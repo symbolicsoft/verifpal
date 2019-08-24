@@ -32,11 +32,11 @@ macos:
 upx:
 	@/bin/echo -n "[Verifpal] Packing with UPX"
 	@/bin/echo -n "."
-	@upx -9 -qqq build/bin/windows/verifpal.exe
+	@upx -9 --ultra-brute -qqq build/bin/windows/verifpal.exe
 	@/bin/echo -n "."
-	@upx -9 -qqq build/bin/linux/verifpal
+	@upx -9 --ultra-brute -qqq build/bin/linux/verifpal
 	@/bin/echo -n "."
-	@upx -9 -qqq build/bin/macos/verifpal
+	@upx -9 --ultra-brute -qqq build/bin/macos/verifpal
 	@/bin/echo "              OK"
 
 dependencies:
