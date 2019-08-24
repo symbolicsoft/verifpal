@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: GPL-3.0
+// Copyright © 2019-2020 Nadim Kobeissi, Symbolic Software <nadim@symbolic.software>.
+// All Rights Reserved.
+
+attacker[active]
+
+principal Alice[]
+principal Protonmail[]
+principal Microsoft[]
+principal Bob[]
+
+principal Alice[
+	knows private psk
+	knows public c0
+	generates a
+	generates m1
+	ga = G^a
+	em1 = AEAD_ENC(psk, m1, ga)
+]
+
+Alice -> Protonmail: ga, em1
+
+principal Protonmail[
+	knows private j
+]
+
+Protonmail -> Microsoft: j, ga, em1
+
+Microsoft -> Bob: j, ga, em1
+
+principal Bob[
+	knows private psk
+	knows public c0
+	generates m2
+	generates b
+	gb = G^b
+	m1b = AEAD_DEC(psk, em1, ga)?
+	em2 = AEAD_ENC(ga^b, m2, ga)
+]
+
+Bob -> Protonmail: em2, gb
+Protonmail -> Alice: em2, gb
+
+principal Alice[
+	m2a = AEAD_DEC(gb^a, em2, ga)?
+]
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+]

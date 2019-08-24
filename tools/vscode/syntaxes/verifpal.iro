@@ -1,0 +1,154 @@
+name                   = verifpal
+file_extensions []     = vp;
+
+
+styles [] {
+   .default : style {
+      color = white
+      textmate_scope = markup
+   }
+   .variable : style {
+      color = blue
+      textmate_scope = variable
+   }
+   .comment : style {
+      color                 = light_green
+      italic                = true
+      textmate_scope        = comment
+   }
+   .meta : style {
+      color                 = pink
+      bold                  = true
+      textmate_scope        = entity.name.function
+   }
+   .keyword : style {
+      color                 = cyan
+      italic                = true
+      textmate_scope        = markup.italic
+   }
+   .constant : style {
+      color                 = gold
+      textmate_scope        = keyword
+   }
+   .punctuation : style {
+      color                 = red
+      textmate_scope        = constant.character
+   }
+   .entity : style {
+      color                 = brown
+      bold                  = true
+      textmate_scope        = string
+   }
+   .function : style {
+      color                 = green
+      textmate_scope        = support.function
+   }
+}
+
+contexts [] {
+   main : context {
+      : inline_push {
+         regex          \= (principal)
+         styles []       = .meta;
+         : pop {  
+            regex       \= (\[)
+            styles []    = .punctuation;
+         }
+         : pattern {
+            regex      \= ([a-zA-Z0-9_]+)
+            styles [] = .entity;
+         }
+         : include "main";
+      }
+      : inline_push {
+         regex          \= (queries)
+         styles []       = .meta;
+         : pop {  
+            regex       \= (\[)
+            styles []    = .punctuation;
+         }
+         : include "main";
+      }
+      : inline_push {
+         regex          \= (attacker)
+         styles []       = .meta;
+         : pop {  
+            regex       \= (\[)
+            styles []    = .punctuation;
+         }
+         : include "main";
+      }
+      : inline_push {
+         regex          \= (\()
+         styles []       = .punctuation;
+         : pop {  
+            regex       \= (\)\??)
+            styles []    = .punctuation;
+         }
+         : pattern {
+            regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|HMACVERIF|HMAC|SIGNVERIF|SIGN|HPKE|G|DH)
+            styles []       = .function;
+         }
+         : pattern {
+            regex      \= ([a-zA-Z0-9_]+)
+            styles [] = .variable;
+         }
+         : include "main";
+      }
+      : pattern {
+         regex          \= (\(|\)|\[|\]|\:|\,|\^|\=|(\-\>))
+         styles []       = .punctuation;
+      }
+      : pattern {
+         regex          \= (confidentiality\?|authentication\?)
+         styles []       = .keyword;
+      }
+      : pattern {
+         regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|HMACVERIF|HMAC|SIGNVERIF|SIGN|HPKE|G|DH)
+         styles []       = .function;
+      }
+      : inline_push {
+         regex          \= ((generates|knows)\s)
+         styles []       = .keyword;
+         : pop {  
+            regex       \= (\s)
+            styles []    = .default;
+         }
+         : pattern {
+            regex          \= ((public)|(private))
+            styles []       = .constant;
+         }
+         : include "main";
+      }
+      : inline_push {
+         regex          \= (((confidentiality)|(authentication))\?)
+         styles []       = .keyword;
+         : pop {  
+            regex       \= (\s\-\>\s)
+            styles []    = .punctuation;
+         }
+         : pattern {
+            regex          \= (\s[a-zA-Z0-9_]+)
+            styles []       = .entity;
+         }
+         : include "main";
+      }
+      : inline_push {
+         regex          \= (^[a-zA-Z0-9_]+)
+         styles []       = .entity;
+         : pop {  
+            regex       \= ([a-zA-Z0-9_]+)
+            styles []    = .entity;
+         }
+         : pattern {
+            regex          \= (\s\-\>\s)
+            styles []       = .punctuation;
+         }
+         : include "main";
+      }
+      : pattern {
+         regex          \= (//.*)
+         styles []       = .comment;
+      }
+   }
+}

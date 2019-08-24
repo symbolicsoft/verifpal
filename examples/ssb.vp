@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: GPL-3.0
+// Copyright © 2019-2020 Nadim Kobeissi, Symbolic Software <nadim@symbolic.software>.
+// All Rights Reserved.
+
+attacker[active]
+
+// Setup phase
+
+principal Alice[
+	knows private n
+	knows private longTermA
+	generates ephemeralA
+	longTermAPub = G^longTermA
+	ephemeralAPub = G^ephemeralA
+]
+
+principal Bob[
+	knows private n
+	knows private longTermB
+	generates ephemeralB
+	longTermBPub = G^longTermB
+	ephemeralBPub = G^ephemeralB
+]
+
+Bob -> Alice: [longTermBPub]
+
+// 1. Client Hello
+
+principal Alice[
+	nHmacAlice = HMAC(n, ephemeralAPub)
+]
+
+Alice -> Bob: ephemeralAPub, nHmacAlice
+
+// 2. Server Hello
+
+principal Bob[
+	nHmacBob = HMAC(n, ephemeralBPub)
+]
+
+Bob -> Alice: ephemeralBPub, nHmacBob
+
+// 3. Client Authenticate
+
+principal Alice[
+	ephemeralSecretAlice = ephemeralBPub^ephemeralA
+	longTermSecretAlice = longTermBPub^ephemeralA
+	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)
+	sig1Alice = SIGN(longTermA, HASH(n, longTermBPub, ephemeralSecretAlice))
+	secretBox1Alice = AEAD_ENC(masterSecret1Alice, sig1Alice, n)
+	secretBox2Alice = AEAD_ENC(masterSecret1Alice, longTermAPub, n)
+	longEphemeralSecretAlice = ephemeralBPub^longTermA
+	masterSecret2Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice, longEphemeralSecretAlice)
+]
+
+// TODO: Concatentation
+Alice -> Bob: secretBox1Alice, secretBox2Alice
+
+principal Bob[
+	ephemeralSecretBob = ephemeralAPub^ephemeralB
+	longTermSecretBob = ephemeralAPub^longTermB
+	masterSecret1Bob = HASH(n, ephemeralSecretBob, longTermSecretBob)
+	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, n)
+	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, n)
+	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)?
+	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
+]
+
+// 4. Server Accept
+
+principal Bob[
+	sig2Bob = SIGN(longTermB, HASH(n, sig1Bob, longTermAPub_Bob, ephemeralSecretBob))
+	masterSecret2Bob = HASH(n, ephemeralSecretBob, longTermSecretBob, longEphemeralSecretBob)
+	secretBox1Bob = AEAD_ENC(masterSecret2Bob, sig2Bob, n)
+]
+
+Bob -> Alice: secretBox1Bob
+
+// 5. Send a message
+
+principal Alice[
+	knows private m1
+	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, n)
+	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)?
+	secretBoxM1Alice = AEAD_ENC(masterSecret2Alice, m1, n)
+]
+
+Alice -> Bob: secretBoxM1Alice
+
+principal Bob[
+	knows private m2
+	m1Bob = AEAD_DEC(masterSecret2Bob, secretBoxM1Alice, n)
+	secretBoxM2Bob = AEAD_ENC(masterSecret2Bob, m2, n)
+]
+
+Bob -> Alice: secretBoxM2Bob
+
+principal Alice [
+	m2Alice = AEAD_DEC(masterSecret2Alice, secretBoxM2Bob, n)
+]
+
+queries[
+	confidentiality? n
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? longTermAPub
+	authentication? Alice -> Bob: secretBox1Alice
+	authentication? Alice -> Bob: secretBox2Alice
+	authentication? Bob -> Alice: secretBox1Bob
+	authentication? Alice -> Bob: secretBoxM1Alice
+	authentication? Bob -> Alice: secretBoxM2Bob
+]

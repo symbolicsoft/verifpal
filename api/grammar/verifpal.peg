@@ -1,0 +1,337 @@
+{
+	/* SPDX-License-Identifier: GPL-3.0
+	 * Copyright © 2019-2020 Nadim Kobeissi, Symbolic Software <nadim@symbolic.software>.
+	 * All Rights Reserved. */
+
+	package main
+
+	func b2s(bs []uint8) string {
+		b := make([]byte, len(bs))
+		for i, v := range bs {
+			b[i] = byte(v)
+		}
+		return string(b)
+	}
+
+	func reserved() []string{
+		return []string{
+			"attacker",
+			"passive",
+			"active",
+			"principal",
+			"public",
+			"private",
+			"queries",
+			"confidentiality",
+			"authentication",
+			"primitive",
+			"dh",
+			"hash",
+			"hkdf",
+			"aead_enc",
+			"aead_dec",
+			"enc",
+			"dec",
+			"hmac",
+			"sign",
+			"signverif",
+			"hpke_enc",
+			"hpke_dec",
+			"g",
+		}
+	}
+}
+
+Verifpal <-
+	Comment*
+	Attacker:Attacker
+	Blocks:(Block+)
+	Queries:Queries
+	Comment*
+	EOF {
+		b := Blocks.([]interface{})
+		q := Queries.([]interface{})
+		db := make([]block, len(b))
+		dq := make([]query, len(q))
+		for i, v := range b { db[i] = v.(block) }
+		for i, v := range q { dq[i] = v.(query) }
+		return verifpal{
+			attacker: Attacker.(string),
+			blocks: db,
+			queries: dq,
+		}, nil
+	}
+
+Attacker <-
+	"attacker" _ '[' _
+	Type:AttackerType _
+	']' _ {
+		return Type, nil
+	}
+
+AttackerType <-
+	("active"/"passive") {
+		return string(c.text), nil
+	}
+
+Block <-
+	Comment*
+	Block:(Principal/Message) _
+	Comment* {
+		return Block, nil
+	}
+
+Principal <-
+	"principal" _ Name:PrincipalName _ '[' _
+	Expressions:(Expression*)
+	']' _ {
+		var err error
+		e  := Expressions.([]interface{})
+		de := make([]expression, len(e))
+		for i, v := range e { de[i] = v.(expression) }
+		name := strings.ToLower(Name.(string))
+		if strInSlice(name, reserved()) ||
+			strings.HasPrefix(name, "attacker") {
+			err = errors.New(fmt.Sprintf(
+				"cannot use reserved keyword as principal name: %s",
+				name,
+			))
+		}
+		return block{
+			kind: "principal",
+			principal: principal {
+				name: strings.Title(name),
+				expressions: de,
+			},
+		}, err
+	}
+
+PrincipalName <-
+	Name:[a-zA-Z0-9_]+ {
+		a  := Name.([]interface{})
+		da := make([]uint8, len(a))
+		for i, v := range a { da[i] = v.([]uint8)[0] }
+		return strings.Title(b2s(da)), nil
+	}
+
+Qualifier <-
+	("private"/"public") {
+		return string(c.text), nil
+	}
+
+Message <-
+	Sender:PrincipalName _
+	"->" _
+	Recipient:PrincipalName _
+	':' _
+	MessageConstants:MessageConstants {
+		var err error
+		sender := strings.ToLower(Sender.(string))
+		recipient := strings.ToLower(Recipient.(string))
+		for _, s := range []string{sender, recipient} {
+			if strInSlice(s, reserved()) ||
+				strings.HasPrefix(s, "attacker") {
+				err = errors.New(fmt.Sprintf(
+					"cannot use reserved keyword as principal name: %s",
+					s,
+				))
+			}
+		}
+		return block{
+			kind: "message",
+			message: message{
+				sender: strings.Title(sender),
+				recipient: strings.Title(recipient),
+				constants: MessageConstants.([]constant),
+			},
+		}, err
+	}
+
+MessageConstants <-
+	MessageConstants:(GuardedConstant/Constant)+ {
+		var da []constant
+		var err error
+		a  := MessageConstants.([]interface{})
+		for _, v := range a {
+			if strInSlice(v.(value).constant.name, reserved()) ||
+				strings.HasPrefix(v.(value).constant.name, "attacker") {
+				err = errors.New(fmt.Sprintf(
+					"cannot use reserved keyword as constant name: %s",
+					v.(value).constant.name,
+				))
+			}
+			da = append(da, v.(value).constant)
+		}
+		return da, err
+	}
+
+Expression <-
+	Comment*
+	Expression:(Assignment/Knows/Generates) _
+	Comment* {
+		return Expression, nil
+	}
+
+Knows <-
+	"knows" _ 
+	Qualifier:Qualifier _ 
+	Constants:Constants {
+		return expression{
+			kind: "knows",
+			qualifier: Qualifier.(string),
+			constants: Constants.([]constant),
+		}, nil
+	}
+
+Generates <-
+	"generates" _ Constants:Constants {
+		return expression{
+			kind: "generates",
+			qualifier: "",
+			constants: Constants.([]constant),
+		}, nil
+	}
+
+Assignment <-
+	Left:Constants _ '=' _ Right:(Primitive/Equation/Constant) {
+		var err error
+		right := value{}
+		switch Right.(value).kind {
+		case "constant":
+			err = errors.New("cannot assign value to value")
+		default:
+			right = Right.(value)
+		}
+		return expression{
+			kind: "assignment",
+			left: Left.([]constant),
+			right: right,
+		}, err
+	}
+
+Constant <-
+	Constant:[a-zA-Z0-9_]+ (_ ',' _)? {
+		a  := Constant.([]interface{})
+		da := make([]uint8, len(a))
+		for i, v := range a { da[i] = v.([]uint8)[0] }
+		return value{
+			kind: "constant",
+			constant: constant{
+				name: strings.ToLower(b2s(da)),
+			},
+		 }, nil
+	}
+
+Constants <-
+	Constants:Constant+ {
+		var da []constant
+		var err error
+		a  := Constants.([]interface{})
+		for _, v := range a { da = append(da, v.(value).constant) }
+		for _, v := range da {
+			if strInSlice(v.name, reserved()) ||
+				strings.HasPrefix(v.name, "attacker") {
+				err = errors.New(fmt.Sprintf(
+					"cannot use reserved keyword as constant name: %s",
+					v.name,
+				))
+			}
+		}
+		return da, err
+	}
+
+
+GuardedConstant <-
+	'[' GuardedConstant:[a-zA-Z0-9_]+ ']' (_ ',' _)? {
+		a  := GuardedConstant.([]interface{})
+		da := make([]uint8, len(a))
+		for i, v := range a { da[i] = v.([]uint8)[0] }
+		return value{
+			kind: "constant",
+			constant: constant{
+				name: strings.ToLower(b2s(da)),
+				guard: true,
+			},
+		 }, nil
+	}
+
+Primitive <-
+	Name:PrimitiveName '(' _ Arguments:(Primitive/Equation/Constant)+ _ ')' Check:'?'? (_ ',' _)? {
+		args := []value{}
+		for _, v  := range Arguments.([]interface{}) {
+			args = append(args, v.(value))
+		}
+		return value{
+			kind: "primitive",
+			primitive: primitive{
+				name: Name.(string),
+				arguments: args,
+				check: Check != nil,
+			},
+		}, nil
+	}
+
+PrimitiveName <-
+	Name:[a-zA-Z0-9_]+ {
+		a  := Name.([]interface{})
+		da := make([]uint8, len(a))
+		for i, v := range a { da[i] = v.([]uint8)[0] }
+		return strings.ToUpper(b2s(da)), nil
+	}
+
+Equation <-
+	FirstConstant:Constant (_ '^' _) SecondConstant:Constant {
+		return value{
+			kind: "equation",
+			equation: equation{
+				constants: []constant{
+					FirstConstant.(value).constant,
+					SecondConstant.(value).constant,
+				},
+			},
+		}, nil
+	}
+	
+Queries <-
+	"queries" _
+	'[' _
+	Queries:(Query*)
+	']' _ {
+		return Queries, nil
+	}
+
+Query <-
+	Comment*
+	Query:(QueryConfidentiality/QueryAuthentication) _
+	Comment* {
+		return Query, nil
+	}
+	
+QueryConfidentiality <-
+	"confidentiality?" _ Constant:Constant {
+		return query{
+			kind: "confidentiality",
+			constant: Constant.(value).constant,
+			message: message{},
+			resolved: false,
+		}, nil
+	}
+
+QueryAuthentication <-
+	"authentication?" _ Message:Message {
+		return query{
+			kind: "authentication",
+			constant: constant{},
+			message: (Message.(block)).message,
+			resolved: false,
+		}, nil
+	}
+
+Comment <-
+	_ "//" [^\n]* _ {
+		return nil, nil
+	}
+
+_ "whitespace" <- [ \t\n\r]*
+
+EOF <- !.
