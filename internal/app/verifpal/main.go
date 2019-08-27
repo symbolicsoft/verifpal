@@ -25,7 +25,7 @@ func mainParse(filename string) (*verifpal, *knowledgeMap) {
 
 func main() {
 	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n\n",
-		"Verifpal 0.1 (https://verifpal.com)",
+		"Verifpal 0.2 (https://verifpal.com)",
 		"© 2019 Symbolic Software",
 		"WARNING: Verifpal is experimental software.",
 	))
