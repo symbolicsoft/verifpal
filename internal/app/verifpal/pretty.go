@@ -109,6 +109,9 @@ func prettyVerifyResultSummary(summary string, attack bool) string {
 }
 
 func prettyConstant(c constant) string {
+	if c.guard {
+		return fmt.Sprintf("[%s]", c.name)
+	}
 	return c.name
 }
 
@@ -123,7 +126,7 @@ func prettyConstants(c []constant) string {
 		}
 		pretty = fmt.Sprintf("%s%s%s",
 			pretty,
-			v.name,
+			prettyConstant(v),
 			sep,
 		)
 	}
