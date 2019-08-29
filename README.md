@@ -36,7 +36,10 @@ You must have [Go](https://golang.org) installed in order to build Verifpal. Ple
 Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser generator and the [Aurora](https://github.com/logrusorgru/aurora) ANSI color printer. you can easily install them by typing `make dependencies`.
 
 #### Compiling Verifpal
-Simply type `make all` to build Verifpal for Windows, Linux and macOS. Builds will be available under `build/bin`.
+- *Windows*: Simply type `Build` to build Verifpal for Windows, Linux and macOS. This will also install dependencies.
+- *Linux and macOS*: Simply type `make all` to build Verifpal for Windows, Linux and macOS.
+
+Builds will be available under `build/bin`.
 
 ### Verifpal for Visual Studio Code
 Verifpal offers an extension for Visual Studio Code that currently supports syntax highlighting for Verifpal models, and will soon support more advanced features. To install it, simply search for "Verifpal" from inside Visual Studio Code.

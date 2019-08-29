@@ -6,7 +6,7 @@
 @echo "       OK"
 
 @echo|set /p="[Verifpal] Generating parser..."
-@pigeon -optimize-basic-latin -optimize-parser -o internal/app/verifpal/parser.go api/grammar/verifpal.peg
+@pigeon -optimize-basic-latin -optimize-parser -o internal\app\verifpal\parser.go api\grammar\verifpal.peg
 @echo "             OK"
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
