@@ -112,6 +112,9 @@ func prettyConstant(c constant) string {
 	if c.guard {
 		return fmt.Sprintf("[%s]", c.name)
 	}
+	if c.name == "g" {
+		return "G"
+	}
 	return c.name
 }
 
