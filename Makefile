@@ -15,19 +15,19 @@ parser:
 	@/bin/echo "             OK"
 
 windows:
-	@/bin/echo -n "[Verifpal] Building Verifpal for Windows... "
+	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
 	@GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/windows/verifpal.exe internal/app/verifpal/*.go
-	@/bin/echo "OK"
+	@/bin/echo " OK"
 
 linux:
-	@/bin/echo -n "[Verifpal] Building Verifpal for Linux... "
+	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
 	@GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/linux/verifpal internal/app/verifpal/*.go
-	@/bin/echo "  OK"
+	@/bin/echo "   OK"
 
 macos:
-	@/bin/echo -n "[Verifpal] Building Verifpal for macOS... "
+	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
 	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/macos/verifpal internal/app/verifpal/*.go
-	@/bin/echo "  OK"
+	@/bin/echo "   OK"
 
 upx:
 	@/bin/echo -n "[Verifpal] Packing with UPX"
@@ -66,12 +66,12 @@ release:
 	@/bin/echo "     OK"
 
 clean:
-	@/bin/echo -n "[Verifpal] Cleaning up... "
+	@/bin/echo -n "[Verifpal] Cleaning up..."
 	@rm -f internal/app/verifpal/parser.go
 	@rm -f build/release/*.zip
 	@rm -f build/bin/windows/verifpal.exe
 	@rm -f build/bin/linux/verifpal
 	@rm -f build/bin/macos/verifpal
-	@/bin/echo "                  OK"
+	@/bin/echo "                   OK"
 
 .PHONY: all parser windows linux macos upx dependencies release clean api build examples internal tools
