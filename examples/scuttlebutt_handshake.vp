@@ -7,6 +7,7 @@ attacker[active]
 // Setup phase
 
 principal Alice[
+	knows public null
 	knows private n
 	knows private longTermA
 	generates ephemeralA
@@ -15,6 +16,7 @@ principal Alice[
 ]
 
 principal Bob[
+	knows public null
 	knows private n
 	knows private longTermB
 	generates ephemeralB
@@ -49,8 +51,8 @@ principal Alice[
 	longTermSecretAlice = longTermBPub^ephemeralA
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)
 	sig1Alice = SIGN(longTermA, HASH(n, longTermBPub, ephemeralSecretAlice))
-	secretBox1Alice = AEAD_ENC(masterSecret1Alice, sig1Alice, n)
-	secretBox2Alice = AEAD_ENC(masterSecret1Alice, longTermAPub, n)
+	secretBox1Alice = AEAD_ENC(masterSecret1Alice, sig1Alice, null)
+	secretBox2Alice = AEAD_ENC(masterSecret1Alice, longTermAPub, null)
 	longEphemeralSecretAlice = ephemeralBPub^longTermA
 	masterSecret2Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice, longEphemeralSecretAlice)
 ]
@@ -62,8 +64,8 @@ principal Bob[
 	ephemeralSecretBob = ephemeralAPub^ephemeralB
 	longTermSecretBob = ephemeralAPub^longTermB
 	masterSecret1Bob = HASH(n, ephemeralSecretBob, longTermSecretBob)
-	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, n)
-	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, n)
+	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, null)
+	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, null)
 	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)?
 	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
 ]
@@ -73,7 +75,7 @@ principal Bob[
 principal Bob[
 	sig2Bob = SIGN(longTermB, HASH(n, sig1Bob, longTermAPub_Bob, ephemeralSecretBob))
 	masterSecret2Bob = HASH(n, ephemeralSecretBob, longTermSecretBob, longEphemeralSecretBob)
-	secretBox1Bob = AEAD_ENC(masterSecret2Bob, sig2Bob, n)
+	secretBox1Bob = AEAD_ENC(masterSecret2Bob, sig2Bob, null)
 ]
 
 Bob -> Alice: secretBox1Bob
@@ -82,23 +84,23 @@ Bob -> Alice: secretBox1Bob
 
 principal Alice[
 	knows private m1
-	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, n)
+	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, null)
 	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)?
-	secretBoxM1Alice = AEAD_ENC(masterSecret2Alice, m1, n)
+	secretBoxM1Alice = AEAD_ENC(masterSecret2Alice, m1, null)
 ]
 
 Alice -> Bob: secretBoxM1Alice
 
 principal Bob[
 	knows private m2
-	m1Bob = AEAD_DEC(masterSecret2Bob, secretBoxM1Alice, n)
-	secretBoxM2Bob = AEAD_ENC(masterSecret2Bob, m2, n)
+	m1Bob = AEAD_DEC(masterSecret2Bob, secretBoxM1Alice, null)
+	secretBoxM2Bob = AEAD_ENC(masterSecret2Bob, m2, null)
 ]
 
 Bob -> Alice: secretBoxM2Bob
 
 principal Alice [
-	m2Alice = AEAD_DEC(masterSecret2Alice, secretBoxM2Bob, n)
+	m2Alice = AEAD_DEC(masterSecret2Alice, secretBoxM2Bob, null)
 ]
 
 queries[
