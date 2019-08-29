@@ -36,7 +36,7 @@ func main() {
 	case "verify":
 		model, valKnowledgeMap := mainParse(os.Args[2])
 		verify(model, valKnowledgeMap)
-		fmt.Fprintf(os.Stdout, "REMINDER: Verifpal is experimental software and may miss attacks.")
+		fmt.Fprintf(os.Stdout, "REMINDER: Verifpal is experimental software and may miss attacks.\n")
 	case "implement":
 		errorCritical("this feature does not yet exist")
 	case "pretty":
