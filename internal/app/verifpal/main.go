@@ -11,6 +11,8 @@ import (
 	"os"
 )
 
+const mainVersion = "0.3"
+
 func mainParse(filename string) (*verifpal, *knowledgeMap) {
 	var model verifpal
 	prettyMessage("parsing model...", 0, "verifpal")
@@ -24,8 +26,8 @@ func mainParse(filename string) (*verifpal, *knowledgeMap) {
 }
 
 func main() {
-	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n\n",
-		"Verifpal 0.2 (https://verifpal.com)",
+	fmt.Fprint(os.Stdout, fmt.Sprintf("%s%s%s\n%s\n%s\n\n",
+		"Verifpal ", mainVersion, " (https://verifpal.com)",
 		"© 2019 Symbolic Software",
 		"WARNING: Verifpal is experimental software.",
 	))
