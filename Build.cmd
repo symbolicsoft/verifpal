@@ -1,33 +1,36 @@
 @echo off
+@setx GOOS "windows" >nul
+@setx GOARCH "amd64" >nul
 
 @echo|set /p="[Verifpal] Installing dependencies..."
 @go get -u github.com/mna/pigeon
 @go get -u github.com/logrusorgru/aurora
-@echo "       OK"
+@echo        OK
 
 @echo|set /p="[Verifpal] Generating parser..."
-@pigeon -optimize-basic-latin -optimize-parser -o internal\app\verifpal\parser.go api\grammar\verifpal.peg
-@echo "             OK"
+@pigeon -optimize-basic-latin -optimize-parser -o internal/app/verifpal/parser.go api/grammar/verifpal.peg
+@echo              OK
+
+@cd internal\app\verifpal
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@set GOOS="windows"
-@set GOARCH="amd64"
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\windows\verifpal.exe internal\app\verifpal\*.go
-@echo " OK"
+@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\windows\verifpal.exe
+@echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
-@set GOOS="linux"
-@set GOARCH="amd64"
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\linux\verifpal internal\app\verifpal\*.go
-@echo "   OK"
+@setx GOOS "linux" >nul
+@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\linux\verifpal
+@echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
-@set GOOS="darwin"
-@set GOARCH="amd64"
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\macos\verifpal internal\app\verifpal\*.go
-@echo "   OK"
+@setx GOOS "darwin" >nul
+@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\macos\verifpal
+@echo    OK
 
 @echo|set /p="[Verifpal] Cleaning up..."
-@set GOOS="windows"
+@setx GOOS "windows" >nul
+@cd ..\..\..
 @del internal\app\verifpal\parser.go
-@echo "                   OK"
+@echo                    OK
+
+@exit /b
