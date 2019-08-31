@@ -46,7 +46,6 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult
 			attackerKnown = len(valAttackerState.known)
 		}
 	}
-	prettyMessage("phase 1a active attacker complete", 0, "info")
 	return verifyResults
 }
 
