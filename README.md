@@ -33,7 +33,7 @@ The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essent
 You have three choices:
 
 - *Download and install a release manually*: Releases for Windows, Linux and macOS are available [here](https://github.com/SymbolicSoft/verifpal/releases/latest).
-- *Run a command that automatically downloads and installs Verifpal*: `bash -c "curl -sL https://verifpal.com/install|bash"` – note that this only works on Linux and macOS, and is also potentialy unsafe since you're running arbitrary code from that script inside your terminal.
+- *Run a command that automatically downloads and installs Verifpal*: `bash -c "curl -sL https://verifpal.com/install|bash"` – note that this only works on Linux and macOS, and is also potentialy unsafe since you're running an [arbitrary script](https://github.com/SymbolicSoft/verifpal/blob/master/tools/quickinstall/quickInstall.sh) inside your terminal.
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source
