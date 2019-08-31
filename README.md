@@ -29,6 +29,13 @@ Verifpal is still highly experimental software. Using it in a classroom or learn
 ### Verifpal User Manual
 The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essential guide to getting started with cryptographic protocol analysis using Verifpal. It is strongly recommended that you read the Verifpal User Manual before starting work with Verifpal.
 
+### Getting a Copy of Verifpal
+You have three choices:
+
+- *Download and install a release manually*: Releases for Windows, Linux and macOS are available [here](https://github.com/SymbolicSoft/verifpal/releases/latest).
+- *Run a command that automatically downloads and installs Verifpal*: `bash -c "curl -sL https://verifpal.com/install|bash"` – note that this only works on Linux and macOS, and is also potentialy unsafe since you're running arbitrary code from that script inside your terminal.
+- *Compile from source*: Keep reading!
+
 ### Building Verifpal from Source
 You must have [Go](https://golang.org) installed in order to build Verifpal. Please review the [Go Getting Started](https://golang.org/doc/install) instructions in order to understand how to best install Go for your computer and operating system.
 
