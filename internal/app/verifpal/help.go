@@ -12,7 +12,7 @@ import (
 )
 
 func help() {
-	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n%s",
+	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n%s\n",
 		"verify    [file]: verify Verifpal model.",
 		"implement [file]: implement Verifpal model in Go.",
 		"pretty    [file]: pretty-print Verifpal model.",
