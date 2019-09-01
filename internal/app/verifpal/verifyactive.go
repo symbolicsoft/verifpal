@@ -14,7 +14,8 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult
 	var verifyResults []verifyResult
 	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
-	prettyMessage("attacker is configured as active attacker", 0, "info")
+	prettyMessage("attacker is configured as active", 0, 0, "info")
+	analysis := 0
 	attackerKnown := -1
 	for len(valAttackerState.known) > attackerKnown {
 		for principalIndex, valPrincipalState := range valPrincipalStates {
@@ -22,7 +23,8 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult
 				valAttackerState.known = valAttackerState.known[1:]
 				valAttackerState.mutatedTo = valAttackerState.mutatedTo[1:]
 			}
-			verifyAnalysis(model, valPrincipalState, valAttackerState, 0)
+			verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, 0)
+			analysis = analysis + 1
 			valReplacementMap, attackerValues := verifyActiveInitReplacementMap1(valPrincipalState, valAttackerState)
 			lastReplacement := valReplacementMap.combinationNext()
 			verifyActiveInjectAttackerValues(
@@ -31,8 +33,9 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult
 			)
 			for !lastReplacement {
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valAttackerState, &valReplacementMap)
-				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, 0)
-				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults)
+				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
+				analysis = analysis + 1
+				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
 				valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
 				if len(verifyResults) == len(model.queries) {
 					return verifyResults

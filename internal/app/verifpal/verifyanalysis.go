@@ -10,34 +10,34 @@ import (
 	"fmt"
 )
 
-func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttackerState *attackerState, depth int) int {
+func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
 		if a.kind == "constant" {
-			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, depth)
-			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, depth)
+			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
+			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
 			if (i >= 0) && valPrincipalState.known[i] {
-				depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, depth)
-				depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, depth)
+				depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+				depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 			}
 		} else {
-			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, depth)
-			depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, depth)
-			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, depth)
-			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, depth)
+			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
+			depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 		}
 	}
 	for _, a := range valPrincipalState.assigned {
-		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, depth)
+		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysis(model, valPrincipalState, valAttackerState, depth+1)
+		depth = verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }
 
-func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttackerState *attackerState, depth int) int {
+func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	i := sanityValueInValues(a, &valPrincipalState.assigned, valPrincipalState)
 	if i < 0 {
@@ -69,19 +69,19 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 			prettyMessage(fmt.Sprintf(
 				"%s resolves to %s",
 				prettyValues(output), prettyValue(resolved),
-			), depth, "deduction")
+			), analysis, depth, "deduction")
 			valAttackerState.conceivable = append(valAttackerState.conceivable, resolved)
 		}
 		valAttackerState.known = append(valAttackerState.known, resolved)
 		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, depth+1)
+		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }
 
-func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, depth int) int {
+func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	var r bool
 	var revealed value
 	var ar []value
@@ -96,7 +96,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 	}
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+		r, revealed, ar = possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 	}
 	if r {
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
@@ -104,7 +104,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 				prettyMessage(fmt.Sprintf(
 					"%s found by attacker by deconstructing %s with %s",
 					prettyValue(revealed), prettyValue(a), prettyValues(ar),
-				), depth, "deduction")
+				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
 			}
 			valPrincipalState.sender[i] = "Attacker"
@@ -113,12 +113,12 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, depth+1)
+		depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, depth int) int {
+func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	var r bool
 	var ar []value
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
@@ -133,9 +133,9 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 	}
 	switch a.kind {
 	case "primitive":
-		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 		for _, aa := range a.primitive.arguments {
-			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, depth)
+			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, analysis, depth)
 		}
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.equation, valAttackerState, valPrincipalState)
@@ -146,7 +146,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 				prettyMessage(fmt.Sprintf(
 					"%s found by attacker by reconstructing with %s",
 					prettyValue(aBackup), prettyValues(ar),
-				), depth, "deduction")
+				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, aBackup)
 			}
 			valPrincipalState.sender[i] = "Attacker"
@@ -155,12 +155,12 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisReconstruct(aBackup, valPrincipalState, valAttackerState, depth+1)
+		depth = verifyAnalysisReconstruct(aBackup, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }
 
-func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAttackerState *attackerState, depth int) int {
+func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, aa := range valPrincipalState.assigned {
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
@@ -169,7 +169,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 					prettyMessage(fmt.Sprintf(
 						"%s found by attacker by equivocating with %s",
 						prettyValue(aa), prettyValue(a),
-					), depth, "deduction")
+					), analysis, depth, "deduction")
 					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
 				}
 				valAttackerState.known = append(valAttackerState.known, aa)
@@ -185,7 +185,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 							prettyMessage(fmt.Sprintf(
 								"%s found by attacker by equivocating with %s",
 								prettyValue(aaa), prettyValue(a),
-							), depth, "deduction")
+							), analysis, depth, "deduction")
 							valAttackerState.conceivable = append(valAttackerState.conceivable, aaa)
 						}
 						valAttackerState.known = append(valAttackerState.known, aaa)
@@ -196,7 +196,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, depth+1)
+		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }

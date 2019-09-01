@@ -14,54 +14,58 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func prettyMessage(m string, depth int, t string) {
+func prettyMessage(m string, analysis int, depth int, t string) {
 	if runtime.GOOS == "windows" {
-		prettyMessageRegular(m, depth, t)
+		prettyMessageRegular(m, analysis, depth, t)
 	} else {
-		prettyMessageColor(m, depth, t)
+		prettyMessageColor(m, analysis, depth, t)
 	}
 }
 
-func prettyMessageRegular(m string, depth int, t string) {
-	var depthString string
-	if depth > 0 {
-		depthString = fmt.Sprintf(
-			"%s%s%s", " (depth ", fmt.Sprintf("%d", depth), ")",
+func prettyMessageRegular(m string, analysis int, depth int, t string) {
+	var infoString string
+	if analysis+depth > 0 {
+		infoString = fmt.Sprintf(
+			"%s%s%s%s%s",
+			" (analysis ", fmt.Sprintf("%d", analysis),
+			", depth ", fmt.Sprintf("%d", depth), ")",
 		)
 	}
 	if t == "verifpal" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
-			"%s%s%s %s%s\n", " ", "Verifpal", "!", m, depthString,
+			"%s%s%s %s%s\n", " ", "Verifpal", "!", m, infoString,
 		))
 	}
 	if t == "info" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
-			"%s%s%s %s%s\n", "     ", "Info", "!", m, depthString,
+			"%s%s%s %s%s\n", "     ", "Info", "!", m, infoString,
 		))
 	}
 	if t == "analysis" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
-			"%s%s%s %s%s\n", " ", "Analysis", "!", m, depthString,
+			"%s%s%s %s%s\n", " ", "Analysis", "!", m, infoString,
 		))
 	}
 	if t == "deduction" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
-			"%s%s%s %s%s\n", "", "Deduction", "!", m, depthString,
+			"%s%s%s %s%s\n", "", "Deduction", "!", m, infoString,
 		))
 	}
 	if t == "result" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
-			"%s%s%s %s%s\n", "   ", "Result", "!", m, depthString,
+			"%s%s%s %s%s\n", "   ", "Result", "!", m, infoString,
 		))
 	}
 }
 
-func prettyMessageColor(m string, depth int, t string) {
-	var depthString string
-	if depth > 0 {
-		depthString = fmt.Sprintf(
-			"%s%s%s",
-			aurora.Gray(15, " (depth ").Italic(),
+func prettyMessageColor(m string, analysis int, depth int, t string) {
+	var infoString string
+	if analysis+depth > 0 {
+		infoString = fmt.Sprintf(
+			"%s%s%s%s%s",
+			aurora.Gray(15, " (analysis ").Italic(),
+			aurora.Gray(15, fmt.Sprintf("%d", analysis)).Italic(),
+			aurora.Gray(15, ", depth "),
 			aurora.Gray(15, fmt.Sprintf("%d", depth)).Italic(),
 			aurora.Gray(15, ")").Italic(),
 		)
@@ -69,31 +73,31 @@ func prettyMessageColor(m string, depth int, t string) {
 	if t == "verifpal" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
 			"%s%s%s %s%s\n",
-			" ", aurora.Green("Verifpal").Bold(), "!", m, depthString,
+			" ", aurora.Green("Verifpal").Bold(), "!", m, infoString,
 		))
 	}
 	if t == "info" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
 			"%s%s%s %s%s\n",
-			"     ", aurora.Blue("Info").Bold(), "!", m, depthString,
+			"     ", aurora.Blue("Info").Bold(), "!", m, infoString,
 		))
 	}
 	if t == "analysis" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
 			"%s%s%s %s%s\n",
-			" ", aurora.Blue("Analysis").Bold(), "!", m, depthString,
+			" ", aurora.Blue("Analysis").Bold(), "!", m, infoString,
 		))
 	}
 	if t == "deduction" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
 			"%s%s%s %s%s\n",
-			"", aurora.Magenta("Deduction").Bold(), "!", m, depthString,
+			"", aurora.Magenta("Deduction").Bold(), "!", m, infoString,
 		))
 	}
 	if t == "result" {
 		fmt.Fprint(os.Stdout, fmt.Sprintf(
 			"%s%s%s %s%s\n",
-			"   ", aurora.Red("Result").Bold(), "!", m, depthString,
+			"   ", aurora.Red("Result").Bold(), "!", m, infoString,
 		))
 	}
 }

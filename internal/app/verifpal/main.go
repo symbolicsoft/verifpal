@@ -15,7 +15,7 @@ const mainVersion = "0.3"
 
 func mainParse(filename string) (*verifpal, *knowledgeMap) {
 	var model verifpal
-	prettyMessage("parsing model...", 0, "verifpal")
+	prettyMessage("parsing model...", 0, 0, "verifpal")
 	parsed, err := ParseFile(filename)
 	if err != nil {
 		errorCritical(err.Error())

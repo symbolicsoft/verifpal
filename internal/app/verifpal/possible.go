@@ -10,7 +10,7 @@ import (
 	"fmt"
 )
 
-func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState) (bool, value, []value) {
+func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, value, []value) {
 	has := []value{}
 	primitive := primitiveGet(p.name)
 	if !primitive.decompose.hasRule {
@@ -32,12 +32,12 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 		}
 		switch a.kind {
 		case "primitive":
-			r, _ := possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+			r, _ := possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+			r, _, _ = possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 			if r {
 				has = append(has, a)
 				continue
@@ -60,7 +60,7 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 				prettyMessage(fmt.Sprintf(
 					"%s now conceivable by deconstructing %s with %s",
 					prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
-				), 0, "analysis")
+				), analysis, depth, "analysis")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, value{
 					kind:      "primitive",
 					primitive: p,
@@ -77,8 +77,8 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 	return false, value{}, has
 }
 
-func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState) (bool, []value) {
-	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState)
+func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, []value) {
+	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState, analysis, depth)
 	if d {
 		return true, has
 	}
@@ -96,12 +96,12 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 		}
 		switch a.kind {
 		case "primitive":
-			r, _, _ := possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+			r, _, _ := possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState)
+			r, _ = possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
 			if r {
 				has = append(has, a)
 				continue
@@ -124,7 +124,7 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 				prettyMessage(fmt.Sprintf(
 					"%s now conceivable by reconstructing with %s",
 					prettyPrimitive(p), prettyValues(has),
-				), 0, "analysis")
+				), analysis, depth, "analysis")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, vp)
 			}
 			valAttackerState.known = append(valAttackerState.known, vp)

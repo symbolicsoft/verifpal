@@ -10,7 +10,7 @@ func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResul
 	var verifyResults []verifyResult
 	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
 	valAttackerState := constructAttackerState(false, model, valKnowledgeMap, true)
-	prettyMessage("attacker is configured as a passive attacker", 0, "info")
-	verifyAnalysis(model, valPrincipalStates[0], valAttackerState, 0)
-	return verifyResolveQueries(model, valKnowledgeMap, valPrincipalStates[0], valAttackerState, verifyResults)
+	prettyMessage("attacker is configured as a passive", 0, 0, "info")
+	verifyAnalysis(model, valPrincipalStates[0], valAttackerState, 0, 0)
+	return verifyResolveQueries(model, valKnowledgeMap, valPrincipalStates[0], valAttackerState, verifyResults, 0)
 }

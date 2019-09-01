@@ -16,7 +16,7 @@ func verify(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult {
 	prettyMessage(fmt.Sprintf(
 		"verification initiated at %s",
 		time.Now().Format("15:04:05"),
-	), 0, "verifpal")
+	), 0, 0, "verifpal")
 	if model.attacker == "passive" {
 		verifyResults = verifyPassive(model, valKnowledgeMap)
 	} else if model.attacker == "active" {
@@ -29,18 +29,18 @@ func verify(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult {
 			"%s: %s",
 			prettyQuery(verifyResult.query),
 			verifyResult.summary,
-		), 0, "result")
+		), 0, 0, "result")
 	}
 	prettyMessage(fmt.Sprintf(
 		"verification completed at %s",
 		time.Now().Format("15:04:05"),
-	), 0, "verifpal")
+	), 0, 0, "verifpal")
 	return verifyResults
 }
 
 func verifyResolveQueries(
 	model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalState *principalState, valAttackerState *attackerState,
-	verifyResults []verifyResult,
+	verifyResults []verifyResult, analysis int,
 ) []verifyResult {
 	for q, query := range model.queries {
 		if !model.queries[q].resolved {
@@ -48,7 +48,7 @@ func verifyResolveQueries(
 			if verifyResult.query.resolved {
 				model.queries[q].resolved = true
 				verifyResults = append(verifyResults, verifyResult)
-				prettyMessage(verifyResult.summary, 0, "deduction")
+				prettyMessage(verifyResult.summary, analysis, 0, "result")
 			}
 		}
 	}

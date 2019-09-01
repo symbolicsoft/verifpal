@@ -327,7 +327,7 @@ func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeM
 							prettyMessage(fmt.Sprintf(
 								"%s has sent %s to %s, rendering it public",
 								block.message.sender, prettyConstant(c), block.message.recipient,
-							), 0, "analysis")
+							), 0, 0, "analysis")
 						}
 						valAttackerState.known = append(valAttackerState.known, v)
 						valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
