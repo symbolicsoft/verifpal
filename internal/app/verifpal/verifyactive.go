@@ -206,7 +206,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aaa)
 					}
 				}
-			case "HKDF":
 			case "AEAD_ENC":
 				aa := value{
 					kind: "primitive",
@@ -242,7 +241,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 					}
 				}
-			case "HMAC":
 			case "SIGN":
 				aa := value{
 					kind: "primitive",

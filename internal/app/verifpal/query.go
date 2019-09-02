@@ -66,12 +66,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		case "constant":
 			continue
 		case "primitive":
-			checkIndexFound := false
-			for _, aa := range a.primitive.arguments {
-				if sanityEquivalentValues(aa, value{kind: "constant", constant: c}, valPrincipalState) {
-					checkIndexFound = true
-				}
-			}
+			checkIndexFound := sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState)
 			if checkIndexFound {
 				checkIndices = append(checkIndices, ii)
 			}

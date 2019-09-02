@@ -321,6 +321,34 @@ func sanityDeconstructEquationValues(e equation, valPrincipalState *principalSta
 	return values
 }
 
+func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *principalState) bool {
+	for _, a := range p.arguments {
+		switch a.kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+			a = valPrincipalState.assigned[i]
+		}
+		switch a.kind {
+		case "constant":
+			if sanityEquivalentValues(a, value{kind: "constant", constant: c}, valPrincipalState) {
+				return true
+			}
+		case "primitive":
+			if sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+				return true
+			}
+		case "equation":
+			v := sanityDeconstructEquationValues(a.equation, valPrincipalState)
+			for _, vv := range v {
+				if sanityEquivalentValues(vv, value{kind: "constant", constant: c}, valPrincipalState) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *principalState) bool {
 	e1Values := sanityDeconstructEquationValues(e1, valPrincipalState)
 	e2Values := sanityDeconstructEquationValues(e2, valPrincipalState)
