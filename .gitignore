@@ -1,6 +1,8 @@
 # Verifpal
 verifpal.exe
-verifpal
+build/bin/windows/verifpal
+build/bin/linux/verifpal
+build/bin/macos/verifpal
 parser.go
 *.zip
 
@@ -19,3 +21,6 @@ parser.go
 
 # macOS
 .DS_Store
+
+# Visual Studio Code
+.vscode
