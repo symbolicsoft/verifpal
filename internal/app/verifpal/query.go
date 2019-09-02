@@ -42,7 +42,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 
 func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
 	var verifyResult verifyResult
-	var checkIndices []int
+	var indices []int
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if i < 0 {
 		return verifyResult
@@ -66,15 +66,23 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		case "constant":
 			continue
 		case "primitive":
-			checkIndexFound := sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState)
-			if checkIndexFound {
-				checkIndices = append(checkIndices, ii)
+			p := primitiveGet(a.primitive.name)
+			if p.check {
+				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+				if pass {
+					indices = append(indices, ii)
+				}
+			} else {
+				if sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+					indices = append(indices, ii)
+				}
 			}
+
 		case "equation":
 			continue
 		}
 	}
-	for _, ii := range checkIndices {
+	for _, ii := range indices {
 		a := valPrincipalState.beforeRewrite[ii]
 		if query.message.sender != sender {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
@@ -82,7 +90,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
 				prettyValue(valPrincipalState.assigned[i]),
-				", is used in primitive ", prettyValue(a),
+				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state",
 			), true)
 			query.resolved = true
