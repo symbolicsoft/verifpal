@@ -175,37 +175,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 			l := len(valReplacementMap.replacements) - 1
 			// TODO: Improve value injection.
 			switch valPrincipalState.assigned[ii].primitive.name {
-			case "HASH":
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "HASH",
-						arguments: []value{
-							ge[0],
-						},
-						check: valPrincipalState.assigned[ii].primitive.check,
-					},
-				}
-				if sanityValueInValues(valPrincipalState.assigned[ii].primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-					}
-				}
-				aaa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "HASH",
-						arguments: []value{
-							e[0],
-						},
-						check: valPrincipalState.assigned[ii].primitive.check,
-					},
-				}
-				if sanityValueInValues(valPrincipalState.assigned[ii].primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-					if sanityExactSameValueInValues(aaa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aaa)
-					}
-				}
 			case "AEAD_ENC":
 				aa := value{
 					kind: "primitive",
@@ -264,22 +233,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
 			l := len(valReplacementMap.replacements) - 1
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], ge[0])
-			/*
-				for _, aa := range valAttackerState.known {
-					if aa.kind == "constant" {
-						ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa.constant)
-						aaa := valPrincipalState.assigned[ii]
-						if aaa.kind == "constant" && aaa.constant.qualifier == "private" {
-							valReplacementMap.replacements[l] = append(
-								valReplacementMap.replacements[l], value{
-									kind:     "equation",
-									equation: equation{constants: []constant{g, aaa.constant}},
-								},
-							)
-						}
-					}
-				}
-			*/
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))

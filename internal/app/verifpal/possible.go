@@ -229,3 +229,121 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	}
 	return true, rewrite
 }
+
+func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+	switch p.name {
+	case "AEAD_DEC":
+		k := p.arguments[0]
+		switch k.kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+			k = valPrincipalState.assigned[i]
+		}
+		switch k.kind {
+		case "constant":
+			if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+				return true
+			}
+		case "primitive":
+			r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+			if r {
+				return true
+			}
+		case "equation":
+			r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+			if r {
+				return true
+			}
+		}
+		a := p.arguments[1]
+		switch a.kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+			a = valPrincipalState.assigned[i]
+		}
+		switch a.kind {
+		case "primitive":
+			if a.primitive.name == "AEAD_ENC" {
+				k := a.primitive.arguments[0]
+				switch k.kind {
+				case "constant":
+					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+					k = valPrincipalState.assigned[i]
+				}
+				switch k.kind {
+				case "constant":
+					if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+						return true
+					}
+				case "primitive":
+					r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+					if r {
+						return true
+					}
+				case "equation":
+					r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+					if r {
+						return true
+					}
+				}
+			}
+		}
+	case "SIGNVERIF":
+		k := p.arguments[0]
+		switch k.kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+			k = valPrincipalState.assigned[i]
+		}
+		switch k.kind {
+		case "constant":
+			if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+				return true
+			}
+		case "primitive":
+			r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+			if r {
+				return true
+			}
+		case "equation":
+			r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+			if r {
+				return true
+			}
+		}
+		a := p.arguments[2]
+		switch a.kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+			a = valPrincipalState.assigned[i]
+		}
+		switch a.kind {
+		case "primitive":
+			if a.primitive.name == "SIGN" {
+				k := a.primitive.arguments[0]
+				switch k.kind {
+				case "constant":
+					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+					k = valPrincipalState.assigned[i]
+				}
+				switch k.kind {
+				case "constant":
+					if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+						return true
+					}
+				case "primitive":
+					r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+					if r {
+						return true
+					}
+				case "equation":
+					r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+					if r {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}

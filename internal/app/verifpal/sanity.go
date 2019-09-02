@@ -325,6 +325,9 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *p
 	for _, a := range p.arguments {
 		switch a.kind {
 		case "constant":
+			if sanityEquivalentValues(a, value{kind: "constant", constant: c}, valPrincipalState) {
+				return true
+			}
 			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
 			a = valPrincipalState.assigned[i]
 		}

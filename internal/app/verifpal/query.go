@@ -43,6 +43,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
 	var verifyResult verifyResult
 	var indices []int
+	var forcedPass []bool
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if i < 0 {
 		return verifyResult
@@ -67,22 +68,29 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		case "primitive":
 			p := primitiveGet(a.primitive.name)
-			if p.check {
-				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-				if pass {
+			if sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+				if p.check {
+					pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+					if pass {
+						indices = append(indices, ii)
+						forcedPass = append(forcedPass, false)
+					} else {
+						pass = possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+						if pass {
+							indices = append(indices, ii)
+							forcedPass = append(forcedPass, true)
+						}
+					}
+				} else {
 					indices = append(indices, ii)
-				}
-			} else {
-				if sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
-					indices = append(indices, ii)
+					forcedPass = append(forcedPass, p.rewrite.hasRule)
 				}
 			}
-
 		case "equation":
 			continue
 		}
 	}
-	for _, ii := range indices {
+	for f, ii := range indices {
 		a := valPrincipalState.beforeRewrite[ii]
 		if query.message.sender != sender {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
@@ -92,6 +100,18 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				prettyValue(valPrincipalState.assigned[i]),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state",
+			), true)
+			query.resolved = true
+			verifyResult.query = query
+			return verifyResult
+		} else if forcedPass[f] && !valPrincipalState.guard[i] {
+			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
+				"%s%s%s%s%s%s%s%s%s%s%s",
+				prettyConstant(c), ", sent by ", sender, " and resolving to ",
+				prettyValue(valPrincipalState.assigned[i]),
+				", is successfully used in primitive ", prettyValue(a),
+				" in ", query.message.recipient, "'s state, ",
+				"despite it being vulnerable to tampering by Attacker",
 			), true)
 			query.resolved = true
 			verifyResult.query = query
