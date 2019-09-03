@@ -51,7 +51,7 @@ var primitiveSpecs = []primitiveSpec{
 		output: 1,
 		decompose: decomposeRule{
 			hasRule: true,
-			given:   []int{0, 2},
+			given:   []int{0},
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
