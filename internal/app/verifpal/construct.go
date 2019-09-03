@@ -257,7 +257,8 @@ func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []
 				switch block.kind {
 				case "message":
 					for _, cc := range block.message.constants {
-						if (c.name == cc.name) && cc.guard && (block.message.recipient == principal) {
+						if ((c.name == cc.name) && cc.guard) &&
+							((block.message.recipient == principal) || (valKnowledgeMap.creator[i] == principal)) {
 							guard = true
 						}
 					}
