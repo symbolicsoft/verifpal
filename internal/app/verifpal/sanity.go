@@ -346,7 +346,6 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *prin
 	if len(e1Values) != len(e2Values) {
 		return false
 	}
-	//fmt.Println(prettyValues(e1Values) + " || " + prettyValues(e2Values))
 	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
 		e1Base := sanityDeconstructEquationValues(e1Values[0].equation, valPrincipalState)
 		e2Base := sanityDeconstructEquationValues(e2Values[0].equation, valPrincipalState)
