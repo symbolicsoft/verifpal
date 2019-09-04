@@ -92,7 +92,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 	}
 	for f, ii := range indices {
 		a := valPrincipalState.beforeRewrite[ii]
-		if query.message.sender != sender {
+		if query.message.sender != sender && !forcedPass[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",
