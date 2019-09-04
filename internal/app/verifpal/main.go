@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-const mainVersion = "0.4"
+const mainVersion = "0.4.1"
 
 func mainParse(filename string) (*verifpal, *knowledgeMap) {
 	var model verifpal

@@ -1,3 +1,9 @@
+
+## Verifpal 0.4.1
+*September 4, 2019*
+
+- More fixes and improvements to authentication queries.
+
 ## Verifpal 0.4
 *September 3, 2019*
 

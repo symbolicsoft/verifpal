@@ -7,11 +7,11 @@
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
 	VERIFPWD=$(pwd)
 	VERIFPALOS="linux"
-	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4/verifpal_linux.zip"
+	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4.1/verifpal_linux.zip"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
 	VERIFPALWD=$(pwd)
 	VERIFPALOS="darwin"
-	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4/verifpal_macos.zip"
+	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4.1/verifpal_macos.zip"
 else
 	/bin/echo ""
 	/bin/echo "This installer is for Linux and macOS only."
