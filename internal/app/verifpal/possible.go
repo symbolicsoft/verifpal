@@ -13,6 +13,10 @@ import (
 func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, value, []value) {
 	has := []value{}
 	primitive := primitiveGet(p.name)
+	p = sanityResolveInternalValues(value{
+		kind:      "primitive",
+		primitive: p,
+	}, valPrincipalState).primitive
 	if !primitive.decompose.hasRule {
 		return false, value{}, has
 	}
@@ -52,24 +56,19 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 	}
 	if len(has) >= len(primitive.decompose.given) {
 		revealed := p.arguments[primitive.decompose.reveal]
-		if sanityExactSameValueInValues(value{
+		v := value{
 			kind:      "primitive",
 			primitive: p,
-		}, &valAttackerState.known) < 0 {
+		}
+		if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
 					"%s now conceivable by deconstructing %s with %s",
 					prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
 				), analysis, depth, "analysis")
-				valAttackerState.conceivable = append(valAttackerState.conceivable, value{
-					kind:      "primitive",
-					primitive: p,
-				})
+				valAttackerState.conceivable = append(valAttackerState.conceivable, v)
 			}
-			valAttackerState.known = append(valAttackerState.known, value{
-				kind:      "primitive",
-				primitive: p,
-			})
+			valAttackerState.known = append(valAttackerState.known, v)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
 		return true, revealed, has
@@ -78,6 +77,10 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 }
 
 func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, []value) {
+	p = sanityResolveInternalValues(value{
+		kind:      "primitive",
+		primitive: p,
+	}, valPrincipalState).primitive
 	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState, analysis, depth)
 	if d {
 		return true, has

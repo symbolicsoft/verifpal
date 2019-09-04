@@ -304,16 +304,17 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAtta
 			continue
 		}
 		failedCheck = true
-		valPrincipalStateWithReplacements.constants = valPrincipalStateWithReplacements.constants[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.assigned = valPrincipalStateWithReplacements.assigned[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.guard = valPrincipalStateWithReplacements.guard[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.known = valPrincipalStateWithReplacements.known[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.creator = valPrincipalStateWithReplacements.creator[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.sender = valPrincipalStateWithReplacements.sender[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.wasRewritten = valPrincipalStateWithReplacements.wasRewritten[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.beforeRewrite = valPrincipalStateWithReplacements.beforeRewrite[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.wasMutated = valPrincipalStateWithReplacements.wasMutated[:failedRewriteIndices[i]]
-		valPrincipalStateWithReplacements.beforeMutate = valPrincipalStateWithReplacements.beforeMutate[:failedRewriteIndices[i]]
+		f := failedRewriteIndices[i] + 1
+		valPrincipalStateWithReplacements.constants = valPrincipalStateWithReplacements.constants[:f]
+		valPrincipalStateWithReplacements.assigned = valPrincipalStateWithReplacements.assigned[:f]
+		valPrincipalStateWithReplacements.guard = valPrincipalStateWithReplacements.guard[:f]
+		valPrincipalStateWithReplacements.known = valPrincipalStateWithReplacements.known[:f]
+		valPrincipalStateWithReplacements.creator = valPrincipalStateWithReplacements.creator[:f]
+		valPrincipalStateWithReplacements.sender = valPrincipalStateWithReplacements.sender[:f]
+		valPrincipalStateWithReplacements.wasRewritten = valPrincipalStateWithReplacements.wasRewritten[:f]
+		valPrincipalStateWithReplacements.beforeRewrite = valPrincipalStateWithReplacements.beforeRewrite[:f]
+		valPrincipalStateWithReplacements.wasMutated = valPrincipalStateWithReplacements.wasMutated[:f]
+		valPrincipalStateWithReplacements.beforeMutate = valPrincipalStateWithReplacements.beforeMutate[:f]
 		break
 	}
 	return &valPrincipalStateWithReplacements, failedCheck

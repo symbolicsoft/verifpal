@@ -251,26 +251,14 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState *principalStat
 				return false
 			}
 		case "primitive":
-			i1 := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a1.constant)
-			if valPrincipalState.assigned[i1].kind != "primitive" {
-				return false
-			}
-			return sanityEquivalentPrimitives(valPrincipalState.assigned[i1].primitive, a2.primitive, valPrincipalState)
+			return false
 		case "equation":
-			i1 := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a1.constant)
-			if valPrincipalState.assigned[i1].kind != "equation" {
-				return false
-			}
-			return sanityEquivalentEquations(valPrincipalState.assigned[i1].equation, a2.equation, valPrincipalState)
+			return false
 		}
 	case "primitive":
 		switch a2.kind {
 		case "constant":
-			i2 := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a2.constant)
-			if valPrincipalState.assigned[i2].kind != "primitive" {
-				return false
-			}
-			return sanityEquivalentPrimitives(valPrincipalState.assigned[i2].primitive, a1.primitive, valPrincipalState)
+			return false
 		case "primitive":
 			return sanityEquivalentPrimitives(a1.primitive, a2.primitive, valPrincipalState)
 		case "equation":
@@ -279,11 +267,7 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState *principalStat
 	case "equation":
 		switch a2.kind {
 		case "constant":
-			i2 := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a2.constant)
-			if valPrincipalState.assigned[i2].kind != "equation" {
-				return false
-			}
-			return sanityEquivalentEquations(valPrincipalState.assigned[i2].equation, a1.equation, valPrincipalState)
+			return false
 		case "primitive":
 			return false
 		case "equation":
@@ -313,10 +297,11 @@ func sanityDeconstructEquationValues(e equation, valPrincipalState *principalSta
 	var values []value
 	for _, c := range e.constants {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-		if i < 0 {
-			return []value{}
+		if i >= 0 {
+			values = append(values, valPrincipalState.assigned[i])
+		} else {
+			values = append(values, value{kind: "constant", constant: c})
 		}
-		values = append(values, valPrincipalState.assigned[i])
 	}
 	return values
 }
@@ -358,6 +343,10 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *prin
 	if (len(e1Values) == 0) || (len(e2Values) == 0) {
 		return false
 	}
+	if len(e1Values) != len(e2Values) {
+		return false
+	}
+	//fmt.Println(prettyValues(e1Values) + " || " + prettyValues(e2Values))
 	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
 		e1Base := sanityDeconstructEquationValues(e1Values[0].equation, valPrincipalState)
 		e2Base := sanityDeconstructEquationValues(e2Values[0].equation, valPrincipalState)
@@ -427,10 +416,19 @@ func sanityPerformRewrites(valPrincipalState *principalState) ([]primitive, []in
 	return failedRewrites, failedRewritesIndices
 }
 
-func sanityGetEquationRootGenerator(e equation, valPrincipalState *principalState) constant {
+func sanityGetEquationRootGenerator(e equation, ee equation, valPrincipalState *principalState, d int) constant {
+	if d >= 2 {
+		errorCritical(fmt.Sprintf(
+			"too many layers in equation, maximum is 2 (%s)",
+			prettyEquation(e),
+		))
+	}
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, e.constants[0])
+	if d > 0 {
+		i = sanityGetPrincipalStateIndexFromConstant(valPrincipalState, ee.constants[0])
+	}
 	if valPrincipalState.assigned[i].kind == "equation" {
-		return sanityGetEquationRootGenerator(valPrincipalState.assigned[i].equation, valPrincipalState)
+		return sanityGetEquationRootGenerator(e, valPrincipalState.assigned[i].equation, valPrincipalState, d+1)
 	}
 	return valPrincipalState.assigned[i].constant
 }
@@ -438,7 +436,7 @@ func sanityGetEquationRootGenerator(e equation, valPrincipalState *principalStat
 func sanityCheckEquationGenerators(valPrincipalState *principalState) {
 	for _, a := range valPrincipalState.assigned {
 		if a.kind == "equation" {
-			c := sanityGetEquationRootGenerator(a.equation, valPrincipalState)
+			c := sanityGetEquationRootGenerator(a.equation, a.equation, valPrincipalState, 0)
 			if c.name != "g" {
 				errorCritical(fmt.Sprintf(
 					"equation does not use 'g' as generator (%s)",
@@ -447,4 +445,62 @@ func sanityCheckEquationGenerators(valPrincipalState *principalState) {
 			}
 		}
 	}
+}
+
+func sanityResolveInternalValues(a value, valPrincipalState *principalState) value {
+	switch a.kind {
+	case "constant":
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+		if i >= 0 {
+			a = valPrincipalState.assigned[i]
+		}
+	}
+	switch a.kind {
+	case "constant":
+		return a
+	case "primitive":
+		r := value{
+			kind: "primitive",
+			primitive: primitive{
+				name:      a.primitive.name,
+				arguments: []value{},
+				check:     a.primitive.check,
+			},
+		}
+		for _, aa := range a.primitive.arguments {
+			r.primitive.arguments = append(r.primitive.arguments, sanityResolveInternalValues(aa, valPrincipalState))
+		}
+		return r
+	case "equation":
+		r := value{
+			kind: "equation",
+			equation: equation{
+				constants: []constant{},
+			},
+		}
+		if len(a.equation.constants) > 2 {
+			return a
+		}
+		aa := sanityDeconstructEquationValues(a.equation, valPrincipalState)
+		switch aa[0].kind {
+		case "constant":
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[0].constant)
+			aa[0] = valPrincipalState.assigned[i]
+		}
+		switch aa[0].kind {
+		case "constant":
+			r.equation.constants = append(r.equation.constants, aa[0].constant)
+			r.equation.constants = append(r.equation.constants, aa[1].constant)
+		case "primitive":
+			r.equation.constants = append(r.equation.constants, aa[0].constant)
+			r.equation.constants = append(r.equation.constants, aa[1].constant)
+		case "equation":
+			aaa := sanityDeconstructEquationValues(aa[0].equation, valPrincipalState)
+			r.equation.constants = append(r.equation.constants, aaa[0].constant)
+			r.equation.constants = append(r.equation.constants, aaa[1].constant)
+			r.equation.constants = append(r.equation.constants, aa[1].constant)
+		}
+		return r
+	}
+	return a
 }
