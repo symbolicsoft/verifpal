@@ -91,6 +91,9 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		}
 	}
 	for f, ii := range indices {
+		if valPrincipalState.creator[ii] != query.message.recipient {
+			continue
+		}
 		a := valPrincipalState.beforeRewrite[ii]
 		if query.message.sender != sender && !forcedPass[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
