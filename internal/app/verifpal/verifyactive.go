@@ -167,8 +167,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 		case "constant":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
-			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e[0])
+			// l := len(valReplacementMap.replacements) - 1
+			// valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e[0])
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
