@@ -347,6 +347,41 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 				}
 			}
 		}
+	case "HMACVERIF":
+		for ii, k := range p.arguments {
+			iii := 0
+			if ii == 0 {
+				iii = 1
+			}
+			switch k.kind {
+			case "constant":
+				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+				k = valPrincipalState.assigned[i]
+			}
+			switch k.kind {
+			case "constant":
+				if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+					if sanityEquivalentValues(k, p.arguments[iii], valPrincipalState) {
+						return true
+					}
+				}
+			case "primitive":
+				r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+				if r {
+					if sanityEquivalentValues(k, p.arguments[iii], valPrincipalState) {
+						return true
+					}
+				}
+			case "equation":
+				r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+				if r {
+					if sanityEquivalentValues(k, p.arguments[iii], valPrincipalState) {
+						return true
+					}
+				}
+			}
+		}
+
 	}
 	return false
 }
