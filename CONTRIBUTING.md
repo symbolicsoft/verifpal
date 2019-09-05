@@ -16,7 +16,7 @@ Here are some key things to remember as you communicate:
 * Be helpful. Your voice is your contribution — make it productive.
 * Be thoughtful. Your statements may be misinterpreted, and you should be thoughtful about making statements that could cause others to make incorrect assumptions.
 
-Don’t troll, name call, or engage in ad hominem attacks--about anyone. This includes making statements that insult, demean, or humiliate (whether individually or by reference to groups) contributors, contributors to similar projects, extended members of the community, Symbolic Software employees, Symbolic Software's business partners, or others (including public figures), or that violate other standards of conduct or policies against harassment and bullying.
+Don’t troll, name call, or engage in ad hominem attacks—about anyone. This includes making statements that insult, demean, or humiliate (whether individually or by reference to groups) contributors, contributors to similar projects, extended members of the community, Symbolic Software employees, Symbolic Software's business partners, or others (including public figures), or that violate other standards of conduct or policies against harassment and bullying.
 
 ### Our Responsibilities
 Project maintainers are responsible for clarifying the standards of acceptable behavior and are expected to take appropriate and fair corrective action in response to any instances of unacceptable behavior.
