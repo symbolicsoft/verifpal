@@ -484,7 +484,9 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState) val
 		switch aa[0].kind {
 		case "constant":
 			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[0].constant)
-			aa[0] = valPrincipalState.assigned[i]
+			if i >= 0 {
+				aa[0] = valPrincipalState.assigned[i]
+			}
 		}
 		switch aa[0].kind {
 		case "constant":
