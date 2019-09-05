@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 )
 
 const mainVersion = "0.4.1"
@@ -26,9 +27,9 @@ func mainParse(filename string) (*verifpal, *knowledgeMap) {
 }
 
 func main() {
-	fmt.Fprint(os.Stdout, fmt.Sprintf("%s%s%s\n%s\n%s\n\n",
-		"Verifpal ", mainVersion, " (https://verifpal.com)",
-		"© 2019 Symbolic Software",
+	fmt.Fprint(os.Stdout, fmt.Sprintf("%s%s%s%s%s\n%s\n%s\n\n",
+		"Verifpal ", mainVersion, " (", runtime.Version(), ")",
+		"© 2019 Symbolic Software — https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
 	))
 	if len(os.Args) != 3 {
