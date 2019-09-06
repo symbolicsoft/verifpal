@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Verifpal
 verifpal.exe
 build/bin/windows/verifpal
@@ -12,6 +15,7 @@ parser.go
 *.dll
 *.so
 *.dylib
+*.upx
 
 # Test binary, build with `go test -c`
 *.test

@@ -1,6 +1,5 @@
-# SPDX-License-Identifier: GPL-3.0
-# Copyright © 2019-2020 Nadim Kobeissi, Symbolic Software <nadim@symbolic.software>.
-# All Rights Reserved.
+# SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: GPL-3.0-only
 
 all:
 	@make -s parser
@@ -53,15 +52,15 @@ release:
 	@/bin/echo -n "[Verifpal] Creating release archives"
 	@/bin/echo -n "."
 	@cp build/bin/windows/verifpal.exe verifpal.exe
-	@zip -q -r9 build/release/verifpal_windows verifpal.exe LICENSE.md README.md CHANGELOG.md examples
+	@zip -q -r9 build/release/verifpal_windows verifpal.exe LICENSES README.md CHANGELOG.md examples
 	@rm verifpal.exe
 	@/bin/echo -n "."
 	@cp build/bin/linux/verifpal verifpal
-	@zip -q -r9 build/release/verifpal_linux verifpal LICENSE.md README.md CHANGELOG.md examples
+	@zip -q -r9 build/release/verifpal_linux verifpal LICENSES README.md CHANGELOG.md examples
 	@rm verifpal
 	@/bin/echo -n "."
 	@cp build/bin/macos/verifpal verifpal
-	@zip -q -r9 build/release/verifpal_macos verifpal LICENSE.md README.md CHANGELOG.md examples
+	@zip -q -r9 build/release/verifpal_macos verifpal LICENSES README.md CHANGELOG.md examples
 	@rm verifpal
 	@/bin/echo "     OK"
 

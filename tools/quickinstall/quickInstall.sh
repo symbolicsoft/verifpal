@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: GPL-3.0-only
+
 /bin/echo "Verifpal Quick Installer and Updater"
 /bin/echo "for Linux and macOS"
 /bin/echo "https://verifpal.com"
@@ -49,7 +52,7 @@ sudo mkdir -p /usr/local/share/verifpal
 sudo rm -f /usr/local/bin/verifpal
 sudo rm -rf /usr/local/share/verifpal/*
 sudo mv verifpal /usr/local/bin/verifpal
-sudo mv README.md LICENSE.md examples /usr/local/share/verifpal/.
+sudo mv README.md LICENSES examples /usr/local/share/verifpal/.
 sudo chmod -R 755 /usr/local/bin/verifpal
 sudo chmod -R 755 /usr/local/share/verifpal
 /bin/echo "   OK"

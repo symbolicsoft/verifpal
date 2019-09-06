@@ -1,3 +1,8 @@
+<!---
+# SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: CC-BY-NC-ND-4.0
+-->
+
 # Contributing to Verifpal
 If you wish to contribute to Verifpal, please first discuss the changes you are envisioning via the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal).
 

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright © 2019-2020 Nadim Kobeissi, Symbolic Software <nadim@symbolic.software>.
  * All Rights Reserved. */
 

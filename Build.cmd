@@ -1,3 +1,6 @@
+REM SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+REM SPDX-License-Identifier: GPL-3.0-only
+
 @echo off
 @setx GOOS "windows" >nul
 @setx GOARCH "amd64" >nul
