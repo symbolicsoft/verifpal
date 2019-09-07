@@ -443,33 +443,38 @@ func sanityPerformRewrites(valPrincipalState *principalState) ([]primitive, []in
 	return failedRewrites, failedRewritesIndices
 }
 
-func sanityGetEquationRootGenerator(e equation, ee equation, valPrincipalState *principalState, d int) constant {
-	if d >= 2 {
+func sanityCheckEquationRootGenerator(e equation, ee equation, valPrincipalState *principalState) {
+	a, _ := sanityResolveInternalValues(value{kind: "equation", equation: e}, valPrincipalState, false)
+	if len(a.equation.constants) > 3 {
 		errorCritical(fmt.Sprintf(
 			"too many layers in equation (%s), maximum is 2",
 			prettyEquation(e),
 		))
 	}
-	a := sanityResolveConstant(valPrincipalState, e.constants[0], false)
-	if d > 0 {
-		a = sanityResolveConstant(valPrincipalState, ee.constants[0], false)
+	for i, c := range a.equation.constants {
+		if i == 0 {
+			if c.name != "g" {
+				errorCritical(fmt.Sprintf(
+					"equation (%s) does not use 'g' as generator",
+					prettyEquation(e),
+				))
+			}
+		}
+		if i > 0 {
+			if c.name == "g" {
+				errorCritical(fmt.Sprintf(
+					"equation (%s) uses 'g' not as a generator",
+					prettyEquation(e),
+				))
+			}
+		}
 	}
-	if a.kind == "equation" {
-		return sanityGetEquationRootGenerator(e, a.equation, valPrincipalState, d+1)
-	}
-	return a.constant
 }
 
 func sanityCheckEquationGenerators(valPrincipalState *principalState) {
 	for _, a := range valPrincipalState.assigned {
 		if a.kind == "equation" {
-			c := sanityGetEquationRootGenerator(a.equation, a.equation, valPrincipalState, 0)
-			if c.name != "g" {
-				errorCritical(fmt.Sprintf(
-					"equation (%s) does not use 'g' as generator",
-					prettyEquation(a.equation),
-				))
-			}
+			sanityCheckEquationRootGenerator(a.equation, a.equation, valPrincipalState)
 		}
 	}
 }
@@ -515,20 +520,25 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState, for
 		aa := sanityDeconstructEquationValues(a.equation, valPrincipalState)
 		switch aa[0].kind {
 		case "constant":
-			aa[0] = sanityResolveConstant(valPrincipalState, aa[0].constant, false)
+			aa[0] = sanityResolveConstant(valPrincipalState, aa[0].constant, forceBeforeMutate)
 		}
 		switch aa[0].kind {
 		case "constant":
 			r.equation.constants = append(r.equation.constants, aa[0].constant)
-			r.equation.constants = append(r.equation.constants, aa[1].constant)
 		case "primitive":
 			r.equation.constants = append(r.equation.constants, aa[0].constant)
+		case "equation":
+			aaa, _ := sanityResolveInternalValues(aa[0], valPrincipalState, forceBeforeMutate)
+			r.equation.constants = aaa.equation.constants
+		}
+		switch aa[1].kind {
+		case "constant":
+			r.equation.constants = append(r.equation.constants, aa[1].constant)
+		case "primitive":
 			r.equation.constants = append(r.equation.constants, aa[1].constant)
 		case "equation":
-			aaa := sanityDeconstructEquationValues(aa[0].equation, valPrincipalState)
-			r.equation.constants = append(r.equation.constants, aaa[0].constant)
-			r.equation.constants = append(r.equation.constants, aaa[1].constant)
-			r.equation.constants = append(r.equation.constants, aa[1].constant)
+			aaa, _ := sanityResolveInternalValues(aa[1], valPrincipalState, forceBeforeMutate)
+			r.equation.constants = append(r.equation.constants, aaa.equation.constants[1:]...)
 		}
 		for _, vv := range r.equation.constants {
 			v = append(v, value{kind: "constant", constant: vv})
