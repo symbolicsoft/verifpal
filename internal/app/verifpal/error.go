@@ -12,10 +12,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
+
+	"github.com/logrusorgru/aurora"
 )
 
 func errorCritical(errText string) {
 	err := errors.New(errText)
-	fmt.Fprintf(os.Stderr, "[Verifpal] Error: %v\n", err)
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(os.Stderr, " Verifpal! Error: %v.\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, " %s! %s: %v.\n", aurora.Red("Verifpal").Bold(), aurora.Red("Error"), err)
+	}
 	os.Exit(1)
 }
