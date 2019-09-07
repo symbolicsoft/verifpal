@@ -246,9 +246,10 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 }
 
 func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+	prim := primitiveGet(p.name)
 	switch p.name {
 	case "AEAD_DEC":
-		k := p.arguments[0]
+		k := p.arguments[prim.decompose.given[0]]
 		switch k.kind {
 		case "constant":
 			k = sanityResolveConstant(valPrincipalState, k.constant, false)
@@ -270,26 +271,26 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 			}
 		}
 	case "SIGNVERIF":
-		k := p.arguments[0]
+		k := p.arguments[prim.rewrite.from]
 		switch k.kind {
 		case "constant":
-			k = sanityResolveConstant(valPrincipalState, k.constant, false)
+			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+			differentCreator := valPrincipalState.creator[i] != valPrincipalState.name
+			k = sanityResolveConstant(valPrincipalState, k.constant, differentCreator)
 		}
 		switch k.kind {
 		case "constant":
-			if sanityValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
-				return true
-			}
+			return false
 		case "primitive":
-			r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
-			if r {
+			if k.primitive.name != "SIGN" {
+				return false
+			}
+			if sanityValueInValues(k.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 				return true
 			}
+			return false
 		case "equation":
-			r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
-			if r {
-				return true
-			}
+			return false
 		}
 	case "HMACVERIF":
 		for ii, k := range p.arguments {
