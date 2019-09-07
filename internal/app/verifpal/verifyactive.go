@@ -132,20 +132,22 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 	e := []value{}
 	ge := []value{}
 	g := constant{
-		name:      "g",
-		guard:     false,
-		output:    0,
-		fresh:     false,
-		qualifier: "public",
+		name:        "g",
+		guard:       false,
+		output:      0,
+		fresh:       false,
+		declaration: "knows",
+		qualifier:   "public",
 	}
 	e = append(e, value{
 		kind: "constant",
 		constant: constant{
-			name:      fmt.Sprintf("attacker_%d", valReplacementMap.injectCounter),
-			guard:     false,
-			output:    0,
-			fresh:     false,
-			qualifier: "private",
+			name:        fmt.Sprintf("attacker_%d", valReplacementMap.injectCounter),
+			guard:       false,
+			output:      0,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "private",
 		},
 	})
 	ge = append(ge, value{

@@ -14,11 +14,12 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	var valKnowledgeMap knowledgeMap
 	valKnowledgeMap.principals = principals
 	g := constant{
-		name:      "g",
-		guard:     false,
-		output:    0,
-		fresh:     false,
-		qualifier: "public",
+		name:        "g",
+		guard:       false,
+		output:      0,
+		fresh:       false,
+		declaration: "knows",
+		qualifier:   "public",
 	}
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, g)
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
@@ -38,13 +39,27 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 				case "knows":
 					for _, c := range expression.constants {
 						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if i < 0 {
+						if i >= 0 {
+							d1 := valKnowledgeMap.constants[i].declaration
+							d2 := "knows"
+							q1 := valKnowledgeMap.constants[i].qualifier
+							q2 := expression.qualifier
+							fresh := valKnowledgeMap.constants[i].fresh
+							if d1 != d2 || q1 != q2 || fresh {
+								errorCritical(fmt.Sprintf(
+									"constant is known more than once and in different ways (%s)",
+									prettyConstant(c),
+								))
+							}
+							valKnowledgeMap.knownBy[i] = append(valKnowledgeMap.knownBy[i], map[string]string{block.principal.name: block.principal.name})
+						} else {
 							c = constant{
-								name:      c.name,
-								guard:     c.guard,
-								output:    c.output,
-								fresh:     false,
-								qualifier: expression.qualifier,
+								name:        c.name,
+								guard:       c.guard,
+								output:      c.output,
+								fresh:       false,
+								declaration: "knows",
+								qualifier:   expression.qualifier,
 							}
 							valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
 							valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
@@ -61,25 +76,25 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 									}
 								}
 							}
-						} else if valKnowledgeMap.constants[i].fresh || (valKnowledgeMap.constants[i].qualifier != "public") {
-							errorCritical(fmt.Sprintf(
-								"constant is known more than once and in different ways (%s)",
-								prettyConstant(c),
-							))
-						} else {
-							valKnowledgeMap.knownBy[i] = append(valKnowledgeMap.knownBy[i], map[string]string{block.principal.name: block.principal.name})
 						}
 					}
 				case "generates":
 					for _, c := range expression.constants {
 						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if i < 0 {
+						if i >= 0 {
+
+							errorCritical(fmt.Sprintf(
+								"constant generated twice (%s)",
+								prettyConstant(c),
+							))
+						} else {
 							c = constant{
-								name:      c.name,
-								guard:     c.guard,
-								output:    c.output,
-								fresh:     true,
-								qualifier: "private",
+								name:        c.name,
+								guard:       c.guard,
+								output:      c.output,
+								fresh:       true,
+								declaration: "generates",
+								qualifier:   "private",
 							}
 							valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
 							valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
@@ -88,11 +103,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							})
 							valKnowledgeMap.creator = append(valKnowledgeMap.creator, block.principal.name)
 							valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-						} else {
-							errorCritical(fmt.Sprintf(
-								"constant generated twice (%s)",
-								prettyConstant(c),
-							))
 						}
 					}
 				case "assignment":
@@ -158,11 +168,12 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							))
 						}
 						c = constant{
-							name:      c.name,
-							guard:     c.guard,
-							output:    i,
-							fresh:     false,
-							qualifier: "private",
+							name:        c.name,
+							guard:       c.guard,
+							output:      i,
+							fresh:       false,
+							declaration: "assignment",
+							qualifier:   "private",
 						}
 						valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
 						valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expression.right)

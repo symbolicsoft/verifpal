@@ -47,11 +47,12 @@ type value struct {
 	equation  equation
 }
 type constant struct {
-	name      string
-	guard     bool
-	output    int
-	qualifier string
-	fresh     bool
+	name        string
+	guard       bool
+	output      int
+	declaration string
+	qualifier   string
+	fresh       bool
 }
 type primitive struct {
 	name      string
