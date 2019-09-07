@@ -19,7 +19,7 @@ principal Bob[
 	gbssig = SIGN(blongterm, gbs)
 ]
 
-Bob -> Alice: gblongterm, gbssig, gbs, gbo
+Bob -> Alice: [gblongterm], gbssig, gbs, gbo
 
 principal Alice[
 	generates ae1
