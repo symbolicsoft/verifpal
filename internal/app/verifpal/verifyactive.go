@@ -10,9 +10,8 @@ import (
 	"fmt"
 )
 
-func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult {
+func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
-	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
 	analysis := 0

@@ -49,7 +49,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	if ii >= 0 {
 		return depth
 	}
-	resolved := sanityResolveInternalValues(valPrincipalState.assigned[i], valPrincipalState)
+	resolved, _ := sanityResolveInternalValues(valPrincipalState.assigned[i], valPrincipalState)
 	output := []value{}
 	if resolved.kind == "primitive" {
 		for _, v := range valAttackerState.known {
@@ -99,7 +99,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 	switch a.kind {
 	case "primitive":
 		r, revealed, ar = possibleToDeconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
-		revealed = sanityResolveInternalValues(revealed, valPrincipalState)
+		revealed, _ = sanityResolveInternalValues(revealed, valPrincipalState)
 	}
 	if r {
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
@@ -124,7 +124,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	var r bool
 	var ar []value
-	a = sanityResolveInternalValues(a, valPrincipalState)
+	a, _ = sanityResolveInternalValues(a, valPrincipalState)
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	aBackup := a
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
@@ -167,10 +167,10 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	aBackup := a
-	a = sanityResolveInternalValues(a, valPrincipalState)
+	a, _ = sanityResolveInternalValues(a, valPrincipalState)
 	for _, aa := range valPrincipalState.assigned {
 		aaBackup := aa
-		aa := sanityResolveInternalValues(aa, valPrincipalState)
+		aa, _ := sanityResolveInternalValues(aa, valPrincipalState)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
@@ -187,7 +187,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 		switch aa.kind {
 		case "primitive":
 			for _, aaa := range aa.primitive.arguments {
-				aaa := sanityResolveInternalValues(aaa, valPrincipalState)
+				aaa, _ := sanityResolveInternalValues(aaa, valPrincipalState)
 				if sanityEquivalentValues(a, aaa, valPrincipalState) {
 					if sanityExactSameValueInValues(aaa, &valAttackerState.known) < 0 {
 						if sanityExactSameValueInValues(aaa, &valAttackerState.conceivable) < 0 {

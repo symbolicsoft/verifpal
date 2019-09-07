@@ -13,16 +13,16 @@ import (
 	"time"
 )
 
-func verify(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult {
+func verify(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
 	prettyMessage(fmt.Sprintf(
 		"verification initiated at %s",
 		time.Now().Format("15:04:05"),
 	), 0, 0, "verifpal")
 	if model.attacker == "passive" {
-		verifyResults = verifyPassive(model, valKnowledgeMap)
+		verifyResults = verifyPassive(model, valKnowledgeMap, valPrincipalStates)
 	} else if model.attacker == "active" {
-		verifyResults = verifyActive(model, valKnowledgeMap)
+		verifyResults = verifyActive(model, valKnowledgeMap, valPrincipalStates)
 	} else {
 		errorCritical("invalid attacker")
 	}

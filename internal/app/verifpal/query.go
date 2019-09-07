@@ -51,18 +51,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		return verifyResult
 	}
 	c := valPrincipalState.constants[i]
-	recipientKnows := valPrincipalState.known[i]
 	sender := valPrincipalState.sender[i]
-	if !recipientKnows {
-		verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
-			"%s%s%s%s",
-			prettyConstant(c), " is not known by ",
-			query.message.recipient, ", query cannot be evaluated",
-		), true)
-		query.resolved = true
-		verifyResult.query = query
-		return verifyResult
-	}
 	for ii := range valPrincipalState.constants {
 		a := valPrincipalState.beforeRewrite[ii]
 		switch a.kind {

@@ -15,10 +15,11 @@ import (
 func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, value, []value) {
 	has := []value{}
 	primitive := primitiveGet(p.name)
-	p = sanityResolveInternalValues(value{
+	pp, _ := sanityResolveInternalValues(value{
 		kind:      "primitive",
 		primitive: p,
-	}, valPrincipalState).primitive
+	}, valPrincipalState)
+	p = pp.primitive
 	if !primitive.decompose.hasRule {
 		return false, value{}, has
 	}
@@ -79,10 +80,11 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 }
 
 func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, []value) {
-	p = sanityResolveInternalValues(value{
+	pp, _ := sanityResolveInternalValues(value{
 		kind:      "primitive",
 		primitive: p,
-	}, valPrincipalState).primitive
+	}, valPrincipalState)
+	p = pp.primitive
 	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState, analysis, depth)
 	if d {
 		return true, has

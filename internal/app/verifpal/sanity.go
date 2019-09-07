@@ -13,12 +13,13 @@ import (
 	"strings"
 )
 
-func sanity(model *verifpal) *knowledgeMap {
+func sanity(model *verifpal) (*knowledgeMap, []*principalState) {
 	var valKnowledgeMap *knowledgeMap
 	principals := sanityDeclaredPrincipals(model)
 	valKnowledgeMap = constructKnowledgeMap(model, principals)
-	sanityQueries(model, valKnowledgeMap)
-	return valKnowledgeMap
+	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
+	sanityQueries(model, valKnowledgeMap, valPrincipalStates)
+	return valKnowledgeMap, valPrincipalStates
 }
 
 func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMap *knowledgeMap) []constant {
@@ -92,43 +93,70 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 	return constants
 }
 
-func sanityQueries(model *verifpal, valKnowledgeMap *knowledgeMap) {
+func sanityQueries(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) {
 	for _, query := range model.queries {
 		switch query.kind {
 		case "confidentiality":
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constant)
 			if i < 0 {
 				errorCritical(fmt.Sprintf(
-					"confidentiality query refers to unknown value (%s)",
+					"confidentiality query (%s) refers to unknown value (%s)",
+					prettyQuery(query),
 					prettyConstant(query.constant),
 				))
 			}
 		case "authentication":
 			if len(query.message.constants) != 1 {
-				errorCritical("authentication queries must only have one constant")
+				errorCritical(fmt.Sprintf(
+					"authentication query (%s) has more than one constant",
+					prettyQuery(query),
+				))
 			}
 			c := query.message.constants[0]
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-			if i >= 0 {
-				knows := false
-				if valKnowledgeMap.creator[i] == query.message.sender {
-					knows = true
-				}
-				for _, m := range valKnowledgeMap.knownBy[i] {
-					if _, ok := m[query.message.sender]; ok {
-						knows = true
-					}
-				}
-				if !knows {
-					errorCritical(fmt.Sprintf(
-						"authentication query depends on %s sending a constant (%s) that they do not know",
-						query.message.sender,
-						prettyConstant(c),
-					))
-				}
-			} else {
+			if i < 0 {
 				errorCritical(fmt.Sprintf(
 					"authentication query refers to unknown constant (%s)",
+					prettyConstant(c),
+				))
+			}
+			senderKnows := false
+			recipientKnows := false
+			if valKnowledgeMap.creator[i] == query.message.sender {
+				senderKnows = true
+			}
+			if valKnowledgeMap.creator[i] == query.message.recipient {
+				recipientKnows = true
+			}
+			for _, m := range valKnowledgeMap.knownBy[i] {
+				if _, ok := m[query.message.sender]; ok {
+					senderKnows = true
+				}
+				if _, ok := m[query.message.recipient]; ok {
+					recipientKnows = true
+				}
+			}
+			if !senderKnows {
+				errorCritical(fmt.Sprintf(
+					"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
+					prettyQuery(query),
+					query.message.sender,
+					prettyConstant(c),
+				))
+			}
+			if !recipientKnows {
+				errorCritical(fmt.Sprintf(
+					"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
+					prettyQuery(query),
+					query.message.recipient,
+					prettyConstant(c),
+				))
+			}
+			if !sanityConstantIsUsedByPrincipal(valPrincipalStates[0], query.message.recipient, c) {
+				errorCritical(fmt.Sprintf(
+					"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
+					prettyQuery(query),
+					query.message.recipient,
 					prettyConstant(c),
 				))
 			}
@@ -420,7 +448,7 @@ func sanityPerformRewrites(valPrincipalState *principalState) ([]primitive, []in
 func sanityGetEquationRootGenerator(e equation, ee equation, valPrincipalState *principalState, d int) constant {
 	if d >= 2 {
 		errorCritical(fmt.Sprintf(
-			"too many layers in equation, maximum is 2 (%s)",
+			"too many layers in equation (%s), maximum is 2",
 			prettyEquation(e),
 		))
 	}
@@ -440,7 +468,7 @@ func sanityCheckEquationGenerators(valPrincipalState *principalState) {
 			c := sanityGetEquationRootGenerator(a.equation, a.equation, valPrincipalState, 0)
 			if c.name != "g" {
 				errorCritical(fmt.Sprintf(
-					"equation does not use 'g' as generator (%s)",
+					"equation (%s) does not use 'g' as generator",
 					prettyEquation(a.equation),
 				))
 			}
@@ -448,9 +476,11 @@ func sanityCheckEquationGenerators(valPrincipalState *principalState) {
 	}
 }
 
-func sanityResolveInternalValues(a value, valPrincipalState *principalState) value {
+func sanityResolveInternalValues(a value, valPrincipalState *principalState) (value, []value) {
+	var v []value
 	switch a.kind {
 	case "constant":
+		v = append(v, a)
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
 		if i >= 0 {
 			a = valPrincipalState.assigned[i]
@@ -458,7 +488,7 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState) val
 	}
 	switch a.kind {
 	case "constant":
-		return a
+		return a, v
 	case "primitive":
 		r := value{
 			kind: "primitive",
@@ -469,9 +499,11 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState) val
 			},
 		}
 		for _, aa := range a.primitive.arguments {
-			r.primitive.arguments = append(r.primitive.arguments, sanityResolveInternalValues(aa, valPrincipalState))
+			s, vv := sanityResolveInternalValues(aa, valPrincipalState)
+			v = append(v, vv...)
+			r.primitive.arguments = append(r.primitive.arguments, s)
 		}
-		return r
+		return r, v
 	case "equation":
 		r := value{
 			kind: "equation",
@@ -480,7 +512,10 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState) val
 			},
 		}
 		if len(a.equation.constants) > 2 {
-			return a
+			for _, vv := range a.equation.constants {
+				v = append(v, value{kind: "constant", constant: vv})
+			}
+			return a, v
 		}
 		aa := sanityDeconstructEquationValues(a.equation, valPrincipalState)
 		switch aa[0].kind {
@@ -503,7 +538,31 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState) val
 			r.equation.constants = append(r.equation.constants, aaa[1].constant)
 			r.equation.constants = append(r.equation.constants, aa[1].constant)
 		}
-		return r
+		for _, vv := range r.equation.constants {
+			v = append(v, value{kind: "constant", constant: vv})
+		}
+		return r, v
 	}
-	return a
+	return a, v
+}
+
+func sanityConstantIsUsedByPrincipal(valPrincipalState *principalState, name string, c constant) bool {
+	for i, a := range valPrincipalState.beforeRewrite {
+		if valPrincipalState.creator[i] != name {
+			continue
+		}
+		switch a.kind {
+		case "primitive":
+			_, v := sanityResolveInternalValues(a, valPrincipalState)
+			for _, vv := range v {
+				switch vv.kind {
+				case "constant":
+					if vv.constant.name == c.name {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }

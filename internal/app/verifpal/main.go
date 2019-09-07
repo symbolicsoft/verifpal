@@ -16,7 +16,7 @@ import (
 
 const mainVersion = "0.4.1"
 
-func mainParse(filename string) (*verifpal, *knowledgeMap) {
+func mainParse(filename string) (*verifpal, *knowledgeMap, []*principalState) {
 	var model verifpal
 	prettyMessage("parsing model...", 0, 0, "verifpal")
 	parsed, err := ParseFile(filename)
@@ -24,8 +24,8 @@ func mainParse(filename string) (*verifpal, *knowledgeMap) {
 		errorCritical(err.Error())
 	}
 	model = parsed.(verifpal)
-	valKnowledgeMap := sanity(&model)
-	return &model, valKnowledgeMap
+	valKnowledgeMap, valPrincipalStates := sanity(&model)
+	return &model, valKnowledgeMap, valPrincipalStates
 }
 
 func main() {
@@ -39,14 +39,14 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "verify":
-		model, valKnowledgeMap := mainParse(os.Args[2])
-		verify(model, valKnowledgeMap)
+		model, valKnowledgeMap, valPrincipalStates := mainParse(os.Args[2])
+		verify(model, valKnowledgeMap, valPrincipalStates)
 		prettyMessage("thank you for using verifpal!", 0, 0, "verifpal")
 		prettyMessage("verifpal is experimental software and may miss attacks.", 0, 0, "info")
 	case "implement":
 		errorCritical("this feature does not yet exist")
 	case "pretty":
-		model, _ := mainParse(os.Args[2])
+		model, _, _ := mainParse(os.Args[2])
 		fmt.Fprint(os.Stdout, prettyPrint(model))
 	default:
 		help()

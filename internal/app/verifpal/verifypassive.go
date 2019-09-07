@@ -8,9 +8,8 @@
 
 package main
 
-func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap) []verifyResult {
+func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
-	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
 	valAttackerState := constructAttackerState(false, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as passive", 0, 0, "info")
 	verifyAnalysis(model, valPrincipalStates[0], valAttackerState, 0, 0)
