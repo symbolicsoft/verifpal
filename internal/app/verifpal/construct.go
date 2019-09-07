@@ -61,7 +61,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 									}
 								}
 							}
-						} else if valKnowledgeMap.constants[i].fresh || (valKnowledgeMap.constants[i].qualifier != expression.qualifier) {
+						} else if valKnowledgeMap.constants[i].fresh || (valKnowledgeMap.constants[i].qualifier != "public") {
 							errorCritical(fmt.Sprintf(
 								"constant is known more than once and in different ways (%s)",
 								prettyConstant(c),
