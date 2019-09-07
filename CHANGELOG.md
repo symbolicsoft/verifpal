@@ -3,6 +3,13 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.4.3
+*September 7, 2019*
+
+- Fix more parsing errors pointed out by Mike.
+- More fixes and improvements to authentication queries.
+- More accurate ProtonMail model. 
+
 ## Verifpal 0.4.2
 *September 7, 2019*
 
