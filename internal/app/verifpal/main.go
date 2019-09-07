@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path"
 	"runtime"
 )
 
@@ -18,7 +19,10 @@ const mainVersion = "0.4.1"
 
 func mainParse(filename string) (*verifpal, *knowledgeMap, []*principalState) {
 	var model verifpal
-	prettyMessage("parsing model...", 0, 0, "verifpal")
+	prettyMessage(fmt.Sprintf(
+		"parsing model \"%s\"...",
+		path.Base(filename),
+	), 0, 0, "verifpal")
 	parsed, err := ParseFile(filename)
 	if err != nil {
 		errorCritical(err.Error())
