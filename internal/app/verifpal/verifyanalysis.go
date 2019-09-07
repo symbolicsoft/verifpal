@@ -79,7 +79,6 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 			), analysis, depth, "deduction")
 			valAttackerState.conceivable = append(valAttackerState.conceivable, resolved)
 		}
-		valPrincipalState.sender[i] = "Attacker"
 		valAttackerState.known = append(valAttackerState.known, resolved)
 		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 	}
@@ -94,7 +93,6 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 	var revealed value
 	var ar []value
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
-	i := sanityValueInValues(a, &valPrincipalState.assigned, valPrincipalState)
 	switch a.kind {
 	case "constant":
 		a = sanityResolveConstant(valPrincipalState, a.constant, false)
@@ -113,7 +111,6 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
 			}
-			valPrincipalState.sender[i] = "Attacker"
 			valAttackerState.known = append(valAttackerState.known, revealed)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
