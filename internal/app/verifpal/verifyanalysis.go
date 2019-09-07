@@ -165,14 +165,13 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 	a, _ = sanityResolveInternalValues(a, valPrincipalState, false)
 	for _, c := range valPrincipalState.constants {
 		aa := sanityResolveConstant(valPrincipalState, c, false)
-		aaBackup := aa
 		aa, _ = sanityResolveInternalValues(aa, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, false, false, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
 					prettyMessage(fmt.Sprintf(
 						"%s found by attacker by equivocating with %s",
-						prettyValue(aaBackup), prettyValue(aBackup),
+						prettyValue(aa), prettyValue(aBackup),
 					), analysis, depth, "deduction")
 					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
 				}
