@@ -286,7 +286,9 @@ func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []
 				))
 			}
 		}
-		sanityCheckEquationGenerators(&valPrincipalState)
+		for _, a := range valPrincipalState.assigned {
+			sanityCheckEquationGenerators(a, &valPrincipalState)
+		}
 		valPrincipalStates = append(valPrincipalStates, &valPrincipalState)
 	}
 	return valPrincipalStates

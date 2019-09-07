@@ -443,7 +443,7 @@ func sanityPerformRewrites(valPrincipalState *principalState) ([]primitive, []in
 	return failedRewrites, failedRewritesIndices
 }
 
-func sanityCheckEquationRootGenerator(e equation, ee equation, valPrincipalState *principalState) {
+func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalState) {
 	a, _ := sanityResolveInternalValues(value{kind: "equation", equation: e}, valPrincipalState, false)
 	if len(a.equation.constants) > 3 {
 		errorCritical(fmt.Sprintf(
@@ -471,11 +471,20 @@ func sanityCheckEquationRootGenerator(e equation, ee equation, valPrincipalState
 	}
 }
 
-func sanityCheckEquationGenerators(valPrincipalState *principalState) {
-	for _, a := range valPrincipalState.assigned {
-		if a.kind == "equation" {
-			sanityCheckEquationRootGenerator(a.equation, a.equation, valPrincipalState)
+func sanityCheckEquationGenerators(a value, valPrincipalState *principalState) {
+	v, _ := sanityResolveInternalValues(a, valPrincipalState, false)
+	switch v.kind {
+	case "primitive":
+		for _, va := range v.primitive.arguments {
+			switch va.kind {
+			case "primitive":
+				sanityCheckEquationGenerators(va, valPrincipalState)
+			case "equation":
+				sanityCheckEquationRootGenerator(va.equation, valPrincipalState)
+			}
 		}
+	case "equation":
+		sanityCheckEquationRootGenerator(v.equation, valPrincipalState)
 	}
 }
 
