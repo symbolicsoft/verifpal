@@ -10,10 +10,11 @@ principal Bob[]
 principal Alice[
 	knows private psk
 	knows public c0
+	knows public null
 	generates a
 	generates m1
 	ga = G^a
-	em1 = AEAD_ENC(psk, m1, ga)
+	em1 = AEAD_ENC(psk, m1, null)
 ]
 
 Alice -> Protonmail: ga, em1
@@ -29,18 +30,21 @@ Microsoft -> Bob: j, ga, em1
 principal Bob[
 	knows private psk
 	knows public c0
+	knows public null
 	generates m2
 	generates b
 	gb = G^b
-	m1b = AEAD_DEC(psk, em1, ga)?
-	em2 = AEAD_ENC(ga^b, m2, ga)
+	gab = ga^b
+	m1b = AEAD_DEC(psk, em1, null)?
+	em2 = AEAD_ENC(gab, m2, null)
 ]
 
 Bob -> Protonmail: em2, gb
 Protonmail -> Alice: em2, gb
 
 principal Alice[
-	m2a = AEAD_DEC(gb^a, em2, ga)?
+	gba = gb^a
+	m2a = AEAD_DEC(gba, em2, null)?
 ]
 
 queries[
