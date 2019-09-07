@@ -161,33 +161,36 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 		if v.kind != "constant" {
 			continue
 		}
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
-		switch valPrincipalState.assigned[ii].kind {
+		a := sanityResolveConstant(valPrincipalState, v.constant, false)
+		switch a.kind {
 		case "constant":
+			if sanityExactSameValue(value{kind: "constant", constant: g}, a) {
+				continue
+			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e[0])
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
 			// TODO: Improve value injection.
-			switch valPrincipalState.assigned[ii].primitive.name {
+			switch a.primitive.name {
 			case "AEAD_ENC":
 				aa := value{
 					kind: "primitive",
 					primitive: primitive{
 						name: "AEAD_ENC",
 						arguments: []value{
-							valPrincipalState.assigned[ii].primitive.arguments[0],
+							a.primitive.arguments[0],
 							ge[0],
-							valPrincipalState.assigned[ii].primitive.arguments[2],
+							a.primitive.arguments[2],
 						},
-						check: valPrincipalState.assigned[ii].primitive.check,
+						check: a.primitive.check,
 					},
 				}
-				if sanityValueInValues(valPrincipalState.assigned[ii].primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+				if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 					}
@@ -198,13 +201,13 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 					primitive: primitive{
 						name: "ENC",
 						arguments: []value{
-							valPrincipalState.assigned[ii].primitive.arguments[0],
+							a.primitive.arguments[0],
 							ge[0],
 						},
-						check: valPrincipalState.assigned[ii].primitive.check,
+						check: a.primitive.check,
 					},
 				}
-				if sanityValueInValues(valPrincipalState.assigned[ii].primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+				if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 					}
@@ -216,12 +219,12 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 						name: "SIGN",
 						arguments: []value{
 							e[0],
-							valPrincipalState.assigned[ii].primitive.arguments[1],
+							a.primitive.arguments[1],
 						},
-						check: valPrincipalState.assigned[ii].primitive.check,
+						check: a.primitive.check,
 					},
 				}
-				if sanityValueInValues(valPrincipalState.assigned[ii].primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+				if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
 					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 					}
@@ -229,7 +232,7 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 			}
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{valPrincipalState.assigned[ii]})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], ge[0])
 		}

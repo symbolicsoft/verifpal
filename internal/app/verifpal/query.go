@@ -28,7 +28,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 	if i < 0 {
 		return verifyResult
 	}
-	ii := sanityValueInValues(valPrincipalState.assigned[i], &valAttackerState.known, valPrincipalState)
+	ii := sanityValueInValues(sanityResolveConstant(valPrincipalState, query.constant, false), &valAttackerState.known, valPrincipalState)
 	if ii >= 0 {
 		verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 			"%s%s%s",
@@ -50,6 +50,9 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 	if i < 0 {
 		return verifyResult
 	}
+	if query.message.recipient != valPrincipalState.name {
+		return verifyResult
+	}
 	c := valPrincipalState.constants[i]
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
@@ -59,23 +62,24 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		case "primitive":
 			p := primitiveGet(a.primitive.name)
-			if sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
-				if p.check {
-					pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-					if pass {
-						indices = append(indices, ii)
-						forcedPass = append(forcedPass, false)
-					} else {
-						pass = possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
-						if pass {
-							indices = append(indices, ii)
-							forcedPass = append(forcedPass, true)
-						}
-					}
-				} else {
-					indices = append(indices, ii)
-					forcedPass = append(forcedPass, p.rewrite.hasRule)
-				}
+			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+				continue
+			}
+			if !p.check {
+				indices = append(indices, ii)
+				forcedPass = append(forcedPass, p.rewrite.hasRule)
+				continue
+			}
+			pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+			if pass {
+				indices = append(indices, ii)
+				forcedPass = append(forcedPass, false)
+				continue
+			}
+			pass = possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+			if pass {
+				indices = append(indices, ii)
+				forcedPass = append(forcedPass, true)
 			}
 		case "equation":
 			continue
@@ -91,7 +95,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
-				prettyValue(valPrincipalState.assigned[i]),
+				prettyValue(sanityResolveConstant(valPrincipalState, c, false)),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state",
 			), true)
@@ -102,7 +106,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
-				prettyValue(valPrincipalState.assigned[i]),
+				prettyValue(sanityResolveConstant(valPrincipalState, c, false)),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state, ",
 				"despite it being vulnerable to tampering by Attacker",

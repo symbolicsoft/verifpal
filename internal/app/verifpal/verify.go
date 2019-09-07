@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -26,6 +27,7 @@ func verify(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates [
 	} else {
 		errorCritical("invalid attacker")
 	}
+	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range verifyResults {
 		prettyMessage(fmt.Sprintf(
 			"%s: %s",
