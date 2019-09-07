@@ -3,6 +3,15 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.4.2
+*September 7, 2019*
+
+- Fix parsing errors pointed out by Mike.
+- More fixes and improvements based on feedback from Loup Vaillant and Sasha Lapiha.
+- Authentication queries where constant is unused by recipient are now invalid.
+- Fixed a crash reported by Renaud Lifchitz.
+- Small general improvements.
+
 ## Verifpal 0.4.1
 *September 4, 2019*
 

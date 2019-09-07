@@ -2,19 +2,21 @@
 # SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 # SPDX-License-Identifier: GPL-3.0-only
 
+VERIFPALVN="0.4.2"
+
 /bin/echo "Verifpal Quick Installer and Updater"
 /bin/echo "for Linux and macOS"
 /bin/echo "https://verifpal.com"
 /bin/echo "------------------------------------"
 
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
-	VERIFPWD=$(pwd)
+	VERIFPALWD=$(pwd)
 	VERIFPALOS="linux"
-	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4.1/verifpal_linux.zip"
+	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/$(VERIFPALVN)/verifpal_linux.zip"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
 	VERIFPALWD=$(pwd)
 	VERIFPALOS="darwin"
-	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/0.4.1/verifpal_macos.zip"
+	VERIFPALDL="https://source.symbolic.software/verifpal/verifpal/releases/download/$(VERIFPALVN)/verifpal_macos.zip"
 else
 	/bin/echo ""
 	/bin/echo "This installer is for Linux and macOS only."
