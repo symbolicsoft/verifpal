@@ -12,6 +12,7 @@ import "fmt"
 
 func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	var valKnowledgeMap knowledgeMap
+	_i := 0
 	valKnowledgeMap.principals = principals
 	g := constant{
 		name:        "g",
@@ -189,6 +190,10 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 						}
 					}
 					for i, c := range expression.left {
+						if c.name == "_" {
+							c.name = fmt.Sprintf("unnamed_%d", _i)
+							_i = _i + 1
+						}
 						ii := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if ii >= 0 {
 							errorCritical(fmt.Sprintf(

@@ -35,12 +35,12 @@
 			"enc",
 			"dec",
 			"hmac",
+			"hmacverif",
 			"sign",
 			"signverif",
-			"hpke_enc",
-			"hpke_dec",
 			"g",
 			"nil",
+			"unnamed",
 		}
 	}
 }
@@ -94,7 +94,8 @@ Principal <-
 		for i, v := range e { de[i] = v.(expression) }
 		name := strings.ToLower(Name.(string))
 		if strInSlice(name, reserved()) ||
-			strings.HasPrefix(name, "attacker") {
+			strings.HasPrefix(name, "attacker") ||
+			strings.HasPrefix(name, "unnamed") {
 			err = errors.New(fmt.Sprintf(
 				"cannot use reserved keyword as principal name: %s",
 				name,
@@ -133,7 +134,8 @@ Message <-
 		recipient := strings.ToLower(Recipient.(string))
 		for _, s := range []string{sender, recipient} {
 			if strInSlice(s, reserved()) ||
-				strings.HasPrefix(s, "attacker") {
+				strings.HasPrefix(strings.ToLower(s), "attacker") ||
+				strings.HasPrefix(strings.ToLower(s), "unnamed") {
 				err = errors.New(fmt.Sprintf(
 					"cannot use reserved keyword as principal name: %s",
 					s,
@@ -156,14 +158,16 @@ MessageConstants <-
 		var err error
 		a  := MessageConstants.([]interface{})
 		for _, v := range a {
-			if strInSlice(v.(value).constant.name, reserved()) ||
-				strings.HasPrefix(v.(value).constant.name, "attacker") {
+			c := v.(value).constant
+			if strInSlice(c.name, reserved()) ||
+				strings.HasPrefix(c.name, "attacker") ||
+				strings.HasPrefix(c.name, "unnamed") {
 				err = errors.New(fmt.Sprintf(
 					"cannot use reserved keyword as constant name: %s",
-					v.(value).constant.name,
+					c.name,
 				))
 			}
-			da = append(da, v.(value).constant)
+			da = append(da, c)
 		}
 		return da, err
 	}
@@ -216,7 +220,7 @@ Constant <-
 	Constant:[a-zA-Z0-9_]+ (_ ',' _)? {
 		a  := Constant.([]interface{})
 		da := make([]uint8, len(a))
-		for i, v := range a { da[i] = v.([]uint8)[0] }
+		for i, c := range a { da[i] = c.([]uint8)[0] }
 		return value{
 			kind: "constant",
 			constant: constant{
@@ -230,13 +234,14 @@ Constants <-
 		var da []constant
 		var err error
 		a  := Constants.([]interface{})
-		for _, v := range a { da = append(da, v.(value).constant) }
-		for _, v := range da {
-			if strInSlice(v.name, reserved()) ||
-				strings.HasPrefix(v.name, "attacker") {
+		for _, c := range a { da = append(da, c.(value).constant) }
+		for _, c := range da {
+			if strInSlice(c.name, reserved()) ||
+				strings.HasPrefix(c.name, "attacker") ||
+				strings.HasPrefix(c.name, "unnamed") {
 				err = errors.New(fmt.Sprintf(
 					"cannot use reserved keyword as constant name: %s",
-					v.name,
+					c.name,
 				))
 			}
 		}
@@ -248,7 +253,7 @@ GuardedConstant <-
 	'[' GuardedConstant:[a-zA-Z0-9_]+ ']' (_ ',' _)? {
 		a  := GuardedConstant.([]interface{})
 		da := make([]uint8, len(a))
-		for i, v := range a { da[i] = v.([]uint8)[0] }
+		for i, c := range a { da[i] = c.([]uint8)[0] }
 		return value{
 			kind: "constant",
 			constant: constant{
@@ -261,8 +266,8 @@ GuardedConstant <-
 Primitive <-
 	Name:PrimitiveName '(' _ Arguments:(Primitive/Equation/Constant)+ _ ')' Check:'?'? (_ ',' _)? {
 		args := []value{}
-		for _, v  := range Arguments.([]interface{}) {
-			args = append(args, v.(value))
+		for _, a := range Arguments.([]interface{}) {
+			args = append(args, a.(value))
 		}
 		return value{
 			kind: "primitive",
