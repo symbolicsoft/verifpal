@@ -343,7 +343,9 @@ func constructAttackerState(active bool, model *verifpal, valKnowledgeMap *knowl
 	valAttackerState := attackerState{
 		active:      active,
 		known:       []value{},
+		wire:        []bool{},
 		conceivable: []value{},
+		mutatedTo:   [][]string{},
 	}
 	constructAttackerStatePopulate(model, valKnowledgeMap, verbose, &valAttackerState)
 	return &valAttackerState
@@ -358,6 +360,7 @@ func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeM
 			}
 			if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
 				valAttackerState.known = append(valAttackerState.known, v)
+				valAttackerState.wire = append(valAttackerState.wire, false)
 				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 			}
 		}
@@ -372,7 +375,10 @@ func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeM
 					constant: valKnowledgeMap.constants[i],
 				}
 				if valKnowledgeMap.constants[i].qualifier == "private" {
-					if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
+					ii := sanityExactSameValueInValues(v, &valAttackerState.known)
+					if ii >= 0 {
+						valAttackerState.wire[ii] = true
+					} else {
 						if verbose {
 							prettyMessage(fmt.Sprintf(
 								"%s has sent %s to %s, rendering it public",
@@ -380,6 +386,7 @@ func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeM
 							), 0, 0, "analysis")
 						}
 						valAttackerState.known = append(valAttackerState.known, v)
+						valAttackerState.wire = append(valAttackerState.wire, true)
 						valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 					}
 				}

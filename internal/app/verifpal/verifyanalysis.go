@@ -80,6 +80,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 			valAttackerState.conceivable = append(valAttackerState.conceivable, resolved)
 		}
 		valAttackerState.known = append(valAttackerState.known, resolved)
+		valAttackerState.wire = append(valAttackerState.wire, false)
 		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
@@ -112,6 +113,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
 			}
 			valAttackerState.known = append(valAttackerState.known, revealed)
+			valAttackerState.wire = append(valAttackerState.wire, false)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
 	}
@@ -150,6 +152,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 				valAttackerState.conceivable = append(valAttackerState.conceivable, a)
 			}
 			valAttackerState.known = append(valAttackerState.known, a)
+			valAttackerState.wire = append(valAttackerState.wire, false)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
 	}
@@ -176,6 +179,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
 				}
 				valAttackerState.known = append(valAttackerState.known, aa)
+				valAttackerState.wire = append(valAttackerState.wire, false)
 				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 			}
 		}
@@ -193,6 +197,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 							valAttackerState.conceivable = append(valAttackerState.conceivable, aaa)
 						}
 						valAttackerState.known = append(valAttackerState.known, aaa)
+						valAttackerState.wire = append(valAttackerState.wire, false)
 						valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 					}
 				}

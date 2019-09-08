@@ -69,6 +69,7 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 				valAttackerState.conceivable = append(valAttackerState.conceivable, v)
 			}
 			valAttackerState.known = append(valAttackerState.known, v)
+			valAttackerState.wire = append(valAttackerState.wire, false)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
 		return true, revealed, has
@@ -129,6 +130,7 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 				valAttackerState.conceivable = append(valAttackerState.conceivable, vp)
 			}
 			valAttackerState.known = append(valAttackerState.known, vp)
+			valAttackerState.wire = append(valAttackerState.wire, false)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}
 		return true, has

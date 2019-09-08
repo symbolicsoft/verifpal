@@ -22,6 +22,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 		for principalIndex, valPrincipalState := range valPrincipalStates {
 			if principalIndex > 0 || attackerKnown >= 0 {
 				valAttackerState.known = valAttackerState.known[1:]
+				valAttackerState.wire = valAttackerState.wire[1:]
 				valAttackerState.mutatedTo = valAttackerState.mutatedTo[1:]
 			}
 			verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, 0)
@@ -69,6 +70,7 @@ func verifyActiveInjectAttackerValues(
 		valPrincipalState.wasMutated = append([]bool{false}, valPrincipalState.wasMutated...)
 		valPrincipalState.beforeMutate = append([]value{v}, valPrincipalState.beforeMutate...)
 		valAttackerState.known = append([]value{v}, valAttackerState.known...)
+		valAttackerState.wire = append([]bool{false}, valAttackerState.wire...)
 		valAttackerState.mutatedTo = append([][]string{{}}, valAttackerState.mutatedTo...)
 		if alsoKnowledgeMap {
 			valKnowledgeMap.constants = append(valKnowledgeMap.constants, v.constant)
@@ -83,6 +85,7 @@ func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap
 	valAttackerStateCleared := attackerState{
 		active:      valAttackerState.active,
 		known:       []value{},
+		wire:        []bool{},
 		conceivable: valAttackerState.conceivable,
 		mutatedTo:   [][]string{},
 	}
@@ -90,6 +93,7 @@ func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap
 		if !verifyActiveValueHasFreshValues(valKnowledgeMap, a) {
 			if sanityExactSameValueInValues(a, &valAttackerStateCleared.known) < 0 {
 				valAttackerStateCleared.known = append(valAttackerStateCleared.known, valAttackerState.known[i])
+				valAttackerStateCleared.wire = append(valAttackerStateCleared.wire, valAttackerState.wire[i])
 				valAttackerStateCleared.mutatedTo = append(valAttackerStateCleared.mutatedTo, valAttackerState.mutatedTo[i])
 			}
 		}
@@ -161,8 +165,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 	valReplacementMap.constants = append(valReplacementMap.constants, e[0].constant)
 	valReplacementMap.replacements = append(valReplacementMap.replacements, []value{e[0]})
 	valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
-	for _, v := range valAttackerState.known {
-		if v.kind != "constant" {
+	for i, v := range valAttackerState.known {
+		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
 		}
 		a := sanityResolveConstant(valPrincipalState, v.constant, false)
@@ -243,8 +247,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
-	for i := range valReplacementMap.depthIndex {
-		valReplacementMap.depthIndex[i] = 0
+	for ii := range valReplacementMap.depthIndex {
+		valReplacementMap.depthIndex[ii] = 0
 	}
 	return valReplacementMap, e
 }

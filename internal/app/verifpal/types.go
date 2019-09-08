@@ -108,6 +108,7 @@ type principalState struct {
 type attackerState struct {
 	active      bool
 	known       []value
+	wire        []bool
 	conceivable []value
 	mutatedTo   [][]string
 }
