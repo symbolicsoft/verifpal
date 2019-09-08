@@ -3,6 +3,15 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.4.4
+*September 8, 2019*
+
+- NEW: `nil` keyword. Self-explanatory (by popular request).
+- NEW: `_` can be used to assign anonymous constants (by popular request).
+- Fix yet more parsing errors pointed out by Mike.
+- More fixes and improvements to authentication queries.
+- Added a new hopefully instructional example model: `ephemerals_and_signature.vp`
+
 ## Verifpal 0.4.3
 *September 7, 2019*
 

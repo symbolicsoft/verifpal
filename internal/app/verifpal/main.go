@@ -15,7 +15,7 @@ import (
 	"runtime"
 )
 
-const mainVersion = "0.4.3"
+const mainVersion = "0.4.4"
 
 func mainParse(filename string) (*verifpal, *knowledgeMap, []*principalState) {
 	var model verifpal
