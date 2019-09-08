@@ -15,17 +15,20 @@ parser:
 
 windows:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
-	@GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/windows/verifpal.exe internal/app/verifpal/*.go
+	@cp assets/windows/versioninfo.json internal/app/verifpal/versioninfo.json
+	@cd internal/app/verifpal; GOOS="windows" GOARCH="amd64" go generate
+	@cd internal/app/verifpal; GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/windows/verifpal.exe
+	@rm internal/app/verifpal/versioninfo.json internal/app/verifpal/resource.syso
 	@/bin/echo " OK"
 
 linux:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
-	@GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/linux/verifpal internal/app/verifpal/*.go
+	@cd internal/app/verifpal; GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/linux/verifpal
 	@/bin/echo "   OK"
 
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
-	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/macos/verifpal internal/app/verifpal/*.go
+	@cd internal/app/verifpal; GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/macos/verifpal
 	@/bin/echo "   OK"
 
 upx:
@@ -39,15 +42,17 @@ upx:
 	@/bin/echo "              OK"
 
 dependencies:
-	@/bin/echo -n "[Verifpal] Installing dependencies."
+	@/bin/echo -n "[Verifpal] Installing dependencies"
 	@go get -u github.com/mna/pigeon
 	@/bin/echo -n "."
 	@go get -u github.com/logrusorgru/aurora
 	@/bin/echo -n "."
+	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
+	@/bin/echo -n "."
 	@/bin/echo "       OK"
 
 release:
-	@vim internal/app/verifpal/main.go tools/quickinstall/quickInstall.sh CHANGELOG.md
+	@vim internal/app/verifpal/main.go tools/quickinstall/quickInstall.sh assets/windows/versioninfo.json CHANGELOG.md
 	@make -s all
 	@make -s upx
 	@/bin/echo -n "[Verifpal] Creating release archives"
