@@ -36,6 +36,10 @@ Symbolic Software wishes to encourage contributions and community involvement in
 
 Plans for contributions (both collective and individual) should be reviewed and approved beforehand. Approval This policy should be effective immediately upon approval.
 
+---
+
 *Approved by Nadim Kobeissi*
+
 *Director, Symbolic Software*
+
 *September 6th, 2019*
