@@ -1,0 +1,45 @@
+attacker [active]
+
+principal Alice [
+	knows private a
+	ga = G^a
+]
+
+principal Bob [
+	knows private message
+]
+
+Alice -> Bob: [ga]
+
+principal Bob [
+	generates be
+	gbe = G^be
+]
+
+Bob -> Alice: gbe
+
+principal Alice [
+	generates ae
+	gae = G^ae
+	as = gbe^ae
+	proof = SIGN(a, as)
+]
+
+Alice -> Bob: gae, proof
+
+principal Bob [
+	bs = gae ^ be
+	_ = SIGNVERIF(ga, bs, proof)?
+	ciphertext = AEAD_ENC(bs, message, nil)
+]
+
+Bob -> Alice: ciphertext
+
+principal Alice [
+	alice_message = AEAD_DEC(as, ciphertext, nil)?
+]
+
+queries [
+	confidentiality? message
+	authentication? Bob -> Alice: ciphertext
+]
