@@ -531,11 +531,15 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState, for
 		case "constant":
 			aa[0] = sanityResolveConstant(valPrincipalState, aa[0].constant, forceBeforeMutate)
 		}
+		switch aa[1].kind {
+		case "constant":
+			aa[1] = sanityResolveConstant(valPrincipalState, aa[1].constant, forceBeforeMutate)
+		}
 		switch aa[0].kind {
 		case "constant":
 			r.equation.constants = append(r.equation.constants, aa[0].constant)
 		case "primitive":
-			r.equation.constants = append(r.equation.constants, aa[0].constant)
+			r.equation.constants = append(r.equation.constants, a.equation.constants[0])
 		case "equation":
 			aaa, _ := sanityResolveInternalValues(aa[0], valPrincipalState, forceBeforeMutate)
 			r.equation.constants = aaa.equation.constants
@@ -544,7 +548,7 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState, for
 		case "constant":
 			r.equation.constants = append(r.equation.constants, aa[1].constant)
 		case "primitive":
-			r.equation.constants = append(r.equation.constants, aa[1].constant)
+			r.equation.constants = append(r.equation.constants, a.equation.constants[1])
 		case "equation":
 			aaa, _ := sanityResolveInternalValues(aa[1], valPrincipalState, forceBeforeMutate)
 			r.equation.constants = append(r.equation.constants, aaa.equation.constants[1:]...)
