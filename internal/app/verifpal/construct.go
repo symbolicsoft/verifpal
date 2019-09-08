@@ -29,7 +29,31 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
 	for _, principal := range principals {
-		valKnowledgeMap.knownBy[0] = append(valKnowledgeMap.knownBy[0], map[string]string{principal: principal})
+		valKnowledgeMap.knownBy[0] = append(
+			valKnowledgeMap.knownBy[0],
+			map[string]string{principal: principal},
+		)
+	}
+	n := constant{
+		name:        "nil",
+		guard:       false,
+		output:      0,
+		fresh:       false,
+		declaration: "knows",
+		qualifier:   "public",
+	}
+	valKnowledgeMap.constants = append(valKnowledgeMap.constants, n)
+	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
+		kind:     "constant",
+		constant: n,
+	})
+	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
+	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+	for _, principal := range principals {
+		valKnowledgeMap.knownBy[1] = append(
+			valKnowledgeMap.knownBy[1],
+			map[string]string{principal: principal},
+		)
 	}
 	for _, block := range model.blocks {
 		switch block.kind {
@@ -51,7 +75,10 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 									prettyConstant(c),
 								))
 							}
-							valKnowledgeMap.knownBy[i] = append(valKnowledgeMap.knownBy[i], map[string]string{block.principal.name: block.principal.name})
+							valKnowledgeMap.knownBy[i] = append(
+								valKnowledgeMap.knownBy[i],
+								map[string]string{block.principal.name: block.principal.name},
+							)
 						} else {
 							c = constant{
 								name:        c.name,
@@ -72,7 +99,10 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							if expression.qualifier == "public" {
 								for _, principal := range principals {
 									if principal != block.principal.name {
-										valKnowledgeMap.knownBy[l] = append(valKnowledgeMap.knownBy[l], map[string]string{principal: principal})
+										valKnowledgeMap.knownBy[l] = append(
+											valKnowledgeMap.knownBy[l],
+											map[string]string{principal: principal},
+										)
 									}
 								}
 							}
@@ -82,9 +112,8 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 					for _, c := range expression.constants {
 						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if i >= 0 {
-
 							errorCritical(fmt.Sprintf(
-								"constant generated twice (%s)",
+								"generated constant already exists (%s)",
 								prettyConstant(c),
 							))
 						} else {
