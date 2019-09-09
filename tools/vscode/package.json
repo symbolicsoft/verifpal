@@ -3,7 +3,7 @@
 	"displayName": "Verifpal",
 	"description": "Verifpal language support.",
 	"icon": "icon.png",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"publisher": "symbolicsoft",
 	"repository": "https://source.symbolic.software/verifpal/verifpal",
 	"engines": {

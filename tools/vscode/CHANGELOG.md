@@ -5,6 +5,8 @@
 
 # Change Log
 
-## 0.0.1
+## 0.0.2
+- Updated syntax highlighting to match the renaming of `HMACVERIF` to `ASSERT` and `HMAC` to `MAC`.
 
+## 0.0.1
 - Initial release.
