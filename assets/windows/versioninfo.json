@@ -2,13 +2,13 @@
   "FixedFileInfo": {
       "FileVersion": {
           "Major": 0,
-          "Minor": 5,
+          "Minor": 6,
           "Patch": 0,
           "Build": 0
       },
       "ProductVersion": {
           "Major": 0,
-          "Minor": 5,
+          "Minor": 6,
           "Patch": 0,
           "Build": 0
       },
@@ -19,7 +19,7 @@
       "FileSubType": "00"
   },
   "StringFileInfo": {
-      "ProductVersion": "v0.5.0.0",
+      "ProductVersion": "v0.6.0.0",
       "Comments": "",
       "CompanyName": "Nadim Kobeissi",
       "FileDescription": "Verifpal",

@@ -3,8 +3,15 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.6
+*September 9, 2019*
+
+- BREAKING: `HMACVERIF` has been renamed to `ASSERT`.
+- BREAKING: `HMAC` has been renamed to `MAC`.
+- Reduced the number of false positives.
+
 ## Verifpal 0.5
-*SeptemBer 9, 2019*
+*September 8, 2019*
 
 - Increased analysis speeds by only mutating relevant values.
 - Fixed even more parsing errors pointed out by Mike.
