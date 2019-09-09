@@ -34,7 +34,7 @@
 			"aead_dec",
 			"enc",
 			"dec",
-			"hmac",
+			"mac",
 			"assert",
 			"sign",
 			"signverif",

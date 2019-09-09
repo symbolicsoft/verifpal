@@ -125,7 +125,7 @@ var primitiveSpecs = []primitiveSpec{
 		check: false,
 	},
 	{
-		name:   "HMAC",
+		name:   "MAC",
 		arity:  2,
 		output: 1,
 		decompose: decomposeRule{

@@ -28,24 +28,24 @@ Bob -> Alice: [longTermBPub]
 // 1. Client Hello
 
 principal Alice[
-	nHmacAlice = HMAC(n, ephemeralAPub)
+	nMacAlice = MAC(n, ephemeralAPub)
 ]
 
-Alice -> Bob: ephemeralAPub, nHmacAlice
+Alice -> Bob: ephemeralAPub, nMacAlice
 
 // 2. Server Hello
 
 principal Bob[
-	nHmacAliceValid = ASSERT(HMAC(n, ephemeralAPub), nHmacAlice)?
-	nHmacBob = HMAC(n, ephemeralBPub)
+	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)?
+	nMacBob = MAC(n, ephemeralBPub)
 ]
 
-Bob -> Alice: ephemeralBPub, nHmacBob
+Bob -> Alice: ephemeralBPub, nMacBob
 
 // 3. Client Authenticate
 
 principal Alice[
-	nHmacBobValid = ASSERT(HMAC(n, ephemeralBPub), nHmacBob)?
+	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)?
 	ephemeralSecretAlice = ephemeralBPub^ephemeralA
 	longTermSecretAlice = longTermBPub^ephemeralA
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)

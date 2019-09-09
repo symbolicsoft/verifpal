@@ -34,7 +34,7 @@ principal Alice[
 	valid = SIGNVERIF(gblongterm, gbs, gbssig)?
 	akshared1 = gbs^ae2
 	arkab1, ackab1 = HKDF(akshared1, arkba1, c2)
-	akenc1, akenc2 = HKDF(HMAC(ackab1, c3), c1, c4)
+	akenc1, akenc2 = HKDF(MAC(ackab1, c3), c1, c4)
 	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
@@ -48,7 +48,7 @@ principal Bob[
 principal Bob[
 	bkshared1 = gae2^bs
 	brkab1, bckab1 = HKDF(bkshared1, brkba1, c2)
-	bkenc1, bkenc2 = HKDF(HMAC(bckab1, c3), c1, c4)
+	bkenc1, bkenc2 = HKDF(MAC(bckab1, c3), c1, c4)
 	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
 ]
 
@@ -57,7 +57,7 @@ principal Bob[
 	gbe = G^be
 	bkshared2 = gae2^be
 	brkba2, bckba2 = HKDF(bkshared2, brkab1, c2)
-	bkenc3, bkenc4 = HKDF(HMAC(bckba2, c3), c1, c4)
+	bkenc3, bkenc4 = HKDF(MAC(bckba2, c3), c1, c4)
 	e2 = AEAD_ENC(bkenc3, m2, HASH(gblongterm, galongterm, gbe))
 ]
 
@@ -66,7 +66,7 @@ Bob -> Alice: gbe, e2
 principal Alice[
 	akshared2 = gbe^ae2
 	arkba2, ackba2 = HKDF(akshared2, arkab1, c2)
-	akenc3, akenc4 = HKDF(HMAC(ackba2, c3), c1, c4)
+	akenc3, akenc4 = HKDF(MAC(ackba2, c3), c1, c4)
 	m2_d = AEAD_DEC(akenc3, e2, HASH(gblongterm, galongterm, gbe))
 ]
 
@@ -75,7 +75,7 @@ principal Alice[
 	gae3 = G^ae3
 	akshared3 = gbe^ae3
 	arkab3, ackab3 = HKDF(akshared3, arkba2, c2)
-	akenc5, akenc6 = HKDF(HMAC(ackab3, c3), c1, c4)
+	akenc5, akenc6 = HKDF(MAC(ackab3, c3), c1, c4)
 	e3 = AEAD_ENC(akenc5, m3, HASH(gblongterm, galongterm, gae3))
 ]
 
@@ -84,7 +84,7 @@ Alice -> Bob: gae3, e3
 principal Bob[
 	bkshared3 = gae3^be
 	brkab3, bckab3 = HKDF(bkshared3, brkba2, c2)
-	bkenc5, bkenc6 = HKDF(HMAC(bckab3, c3), c1, c4)
+	bkenc5, bkenc6 = HKDF(MAC(bckab3, c3), c1, c4)
 	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))
 ]
 
