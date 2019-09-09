@@ -35,7 +35,7 @@
 			"enc",
 			"dec",
 			"hmac",
-			"hmacverif",
+			"assert",
 			"sign",
 			"signverif",
 			"g",

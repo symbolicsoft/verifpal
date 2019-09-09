@@ -36,7 +36,7 @@ Alice -> Bob: ephemeralAPub, nHmacAlice
 // 2. Server Hello
 
 principal Bob[
-	nHmacAliceValid = HMACVERIF(HMAC(n, ephemeralAPub), nHmacAlice)?
+	nHmacAliceValid = ASSERT(HMAC(n, ephemeralAPub), nHmacAlice)?
 	nHmacBob = HMAC(n, ephemeralBPub)
 ]
 
@@ -45,7 +45,7 @@ Bob -> Alice: ephemeralBPub, nHmacBob
 // 3. Client Authenticate
 
 principal Alice[
-	nHmacBobValid = HMACVERIF(HMAC(n, ephemeralBPub), nHmacBob)?
+	nHmacBobValid = ASSERT(HMAC(n, ephemeralBPub), nHmacBob)?
 	ephemeralSecretAlice = ephemeralBPub^ephemeralA
 	longTermSecretAlice = longTermBPub^ephemeralA
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)

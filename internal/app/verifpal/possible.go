@@ -193,7 +193,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	case "constant":
 		return false, value{}
 	case "primitive":
-		if p.name == "HMACVERIF" {
+		if p.name == "ASSERT" {
 			if sanityEquivalentValues(p.arguments[0], p.arguments[1], false, false, valPrincipalState) {
 				return true, p.arguments[0]
 			}
@@ -294,7 +294,7 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 		case "equation":
 			return false
 		}
-	case "HMACVERIF":
+	case "ASSERT":
 		for ii, k := range p.arguments {
 			iii := 0
 			if ii == 0 {
