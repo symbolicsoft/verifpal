@@ -295,6 +295,30 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 							}
 						}
 					}
+					if aaa.kind == a.primitive.arguments[1].kind &&
+						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+							(aaa.kind == "primitive" &&
+								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
+								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
+							(aaa.kind == "equation" &&
+								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
+						aa := value{
+							kind: "primitive",
+							primitive: primitive{
+								name: "MAC",
+								arguments: []value{
+									a.primitive.arguments[0],
+									aaa,
+								},
+								check: a.primitive.check,
+							},
+						}
+						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+								valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+							}
+						}
+					}
 				}
 			}
 		case "equation":

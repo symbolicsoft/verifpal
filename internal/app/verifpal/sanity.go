@@ -578,8 +578,9 @@ func sanityResolveConstant(valPrincipalState *principalState, c constant, forceB
 		if !valPrincipalState.known[i] {
 			return valPrincipalState.beforeMutate[i]
 		}
+		return valPrincipalState.assigned[i]
 	}
-	return valPrincipalState.assigned[i]
+	return valPrincipalState.beforeMutate[i]
 }
 
 func sanityConstantIsUsedByPrincipal(valPrincipalState *principalState, name string, c constant) bool {
