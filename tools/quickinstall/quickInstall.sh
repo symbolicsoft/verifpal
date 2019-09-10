@@ -28,7 +28,7 @@ fi
 
 sleep 1
 /bin/echo ""
-/bin/echo "We will install Verifpal in: /usr/local/bin/verifpal"
+/bin/echo "We will install Verifpal ${VERIFPALVN} in: /usr/local/bin/verifpal"
 /bin/echo "Verifpal examples: /usr/local/share/verifpal/examples/"
 /bin/echo "Press Enter to continue, or Ctrl+C to quit."
 read </dev/tty
