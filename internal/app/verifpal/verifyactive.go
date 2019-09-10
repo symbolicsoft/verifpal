@@ -170,6 +170,7 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 			continue
 		}
 		a := sanityResolveConstant(valPrincipalState, v.constant, false)
+		a, _ = sanityResolveInternalValues(a, valPrincipalState, false)
 		switch a.kind {
 		case "constant":
 			if sanityExactSameValue(value{kind: "constant", constant: g}, a) {
@@ -183,58 +184,116 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
-			// TODO: Improve value injection.
 			switch a.primitive.name {
 			case "AEAD_ENC":
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "AEAD_ENC",
-						arguments: []value{
-							a.primitive.arguments[0],
-							ge[0],
-							a.primitive.arguments[2],
-						},
-						check: a.primitive.check,
-					},
-				}
-				if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				for _, aaa := range valAttackerState.known {
+					if aaa.kind == a.primitive.arguments[1].kind &&
+						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+							(aaa.kind == "primitive" &&
+								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
+								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
+							(aaa.kind == "equation" &&
+								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
+						aa := value{
+							kind: "primitive",
+							primitive: primitive{
+								name: "AEAD_ENC",
+								arguments: []value{
+									a.primitive.arguments[0],
+									aaa,
+									a.primitive.arguments[2],
+								},
+								check: a.primitive.check,
+							},
+						}
+						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityValueInValues(a.primitive.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
+								if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+									valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+								}
+							}
+						}
 					}
 				}
 			case "ENC":
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "ENC",
-						arguments: []value{
-							a.primitive.arguments[0],
-							ge[0],
-						},
-						check: a.primitive.check,
-					},
-				}
-				if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				for _, aaa := range valAttackerState.known {
+					if aaa.kind == a.primitive.arguments[1].kind &&
+						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+							(aaa.kind == "primitive" &&
+								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
+								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
+							(aaa.kind == "equation" &&
+								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
+						aa := value{
+							kind: "primitive",
+							primitive: primitive{
+								name: "ENC",
+								arguments: []value{
+									a.primitive.arguments[0],
+									aaa,
+								},
+								check: a.primitive.check,
+							},
+						}
+						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+								valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+							}
+						}
 					}
 				}
 			case "SIGN":
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "SIGN",
-						arguments: []value{
-							e[0],
-							a.primitive.arguments[1],
-						},
-						check: a.primitive.check,
-					},
+				for _, aaa := range valAttackerState.known {
+					if aaa.kind == a.primitive.arguments[0].kind &&
+						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+							(aaa.kind == "primitive" &&
+								aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
+								len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
+							(aaa.kind == "equation" &&
+								len(aaa.equation.constants) == len(a.primitive.arguments[0].equation.constants))) {
+						aa := value{
+							kind: "primitive",
+							primitive: primitive{
+								name: "SIGN",
+								arguments: []value{
+									aaa,
+									a.primitive.arguments[1],
+								},
+								check: a.primitive.check,
+							},
+						}
+						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+								valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+							}
+						}
+					}
 				}
-				if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			case "MAC":
+				for _, aaa := range valAttackerState.known {
+					if aaa.kind == a.primitive.arguments[0].kind &&
+						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+							(aaa.kind == "primitive" &&
+								aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
+								len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
+							(aaa.kind == "equation" &&
+								len(aaa.equation.constants) == len(a.primitive.arguments[0].equation.constants))) {
+						aa := value{
+							kind: "primitive",
+							primitive: primitive{
+								name: "MAC",
+								arguments: []value{
+									aaa,
+									a.primitive.arguments[1],
+								},
+								check: a.primitive.check,
+							},
+						}
+						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+								valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+							}
+						}
 					}
 				}
 			}
@@ -296,7 +355,9 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAtta
 				}
 			}
 			if valPrincipalState.known[iii] && !unassailable {
-				if !sanityExactSameValue(valPrincipalStateWithReplacements.assigned[ii], valReplacementMap.combination[i]) {
+				ar, _ := sanityResolveInternalValues(valPrincipalStateWithReplacements.assigned[ii], valPrincipalState, false)
+				ac, _ := sanityResolveInternalValues(valReplacementMap.combination[i], valPrincipalState, false)
+				if !sanityExactSameValue(ar, ac) {
 					valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 					valPrincipalStateWithReplacements.sender[ii] = "Attacker"
 					valPrincipalStateWithReplacements.assigned[ii] = valReplacementMap.combination[i]

@@ -43,7 +43,20 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule: false,
+			hasRule:  true,
+			name:     "AEAD_DEC",
+			from:     1,
+			to:       1,
+			matching: []int{0, 2},
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				switch i {
+				case 0:
+					return x, true
+				case 2:
+					return x, true
+				}
+				return x, false
+			},
 		},
 		check: false,
 	},
@@ -84,7 +97,7 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule:  false,
+			hasRule:  true,
 			name:     "DEC",
 			from:     1,
 			to:       1,
@@ -184,6 +197,7 @@ var primitiveSpecs = []primitiveSpec{
 					case "equation":
 						values := sanityDeconstructEquationValues(
 							x.equation,
+							false,
 							valPrincipalState,
 						)
 						if len(values) == 2 {

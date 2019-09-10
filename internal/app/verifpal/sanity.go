@@ -262,6 +262,8 @@ func sanityEquivalentValues(a1 value, a2 value, fbm1 bool, fbm2 bool, valPrincip
 	case "constant":
 		a2 = sanityResolveConstant(valPrincipalState, a2.constant, fbm2)
 	}
+	a1, _ = sanityResolveInternalValues(a1, valPrincipalState, fbm1)
+	a2, _ = sanityResolveInternalValues(a2, valPrincipalState, fbm2)
 	switch a1.kind {
 	case "constant":
 		switch a2.kind {
@@ -282,7 +284,7 @@ func sanityEquivalentValues(a1 value, a2 value, fbm1 bool, fbm2 bool, valPrincip
 		case "constant":
 			return false
 		case "primitive":
-			return sanityEquivalentPrimitives(a1.primitive, a2.primitive, valPrincipalState)
+			return sanityEquivalentPrimitives(a1.primitive, a2.primitive, fbm1, fbm2, valPrincipalState)
 		case "equation":
 			return false
 		}
@@ -293,13 +295,13 @@ func sanityEquivalentValues(a1 value, a2 value, fbm1 bool, fbm2 bool, valPrincip
 		case "primitive":
 			return false
 		case "equation":
-			return sanityEquivalentEquations(a1.equation, a2.equation, valPrincipalState)
+			return sanityEquivalentEquations(a1.equation, a2.equation, fbm1, fbm2, valPrincipalState)
 		}
 	}
 	return true
 }
 
-func sanityEquivalentPrimitives(p1 primitive, p2 primitive, valPrincipalState *principalState) bool {
+func sanityEquivalentPrimitives(p1 primitive, p2 primitive, fbm1 bool, fbm2 bool, valPrincipalState *principalState) bool {
 	if p1.name != p2.name {
 		return false
 	}
@@ -307,7 +309,7 @@ func sanityEquivalentPrimitives(p1 primitive, p2 primitive, valPrincipalState *p
 		return false
 	}
 	for i := range p1.arguments {
-		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i], false, false, valPrincipalState)
+		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i], fbm1, fbm2, valPrincipalState)
 		if !equiv {
 			return false
 		}
@@ -315,10 +317,50 @@ func sanityEquivalentPrimitives(p1 primitive, p2 primitive, valPrincipalState *p
 	return true
 }
 
-func sanityDeconstructEquationValues(e equation, valPrincipalState *principalState) []value {
+func sanityEquivalentEquations(e1 equation, e2 equation, fbm1 bool, fbm2 bool, valPrincipalState *principalState) bool {
+	e1Values := sanityDeconstructEquationValues(e1, fbm1, valPrincipalState)
+	e2Values := sanityDeconstructEquationValues(e2, fbm2, valPrincipalState)
+	if (len(e1Values) == 0) || (len(e2Values) == 0) {
+		return false
+	}
+	if len(e1Values) != len(e2Values) {
+		return false
+	}
+	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
+		e1Base := sanityDeconstructEquationValues(e1Values[0].equation, fbm1, valPrincipalState)
+		e2Base := sanityDeconstructEquationValues(e2Values[0].equation, fbm2, valPrincipalState)
+		if sanityEquivalentValues(e1Base[1], e2Values[1], fbm1, fbm2, valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Base[1], fbm1, fbm2, valPrincipalState) {
+			return true
+		}
+		if sanityEquivalentValues(e1Base[1], e2Base[1], fbm1, fbm2, valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Values[1], fbm1, fbm2, valPrincipalState) {
+			return true
+		}
+		return false
+	}
+	if len(e1Values) > 2 {
+		if sanityEquivalentValues(e1Values[1], e2Values[2], fbm1, fbm2, valPrincipalState) {
+			if sanityEquivalentValues(e1Values[2], e2Values[1], fbm1, fbm2, valPrincipalState) {
+				return true
+			}
+		}
+		if sanityEquivalentValues(e1Values[1], e2Values[1], fbm1, fbm2, valPrincipalState) {
+			if sanityEquivalentValues(e1Values[2], e2Values[2], fbm1, fbm2, valPrincipalState) {
+				return true
+			}
+		}
+	}
+	if sanityEquivalentValues(e1Values[0], e2Values[0], fbm1, fbm2, valPrincipalState) {
+		if sanityEquivalentValues(e1Values[1], e2Values[1], fbm1, fbm2, valPrincipalState) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanityDeconstructEquationValues(e equation, fbm bool, valPrincipalState *principalState) []value {
 	var values []value
 	for _, c := range e.constants {
-		values = append(values, sanityResolveConstant(valPrincipalState, c, false))
+		values = append(values, sanityResolveConstant(valPrincipalState, c, fbm))
 	}
 	return values
 }
@@ -342,52 +384,12 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *p
 				return true
 			}
 		case "equation":
-			v := sanityDeconstructEquationValues(a.equation, valPrincipalState)
+			v := sanityDeconstructEquationValues(a.equation, false, valPrincipalState)
 			for _, vv := range v {
 				if sanityEquivalentValues(vv, value{kind: "constant", constant: c}, false, false, valPrincipalState) {
 					return true
 				}
 			}
-		}
-	}
-	return false
-}
-
-func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *principalState) bool {
-	e1Values := sanityDeconstructEquationValues(e1, valPrincipalState)
-	e2Values := sanityDeconstructEquationValues(e2, valPrincipalState)
-	if (len(e1Values) == 0) || (len(e2Values) == 0) {
-		return false
-	}
-	if len(e1Values) != len(e2Values) {
-		return false
-	}
-	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
-		e1Base := sanityDeconstructEquationValues(e1Values[0].equation, valPrincipalState)
-		e2Base := sanityDeconstructEquationValues(e2Values[0].equation, valPrincipalState)
-		if sanityEquivalentValues(e1Base[1], e2Values[1], false, false, valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Base[1], false, false, valPrincipalState) {
-			return true
-		}
-		if sanityEquivalentValues(e1Base[1], e2Base[1], false, false, valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Values[1], false, false, valPrincipalState) {
-			return true
-		}
-		return false
-	}
-	if len(e1Values) > 2 {
-		if sanityEquivalentValues(e1Values[1], e2Values[2], false, false, valPrincipalState) {
-			if sanityEquivalentValues(e1Values[2], e2Values[1], false, false, valPrincipalState) {
-				return true
-			}
-		}
-		if sanityEquivalentValues(e1Values[1], e2Values[1], false, false, valPrincipalState) {
-			if sanityEquivalentValues(e1Values[2], e2Values[2], false, false, valPrincipalState) {
-				return true
-			}
-		}
-	}
-	if sanityEquivalentValues(e1Values[0], e2Values[0], false, false, valPrincipalState) {
-		if sanityEquivalentValues(e1Values[1], e2Values[1], false, false, valPrincipalState) {
-			return true
 		}
 	}
 	return false
@@ -526,7 +528,7 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState, for
 			}
 			return a, v
 		}
-		aa := sanityDeconstructEquationValues(a.equation, valPrincipalState)
+		aa := sanityDeconstructEquationValues(a.equation, forceBeforeMutate, valPrincipalState)
 		switch aa[0].kind {
 		case "constant":
 			aa[0] = sanityResolveConstant(valPrincipalState, aa[0].constant, forceBeforeMutate)

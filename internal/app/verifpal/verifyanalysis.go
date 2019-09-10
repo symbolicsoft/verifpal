@@ -15,20 +15,10 @@ import (
 func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
-		if a.kind == "constant" {
-			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
-			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
-			i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
-			if (i >= 0) && valPrincipalState.known[i] {
-				depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
-				depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
-			}
-		} else {
-			depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
-			depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
-			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
-			depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
-		}
+		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
+		depth = verifyAnalysisDeconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	for _, c := range valPrincipalState.constants {
 		a := sanityResolveConstant(valPrincipalState, c, false)

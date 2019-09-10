@@ -45,7 +45,8 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
 	var verifyResult verifyResult
 	var indices []int
-	var forcedPass []bool
+	var passes []bool
+	var forcedPasses []bool
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if i < 0 {
 		return verifyResult
@@ -61,25 +62,21 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		case "constant":
 			continue
 		case "primitive":
-			p := primitiveGet(a.primitive.name)
 			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
 				continue
 			}
-			if !p.check {
+			if !primitiveGet(a.primitive.name).rewrite.hasRule {
 				indices = append(indices, ii)
-				forcedPass = append(forcedPass, false)
+				passes = append(passes, false)
+				forcedPasses = append(forcedPasses, false)
 				continue
 			}
 			pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-			if pass {
+			forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+			if pass || forcedPass {
 				indices = append(indices, ii)
-				forcedPass = append(forcedPass, false)
-				continue
-			}
-			pass = possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
-			if pass {
-				indices = append(indices, ii)
-				forcedPass = append(forcedPass, true)
+				passes = append(forcedPasses, pass)
+				forcedPasses = append(forcedPasses, forcedPass)
 			}
 		case "equation":
 			continue
@@ -90,23 +87,26 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
-		if query.message.sender != sender && !forcedPass[f] {
+		if query.message.sender != sender && !forcedPasses[f] {
+			r, _ := sanityResolveInternalValues(sanityResolveConstant(valPrincipalState, c, false), valPrincipalState, false)
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
-				prettyValue(sanityResolveConstant(valPrincipalState, c, false)),
+				prettyValue(r),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state",
 			), true)
 			query.resolved = true
 			verifyResult.query = query
 			return verifyResult
-		} else if forcedPass[f] && !valPrincipalState.guard[i] {
+		} else if !valPrincipalState.guard[i] && forcedPasses[f] {
+			r, _ := sanityResolveInternalValues(sanityResolveConstant(valPrincipalState, c, false), valPrincipalState, false)
+			a, _ = sanityResolveInternalValues(a, valPrincipalState, false)
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
-				prettyValue(sanityResolveConstant(valPrincipalState, c, false)),
+				prettyValue(r),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state, ",
 				"despite it being vulnerable to tampering by Attacker",
