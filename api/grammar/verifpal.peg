@@ -274,6 +274,7 @@ Primitive <-
 			primitive: primitive{
 				name: Name.(string),
 				arguments: args,
+				output: 0,
 				check: Check != nil,
 			},
 		}, nil

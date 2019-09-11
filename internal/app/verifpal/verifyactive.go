@@ -140,7 +140,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 	g := constant{
 		name:        "g",
 		guard:       false,
-		output:      0,
 		fresh:       false,
 		declaration: "knows",
 		qualifier:   "public",
@@ -150,7 +149,6 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 		constant: constant{
 			name:        fmt.Sprintf("attacker_%d", valReplacementMap.injectCounter),
 			guard:       false,
-			output:      0,
 			fresh:       false,
 			declaration: "knows",
 			qualifier:   "private",
@@ -173,7 +171,7 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 		a, _ = sanityResolveInternalValues(a, valPrincipalState, false)
 		switch a.kind {
 		case "constant":
-			if sanityExactSameValue(value{kind: "constant", constant: g}, a) {
+			if a.constant.name == "g" {
 				continue
 			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
@@ -203,7 +201,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 									aaa,
 									a.primitive.arguments[2],
 								},
-								check: a.primitive.check,
+								output: a.primitive.output,
+								check:  a.primitive.check,
 							},
 						}
 						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
@@ -232,7 +231,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 									a.primitive.arguments[0],
 									aaa,
 								},
-								check: a.primitive.check,
+								output: a.primitive.output,
+								check:  a.primitive.check,
 							},
 						}
 						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
@@ -259,7 +259,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 									aaa,
 									a.primitive.arguments[1],
 								},
-								check: a.primitive.check,
+								output: a.primitive.output,
+								check:  a.primitive.check,
 							},
 						}
 						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
@@ -286,7 +287,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 									aaa,
 									a.primitive.arguments[1],
 								},
-								check: a.primitive.check,
+								output: a.primitive.output,
+								check:  a.primitive.check,
 							},
 						}
 						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
@@ -310,7 +312,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 									a.primitive.arguments[0],
 									aaa,
 								},
-								check: a.primitive.check,
+								output: a.primitive.output,
+								check:  a.primitive.check,
 							},
 						}
 						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
@@ -381,7 +384,7 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAtta
 			if valPrincipalState.known[iii] && !unassailable {
 				ar, _ := sanityResolveInternalValues(valPrincipalStateWithReplacements.assigned[ii], valPrincipalState, false)
 				ac, _ := sanityResolveInternalValues(valReplacementMap.combination[i], valPrincipalState, false)
-				if !sanityExactSameValue(ar, ac) {
+				if !sanityEquivalentValues(ar, ac, false, false, valPrincipalState) {
 					valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 					valPrincipalStateWithReplacements.sender[ii] = "Attacker"
 					valPrincipalStateWithReplacements.assigned[ii] = valReplacementMap.combination[i]

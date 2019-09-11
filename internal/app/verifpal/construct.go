@@ -17,7 +17,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	g := constant{
 		name:        "g",
 		guard:       false,
-		output:      0,
 		fresh:       false,
 		declaration: "knows",
 		qualifier:   "public",
@@ -38,7 +37,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	n := constant{
 		name:        "nil",
 		guard:       false,
-		output:      0,
 		fresh:       false,
 		declaration: "knows",
 		qualifier:   "public",
@@ -84,7 +82,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							c = constant{
 								name:        c.name,
 								guard:       c.guard,
-								output:      c.output,
 								fresh:       false,
 								declaration: "knows",
 								qualifier:   expression.qualifier,
@@ -121,7 +118,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							c = constant{
 								name:        c.name,
 								guard:       c.guard,
-								output:      c.output,
 								fresh:       true,
 								declaration: "generates",
 								qualifier:   "private",
@@ -204,10 +200,13 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 						c = constant{
 							name:        c.name,
 							guard:       c.guard,
-							output:      i,
 							fresh:       false,
 							declaration: "assignment",
 							qualifier:   "private",
+						}
+						switch expression.right.kind {
+						case "primitive":
+							expression.right.primitive.output = i
 						}
 						valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
 						valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expression.right)

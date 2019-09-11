@@ -249,10 +249,6 @@ func sanityDeclaredPrincipals(model *verifpal) []string {
 	return principals
 }
 
-func sanityExactSameValue(a1 value, a2 value) bool {
-	return strings.Compare(prettyValue(a1), prettyValue(a2)) == 0
-}
-
 func sanityEquivalentValues(a1 value, a2 value, fbm1 bool, fbm2 bool, valPrincipalState *principalState) bool {
 	switch a1.kind {
 	case "constant":
@@ -269,9 +265,6 @@ func sanityEquivalentValues(a1 value, a2 value, fbm1 bool, fbm2 bool, valPrincip
 		switch a2.kind {
 		case "constant":
 			if a1.constant.name != a2.constant.name {
-				return false
-			}
-			if a1.constant.output != a2.constant.output {
 				return false
 			}
 		case "primitive":
@@ -306,6 +299,9 @@ func sanityEquivalentPrimitives(p1 primitive, p2 primitive, fbm1 bool, fbm2 bool
 		return false
 	}
 	if len(p1.arguments) != len(p2.arguments) {
+		return false
+	}
+	if p1.output != p2.output {
 		return false
 	}
 	for i := range p1.arguments {
@@ -398,7 +394,18 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *p
 func sanityExactSameValueInValues(v value, assigneds *[]value) int {
 	index := -1
 	for i, a := range *assigneds {
-		if sanityExactSameValue(v, a) {
+		vs := prettyValue(v)
+		as := prettyValue(a)
+		switch v.kind {
+		case "primitive":
+			vs = fmt.Sprintf("%s|%d", vs, v.primitive.output)
+		}
+		switch a.kind {
+		case "primitive":
+			as = fmt.Sprintf("%s|%d", as, a.primitive.output)
+		}
+		s := strings.Compare(vs, as)
+		if s == 0 {
 			index = i
 			break
 		}
@@ -506,6 +513,7 @@ func sanityResolveInternalValues(a value, valPrincipalState *principalState, for
 			primitive: primitive{
 				name:      a.primitive.name,
 				arguments: []value{},
+				output:    a.primitive.output,
 				check:     a.primitive.check,
 			},
 		}

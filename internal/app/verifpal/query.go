@@ -24,10 +24,6 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
-	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.constant)
-	if i < 0 {
-		return verifyResult
-	}
 	ii := sanityValueInValues(sanityResolveConstant(valPrincipalState, query.constant, false), &valAttackerState.known, valPrincipalState)
 	if ii >= 0 {
 		verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(

@@ -32,10 +32,6 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 
 func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
-	i := sanityValueInValues(a, &valPrincipalState.assigned, valPrincipalState)
-	if i < 0 {
-		return depth
-	}
 	switch a.kind {
 	case "constant":
 		a = sanityResolveConstant(valPrincipalState, a.constant, false)
@@ -46,7 +42,10 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	}
 	resolved, _ := sanityResolveInternalValues(a, valPrincipalState, false)
 	output := []value{}
-	if resolved.kind == "primitive" {
+	switch resolved.kind {
+	case "constant":
+		output = append(output, a)
+	case "primitive":
 		for _, v := range valAttackerState.known {
 			switch v.kind {
 			case "constant":
@@ -58,7 +57,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 		if len(output) != primitiveGet(resolved.primitive.name).output {
 			return depth
 		}
-	} else {
+	case "equation":
 		output = append(output, a)
 	}
 	if sanityExactSameValueInValues(resolved, &valAttackerState.known) < 0 {

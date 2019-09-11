@@ -49,7 +49,6 @@ type value struct {
 type constant struct {
 	name        string
 	guard       bool
-	output      int
 	declaration string
 	qualifier   string
 	fresh       bool
@@ -57,6 +56,7 @@ type constant struct {
 type primitive struct {
 	name      string
 	arguments []value
+	output    int
 	check     bool
 }
 type equation struct {
