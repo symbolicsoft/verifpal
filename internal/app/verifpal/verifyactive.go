@@ -340,6 +340,8 @@ func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttac
 }
 
 func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAttackerState *attackerState, valReplacementMap *replacementMap) (*principalState, bool) {
+	var failedRewrites []primitive
+	var failedRewriteIndices []int
 	failedCheck := false
 	valPrincipalStateWithReplacements := principalState{
 		name:          valPrincipalState.name,
@@ -396,7 +398,14 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAtta
 			}
 		}
 	}
-	failedRewrites, failedRewriteIndices := sanityPerformRewrites(&valPrincipalStateWithReplacements)
+	for i, c := range valPrincipalStateWithReplacements.constants {
+		a := sanityResolveConstant(valPrincipalState, c, false)
+		failedRewrite, failedRewriteIndex, wasRewritten, _ := sanityPerformRewrite(a, i, &valPrincipalStateWithReplacements)
+		if !wasRewritten {
+			failedRewrites = append(failedRewrites, failedRewrite)
+			failedRewriteIndices = append(failedRewriteIndices, failedRewriteIndex)
+		}
+	}
 	for i, p := range failedRewrites {
 		if !p.check {
 			continue

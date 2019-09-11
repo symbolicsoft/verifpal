@@ -424,32 +424,28 @@ func sanityValueInValues(v value, assigneds *[]value, valPrincipalState *princip
 	return index
 }
 
-func sanityPerformRewrites(valPrincipalState *principalState) ([]primitive, []int) {
-	var failedRewrites []primitive
-	var failedRewritesIndices []int
-	for i, c := range valPrincipalState.constants {
-		a := sanityResolveConstant(valPrincipalState, c, false)
-		switch a.kind {
-		case "constant":
-			continue
-		case "primitive":
-			prim := primitiveGet(a.primitive.name)
-			if prim.rewrite.hasRule {
-				wasRewritten, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-				if wasRewritten {
-					valPrincipalState.wasRewritten[i] = true
-					valPrincipalState.assigned[i] = rewrite
-					valPrincipalState.beforeMutate[i] = rewrite
-				} else {
-					failedRewrites = append(failedRewrites, a.primitive)
-					failedRewritesIndices = append(failedRewritesIndices, i)
-				}
+func sanityPerformRewrite(a value, i int, valPrincipalState *principalState) (primitive, int, bool, value) {
+	switch a.kind {
+	case "primitive":
+		for i, aa := range a.primitive.arguments {
+			_, _, wasRewritten, rewrite := sanityPerformRewrite(aa, -1, valPrincipalState)
+			if wasRewritten {
+				a.primitive.arguments[i] = rewrite
 			}
-		case "equation":
-			continue
+		}
+		prim := primitiveGet(a.primitive.name)
+		if prim.rewrite.hasRule {
+			wasRewritten, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+			if wasRewritten && i >= 0 {
+				valPrincipalState.wasRewritten[i] = true
+				valPrincipalState.assigned[i] = rewrite
+				valPrincipalState.beforeMutate[i] = rewrite
+			} else {
+				return a.primitive, i, wasRewritten, rewrite
+			}
 		}
 	}
-	return failedRewrites, failedRewritesIndices
+	return primitive{}, 0, false, value{}
 }
 
 func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalState) {
