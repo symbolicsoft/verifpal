@@ -184,7 +184,19 @@ func possibleToReconstructEquation(e equation, valAttackerState *attackerState, 
 	return false, []value{}
 }
 
+func possibleToPrimitivePassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
+	pp, _ := sanityResolveInternalValues(value{kind: "primitive", primitive: p}, valPrincipalState, false)
+	p = pp.primitive
+	if sanityEquivalentValues(p.arguments[0], p.arguments[1], false, false, valPrincipalState) {
+		return true, p.arguments[0]
+	}
+	return false, value{}
+}
+
 func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalState) (bool, value) {
+	if p.name == "ASSERT" {
+		return possibleToPrimitivePassAssert(p, valPrincipalState)
+	}
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	forceBeforeMutate := false
@@ -201,12 +213,6 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 		return false, value{}
 	case "primitive":
 		from, _ = sanityResolveInternalValues(from, valPrincipalState, forceBeforeMutate)
-		if p.name == "ASSERT" {
-			if sanityEquivalentValues(p.arguments[0], p.arguments[1], false, false, valPrincipalState) {
-				return true, p.arguments[0]
-			}
-			return false, value{}
-		}
 		if from.primitive.name != prim.rewrite.name {
 			return false, value{}
 		}
