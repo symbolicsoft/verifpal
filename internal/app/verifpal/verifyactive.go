@@ -23,7 +23,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			}
 			verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, 0)
 			analysis = analysis + 1
-			valReplacementMap, attackerValues := verifyActiveInitReplacementMap1(valPrincipalState, valAttackerState)
+			valReplacementMap, attackerValues := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
 			lastReplacement := valReplacementMap.combinationNext()
 			verifyActiveInjectAttackerValues(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
@@ -39,7 +39,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 					return verifyResults
 				}
 				if len(valAttackerState.known) > attackerKnown {
-					valReplacementMap, _ = verifyActiveInitReplacementMap1(valPrincipalState, valAttackerState)
+					valReplacementMap, _ = verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
 				}
 				attackerKnown = len(valAttackerState.known)
 				lastReplacement = valReplacementMap.combinationNext()
@@ -127,7 +127,7 @@ func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) boo
 	return false
 }
 
-func verifyActiveInitReplacementMap1(valPrincipalState *principalState, valAttackerState *attackerState) (replacementMap, []value) {
+func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState) (replacementMap, []value) {
 	valReplacementMap := replacementMap{
 		injectCounter: 0,
 	}
