@@ -268,7 +268,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 
 func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []*principalState {
 	var valPrincipalStates []*principalState
-	var failedRewrites []primitive
 	for _, principal := range valKnowledgeMap.principals {
 		valPrincipalState := principalState{
 			name:          principal,
@@ -317,21 +316,6 @@ func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []
 			valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, assigned)
 			valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
 			valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, assigned)
-		}
-		for i, c := range valPrincipalState.constants {
-			a := sanityResolveConstant(&valPrincipalState, c, false)
-			failedRewrite, _, wasRewritten, _ := sanityPerformRewrite(a, i, &valPrincipalState)
-			if !wasRewritten {
-				failedRewrites = append(failedRewrites, failedRewrite)
-			}
-		}
-		for _, p := range failedRewrites {
-			if p.check {
-				errorCritical(fmt.Sprintf(
-					"checked primitive fails: %s",
-					prettyPrimitive(p),
-				))
-			}
 		}
 		valPrincipalStates = append(valPrincipalStates, &valPrincipalState)
 	}

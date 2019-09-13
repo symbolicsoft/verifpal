@@ -15,6 +15,17 @@ func sanity(model *verifpal) (*knowledgeMap, []*principalState) {
 	valKnowledgeMap = constructKnowledgeMap(model, principals)
 	valPrincipalStates := constructPrincipalStates(model, valKnowledgeMap)
 	sanityQueries(model, valKnowledgeMap, valPrincipalStates)
+	for _, valPrincipalState := range valPrincipalStates {
+		failedRewrites, _ := sanityPerformPrimitiveRewrites(valPrincipalState)
+		for _, p := range failedRewrites {
+			if p.check {
+				errorCritical(fmt.Sprintf(
+					"checked primitive fails: %s",
+					prettyPrimitive(p),
+				))
+			}
+		}
+	}
 	return valKnowledgeMap, valPrincipalStates
 }
 
@@ -420,28 +431,49 @@ func sanityValueInValues(v value, assigneds *[]value, valPrincipalState *princip
 	return index
 }
 
-func sanityPerformRewrite(a value, i int, valPrincipalState *principalState) (primitive, int, bool, value) {
-	switch a.kind {
-	case "primitive":
-		for i, aa := range a.primitive.arguments {
-			_, _, wasRewritten, rewrite := sanityPerformRewrite(aa, -1, valPrincipalState)
+func sanityPerformPrimitiveRewrite(p primitive, i int, valPrincipalState *principalState) (primitive, int, bool, value) {
+	wasRewritten := false
+	rewrite := value{}
+	for i, a := range p.arguments {
+		switch a.kind {
+		case "primitive":
+			_, _, wasRewritten, rewrite := sanityPerformPrimitiveRewrite(a.primitive, -1, valPrincipalState)
 			if wasRewritten {
-				a.primitive.arguments[i] = rewrite
-			}
-		}
-		prim := primitiveGet(a.primitive.name)
-		if prim.rewrite.hasRule {
-			wasRewritten, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-			if wasRewritten && i >= 0 {
-				valPrincipalState.wasRewritten[i] = true
-				valPrincipalState.assigned[i] = rewrite
-				valPrincipalState.beforeMutate[i] = rewrite
-			} else {
-				return a.primitive, i, wasRewritten, rewrite
+				p.arguments[i] = rewrite
 			}
 		}
 	}
-	return primitive{}, 0, false, value{}
+	prim := primitiveGet(p.name)
+	if prim.rewrite.hasRule {
+		wasRewritten, rewrite = possibleToPrimitivePassRewrite(p, valPrincipalState)
+		if wasRewritten && i >= 0 {
+			valPrincipalState.wasRewritten[i] = true
+			valPrincipalState.assigned[i] = rewrite
+			valPrincipalState.beforeMutate[i] = rewrite
+		}
+	}
+	return p, i, wasRewritten, rewrite
+}
+
+func sanityPerformPrimitiveRewrites(valPrincipalState *principalState) ([]primitive, []int) {
+	var failedRewrites []primitive
+	var failedRewriteIndices []int
+	for i, c := range valPrincipalState.constants {
+		a := sanityResolveConstant(valPrincipalState, c, false)
+		switch a.kind {
+		case "primitive":
+			prim := primitiveGet(a.primitive.name)
+			if !prim.rewrite.hasRule {
+				continue
+			}
+			failedRewrite, failedRewriteIndex, wasRewritten, _ := sanityPerformPrimitiveRewrite(a.primitive, i, valPrincipalState)
+			if !wasRewritten {
+				failedRewrites = append(failedRewrites, failedRewrite)
+				failedRewriteIndices = append(failedRewriteIndices, failedRewriteIndex)
+			}
+		}
+	}
+	return failedRewrites, failedRewriteIndices
 }
 
 func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalState) {

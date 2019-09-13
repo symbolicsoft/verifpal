@@ -45,6 +45,9 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		return verifyResult
 	}
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
+	if i < 0 {
+		return verifyResult
+	}
 	c := valPrincipalState.constants[i]
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
