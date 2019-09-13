@@ -26,6 +26,9 @@ func sanity(model *verifpal) (*knowledgeMap, []*principalState) {
 			}
 		}
 	}
+	for _, a := range valPrincipalStates[0].assigned {
+		sanityCheckEquationGenerators(a, valPrincipalStates[0])
+	}
 	return valKnowledgeMap, valPrincipalStates
 }
 
