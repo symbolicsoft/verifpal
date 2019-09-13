@@ -1,9 +1,5 @@
-/*
- * SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
- *
- * SPDX-License-Identifier: GPL-3.0-only
- */
-
+/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
 // bc668866bf7ad5972a2f8a9999e62fe7
 
 package main

@@ -1,9 +1,5 @@
-/*
- * SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
- *
- * SPDX-License-Identifier: GPL-3.0-only
- */
-
+/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
 //go:generate goversioninfo -64=true -icon=../../../assets/windows/icon.ico
