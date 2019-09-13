@@ -3,13 +3,13 @@
       "FileVersion": {
           "Major": 0,
           "Minor": 6,
-          "Patch": 4,
+          "Patch": 5,
           "Build": 0
       },
       "ProductVersion": {
           "Major": 0,
           "Minor": 6,
-          "Patch": 4,
+          "Patch": 5,
           "Build": 0
       },
       "FileFlagsMask": "3f",
@@ -19,7 +19,7 @@
       "FileSubType": "00"
   },
   "StringFileInfo": {
-      "ProductVersion": "v0.6.4.0",
+      "ProductVersion": "v0.6.5.0",
       "Comments": "",
       "CompanyName": "Nadim Kobeissi",
       "FileDescription": "Verifpal",
