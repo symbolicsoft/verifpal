@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.6.6
+*September 13, 2019*
+
+- Fixes to sanity check order.
+
 ## Verifpal 0.6.5
 *September 13, 2019*
 
