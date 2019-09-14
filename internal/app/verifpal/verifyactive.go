@@ -33,6 +33,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 				analysis = analysis + 1
+				prettyAnalysis(analysis)
 				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
 				valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
 				if len(verifyResults) == len(model.queries) {

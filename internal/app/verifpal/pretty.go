@@ -287,3 +287,14 @@ func prettyPrint(model *verifpal) string {
 	output = fmt.Sprintf("%s]", output)
 	return output
 }
+
+func prettyAnalysis(n int) {
+	if runtime.GOOS == "windows" {
+		analysis := fmt.Sprintf(" Analysis %d...", n)
+		fmt.Fprint(os.Stdout, analysis)
+	} else {
+		analysis := aurora.Gray(15, fmt.Sprintf(" Analysis %d...", n)).Italic()
+		fmt.Fprint(os.Stdout, analysis)
+	}
+	fmt.Fprint(os.Stdout, "\r \r")
+}
