@@ -465,10 +465,6 @@ func sanityPerformPrimitiveRewrites(valPrincipalState *principalState) ([]primit
 		a := sanityResolveConstant(valPrincipalState, c, false)
 		switch a.kind {
 		case "primitive":
-			prim := primitiveGet(a.primitive.name)
-			if !prim.rewrite.hasRule {
-				continue
-			}
 			failedRewrite, failedRewriteIndex, wasRewritten, _ := sanityPerformPrimitiveRewrite(a.primitive, i, valPrincipalState)
 			if !wasRewritten {
 				failedRewrites = append(failedRewrites, failedRewrite)
