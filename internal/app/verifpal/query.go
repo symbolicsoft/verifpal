@@ -59,22 +59,22 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
 				continue
 			}
-			if !primitiveGet(a.primitive.name).rewrite.hasRule {
+			if primitiveGet(a.primitive.name).rewrite.hasRule {
+				pass, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+				forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+				if pass || forcedPass {
+					indices = append(indices, ii)
+					passes = append(forcedPasses, pass)
+					forcedPasses = append(forcedPasses, forcedPass)
+					rewrites = append(rewrites, rewrite)
+					forcedRewrites = append(forcedRewrites, a)
+				}
+			} else {
 				indices = append(indices, ii)
-				passes = append(passes, false)
+				passes = append(passes, true)
 				forcedPasses = append(forcedPasses, false)
 				rewrites = append(rewrites, sanityResolveConstant(valPrincipalState, c, false))
 				forcedRewrites = append(forcedRewrites, sanityResolveConstant(valPrincipalState, c, false))
-				continue
-			}
-			pass, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-			forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
-			if pass || forcedPass {
-				indices = append(indices, ii)
-				passes = append(forcedPasses, pass)
-				forcedPasses = append(forcedPasses, forcedPass)
-				rewrites = append(rewrites, rewrite)
-				forcedRewrites = append(forcedRewrites, a)
 			}
 		case "equation":
 			continue
