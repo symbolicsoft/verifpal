@@ -39,8 +39,6 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
-	var rewrites []value
-	var forcedRewrites []value
 	if query.message.recipient != valPrincipalState.name {
 		return verifyResult
 	}
@@ -60,21 +58,17 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				continue
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
-				pass, rewrite := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
+				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
 				forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
 				if pass || forcedPass {
 					indices = append(indices, ii)
 					passes = append(forcedPasses, pass)
 					forcedPasses = append(forcedPasses, forcedPass)
-					rewrites = append(rewrites, rewrite)
-					forcedRewrites = append(forcedRewrites, a)
 				}
 			} else {
 				indices = append(indices, ii)
 				passes = append(passes, true)
 				forcedPasses = append(forcedPasses, false)
-				rewrites = append(rewrites, sanityResolveConstant(valPrincipalState, c, false))
-				forcedRewrites = append(forcedRewrites, sanityResolveConstant(valPrincipalState, c, false))
 			}
 		case "equation":
 			continue
@@ -85,12 +79,13 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
+		cc := sanityResolveConstant(valPrincipalState, c, false)
 		if query.message.sender != sender && passes[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
-				prettyValue(rewrites[f]),
+				prettyValue(cc),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state",
 			), true)
@@ -102,7 +97,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
-				prettyValue(forcedRewrites[f]),
+				prettyValue(cc),
 				", is successfully used in primitive ", prettyValue(a),
 				" in ", query.message.recipient, "'s state, ",
 				"despite it being vulnerable to tampering by Attacker",
