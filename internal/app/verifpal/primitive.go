@@ -173,7 +173,6 @@ var primitiveSpecs = []primitiveSpec{
 					case "equation":
 						values := sanityDeconstructEquationValues(
 							x.equation,
-							false,
 							valPrincipalState,
 						)
 						if len(values) == 2 {

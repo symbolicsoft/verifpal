@@ -11,11 +11,6 @@ import (
 func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, value, []value) {
 	has := []value{}
 	primitive := primitiveGet(p.name)
-	pp, _ := sanityResolveInternalValues(value{
-		kind:      "primitive",
-		primitive: p,
-	}, valPrincipalState, false)
-	p = pp.primitive
 	if !primitive.decompose.hasRule {
 		return false, value{}, has
 	}
@@ -28,7 +23,7 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 		}
 		switch a.kind {
 		case "constant":
-			a = sanityResolveConstant(valPrincipalState, a.constant, false)
+			a = sanityResolveConstant(valPrincipalState, a.constant)
 		}
 		switch a.kind {
 		case "primitive":
@@ -74,11 +69,6 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 }
 
 func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, []value) {
-	pp, _ := sanityResolveInternalValues(value{
-		kind:      "primitive",
-		primitive: p,
-	}, valPrincipalState, false)
-	p = pp.primitive
 	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState, analysis, depth)
 	if d {
 		return true, has
@@ -90,7 +80,7 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 		}
 		switch a.kind {
 		case "constant":
-			a = sanityResolveConstant(valPrincipalState, a.constant, false)
+			a = sanityResolveConstant(valPrincipalState, a.constant)
 		}
 		switch a.kind {
 		case "primitive":
@@ -135,17 +125,12 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 }
 
 func possibleToReconstructEquation(e equation, valAttackerState *attackerState, valPrincipalState *principalState) (bool, []value) {
-	ee, _ := sanityResolveInternalValues(value{
-		kind:     "equation",
-		equation: e,
-	}, valPrincipalState, false)
-	e = ee.equation
-	eValues := sanityDeconstructEquationValues(e, false, valPrincipalState)
+	eValues := sanityDeconstructEquationValues(e, valPrincipalState)
 	if len(eValues) > 2 {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, eValues[2].constant)
 		if i >= 0 {
-			s0 := sanityResolveConstant(valPrincipalState, eValues[1].constant, false)
-			s1 := sanityResolveConstant(valPrincipalState, eValues[2].constant, false)
+			s0 := sanityResolveConstant(valPrincipalState, eValues[1].constant)
+			s1 := sanityResolveConstant(valPrincipalState, eValues[2].constant)
 			hs0 := sanityValueInValues(s0, &valAttackerState.known, valPrincipalState) >= 0
 			hs1 := sanityValueInValues(s1, &valAttackerState.known, valPrincipalState) >= 0
 			p0 := value{
@@ -181,9 +166,7 @@ func possibleToReconstructEquation(e equation, valAttackerState *attackerState, 
 }
 
 func possibleToPrimitivePassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
-	pp, _ := sanityResolveInternalValues(value{kind: "primitive", primitive: p}, valPrincipalState, false)
-	p = pp.primitive
-	if sanityEquivalentValues(p.arguments[0], p.arguments[1], false, false, valPrincipalState) {
+	if sanityEquivalentValues(p.arguments[0], p.arguments[1], valPrincipalState) {
 		return true, p.arguments[0]
 	}
 	return false, value{kind: "primitive", primitive: p}
@@ -195,20 +178,14 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	}
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
-	forceBeforeMutate := false
 	switch from.kind {
 	case "constant":
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, from.constant)
-		from = sanityResolveConstant(valPrincipalState, from.constant, false)
-		if !valPrincipalState.wasMutated[i] {
-			forceBeforeMutate = true
-		}
+		from = sanityResolveConstant(valPrincipalState, from.constant)
 	}
 	switch from.kind {
 	case "constant":
 		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 	case "primitive":
-		from, _ = sanityResolveInternalValues(from, valPrincipalState, forceBeforeMutate)
 		if from.primitive.name != prim.rewrite.name {
 			return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 		}
@@ -216,7 +193,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 			x := p.arguments[m]
 			switch x.kind {
 			case "constant":
-				x = sanityResolveConstant(valPrincipalState, x.constant, false)
+				x = sanityResolveConstant(valPrincipalState, x.constant)
 			}
 			x, valid := prim.rewrite.filter(x, m, valPrincipalState)
 			if !valid {
@@ -226,7 +203,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 			var a2 value
 			switch x.kind {
 			case "constant":
-				a1 = sanityResolveConstant(valPrincipalState, x.constant, false)
+				a1 = sanityResolveConstant(valPrincipalState, x.constant)
 			case "primitive":
 				a1 = x
 			case "equation":
@@ -234,15 +211,13 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 			}
 			switch from.primitive.arguments[m].kind {
 			case "constant":
-				a2 = sanityResolveConstant(valPrincipalState, from.primitive.arguments[m].constant, forceBeforeMutate)
+				a2 = sanityResolveConstant(valPrincipalState, from.primitive.arguments[m].constant)
 			case "primitive":
 				a2 = from.primitive.arguments[m]
 			case "equation":
 				a2 = from.primitive.arguments[m]
 			}
-			a1, _ = sanityResolveInternalValues(a1, valPrincipalState, false)
-			a2, _ = sanityResolveInternalValues(a2, valPrincipalState, forceBeforeMutate)
-			if !sanityEquivalentValues(a1, a2, false, forceBeforeMutate, valPrincipalState) {
+			if !sanityEquivalentValues(a1, a2, valPrincipalState) {
 				return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 			}
 		}
@@ -252,7 +227,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	rewrite := from.primitive.arguments[prim.rewrite.to]
 	switch rewrite.kind {
 	case "constant":
-		rewrite = sanityResolveConstant(valPrincipalState, rewrite.constant, forceBeforeMutate)
+		rewrite = sanityResolveConstant(valPrincipalState, rewrite.constant)
 	}
 	return true, rewrite
 }
@@ -264,7 +239,7 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 		k := p.arguments[prim.decompose.given[0]]
 		switch k.kind {
 		case "constant":
-			k = sanityResolveConstant(valPrincipalState, k.constant, false)
+			k = sanityResolveConstant(valPrincipalState, k.constant)
 		}
 		switch k.kind {
 		case "constant":
@@ -286,7 +261,7 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 		k := p.arguments[0]
 		switch k.kind {
 		case "constant":
-			k = sanityResolveConstant(valPrincipalState, k.constant, false)
+			k = sanityResolveConstant(valPrincipalState, k.constant)
 		}
 		switch k.kind {
 		case "constant":
@@ -310,11 +285,11 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 			aiii := p.arguments[iii]
 			switch aii.kind {
 			case "constant":
-				aii = sanityResolveConstant(valPrincipalState, aii.constant, false)
+				aii = sanityResolveConstant(valPrincipalState, aii.constant)
 			}
 			switch aiii.kind {
 			case "constant":
-				aiii = sanityResolveConstant(valPrincipalState, aiii.constant, false)
+				aiii = sanityResolveConstant(valPrincipalState, aiii.constant)
 			}
 			switch aii.kind {
 			case "constant":
@@ -324,9 +299,7 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 			case "equation":
 				r, _ = possibleToReconstructEquation(aii.equation, valAttackerState, valPrincipalState)
 			}
-			xii, _ := sanityResolveInternalValues(aii, valPrincipalState, false)
-			xiii, _ := sanityResolveInternalValues(aiii, valPrincipalState, false)
-			if r && sanityEquivalentValues(xii, xiii, false, false, valPrincipalState) {
+			if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
 				return false
 			}
 		}

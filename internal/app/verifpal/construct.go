@@ -7,9 +7,14 @@ package main
 import "fmt"
 
 func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
-	var valKnowledgeMap knowledgeMap
+	valKnowledgeMap := knowledgeMap{
+		principals: principals,
+		constants:  []constant{},
+		assigned:   []value{},
+		creator:    []string{},
+		knownBy:    [][]map[string]string{},
+	}
 	_i := 0
-	valKnowledgeMap.principals = principals
 	g := constant{
 		name:        "g",
 		guard:       false,
@@ -320,6 +325,36 @@ func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []
 		valPrincipalStates = append(valPrincipalStates, &valPrincipalState)
 	}
 	return valPrincipalStates
+}
+
+func constructPrincipalStateClone(valPrincipalState *principalState) *principalState {
+	valPrincipalStateClone := principalState{
+		name:          valPrincipalState.name,
+		constants:     make([]constant, len(valPrincipalState.constants)),
+		assigned:      make([]value, len(valPrincipalState.assigned)),
+		guard:         make([]bool, len(valPrincipalState.guard)),
+		known:         make([]bool, len(valPrincipalState.known)),
+		creator:       make([]string, len(valPrincipalState.creator)),
+		sender:        make([]string, len(valPrincipalState.sender)),
+		wasRewritten:  make([]bool, len(valPrincipalState.wasRewritten)),
+		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
+		wasMutated:    make([]bool, len(valPrincipalState.wasMutated)),
+		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
+	}
+	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
+	copy(valPrincipalStateClone.assigned, valPrincipalState.beforeRewrite)
+	copy(valPrincipalStateClone.guard, valPrincipalState.guard)
+	copy(valPrincipalStateClone.known, valPrincipalState.known)
+	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
+	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
+	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
+	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
+	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
+	for i := range valPrincipalStateClone.wasRewritten {
+		valPrincipalStateClone.wasRewritten[i] = false
+		valPrincipalStateClone.wasMutated[i] = false
+	}
+	return &valPrincipalStateClone
 }
 
 func constructAttackerState(active bool, model *verifpal, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {

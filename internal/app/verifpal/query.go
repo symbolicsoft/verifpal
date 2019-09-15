@@ -20,16 +20,21 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
-	ii := sanityValueInValues(sanityResolveConstant(valPrincipalState, query.constant, false), &valAttackerState.known, valPrincipalState)
-	if ii >= 0 {
-		verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
-			"%s%s%s",
-			prettyConstant(query.constant),
-			" is obtained by the attacker as ",
-			prettyValue(valAttackerState.known[ii]),
-		), true)
-		query.resolved = true
+	ii := sanityValueInValues(
+		sanityResolveConstant(valPrincipalState, query.constant),
+		&valAttackerState.known,
+		valPrincipalState,
+	)
+	if ii < 0 {
+		return verifyResult
 	}
+	verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
+		"%s%s%s",
+		prettyConstant(query.constant),
+		" is obtained by the attacker as ",
+		prettyValue(valAttackerState.known[ii]),
+	), true)
+	query.resolved = true
 	verifyResult.query = query
 	return verifyResult
 }
@@ -79,7 +84,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
-		cc := sanityResolveConstant(valPrincipalState, c, false)
+		cc := sanityResolveConstant(valPrincipalState, c)
 		if query.message.sender != sender && passes[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
@@ -93,7 +98,6 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			verifyResult.query = query
 			return verifyResult
 		} else if !valPrincipalState.guard[i] && forcedPasses[f] {
-			a, _ = sanityResolveInternalValues(a, valPrincipalState, false)
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
