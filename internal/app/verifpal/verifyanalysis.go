@@ -17,7 +17,7 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	for _, c := range valPrincipalState.constants {
-		a := sanityResolveConstant(valPrincipalState, c)
+		a := sanityResolveConstant(valPrincipalState, c, true)
 		if sanityValueInValues(a, &valAttackerState.known, valPrincipalState) < 0 {
 			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 		}
@@ -32,7 +32,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant)
+		a = sanityResolveConstant(valPrincipalState, a.constant, true)
 	}
 	ii := sanityExactSameValueInValues(a, &valAttackerState.known)
 	if ii >= 0 {
@@ -57,18 +57,16 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	case "equation":
 		output = append(output, a)
 	}
-	if sanityExactSameValueInValues(a, &valAttackerState.known) < 0 {
-		if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
-			prettyMessage(fmt.Sprintf(
-				"%s resolves to %s",
-				prettyValues(output), prettyValue(a),
-			), analysis, depth, "deduction")
-			valAttackerState.conceivable = append(valAttackerState.conceivable, a)
-		}
-		valAttackerState.known = append(valAttackerState.known, a)
-		valAttackerState.wire = append(valAttackerState.wire, false)
-		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+	if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
+		prettyMessage(fmt.Sprintf(
+			"%s resolves to %s",
+			prettyValues(output), prettyValue(a),
+		), analysis, depth, "deduction")
+		valAttackerState.conceivable = append(valAttackerState.conceivable, a)
 	}
+	valAttackerState.known = append(valAttackerState.known, a)
+	valAttackerState.wire = append(valAttackerState.wire, false)
+	valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
 		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
@@ -82,7 +80,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant)
+		a = sanityResolveConstant(valPrincipalState, a.constant, true)
 	}
 	switch a.kind {
 	case "primitive":
@@ -115,7 +113,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 	aBackup := a
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant)
+		a = sanityResolveConstant(valPrincipalState, a.constant, true)
 	}
 	switch a.kind {
 	case "primitive":
@@ -150,7 +148,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	aBackup := a
 	for _, c := range valPrincipalState.constants {
-		aa := sanityResolveConstant(valPrincipalState, c)
+		aa := sanityResolveConstant(valPrincipalState, c, true)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {

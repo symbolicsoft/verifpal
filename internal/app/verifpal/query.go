@@ -21,11 +21,12 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
 	ii := sanityValueInValues(
-		sanityResolveConstant(valPrincipalState, query.constant),
+		sanityResolveConstant(valPrincipalState, query.constant, true),
 		&valAttackerState.known,
 		valPrincipalState,
 	)
 	if ii < 0 {
+		//fmt.Println(prettyValues(valAttackerState.known))
 		return verifyResult
 	}
 	verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
@@ -52,6 +53,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		return verifyResult
 	}
 	c := valPrincipalState.constants[i]
+	cc := sanityResolveConstant(valPrincipalState, c, true)
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
 		a := valPrincipalState.beforeRewrite[ii]
@@ -62,6 +64,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
 				continue
 			}
+			//fmt.Println(prettyValue(cc) + " " + prettyPrimitive(a.primitive))
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
 				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
 				forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
@@ -84,7 +87,6 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
-		cc := sanityResolveConstant(valPrincipalState, c)
 		if query.message.sender != sender && passes[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
