@@ -181,6 +181,22 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			l := len(valReplacementMap.replacements) - 1
 			switch a.primitive.name {
 			case "AEAD_ENC":
+				aa := value{
+					kind: "primitive",
+					primitive: primitive{
+						name: "AEAD_ENC",
+						arguments: []value{
+							e[0],
+							e[0],
+							e[0],
+						},
+						output: a.primitive.output,
+						check:  a.primitive.check,
+					},
+				}
+				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				}
 				for _, aaa := range valAttackerState.known {
 					if aaa.kind == a.primitive.arguments[1].kind &&
 						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
@@ -213,6 +229,21 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				}
 			case "ENC":
 				for _, aaa := range valAttackerState.known {
+					aa := value{
+						kind: "primitive",
+						primitive: primitive{
+							name: "ENC",
+							arguments: []value{
+								e[0],
+								e[0],
+							},
+							output: a.primitive.output,
+							check:  a.primitive.check,
+						},
+					}
+					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+					}
 					if aaa.kind == a.primitive.arguments[1].kind &&
 						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
 							(aaa.kind == "primitive" &&
@@ -220,7 +251,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
 								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
-						aa := value{
+						aa = value{
 							kind: "primitive",
 							primitive: primitive{
 								name: "ENC",
@@ -240,6 +271,21 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 					}
 				}
 			case "SIGN":
+				aa := value{
+					kind: "primitive",
+					primitive: primitive{
+						name: "SIGN",
+						arguments: []value{
+							e[0],
+							e[0],
+						},
+						output: a.primitive.output,
+						check:  a.primitive.check,
+					},
+				}
+				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				}
 				for _, aaa := range valAttackerState.known {
 					if aaa.kind == a.primitive.arguments[0].kind &&
 						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
@@ -268,6 +314,21 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 					}
 				}
 			case "MAC":
+				aa := value{
+					kind: "primitive",
+					primitive: primitive{
+						name: "MAC",
+						arguments: []value{
+							e[0],
+							e[0],
+						},
+						output: a.primitive.output,
+						check:  a.primitive.check,
+					},
+				}
+				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				}
 				for _, aaa := range valAttackerState.known {
 					if aaa.kind == a.primitive.arguments[0].kind &&
 						((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||

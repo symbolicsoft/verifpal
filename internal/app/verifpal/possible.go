@@ -186,7 +186,7 @@ func possibleToPrimitivePassAssert(p primitive, valPrincipalState *principalStat
 	if sanityEquivalentValues(p.arguments[0], p.arguments[1], false, false, valPrincipalState) {
 		return true, p.arguments[0]
 	}
-	return false, value{}
+	return false, value{kind: "primitive", primitive: p}
 }
 
 func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalState) (bool, value) {
@@ -206,11 +206,11 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	}
 	switch from.kind {
 	case "constant":
-		return false, value{}
+		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 	case "primitive":
 		from, _ = sanityResolveInternalValues(from, valPrincipalState, forceBeforeMutate)
 		if from.primitive.name != prim.rewrite.name {
-			return false, value{}
+			return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 		}
 		for _, m := range prim.rewrite.matching {
 			x := p.arguments[m]
@@ -220,7 +220,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 			}
 			x, valid := prim.rewrite.filter(x, m, valPrincipalState)
 			if !valid {
-				return false, value{}
+				return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 			}
 			var a1 value
 			var a2 value
@@ -243,11 +243,11 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 			a1, _ = sanityResolveInternalValues(a1, valPrincipalState, false)
 			a2, _ = sanityResolveInternalValues(a2, valPrincipalState, forceBeforeMutate)
 			if !sanityEquivalentValues(a1, a2, false, forceBeforeMutate, valPrincipalState) {
-				return false, value{}
+				return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 			}
 		}
 	case "equation":
-		return false, value{}
+		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 	}
 	rewrite := from.primitive.arguments[prim.rewrite.to]
 	switch rewrite.kind {
@@ -260,7 +260,7 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
 	prim := primitiveGet(p.name)
 	switch p.name {
-	case "ENC", "DEC", "AEAD_ENC", "AEAD_DEC":
+	case "DEC", "AEAD_DEC":
 		k := p.arguments[prim.decompose.given[0]]
 		switch k.kind {
 		case "constant":

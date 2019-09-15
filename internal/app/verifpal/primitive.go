@@ -39,20 +39,7 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "AEAD_DEC",
-			from:     1,
-			to:       1,
-			matching: []int{0, 2},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
-				switch i {
-				case 0:
-					return x, true
-				case 2:
-					return x, true
-				}
-				return x, false
-			},
+			hasRule: false,
 		},
 		check: false,
 	},
@@ -66,11 +53,12 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "AEAD_ENC",
-			from:     1,
-			to:       1,
-			matching: []int{0, 2},
+			hasRule:      true,
+			passesAlways: false,
+			name:         "AEAD_ENC",
+			from:         1,
+			to:           1,
+			matching:     []int{0, 2},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -93,18 +81,7 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "DEC",
-			from:     1,
-			to:       1,
-			matching: []int{0},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
-				switch i {
-				case 0:
-					return x, true
-				}
-				return x, false
-			},
+			hasRule: false,
 		},
 		check: false,
 	},
@@ -118,11 +95,12 @@ var primitiveSpecs = []primitiveSpec{
 			reveal:  1,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "ENC",
-			from:     1,
-			to:       1,
-			matching: []int{0},
+			hasRule:      true,
+			passesAlways: true,
+			name:         "ENC",
+			from:         1,
+			to:           1,
+			matching:     []int{0},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -153,7 +131,8 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule: true,
+			hasRule:      true,
+			passesAlways: false,
 		},
 		check: true,
 	},
@@ -177,11 +156,12 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "SIGN",
-			from:     2,
-			to:       1,
-			matching: []int{0, 1},
+			hasRule:      true,
+			passesAlways: false,
+			name:         "SIGN",
+			from:         2,
+			to:           1,
+			matching:     []int{0, 1},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
