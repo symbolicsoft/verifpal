@@ -7,6 +7,13 @@
 
 Verifpal language support for Vim.
 
+## Installation Instructions
+
+- Copy the contents of `filetype.vim` into your Vim folder (`~/.vim/` for Vim, `~/.config/nvim/` for Neovim).
+- Copy `syntax/verifpal.vim` into `~/.vim/syntax/` for Vim, or `~/.config/nvim/syntax/` for Neovim.
+
+You may have an existing `filetype.vim` in your Vim folder. If so, then ensure that you only copy the content of Verifpal's `filetype.vim` and that you do not overwrite your existing file.
+
 ## Features
 
 - Verifpal syntax highlighting.
