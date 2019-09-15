@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-attacker [active]
+attacker[active]
 
 // Pre init
 principal I[
@@ -32,10 +32,8 @@ principal I[
     H7  = HASH(H6, zero)
     T1  = HASH(H6, one)
     H8  = HASH(H7, RS^I)
-    H9  = HASH(H8, zero)
-    K2  = HASH(H8, one)
-    H11 = HASH(H9, zero)
-    T2  = HASH(H9, one)
+    H11 = HASH(H8, zero)
+    T2  = HASH(H8, one)
 ]
 // msg1
 I -> R: IE, S1, T1, T2
@@ -54,10 +52,8 @@ principal R[
     _    = ASSERT(_T1, T1)?
     _IS  = DEC(_K1, S1)
     _H8  = HASH(_H7, _IS^R)
-    _H9  = HASH(_H8, zero)
-    _K2  = HASH(_H8, one)
-    _H11 = HASH(_H9, zero)
-    _T2  = HASH(_H9, one)
+    _H11 = HASH(_H8, zero)
+    _T2  = HASH(_H8, one)
     _    = ASSERT(_T2, T2)?
 ]
 // Done.
@@ -86,6 +82,15 @@ principal R [
 ]
 
 queries[
+    // private keys stay private
+    confidentiality? I
+    confidentiality? R
+    confidentiality? E
+
+    // Initiator anonymity
+    confidentiality? IS
+
+    // Session confidentiality
     confidentiality? H11
     confidentiality? pld_i
     confidentiality? pld_r
