@@ -1,0 +1,98 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker [active]
+
+// Pre init
+principal I[
+    knows public pid, zero, one
+    knows private I
+    IS = G^I
+]
+principal R[
+    knows public pid, zero, one
+    knows private R
+    RS = G^R
+]
+// <- s  (in advance, over a secure channel)
+R -> I: [RS]
+
+principal I[
+    generates E
+    IE = G^E
+    // H0
+    H1  = HASH(pid, RS)
+    H2  = HASH(H1)
+    H3  = HASH(H2, IE)
+    H4  = HASH(H3, RS^E)
+    H5  = HASH(H4, zero)
+    K1  = HASH(H4, one)
+    S1  = ENC(K1, IS)
+    H6  = HASH(H5, S1)
+    H7  = HASH(H6, zero)
+    T1  = HASH(H6, one)
+    H8  = HASH(H7, RS^I)
+    H9  = HASH(H8, zero)
+    K2  = HASH(H8, one)
+    H11 = HASH(H9, zero)
+    T2  = HASH(H9, one)
+]
+// msg1
+I -> R: IE, S1, T1, T2
+
+principal R[
+    // _H0
+    _H1  = HASH(pid, RS)
+    _H2  = HASH(_H1)
+    _H3  = HASH(_H2, IE)
+    _H4  = HASH(_H3, IE^R)
+    _H5  = HASH(_H4, zero)
+    _K1  = HASH(_H4, one)
+    _H6  = HASH(_H5, S1)
+    _H7  = HASH(_H6, zero)
+    _T1  = HASH(_H6, one)
+    _    = ASSERT(_T1, T1)?
+    _IS  = DEC(_K1, S1)
+    _H8  = HASH(_H7, _IS^R)
+    _H9  = HASH(_H8, zero)
+    _K2  = HASH(_H8, one)
+    _H11 = HASH(_H9, zero)
+    _T2  = HASH(_H9, one)
+    _    = ASSERT(_T2, T2)?
+]
+// Done.
+
+// The session keys are the two halves of H11
+// Lets check the security of the channel by sending messages with those keys
+principal I [
+    generates pld_i
+    msg_i = AEAD_ENC(H11, pld_i, nil)
+]
+principal R [
+    generates pld_r
+    msg_r = AEAD_ENC(_H11, pld_r, nil)
+]
+I -> R: msg_i
+R -> I: msg_r
+
+// and of course we receive the messages
+principal I [
+    _pld_r = AEAD_DEC(H11, msg_r, nil)?
+    _      = HASH(_pld_r) // make sure Verifpal mark it as used
+]
+principal R [
+    _pld_i = AEAD_DEC(_H11, msg_i, nil)?
+    _      = HASH(_pld_i)  // make sure Verifpal mark it as used
+]
+
+queries[
+    confidentiality? H11
+    confidentiality? pld_i
+    confidentiality? pld_r
+
+    authentication? I -> R : IE
+    authentication? I -> R : S1    // encrypted static key
+    authentication? I -> R : msg_i // message after handshake
+
+    authentication? R -> I : msg_r // message after handshake
+]
