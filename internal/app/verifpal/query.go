@@ -26,7 +26,6 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 		valPrincipalState,
 	)
 	if ii < 0 {
-		//fmt.Println(prettyValues(valAttackerState.known))
 		return verifyResult
 	}
 	verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
@@ -64,7 +63,6 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
 				continue
 			}
-			//fmt.Println(prettyValue(cc) + " " + prettyPrimitive(a.primitive))
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
 				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
 				forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)

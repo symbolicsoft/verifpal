@@ -38,12 +38,6 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			for !lastReplacement {
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valAttackerState, &valReplacementMap)
 				sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-				if true {
-					for i, c := range valPrincipalStateWithReplacements.constants {
-						fmt.Println(prettyConstant(valPrincipalStateWithReplacements.constants[i]) + ": " + prettyValue(sanityResolveConstant(valPrincipalStateWithReplacements, c, false)) + " (" + valPrincipalStateWithReplacements.name + ")")
-					}
-					fmt.Println("")
-				}
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 				analysis = analysis + 1
 				prettyAnalysis(analysis)
@@ -405,11 +399,6 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
 	for ii := range valReplacementMap.depthIndex {
 		valReplacementMap.depthIndex[ii] = 0
-	}
-	if false {
-		for i := range valReplacementMap.constants {
-			fmt.Println(prettyConstant(valReplacementMap.constants[i]) + ": " + prettyValues(valReplacementMap.replacements[i]))
-		}
 	}
 	return valReplacementMap, e
 }
