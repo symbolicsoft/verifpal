@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.3
+- Added `nil` and `_` keywords.
+
 ## 0.0.2
 - Updated syntax highlighting to match the renaming of `HMACVERIF` to `ASSERT` and `HMAC` to `MAC`.
 
