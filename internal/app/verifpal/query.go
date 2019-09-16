@@ -20,7 +20,7 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
-	ii := sanityValueInValues(
+	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
 		&valAttackerState.known,
 		valPrincipalState,

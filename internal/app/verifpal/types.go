@@ -56,7 +56,7 @@ type primitive struct {
 	check     bool
 }
 type equation struct {
-	constants []constant
+	values []value
 }
 type knowledgeMap struct {
 	principals []string

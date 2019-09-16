@@ -18,7 +18,7 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 	}
 	for _, c := range valPrincipalState.constants {
 		a := sanityResolveConstant(c, valPrincipalState, false)
-		if sanityValueInValues(a, &valAttackerState.known, valPrincipalState) < 0 {
+		if sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState) < 0 {
 			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 		}
 	}

@@ -290,9 +290,9 @@ Equation <-
 		return value{
 			kind: "equation",
 			equation: equation{
-				constants: []constant{
-					FirstConstant.(value).constant,
-					SecondConstant.(value).constant,
+				values: []value{
+					FirstConstant.(value),
+					SecondConstant.(value),
 				},
 			},
 		}, nil

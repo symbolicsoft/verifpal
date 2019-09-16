@@ -23,7 +23,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			}
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-			failedRewrites, _ := sanityPerformPrimitiveRewrites(valPrincipalStateClone)
+			failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
 			sanityFailOnFailedRewrite(failedRewrites)
 			for _, a := range valPrincipalStateClone.assigned {
 				sanityCheckEquationGenerators(a, valPrincipalStateClone)
@@ -125,8 +125,8 @@ func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) boo
 			}
 		}
 	case "equation":
-		for _, aaa := range aa.equation.constants {
-			ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aaa)
+		for _, aaa := range aa.equation.values {
+			ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aaa.constant)
 			if verifyActiveValueHasFreshValues(valKnowledgeMap, valKnowledgeMap.assigned[ii]) {
 				return true
 			}
@@ -141,12 +141,15 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	}
 	e := []value{}
 	ge := []value{}
-	g := constant{
-		name:        "g",
-		guard:       false,
-		fresh:       false,
-		declaration: "knows",
-		qualifier:   "public",
+	g := value{
+		kind: "constant",
+		constant: constant{
+			name:        "g",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
 	}
 	e = append(e, value{
 		kind: "constant",
@@ -161,7 +164,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	ge = append(ge, value{
 		kind: "equation",
 		equation: equation{
-			constants: []constant{g, e[0].constant},
+			values: []value{g, e[0]},
 		},
 	})
 	valReplacementMap.constants = append(valReplacementMap.constants, e[0].constant)
@@ -210,9 +213,9 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
-								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
-						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-							if sanityValueInValues(a.primitive.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
+								len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+						if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+							if sanityEquivalentValueInValues(a.primitive.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
 								aa := value{
 									kind: "primitive",
 									primitive: primitive{
@@ -256,8 +259,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
-								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
-						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+								len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+						if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 							aa = value{
 								kind: "primitive",
 								primitive: primitive{
@@ -299,8 +302,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
-								len(aaa.equation.constants) == len(a.primitive.arguments[0].equation.constants))) {
-						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+								len(aaa.equation.values) == len(a.primitive.arguments[0].equation.values))) {
+						if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
 							aa := value{
 								kind: "primitive",
 								primitive: primitive{
@@ -342,8 +345,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
-								len(aaa.equation.constants) == len(a.primitive.arguments[0].equation.constants))) {
-						if sanityValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+								len(aaa.equation.values) == len(a.primitive.arguments[0].equation.values))) {
+						if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
 							aa := value{
 								kind: "primitive",
 								primitive: primitive{
@@ -367,8 +370,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 								aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
 								len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
 							(aaa.kind == "equation" &&
-								len(aaa.equation.constants) == len(a.primitive.arguments[1].equation.constants))) {
-						if sanityValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+								len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+						if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 							aa := value{
 								kind: "primitive",
 								primitive: primitive{
@@ -436,7 +439,16 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		}
 	}
 	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	failedRewrites, failedRewriteIndices := sanityPerformPrimitiveRewrites(valPrincipalStateWithReplacements)
+	if false {
+		if valPrincipalStateWithReplacements.name == "Bob" {
+			fmt.Println(valPrincipalStateWithReplacements.name)
+			for i, x := range valPrincipalStateWithReplacements.constants {
+				fmt.Println(x.name + ": " + prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+			}
+			fmt.Println("")
+		}
+	}
+	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
 		if !p.check {
 			continue

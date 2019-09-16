@@ -141,13 +141,13 @@ func prettyConstants(c []constant) string {
 func prettyEquation(e equation) string {
 	var pretty string
 	pretty = ""
-	for i, c := range e.constants {
+	for i, c := range e.values {
 		if i == 0 {
-			pretty = prettyConstant(c)
+			pretty = prettyValue(c)
 		} else {
 			pretty = fmt.Sprintf(
 				"%s^%s",
-				pretty, prettyConstant(c),
+				pretty, prettyValue(c),
 			)
 		}
 	}
