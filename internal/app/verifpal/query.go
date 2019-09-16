@@ -21,7 +21,7 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
 	ii := sanityValueInValues(
-		sanityResolveConstant(valPrincipalState, query.constant, true),
+		sanityResolveConstant(query.constant, valPrincipalState, false),
 		&valAttackerState.known,
 		valPrincipalState,
 	)
@@ -52,7 +52,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		return verifyResult
 	}
 	c := valPrincipalState.constants[i]
-	cc := sanityResolveConstant(valPrincipalState, c, true)
+	cc := sanityResolveConstant(c, valPrincipalState, true)
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
 		a := valPrincipalState.beforeRewrite[ii]

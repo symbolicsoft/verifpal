@@ -23,6 +23,8 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			}
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+			failedRewrites, _ := sanityPerformPrimitiveRewrites(valPrincipalStateClone)
+			sanityFailOnFailedRewrite(failedRewrites)
 			for _, a := range valPrincipalStateClone.assigned {
 				sanityCheckEquationGenerators(a, valPrincipalStateClone)
 			}
@@ -35,11 +37,10 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 				&attackerValues, (principalIndex == 0),
 			)
 			for !lastReplacement {
-				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valAttackerState, &valReplacementMap)
-				sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
+				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 				analysis = analysis + 1
-				prettyAnalysis(analysis)
+				//prettyAnalysis(analysis)
 				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
 				valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
 				if len(verifyResults) == len(model.queries) {
@@ -170,7 +171,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
 		}
-		a := sanityResolveConstant(valPrincipalState, v.constant, false)
+		a := sanityResolveConstant(v.constant, valPrincipalState, true)
 		switch a.kind {
 		case "constant":
 			if a.constant.name == "g" {
@@ -402,7 +403,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	return valReplacementMap, e
 }
 
-func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAttackerState *attackerState, valReplacementMap *replacementMap) (*principalState, bool) {
+func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, valReplacementMap *replacementMap) (*principalState, bool) {
 	valPrincipalStateWithReplacements := constructPrincipalStateClone(valPrincipalState)
 	failedCheck := false
 	for i, c := range valReplacementMap.constants {
@@ -434,6 +435,7 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valAtta
 			}
 		}
 	}
+	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
 	failedRewrites, failedRewriteIndices := sanityPerformPrimitiveRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
 		if !p.check {

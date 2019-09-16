@@ -9,6 +9,10 @@ func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalS
 	valAttackerState := constructAttackerState(false, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as passive", 0, 0, "info")
 	sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
+	for _, valPrincipalState := range valPrincipalStates {
+		failedRewrites, _ := sanityPerformPrimitiveRewrites(valPrincipalState)
+		sanityFailOnFailedRewrite(failedRewrites)
+	}
 	for _, a := range valPrincipalStates[0].assigned {
 		sanityCheckEquationGenerators(a, valPrincipalStates[0])
 	}

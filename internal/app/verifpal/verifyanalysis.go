@@ -17,7 +17,7 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	for _, c := range valPrincipalState.constants {
-		a := sanityResolveConstant(valPrincipalState, c, true)
+		a := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityValueInValues(a, &valAttackerState.known, valPrincipalState) < 0 {
 			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 		}
@@ -32,7 +32,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant, true)
+		a = sanityResolveConstant(a.constant, valPrincipalState, false)
 	}
 	ii := sanityExactSameValueInValues(a, &valAttackerState.known)
 	if ii >= 0 {
@@ -80,7 +80,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant, true)
+		a = sanityResolveConstant(a.constant, valPrincipalState, false)
 	}
 	switch a.kind {
 	case "primitive":
@@ -113,7 +113,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 	aBackup := a
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(valPrincipalState, a.constant, true)
+		a = sanityResolveConstant(a.constant, valPrincipalState, true)
 	}
 	switch a.kind {
 	case "primitive":
@@ -148,7 +148,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	aBackup := a
 	for _, c := range valPrincipalState.constants {
-		aa := sanityResolveConstant(valPrincipalState, c, true)
+		aa := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
