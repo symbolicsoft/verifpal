@@ -22,7 +22,6 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 				valAttackerState.mutatedTo = valAttackerState.mutatedTo[1:]
 			}
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-			sanityPerformPrimitiveRewrites(valPrincipalStateClone)
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
 			for _, a := range valPrincipalStateClone.assigned {
 				sanityCheckEquationGenerators(a, valPrincipalStateClone)
