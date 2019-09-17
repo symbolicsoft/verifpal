@@ -468,7 +468,6 @@ func sanityPerformPrimitiveRewrite(p primitive, i int, valPrincipalState *princi
 		wasRewritten = true
 	} else {
 		failedRewrites = append(failedRewrites, rewrite.primitive)
-
 	}
 	if wasRewritten && i >= 0 {
 		valPrincipalState.wasRewritten[i] = true
