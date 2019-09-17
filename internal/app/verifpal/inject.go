@@ -72,12 +72,10 @@ func injectAEADENC(a value, valPrincipalState *principalState, valReplacementMap
 	}
 	for _, aaa := range valAttackerState.known {
 		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+			((aaa.kind == "constant") ||
 				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
-					len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
-				(aaa.kind == "equation" &&
-					len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
+				(aaa.kind == "equation")) {
 			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 				if sanityEquivalentValueInValues(a.primitive.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
 					aa := value{
@@ -122,12 +120,10 @@ func injectENC(a value, valPrincipalState *principalState, valReplacementMap *re
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 		}
 		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+			((aaa.kind == "constant") ||
 				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
-					len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
-				(aaa.kind == "equation" &&
-					len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
+				(aaa.kind == "equation")) {
 			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 				aa = value{
 					kind: "primitive",
@@ -169,12 +165,10 @@ func injectSIGN(a value, valPrincipalState *principalState, valReplacementMap *r
 	}
 	for _, aaa := range valAttackerState.known {
 		if aaa.kind == a.primitive.arguments[0].kind &&
-			((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+			((aaa.kind == "constant") ||
 				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
-					len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
-				(aaa.kind == "equation" &&
-					len(aaa.equation.values) == len(a.primitive.arguments[0].equation.values))) {
+					aaa.primitive.name == a.primitive.arguments[0].primitive.name) ||
+				(aaa.kind == "equation")) {
 			if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
 				aa := value{
 					kind: "primitive",
@@ -216,12 +210,10 @@ func injectMAC(a value, valPrincipalState *principalState, valReplacementMap *re
 	}
 	for _, aaa := range valAttackerState.known {
 		if aaa.kind == a.primitive.arguments[0].kind &&
-			((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+			((aaa.kind == "constant") ||
 				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[0].primitive.name &&
-					len(aaa.primitive.arguments) == len(a.primitive.arguments[0].primitive.arguments)) ||
-				(aaa.kind == "equation" &&
-					len(aaa.equation.values) == len(a.primitive.arguments[0].equation.values))) {
+					aaa.primitive.name == a.primitive.arguments[0].primitive.name) ||
+				(aaa.kind == "equation")) {
 			if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
 				aa := value{
 					kind: "primitive",
@@ -241,12 +233,10 @@ func injectMAC(a value, valPrincipalState *principalState, valReplacementMap *re
 			}
 		}
 		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant" && aaa.constant.name == e[0].constant.name) ||
+			((aaa.kind == "constant") ||
 				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name &&
-					len(aaa.primitive.arguments) == len(a.primitive.arguments[1].primitive.arguments)) ||
-				(aaa.kind == "equation" &&
-					len(aaa.equation.values) == len(a.primitive.arguments[1].equation.values))) {
+					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
+				(aaa.kind == "equation")) {
 			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
 				aa := value{
 					kind: "primitive",
