@@ -13,7 +13,7 @@ import (
 	"runtime"
 )
 
-const mainVersion = "0.6.7"
+const mainVersion = "0.6.8"
 const mainDebug = false
 
 func mainParse(filename string) (*verifpal, *knowledgeMap, []*principalState) {

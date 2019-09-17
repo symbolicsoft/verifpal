@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.6.8
+*September 17, 2019*
+
+- Major refactor of analysis logic. Missed attacks in more complex models should be expected. However, Verifpal's behavior is now significantly more correct, more complete, and analysis speed has increased dramatically.
+
 ## Verifpal 0.6.7
 *September 14, 2019*
 
