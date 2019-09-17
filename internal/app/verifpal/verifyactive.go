@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 )
 
 func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
@@ -40,7 +41,9 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 				analysis = analysis + 1
-				//prettyAnalysis(analysis)
+				if !mainDebug {
+					prettyAnalysis(analysis)
+				}
 				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
 				valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
 				if len(verifyResults) == len(model.queries) {
@@ -428,8 +431,9 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 				if !sanityEquivalentValues(ar, ac, valPrincipalState) {
 					valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 					valPrincipalStateWithReplacements.sender[ii] = "Attacker"
-					valPrincipalStateWithReplacements.assigned[ii] = valReplacementMap.combination[i]
 					valPrincipalStateWithReplacements.wasMutated[ii] = true
+					valPrincipalStateWithReplacements.assigned[ii] = valReplacementMap.combination[i]
+					valPrincipalStateWithReplacements.beforeRewrite[ii] = valReplacementMap.combination[i]
 					if !strInSlice(valPrincipalState.name, valAttackerState.mutatedTo[iiii]) {
 						valAttackerState.mutatedTo[iiii] = append(valAttackerState.mutatedTo[iiii], valPrincipalState.name)
 					}
@@ -438,14 +442,12 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		}
 	}
 	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	if true {
-		if valPrincipalStateWithReplacements.name == "Bob" {
-			fmt.Println(valPrincipalStateWithReplacements.name)
-			for i, x := range valPrincipalStateWithReplacements.constants {
-				fmt.Println(x.name + ": " + prettyValue(valPrincipalStateWithReplacements.assigned[i]))
-			}
-			fmt.Println("")
+	if mainDebug {
+		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
+		for i, x := range valPrincipalStateWithReplacements.constants {
+			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
 		}
+		fmt.Fprintln(os.Stdout, "")
 	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {

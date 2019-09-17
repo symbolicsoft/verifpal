@@ -14,6 +14,7 @@ import (
 )
 
 const mainVersion = "0.6.7"
+const mainDebug = false
 
 func mainParse(filename string) (*verifpal, *knowledgeMap, []*principalState) {
 	var model verifpal

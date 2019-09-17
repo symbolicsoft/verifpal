@@ -356,7 +356,7 @@ func sanityDeconstructEquationValues(e equation, valPrincipalState *principalSta
 }
 
 func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *principalState) bool {
-	a := sanityResolveConstant(c, valPrincipalState, false)
+	a := sanityResolveConstant(c, valPrincipalState, true)
 	for _, aa := range p.arguments {
 		switch aa.kind {
 		case "constant":
@@ -466,6 +466,8 @@ func sanityPerformPrimitiveRewrite(p primitive, i int, valPrincipalState *princi
 	wasRewrittenTotal, rewrite := possibleToPrimitivePassRewrite(rewrite.primitive, valPrincipalState)
 	if wasRewrittenTotal {
 		wasRewritten = true
+	} else {
+		failedRewrites = append(failedRewrites, rewrite.primitive)
 	}
 	if wasRewritten && i >= 0 {
 		valPrincipalState.wasRewritten[i] = true
@@ -535,13 +537,17 @@ func sanityPerformAllRewrites(valPrincipalState *principalState) ([]primitive, [
 			failedRewrite, _, _ := sanityPerformPrimitiveRewrite(valPrincipalState.assigned[i].primitive, i, valPrincipalState)
 			if len(failedRewrite) > 0 {
 				failedRewrites = append(failedRewrites, failedRewrite...)
-				failedRewriteIndices = append(failedRewriteIndices, i)
+				for range failedRewrite {
+					failedRewriteIndices = append(failedRewriteIndices, i)
+				}
 			}
 		case "equation":
 			failedRewrite, _, _ := sanityPerformEquationRewrite(valPrincipalState.assigned[i].equation, i, valPrincipalState)
 			if len(failedRewrite) > 0 {
 				failedRewrites = append(failedRewrites, failedRewrite...)
-				failedRewriteIndices = append(failedRewriteIndices, i)
+				for range failedRewrite {
+					failedRewriteIndices = append(failedRewriteIndices, i)
+				}
 			}
 		}
 	}
