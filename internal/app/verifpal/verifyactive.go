@@ -25,8 +25,8 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
 			failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
 			sanityFailOnFailedRewrite(failedRewrites)
-			for _, a := range valPrincipalStateClone.assigned {
-				sanityCheckEquationGenerators(a, valPrincipalStateClone)
+			for i := range valPrincipalStateClone.assigned {
+				sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
 			}
 			verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
 			analysis = analysis + 1
@@ -126,8 +126,7 @@ func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) boo
 		}
 	case "equation":
 		for _, aaa := range aa.equation.values {
-			ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aaa.constant)
-			if verifyActiveValueHasFreshValues(valKnowledgeMap, valKnowledgeMap.assigned[ii]) {
+			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
 				return true
 			}
 		}
@@ -439,7 +438,7 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		}
 	}
 	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	if false {
+	if true {
 		if valPrincipalStateWithReplacements.name == "Bob" {
 			fmt.Println(valPrincipalStateWithReplacements.name)
 			for i, x := range valPrincipalStateWithReplacements.constants {
