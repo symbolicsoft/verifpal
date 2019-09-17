@@ -16,11 +16,8 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 		depth = verifyAnalysisEquivocate(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
-	for _, c := range valPrincipalState.constants {
-		a := sanityResolveConstant(c, valPrincipalState, false)
-		if sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState) < 0 {
-			depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
-		}
+	for _, a := range valPrincipalState.assigned {
+		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
 		depth = verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, depth+1)
@@ -113,7 +110,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 	aBackup := a
 	switch a.kind {
 	case "constant":
-		a = sanityResolveConstant(a.constant, valPrincipalState, true)
+		a = sanityResolveConstant(a.constant, valPrincipalState, false)
 	}
 	switch a.kind {
 	case "primitive":
