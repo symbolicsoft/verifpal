@@ -8,6 +8,7 @@ func (valReplacementMap *replacementMap) combinationNext() bool {
 	lastCombination := false
 	for i := 0; i < len(valReplacementMap.combination); i++ {
 		valReplacementMap.combination[i] = valReplacementMap.replacements[i][valReplacementMap.depthIndex[i]]
+		valReplacementMap.requiredKnown[i] = valReplacementMap.requiredKnowns[i][valReplacementMap.depthIndex[i]]
 		if i == len(valReplacementMap.combination)-1 {
 			valReplacementMap.depthIndex[i] = valReplacementMap.depthIndex[i] + 1
 			for ii := i; ii >= 0; ii-- {

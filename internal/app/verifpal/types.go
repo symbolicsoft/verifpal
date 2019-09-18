@@ -114,9 +114,11 @@ type verifyResult struct {
 	summary string
 }
 type replacementMap struct {
-	constants     []constant
-	replacements  [][]value
-	combination   []value
-	depthIndex    []int
-	injectCounter int
+	constants      []constant
+	replacements   [][]value
+	requiredKnowns [][][]int
+	combination    []value
+	requiredKnown  [][]int
+	depthIndex     []int
+	injectCounter  int
 }

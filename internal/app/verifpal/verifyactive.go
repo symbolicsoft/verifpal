@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
@@ -123,11 +124,13 @@ func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) boo
 
 func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState, stage int) replacementMap {
 	valReplacementMap := replacementMap{
-		constants:     []constant{},
-		replacements:  [][]value{},
-		combination:   []value{},
-		depthIndex:    []int{},
-		injectCounter: 0,
+		constants:      []constant{},
+		replacements:   [][]value{},
+		requiredKnowns: [][][]int{},
+		combination:    []value{},
+		requiredKnown:  [][]int{},
+		depthIndex:     []int{},
+		injectCounter:  0,
 	}
 	// valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
 	for i, v := range valAttackerState.known {
@@ -145,9 +148,11 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
 			if stage == 2 {
 				inject(a.primitive, valPrincipalState, &valReplacementMap, valAttackerState)
 			}
@@ -180,11 +185,14 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
 			l := len(valReplacementMap.replacements) - 1
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], gn)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
+	valReplacementMap.requiredKnown = make([][]int, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
 	for ii := range valReplacementMap.depthIndex {
 		valReplacementMap.depthIndex[ii] = 0
@@ -225,32 +233,21 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		if sanityEquivalentValues(ar, ac, valPrincipalState) {
 			continue
 		}
-		if ac.kind == "primitive" && ac.primitive.name == "AEAD_ENC" {
+		failedMutate := false
+		if ac.kind == "primitive" {
 			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
-			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
-				continue
+			for _, r := range valReplacementMap.requiredKnown[i] {
+				if r < 0 {
+				} else if sanityEquivalentValueInValues(ac.primitive.arguments[r], &valAttackerState.known, valPrincipalState) < 0 {
+					failedMutate = true
+				}
 			}
-			if sanityEquivalentValueInValues(ac.primitive.arguments[2], &valAttackerState.known, valPrincipalState) < 0 {
-				continue
+			if !failedMutate {
+				fmt.Println(prettyValue(ac) + " " + strconv.Itoa(i) + " " + strconv.Itoa(valReplacementMap.requiredKnown[i][0]))
 			}
 		}
-		if ac.kind == "primitive" && ac.primitive.name == "ENC" {
-			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
-			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
-				continue
-			}
-		}
-		if ac.kind == "primitive" && ac.primitive.name == "SIGN" {
-			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
-			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
-				continue
-			}
-		}
-		if ac.kind == "primitive" && ac.primitive.name == "MAC" {
-			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
-			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
-				continue
-			}
+		if failedMutate {
+			continue
 		}
 		valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 		valPrincipalStateWithReplacements.sender[ii] = "Attacker"

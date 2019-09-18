@@ -41,6 +41,7 @@ func injectAEADENC(
 		}
 		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0, 2})
 		}
 	}
 }
@@ -65,6 +66,23 @@ func injectENC(
 		}
 		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+		}
+		aa = value{
+			kind: "primitive",
+			primitive: primitive{
+				name: "ENC",
+				arguments: []value{
+					k,
+					p.arguments[1],
+				},
+				output: p.output,
+				check:  p.check,
+			},
+		}
+		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{1})
 		}
 	}
 }
@@ -89,6 +107,23 @@ func injectSIGN(
 		}
 		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+		}
+		aa = value{
+			kind: "primitive",
+			primitive: primitive{
+				name: "SIGN",
+				arguments: []value{
+					k,
+					p.arguments[1],
+				},
+				output: p.output,
+				check:  p.check,
+			},
+		}
+		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{1})
 		}
 	}
 }
@@ -113,6 +148,23 @@ func injectMAC(
 		}
 		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+		}
+		aa = value{
+			kind: "primitive",
+			primitive: primitive{
+				name: "MAC",
+				arguments: []value{
+					k,
+					p.arguments[1],
+				},
+				output: p.output,
+				check:  p.check,
+			},
+		}
+		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{1})
 		}
 	}
 }
