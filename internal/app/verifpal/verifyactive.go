@@ -162,35 +162,40 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalStateWithReplacements, c)
 		iii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 		iiii := sanityGetAttackerStateIndexFromConstant(valAttackerState, c)
-		if valPrincipalStateWithReplacements.creator[ii] != valPrincipalStateWithReplacements.name {
-			unassailable := false
-			if valPrincipalState.guard[iii] {
-				unassailable = true
-				if iiii >= 0 {
-					if strInSlice(valPrincipalState.sender[iii], valAttackerState.mutatedTo[iiii]) {
-						unassailable = false
-					}
-				}
+		mutatedTo := strInSlice(valPrincipalState.sender[iii], valAttackerState.mutatedTo[iiii])
+		unassailable := false
+		if valPrincipalState.guard[iii] {
+			unassailable = true
+			if iiii >= 0 && mutatedTo {
+				unassailable = false
 			}
-			if valPrincipalState.known[iii] && !unassailable {
-				ar := valPrincipalStateWithReplacements.assigned[ii]
-				ac := valReplacementMap.combination[i]
-				switch ar.kind {
-				case "primitive":
-					ac.primitive.output = ar.primitive.output
-					ac.primitive.check = ar.primitive.check
-				}
-				if !sanityEquivalentValues(ar, ac, valPrincipalState) {
-					valPrincipalStateWithReplacements.creator[ii] = "Attacker"
-					valPrincipalStateWithReplacements.sender[ii] = "Attacker"
-					valPrincipalStateWithReplacements.wasMutated[ii] = true
-					valPrincipalStateWithReplacements.assigned[ii] = ac
-					valPrincipalStateWithReplacements.beforeRewrite[ii] = ac
-					if !strInSlice(valPrincipalState.name, valAttackerState.mutatedTo[iiii]) {
-						valAttackerState.mutatedTo[iiii] = append(valAttackerState.mutatedTo[iiii], valPrincipalState.name)
-					}
-				}
-			}
+		}
+		if unassailable {
+			continue
+		}
+		if valPrincipalStateWithReplacements.creator[ii] == valPrincipalStateWithReplacements.name {
+			continue
+		}
+		if !valPrincipalState.known[iii] {
+			continue
+		}
+		ar := valPrincipalStateWithReplacements.assigned[ii]
+		ac := valReplacementMap.combination[i]
+		switch ar.kind {
+		case "primitive":
+			ac.primitive.output = ar.primitive.output
+			ac.primitive.check = ar.primitive.check
+		}
+		if sanityEquivalentValues(ar, ac, valPrincipalState) {
+			continue
+		}
+		valPrincipalStateWithReplacements.creator[ii] = "Attacker"
+		valPrincipalStateWithReplacements.sender[ii] = "Attacker"
+		valPrincipalStateWithReplacements.wasMutated[ii] = true
+		valPrincipalStateWithReplacements.assigned[ii] = ac
+		valPrincipalStateWithReplacements.beforeRewrite[ii] = ac
+		if !strInSlice(valPrincipalState.name, valAttackerState.mutatedTo[iiii]) {
+			valAttackerState.mutatedTo[iiii] = append(valAttackerState.mutatedTo[iiii], valPrincipalState.name)
 		}
 	}
 	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
