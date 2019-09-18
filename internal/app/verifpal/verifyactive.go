@@ -233,28 +233,24 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 			if sanityEquivalentValueInValues(ac.primitive.arguments[2], &valAttackerState.known, valPrincipalState) < 0 {
 				continue
 			}
-			fmt.Println(prettyValue(ac))
 		}
 		if ac.kind == "primitive" && ac.primitive.name == "ENC" {
 			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
 			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
 				continue
 			}
-			fmt.Println(prettyValue(ac))
 		}
 		if ac.kind == "primitive" && ac.primitive.name == "SIGN" {
 			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
 			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
 				continue
 			}
-			fmt.Println(prettyValue(ac))
 		}
 		if ac.kind == "primitive" && ac.primitive.name == "MAC" {
 			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
 			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
 				continue
 			}
-			fmt.Println(prettyValue(ac))
 		}
 		valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 		valPrincipalStateWithReplacements.sender[ii] = "Attacker"
