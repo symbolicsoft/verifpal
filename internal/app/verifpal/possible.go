@@ -43,19 +43,15 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 	}
 	if len(has) >= len(primitive.decompose.given) {
 		revealed := p.arguments[primitive.decompose.reveal]
-		v := value{
-			kind:      "primitive",
-			primitive: p,
-		}
-		if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
 					"%s now conceivable by deconstructing %s with %s",
 					prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
 				), analysis, depth, "analysis")
-				valAttackerState.conceivable = append(valAttackerState.conceivable, v)
+				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
 			}
-			valAttackerState.known = append(valAttackerState.known, v)
+			valAttackerState.known = append(valAttackerState.known, revealed)
 			valAttackerState.wire = append(valAttackerState.wire, false)
 			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 		}

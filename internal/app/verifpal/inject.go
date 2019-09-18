@@ -14,7 +14,7 @@ func inject(
 ) {
 	switch p.name {
 	case "AEAD_ENC":
-		injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		//injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "ENC":
 		//injectENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "SIGN":
@@ -116,10 +116,10 @@ func injectAttackerValues(
 	valAttackerState *attackerState, injectCounter int, alsoKnowledgeMap bool,
 ) {
 	attackerValues := []value{}
-	e, ge := injectGetAttackerEquations(injectCounter)
-	attackerPrimitives := injectGetAttackerPrimitives(injectCounter)
-	attackerValues = append(attackerValues, []value{e, ge}...)
-	attackerValues = append(attackerValues, attackerPrimitives...)
+	e, _ := injectGetAttackerEquations(injectCounter)
+	//attackerPrimitives := injectGetAttackerPrimitives(injectCounter)
+	attackerValues = append(attackerValues, []value{e}...)
+	//attackerValues = append(attackerValues, attackerPrimitives...)
 	for _, v := range attackerValues {
 		valPrincipalState.constants = append(valPrincipalState.constants, v.constant)
 		valPrincipalState.assigned = append(valPrincipalState.assigned, v)
@@ -149,25 +149,21 @@ func injectAEADENC(
 ) {
 	l := len(valReplacementMap.replacements) - 1
 	for _, k := range valAttackerState.known {
-		if sanityEquivalentValueInValues(p.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-			if sanityEquivalentValueInValues(p.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "AEAD_ENC",
-						arguments: []value{
-							p.arguments[0],
-							k,
-							p.arguments[2],
-						},
-						output: p.output,
-						check:  p.check,
-					},
-				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				}
-			}
+		aa := value{
+			kind: "primitive",
+			primitive: primitive{
+				name: "AEAD_ENC",
+				arguments: []value{
+					p.arguments[0],
+					k,
+					p.arguments[2],
+				},
+				output: p.output,
+				check:  p.check,
+			},
+		}
+		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 		}
 	}
 }

@@ -107,7 +107,6 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 	var r bool
 	var ar []value
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
-	aBackup := a
 	switch a.kind {
 	case "constant":
 		a = sanityResolveConstant(a.constant, valPrincipalState, false)
@@ -122,11 +121,11 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 		r, ar = possibleToReconstructEquation(a.equation, valAttackerState, valPrincipalState)
 	}
 	if r {
-		if sanityExactSameValueInValues(aBackup, &valAttackerState.known) < 0 {
-			if sanityExactSameValueInValues(aBackup, &valAttackerState.conceivable) < 0 {
+		if sanityExactSameValueInValues(a, &valAttackerState.known) < 0 {
+			if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
 					"%s found by attacker by reconstructing with %s",
-					prettyValue(aBackup), prettyValues(ar),
+					prettyValue(a), prettyValues(ar),
 				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, a)
 			}
@@ -136,14 +135,13 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisReconstruct(aBackup, valPrincipalState, valAttackerState, analysis, depth+1)
+		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }
 
 func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
-	aBackup := a
 	for _, c := range valPrincipalState.constants {
 		aa := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
@@ -151,7 +149,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
 					prettyMessage(fmt.Sprintf(
 						"%s found by attacker by equivocating with %s",
-						prettyValue(aa), prettyValue(aBackup),
+						prettyValue(aa), prettyValue(a),
 					), analysis, depth, "deduction")
 					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
 				}
@@ -168,7 +166,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 						if sanityExactSameValueInValues(aaa, &valAttackerState.conceivable) < 0 {
 							prettyMessage(fmt.Sprintf(
 								"%s found by attacker by equivocating with %s",
-								prettyValue(aaa), prettyValue(aBackup),
+								prettyValue(aaa), prettyValue(a),
 							), analysis, depth, "deduction")
 							valAttackerState.conceivable = append(valAttackerState.conceivable, aaa)
 						}

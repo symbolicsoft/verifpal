@@ -16,7 +16,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 	analysis := 0
 	attackerKnown := -1
 	for len(valAttackerState.known) > attackerKnown {
-		for principalIndex, valPrincipalState := range valPrincipalStates {
+		for _, valPrincipalState := range valPrincipalStates {
 			lastReplacement := false
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
@@ -28,10 +28,12 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
 			analysis = verifyActiveIncrementAnalysis(analysis)
 			valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
-			injectAttackerValues(
-				valKnowledgeMap, valPrincipalState, valAttackerState,
-				valReplacementMap.injectCounter, (principalIndex == 0),
-			)
+			/*
+				injectAttackerValues(
+					valKnowledgeMap, valPrincipalState, valAttackerState,
+					valReplacementMap.injectCounter, (analysis == 1),
+				)
+			*/
 			for !lastReplacement {
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
@@ -118,10 +120,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		depthIndex:    []int{},
 		injectCounter: 0,
 	}
-	e, ge := injectGetAttackerEquations(valReplacementMap.injectCounter)
 	// valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
-	valReplacementMap.constants = append(valReplacementMap.constants, e.constant)
-	valReplacementMap.replacements = append(valReplacementMap.replacements, []value{e})
 	for i, v := range valAttackerState.known {
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
@@ -132,10 +131,11 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			if a.constant.name == "g" {
 				continue
 			}
+			if a.constant.name == "nil" {
+				continue
+			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e)
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
@@ -143,8 +143,6 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], ge)
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
@@ -157,7 +155,6 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 
 func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, valReplacementMap *replacementMap) (*principalState, bool) {
 	valPrincipalStateWithReplacements := constructPrincipalStateClone(valPrincipalState)
-	failedCheck := false
 	for i, c := range valReplacementMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalStateWithReplacements, c)
 		iii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
@@ -189,6 +186,16 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		if sanityEquivalentValues(ar, ac, valPrincipalState) {
 			continue
 		}
+		if ac.kind == "primitive" && ac.primitive.name == "AEAD_ENC" {
+			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
+			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
+				return valPrincipalStateWithReplacements, true
+			}
+			fmt.Println(prettyValue(ac))
+			if sanityEquivalentValueInValues(ac.primitive.arguments[2], &valAttackerState.known, valPrincipalState) < 0 {
+				return valPrincipalStateWithReplacements, true
+			}
+		}
 		valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 		valPrincipalStateWithReplacements.sender[ii] = "Attacker"
 		valPrincipalStateWithReplacements.wasMutated[ii] = true
@@ -211,19 +218,21 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		if !p.check {
 			continue
 		}
-		failedCheck = true
-		f := failedRewriteIndices[i] + 1
-		valPrincipalStateWithReplacements.constants = valPrincipalStateWithReplacements.constants[:f]
-		valPrincipalStateWithReplacements.assigned = valPrincipalStateWithReplacements.assigned[:f]
-		valPrincipalStateWithReplacements.guard = valPrincipalStateWithReplacements.guard[:f]
-		valPrincipalStateWithReplacements.known = valPrincipalStateWithReplacements.known[:f]
-		valPrincipalStateWithReplacements.creator = valPrincipalStateWithReplacements.creator[:f]
-		valPrincipalStateWithReplacements.sender = valPrincipalStateWithReplacements.sender[:f]
-		valPrincipalStateWithReplacements.wasRewritten = valPrincipalStateWithReplacements.wasRewritten[:f]
-		valPrincipalStateWithReplacements.beforeRewrite = valPrincipalStateWithReplacements.beforeRewrite[:f]
-		valPrincipalStateWithReplacements.wasMutated = valPrincipalStateWithReplacements.wasMutated[:f]
-		valPrincipalStateWithReplacements.beforeMutate = valPrincipalStateWithReplacements.beforeMutate[:f]
+		verifyActiveDropPrincipalStateAfterIndex(valPrincipalStateWithReplacements, failedRewriteIndices[i]+1)
 		break
 	}
-	return valPrincipalStateWithReplacements, failedCheck
+	return valPrincipalStateWithReplacements, false
+}
+
+func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *principalState, f int) {
+	valPrincipalState.constants = valPrincipalState.constants[:f]
+	valPrincipalState.assigned = valPrincipalState.assigned[:f]
+	valPrincipalState.guard = valPrincipalState.guard[:f]
+	valPrincipalState.known = valPrincipalState.known[:f]
+	valPrincipalState.creator = valPrincipalState.creator[:f]
+	valPrincipalState.sender = valPrincipalState.sender[:f]
+	valPrincipalState.wasRewritten = valPrincipalState.wasRewritten[:f]
+	valPrincipalState.beforeRewrite = valPrincipalState.beforeRewrite[:f]
+	valPrincipalState.wasMutated = valPrincipalState.wasMutated[:f]
+	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
 }
