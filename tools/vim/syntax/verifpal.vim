@@ -1,7 +1,7 @@
 " Vim syntax file
 " Language:     Verifpal
 " Maintainer:   Nadim Kobeissi <nadim@symbolic.software>
-" Last Change:  2019 09 15
+" Last Change:  2019 09 18
 " SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 " SPDX-License-Identifier: GPL-3.0-only
 
@@ -26,7 +26,6 @@ syn match verifpalDelim "("
 syn match verifpalDelim ")"
 syn match verifpalDelim "\["
 syn match verifpalDelim "]"
-syn match verifpalPrin "[A-Z][a-z0-9]\+"
 syn keyword verifpalKeywrd knows generates active
 syn keyword verifpalConstr         HASH HKDF AEAD_ENC ENC DEC ASSERT MAC SIGNVERIF SIGN G DH nil _
 syn match verifpalConstr           "\^"
@@ -41,7 +40,6 @@ if version >= 508 || !exists("did_verifpal_syn_inits")
     VerifpalHiLink verifpalOper      Operator
     VerifpalHiLink verifpalDelim     Delimiter
     VerifpalHiLink verifpalKeywrd    Keyword
-    VerifpalHiLink verifpalPrin      String
     VerifpalHiLink verifpalConstr    Function
     VerifpalHiLink verifpalDecl      Typedef
     VerifpalHiLink verifpalTransfer  Typedef
