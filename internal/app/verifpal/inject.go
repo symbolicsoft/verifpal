@@ -4,24 +4,29 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
-func inject(a value, valPrincipalState *principalState, valReplacementMap *replacementMap, valAttackerState *attackerState) {
-	switch a.primitive.name {
+func inject(
+	p primitive, valPrincipalState *principalState,
+	valReplacementMap *replacementMap, valAttackerState *attackerState,
+) {
+	switch p.name {
 	case "AEAD_ENC":
-		injectAEADENC(a, valPrincipalState, valReplacementMap, valAttackerState)
+		injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "ENC":
-		injectENC(a, valPrincipalState, valReplacementMap, valAttackerState)
+		//injectENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "SIGN":
-		injectSIGN(a, valPrincipalState, valReplacementMap, valAttackerState)
+		//injectSIGN(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "MAC":
-		injectMAC(a, valPrincipalState, valReplacementMap, valAttackerState)
+		//injectMAC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	}
 }
 
-func injectGetAttackerValues(valReplacementMap *replacementMap) ([]value, []value) {
-	e := []value{}
-	ge := []value{}
+func injectGetAttackerEquations(injectCounter int) (value, value) {
+	e := value{}
+	ge := value{}
 	g := value{
 		kind: "constant",
 		constant: constant{
@@ -32,154 +37,131 @@ func injectGetAttackerValues(valReplacementMap *replacementMap) ([]value, []valu
 			qualifier:   "public",
 		},
 	}
-	e = append(e, value{
+	e = value{
 		kind: "constant",
 		constant: constant{
-			name:        fmt.Sprintf("attacker_%d", valReplacementMap.injectCounter),
+			name:        fmt.Sprintf("attacker_%d", injectCounter),
 			guard:       false,
 			fresh:       false,
 			declaration: "knows",
 			qualifier:   "private",
 		},
-	})
-	ge = append(ge, value{
+	}
+	ge = value{
 		kind: "equation",
 		equation: equation{
-			values: []value{g, e[0]},
+			values: []value{g, e},
 		},
-	})
+	}
 	return e, ge
 }
 
-func injectAEADENC(a value, valPrincipalState *principalState, valReplacementMap *replacementMap, valAttackerState *attackerState) {
-	e, ge := injectGetAttackerValues(valReplacementMap)
-	l := len(valReplacementMap.replacements) - 1
-	aa := value{
+func injectGetAttackerPrimitives(injectCounter int) []value {
+	attackerPrimitives := []value{}
+	e, ge := injectGetAttackerEquations(injectCounter)
+	attackerPrimitives = append(attackerPrimitives, value{
 		kind: "primitive",
 		primitive: primitive{
 			name: "AEAD_ENC",
 			arguments: []value{
-				e[0],
-				ge[0],
-				e[0],
+				e,
+				ge,
+				e,
 			},
-			output: a.primitive.output,
-			check:  a.primitive.check,
+			output: primitiveGet("AEAD_ENC").output,
+			check:  false,
 		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for _, aaa := range valAttackerState.known {
-		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant") ||
-				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
-				(aaa.kind == "equation")) {
-			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-				if sanityEquivalentValueInValues(a.primitive.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
-					aa := value{
-						kind: "primitive",
-						primitive: primitive{
-							name: "AEAD_ENC",
-							arguments: []value{
-								a.primitive.arguments[0],
-								aaa,
-								a.primitive.arguments[2],
-							},
-							output: a.primitive.output,
-							check:  a.primitive.check,
-						},
-					}
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-					}
-				}
-			}
-		}
-	}
-}
-
-func injectENC(a value, valPrincipalState *principalState, valReplacementMap *replacementMap, valAttackerState *attackerState) {
-	e, ge := injectGetAttackerValues(valReplacementMap)
-	l := len(valReplacementMap.replacements) - 1
-	for _, aaa := range valAttackerState.known {
-		aa := value{
-			kind: "primitive",
-			primitive: primitive{
-				name: "ENC",
-				arguments: []value{
-					e[0],
-					ge[0],
-				},
-				output: a.primitive.output,
-				check:  a.primitive.check,
+	})
+	attackerPrimitives = append(attackerPrimitives, value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "ENC",
+			arguments: []value{
+				e,
+				ge,
 			},
-		}
-		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-		}
-		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant") ||
-				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
-				(aaa.kind == "equation")) {
-			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-				aa = value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "ENC",
-						arguments: []value{
-							a.primitive.arguments[0],
-							aaa,
-						},
-						output: a.primitive.output,
-						check:  a.primitive.check,
-					},
-				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				}
-			}
-		}
-	}
-}
-
-func injectSIGN(a value, valPrincipalState *principalState, valReplacementMap *replacementMap, valAttackerState *attackerState) {
-	e, ge := injectGetAttackerValues(valReplacementMap)
-	l := len(valReplacementMap.replacements) - 1
-	aa := value{
+			output: primitiveGet("ENC").output,
+			check:  false,
+		},
+	})
+	attackerPrimitives = append(attackerPrimitives, value{
 		kind: "primitive",
 		primitive: primitive{
 			name: "SIGN",
 			arguments: []value{
-				e[0],
-				ge[0],
+				e,
+				ge,
 			},
-			output: a.primitive.output,
-			check:  a.primitive.check,
+			output: primitiveGet("SIGN").output,
+			check:  false,
 		},
+	})
+	attackerPrimitives = append(attackerPrimitives, value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "MAC",
+			arguments: []value{
+				e,
+				ge,
+			},
+			output: primitiveGet("MAC").output,
+			check:  false,
+		},
+	})
+	return attackerPrimitives
+}
+
+func injectAttackerValues(
+	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState,
+	valAttackerState *attackerState, injectCounter int, alsoKnowledgeMap bool,
+) {
+	attackerValues := []value{}
+	e, ge := injectGetAttackerEquations(injectCounter)
+	attackerPrimitives := injectGetAttackerPrimitives(injectCounter)
+	attackerValues = append(attackerValues, []value{e, ge}...)
+	attackerValues = append(attackerValues, attackerPrimitives...)
+	for _, v := range attackerValues {
+		valPrincipalState.constants = append(valPrincipalState.constants, v.constant)
+		valPrincipalState.assigned = append(valPrincipalState.assigned, v)
+		valPrincipalState.guard = append(valPrincipalState.guard, false)
+		valPrincipalState.known = append(valPrincipalState.known, false)
+		valPrincipalState.sender = append(valPrincipalState.sender, "Attacker")
+		valPrincipalState.creator = append(valPrincipalState.creator, "Attacker")
+		valPrincipalState.wasRewritten = append(valPrincipalState.wasRewritten, false)
+		valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, v)
+		valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
+		valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, v)
+		valAttackerState.known = append(valAttackerState.known, v)
+		valAttackerState.wire = append(valAttackerState.wire, false)
+		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+		if alsoKnowledgeMap {
+			valKnowledgeMap.constants = append(valKnowledgeMap.constants, v.constant)
+			valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, v)
+			valKnowledgeMap.creator = append(valKnowledgeMap.creator, "Attacker")
+			valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
+		}
 	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for _, aaa := range valAttackerState.known {
-		if aaa.kind == a.primitive.arguments[0].kind &&
-			((aaa.kind == "constant") ||
-				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[0].primitive.name) ||
-				(aaa.kind == "equation")) {
-			if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+}
+
+func injectAEADENC(
+	p primitive, valPrincipalState *principalState,
+	valReplacementMap *replacementMap, valAttackerState *attackerState,
+) {
+	l := len(valReplacementMap.replacements) - 1
+	for _, k := range valAttackerState.known {
+		if sanityEquivalentValueInValues(p.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
+			if sanityEquivalentValueInValues(p.arguments[2], &valAttackerState.known, valPrincipalState) >= 0 {
 				aa := value{
 					kind: "primitive",
 					primitive: primitive{
-						name: "SIGN",
+						name: "AEAD_ENC",
 						arguments: []value{
-							aaa,
-							a.primitive.arguments[1],
+							p.arguments[0],
+							k,
+							p.arguments[2],
 						},
-						output: a.primitive.output,
-						check:  a.primitive.check,
+						output: p.output,
+						check:  p.check,
 					},
 				}
 				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
@@ -190,69 +172,27 @@ func injectSIGN(a value, valPrincipalState *principalState, valReplacementMap *r
 	}
 }
 
-func injectMAC(a value, valPrincipalState *principalState, valReplacementMap *replacementMap, valAttackerState *attackerState) {
-	e, ge := injectGetAttackerValues(valReplacementMap)
+func injectSIGN(
+	p primitive, valPrincipalState *principalState,
+	valReplacementMap *replacementMap, valAttackerState *attackerState,
+) {
 	l := len(valReplacementMap.replacements) - 1
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "MAC",
-			arguments: []value{
-				e[0],
-				ge[0],
-			},
-			output: a.primitive.output,
-			check:  a.primitive.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for _, aaa := range valAttackerState.known {
-		if aaa.kind == a.primitive.arguments[0].kind &&
-			((aaa.kind == "constant") ||
-				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[0].primitive.name) ||
-				(aaa.kind == "equation")) {
-			if sanityEquivalentValueInValues(a.primitive.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "MAC",
-						arguments: []value{
-							aaa,
-							a.primitive.arguments[1],
-						},
-						output: a.primitive.output,
-						check:  a.primitive.check,
+	for _, k := range valAttackerState.known {
+		if sanityEquivalentValueInValues(p.arguments[1], &valAttackerState.known, valPrincipalState) >= 0 {
+			aa := value{
+				kind: "primitive",
+				primitive: primitive{
+					name: "SIGN",
+					arguments: []value{
+						k,
+						p.arguments[1],
 					},
-				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				}
+					output: p.output,
+					check:  p.check,
+				},
 			}
-		}
-		if aaa.kind == a.primitive.arguments[1].kind &&
-			((aaa.kind == "constant") ||
-				(aaa.kind == "primitive" &&
-					aaa.primitive.name == a.primitive.arguments[1].primitive.name) ||
-				(aaa.kind == "equation")) {
-			if sanityEquivalentValueInValues(a.primitive.arguments[0], &valAttackerState.known, valPrincipalState) >= 0 {
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "MAC",
-						arguments: []value{
-							a.primitive.arguments[0],
-							aaa,
-						},
-						output: a.primitive.output,
-						check:  a.primitive.check,
-					},
-				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				}
+			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 			}
 		}
 	}

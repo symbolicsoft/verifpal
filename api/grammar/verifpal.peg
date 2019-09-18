@@ -245,7 +245,6 @@ Constants <-
 		return da, err
 	}
 
-
 GuardedConstant <-
 	'[' GuardedConstant:[a-zA-Z0-9_]+ ']' (_ ',' _)? {
 		a  := GuardedConstant.([]interface{})

@@ -17,11 +17,7 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 	attackerKnown := -1
 	for len(valAttackerState.known) > attackerKnown {
 		for principalIndex, valPrincipalState := range valPrincipalStates {
-			if principalIndex > 0 || attackerKnown >= 0 {
-				valAttackerState.known = valAttackerState.known[1:]
-				valAttackerState.wire = valAttackerState.wire[1:]
-				valAttackerState.mutatedTo = valAttackerState.mutatedTo[1:]
-			}
+			lastReplacement := false
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
 			failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
@@ -30,17 +26,16 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 				sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
 			}
 			verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
-			analysis = analysis + 1
-			valReplacementMap, attackerValues := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
-			lastReplacement := valReplacementMap.combinationNext()
-			verifyActiveInjectAttackerValues(
+			analysis = verifyActiveIncrementAnalysis(analysis)
+			valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
+			injectAttackerValues(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
-				&attackerValues, (principalIndex == 0),
+				valReplacementMap.injectCounter, (principalIndex == 0),
 			)
 			for !lastReplacement {
 				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
-				analysis = analysis + 1
+				analysis = verifyActiveIncrementAnalysis(analysis)
 				if !mainDebug {
 					prettyAnalysis(analysis)
 				}
@@ -50,10 +45,11 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 					return verifyResults
 				}
 				if len(valAttackerState.known) > attackerKnown {
-					valReplacementMap, _ = verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
+					valReplacementMap = verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
+				} else {
+					lastReplacement = valReplacementMap.combinationNext()
 				}
 				attackerKnown = len(valAttackerState.known)
-				lastReplacement = valReplacementMap.combinationNext()
 			}
 			attackerKnown = len(valAttackerState.known)
 		}
@@ -61,31 +57,8 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 	return verifyResults
 }
 
-func verifyActiveInjectAttackerValues(
-	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState, valAttackerState *attackerState,
-	attackerValues *[]value, alsoKnowledgeMap bool,
-) {
-	for _, v := range *attackerValues {
-		valPrincipalState.constants = append([]constant{v.constant}, valPrincipalState.constants...)
-		valPrincipalState.assigned = append([]value{v}, valPrincipalState.assigned...)
-		valPrincipalState.guard = append([]bool{false}, valPrincipalState.guard...)
-		valPrincipalState.known = append([]bool{false}, valPrincipalState.known...)
-		valPrincipalState.sender = append([]string{"Attacker"}, valPrincipalState.sender...)
-		valPrincipalState.creator = append([]string{"Attacker"}, valPrincipalState.creator...)
-		valPrincipalState.wasRewritten = append([]bool{false}, valPrincipalState.wasRewritten...)
-		valPrincipalState.beforeRewrite = append([]value{v}, valPrincipalState.beforeRewrite...)
-		valPrincipalState.wasMutated = append([]bool{false}, valPrincipalState.wasMutated...)
-		valPrincipalState.beforeMutate = append([]value{v}, valPrincipalState.beforeMutate...)
-		valAttackerState.known = append([]value{v}, valAttackerState.known...)
-		valAttackerState.wire = append([]bool{false}, valAttackerState.wire...)
-		valAttackerState.mutatedTo = append([][]string{{}}, valAttackerState.mutatedTo...)
-		if alsoKnowledgeMap {
-			valKnowledgeMap.constants = append(valKnowledgeMap.constants, v.constant)
-			valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, v)
-			valKnowledgeMap.creator = append(valKnowledgeMap.creator, "Attacker")
-			valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-		}
-	}
+func verifyActiveIncrementAnalysis(analysis int) int {
+	return analysis + 1
 }
 
 func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
@@ -137,14 +110,18 @@ func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) boo
 	return false
 }
 
-func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState) (replacementMap, []value) {
+func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState) replacementMap {
 	valReplacementMap := replacementMap{
+		constants:     []constant{},
+		replacements:  [][]value{},
+		combination:   []value{},
+		depthIndex:    []int{},
 		injectCounter: 0,
 	}
-	e, ge := injectGetAttackerValues(&valReplacementMap)
-	//valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
-	valReplacementMap.constants = append(valReplacementMap.constants, e[0].constant)
-	valReplacementMap.replacements = append(valReplacementMap.replacements, []value{e[0]})
+	e, ge := injectGetAttackerEquations(valReplacementMap.injectCounter)
+	// valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
+	valReplacementMap.constants = append(valReplacementMap.constants, e.constant)
+	valReplacementMap.replacements = append(valReplacementMap.replacements, []value{e})
 	for i, v := range valAttackerState.known {
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
@@ -158,16 +135,16 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e[0])
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], e)
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			inject(a, valPrincipalState, &valReplacementMap, valAttackerState)
+			inject(a.primitive, valPrincipalState, &valReplacementMap, valAttackerState)
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], ge[0])
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], ge)
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
@@ -175,7 +152,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	for ii := range valReplacementMap.depthIndex {
 		valReplacementMap.depthIndex[ii] = 0
 	}
-	return valReplacementMap, e
+	return valReplacementMap
 }
 
 func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, valReplacementMap *replacementMap) (*principalState, bool) {
@@ -198,12 +175,17 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 			if valPrincipalState.known[iii] && !unassailable {
 				ar := valPrincipalStateWithReplacements.assigned[ii]
 				ac := valReplacementMap.combination[i]
+				switch ar.kind {
+				case "primitive":
+					ac.primitive.output = ar.primitive.output
+					ac.primitive.check = ar.primitive.check
+				}
 				if !sanityEquivalentValues(ar, ac, valPrincipalState) {
 					valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 					valPrincipalStateWithReplacements.sender[ii] = "Attacker"
 					valPrincipalStateWithReplacements.wasMutated[ii] = true
-					valPrincipalStateWithReplacements.assigned[ii] = valReplacementMap.combination[i]
-					valPrincipalStateWithReplacements.beforeRewrite[ii] = valReplacementMap.combination[i]
+					valPrincipalStateWithReplacements.assigned[ii] = ac
+					valPrincipalStateWithReplacements.beforeRewrite[ii] = ac
 					if !strInSlice(valPrincipalState.name, valAttackerState.mutatedTo[iiii]) {
 						valAttackerState.mutatedTo[iiii] = append(valAttackerState.mutatedTo[iiii], valPrincipalState.name)
 					}
