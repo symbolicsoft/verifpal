@@ -10,13 +10,13 @@ func inject(
 ) {
 	switch p.name {
 	case "AEAD_ENC":
-		//injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "ENC":
-		//injectENC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "SIGN":
-		//injectSIGN(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectSIGN(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "MAC":
-		//injectMAC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectMAC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	}
 }
 
@@ -79,6 +79,30 @@ func injectSIGN(
 			kind: "primitive",
 			primitive: primitive{
 				name: "SIGN",
+				arguments: []value{
+					p.arguments[0],
+					k,
+				},
+				output: p.output,
+				check:  p.check,
+			},
+		}
+		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		}
+	}
+}
+
+func injectMAC(
+	p primitive, valPrincipalState *principalState,
+	valReplacementMap *replacementMap, valAttackerState *attackerState,
+) {
+	l := len(valReplacementMap.replacements) - 1
+	for _, k := range valAttackerState.known {
+		aa := value{
+			kind: "primitive",
+			primitive: primitive{
+				name: "MAC",
 				arguments: []value{
 					p.arguments[0],
 					k,
