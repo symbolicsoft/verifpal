@@ -28,18 +28,14 @@ func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalSt
 			verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
 			analysis = verifyActiveIncrementAnalysis(analysis)
 			valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState)
-			/*
-				injectAttackerValues(
-					valKnowledgeMap, valPrincipalState, valAttackerState,
-					valReplacementMap.injectCounter, (analysis == 1),
-				)
-			*/
 			for !lastReplacement {
-				valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
+				valPrincipalStateWithReplacements, failedMutate := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
 				verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
-				analysis = verifyActiveIncrementAnalysis(analysis)
-				if !mainDebug {
-					prettyAnalysis(analysis)
+				if !failedMutate {
+					analysis = verifyActiveIncrementAnalysis(analysis)
+					if !mainDebug {
+						prettyAnalysis(analysis)
+					}
 				}
 				verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
 				valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
@@ -141,8 +137,36 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			inject(a.primitive, valPrincipalState, &valReplacementMap, valAttackerState)
 		case "equation":
+			g := value{
+				kind: "constant",
+				constant: constant{
+					name:        "g",
+					guard:       false,
+					fresh:       false,
+					declaration: "knows",
+					qualifier:   "public",
+				},
+			}
+			n := value{
+				kind: "constant",
+				constant: constant{
+					name:        "nil",
+					guard:       false,
+					fresh:       false,
+					declaration: "knows",
+					qualifier:   "public",
+				},
+			}
+			gn := value{
+				kind: "equation",
+				equation: equation{
+					values: []value{g, n},
+				},
+			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+			l := len(valReplacementMap.replacements) - 1
+			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], gn)
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
@@ -189,12 +213,26 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		if ac.kind == "primitive" && ac.primitive.name == "AEAD_ENC" {
 			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
 			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
-				return valPrincipalStateWithReplacements, true
+				continue
+			}
+			if sanityEquivalentValueInValues(ac.primitive.arguments[2], &valAttackerState.known, valPrincipalState) < 0 {
+				continue
 			}
 			fmt.Println(prettyValue(ac))
-			if sanityEquivalentValueInValues(ac.primitive.arguments[2], &valAttackerState.known, valPrincipalState) < 0 {
-				return valPrincipalStateWithReplacements, true
+		}
+		if ac.kind == "primitive" && ac.primitive.name == "ENC" {
+			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
+			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
+				continue
 			}
+			fmt.Println(prettyValue(ac))
+		}
+		if ac.kind == "primitive" && ac.primitive.name == "SIGN" {
+			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
+			if sanityEquivalentValueInValues(ac.primitive.arguments[0], &valAttackerState.known, valPrincipalState) < 0 {
+				continue
+			}
+			fmt.Println(prettyValue(ac))
 		}
 		valPrincipalStateWithReplacements.creator[ii] = "Attacker"
 		valPrincipalStateWithReplacements.sender[ii] = "Attacker"

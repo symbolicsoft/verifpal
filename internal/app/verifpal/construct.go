@@ -22,6 +22,13 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 		declaration: "knows",
 		qualifier:   "public",
 	}
+	n := constant{
+		name:        "nil",
+		guard:       false,
+		fresh:       false,
+		declaration: "knows",
+		qualifier:   "public",
+	}
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, g)
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
 		kind:     "constant",
@@ -34,13 +41,6 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 			valKnowledgeMap.knownBy[0],
 			map[string]string{principal: principal},
 		)
-	}
-	n := constant{
-		name:        "nil",
-		guard:       false,
-		fresh:       false,
-		declaration: "knows",
-		qualifier:   "public",
 	}
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, n)
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
