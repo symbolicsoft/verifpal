@@ -7,7 +7,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 )
 
 func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
