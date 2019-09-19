@@ -242,9 +242,6 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 					failedMutate = true
 				}
 			}
-			if !failedMutate {
-				fmt.Println(prettyValue(ac) + " " + strconv.Itoa(i) + " " + strconv.Itoa(valReplacementMap.requiredKnown[i][0]))
-			}
 		}
 		if failedMutate {
 			continue
