@@ -19,7 +19,7 @@ principal Bob[
 	gbssig = SIGN(blongterm, gbs)
 ]
 
-Bob -> Alice: gblongterm, gbssig, gbs, gbo
+Bob -> Alice: [gblongterm], gbssig, gbs, gbo
 
 principal Alice[
 	generates ae1
@@ -38,7 +38,7 @@ principal Alice[
 	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: galongterm, gae1, gae2, e1
+Alice -> Bob: [galongterm], gae1, gae2, e1
 
 principal Bob[
 	bmaster = HASH(c0, galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
