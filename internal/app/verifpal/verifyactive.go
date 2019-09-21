@@ -9,58 +9,42 @@ import (
 	"os"
 )
 
-func verifyActive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
+func verifyActive(
+	model *verifpal,
+	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
+) []verifyResult {
 	var verifyResults []verifyResult
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
 	analysis := 0
-	attackerKnown := -1
-	for len(valAttackerState.known) > attackerKnown {
-		for _, valPrincipalState := range valPrincipalStates {
-			stage := 0
-			lastReplacement := false
-			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-			sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-			failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
-			sanityFailOnFailedRewrite(failedRewrites)
-			for i := range valPrincipalStateClone.assigned {
-				sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
-			}
-			verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
-			if !mainDebug {
-				prettyAnalysis(analysis, stage)
-			}
-			analysis = verifyActiveIncrementAnalysis(analysis)
+	// attackerKnown := -1
+	// for len(valAttackerState.known) > attackerKnown {
+	// attackerKnown = len(valAttackerState.known)
+	for _, valPrincipalState := range valPrincipalStates {
+		stage := 0
+		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
+		sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
+		sanityFailOnFailedRewrite(failedRewrites)
+		for i := range valPrincipalStateClone.assigned {
+			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
+		}
+		verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
+		if !mainDebug {
+			prettyAnalysis(analysis, stage)
+		}
+		analysis = verifyActiveIncrementAnalysis(analysis)
+		stage = verifyActiveIncrementStage(stage)
+		for stage <= 2 {
+			valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
+			verifyResults, analysis, stage = verifyActiveScanCombination(model,
+				valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
+				true, analysis, stage,
+			)
 			stage = verifyActiveIncrementStage(stage)
-			prevStage := stage
-			for stage <= 2 {
-				valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-				lastReplacement = false
-				for !lastReplacement {
-					valPrincipalStateWithReplacements := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap)
-					verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
-					verifyResults = verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, verifyResults, analysis)
-					valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
-					if len(verifyResults) == len(model.queries) {
-						return verifyResults
-					}
-					if len(valAttackerState.known) > attackerKnown || prevStage < stage {
-						valReplacementMap = verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
-					} else {
-						lastReplacement = valReplacementMap.combinationNext()
-					}
-					if !mainDebug {
-						prettyAnalysis(analysis, stage)
-					}
-					analysis = verifyActiveIncrementAnalysis(analysis)
-					attackerKnown = len(valAttackerState.known)
-					prevStage = stage
-				}
-				attackerKnown = len(valAttackerState.known)
-				stage = verifyActiveIncrementStage(stage)
-			}
 		}
 	}
+	//}
 	return verifyResults
 }
 
@@ -70,6 +54,41 @@ func verifyActiveIncrementAnalysis(analysis int) int {
 
 func verifyActiveIncrementStage(stage int) int {
 	return stage + 1
+}
+
+func verifyActiveScanCombination(
+	model *verifpal,
+	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
+	valAttackerState *attackerState, valReplacementMap *replacementMap,
+	newStage bool, analysis int, stage int,
+) ([]verifyResult, int, int) {
+	lastReplacement := valReplacementMap.combinationNext()
+	attackerKnown := len(valAttackerState.known)
+	valPrincipalStateWithReplacements := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap)
+	verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
+	verifyResults := verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, analysis)
+	valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
+	analysis = verifyActiveIncrementAnalysis(analysis)
+	if !mainDebug {
+		prettyAnalysis(analysis, stage)
+	}
+	if len(verifyResults) == len(model.queries) {
+		return verifyResults, analysis, stage
+	}
+	if (len(valAttackerState.known) > attackerKnown) || newStage {
+		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
+		return verifyActiveScanCombination(model,
+			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMapUpdate,
+			false, analysis, stage,
+		)
+	}
+	if !lastReplacement {
+		return verifyActiveScanCombination(model,
+			valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap,
+			false, analysis, stage,
+		)
+	}
+	return verifyResults, analysis, stage
 }
 
 func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
@@ -129,9 +148,33 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		combination:    []value{},
 		requiredKnown:  [][]int{},
 		depthIndex:     []int{},
-		injectCounter:  0,
 	}
-	// valReplacementMap.injectCounter = valReplacementMap.injectCounter + 1
+	n := value{
+		kind: "constant",
+		constant: constant{
+			name:        "nil",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	g := value{
+		kind: "constant",
+		constant: constant{
+			name:        "g",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	gn := value{
+		kind: "equation",
+		equation: equation{
+			values: []value{g, n},
+		},
+	}
 	for i, v := range valAttackerState.known {
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
@@ -146,8 +189,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				continue
 			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a, n})
+			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}, []int{-1}})
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
@@ -156,50 +199,25 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				inject(a.primitive, valPrincipalState, &valReplacementMap, valAttackerState)
 			}
 		case "equation":
-			g := value{
-				kind: "constant",
-				constant: constant{
-					name:        "g",
-					guard:       false,
-					fresh:       false,
-					declaration: "knows",
-					qualifier:   "public",
-				},
-			}
-			n := value{
-				kind: "constant",
-				constant: constant{
-					name:        "nil",
-					guard:       false,
-					fresh:       false,
-					declaration: "knows",
-					qualifier:   "public",
-				},
-			}
-			gn := value{
-				kind: "equation",
-				equation: equation{
-					values: []value{g, n},
-				},
-			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
-			l := len(valReplacementMap.replacements) - 1
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], gn)
-			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a, gn})
+			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}, []int{-1}})
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
 	valReplacementMap.requiredKnown = make([][]int, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
-	for ii := range valReplacementMap.depthIndex {
+	for ii := range valReplacementMap.constants {
+		valReplacementMap.requiredKnown[ii] = []int{-1}
 		valReplacementMap.depthIndex[ii] = 0
 	}
 	return valReplacementMap
 }
 
-func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, valReplacementMap *replacementMap) *principalState {
+func verifyActiveMutatePrincipalState(
+	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
+	valAttackerState *attackerState, valReplacementMap *replacementMap,
+) *principalState {
 	valPrincipalStateWithReplacements := constructPrincipalStateClone(valPrincipalState)
 	for i, c := range valReplacementMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalStateWithReplacements, c)
@@ -222,8 +240,8 @@ func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnow
 		if !valPrincipalState.known[iii] {
 			continue
 		}
-		ar := valPrincipalStateWithReplacements.assigned[ii]
 		ac := valReplacementMap.combination[i]
+		ar := valPrincipalStateWithReplacements.assigned[ii]
 		switch ar.kind {
 		case "primitive":
 			ac.primitive.output = ar.primitive.output

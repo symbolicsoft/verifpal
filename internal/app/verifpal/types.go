@@ -120,5 +120,4 @@ type replacementMap struct {
 	combination    []value
 	requiredKnown  [][]int
 	depthIndex     []int
-	injectCounter  int
 }

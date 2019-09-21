@@ -5,7 +5,6 @@
 package main
 
 func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
-	var verifyResults []verifyResult
 	valAttackerState := constructAttackerState(false, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as passive", 0, 0, "info")
 	sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
@@ -17,5 +16,5 @@ func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalS
 		sanityCheckEquationGenerators(a, valPrincipalStates[0])
 	}
 	verifyAnalysis(model, valPrincipalStates[0], valAttackerState, 0, 0)
-	return verifyResolveQueries(model, valKnowledgeMap, valPrincipalStates[0], valAttackerState, verifyResults, 0)
+	return verifyResolveQueries(model, valKnowledgeMap, valPrincipalStates[0], valAttackerState, 0)
 }
