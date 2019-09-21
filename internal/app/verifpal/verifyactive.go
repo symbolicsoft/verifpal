@@ -43,9 +43,9 @@ func verifyActive(
 			for _, valPrincipalState := range valPrincipalStates {
 				analysis = verifyActiveIncrementAnalysis(analysis)
 				valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-				verifyResults, analysis, stage = verifyActiveScanCombination(model,
+				analysis, stage = verifyActiveScanCombination(model,
 					valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
-					true, analysis, stage,
+					&verifyResults, true, analysis, stage,
 				)
 			}
 			stage = verifyActiveIncrementStage(stage)
@@ -68,35 +68,38 @@ func verifyActiveScanCombination(
 	model *verifpal,
 	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
 	valAttackerState *attackerState, valReplacementMap *replacementMap,
-	newStage bool, analysis int, stage int,
-) ([]verifyResult, int, int) {
+	verifyResults *[]verifyResult, newStage bool, analysis int, stage int,
+) (int, int) {
 	lastReplacement := valReplacementMap.combinationNext()
 	attackerKnown := len(valAttackerState.known)
 	valPrincipalStateWithReplacements := verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap)
 	verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
-	verifyResults := verifyResolveQueries(model, valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState, analysis)
+	verifyResolveQueries(model,
+		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
+		verifyResults, analysis,
+	)
 	valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
 	analysis = verifyActiveIncrementAnalysis(analysis)
 	if !mainDebug {
 		prettyAnalysis(analysis, stage)
 	}
-	if len(verifyResults) == len(model.queries) {
-		return verifyResults, analysis, stage
+	if len(*verifyResults) == len(model.queries) {
+		return analysis, stage
 	}
 	if (len(valAttackerState.known) > attackerKnown) || newStage {
 		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
 		return verifyActiveScanCombination(model,
 			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMapUpdate,
-			false, analysis, stage,
+			verifyResults, false, analysis, stage,
 		)
 	}
 	if !lastReplacement {
 		return verifyActiveScanCombination(model,
 			valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap,
-			false, analysis, stage,
+			verifyResults, false, analysis, stage,
 		)
 	}
-	return verifyResults, analysis, stage
+	return analysis, stage
 }
 
 func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {

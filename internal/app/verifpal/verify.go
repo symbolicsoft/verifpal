@@ -41,9 +41,8 @@ func verify(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates [
 func verifyResolveQueries(
 	model *verifpal,
 	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState,
-	valAttackerState *attackerState, analysis int,
-) []verifyResult {
-	var verifyResults []verifyResult
+	valAttackerState *attackerState, verifyResults *[]verifyResult, analysis int,
+) {
 	for q, query := range model.queries {
 		if model.queries[q].resolved {
 			continue
@@ -51,9 +50,8 @@ func verifyResolveQueries(
 		verifyResult := queryStart(query, valAttackerState, valPrincipalState, valKnowledgeMap)
 		if verifyResult.query.resolved {
 			model.queries[q].resolved = true
-			verifyResults = append(verifyResults, verifyResult)
+			*verifyResults = append(*verifyResults, verifyResult)
 			prettyMessage(verifyResult.summary, analysis, 0, "result")
 		}
 	}
-	return verifyResults
 }
