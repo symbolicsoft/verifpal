@@ -14,37 +14,45 @@ func verifyActive(
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
 ) []verifyResult {
 	var verifyResults []verifyResult
+	analysis := 0
+	stage := 0
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
-	analysis := 0
 	// attackerKnown := -1
 	// for len(valAttackerState.known) > attackerKnown {
 	// attackerKnown = len(valAttackerState.known)
-	for _, valPrincipalState := range valPrincipalStates {
-		stage := 0
-		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-		sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
-		sanityFailOnFailedRewrite(failedRewrites)
-		for i := range valPrincipalStateClone.assigned {
-			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
-		}
-		verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
-		if !mainDebug {
-			prettyAnalysis(analysis, stage)
-		}
-		analysis = verifyActiveIncrementAnalysis(analysis)
-		stage = verifyActiveIncrementStage(stage)
-		for stage <= 2 {
-			valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-			verifyResults, analysis, stage = verifyActiveScanCombination(model,
-				valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
-				true, analysis, stage,
-			)
+	for stage < 3 {
+		if stage == 0 {
+			for _, valPrincipalState := range valPrincipalStates {
+				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
+				sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+				failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
+				sanityFailOnFailedRewrite(failedRewrites)
+				for i := range valPrincipalStateClone.assigned {
+					sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
+				}
+				verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
+				if !mainDebug {
+					prettyAnalysis(analysis, stage)
+				}
+			}
 			stage = verifyActiveIncrementStage(stage)
+			continue
+		}
+		if stage > 0 {
+			for _, valPrincipalState := range valPrincipalStates {
+				analysis = verifyActiveIncrementAnalysis(analysis)
+				valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
+				verifyResults, analysis, stage = verifyActiveScanCombination(model,
+					valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
+					true, analysis, stage,
+				)
+			}
+			stage = verifyActiveIncrementStage(stage)
+			continue
 		}
 	}
-	//}
+	// }
 	return verifyResults
 }
 
