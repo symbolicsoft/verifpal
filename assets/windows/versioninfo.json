@@ -3,13 +3,13 @@
       "FileVersion": {
           "Major": 0,
           "Minor": 6,
-          "Patch": 8,
+          "Patch": 9,
           "Build": 0
       },
       "ProductVersion": {
           "Major": 0,
           "Minor": 6,
-          "Patch": 8,
+          "Patch": 9,
           "Build": 0
       },
       "FileFlagsMask": "3f",
@@ -19,7 +19,7 @@
       "FileSubType": "00"
   },
   "StringFileInfo": {
-      "ProductVersion": "v0.6.8.0",
+      "ProductVersion": "v0.6.9.0",
       "Comments": "",
       "CompanyName": "Nadim Kobeissi",
       "FileDescription": "Verifpal",
@@ -29,7 +29,7 @@
       "LegalTrademarks": "Verifpal is a registered trademark of Nadim Kobeissi. All Rights Reserved.",
       "OriginalFilename": "verifpal.exe",
       "PrivateBuild": "",
-      "ProductName": "Resilience",
+      "ProductName": "Verifpal",
       "SpecialBuild": ""
   },
   "VarFileInfo": {
