@@ -610,7 +610,7 @@ func sanityCheckEquationGenerators(a value, valPrincipalState *principalState) {
 }
 
 func sanityShouldResolveToBeforeMutate(i int, valPrincipalState *principalState) bool {
-	if valPrincipalState.creator[i] != valPrincipalState.name {
+	if valPrincipalState.creator[i] == valPrincipalState.name {
 		return true
 	}
 	if !valPrincipalState.known[i] {
