@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.7.0
+*September 22, 2019*
+
+- More work on spotting missed attacks.
+
 ## Verifpal 0.6.9
 *September 21, 2019*
 
