@@ -25,7 +25,7 @@ func verifyActive(
 		if stage == 0 {
 			for _, valPrincipalState := range valPrincipalStates {
 				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-				sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+				valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
 				failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
 				sanityFailOnFailedRewrite(failedRewrites)
 				for i := range valPrincipalStateClone.assigned {
@@ -275,15 +275,13 @@ func verifyActiveMutatePrincipalState(
 			valAttackerState.mutatedTo[iiii] = append(valAttackerState.mutatedTo[iiii], valPrincipalState.name)
 		}
 	}
-	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
+	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
 	if mainDebug {
-		if valPrincipalStateWithReplacements.name == "Bob" {
-			fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
-			for i, x := range valPrincipalStateWithReplacements.constants {
-				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
-			}
-			fmt.Fprintln(os.Stdout, "")
+		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
+		for i, x := range valPrincipalStateWithReplacements.constants {
+			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
 		}
+		fmt.Fprintln(os.Stdout, "")
 	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {

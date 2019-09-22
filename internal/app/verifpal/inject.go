@@ -10,11 +10,9 @@ func inject(
 ) {
 	pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 		kind: "primitive", primitive: p,
-	}, rootIndex, valPrincipalState, true)
+	}, rootIndex, valPrincipalState, false)
 	p = pp.primitive
 	switch p.name {
-	case "HASH":
-		injectHASH(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "AEAD_ENC":
 		injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "ENC":
@@ -26,62 +24,38 @@ func inject(
 	}
 }
 
-func injectHASH(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		switch k.kind {
-		case "constant":
-			if p.arguments[0].kind != "constant" {
-				continue
-			}
-			if k.constant.name == "g" {
-				continue
-			}
-		case "primitive":
-			if p.arguments[0].kind != "primitive" {
-				continue
-			}
-			if k.primitive.name != p.arguments[0].primitive.name {
-				continue
-			}
-		case "equation":
-			if p.arguments[0].kind != "equation" {
-				continue
-			}
-			if len(k.equation.values) != len(p.arguments[0].equation.values) {
-				continue
-			}
-		}
-		aa := value{
-			kind: "primitive",
-			primitive: primitive{
-				name: "HASH",
-				arguments: []value{
-					valAttackerState.known[i],
-				},
-				output: p.output,
-				check:  p.check,
-			},
-		}
-		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-			valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
-		}
-	}
-}
-
 func injectAEADENC(
 	p primitive, valPrincipalState *principalState,
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
 ) {
 	l := len(valReplacementMap.replacements) - 1
+	n := value{
+		kind: "constant",
+		constant: constant{
+			name:        "nil",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	aa := value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "AEAD_ENC",
+			arguments: []value{
+				n,
+				n,
+				n,
+			},
+			output: p.output,
+			check:  p.check,
+		},
+	}
+	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
 		case "constant":
@@ -193,6 +167,32 @@ func injectENC(
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
 ) {
 	l := len(valReplacementMap.replacements) - 1
+	n := value{
+		kind: "constant",
+		constant: constant{
+			name:        "nil",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	aa := value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "ENC",
+			arguments: []value{
+				n,
+				n,
+			},
+			output: p.output,
+			check:  p.check,
+		},
+	}
+	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
 		case "constant":
@@ -274,6 +274,32 @@ func injectSIGN(
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
 ) {
 	l := len(valReplacementMap.replacements) - 1
+	n := value{
+		kind: "constant",
+		constant: constant{
+			name:        "nil",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	aa := value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "SIGN",
+			arguments: []value{
+				n,
+				n,
+			},
+			output: p.output,
+			check:  p.check,
+		},
+	}
+	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
 		case "constant":
@@ -355,6 +381,32 @@ func injectMAC(
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
 ) {
 	l := len(valReplacementMap.replacements) - 1
+	n := value{
+		kind: "constant",
+		constant: constant{
+			name:        "nil",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
+	aa := value{
+		kind: "primitive",
+		primitive: primitive{
+			name: "MAC",
+			arguments: []value{
+				n,
+				n,
+			},
+			output: p.output,
+			check:  p.check,
+		},
+	}
+	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
+	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
 		case "constant":
