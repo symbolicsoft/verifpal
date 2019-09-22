@@ -190,7 +190,8 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
 		}
-		a := sanityResolveConstant(v.constant, valPrincipalState, true)
+		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
+		a := valPrincipalState.assigned[ii]
 		switch a.kind {
 		case "constant":
 			if a.constant.name == "g" {
@@ -207,7 +208,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
 			valReplacementMap.requiredKnowns = append(valReplacementMap.requiredKnowns, [][]int{[]int{-1}})
 			if stage == 2 {
-				inject(a.primitive, valPrincipalState, &valReplacementMap, valAttackerState)
+				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState)
 			}
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
@@ -218,9 +219,9 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
 	valReplacementMap.requiredKnown = make([][]int, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
-	for ii := range valReplacementMap.constants {
-		valReplacementMap.requiredKnown[ii] = []int{-1}
-		valReplacementMap.depthIndex[ii] = 0
+	for iii := range valReplacementMap.constants {
+		valReplacementMap.requiredKnown[iii] = []int{-1}
+		valReplacementMap.depthIndex[iii] = 0
 	}
 	return valReplacementMap
 }
@@ -262,15 +263,6 @@ func verifyActiveMutatePrincipalState(
 			continue
 		}
 		failedMutate := false
-		if ac.kind == "primitive" {
-			ac, _ = sanityResolveInternalValuesFromPrincipalState(ac, ii, valPrincipalStateWithReplacements, false)
-			for _, r := range valReplacementMap.requiredKnown[i] {
-				if r < 0 {
-				} else if sanityEquivalentValueInValues(ac.primitive.arguments[r], &valAttackerState.known, valPrincipalState) < 0 {
-					failedMutate = true
-				}
-			}
-		}
 		if failedMutate {
 			continue
 		}
@@ -285,11 +277,13 @@ func verifyActiveMutatePrincipalState(
 	}
 	sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
 	if mainDebug {
-		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
-		for i, x := range valPrincipalStateWithReplacements.constants {
-			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+		if valPrincipalStateWithReplacements.name == "Bob" {
+			fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
+			for i, x := range valPrincipalStateWithReplacements.constants {
+				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+			}
+			fmt.Fprintln(os.Stdout, "")
 		}
-		fmt.Fprintln(os.Stdout, "")
 	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
