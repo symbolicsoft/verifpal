@@ -42,7 +42,7 @@ cd /tmp/verifpal
 /bin/echo "[Verifpal] Downloading latest Verifpal..."
 curl -# -L -o verifpal.zip $VERIFPALDL
 
-/bin/echo -n "[Verifpal] Decompresing archive..."
+/bin/echo -n "[Verifpal] Decompressing archive..."
 unzip -qq verifpal.zip
 /bin/echo "  OK"
 
