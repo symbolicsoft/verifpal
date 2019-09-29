@@ -24,6 +24,36 @@ func inject(
 	}
 }
 
+func injectValueRules(k value, arg int, p primitive, valPrincipalState *principalState) bool {
+	if sanityEquivalentValues(k, value{kind: "primitive", primitive: p}, valPrincipalState) {
+		return false
+	}
+	switch k.kind {
+	case "constant":
+		if p.arguments[arg].kind != "constant" {
+			return false
+		}
+		if k.constant.name == "g" {
+			return false
+		}
+	case "primitive":
+		if p.arguments[arg].kind != "primitive" {
+			return false
+		}
+		if k.primitive.name != p.arguments[arg].primitive.name {
+			return false
+		}
+	case "equation":
+		if p.arguments[arg].kind != "equation" {
+			return false
+		}
+		if len(k.equation.values) != len(p.arguments[arg].equation.values) {
+			return false
+		}
+	}
+	return true
+}
+
 func injectAEADENC(
 	p primitive, valPrincipalState *principalState,
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
@@ -61,84 +91,24 @@ func injectAEADENC(
 		case "constant":
 			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
 		}
-		switch k.kind {
-		case "constant":
-			if p.arguments[0].kind != "constant" {
-				continue
-			}
-			if k.constant.name == "g" {
-				continue
-			}
-		case "primitive":
-			if p.arguments[0].kind != "primitive" {
-				continue
-			}
-			if k.primitive.name != p.arguments[0].primitive.name {
-				continue
-			}
-		case "equation":
-			if p.arguments[0].kind != "equation" {
-				continue
-			}
-			if len(k.equation.values) != len(p.arguments[0].equation.values) {
-				continue
-			}
+		if !injectValueRules(k, 0, p, valPrincipalState) {
+			continue
 		}
 		for ii, kk := range valAttackerState.known {
 			switch kk.kind {
 			case "constant":
 				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
 			}
-			switch kk.kind {
-			case "constant":
-				if p.arguments[1].kind != "constant" {
-					continue
-				}
-				if kk.constant.name == "g" {
-					continue
-				}
-			case "primitive":
-				if p.arguments[1].kind != "primitive" {
-					continue
-				}
-				if kk.primitive.name != p.arguments[1].primitive.name {
-					continue
-				}
-			case "equation":
-				if p.arguments[1].kind != "equation" {
-					continue
-				}
-				if len(kk.equation.values) != len(p.arguments[1].equation.values) {
-					continue
-				}
+			if !injectValueRules(kk, 1, p, valPrincipalState) {
+				continue
 			}
 			for iii, kkk := range valAttackerState.known {
 				switch kkk.kind {
 				case "constant":
 					kkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkk.constant)]
 				}
-				switch kkk.kind {
-				case "constant":
-					if p.arguments[2].kind != "constant" {
-						continue
-					}
-					if kkk.constant.name == "g" {
-						continue
-					}
-				case "primitive":
-					if p.arguments[2].kind != "primitive" {
-						continue
-					}
-					if kkk.primitive.name != p.arguments[2].primitive.name {
-						continue
-					}
-				case "equation":
-					if p.arguments[2].kind != "equation" {
-						continue
-					}
-					if len(kkk.equation.values) != len(p.arguments[2].equation.values) {
-						continue
-					}
+				if !injectValueRules(kkk, 2, p, valPrincipalState) {
+					continue
 				}
 				aa := value{
 					kind: "primitive",
@@ -198,56 +168,16 @@ func injectENC(
 		case "constant":
 			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
 		}
-		switch k.kind {
-		case "constant":
-			if p.arguments[0].kind != "constant" {
-				continue
-			}
-			if k.constant.name == "g" {
-				continue
-			}
-		case "primitive":
-			if p.arguments[0].kind != "primitive" {
-				continue
-			}
-			if k.primitive.name != p.arguments[0].primitive.name {
-				continue
-			}
-		case "equation":
-			if p.arguments[0].kind != "equation" {
-				continue
-			}
-			if len(k.equation.values) != len(p.arguments[0].equation.values) {
-				continue
-			}
+		if !injectValueRules(k, 0, p, valPrincipalState) {
+			continue
 		}
 		for ii, kk := range valAttackerState.known {
 			switch kk.kind {
 			case "constant":
 				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
 			}
-			switch kk.kind {
-			case "constant":
-				if p.arguments[1].kind != "constant" {
-					continue
-				}
-				if kk.constant.name == "g" {
-					continue
-				}
-			case "primitive":
-				if p.arguments[1].kind != "primitive" {
-					continue
-				}
-				if kk.primitive.name != p.arguments[1].primitive.name {
-					continue
-				}
-			case "equation":
-				if p.arguments[1].kind != "equation" {
-					continue
-				}
-				if len(kk.equation.values) != len(p.arguments[1].equation.values) {
-					continue
-				}
+			if !injectValueRules(kk, 1, p, valPrincipalState) {
+				continue
 			}
 			aa := value{
 				kind: "primitive",
@@ -305,56 +235,16 @@ func injectSIGN(
 		case "constant":
 			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
 		}
-		switch k.kind {
-		case "constant":
-			if p.arguments[0].kind != "constant" {
-				continue
-			}
-			if k.constant.name == "g" {
-				continue
-			}
-		case "primitive":
-			if p.arguments[0].kind != "primitive" {
-				continue
-			}
-			if k.primitive.name != p.arguments[0].primitive.name {
-				continue
-			}
-		case "equation":
-			if p.arguments[0].kind != "equation" {
-				continue
-			}
-			if len(k.equation.values) != len(p.arguments[0].equation.values) {
-				continue
-			}
+		if !injectValueRules(k, 0, p, valPrincipalState) {
+			continue
 		}
 		for ii, kk := range valAttackerState.known {
 			switch kk.kind {
 			case "constant":
 				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
 			}
-			switch kk.kind {
-			case "constant":
-				if p.arguments[1].kind != "constant" {
-					continue
-				}
-				if kk.constant.name == "g" {
-					continue
-				}
-			case "primitive":
-				if p.arguments[1].kind != "primitive" {
-					continue
-				}
-				if kk.primitive.name != p.arguments[1].primitive.name {
-					continue
-				}
-			case "equation":
-				if p.arguments[1].kind != "equation" {
-					continue
-				}
-				if len(kk.equation.values) != len(p.arguments[1].equation.values) {
-					continue
-				}
+			if !injectValueRules(kk, 1, p, valPrincipalState) {
+				continue
 			}
 			aa := value{
 				kind: "primitive",
@@ -412,56 +302,16 @@ func injectMAC(
 		case "constant":
 			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
 		}
-		switch k.kind {
-		case "constant":
-			if p.arguments[0].kind != "constant" {
-				continue
-			}
-			if k.constant.name == "g" {
-				continue
-			}
-		case "primitive":
-			if p.arguments[0].kind != "primitive" {
-				continue
-			}
-			if k.primitive.name != p.arguments[0].primitive.name {
-				continue
-			}
-		case "equation":
-			if p.arguments[0].kind != "equation" {
-				continue
-			}
-			if len(k.equation.values) != len(p.arguments[0].equation.values) {
-				continue
-			}
+		if !injectValueRules(k, 0, p, valPrincipalState) {
+			continue
 		}
 		for ii, kk := range valAttackerState.known {
 			switch kk.kind {
 			case "constant":
 				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
 			}
-			switch kk.kind {
-			case "constant":
-				if p.arguments[1].kind != "constant" {
-					continue
-				}
-				if kk.constant.name == "g" {
-					continue
-				}
-			case "primitive":
-				if p.arguments[1].kind != "primitive" {
-					continue
-				}
-				if kk.primitive.name != p.arguments[1].primitive.name {
-					continue
-				}
-			case "equation":
-				if p.arguments[1].kind != "equation" {
-					continue
-				}
-				if len(kk.equation.values) != len(p.arguments[1].equation.values) {
-					continue
-				}
+			if !injectValueRules(kk, 1, p, valPrincipalState) {
+				continue
 			}
 			aa := value{
 				kind: "primitive",
