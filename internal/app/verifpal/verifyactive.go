@@ -18,9 +18,6 @@ func verifyActive(
 	stage := 0
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
-	// attackerKnown := -1
-	// for len(valAttackerState.known) > attackerKnown {
-	// attackerKnown = len(valAttackerState.known)
 	for stage < 3 {
 		if stage == 0 {
 			for _, valPrincipalState := range valPrincipalStates {
@@ -52,7 +49,6 @@ func verifyActive(
 			continue
 		}
 	}
-	// }
 	return verifyResults
 }
 
