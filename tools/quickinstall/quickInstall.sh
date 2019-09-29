@@ -44,7 +44,7 @@ curl -# -L -o verifpal.zip $VERIFPALDL
 
 /bin/echo -n "[Verifpal] Decompressing archive..."
 unzip -qq verifpal.zip
-/bin/echo "  OK"
+/bin/echo " OK"
 
 /bin/echo "[Verifpal] Admin access required."
 sudo false
