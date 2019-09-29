@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.7.1
+*September 29, 2019*
+
+- Fix passive attacker analysis not initializing on some models.
+
 ## Verifpal 0.7.0
 *September 22, 2019*
 
