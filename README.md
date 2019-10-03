@@ -6,7 +6,7 @@
 # [Verifpal](https://verifpal.com)
 <a href="https://liberapay.com/verifpal/donate"><img alt="Donate using Liberapay" src="https://verifpal.com/res/img/svg/donate.svg"></a>
 ## What is Verifpal?
-<img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="300">
+<img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="400">
 
 Verifpal is new software for verifying the security of cryptographic protocols. Building upon contemporary research in symbolic formal verification, Verifpal’s main aim is to appeal more to real-world practitioners, students and engineers without sacrificing comprehensive formal verification features.
 
