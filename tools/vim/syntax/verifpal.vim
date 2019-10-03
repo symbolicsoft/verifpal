@@ -27,7 +27,7 @@ syn match verifpalDelim ")"
 syn match verifpalDelim "\["
 syn match verifpalDelim "]"
 syn keyword verifpalKeywrd knows generates active
-syn keyword verifpalConstr         HASH HKDF AEAD_ENC ENC DEC ASSERT MAC SIGNVERIF SIGN G DH nil _
+syn keyword verifpalConstr         HASH HKDF AEAD_ENC AEAD_DEC ENC DEC ASSERT MAC SIGNVERIF SIGN G DH nil _
 syn match verifpalConstr           "\^"
 syn keyword verifpalDecl           principal queries attacker confidentiality authentication
 syn match verifpalTransfer         "->"
