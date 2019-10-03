@@ -4,7 +4,7 @@
 -->
 
 # [Verifpal](https://verifpal.com)
-<a href="https://liberapay.com/verifpal/donate"><img alt="Donate using Liberapay" src="https://liberapay.com/assets/widgets/donate.svg"></a>
+<a href="https://liberapay.com/verifpal/donate"><img alt="Donate using Liberapay" src="https://verifpal.com/res/img/svg/donate.svg"></a>
 ## What is Verifpal?
 <img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="300">
 
