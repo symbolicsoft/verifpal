@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 # SPDX-License-Identifier: GPL-3.0-only
 
-VERIFPALVN="0.7.1"
+VERIFPALVN="0.7.2"
 
 /bin/echo "Verifpal Quick Installer and Updater"
 /bin/echo "for Linux and macOS"
