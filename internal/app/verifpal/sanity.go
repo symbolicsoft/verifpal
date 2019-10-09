@@ -349,8 +349,12 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *prin
 
 func sanityDeconstructEquationValues(e equation, valPrincipalState *principalState) []value {
 	var values []value
-	for _, c := range e.values {
-		values = append(values, sanityResolveConstant(c.constant, valPrincipalState, false))
+	for _, v := range e.values {
+		switch v.kind {
+		case "constant":
+			v = sanityResolveConstant(v.constant, valPrincipalState, false)
+		}
+		values = append(values, v)
 	}
 	return values
 }
