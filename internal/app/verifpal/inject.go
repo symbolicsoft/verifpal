@@ -84,7 +84,6 @@ func injectAEADENC(
 	}
 	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
 	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
@@ -125,7 +124,6 @@ func injectAEADENC(
 				}
 				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-					valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
 				}
 			}
 		}
@@ -161,7 +159,6 @@ func injectENC(
 	}
 	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
 	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
@@ -193,7 +190,6 @@ func injectENC(
 			}
 			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
 			}
 		}
 	}
@@ -228,7 +224,6 @@ func injectSIGN(
 	}
 	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
 	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
@@ -260,7 +255,6 @@ func injectSIGN(
 			}
 			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{-1})
 			}
 		}
 	}
@@ -295,7 +289,6 @@ func injectMAC(
 	}
 	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-		valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
 	}
 	for i, k := range valAttackerState.known {
 		switch k.kind {
@@ -327,7 +320,6 @@ func injectMAC(
 			}
 			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				valReplacementMap.requiredKnowns[l] = append(valReplacementMap.requiredKnowns[l], []int{0})
 			}
 		}
 	}
