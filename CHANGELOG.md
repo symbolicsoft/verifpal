@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.7.3
+*October 14, 2019*
+
+- Improve analysis performance speed.
+
 ## Verifpal 0.7.2
 *October 9, 2019*
 
