@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-NC-ND-4.0
 -->
 
+## Verifpal 0.7.4
+*October 17, 2019*
+
+- Compiled with Go 1.13.2.
+
 ## Verifpal 0.7.3
 *October 14, 2019*
 
