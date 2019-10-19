@@ -52,7 +52,6 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		return verifyResult
 	}
 	c := valPrincipalState.constants[i]
-	cc := sanityResolveConstant(c, valPrincipalState, true)
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
 		a := valPrincipalState.beforeRewrite[ii]
@@ -60,7 +59,8 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		case "constant":
 			continue
 		case "primitive":
-			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+			b := valPrincipalState.beforeMutate[ii]
+			if !sanityFindConstantInPrimitive(c, b.primitive, valPrincipalState) {
 				continue
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
@@ -85,6 +85,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
+		cc := sanityResolveConstant(c, valPrincipalState, true)
 		if query.message.sender != sender && passes[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
@@ -97,7 +98,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			query.resolved = true
 			verifyResult.query = query
 			return verifyResult
-		} else if !valPrincipalState.guard[i] && forcedPasses[f] {
+		} else if forcedPasses[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",

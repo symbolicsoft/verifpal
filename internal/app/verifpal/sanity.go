@@ -364,6 +364,9 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *p
 	for _, aa := range p.arguments {
 		switch aa.kind {
 		case "constant":
+			if c.name == aa.constant.name {
+				return true
+			}
 			switch a.kind {
 			case "constant":
 				if a.constant.name == aa.constant.name {
