@@ -54,7 +54,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 	c := valPrincipalState.constants[i]
 	sender := valPrincipalState.sender[i]
 	for ii := range valPrincipalState.constants {
-		a := valPrincipalState.beforeRewrite[ii]
+		a := valPrincipalState.assigned[ii]
 		switch a.kind {
 		case "constant":
 			continue
@@ -86,7 +86,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		}
 		a := valPrincipalState.beforeRewrite[ii]
 		cc := sanityResolveConstant(c, valPrincipalState, true)
-		if query.message.sender != sender && passes[f] {
+		if passes[f] && (query.message.sender != sender) {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",

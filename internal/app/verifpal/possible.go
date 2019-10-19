@@ -155,7 +155,7 @@ func possibleToReconstructEquation(e equation, valAttackerState *attackerState, 
 
 func possibleToPrimitivePassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
 	if sanityEquivalentValues(p.arguments[0], p.arguments[1], valPrincipalState) {
-		return true, p.arguments[0]
+		return true, value{kind: "primitive", primitive: p}
 	}
 	return false, value{kind: "primitive", primitive: p}
 }
@@ -187,7 +187,10 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	case "equation":
 		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
 	}
-	rewrite := from.primitive.arguments[prim.rewrite.to]
+	rewrite := value{kind: "primitive", primitive: p}
+	if prim.rewrite.to > 0 {
+		rewrite = from.primitive.arguments[prim.rewrite.to]
+	}
 	return true, rewrite
 }
 

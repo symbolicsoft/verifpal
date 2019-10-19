@@ -266,9 +266,6 @@ func verifyActiveMutatePrincipalState(
 			isWorthwhileMutation = true
 		}
 	}
-	if !isWorthwhileMutation {
-		return valPrincipalState, isWorthwhileMutation
-	}
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
 	if mainDebug {
 		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)

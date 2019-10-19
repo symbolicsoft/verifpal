@@ -133,6 +133,7 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule:      true,
 			passesAlways: false,
+			to:           -1,
 		},
 		check: true,
 	},
@@ -160,7 +161,7 @@ var primitiveSpecs = []primitiveSpec{
 			passesAlways: false,
 			name:         "SIGN",
 			from:         2,
-			to:           1,
+			to:           -1,
 			matching:     []int{0, 1},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {

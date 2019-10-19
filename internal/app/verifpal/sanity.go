@@ -39,14 +39,14 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 				right.primitive.name,
 			))
 		}
-		if (len(right.primitive.arguments) == 0) || ((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
+		if (len(right.primitive.arguments) == 0) || (len(right.primitive.arguments) > 5) || ((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
 			plural := ""
 			arity := fmt.Sprintf("%d", p.arity)
 			if len(right.primitive.arguments) > 1 {
 				plural = "s"
 			}
 			if p.arity < 0 {
-				arity = "at least 1"
+				arity = "between 1 and 5"
 			}
 			errorCritical(fmt.Sprintf(
 				"primitive %s has %d input%s, expecting %s",
@@ -384,10 +384,19 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState *p
 				return true
 			}
 		case "equation":
+			switch a.kind {
+			case "equation":
+				if sanityEquivalentEquations(a.equation, aa.equation, valPrincipalState) {
+					return true
+				}
+			}
 			v := sanityDeconstructEquationValues(aa.equation, valPrincipalState)
 			for _, vv := range v {
 				switch vv.kind {
 				case "constant":
+					if c.name == vv.constant.name {
+						return true
+					}
 					switch a.kind {
 					case "constant":
 						if a.constant.name == vv.constant.name {
