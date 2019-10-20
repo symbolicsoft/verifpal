@@ -7,6 +7,7 @@ package main
 func inject(
 	p primitive, rootIndex int, valPrincipalState *principalState,
 	valReplacementMap *replacementMap, valAttackerState *attackerState,
+	includeHashes bool,
 ) {
 	pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 		kind: "primitive", primitive: p,
@@ -22,6 +23,9 @@ func inject(
 	case "MAC":
 		injectMAC(p, valPrincipalState, valReplacementMap, valAttackerState)
 	case "HASH":
+		if !includeHashes {
+			return
+		}
 		switch len(p.arguments) {
 		case 1:
 			injectHASH1(p, valPrincipalState, valReplacementMap, valAttackerState)

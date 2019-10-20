@@ -18,38 +18,64 @@ func verifyActive(
 	stage := 0
 	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
-	for stage < 3 {
-		if stage == 0 {
-			for _, valPrincipalState := range valPrincipalStates {
-				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-				valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-				failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
-				sanityFailOnFailedRewrite(failedRewrites)
-				for i := range valPrincipalStateClone.assigned {
-					sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
-				}
-				verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
-				if !mainDebug {
-					prettyAnalysis(analysis, stage)
-				}
-			}
-			stage = verifyActiveIncrementStage(stage)
-			continue
-		}
-		if stage > 0 {
-			for _, valPrincipalState := range valPrincipalStates {
-				analysis = verifyActiveIncrementAnalysis(analysis)
-				valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-				analysis, stage = verifyActiveScanCombination(model,
-					valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
-					&verifyResults, true, analysis, stage,
-				)
-			}
-			stage = verifyActiveIncrementStage(stage)
-			continue
+	for stage <= 3 {
+		switch stage {
+		case 0:
+			analysis, stage = verifyActiveStage0(
+				model, valKnowledgeMap, valPrincipalStates,
+				&verifyResults, valAttackerState,
+				analysis, stage,
+			)
+		default:
+			analysis, stage = verifyActiveStage123(
+				model, valKnowledgeMap, valPrincipalStates,
+				&verifyResults, valAttackerState,
+				analysis, stage,
+			)
 		}
 	}
 	return verifyResults
+}
+
+func verifyActiveStage0(
+	model *verifpal,
+	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
+	verifyResults *[]verifyResult, valAttackerState *attackerState,
+	analysis int, stage int,
+) (int, int) {
+	for _, valPrincipalState := range valPrincipalStates {
+		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
+		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
+		sanityFailOnFailedRewrite(failedRewrites)
+		for i := range valPrincipalStateClone.assigned {
+			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
+		}
+		verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
+		if !mainDebug {
+			prettyAnalysis(analysis, stage)
+		}
+	}
+	stage = verifyActiveIncrementStage(stage)
+	return analysis, stage
+}
+
+func verifyActiveStage123(
+	model *verifpal,
+	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
+	verifyResults *[]verifyResult, valAttackerState *attackerState,
+	analysis int, stage int,
+) (int, int) {
+	for _, valPrincipalState := range valPrincipalStates {
+		analysis = verifyActiveIncrementAnalysis(analysis)
+		valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
+		analysis, stage = verifyActiveScanCombination(model,
+			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
+			verifyResults, true, analysis, stage,
+		)
+	}
+	stage = verifyActiveIncrementStage(stage)
+	return analysis, stage
 }
 
 func verifyActiveIncrementAnalysis(analysis int) int {
@@ -219,8 +245,11 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			if stage == 2 {
-				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState)
+			switch stage {
+			case 2:
+				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState, false)
+			case 3:
+				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState, true)
 			}
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
