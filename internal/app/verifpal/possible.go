@@ -246,7 +246,7 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 				r, _ = possibleToReconstructEquation(aii.equation, valAttackerState, valPrincipalState)
 			}
 			if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
-				return false
+				return true
 			}
 		}
 	}
