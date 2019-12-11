@@ -1,6 +1,6 @@
 <!---
 # SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
-# SPDX-License-Identifier: CC-BY-NC-ND-4.0
+# SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
 # Change Log
