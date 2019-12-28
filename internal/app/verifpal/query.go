@@ -20,6 +20,7 @@ func queryStart(query query, valAttackerState *attackerState, valPrincipalState 
 
 func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
 	var verifyResult verifyResult
+	var mutated string
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
 		&valAttackerState.known,
@@ -28,8 +29,20 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 	if ii < 0 {
 		return verifyResult
 	}
+	for i := range valPrincipalState.constants {
+		if valPrincipalState.wasMutated[i] {
+			mutated = fmt.Sprintf("%s\n           %s → %s", mutated,
+				prettyConstant(valPrincipalState.constants[i]),
+				prettyValue(valPrincipalState.assigned[i]),
+			)
+		}
+	}
+	if len(mutated) > 0 {
+		mutated = fmt.Sprintf("%s%s", "When the following values are mutated by the attacker:", mutated)
+	}
 	verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
-		"%s%s%s",
+		"%s\n           %s%s%s",
+		mutated,
 		prettyConstant(query.constant),
 		" is obtained by the attacker as ",
 		prettyValue(valAttackerState.known[ii]),
@@ -41,6 +54,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 
 func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
 	var verifyResult verifyResult
+	var mutated string
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
@@ -86,9 +100,21 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		}
 		a := valPrincipalState.beforeRewrite[ii]
 		cc := sanityResolveConstant(c, valPrincipalState, true)
+		for i := range valPrincipalState.constants {
+			if valPrincipalState.wasMutated[i] {
+				mutated = fmt.Sprintf("%s\n           %s → %s", mutated,
+					prettyConstant(valPrincipalState.constants[i]),
+					prettyValue(valPrincipalState.assigned[i]),
+				)
+			}
+		}
+		if len(mutated) > 0 {
+			mutated = fmt.Sprintf("%s%s", "When the following values are mutated by the attacker:", mutated)
+		}
 		if passes[f] && (query.message.sender != sender) {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
-				"%s%s%s%s%s%s%s%s%s%s%s%s",
+				"%s\n        %s%s%s%s%s%s%s%s%s%s%s%s",
+				mutated,
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
 				prettyValue(cc),
@@ -100,7 +126,8 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			return verifyResult
 		} else if forcedPasses[f] {
 			verifyResult.summary = prettyVerifyResultSummary(fmt.Sprintf(
-				"%s%s%s%s%s%s%s%s%s%s%s",
+				"%s\n           %s%s%s%s%s%s%s%s%s%s%s",
+				mutated,
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
 				prettyValue(cc),
 				", is successfully used in primitive ", prettyValue(a),

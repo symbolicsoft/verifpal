@@ -347,13 +347,16 @@ func constructPrincipalStateClone(valPrincipalState *principalState) *principalS
 	copy(valPrincipalStateClone.known, valPrincipalState.known)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
 	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
+	copy(valPrincipalStateClone.wasRewritten, valPrincipalState.wasRewritten)
 	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
 	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
-	for i := range valPrincipalStateClone.wasRewritten {
-		valPrincipalStateClone.wasRewritten[i] = false
-		valPrincipalStateClone.wasMutated[i] = false
-	}
+	/*
+		for i := range valPrincipalStateClone.wasRewritten {
+			valPrincipalStateClone.wasRewritten[i] = false
+			valPrincipalStateClone.wasMutated[i] = false
+		}
+	*/
 	return &valPrincipalStateClone
 }
 
