@@ -299,7 +299,9 @@ func verifyActiveMutatePrincipalState(
 	if mainDebug {
 		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
 		for i, x := range valPrincipalStateWithReplacements.constants {
-			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+			if valPrincipalStateWithReplacements.wasMutated[i] {
+				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+			}
 		}
 		fmt.Fprintln(os.Stdout, "")
 	}
