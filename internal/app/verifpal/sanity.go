@@ -338,10 +338,11 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *prin
 				return true
 			}
 		}
-	}
-	if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) {
-		if sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
-			return true
+	} else {
+		if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) {
+			if sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
+				return true
+			}
 		}
 	}
 	return false
