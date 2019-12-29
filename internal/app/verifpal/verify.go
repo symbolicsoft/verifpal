@@ -51,7 +51,11 @@ func verifyResolveQueries(
 		if verifyResult.query.resolved {
 			model.queries[q].resolved = true
 			*verifyResults = append(*verifyResults, verifyResult)
-			prettyMessage(verifyResult.summary, analysis, 0, "result")
+			prettyMessage(fmt.Sprintf(
+				"%s: %s",
+				prettyQuery(verifyResult.query),
+				verifyResult.summary,
+			), analysis, 0, "result")
 		}
 	}
 }

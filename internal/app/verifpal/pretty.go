@@ -100,12 +100,22 @@ func prettyMessageColor(m string, analysis int, depth int, t string) {
 	}
 }
 
-func prettyVerifyResultSummary(summary string, attack bool) string {
+func prettyVerifyResultSummary(mutated string, summary string, attack bool) string {
+	var mutatedIntro string
+	if len(mutated) > 0 {
+		mutatedIntro = "When the following values are mutated by the attacker:"
+	}
 	if runtime.GOOS == "windows" {
-		return summary
+		return fmt.Sprintf("%s%s\n           %s",
+			mutatedIntro, mutated, summary,
+		)
 	}
 	if attack {
-		return aurora.BrightRed(summary).Bold().String()
+		return fmt.Sprintf("%s%s\n           %s",
+			aurora.Italic(mutatedIntro).String(),
+			aurora.BrightYellow(mutated).Italic().String(),
+			aurora.BrightRed(summary).Italic().Bold().String(),
+		)
 	}
 	return summary
 }
