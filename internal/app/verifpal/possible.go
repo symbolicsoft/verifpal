@@ -237,9 +237,11 @@ func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *princip
 			r := false
 			aii := p.arguments[ii]
 			aiii := p.arguments[iii]
+			r = sanityEquivalentValueInValues(aii, &valAttackerState.known, valPrincipalState) >= 0
+			if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
+				return true
+			}
 			switch aii.kind {
-			case "constant":
-				r = sanityEquivalentValueInValues(aii, &valAttackerState.known, valPrincipalState) >= 0
 			case "primitive":
 				r, _ = possibleToReconstructPrimitive(aii.primitive, valAttackerState, valPrincipalState, analysis, depth)
 			case "equation":
