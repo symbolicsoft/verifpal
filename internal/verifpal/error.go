@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // ce25ae21cf9eb2957686b8bb45225a31
 
-package main
+package verifpal
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func errorCritical(errText string) {
+func ErrorCritical(errText string) {
 	err := errors.New(errText)
 	if runtime.GOOS == "windows" {
 		fmt.Fprintf(os.Stderr, " Verifpal! Error: %v.\n", err)

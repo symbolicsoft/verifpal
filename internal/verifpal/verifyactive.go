@@ -2,33 +2,28 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 7d5d2341a999bccff8fc2ff129fefc89
 
-package main
-
-import (
-	"fmt"
-	"os"
-)
+package verifpal
 
 func verifyActive(
-	model *verifpal,
+	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
 ) []verifyResult {
 	var verifyResults []verifyResult
 	analysis := 0
 	stage := 0
-	valAttackerState := constructAttackerState(true, model, valKnowledgeMap, true)
+	valAttackerState := constructAttackerState(true, m, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as active", 0, 0, "info")
 	for stage <= 3 {
 		switch stage {
 		case 0:
 			analysis, stage = verifyActiveStage0(
-				model, valKnowledgeMap, valPrincipalStates,
+				m, valKnowledgeMap, valPrincipalStates,
 				&verifyResults, valAttackerState,
 				analysis, stage,
 			)
 		default:
 			analysis, stage = verifyActiveStage123(
-				model, valKnowledgeMap, valPrincipalStates,
+				m, valKnowledgeMap, valPrincipalStates,
 				&verifyResults, valAttackerState,
 				analysis, stage,
 			)
@@ -38,7 +33,7 @@ func verifyActive(
 }
 
 func verifyActiveStage0(
-	model *verifpal,
+	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
 	verifyResults *[]verifyResult, valAttackerState *attackerState,
 	analysis int, stage int,
@@ -51,17 +46,15 @@ func verifyActiveStage0(
 		for i := range valPrincipalStateClone.assigned {
 			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
 		}
-		verifyAnalysis(model, valPrincipalStateClone, valAttackerState, analysis, 0)
-		if !mainDebug {
-			prettyAnalysis(analysis, stage)
-		}
+		verifyAnalysis(m, valPrincipalStateClone, valAttackerState, analysis, 0)
+		prettyAnalysis(analysis, stage)
 	}
 	stage = verifyActiveIncrementStage(stage)
 	return analysis, stage
 }
 
 func verifyActiveStage123(
-	model *verifpal,
+	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
 	verifyResults *[]verifyResult, valAttackerState *attackerState,
 	analysis int, stage int,
@@ -69,7 +62,7 @@ func verifyActiveStage123(
 	for _, valPrincipalState := range valPrincipalStates {
 		analysis = verifyActiveIncrementAnalysis(analysis)
 		valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-		analysis, stage = verifyActiveScanCombination(model,
+		analysis, stage = verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
 			verifyResults, true, analysis, stage,
 		)
@@ -87,7 +80,7 @@ func verifyActiveIncrementStage(stage int) int {
 }
 
 func verifyActiveScanCombination(
-	model *verifpal,
+	m *model,
 	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
 	valAttackerState *attackerState, valReplacementMap *replacementMap,
 	verifyResults *[]verifyResult, newStage bool, analysis int, stage int,
@@ -97,28 +90,26 @@ func verifyActiveScanCombination(
 	attackerKnown := len(valAttackerState.known)
 	lastReplacement = valReplacementMap.combinationNext()
 	valPrincipalStateWithReplacements, _ = verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap)
-	verifyAnalysis(model, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
-	verifyResolveQueries(model,
+	verifyAnalysis(m, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
+	verifyResolveQueries(m,
 		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
 		verifyResults, analysis,
 	)
-	valAttackerState = verifyActiveClearFreshValues(model, valKnowledgeMap, valAttackerState)
+	valAttackerState = verifyActiveClearFreshValues(m, valKnowledgeMap, valAttackerState)
 	analysis = verifyActiveIncrementAnalysis(analysis)
-	if !mainDebug {
-		prettyAnalysis(analysis, stage)
-	}
-	if len(*verifyResults) == len(model.queries) {
+	prettyAnalysis(analysis, stage)
+	if len(*verifyResults) == len(m.queries) {
 		return analysis, stage
 	}
 	if (len(valAttackerState.known) > attackerKnown) || newStage {
 		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
-		return verifyActiveScanCombination(model,
+		return verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMapUpdate,
 			verifyResults, false, analysis, stage,
 		)
 	}
 	if !lastReplacement {
-		return verifyActiveScanCombination(model,
+		return verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap,
 			verifyResults, false, analysis, stage,
 		)
@@ -126,7 +117,7 @@ func verifyActiveScanCombination(
 	return analysis, stage
 }
 
-func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
+func verifyActiveClearFreshValues(m *model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
 	valAttackerStateCleared := attackerState{
 		active:      valAttackerState.active,
 		known:       []value{},
@@ -143,7 +134,7 @@ func verifyActiveClearFreshValues(model *verifpal, valKnowledgeMap *knowledgeMap
 			}
 		}
 	}
-	constructAttackerStatePopulate(model, valKnowledgeMap, false, &valAttackerStateCleared)
+	constructAttackerStatePopulate(m, valKnowledgeMap, false, &valAttackerStateCleared)
 	return &valAttackerStateCleared
 }
 
@@ -296,15 +287,6 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	if mainDebug {
-		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
-		for i, x := range valPrincipalStateWithReplacements.constants {
-			if valPrincipalStateWithReplacements.wasMutated[i] {
-				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
-			}
-		}
-		fmt.Fprintln(os.Stdout, "")
-	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
 		if !p.check {

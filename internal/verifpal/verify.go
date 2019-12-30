@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 458871bd68906e9965785ac87c2708ec
 
-package main
+package verifpal
 
 import (
 	"fmt"
@@ -10,18 +10,18 @@ import (
 	"time"
 )
 
-func verify(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
+func Verify(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
 	prettyMessage(fmt.Sprintf(
 		"verification initiated at %s",
 		time.Now().Format("15:04:05"),
 	), 0, 0, "verifpal")
-	if model.attacker == "passive" {
-		verifyResults = verifyPassive(model, valKnowledgeMap, valPrincipalStates)
-	} else if model.attacker == "active" {
-		verifyResults = verifyActive(model, valKnowledgeMap, valPrincipalStates)
+	if m.attacker == "passive" {
+		verifyResults = verifyPassive(m, valKnowledgeMap, valPrincipalStates)
+	} else if m.attacker == "active" {
+		verifyResults = verifyActive(m, valKnowledgeMap, valPrincipalStates)
 	} else {
-		errorCritical(fmt.Sprintf("invalid attacker (%s)", model.attacker))
+		ErrorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
 	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range verifyResults {
@@ -35,21 +35,23 @@ func verify(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates [
 		"verification completed at %s",
 		time.Now().Format("15:04:05"),
 	), 0, 0, "verifpal")
+	prettyMessage("thank you for using verifpal!", 0, 0, "verifpal")
+	prettyMessage("verifpal is experimental software and may miss attacks.", 0, 0, "info")
 	return verifyResults
 }
 
 func verifyResolveQueries(
-	model *verifpal,
+	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState,
 	valAttackerState *attackerState, verifyResults *[]verifyResult, analysis int,
 ) {
-	for q, query := range model.queries {
-		if model.queries[q].resolved {
+	for q, query := range m.queries {
+		if m.queries[q].resolved {
 			continue
 		}
 		verifyResult := queryStart(query, valAttackerState, valPrincipalState, valKnowledgeMap)
 		if verifyResult.query.resolved {
-			model.queries[q].resolved = true
+			m.queries[q].resolved = true
 			*verifyResults = append(*verifyResults, verifyResult)
 			prettyMessage(fmt.Sprintf(
 				"%s: %s",

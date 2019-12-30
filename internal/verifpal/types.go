@@ -2,9 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 6dc5ca957dc5760bba97d4d8a0fe4adf
 
-package main
+package verifpal
 
-type verifpal struct {
+type model struct {
 	attacker string
 	blocks   []block
 	queries  []query

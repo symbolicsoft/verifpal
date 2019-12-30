@@ -2,13 +2,13 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // bc668866bf7ad5972a2f8a9999e62fe7
 
-package main
+package verifpal
 
 import (
 	"fmt"
 )
 
-func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysis(m *model, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
 		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
@@ -20,7 +20,7 @@ func verifyAnalysis(model *verifpal, valPrincipalState *principalState, valAttac
 		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysis(model, valPrincipalState, valAttackerState, analysis, depth+1)
+		depth = verifyAnalysis(m, valPrincipalState, valAttackerState, analysis, depth+1)
 	}
 	return depth
 }

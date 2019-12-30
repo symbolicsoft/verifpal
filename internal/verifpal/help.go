@@ -2,14 +2,14 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 2f07afecf9e6e77cc63ba896cc25d1da
 
-package main
+package verifpal
 
 import (
 	"fmt"
 	"os"
 )
 
-func help() {
+func Help() {
 	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n%s\n",
 		"verify    [file]: verify Verifpal model.",
 		"implement [file]: implement Verifpal model in Go.",

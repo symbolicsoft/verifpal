@@ -6,7 +6,6 @@ verifpal.exe
 build/bin/windows/verifpal
 build/bin/linux/verifpal
 build/bin/macos/verifpal
-parser.go
 *.zip
 
 # Binaries for programs and plugins

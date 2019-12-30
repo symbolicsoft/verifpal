@@ -2,11 +2,11 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // e7f38dcfcb1b02f4419c2e9e90efa017
 
-package main
+package verifpal
 
 import "fmt"
 
-func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
+func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
 		principals: principals,
 		constants:  []constant{},
@@ -55,7 +55,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 			map[string]string{principal: principal},
 		)
 	}
-	for _, block := range model.blocks {
+	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
 			for _, expression := range block.principal.expressions {
@@ -70,7 +70,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							q2 := expression.qualifier
 							fresh := valKnowledgeMap.constants[i].fresh
 							if d1 != d2 || q1 != q2 || fresh {
-								errorCritical(fmt.Sprintf(
+								ErrorCritical(fmt.Sprintf(
 									"constant is known more than once and in different ways (%s)",
 									prettyConstant(c),
 								))
@@ -111,7 +111,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 					for _, c := range expression.constants {
 						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if i >= 0 {
-							errorCritical(fmt.Sprintf(
+							ErrorCritical(fmt.Sprintf(
 								"generated constant already exists (%s)",
 								prettyConstant(c),
 							))
@@ -146,14 +146,14 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 							if prim.output < 0 {
 								output = "at least 1"
 							}
-							errorCritical(fmt.Sprintf(
+							ErrorCritical(fmt.Sprintf(
 								"primitive %s has %d output%s, expecting %s",
 								prim.name, len(expression.left), plural, output,
 							))
 						}
 						if expression.right.primitive.check {
 							if !prim.check {
-								errorCritical(fmt.Sprintf(
+								ErrorCritical(fmt.Sprintf(
 									"primitive %s is checked but does not support checking",
 									prim.name,
 								))
@@ -173,14 +173,14 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 								}
 							}
 							if !knows {
-								errorCritical(fmt.Sprintf(
+								ErrorCritical(fmt.Sprintf(
 									"%s is using constant (%s) despite not knowing it",
 									block.principal.name,
 									prettyConstant(c),
 								))
 							}
 						} else {
-							errorCritical(fmt.Sprintf(
+							ErrorCritical(fmt.Sprintf(
 								"constant does not exist (%s)",
 								prettyConstant(c),
 							))
@@ -193,7 +193,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 						}
 						ii := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if ii >= 0 {
-							errorCritical(fmt.Sprintf(
+							ErrorCritical(fmt.Sprintf(
 								"constant assigned twice (%s)",
 								prettyConstant(c),
 							))
@@ -240,13 +240,13 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 						}
 					}
 					if !senderKnows {
-						errorCritical(fmt.Sprintf(
+						ErrorCritical(fmt.Sprintf(
 							"%s is sending constant (%s) despite not knowing it",
 							block.message.sender,
 							prettyConstant(c),
 						))
 					} else if recipientKnows {
-						errorCritical(fmt.Sprintf(
+						ErrorCritical(fmt.Sprintf(
 							"%s is receiving constant (%s) despite already knowing it",
 							block.message.recipient,
 							prettyConstant(c),
@@ -258,7 +258,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 						)
 					}
 				} else {
-					errorCritical(fmt.Sprintf(
+					ErrorCritical(fmt.Sprintf(
 						"%s sends unknown constant to %s (%s)",
 						block.message.sender,
 						block.message.recipient,
@@ -271,7 +271,7 @@ func constructKnowledgeMap(model *verifpal, principals []string) *knowledgeMap {
 	return &valKnowledgeMap
 }
 
-func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []*principalState {
+func constructPrincipalStates(m *model, valKnowledgeMap *knowledgeMap) []*principalState {
 	var valPrincipalStates []*principalState
 	for _, principal := range valKnowledgeMap.principals {
 		valPrincipalState := principalState{
@@ -300,7 +300,7 @@ func constructPrincipalStates(model *verifpal, valKnowledgeMap *knowledgeMap) []
 					knows = true
 				}
 			}
-			for _, block := range model.blocks {
+			for _, block := range m.blocks {
 				switch block.kind {
 				case "message":
 					for _, cc := range block.message.constants {
@@ -360,7 +360,7 @@ func constructPrincipalStateClone(valPrincipalState *principalState) *principalS
 	return &valPrincipalStateClone
 }
 
-func constructAttackerState(active bool, model *verifpal, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {
+func constructAttackerState(active bool, m *model, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {
 	valAttackerState := attackerState{
 		active:      active,
 		known:       []value{},
@@ -368,11 +368,11 @@ func constructAttackerState(active bool, model *verifpal, valKnowledgeMap *knowl
 		conceivable: []value{},
 		mutatedTo:   [][]string{},
 	}
-	constructAttackerStatePopulate(model, valKnowledgeMap, verbose, &valAttackerState)
+	constructAttackerStatePopulate(m, valKnowledgeMap, verbose, &valAttackerState)
 	return &valAttackerState
 }
 
-func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeMap, verbose bool, valAttackerState *attackerState) {
+func constructAttackerStatePopulate(m *model, valKnowledgeMap *knowledgeMap, verbose bool, valAttackerState *attackerState) {
 	for _, c := range valKnowledgeMap.constants {
 		if c.qualifier == "public" {
 			v := value{
@@ -386,7 +386,7 @@ func constructAttackerStatePopulate(model *verifpal, valKnowledgeMap *knowledgeM
 			}
 		}
 	}
-	for _, block := range model.blocks {
+	for _, block := range m.blocks {
 		switch block.kind {
 		case "message":
 			for _, c := range block.message.constants {

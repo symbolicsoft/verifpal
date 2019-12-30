@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 5e88e17b2b330ef227c81153d720b176
 
-package main
+package verifpal
 
 var primitiveSpecs = []primitiveSpec{
 	{

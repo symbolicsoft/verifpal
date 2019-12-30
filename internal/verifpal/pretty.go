@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 362636d0e0b1ba89495c376703a829e8
 
-package main
+package verifpal
 
 import (
 	"fmt"
@@ -235,13 +235,13 @@ func prettyQuery(query query) string {
 	return output
 }
 
-func prettyPrint(model *verifpal) string {
+func PrettyPrint(m *model) string {
 	var output string
 	output = fmt.Sprintf(
 		"attacker [\n\t%s\n]\n\n",
-		model.attacker,
+		m.attacker,
 	)
-	for _, block := range model.blocks {
+	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
 			output = fmt.Sprintf(
@@ -289,7 +289,7 @@ func prettyPrint(model *verifpal) string {
 		}
 	}
 	output = fmt.Sprintf("%squeries[\n", output)
-	for _, query := range model.queries {
+	for _, query := range m.queries {
 		output = fmt.Sprintf(
 			"%s\t%s\n", output, prettyQuery(query),
 		)

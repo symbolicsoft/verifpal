@@ -2,7 +2,19 @@
 	/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 	 * SPDX-License-Identifier: GPL-3.0-only */
 
-	package main
+	package verifpal
+
+	import(
+		"io"
+		"io/ioutil"
+		"unicode"
+		"unicode/utf8"
+		"strings"
+		"fmt"
+		"errors"
+		"os"
+		"bytes"
+	)
 
 	func b2s(bs []uint8) string {
 		b := make([]byte, len(bs))
@@ -55,7 +67,7 @@ Verifpal <-
 		dq := make([]query, len(q))
 		for i, v := range b { db[i] = v.(block) }
 		for i, v := range q { dq[i] = v.(query) }
-		return verifpal{
+		return model{
 			attacker: Attacker.(string),
 			blocks: db,
 			queries: dq,

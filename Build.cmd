@@ -12,31 +12,31 @@
 @echo        OK
 
 @echo|set /p="[Verifpal] Generating parser..."
-@pigeon -optimize-basic-latin -optimize-parser -o internal/app/verifpal/parser.go api/grammar/verifpal.peg
+@del internal\verifpal\parser.go
+@pigeon -o internal\verifpal\parser.go api\grammar\verifpal.peg
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@copy assets\windows\versioninfo.json internal\app\verifpal\versioninfo.json >nul
-@cd internal\app\verifpal
+@copy assets\windows\versioninfo.json cmd\verifpal\versioninfo.json >nul
+@cd cmd\verifpal
 @go generate
-@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\windows\verifpal.exe
-@del versioninfo.json resource.syso
+@cd ..\..
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\windows verifpal.com/source/...
+@del cmd\verifpal\versioninfo.json cmd\verifpal\resource.syso
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
 @setx GOOS "linux" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\linux\verifpal
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\linux verifpal.com/source/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
 @setx GOOS "darwin" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o ..\..\..\build\bin\macos\verifpal
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\macos verifpal.com/source/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Cleaning up..."
 @setx GOOS "windows" >nul
-@cd ..\..\..
-@del internal\app\verifpal\parser.go
 @echo                    OK
 
 @exit /b

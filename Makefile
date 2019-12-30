@@ -9,26 +9,26 @@ all:
 
 parser:
 	@/bin/echo -n "[Verifpal] Generating parser..."
-	@rm -f internal/app/verifpal/parser.go
-	@pigeon -optimize-basic-latin -optimize-parser -o internal/app/verifpal/parser.go api/grammar/verifpal.peg
+	@rm -f internal/verifpal/parser.go
+	@pigeon -o internal/verifpal/parser.go api/grammar/verifpal.peg
 	@/bin/echo "             OK"
 
 windows:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
-	@cp assets/windows/versioninfo.json internal/app/verifpal/versioninfo.json
-	@cd internal/app/verifpal; GOOS="windows" GOARCH="amd64" go generate
-	@cd internal/app/verifpal; GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/windows/verifpal.exe
-	@rm internal/app/verifpal/versioninfo.json internal/app/verifpal/resource.syso
+	@cp assets/windows/versioninfo.json cmd/verifpal/versioninfo.json
+	@cd cmd/verifpal; GOOS="windows" GOARCH="amd64" go generate
+	@GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/windows verifpal.com/source/...
+	@rm cmd/verifpal/versioninfo.json cmd/verifpal/resource.syso
 	@/bin/echo " OK"
 
 linux:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
-	@cd internal/app/verifpal; GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/linux/verifpal
+	@GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/linux verifpal.com/source/...
 	@/bin/echo "   OK"
 
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
-	@cd internal/app/verifpal; GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o ../../../build/bin/macos/verifpal
+	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/macos verifpal.com/source/...
 	@/bin/echo "   OK"
 
 upx:
@@ -52,7 +52,7 @@ dependencies:
 	@/bin/echo "       OK"
 
 release:
-	@vim internal/app/verifpal/main.go tools/quickinstall/quickInstall.sh assets/windows/versioninfo.json CHANGELOG.md
+	@vim cmd/verifpal/main.go tools/quickinstall/quickInstall.sh assets/windows/versioninfo.json CHANGELOG.md
 	@make -s all
 	@make -s upx
 	@/bin/echo -n "[Verifpal] Creating release archives"
@@ -72,7 +72,6 @@ release:
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
-	@rm -f internal/app/verifpal/parser.go
 	@rm -f build/release/*.zip
 	@rm -f build/bin/windows/verifpal.exe
 	@rm -f build/bin/linux/verifpal

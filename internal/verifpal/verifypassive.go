@@ -2,11 +2,11 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 00000000000000000000000000000000
 
-package main
+package verifpal
 
-func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
+func verifyPassive(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
-	valAttackerState := constructAttackerState(false, model, valKnowledgeMap, true)
+	valAttackerState := constructAttackerState(false, m, valKnowledgeMap, true)
 	prettyMessage("attacker is configured as passive", 0, 0, "info")
 	valPrincipalStates[0] = sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
 	failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStates[0])
@@ -14,7 +14,7 @@ func verifyPassive(model *verifpal, valKnowledgeMap *knowledgeMap, valPrincipalS
 	for _, a := range valPrincipalStates[0].assigned {
 		sanityCheckEquationGenerators(a, valPrincipalStates[0])
 	}
-	verifyAnalysis(model, valPrincipalStates[0], valAttackerState, 0, 0)
-	verifyResolveQueries(model, valKnowledgeMap, valPrincipalStates[0], valAttackerState, &verifyResults, 0)
+	verifyAnalysis(m, valPrincipalStates[0], valAttackerState, 0, 0)
+	verifyResolveQueries(m, valKnowledgeMap, valPrincipalStates[0], valAttackerState, &verifyResults, 0)
 	return verifyResults
 }
