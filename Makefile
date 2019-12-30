@@ -17,18 +17,18 @@ windows:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
 	@cp assets/windows/versioninfo.json cmd/verifpal/versioninfo.json
 	@cd cmd/verifpal; GOOS="windows" GOARCH="amd64" go generate
-	@GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/windows verifpal.com/source/...
+	@GOOS="windows" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/windows verifpal.com/...
 	@rm cmd/verifpal/versioninfo.json cmd/verifpal/resource.syso
 	@/bin/echo " OK"
 
 linux:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
-	@GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/linux verifpal.com/source/...
+	@GOOS="linux" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/linux verifpal.com/...
 	@/bin/echo "   OK"
 
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
-	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/macos verifpal.com/source/...
+	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/bin/macos verifpal.com/...
 	@/bin/echo "   OK"
 
 upx:

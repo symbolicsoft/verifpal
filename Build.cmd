@@ -21,18 +21,18 @@
 @cd cmd\verifpal
 @go generate
 @cd ..\..
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\windows verifpal.com/source/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\windows verifpal.com/...
 @del cmd\verifpal\versioninfo.json cmd\verifpal\resource.syso
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
 @setx GOOS "linux" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\linux verifpal.com/source/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\linux verifpal.com/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
 @setx GOOS "darwin" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\macos verifpal.com/source/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\macos verifpal.com/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Cleaning up..."

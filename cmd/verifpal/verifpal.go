@@ -11,7 +11,7 @@ import (
 	"os"
 	"runtime"
 
-	"verifpal.com/source/internal/verifpal"
+	"verifpal.com/internal/verifpal"
 )
 
 const mainVersion = "0.7.8"
