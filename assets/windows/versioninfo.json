@@ -3,13 +3,13 @@
       "FileVersion": {
           "Major": 0,
           "Minor": 7,
-          "Patch": 7,
+          "Patch": 8,
           "Build": 0
       },
       "ProductVersion": {
           "Major": 0,
           "Minor": 7,
-          "Patch": 7,
+          "Patch": 8,
           "Build": 0
       },
       "FileFlagsMask": "3f",
@@ -19,11 +19,11 @@
       "FileSubType": "00"
   },
   "StringFileInfo": {
-      "ProductVersion": "v0.7.7.0",
+      "FileVersion": "0.7.8.0",
+      "ProductVersion": "v0.7.8.0",
       "Comments": "",
       "CompanyName": "Nadim Kobeissi",
       "FileDescription": "Verifpal",
-      "FileVersion": "0.0",
       "InternalName": "Verifpal",
       "LegalCopyright": "© 2019-2020 Nadim Kobeissi <nadim@symbolic.software>",
       "LegalTrademarks": "Verifpal is a registered trademark of Nadim Kobeissi. All Rights Reserved.",
