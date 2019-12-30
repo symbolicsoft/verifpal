@@ -9,26 +9,31 @@ type verifpal struct {
 	blocks   []block
 	queries  []query
 }
+
 type block struct {
 	kind      string
 	principal principal
 	message   message
 }
+
 type principal struct {
 	name        string
 	expressions []expression
 }
+
 type message struct {
 	sender    string
 	recipient string
 	constants []constant
 }
+
 type query struct {
 	kind     string
 	constant constant
 	message  message
 	resolved bool
 }
+
 type expression struct {
 	kind      string
 	qualifier string
@@ -36,12 +41,14 @@ type expression struct {
 	left      []constant
 	right     value
 }
+
 type value struct {
 	kind      string
 	constant  constant
 	primitive primitive
 	equation  equation
 }
+
 type constant struct {
 	name        string
 	guard       bool
@@ -49,15 +56,18 @@ type constant struct {
 	qualifier   string
 	fresh       bool
 }
+
 type primitive struct {
 	name      string
 	arguments []value
 	output    int
 	check     bool
 }
+
 type equation struct {
 	values []value
 }
+
 type knowledgeMap struct {
 	principals []string
 	constants  []constant
@@ -65,6 +75,7 @@ type knowledgeMap struct {
 	creator    []string
 	knownBy    [][]map[string]string
 }
+
 type decomposeRule struct {
 	hasRule bool
 	given   []int
@@ -80,6 +91,7 @@ type rewriteRule struct {
 	matching     []int
 	filter       func(value, int, *principalState) (value, bool)
 }
+
 type primitiveSpec struct {
 	name      string
 	arity     int
@@ -102,6 +114,7 @@ type principalState struct {
 	wasMutated    []bool
 	beforeMutate  []value
 }
+
 type attackerState struct {
 	active      bool
 	known       []value
@@ -109,10 +122,12 @@ type attackerState struct {
 	conceivable []value
 	mutatedTo   [][]string
 }
+
 type verifyResult struct {
 	query   query
 	summary string
 }
+
 type replacementMap struct {
 	constants     []constant
 	replacements  [][]value
