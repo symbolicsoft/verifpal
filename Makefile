@@ -52,7 +52,7 @@ dependencies:
 	@/bin/echo "       OK"
 
 release:
-	@vim cmd/verifpal/main.go tools/quickinstall/quickInstall.sh assets/windows/versioninfo.json CHANGELOG.md
+	@vim cmd/verifpal/main.go assets/windows/versioninfo.json CHANGELOG.md
 	@make -s all
 	@make -s upx
 	@/bin/echo -n "[Verifpal] Creating release archives"
