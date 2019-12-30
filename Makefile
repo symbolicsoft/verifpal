@@ -34,11 +34,11 @@ macos:
 upx:
 	@/bin/echo -n "[Verifpal] Packing with UPX"
 	@/bin/echo -n "."
-	@upx -9 --ultra-brute -qqq build/bin/windows/verifpal.exe
+	@upx -9 -qqq build/bin/windows/verifpal.exe
 	@/bin/echo -n "."
-	@upx -9 --ultra-brute -qqq build/bin/linux/verifpal
+	@upx -9 -qqq build/bin/linux/verifpal
 	@/bin/echo -n "."
-	@upx -9 --ultra-brute -qqq build/bin/macos/verifpal
+	@upx -9 -qqq build/bin/macos/verifpal
 	@/bin/echo "              OK"
 
 dependencies:
@@ -52,7 +52,7 @@ dependencies:
 	@/bin/echo "       OK"
 
 release:
-	@vim cmd/verifpal/main.go assets/windows/versioninfo.json CHANGELOG.md
+	@vim cmd/verifpal/verifpal.go assets/windows/versioninfo.json CHANGELOG.md
 	@make -s all
 	@make -s upx
 	@/bin/echo -n "[Verifpal] Creating release archives"
