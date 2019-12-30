@@ -21,7 +21,7 @@ func Verify(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*princ
 	} else if m.attacker == "active" {
 		verifyResults = verifyActive(m, valKnowledgeMap, valPrincipalStates)
 	} else {
-		ErrorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
+		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
 	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range verifyResults {

@@ -5,5 +5,5 @@
 package verifpal
 
 func Implement() {
-	ErrorCritical("this feature does not exist yet")
+	errorCritical("this feature does not exist yet")
 }

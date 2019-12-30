@@ -34,7 +34,7 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 	case "primitive":
 		p := primitiveGet(right.primitive.name)
 		if len(p.name) == 0 {
-			ErrorCritical(fmt.Sprintf(
+			errorCritical(fmt.Sprintf(
 				"invalid primitive (%s)",
 				right.primitive.name,
 			))
@@ -48,7 +48,7 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 			if p.arity < 0 {
 				arity = "between 1 and 5"
 			}
-			ErrorCritical(fmt.Sprintf(
+			errorCritical(fmt.Sprintf(
 				"primitive %s has %d input%s, expecting %s",
 				right.primitive.name, len(right.primitive.arguments), plural, arity,
 			))
@@ -95,7 +95,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 		case "confidentiality":
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constant)
 			if i < 0 {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"confidentiality query (%s) refers to unknown value (%s)",
 					prettyQuery(query),
 					prettyConstant(query.constant),
@@ -103,7 +103,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 			}
 		case "authentication":
 			if len(query.message.constants) != 1 {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"authentication query (%s) has more than one constant",
 					prettyQuery(query),
 				))
@@ -111,7 +111,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 			c := query.message.constants[0]
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 			if i < 0 {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"authentication query refers to unknown constant (%s)",
 					prettyConstant(c),
 				))
@@ -133,7 +133,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 				}
 			}
 			if !senderKnows {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
 					prettyQuery(query),
 					query.message.sender,
@@ -141,7 +141,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 				))
 			}
 			if !recipientKnows {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
 					prettyQuery(query),
 					query.message.recipient,
@@ -149,7 +149,7 @@ func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
 				))
 			}
 			if !sanityConstantIsUsedByPrincipal(valKnowledgeMap, query.message.recipient, c) {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
 					prettyQuery(query),
 					query.message.recipient,
@@ -212,13 +212,13 @@ func sanityDeclaredPrincipals(m *model) []string {
 			principals, _ = appendUnique(principals, block.principal.name)
 		case "message":
 			if !strInSlice(block.message.sender, principals) {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"principal does not exist (%s)",
 					block.message.sender,
 				))
 			}
 			if !strInSlice(block.message.recipient, principals) {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"principal does not exist (%s)",
 					block.message.recipient,
 				))
@@ -229,13 +229,13 @@ func sanityDeclaredPrincipals(m *model) []string {
 		switch query.kind {
 		case "authentication":
 			if !strInSlice(query.message.sender, principals) {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"principal does not exist (%s)",
 					query.message.sender,
 				))
 			}
 			if !strInSlice(query.message.recipient, principals) {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"principal does not exist (%s)",
 					query.message.recipient,
 				))
@@ -576,7 +576,7 @@ func sanityFailOnFailedRewrite(failedRewrites []primitive) {
 		if !p.check {
 			continue
 		}
-		ErrorCritical(fmt.Sprintf(
+		errorCritical(fmt.Sprintf(
 			"checked primitive fails: %s",
 			prettyPrimitive(p),
 		))
@@ -585,7 +585,7 @@ func sanityFailOnFailedRewrite(failedRewrites []primitive) {
 
 func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalState) {
 	if len(e.values) > 3 {
-		ErrorCritical(fmt.Sprintf(
+		errorCritical(fmt.Sprintf(
 			"too many layers in equation (%s), maximum is 2",
 			prettyEquation(e),
 		))
@@ -593,7 +593,7 @@ func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalSt
 	for i, c := range e.values {
 		if i == 0 {
 			if c.constant.name != "g" {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"equation (%s) does not use 'g' as generator",
 					prettyEquation(e),
 				))
@@ -601,7 +601,7 @@ func sanityCheckEquationRootGenerator(e equation, valPrincipalState *principalSt
 		}
 		if i > 0 {
 			if c.constant.name == "g" {
-				ErrorCritical(fmt.Sprintf(
+				errorCritical(fmt.Sprintf(
 					"equation (%s) uses 'g' not as a generator",
 					prettyEquation(e),
 				))

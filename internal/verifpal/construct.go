@@ -70,7 +70,7 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 							q2 := expression.qualifier
 							fresh := valKnowledgeMap.constants[i].fresh
 							if d1 != d2 || q1 != q2 || fresh {
-								ErrorCritical(fmt.Sprintf(
+								errorCritical(fmt.Sprintf(
 									"constant is known more than once and in different ways (%s)",
 									prettyConstant(c),
 								))
@@ -111,7 +111,7 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 					for _, c := range expression.constants {
 						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if i >= 0 {
-							ErrorCritical(fmt.Sprintf(
+							errorCritical(fmt.Sprintf(
 								"generated constant already exists (%s)",
 								prettyConstant(c),
 							))
@@ -146,14 +146,14 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 							if prim.output < 0 {
 								output = "at least 1"
 							}
-							ErrorCritical(fmt.Sprintf(
+							errorCritical(fmt.Sprintf(
 								"primitive %s has %d output%s, expecting %s",
 								prim.name, len(expression.left), plural, output,
 							))
 						}
 						if expression.right.primitive.check {
 							if !prim.check {
-								ErrorCritical(fmt.Sprintf(
+								errorCritical(fmt.Sprintf(
 									"primitive %s is checked but does not support checking",
 									prim.name,
 								))
@@ -173,14 +173,14 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 								}
 							}
 							if !knows {
-								ErrorCritical(fmt.Sprintf(
+								errorCritical(fmt.Sprintf(
 									"%s is using constant (%s) despite not knowing it",
 									block.principal.name,
 									prettyConstant(c),
 								))
 							}
 						} else {
-							ErrorCritical(fmt.Sprintf(
+							errorCritical(fmt.Sprintf(
 								"constant does not exist (%s)",
 								prettyConstant(c),
 							))
@@ -193,7 +193,7 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 						}
 						ii := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
 						if ii >= 0 {
-							ErrorCritical(fmt.Sprintf(
+							errorCritical(fmt.Sprintf(
 								"constant assigned twice (%s)",
 								prettyConstant(c),
 							))
@@ -240,13 +240,13 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 						}
 					}
 					if !senderKnows {
-						ErrorCritical(fmt.Sprintf(
+						errorCritical(fmt.Sprintf(
 							"%s is sending constant (%s) despite not knowing it",
 							block.message.sender,
 							prettyConstant(c),
 						))
 					} else if recipientKnows {
-						ErrorCritical(fmt.Sprintf(
+						errorCritical(fmt.Sprintf(
 							"%s is receiving constant (%s) despite already knowing it",
 							block.message.recipient,
 							prettyConstant(c),
@@ -258,7 +258,7 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 						)
 					}
 				} else {
-					ErrorCritical(fmt.Sprintf(
+					errorCritical(fmt.Sprintf(
 						"%s sends unknown constant to %s (%s)",
 						block.message.sender,
 						block.message.recipient,

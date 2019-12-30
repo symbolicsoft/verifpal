@@ -17,7 +17,7 @@ func ParseModel(filename string) (*model, *knowledgeMap, []*principalState) {
 	), 0, 0, "verifpal")
 	parsed, err := ParseFile(filename)
 	if err != nil {
-		ErrorCritical(err.Error())
+		errorCritical(err.Error())
 	}
 	m = parsed.(model)
 	valKnowledgeMap, valPrincipalStates := sanity(&m)

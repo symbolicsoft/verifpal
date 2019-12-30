@@ -13,7 +13,7 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func ErrorCritical(errText string) {
+func errorCritical(errText string) {
 	err := errors.New(errText)
 	if runtime.GOOS == "windows" {
 		fmt.Fprintf(os.Stderr, " Verifpal! Error: %v.\n", err)
