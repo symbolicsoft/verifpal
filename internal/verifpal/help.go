@@ -17,5 +17,4 @@ func Help() {
 		"pretty    [file]: pretty-print Verifpal model.",
 		"help:             show this help text.",
 	)
-	os.Exit(0)
 }

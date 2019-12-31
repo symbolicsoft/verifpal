@@ -17,12 +17,13 @@ import (
 const mainVersion = "0.7.8"
 
 func main() {
-	fmt.Fprint(os.Stdout, fmt.Sprintf("%s%s%s%s%s\n%s\n\n",
+	fmt.Fprintf(os.Stdout, "%s%s%s%s%s\n%s\n\n",
 		"Verifpal ", mainVersion, " (", runtime.Version(), ") — https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
-	))
+	)
 	if len(os.Args) != 3 {
 		verifpal.Help()
+		return
 	}
 	switch os.Args[1] {
 	case "verify":
