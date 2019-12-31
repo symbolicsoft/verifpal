@@ -239,51 +239,51 @@ func constructKnowledgeMapRenderAssignment(valKnowledgeMap *knowledgeMap, blck *
 func constructKnowledgeMapRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
 	for _, c := range blck.message.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-		if i >= 0 {
-			c = valKnowledgeMap.constants[i]
-			senderKnows := false
-			recipientKnows := false
-			if valKnowledgeMap.creator[i] == blck.message.sender {
-				senderKnows = true
-			}
-			for _, m := range valKnowledgeMap.knownBy[i] {
-				if _, ok := m[blck.message.sender]; ok {
-					senderKnows = true
-				}
-			}
-			if valKnowledgeMap.creator[i] == blck.message.recipient {
-				recipientKnows = true
-			}
-			for _, m := range valKnowledgeMap.knownBy[i] {
-				if _, ok := m[blck.message.recipient]; ok {
-					recipientKnows = true
-				}
-			}
-			if !senderKnows {
-				errorCritical(fmt.Sprintf(
-					"%s is sending constant (%s) despite not knowing it",
-					blck.message.sender,
-					prettyConstant(c),
-				))
-			} else if recipientKnows {
-				errorCritical(fmt.Sprintf(
-					"%s is receiving constant (%s) despite already knowing it",
-					blck.message.recipient,
-					prettyConstant(c),
-				))
-			} else {
-				valKnowledgeMap.knownBy[i] = append(
-					valKnowledgeMap.knownBy[i],
-					map[string]string{blck.message.recipient: blck.message.sender},
-				)
-			}
-		} else {
+		if i < 0 {
 			errorCritical(fmt.Sprintf(
 				"%s sends unknown constant to %s (%s)",
 				blck.message.sender,
 				blck.message.recipient,
 				prettyConstant(c),
 			))
+			continue
+		}
+		c = valKnowledgeMap.constants[i]
+		senderKnows := false
+		recipientKnows := false
+		if valKnowledgeMap.creator[i] == blck.message.sender {
+			senderKnows = true
+		}
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if _, ok := m[blck.message.sender]; ok {
+				senderKnows = true
+			}
+		}
+		if valKnowledgeMap.creator[i] == blck.message.recipient {
+			recipientKnows = true
+		}
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if _, ok := m[blck.message.recipient]; ok {
+				recipientKnows = true
+			}
+		}
+		if !senderKnows {
+			errorCritical(fmt.Sprintf(
+				"%s is sending constant (%s) despite not knowing it",
+				blck.message.sender,
+				prettyConstant(c),
+			))
+		} else if recipientKnows {
+			errorCritical(fmt.Sprintf(
+				"%s is receiving constant (%s) despite already knowing it",
+				blck.message.recipient,
+				prettyConstant(c),
+			))
+		} else {
+			valKnowledgeMap.knownBy[i] = append(
+				valKnowledgeMap.knownBy[i],
+				map[string]string{blck.message.recipient: blck.message.sender},
+			)
 		}
 	}
 }
