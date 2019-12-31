@@ -35,9 +35,15 @@ Verifpal is still highly experimental software. Using it in a classroom or learn
 The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essential guide to getting started with cryptographic protocol analysis using Verifpal. It is strongly recommended that you read the Verifpal User Manual before starting work with Verifpal.
 
 ### Getting a Copy of Verifpal
-You have three choices:
+On Linux and macOS, the best way to install Verifpal is through the [Homebrew](https://brew.sh) package manager, since you'll also get automatic updates:
 
-- *Via [Homebrew](https://brew.sh) (on Linux and macOS)*: `brew tap verifpal.com/source https://source.symbolic.software/verifpal/verifpal; brew install verifpal`
+```
+brew tap verifpal.com/source https://source.symbolic.software/verifpal/verifpal
+brew install verifpal
+```
+
+Otherwise, you can:
+
 - *Download and install a release manually*: Releases for Windows, Linux and macOS are available [here](https://source.symbolic.software/verifpal/verifpal/releases).
 - *Compile from source*: Keep reading!
 
