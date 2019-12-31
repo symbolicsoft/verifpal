@@ -11,6 +11,7 @@ parser:
 	@/bin/echo -n "[Verifpal] Generating parser..."
 	@rm -f internal/verifpal/parser.go
 	@pigeon -o internal/verifpal/parser.go api/grammar/verifpal.peg
+	@gofmt -s -w internal/verifpal/parser.go
 	@/bin/echo "             OK"
 
 windows:
