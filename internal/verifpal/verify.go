@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Verify runs the main verification engine for Verifpal on output from ParseModel.
 func Verify(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
 	var verifyResults []verifyResult
 	prettyMessage(fmt.Sprintf(

@@ -9,6 +9,7 @@ import (
 	"path"
 )
 
+// ParseModel reads a Verifpal model from a file on disk and parses it into an abstract representation that Verifpal can then use.
 func ParseModel(filename string) (*model, *knowledgeMap, []*principalState) {
 	var m model
 	prettyMessage(fmt.Sprintf(

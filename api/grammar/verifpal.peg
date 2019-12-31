@@ -105,10 +105,10 @@ Principal <-
 		if strInSlice(name, reserved()) ||
 			strings.HasPrefix(name, "attacker") ||
 			strings.HasPrefix(name, "unnamed") {
-			err = errors.New(fmt.Sprintf(
+			err = fmt.Errorf(
 				"cannot use reserved keyword as principal name: %s",
 				name,
-			))
+			)
 		}
 		return block{
 			kind: "principal",
@@ -145,10 +145,10 @@ Message <-
 			if strInSlice(s, reserved()) ||
 				strings.HasPrefix(strings.ToLower(s), "attacker") ||
 				strings.HasPrefix(strings.ToLower(s), "unnamed") {
-				err = errors.New(fmt.Sprintf(
+				err = fmt.Errorf(
 					"cannot use reserved keyword as principal name: %s",
 					s,
-				))
+				)
 			}
 		}
 		return block{
@@ -171,10 +171,10 @@ MessageConstants <-
 			if strInSlice(c.name, reserved()) ||
 				strings.HasPrefix(c.name, "attacker") ||
 				strings.HasPrefix(c.name, "unnamed") {
-				err = errors.New(fmt.Sprintf(
+				err = fmt.Errorf(
 					"cannot use reserved keyword as constant name: %s",
 					c.name,
-				))
+				)
 			}
 			da = append(da, c)
 		}
@@ -248,10 +248,7 @@ Constants <-
 			if strInSlice(c.name, reserved()) ||
 				strings.HasPrefix(c.name, "attacker") ||
 				strings.HasPrefix(c.name, "unnamed") {
-				err = errors.New(fmt.Sprintf(
-					"cannot use reserved keyword as constant name: %s",
-					c.name,
-				))
+				err = fmt.Errorf("cannot use reserved keyword as constant name: %s", c.name)
 			}
 		}
 		return da, err

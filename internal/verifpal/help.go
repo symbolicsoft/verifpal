@@ -9,12 +9,13 @@ import (
 	"os"
 )
 
+// Help displays Verifpal command-line usage instructions.
 func Help() {
-	fmt.Fprint(os.Stdout, fmt.Sprintf("%s\n%s\n%s\n%s\n",
+	fmt.Fprintf(os.Stdout, "%s\n%s\n%s\n%s\n",
 		"verify    [file]: verify Verifpal model.",
 		"implement [file]: implement Verifpal model in Go.",
 		"pretty    [file]: pretty-print Verifpal model.",
 		"help:             show this help text.",
-	))
+	)
 	os.Exit(0)
 }

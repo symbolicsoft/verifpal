@@ -134,7 +134,7 @@ func verifyActiveClearFreshValues(m *model, valKnowledgeMap *knowledgeMap, valAt
 			}
 		}
 	}
-	constructAttackerStatePopulate(m, valKnowledgeMap, false, &valAttackerStateCleared)
+	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerStateCleared, false)
 	return &valAttackerStateCleared
 }
 

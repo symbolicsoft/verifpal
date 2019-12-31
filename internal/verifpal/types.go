@@ -69,11 +69,12 @@ type equation struct {
 }
 
 type knowledgeMap struct {
-	principals []string
-	constants  []constant
-	assigned   []value
-	creator    []string
-	knownBy    [][]map[string]string
+	principals     []string
+	constants      []constant
+	assigned       []value
+	creator        []string
+	knownBy        [][]map[string]string
+	unnamedCounter int
 }
 
 type decomposeRule struct {

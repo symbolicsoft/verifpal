@@ -30,29 +30,29 @@ func prettyMessageRegular(m string, analysis int, depth int, t string) {
 		)
 	}
 	if t == "verifpal" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n", " ", "Verifpal", "!", m, infoString,
-		))
+		)
 	}
 	if t == "info" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n", "     ", "Info", "!", m, infoString,
-		))
+		)
 	}
 	if t == "analysis" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n", " ", "Analysis", "!", m, infoString,
-		))
+		)
 	}
 	if t == "deduction" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n", "", "Deduction", "!", m, infoString,
-		))
+		)
 	}
 	if t == "result" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n", "   ", "Result", "!", m, infoString,
-		))
+		)
 	}
 }
 
@@ -69,34 +69,34 @@ func prettyMessageColor(m string, analysis int, depth int, t string) {
 		)
 	}
 	if t == "verifpal" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n",
 			" ", aurora.Green("Verifpal").Bold(), "!", m, infoString,
-		))
+		)
 	}
 	if t == "info" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n",
 			"     ", aurora.Blue("Info").Bold(), "!", m, infoString,
-		))
+		)
 	}
 	if t == "analysis" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n",
 			" ", aurora.Blue("Analysis").Bold(), "!", m, infoString,
-		))
+		)
 	}
 	if t == "deduction" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n",
 			"", aurora.Magenta("Deduction").Bold(), "!", m, infoString,
-		))
+		)
 	}
 	if t == "result" {
-		fmt.Fprint(os.Stdout, fmt.Sprintf(
+		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s%s\n",
 			"   ", aurora.Red("Result").Bold(), "!", m, infoString,
-		))
+		)
 	}
 }
 
@@ -235,6 +235,7 @@ func prettyQuery(query query) string {
 	return output
 }
 
+// PrettyPrint pretty-prints a Verifpal model based on an abstract representation obtained from ParseModel.
 func PrettyPrint(m *model) string {
 	var output string
 	output = fmt.Sprintf(

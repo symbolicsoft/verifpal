@@ -4,6 +4,7 @@
 
 package verifpal
 
+// Implement is supposed to implement Golang generation from Verifpal models. It does not exist yet.
 func Implement() {
 	errorCritical("this feature does not exist yet")
 }

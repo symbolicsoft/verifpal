@@ -8,13 +8,13 @@ import "fmt"
 
 func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
-		principals: principals,
-		constants:  []constant{},
-		assigned:   []value{},
-		creator:    []string{},
-		knownBy:    [][]map[string]string{},
+		principals:     principals,
+		constants:      []constant{},
+		assigned:       []value{},
+		creator:        []string{},
+		knownBy:        [][]map[string]string{},
+		unnamedCounter: 0,
 	}
-	_i := 0
 	g := constant{
 		name:        "g",
 		guard:       false,
@@ -55,220 +55,237 @@ func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
 			map[string]string{principal: principal},
 		)
 	}
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, blck := range m.blocks {
+		switch blck.kind {
 		case "principal":
-			for _, expression := range block.principal.expressions {
-				switch expression.kind {
+			for _, expr := range blck.principal.expressions {
+				switch expr.kind {
 				case "knows":
-					for _, c := range expression.constants {
-						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if i >= 0 {
-							d1 := valKnowledgeMap.constants[i].declaration
-							d2 := "knows"
-							q1 := valKnowledgeMap.constants[i].qualifier
-							q2 := expression.qualifier
-							fresh := valKnowledgeMap.constants[i].fresh
-							if d1 != d2 || q1 != q2 || fresh {
-								errorCritical(fmt.Sprintf(
-									"constant is known more than once and in different ways (%s)",
-									prettyConstant(c),
-								))
-							}
-							valKnowledgeMap.knownBy[i] = append(
-								valKnowledgeMap.knownBy[i],
-								map[string]string{block.principal.name: block.principal.name},
-							)
-						} else {
-							c = constant{
-								name:        c.name,
-								guard:       c.guard,
-								fresh:       false,
-								declaration: "knows",
-								qualifier:   expression.qualifier,
-							}
-							valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-							valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-								kind:     "constant",
-								constant: c,
-							})
-							valKnowledgeMap.creator = append(valKnowledgeMap.creator, block.principal.name)
-							valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-							l := len(valKnowledgeMap.constants) - 1
-							if expression.qualifier == "public" {
-								for _, principal := range principals {
-									if principal != block.principal.name {
-										valKnowledgeMap.knownBy[l] = append(
-											valKnowledgeMap.knownBy[l],
-											map[string]string{principal: principal},
-										)
-									}
-								}
-							}
-						}
-					}
+					constructKnowledgeMapRenderKnows(&valKnowledgeMap, &blck, &expr)
 				case "generates":
-					for _, c := range expression.constants {
-						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if i >= 0 {
-							errorCritical(fmt.Sprintf(
-								"generated constant already exists (%s)",
-								prettyConstant(c),
-							))
-						} else {
-							c = constant{
-								name:        c.name,
-								guard:       c.guard,
-								fresh:       true,
-								declaration: "generates",
-								qualifier:   "private",
-							}
-							valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-							valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-								kind:     "constant",
-								constant: c,
-							})
-							valKnowledgeMap.creator = append(valKnowledgeMap.creator, block.principal.name)
-							valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-						}
-					}
+					constructKnowledgeMapRenderGenerates(&valKnowledgeMap, &blck, &expr)
 				case "assignment":
-					constants := sanityAssignmentConstants(expression.right, []constant{}, &valKnowledgeMap)
-					switch expression.right.kind {
-					case "primitive":
-						prim := primitiveGet(expression.right.primitive.name)
-						if (len(expression.left) != prim.output) && (prim.output >= 0) {
-							plural := ""
-							output := fmt.Sprintf("%d", prim.output)
-							if len(expression.left) > 1 {
-								plural = "s"
-							}
-							if prim.output < 0 {
-								output = "at least 1"
-							}
-							errorCritical(fmt.Sprintf(
-								"primitive %s has %d output%s, expecting %s",
-								prim.name, len(expression.left), plural, output,
-							))
-						}
-						if expression.right.primitive.check {
-							if !prim.check {
-								errorCritical(fmt.Sprintf(
-									"primitive %s is checked but does not support checking",
-									prim.name,
-								))
-							}
-						}
-					}
-					for _, c := range constants {
-						i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if i >= 0 {
-							knows := false
-							if valKnowledgeMap.creator[i] == block.principal.name {
-								knows = true
-							}
-							for _, m := range valKnowledgeMap.knownBy[i] {
-								if _, ok := m[block.principal.name]; ok {
-									knows = true
-								}
-							}
-							if !knows {
-								errorCritical(fmt.Sprintf(
-									"%s is using constant (%s) despite not knowing it",
-									block.principal.name,
-									prettyConstant(c),
-								))
-							}
-						} else {
-							errorCritical(fmt.Sprintf(
-								"constant does not exist (%s)",
-								prettyConstant(c),
-							))
-						}
-					}
-					for i, c := range expression.left {
-						if c.name == "_" {
-							c.name = fmt.Sprintf("unnamed_%d", _i)
-							_i = _i + 1
-						}
-						ii := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-						if ii >= 0 {
-							errorCritical(fmt.Sprintf(
-								"constant assigned twice (%s)",
-								prettyConstant(c),
-							))
-						}
-						c = constant{
-							name:        c.name,
-							guard:       c.guard,
-							fresh:       false,
-							declaration: "assignment",
-							qualifier:   "private",
-						}
-						switch expression.right.kind {
-						case "primitive":
-							expression.right.primitive.output = i
-						}
-						valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-						valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expression.right)
-						valKnowledgeMap.creator = append(valKnowledgeMap.creator, block.principal.name)
-						valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-					}
+					constructKnowledgeMapRenderAssignment(&valKnowledgeMap, &blck, &expr)
 				}
 			}
 		case "message":
-			for _, c := range block.message.constants {
-				i := sanityGetKnowledgeMapIndexFromConstant(&valKnowledgeMap, c)
-				if i >= 0 {
-					c = valKnowledgeMap.constants[i]
-					senderKnows := false
-					recipientKnows := false
-					if valKnowledgeMap.creator[i] == block.message.sender {
-						senderKnows = true
-					}
-					for _, m := range valKnowledgeMap.knownBy[i] {
-						if _, ok := m[block.message.sender]; ok {
-							senderKnows = true
-						}
-					}
-					if valKnowledgeMap.creator[i] == block.message.recipient {
-						recipientKnows = true
-					}
-					for _, m := range valKnowledgeMap.knownBy[i] {
-						if _, ok := m[block.message.recipient]; ok {
-							recipientKnows = true
-						}
-					}
-					if !senderKnows {
-						errorCritical(fmt.Sprintf(
-							"%s is sending constant (%s) despite not knowing it",
-							block.message.sender,
-							prettyConstant(c),
-						))
-					} else if recipientKnows {
-						errorCritical(fmt.Sprintf(
-							"%s is receiving constant (%s) despite already knowing it",
-							block.message.recipient,
-							prettyConstant(c),
-						))
-					} else {
-						valKnowledgeMap.knownBy[i] = append(
-							valKnowledgeMap.knownBy[i],
-							map[string]string{block.message.recipient: block.message.sender},
-						)
-					}
-				} else {
-					errorCritical(fmt.Sprintf(
-						"%s sends unknown constant to %s (%s)",
-						block.message.sender,
-						block.message.recipient,
-						prettyConstant(c),
-					))
+			constructKnowledgeMapRenderMessage(&valKnowledgeMap, &blck)
+		}
+	}
+	return &valKnowledgeMap
+}
+
+func constructKnowledgeMapRenderKnows(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+	for _, c := range expr.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if i >= 0 {
+			d1 := valKnowledgeMap.constants[i].declaration
+			d2 := "knows"
+			q1 := valKnowledgeMap.constants[i].qualifier
+			q2 := expr.qualifier
+			fresh := valKnowledgeMap.constants[i].fresh
+			if d1 != d2 || q1 != q2 || fresh {
+				errorCritical(fmt.Sprintf(
+					"constant is known more than once and in different ways (%s)",
+					prettyConstant(c),
+				))
+			}
+			valKnowledgeMap.knownBy[i] = append(
+				valKnowledgeMap.knownBy[i],
+				map[string]string{blck.principal.name: blck.principal.name},
+			)
+		} else {
+			c = constant{
+				name:        c.name,
+				guard:       c.guard,
+				fresh:       false,
+				declaration: "knows",
+				qualifier:   expr.qualifier,
+			}
+			valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
+			valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
+				kind:     "constant",
+				constant: c,
+			})
+			valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
+			valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+			l := len(valKnowledgeMap.constants) - 1
+			if expr.qualifier != "public" {
+				continue
+			}
+			for _, principal := range valKnowledgeMap.principals {
+				if principal != blck.principal.name {
+					valKnowledgeMap.knownBy[l] = append(
+						valKnowledgeMap.knownBy[l],
+						map[string]string{principal: principal},
+					)
 				}
 			}
 		}
 	}
-	return &valKnowledgeMap
+}
+
+func constructKnowledgeMapRenderGenerates(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+	for _, c := range expr.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if i >= 0 {
+			errorCritical(fmt.Sprintf(
+				"generated constant already exists (%s)",
+				prettyConstant(c),
+			))
+			continue
+		}
+		c = constant{
+			name:        c.name,
+			guard:       c.guard,
+			fresh:       true,
+			declaration: "generates",
+			qualifier:   "private",
+		}
+		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
+		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
+			kind:     "constant",
+			constant: c,
+		})
+		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
+		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
+	}
+}
+
+func constructKnowledgeMapRenderAssignment(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
+	switch expr.right.kind {
+	case "primitive":
+		prim := primitiveGet(expr.right.primitive.name)
+		if (len(expr.left) != prim.output) && (prim.output >= 0) {
+			plural := ""
+			output := fmt.Sprintf("%d", prim.output)
+			if len(expr.left) > 1 {
+				plural = "s"
+			}
+			if prim.output < 0 {
+				output = "at least 1"
+			}
+			errorCritical(fmt.Sprintf(
+				"primitive %s has %d output%s, expecting %s",
+				prim.name, len(expr.left), plural, output,
+			))
+		}
+		if expr.right.primitive.check {
+			if !prim.check {
+				errorCritical(fmt.Sprintf(
+					"primitive %s is checked but does not support checking",
+					prim.name,
+				))
+			}
+		}
+	}
+	for _, c := range constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if i >= 0 {
+			knows := false
+			if valKnowledgeMap.creator[i] == blck.principal.name {
+				knows = true
+			}
+			for _, m := range valKnowledgeMap.knownBy[i] {
+				if _, ok := m[blck.principal.name]; ok {
+					knows = true
+				}
+			}
+			if !knows {
+				errorCritical(fmt.Sprintf(
+					"%s is using constant (%s) despite not knowing it",
+					blck.principal.name,
+					prettyConstant(c),
+				))
+			}
+		} else {
+			errorCritical(fmt.Sprintf(
+				"constant does not exist (%s)",
+				prettyConstant(c),
+			))
+		}
+	}
+	for i, c := range expr.left {
+		if c.name == "_" {
+			c.name = fmt.Sprintf("unnamed_%d", valKnowledgeMap.unnamedCounter)
+			valKnowledgeMap.unnamedCounter = valKnowledgeMap.unnamedCounter + 1
+		}
+		ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if ii >= 0 {
+			errorCritical(fmt.Sprintf(
+				"constant assigned twice (%s)",
+				prettyConstant(c),
+			))
+		}
+		c = constant{
+			name:        c.name,
+			guard:       c.guard,
+			fresh:       false,
+			declaration: "assignment",
+			qualifier:   "private",
+		}
+		switch expr.right.kind {
+		case "primitive":
+			expr.right.primitive.output = i
+		}
+		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
+		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expr.right)
+		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
+		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
+	}
+}
+
+func constructKnowledgeMapRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
+	for _, c := range blck.message.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if i >= 0 {
+			c = valKnowledgeMap.constants[i]
+			senderKnows := false
+			recipientKnows := false
+			if valKnowledgeMap.creator[i] == blck.message.sender {
+				senderKnows = true
+			}
+			for _, m := range valKnowledgeMap.knownBy[i] {
+				if _, ok := m[blck.message.sender]; ok {
+					senderKnows = true
+				}
+			}
+			if valKnowledgeMap.creator[i] == blck.message.recipient {
+				recipientKnows = true
+			}
+			for _, m := range valKnowledgeMap.knownBy[i] {
+				if _, ok := m[blck.message.recipient]; ok {
+					recipientKnows = true
+				}
+			}
+			if !senderKnows {
+				errorCritical(fmt.Sprintf(
+					"%s is sending constant (%s) despite not knowing it",
+					blck.message.sender,
+					prettyConstant(c),
+				))
+			} else if recipientKnows {
+				errorCritical(fmt.Sprintf(
+					"%s is receiving constant (%s) despite already knowing it",
+					blck.message.recipient,
+					prettyConstant(c),
+				))
+			} else {
+				valKnowledgeMap.knownBy[i] = append(
+					valKnowledgeMap.knownBy[i],
+					map[string]string{blck.message.recipient: blck.message.sender},
+				)
+			}
+		} else {
+			errorCritical(fmt.Sprintf(
+				"%s sends unknown constant to %s (%s)",
+				blck.message.sender,
+				blck.message.recipient,
+				prettyConstant(c),
+			))
+		}
+	}
 }
 
 func constructPrincipalStates(m *model, valKnowledgeMap *knowledgeMap) []*principalState {
@@ -300,12 +317,13 @@ func constructPrincipalStates(m *model, valKnowledgeMap *knowledgeMap) []*princi
 					knows = true
 				}
 			}
-			for _, block := range m.blocks {
-				switch block.kind {
+			for _, blck := range m.blocks {
+				switch blck.kind {
 				case "message":
-					for _, cc := range block.message.constants {
+					for _, cc := range blck.message.constants {
 						if ((c.name == cc.name) && cc.guard) &&
-							((block.message.recipient == principal) || (valKnowledgeMap.creator[i] == principal)) {
+							((blck.message.recipient == principal) ||
+								(valKnowledgeMap.creator[i] == principal)) {
 							guard = true
 						}
 					}
@@ -368,11 +386,11 @@ func constructAttackerState(active bool, m *model, valKnowledgeMap *knowledgeMap
 		conceivable: []value{},
 		mutatedTo:   [][]string{},
 	}
-	constructAttackerStatePopulate(m, valKnowledgeMap, verbose, &valAttackerState)
+	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerState, verbose)
 	return &valAttackerState
 }
 
-func constructAttackerStatePopulate(m *model, valKnowledgeMap *knowledgeMap, verbose bool, valAttackerState *attackerState) {
+func constructAttackerStatePopulate(m *model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, verbose bool) {
 	for _, c := range valKnowledgeMap.constants {
 		if c.qualifier == "public" {
 			v := value{
@@ -386,31 +404,35 @@ func constructAttackerStatePopulate(m *model, valKnowledgeMap *knowledgeMap, ver
 			}
 		}
 	}
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, blck := range m.blocks {
+		switch blck.kind {
 		case "message":
-			for _, c := range block.message.constants {
-				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-				v := value{
-					kind:     "constant",
-					constant: valKnowledgeMap.constants[i],
+			constructAttackerStateRenderMessage(valKnowledgeMap, valAttackerState, &blck, verbose)
+		}
+	}
+}
+
+func constructAttackerStateRenderMessage(valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, blck *block, verbose bool) {
+	for _, c := range blck.message.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		v := value{
+			kind:     "constant",
+			constant: valKnowledgeMap.constants[i],
+		}
+		if valKnowledgeMap.constants[i].qualifier == "private" {
+			ii := sanityExactSameValueInValues(v, &valAttackerState.known)
+			if ii >= 0 {
+				valAttackerState.wire[ii] = true
+			} else {
+				if verbose {
+					prettyMessage(fmt.Sprintf(
+						"%s has sent %s to %s, rendering it public",
+						blck.message.sender, prettyConstant(c), blck.message.recipient,
+					), 0, 0, "analysis")
 				}
-				if valKnowledgeMap.constants[i].qualifier == "private" {
-					ii := sanityExactSameValueInValues(v, &valAttackerState.known)
-					if ii >= 0 {
-						valAttackerState.wire[ii] = true
-					} else {
-						if verbose {
-							prettyMessage(fmt.Sprintf(
-								"%s has sent %s to %s, rendering it public",
-								block.message.sender, prettyConstant(c), block.message.recipient,
-							), 0, 0, "analysis")
-						}
-						valAttackerState.known = append(valAttackerState.known, v)
-						valAttackerState.wire = append(valAttackerState.wire, true)
-						valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
-					}
-				}
+				valAttackerState.known = append(valAttackerState.known, v)
+				valAttackerState.wire = append(valAttackerState.wire, true)
+				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
 			}
 		}
 	}
