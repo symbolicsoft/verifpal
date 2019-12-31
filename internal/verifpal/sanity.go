@@ -39,7 +39,9 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 				right.primitive.name,
 			))
 		}
-		if (len(right.primitive.arguments) == 0) || (len(right.primitive.arguments) > 5) || ((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
+		if (len(right.primitive.arguments) == 0) ||
+			(len(right.primitive.arguments) > 5) ||
+			((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
 			plural := ""
 			arity := fmt.Sprintf("%d", p.arity)
 			if len(right.primitive.arguments) > 1 {
@@ -319,10 +321,12 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState *prin
 	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
 		e1Base := sanityDeconstructEquationValues(e1Values[0].equation, valPrincipalState)
 		e2Base := sanityDeconstructEquationValues(e2Values[0].equation, valPrincipalState)
-		if sanityEquivalentValues(e1Base[1], e2Values[1], valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Base[1], valPrincipalState) {
+		if sanityEquivalentValues(e1Base[1], e2Values[1], valPrincipalState) &&
+			sanityEquivalentValues(e1Values[1], e2Base[1], valPrincipalState) {
 			return true
 		}
-		if sanityEquivalentValues(e1Base[1], e2Base[1], valPrincipalState) && sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
+		if sanityEquivalentValues(e1Base[1], e2Base[1], valPrincipalState) &&
+			sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
 			return true
 		}
 		return false
@@ -848,9 +852,17 @@ func sanityConstantIsUsedByPrincipal(valKnowledgeMap *knowledgeMap, name string,
 func sanityResolveAllPrincipalStateValues(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) *principalState {
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 	for i := range valPrincipalState.assigned {
-		valPrincipalStateClone.assigned[i], _ = sanityResolveInternalValuesFromPrincipalState(valPrincipalState.assigned[i], i, valPrincipalState, sanityShouldResolveToBeforeMutate(i, valPrincipalState))
-		valPrincipalStateClone.beforeRewrite[i], _ = sanityResolveInternalValuesFromPrincipalState(valPrincipalState.beforeRewrite[i], i, valPrincipalState, sanityShouldResolveToBeforeMutate(i, valPrincipalState))
-		valPrincipalStateClone.beforeMutate[i], _ = sanityResolveInternalValuesFromKnowledgeMap(valPrincipalState.beforeMutate[i], valKnowledgeMap)
+		valPrincipalStateClone.assigned[i], _ = sanityResolveInternalValuesFromPrincipalState(
+			valPrincipalState.assigned[i], i, valPrincipalState,
+			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+		)
+		valPrincipalStateClone.beforeRewrite[i], _ = sanityResolveInternalValuesFromPrincipalState(
+			valPrincipalState.beforeRewrite[i], i, valPrincipalState,
+			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+		)
+		valPrincipalStateClone.beforeMutate[i], _ = sanityResolveInternalValuesFromKnowledgeMap(
+			valPrincipalState.beforeMutate[i], valKnowledgeMap,
+		)
 	}
 	return valPrincipalStateClone
 }
