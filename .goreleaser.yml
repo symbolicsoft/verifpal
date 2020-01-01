@@ -40,6 +40,6 @@ gitea_urls:
   skip_tls_verify: false
 release:
   gitea:
-    owner: nadim
-    name: verifpal/verifpal
+    owner: verifpal
+    name: verifpal
   disable: false
