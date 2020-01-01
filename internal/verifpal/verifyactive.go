@@ -4,11 +4,6 @@
 
 package verifpal
 
-import (
-	"fmt"
-	"os"
-)
-
 func verifyActive(
 	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
@@ -100,7 +95,7 @@ func verifyActiveScanCombination(
 		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
 		verifyResults, analysis,
 	)
-	valAttackerState = verifyActiveClearFreshValues(m, valKnowledgeMap, valAttackerState)
+	// valAttackerState = verifyActiveClearFreshValues(m, valKnowledgeMap, valAttackerState)
 	analysis = verifyActiveIncrementAnalysis(analysis)
 	prettyAnalysis(analysis, stage)
 	if len(*verifyResults) == len(m.queries) {
@@ -241,14 +236,13 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			if stage < 2 {
-				continue
-			}
-			l := len(valReplacementMap.replacements) - 1
-			injectants := inject(a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
-			for _, aa := range *injectants {
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			if stage > 1 {
+				l := len(valReplacementMap.replacements) - 1
+				injectants := inject(a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
+				for _, aa := range *injectants {
+					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+					}
 				}
 			}
 		case "equation":
@@ -296,16 +290,6 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	t1 := sanityGetPrincipalStateIndexFromConstant(valPrincipalStateWithReplacements, constant{
-		name: "m2",
-	})
-	if prettyValue(valPrincipalStateWithReplacements.assigned[t1]) == "G^nil" {
-		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
-		for i, x := range valPrincipalStateWithReplacements.constants {
-			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
-		}
-		fmt.Fprintln(os.Stdout, "")
-	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
 		if !p.check {

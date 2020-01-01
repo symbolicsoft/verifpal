@@ -34,7 +34,7 @@ Alice -> Bob: ephemeralAPub, nMacAlice
 // 2. Server Hello
 
 principal Bob[
-	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)
+	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)?
 	nMacBob = MAC(n, ephemeralBPub)
 ]
 
@@ -43,7 +43,7 @@ Bob -> Alice: ephemeralBPub, nMacBob
 // 3. Client Authenticate
 
 principal Alice[
-	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)
+	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)?
 	ephemeralSecretAlice = ephemeralBPub^ephemeralA
 	longTermSecretAlice = longTermBPub^ephemeralA
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)
@@ -61,9 +61,9 @@ principal Bob[
 	ephemeralSecretBob = ephemeralAPub^ephemeralB
 	longTermSecretBob = ephemeralAPub^longTermB
 	masterSecret1Bob = HASH(n, ephemeralSecretBob, longTermSecretBob)
-	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, nil)
-	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, nil)
-	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)
+	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, nil)?
+	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, nil)?
+	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)?
 	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
 ]
 
@@ -81,8 +81,8 @@ Bob -> Alice: secretBox1Bob
 
 principal Alice[
 	knows private m1
-	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, nil)
-	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)
+	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, nil)?
+	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)?
 	secretBoxM1Alice = AEAD_ENC(masterSecret2Alice, m1, nil)
 ]
 
@@ -90,14 +90,14 @@ Alice -> Bob: secretBoxM1Alice
 
 principal Bob[
 	knows private m2
-	m1Bob = AEAD_DEC(masterSecret2Bob, secretBoxM1Alice, nil)
+	m1Bob = AEAD_DEC(masterSecret2Bob, secretBoxM1Alice, nil)?
 	secretBoxM2Bob = AEAD_ENC(masterSecret2Bob, m2, nil)
 ]
 
 Bob -> Alice: secretBoxM2Bob
 
 principal Alice [
-	m2Alice = AEAD_DEC(masterSecret2Alice, secretBoxM2Bob, nil)
+	m2Alice = AEAD_DEC(masterSecret2Alice, secretBoxM2Bob, nil)?
 ]
 
 queries[

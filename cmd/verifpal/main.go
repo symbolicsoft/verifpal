@@ -9,20 +9,18 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 
 	"verifpal.com/internal/verifpal"
 )
 
 var (
 	version = "dev"
-	commit  = "none"
-	date    = "unknown"
+	commit  = "00000000"
 )
 
 func main() {
-	fmt.Fprintf(os.Stdout, "%s%s%s%s%s\n%s\n\n",
-		"Verifpal ", version, " (", runtime.Version(), ") — https://verifpal.com",
+	fmt.Fprintf(os.Stdout, "Verifpal %s (%s) - %s\n%s\n\n",
+		version, commit[0:8], "https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
 	)
 	if len(os.Args) != 3 {

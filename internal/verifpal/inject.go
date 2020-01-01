@@ -62,12 +62,23 @@ func injectValueRules(k value, arg int, p primitive, valPrincipalState *principa
 	return true
 }
 
-func injectPrimitive(
-	p primitive, valPrincipalState *principalState,
-	valAttackerState *attackerState, includeHashes bool,
-) []value {
-	var injectants []value
-	kinjectants := make([][]value, len(p.arguments))
+func injectPrimitiveSkeleton(p primitive) primitive {
+	skeleton := primitive{
+		name:      p.name,
+		arguments: []value{},
+		output:    p.output,
+		check:     false,
+	}
+	g := value{
+		kind: "constant",
+		constant: constant{
+			name:        "g",
+			guard:       false,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   "public",
+		},
+	}
 	n := value{
 		kind: "constant",
 		constant: constant{
@@ -78,19 +89,50 @@ func injectPrimitive(
 			qualifier:   "public",
 		},
 	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name:      p.name,
-			arguments: []value{},
-			output:    p.output,
-			check:     p.check,
-		},
+	for _, a := range p.arguments {
+		switch a.kind {
+		case "constant":
+			skeleton.arguments = append(skeleton.arguments, n)
+		case "primitive":
+			aa := value{
+				kind:      "primitive",
+				primitive: injectPrimitiveSkeleton(a.primitive),
+			}
+			skeleton.arguments = append(skeleton.arguments, aa)
+		case "equation":
+			aa := value{
+				kind: "equation",
+				equation: equation{
+					values: []value{g},
+				},
+			}
+			if len(a.equation.values) == 2 {
+				aa.equation.values = append(aa.equation.values, n)
+			} else if len(a.equation.values) == 3 {
+				aa.equation.values = append(aa.equation.values, n)
+				aa.equation.values = append(aa.equation.values, n)
+			}
+			skeleton.arguments = append(skeleton.arguments, aa)
+		}
 	}
-	for range p.arguments {
-		aa.primitive.arguments = append(aa.primitive.arguments, n)
+	return skeleton
+}
+
+func injectPrimitive(
+	p primitive, valPrincipalState *principalState,
+	valAttackerState *attackerState, includeHashes bool,
+) []value {
+	var injectants []value
+	skeleton := value{
+		kind:      "primitive",
+		primitive: injectPrimitiveSkeleton(p),
 	}
-	injectants = append(injectants, aa)
+	if sanityExactSameValueInValues(skeleton, &valAttackerState.known) < 0 {
+		valAttackerState.known = append(valAttackerState.known, skeleton)
+		valAttackerState.wire = append(valAttackerState.wire, false)
+		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+	}
+	kinjectants := make([][]value, len(p.arguments))
 	for arg := range p.arguments {
 		for _, k := range valAttackerState.known {
 			switch k.kind {
