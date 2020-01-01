@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate goversioninfo -64=true -icon=../../assets/windows/icon.ico
+//go:generate goversioninfo -64=true -icon=icon.ico
 
 package main
 
@@ -14,11 +14,15 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-const mainVersion = "0.7.8"
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	fmt.Fprintf(os.Stdout, "%s%s%s%s%s\n%s\n\n",
-		"Verifpal ", mainVersion, " (", runtime.Version(), ") — https://verifpal.com",
+		"Verifpal ", version, " (", runtime.Version(), ") — https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
 	)
 	if len(os.Args) != 3 {

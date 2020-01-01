@@ -4,6 +4,11 @@
 
 package verifpal
 
+import (
+	"fmt"
+	"os"
+)
+
 func verifyActive(
 	m *model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
@@ -287,6 +292,15 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
+	if false {
+		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
+		for i, x := range valPrincipalStateWithReplacements.constants {
+			if valPrincipalStateWithReplacements.wasMutated[i] {
+				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
+			}
+		}
+		fmt.Fprintln(os.Stdout, "")
+	}
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
 		if !p.check {

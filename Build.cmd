@@ -14,28 +14,26 @@
 @echo|set /p="[Verifpal] Generating parser..."
 @del internal\verifpal\parser.go
 @pigeon -o internal\verifpal\parser.go api\grammar\verifpal.peg
+@gofmt -s -w internal\verifpal\parser.go
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@copy assets\windows\versioninfo.json cmd\verifpal\versioninfo.json >nul
-@cd cmd\verifpal
-@go generate
-@cd ..\..
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\windows verifpal.com/...
-@del cmd\verifpal\versioninfo.json cmd\verifpal\resource.syso
+@go generate ./...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/...
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
 @setx GOOS "linux" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\linux verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
 @setx GOOS "darwin" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\bin\macos verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/...
 @echo    OK
 
 @echo|set /p="[Verifpal] Cleaning up..."
+@del cmd\verifpal\resource.syso
 @setx GOOS "windows" >nul
 @echo                    OK
 

@@ -2,11 +2,7 @@
 # SPDX-License-Identifier: CC0-1.0
 
 # Verifpal
-verifpal.exe
-build/bin/windows/verifpal
-build/bin/linux/verifpal
-build/bin/macos/verifpal
-*.zip
+dist
 
 # Binaries for programs and plugins
 *.exe
