@@ -5,40 +5,31 @@
 package verifpal
 
 func inject(
-	p primitive, rootIndex int, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-	includeHashes bool,
-) {
-	pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
-		kind: "primitive", primitive: p,
-	}, rootIndex, valPrincipalState, false)
-	p = pp.primitive
+	p primitive, isRootValue bool, rootIndex int, valPrincipalState *principalState,
+	valAttackerState *attackerState, includeHashes bool,
+) *[]value {
+	var injectants []value
+	if isRootValue {
+		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
+			kind: "primitive", primitive: p,
+		}, rootIndex, valPrincipalState, false)
+		p = pp.primitive
+	}
 	switch p.name {
 	case "AEAD_ENC":
-		injectAEADENC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 	case "ENC":
-		injectENC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 	case "SIGN":
-		injectSIGN(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 	case "MAC":
-		injectMAC(p, valPrincipalState, valReplacementMap, valAttackerState)
+		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 	case "HASH":
-		if !includeHashes {
-			return
-		}
-		switch len(p.arguments) {
-		case 1:
-			injectHASH1(p, valPrincipalState, valReplacementMap, valAttackerState)
-		case 2:
-			injectHASH2(p, valPrincipalState, valReplacementMap, valAttackerState)
-		case 3:
-			injectHASH3(p, valPrincipalState, valReplacementMap, valAttackerState)
-		case 4:
-			injectHASH4(p, valPrincipalState, valReplacementMap, valAttackerState)
-		case 5:
-			injectHASH5(p, valPrincipalState, valReplacementMap, valAttackerState)
+		if includeHashes {
+			injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 		}
 	}
+	return &injectants
 }
 
 func injectValueRules(k value, arg int, p primitive, valPrincipalState *principalState) bool {
@@ -71,11 +62,12 @@ func injectValueRules(k value, arg int, p primitive, valPrincipalState *principa
 	return true
 }
 
-func injectAEADENC(
+func injectPrimitive(
 	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
+	valAttackerState *attackerState, includeHashes bool,
+) []value {
+	var injectants []value
+	kinjectants := make([][]value, len(p.arguments))
 	n := value{
 		kind: "constant",
 		constant: constant{
@@ -89,534 +81,138 @@ func injectAEADENC(
 	aa := value{
 		kind: "primitive",
 		primitive: primitive{
-			name: "AEAD_ENC",
-			arguments: []value{
-				n,
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
+			name:      p.name,
+			arguments: []value{},
+			output:    p.output,
+			check:     p.check,
 		},
 	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+	for range p.arguments {
+		aa.primitive.arguments = append(aa.primitive.arguments, n)
 	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
+	injectants = append(injectants, aa)
+	for arg := range p.arguments {
+		for _, k := range valAttackerState.known {
+			switch k.kind {
 			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
+				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+				k = valPrincipalState.beforeMutate[i]
 			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			for iii, kkk := range valAttackerState.known {
-				switch kkk.kind {
+			if injectValueRules(k, arg, p, valPrincipalState) {
+				switch k.kind {
 				case "constant":
-					kkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkk.constant)]
-				}
-				if !injectValueRules(kkk, 2, p, valPrincipalState) {
-					continue
-				}
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: "AEAD_ENC",
-						arguments: []value{
-							valAttackerState.known[i],
-							valAttackerState.known[ii],
-							valAttackerState.known[iii],
-						},
-						output: p.output,
-						check:  p.check,
-					},
-				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+					kinjectants[arg] = append(kinjectants[arg], k)
+				case "primitive":
+					kprims := inject(k.primitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
+					kinjectants[arg] = append(kinjectants[arg], *kprims...)
+				case "equation":
+					kinjectants[arg] = append(kinjectants[arg], k)
 				}
 			}
 		}
 	}
+	switch len(p.arguments) {
+	case 1:
+		injectLoop1(p, &injectants, &kinjectants)
+	case 2:
+		injectLoop2(p, &injectants, &kinjectants)
+	case 3:
+		injectLoop3(p, &injectants, &kinjectants)
+	case 4:
+		injectLoop4(p, &injectants, &kinjectants)
+	case 5:
+		injectLoop5(p, &injectants, &kinjectants)
+	}
+	return injectants
 }
 
-func injectENC(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "ENC",
-			arguments: []value{
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			aa := value{
-				kind: "primitive",
-				primitive: primitive{
-					name: "ENC",
-					arguments: []value{
-						valAttackerState.known[i],
-						valAttackerState.known[ii],
-					},
-					output: p.output,
-					check:  p.check,
-				},
-			}
-			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-			}
-		}
-	}
-}
-
-func injectSIGN(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "SIGN",
-			arguments: []value{
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			aa := value{
-				kind: "primitive",
-				primitive: primitive{
-					name: "SIGN",
-					arguments: []value{
-						valAttackerState.known[i],
-						valAttackerState.known[ii],
-					},
-					output: p.output,
-					check:  p.check,
-				},
-			}
-			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-			}
-		}
-	}
-}
-
-func injectMAC(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "MAC",
-			arguments: []value{
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			aa := value{
-				kind: "primitive",
-				primitive: primitive{
-					name: "MAC",
-					arguments: []value{
-						valAttackerState.known[i],
-						valAttackerState.known[ii],
-					},
-					output: p.output,
-					check:  p.check,
-				},
-			}
-			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-			}
-		}
-	}
-}
-
-func injectHASH1(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "HASH",
-			arguments: []value{
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
+func injectLoop1(p primitive, injectants *[]value, kinjectants *[][]value) {
+	for i := range (*kinjectants)[0] {
 		aa := value{
 			kind: "primitive",
 			primitive: primitive{
-				name: "HASH",
+				name: p.name,
 				arguments: []value{
-					valAttackerState.known[i],
+					(*kinjectants)[0][i],
 				},
 				output: p.output,
 				check:  p.check,
 			},
 		}
-		if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-			valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+		if sanityExactSameValueInValues(aa, injectants) < 0 {
+			*injectants = append(*injectants, aa)
 		}
 	}
 }
 
-func injectHASH2(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "HASH",
-			arguments: []value{
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
+func injectLoop2(p primitive, injectants *[]value, kinjectants *[][]value) {
+	for i := range (*kinjectants)[0] {
+		for ii := range (*kinjectants)[1] {
 			aa := value{
 				kind: "primitive",
 				primitive: primitive{
-					name: "HASH",
+					name: p.name,
 					arguments: []value{
-						valAttackerState.known[i],
-						valAttackerState.known[ii],
+						(*kinjectants)[0][i],
+						(*kinjectants)[1][ii],
 					},
 					output: p.output,
 					check:  p.check,
 				},
 			}
-			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			if sanityExactSameValueInValues(aa, injectants) < 0 {
+				*injectants = append(*injectants, aa)
 			}
 		}
 	}
 }
 
-func injectHASH3(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "HASH",
-			arguments: []value{
-				n,
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			for iii, kkk := range valAttackerState.known {
-				switch kkk.kind {
-				case "constant":
-					kkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkk.constant)]
-				}
-				if !injectValueRules(kkk, 2, p, valPrincipalState) {
-					continue
-				}
+func injectLoop3(p primitive, injectants *[]value, kinjectants *[][]value) {
+	for i := range (*kinjectants)[0] {
+		for ii := range (*kinjectants)[1] {
+			for iii := range (*kinjectants)[2] {
 				aa := value{
 					kind: "primitive",
 					primitive: primitive{
-						name: "HASH",
+						name: p.name,
 						arguments: []value{
-							valAttackerState.known[i],
-							valAttackerState.known[ii],
-							valAttackerState.known[iii],
+							(*kinjectants)[0][i],
+							(*kinjectants)[1][ii],
+							(*kinjectants)[2][iii],
 						},
 						output: p.output,
 						check:  p.check,
 					},
 				}
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				if sanityExactSameValueInValues(aa, injectants) < 0 {
+					*injectants = append(*injectants, aa)
 				}
 			}
 		}
 	}
 }
 
-func injectHASH4(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "HASH",
-			arguments: []value{
-				n,
-				n,
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			for iii, kkk := range valAttackerState.known {
-				switch kkk.kind {
-				case "constant":
-					kkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkk.constant)]
-				}
-				if !injectValueRules(kkk, 2, p, valPrincipalState) {
-					continue
-				}
-				for iiii, kkkk := range valAttackerState.known {
-					switch kkkk.kind {
-					case "constant":
-						kkkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkkk.constant)]
-					}
-					if !injectValueRules(kkkk, 3, p, valPrincipalState) {
-						continue
-					}
+func injectLoop4(p primitive, injectants *[]value, kinjectants *[][]value) {
+	for i := range (*kinjectants)[0] {
+		for ii := range (*kinjectants)[1] {
+			for iii := range (*kinjectants)[2] {
+				for iiii := range (*kinjectants)[3] {
 					aa := value{
 						kind: "primitive",
 						primitive: primitive{
-							name: "HASH",
+							name: p.name,
 							arguments: []value{
-								valAttackerState.known[i],
-								valAttackerState.known[ii],
-								valAttackerState.known[iii],
-								valAttackerState.known[iiii],
+								(*kinjectants)[0][i],
+								(*kinjectants)[1][ii],
+								(*kinjectants)[2][iii],
+								(*kinjectants)[3][iiii],
 							},
 							output: p.output,
 							check:  p.check,
 						},
 					}
-					if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-						valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+					if sanityExactSameValueInValues(aa, injectants) < 0 {
+						*injectants = append(*injectants, aa)
 					}
 				}
 			}
@@ -624,96 +220,29 @@ func injectHASH4(
 	}
 }
 
-func injectHASH5(
-	p primitive, valPrincipalState *principalState,
-	valReplacementMap *replacementMap, valAttackerState *attackerState,
-) {
-	l := len(valReplacementMap.replacements) - 1
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	aa := value{
-		kind: "primitive",
-		primitive: primitive{
-			name: "HASH",
-			arguments: []value{
-				n,
-				n,
-				n,
-				n,
-				n,
-			},
-			output: p.output,
-			check:  p.check,
-		},
-	}
-	if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-		valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-	}
-	for i, k := range valAttackerState.known {
-		switch k.kind {
-		case "constant":
-			k = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)]
-		}
-		if !injectValueRules(k, 0, p, valPrincipalState) {
-			continue
-		}
-		for ii, kk := range valAttackerState.known {
-			switch kk.kind {
-			case "constant":
-				kk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kk.constant)]
-			}
-			if !injectValueRules(kk, 1, p, valPrincipalState) {
-				continue
-			}
-			for iii, kkk := range valAttackerState.known {
-				switch kkk.kind {
-				case "constant":
-					kkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkk.constant)]
-				}
-				if !injectValueRules(kkk, 2, p, valPrincipalState) {
-					continue
-				}
-				for iiii, kkkk := range valAttackerState.known {
-					switch kkkk.kind {
-					case "constant":
-						kkkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkkk.constant)]
-					}
-					if !injectValueRules(kkkk, 3, p, valPrincipalState) {
-						continue
-					}
-					for iiiii, kkkkk := range valAttackerState.known {
-						switch kkkkk.kind {
-						case "constant":
-							kkkkk = valPrincipalState.beforeMutate[sanityGetPrincipalStateIndexFromConstant(valPrincipalState, kkkkk.constant)]
-						}
-						if !injectValueRules(kkkkk, 4, p, valPrincipalState) {
-							continue
-						}
+func injectLoop5(p primitive, injectants *[]value, kinjectants *[][]value) {
+	for i := range (*kinjectants)[0] {
+		for ii := range (*kinjectants)[1] {
+			for iii := range (*kinjectants)[2] {
+				for iiii := range (*kinjectants)[3] {
+					for iiiii := range (*kinjectants)[4] {
 						aa := value{
 							kind: "primitive",
 							primitive: primitive{
-								name: "HASH",
+								name: p.name,
 								arguments: []value{
-									valAttackerState.known[i],
-									valAttackerState.known[ii],
-									valAttackerState.known[iii],
-									valAttackerState.known[iiii],
-									valAttackerState.known[iiiii],
+									(*kinjectants)[0][i],
+									(*kinjectants)[1][ii],
+									(*kinjectants)[2][iii],
+									(*kinjectants)[3][iiii],
+									(*kinjectants)[4][iiiii],
 								},
 								output: p.output,
 								check:  p.check,
 							},
 						}
-						if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-							valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+						if sanityExactSameValueInValues(aa, injectants) < 0 {
+							*injectants = append(*injectants, aa)
 						}
 					}
 				}

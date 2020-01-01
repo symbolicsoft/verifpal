@@ -241,11 +241,15 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			switch stage {
-			case 2:
-				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState, false)
-			case 3:
-				inject(a.primitive, ii, valPrincipalState, &valReplacementMap, valAttackerState, true)
+			if stage < 2 {
+				continue
+			}
+			l := len(valReplacementMap.replacements) - 1
+			injectants := inject(a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
+			for _, aa := range *injectants {
+				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+				}
 			}
 		case "equation":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
@@ -292,12 +296,13 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
-	if false {
+	t1 := sanityGetPrincipalStateIndexFromConstant(valPrincipalStateWithReplacements, constant{
+		name: "m2",
+	})
+	if prettyValue(valPrincipalStateWithReplacements.assigned[t1]) == "G^nil" {
 		fmt.Fprintln(os.Stdout, valPrincipalStateWithReplacements.name)
 		for i, x := range valPrincipalStateWithReplacements.constants {
-			if valPrincipalStateWithReplacements.wasMutated[i] {
-				fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
-			}
+			fmt.Fprintln(os.Stdout, x.name+": "+prettyValue(valPrincipalStateWithReplacements.assigned[i]))
 		}
 		fmt.Fprintln(os.Stdout, "")
 	}
