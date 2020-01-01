@@ -1,3 +1,4 @@
+project_name: verifpal
 before:
   hooks:
     - go generate ./...
@@ -9,7 +10,6 @@ builds:
       - windows
       - linux
       - darwin
-      - freebsd
     goarch:
       - amd64
 archives:
@@ -42,4 +42,5 @@ release:
   gitea:
     owner: verifpal
     name: verifpal
-  disable: false
+  name_template: "Verifpal {{.Version}}"
+  prerelease: true
