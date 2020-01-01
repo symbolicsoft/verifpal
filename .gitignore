@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: CC0-1.0
 
 # Verifpal
+cmd/verifpal/resource.syso
 dist
 
 # Binaries for programs and plugins
