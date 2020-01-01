@@ -4,8 +4,8 @@
 class Verifpal < Formula
 	desc "Cryptographic protocol analysis for students and engineers"
 	homepage "https://verifpal.com"
-	url "https://source.symbolic.software/verifpal/verifpal/archive/0.7.8.zip"
-	sha256 "95671a45401aeefdb99fc530c43cb86943a5d9aca0e801188aa55985c4ed9f9e"
+	url "https://source.symbolic.software/verifpal/verifpal/archive/0.8.0.zip"
+	sha256 "cd894fdab2a0cbcba11383472b66ff56b9e18377ffba1c3f0e062e7f56374835"
 
 	depends_on "go" => :build
 
