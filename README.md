@@ -57,7 +57,7 @@ Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser genera
 - *Windows*: Simply type `Build` to build Verifpal for Windows, Linux and macOS. This will also install dependencies.
 - *Linux and macOS*: Simply type `make all` to build Verifpal for Windows, Linux and macOS.
 
-Builds will be available under `build/bin`.
+Builds will be available under `build/`.
 
 ### Verifpal for Visual Studio Code
 Verifpal offers an extension for Visual Studio Code that currently supports syntax highlighting for Verifpal models, and will soon support more advanced features. To install it, simply search for "Verifpal" from inside Visual Studio Code.
