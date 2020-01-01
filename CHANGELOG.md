@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
+## Verifpal 0.8.0
+*January 1, 2020*
+
+- Skeleton-based recursive mutation injection.
+
 ## Verifpal 0.7.8
 *December 30, 2019*
 
