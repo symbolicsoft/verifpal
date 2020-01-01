@@ -14,13 +14,12 @@ import (
 )
 
 var (
-	version = "dev"
-	commit  = "00000000"
+	version = "0.8.0"
 )
 
 func main() {
-	fmt.Fprintf(os.Stdout, "Verifpal %s (%s) - %s\n%s\n\n",
-		version, commit[0:8], "https://verifpal.com",
+	fmt.Fprintf(os.Stdout, "Verifpal %s - %s\n%s\n\n",
+		version, "https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
 	)
 	if len(os.Args) != 3 {
