@@ -6,6 +6,7 @@ cmd/verifpal/resource.syso
 build/linux/verifpal
 build/macos/verifpal
 dist
+release.sh
 
 # Binaries for programs and plugins
 *.exe
