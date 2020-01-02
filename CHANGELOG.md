@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
+## Verifpal 0.8.1
+*January 2, 2020*
+
+- Performance optimizations for skeleton-based injection.
+
 ## Verifpal 0.8.0
 *January 1, 2020*
 
