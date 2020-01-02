@@ -4,6 +4,8 @@
 
 package verifpal
 
+import "strings"
+
 func inject(
 	p primitive, isRootValue bool, rootIndex int, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
@@ -69,16 +71,6 @@ func injectPrimitiveSkeleton(p primitive) primitive {
 		output:    p.output,
 		check:     false,
 	}
-	g := value{
-		kind: "constant",
-		constant: constant{
-			name:        "g",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
 	n := value{
 		kind: "constant",
 		constant: constant{
@@ -100,22 +92,46 @@ func injectPrimitiveSkeleton(p primitive) primitive {
 			}
 			skeleton.arguments = append(skeleton.arguments, aa)
 		case "equation":
-			aa := value{
-				kind: "equation",
-				equation: equation{
-					values: []value{g},
-				},
-			}
-			if len(a.equation.values) == 2 {
-				aa.equation.values = append(aa.equation.values, n)
-			} else if len(a.equation.values) == 3 {
-				aa.equation.values = append(aa.equation.values, n)
-				aa.equation.values = append(aa.equation.values, n)
-			}
-			skeleton.arguments = append(skeleton.arguments, aa)
+			skeleton.arguments = append(skeleton.arguments, n)
 		}
 	}
 	return skeleton
+}
+
+func injectMatchSkeletons(p primitive, skeleton primitive) bool {
+	s := strings.Compare(
+		prettyPrimitive(injectPrimitiveSkeleton(p)),
+		prettyPrimitive(skeleton),
+	)
+	return s == 0
+}
+
+func injectMissingSkeletons(p primitive, valAttackerState *attackerState) {
+	skeleton := injectPrimitiveSkeleton(p)
+	matchingSkeleton := false
+	for _, a := range valAttackerState.known {
+		switch a.kind {
+		case "primitive":
+			if injectMatchSkeletons(a.primitive, skeleton) {
+				matchingSkeleton = true
+				break
+			}
+		}
+	}
+	if !matchingSkeleton {
+		valAttackerState.known = append(valAttackerState.known, value{
+			kind:      "primitive",
+			primitive: skeleton,
+		})
+		valAttackerState.wire = append(valAttackerState.wire, false)
+		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+	}
+	for _, a := range p.arguments {
+		switch a.kind {
+		case "primitive":
+			injectMissingSkeletons(a.primitive, valAttackerState)
+		}
+	}
 }
 
 func injectPrimitive(
@@ -123,16 +139,8 @@ func injectPrimitive(
 	valAttackerState *attackerState, includeHashes bool,
 ) []value {
 	var injectants []value
-	skeleton := value{
-		kind:      "primitive",
-		primitive: injectPrimitiveSkeleton(p),
-	}
-	if sanityExactSameValueInValues(skeleton, &valAttackerState.known) < 0 {
-		valAttackerState.known = append(valAttackerState.known, skeleton)
-		valAttackerState.wire = append(valAttackerState.wire, false)
-		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
-	}
 	kinjectants := make([][]value, len(p.arguments))
+	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.arguments {
 		for _, k := range valAttackerState.known {
 			switch k.kind {
