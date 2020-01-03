@@ -53,6 +53,9 @@ func injectValueRules(k value, arg int, p primitive, valPrincipalState *principa
 		if k.primitive.name != p.arguments[arg].primitive.name {
 			return false
 		}
+		if len(k.primitive.arguments) != len(p.arguments) {
+			return false
+		}
 	case "equation":
 		if p.arguments[arg].kind != "equation" {
 			return false
