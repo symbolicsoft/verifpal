@@ -19,7 +19,6 @@ archives:
   files:
     - LICENSES/*
     - examples/*
-    - CHANGELOG.md
     - README.md
   wrap_in_directory: true
 checksum:
