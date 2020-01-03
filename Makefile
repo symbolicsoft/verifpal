@@ -42,7 +42,7 @@ dependencies:
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
-	@rm cmd/verifpal/resource.syso
+	@rm -f cmd/verifpal/resource.syso
 	@/bin/echo "                   OK"
 
 .PHONY: all parser windows linux macos dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools
