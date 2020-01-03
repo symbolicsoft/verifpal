@@ -112,12 +112,13 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 func injectMissingSkeletons(p primitive, valAttackerState *attackerState) {
 	skeleton := injectPrimitiveSkeleton(p)
 	matchingSkeleton := false
+SkeletonSearch:
 	for _, a := range valAttackerState.known {
 		switch a.kind {
 		case "primitive":
 			if injectMatchSkeletons(a.primitive, skeleton) {
 				matchingSkeleton = true
-				break
+				break SkeletonSearch
 			}
 		}
 	}
