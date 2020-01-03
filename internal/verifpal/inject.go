@@ -53,7 +53,7 @@ func injectValueRules(k value, arg int, p primitive, valPrincipalState *principa
 		if k.primitive.name != p.arguments[arg].primitive.name {
 			return false
 		}
-		if len(k.primitive.arguments) != len(p.arguments) {
+		if len(k.primitive.arguments) != len(p.arguments[arg].primitive.arguments) {
 			return false
 		}
 	case "equation":
