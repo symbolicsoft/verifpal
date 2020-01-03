@@ -10,7 +10,7 @@ func inject(
 	p primitive, isRootValue bool, rootIndex int, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
-	var injectants *[]value
+	injectants := &([]value{})
 	if isRootValue {
 		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 			kind: "primitive", primitive: p,
@@ -157,7 +157,9 @@ func injectPrimitive(
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
 					kprims := inject(k.primitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
-					kinjectants[arg] = append(kinjectants[arg], *kprims...)
+					if len(*kprims) > 0 {
+						kinjectants[arg] = append(kinjectants[arg], *kprims...)
+					}
 				case "equation":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
