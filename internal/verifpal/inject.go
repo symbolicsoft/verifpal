@@ -10,7 +10,7 @@ func inject(
 	p primitive, isRootValue bool, rootIndex int, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
-	var injectants []value
+	var injectants *[]value
 	if isRootValue {
 		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 			kind: "primitive", primitive: p,
@@ -31,7 +31,7 @@ func inject(
 			injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
 		}
 	}
-	return &injectants
+	return injectants
 }
 
 func injectValueRules(k value, arg int, p primitive, valPrincipalState *principalState) bool {
@@ -140,7 +140,7 @@ func injectMissingSkeletons(p primitive, valAttackerState *attackerState) {
 func injectPrimitive(
 	p primitive, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
-) []value {
+) *[]value {
 	var injectants []value
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
@@ -176,7 +176,7 @@ func injectPrimitive(
 	case 5:
 		injectLoop5(p, &injectants, &kinjectants)
 	}
-	return injectants
+	return &injectants
 }
 
 func injectLoop1(p primitive, injectants *[]value, kinjectants *[][]value) {
