@@ -7,35 +7,45 @@ package verifpal
 import "strings"
 
 func inject(
-	p primitive, isRootValue bool, rootIndex int, valPrincipalState *principalState,
+	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
 	injectants := &([]value{})
-	if isRootValue {
+	if isRootPrimitive {
 		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 			kind: "primitive", primitive: p,
 		}, rootIndex, valPrincipalState, false)
 		p = pp.primitive
+		rootPrimitive = p
 	}
 	switch p.name {
 	case "AEAD_ENC":
-		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
+		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 	case "ENC":
-		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
+		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 	case "SIGN":
-		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
+		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 	case "MAC":
-		injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
+		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 	case "HASH":
 		if includeHashes {
-			injectants = injectPrimitive(p, valPrincipalState, valAttackerState, includeHashes)
+			injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 		}
 	}
 	return injectants
 }
 
-func injectValueRules(k value, arg int, p primitive, valPrincipalState *principalState) bool {
-	if sanityEquivalentValues(k, value{kind: "primitive", primitive: p}, valPrincipalState) {
+func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, valPrincipalState *principalState) bool {
+	if sanityEquivalentValues(k, value{
+		kind:      "primitive",
+		primitive: p,
+	}, valPrincipalState) {
+		return false
+	}
+	if sanityEquivalentValues(k, value{
+		kind:      "primitive",
+		primitive: rootPrimitive,
+	}, valPrincipalState) {
 		return false
 	}
 	switch k.kind {
@@ -139,7 +149,7 @@ SkeletonSearch:
 }
 
 func injectPrimitive(
-	p primitive, valPrincipalState *principalState,
+	p primitive, rootPrimitive primitive, valPrincipalState *principalState,
 	valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
 	var injectants []value
@@ -152,12 +162,12 @@ func injectPrimitive(
 				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
 				k = valPrincipalState.beforeMutate[i]
 			}
-			if injectValueRules(k, arg, p, valPrincipalState) {
+			if injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
 				switch k.kind {
 				case "constant":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
-					kprims := inject(k.primitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
+					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
 					if len(*kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], *kprims...)
 					}

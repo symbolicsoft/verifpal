@@ -240,7 +240,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				continue
 			}
 			l := len(valReplacementMap.replacements) - 1
-			injectants := inject(a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
+			injectants := inject(a.primitive, a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
 			for _, aa := range *injectants {
 				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
