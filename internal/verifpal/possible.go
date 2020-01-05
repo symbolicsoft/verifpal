@@ -153,16 +153,16 @@ func possibleToReconstructEquation(e equation, valAttackerState *attackerState, 
 	return false, []value{}
 }
 
-func possibleToPrimitivePassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
+func possibleToPassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
 	if sanityEquivalentValues(p.arguments[0], p.arguments[1], valPrincipalState) {
 		return true, value{kind: "primitive", primitive: p}
 	}
 	return false, value{kind: "primitive", primitive: p}
 }
 
-func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalState) (bool, value) {
+func possibleToPassRewrite(p primitive, valPrincipalState *principalState) (bool, value) {
 	if p.name == "ASSERT" {
-		return possibleToPrimitivePassAssert(p, valPrincipalState)
+		return possibleToPassAssert(p, valPrincipalState)
 	}
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
@@ -194,62 +194,77 @@ func possibleToPrimitivePassRewrite(p primitive, valPrincipalState *principalSta
 	return true, rewrite
 }
 
-func possibleToPrimitiveForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
-	prim := primitiveGet(p.name)
+func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
 	switch p.name {
 	case "DEC", "AEAD_DEC":
-		k := p.arguments[prim.decompose.given[0]]
-		switch k.kind {
-		case "constant":
-			if sanityEquivalentValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
-				return true
-			}
-		case "primitive":
-			r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
-			if r {
-				return true
-			}
-		case "equation":
-			r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
-			if r {
-				return true
-			}
-		}
+		return possibleToForcePassRewriteDECandAEAD_DEC(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "SIGNVERIF":
-		k := p.arguments[0]
-		switch k.kind {
-		case "constant":
-			return false
-		case "primitive":
-			return false
-		case "equation":
-			r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
-			if r {
-				return true
-			}
-		}
+		return possibleToForcePassRewriteSIGNVERIF(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "ASSERT":
-		for ii := range p.arguments {
-			iii := 0
-			if ii == 0 {
-				iii = 1
-			}
-			r := false
-			aii := p.arguments[ii]
-			aiii := p.arguments[iii]
-			r = sanityEquivalentValueInValues(aii, &valAttackerState.known, valPrincipalState) >= 0
-			if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
-				return true
-			}
-			switch aii.kind {
-			case "primitive":
-				r, _ = possibleToReconstructPrimitive(aii.primitive, valAttackerState, valPrincipalState, analysis, depth)
-			case "equation":
-				r, _ = possibleToReconstructEquation(aii.equation, valAttackerState, valPrincipalState)
-			}
-			if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
-				return true
-			}
+		return possibleToForcePassRewriteASSERT(p, valPrincipalState, valAttackerState, analysis, depth)
+	}
+	return false
+}
+
+func possibleToForcePassRewriteDECandAEAD_DEC(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+	prim := primitiveGet(p.name)
+	k := p.arguments[prim.decompose.given[0]]
+	switch k.kind {
+	case "constant":
+		if sanityEquivalentValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+			return true
+		}
+	case "primitive":
+		r, _ := possibleToReconstructPrimitive(k.primitive, valAttackerState, valPrincipalState, analysis, depth)
+		if r {
+			return true
+		}
+	case "equation":
+		r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+		if r {
+			return true
+		}
+	}
+	return false
+}
+
+func possibleToForcePassRewriteSIGNVERIF(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+	k := p.arguments[0]
+	switch k.kind {
+	case "constant":
+		return false
+	case "primitive":
+		return false
+	case "equation":
+		r, _ := possibleToReconstructEquation(k.equation, valAttackerState, valPrincipalState)
+		if r {
+			return true
+		}
+	}
+	return false
+}
+
+func possibleToForcePassRewriteASSERT(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+	for ii := range p.arguments {
+		iii := 0
+		if ii == 0 {
+			iii = 1
+		}
+		r := false
+		aii := p.arguments[ii]
+		aiii := p.arguments[iii]
+		r = sanityEquivalentValueInValues(aii, &valAttackerState.known, valPrincipalState) >= 0
+		if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
+			return true
+		}
+		switch aii.kind {
+		case "primitive":
+			r, _ = possibleToReconstructPrimitive(aii.primitive, valAttackerState, valPrincipalState, analysis, depth)
+		case "equation":
+			r, _ = possibleToReconstructEquation(aii.equation, valAttackerState, valPrincipalState)
+		}
+		if r && sanityEquivalentValues(aii, aiii, valPrincipalState) {
+			return true
 		}
 	}
 	return false

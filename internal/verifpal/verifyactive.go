@@ -206,14 +206,14 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
 		iii := sanityGetAttackerStateIndexFromConstant(valAttackerState, v.constant)
 		mutatedTo := strInSlice(valPrincipalState.sender[ii], valAttackerState.mutatedTo[iii])
-		unassailable := false
+		trulyGuarded := false
 		if valPrincipalState.guard[ii] {
-			unassailable = true
+			trulyGuarded = true
 			if iii >= 0 && mutatedTo {
-				unassailable = false
+				trulyGuarded = false
 			}
 		}
-		if unassailable {
+		if trulyGuarded {
 			continue
 		}
 		if valPrincipalState.creator[ii] == valPrincipalState.name {

@@ -73,8 +73,8 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				continue
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
-				pass, _ := possibleToPrimitivePassRewrite(a.primitive, valPrincipalState)
-				forcedPass := possibleToPrimitiveForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+				pass, _ := possibleToPassRewrite(a.primitive, valPrincipalState)
+				forcedPass := possibleToForcePassRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
 				if pass || forcedPass {
 					indices = append(indices, ii)
 					passes = append(passes, pass)

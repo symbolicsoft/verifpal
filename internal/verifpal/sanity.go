@@ -32,60 +32,74 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 			constants = append(constants, right.constant)
 		}
 	case "primitive":
-		p := primitiveGet(right.primitive.name)
-		if len(p.name) == 0 {
-			errorCritical(fmt.Sprintf(
-				"invalid primitive (%s)",
-				right.primitive.name,
-			))
-		}
-		if (len(right.primitive.arguments) == 0) ||
-			(len(right.primitive.arguments) > 5) ||
-			((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
-			plural := ""
-			arity := fmt.Sprintf("%d", p.arity)
-			if len(right.primitive.arguments) > 1 {
-				plural = "s"
-			}
-			if p.arity < 0 {
-				arity = "between 1 and 5"
-			}
-			errorCritical(fmt.Sprintf(
-				"primitive %s has %d input%s, expecting %s",
-				right.primitive.name, len(right.primitive.arguments), plural, arity,
-			))
-		}
-		for _, a := range right.primitive.arguments {
-			switch a.kind {
-			case "constant":
-				unique := true
-				for _, c := range constants {
-					if a.constant.name == c.name {
-						unique = false
-						break
-					}
-				}
-				if unique {
-					constants = append(constants, a.constant)
-				}
-			case "primitive":
-				constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
-			case "equation":
-				constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
-			}
-		}
+		constants = append(constants, sanityAssignmentConstantsFromPrimitive(
+			right, constants, valKnowledgeMap,
+		)...)
 	case "equation":
-		for _, v := range right.equation.values {
+		constants = append(constants, sanityAssignmentConstantsFromEquation(
+			right, constants, valKnowledgeMap,
+		)...)
+	}
+	return constants
+}
+
+func sanityAssignmentConstantsFromPrimitive(right value, constants []constant, valKnowledgeMap *knowledgeMap) []constant {
+	p := primitiveGet(right.primitive.name)
+	if len(p.name) == 0 {
+		errorCritical(fmt.Sprintf(
+			"invalid primitive (%s)",
+			right.primitive.name,
+		))
+	}
+	if (len(right.primitive.arguments) == 0) ||
+		(len(right.primitive.arguments) > 5) ||
+		((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
+		plural := ""
+		arity := fmt.Sprintf("%d", p.arity)
+		if len(right.primitive.arguments) > 1 {
+			plural = "s"
+		}
+		if p.arity < 0 {
+			arity = "between 1 and 5"
+		}
+		errorCritical(fmt.Sprintf(
+			"primitive %s has %d input%s, expecting %s",
+			right.primitive.name, len(right.primitive.arguments), plural, arity,
+		))
+	}
+	for _, a := range right.primitive.arguments {
+		switch a.kind {
+		case "constant":
 			unique := true
 			for _, c := range constants {
-				if v.constant.name == c.name {
+				if a.constant.name == c.name {
 					unique = false
 					break
 				}
 			}
 			if unique {
-				constants = append(constants, v.constant)
+				constants = append(constants, a.constant)
 			}
+		case "primitive":
+			constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+		case "equation":
+			constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+		}
+	}
+	return constants
+}
+
+func sanityAssignmentConstantsFromEquation(right value, constants []constant, valKnowledgeMap *knowledgeMap) []constant {
+	for _, v := range right.equation.values {
+		unique := true
+		for _, c := range constants {
+			if v.constant.name == c.name {
+				unique = false
+				break
+			}
+		}
+		if unique {
+			constants = append(constants, v.constant)
 		}
 	}
 	return constants
@@ -484,7 +498,7 @@ func sanityPerformPrimitiveRewrite(p primitive, i int, valPrincipalState *princi
 			}
 		}
 	}
-	wasRewrittenTotal, rewrite := possibleToPrimitivePassRewrite(rewrite.primitive, valPrincipalState)
+	wasRewrittenTotal, rewrite := possibleToPassRewrite(rewrite.primitive, valPrincipalState)
 	if wasRewrittenTotal {
 		wasRewritten = true
 	} else {
@@ -707,43 +721,32 @@ func sanityResolveInternalValuesFromPrincipalState(a value, rootIndex int, valPr
 		}
 		aa := []value{}
 		aa = append(aa, a.equation.values...)
-		switch aa[0].kind {
-		case "constant":
-			if forceBeforeMutate {
-				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[0].constant)
-				aa[0] = valPrincipalState.beforeMutate[i]
-			} else {
-				aa[0] = sanityResolveConstant(aa[0].constant, valPrincipalState, true)
+		for aai := range aa {
+			switch aa[aai].kind {
+			case "constant":
+				if forceBeforeMutate {
+					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[aai].constant)
+					aa[aai] = valPrincipalState.beforeMutate[i]
+				} else {
+					aa[aai] = sanityResolveConstant(aa[aai].constant, valPrincipalState, true)
+				}
 			}
 		}
-		switch aa[1].kind {
-		case "constant":
-			if forceBeforeMutate {
-				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[1].constant)
-				aa[1] = valPrincipalState.beforeMutate[i]
-			} else {
-				aa[1] = sanityResolveConstant(aa[1].constant, valPrincipalState, true)
+		for aai := range aa {
+			switch aa[aai].kind {
+			case "constant":
+				r.equation.values = append(r.equation.values, aa[aai])
+			case "primitive":
+				aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[aai], rootIndex, valPrincipalState, forceBeforeMutate)
+				r.equation.values = append(r.equation.values, aaa)
+			case "equation":
+				aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[aai], rootIndex, valPrincipalState, forceBeforeMutate)
+				if aai == 0 {
+					r.equation.values = aaa.equation.values
+				} else {
+					r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+				}
 			}
-		}
-		switch aa[0].kind {
-		case "constant":
-			r.equation.values = append(r.equation.values, aa[0])
-		case "primitive":
-			aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[0], rootIndex, valPrincipalState, forceBeforeMutate)
-			r.equation.values = append(r.equation.values, aaa)
-		case "equation":
-			aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[0], rootIndex, valPrincipalState, forceBeforeMutate)
-			r.equation.values = aaa.equation.values
-		}
-		switch aa[1].kind {
-		case "constant":
-			r.equation.values = append(r.equation.values, aa[1])
-		case "primitive":
-			aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[1], rootIndex, valPrincipalState, forceBeforeMutate)
-			r.equation.values = append(r.equation.values, aaa)
-		case "equation":
-			aaa, _ := sanityResolveInternalValuesFromPrincipalState(aa[1], rootIndex, valPrincipalState, forceBeforeMutate)
-			r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
 		}
 		v = append(v, r.equation.values...)
 		return r, v
@@ -794,33 +797,27 @@ func sanityResolveInternalValuesFromKnowledgeMap(a value, valKnowledgeMap *knowl
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.constant)
 			aa = append(aa, valKnowledgeMap.assigned[i])
 		}
-		switch aa[0].kind {
-		case "constant":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[0].constant)
-			aa[0] = valKnowledgeMap.assigned[i]
+		for aai := range aa {
+			switch aa[aai].kind {
+			case "constant":
+				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].constant)
+				aa[aai] = valKnowledgeMap.assigned[i]
+			}
 		}
-		switch aa[1].kind {
-		case "constant":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[1].constant)
-			aa[1] = valKnowledgeMap.assigned[i]
-		}
-		switch aa[0].kind {
-		case "constant":
-			r.equation.values = append(r.equation.values, aa[0])
-		case "primitive":
-			r.equation.values = append(r.equation.values, aa[0])
-		case "equation":
-			aaa, _ := sanityResolveInternalValuesFromKnowledgeMap(aa[0], valKnowledgeMap)
-			r.equation.values = aaa.equation.values
-		}
-		switch aa[1].kind {
-		case "constant":
-			r.equation.values = append(r.equation.values, aa[1])
-		case "primitive":
-			r.equation.values = append(r.equation.values, aa[1])
-		case "equation":
-			aaa, _ := sanityResolveInternalValuesFromKnowledgeMap(aa[1], valKnowledgeMap)
-			r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+		for aai := range aa {
+			switch aa[aai].kind {
+			case "constant":
+				r.equation.values = append(r.equation.values, aa[aai])
+			case "primitive":
+				r.equation.values = append(r.equation.values, aa[aai])
+			case "equation":
+				aaa, _ := sanityResolveInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
+				if aai == 0 {
+					r.equation.values = aaa.equation.values
+				} else {
+					r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+				}
+			}
 		}
 		v = append(v, r.equation.values...)
 		return r, v
