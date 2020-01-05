@@ -201,7 +201,8 @@ func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, 
 	case "SIGNVERIF":
 		return possibleToForcePassRewriteSIGNVERIF(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "ASSERT":
-		return possibleToForcePassRewriteASSERT(p, valPrincipalState, valAttackerState, analysis, depth)
+		return false
+		// return possibleToForcePassRewriteASSERT(p, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	return false
 }
