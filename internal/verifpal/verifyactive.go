@@ -5,10 +5,10 @@
 package verifpal
 
 func verifyActive(
-	m *model,
+	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
-) []verifyResult {
-	var verifyResults []verifyResult
+) []VerifyResult {
+	var VerifyResults []VerifyResult
 	analysis := 0
 	stage := 0
 	valAttackerState := constructAttackerState(true, m, valKnowledgeMap, true)
@@ -18,24 +18,24 @@ func verifyActive(
 		case 0:
 			analysis, stage = verifyActiveStage0(
 				m, valKnowledgeMap, valPrincipalStates,
-				&verifyResults, valAttackerState,
+				&VerifyResults, valAttackerState,
 				analysis, stage,
 			)
 		default:
 			analysis, stage = verifyActiveStage123(
 				m, valKnowledgeMap, valPrincipalStates,
-				&verifyResults, valAttackerState,
+				&VerifyResults, valAttackerState,
 				analysis, stage,
 			)
 		}
 	}
-	return verifyResults
+	return VerifyResults
 }
 
 func verifyActiveStage0(
-	m *model,
+	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
-	verifyResults *[]verifyResult, valAttackerState *attackerState,
+	VerifyResults *[]VerifyResult, valAttackerState *attackerState,
 	analysis int, stage int,
 ) (int, int) {
 	for _, valPrincipalState := range valPrincipalStates {
@@ -54,9 +54,9 @@ func verifyActiveStage0(
 }
 
 func verifyActiveStage123(
-	m *model,
+	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
-	verifyResults *[]verifyResult, valAttackerState *attackerState,
+	VerifyResults *[]VerifyResult, valAttackerState *attackerState,
 	analysis int, stage int,
 ) (int, int) {
 	for _, valPrincipalState := range valPrincipalStates {
@@ -64,7 +64,7 @@ func verifyActiveStage123(
 		valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
 		analysis, stage = verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
-			verifyResults, true, analysis, stage,
+			VerifyResults, true, analysis, stage,
 		)
 	}
 	stage = verifyActiveIncrementStage(stage)
@@ -80,10 +80,10 @@ func verifyActiveIncrementStage(stage int) int {
 }
 
 func verifyActiveScanCombination(
-	m *model,
+	m *Model,
 	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
 	valAttackerState *attackerState, valReplacementMap *replacementMap,
-	verifyResults *[]verifyResult, newStage bool, analysis int, stage int,
+	VerifyResults *[]VerifyResult, newStage bool, analysis int, stage int,
 ) (int, int) {
 	var lastReplacement bool
 	var valPrincipalStateWithReplacements *principalState
@@ -93,31 +93,31 @@ func verifyActiveScanCombination(
 	verifyAnalysis(m, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 	verifyResolveQueries(m,
 		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
-		verifyResults, analysis,
+		VerifyResults, analysis,
 	)
 	// valAttackerState = verifyActiveClearFreshValues(m, valKnowledgeMap, valAttackerState)
 	analysis = verifyActiveIncrementAnalysis(analysis)
 	prettyAnalysis(analysis, stage)
-	if len(*verifyResults) == len(m.queries) {
+	if len(*VerifyResults) == len(m.queries) {
 		return analysis, stage
 	}
 	if (len(valAttackerState.known) > attackerKnown) || newStage {
 		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
 		return verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMapUpdate,
-			verifyResults, false, analysis, stage,
+			VerifyResults, false, analysis, stage,
 		)
 	}
 	if !lastReplacement {
 		return verifyActiveScanCombination(m,
 			valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap,
-			verifyResults, false, analysis, stage,
+			VerifyResults, false, analysis, stage,
 		)
 	}
 	return analysis, stage
 }
 
-func verifyActiveClearFreshValues(m *model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
+func verifyActiveClearFreshValues(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
 	valAttackerStateCleared := attackerState{
 		active:      valAttackerState.active,
 		known:       []value{},

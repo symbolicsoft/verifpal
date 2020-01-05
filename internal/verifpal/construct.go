@@ -6,7 +6,7 @@ package verifpal
 
 import "fmt"
 
-func constructKnowledgeMap(m *model, principals []string) *knowledgeMap {
+func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
 		principals:     principals,
 		constants:      []constant{},
@@ -288,7 +288,7 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap *knowledgeMap, blck *blo
 	}
 }
 
-func constructPrincipalStates(m *model, valKnowledgeMap *knowledgeMap) []*principalState {
+func constructPrincipalStates(m *Model, valKnowledgeMap *knowledgeMap) []*principalState {
 	var valPrincipalStates []*principalState
 	for _, principal := range valKnowledgeMap.principals {
 		valPrincipalState := principalState{
@@ -378,7 +378,7 @@ func constructPrincipalStateClone(valPrincipalState *principalState) *principalS
 	return &valPrincipalStateClone
 }
 
-func constructAttackerState(active bool, m *model, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {
+func constructAttackerState(active bool, m *Model, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {
 	valAttackerState := attackerState{
 		active:      active,
 		known:       []value{},
@@ -390,7 +390,7 @@ func constructAttackerState(active bool, m *model, valKnowledgeMap *knowledgeMap
 	return &valAttackerState
 }
 
-func constructAttackerStatePopulate(m *model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, verbose bool) {
+func constructAttackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, verbose bool) {
 	for _, c := range valKnowledgeMap.constants {
 		if c.qualifier == "public" {
 			v := value{

@@ -26,13 +26,12 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "verify":
-		model, valKnowledgeMap, valPrincipalStates := verifpal.ParseModel(os.Args[2])
-		verifpal.Verify(model, valKnowledgeMap, valPrincipalStates)
+		verifpal.Verify(os.Args[2])
 	case "implement":
 		verifpal.Implement()
 	case "pretty":
-		model, _, _ := verifpal.ParseModel(os.Args[2])
-		fmt.Fprint(os.Stdout, verifpal.PrettyPrint(model))
+		prettyModel := verifpal.PrettyPrint(os.Args[2])
+		fmt.Fprint(os.Stdout, prettyModel)
 	default:
 		verifpal.Help()
 	}

@@ -4,7 +4,8 @@
 
 package verifpal
 
-type model struct {
+// Model is the main parsed representation of the Verifpal model.
+type Model struct {
 	attacker string
 	blocks   []block
 	queries  []query
@@ -124,7 +125,8 @@ type attackerState struct {
 	mutatedTo   [][]string
 }
 
-type verifyResult struct {
+// VerifyResult contains the verification result for a model query analyzed by Verifpal.
+type VerifyResult struct {
 	query   query
 	summary string
 }

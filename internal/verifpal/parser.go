@@ -1143,7 +1143,7 @@ func (c *current) onVerifpal1(Attacker, Blocks, Queries interface{}) (interface{
 	for i, v := range q {
 		dq[i] = v.(query)
 	}
-	return model{
+	return Model{
 		attacker: Attacker.(string),
 		blocks:   db,
 		queries:  dq,

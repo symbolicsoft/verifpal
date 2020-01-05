@@ -197,7 +197,7 @@ func possibleToPassRewrite(p primitive, valPrincipalState *principalState) (bool
 func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
 	switch p.name {
 	case "DEC", "AEAD_DEC":
-		return possibleToForcePassRewriteDECandAEAD_DEC(p, valPrincipalState, valAttackerState, analysis, depth)
+		return possibleToForcePassRewriteDECandAEADDEC(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "SIGNVERIF":
 		return possibleToForcePassRewriteSIGNVERIF(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "ASSERT":
@@ -206,7 +206,7 @@ func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, 
 	return false
 }
 
-func possibleToForcePassRewriteDECandAEAD_DEC(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+func possibleToForcePassRewriteDECandAEADDEC(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
 	switch k.kind {

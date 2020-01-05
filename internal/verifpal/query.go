@@ -8,18 +8,18 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
+func queryStart(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
 	switch query.kind {
 	case "confidentiality":
 		return queryConfidentiality(query, valAttackerState, valPrincipalState)
 	case "authentication":
 		return queryAuthentication(query, valAttackerState, valPrincipalState, valKnowledgeMap)
 	}
-	return verifyResult{}
+	return VerifyResult{}
 }
 
-func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) verifyResult {
-	var verifyResult verifyResult
+func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) VerifyResult {
+	var VerifyResult VerifyResult
 	var mutated string
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
@@ -27,7 +27,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 		valPrincipalState,
 	)
 	if ii < 0 {
-		return verifyResult
+		return VerifyResult
 	}
 	for i := range valPrincipalState.constants {
 		if valPrincipalState.wasMutated[i] {
@@ -37,28 +37,28 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 			)
 		}
 	}
-	verifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+	VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s%s%s",
 		prettyConstant(query.constant),
 		" is obtained by the attacker as ",
 		prettyValue(valAttackerState.known[ii]),
 	), true)
 	query.resolved = true
-	verifyResult.query = query
-	return verifyResult
+	VerifyResult.query = query
+	return VerifyResult
 }
 
-func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) verifyResult {
-	var verifyResult verifyResult
+func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
+	var VerifyResult VerifyResult
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
 	if query.message.recipient != valPrincipalState.name {
-		return verifyResult
+		return VerifyResult
 	}
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if i < 0 {
-		return verifyResult
+		return VerifyResult
 	}
 	c := valPrincipalState.constants[i]
 	sender := valPrincipalState.sender[i]
@@ -105,7 +105,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			}
 		}
 		if passes[f] && (query.message.sender != sender) {
-			verifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and not by ",
 				query.message.sender, " and resolving to ",
@@ -114,10 +114,10 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				" in ", query.message.recipient, "'s state",
 			), true)
 			query.resolved = true
-			verifyResult.query = query
-			return verifyResult
+			VerifyResult.query = query
+			return VerifyResult
 		} else if forcedPasses[f] {
-			verifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s%s%s%s%s%s%s%s%s%s%s",
 				prettyConstant(c), ", sent by ", sender, " and resolving to ",
 				prettyValue(cc),
@@ -126,10 +126,10 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 				"despite it being vulnerable to tampering by Attacker",
 			), true)
 			query.resolved = true
-			verifyResult.query = query
-			return verifyResult
+			VerifyResult.query = query
+			return VerifyResult
 		}
 	}
-	verifyResult.query = query
-	return verifyResult
+	VerifyResult.query = query
+	return VerifyResult
 }

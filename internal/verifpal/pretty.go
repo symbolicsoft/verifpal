@@ -235,8 +235,9 @@ func prettyQuery(query query) string {
 	return output
 }
 
-// PrettyPrint pretty-prints a Verifpal model based on an abstract representation obtained from ParseModel.
-func PrettyPrint(m *model) string {
+// PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
+func PrettyPrint(modelFile string) string {
+	m, _, _ := parseModel(modelFile)
 	var output string
 	output = fmt.Sprintf(
 		"attacker [\n\t%s\n]\n\n",

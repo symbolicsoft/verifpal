@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func sanity(m *model) (*knowledgeMap, []*principalState) {
+func sanity(m *Model) (*knowledgeMap, []*principalState) {
 	var valKnowledgeMap *knowledgeMap
 	principals := sanityDeclaredPrincipals(m)
 	valKnowledgeMap = constructKnowledgeMap(m, principals)
@@ -105,7 +105,7 @@ func sanityAssignmentConstantsFromEquation(right value, constants []constant, va
 	return constants
 }
 
-func sanityQueries(m *model, valKnowledgeMap *knowledgeMap) {
+func sanityQueries(m *Model, valKnowledgeMap *knowledgeMap) {
 	for _, query := range m.queries {
 		switch query.kind {
 		case "confidentiality":
@@ -220,7 +220,7 @@ func sanityGetAttackerStateIndexFromConstant(valAttackerState *attackerState, c 
 	return -1
 }
 
-func sanityDeclaredPrincipals(m *model) []string {
+func sanityDeclaredPrincipals(m *Model) []string {
 	var principals []string
 	for _, block := range m.blocks {
 		switch block.kind {

@@ -10,26 +10,27 @@ import (
 	"time"
 )
 
-// Verify runs the main verification engine for Verifpal on output from ParseModel.
-func Verify(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []verifyResult {
-	var verifyResults []verifyResult
+// Verify runs the main verification engine for Verifpal on a model loaded from a file.
+func Verify(modelFile string) []VerifyResult {
+	m, valKnowledgeMap, valPrincipalStates := parseModel(modelFile)
+	var VerifyResults []VerifyResult
 	prettyMessage(fmt.Sprintf(
 		"verification initiated at %s",
 		time.Now().Format("15:04:05"),
 	), 0, 0, "verifpal")
 	if m.attacker == "passive" {
-		verifyResults = verifyPassive(m, valKnowledgeMap, valPrincipalStates)
+		VerifyResults = verifyPassive(m, valKnowledgeMap, valPrincipalStates)
 	} else if m.attacker == "active" {
-		verifyResults = verifyActive(m, valKnowledgeMap, valPrincipalStates)
+		VerifyResults = verifyActive(m, valKnowledgeMap, valPrincipalStates)
 	} else {
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
 	fmt.Fprint(os.Stdout, "\n")
-	for _, verifyResult := range verifyResults {
+	for _, VerifyResult := range VerifyResults {
 		prettyMessage(fmt.Sprintf(
 			"%s: %s",
-			prettyQuery(verifyResult.query),
-			verifyResult.summary,
+			prettyQuery(VerifyResult.query),
+			VerifyResult.summary,
 		), 0, 0, "result")
 	}
 	prettyMessage(fmt.Sprintf(
@@ -38,27 +39,42 @@ func Verify(m *model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*princ
 	), 0, 0, "verifpal")
 	prettyMessage("thank you for using verifpal!", 0, 0, "verifpal")
 	prettyMessage("verifpal is experimental software and may miss attacks.", 0, 0, "info")
-	return verifyResults
+	return VerifyResults
 }
 
 func verifyResolveQueries(
-	m *model,
+	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState,
-	valAttackerState *attackerState, verifyResults *[]verifyResult, analysis int,
+	valAttackerState *attackerState, VerifyResults *[]VerifyResult, analysis int,
 ) {
 	for q, query := range m.queries {
 		if m.queries[q].resolved {
 			continue
 		}
-		verifyResult := queryStart(query, valAttackerState, valPrincipalState, valKnowledgeMap)
-		if verifyResult.query.resolved {
+		VerifyResult := queryStart(query, valAttackerState, valPrincipalState, valKnowledgeMap)
+		if VerifyResult.query.resolved {
 			m.queries[q].resolved = true
-			*verifyResults = append(*verifyResults, verifyResult)
+			*VerifyResults = append(*VerifyResults, VerifyResult)
 			prettyMessage(fmt.Sprintf(
 				"%s: %s",
-				prettyQuery(verifyResult.query),
-				verifyResult.summary,
+				prettyQuery(VerifyResult.query),
+				VerifyResult.summary,
 			), analysis, 0, "result")
 		}
 	}
+}
+
+func verifyPassive(m *Model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []VerifyResult {
+	var VerifyResults []VerifyResult
+	valAttackerState := constructAttackerState(false, m, valKnowledgeMap, true)
+	prettyMessage("attacker is configured as passive", 0, 0, "info")
+	valPrincipalStates[0] = sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
+	failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStates[0])
+	sanityFailOnFailedRewrite(failedRewrites)
+	for _, a := range valPrincipalStates[0].assigned {
+		sanityCheckEquationGenerators(a, valPrincipalStates[0])
+	}
+	verifyAnalysis(m, valPrincipalStates[0], valAttackerState, 0, 0)
+	verifyResolveQueries(m, valKnowledgeMap, valPrincipalStates[0], valAttackerState, &VerifyResults, 0)
+	return VerifyResults
 }

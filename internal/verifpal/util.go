@@ -6,6 +6,11 @@ package verifpal
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"runtime"
+
+	"github.com/logrusorgru/aurora"
 )
 
 func strInSlice(x string, a []string) bool {
@@ -22,4 +27,14 @@ func appendUnique(a []string, x string) ([]string, error) {
 		return append(a, x), nil
 	}
 	return a, errors.New("string is not unique")
+}
+
+func errorCritical(errText string) {
+	err := errors.New(errText)
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(os.Stderr, " Verifpal! Error: %v.\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, " %s! %s: %v.\n", aurora.Red("Verifpal").Bold(), aurora.Red("Error"), err)
+	}
+	os.Exit(1)
 }

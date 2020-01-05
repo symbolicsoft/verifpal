@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func verifyAnalysis(m *model, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysis(m *Model, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
 		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
