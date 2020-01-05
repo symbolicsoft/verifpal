@@ -12,7 +12,7 @@ import (
 
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 func Verify(modelFile string) []VerifyResult {
-	m, valKnowledgeMap, valPrincipalStates := parseModel(modelFile)
+	m, valKnowledgeMap, valPrincipalStates := parserParseModel(modelFile)
 	var VerifyResults []VerifyResult
 	prettyMessage(fmt.Sprintf(
 		"verification initiated at %s",
