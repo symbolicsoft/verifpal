@@ -264,14 +264,6 @@ func sanityDeclaredPrincipals(m *Model) []string {
 func sanityEquivalentValues(a1 value, a2 value, valPrincipalState *principalState) bool {
 	switch a1.kind {
 	case "constant":
-		a1 = sanityResolveConstant(a1.constant, valPrincipalState, false)
-	}
-	switch a2.kind {
-	case "constant":
-		a2 = sanityResolveConstant(a2.constant, valPrincipalState, false)
-	}
-	switch a1.kind {
-	case "constant":
 		switch a2.kind {
 		case "constant":
 			if a1.constant.name != a2.constant.name {
