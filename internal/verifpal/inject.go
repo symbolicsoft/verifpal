@@ -4,7 +4,9 @@
 
 package verifpal
 
-import "strings"
+import (
+	"strings"
+)
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int, valPrincipalState *principalState,
@@ -112,6 +114,9 @@ func injectPrimitiveSkeleton(p primitive) primitive {
 }
 
 func injectMatchSkeletons(p primitive, skeleton primitive) bool {
+	if p.name != skeleton.name {
+		return false
+	}
 	s := strings.Compare(
 		prettyPrimitive(injectPrimitiveSkeleton(p)),
 		prettyPrimitive(skeleton),
