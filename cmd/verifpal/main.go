@@ -32,6 +32,8 @@ func main() {
 	case "pretty":
 		prettyModel := verifpal.PrettyPrint(os.Args[2])
 		fmt.Fprint(os.Stdout, prettyModel)
+	case "help":
+		verifpal.Help()
 	default:
 		verifpal.Help()
 	}

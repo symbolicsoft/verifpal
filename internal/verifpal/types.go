@@ -11,6 +11,12 @@ type Model struct {
 	queries  []query
 }
 
+// VerifyResult contains the verification result for a model query analyzed by Verifpal.
+type VerifyResult struct {
+	query   query
+	summary string
+}
+
 type block struct {
 	kind      string
 	principal principal
@@ -123,12 +129,6 @@ type attackerState struct {
 	wire        []bool
 	conceivable []value
 	mutatedTo   [][]string
-}
-
-// VerifyResult contains the verification result for a model query analyzed by Verifpal.
-type VerifyResult struct {
-	query   query
-	summary string
 }
 
 type replacementMap struct {

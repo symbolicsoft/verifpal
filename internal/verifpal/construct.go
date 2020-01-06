@@ -426,7 +426,7 @@ func constructAttackerStateRenderMessage(valKnowledgeMap *knowledgeMap, valAttac
 			} else {
 				if verbose {
 					prettyMessage(fmt.Sprintf(
-						"%s has sent %s to %s, rendering it public",
+						"%s has sent %s to %s, rendering it public.",
 						blck.message.sender, prettyConstant(c), blck.message.recipient,
 					), 0, 0, "analysis")
 				}

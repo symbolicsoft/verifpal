@@ -13,6 +13,7 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
+// b2s converts a byte array to a string.
 func b2s(bs []uint8) string {
 	b := make([]byte, len(bs))
 	for i, v := range bs {
@@ -21,6 +22,7 @@ func b2s(bs []uint8) string {
 	return string(b)
 }
 
+// strInSlice checks if a string can be found within a slice.
 func strInSlice(x string, a []string) bool {
 	for _, n := range a {
 		if x == n {
@@ -30,6 +32,7 @@ func strInSlice(x string, a []string) bool {
 	return false
 }
 
+// appendUnique appends a string to a slice only if it is unique within that slice.
 func appendUnique(a []string, x string) ([]string, error) {
 	if !strInSlice(x, a) {
 		return append(a, x), nil
@@ -37,12 +40,16 @@ func appendUnique(a []string, x string) ([]string, error) {
 	return a, errors.New("string is not unique")
 }
 
+// errorCritical declares an unrecoverable error and ends the Verifpal program.
 func errorCritical(errText string) {
 	err := errors.New(errText)
 	if runtime.GOOS == "windows" {
 		fmt.Fprintf(os.Stderr, " Verifpal! Error: %v.\n", err)
 	} else {
-		fmt.Fprintf(os.Stderr, " %s! %s: %v.\n", aurora.Red("Verifpal").Bold(), aurora.Red("Error"), err)
+		fmt.Fprintf(os.Stderr, " %s! %s: %v.\n",
+			aurora.Red("Verifpal").Bold(),
+			aurora.Red("Error"), err,
+		)
 	}
 	os.Exit(1)
 }

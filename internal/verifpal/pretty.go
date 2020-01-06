@@ -23,35 +23,28 @@ func prettyMessage(m string, analysis int, depth int, t string) {
 func prettyMessageRegular(m string, analysis int, depth int, t string) {
 	var infoString string
 	if analysis+depth > 0 {
-		infoString = fmt.Sprintf(
-			"%s%s%s%s%s",
-			" (analysis ", fmt.Sprintf("%d", analysis),
-			", depth ", fmt.Sprintf("%d", depth), ")",
-		)
+		infoString = fmt.Sprintf("(analysis %d, depth %d)", analysis, depth)
 	}
-	if t == "verifpal" {
+	switch t {
+	case "verifpal":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n", " ", "Verifpal", "!", m, infoString,
+			" Verifpal • %s %s\n", m, infoString,
 		)
-	}
-	if t == "info" {
+	case "info":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n", "     ", "Info", "!", m, infoString,
+			"     Info • %s %s\n", m, infoString,
 		)
-	}
-	if t == "analysis" {
+	case "analysis":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n", " ", "Analysis", "!", m, infoString,
+			" Analysis • %s %s\n", m, infoString,
 		)
-	}
-	if t == "deduction" {
+	case "deduction":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n", "", "Deduction", "!", m, infoString,
+			"Deduction • %s %s\n", m, infoString,
 		)
-	}
-	if t == "result" {
+	case "result":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n", "   ", "Result", "!", m, infoString,
+			"   Result • %s %s\n", m, infoString,
 		)
 	}
 }
@@ -59,49 +52,45 @@ func prettyMessageRegular(m string, analysis int, depth int, t string) {
 func prettyMessageColor(m string, analysis int, depth int, t string) {
 	var infoString string
 	if analysis+depth > 0 {
-		infoString = fmt.Sprintf(
-			"%s%s%s%s%s",
-			aurora.Gray(15, " (analysis ").Italic(),
-			aurora.Gray(15, fmt.Sprintf("%d", analysis)).Italic(),
-			aurora.Gray(15, ", depth "),
-			aurora.Gray(15, fmt.Sprintf("%d", depth)).Italic(),
-			aurora.Gray(15, ")").Italic(),
-		)
+		infoString = aurora.Gray(15, fmt.Sprintf(
+			"(analysis %d, depth %d)",
+			analysis, depth,
+		)).Italic().String()
 	}
-	if t == "verifpal" {
+	switch t {
+	case "verifpal":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n",
-			" ", aurora.Green("Verifpal").Bold(), "!", m, infoString,
+			"%s%s%s %s %s\n",
+			" ", aurora.Green("Verifpal").Bold(), " •", m, infoString,
 		)
-	}
-	if t == "info" {
+	case "info":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n",
-			"     ", aurora.Blue("Info").Bold(), "!", m, infoString,
+			"%s%s%s %s %s\n",
+			"     ", aurora.Blue("Info").Bold(), " •", m, infoString,
 		)
-	}
-	if t == "analysis" {
+	case "analysis":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n",
-			" ", aurora.Blue("Analysis").Bold(), "!", m, infoString,
+			"%s%s%s %s %s\n",
+			" ", aurora.Blue("Analysis").Bold(), " •", m, infoString,
 		)
-	}
-	if t == "deduction" {
+	case "deduction":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n",
-			"", aurora.Magenta("Deduction").Bold(), "!", m, infoString,
+			"%s%s%s %s %s\n",
+			"", aurora.Magenta("Deduction").Bold(), " •", m, infoString,
 		)
-	}
-	if t == "result" {
+	case "result":
 		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s%s\n",
-			"   ", aurora.Red("Result").Bold(), "!", m, infoString,
+			"%s%s%s %s %s\n",
+			"   ", aurora.Red("Result").Bold(), " •", m, infoString,
 		)
 	}
 }
 
 func prettyVerifyResultSummary(mutated string, summary string, attack bool) string {
 	var mutatedIntro string
+	if !attack {
+		return summary
+	}
 	if len(mutated) > 0 {
 		mutatedIntro = "When the following values are mutated by the attacker:"
 	}
@@ -110,14 +99,11 @@ func prettyVerifyResultSummary(mutated string, summary string, attack bool) stri
 			mutatedIntro, mutated, summary,
 		)
 	}
-	if attack {
-		return fmt.Sprintf("%s%s\n           %s",
-			aurora.Italic(mutatedIntro).String(),
-			aurora.BrightYellow(mutated).Italic().String(),
-			aurora.BrightRed(summary).Italic().Bold().String(),
-		)
-	}
-	return summary
+	return fmt.Sprintf("%s%s\n           %s",
+		aurora.Italic(mutatedIntro).String(),
+		aurora.BrightYellow(mutated).Italic().String(),
+		aurora.BrightRed(summary).Italic().Bold().String(),
+	)
 }
 
 func prettyConstant(c constant) string {

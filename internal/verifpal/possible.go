@@ -8,7 +8,10 @@ import (
 	"fmt"
 )
 
-func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, value, []value) {
+func possibleToDeconstructPrimitive(
+	p primitive, valAttackerState *attackerState, valPrincipalState *principalState,
+	analysis int, depth int,
+) (bool, value, []value) {
 	has := []value{}
 	primitive := primitiveGet(p.name)
 	if !primitive.decompose.hasRule {
@@ -46,7 +49,7 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
-					"%s now conceivable by deconstructing %s with %s",
+					"%s now conceivable by deconstructing %s with %s.",
 					prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
 				), analysis, depth, "analysis")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
@@ -60,7 +63,10 @@ func possibleToDeconstructPrimitive(p primitive, valAttackerState *attackerState
 	return false, value{}, has
 }
 
-func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState, valPrincipalState *principalState, analysis int, depth int) (bool, []value) {
+func possibleToReconstructPrimitive(
+	p primitive, valAttackerState *attackerState, valPrincipalState *principalState,
+	analysis int, depth int,
+) (bool, []value) {
 	d, _, has := possibleToDeconstructPrimitive(p, valAttackerState, valPrincipalState, analysis, depth)
 	if d {
 		return true, has
@@ -98,7 +104,7 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 		if sanityExactSameValueInValues(vp, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(vp, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
-					"%s now conceivable by reconstructing with %s",
+					"%s now conceivable by reconstructing with %s.",
 					prettyPrimitive(p), prettyValues(has),
 				), analysis, depth, "analysis")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, vp)
@@ -112,7 +118,10 @@ func possibleToReconstructPrimitive(p primitive, valAttackerState *attackerState
 	return false, []value{}
 }
 
-func possibleToReconstructEquation(e equation, valAttackerState *attackerState, valPrincipalState *principalState) (bool, []value) {
+func possibleToReconstructEquation(
+	e equation,
+	valAttackerState *attackerState, valPrincipalState *principalState,
+) (bool, []value) {
 	eValues := sanityDeconstructEquationValues(e, valPrincipalState)
 	if len(eValues) > 2 {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, eValues[2].constant)
@@ -207,7 +216,10 @@ func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, 
 	return false
 }
 
-func possibleToForcePassRewriteDECandAEADDEC(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+func possibleToForcePassRewriteDECandAEADDEC(
+	p primitive, valPrincipalState *principalState, valAttackerState *attackerState,
+	analysis int, depth int,
+) bool {
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
 	switch k.kind {
@@ -229,7 +241,10 @@ func possibleToForcePassRewriteDECandAEADDEC(p primitive, valPrincipalState *pri
 	return false
 }
 
-func possibleToForcePassRewriteSIGNVERIF(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+func possibleToForcePassRewriteSIGNVERIF(
+	p primitive, valPrincipalState *principalState, valAttackerState *attackerState,
+	analysis int, depth int,
+) bool {
 	k := p.arguments[0]
 	switch k.kind {
 	case "constant":
@@ -245,7 +260,10 @@ func possibleToForcePassRewriteSIGNVERIF(p primitive, valPrincipalState *princip
 	return false
 }
 
-func possibleToForcePassRewriteASSERT(p primitive, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) bool {
+func possibleToForcePassRewriteASSERT(
+	p primitive, valPrincipalState *principalState, valAttackerState *attackerState,
+	analysis int, depth int,
+) bool {
 	for ii := range p.arguments {
 		iii := 0
 		if ii == 0 {

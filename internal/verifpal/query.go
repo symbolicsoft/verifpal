@@ -31,16 +31,16 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 	}
 	for i := range valPrincipalState.constants {
 		if valPrincipalState.wasMutated[i] {
-			mutated = fmt.Sprintf("%s\n           %s → %s", mutated,
+			mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,
 				prettyConstant(valPrincipalState.constants[i]),
 				prettyValue(valPrincipalState.assigned[i]),
+				prettyValue(valPrincipalState.beforeMutate[i]),
 			)
 		}
 	}
 	VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-		"%s%s%s",
+		"%s is obtained by the attacker as %s",
 		prettyConstant(query.constant),
-		" is obtained by the attacker as ",
 		prettyValue(valAttackerState.known[ii]),
 	), true)
 	query.resolved = true
@@ -98,32 +98,28 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 		cc := sanityResolveConstant(c, valPrincipalState, true)
 		for i := range valPrincipalState.constants {
 			if valPrincipalState.wasMutated[i] {
-				mutated = fmt.Sprintf("%s\n           %s → %s", mutated,
+				mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,
 					prettyConstant(valPrincipalState.constants[i]),
 					prettyValue(valPrincipalState.assigned[i]),
+					prettyValue(valPrincipalState.beforeMutate[i]),
 				)
 			}
 		}
 		if passes[f] && (query.message.sender != sender) {
 			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s%s%s%s%s%s%s%s%s%s%s%s",
-				prettyConstant(c), ", sent by ", sender, " and not by ",
-				query.message.sender, " and resolving to ",
-				prettyValue(cc),
-				", is successfully used in primitive ", prettyValue(a),
-				" in ", query.message.recipient, "'s state",
+				"%s, sent by %s and not by %s and resolving to %s, is successfully used in "+
+					"primitive %s in %s's state.",
+				prettyConstant(c), sender, query.message.sender,
+				prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
 			query.resolved = true
 			VerifyResult.query = query
 			return VerifyResult
 		} else if forcedPasses[f] {
 			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s%s%s%s%s%s%s%s%s%s%s",
-				prettyConstant(c), ", sent by ", sender, " and resolving to ",
-				prettyValue(cc),
-				", is successfully used in primitive ", prettyValue(a),
-				" in ", query.message.recipient, "'s state, ",
-				"despite it being vulnerable to tampering by Attacker",
+				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
+					"%s's state, despite it being vulnerable to tampering by Attacker.",
+				prettyConstant(c), sender, prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
 			query.resolved = true
 			VerifyResult.query = query

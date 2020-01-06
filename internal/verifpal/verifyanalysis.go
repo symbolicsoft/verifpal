@@ -56,7 +56,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 	}
 	if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
 		prettyMessage(fmt.Sprintf(
-			"%s resolves to %s",
+			"%s resolves to %s.",
 			prettyValues(output), prettyValue(a),
 		), analysis, depth, "deduction")
 		valAttackerState.conceivable = append(valAttackerState.conceivable, a)
@@ -87,7 +87,7 @@ func verifyAnalysisDeconstruct(a value, valPrincipalState *principalState, valAt
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
-					"%s found by attacker by deconstructing %s with %s",
+					"%s obtained by deconstructing %s with %s.",
 					prettyValue(revealed), prettyValue(a), prettyValues(ar),
 				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
@@ -124,7 +124,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAt
 		if sanityExactSameValueInValues(a, &valAttackerState.known) < 0 {
 			if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
 				prettyMessage(fmt.Sprintf(
-					"%s found by attacker by reconstructing with %s",
+					"%s obtained by reconstructing with %s.",
 					prettyValue(a), prettyValues(ar),
 				), analysis, depth, "deduction")
 				valAttackerState.conceivable = append(valAttackerState.conceivable, a)
@@ -148,7 +148,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
 				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
 					prettyMessage(fmt.Sprintf(
-						"%s found by attacker by equivocating with %s",
+						"%s obtained by equivocating with %s.",
 						prettyValue(aa), prettyValue(a),
 					), analysis, depth, "deduction")
 					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
@@ -165,7 +165,7 @@ func verifyAnalysisEquivocate(a value, valPrincipalState *principalState, valAtt
 					if sanityExactSameValueInValues(aaa, &valAttackerState.known) < 0 {
 						if sanityExactSameValueInValues(aaa, &valAttackerState.conceivable) < 0 {
 							prettyMessage(fmt.Sprintf(
-								"%s found by attacker by equivocating with %s",
+								"%s obtained by equivocating with %s.",
 								prettyValue(aaa), prettyValue(a),
 							), analysis, depth, "deduction")
 							valAttackerState.conceivable = append(valAttackerState.conceivable, aaa)

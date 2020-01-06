@@ -21,7 +21,7 @@ import (
 func parserParseModel(filename string) (*Model, *knowledgeMap, []*principalState) {
 	var m Model
 	prettyMessage(fmt.Sprintf(
-		"parsing model \"%s\"...",
+		"Parsing model \"%s\"...",
 		path.Base(filename),
 	), 0, 0, "verifpal")
 	parsed, err := ParseFile(filename)

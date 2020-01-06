@@ -12,7 +12,7 @@ func verifyActive(
 	analysis := 0
 	stage := 0
 	valAttackerState := constructAttackerState(true, m, valKnowledgeMap, true)
-	prettyMessage("attacker is configured as active", 0, 0, "info")
+	prettyMessage("Attacker is configured as active.", 0, 0, "info")
 	for stage <= 3 {
 		switch stage {
 		case 0:
@@ -89,7 +89,10 @@ func verifyActiveScanCombination(
 	var valPrincipalStateWithReplacements *principalState
 	attackerKnown := len(valAttackerState.known)
 	lastReplacement = valReplacementMap.combinationNext()
-	valPrincipalStateWithReplacements, _ = verifyActiveMutatePrincipalState(valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap)
+	valPrincipalStateWithReplacements, _ = verifyActiveMutatePrincipalState(
+		valPrincipalState, valKnowledgeMap,
+		valAttackerState, valReplacementMap,
+	)
 	verifyAnalysis(m, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
 	verifyResolveQueries(m,
 		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
@@ -225,10 +228,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		a := valPrincipalState.assigned[ii]
 		switch a.kind {
 		case "constant":
-			if a.constant.name == "g" {
-				continue
-			}
-			if a.constant.name == "nil" {
+			if (a.constant.name == "g") || (a.constant.name == "nil") {
 				continue
 			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
@@ -240,7 +240,9 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				continue
 			}
 			l := len(valReplacementMap.replacements) - 1
-			injectants := inject(a.primitive, a.primitive, true, ii, valPrincipalState, valAttackerState, (stage > 2))
+			includeHashes := (stage > 2)
+			injectants := inject(a.primitive, a.primitive, true, ii,
+				valPrincipalState, valAttackerState, includeHashes)
 			for _, aa := range *injectants {
 				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
@@ -293,11 +295,10 @@ func verifyActiveMutatePrincipalState(
 	valPrincipalStateWithReplacements = sanityResolveAllPrincipalStateValues(valPrincipalStateWithReplacements, valKnowledgeMap)
 	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalStateWithReplacements)
 	for i, p := range failedRewrites {
-		if !p.check {
-			continue
+		if p.check {
+			verifyActiveDropPrincipalStateAfterIndex(valPrincipalStateWithReplacements, failedRewriteIndices[i]+1)
+			break
 		}
-		verifyActiveDropPrincipalStateAfterIndex(valPrincipalStateWithReplacements, failedRewriteIndices[i]+1)
-		break
 	}
 	return valPrincipalStateWithReplacements, isWorthwhileMutation
 }

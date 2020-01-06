@@ -9,8 +9,8 @@ import (
 )
 
 func inject(
-	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int, valPrincipalState *principalState,
-	valAttackerState *attackerState, includeHashes bool,
+	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
+	valPrincipalState *principalState, valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
 	injectants := &([]value{})
 	if isRootPrimitive {
@@ -167,18 +167,20 @@ func injectPrimitive(
 				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
 				k = valPrincipalState.beforeMutate[i]
 			}
-			if injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
-				switch k.kind {
-				case "constant":
-					kinjectants[arg] = append(kinjectants[arg], k)
-				case "primitive":
-					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
-					if len(*kprims) > 0 {
-						kinjectants[arg] = append(kinjectants[arg], *kprims...)
-					}
-				case "equation":
-					kinjectants[arg] = append(kinjectants[arg], k)
+			if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
+				continue
+			}
+			switch k.kind {
+			case "constant":
+				kinjectants[arg] = append(kinjectants[arg], k)
+			case "primitive":
+				kprims := inject(k.primitive, rootPrimitive, false, -1,
+					valPrincipalState, valAttackerState, includeHashes)
+				if len(*kprims) > 0 {
+					kinjectants[arg] = append(kinjectants[arg], *kprims...)
 				}
+			case "equation":
+				kinjectants[arg] = append(kinjectants[arg], k)
 			}
 		}
 	}
