@@ -4,6 +4,8 @@
 
 package verifpal
 
+import "fmt"
+
 var primitiveSpecs = []primitiveSpec{
 	{
 		name:   "HASH",
@@ -202,14 +204,17 @@ var primitiveSpecs = []primitiveSpec{
 }
 
 func primitiveGet(name string) *primitiveSpec {
-	p := &primitiveSpec{
-		name: "",
-	}
+	var p *primitiveSpec
+	found := false
 	for _, v := range primitiveSpecs {
 		if v.name == name {
+			found = true
 			p = &v
 			break
 		}
+	}
+	if !found {
+		errorCritical(fmt.Sprintf("invalid primitive (%s)", name))
 	}
 	return p
 }
