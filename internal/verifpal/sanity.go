@@ -45,12 +45,6 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 
 func sanityAssignmentConstantsFromPrimitive(right value, constants []constant, valKnowledgeMap *knowledgeMap) []constant {
 	p := primitiveGet(right.primitive.name)
-	if len(p.name) == 0 {
-		errorCritical(fmt.Sprintf(
-			"invalid primitive (%s)",
-			right.primitive.name,
-		))
-	}
 	if (len(right.primitive.arguments) == 0) ||
 		(len(right.primitive.arguments) > 5) ||
 		((p.arity >= 0) && (len(right.primitive.arguments) != p.arity)) {
