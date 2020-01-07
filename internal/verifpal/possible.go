@@ -209,9 +209,6 @@ func possibleToForcePassRewrite(p primitive, valPrincipalState *principalState, 
 		return possibleToForcePassRewriteDECandAEADDEC(p, valPrincipalState, valAttackerState, analysis, depth)
 	case "SIGNVERIF":
 		return possibleToForcePassRewriteSIGNVERIF(p, valPrincipalState, valAttackerState, analysis, depth)
-	case "ASSERT":
-		return false
-		// return possibleToForcePassRewriteASSERT(p, valPrincipalState, valAttackerState, analysis, depth)
 	}
 	return false
 }
@@ -260,6 +257,7 @@ func possibleToForcePassRewriteSIGNVERIF(
 	return false
 }
 
+/*
 func possibleToForcePassRewriteASSERT(
 	p primitive, valPrincipalState *principalState, valAttackerState *attackerState,
 	analysis int, depth int,
@@ -288,3 +286,4 @@ func possibleToForcePassRewriteASSERT(
 	}
 	return false
 }
+*/

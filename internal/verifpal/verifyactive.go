@@ -120,55 +120,6 @@ func verifyActiveScanCombination(
 	return analysis, stage
 }
 
-func verifyActiveClearFreshValues(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
-	valAttackerStateCleared := attackerState{
-		active:      valAttackerState.active,
-		known:       []value{},
-		wire:        []bool{},
-		conceivable: valAttackerState.conceivable,
-		mutatedTo:   [][]string{},
-	}
-	for i, a := range valAttackerState.known {
-		if !verifyActiveValueHasFreshValues(valKnowledgeMap, a) {
-			if sanityExactSameValueInValues(a, &valAttackerStateCleared.known) < 0 {
-				valAttackerStateCleared.known = append(valAttackerStateCleared.known, valAttackerState.known[i])
-				valAttackerStateCleared.wire = append(valAttackerStateCleared.wire, valAttackerState.wire[i])
-				valAttackerStateCleared.mutatedTo = append(valAttackerStateCleared.mutatedTo, valAttackerState.mutatedTo[i])
-			}
-		}
-	}
-	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerStateCleared, false)
-	return &valAttackerStateCleared
-}
-
-func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) bool {
-	aa := a
-	switch a.kind {
-	case "constant":
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
-		aa = valKnowledgeMap.assigned[i]
-	}
-	switch aa.kind {
-	case "constant":
-		if aa.constant.fresh {
-			return true
-		}
-	case "primitive":
-		for _, aaa := range aa.primitive.arguments {
-			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
-				return true
-			}
-		}
-	case "equation":
-		for _, aaa := range aa.equation.values {
-			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState, stage int) replacementMap {
 	valReplacementMap := replacementMap{
 		constants:    []constant{},
@@ -315,3 +266,55 @@ func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *principalState,
 	valPrincipalState.wasMutated = valPrincipalState.wasMutated[:f]
 	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
 }
+
+/*
+func verifyActiveClearFreshValues(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
+	valAttackerStateCleared := attackerState{
+		active:      valAttackerState.active,
+		known:       []value{},
+		wire:        []bool{},
+		conceivable: valAttackerState.conceivable,
+		mutatedTo:   [][]string{},
+	}
+	for i, a := range valAttackerState.known {
+		if !verifyActiveValueHasFreshValues(valKnowledgeMap, a) {
+			if sanityExactSameValueInValues(a, &valAttackerStateCleared.known) < 0 {
+				valAttackerStateCleared.known = append(valAttackerStateCleared.known, valAttackerState.known[i])
+				valAttackerStateCleared.wire = append(valAttackerStateCleared.wire, valAttackerState.wire[i])
+				valAttackerStateCleared.mutatedTo = append(valAttackerStateCleared.mutatedTo, valAttackerState.mutatedTo[i])
+			}
+		}
+	}
+	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerStateCleared, false)
+	return &valAttackerStateCleared
+}
+
+
+func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) bool {
+	aa := a
+	switch a.kind {
+	case "constant":
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
+		aa = valKnowledgeMap.assigned[i]
+	}
+	switch aa.kind {
+	case "constant":
+		if aa.constant.fresh {
+			return true
+		}
+	case "primitive":
+		for _, aaa := range aa.primitive.arguments {
+			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
+				return true
+			}
+		}
+	case "equation":
+		for _, aaa := range aa.equation.values {
+			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
+				return true
+			}
+		}
+	}
+	return false
+}
+*/
