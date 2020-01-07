@@ -12,7 +12,11 @@ func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
 	valPrincipalState *principalState, valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
+	prim := primitiveGet(p.name)
 	injectants := &([]value{})
+	if !prim.injectable {
+		return injectants
+	}
 	if isRootPrimitive {
 		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
 			kind: "primitive", primitive: p,
@@ -20,19 +24,11 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	switch p.name {
-	case "AEAD_ENC":
-		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
-	case "ENC":
-		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
-	case "SIGN":
-		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
-	case "MAC":
-		injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
-	case "HASH":
-		if includeHashes {
-			injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
-		}
+	if !includeHashes || (p.name == "HASH" && includeHashes) {
+		injectants = injectPrimitive(
+			p, rootPrimitive,
+			valPrincipalState, valAttackerState, includeHashes,
+		)
 	}
 	return injectants
 }

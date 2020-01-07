@@ -15,7 +15,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: true,
 	},
 	{
 		name:   "HKDF",
@@ -27,7 +28,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: false,
 	},
 	{
 		name:   "AEAD_ENC",
@@ -41,7 +43,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: true,
 	},
 	{
 		name:   "AEAD_DEC",
@@ -69,7 +72,8 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		check: true,
+		check:      true,
+		injectable: false,
 	},
 	{
 		name:   "ENC",
@@ -83,7 +87,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: true,
 	},
 	{
 		name:   "DEC",
@@ -109,7 +114,8 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		check: false,
+		check:      false,
+		injectable: false,
 	},
 	{
 		name:   "MAC",
@@ -121,7 +127,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: true,
 	},
 	{
 		name:   "ASSERT",
@@ -135,7 +142,8 @@ var primitiveSpecs = []primitiveSpec{
 			passesAlways: false,
 			to:           -1,
 		},
-		check: true,
+		check:      true,
+		injectable: false,
 	},
 	{
 		name:   "SIGN",
@@ -147,7 +155,8 @@ var primitiveSpecs = []primitiveSpec{
 		rewrite: rewriteRule{
 			hasRule: false,
 		},
-		check: false,
+		check:      false,
+		injectable: true,
 	},
 	{
 		name:   "SIGNVERIF",
@@ -187,7 +196,8 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		check: true,
+		check:      true,
+		injectable: false,
 	},
 }
 

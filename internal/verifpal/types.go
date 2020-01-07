@@ -101,12 +101,13 @@ type rewriteRule struct {
 }
 
 type primitiveSpec struct {
-	name      string
-	arity     int
-	output    int
-	decompose decomposeRule
-	rewrite   rewriteRule
-	check     bool
+	name       string
+	arity      int
+	output     int
+	decompose  decomposeRule
+	rewrite    rewriteRule
+	check      bool
+	injectable bool
 }
 
 type principalState struct {
