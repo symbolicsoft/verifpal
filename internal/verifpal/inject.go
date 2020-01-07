@@ -24,12 +24,10 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	if !includeHashes || (p.name == "HASH" && includeHashes) {
-		injectants = injectPrimitive(
-			p, rootPrimitive,
-			valPrincipalState, valAttackerState, includeHashes,
-		)
-	}
+	injectants = injectPrimitive(
+		p, rootPrimitive,
+		valPrincipalState, valAttackerState, includeHashes,
+	)
 	return injectants
 }
 
@@ -154,6 +152,9 @@ func injectPrimitive(
 	valAttackerState *attackerState, includeHashes bool,
 ) *[]value {
 	var injectants []value
+	if p.name == "HASH" && !includeHashes {
+		return &injectants
+	}
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.arguments {
