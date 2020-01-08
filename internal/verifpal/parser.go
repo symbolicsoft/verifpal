@@ -56,6 +56,8 @@ func reserved() []string {
 		"assert",
 		"sign",
 		"signverif",
+		"pke_enc",
+		"pke_dec",
 		"g",
 		"nil",
 		"unnamed",
