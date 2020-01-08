@@ -1,9 +1,9 @@
 {
+	"version": "0.0.4",
 	"name": "verifpal",
 	"displayName": "Verifpal",
 	"description": "Verifpal language support.",
 	"icon": "icon.png",
-	"version": "0.0.3",
 	"publisher": "symbolicsoft",
 	"repository": "https://source.symbolic.software/verifpal/verifpal",
 	"engines": {

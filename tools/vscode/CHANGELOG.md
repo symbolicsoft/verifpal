@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.4
+- Added `PKE_ENC` and `PKE_DEC` keywords.
+
 ## 0.0.3
 - Added `nil` and `_` keywords.
 
