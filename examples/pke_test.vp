@@ -1,0 +1,32 @@
+attacker[active]
+
+principal Alice[
+    generates a
+    ga = G^a
+]
+
+principal Bob[
+    generates b
+    gb = G^b
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+    generates m
+    e = PKE_ENC(gb, m)
+    h = MAC(gb^a, e)
+]
+
+Alice -> Bob: e, h
+
+principal Bob[
+    _ = ASSERT(MAC(ga^b, e), h)?
+    d = PKE_DEC(b, e)
+]
+
+queries[
+    confidentiality? m
+    authentication? Alice -> Bob: e
+]
