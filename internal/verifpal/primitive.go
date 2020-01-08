@@ -41,6 +41,9 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
 		},
 		rewrite: rewriteRule{
 			hasRule: false,
@@ -56,14 +59,16 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
 		},
 		rewrite: rewriteRule{
-			hasRule:      true,
-			passesAlways: false,
-			name:         "AEAD_ENC",
-			from:         1,
-			to:           1,
-			matching:     []int{0, 2},
+			hasRule:  true,
+			name:     "AEAD_ENC",
+			from:     1,
+			to:       1,
+			matching: []int{0, 2},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -85,6 +90,9 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
 		},
 		rewrite: rewriteRule{
 			hasRule: false,
@@ -100,14 +108,16 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
 		},
 		rewrite: rewriteRule{
-			hasRule:      true,
-			passesAlways: true,
-			name:         "ENC",
-			from:         1,
-			to:           1,
-			matching:     []int{0},
+			hasRule:  true,
+			name:     "ENC",
+			from:     1,
+			to:       1,
+			matching: []int{0},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -140,9 +150,8 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:      true,
-			passesAlways: false,
-			to:           -1,
+			hasRule: true,
+			to:      -1,
 		},
 		check:      true,
 		injectable: false,
@@ -168,12 +177,11 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:      true,
-			passesAlways: false,
-			name:         "SIGN",
-			from:         2,
-			to:           -1,
-			matching:     []int{0, 1},
+			hasRule:  true,
+			name:     "SIGN",
+			from:     2,
+			to:       -1,
+			matching: []int{0, 1},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -199,6 +207,93 @@ var primitiveSpecs = []primitiveSpec{
 			},
 		},
 		check:      true,
+		injectable: false,
+	},
+	{
+		name:   "PKE_ENC",
+		arity:  2,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: true,
+			given:   []int{0},
+			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				switch i {
+				case 0:
+					switch x.kind {
+					case "constant":
+						return x, false
+					case "primitive":
+						return x, false
+					case "equation":
+						values := sanityDeconstructEquationValues(
+							x.equation,
+							valPrincipalState,
+						)
+						if len(values) == 2 {
+							return values[1], true
+						}
+						return x, false
+					}
+				case 1:
+					return x, true
+				}
+				return x, false
+			},
+		},
+		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		check:      false,
+		injectable: true,
+	},
+	{
+		name:   "PKE_DEC",
+		arity:  2,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: true,
+			given:   []int{0},
+			reveal:  1,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
+		},
+		rewrite: rewriteRule{
+			hasRule:  true,
+			name:     "PKE_ENC",
+			from:     1,
+			to:       1,
+			matching: []int{0},
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				g := value{
+					kind: "constant",
+					constant: constant{
+						name:        "g",
+						guard:       false,
+						fresh:       false,
+						declaration: "knows",
+						qualifier:   "public",
+					},
+				}
+				switch i {
+				case 0:
+					switch x.kind {
+					case "constant", "primitive":
+						return value{
+							kind: "equation",
+							equation: equation{
+								values: []value{g, x},
+							},
+						}, true
+					case "equation":
+						return x, false
+					}
+				}
+				return x, false
+			},
+		},
+		check:      false,
 		injectable: false,
 	},
 }

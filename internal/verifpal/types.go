@@ -88,16 +88,16 @@ type decomposeRule struct {
 	hasRule bool
 	given   []int
 	reveal  int
+	filter  func(value, int, *principalState) (value, bool)
 }
 
 type rewriteRule struct {
-	hasRule      bool
-	passesAlways bool
-	name         string
-	from         int
-	to           int
-	matching     []int
-	filter       func(value, int, *principalState) (value, bool)
+	hasRule  bool
+	name     string
+	from     int
+	to       int
+	matching []int
+	filter   func(value, int, *principalState) (value, bool)
 }
 
 type primitiveSpec struct {

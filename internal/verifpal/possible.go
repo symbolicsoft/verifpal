@@ -17,10 +17,11 @@ func possibleToDeconstructPrimitive(
 	if !primitive.decompose.hasRule {
 		return false, value{}, has
 	}
-	for _, g := range primitive.decompose.given {
+	for i, g := range primitive.decompose.given {
 		a := p.arguments[g]
-		i := sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState)
-		if i >= 0 {
+		a, valid := primitive.decompose.filter(a, i, valPrincipalState)
+		ii := sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState)
+		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -177,24 +178,24 @@ func possibleToPassRewrite(p primitive, valPrincipalState *principalState) (bool
 	from := p.arguments[prim.rewrite.from]
 	switch from.kind {
 	case "constant":
-		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
+		return (false || !prim.check), value{kind: "primitive", primitive: p}
 	case "primitive":
 		if from.primitive.name != prim.rewrite.name {
-			return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
+			return (false || !prim.check), value{kind: "primitive", primitive: p}
 		}
 		for _, m := range prim.rewrite.matching {
 			a1 := p.arguments[m]
 			a1, valid := prim.rewrite.filter(a1, m, valPrincipalState)
 			if !valid {
-				return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
+				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
 			a2 := from.primitive.arguments[m]
 			if !sanityEquivalentValues(a1, a2, valPrincipalState) {
-				return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
+				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
 		}
 	case "equation":
-		return (false || prim.rewrite.passesAlways), value{kind: "primitive", primitive: p}
+		return (false || !prim.check), value{kind: "primitive", primitive: p}
 	}
 	rewrite := value{kind: "primitive", primitive: p}
 	if prim.rewrite.to > 0 {
