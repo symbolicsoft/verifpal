@@ -161,7 +161,7 @@
         </dict>
         <dict>
           <key>match</key>
-          <string>(HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|G|DH|nil|_)</string>
+          <string>(HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|G|DH|nil|_)</string>
           <key>name</key>
           <string>support.function.verifpal</string>
         </dict>
@@ -302,7 +302,7 @@
       <array> 
         <dict>
           <key>match</key>
-          <string>(HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|G|DH|nil|_)</string>
+          <string>(HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|G|DH|nil|_)</string>
           <key>name</key>
           <string>support.function.verifpal</string>
         </dict>
