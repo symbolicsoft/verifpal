@@ -182,8 +182,17 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			if (a.constant.name == "g") || (a.constant.name == "nil") {
 				continue
 			}
+			replacements := []value{a, n}
+			for _, v := range valAttackerState.known {
+				switch v.kind {
+				case "constant":
+					if sanityExactSameValueInValues(v, &replacements) < 0 {
+						replacements = append(replacements, v)
+					}
+				}
+			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a, n})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
 		case "primitive":
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
@@ -200,8 +209,19 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 				}
 			}
 		case "equation":
+			replacements := []value{a, gn}
+			for _, v := range valAttackerState.known {
+				switch v.kind {
+				case "equation":
+					if sanityExactSameValueInValues(v, &replacements) < 0 {
+						if len(v.equation.values) == len(a.equation.values) {
+							replacements = append(replacements, v)
+						}
+					}
+				}
+			}
 			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a, gn})
+			valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
 		}
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
