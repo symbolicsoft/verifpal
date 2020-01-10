@@ -14,7 +14,13 @@ var primitiveSpecs = []primitiveSpec{
 		decompose: decomposeRule{
 			hasRule: false,
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -27,7 +33,13 @@ var primitiveSpecs = []primitiveSpec{
 		decompose: decomposeRule{
 			hasRule: false,
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -45,7 +57,13 @@ var primitiveSpecs = []primitiveSpec{
 				return x, true
 			},
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -63,6 +81,9 @@ var primitiveSpecs = []primitiveSpec{
 				return x, true
 			},
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
 			hasRule:  true,
 			name:     "AEAD_ENC",
@@ -79,6 +100,9 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
 		check:      true,
 		injectable: false,
 	},
@@ -94,7 +118,13 @@ var primitiveSpecs = []primitiveSpec{
 				return x, true
 			},
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -112,6 +142,9 @@ var primitiveSpecs = []primitiveSpec{
 				return x, true
 			},
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
 			hasRule:  true,
 			name:     "ENC",
@@ -126,6 +159,9 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
 		check:      false,
 		injectable: false,
 	},
@@ -136,7 +172,13 @@ var primitiveSpecs = []primitiveSpec{
 		decompose: decomposeRule{
 			hasRule: false,
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -149,9 +191,15 @@ var primitiveSpecs = []primitiveSpec{
 		decompose: decomposeRule{
 			hasRule: false,
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
 			hasRule: true,
 			to:      -1,
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
 		},
 		check:      true,
 		injectable: false,
@@ -163,7 +211,13 @@ var primitiveSpecs = []primitiveSpec{
 		decompose: decomposeRule{
 			hasRule: false,
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -174,6 +228,9 @@ var primitiveSpecs = []primitiveSpec{
 		arity:  3,
 		output: 1,
 		decompose: decomposeRule{
+			hasRule: false,
+		},
+		recompose: recomposeRule{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
@@ -191,7 +248,7 @@ var primitiveSpecs = []primitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						values := sanityDeconstructEquationValues(
+						values := sanityDecomposeEquationValues(
 							x.equation,
 							valPrincipalState,
 						)
@@ -205,6 +262,9 @@ var primitiveSpecs = []primitiveSpec{
 				}
 				return x, false
 			},
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
 		},
 		check:      true,
 		injectable: false,
@@ -226,7 +286,7 @@ var primitiveSpecs = []primitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						values := sanityDeconstructEquationValues(
+						values := sanityDecomposeEquationValues(
 							x.equation,
 							valPrincipalState,
 						)
@@ -241,7 +301,13 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
 		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
 			hasRule: false,
 		},
 		check:      false,
@@ -258,6 +324,9 @@ var primitiveSpecs = []primitiveSpec{
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
 				return x, true
 			},
+		},
+		recompose: recomposeRule{
+			hasRule: false,
 		},
 		rewrite: rewriteRule{
 			hasRule:  true,
@@ -291,6 +360,69 @@ var primitiveSpecs = []primitiveSpec{
 					}
 				}
 				return x, false
+			},
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
+		check:      false,
+		injectable: false,
+	},
+	{
+		name:   "SHAMIR_SPLIT",
+		arity:  1,
+		output: 3,
+		decompose: decomposeRule{
+			hasRule: false,
+		},
+		recompose: recomposeRule{
+			hasRule: true,
+			given: [][]int{
+				[]int{0, 1},
+				[]int{0, 2},
+				[]int{1, 2},
+			},
+			reveal: 0,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
+			},
+		},
+		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
+		check:      false,
+		injectable: false,
+	},
+	{
+		name:   "SHAMIR_JOIN",
+		arity:  2,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: true,
+		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
+		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
+			hasRule: true,
+			name:    "SHAMIR_SPLIT",
+			given: [][]int{
+				[]int{0, 1},
+				[]int{1, 0},
+				[]int{0, 2},
+				[]int{2, 0},
+				[]int{1, 2},
+				[]int{2, 1},
+			},
+			reveal: 0,
+			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+				return x, true
 			},
 		},
 		check:      false,

@@ -91,6 +91,13 @@ type decomposeRule struct {
 	filter  func(value, int, *principalState) (value, bool)
 }
 
+type recomposeRule struct {
+	hasRule bool
+	given   [][]int
+	reveal  int
+	filter  func(value, int, *principalState) (value, bool)
+}
+
 type rewriteRule struct {
 	hasRule  bool
 	name     string
@@ -100,12 +107,22 @@ type rewriteRule struct {
 	filter   func(value, int, *principalState) (value, bool)
 }
 
+type rebuildRule struct {
+	hasRule bool
+	name    string
+	given   [][]int
+	reveal  int
+	filter  func(value, int, *principalState) (value, bool)
+}
+
 type primitiveSpec struct {
 	name       string
 	arity      int
 	output     int
 	decompose  decomposeRule
+	recompose  recomposeRule
 	rewrite    rewriteRule
+	rebuild    rebuildRule
 	check      bool
 	injectable bool
 }
