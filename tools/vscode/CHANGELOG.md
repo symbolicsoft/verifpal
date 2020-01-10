@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.5
+- Added `SHAMIR_SPLIT` and `SHAMIR_JOIN` keywords.
+
 ## 0.0.4
 - Added `PKE_ENC` and `PKE_DEC` keywords.
 
