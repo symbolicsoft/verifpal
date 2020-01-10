@@ -1,0 +1,20 @@
+attacker[active]
+
+principal Bob[]
+principal Alice[
+    generates k
+    generates m
+    s1, s2, s3 = SHAMIR_SPLIT(k)
+    e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e, s1, s2
+
+principal Bob[
+    kk = SHAMIR_JOIN(s1, s2)
+    d = AEAD_DEC(kk, e, nil)?
+]
+
+queries[
+    confidentiality? m
+]
