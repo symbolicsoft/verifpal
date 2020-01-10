@@ -15,25 +15,8 @@ func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
 		knownBy:        [][]map[string]string{},
 		unnamedCounter: 0,
 	}
-	g := constant{
-		name:        "g",
-		guard:       false,
-		fresh:       false,
-		declaration: "knows",
-		qualifier:   "public",
-	}
-	n := constant{
-		name:        "nil",
-		guard:       false,
-		fresh:       false,
-		declaration: "knows",
-		qualifier:   "public",
-	}
-	valKnowledgeMap.constants = append(valKnowledgeMap.constants, g)
-	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-		kind:     "constant",
-		constant: g,
-	})
+	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantG.constant)
+	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantG)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
 	for _, principal := range principals {
@@ -42,11 +25,8 @@ func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
 			map[string]string{principal: principal},
 		)
 	}
-	valKnowledgeMap.constants = append(valKnowledgeMap.constants, n)
-	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-		kind:     "constant",
-		constant: n,
-	})
+	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantN.constant)
+	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantN)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
 	for _, principal := range principals {

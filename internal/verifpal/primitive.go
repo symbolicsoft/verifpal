@@ -335,16 +335,6 @@ var primitiveSpecs = []primitiveSpec{
 			to:       1,
 			matching: []int{0},
 			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
-				g := value{
-					kind: "constant",
-					constant: constant{
-						name:        "g",
-						guard:       false,
-						fresh:       false,
-						declaration: "knows",
-						qualifier:   "public",
-					},
-				}
 				switch i {
 				case 0:
 					switch x.kind {
@@ -352,7 +342,7 @@ var primitiveSpecs = []primitiveSpec{
 						return value{
 							kind: "equation",
 							equation: equation{
-								values: []value{g, x},
+								values: []value{constantG, x},
 							},
 						}, true
 					case "equation":

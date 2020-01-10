@@ -168,38 +168,12 @@ func verifyActiveProvideValueReplacements(
 	a value, v value, rootIndex int, stage int,
 	valPrincipalState *principalState, valAttackerState *attackerState, valReplacementMap *replacementMap,
 ) {
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	g := value{
-		kind: "constant",
-		constant: constant{
-			name:        "g",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
-	gn := value{
-		kind: "equation",
-		equation: equation{
-			values: []value{g, n},
-		},
-	}
 	switch a.kind {
 	case "constant":
 		if (a.constant.name == "g") || (a.constant.name == "nil") {
 			return
 		}
-		replacements := []value{a, n}
+		replacements := []value{a, constantN}
 		for _, v := range valAttackerState.known {
 			switch v.kind {
 			case "constant":
@@ -226,7 +200,7 @@ func verifyActiveProvideValueReplacements(
 			}
 		}
 	case "equation":
-		replacements := []value{a, gn}
+		replacements := []value{a, constantGN}
 		/*
 			for _, v := range valAttackerState.known {
 				switch v.kind {

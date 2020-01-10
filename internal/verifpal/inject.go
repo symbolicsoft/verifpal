@@ -80,20 +80,10 @@ func injectPrimitiveSkeleton(p primitive) primitive {
 		output:    p.output,
 		check:     false,
 	}
-	n := value{
-		kind: "constant",
-		constant: constant{
-			name:        "nil",
-			guard:       false,
-			fresh:       false,
-			declaration: "knows",
-			qualifier:   "public",
-		},
-	}
 	for _, a := range p.arguments {
 		switch a.kind {
 		case "constant":
-			skeleton.arguments = append(skeleton.arguments, n)
+			skeleton.arguments = append(skeleton.arguments, constantN)
 		case "primitive":
 			aa := value{
 				kind:      "primitive",
@@ -101,7 +91,7 @@ func injectPrimitiveSkeleton(p primitive) primitive {
 			}
 			skeleton.arguments = append(skeleton.arguments, aa)
 		case "equation":
-			skeleton.arguments = append(skeleton.arguments, n)
+			skeleton.arguments = append(skeleton.arguments, constantN)
 		}
 	}
 	return skeleton
