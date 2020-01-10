@@ -1,0 +1,23 @@
+attacker[active]
+
+principal Authenticator[
+	knows private k
+	knows public c0
+]
+
+principal Client[
+	generates m1
+]
+
+Client -> Authenticator: m1
+
+principal Authenticator[
+	a1 = MAC(k, m1)
+	k2 = MAC(k, c0)
+]
+
+Authenticator -> Client: a1
+
+queries[
+	confidentiality? k2
+]
