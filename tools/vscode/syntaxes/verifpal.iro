@@ -89,7 +89,7 @@ contexts [] {
             styles []    = .punctuation;
          }
          : pattern {
-            regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|G|DH|nil|_)
+            regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|DH|nil|_)
             styles []       = .function;
          }
          : pattern {
@@ -107,7 +107,7 @@ contexts [] {
          styles []       = .keyword;
       }
       : pattern {
-         regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|G|DH|nil|_)
+         regex          \= (HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|DH|nil|_)
          styles []       = .function;
       }
       : inline_push {
