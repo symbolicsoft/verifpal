@@ -127,6 +127,47 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		combination:  []value{},
 		depthIndex:   []int{},
 	}
+	for i, v := range valAttackerState.known {
+		if !valAttackerState.wire[i] || v.kind != "constant" {
+			continue
+		}
+		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
+		iii := sanityGetAttackerStateIndexFromConstant(valAttackerState, v.constant)
+		mutatedTo := strInSlice(valPrincipalState.sender[ii], valAttackerState.mutatedTo[iii])
+		trulyGuarded := false
+		if valPrincipalState.guard[ii] {
+			trulyGuarded = true
+			if iii >= 0 && mutatedTo {
+				trulyGuarded = false
+			}
+		}
+		if trulyGuarded {
+			continue
+		}
+		if valPrincipalState.creator[ii] == valPrincipalState.name {
+			continue
+		}
+		if !valPrincipalState.known[ii] {
+			continue
+		}
+		a := valPrincipalState.assigned[ii]
+		verifyActiveProvideValueReplacements(
+			a, v, ii, stage,
+			valPrincipalState, valAttackerState, &valReplacementMap,
+		)
+	}
+	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
+	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
+	for iiii := range valReplacementMap.constants {
+		valReplacementMap.depthIndex[iiii] = 0
+	}
+	return valReplacementMap
+}
+
+func verifyActiveProvideValueReplacements(
+	a value, v value, rootIndex int, stage int,
+	valPrincipalState *principalState, valAttackerState *attackerState, valReplacementMap *replacementMap,
+) {
 	n := value{
 		kind: "constant",
 		constant: constant{
@@ -153,63 +194,40 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 			values: []value{g, n},
 		},
 	}
-	for i, v := range valAttackerState.known {
-		if !valAttackerState.wire[i] || v.kind != "constant" {
-			continue
+	switch a.kind {
+	case "constant":
+		if (a.constant.name == "g") || (a.constant.name == "nil") {
+			return
 		}
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
-		iii := sanityGetAttackerStateIndexFromConstant(valAttackerState, v.constant)
-		mutatedTo := strInSlice(valPrincipalState.sender[ii], valAttackerState.mutatedTo[iii])
-		trulyGuarded := false
-		if valPrincipalState.guard[ii] {
-			trulyGuarded = true
-			if iii >= 0 && mutatedTo {
-				trulyGuarded = false
-			}
-		}
-		if trulyGuarded {
-			continue
-		}
-		if valPrincipalState.creator[ii] == valPrincipalState.name {
-			continue
-		}
-		if !valPrincipalState.known[ii] {
-			continue
-		}
-		a := valPrincipalState.assigned[ii]
-		switch a.kind {
-		case "constant":
-			if (a.constant.name == "g") || (a.constant.name == "nil") {
-				continue
-			}
-			replacements := []value{a, n}
-			for _, v := range valAttackerState.known {
-				switch v.kind {
-				case "constant":
-					if sanityExactSameValueInValues(v, &replacements) < 0 {
-						replacements = append(replacements, v)
-					}
+		replacements := []value{a, n}
+		for _, v := range valAttackerState.known {
+			switch v.kind {
+			case "constant":
+				if sanityExactSameValueInValues(v, &replacements) < 0 {
+					replacements = append(replacements, v)
 				}
 			}
-			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
-		case "primitive":
-			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
-			if stage < 2 {
-				continue
+		}
+		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
+		valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
+	case "primitive":
+		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
+		valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+		if stage < 2 {
+			return
+		}
+		l := len(valReplacementMap.replacements) - 1
+		includeHashes := (stage > 2)
+		injectants := inject(a.primitive, a.primitive, true, rootIndex,
+			valPrincipalState, valAttackerState, includeHashes)
+		for _, aa := range *injectants {
+			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
+				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
 			}
-			l := len(valReplacementMap.replacements) - 1
-			includeHashes := (stage > 2)
-			injectants := inject(a.primitive, a.primitive, true, ii,
-				valPrincipalState, valAttackerState, includeHashes)
-			for _, aa := range *injectants {
-				if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
-					valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
-				}
-			}
-		case "equation":
-			replacements := []value{a, gn}
+		}
+	case "equation":
+		replacements := []value{a, gn}
+		/*
 			for _, v := range valAttackerState.known {
 				switch v.kind {
 				case "equation":
@@ -220,16 +238,10 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 					}
 				}
 			}
-			valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
-		}
+		*/
+		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
+		valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
 	}
-	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
-	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
-	for iiii := range valReplacementMap.constants {
-		valReplacementMap.depthIndex[iiii] = 0
-	}
-	return valReplacementMap
 }
 
 func verifyActiveMutatePrincipalState(
@@ -308,7 +320,6 @@ func verifyActiveClearFreshValues(m *Model, valKnowledgeMap *knowledgeMap, valAt
 	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerStateCleared, false)
 	return &valAttackerStateCleared
 }
-
 
 func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) bool {
 	aa := a
