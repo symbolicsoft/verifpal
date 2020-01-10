@@ -59,6 +59,8 @@
 			"signverif",
 			"pke_enc",
 			"pke_dec",
+			"shamir_split",
+			"shamir_join",
 			"g",
 			"nil",
 			"unnamed",
