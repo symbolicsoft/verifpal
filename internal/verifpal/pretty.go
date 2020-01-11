@@ -7,16 +7,15 @@ package verifpal
 import (
 	"fmt"
 	"os"
-	"runtime"
 
 	"github.com/logrusorgru/aurora"
 )
 
 func prettyMessage(m string, analysis int, depth int, t string) {
-	if runtime.GOOS == "windows" {
-		prettyMessageRegular(m, analysis, depth, t)
-	} else {
+	if colorOutputSupport() {
 		prettyMessageColor(m, analysis, depth, t)
+	} else {
+		prettyMessageRegular(m, analysis, depth, t)
 	}
 }
 
@@ -94,15 +93,15 @@ func prettyVerifyResultSummary(mutated string, summary string, attack bool) stri
 	if len(mutated) > 0 {
 		mutatedIntro = "When the following values are mutated by the attacker:"
 	}
-	if runtime.GOOS == "windows" {
+	if colorOutputSupport() {
 		return fmt.Sprintf("%s%s\n           %s",
-			mutatedIntro, mutated, summary,
+			aurora.Italic(mutatedIntro).String(),
+			aurora.BrightYellow(mutated).Italic().String(),
+			aurora.BrightRed(summary).Italic().Bold().String(),
 		)
 	}
 	return fmt.Sprintf("%s%s\n           %s",
-		aurora.Italic(mutatedIntro).String(),
-		aurora.BrightYellow(mutated).Italic().String(),
-		aurora.BrightRed(summary).Italic().Bold().String(),
+		mutatedIntro, mutated, summary,
 	)
 }
 
@@ -287,11 +286,11 @@ func PrettyPrint(modelFile string) string {
 }
 
 func prettyAnalysis(analysis int, stage int) {
-	if runtime.GOOS == "windows" {
-		analysis := fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)
+	if colorOutputSupport() {
+		analysis := aurora.Gray(15, fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)).Italic()
 		fmt.Fprint(os.Stdout, analysis)
 	} else {
-		analysis := aurora.Gray(15, fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)).Italic()
+		analysis := fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)
 		fmt.Fprint(os.Stdout, analysis)
 	}
 	fmt.Fprint(os.Stdout, "\r \r")
