@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-attacker[passive]
+attacker[active]
 
 principal Client[
 	generates clientRandom
@@ -30,17 +30,17 @@ principal Server[
 	knows public key
 	knows public iv
 	sharedSecretServer = gc^s
-	helloHash = HASH(clientRandom, gc, serverRandom, gs)
-	earlySecret = HKDF(nil, nil, nil)
-	emptyHash = HASH(nil)
-	derivedSecret = HKDF(earlySecret, derived, emptyHash)
-	handshakeSecret = HKDF(derivedSecret, sharedSecretServer, nil)
-	clientHandshakeTrafficSecret = HKDF(handshakeSecret, c_hs_traffic, helloHash)
-	serverHandshakeTrafficSecret = HKDF(handshakeSecret, s_hs_traffic, helloHash)
-	clientHandshakeKey = HKDF(clientHandshakeTrafficSecret, key, nil)
-	serverHandshakeKey = HKDF(serverHandshakeTrafficSecret, key, nil)
-	clientHandshakeIV = HKDF(clientHandshakeTrafficSecret, iv, nil)
-	serverHandshakeIV = HKDF(serverHandshakeTrafficSecret, iv, nil)
+	helloHashServer = HASH(clientRandom, gc, serverRandom, gs)
+	earlySecretServer = HKDF(nil, nil, nil)
+	emptyHashServer = HASH(nil)
+	derivedSecretServer = HKDF(earlySecretServer, derived, emptyHashServer)
+	handshakeSecretServer = HKDF(derivedSecretServer, sharedSecretServer, nil)
+	clientHandshakeTrafficSecretServer = HKDF(handshakeSecretServer, c_hs_traffic, helloHashServer)
+	serverHandshakeTrafficSecretServer = HKDF(handshakeSecretServer, s_hs_traffic, helloHashServer)
+	clientHandshakeKeyServer = HKDF(clientHandshakeTrafficSecretServer, key, nil)
+	serverHandshakeKeyServer = HKDF(serverHandshakeTrafficSecretServer, key, nil)
+	clientHandshakeIVServer = HKDF(clientHandshakeTrafficSecretServer, iv, nil)
+	serverHandshakeIVServer = HKDF(serverHandshakeTrafficSecretServer, iv, nil)
 ]
 
 principal Client[
@@ -63,4 +63,25 @@ principal Client[
 	serverHandshakeIVClient = HKDF(serverHandshakeTrafficSecretClient, iv, nil)
 ]
 
-queries[]
+principal Server[
+	e1 = AEAD_ENC(serverHandshakeKeyServer, certificate, nil)
+	certVerifyServer = SIGN(certificateKey, HASH(helloHashServer, e1))
+	e2 = AEAD_ENC(serverHandshakeKeyServer, certVerifyServer, nil)
+	e3 = AEAD_ENC(serverHandshakeKeyServer, gCertificate, nil)
+]
+
+Server -> Client: e1, e2, e3
+
+principal Client[
+	d1 = AEAD_DEC(serverHandshakeKeyClient, e1, nil)?
+	d2 = AEAD_DEC(serverHandshakeKeyClient, e2, nil)?
+	d3 = AEAD_DEC(serverHandshakeKeyClient, e3, nil)?
+	_ = SIGNVERIF(d3, HASH(helloHashClient, e1), d2)?
+]
+
+principal Server[
+]
+
+queries[
+	confidentiality? certificate
+]
