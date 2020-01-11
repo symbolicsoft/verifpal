@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[passive]
+
+principal Client[
+	generates clientRandom
+	generates c
+	gc = G^c
+]
+
+principal Server[
+	knows private certificateKey
+	knows public hostname
+	generates serverRandom
+	generates s
+	gs = G^s
+	certificate = HASH(certificateKey, hostname)
+	gCertificate = G^certificateKey
+]
+
+Client -> Server: clientRandom, gc
+
+Server -> Client: serverRandom, gs
+
+principal Server[
+	knows public derived
+	knows public c_hs_traffic
+	knows public s_hs_traffic
+	knows public key
+	knows public iv
+	sharedSecretServer = gc^s
+	helloHash = HASH(clientRandom, gc, serverRandom, gs)
+	earlySecret = HKDF(nil, nil, nil)
+	emptyHash = HASH(nil)
+	derivedSecret = HKDF(earlySecret, derived, emptyHash)
+	handshakeSecret = HKDF(derivedSecret, sharedSecretServer, nil)
+	clientHandshakeTrafficSecret = HKDF(handshakeSecret, c_hs_traffic, helloHash)
+	serverHandshakeTrafficSecret = HKDF(handshakeSecret, s_hs_traffic, helloHash)
+	clientHandshakeKey = HKDF(clientHandshakeTrafficSecret, key, nil)
+	serverHandshakeKey = HKDF(serverHandshakeTrafficSecret, key, nil)
+	clientHandshakeIV = HKDF(clientHandshakeTrafficSecret, iv, nil)
+	serverHandshakeIV = HKDF(serverHandshakeTrafficSecret, iv, nil)
+]
+
+principal Client[
+	knows public derived
+	knows public c_hs_traffic
+	knows public s_hs_traffic
+	knows public key
+	knows public iv
+	sharedSecretClient = gs^c
+	helloHashClient = HASH(clientRandom, gc, serverRandom, gs)
+	earlySecretClient = HKDF(nil, nil, nil)
+	emptyHashClient = HASH(nil)
+	derivedSecretClient = HKDF(earlySecretClient, derived, emptyHashClient)
+	handshakeSecretClient = HKDF(derivedSecretClient, sharedSecretClient, nil)
+	clientHandshakeTrafficSecretClient = HKDF(handshakeSecretClient, c_hs_traffic, helloHashClient)
+	serverHandshakeTrafficSecretClient = HKDF(handshakeSecretClient, s_hs_traffic, helloHashClient)
+	clientHandshakeKeyClient = HKDF(clientHandshakeTrafficSecretClient, key, nil)
+	serverHandshakeKeyClient = HKDF(serverHandshakeTrafficSecretClient, key, nil)
+	clientHandshakeIVClient = HKDF(clientHandshakeTrafficSecretClient, iv, nil)
+	serverHandshakeIVClient = HKDF(serverHandshakeTrafficSecretClient, iv, nil)
+]
+
+queries[]
