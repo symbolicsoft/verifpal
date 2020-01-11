@@ -30,6 +30,12 @@ macos:
 	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/...
 	@/bin/echo "   OK"
 
+wasm:
+	@/bin/echo -n "[Verifpal] Building Verifpal for WebAssembly..."
+	@GOOS="js" GOARCH="wasm" go build -gcflags="-e" -ldflags="-s -w" -o build/wasm verifpal.com/...
+	@mv build/wasm/verifpal build/wasm/verifpal.wasm
+	@/bin/echo " OK"
+
 dependencies:
 	@/bin/echo -n "[Verifpal] Installing dependencies."
 	@go get -u github.com/mna/pigeon
@@ -47,4 +53,4 @@ clean:
 	@$(RM) build/macos/verifpal
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools
+.PHONY: all parser windows linux macos wasm dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools
