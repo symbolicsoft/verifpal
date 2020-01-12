@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal ComputerA[
+	knows private username
+	knows private password
+	knows public salt
+	knows private data
+	hashedPassword = HASH(password, salt)
+	h1, h2 = HKDF(password, salt, nil)
+	e1 = AEAD_ENC(h1, data, nil)
+]
+
+principal ComputerB[]
+
+principal Server[]
+
+ComputerA -> Server: username, h2, e1
+
+principal Server[
+	h3 = HASH(username, h2)
+]
+
+principal ComputerB[
+	knows private username
+	knows private password
+	knows public salt
+	usernameb = DEC(password, ENC(password, username)) // Terrible hack
+	h1b, h2b = HKDF(password, salt, nil)
+]
+
+ComputerB -> Server: usernameb, h2b
+
+principal Server[
+	_ = ASSERT(username, usernameb)?
+	_ = ASSERT(h3, HASH(usernameb, h2b))?
+]
+
+Server -> ComputerB: e1
+
+principal ComputerB[
+	d1 = AEAD_DEC(h1b, e1, nil)?
+]
+
+queries[
+	confidentiality? data
+	authentication? Server -> ComputerB: e1
+]
