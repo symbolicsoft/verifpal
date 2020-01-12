@@ -51,6 +51,7 @@ clean:
 	@$(RM) build/windows/verifpal.exe
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
+	@$(RM) build/wasm/verifpal.wasm
 	@/bin/echo "                   OK"
 
 .PHONY: all parser windows linux macos wasm dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools
