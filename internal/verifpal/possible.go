@@ -297,37 +297,33 @@ func possibleToRebuild(p primitive, valPrincipalState *principalState) (bool, va
 	if !prim.rebuild.hasRule {
 		return false, value{}
 	}
-	for _, i := range prim.rebuild.given {
+	for _, g := range prim.rebuild.given {
 		has := []value{}
-		for _, ii := range i {
-			a := p.arguments[ii]
+	aLoop:
+		for _, a := range p.arguments {
 			switch a.kind {
 			case "constant":
-				continue
+				continue aLoop
 			case "primitive":
 				if a.primitive.name == prim.rebuild.name {
 					has = append(has, a)
 				}
 			case "equation":
-				continue
+				continue aLoop
 			}
-			rebuildPasses := true
-			if len(has) >= len(i) {
-				for ai, aa := range has {
-					if ai == 0 {
-						continue
-					}
-					equivPrim, o1, o2 := sanityEquivalentPrimitives(has[0].primitive, aa.primitive, valPrincipalState, false)
-					if !equivPrim || (o1 == o2) {
-						rebuildPasses = false
-					}
+			if len(has) < len(g) {
+				continue aLoop
+			}
+			for ai := 1; ai < len(has); ai++ {
+				equivPrim, o1, o2 := sanityEquivalentPrimitives(
+					has[0].primitive, has[ai].primitive,
+					valPrincipalState, false,
+				)
+				if !equivPrim || (o1 == o2) {
+					continue aLoop
 				}
-			} else {
-				rebuildPasses = false
 			}
-			if rebuildPasses {
-				return true, has[0].primitive.arguments[prim.rebuild.reveal]
-			}
+			return true, has[0].primitive.arguments[prim.rebuild.reveal]
 		}
 	}
 	return false, value{}
