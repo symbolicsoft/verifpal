@@ -4,7 +4,9 @@
 
 package verifpal
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
@@ -349,71 +351,10 @@ func constructPrincipalStateClone(valPrincipalState *principalState) *principalS
 	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
 	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
-	/*
-		for i := range valPrincipalStateClone.wasRewritten {
-			valPrincipalStateClone.wasRewritten[i] = false
-			valPrincipalStateClone.wasMutated[i] = false
-		}
-	*/
 	return &valPrincipalStateClone
 }
 
-func constructAttackerState(active bool, m *Model, valKnowledgeMap *knowledgeMap, verbose bool) *attackerState {
-	valAttackerState := attackerState{
-		active:      active,
-		known:       []value{},
-		wire:        []bool{},
-		conceivable: []value{},
-		mutatedTo:   [][]string{},
-	}
-	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerState, verbose)
-	return &valAttackerState
-}
-
-func constructAttackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, verbose bool) {
-	for _, c := range valKnowledgeMap.constants {
-		if c.qualifier == "public" {
-			v := value{
-				kind:     "constant",
-				constant: c,
-			}
-			if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
-				valAttackerState.known = append(valAttackerState.known, v)
-				valAttackerState.wire = append(valAttackerState.wire, false)
-				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
-			}
-		}
-	}
-	for _, blck := range m.blocks {
-		switch blck.kind {
-		case "message":
-			constructAttackerStateRenderMessage(valKnowledgeMap, valAttackerState, &blck, verbose)
-		}
-	}
-}
-
-func constructAttackerStateRenderMessage(valKnowledgeMap *knowledgeMap, valAttackerState *attackerState, blck *block, verbose bool) {
-	for _, c := range blck.message.constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-		v := value{
-			kind:     "constant",
-			constant: valKnowledgeMap.constants[i],
-		}
-		if valKnowledgeMap.constants[i].qualifier == "private" {
-			ii := sanityExactSameValueInValues(v, &valAttackerState.known)
-			if ii >= 0 {
-				valAttackerState.wire[ii] = true
-			} else {
-				if verbose {
-					prettyMessage(fmt.Sprintf(
-						"%s has sent %s to %s, rendering it public.",
-						blck.message.sender, prettyConstant(c), blck.message.recipient,
-					), 0, 0, "analysis")
-				}
-				valAttackerState.known = append(valAttackerState.known, v)
-				valAttackerState.wire = append(valAttackerState.wire, true)
-				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
-			}
-		}
-	}
+func constructAttackerState(active bool, m *Model, valKnowledgeMap *knowledgeMap, verbose bool) {
+	attackerStateInit(active)
+	attackerStatePopulate(m, valKnowledgeMap, verbose)
 }

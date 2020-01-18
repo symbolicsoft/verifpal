@@ -4,6 +4,8 @@
 
 package verifpal
 
+import "sync"
+
 func verifyActive(
 	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
@@ -11,21 +13,19 @@ func verifyActive(
 	var VerifyResults []VerifyResult
 	analysis := 0
 	stage := 0
-	valAttackerState := constructAttackerState(true, m, valKnowledgeMap, true)
-	prettyMessage("Attacker is configured as active.", 0, 0, "info")
+	constructAttackerState(true, m, valKnowledgeMap, true)
+	prettyMessage("Attacker is configured as active.", 0, "info")
 	for stage <= 3 {
 		switch stage {
 		case 0:
 			analysis, stage = verifyActiveStage0(
 				m, valKnowledgeMap, valPrincipalStates,
-				&VerifyResults, valAttackerState,
-				analysis, stage,
+				&VerifyResults, analysis, stage,
 			)
 		default:
 			analysis, stage = verifyActiveStage123(
 				m, valKnowledgeMap, valPrincipalStates,
-				&VerifyResults, valAttackerState,
-				analysis, stage,
+				&VerifyResults, analysis, stage,
 			)
 		}
 	}
@@ -33,10 +33,8 @@ func verifyActive(
 }
 
 func verifyActiveStage0(
-	m *Model,
-	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
-	VerifyResults *[]VerifyResult, valAttackerState *attackerState,
-	analysis int, stage int,
+	m *Model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
+	VerifyResults *[]VerifyResult, analysis int, stage int,
 ) (int, int) {
 	for _, valPrincipalState := range valPrincipalStates {
 		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
@@ -46,7 +44,7 @@ func verifyActiveStage0(
 		for i := range valPrincipalStateClone.assigned {
 			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
 		}
-		verifyAnalysis(m, valPrincipalStateClone, valAttackerState, analysis, 0)
+		verifyAnalysis(m, valPrincipalStateClone, analysis)
 		prettyAnalysis(analysis, stage)
 	}
 	stage = verifyActiveIncrementStage(stage)
@@ -56,17 +54,24 @@ func verifyActiveStage0(
 func verifyActiveStage123(
 	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState,
-	VerifyResults *[]VerifyResult, valAttackerState *attackerState,
-	analysis int, stage int,
+	VerifyResults *[]VerifyResult, analysis int, stage int,
 ) (int, int) {
+	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
-		analysis = verifyActiveIncrementAnalysis(analysis)
-		valReplacementMap := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
-		analysis, stage = verifyActiveScanCombination(m,
-			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMap,
-			VerifyResults, true, analysis, stage,
-		)
+		principalsGroup.Add(1)
+		go func(valPrincipalState *principalState, pg *sync.WaitGroup) {
+			var combinationsGroup sync.WaitGroup
+			analysis = verifyActiveIncrementAnalysis(analysis)
+			combinationsGroup.Add(1)
+			go verifyActiveScanCombination(m,
+				valPrincipalState, valKnowledgeMap, &replacementMap{initialized: false},
+				VerifyResults, true, analysis, stage, &combinationsGroup,
+			)
+			combinationsGroup.Wait()
+			pg.Done()
+		}(valPrincipalState, &principalsGroup)
 	}
+	principalsGroup.Wait()
 	stage = verifyActiveIncrementStage(stage)
 	return analysis, stage
 }
@@ -81,52 +86,57 @@ func verifyActiveIncrementStage(stage int) int {
 
 func verifyActiveScanCombination(
 	m *Model,
-	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
-	valAttackerState *attackerState, valReplacementMap *replacementMap,
-	VerifyResults *[]VerifyResult, newStage bool, analysis int, stage int,
+	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valReplacementMap *replacementMap,
+	VerifyResults *[]VerifyResult, newStage bool, analysis int, stage int, cg *sync.WaitGroup,
 ) (int, int) {
 	var lastReplacement bool
 	var valPrincipalStateWithReplacements *principalState
+	valAttackerState := attackerStateGetRead()
+	if !valReplacementMap.initialized {
+		valReplacementMapInit := verifyActiveInitReplacementMap(valPrincipalState, 0)
+		valReplacementMap = &valReplacementMapInit
+	}
 	attackerKnown := len(valAttackerState.known)
 	lastReplacement = valReplacementMap.combinationNext()
 	valPrincipalStateWithReplacements, _ = verifyActiveMutatePrincipalState(
-		valPrincipalState, valKnowledgeMap,
-		valAttackerState, valReplacementMap,
+		valPrincipalState, valKnowledgeMap, valReplacementMap,
 	)
-	verifyAnalysis(m, valPrincipalStateWithReplacements, valAttackerState, analysis, 0)
+	verifyAnalysis(m, valPrincipalStateWithReplacements, analysis)
 	verifyResolveQueries(m,
-		valKnowledgeMap, valPrincipalStateWithReplacements, valAttackerState,
+		valKnowledgeMap, valPrincipalStateWithReplacements,
 		VerifyResults, analysis,
 	)
-	// valAttackerState = verifyActiveClearFreshValues(m, valKnowledgeMap, valAttackerState)
 	analysis = verifyActiveIncrementAnalysis(analysis)
 	prettyAnalysis(analysis, stage)
 	if len(*VerifyResults) == len(m.queries) {
-		return analysis, stage
-	}
-	if (len(valAttackerState.known) > attackerKnown) || newStage {
-		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
-		return verifyActiveScanCombination(m,
-			valPrincipalState, valKnowledgeMap, valAttackerState, &valReplacementMapUpdate,
-			VerifyResults, false, analysis, stage,
+		// Nothing
+	} else if (len(valAttackerState.known) > attackerKnown) || newStage {
+		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, stage)
+		cg.Add(1)
+		go verifyActiveScanCombination(m,
+			valPrincipalState, valKnowledgeMap, &valReplacementMapUpdate,
+			VerifyResults, false, analysis, stage, cg,
+		)
+	} else if !lastReplacement {
+		cg.Add(1)
+		go verifyActiveScanCombination(m,
+			valPrincipalState, valKnowledgeMap, valReplacementMap,
+			VerifyResults, false, analysis, stage, cg,
 		)
 	}
-	if !lastReplacement {
-		return verifyActiveScanCombination(m,
-			valPrincipalState, valKnowledgeMap, valAttackerState, valReplacementMap,
-			VerifyResults, false, analysis, stage,
-		)
-	}
+	cg.Done()
 	return analysis, stage
 }
 
-func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttackerState *attackerState, stage int) replacementMap {
+func verifyActiveInitReplacementMap(valPrincipalState *principalState, stage int) replacementMap {
 	valReplacementMap := replacementMap{
+		initialized:  true,
 		constants:    []constant{},
 		replacements: [][]value{},
 		combination:  []value{},
 		depthIndex:   []int{},
 	}
+	valAttackerState := attackerStateGetRead()
 	for i, v := range valAttackerState.known {
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
@@ -153,7 +163,7 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 		a := valPrincipalState.assigned[ii]
 		verifyActiveProvideValueReplacements(
 			a, v, ii, stage,
-			valPrincipalState, valAttackerState, &valReplacementMap,
+			valPrincipalState, &valReplacementMap,
 		)
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
@@ -166,8 +176,9 @@ func verifyActiveInitReplacementMap(valPrincipalState *principalState, valAttack
 
 func verifyActiveProvideValueReplacements(
 	a value, v value, rootIndex int, stage int,
-	valPrincipalState *principalState, valAttackerState *attackerState, valReplacementMap *replacementMap,
+	valPrincipalState *principalState, valReplacementMap *replacementMap,
 ) {
+	valAttackerState := attackerStateGetRead()
 	switch a.kind {
 	case "constant":
 		if (a.constant.name == "g") || (a.constant.name == "nil") {
@@ -192,8 +203,7 @@ func verifyActiveProvideValueReplacements(
 		}
 		l := len(valReplacementMap.replacements) - 1
 		includeHashes := (stage > 2)
-		injectants := inject(a.primitive, a.primitive, true, rootIndex,
-			valPrincipalState, valAttackerState, includeHashes)
+		injectants := inject(a.primitive, a.primitive, true, rootIndex, valPrincipalState, includeHashes)
 		for _, aa := range *injectants {
 			if sanityExactSameValueInValues(aa, &valReplacementMap.replacements[l]) < 0 {
 				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
@@ -201,27 +211,13 @@ func verifyActiveProvideValueReplacements(
 		}
 	case "equation":
 		replacements := []value{a, constantGN}
-		/*
-			for _, v := range valAttackerState.known {
-				switch v.kind {
-				case "equation":
-					if sanityExactSameValueInValues(v, &replacements) < 0 {
-						if len(v.equation.values) == len(a.equation.values) {
-							replacements = append(replacements, v)
-						}
-					}
-				}
-			}
-		*/
 		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
 		valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
 	}
 }
 
-func verifyActiveMutatePrincipalState(
-	valPrincipalState *principalState, valKnowledgeMap *knowledgeMap,
-	valAttackerState *attackerState, valReplacementMap *replacementMap,
-) (*principalState, bool) {
+func verifyActiveMutatePrincipalState(valPrincipalState *principalState, valKnowledgeMap *knowledgeMap, valReplacementMap *replacementMap) (*principalState, bool) {
+	valAttackerState := attackerStateGetRead()
 	isWorthwhileMutation := false
 	valPrincipalStateWithReplacements := constructPrincipalStateClone(valPrincipalState)
 	for i, c := range valReplacementMap.constants {
@@ -272,54 +268,3 @@ func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *principalState,
 	valPrincipalState.wasMutated = valPrincipalState.wasMutated[:f]
 	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
 }
-
-/*
-func verifyActiveClearFreshValues(m *Model, valKnowledgeMap *knowledgeMap, valAttackerState *attackerState) *attackerState {
-	valAttackerStateCleared := attackerState{
-		active:      valAttackerState.active,
-		known:       []value{},
-		wire:        []bool{},
-		conceivable: valAttackerState.conceivable,
-		mutatedTo:   [][]string{},
-	}
-	for i, a := range valAttackerState.known {
-		if !verifyActiveValueHasFreshValues(valKnowledgeMap, a) {
-			if sanityExactSameValueInValues(a, &valAttackerStateCleared.known) < 0 {
-				valAttackerStateCleared.known = append(valAttackerStateCleared.known, valAttackerState.known[i])
-				valAttackerStateCleared.wire = append(valAttackerStateCleared.wire, valAttackerState.wire[i])
-				valAttackerStateCleared.mutatedTo = append(valAttackerStateCleared.mutatedTo, valAttackerState.mutatedTo[i])
-			}
-		}
-	}
-	constructAttackerStatePopulate(m, valKnowledgeMap, &valAttackerStateCleared, false)
-	return &valAttackerStateCleared
-}
-
-func verifyActiveValueHasFreshValues(valKnowledgeMap *knowledgeMap, a value) bool {
-	aa := a
-	switch a.kind {
-	case "constant":
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
-		aa = valKnowledgeMap.assigned[i]
-	}
-	switch aa.kind {
-	case "constant":
-		if aa.constant.fresh {
-			return true
-		}
-	case "primitive":
-		for _, aaa := range aa.primitive.arguments {
-			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
-				return true
-			}
-		}
-	case "equation":
-		for _, aaa := range aa.equation.values {
-			if verifyActiveValueHasFreshValues(valKnowledgeMap, aaa) {
-				return true
-			}
-		}
-	}
-	return false
-}
-*/

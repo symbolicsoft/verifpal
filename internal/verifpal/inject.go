@@ -10,7 +10,7 @@ import (
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
-	valPrincipalState *principalState, valAttackerState *attackerState, includeHashes bool,
+	valPrincipalState *principalState, includeHashes bool,
 ) *[]value {
 	prim := primitiveGet(p.name)
 	injectants := &([]value{})
@@ -24,10 +24,7 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	injectants = injectPrimitive(
-		p, rootPrimitive,
-		valPrincipalState, valAttackerState, includeHashes,
-	)
+	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, includeHashes)
 	return injectants
 }
 
@@ -122,12 +119,16 @@ SkeletonSearch:
 		}
 	}
 	if !matchingSkeleton {
-		valAttackerState.known = append(valAttackerState.known, value{
-			kind:      "primitive",
-			primitive: skeleton,
-		})
-		valAttackerState.wire = append(valAttackerState.wire, false)
-		valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+		write := attackerStateWrite{
+			known: value{
+				kind:      "primitive",
+				primitive: skeleton,
+			},
+			wire:      false,
+			mutatedTo: []string{},
+			resp:      make(chan bool),
+		}
+		attackerStatePutWrite(write)
 	}
 	for _, a := range p.arguments {
 		switch a.kind {
@@ -137,10 +138,8 @@ SkeletonSearch:
 	}
 }
 
-func injectPrimitive(
-	p primitive, rootPrimitive primitive, valPrincipalState *principalState,
-	valAttackerState *attackerState, includeHashes bool,
-) *[]value {
+func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState *principalState, includeHashes bool) *[]value {
+	valAttackerState := attackerStateGetRead()
 	var injectants []value
 	if p.name == "HASH" && !includeHashes {
 		return &injectants
@@ -161,8 +160,7 @@ func injectPrimitive(
 			case "constant":
 				kinjectants[arg] = append(kinjectants[arg], k)
 			case "primitive":
-				kprims := inject(k.primitive, rootPrimitive, false, -1,
-					valPrincipalState, valAttackerState, includeHashes)
+				kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, includeHashes)
 				if len(*kprims) > 0 {
 					kinjectants[arg] = append(kinjectants[arg], *kprims...)
 				}

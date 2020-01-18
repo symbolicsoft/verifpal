@@ -11,18 +11,18 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func prettyMessage(m string, analysis int, depth int, t string) {
+func prettyMessage(m string, analysis int, t string) {
 	if colorOutputSupport() {
-		prettyMessageColor(m, analysis, depth, t)
+		prettyMessageColor(m, analysis, t)
 	} else {
-		prettyMessageRegular(m, analysis, depth, t)
+		prettyMessageRegular(m, analysis, t)
 	}
 }
 
-func prettyMessageRegular(m string, analysis int, depth int, t string) {
+func prettyMessageRegular(m string, analysis int, t string) {
 	var infoString string
-	if analysis+depth > 0 {
-		infoString = fmt.Sprintf("(analysis %d, depth %d)", analysis, depth)
+	if analysis > 0 {
+		infoString = fmt.Sprintf("(Analysis %d)", analysis)
 	}
 	switch t {
 	case "verifpal":
@@ -48,12 +48,11 @@ func prettyMessageRegular(m string, analysis int, depth int, t string) {
 	}
 }
 
-func prettyMessageColor(m string, analysis int, depth int, t string) {
+func prettyMessageColor(m string, analysis int, t string) {
 	var infoString string
-	if analysis+depth > 0 {
+	if analysis > 0 {
 		infoString = aurora.Gray(15, fmt.Sprintf(
-			"(analysis %d, depth %d)",
-			analysis, depth,
+			"(Analysis %d)", analysis,
 		)).Italic().String()
 	}
 	switch t {

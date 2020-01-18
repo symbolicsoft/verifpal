@@ -142,14 +142,25 @@ type principalState struct {
 }
 
 type attackerState struct {
-	active      bool
-	known       []value
-	wire        []bool
-	conceivable []value
-	mutatedTo   [][]string
+	active    bool
+	known     []value
+	wire      []bool
+	mutatedTo [][]string
+}
+
+type attackerStateRead struct {
+	resp chan attackerState
+}
+
+type attackerStateWrite struct {
+	known     value
+	wire      bool
+	mutatedTo []string
+	resp      chan bool
 }
 
 type replacementMap struct {
+	initialized   bool
 	constants     []constant
 	replacements  [][]value
 	combination   []value

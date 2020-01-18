@@ -1,0 +1,99 @@
+/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+// 00000000000000000000000000000000
+
+package verifpal
+
+var attackerStateReady chan bool = make(chan bool)
+var attackerStateReads chan attackerStateRead = make(chan attackerStateRead)
+var attackerStateWrites chan attackerStateWrite = make(chan attackerStateWrite)
+
+func attackerStateInit(active bool) bool {
+	go func() {
+		valAttackerState := attackerState{
+			active:    active,
+			known:     []value{},
+			wire:      []bool{},
+			mutatedTo: [][]string{},
+		}
+		attackerStateReady <- true
+		for {
+			select {
+			case read := <-attackerStateReads:
+				read.resp <- valAttackerState
+			case write := <-attackerStateWrites:
+				valAttackerState.known = append(valAttackerState.known, write.known)
+				valAttackerState.wire = append(valAttackerState.wire, write.wire)
+				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, write.mutatedTo)
+				write.resp <- true
+			}
+		}
+	}()
+	return <-attackerStateReady
+}
+
+func attackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, verbose bool) {
+	valAttackerState := attackerStateGetRead()
+	for _, c := range valKnowledgeMap.constants {
+		if c.qualifier == "public" {
+			v := value{
+				kind:     "constant",
+				constant: c,
+			}
+			if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
+				write := attackerStateWrite{
+					known:     v,
+					wire:      false,
+					mutatedTo: []string{},
+					resp:      make(chan bool),
+				}
+				attackerStatePutWrite(write)
+			}
+		}
+	}
+	for _, blck := range m.blocks {
+		switch blck.kind {
+		case "message":
+			attackerStateRenderMessage(valKnowledgeMap, &blck)
+		}
+	}
+}
+
+func attackerStateRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
+	valAttackerState := attackerStateGetRead()
+	for _, c := range blck.message.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		v := value{
+			kind:     "constant",
+			constant: valKnowledgeMap.constants[i],
+		}
+		if valKnowledgeMap.constants[i].qualifier == "private" {
+			ii := sanityExactSameValueInValues(v, &valAttackerState.known)
+			if ii >= 0 {
+				valAttackerState.wire[ii] = true
+			} else {
+				write := attackerStateWrite{
+					known:     v,
+					wire:      true,
+					mutatedTo: []string{},
+					resp:      make(chan bool),
+				}
+				attackerStatePutWrite(write)
+			}
+		}
+	}
+}
+
+func attackerStateGetRead() *attackerState {
+	read := attackerStateRead{
+		resp: make(chan attackerState),
+	}
+	attackerStateReads <- read
+	valAttackerState := <-read.resp
+	return &valAttackerState
+}
+
+func attackerStatePutWrite(write attackerStateWrite) bool {
+	attackerStateWrites <- write
+	return <-write.resp
+}

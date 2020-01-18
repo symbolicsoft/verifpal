@@ -17,7 +17,7 @@ func Verify(modelFile string) []VerifyResult {
 	prettyMessage(fmt.Sprintf(
 		"Verification initiated at %s.",
 		time.Now().Format("15:04:05"),
-	), 0, 0, "verifpal")
+	), 0, "verifpal")
 	switch m.attacker {
 	case "passive":
 		VerifyResults = verifyPassive(m, valKnowledgeMap, valPrincipalStates)
@@ -32,25 +32,25 @@ func Verify(modelFile string) []VerifyResult {
 			"%s: %s",
 			prettyQuery(VerifyResult.query),
 			VerifyResult.summary,
-		), 0, 0, "result")
+		), 0, "result")
 	}
 	prettyMessage(fmt.Sprintf(
 		"Verification completed at %s. Thank you for using Verifpal.",
 		time.Now().Format("15:04:05"),
-	), 0, 0, "verifpal")
+	), 0, "verifpal")
 	return VerifyResults
 }
 
 func verifyResolveQueries(
 	m *Model,
 	valKnowledgeMap *knowledgeMap, valPrincipalState *principalState,
-	valAttackerState *attackerState, VerifyResults *[]VerifyResult, analysis int,
+	VerifyResults *[]VerifyResult, analysis int,
 ) {
 	for q, query := range m.queries {
 		if m.queries[q].resolved {
 			continue
 		}
-		VerifyResult := queryStart(query, valAttackerState, valPrincipalState, valKnowledgeMap)
+		VerifyResult := queryStart(query, valPrincipalState, valKnowledgeMap)
 		if !VerifyResult.query.resolved {
 			continue
 		}
@@ -60,21 +60,21 @@ func verifyResolveQueries(
 			"%s: %s",
 			prettyQuery(VerifyResult.query),
 			VerifyResult.summary,
-		), analysis, 0, "result")
+		), analysis, "result")
 	}
 }
 
 func verifyPassive(m *Model, valKnowledgeMap *knowledgeMap, valPrincipalStates []*principalState) []VerifyResult {
 	var VerifyResults []VerifyResult
-	valAttackerState := constructAttackerState(false, m, valKnowledgeMap, true)
-	prettyMessage("Attacker is configured as passive.", 0, 0, "info")
+	constructAttackerState(false, m, valKnowledgeMap, true)
+	prettyMessage("Attacker is configured as passive.", 0, "info")
 	valPrincipalStates[0] = sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
 	failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStates[0])
 	sanityFailOnFailedRewrite(failedRewrites)
 	for _, a := range valPrincipalStates[0].assigned {
 		sanityCheckEquationGenerators(a, valPrincipalStates[0])
 	}
-	verifyAnalysis(m, valPrincipalStates[0], valAttackerState, 0, 0)
-	verifyResolveQueries(m, valKnowledgeMap, valPrincipalStates[0], valAttackerState, &VerifyResults, 0)
+	verifyAnalysis(m, valPrincipalStates[0], 0)
+	verifyResolveQueries(m, valKnowledgeMap, valPrincipalStates[0], &VerifyResults, 0)
 	return VerifyResults
 }

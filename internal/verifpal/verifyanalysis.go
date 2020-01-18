@@ -8,32 +8,33 @@ import (
 	"fmt"
 )
 
-func verifyAnalysis(m *Model, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysis(m *Model, valPrincipalState *principalState, analysis int) {
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
 		switch a.kind {
 		case "constant":
 			a = sanityResolveConstant(a.constant, valPrincipalState, false)
 		}
-		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth)
-		depth = verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, analysis, depth)
-		depth = verifyAnalysisEquivalize(a, valPrincipalState, valAttackerState, analysis, depth)
+		verifyAnalysisResolve(a, valPrincipalState, analysis)
+		verifyAnalysisDecompose(a, valPrincipalState, analysis)
+		verifyAnalysisEquivalize(a, valPrincipalState, analysis)
 	}
 	for _, a := range valPrincipalState.assigned {
-		depth = verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, analysis, depth)
-		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth)
+		verifyAnalysisRecompose(a, valPrincipalState, analysis)
+		verifyAnalysisReconstruct(a, valPrincipalState, analysis)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysis(m, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysis(m, valPrincipalState, analysis)
 	}
-	return depth
 }
 
-func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysisResolve(a value, valPrincipalState *principalState, analysis int) {
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	ii := sanityExactSameValueInValues(a, &valAttackerState.known)
 	if ii >= 0 {
-		return depth
+		return
 	}
 	output := []value{}
 	switch a.kind {
@@ -49,158 +50,164 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, valAttack
 			}
 		}
 		if len(output) != primitiveGet(a.primitive.name).output {
-			return depth
+			return
 		}
 	case "equation":
 		output = append(output, a)
 	}
-	if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
-		prettyMessage(fmt.Sprintf(
-			"%s resolves to %s.",
-			prettyValues(output), prettyValue(a),
-		), analysis, depth, "deduction")
-		valAttackerState.conceivable = append(valAttackerState.conceivable, a)
+	prettyMessage(fmt.Sprintf(
+		"%s resolves to %s.",
+		prettyValues(output), prettyValue(a),
+	), analysis, "deduction")
+	write := attackerStateWrite{
+		known:     a,
+		wire:      false,
+		mutatedTo: []string{},
+		resp:      make(chan bool),
 	}
-	valAttackerState.known = append(valAttackerState.known, a)
-	valAttackerState.wire = append(valAttackerState.wire, false)
-	valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+	attackerStatePutWrite(write)
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisResolve(a, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysisResolve(a, valPrincipalState, analysis)
 	}
-	return depth
 }
 
-func verifyAnalysisDecompose(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysisDecompose(a value, valPrincipalState *principalState, analysis int) {
 	var r bool
 	var revealed value
 	var ar []value
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
+		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, analysis)
 	}
 	if r {
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
-			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
-				prettyMessage(fmt.Sprintf(
-					"%s obtained by decomposing %s with %s.",
-					prettyValue(revealed), prettyValue(a), prettyValues(ar),
-				), analysis, depth, "deduction")
-				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
+			prettyMessage(fmt.Sprintf(
+				"%s obtained by decomposing %s with %s.",
+				prettyValue(revealed), prettyValue(a), prettyValues(ar),
+			), analysis, "deduction")
+			write := attackerStateWrite{
+				known:     revealed,
+				wire:      false,
+				mutatedTo: []string{},
+				resp:      make(chan bool),
 			}
-			valAttackerState.known = append(valAttackerState.known, revealed)
-			valAttackerState.wire = append(valAttackerState.wire, false)
-			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+			attackerStatePutWrite(write)
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysisDecompose(a, valPrincipalState, analysis)
 	}
-	return depth
 }
 
-func verifyAnalysisRecompose(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysisRecompose(a value, valPrincipalState *principalState, analysis int) {
 	var r bool
 	var revealed value
 	var ar []value
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
+		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, analysis)
 	}
 	if r {
 		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
-			if sanityExactSameValueInValues(revealed, &valAttackerState.conceivable) < 0 {
-				prettyMessage(fmt.Sprintf(
-					"%s obtained by recomposing %s with %s.",
-					prettyValue(revealed), prettyValue(a), prettyValues(ar),
-				), analysis, depth, "deduction")
-				valAttackerState.conceivable = append(valAttackerState.conceivable, revealed)
+			prettyMessage(fmt.Sprintf(
+				"%s obtained by recomposing %s with %s.",
+				prettyValue(revealed), prettyValue(a), prettyValues(ar),
+			), analysis, "deduction")
+			write := attackerStateWrite{
+				known:     revealed,
+				wire:      false,
+				mutatedTo: []string{},
+				resp:      make(chan bool),
 			}
-			valAttackerState.known = append(valAttackerState.known, revealed)
-			valAttackerState.wire = append(valAttackerState.wire, false)
-			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+			attackerStatePutWrite(write)
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysisRecompose(a, valPrincipalState, analysis)
 	}
-	return depth
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, analysis int) {
 	var r bool
 	var ar []value
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	switch a.kind {
 	case "primitive":
-		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState, valPrincipalState, analysis, depth)
+		r, ar = possibleToReconstructPrimitive(a.primitive, valPrincipalState, analysis)
 		for _, aa := range a.primitive.arguments {
-			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, analysis, depth)
+			verifyAnalysisReconstruct(aa, valPrincipalState, analysis)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.equation, valAttackerState, valPrincipalState)
+		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState)
 	}
 	if r {
 		if sanityExactSameValueInValues(a, &valAttackerState.known) < 0 {
-			if sanityExactSameValueInValues(a, &valAttackerState.conceivable) < 0 {
-				prettyMessage(fmt.Sprintf(
-					"%s obtained by reconstructing with %s.",
-					prettyValue(a), prettyValues(ar),
-				), analysis, depth, "deduction")
-				valAttackerState.conceivable = append(valAttackerState.conceivable, a)
+			prettyMessage(fmt.Sprintf(
+				"%s obtained by reconstructing with %s.",
+				prettyValue(a), prettyValues(ar),
+			), analysis, "deduction")
+			write := attackerStateWrite{
+				known:     a,
+				wire:      false,
+				mutatedTo: []string{},
+				resp:      make(chan bool),
 			}
-			valAttackerState.known = append(valAttackerState.known, a)
-			valAttackerState.wire = append(valAttackerState.wire, false)
-			valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+			attackerStatePutWrite(write)
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysisReconstruct(a, valPrincipalState, analysis)
 	}
-	return depth
 }
 
-func verifyAnalysisEquivalize(a value, valPrincipalState *principalState, valAttackerState *attackerState, analysis int, depth int) int {
+func verifyAnalysisEquivalize(a value, valPrincipalState *principalState, analysis int) {
+	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, c := range valPrincipalState.constants {
 		aa := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
-				if sanityExactSameValueInValues(aa, &valAttackerState.conceivable) < 0 {
-					prettyMessage(fmt.Sprintf(
-						"%s obtained by equivalizing with %s.",
-						prettyValue(aa), prettyValue(a),
-					), analysis, depth, "deduction")
-					valAttackerState.conceivable = append(valAttackerState.conceivable, aa)
+				prettyMessage(fmt.Sprintf(
+					"%s obtained by equivalizing with %s.",
+					prettyValue(aa), prettyValue(a),
+				), analysis, "deduction")
+				write := attackerStateWrite{
+					known:     aa,
+					wire:      false,
+					mutatedTo: []string{},
+					resp:      make(chan bool),
 				}
-				valAttackerState.known = append(valAttackerState.known, aa)
-				valAttackerState.wire = append(valAttackerState.wire, false)
-				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+				attackerStatePutWrite(write)
 			}
 		}
+		valAttackerState = attackerStateGetRead()
 		switch aa.kind {
 		case "primitive":
 			for _, aaa := range aa.primitive.arguments {
 				if sanityEquivalentValues(a, aaa, valPrincipalState) {
 					if sanityExactSameValueInValues(aaa, &valAttackerState.known) < 0 {
-						if sanityExactSameValueInValues(aaa, &valAttackerState.conceivable) < 0 {
-							prettyMessage(fmt.Sprintf(
-								"%s obtained by equivalizing with %s.",
-								prettyValue(aaa), prettyValue(a),
-							), analysis, depth, "deduction")
-							valAttackerState.conceivable = append(valAttackerState.conceivable, aaa)
+						prettyMessage(fmt.Sprintf(
+							"%s obtained by equivalizing with %s.",
+							prettyValue(aaa), prettyValue(a),
+						), analysis, "deduction")
+						write := attackerStateWrite{
+							known:     aaa,
+							wire:      false,
+							mutatedTo: []string{},
+							resp:      make(chan bool),
 						}
-						valAttackerState.known = append(valAttackerState.known, aaa)
-						valAttackerState.wire = append(valAttackerState.wire, false)
-						valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, []string{})
+						attackerStatePutWrite(write)
 					}
 				}
 			}
 		}
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		depth = verifyAnalysisEquivalize(a, valPrincipalState, valAttackerState, analysis, depth+1)
+		verifyAnalysisEquivalize(a, valPrincipalState, analysis)
 	}
-	return depth
 }

@@ -8,19 +8,20 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
+func queryStart(query query, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
 	switch query.kind {
 	case "confidentiality":
-		return queryConfidentiality(query, valAttackerState, valPrincipalState)
+		return queryConfidentiality(query, valPrincipalState)
 	case "authentication":
-		return queryAuthentication(query, valAttackerState, valPrincipalState, valKnowledgeMap)
+		return queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	}
 	return VerifyResult{}
 }
 
-func queryConfidentiality(query query, valAttackerState *attackerState, valPrincipalState *principalState) VerifyResult {
+func queryConfidentiality(query query, valPrincipalState *principalState) VerifyResult {
 	var VerifyResult VerifyResult
 	var mutated string
+	valAttackerState := attackerStateGetRead()
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
 		&valAttackerState.known,
@@ -48,7 +49,7 @@ func queryConfidentiality(query query, valAttackerState *attackerState, valPrinc
 	return VerifyResult
 }
 
-func queryAuthentication(query query, valAttackerState *attackerState, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
+func queryAuthentication(query query, valKnowledgeMap *knowledgeMap, valPrincipalState *principalState) VerifyResult {
 	var VerifyResult VerifyResult
 	var indices []int
 	var passes []bool
@@ -74,7 +75,7 @@ func queryAuthentication(query query, valAttackerState *attackerState, valPrinci
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
 				pass, _ := possibleToRewrite(a.primitive, valPrincipalState)
-				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState, valAttackerState, 0, 0)
+				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState, 0)
 				if pass || forcedPass {
 					indices = append(indices, ii)
 					passes = append(passes, pass)
