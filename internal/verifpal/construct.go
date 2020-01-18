@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
+func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
 		principals:     principals,
 		constants:      []constant{},
@@ -43,21 +43,21 @@ func constructKnowledgeMap(m *Model, principals []string) *knowledgeMap {
 			for _, expr := range blck.principal.expressions {
 				switch expr.kind {
 				case "knows":
-					constructKnowledgeMapRenderKnows(&valKnowledgeMap, &blck, &expr)
+					valKnowledgeMap = constructKnowledgeMapRenderKnows(valKnowledgeMap, blck, expr)
 				case "generates":
-					constructKnowledgeMapRenderGenerates(&valKnowledgeMap, &blck, &expr)
+					valKnowledgeMap = constructKnowledgeMapRenderGenerates(valKnowledgeMap, blck, expr)
 				case "assignment":
-					constructKnowledgeMapRenderAssignment(&valKnowledgeMap, &blck, &expr)
+					valKnowledgeMap = constructKnowledgeMapRenderAssignment(valKnowledgeMap, blck, expr)
 				}
 			}
 		case "message":
-			constructKnowledgeMapRenderMessage(&valKnowledgeMap, &blck)
+			valKnowledgeMap = constructKnowledgeMapRenderMessage(valKnowledgeMap, blck)
 		}
 	}
-	return &valKnowledgeMap
+	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderKnows(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -105,9 +105,10 @@ func constructKnowledgeMapRenderKnows(valKnowledgeMap *knowledgeMap, blck *block
 			}
 		}
 	}
+	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderGenerates(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -132,9 +133,10 @@ func constructKnowledgeMapRenderGenerates(valKnowledgeMap *knowledgeMap, blck *b
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
 	}
+	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderAssignment(valKnowledgeMap *knowledgeMap, blck *block, expr *expression) {
+func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
 	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
 	switch expr.right.kind {
 	case "primitive":
@@ -216,9 +218,10 @@ func constructKnowledgeMapRenderAssignment(valKnowledgeMap *knowledgeMap, blck *
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
 	}
+	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
+func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block) knowledgeMap {
 	for _, c := range blck.message.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
@@ -268,10 +271,11 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap *knowledgeMap, blck *blo
 			)
 		}
 	}
+	return valKnowledgeMap
 }
 
-func constructPrincipalStates(m *Model, valKnowledgeMap *knowledgeMap) []*principalState {
-	var valPrincipalStates []*principalState
+func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principalState {
+	var valPrincipalStates []principalState
 	for _, principal := range valKnowledgeMap.principals {
 		valPrincipalState := principalState{
 			name:          principal,
@@ -322,12 +326,12 @@ func constructPrincipalStates(m *Model, valKnowledgeMap *knowledgeMap) []*princi
 			valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
 			valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, assigned)
 		}
-		valPrincipalStates = append(valPrincipalStates, &valPrincipalState)
+		valPrincipalStates = append(valPrincipalStates, valPrincipalState)
 	}
 	return valPrincipalStates
 }
 
-func constructPrincipalStateClone(valPrincipalState *principalState) *principalState {
+func constructPrincipalStateClone(valPrincipalState principalState) principalState {
 	valPrincipalStateClone := principalState{
 		name:          valPrincipalState.name,
 		constants:     make([]constant, len(valPrincipalState.constants)),
@@ -351,10 +355,10 @@ func constructPrincipalStateClone(valPrincipalState *principalState) *principalS
 	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
 	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
-	return &valPrincipalStateClone
+	return valPrincipalStateClone
 }
 
-func constructAttackerState(active bool, m *Model, valKnowledgeMap *knowledgeMap, verbose bool) {
+func constructAttackerState(active bool, m Model, valKnowledgeMap knowledgeMap, verbose bool) {
 	attackerStateInit(active)
 	attackerStatePopulate(m, valKnowledgeMap, verbose)
 }

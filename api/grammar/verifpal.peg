@@ -19,7 +19,7 @@
 		"unicode/utf8"
 	)
 
-	func parserParseModel(filename string) (*Model, *knowledgeMap, []*principalState) {
+	func parserParseModel(filename string) (Model, knowledgeMap, []principalState) {
 		var m Model
 		prettyMessage(fmt.Sprintf(
 			"Parsing model \"%s\"...",
@@ -30,8 +30,8 @@
 			errorCritical(err.Error())
 		}
 		m = parsed.(Model)
-		valKnowledgeMap, valPrincipalStates := sanity(&m)
-		return &m, valKnowledgeMap, valPrincipalStates
+		valKnowledgeMap, valPrincipalStates := sanity(m)
+		return m, valKnowledgeMap, valPrincipalStates
 	}
 	
 	func reserved() []string{
@@ -341,7 +341,6 @@ QueryConfidentiality <-
 			kind: "confidentiality",
 			constant: Constant.(value).constant,
 			message: message{},
-			resolved: false,
 		}, nil
 	}
 
@@ -351,7 +350,6 @@ QueryAuthentication <-
 			kind: "authentication",
 			constant: constant{},
 			message: (Message.(block)).message,
-			resolved: false,
 		}, nil
 	}
 

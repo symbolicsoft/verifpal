@@ -13,8 +13,18 @@ type Model struct {
 
 // VerifyResult contains the verification result for a model query analyzed by Verifpal.
 type VerifyResult struct {
-	query   query
-	summary string
+	query    query
+	resolved bool
+	summary  string
+}
+
+type verifyResultsRead struct {
+	resp chan []VerifyResult
+}
+
+type verifyResultsWrite struct {
+	verifyResult VerifyResult
+	resp         chan bool
 }
 
 type block struct {
@@ -38,7 +48,6 @@ type query struct {
 	kind     string
 	constant constant
 	message  message
-	resolved bool
 }
 
 type expression struct {
@@ -88,14 +97,14 @@ type decomposeRule struct {
 	hasRule bool
 	given   []int
 	reveal  int
-	filter  func(value, int, *principalState) (value, bool)
+	filter  func(value, int, principalState) (value, bool)
 }
 
 type recomposeRule struct {
 	hasRule bool
 	given   [][]int
 	reveal  int
-	filter  func(value, int, *principalState) (value, bool)
+	filter  func(value, int, principalState) (value, bool)
 }
 
 type rewriteRule struct {
@@ -104,7 +113,7 @@ type rewriteRule struct {
 	from     int
 	to       int
 	matching []int
-	filter   func(value, int, *principalState) (value, bool)
+	filter   func(value, int, principalState) (value, bool)
 }
 
 type rebuildRule struct {
@@ -112,7 +121,7 @@ type rebuildRule struct {
 	name    string
 	given   [][]int
 	reveal  int
-	filter  func(value, int, *principalState) (value, bool)
+	filter  func(value, int, principalState) (value, bool)
 }
 
 type primitiveSpec struct {

@@ -8,27 +8,25 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valPrincipalState *principalState, valKnowledgeMap *knowledgeMap) VerifyResult {
+func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap, analysis int) {
 	switch query.kind {
 	case "confidentiality":
-		return queryConfidentiality(query, valPrincipalState)
+		queryConfidentiality(query, valPrincipalState, analysis)
 	case "authentication":
-		return queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState, analysis)
 	}
-	return VerifyResult{}
 }
 
-func queryConfidentiality(query query, valPrincipalState *principalState) VerifyResult {
-	var VerifyResult VerifyResult
+func queryConfidentiality(query query, valPrincipalState principalState, analysis int) {
 	var mutated string
 	valAttackerState := attackerStateGetRead()
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
-		&valAttackerState.known,
+		valAttackerState.known,
 		valPrincipalState,
 	)
 	if ii < 0 {
-		return VerifyResult
+		return
 	}
 	for i := range valPrincipalState.constants {
 		if valPrincipalState.wasMutated[i] {
@@ -39,27 +37,35 @@ func queryConfidentiality(query query, valPrincipalState *principalState) Verify
 			)
 		}
 	}
-	VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+	summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s is obtained by the attacker as %s",
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), true)
-	query.resolved = true
-	VerifyResult.query = query
-	return VerifyResult
+	verifyResultsPutWrite(verifyResultsWrite{
+		verifyResult: VerifyResult{
+			query:    query,
+			resolved: true,
+			summary:  summary,
+		},
+		resp: make(chan bool),
+	})
+	prettyMessage(fmt.Sprintf(
+		"%s: %s", prettyQuery(query), summary,
+	), analysis, "result")
+	return
 }
 
-func queryAuthentication(query query, valKnowledgeMap *knowledgeMap, valPrincipalState *principalState) VerifyResult {
-	var VerifyResult VerifyResult
+func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, analysis int) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
 	if query.message.recipient != valPrincipalState.name {
-		return VerifyResult
+		return
 	}
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if i < 0 {
-		return VerifyResult
+		return
 	}
 	c := valPrincipalState.constants[i]
 	sender := valPrincipalState.sender[i]
@@ -107,26 +113,42 @@ func queryAuthentication(query query, valKnowledgeMap *knowledgeMap, valPrincipa
 			}
 		}
 		if passes[f] && (query.message.sender != sender) {
-			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s, sent by %s and not by %s and resolving to %s, is successfully used in "+
 					"primitive %s in %s's state.",
 				prettyConstant(c), sender, query.message.sender,
 				prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			query.resolved = true
-			VerifyResult.query = query
-			return VerifyResult
+			verifyResultsPutWrite(verifyResultsWrite{
+				verifyResult: VerifyResult{
+					query:    query,
+					resolved: true,
+					summary:  summary,
+				},
+				resp: make(chan bool),
+			})
+			prettyMessage(fmt.Sprintf(
+				"%s: %s", prettyQuery(query), summary,
+			), analysis, "result")
+			return
 		} else if forcedPasses[f] {
-			VerifyResult.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
 					"%s's state, despite it being vulnerable to tampering by Attacker.",
 				prettyConstant(c), sender, prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			query.resolved = true
-			VerifyResult.query = query
-			return VerifyResult
+			verifyResultsPutWrite(verifyResultsWrite{
+				verifyResult: VerifyResult{
+					query:    query,
+					resolved: true,
+					summary:  summary,
+				},
+				resp: make(chan bool),
+			})
+			prettyMessage(fmt.Sprintf(
+				"%s: %s", prettyQuery(query), summary,
+			), analysis, "result")
 		}
 	}
-	VerifyResult.query = query
-	return VerifyResult
+	return
 }

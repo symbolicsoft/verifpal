@@ -4,7 +4,7 @@
 
 package verifpal
 
-func possibleToDecomposePrimitive(p primitive, valPrincipalState *principalState, analysis int) (bool, value, []value) {
+func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState, analysis int) (bool, value, []value) {
 	valAttackerState := attackerStateGetRead()
 	has := []value{}
 	prim := primitiveGet(p.name)
@@ -14,7 +14,7 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState *principalState
 	for i, g := range prim.decompose.given {
 		a := p.arguments[g]
 		a, valid := prim.decompose.filter(a, i, valPrincipalState)
-		ii := sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState)
+		ii := sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState)
 		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
@@ -41,7 +41,7 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState *principalState
 	}
 	if len(has) >= len(prim.decompose.given) {
 		revealed := p.arguments[prim.decompose.reveal]
-		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(revealed, valAttackerState.known) < 0 {
 			write := attackerStateWrite{
 				known:     revealed,
 				wire:      false,
@@ -55,7 +55,7 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState *principalState
 	return false, value{}, has
 }
 
-func possibleToRecomposePrimitive(p primitive, valPrincipalState *principalState, analysis int) (bool, value, []value) {
+func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState, analysis int) (bool, value, []value) {
 	valAttackerState := attackerStateGetRead()
 	prim := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
@@ -90,11 +90,11 @@ func possibleToRecomposePrimitive(p primitive, valPrincipalState *principalState
 	return false, value{}, []value{}
 }
 
-func possibleToReconstructPrimitive(p primitive, valPrincipalState *principalState, analysis int) (bool, []value) {
+func possibleToReconstructPrimitive(p primitive, valPrincipalState principalState, analysis int) (bool, []value) {
 	valAttackerState := attackerStateGetRead()
 	has := []value{}
 	for _, a := range p.arguments {
-		if sanityEquivalentValueInValues(a, &valAttackerState.known, valPrincipalState) >= 0 {
+		if sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState) >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -123,7 +123,7 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState *principalSta
 			kind:      "primitive",
 			primitive: p,
 		}
-		if sanityExactSameValueInValues(vp, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(vp, valAttackerState.known) < 0 {
 			write := attackerStateWrite{
 				known:     vp,
 				wire:      false,
@@ -137,7 +137,7 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState *principalSta
 	return false, []value{}
 }
 
-func possibleToReconstructEquation(e equation, valPrincipalState *principalState) (bool, []value) {
+func possibleToReconstructEquation(e equation, valPrincipalState principalState) (bool, []value) {
 	valAttackerState := attackerStateGetRead()
 	eValues := sanityDecomposeEquationValues(e, valPrincipalState)
 	if len(eValues) > 2 {
@@ -147,8 +147,8 @@ func possibleToReconstructEquation(e equation, valPrincipalState *principalState
 		}
 		s0 := eValues[1]
 		s1 := eValues[2]
-		hs0 := sanityEquivalentValueInValues(s0, &valAttackerState.known, valPrincipalState) >= 0
-		hs1 := sanityEquivalentValueInValues(s1, &valAttackerState.known, valPrincipalState) >= 0
+		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known, valPrincipalState) >= 0
+		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.known, valPrincipalState) >= 0
 		p0 := value{
 			kind: "equation",
 			equation: equation{
@@ -161,8 +161,8 @@ func possibleToReconstructEquation(e equation, valPrincipalState *principalState
 				values: []value{e.values[0], e.values[2]},
 			},
 		}
-		hp0 := sanityEquivalentValueInValues(p0, &valAttackerState.known, valPrincipalState) >= 0
-		hp1 := sanityEquivalentValueInValues(p1, &valAttackerState.known, valPrincipalState) >= 0
+		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.known, valPrincipalState) >= 0
+		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.known, valPrincipalState) >= 0
 		if hs0 && hs1 {
 			return true, []value{s0, s1}
 		}
@@ -173,20 +173,20 @@ func possibleToReconstructEquation(e equation, valPrincipalState *principalState
 			return true, []value{p0, s1}
 		}
 	}
-	if sanityEquivalentValueInValues(eValues[1], &valAttackerState.known, valPrincipalState) >= 0 {
+	if sanityEquivalentValueInValues(eValues[1], valAttackerState.known, valPrincipalState) >= 0 {
 		return true, []value{eValues[1]}
 	}
 	return false, []value{}
 }
 
-func possibleToPassAssert(p primitive, valPrincipalState *principalState) (bool, value) {
+func possibleToPassAssert(p primitive, valPrincipalState principalState) (bool, value) {
 	if sanityEquivalentValues(p.arguments[0], p.arguments[1], valPrincipalState) {
 		return true, value{kind: "primitive", primitive: p}
 	}
 	return false, value{kind: "primitive", primitive: p}
 }
 
-func possibleToRewrite(p primitive, valPrincipalState *principalState) (bool, value) {
+func possibleToRewrite(p primitive, valPrincipalState principalState) (bool, value) {
 	if p.name == "ASSERT" {
 		return possibleToPassAssert(p, valPrincipalState)
 	}
@@ -220,7 +220,7 @@ func possibleToRewrite(p primitive, valPrincipalState *principalState) (bool, va
 	return true, rewrite
 }
 
-func possibleToForceRewrite(p primitive, valPrincipalState *principalState, analysis int) bool {
+func possibleToForceRewrite(p primitive, valPrincipalState principalState, analysis int) bool {
 	switch p.name {
 	case "DEC", "AEAD_DEC":
 		return possibleToForceRewriteDECandAEADDEC(p, valPrincipalState, analysis)
@@ -230,13 +230,13 @@ func possibleToForceRewrite(p primitive, valPrincipalState *principalState, anal
 	return false
 }
 
-func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState *principalState, analysis int) bool {
+func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principalState, analysis int) bool {
 	valAttackerState := attackerStateGetRead()
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
 	switch k.kind {
 	case "constant":
-		if sanityEquivalentValueInValues(k, &valAttackerState.known, valPrincipalState) >= 0 {
+		if sanityEquivalentValueInValues(k, valAttackerState.known, valPrincipalState) >= 0 {
 			return true
 		}
 	case "primitive":
@@ -253,7 +253,7 @@ func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState *princip
 	return false
 }
 
-func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState *principalState, analysis int) bool {
+func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState principalState, analysis int) bool {
 	k := p.arguments[0]
 	switch k.kind {
 	case "constant":
@@ -269,7 +269,7 @@ func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState *principalSt
 	return false
 }
 
-func possibleToRebuild(p primitive, valPrincipalState *principalState) (bool, value) {
+func possibleToRebuild(p primitive, valPrincipalState principalState) (bool, value) {
 	prim := primitiveGet(p.name)
 	if !prim.rebuild.hasRule {
 		return false, value{}

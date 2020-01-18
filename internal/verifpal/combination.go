@@ -4,7 +4,7 @@
 
 package verifpal
 
-func (valReplacementMap *replacementMap) combinationNext() bool {
+func (valReplacementMap replacementMap) combinationNext() bool {
 	lastCombination := false
 	if len(valReplacementMap.combination) == 0 {
 		lastCombination = true

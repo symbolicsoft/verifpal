@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func verifyAnalysis(m *Model, valPrincipalState *principalState, analysis int) {
+func verifyAnalysis(valPrincipalState principalState, analysis int) {
 	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
@@ -25,14 +25,14 @@ func verifyAnalysis(m *Model, valPrincipalState *principalState, analysis int) {
 		verifyAnalysisReconstruct(a, valPrincipalState, analysis)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		verifyAnalysis(m, valPrincipalState, analysis)
+		verifyAnalysis(valPrincipalState, analysis)
 	}
 }
 
-func verifyAnalysisResolve(a value, valPrincipalState *principalState, analysis int) {
+func verifyAnalysisResolve(a value, valPrincipalState principalState, analysis int) {
 	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
-	ii := sanityExactSameValueInValues(a, &valAttackerState.known)
+	ii := sanityExactSameValueInValues(a, valAttackerState.known)
 	if ii >= 0 {
 		return
 	}
@@ -71,7 +71,7 @@ func verifyAnalysisResolve(a value, valPrincipalState *principalState, analysis 
 	}
 }
 
-func verifyAnalysisDecompose(a value, valPrincipalState *principalState, analysis int) {
+func verifyAnalysisDecompose(a value, valPrincipalState principalState, analysis int) {
 	var r bool
 	var revealed value
 	var ar []value
@@ -82,7 +82,7 @@ func verifyAnalysisDecompose(a value, valPrincipalState *principalState, analysi
 		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, analysis)
 	}
 	if r {
-		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(revealed, valAttackerState.known) < 0 {
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
@@ -101,7 +101,7 @@ func verifyAnalysisDecompose(a value, valPrincipalState *principalState, analysi
 	}
 }
 
-func verifyAnalysisRecompose(a value, valPrincipalState *principalState, analysis int) {
+func verifyAnalysisRecompose(a value, valPrincipalState principalState, analysis int) {
 	var r bool
 	var revealed value
 	var ar []value
@@ -112,7 +112,7 @@ func verifyAnalysisRecompose(a value, valPrincipalState *principalState, analysi
 		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, analysis)
 	}
 	if r {
-		if sanityExactSameValueInValues(revealed, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(revealed, valAttackerState.known) < 0 {
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by recomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
@@ -131,7 +131,7 @@ func verifyAnalysisRecompose(a value, valPrincipalState *principalState, analysi
 	}
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, analysis int) {
+func verifyAnalysisReconstruct(a value, valPrincipalState principalState, analysis int) {
 	var r bool
 	var ar []value
 	valAttackerState := attackerStateGetRead()
@@ -146,7 +146,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, analy
 		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState)
 	}
 	if r {
-		if sanityExactSameValueInValues(a, &valAttackerState.known) < 0 {
+		if sanityExactSameValueInValues(a, valAttackerState.known) < 0 {
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
 				prettyValue(a), prettyValues(ar),
@@ -165,13 +165,13 @@ func verifyAnalysisReconstruct(a value, valPrincipalState *principalState, analy
 	}
 }
 
-func verifyAnalysisEquivalize(a value, valPrincipalState *principalState, analysis int) {
+func verifyAnalysisEquivalize(a value, valPrincipalState principalState, analysis int) {
 	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, c := range valPrincipalState.constants {
 		aa := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
-			if sanityExactSameValueInValues(aa, &valAttackerState.known) < 0 {
+			if sanityExactSameValueInValues(aa, valAttackerState.known) < 0 {
 				prettyMessage(fmt.Sprintf(
 					"%s obtained by equivalizing with %s.",
 					prettyValue(aa), prettyValue(a),
@@ -190,7 +190,7 @@ func verifyAnalysisEquivalize(a value, valPrincipalState *principalState, analys
 		case "primitive":
 			for _, aaa := range aa.primitive.arguments {
 				if sanityEquivalentValues(a, aaa, valPrincipalState) {
-					if sanityExactSameValueInValues(aaa, &valAttackerState.known) < 0 {
+					if sanityExactSameValueInValues(aaa, valAttackerState.known) < 0 {
 						prettyMessage(fmt.Sprintf(
 							"%s obtained by equivalizing with %s.",
 							prettyValue(aaa), prettyValue(a),

@@ -32,7 +32,20 @@ func attackerStateInit(active bool) bool {
 	return <-attackerStateReady
 }
 
-func attackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, verbose bool) {
+func attackerStateGetRead() attackerState {
+	read := attackerStateRead{
+		resp: make(chan attackerState),
+	}
+	attackerStateReads <- read
+	return <-read.resp
+}
+
+func attackerStatePutWrite(write attackerStateWrite) bool {
+	attackerStateWrites <- write
+	return <-write.resp
+}
+
+func attackerStatePopulate(m Model, valKnowledgeMap knowledgeMap, verbose bool) {
 	valAttackerState := attackerStateGetRead()
 	for _, c := range valKnowledgeMap.constants {
 		if c.qualifier == "public" {
@@ -40,7 +53,7 @@ func attackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, verbose bool
 				kind:     "constant",
 				constant: c,
 			}
-			if sanityExactSameValueInValues(v, &valAttackerState.known) < 0 {
+			if sanityExactSameValueInValues(v, valAttackerState.known) < 0 {
 				write := attackerStateWrite{
 					known:     v,
 					wire:      false,
@@ -54,12 +67,12 @@ func attackerStatePopulate(m *Model, valKnowledgeMap *knowledgeMap, verbose bool
 	for _, blck := range m.blocks {
 		switch blck.kind {
 		case "message":
-			attackerStateRenderMessage(valKnowledgeMap, &blck)
+			attackerStateRenderMessage(valKnowledgeMap, blck)
 		}
 	}
 }
 
-func attackerStateRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
+func attackerStateRenderMessage(valKnowledgeMap knowledgeMap, blck block) {
 	valAttackerState := attackerStateGetRead()
 	for _, c := range blck.message.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -68,7 +81,7 @@ func attackerStateRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
 			constant: valKnowledgeMap.constants[i],
 		}
 		if valKnowledgeMap.constants[i].qualifier == "private" {
-			ii := sanityExactSameValueInValues(v, &valAttackerState.known)
+			ii := sanityExactSameValueInValues(v, valAttackerState.known)
 			if ii >= 0 {
 				valAttackerState.wire[ii] = true
 			} else {
@@ -82,18 +95,4 @@ func attackerStateRenderMessage(valKnowledgeMap *knowledgeMap, blck *block) {
 			}
 		}
 	}
-}
-
-func attackerStateGetRead() *attackerState {
-	read := attackerStateRead{
-		resp: make(chan attackerState),
-	}
-	attackerStateReads <- read
-	valAttackerState := <-read.resp
-	return &valAttackerState
-}
-
-func attackerStatePutWrite(write attackerStateWrite) bool {
-	attackerStateWrites <- write
-	return <-write.resp
 }

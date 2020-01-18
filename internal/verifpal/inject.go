@@ -10,10 +10,10 @@ import (
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
-	valPrincipalState *principalState, includeHashes bool,
-) *[]value {
+	valPrincipalState principalState, includeHashes bool,
+) []value {
 	prim := primitiveGet(p.name)
-	injectants := &([]value{})
+	injectants := ([]value{})
 	if !prim.injectable {
 		return injectants
 	}
@@ -28,7 +28,7 @@ func inject(
 	return injectants
 }
 
-func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, valPrincipalState *principalState) bool {
+func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, valPrincipalState principalState) bool {
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: p,
@@ -105,7 +105,7 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 	return s == 0
 }
 
-func injectMissingSkeletons(p primitive, valAttackerState *attackerState) {
+func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
 	skeleton := injectPrimitiveSkeleton(p)
 	matchingSkeleton := false
 SkeletonSearch:
@@ -138,11 +138,11 @@ SkeletonSearch:
 	}
 }
 
-func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState *principalState, includeHashes bool) *[]value {
+func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState principalState, includeHashes bool) []value {
 	valAttackerState := attackerStateGetRead()
 	var injectants []value
 	if p.name == "HASH" && !includeHashes {
-		return &injectants
+		return injectants
 	}
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
@@ -161,8 +161,8 @@ func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState *pr
 				kinjectants[arg] = append(kinjectants[arg], k)
 			case "primitive":
 				kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, includeHashes)
-				if len(*kprims) > 0 {
-					kinjectants[arg] = append(kinjectants[arg], *kprims...)
+				if len(kprims) > 0 {
+					kinjectants[arg] = append(kinjectants[arg], kprims...)
 				}
 			case "equation":
 				kinjectants[arg] = append(kinjectants[arg], k)
@@ -171,140 +171,145 @@ func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState *pr
 	}
 	switch len(p.arguments) {
 	case 1:
-		injectLoop1(p, &injectants, &kinjectants)
+		injectants = injectLoop1(p, injectants, kinjectants)
 	case 2:
-		injectLoop2(p, &injectants, &kinjectants)
+		injectants = injectLoop2(p, injectants, kinjectants)
 	case 3:
-		injectLoop3(p, &injectants, &kinjectants)
+		injectants = injectLoop3(p, injectants, kinjectants)
 	case 4:
-		injectLoop4(p, &injectants, &kinjectants)
+		injectants = injectLoop4(p, injectants, kinjectants)
 	case 5:
-		injectLoop5(p, &injectants, &kinjectants)
+		injectants = injectLoop5(p, injectants, kinjectants)
 	}
-	return &injectants
+	return injectants
 }
 
-func injectLoop1(p primitive, injectants *[]value, kinjectants *[][]value) {
-	for i := range (*kinjectants)[0] {
+func injectLoop1(p primitive, injectants []value, kinjectants [][]value) []value {
+	for i := range kinjectants[0] {
 		aa := value{
 			kind: "primitive",
 			primitive: primitive{
 				name: p.name,
 				arguments: []value{
-					(*kinjectants)[0][i],
+					kinjectants[0][i],
 				},
 				output: p.output,
 				check:  p.check,
 			},
 		}
 		if sanityExactSameValueInValues(aa, injectants) < 0 {
-			*injectants = append(*injectants, aa)
+			injectants = append(injectants, aa)
 		}
 	}
+	return injectants
 }
 
-func injectLoop2(p primitive, injectants *[]value, kinjectants *[][]value) {
-	for i := range (*kinjectants)[0] {
-		for ii := range (*kinjectants)[1] {
+func injectLoop2(p primitive, injectants []value, kinjectants [][]value) []value {
+	for i := range kinjectants[0] {
+		for ii := range kinjectants[1] {
 			aa := value{
 				kind: "primitive",
 				primitive: primitive{
 					name: p.name,
 					arguments: []value{
-						(*kinjectants)[0][i],
-						(*kinjectants)[1][ii],
+						kinjectants[0][i],
+						kinjectants[1][ii],
 					},
 					output: p.output,
 					check:  p.check,
 				},
 			}
 			if sanityExactSameValueInValues(aa, injectants) < 0 {
-				*injectants = append(*injectants, aa)
+				injectants = append(injectants, aa)
 			}
 		}
 	}
+	return injectants
 }
 
-func injectLoop3(p primitive, injectants *[]value, kinjectants *[][]value) {
-	for i := range (*kinjectants)[0] {
-		for ii := range (*kinjectants)[1] {
-			for iii := range (*kinjectants)[2] {
+func injectLoop3(p primitive, injectants []value, kinjectants [][]value) []value {
+	for i := range kinjectants[0] {
+		for ii := range kinjectants[1] {
+			for iii := range kinjectants[2] {
 				aa := value{
 					kind: "primitive",
 					primitive: primitive{
 						name: p.name,
 						arguments: []value{
-							(*kinjectants)[0][i],
-							(*kinjectants)[1][ii],
-							(*kinjectants)[2][iii],
+							kinjectants[0][i],
+							kinjectants[1][ii],
+							kinjectants[2][iii],
 						},
 						output: p.output,
 						check:  p.check,
 					},
 				}
 				if sanityExactSameValueInValues(aa, injectants) < 0 {
-					*injectants = append(*injectants, aa)
+					injectants = append(injectants, aa)
 				}
 			}
 		}
 	}
+	return injectants
 }
 
-func injectLoop4(p primitive, injectants *[]value, kinjectants *[][]value) {
-	for i := range (*kinjectants)[0] {
-		for ii := range (*kinjectants)[1] {
-			for iii := range (*kinjectants)[2] {
-				for iiii := range (*kinjectants)[3] {
+func injectLoop4(p primitive, injectants []value, kinjectants [][]value) []value {
+	for i := range kinjectants[0] {
+		for ii := range kinjectants[1] {
+			for iii := range kinjectants[2] {
+				for iiii := range kinjectants[3] {
 					aa := value{
 						kind: "primitive",
 						primitive: primitive{
 							name: p.name,
 							arguments: []value{
-								(*kinjectants)[0][i],
-								(*kinjectants)[1][ii],
-								(*kinjectants)[2][iii],
-								(*kinjectants)[3][iiii],
+								kinjectants[0][i],
+								kinjectants[1][ii],
+								kinjectants[2][iii],
+								kinjectants[3][iiii],
 							},
 							output: p.output,
 							check:  p.check,
 						},
 					}
 					if sanityExactSameValueInValues(aa, injectants) < 0 {
-						*injectants = append(*injectants, aa)
+						injectants = append(injectants, aa)
 					}
 				}
 			}
 		}
 	}
+	return injectants
 }
 
-func injectLoop5(p primitive, injectants *[]value, kinjectants *[][]value) {
-	for i := range (*kinjectants)[0] {
-		for ii := range (*kinjectants)[1] {
-			for iii := range (*kinjectants)[2] {
-				for iiii := range (*kinjectants)[3] {
-					for iiiii := range (*kinjectants)[4] {
+func injectLoop5(p primitive, injectants []value, kinjectants [][]value) []value {
+	for i := range kinjectants[0] {
+		for ii := range kinjectants[1] {
+			for iii := range kinjectants[2] {
+				for iiii := range kinjectants[3] {
+					for iiiii := range kinjectants[4] {
 						aa := value{
 							kind: "primitive",
 							primitive: primitive{
 								name: p.name,
 								arguments: []value{
-									(*kinjectants)[0][i],
-									(*kinjectants)[1][ii],
-									(*kinjectants)[2][iii],
-									(*kinjectants)[3][iiii],
-									(*kinjectants)[4][iiiii],
+									kinjectants[0][i],
+									kinjectants[1][ii],
+									kinjectants[2][iii],
+									kinjectants[3][iiii],
+									kinjectants[4][iiiii],
 								},
 								output: p.output,
 								check:  p.check,
 							},
 						}
 						if sanityExactSameValueInValues(aa, injectants) < 0 {
-							*injectants = append(*injectants, aa)
+							injectants = append(injectants, aa)
 						}
 					}
 				}
 			}
 		}
 	}
+	return injectants
 }

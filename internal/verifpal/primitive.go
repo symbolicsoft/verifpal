@@ -53,7 +53,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -77,7 +77,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -90,7 +90,7 @@ var primitiveSpecs = []primitiveSpec{
 			from:     1,
 			to:       1,
 			matching: []int{0, 2},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -114,7 +114,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -138,7 +138,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -151,7 +151,7 @@ var primitiveSpecs = []primitiveSpec{
 			from:     1,
 			to:       1,
 			matching: []int{0},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -239,7 +239,7 @@ var primitiveSpecs = []primitiveSpec{
 			from:     2,
 			to:       -1,
 			matching: []int{0, 1},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -277,7 +277,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -321,7 +321,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -334,7 +334,7 @@ var primitiveSpecs = []primitiveSpec{
 			from:     1,
 			to:       1,
 			matching: []int{0},
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -373,7 +373,7 @@ var primitiveSpecs = []primitiveSpec{
 				[]int{1, 2},
 			},
 			reveal: 0,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -411,7 +411,7 @@ var primitiveSpecs = []primitiveSpec{
 				[]int{2, 1},
 			},
 			reveal: 0,
-			filter: func(x value, i int, valPrincipalState *principalState) (value, bool) {
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				return x, true
 			},
 		},
@@ -420,13 +420,13 @@ var primitiveSpecs = []primitiveSpec{
 	},
 }
 
-func primitiveGet(name string) *primitiveSpec {
-	var p *primitiveSpec
+func primitiveGet(name string) primitiveSpec {
+	var p primitiveSpec
 	found := false
 	for _, v := range primitiveSpecs {
 		if v.name == name {
 			found = true
-			p = &v
+			p = v
 			break
 		}
 	}
