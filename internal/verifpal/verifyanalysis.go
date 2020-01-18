@@ -176,10 +176,6 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, analysi
 		aa := sanityResolveConstant(c, valPrincipalState, false)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			if sanityExactSameValueInValues(aa, valAttackerState.known) < 0 {
-				prettyMessage(fmt.Sprintf(
-					"%s obtained by equivalizing with %s.",
-					prettyValue(aa), prettyValue(a),
-				), analysis, "deduction")
 				write := attackerStateWrite{
 					known:     aa,
 					wire:      false,
@@ -189,16 +185,11 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, analysi
 				attackerStatePutWrite(write)
 			}
 		}
-		valAttackerState = attackerStateGetRead()
 		switch aa.kind {
 		case "primitive":
 			for _, aaa := range aa.primitive.arguments {
 				if sanityEquivalentValues(a, aaa, valPrincipalState) {
 					if sanityExactSameValueInValues(aaa, valAttackerState.known) < 0 {
-						prettyMessage(fmt.Sprintf(
-							"%s obtained by equivalizing with %s.",
-							prettyValue(aaa), prettyValue(a),
-						), analysis, "deduction")
 						write := attackerStateWrite{
 							known:     aaa,
 							wire:      false,
