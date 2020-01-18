@@ -103,7 +103,6 @@ func verifyActiveScanCombination(
 		cg.Add(1)
 		go verifyActiveScanCombination(valPrincipalState, valKnowledgeMap, valReplacementMapUpdate, false, analysis, stage, cg)
 	} else if !lastReplacement {
-		analysis = verifyActiveIncrementAnalysis(analysis)
 		cg.Add(1)
 		go verifyActiveScanCombination(valPrincipalState, valKnowledgeMap, valReplacementMap, false, analysis, stage, cg)
 	}
