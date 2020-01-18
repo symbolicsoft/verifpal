@@ -24,7 +24,7 @@
 		prettyMessage(fmt.Sprintf(
 			"Parsing model \"%s\"...",
 			path.Base(filename),
-		), 0, 0, "verifpal")
+		), 0, "verifpal")
 		parsed, err := ParseFile(filename)
 		if err != nil {
 			errorCritical(err.Error())
