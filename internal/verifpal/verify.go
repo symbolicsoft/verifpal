@@ -30,6 +30,9 @@ func Verify(modelFile string) (Model, []VerifyResult) {
 	fmt.Fprint(os.Stdout, "\n")
 	verifyResults := verifyResultsGetRead()
 	for _, verifyResult := range verifyResults {
+		if !verifyResult.resolved {
+			continue
+		}
 		prettyMessage(fmt.Sprintf(
 			"%s: %s",
 			prettyQuery(verifyResult.query),
