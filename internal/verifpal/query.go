@@ -53,7 +53,6 @@ func queryConfidentiality(query query, valPrincipalState principalState, analysi
 	prettyMessage(fmt.Sprintf(
 		"%s: %s", prettyQuery(query), summary,
 	), analysis, "result")
-	return
 }
 
 func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, analysis int) {
@@ -150,5 +149,4 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			), analysis, "result")
 		}
 	}
-	return
 }

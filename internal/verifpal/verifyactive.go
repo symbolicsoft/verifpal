@@ -13,23 +13,18 @@ func verifyActive(
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 ) {
 	analysis := 0
-	stage := 0
 	constructAttackerState(true, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as active.", 0, "info")
-	for stage <= 3 {
-		switch stage {
-		case 0:
-			analysis, stage = verifyActiveStage0(valKnowledgeMap, valPrincipalStates, analysis, stage)
-		default:
-			analysis, stage = verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, stage)
-		}
-	}
+	analysis = verifyActiveStage0(valKnowledgeMap, valPrincipalStates, analysis, 0)
+	analysis = verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 1)
+	analysis = verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 2)
+	verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 3)
 }
 
 func verifyActiveStage0(
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 	analysis int, stage int,
-) (int, int) {
+) int {
 	for _, valPrincipalState := range valPrincipalStates {
 		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
@@ -41,11 +36,10 @@ func verifyActiveStage0(
 		verifyAnalysis(valPrincipalStateClone, analysis)
 		prettyAnalysis(analysis, stage)
 	}
-	stage = verifyActiveIncrementStage(stage)
-	return analysis, stage
+	return analysis
 }
 
-func verifyActiveStage123(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) (int, int) {
+func verifyActiveStage123(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) int {
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
@@ -62,16 +56,11 @@ func verifyActiveStage123(valKnowledgeMap knowledgeMap, valPrincipalStates []pri
 		}(valPrincipalState, &principalsGroup)
 	}
 	principalsGroup.Wait()
-	stage = verifyActiveIncrementStage(stage)
-	return analysis, stage
+	return analysis
 }
 
 func verifyActiveIncrementAnalysis(analysis int) int {
 	return analysis + 1
-}
-
-func verifyActiveIncrementStage(stage int) int {
-	return stage + 1
 }
 
 func verifyActiveScanCombination(
