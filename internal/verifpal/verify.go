@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -53,6 +54,7 @@ func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState princi
 }
 
 func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+	var scanGroup sync.WaitGroup
 	constructAttackerState(false, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as passive.", 0, "info")
 	valPrincipalStates[0] = sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
@@ -61,6 +63,7 @@ func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []p
 	for _, a := range valPrincipalStates[0].assigned {
 		sanityCheckEquationGenerators(a, valPrincipalStates[0])
 	}
-	verifyAnalysis(valPrincipalStates[0], 0)
-	verifyResolveQueries(valKnowledgeMap, valPrincipalStates[0], 0)
+	scanGroup.Add(1)
+	go verifyAnalysis(valKnowledgeMap, valPrincipalStates[0], 0, &scanGroup)
+	scanGroup.Wait()
 }

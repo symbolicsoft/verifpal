@@ -19,9 +19,9 @@ principal Server[
 	gCertificate = G^certificateKey
 ]
 
-Client -> Server: clientRandom, gc
+Client -> Server: clientRandom, [gc]
 
-Server -> Client: serverRandom, gs
+Server -> Client: serverRandom, [gs]
 
 principal Server[
 	knows public derived

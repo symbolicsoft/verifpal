@@ -20,7 +20,6 @@ func main() {
 		version, "https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
 	)
-
 	if len(os.Args) != 3 {
 		verifpal.Help()
 		return

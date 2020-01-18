@@ -25,6 +25,7 @@ func verifyActiveStage0(
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 	analysis int, stage int,
 ) int {
+	var scanGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
@@ -33,7 +34,9 @@ func verifyActiveStage0(
 		for i := range valPrincipalStateClone.assigned {
 			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
 		}
-		verifyAnalysis(valPrincipalStateClone, analysis)
+		scanGroup.Add(1)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalStateClone, analysis, &scanGroup)
+		scanGroup.Wait()
 		prettyAnalysis(analysis, stage)
 	}
 	return analysis
@@ -67,20 +70,19 @@ func verifyActiveScanCombination(
 	valPrincipalState principalState, valKnowledgeMap knowledgeMap, valReplacementMap replacementMap,
 	newStage bool, analysis int, stage int, cg *sync.WaitGroup,
 ) (int, int) {
-	var lastReplacement bool
-	var valPrincipalStateWithReplacements principalState
+	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
+	attackerKnown := len(valAttackerState.known)
 	if !valReplacementMap.initialized {
-		valReplacementMapInit := verifyActiveInitReplacementMap(valPrincipalState, 0)
+		valReplacementMapInit := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, 0)
 		valReplacementMap = valReplacementMapInit
 	}
-	attackerKnown := len(valAttackerState.known)
-	lastReplacement = valReplacementMap.combinationNext()
-	valPrincipalStateWithReplacements, _ = verifyActiveMutatePrincipalState(
+	lastReplacement := valReplacementMap.combinationNext()
+	valPrincipalStateWithReplacements, _ := verifyActiveMutatePrincipalState(
 		valPrincipalState, valKnowledgeMap, valReplacementMap,
 	)
-	verifyAnalysis(valPrincipalStateWithReplacements, analysis)
-	verifyResolveQueries(valKnowledgeMap, valPrincipalStateWithReplacements, analysis)
+	scanGroup.Add(1)
+	go verifyAnalysis(valKnowledgeMap, valPrincipalStateWithReplacements, analysis, &scanGroup)
 	analysis = verifyActiveIncrementAnalysis(analysis)
 	prettyAnalysis(analysis, stage)
 	verifyResults := verifyResultsGetRead()
@@ -92,22 +94,25 @@ func verifyActiveScanCombination(
 		}
 	}
 	if allQueriesResolved {
+		scanGroup.Done()
 		cg.Done()
 		return analysis, stage
 	}
 	if (len(valAttackerState.known) > attackerKnown) || newStage {
-		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, stage)
+		valReplacementMapUpdate := verifyActiveInitReplacementMap(valPrincipalState, valAttackerState, stage)
 		cg.Add(1)
 		go verifyActiveScanCombination(valPrincipalState, valKnowledgeMap, valReplacementMapUpdate, false, analysis, stage, cg)
 	} else if !lastReplacement {
+		analysis = verifyActiveIncrementAnalysis(analysis)
 		cg.Add(1)
 		go verifyActiveScanCombination(valPrincipalState, valKnowledgeMap, valReplacementMap, false, analysis, stage, cg)
 	}
+	scanGroup.Wait()
 	cg.Done()
 	return analysis, stage
 }
 
-func verifyActiveInitReplacementMap(valPrincipalState principalState, stage int) replacementMap {
+func verifyActiveInitReplacementMap(valPrincipalState principalState, valAttackerState attackerState, stage int) replacementMap {
 	valReplacementMap := replacementMap{
 		initialized:  true,
 		constants:    []constant{},
@@ -115,7 +120,6 @@ func verifyActiveInitReplacementMap(valPrincipalState principalState, stage int)
 		combination:  []value{},
 		depthIndex:   []int{},
 	}
-	valAttackerState := attackerStateGetRead()
 	for i, v := range valAttackerState.known {
 		if !valAttackerState.wire[i] || v.kind != "constant" {
 			continue
@@ -142,7 +146,7 @@ func verifyActiveInitReplacementMap(valPrincipalState principalState, stage int)
 		a := valPrincipalState.assigned[ii]
 		valReplacementMap = verifyActiveProvideValueReplacements(
 			a, v, ii, stage,
-			valPrincipalState, valReplacementMap,
+			valPrincipalState, valAttackerState, valReplacementMap,
 		)
 	}
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
@@ -155,9 +159,8 @@ func verifyActiveInitReplacementMap(valPrincipalState principalState, stage int)
 
 func verifyActiveProvideValueReplacements(
 	a value, v value, rootIndex int, stage int,
-	valPrincipalState principalState, valReplacementMap replacementMap,
+	valPrincipalState principalState, valAttackerState attackerState, valReplacementMap replacementMap,
 ) replacementMap {
-	valAttackerState := attackerStateGetRead()
 	switch a.kind {
 	case "constant":
 		if (a.constant.name == "g") || (a.constant.name == "nil") {

@@ -6,9 +6,10 @@ package verifpal
 
 import (
 	"fmt"
+	"sync"
 )
 
-func verifyAnalysis(valPrincipalState principalState, analysis int) {
+func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, analysis int, sg *sync.WaitGroup) {
 	valAttackerState := attackerStateGetRead()
 	valAttackerStateKnownInitLen := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
@@ -25,8 +26,11 @@ func verifyAnalysis(valPrincipalState principalState, analysis int) {
 		verifyAnalysisReconstruct(a, valPrincipalState, analysis)
 	}
 	if len(valAttackerState.known) > valAttackerStateKnownInitLen {
-		verifyAnalysis(valPrincipalState, analysis)
+		sg.Add(1)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, analysis, sg)
 	}
+	verifyResolveQueries(valKnowledgeMap, valPrincipalState, analysis)
+	sg.Done()
 }
 
 func verifyAnalysisResolve(a value, valPrincipalState principalState, analysis int) {
