@@ -29,21 +29,21 @@ principal Alice[
 	nMacAlice = MAC(n, ephemeralAPub)
 ]
 
-Alice -> Bob: ephemeralAPub, [nMacAlice]
+Alice -> Bob: ephemeralAPub, nMacAlice
 
 // 2. Server Hello
 
 principal Bob[
-	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)
+	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)?
 	nMacBob = MAC(n, ephemeralBPub)
 ]
 
-Bob -> Alice: ephemeralBPub, [nMacBob]
+Bob -> Alice: ephemeralBPub, nMacBob
 
 // 3. Client Authenticate
 
 principal Alice[
-	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)
+	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)?
 	ephemeralSecretAlice = ephemeralBPub^ephemeralA
 	longTermSecretAlice = longTermBPub^ephemeralA
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)
@@ -55,7 +55,7 @@ principal Alice[
 ]
 
 // TODO: Concatentation
-Alice -> Bob: [secretBox1Alice], secretBox2Alice
+Alice -> Bob: secretBox1Alice, secretBox2Alice
 
 principal Bob[
 	ephemeralSecretBob = ephemeralAPub^ephemeralB
@@ -63,7 +63,7 @@ principal Bob[
 	masterSecret1Bob = HASH(n, ephemeralSecretBob, longTermSecretBob)
 	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, nil)?
 	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, nil)?
-	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)
+	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)?
 	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
 ]
 
@@ -75,14 +75,14 @@ principal Bob[
 	secretBox1Bob = AEAD_ENC(masterSecret2Bob, sig2Bob, nil)
 ]
 
-Bob -> Alice: [secretBox1Bob]
+Bob -> Alice: secretBox1Bob
 
 // 5. Send a message
 
 principal Alice[
 	knows private m1
 	sig2Alice = AEAD_DEC(masterSecret2Alice, secretBox1Bob, nil)?
-	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)
+	sig2Valid = SIGNVERIF(longTermBPub, HASH(n, sig1Alice, longTermAPub, ephemeralSecretAlice), sig2Alice)?
 	secretBoxM1Alice = AEAD_ENC(masterSecret2Alice, m1, nil)
 ]
 
