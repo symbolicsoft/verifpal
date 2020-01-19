@@ -56,17 +56,26 @@ func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState princi
 	}
 }
 
-func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) int {
 	var scanGroup sync.WaitGroup
+	for _, valPrincipalState := range valPrincipalStates {
+		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
+		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
+		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
+		sanityFailOnFailedRewrite(failedRewrites)
+		for i := range valPrincipalStateClone.assigned {
+			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
+		}
+		scanGroup.Add(1)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalStateClone, analysis, &scanGroup)
+		scanGroup.Wait()
+		prettyAnalysis(analysis, stage)
+	}
+	return analysis
+}
+
+func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	constructAttackerState(false, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as passive.", 0, "info")
-	valPrincipalStates[0] = sanityResolveAllPrincipalStateValues(valPrincipalStates[0], valKnowledgeMap)
-	failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStates[0])
-	sanityFailOnFailedRewrite(failedRewrites)
-	for _, a := range valPrincipalStates[0].assigned {
-		sanityCheckEquationGenerators(a, valPrincipalStates[0])
-	}
-	scanGroup.Add(1)
-	go verifyAnalysis(valKnowledgeMap, valPrincipalStates[0], 0, &scanGroup)
-	scanGroup.Wait()
+	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0, 0)
 }

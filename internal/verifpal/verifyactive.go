@@ -12,37 +12,15 @@ func verifyActive(
 	m Model,
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 ) {
-	analysis := 0
 	constructAttackerState(true, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as active.", 0, "info")
-	analysis = verifyActiveStage0(valKnowledgeMap, valPrincipalStates, analysis, 0)
-	analysis = verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 1)
-	analysis = verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 2)
-	verifyActiveStage123(valKnowledgeMap, valPrincipalStates, analysis, 3)
+	analysis := verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0, 0)
+	analysis = verifyActiveStages(valKnowledgeMap, valPrincipalStates, analysis, 1)
+	analysis = verifyActiveStages(valKnowledgeMap, valPrincipalStates, analysis, 2)
+	verifyActiveStages(valKnowledgeMap, valPrincipalStates, analysis, 3)
 }
 
-func verifyActiveStage0(
-	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
-	analysis int, stage int,
-) int {
-	var scanGroup sync.WaitGroup
-	for _, valPrincipalState := range valPrincipalStates {
-		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
-		sanityFailOnFailedRewrite(failedRewrites)
-		for i := range valPrincipalStateClone.assigned {
-			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
-		}
-		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateClone, analysis, &scanGroup)
-		scanGroup.Wait()
-		prettyAnalysis(analysis, stage)
-	}
-	return analysis
-}
-
-func verifyActiveStage123(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) int {
+func verifyActiveStages(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) int {
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
