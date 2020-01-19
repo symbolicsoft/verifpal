@@ -58,7 +58,8 @@ func verifyResultsPutWrite(write verifyResultsWrite) bool {
 	return <-write.resp
 }
 
-func verifyResultsAllResolved(verifyResults []VerifyResult) bool {
+func verifyResultsAllResolved() bool {
+	verifyResults := verifyResultsGetRead()
 	for _, verifyResult := range verifyResults {
 		if !verifyResult.resolved {
 			return false

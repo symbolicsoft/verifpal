@@ -57,24 +57,23 @@ func verifyActiveScan(
 		)
 		return
 	}
-	if valReplacementMap.outOfReplacements {
-		cg.Done()
-		return
+	if !valReplacementMap.outOfReplacements {
+		cg.Add(1)
+		go verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
+			attackerKnown, stage, lockIndex, cg,
+		)
 	}
-	valPrincipalStateMutated, _ := verifyActiveMutatePrincipalState(
-		valPrincipalState, valKnowledgeMap, valReplacementMap,
-	)
 	scanGroup.Add(1)
-	go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
-	verifyResults := verifyResultsGetRead()
-	if verifyResultsAllResolved(verifyResults) {
-		verifyEnd()
-	}
-	cg.Add(1)
-	go verifyActiveScan(
-		valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
-		attackerKnown, stage, lockIndex, cg,
-	)
+	go func() {
+		valPrincipalStateMutated, _ := verifyActiveMutatePrincipalState(
+			valPrincipalState, valKnowledgeMap, valReplacementMap,
+		)
+		verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		if verifyResultsAllResolved() {
+			verifyEnd()
+		}
+	}()
 	scanGroup.Wait()
 	cg.Done()
 	return
