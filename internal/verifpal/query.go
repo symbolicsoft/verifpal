@@ -42,7 +42,7 @@ func queryConfidentiality(query query, valPrincipalState principalState) {
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), true)
-	verifyResultsPutWrite(verifyResultsWrite{
+	written := verifyResultsPutWrite(verifyResultsWrite{
 		verifyResult: VerifyResult{
 			query:    query,
 			resolved: true,
@@ -50,9 +50,11 @@ func queryConfidentiality(query query, valPrincipalState principalState) {
 		},
 		resp: make(chan bool),
 	})
-	prettyMessage(fmt.Sprintf(
-		"%s: %s", prettyQuery(query), summary,
-	), "result")
+	if written {
+		prettyMessage(fmt.Sprintf(
+			"%s: %s", prettyQuery(query), summary,
+		), "result")
+	}
 }
 
 func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState) {
@@ -118,7 +120,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 				prettyConstant(c), sender, query.message.sender,
 				prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			verifyResultsPutWrite(verifyResultsWrite{
+			written := verifyResultsPutWrite(verifyResultsWrite{
 				verifyResult: VerifyResult{
 					query:    query,
 					resolved: true,
@@ -126,9 +128,11 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 				},
 				resp: make(chan bool),
 			})
-			prettyMessage(fmt.Sprintf(
-				"%s: %s", prettyQuery(query), summary,
-			), "result")
+			if written {
+				prettyMessage(fmt.Sprintf(
+					"%s: %s", prettyQuery(query), summary,
+				), "result")
+			}
 			return
 		} else if forcedPasses[f] {
 			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
@@ -136,7 +140,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 					"%s's state, despite it being vulnerable to tampering by Attacker.",
 				prettyConstant(c), sender, prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			verifyResultsPutWrite(verifyResultsWrite{
+			written := verifyResultsPutWrite(verifyResultsWrite{
 				verifyResult: VerifyResult{
 					query:    query,
 					resolved: true,
@@ -144,9 +148,12 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 				},
 				resp: make(chan bool),
 			})
-			prettyMessage(fmt.Sprintf(
-				"%s: %s", prettyQuery(query), summary,
-			), "result")
+			if written {
+				prettyMessage(fmt.Sprintf(
+					"%s: %s", prettyQuery(query), summary,
+				), "result")
+			}
+			return
 		}
 	}
 }

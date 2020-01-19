@@ -26,15 +26,19 @@ func verifyResultsInit(m Model) bool {
 			case read := <-verifyResultsReads:
 				read.resp <- verifyResults
 			case write := <-verifyResultsWrites:
+				written := false
 				qw := prettyQuery(write.verifyResult.query)
 				for i, verifyResult := range verifyResults {
 					qv := prettyQuery(verifyResult.query)
 					if strings.Compare(qw, qv) == 0 {
-						verifyResults[i].resolved = write.verifyResult.resolved
-						verifyResults[i].summary = write.verifyResult.summary
+						if !verifyResults[i].resolved {
+							verifyResults[i].resolved = write.verifyResult.resolved
+							verifyResults[i].summary = write.verifyResult.summary
+							written = true
+						}
 					}
 				}
-				write.resp <- true
+				write.resp <- written
 			}
 		}
 	}()
