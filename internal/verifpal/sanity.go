@@ -252,6 +252,12 @@ func sanityDeclaredPrincipals(m Model) []string {
 			}
 		}
 	}
+	if len(principals) > 64 {
+		errorCritical(fmt.Sprintf(
+			"more than 64 principals not supported (%d declared)",
+			len(principals),
+		))
+	}
 	return principals
 }
 

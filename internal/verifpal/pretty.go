@@ -11,18 +11,18 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func prettyMessage(m string, analysis int, t string) {
+func prettyMessage(m string, t string) {
 	if colorOutputSupport() {
-		prettyMessageColor(m, analysis, t)
+		prettyMessageColor(m, t)
 	} else {
-		prettyMessageRegular(m, analysis, t)
+		prettyMessageRegular(m, t)
 	}
 }
 
-func prettyMessageRegular(m string, analysis int, t string) {
+func prettyMessageRegular(m string, t string) {
 	var infoString string
-	if analysis > 0 {
-		infoString = fmt.Sprintf("(Analysis %d)", analysis)
+	if verifyAnalysisCount > 0 {
+		infoString = fmt.Sprintf("(Analysis %d)", verifyAnalysisCount)
 	}
 	switch t {
 	case "verifpal":
@@ -48,11 +48,11 @@ func prettyMessageRegular(m string, analysis int, t string) {
 	}
 }
 
-func prettyMessageColor(m string, analysis int, t string) {
+func prettyMessageColor(m string, t string) {
 	var infoString string
-	if analysis > 0 {
+	if verifyAnalysisCount > 0 {
 		infoString = aurora.Gray(15, fmt.Sprintf(
-			"(Analysis %d)", analysis,
+			"(Analysis %d)", verifyAnalysisCount,
 		)).Italic().String()
 	}
 	switch t {
@@ -284,13 +284,15 @@ func PrettyPrint(modelFile string) string {
 	return output
 }
 
-func prettyAnalysis(analysis int, stage int) {
+func prettyAnalysis(stage int) {
+	var a string
 	if colorOutputSupport() {
-		analysis := aurora.Gray(15, fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)).Italic()
-		fmt.Fprint(os.Stdout, analysis)
+		a = aurora.Gray(15, fmt.Sprintf(
+			" Stage %d, Analysis %d...", stage, verifyAnalysisCount,
+		)).Italic().String()
 	} else {
-		analysis := fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysis)
-		fmt.Fprint(os.Stdout, analysis)
+		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, verifyAnalysisCount)
 	}
+	fmt.Fprint(os.Stdout, a)
 	fmt.Fprint(os.Stdout, "\r \r")
 }

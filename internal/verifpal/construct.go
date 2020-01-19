@@ -288,6 +288,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			beforeRewrite: []value{},
 			wasMutated:    []bool{},
 			beforeMutate:  []value{},
+			lock:          0,
 		}
 		for i, c := range valKnowledgeMap.constants {
 			guard := false
@@ -344,6 +345,7 @@ func constructPrincipalStateClone(valPrincipalState principalState) principalSta
 		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
 		wasMutated:    make([]bool, len(valPrincipalState.wasMutated)),
 		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
+		lock:          valPrincipalState.lock,
 	}
 	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
 	copy(valPrincipalStateClone.assigned, valPrincipalState.beforeRewrite)

@@ -12,13 +12,13 @@ import (
 )
 
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
-func Verify(modelFile string) (Model, []VerifyResult) {
+func Verify(modelFile string) {
 	m, valKnowledgeMap, valPrincipalStates := parserParseModel(modelFile)
 	verifyResultsInit(m)
 	prettyMessage(fmt.Sprintf(
 		"Verification initiated at %s.",
 		time.Now().Format("15:04:05"),
-	), 0, "verifpal")
+	), "verifpal")
 	switch m.attacker {
 	case "passive":
 		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
@@ -28,6 +28,41 @@ func Verify(modelFile string) (Model, []VerifyResult) {
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
 	fmt.Fprint(os.Stdout, "\n")
+	verifyEnd()
+}
+
+func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState) {
+	verifyResults := verifyResultsGetRead()
+	for _, verifyResult := range verifyResults {
+		if verifyResult.resolved {
+			continue
+		}
+		queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap)
+	}
+}
+
+func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
+	var scanGroup sync.WaitGroup
+	for _, valPrincipalState := range valPrincipalStates {
+		valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
+		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalState)
+		sanityFailOnFailedRewrite(failedRewrites)
+		for i := range valPrincipalState.assigned {
+			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
+		}
+		scanGroup.Add(1)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
+		scanGroup.Wait()
+	}
+}
+
+func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+	constructAttackerState(false, m, valKnowledgeMap, true)
+	prettyMessage("Attacker is configured as passive.", "info")
+	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+}
+
+func verifyEnd() {
 	verifyResults := verifyResultsGetRead()
 	for _, verifyResult := range verifyResults {
 		if !verifyResult.resolved {
@@ -37,45 +72,11 @@ func Verify(modelFile string) (Model, []VerifyResult) {
 			"%s: %s",
 			prettyQuery(verifyResult.query),
 			verifyResult.summary,
-		), 0, "result")
+		), "result")
 	}
 	prettyMessage(fmt.Sprintf(
 		"Verification completed at %s. Thank you for using Verifpal.",
 		time.Now().Format("15:04:05"),
-	), 0, "verifpal")
-	return m, verifyResults
-}
-
-func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState, analysis int) {
-	verifyResults := verifyResultsGetRead()
-	for _, verifyResult := range verifyResults {
-		if verifyResult.resolved {
-			continue
-		}
-		queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap, analysis)
-	}
-}
-
-func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, analysis int, stage int) int {
-	var scanGroup sync.WaitGroup
-	for _, valPrincipalState := range valPrincipalStates {
-		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
-		valPrincipalStateClone = sanityResolveAllPrincipalStateValues(valPrincipalStateClone, valKnowledgeMap)
-		failedRewrites, _ := sanityPerformAllRewrites(valPrincipalStateClone)
-		sanityFailOnFailedRewrite(failedRewrites)
-		for i := range valPrincipalStateClone.assigned {
-			sanityCheckEquationGenerators(valPrincipalStateClone.assigned[i], valPrincipalStateClone)
-		}
-		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateClone, analysis, &scanGroup)
-		scanGroup.Wait()
-		prettyAnalysis(analysis, stage)
-	}
-	return analysis
-}
-
-func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
-	constructAttackerState(false, m, valKnowledgeMap, true)
-	prettyMessage("Attacker is configured as passive.", 0, "info")
-	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0, 0)
+	), "verifpal")
+	os.Exit(0)
 }

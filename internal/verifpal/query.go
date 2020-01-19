@@ -8,16 +8,16 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap, analysis int) {
+func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap) {
 	switch query.kind {
 	case "confidentiality":
-		queryConfidentiality(query, valPrincipalState, analysis)
+		queryConfidentiality(query, valPrincipalState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState, analysis)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	}
 }
 
-func queryConfidentiality(query query, valPrincipalState principalState, analysis int) {
+func queryConfidentiality(query query, valPrincipalState principalState) {
 	var mutated string
 	valAttackerState := attackerStateGetRead()
 	ii := sanityEquivalentValueInValues(
@@ -52,10 +52,10 @@ func queryConfidentiality(query query, valPrincipalState principalState, analysi
 	})
 	prettyMessage(fmt.Sprintf(
 		"%s: %s", prettyQuery(query), summary,
-	), analysis, "result")
+	), "result")
 }
 
-func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, analysis int) {
+func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
@@ -80,7 +80,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
 				pass, _ := possibleToRewrite(a.primitive, valPrincipalState)
-				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState, 0)
+				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState)
 				if pass || forcedPass {
 					indices = append(indices, ii)
 					passes = append(passes, pass)
@@ -128,7 +128,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			})
 			prettyMessage(fmt.Sprintf(
 				"%s: %s", prettyQuery(query), summary,
-			), analysis, "result")
+			), "result")
 			return
 		} else if forcedPasses[f] {
 			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
@@ -146,7 +146,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			})
 			prettyMessage(fmt.Sprintf(
 				"%s: %s", prettyQuery(query), summary,
-			), analysis, "result")
+			), "result")
 		}
 	}
 }

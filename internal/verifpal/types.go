@@ -148,6 +148,7 @@ type principalState struct {
 	beforeRewrite []value
 	wasMutated    []bool
 	beforeMutate  []value
+	lock          int
 }
 
 type attackerState struct {
@@ -169,10 +170,11 @@ type attackerStateWrite struct {
 }
 
 type replacementMap struct {
-	initialized   bool
-	constants     []constant
-	replacements  [][]value
-	combination   []value
-	depthIndex    []int
-	lastIncrement int
+	initialized       bool
+	constants         []constant
+	replacements      [][]value
+	combination       []value
+	depthIndex        []int
+	lastIncrement     int
+	outOfReplacements bool
 }

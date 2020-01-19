@@ -22,10 +22,14 @@ func attackerStateInit(active bool) bool {
 			case read := <-attackerStateReads:
 				read.resp <- valAttackerState
 			case write := <-attackerStateWrites:
-				valAttackerState.known = append(valAttackerState.known, write.known)
-				valAttackerState.wire = append(valAttackerState.wire, write.wire)
-				valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, write.mutatedTo)
-				write.resp <- true
+				if sanityExactSameValueInValues(write.known, valAttackerState.known) < 0 {
+					valAttackerState.known = append(valAttackerState.known, write.known)
+					valAttackerState.wire = append(valAttackerState.wire, write.wire)
+					valAttackerState.mutatedTo = append(valAttackerState.mutatedTo, write.mutatedTo)
+					write.resp <- true
+				} else {
+					write.resp <- false
+				}
 			}
 		}
 	}()
@@ -46,22 +50,19 @@ func attackerStatePutWrite(write attackerStateWrite) bool {
 }
 
 func attackerStatePopulate(m Model, valKnowledgeMap knowledgeMap, verbose bool) {
-	valAttackerState := attackerStateGetRead()
 	for _, c := range valKnowledgeMap.constants {
 		if c.qualifier == "public" {
 			v := value{
 				kind:     "constant",
 				constant: c,
 			}
-			if sanityExactSameValueInValues(v, valAttackerState.known) < 0 {
-				write := attackerStateWrite{
-					known:     v,
-					wire:      false,
-					mutatedTo: []string{},
-					resp:      make(chan bool),
-				}
-				attackerStatePutWrite(write)
+			write := attackerStateWrite{
+				known:     v,
+				wire:      false,
+				mutatedTo: []string{},
+				resp:      make(chan bool),
 			}
+			attackerStatePutWrite(write)
 		}
 	}
 	for _, blck := range m.blocks {
