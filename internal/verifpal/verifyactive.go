@@ -76,7 +76,6 @@ func verifyActiveScan(
 	}()
 	scanGroup.Wait()
 	cg.Done()
-	return
 }
 
 func verifyActiveMutatePrincipalState(valPrincipalState principalState, valKnowledgeMap knowledgeMap, valReplacementMap replacementMap) (principalState, bool) {

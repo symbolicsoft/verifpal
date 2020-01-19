@@ -45,6 +45,11 @@ func prettyMessageRegular(m string, t string) {
 		fmt.Fprintf(os.Stdout,
 			"   Result • %s %s\n", m, infoString,
 		)
+	default:
+		errorCritical(fmt.Sprintf(
+			"invalid log message type (%s)",
+			t,
+		))
 	}
 }
 
@@ -81,6 +86,11 @@ func prettyMessageColor(m string, t string) {
 			"%s%s%s %s %s\n",
 			"   ", aurora.Red("Result").Bold(), " •", m, infoString,
 		)
+	default:
+		errorCritical(fmt.Sprintf(
+			"invalid log message type (%s)",
+			t,
+		))
 	}
 }
 

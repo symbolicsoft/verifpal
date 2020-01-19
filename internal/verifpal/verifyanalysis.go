@@ -67,10 +67,6 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, obtained i
 	case "equation":
 		output = append(output, a)
 	}
-	prettyMessage(fmt.Sprintf(
-		"%s resolves to %s.",
-		prettyValues(output), prettyValue(a),
-	), "deduction")
 	write := attackerStateWrite{
 		known:     a,
 		wire:      false,
@@ -78,6 +74,10 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, obtained i
 		resp:      make(chan bool),
 	}
 	if attackerStatePutWrite(write) {
+		prettyMessage(fmt.Sprintf(
+			"%s resolves to %s.",
+			prettyValues(output), prettyValue(a),
+		), "deduction")
 		obtained = obtained + 1
 	}
 	if obtained > lastObtained {

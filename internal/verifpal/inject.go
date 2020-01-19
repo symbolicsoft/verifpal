@@ -5,6 +5,7 @@
 package verifpal
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -128,7 +129,12 @@ SkeletonSearch:
 			mutatedTo: []string{},
 			resp:      make(chan bool),
 		}
-		attackerStatePutWrite(write)
+		if attackerStatePutWrite(write) {
+			prettyMessage(fmt.Sprintf(
+				"Constructed skeleton %s.",
+				prettyPrimitive(skeleton),
+			), "analysis")
+		}
 	}
 	for _, a := range p.arguments {
 		switch a.kind {
