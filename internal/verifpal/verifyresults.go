@@ -4,15 +4,11 @@
 
 package verifpal
 
-import (
-	"strings"
-	"sync"
-)
+import "strings"
 
 var verifyResultsReady chan bool = make(chan bool)
 var verifyResultsReads chan verifyResultsRead = make(chan verifyResultsRead)
 var verifyResultsWrites chan verifyResultsWrite = make(chan verifyResultsWrite)
-var verifyResultsMutex sync.Mutex
 
 func verifyResultsInit(m Model) bool {
 	go func() {
