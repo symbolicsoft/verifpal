@@ -7,16 +7,16 @@ package verifpal
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
-var verifyAnalysisCount int
-var verifyAnalysisCountMutex sync.Mutex
+var verifyAnalysisCount uint32
 
 func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
 	var aGroup sync.WaitGroup
 	var pGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
-	output := 0
+	var output uint32
 	for _, a := range valAttackerState.known {
 		aGroup.Add(1)
 		go func(a value) {
@@ -24,17 +24,17 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 			case "constant":
 				a = sanityResolveConstant(a.constant, valPrincipalState, false)
 			}
-			output += verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0)
-			output += verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
-			output += verifyAnalysisEquivalize(a, valPrincipalState, 0)
+			atomic.AddUint32(&output, verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0))
+			atomic.AddUint32(&output, verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0))
+			atomic.AddUint32(&output, verifyAnalysisEquivalize(a, valPrincipalState, 0))
 			aGroup.Done()
 		}(a)
 	}
 	for _, a := range valPrincipalState.assigned {
 		pGroup.Add(1)
 		go func(a value) {
-			output += verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0)
-			output += verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
+			atomic.AddUint32(&output, verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0))
+			atomic.AddUint32(&output, verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0))
 			pGroup.Done()
 		}(a)
 	}
@@ -43,7 +43,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
 	verifyAnalysisIncrementCount()
 	prettyAnalysis(stage)
-	if output > 0 {
+	if atomic.LoadUint32(&output) > 0 {
 		sg.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
 	}
@@ -51,19 +51,15 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 }
 
 func verifyAnalysisIncrementCount() {
-	verifyAnalysisCountMutex.Lock()
-	verifyAnalysisCount = verifyAnalysisCount + 1
-	verifyAnalysisCountMutex.Unlock()
+	atomic.AddUint32(&verifyAnalysisCount, 1)
 }
 
 func verifyAnalysisGetCount() int {
-	verifyAnalysisCountMutex.Lock()
-	analysisCount := verifyAnalysisCount
-	verifyAnalysisCountMutex.Unlock()
-	return analysisCount
+	analysisCount := atomic.LoadUint32(&verifyAnalysisCount)
+	return int(analysisCount)
 }
 
-func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
+func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttackerState attackerState, obtained uint32) uint32 {
 	lastObtained := obtained
 	ii := sanityExactSameValueInValues(a, valAttackerState.known)
 	if ii >= 0 {
@@ -107,7 +103,7 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttacke
 	return obtained
 }
 
-func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
+func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained uint32) uint32 {
 	var r bool
 	var revealed value
 	var ar []value
@@ -137,7 +133,7 @@ func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttac
 	return obtained
 }
 
-func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
+func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained uint32) uint32 {
 	var r bool
 	var revealed value
 	var ar []value
@@ -167,7 +163,7 @@ func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttac
 	return obtained
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
+func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAttackerState attackerState, obtained uint32) uint32 {
 	var r bool
 	var ar []value
 	lastObtained := obtained
@@ -201,7 +197,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAtt
 	return obtained
 }
 
-func verifyAnalysisEquivalize(a value, valPrincipalState principalState, obtained int) int {
+func verifyAnalysisEquivalize(a value, valPrincipalState principalState, obtained uint32) uint32 {
 	lastObtained := obtained
 	for _, c := range valPrincipalState.constants {
 		aa := sanityResolveConstant(c, valPrincipalState, false)
