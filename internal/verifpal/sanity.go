@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 func sanity(m Model) (knowledgeMap, []principalState) {
@@ -463,7 +464,7 @@ func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState princi
 		kind: "primitive",
 		primitive: primitive{
 			name:      p.name,
-			arguments: []value{},
+			arguments: make([]value, len(p.arguments)),
 			output:    p.output,
 			check:     p.check,
 		},
@@ -471,23 +472,23 @@ func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState princi
 	for i, a := range p.arguments {
 		switch a.kind {
 		case "constant":
-			rewrite.primitive.arguments = append(rewrite.primitive.arguments, p.arguments[i])
+			rewrite.primitive.arguments[i] = p.arguments[i]
 		case "primitive":
 			pFailedRewrite, pWasRewritten, pRewrite := sanityPerformPrimitiveRewrite(a.primitive, -1, valPrincipalState)
 			if pWasRewritten {
 				wasRewritten = true
-				rewrite.primitive.arguments = append(rewrite.primitive.arguments, pRewrite)
+				rewrite.primitive.arguments[i] = pRewrite
 			} else {
-				rewrite.primitive.arguments = append(rewrite.primitive.arguments, p.arguments[i])
+				rewrite.primitive.arguments[i] = p.arguments[i]
 				failedRewrites = append(failedRewrites, pFailedRewrite...)
 			}
 		case "equation":
 			eFailedRewrite, eWasRewritten, eRewrite := sanityPerformEquationRewrite(a.equation, -1, valPrincipalState)
 			if eWasRewritten {
 				wasRewritten = true
-				rewrite.primitive.arguments = append(rewrite.primitive.arguments, eRewrite)
+				rewrite.primitive.arguments[i] = eRewrite
 			} else {
-				rewrite.primitive.arguments = append(rewrite.primitive.arguments, p.arguments[i])
+				rewrite.primitive.arguments[i] = p.arguments[i]
 				failedRewrites = append(failedRewrites, eFailedRewrite...)
 			}
 		}
@@ -853,19 +854,25 @@ func sanityConstantIsUsedByPrincipal(valKnowledgeMap knowledgeMap, name string, 
 }
 
 func sanityResolveAllPrincipalStateValues(valPrincipalState principalState, valKnowledgeMap knowledgeMap) principalState {
+	var resolvesGroup sync.WaitGroup
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
 	for i := range valPrincipalState.assigned {
-		valPrincipalStateClone.assigned[i], _ = sanityResolveInternalValuesFromPrincipalState(
-			valPrincipalState.assigned[i], i, valPrincipalState,
-			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
-		)
-		valPrincipalStateClone.beforeRewrite[i], _ = sanityResolveInternalValuesFromPrincipalState(
-			valPrincipalState.beforeRewrite[i], i, valPrincipalState,
-			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
-		)
-		valPrincipalStateClone.beforeMutate[i], _ = sanityResolveInternalValuesFromKnowledgeMap(
-			valPrincipalState.beforeMutate[i], valKnowledgeMap,
-		)
+		resolvesGroup.Add(1)
+		go func(i int) {
+			valPrincipalStateClone.assigned[i], _ = sanityResolveInternalValuesFromPrincipalState(
+				valPrincipalState.assigned[i], i, valPrincipalState,
+				sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+			)
+			valPrincipalStateClone.beforeRewrite[i], _ = sanityResolveInternalValuesFromPrincipalState(
+				valPrincipalState.beforeRewrite[i], i, valPrincipalState,
+				sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+			)
+			valPrincipalStateClone.beforeMutate[i], _ = sanityResolveInternalValuesFromKnowledgeMap(
+				valPrincipalState.beforeMutate[i], valKnowledgeMap,
+			)
+			resolvesGroup.Done()
+		}(i)
 	}
+	resolvesGroup.Wait()
 	return valPrincipalStateClone
 }

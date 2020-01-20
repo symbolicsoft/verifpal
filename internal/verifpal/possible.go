@@ -4,13 +4,12 @@
 
 package verifpal
 
-func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState) (bool, value, []value) {
+func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, value, []value) {
 	has := []value{}
 	prim := primitiveGet(p.name)
 	if !prim.decompose.hasRule {
 		return false, value{}, has
 	}
-	valAttackerState := attackerStateGetRead()
 	for i, g := range prim.decompose.given {
 		a := p.arguments[g]
 		a, valid := prim.decompose.filter(a, i, valPrincipalState)
@@ -21,18 +20,18 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState)
 		}
 		switch a.kind {
 		case "primitive":
-			r, _ := possibleToReconstructPrimitive(a.primitive, valPrincipalState)
+			r, _ := possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDecomposePrimitive(a.primitive, valPrincipalState)
+			r, _, _ = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState)
+			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -53,12 +52,11 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState)
 	return false, value{}, has
 }
 
-func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState) (bool, value, []value) {
+func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, value, []value) {
 	prim := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
 		return false, value{}, []value{}
 	}
-	valAttackerState := attackerStateGetRead()
 	for _, i := range prim.recompose.given {
 		ar := []value{}
 		for _, ii := range i {
@@ -88,8 +86,7 @@ func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState)
 	return false, value{}, []value{}
 }
 
-func possibleToReconstructPrimitive(p primitive, valPrincipalState principalState) (bool, []value) {
-	valAttackerState := attackerStateGetRead()
+func possibleToReconstructPrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, []value) {
 	has := []value{}
 	for _, a := range p.arguments {
 		if sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState) >= 0 {
@@ -98,18 +95,18 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 		}
 		switch a.kind {
 		case "primitive":
-			r, _, _ := possibleToDecomposePrimitive(a.primitive, valPrincipalState)
+			r, _, _ := possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.primitive, valPrincipalState)
+			r, _ = possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState)
+			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -133,8 +130,7 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 	return false, []value{}
 }
 
-func possibleToReconstructEquation(e equation, valPrincipalState principalState) (bool, []value) {
-	valAttackerState := attackerStateGetRead()
+func possibleToReconstructEquation(e equation, valPrincipalState principalState, valAttackerState attackerState) (bool, []value) {
 	eValues := sanityDecomposeEquationValues(e, valPrincipalState)
 	if len(eValues) > 2 {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, eValues[2].constant)
@@ -216,32 +212,31 @@ func possibleToRewrite(p primitive, valPrincipalState principalState) (bool, val
 	return true, rewrite
 }
 
-func possibleToForceRewrite(p primitive, valPrincipalState principalState) bool {
+func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
 	switch p.name {
 	case "DEC", "AEAD_DEC":
-		return possibleToForceRewriteDECandAEADDEC(p, valPrincipalState)
+		return possibleToForceRewriteDECandAEADDEC(p, valPrincipalState, valAttackerState)
 	case "SIGNVERIF":
-		return possibleToForceRewriteSIGNVERIF(p, valPrincipalState)
+		return possibleToForceRewriteSIGNVERIF(p, valPrincipalState, valAttackerState)
 	}
 	return false
 }
 
-func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principalState) bool {
+func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
 	switch k.kind {
 	case "constant":
-		valAttackerState := attackerStateGetRead()
 		if sanityEquivalentValueInValues(k, valAttackerState.known, valPrincipalState) >= 0 {
 			return true
 		}
 	case "primitive":
-		r, _ := possibleToReconstructPrimitive(k.primitive, valPrincipalState)
+		r, _ := possibleToReconstructPrimitive(k.primitive, valPrincipalState, valAttackerState)
 		if r {
 			return true
 		}
 	case "equation":
-		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState)
+		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState, valAttackerState)
 		if r {
 			return true
 		}
@@ -249,7 +244,7 @@ func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principa
 	return false
 }
 
-func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState principalState) bool {
+func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
 	k := p.arguments[0]
 	switch k.kind {
 	case "constant":
@@ -257,7 +252,7 @@ func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState principalSta
 	case "primitive":
 		return false
 	case "equation":
-		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState)
+		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState, valAttackerState)
 		if r {
 			return true
 		}

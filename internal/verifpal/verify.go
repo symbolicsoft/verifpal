@@ -31,13 +31,13 @@ func Verify(modelFile string) {
 	verifyEnd()
 }
 
-func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState) {
+func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
 	verifyResults := verifyResultsGetRead()
 	for _, verifyResult := range verifyResults {
 		if verifyResult.resolved {
 			continue
 		}
-		queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap)
+		queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap, valAttackerState)
 	}
 }
 
@@ -51,7 +51,8 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
 		}
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
+		valAttackerState := attackerStateGetRead()
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, &scanGroup)
 		scanGroup.Wait()
 	}
 }

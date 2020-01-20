@@ -8,18 +8,17 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap) {
+func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap, valAttackerState attackerState) {
 	switch query.kind {
 	case "confidentiality":
-		queryConfidentiality(query, valPrincipalState)
+		queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 }
 
-func queryConfidentiality(query query, valPrincipalState principalState) {
+func queryConfidentiality(query query, valPrincipalState principalState, valAttackerState attackerState) {
 	var mutated string
-	valAttackerState := attackerStateGetRead()
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState, false),
 		valAttackerState.known,
@@ -57,7 +56,7 @@ func queryConfidentiality(query query, valPrincipalState principalState) {
 	}
 }
 
-func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState) {
+func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
@@ -82,7 +81,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			}
 			if primitiveGet(a.primitive.name).rewrite.hasRule {
 				pass, _ := possibleToRewrite(a.primitive, valPrincipalState)
-				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState)
+				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState, valAttackerState)
 				if pass || forcedPass {
 					indices = append(indices, ii)
 					passes = append(passes, pass)

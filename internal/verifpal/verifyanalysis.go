@@ -12,11 +12,10 @@ import (
 var verifyAnalysisCount int
 var verifyAnalysisCountMutex sync.Mutex
 
-func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
+func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int, sg *sync.WaitGroup) {
 	var aGroup sync.WaitGroup
 	var pGroup sync.WaitGroup
-	valAttackerState := attackerStateGetRead()
-	attackerKnown := len(valAttackerState.known)
+	output := 0
 	for _, a := range valAttackerState.known {
 		aGroup.Add(1)
 		go func(a value) {
@@ -24,29 +23,28 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 			case "constant":
 				a = sanityResolveConstant(a.constant, valPrincipalState, false)
 			}
-			verifyAnalysisResolve(a, valPrincipalState, 0)
-			verifyAnalysisDecompose(a, valPrincipalState, 0)
-			verifyAnalysisEquivalize(a, valPrincipalState, 0)
+			output += verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0)
+			output += verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
+			output += verifyAnalysisEquivalize(a, valPrincipalState, 0)
 			aGroup.Done()
 		}(a)
 	}
 	for _, a := range valPrincipalState.assigned {
 		pGroup.Add(1)
 		go func(a value) {
-			verifyAnalysisRecompose(a, valPrincipalState, 0)
-			verifyAnalysisReconstruct(a, valPrincipalState, 0)
+			output += verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0)
+			output += verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
 			pGroup.Done()
 		}(a)
 	}
 	aGroup.Wait()
 	pGroup.Wait()
-	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
 	verifyAnalysisIncrementCount()
 	prettyAnalysis(stage)
-	valAttackerState = attackerStateGetRead()
-	if len(valAttackerState.known) > attackerKnown {
+	if output > 0 {
 		sg.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, sg)
 	}
 	sg.Done()
 }
@@ -64,8 +62,7 @@ func verifyAnalysisGetCount() int {
 	return analysisCount
 }
 
-func verifyAnalysisResolve(a value, valPrincipalState principalState, obtained int) int {
-	valAttackerState := attackerStateGetRead()
+func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
 	lastObtained := obtained
 	ii := sanityExactSameValueInValues(a, valAttackerState.known)
 	if ii >= 0 {
@@ -104,19 +101,19 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, obtained i
 		obtained = obtained + 1
 	}
 	if obtained > lastObtained {
-		return verifyAnalysisResolve(a, valPrincipalState, obtained)
+		return verifyAnalysisResolve(a, valPrincipalState, valAttackerState, obtained)
 	}
 	return obtained
 }
 
-func verifyAnalysisDecompose(a value, valPrincipalState principalState, obtained int) int {
+func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
 	var r bool
 	var revealed value
 	var ar []value
 	lastObtained := obtained
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 	}
 	if r {
 		write := attackerStateWrite{
@@ -134,19 +131,19 @@ func verifyAnalysisDecompose(a value, valPrincipalState principalState, obtained
 		}
 	}
 	if obtained > lastObtained {
-		return verifyAnalysisDecompose(a, valPrincipalState, obtained)
+		return verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, obtained)
 	}
 	return obtained
 }
 
-func verifyAnalysisRecompose(a value, valPrincipalState principalState, obtained int) int {
+func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
 	var r bool
 	var revealed value
 	var ar []value
 	lastObtained := obtained
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState)
+		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 	}
 	if r {
 		write := attackerStateWrite{
@@ -164,23 +161,23 @@ func verifyAnalysisRecompose(a value, valPrincipalState principalState, obtained
 		}
 	}
 	if obtained > lastObtained {
-		return verifyAnalysisRecompose(a, valPrincipalState, obtained)
+		return verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, obtained)
 	}
 	return obtained
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState principalState, obtained int) int {
+func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAttackerState attackerState, obtained int) int {
 	var r bool
 	var ar []value
 	lastObtained := obtained
 	switch a.kind {
 	case "primitive":
-		r, ar = possibleToReconstructPrimitive(a.primitive, valPrincipalState)
+		r, ar = possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
 		for _, aa := range a.primitive.arguments {
-			verifyAnalysisReconstruct(aa, valPrincipalState, obtained)
+			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, obtained)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState)
+		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
 	}
 	if r {
 		write := attackerStateWrite{
@@ -198,7 +195,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState principalState, obtain
 		}
 	}
 	if obtained > lastObtained {
-		return verifyAnalysisReconstruct(a, valPrincipalState, obtained)
+		return verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, obtained)
 	}
 	return obtained
 }

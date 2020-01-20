@@ -12,7 +12,7 @@ import (
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
-	valPrincipalState principalState, includeHashes bool,
+	valPrincipalState principalState, valAttackerState attackerState, includeHashes bool,
 ) []value {
 	prim := primitiveGet(p.name)
 	injectants := ([]value{})
@@ -26,7 +26,7 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, includeHashes)
+	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
 	return injectants
 }
 
@@ -75,22 +75,22 @@ func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, va
 func injectPrimitiveSkeleton(p primitive) primitive {
 	skeleton := primitive{
 		name:      p.name,
-		arguments: []value{},
+		arguments: make([]value, len(p.arguments)),
 		output:    p.output,
 		check:     false,
 	}
-	for _, a := range p.arguments {
+	for i, a := range p.arguments {
 		switch a.kind {
 		case "constant":
-			skeleton.arguments = append(skeleton.arguments, constantN)
+			skeleton.arguments[i] = constantN
 		case "primitive":
 			aa := value{
 				kind:      "primitive",
 				primitive: injectPrimitiveSkeleton(a.primitive),
 			}
-			skeleton.arguments = append(skeleton.arguments, aa)
+			skeleton.arguments[i] = aa
 		case "equation":
-			skeleton.arguments = append(skeleton.arguments, constantN)
+			skeleton.arguments[i] = constantN
 		}
 	}
 	return skeleton
@@ -145,9 +145,8 @@ SkeletonSearch:
 	}
 }
 
-func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState principalState, includeHashes bool) []value {
+func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState principalState, valAttackerState attackerState, includeHashes bool) []value {
 	var injectsGroup sync.WaitGroup
-	valAttackerState := attackerStateGetRead()
 	var injectants []value
 	if p.name == "HASH" && !includeHashes {
 		return injectants
@@ -170,7 +169,7 @@ func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState pri
 				case "constant":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
-					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, includeHashes)
+					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
 					if len(kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], kprims...)
 					}

@@ -66,11 +66,11 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valPrincipalState, valKnowledgeMap, valReplacementMap,
+		valKnowledgeMap, valPrincipalState, valAttackerState, valReplacementMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, &scanGroup)
 	}
 	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
@@ -83,8 +83,7 @@ func verifyActiveScan(
 	cg.Done()
 }
 
-func verifyActiveMutatePrincipalState(valPrincipalState principalState, valKnowledgeMap knowledgeMap, valReplacementMap replacementMap) (principalState, bool) {
-	valAttackerState := attackerStateGetRead()
+func verifyActiveMutatePrincipalState(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, valReplacementMap replacementMap) (principalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valReplacementMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
