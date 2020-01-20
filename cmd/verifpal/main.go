@@ -14,7 +14,7 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-var version = "0.9.5"
+var version = "0.9.6"
 
 func main() {
 	debug.SetGCPercent(1000)
