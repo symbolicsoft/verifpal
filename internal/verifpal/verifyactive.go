@@ -22,58 +22,65 @@ func verifyActive(
 
 func verifyActiveStages(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
 	var principalsGroup sync.WaitGroup
-	for i, valPrincipalState := range valPrincipalStates {
+	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
-		go func(valPrincipalState principalState, lockIndex int, pg *sync.WaitGroup) {
+		go func(valPrincipalState principalState, pg *sync.WaitGroup) {
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			go verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, replacementMap{initialized: false},
-				0, stage, lockIndex, &combinationsGroup,
+				stage, &combinationsGroup,
 			)
 			combinationsGroup.Wait()
 			pg.Done()
-		}(valPrincipalState, i, &principalsGroup)
+		}(valPrincipalState, &principalsGroup)
 	}
 	principalsGroup.Wait()
 }
 
 func verifyActiveScan(
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valReplacementMap replacementMap,
-	attackerKnown int, stage int, lockIndex int, cg *sync.WaitGroup,
+	stage int, cg *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
-	attackerKnowsMore := false
-	if len(valAttackerState.known) > attackerKnown {
-		attackerKnowsMore = true
-		attackerKnown = len(valAttackerState.known)
+	attackerKnown := len(valAttackerState.known)
+	attackerKnowsMore := len(valAttackerState.known) > attackerKnown
+	goodLock := valPrincipalState.lock == 0 || valPrincipalState.lock >= attackerKnown
+	if verifyResultsAllResolved() {
+		verifyEnd()
 	}
-	if !valReplacementMap.initialized || attackerKnowsMore {
-		valReplacementMap = replacementMapInit(valPrincipalState, valAttackerState, stage)
-		verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
-			attackerKnown, stage, lockIndex, cg,
-		)
+	if attackerKnowsMore {
+		valPrincipalState.lock = attackerKnown
+	}
+	if (goodLock && !valReplacementMap.initialized) || attackerKnowsMore {
+		cg.Add(1)
+		go func() {
+			valReplacementMap = replacementMapInit(valPrincipalState, valAttackerState, stage)
+			verifyActiveScan(
+				valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
+				stage, cg,
+			)
+		}()
+		cg.Done()
 		return
 	}
-	if !valReplacementMap.outOfReplacements {
+	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
+		valPrincipalState, valKnowledgeMap, valReplacementMap,
+	)
+	if isWorthwhileMutation {
+		scanGroup.Add(1)
+		go func() {
+			verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		}()
+	}
+	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
 		go verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
-			attackerKnown, stage, lockIndex, cg,
+			stage, cg,
 		)
 	}
-	scanGroup.Add(1)
-	go func() {
-		valPrincipalStateMutated, _ := verifyActiveMutatePrincipalState(
-			valPrincipalState, valKnowledgeMap, valReplacementMap,
-		)
-		verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
-		if verifyResultsAllResolved() {
-			verifyEnd()
-		}
-	}()
 	scanGroup.Wait()
 	cg.Done()
 }

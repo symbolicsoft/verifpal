@@ -10,27 +10,41 @@ import (
 )
 
 var verifyAnalysisCount int
+var verifyAnalysisCountMutex sync.Mutex
 
 func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
+	var aGroup sync.WaitGroup
+	var pGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
-	obtained := 0
+	attackerKnown := len(valAttackerState.known)
 	for _, a := range valAttackerState.known {
-		switch a.kind {
-		case "constant":
-			a = sanityResolveConstant(a.constant, valPrincipalState, false)
-		}
-		obtained += verifyAnalysisResolve(a, valPrincipalState, 0)
-		obtained += verifyAnalysisDecompose(a, valPrincipalState, 0)
-		obtained += verifyAnalysisEquivalize(a, valPrincipalState, 0)
+		aGroup.Add(1)
+		go func(a value) {
+			switch a.kind {
+			case "constant":
+				a = sanityResolveConstant(a.constant, valPrincipalState, false)
+			}
+			verifyAnalysisResolve(a, valPrincipalState, 0)
+			verifyAnalysisDecompose(a, valPrincipalState, 0)
+			verifyAnalysisEquivalize(a, valPrincipalState, 0)
+			aGroup.Done()
+		}(a)
 	}
 	for _, a := range valPrincipalState.assigned {
-		obtained += verifyAnalysisRecompose(a, valPrincipalState, 0)
-		obtained += verifyAnalysisReconstruct(a, valPrincipalState, 0)
+		pGroup.Add(1)
+		go func(a value) {
+			verifyAnalysisRecompose(a, valPrincipalState, 0)
+			verifyAnalysisReconstruct(a, valPrincipalState, 0)
+			pGroup.Done()
+		}(a)
 	}
+	aGroup.Wait()
+	pGroup.Wait()
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	verifyAnalysisIncrementCount()
 	prettyAnalysis(stage)
-	if obtained > 0 {
+	valAttackerState = attackerStateGetRead()
+	if len(valAttackerState.known) > attackerKnown {
 		sg.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
 	}
@@ -38,7 +52,16 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 }
 
 func verifyAnalysisIncrementCount() {
+	verifyAnalysisCountMutex.Lock()
 	verifyAnalysisCount = verifyAnalysisCount + 1
+	verifyAnalysisCountMutex.Unlock()
+}
+
+func verifyAnalysisGetCount() int {
+	verifyAnalysisCountMutex.Lock()
+	analysisCount := verifyAnalysisCount
+	verifyAnalysisCountMutex.Unlock()
+	return analysisCount
 }
 
 func verifyAnalysisResolve(a value, valPrincipalState principalState, obtained int) int {

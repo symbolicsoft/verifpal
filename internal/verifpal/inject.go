@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 func inject(
@@ -145,6 +146,7 @@ SkeletonSearch:
 }
 
 func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState principalState, includeHashes bool) []value {
+	var injectsGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
 	var injectants []value
 	if p.name == "HASH" && !includeHashes {
@@ -153,28 +155,33 @@ func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState pri
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.arguments {
-		for _, k := range valAttackerState.known {
-			switch k.kind {
-			case "constant":
-				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
-				k = valPrincipalState.beforeMutate[i]
-			}
-			if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
-				continue
-			}
-			switch k.kind {
-			case "constant":
-				kinjectants[arg] = append(kinjectants[arg], k)
-			case "primitive":
-				kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, includeHashes)
-				if len(kprims) > 0 {
-					kinjectants[arg] = append(kinjectants[arg], kprims...)
+		injectsGroup.Add(1)
+		go func(arg int) {
+			for _, k := range valAttackerState.known {
+				switch k.kind {
+				case "constant":
+					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+					k = valPrincipalState.beforeMutate[i]
 				}
-			case "equation":
-				kinjectants[arg] = append(kinjectants[arg], k)
+				if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
+					continue
+				}
+				switch k.kind {
+				case "constant":
+					kinjectants[arg] = append(kinjectants[arg], k)
+				case "primitive":
+					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, includeHashes)
+					if len(kprims) > 0 {
+						kinjectants[arg] = append(kinjectants[arg], kprims...)
+					}
+				case "equation":
+					kinjectants[arg] = append(kinjectants[arg], k)
+				}
 			}
-		}
+			injectsGroup.Done()
+		}(arg)
 	}
+	injectsGroup.Wait()
 	switch len(p.arguments) {
 	case 1:
 		injectants = injectLoop1(p, injectants, kinjectants)

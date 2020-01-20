@@ -12,17 +12,18 @@ import (
 )
 
 func prettyMessage(m string, t string) {
+	analysisCount := verifyAnalysisGetCount()
 	if colorOutputSupport() {
-		prettyMessageColor(m, t)
+		prettyMessageColor(m, t, analysisCount)
 	} else {
-		prettyMessageRegular(m, t)
+		prettyMessageRegular(m, t, analysisCount)
 	}
 }
 
-func prettyMessageRegular(m string, t string) {
+func prettyMessageRegular(m string, t string, analysisCount int) {
 	var infoString string
-	if verifyAnalysisCount > 0 {
-		infoString = fmt.Sprintf("(Analysis %d)", verifyAnalysisCount)
+	if analysisCount > 0 {
+		infoString = fmt.Sprintf("(Analysis %d)", analysisCount)
 	}
 	switch t {
 	case "verifpal":
@@ -53,11 +54,11 @@ func prettyMessageRegular(m string, t string) {
 	}
 }
 
-func prettyMessageColor(m string, t string) {
+func prettyMessageColor(m string, t string, analysisCount int) {
 	var infoString string
-	if verifyAnalysisCount > 0 {
+	if analysisCount > 0 {
 		infoString = aurora.Gray(15, fmt.Sprintf(
-			"(Analysis %d)", verifyAnalysisCount,
+			"(Analysis %d)", analysisCount,
 		)).Italic().String()
 	}
 	switch t {
@@ -296,12 +297,16 @@ func PrettyPrint(modelFile string) string {
 
 func prettyAnalysis(stage int) {
 	var a string
+	analysisCount := verifyAnalysisGetCount()
+	if analysisCount%10 != 0 {
+		return
+	}
 	if colorOutputSupport() {
 		a = aurora.Gray(15, fmt.Sprintf(
-			" Stage %d, Analysis %d...", stage, verifyAnalysisCount,
+			" Stage %d, Analysis %d...", stage, analysisCount,
 		)).Italic().String()
 	} else {
-		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, verifyAnalysisCount)
+		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysisCount)
 	}
 	fmt.Fprint(os.Stdout, a)
 	fmt.Fprint(os.Stdout, "\r \r")

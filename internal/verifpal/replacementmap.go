@@ -4,7 +4,11 @@
 
 package verifpal
 
+import "sync"
+
 func replacementMapInit(valPrincipalState principalState, valAttackerState attackerState, stage int) replacementMap {
+	var replacementsGroup sync.WaitGroup
+	var replacementsMutex sync.Mutex
 	valReplacementMap := replacementMap{
 		initialized:       true,
 		constants:         []constant{},
@@ -37,11 +41,22 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 			continue
 		}
 		a := valPrincipalState.assigned[ii]
-		valReplacementMap = replacementMapReplaceValues(
-			a, v, ii, stage,
-			valPrincipalState, valAttackerState, valReplacementMap,
-		)
+		replacementsGroup.Add(1)
+		go func(v value) {
+			c, r, b := replacementMapReplaceValue(
+				a, v, ii, stage,
+				valPrincipalState, valAttackerState,
+			)
+			if b {
+				replacementsMutex.Lock()
+				valReplacementMap.constants = append(valReplacementMap.constants, c)
+				valReplacementMap.replacements = append(valReplacementMap.replacements, r)
+				replacementsMutex.Unlock()
+			}
+			replacementsGroup.Done()
+		}(v)
 	}
+	replacementsGroup.Wait()
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
 	for iiii := range valReplacementMap.constants {
@@ -50,46 +65,43 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 	return valReplacementMap
 }
 
-func replacementMapReplaceValues(
+func replacementMapReplaceValue(
 	a value, v value, rootIndex int, stage int,
-	valPrincipalState principalState, valAttackerState attackerState, valReplacementMap replacementMap,
-) replacementMap {
+	valPrincipalState principalState, valAttackerState attackerState,
+) (constant, []value, bool) {
+	replacements := []value{}
 	switch a.kind {
 	case "constant":
 		if (a.constant.name == "g") || (a.constant.name == "nil") {
-			return valReplacementMap
+			return v.constant, replacements, false
 		}
-		replacements := []value{a, constantN}
-		for _, v := range valAttackerState.known {
-			switch v.kind {
+		replacements = append(replacements, a)
+		replacements = append(replacements, constantN)
+		for _, c := range valAttackerState.known {
+			switch c.kind {
 			case "constant":
-				if sanityExactSameValueInValues(v, replacements) < 0 {
-					replacements = append(replacements, v)
+				if sanityExactSameValueInValues(c, replacements) < 0 {
+					replacements = append(replacements, c)
 				}
 			}
 		}
-		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-		valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
 	case "primitive":
-		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-		valReplacementMap.replacements = append(valReplacementMap.replacements, []value{a})
+		replacements = append(replacements, a)
 		if stage < 2 {
-			return valReplacementMap
+			return v.constant, replacements, true
 		}
-		l := len(valReplacementMap.replacements) - 1
 		includeHashes := (stage > 2)
 		injectants := inject(a.primitive, a.primitive, true, rootIndex, valPrincipalState, includeHashes)
 		for _, aa := range injectants {
-			if sanityExactSameValueInValues(aa, valReplacementMap.replacements[l]) < 0 {
-				valReplacementMap.replacements[l] = append(valReplacementMap.replacements[l], aa)
+			if sanityExactSameValueInValues(aa, replacements) < 0 {
+				replacements = append(replacements, aa)
 			}
 		}
 	case "equation":
-		replacements := []value{a, constantGN}
-		valReplacementMap.constants = append(valReplacementMap.constants, v.constant)
-		valReplacementMap.replacements = append(valReplacementMap.replacements, replacements)
+		replacements = append(replacements, a)
+		replacements = append(replacements, constantGN)
 	}
-	return valReplacementMap
+	return v.constant, replacements, true
 }
 
 func replacementMapNext(valReplacementMap replacementMap) replacementMap {
