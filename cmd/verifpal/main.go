@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"verifpal.com/internal/verifpal"
 )
@@ -16,6 +17,7 @@ import (
 var version = "0.9.5"
 
 func main() {
+	debug.SetGCPercent(1000)
 	fmt.Fprintf(os.Stdout, "Verifpal %s - %s\n%s\n\n",
 		version, "https://verifpal.com",
 		"WARNING: Verifpal is experimental software.",
