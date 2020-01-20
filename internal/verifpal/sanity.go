@@ -855,7 +855,7 @@ func sanityConstantIsUsedByPrincipal(valKnowledgeMap knowledgeMap, name string, 
 
 func sanityResolveAllPrincipalStateValues(valPrincipalState principalState, valKnowledgeMap knowledgeMap) principalState {
 	var resolvesGroup sync.WaitGroup
-	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState)
+	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, true)
 	for i := range valPrincipalState.assigned {
 		resolvesGroup.Add(1)
 		go func(i int) {

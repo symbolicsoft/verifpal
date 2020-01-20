@@ -12,32 +12,12 @@ func verifyActive(
 	m Model,
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 ) {
-	var stagesGroup sync.WaitGroup
 	constructAttackerState(true, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as active.", "info")
-	stagesGroup.Add(3)
-	valPrincipalStates1 := make([]principalState, len(valPrincipalStates))
-	valPrincipalStates2 := make([]principalState, len(valPrincipalStates))
-	valPrincipalStates3 := make([]principalState, len(valPrincipalStates))
-	for i := range valPrincipalStates {
-		valPrincipalStates1[i] = constructPrincipalStateClone(valPrincipalStates[i])
-		valPrincipalStates2[i] = constructPrincipalStateClone(valPrincipalStates[i])
-		valPrincipalStates3[i] = constructPrincipalStateClone(valPrincipalStates[i])
-	}
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
-	go func() {
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates1, 1)
-		stagesGroup.Done()
-	}()
-	go func() {
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates2, 2)
-		stagesGroup.Done()
-	}()
-	go func() {
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates3, 3)
-		stagesGroup.Done()
-	}()
-	stagesGroup.Wait()
+	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
+	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
+	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
 }
 
 func verifyActiveStages(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
@@ -85,13 +65,18 @@ func verifyActiveScan(
 		cg.Done()
 		return
 	}
-	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valKnowledgeMap, valPrincipalState, valAttackerState, valReplacementMap,
-	)
-	if isWorthwhileMutation {
-		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
-	}
+	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+	scanGroup.Add(1)
+	go func() {
+		valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
+			valKnowledgeMap, valPrincipalStateClone, valAttackerState, valReplacementMap,
+		)
+		if isWorthwhileMutation {
+			go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		} else {
+			scanGroup.Done()
+		}
+	}()
 	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
 		go verifyActiveScan(

@@ -332,7 +332,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 	return valPrincipalStates
 }
 
-func constructPrincipalStateClone(valPrincipalState principalState) principalState {
+func constructPrincipalStateClone(valPrincipalState principalState, purify bool) principalState {
 	valPrincipalStateClone := principalState{
 		name:          valPrincipalState.name,
 		constants:     make([]constant, len(valPrincipalState.constants)),
@@ -348,7 +348,11 @@ func constructPrincipalStateClone(valPrincipalState principalState) principalSta
 		lock:          valPrincipalState.lock,
 	}
 	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
-	copy(valPrincipalStateClone.assigned, valPrincipalState.beforeRewrite)
+	if purify {
+		copy(valPrincipalStateClone.assigned, valPrincipalState.beforeRewrite)
+	} else {
+		copy(valPrincipalStateClone.assigned, valPrincipalState.assigned)
+	}
 	copy(valPrincipalStateClone.guard, valPrincipalState.guard)
 	copy(valPrincipalStateClone.known, valPrincipalState.known)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
@@ -356,7 +360,11 @@ func constructPrincipalStateClone(valPrincipalState principalState) principalSta
 	copy(valPrincipalStateClone.wasRewritten, valPrincipalState.wasRewritten)
 	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
-	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
+	if purify {
+		copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
+	} else {
+		copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
+	}
 	return valPrincipalStateClone
 }
 
