@@ -12,9 +12,10 @@ import (
 var verifyAnalysisCount int
 var verifyAnalysisCountMutex sync.Mutex
 
-func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int, sg *sync.WaitGroup) {
+func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
 	var aGroup sync.WaitGroup
 	var pGroup sync.WaitGroup
+	valAttackerState := attackerStateGetRead()
 	output := 0
 	for _, a := range valAttackerState.known {
 		aGroup.Add(1)
@@ -44,7 +45,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	prettyAnalysis(stage)
 	if output > 0 {
 		sg.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, sg)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
 	}
 	sg.Done()
 }

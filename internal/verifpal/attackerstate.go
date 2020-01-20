@@ -7,6 +7,7 @@ package verifpal
 var attackerStateReady chan bool = make(chan bool)
 var attackerStateReads chan attackerStateRead = make(chan attackerStateRead)
 var attackerStateWrites chan attackerStateWrite = make(chan attackerStateWrite)
+var attackerStateMutatedToUpdates chan attackerStateMutatedToUpdate = make(chan attackerStateMutatedToUpdate)
 
 func attackerStateInit(active bool) bool {
 	go func() {
@@ -30,6 +31,9 @@ func attackerStateInit(active bool) bool {
 				} else {
 					write.resp <- false
 				}
+			case update := <-attackerStateMutatedToUpdates:
+				valAttackerState.mutatedTo[update.i] = append(valAttackerState.mutatedTo[update.i], update.principal)
+				update.resp <- true
 			}
 		}
 	}()
@@ -47,6 +51,12 @@ func attackerStateGetRead() attackerState {
 func attackerStatePutWrite(write attackerStateWrite) bool {
 	attackerStateWrites <- write
 	return <-write.resp
+}
+
+func attackerStatePutMutatedToUpdate(update attackerStateMutatedToUpdate) bool {
+	attackerStateMutatedToUpdates <- update
+	return <-update.resp
+
 }
 
 func attackerStatePopulate(m Model, valKnowledgeMap knowledgeMap, verbose bool) {

@@ -51,8 +51,7 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
 		}
 		scanGroup.Add(1)
-		valAttackerState := attackerStateGetRead()
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, &scanGroup)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
 		scanGroup.Wait()
 	}
 }

@@ -169,6 +169,12 @@ type attackerStateWrite struct {
 	resp      chan bool
 }
 
+type attackerStateMutatedToUpdate struct {
+	i         int
+	principal string
+	resp      chan bool
+}
+
 type replacementMap struct {
 	initialized       bool
 	constants         []constant
