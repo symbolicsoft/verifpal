@@ -65,18 +65,13 @@ func verifyActiveScan(
 		cg.Done()
 		return
 	}
-	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
-	scanGroup.Add(1)
-	go func() {
-		valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-			valKnowledgeMap, valPrincipalStateClone, valAttackerState, valReplacementMap,
-		)
-		if isWorthwhileMutation {
-			go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
-		} else {
-			scanGroup.Done()
-		}
-	}()
+	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
+		valKnowledgeMap, valPrincipalState, valAttackerState, valReplacementMap,
+	)
+	if isWorthwhileMutation {
+		scanGroup.Add(1)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+	}
 	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
 		go verifyActiveScan(
