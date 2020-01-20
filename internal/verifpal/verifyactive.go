@@ -70,9 +70,7 @@ func verifyActiveScan(
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go func() {
-			verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
-		}()
+		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
 	}
 	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
