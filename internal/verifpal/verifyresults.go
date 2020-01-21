@@ -4,66 +4,63 @@
 
 package verifpal
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
-var verifyResultsReady chan bool = make(chan bool)
-var verifyResultsReads chan verifyResultsRead = make(chan verifyResultsRead)
-var verifyResultsWrites chan verifyResultsWrite = make(chan verifyResultsWrite)
+var verifyResultsShared []verifyResult
+var verifyResultsMutex sync.Mutex
 
 func verifyResultsInit(m Model) bool {
-	go func() {
-		verifyResults := []VerifyResult{}
-		for _, q := range m.queries {
-			verifyResults = append(verifyResults, VerifyResult{
-				query:    q,
-				resolved: false,
-				summary:  "",
-			})
+	verifyResultsMutex.Lock()
+	verifyResultsShared = make([]verifyResult, len(m.queries))
+	for i, q := range m.queries {
+		verifyResultsShared[i] = verifyResult{
+			query:    q,
+			resolved: false,
+			summary:  "",
 		}
-		verifyResultsReady <- true
-		for {
-			select {
-			case read := <-verifyResultsReads:
-				read.resp <- verifyResults
-			case write := <-verifyResultsWrites:
-				written := false
-				qw := prettyQuery(write.verifyResult.query)
-				for i, verifyResult := range verifyResults {
-					qv := prettyQuery(verifyResult.query)
-					if strings.Compare(qw, qv) == 0 {
-						if !verifyResults[i].resolved {
-							verifyResults[i].resolved = write.verifyResult.resolved
-							verifyResults[i].summary = write.verifyResult.summary
-							written = true
-						}
-					}
-				}
-				write.resp <- written
+	}
+	verifyResultsMutex.Unlock()
+	return true
+}
+
+func verifyResultsGetRead() []verifyResult {
+	verifyResultsMutex.Lock()
+	valVerifyResults := make([]verifyResult, len(verifyResultsShared))
+	copy(valVerifyResults, verifyResultsShared)
+	verifyResultsMutex.Unlock()
+	return valVerifyResults
+}
+
+func verifyResultsPutWrite(result verifyResult) bool {
+	written := false
+	qw := prettyQuery(result.query)
+	verifyResultsMutex.Lock()
+	for i, verifyResult := range verifyResultsShared {
+		qv := prettyQuery(verifyResult.query)
+		if strings.Compare(qw, qv) == 0 {
+			if !verifyResultsShared[i].resolved {
+				verifyResultsShared[i].resolved = result.resolved
+				verifyResultsShared[i].summary = result.summary
+				written = true
 			}
 		}
-	}()
-	return <-verifyResultsReady
-}
-
-func verifyResultsGetRead() []VerifyResult {
-	read := verifyResultsRead{
-		resp: make(chan []VerifyResult),
 	}
-	verifyResultsReads <- read
-	return <-read.resp
-}
-
-func verifyResultsPutWrite(write verifyResultsWrite) bool {
-	verifyResultsWrites <- write
-	return <-write.resp
+	verifyResultsMutex.Unlock()
+	return written
 }
 
 func verifyResultsAllResolved() bool {
-	verifyResults := verifyResultsGetRead()
-	for _, verifyResult := range verifyResults {
+	allResolved := true
+	verifyResultsMutex.Lock()
+	for _, verifyResult := range verifyResultsShared {
 		if !verifyResult.resolved {
-			return false
+			allResolved = false
+			break
 		}
 	}
-	return true
+	verifyResultsMutex.Unlock()
+	return allResolved
 }

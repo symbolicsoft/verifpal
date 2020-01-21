@@ -101,7 +101,7 @@ func prettyVerifyResultSummary(mutated string, summary string, attack bool) stri
 		return summary
 	}
 	if len(mutated) > 0 {
-		mutatedIntro = "When the following values are mutated by the attacker:"
+		mutatedIntro = "When the following values are controlled by the attacker:"
 	}
 	if colorOutputSupport() {
 		return fmt.Sprintf("%s%s\n           %s",

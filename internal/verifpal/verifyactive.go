@@ -12,7 +12,6 @@ func verifyActive(
 	m Model,
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 ) {
-	constructAttackerState(true, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as active.", "info")
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
@@ -47,12 +46,14 @@ func verifyActiveScan(
 	attackerKnown := len(valAttackerState.known)
 	attackerKnowsMore := len(valAttackerState.known) > attackerKnown
 	goodLock := valPrincipalState.lock == 0 || valPrincipalState.lock >= attackerKnown
-	if verifyResultsAllResolved() {
-		verifyEnd()
-	}
 	if attackerKnowsMore {
 		valPrincipalState.lock = attackerKnown
 	}
+	defer func() {
+		if verifyResultsAllResolved() {
+			verifyEnd()
+		}
+	}()
 	if (goodLock && !valReplacementMap.initialized) || attackerKnowsMore {
 		cg.Add(1)
 		go func() {
@@ -107,7 +108,6 @@ func verifyActiveMutatePrincipalState(valKnowledgeMap knowledgeMap, valPrincipal
 			update := attackerStateMutatedToUpdate{
 				i:         iii,
 				principal: valPrincipalState.name,
-				resp:      make(chan bool),
 			}
 			attackerStatePutMutatedToUpdate(update)
 		}

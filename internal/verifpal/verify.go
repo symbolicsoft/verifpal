@@ -14,11 +14,10 @@ import (
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 func Verify(modelFile string) {
 	m, valKnowledgeMap, valPrincipalStates := parserParseModel(modelFile)
+	attackerStateInit(m, valKnowledgeMap, m.attacker == "active")
 	verifyResultsInit(m)
-	prettyMessage(fmt.Sprintf(
-		"Verification initiated at %s.",
-		time.Now().Format("15:04:05"),
-	), "verifpal")
+	initiated := time.Now().Format("15:04:05")
+	prettyMessage(fmt.Sprintf("Verification initiated at %s.", initiated), "verifpal")
 	switch m.attacker {
 	case "passive":
 		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
@@ -32,12 +31,11 @@ func Verify(modelFile string) {
 }
 
 func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
-	verifyResults := verifyResultsGetRead()
-	for _, verifyResult := range verifyResults {
-		if verifyResult.resolved {
-			continue
+	valVerifyResults := verifyResultsGetRead()
+	for _, verifyResult := range valVerifyResults {
+		if !verifyResult.resolved {
+			queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap, valAttackerState)
 		}
-		queryStart(verifyResult.query, valPrincipalState, valKnowledgeMap, valAttackerState)
 	}
 }
 
@@ -57,26 +55,25 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 }
 
 func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
-	constructAttackerState(false, m, valKnowledgeMap, true)
 	prettyMessage("Attacker is configured as passive.", "info")
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 }
 
 func verifyEnd() {
-	verifyResults := verifyResultsGetRead()
-	for _, verifyResult := range verifyResults {
-		if !verifyResult.resolved {
-			continue
+	valVerifyResults := verifyResultsGetRead()
+	for _, verifyResult := range valVerifyResults {
+		if verifyResult.resolved {
+			prettyMessage(fmt.Sprintf(
+				"%s: %s",
+				prettyQuery(verifyResult.query),
+				verifyResult.summary,
+			), "result")
 		}
-		prettyMessage(fmt.Sprintf(
-			"%s: %s",
-			prettyQuery(verifyResult.query),
-			verifyResult.summary,
-		), "result")
 	}
+	completed := time.Now().Format("15:04:05")
 	prettyMessage(fmt.Sprintf(
-		"Verification completed at %s. Thank you for using Verifpal.",
-		time.Now().Format("15:04:05"),
+		"Verification completed at %s. %s", completed,
+		"Thank you for using Verifpal.",
 	), "verifpal")
 	os.Exit(0)
 }

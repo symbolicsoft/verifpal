@@ -41,13 +41,10 @@ func queryConfidentiality(query query, valPrincipalState principalState, valAtta
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), true)
-	written := verifyResultsPutWrite(verifyResultsWrite{
-		verifyResult: VerifyResult{
-			query:    query,
-			resolved: true,
-			summary:  summary,
-		},
-		resp: make(chan bool),
+	written := verifyResultsPutWrite(verifyResult{
+		query:    query,
+		resolved: true,
+		summary:  summary,
 	})
 	if written {
 		prettyMessage(fmt.Sprintf(
@@ -119,13 +116,10 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 				prettyConstant(c), sender, query.message.sender,
 				prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			written := verifyResultsPutWrite(verifyResultsWrite{
-				verifyResult: VerifyResult{
-					query:    query,
-					resolved: true,
-					summary:  summary,
-				},
-				resp: make(chan bool),
+			written := verifyResultsPutWrite(verifyResult{
+				query:    query,
+				resolved: true,
+				summary:  summary,
 			})
 			if written {
 				prettyMessage(fmt.Sprintf(
@@ -139,13 +133,10 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 					"%s's state, despite it being vulnerable to tampering by Attacker.",
 				prettyConstant(c), sender, prettyValue(cc), prettyValue(a), query.message.recipient,
 			), true)
-			written := verifyResultsPutWrite(verifyResultsWrite{
-				verifyResult: VerifyResult{
-					query:    query,
-					resolved: true,
-					summary:  summary,
-				},
-				resp: make(chan bool),
+			written := verifyResultsPutWrite(verifyResult{
+				query:    query,
+				resolved: true,
+				summary:  summary,
 			})
 			if written {
 				prettyMessage(fmt.Sprintf(

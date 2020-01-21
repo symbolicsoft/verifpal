@@ -128,7 +128,6 @@ SkeletonSearch:
 			},
 			wire:      false,
 			mutatedTo: []string{},
-			resp:      make(chan bool),
 		}
 		if attackerStatePutWrite(write) {
 			prettyMessage(fmt.Sprintf(

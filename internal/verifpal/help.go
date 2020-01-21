@@ -12,7 +12,7 @@ import (
 // Help displays Verifpal command-line usage instructions.
 func Help() {
 	fmt.Fprintf(os.Stdout, "%s\n%s\n%s\n%s\n",
-		"verify    [file]: Load Verifpal model from file and analyze.",
+		"verify    [file]: Load and analyze Verifpal model from file.",
 		"implement [file]: Implement Verifpal model in Go.",
 		"pretty    [file]: Pretty-print Verifpal model.",
 		"help:             Show this help text.",

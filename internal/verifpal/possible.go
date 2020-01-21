@@ -44,7 +44,6 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState,
 			known:     revealed,
 			wire:      false,
 			mutatedTo: []string{},
-			resp:      make(chan bool),
 		}
 		attackerStatePutWrite(write)
 		return true, revealed, has
@@ -122,7 +121,6 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 			known:     vp,
 			wire:      false,
 			mutatedTo: []string{},
-			resp:      make(chan bool),
 		}
 		attackerStatePutWrite(write)
 		return true, has

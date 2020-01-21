@@ -10,21 +10,10 @@ type Model struct {
 	blocks   []block
 	queries  []query
 }
-
-// VerifyResult contains the verification result for a model query analyzed by Verifpal.
-type VerifyResult struct {
+type verifyResult struct {
 	query    query
 	resolved bool
 	summary  string
-}
-
-type verifyResultsRead struct {
-	resp chan []VerifyResult
-}
-
-type verifyResultsWrite struct {
-	verifyResult VerifyResult
-	resp         chan bool
 }
 
 type block struct {
@@ -158,21 +147,15 @@ type attackerState struct {
 	mutatedTo [][]string
 }
 
-type attackerStateRead struct {
-	resp chan attackerState
-}
-
 type attackerStateWrite struct {
 	known     value
 	wire      bool
 	mutatedTo []string
-	resp      chan bool
 }
 
 type attackerStateMutatedToUpdate struct {
 	i         int
 	principal string
-	resp      chan bool
 }
 
 type replacementMap struct {

@@ -367,8 +367,3 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	}
 	return valPrincipalStateClone
 }
-
-func constructAttackerState(active bool, m Model, valKnowledgeMap knowledgeMap, verbose bool) {
-	attackerStateInit(active)
-	attackerStatePopulate(m, valKnowledgeMap, verbose)
-}
