@@ -92,7 +92,7 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttacke
 		prettyMessage(fmt.Sprintf(
 			"%s resolves to %s.",
 			prettyValues(output), prettyValue(a),
-		), "deduction")
+		), "analysis")
 		o = o + 1
 	}
 	if o > oo {

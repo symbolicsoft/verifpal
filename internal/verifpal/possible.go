@@ -4,6 +4,8 @@
 
 package verifpal
 
+import "fmt"
+
 func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, value, []value) {
 	has := []value{}
 	prim := primitiveGet(p.name)
@@ -45,7 +47,12 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState,
 			wire:      false,
 			mutatedTo: []string{},
 		}
-		attackerStatePutWrite(write)
+		if attackerStatePutWrite(write) {
+			prettyMessage(fmt.Sprintf(
+				"%s obtained by decomposing %s with %s.",
+				prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
+			), "deduction")
+		}
 		return true, revealed, has
 	}
 	return false, value{}, has
@@ -122,7 +129,12 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 			wire:      false,
 			mutatedTo: []string{},
 		}
-		attackerStatePutWrite(write)
+		if attackerStatePutWrite(write) {
+			prettyMessage(fmt.Sprintf(
+				"%s obtained by reconstructing with %s.",
+				prettyValue(vp), prettyValues(has),
+			), "deduction")
+		}
 		return true, has
 	}
 	return false, []value{}
