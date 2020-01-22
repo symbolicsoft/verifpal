@@ -389,7 +389,9 @@ func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState pr
 		case "primitive":
 			switch a.kind {
 			case "primitive":
-				equivPrim, _, _ := sanityEquivalentPrimitives(a.primitive, aa.primitive, valPrincipalState, true)
+				equivPrim, _, _ := sanityEquivalentPrimitives(
+					a.primitive, aa.primitive, valPrincipalState, true,
+				)
 				if equivPrim {
 					return true
 				}
@@ -474,7 +476,9 @@ func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState princi
 		case "constant":
 			rewrite.primitive.arguments[i] = p.arguments[i]
 		case "primitive":
-			pFailedRewrite, pWasRewritten, pRewrite := sanityPerformPrimitiveRewrite(a.primitive, -1, valPrincipalState)
+			pFailedRewrite, pWasRewritten, pRewrite := sanityPerformPrimitiveRewrite(
+				a.primitive, -1, valPrincipalState,
+			)
 			if pWasRewritten {
 				wasRewritten = true
 				rewrite.primitive.arguments[i] = pRewrite
@@ -483,7 +487,9 @@ func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState princi
 				failedRewrites = append(failedRewrites, pFailedRewrite...)
 			}
 		case "equation":
-			eFailedRewrite, eWasRewritten, eRewrite := sanityPerformEquationRewrite(a.equation, -1, valPrincipalState)
+			eFailedRewrite, eWasRewritten, eRewrite := sanityPerformEquationRewrite(
+				a.equation, -1, valPrincipalState,
+			)
 			if eWasRewritten {
 				wasRewritten = true
 				rewrite.primitive.arguments[i] = eRewrite
@@ -534,32 +540,37 @@ func sanityPerformEquationRewrite(e equation, pi int, valPrincipalState principa
 			rewrite.equation.values = append(rewrite.equation.values, a)
 		case "primitive":
 			prim := primitiveGet(a.primitive.name)
-			if prim.rewrite.hasRule {
-				pFailedRewrite, pWasRewritten, pRewrite := sanityPerformPrimitiveRewrite(a.primitive, -1, valPrincipalState)
-				if pWasRewritten {
-					wasRewritten = true
-					switch pRewrite.kind {
-					case "constant":
-						rewrite.equation.values = append(rewrite.equation.values, pRewrite)
-					case "primitive":
-						rewrite.equation.values = append(rewrite.equation.values, pRewrite)
-					case "equation":
-						rewrite.equation.values = append(rewrite.equation.values, pRewrite.equation.values...)
-					}
-				} else {
-					rewrite.equation.values = append(rewrite.equation.values, e.values[i])
-					failedRewrites = append(failedRewrites, pFailedRewrite...)
-				}
+			if !prim.rewrite.hasRule {
+				continue
 			}
+			pFailedRewrite, pWasRewritten, pRewrite := sanityPerformPrimitiveRewrite(
+				a.primitive, -1, valPrincipalState,
+			)
+			if pWasRewritten {
+				wasRewritten = true
+				switch pRewrite.kind {
+				case "constant":
+					rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+				case "primitive":
+					rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+				case "equation":
+					rewrite.equation.values = append(rewrite.equation.values, pRewrite.equation.values...)
+				}
+				continue
+			}
+			rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+			failedRewrites = append(failedRewrites, pFailedRewrite...)
 		case "equation":
-			eFailedRewrite, eWasRewritten, eRewrite := sanityPerformEquationRewrite(a.equation, -1, valPrincipalState)
+			eFailedRewrite, eWasRewritten, eRewrite := sanityPerformEquationRewrite(
+				a.equation, -1, valPrincipalState,
+			)
 			if eWasRewritten {
 				wasRewritten = true
 				rewrite.equation.values = append(rewrite.equation.values, eRewrite)
-			} else {
-				rewrite.equation.values = append(rewrite.equation.values, e.values[i])
-				failedRewrites = append(failedRewrites, eFailedRewrite...)
+				continue
 			}
+			rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
 	if wasRewritten && pi >= 0 {
@@ -576,20 +587,26 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 	for i := range valPrincipalState.assigned {
 		switch valPrincipalState.assigned[i].kind {
 		case "primitive":
-			failedRewrite, _, _ := sanityPerformPrimitiveRewrite(valPrincipalState.assigned[i].primitive, i, valPrincipalState)
-			if len(failedRewrite) > 0 {
-				failedRewrites = append(failedRewrites, failedRewrite...)
-				for range failedRewrite {
-					failedRewriteIndices = append(failedRewriteIndices, i)
-				}
+			failedRewrite, _, _ := sanityPerformPrimitiveRewrite(
+				valPrincipalState.assigned[i].primitive, i, valPrincipalState,
+			)
+			if len(failedRewrite) <= 0 {
+				continue
+			}
+			failedRewrites = append(failedRewrites, failedRewrite...)
+			for range failedRewrite {
+				failedRewriteIndices = append(failedRewriteIndices, i)
 			}
 		case "equation":
-			failedRewrite, _, _ := sanityPerformEquationRewrite(valPrincipalState.assigned[i].equation, i, valPrincipalState)
-			if len(failedRewrite) > 0 {
-				failedRewrites = append(failedRewrites, failedRewrite...)
-				for range failedRewrite {
-					failedRewriteIndices = append(failedRewriteIndices, i)
-				}
+			failedRewrite, _, _ := sanityPerformEquationRewrite(
+				valPrincipalState.assigned[i].equation, i, valPrincipalState,
+			)
+			if len(failedRewrite) <= 0 {
+				continue
+			}
+			failedRewrites = append(failedRewrites, failedRewrite...)
+			for range failedRewrite {
+				failedRewriteIndices = append(failedRewriteIndices, i)
 			}
 		}
 	}
