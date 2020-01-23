@@ -77,8 +77,12 @@ func attackerStatePutWrite(write attackerStateWrite) bool {
 }
 
 func attackerStatePutMutatedToUpdate(update attackerStateMutatedToUpdate) bool {
+	written := false
 	attackerStateMutex.Lock()
-	attackerStateShared.mutatedTo[update.i] = append(attackerStateShared.mutatedTo[update.i], update.principal)
+	if !strInSlice(update.principal, attackerStateShared.mutatedTo[update.i]) {
+		written = true
+		attackerStateShared.mutatedTo[update.i] = append(attackerStateShared.mutatedTo[update.i], update.principal)
+	}
 	attackerStateMutex.Unlock()
-	return true
+	return written
 }

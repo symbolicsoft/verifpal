@@ -67,7 +67,7 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valKnowledgeMap, valPrincipalState, valAttackerState, valReplacementMap,
+		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, false), valAttackerState, valReplacementMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
@@ -104,19 +104,17 @@ func verifyActiveMutatePrincipalState(valKnowledgeMap knowledgeMap, valPrincipal
 		valPrincipalState.wasMutated[ii] = true
 		valPrincipalState.assigned[ii] = ac
 		valPrincipalState.beforeRewrite[ii] = ac
-		if !strInSlice(valPrincipalState.name, valAttackerState.mutatedTo[iii]) {
-			update := attackerStateMutatedToUpdate{
-				i:         iii,
-				principal: valPrincipalState.name,
-			}
-			attackerStatePutMutatedToUpdate(update)
+		update := attackerStateMutatedToUpdate{
+			i:         iii,
+			principal: valPrincipalState.name,
 		}
+		attackerStatePutMutatedToUpdate(update)
 		if i >= valReplacementMap.lastIncrement {
 			isWorthwhileMutation = true
 		}
 	}
 	valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
-	failedRewrites, failedRewriteIndices := sanityPerformAllRewrites(valPrincipalState)
+	failedRewrites, failedRewriteIndices, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 	for i, p := range failedRewrites {
 		if p.check {
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(valPrincipalState, failedRewriteIndices[i]+1)
