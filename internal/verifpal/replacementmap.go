@@ -80,8 +80,12 @@ func replacementMapReplaceValue(
 		for _, c := range valAttackerState.known {
 			switch c.kind {
 			case "constant":
-				if sanityExactSameValueInValues(c, replacements) < 0 {
-					replacements = append(replacements, c)
+				cc := sanityResolveConstant(c.constant, valPrincipalState, false)
+				switch cc.kind {
+				case "constant":
+					if sanityExactSameValueInValues(cc, replacements) < 0 {
+						replacements = append(replacements, cc)
+					}
 				}
 			}
 		}
