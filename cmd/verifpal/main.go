@@ -13,7 +13,7 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-var version = "0.9.10"
+var version = "0.9.11"
 
 func main() {
 	fmt.Fprintf(os.Stdout, "Verifpal %s - %s\n%s\n\n",
