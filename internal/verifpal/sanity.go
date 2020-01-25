@@ -365,7 +365,7 @@ func sanityDecomposeEquationValues(e equation, valPrincipalState principalState)
 	for _, v := range e.values {
 		switch v.kind {
 		case "constant":
-			v = sanityResolveConstant(v.constant, valPrincipalState, false)
+			v = sanityResolveConstant(v.constant, valPrincipalState)
 		}
 		values = append(values, v)
 	}
@@ -373,7 +373,7 @@ func sanityDecomposeEquationValues(e equation, valPrincipalState principalState)
 }
 
 func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState principalState) bool {
-	a := sanityResolveConstant(c, valPrincipalState, true)
+	a := sanityResolveConstant(c, valPrincipalState)
 	for _, aa := range p.arguments {
 		switch aa.kind {
 		case "constant":
@@ -697,13 +697,10 @@ func sanityShouldResolveToBeforeMutate(i int, valPrincipalState principalState) 
 	return !valPrincipalState.wasMutated[i]
 }
 
-func sanityResolveConstant(c constant, valPrincipalState principalState, forceAssigned bool) value {
+func sanityResolveConstant(c constant, valPrincipalState principalState) value {
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	if i < 0 {
 		return value{kind: "constant", constant: c}
-	}
-	if forceAssigned {
-		return valPrincipalState.assigned[i]
 	}
 	if sanityShouldResolveToBeforeMutate(i, valPrincipalState) {
 		return valPrincipalState.beforeMutate[i]
@@ -722,7 +719,7 @@ func sanityResolveInternalValuesFromPrincipalState(a value, rootIndex int, valPr
 		if forceBeforeMutate {
 			a = valPrincipalState.beforeMutate[rootIndex]
 		} else {
-			a = sanityResolveConstant(a.constant, valPrincipalState, true)
+			a = sanityResolveConstant(a.constant, valPrincipalState)
 		}
 		v = append(v, a)
 	}
@@ -771,7 +768,7 @@ func sanityResolveInternalValuesFromPrincipalState(a value, rootIndex int, valPr
 					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[aai].constant)
 					aa[aai] = valPrincipalState.beforeMutate[i]
 				} else {
-					aa[aai] = sanityResolveConstant(aa[aai].constant, valPrincipalState, true)
+					aa[aai] = sanityResolveConstant(aa[aai].constant, valPrincipalState)
 				}
 			}
 		}

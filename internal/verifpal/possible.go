@@ -70,7 +70,7 @@ func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState,
 				vb := v
 				switch v.kind {
 				case "constant":
-					v = sanityResolveConstant(v.constant, valPrincipalState, false)
+					v = sanityResolveConstant(v.constant, valPrincipalState)
 				}
 				switch v.kind {
 				case "constant":

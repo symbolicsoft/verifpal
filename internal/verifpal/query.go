@@ -20,7 +20,7 @@ func queryStart(query query, valPrincipalState principalState, valKnowledgeMap k
 func queryConfidentiality(query query, valPrincipalState principalState, valAttackerState attackerState) {
 	var mutated string
 	ii := sanityEquivalentValueInValues(
-		sanityResolveConstant(query.constant, valPrincipalState, false),
+		sanityResolveConstant(query.constant, valPrincipalState),
 		valAttackerState.known,
 		valPrincipalState,
 	)
@@ -99,7 +99,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			continue
 		}
 		a := valPrincipalState.beforeRewrite[ii]
-		cc := sanityResolveConstant(c, valPrincipalState, true)
+		cc := sanityResolveConstant(c, valPrincipalState)
 		for i := range valPrincipalState.constants {
 			if valPrincipalState.wasMutated[i] {
 				mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,

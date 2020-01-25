@@ -22,7 +22,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 		go func(a value) {
 			switch a.kind {
 			case "constant":
-				a = sanityResolveConstant(a.constant, valPrincipalState, false)
+				a = sanityResolveConstant(a.constant, valPrincipalState)
 			}
 			atomic.AddUint32(&o, verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0))
 			atomic.AddUint32(&o, verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0))
@@ -195,7 +195,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAtt
 func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint32) uint32 {
 	oo := o
 	for _, c := range valPrincipalState.constants {
-		aa := sanityResolveConstant(c, valPrincipalState, false)
+		aa := sanityResolveConstant(c, valPrincipalState)
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			write := attackerStateWrite{
 				known:     aa,
