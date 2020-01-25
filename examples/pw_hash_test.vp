@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[passive]
+
+principal Alice[
+	knows password pass1
+	knows password pass2
+	knows password pass3
+	knows password pass4
+	knows password pass5
+	knows private m1
+	knows private m2
+	knows private m3
+	knows private m4
+	knows private m5
+	knows private m6
+	ga = G^pass5
+	e1 = ENC(pass1, m1)
+	e2 = ENC(PW_HASH(pass2), m2)
+	e3 = ENC(PW_HASH(HASH(pass3)), m3)
+	e4 = ENC(HASH(PW_HASH(pass4)), m4)
+	e5 = ENC(HASH(PW_HASH(pass1)), m5)
+	e6 = PKE_ENC(ga, m6)
+]
+
+principal Bob[]
+
+Alice -> Bob: e1, e2, e3, e4, e5, e6
+
+// Attacker will find out m1, m5 and m6 only.
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? m3
+	confidentiality? m4
+	confidentiality? m5
+	confidentiality? m6
+]

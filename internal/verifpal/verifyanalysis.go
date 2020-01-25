@@ -27,6 +27,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 			atomic.AddUint32(&o, verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0))
 			atomic.AddUint32(&o, verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0))
 			atomic.AddUint32(&o, verifyAnalysisEquivalize(a, valPrincipalState, 0))
+			atomic.AddUint32(&o, verifyAnalysisPasswords(a, valPrincipalState, 0))
 			aGroup.Done()
 		}(a)
 	}
@@ -224,6 +225,29 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint3
 	}
 	if o > oo {
 		return verifyAnalysisEquivalize(a, valPrincipalState, o)
+	}
+	return o
+}
+
+func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32) uint32 {
+	oo := o
+	passwords := possibleToObtainPasswords(a, valPrincipalState)
+	for _, password := range passwords {
+		write := attackerStateWrite{
+			known:     password,
+			wire:      false,
+			mutatedTo: []string{},
+		}
+		if attackerStatePutWrite(write) {
+			prettyMessage(fmt.Sprintf(
+				"%s obtained as a password unsafely used within %s.",
+				prettyValue(password), prettyValue(a),
+			), "deduction")
+			o = o + 1
+		}
+	}
+	if o > oo {
+		return verifyAnalysisPasswords(a, valPrincipalState, o)
 	}
 	return o
 }

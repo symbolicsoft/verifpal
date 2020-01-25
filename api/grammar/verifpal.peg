@@ -42,11 +42,12 @@
 			"principal",
 			"public",
 			"private",
+			"password",
 			"queries",
 			"confidentiality",
 			"authentication",
 			"primitive",
-			"dh",
+			"pw_hash",
 			"hash",
 			"hkdf",
 			"aead_enc",
@@ -142,7 +143,7 @@ PrincipalName <-
 	}
 
 Qualifier <-
-	("private"/"public") {
+	("public"/"private"/"password") {
 		return string(c.text), nil
 	}
 

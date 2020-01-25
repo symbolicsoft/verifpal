@@ -306,3 +306,31 @@ func possibleToRebuild(p primitive, valPrincipalState principalState) (bool, val
 	}
 	return false, value{}
 }
+
+func possibleToObtainPasswords(a value, valPrincipalState principalState) []value {
+	var passwords []value
+	switch a.kind {
+	case "constant":
+		aa := sanityResolveConstant(a.constant, valPrincipalState)
+		switch aa.kind {
+		case "constant":
+			if aa.constant.qualifier == "password" {
+				passwords = append(passwords, aa)
+			}
+		}
+	case "primitive":
+		prim := primitiveGet(a.primitive.name)
+		if prim.passwordHashing {
+			return passwords
+		}
+		for _, aa := range a.primitive.arguments {
+			passwords = append(passwords, possibleToObtainPasswords(aa, valPrincipalState)...)
+		}
+	case "equation":
+		e := sanityDecomposeEquationValues(a.equation, valPrincipalState)
+		for _, ee := range e {
+			passwords = append(passwords, possibleToObtainPasswords(ee, valPrincipalState)...)
+		}
+	}
+	return passwords
+}

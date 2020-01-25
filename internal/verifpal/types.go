@@ -114,15 +114,16 @@ type rebuildRule struct {
 }
 
 type primitiveSpec struct {
-	name       string
-	arity      int
-	output     int
-	decompose  decomposeRule
-	recompose  recomposeRule
-	rewrite    rewriteRule
-	rebuild    rebuildRule
-	check      bool
-	injectable bool
+	name            string
+	arity           int
+	output          int
+	decompose       decomposeRule
+	recompose       recomposeRule
+	rewrite         rewriteRule
+	rebuild         rebuildRule
+	check           bool
+	injectable      bool
+	passwordHashing bool
 }
 
 type principalState struct {

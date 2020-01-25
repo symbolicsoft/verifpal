@@ -8,6 +8,26 @@ import "fmt"
 
 var primitiveSpecs = []primitiveSpec{
 	{
+		name:   "PW_HASH",
+		arity:  -1,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: false,
+		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
+		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
+		check:           false,
+		injectable:      true,
+		passwordHashing: true,
+	},
+	{
 		name:   "HASH",
 		arity:  -1,
 		output: 1,
@@ -23,8 +43,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "HKDF",
@@ -42,8 +63,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: false,
+		check:           false,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "AEAD_ENC",
@@ -66,8 +88,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "AEAD_DEC",
@@ -103,8 +126,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      true,
-		injectable: false,
+		check:           true,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "ENC",
@@ -127,8 +151,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "DEC",
@@ -162,8 +187,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: false,
+		check:           false,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "MAC",
@@ -181,8 +207,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "ASSERT",
@@ -201,8 +228,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      true,
-		injectable: false,
+		check:           true,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "SIGN",
@@ -220,8 +248,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "SIGNVERIF",
@@ -266,8 +295,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      true,
-		injectable: false,
+		check:           true,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "PKE_ENC",
@@ -310,8 +340,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: true,
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
 	},
 	{
 		name:   "PKE_DEC",
@@ -355,8 +386,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: false,
+		check:           false,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "SHAMIR_SPLIT",
@@ -383,8 +415,9 @@ var primitiveSpecs = []primitiveSpec{
 		rebuild: rebuildRule{
 			hasRule: false,
 		},
-		check:      false,
-		injectable: false,
+		check:           false,
+		injectable:      false,
+		passwordHashing: false,
 	},
 	{
 		name:   "SHAMIR_JOIN",
@@ -415,8 +448,9 @@ var primitiveSpecs = []primitiveSpec{
 				return x, true
 			},
 		},
-		check:      false,
-		injectable: false,
+		check:           false,
+		injectable:      false,
+		passwordHashing: false,
 	},
 }
 
