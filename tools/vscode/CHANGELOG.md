@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.6
+- Added `PW_HASH` and `password` keywords.
+
 ## 0.0.5
 - Added `SHAMIR_SPLIT` and `SHAMIR_JOIN` keywords.
 
