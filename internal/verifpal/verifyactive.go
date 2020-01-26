@@ -71,7 +71,7 @@ func verifyActiveScan(
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		go verifyAnalysis(valPrincipalStateMutated, stage, &scanGroup)
 	}
 	if goodLock && !valReplacementMap.outOfReplacements {
 		cg.Add(1)
@@ -129,6 +129,7 @@ func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState principalState, 
 	valPrincipalState.assigned = valPrincipalState.assigned[:f]
 	valPrincipalState.guard = valPrincipalState.guard[:f]
 	valPrincipalState.known = valPrincipalState.known[:f]
+	valPrincipalState.knownBy = valPrincipalState.knownBy[:f]
 	valPrincipalState.creator = valPrincipalState.creator[:f]
 	valPrincipalState.sender = valPrincipalState.sender[:f]
 	valPrincipalState.wasRewritten = valPrincipalState.wasRewritten[:f]

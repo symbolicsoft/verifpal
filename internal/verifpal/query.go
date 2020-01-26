@@ -8,12 +8,12 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valPrincipalState principalState, valKnowledgeMap knowledgeMap, valAttackerState attackerState) {
+func queryStart(query query, valPrincipalState principalState, valAttackerState attackerState) {
 	switch query.kind {
 	case "confidentiality":
 		queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		queryAuthentication(query, valPrincipalState, valAttackerState)
 	}
 }
 
@@ -53,7 +53,7 @@ func queryConfidentiality(query query, valPrincipalState principalState, valAtta
 	}
 }
 
-func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
+func queryAuthentication(query query, valPrincipalState principalState, valAttackerState attackerState) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
@@ -95,17 +95,14 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 	}
 	for f, ii := range indices {
 		var mutated string
-		if valPrincipalState.creator[ii] != query.message.recipient {
-			continue
-		}
 		a := valPrincipalState.beforeRewrite[ii]
 		cc := sanityResolveConstant(c, valPrincipalState)
-		for i := range valPrincipalState.constants {
-			if valPrincipalState.wasMutated[i] {
+		for iii := range valPrincipalState.constants {
+			if valPrincipalState.wasMutated[iii] {
 				mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,
-					prettyConstant(valPrincipalState.constants[i]),
-					prettyValue(valPrincipalState.assigned[i]),
-					prettyValue(valPrincipalState.beforeMutate[i]),
+					prettyConstant(valPrincipalState.constants[iii]),
+					prettyValue(valPrincipalState.assigned[iii]),
+					prettyValue(valPrincipalState.beforeMutate[iii]),
 				)
 			}
 		}

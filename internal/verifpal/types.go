@@ -132,6 +132,7 @@ type principalState struct {
 	assigned      []value
 	guard         []bool
 	known         []bool
+	knownBy       [][]map[string]string
 	creator       []string
 	sender        []string
 	wasRewritten  []bool

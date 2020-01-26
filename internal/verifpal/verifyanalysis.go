@@ -12,7 +12,7 @@ import (
 
 var verifyAnalysisCount uint32
 
-func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
+func verifyAnalysis(valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
 	var aGroup sync.WaitGroup
 	var pGroup sync.WaitGroup
 	var o uint32
@@ -41,12 +41,12 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	}
 	aGroup.Wait()
 	pGroup.Wait()
-	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
+	verifyResolveQueries(valPrincipalState, valAttackerState)
 	verifyAnalysisIncrementCount()
 	prettyAnalysis(stage)
 	if atomic.LoadUint32(&o) > 0 {
 		sg.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
+		go verifyAnalysis(valPrincipalState, stage, sg)
 	}
 	sg.Done()
 }

@@ -283,6 +283,8 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			assigned:      []value{},
 			guard:         []bool{},
 			known:         []bool{},
+			knownBy:       [][]map[string]string{},
+			creator:       []string{},
 			sender:        []string{},
 			wasRewritten:  []bool{},
 			beforeRewrite: []value{},
@@ -320,8 +322,9 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			valPrincipalState.assigned = append(valPrincipalState.assigned, assigned)
 			valPrincipalState.guard = append(valPrincipalState.guard, guard)
 			valPrincipalState.known = append(valPrincipalState.known, knows)
-			valPrincipalState.sender = append(valPrincipalState.sender, sender)
+			valPrincipalState.knownBy = append(valKnowledgeMap.knownBy, valKnowledgeMap.knownBy[i])
 			valPrincipalState.creator = append(valPrincipalState.creator, valKnowledgeMap.creator[i])
+			valPrincipalState.sender = append(valPrincipalState.sender, sender)
 			valPrincipalState.wasRewritten = append(valPrincipalState.wasRewritten, false)
 			valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, assigned)
 			valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
@@ -339,6 +342,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		assigned:      make([]value, len(valPrincipalState.assigned)),
 		guard:         make([]bool, len(valPrincipalState.guard)),
 		known:         make([]bool, len(valPrincipalState.known)),
+		knownBy:       make([][]map[string]string, len(valPrincipalState.knownBy)),
 		creator:       make([]string, len(valPrincipalState.creator)),
 		sender:        make([]string, len(valPrincipalState.sender)),
 		wasRewritten:  make([]bool, len(valPrincipalState.wasRewritten)),
@@ -355,6 +359,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	}
 	copy(valPrincipalStateClone.guard, valPrincipalState.guard)
 	copy(valPrincipalStateClone.known, valPrincipalState.known)
+	copy(valPrincipalStateClone.knownBy, valPrincipalState.knownBy)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
 	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
 	copy(valPrincipalStateClone.wasRewritten, valPrincipalState.wasRewritten)
