@@ -63,6 +63,15 @@ contexts [] {
          }
          : include "main";
       }
+	  : inline_push {
+         regex          \= (phase)
+         styles []       = .meta;
+         : pop {  
+            regex       \= (\[)
+            styles []    = .punctuation;
+         }
+         : include "main";
+      }
       : inline_push {
          regex          \= (queries)
          styles []       = .meta;

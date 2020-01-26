@@ -14,6 +14,7 @@
 		"io/ioutil"
 		"os"
 		"path"
+		"strconv"
 		"strings"
 		"unicode"
 		"unicode/utf8"
@@ -40,6 +41,7 @@
 			"passive",
 			"active",
 			"principal",
+			"phase",
 			"public",
 			"private",
 			"password",
@@ -103,7 +105,7 @@ AttackerType <-
 
 Block <-
 	Comment*
-	Block:(Principal/Message) _
+	Block:(Principal/Message/Phase) _
 	Comment* {
 		return Block, nil
 	}
@@ -267,6 +269,21 @@ Constants <-
 			}
 		}
 		return da, err
+	}
+
+Phase <-
+	"phase" _ '[' _ Number:[0-9]+ _ ']' _ {
+		var err error
+		a  := Number.([]interface{})
+		da := make([]uint8, len(a))
+		for i, v := range a { da[i] = v.([]uint8)[0] }
+		n, err := strconv.Atoi(b2s(da))
+		return block{
+			kind: "phase",
+			phase: phase{
+				number: n,
+			},
+		}, err
 	}
 
 GuardedConstant <-

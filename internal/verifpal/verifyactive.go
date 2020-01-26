@@ -136,5 +136,6 @@ func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState principalState, 
 	valPrincipalState.beforeRewrite = valPrincipalState.beforeRewrite[:f]
 	valPrincipalState.wasMutated = valPrincipalState.wasMutated[:f]
 	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
+	valPrincipalState.phase = valPrincipalState.phase[:f]
 	return valPrincipalState
 }

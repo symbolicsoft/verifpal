@@ -20,6 +20,7 @@ type block struct {
 	kind      string
 	principal principal
 	message   message
+	phase     phase
 }
 
 type principal struct {
@@ -31,6 +32,10 @@ type message struct {
 	sender    string
 	recipient string
 	constants []constant
+}
+
+type phase struct {
+	number int
 }
 
 type query struct {
@@ -79,6 +84,7 @@ type knowledgeMap struct {
 	assigned       []value
 	creator        []string
 	knownBy        [][]map[string]string
+	phase          []int
 	unnamedCounter int
 }
 
@@ -139,6 +145,7 @@ type principalState struct {
 	beforeRewrite []value
 	wasMutated    []bool
 	beforeMutate  []value
+	phase         []int
 	lock          int
 }
 

@@ -12,11 +12,34 @@ import (
 
 func sanity(m Model) (knowledgeMap, []principalState) {
 	var valKnowledgeMap knowledgeMap
+	sanityPhases(m)
 	principals := sanityDeclaredPrincipals(m)
 	valKnowledgeMap = constructKnowledgeMap(m, principals)
-	valPrincipalStates := constructPrincipalStates(m, valKnowledgeMap)
 	sanityQueries(m, valKnowledgeMap)
+	valPrincipalStates := constructPrincipalStates(m, valKnowledgeMap)
 	return valKnowledgeMap, valPrincipalStates
+}
+
+func sanityPhases(m Model) {
+	phase := 0
+	for _, blck := range m.blocks {
+		switch blck.kind {
+		case "phase":
+			if blck.phase.number <= phase {
+				errorCritical(fmt.Sprintf(
+					"phase being declared (%d) must be superior to last declared phase (%d)",
+					blck.phase.number, phase,
+				))
+			} else if blck.phase.number != phase+1 {
+				errorCritical(fmt.Sprintf(
+					"phase being declared (%d) skips phases since last declared phase (%d)",
+					blck.phase.number, phase,
+				))
+			} else {
+				phase = blck.phase.number
+			}
+		}
+	}
 }
 
 func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMap knowledgeMap) []constant {

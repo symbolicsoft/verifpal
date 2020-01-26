@@ -15,12 +15,15 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 		assigned:       []value{},
 		creator:        []string{},
 		knownBy:        [][]map[string]string{},
+		phase:          []int{},
 		unnamedCounter: 0,
 	}
+	phase := 0
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantG.constant)
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantG)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+	valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
 	for _, principal := range principals {
 		valKnowledgeMap.knownBy[0] = append(
 			valKnowledgeMap.knownBy[0],
@@ -31,6 +34,7 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantN)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+	valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
 	for _, principal := range principals {
 		valKnowledgeMap.knownBy[1] = append(
 			valKnowledgeMap.knownBy[1],
@@ -43,21 +47,23 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 			for _, expr := range blck.principal.expressions {
 				switch expr.kind {
 				case "knows":
-					valKnowledgeMap = constructKnowledgeMapRenderKnows(valKnowledgeMap, blck, expr)
+					valKnowledgeMap = constructKnowledgeMapRenderKnows(valKnowledgeMap, blck, expr, phase)
 				case "generates":
-					valKnowledgeMap = constructKnowledgeMapRenderGenerates(valKnowledgeMap, blck, expr)
+					valKnowledgeMap = constructKnowledgeMapRenderGenerates(valKnowledgeMap, blck, expr, phase)
 				case "assignment":
-					valKnowledgeMap = constructKnowledgeMapRenderAssignment(valKnowledgeMap, blck, expr)
+					valKnowledgeMap = constructKnowledgeMapRenderAssignment(valKnowledgeMap, blck, expr, phase)
 				}
 			}
 		case "message":
 			valKnowledgeMap = constructKnowledgeMapRenderMessage(valKnowledgeMap, blck)
+		case "phase":
+			phase = blck.phase.number
 		}
 	}
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
+func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -91,6 +97,7 @@ func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, 
 			})
 			valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 			valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+			valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
 			l := len(valKnowledgeMap.constants) - 1
 			if expr.qualifier != "public" {
 				continue
@@ -108,7 +115,7 @@ func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, 
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
+func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -132,11 +139,12 @@ func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck blo
 		})
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
 	}
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck block, expr expression) knowledgeMap {
+func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
 	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
 	switch expr.right.kind {
 	case "primitive":
@@ -217,6 +225,7 @@ func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck bl
 		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expr.right)
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
 	}
 	return valKnowledgeMap
 }
@@ -290,6 +299,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			beforeRewrite: []value{},
 			wasMutated:    []bool{},
 			beforeMutate:  []value{},
+			phase:         []int{},
 			lock:          0,
 		}
 		for i, c := range valKnowledgeMap.constants {
@@ -329,6 +339,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, assigned)
 			valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
 			valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, assigned)
+			valPrincipalState.phase = append(valPrincipalState.phase, valKnowledgeMap.phase[i])
 		}
 		valPrincipalStates = append(valPrincipalStates, valPrincipalState)
 	}
@@ -349,6 +360,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
 		wasMutated:    make([]bool, len(valPrincipalState.wasMutated)),
 		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
+		phase:         make([]int, len(valPrincipalState.phase)),
 		lock:          valPrincipalState.lock,
 	}
 	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
@@ -370,5 +382,6 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	} else {
 		copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
 	}
+	copy(valPrincipalStateClone.phase, valPrincipalState.phase)
 	return valPrincipalStateClone
 }
