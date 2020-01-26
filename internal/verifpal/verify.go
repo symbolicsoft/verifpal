@@ -18,9 +18,6 @@ func Verify(modelFile string) {
 	verifyResultsInit(m)
 	initiated := time.Now().Format("15:04:05")
 	prettyMessage(fmt.Sprintf("Verification initiated at %s.", initiated), "verifpal")
-	for i, valPrincipalState := range valPrincipalStates {
-		valPrincipalStates[i] = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
-	}
 	switch m.attacker {
 	case "passive":
 		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
@@ -33,11 +30,11 @@ func Verify(modelFile string) {
 	verifyEnd()
 }
 
-func verifyResolveQueries(valPrincipalState principalState, valAttackerState attackerState) {
+func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
 	valVerifyResults := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if !verifyResult.resolved {
-			queryStart(verifyResult.query, valPrincipalState, valAttackerState)
+			queryStart(verifyResult.query, valKnowledgeMap, valPrincipalState, valAttackerState)
 		}
 	}
 }
@@ -45,13 +42,14 @@ func verifyResolveQueries(valPrincipalState principalState, valAttackerState att
 func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
 	var scanGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
+		valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
 		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 		sanityFailOnFailedRewrite(failedRewrites)
 		for i := range valPrincipalState.assigned {
 			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
 		}
 		scanGroup.Add(1)
-		go verifyAnalysis(valPrincipalState, stage, &scanGroup)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
 		scanGroup.Wait()
 	}
 }

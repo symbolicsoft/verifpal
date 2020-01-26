@@ -676,7 +676,7 @@ func sanityCheckEquationRootGenerator(e equation, valPrincipalState principalSta
 	}
 	for i, c := range e.values {
 		if i == 0 {
-			if c.constant.name != "g" {
+			if strings.ToLower(c.constant.name) != "g" {
 				errorCritical(fmt.Sprintf(
 					"equation (%s) does not use 'g' as generator",
 					prettyEquation(e),
@@ -684,7 +684,7 @@ func sanityCheckEquationRootGenerator(e equation, valPrincipalState principalSta
 			}
 		}
 		if i > 0 {
-			if c.constant.name == "g" {
+			if strings.ToLower(c.constant.name) == "g" {
 				errorCritical(fmt.Sprintf(
 					"equation (%s) uses 'g' not as a generator",
 					prettyEquation(e),
@@ -911,7 +911,7 @@ func sanityConstantIsUsedByPrincipal(valKnowledgeMap knowledgeMap, name string, 
 
 func sanityResolveAllPrincipalStateValues(valPrincipalState principalState, valKnowledgeMap knowledgeMap) principalState {
 	var resolvesGroup sync.WaitGroup
-	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, true)
+	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.assigned {
 		resolvesGroup.Add(1)
 		go func(i int) {

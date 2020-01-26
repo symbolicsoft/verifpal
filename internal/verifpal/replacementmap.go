@@ -4,7 +4,10 @@
 
 package verifpal
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 func replacementMapInit(valPrincipalState principalState, valAttackerState attackerState, stage int) replacementMap {
 	var replacementsGroup sync.WaitGroup
@@ -72,7 +75,7 @@ func replacementMapReplaceValue(
 	replacements := []value{}
 	switch a.kind {
 	case "constant":
-		if (a.constant.name == "g") || (a.constant.name == "nil") {
+		if (strings.ToLower(a.constant.name) == "g") || (a.constant.name == "nil") {
 			return v.constant, replacements, false
 		}
 		replacements = append(replacements, a)
@@ -83,6 +86,9 @@ func replacementMapReplaceValue(
 				cc := sanityResolveConstant(c.constant, valPrincipalState)
 				switch cc.kind {
 				case "constant":
+					if (strings.ToLower(cc.constant.name) == "g") || (cc.constant.name == "nil") {
+						return v.constant, replacements, false
+					}
 					if sanityExactSameValueInValues(cc, replacements) < 0 {
 						replacements = append(replacements, cc)
 					}

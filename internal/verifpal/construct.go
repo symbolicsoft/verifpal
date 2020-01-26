@@ -365,7 +365,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	}
 	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
 	if purify {
-		copy(valPrincipalStateClone.assigned, valPrincipalState.beforeRewrite)
+		copy(valPrincipalStateClone.assigned, valPrincipalState.beforeMutate)
 	} else {
 		copy(valPrincipalStateClone.assigned, valPrincipalState.assigned)
 	}
@@ -375,13 +375,13 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
 	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
 	copy(valPrincipalStateClone.wasRewritten, valPrincipalState.wasRewritten)
-	copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
-	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
 	if purify {
-		copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeRewrite)
+		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeMutate)
 	} else {
-		copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
+		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	}
+	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
+	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
 	copy(valPrincipalStateClone.phase, valPrincipalState.phase)
 	return valPrincipalStateClone
 }

@@ -208,6 +208,20 @@ func possibleToRewrite(p primitive, valPrincipalState principalState) (bool, val
 				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
 			a2 := from.primitive.arguments[m]
+			switch a1.kind {
+			case "primitive":
+				r, v := possibleToRewrite(a1.primitive, valPrincipalState)
+				if r {
+					a1 = v
+				}
+			}
+			switch a2.kind {
+			case "primitive":
+				r, v := possibleToRewrite(a2.primitive, valPrincipalState)
+				if r {
+					a2 = v
+				}
+			}
 			if !sanityEquivalentValues(a1, a2, valPrincipalState) {
 				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
@@ -235,6 +249,13 @@ func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAt
 func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
+	switch k.kind {
+	case "primitive":
+		r, v := possibleToRewrite(k.primitive, valPrincipalState)
+		if r {
+			k = v
+		}
+	}
 	switch k.kind {
 	case "constant":
 		if sanityEquivalentValueInValues(k, valAttackerState.known, valPrincipalState) >= 0 {

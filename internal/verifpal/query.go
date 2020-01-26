@@ -8,12 +8,12 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valPrincipalState principalState, valAttackerState attackerState) {
+func queryStart(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
 	switch query.kind {
 	case "confidentiality":
 		queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valPrincipalState, valAttackerState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 }
 
@@ -53,49 +53,50 @@ func queryConfidentiality(query query, valPrincipalState principalState, valAtta
 	}
 }
 
-func queryAuthentication(query query, valPrincipalState principalState, valAttackerState attackerState) {
+func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
 	if query.message.recipient != valPrincipalState.name {
 		return
 	}
-	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
-	if i < 0 {
+	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.message.constants[0])
+	ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
+	if ii < 0 {
 		return
 	}
-	c := valPrincipalState.constants[i]
-	sender := valPrincipalState.sender[i]
-	for ii := range valPrincipalState.constants {
-		a := valPrincipalState.assigned[ii]
+	c := valKnowledgeMap.constants[i]
+	sender := valPrincipalState.sender[ii]
+	for iii := range valKnowledgeMap.constants {
+		a := valKnowledgeMap.assigned[iii]
 		switch a.kind {
-		case "constant":
-			continue
 		case "primitive":
-			b := valPrincipalState.beforeMutate[ii]
-			if !sanityFindConstantInPrimitive(c, b.primitive, valPrincipalState) {
+			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
 				continue
 			}
-			if primitiveGet(a.primitive.name).rewrite.hasRule {
-				pass, _ := possibleToRewrite(a.primitive, valPrincipalState)
-				forcedPass := possibleToForceRewrite(a.primitive, valPrincipalState, valAttackerState)
+			iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.constants[iii])
+			if iiii < 0 {
+				return
+			}
+			b := valPrincipalState.beforeRewrite[iiii]
+			if primitiveGet(b.primitive.name).rewrite.hasRule {
+				pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
+				forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
 				if pass || forcedPass {
-					indices = append(indices, ii)
+					indices = append(indices, iiii)
 					passes = append(passes, pass)
 					forcedPasses = append(forcedPasses, forcedPass)
 				}
 			} else {
-				indices = append(indices, ii)
+				indices = append(indices, iiii)
 				passes = append(passes, true)
 				forcedPasses = append(forcedPasses, false)
 			}
-		case "equation":
-			continue
 		}
 	}
-	for f, ii := range indices {
+	for f, index := range indices {
 		var mutated string
-		a := valPrincipalState.beforeRewrite[ii]
+		b := valPrincipalState.beforeRewrite[index]
 		cc := sanityResolveConstant(c, valPrincipalState)
 		for iii := range valPrincipalState.constants {
 			if valPrincipalState.wasMutated[iii] {
@@ -111,7 +112,7 @@ func queryAuthentication(query query, valPrincipalState principalState, valAttac
 				"%s, sent by %s and not by %s and resolving to %s, is successfully used in "+
 					"primitive %s in %s's state.",
 				prettyConstant(c), sender, query.message.sender,
-				prettyValue(cc), prettyValue(a), query.message.recipient,
+				prettyValue(cc), prettyValue(b), query.message.recipient,
 			), true)
 			written := verifyResultsPutWrite(verifyResult{
 				query:    query,
@@ -128,7 +129,7 @@ func queryAuthentication(query query, valPrincipalState principalState, valAttac
 			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
 					"%s's state, despite it being vulnerable to tampering by Attacker.",
-				prettyConstant(c), sender, prettyValue(cc), prettyValue(a), query.message.recipient,
+				prettyConstant(c), sender, prettyValue(cc), prettyValue(b), query.message.recipient,
 			), true)
 			written := verifyResultsPutWrite(verifyResult{
 				query:    query,

@@ -48,7 +48,7 @@ func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, va
 		if p.arguments[arg].kind != "constant" {
 			return false
 		}
-		if k.constant.name == "g" {
+		if strings.ToLower(k.constant.name) == "g" {
 			return false
 		}
 	case "primitive":
