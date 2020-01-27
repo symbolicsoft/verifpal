@@ -24,7 +24,6 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 			case "constant":
 				a = sanityResolveConstant(a.constant, valPrincipalState)
 			}
-			atomic.AddUint32(&o, verifyAnalysisResolve(a, valPrincipalState, valAttackerState, 0))
 			atomic.AddUint32(&o, verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0))
 			atomic.AddUint32(&o, verifyAnalysisEquivalize(a, valPrincipalState, 0))
 			atomic.AddUint32(&o, verifyAnalysisPasswords(a, valPrincipalState, 0))
@@ -57,49 +56,6 @@ func verifyAnalysisIncrementCount() {
 
 func verifyAnalysisGetCount() int {
 	return int(atomic.LoadUint32(&verifyAnalysisCount))
-}
-
-func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttackerState attackerState, o uint32) uint32 {
-	oo := o
-	ii := sanityExactSameValueInValues(a, valAttackerState.known)
-	if ii >= 0 {
-		return o
-	}
-	output := []value{}
-	switch a.kind {
-	case "constant":
-		output = append(output, a)
-	case "primitive":
-		for _, v := range valAttackerState.known {
-			switch v.kind {
-			case "constant":
-				if sanityEquivalentValues(v, a, valPrincipalState) {
-					output = append(output, v)
-				}
-			}
-		}
-		if len(output) != primitiveGet(a.primitive.name).output {
-			return o
-		}
-	case "equation":
-		output = append(output, a)
-	}
-	write := attackerStateWrite{
-		known:     a,
-		wire:      false,
-		mutatedTo: []string{},
-	}
-	if attackerStatePutWrite(write) {
-		prettyMessage(fmt.Sprintf(
-			"%s resolves to %s.",
-			prettyValues(output), prettyValue(a),
-		), "analysis", true)
-		o = o + 1
-	}
-	if o > oo {
-		return verifyAnalysisResolve(a, valPrincipalState, valAttackerState, o)
-	}
-	return o
 }
 
 func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttackerState attackerState, o uint32) uint32 {
