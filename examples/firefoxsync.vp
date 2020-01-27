@@ -5,11 +5,11 @@ attacker[active]
 
 principal ComputerA[
 	knows private username
-	knows private password
+	knows private pass
 	knows public salt
 	knows private data
-	hashedPassword = HASH(password, salt)
-	h1, h2 = HKDF(password, salt, nil)
+	hashedPassword = HASH(pass, salt)
+	h1, h2 = HKDF(pass, salt, nil)
 	e1 = AEAD_ENC(h1, data, nil)
 ]
 
@@ -25,10 +25,10 @@ principal Server[
 
 principal ComputerB[
 	knows private username
-	knows private password
+	knows private pass
 	knows public salt
-	usernameb = DEC(password, ENC(password, username)) // Terrible hack
-	h1b, h2b = HKDF(password, salt, nil)
+	usernameb = DEC(pass, ENC(pass, username)) // Terrible hack
+	h1b, h2b = HKDF(pass, salt, nil)
 ]
 
 ComputerB -> Server: usernameb, h2b
