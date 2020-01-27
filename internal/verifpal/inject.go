@@ -20,7 +20,7 @@ func inject(
 		return injectants
 	}
 	if isRootPrimitive {
-		pp, _ := sanityResolveInternalValuesFromPrincipalState(value{
+		pp, _ := sanityResolveValueInternalValuesFromPrincipalState(value{
 			kind: "primitive", primitive: p,
 		}, rootIndex, valPrincipalState, false)
 		p = pp.primitive

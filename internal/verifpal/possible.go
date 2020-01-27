@@ -195,45 +195,37 @@ func possibleToRewrite(p primitive, valPrincipalState principalState) (bool, val
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	switch from.kind {
-	case "constant":
-		return (false || !prim.check), value{kind: "primitive", primitive: p}
 	case "primitive":
 		if from.primitive.name != prim.rewrite.name {
 			return (false || !prim.check), value{kind: "primitive", primitive: p}
 		}
 		for _, m := range prim.rewrite.matching {
-			a1 := p.arguments[m]
-			a1, valid := prim.rewrite.filter(a1, m, valPrincipalState)
+			var valid bool
+			ax := []value{p.arguments[m], from.primitive.arguments[m]}
+			ax[0], valid = prim.rewrite.filter(ax[0], m, valPrincipalState)
 			if !valid {
 				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
-			a2 := from.primitive.arguments[m]
-			switch a1.kind {
-			case "primitive":
-				r, v := possibleToRewrite(a1.primitive, valPrincipalState)
-				if r {
-					a1 = v
+			for i := range ax {
+				switch ax[i].kind {
+				case "primitive":
+					r, v := possibleToRewrite(ax[i].primitive, valPrincipalState)
+					if r {
+						ax[i] = v
+					}
 				}
 			}
-			switch a2.kind {
-			case "primitive":
-				r, v := possibleToRewrite(a2.primitive, valPrincipalState)
-				if r {
-					a2 = v
-				}
-			}
-			if !sanityEquivalentValues(a1, a2, valPrincipalState) {
+			if !sanityEquivalentValues(ax[0], ax[1], valPrincipalState) {
 				return (false || !prim.check), value{kind: "primitive", primitive: p}
 			}
 		}
-	case "equation":
-		return (false || !prim.check), value{kind: "primitive", primitive: p}
+		rewrite := value{kind: "primitive", primitive: p}
+		if prim.rewrite.to > 0 {
+			rewrite = from.primitive.arguments[prim.rewrite.to]
+		}
+		return true, rewrite
 	}
-	rewrite := value{kind: "primitive", primitive: p}
-	if prim.rewrite.to > 0 {
-		rewrite = from.primitive.arguments[prim.rewrite.to]
-	}
-	return true, rewrite
+	return (false || !prim.check), value{kind: "primitive", primitive: p}
 }
 
 func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
