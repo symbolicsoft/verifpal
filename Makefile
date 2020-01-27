@@ -6,6 +6,7 @@ all:
 	@make -s windows
 	@make -s linux
 	@make -s macos
+	@make -s freebsd
 
 parser:
 	@/bin/echo -n "[Verifpal] Generating parser..."
@@ -30,6 +31,11 @@ macos:
 	@GOOS="darwin" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/...
 	@/bin/echo "   OK"
 
+freebsd:
+	@/bin/echo -n "[Verifpal] Building Verifpal for FreeBSD..."
+	@GOOS="freebsd" GOARCH="amd64" go build -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/...
+	@/bin/echo " OK"
+
 wasm:
 	@/bin/echo -n "[Verifpal] Building Verifpal for WebAssembly..."
 	@GOOS="js" GOARCH="wasm" go build -gcflags="-e" -ldflags="-s -w" -o build/wasm verifpal.com/...
@@ -51,7 +57,8 @@ clean:
 	@$(RM) build/windows/verifpal.exe
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
+	@$(RM) build/freebsd/verifpal
 	@$(RM) build/wasm/verifpal.wasm
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos wasm dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools
+.PHONY: all parser windows linux macos freebsd wasm dependencies clean HomebrewFormula LICENSES api build cmd dist examples internal tools

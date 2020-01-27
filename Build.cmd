@@ -32,6 +32,11 @@
 @go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/...
 @echo    OK
 
+@echo|set /p="[Verifpal] Building Verifpal for FreeBSD..."
+@setx GOOS "freebsd" >nul
+@go build -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/...
+@echo  OK
+
 @echo|set /p="[Verifpal] Cleaning up..."
 @del cmd\verifpal\resource.syso
 @setx GOOS "windows" >nul

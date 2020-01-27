@@ -6,6 +6,7 @@ cmd/verifpal/resource.syso
 build/windows/verifpal.exe
 build/linux/verifpal
 build/macos/verifpal
+build/freebsd/verifpal
 build/wasm/verifpal.wasm
 dist
 release.sh

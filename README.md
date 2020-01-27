@@ -44,7 +44,7 @@ brew install verifpal
 
 Otherwise, you can:
 
-- *Download and install a release manually*: Releases for Windows, Linux and macOS are available [here](https://source.symbolic.software/verifpal/verifpal/releases).
+- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/releases).
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source
@@ -55,7 +55,7 @@ Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser genera
 
 #### Compiling Verifpal
 - *Windows*: Simply type `Build` to build Verifpal for Windows, Linux and macOS. This will also install dependencies.
-- *Linux and macOS*: Simply type `make all` to build Verifpal for Windows, Linux and macOS.
+- *Linux, macOS and FreeBSD*: Simply type `make all` to build Verifpal for Windows, Linux, macOS and FreeBSD.
 
 Builds will be available under `build/`.
 
