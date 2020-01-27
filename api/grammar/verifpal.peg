@@ -14,23 +14,31 @@
 		"io/ioutil"
 		"os"
 		"path"
+		"path/filepath"
 		"strconv"
 		"strings"
 		"unicode"
 		"unicode/utf8"
 	)
 
-	func parserParseModel(filename string) (Model, knowledgeMap, []principalState) {
+	func parserParseModel(filePath string) (Model, knowledgeMap, []principalState) {
 		var m Model
+		fileName := path.Base(filePath)
+		if len(fileName) > 64 {
+			errorCritical("model file name must be 64 characters or less")
+		}
+		if filepath.Ext(fileName) != ".vp" {
+			errorCritical("model file name must have a '.vp' extension")
+		}
 		prettyMessage(fmt.Sprintf(
-			"Parsing model \"%s\"...",
-			path.Base(filename),
-		), "verifpal")
-		parsed, err := ParseFile(filename)
+			"Parsing model '%s'...", fileName,
+		), "verifpal", false)
+		parsed, err := ParseFile(filePath)
 		if err != nil {
 			errorCritical(err.Error())
 		}
 		m = parsed.(Model)
+		m.fileName = fileName
 		valKnowledgeMap, valPrincipalStates := sanity(m)
 		return m, valKnowledgeMap, valPrincipalStates
 	}

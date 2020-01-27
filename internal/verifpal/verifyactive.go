@@ -12,7 +12,7 @@ func verifyActive(
 	m Model,
 	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
 ) {
-	prettyMessage("Attacker is configured as active.", "info")
+	prettyMessage("Attacker is configured as active.", "info", false)
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
@@ -49,11 +49,6 @@ func verifyActiveScan(
 	if attackerKnowsMore {
 		valPrincipalState.lock = attackerKnown
 	}
-	defer func() {
-		if verifyResultsAllResolved() {
-			verifyEnd()
-		}
-	}()
 	if (goodLock && !valReplacementMap.initialized) || attackerKnowsMore {
 		cg.Add(1)
 		go func() {

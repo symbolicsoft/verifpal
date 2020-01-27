@@ -51,7 +51,7 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState,
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
-			), "deduction")
+			), "deduction", true)
 		}
 		return true, revealed, has
 	}
@@ -133,7 +133,7 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
 				prettyValue(vp), prettyValues(has),
-			), "deduction")
+			), "deduction", true)
 		}
 		return true, has
 	}

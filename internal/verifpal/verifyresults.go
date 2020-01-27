@@ -5,11 +5,11 @@
 package verifpal
 
 import (
-	"strings"
 	"sync"
 )
 
 var verifyResultsShared []verifyResult
+var verifyResultsFileNameShared string
 var verifyResultsMutex sync.Mutex
 
 func verifyResultsInit(m Model) bool {
@@ -22,16 +22,18 @@ func verifyResultsInit(m Model) bool {
 			summary:  "",
 		}
 	}
+	verifyResultsFileNameShared = m.fileName
 	verifyResultsMutex.Unlock()
 	return true
 }
 
-func verifyResultsGetRead() []verifyResult {
+func verifyResultsGetRead() ([]verifyResult, string) {
 	verifyResultsMutex.Lock()
 	valVerifyResults := make([]verifyResult, len(verifyResultsShared))
 	copy(valVerifyResults, verifyResultsShared)
+	fileName := verifyResultsFileNameShared
 	verifyResultsMutex.Unlock()
-	return valVerifyResults
+	return valVerifyResults, fileName
 }
 
 func verifyResultsPutWrite(result verifyResult) bool {
@@ -40,7 +42,7 @@ func verifyResultsPutWrite(result verifyResult) bool {
 	verifyResultsMutex.Lock()
 	for i, verifyResult := range verifyResultsShared {
 		qv := prettyQuery(verifyResult.query)
-		if strings.Compare(qw, qv) == 0 {
+		if qw == qv {
 			if !verifyResultsShared[i].resolved {
 				verifyResultsShared[i].resolved = result.resolved
 				verifyResultsShared[i].summary = result.summary
@@ -49,6 +51,9 @@ func verifyResultsPutWrite(result verifyResult) bool {
 		}
 	}
 	verifyResultsMutex.Unlock()
+	if written && verifyResultsAllResolved() {
+		verifyEnd()
+	}
 	return written
 }
 

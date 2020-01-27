@@ -100,11 +100,8 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 	if p.name != skeleton.name {
 		return false
 	}
-	s := strings.Compare(
-		prettyPrimitive(injectPrimitiveSkeleton(p)),
-		prettyPrimitive(skeleton),
-	)
-	return s == 0
+	return prettyPrimitive(injectPrimitiveSkeleton(p)) == prettyPrimitive(skeleton)
+
 }
 
 func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
@@ -133,7 +130,7 @@ SkeletonSearch:
 			prettyMessage(fmt.Sprintf(
 				"Constructed skeleton %s.",
 				prettyPrimitive(skeleton),
-			), "analysis")
+			), "analysis", true)
 		}
 	}
 	for _, a := range p.arguments {

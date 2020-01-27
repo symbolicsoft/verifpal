@@ -93,7 +93,7 @@ func verifyAnalysisResolve(a value, valPrincipalState principalState, valAttacke
 		prettyMessage(fmt.Sprintf(
 			"%s resolves to %s.",
 			prettyValues(output), prettyValue(a),
-		), "analysis")
+		), "analysis", true)
 		o = o + 1
 	}
 	if o > oo {
@@ -121,7 +121,7 @@ func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttac
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
-			), "deduction")
+			), "deduction", true)
 			o = o + 1
 		}
 	}
@@ -150,7 +150,7 @@ func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttac
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by recomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
-			), "deduction")
+			), "deduction", true)
 			o = o + 1
 		}
 	}
@@ -183,7 +183,7 @@ func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAtt
 			prettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
 				prettyValue(a), prettyValues(ar),
-			), "deduction")
+			), "deduction", true)
 			o = o + 1
 		}
 	}
@@ -242,7 +242,7 @@ func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32
 			prettyMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
 				prettyValue(password), prettyValue(a),
-			), "deduction")
+			), "deduction", true)
 			o = o + 1
 		}
 	}

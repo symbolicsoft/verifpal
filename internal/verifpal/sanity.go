@@ -462,8 +462,7 @@ func sanityExactSameValueInValues(v value, assigneds []value) int {
 		case "primitive":
 			as = fmt.Sprintf("%s|%d", as, a.primitive.output)
 		}
-		s := strings.Compare(vs, as)
-		if s == 0 {
+		if vs == as {
 			index = i
 			break
 		}

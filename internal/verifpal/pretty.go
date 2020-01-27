@@ -11,8 +11,11 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func prettyMessage(m string, t string) {
-	analysisCount := verifyAnalysisGetCount()
+func prettyMessage(m string, t string, showAnalysis bool) {
+	analysisCount := 0
+	if showAnalysis {
+		analysisCount = verifyAnalysisGetCount()
+	}
 	if colorOutputSupport() {
 		prettyMessageColor(m, t, analysisCount)
 	} else {

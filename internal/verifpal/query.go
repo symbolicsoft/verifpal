@@ -49,7 +49,7 @@ func queryConfidentiality(query query, valPrincipalState principalState, valAtta
 	if written {
 		prettyMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(query), summary,
-		), "result")
+		), "result", true)
 	}
 }
 
@@ -122,7 +122,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			if written {
 				prettyMessage(fmt.Sprintf(
 					"%s: %s", prettyQuery(query), summary,
-				), "result")
+				), "result", true)
 			}
 			return
 		} else if forcedPasses[f] {
@@ -139,7 +139,7 @@ func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipal
 			if written {
 				prettyMessage(fmt.Sprintf(
 					"%s: %s", prettyQuery(query), summary,
-				), "result")
+				), "result", true)
 			}
 			return
 		}

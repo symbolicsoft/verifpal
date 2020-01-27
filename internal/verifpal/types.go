@@ -6,6 +6,7 @@ package verifpal
 
 // Model is the main parsed representation of the Verifpal model.
 type Model struct {
+	fileName string
 	attacker string
 	blocks   []block
 	queries  []query
