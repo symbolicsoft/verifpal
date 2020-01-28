@@ -5,7 +5,7 @@
 
 # [Verifpal](https://verifpal.com)
 
-<a href="https://liberapay.com/verifpal/donate"><img alt="Donate using Liberapay" src="https://verifpal.com/res/img/svg/donate.svg" style="height:32px;width:auto"></a> <a href="https://drone.symbolic.software/verifpal/verifpal"><img src="https://drone.symbolic.software/api/badges/verifpal/verifpal/status.svg" style="height:32px;width:auto" /></a>
+<a href="https://liberapay.com/verifpal/donate"><img alt="Donate using Liberapay" src="https://verifpal.com/res/img/svg/donate.svg" height="32"></a> <a href="https://drone.symbolic.software/verifpal/verifpal"><img src="https://drone.symbolic.software/api/badges/verifpal/verifpal/status.svg" height="32" /></a>
 
 ## What is Verifpal?
 <img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="400">
