@@ -10,7 +10,11 @@ steps:
   image: golang:latest
   commands:
   - make dependencies
+  - make parser
   - go version
   - go get ./...
   - go build verifpal.com/cmd/verifpal
-  - go run verifpal.com/cmd/verifpal
+- name: model
+  image: golang:latest
+  commands:
+  - go run verifpal.com/cmd/verifpal verify examples/signal_small.vp
