@@ -54,7 +54,7 @@ You must have [Go](https://golang.org) installed in order to build Verifpal. Ple
 Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser generator and the [Aurora](https://github.com/logrusorgru/aurora) ANSI color printer. you can easily install them by typing `make dependencies`.
 
 #### Compiling Verifpal
-- *Windows*: Simply type `Build` to build Verifpal for Windows, Linux and macOS. This will also install dependencies.
+- *Windows*: Simply type `Build` to build Verifpal for Windows, Linux, macOS and FreeBSD. This will also install dependencies.
 - *Linux, macOS and FreeBSD*: Simply type `make all` to build Verifpal for Windows, Linux, macOS and FreeBSD.
 
 Builds will be available under `build/`.
