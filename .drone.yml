@@ -1,3 +1,6 @@
+kind: pipeline
+type: docker
+
 clone:
   path: source.symbolic.software/verifpal/verifpal
 
