@@ -9,6 +9,9 @@ build/macos/verifpal
 build/freebsd/verifpal
 build/wasm/verifpal.wasm
 dist
+
+# Release scripts
+.goreleaser.yml
 release.sh
 
 # Binaries for programs and plugins
