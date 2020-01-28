@@ -63,7 +63,9 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
+func constructKnowledgeMapRenderKnows(
+	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -115,7 +117,9 @@ func constructKnowledgeMapRenderKnows(valKnowledgeMap knowledgeMap, blck block, 
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
+func constructKnowledgeMapRenderGenerates(
+	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -144,7 +148,9 @@ func constructKnowledgeMapRenderGenerates(valKnowledgeMap knowledgeMap, blck blo
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck block, expr expression, phase int) knowledgeMap {
+func constructKnowledgeMapRenderAssignment(
+	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+) knowledgeMap {
 	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
 	switch expr.right.kind {
 	case "primitive":
@@ -163,37 +169,35 @@ func constructKnowledgeMapRenderAssignment(valKnowledgeMap knowledgeMap, blck bl
 				prim.name, len(expr.left), plural, output,
 			))
 		}
-		if expr.right.primitive.check {
-			if !prim.check {
-				errorCritical(fmt.Sprintf(
-					"primitive %s is checked but does not support checking",
-					prim.name,
-				))
-			}
+		if expr.right.primitive.check && !prim.check {
+			errorCritical(fmt.Sprintf(
+				"primitive %s is checked but does not support checking",
+				prim.name,
+			))
 		}
 	}
 	for _, c := range constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-		if i >= 0 {
-			knows := false
-			if valKnowledgeMap.creator[i] == blck.principal.name {
-				knows = true
-			}
-			for _, m := range valKnowledgeMap.knownBy[i] {
-				if _, ok := m[blck.principal.name]; ok {
-					knows = true
-				}
-			}
-			if !knows {
-				errorCritical(fmt.Sprintf(
-					"%s is using constant (%s) despite not knowing it",
-					blck.principal.name,
-					prettyConstant(c),
-				))
-			}
-		} else {
+		if i < 0 {
 			errorCritical(fmt.Sprintf(
 				"constant does not exist (%s)",
+				prettyConstant(c),
+			))
+		}
+		knows := false
+		if valKnowledgeMap.creator[i] == blck.principal.name {
+			knows = true
+		}
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if _, ok := m[blck.principal.name]; ok {
+				knows = true
+				break
+			}
+		}
+		if !knows {
+			errorCritical(fmt.Sprintf(
+				"%s is using constant (%s) despite not knowing it",
+				blck.principal.name,
 				prettyConstant(c),
 			))
 		}
@@ -261,19 +265,20 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block
 				recipientKnows = true
 			}
 		}
-		if !senderKnows {
+		switch {
+		case !senderKnows:
 			errorCritical(fmt.Sprintf(
 				"%s is sending constant (%s) despite not knowing it",
 				blck.message.sender,
 				prettyConstant(c),
 			))
-		} else if recipientKnows {
+		case recipientKnows:
 			errorCritical(fmt.Sprintf(
 				"%s is receiving constant (%s) despite already knowing it",
 				blck.message.recipient,
 				prettyConstant(c),
 			))
-		} else {
+		default:
 			valKnowledgeMap.knownBy[i] = append(
 				valKnowledgeMap.knownBy[i],
 				map[string]string{blck.message.recipient: blck.message.sender},
@@ -284,7 +289,7 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block
 }
 
 func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principalState {
-	var valPrincipalStates []principalState
+	valPrincipalStates := []principalState{}
 	for _, principal := range valKnowledgeMap.principals {
 		valPrincipalState := principalState{
 			name:          principal,
@@ -332,7 +337,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			valPrincipalState.assigned = append(valPrincipalState.assigned, assigned)
 			valPrincipalState.guard = append(valPrincipalState.guard, guard)
 			valPrincipalState.known = append(valPrincipalState.known, knows)
-			valPrincipalState.knownBy = append(valKnowledgeMap.knownBy, valKnowledgeMap.knownBy[i])
+			valPrincipalState.knownBy = append(valPrincipalState.knownBy, valKnowledgeMap.knownBy[i])
 			valPrincipalState.creator = append(valPrincipalState.creator, valKnowledgeMap.creator[i])
 			valPrincipalState.sender = append(valPrincipalState.sender, sender)
 			valPrincipalState.wasRewritten = append(valPrincipalState.wasRewritten, false)

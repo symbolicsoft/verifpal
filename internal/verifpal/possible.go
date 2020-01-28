@@ -6,7 +6,9 @@ package verifpal
 
 import "fmt"
 
-func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, value, []value) {
+func possibleToDecomposePrimitive(
+	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+) (bool, value, []value) {
 	has := []value{}
 	prim := primitiveGet(p.name)
 	if !prim.decompose.hasRule {
@@ -58,7 +60,9 @@ func possibleToDecomposePrimitive(p primitive, valPrincipalState principalState,
 	return false, value{}, has
 }
 
-func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, value, []value) {
+func possibleToRecomposePrimitive(
+	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+) (bool, value, []value) {
 	prim := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
 		return false, value{}, []value{}
@@ -92,7 +96,9 @@ func possibleToRecomposePrimitive(p primitive, valPrincipalState principalState,
 	return false, value{}, []value{}
 }
 
-func possibleToReconstructPrimitive(p primitive, valPrincipalState principalState, valAttackerState attackerState) (bool, []value) {
+func possibleToReconstructPrimitive(
+	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+) (bool, []value) {
 	has := []value{}
 	for _, a := range p.arguments {
 		if sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState) >= 0 {
@@ -140,7 +146,9 @@ func possibleToReconstructPrimitive(p primitive, valPrincipalState principalStat
 	return false, []value{}
 }
 
-func possibleToReconstructEquation(e equation, valPrincipalState principalState, valAttackerState attackerState) (bool, []value) {
+func possibleToReconstructEquation(
+	e equation, valPrincipalState principalState, valAttackerState attackerState,
+) (bool, []value) {
 	eValues := sanityDecomposeEquationValues(e, valPrincipalState)
 	if len(eValues) > 2 {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, eValues[2].constant)
@@ -188,7 +196,9 @@ func possibleToPassAssert(p primitive, valPrincipalState principalState) (bool, 
 	return false, value{kind: "primitive", primitive: p}
 }
 
-func possibleToRewrite(p primitive, valPrincipalState principalState) (bool, value) {
+func possibleToRewrite(
+	p primitive, valPrincipalState principalState,
+) (bool, value) {
 	if p.name == "ASSERT" {
 		return possibleToPassAssert(p, valPrincipalState)
 	}
@@ -238,7 +248,9 @@ func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAt
 	return false
 }
 
-func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
+func possibleToForceRewriteDECandAEADDEC(
+	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+) bool {
 	prim := primitiveGet(p.name)
 	k := p.arguments[prim.decompose.given[0]]
 	switch k.kind {
@@ -267,7 +279,9 @@ func possibleToForceRewriteDECandAEADDEC(p primitive, valPrincipalState principa
 	return false
 }
 
-func possibleToForceRewriteSIGNVERIF(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
+func possibleToForceRewriteSIGNVERIF(
+	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+) bool {
 	k := p.arguments[0]
 	switch k.kind {
 	case "constant":

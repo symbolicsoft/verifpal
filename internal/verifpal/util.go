@@ -16,9 +16,7 @@ import (
 // b2s converts a byte array to a string.
 func b2s(bs []uint8) string {
 	b := make([]byte, len(bs))
-	for i, v := range bs {
-		b[i] = byte(v)
-	}
+	copy(b, bs)
 	return string(b)
 }
 

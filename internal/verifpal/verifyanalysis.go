@@ -58,7 +58,9 @@ func verifyAnalysisGetCount() int {
 	return int(atomic.LoadUint32(&verifyAnalysisCount))
 }
 
-func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttackerState attackerState, o uint32) uint32 {
+func verifyAnalysisDecompose(
+	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
+) uint32 {
 	var r bool
 	var revealed value
 	var ar []value
@@ -87,7 +89,9 @@ func verifyAnalysisDecompose(a value, valPrincipalState principalState, valAttac
 	return o
 }
 
-func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttackerState attackerState, o uint32) uint32 {
+func verifyAnalysisRecompose(
+	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
+) uint32 {
 	var r bool
 	var revealed value
 	var ar []value
@@ -116,7 +120,9 @@ func verifyAnalysisRecompose(a value, valPrincipalState principalState, valAttac
 	return o
 }
 
-func verifyAnalysisReconstruct(a value, valPrincipalState principalState, valAttackerState attackerState, o uint32) uint32 {
+func verifyAnalysisReconstruct(
+	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
+) uint32 {
 	var r bool
 	var ar []value
 	oo := o

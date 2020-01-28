@@ -31,7 +31,6 @@ func attackerStateInit(m Model, valKnowledgeMap knowledgeMap, active bool) bool 
 	for _, blck := range m.blocks {
 		switch blck.kind {
 		case "message":
-		MessageLoop:
 			for _, c := range blck.message.constants {
 				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 				v := value{
@@ -39,12 +38,12 @@ func attackerStateInit(m Model, valKnowledgeMap knowledgeMap, active bool) bool 
 					constant: valKnowledgeMap.constants[i],
 				}
 				if valKnowledgeMap.constants[i].qualifier != "private" {
-					continue MessageLoop
+					continue
 				}
 				ii := sanityExactSameValueInValues(v, attackerStateShared.known)
 				if ii >= 0 {
 					attackerStateShared.wire[ii] = true
-					continue MessageLoop
+					continue
 				}
 				attackerStateShared.known = append(attackerStateShared.known, v)
 				attackerStateShared.wire = append(attackerStateShared.wire, true)

@@ -400,9 +400,9 @@ var primitiveSpecs = []primitiveSpec{
 		recompose: recomposeRule{
 			hasRule: true,
 			given: [][]int{
-				[]int{0, 1},
-				[]int{0, 2},
-				[]int{1, 2},
+				{0, 1},
+				{0, 2},
+				{1, 2},
 			},
 			reveal: 0,
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
@@ -436,12 +436,12 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			name:    "SHAMIR_SPLIT",
 			given: [][]int{
-				[]int{0, 1},
-				[]int{1, 0},
-				[]int{0, 2},
-				[]int{2, 0},
-				[]int{1, 2},
-				[]int{2, 1},
+				{0, 1},
+				{1, 0},
+				{0, 2},
+				{2, 0},
+				{1, 2},
+				{2, 1},
 			},
 			reveal: 0,
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {

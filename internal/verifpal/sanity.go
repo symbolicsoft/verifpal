@@ -25,17 +25,18 @@ func sanityPhases(m Model) {
 	for _, blck := range m.blocks {
 		switch blck.kind {
 		case "phase":
-			if blck.phase.number <= phase {
+			switch {
+			case blck.phase.number <= phase:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) must be superior to last declared phase (%d)",
 					blck.phase.number, phase,
 				))
-			} else if blck.phase.number != phase+1 {
+			case blck.phase.number != phase+1:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) skips phases since last declared phase (%d)",
 					blck.phase.number, phase,
 				))
-			} else {
+			default:
 				phase = blck.phase.number
 			}
 		}
@@ -61,13 +62,15 @@ func sanityAssignmentConstants(right value, constants []constant, valKnowledgeMa
 		)...)
 	case "equation":
 		constants = append(constants, sanityAssignmentConstantsFromEquation(
-			right, constants, valKnowledgeMap,
+			right, constants,
 		)...)
 	}
 	return constants
 }
 
-func sanityAssignmentConstantsFromPrimitive(right value, constants []constant, valKnowledgeMap knowledgeMap) []constant {
+func sanityAssignmentConstantsFromPrimitive(
+	right value, constants []constant, valKnowledgeMap knowledgeMap,
+) []constant {
 	prim := primitiveGet(right.primitive.name)
 	if (len(right.primitive.arguments) == 0) ||
 		(len(right.primitive.arguments) > 5) ||
@@ -107,7 +110,7 @@ func sanityAssignmentConstantsFromPrimitive(right value, constants []constant, v
 	return constants
 }
 
-func sanityAssignmentConstantsFromEquation(right value, constants []constant, valKnowledgeMap knowledgeMap) []constant {
+func sanityAssignmentConstantsFromEquation(right value, constants []constant) []constant {
 	for _, v := range right.equation.values {
 		unique := true
 		for _, c := range constants {
@@ -166,31 +169,38 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 					recipientKnows = true
 				}
 			}
-			if !senderKnows {
-				errorCritical(fmt.Sprintf(
-					"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
-					prettyQuery(query),
-					query.message.sender,
-					prettyConstant(c),
-				))
-			}
-			if !recipientKnows {
-				errorCritical(fmt.Sprintf(
-					"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
-					prettyQuery(query),
-					query.message.recipient,
-					prettyConstant(c),
-				))
-			}
-			if !sanityConstantIsUsedByPrincipal(valKnowledgeMap, query.message.recipient, c) {
-				errorCritical(fmt.Sprintf(
-					"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
-					prettyQuery(query),
-					query.message.recipient,
-					prettyConstant(c),
-				))
-			}
+			constantUsedByPrincipal := sanityConstantIsUsedByPrincipal(valKnowledgeMap, query.message.recipient, c)
+			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		}
+	}
+}
+
+func sanityQueriesCheckKnown(
+	query query, c constant, senderKnows bool, recipientKnows bool, constantUsedByPrincipal bool,
+) {
+	if !senderKnows {
+		errorCritical(fmt.Sprintf(
+			"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
+			prettyQuery(query),
+			query.message.sender,
+			prettyConstant(c),
+		))
+	}
+	if !recipientKnows {
+		errorCritical(fmt.Sprintf(
+			"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
+			prettyQuery(query),
+			query.message.recipient,
+			prettyConstant(c),
+		))
+	}
+	if !constantUsedByPrincipal {
+		errorCritical(fmt.Sprintf(
+			"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
+			prettyQuery(query),
+			query.message.recipient,
+			prettyConstant(c),
+		))
 	}
 }
 
@@ -321,7 +331,9 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 	return true
 }
 
-func sanityEquivalentPrimitives(p1 primitive, p2 primitive, valPrincipalState principalState, considerOutput bool) (bool, int, int) {
+func sanityEquivalentPrimitives(
+	p1 primitive, p2 primitive, valPrincipalState principalState, considerOutput bool,
+) (bool, int, int) {
 	if p1.name != p2.name {
 		return false, 0, 0
 	}
@@ -373,18 +385,16 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState princ
 				return true
 			}
 		}
-	} else {
-		if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) {
-			if sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
-				return true
-			}
+	} else if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) {
+		if sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
+			return true
 		}
 	}
 	return false
 }
 
 func sanityDecomposeEquationValues(e equation, valPrincipalState principalState) []value {
-	var values []value
+	values := []value{}
 	for _, v := range e.values {
 		switch v.kind {
 		case "constant":
@@ -395,7 +405,9 @@ func sanityDecomposeEquationValues(e equation, valPrincipalState principalState)
 	return values
 }
 
-func sanityFindConstantInPrimitive(c constant, p primitive, valPrincipalState principalState) bool {
+func sanityFindConstantInPrimitive(
+	c constant, p primitive, valPrincipalState principalState,
+) bool {
 	a := sanityResolveConstant(c, valPrincipalState)
 	for _, aa := range p.arguments {
 		switch aa.kind {
@@ -481,7 +493,9 @@ func sanityEquivalentValueInValues(v value, assigneds []value, valPrincipalState
 	return index
 }
 
-func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState principalState) ([]primitive, bool, value, principalState) {
+func sanityPerformPrimitiveRewrite(
+	p primitive, pi int, valPrincipalState principalState,
+) ([]primitive, bool, value, principalState) {
 	var wasRewritten bool
 	var failedRewrites []primitive
 	var pFailedRewrite []primitive
@@ -557,7 +571,9 @@ func sanityPerformPrimitiveRewrite(p primitive, pi int, valPrincipalState princi
 	return failedRewrites, wasRewritten, rewrite, valPrincipalState
 }
 
-func sanityPerformEquationRewrite(e equation, pi int, valPrincipalState principalState) ([]primitive, bool, value, principalState) {
+func sanityPerformEquationRewrite(
+	e equation, pi int, valPrincipalState principalState,
+) ([]primitive, bool, value, principalState) {
 	var wasRewritten bool
 	var failedRewrites []primitive
 	var pFailedRewrite []primitive
@@ -631,7 +647,7 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 			failedRewrite, _, _, valPrincipalState = sanityPerformPrimitiveRewrite(
 				valPrincipalState.assigned[i].primitive, i, valPrincipalState,
 			)
-			if len(failedRewrite) <= 0 {
+			if len(failedRewrite) == 0 {
 				continue
 			}
 			failedRewrites = append(failedRewrites, failedRewrite...)
@@ -642,7 +658,7 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 			failedRewrite, _, _, valPrincipalState = sanityPerformEquationRewrite(
 				valPrincipalState.assigned[i].equation, i, valPrincipalState,
 			)
-			if len(failedRewrite) <= 0 {
+			if len(failedRewrite) == 0 {
 				continue
 			}
 			failedRewrites = append(failedRewrites, failedRewrite...)
@@ -666,7 +682,7 @@ func sanityFailOnFailedRewrite(failedRewrites []primitive) {
 	}
 }
 
-func sanityCheckEquationRootGenerator(e equation, valPrincipalState principalState) {
+func sanityCheckEquationRootGenerator(e equation) {
 	if len(e.values) > 3 {
 		errorCritical(fmt.Sprintf(
 			"too many layers in equation (%s), maximum is 2",
@@ -701,11 +717,11 @@ func sanityCheckEquationGenerators(a value, valPrincipalState principalState) {
 			case "primitive":
 				sanityCheckEquationGenerators(va, valPrincipalState)
 			case "equation":
-				sanityCheckEquationRootGenerator(va.equation, valPrincipalState)
+				sanityCheckEquationRootGenerator(va.equation)
 			}
 		}
 	case "equation":
-		sanityCheckEquationRootGenerator(a.equation, valPrincipalState)
+		sanityCheckEquationRootGenerator(a.equation)
 	}
 }
 
@@ -730,7 +746,9 @@ func sanityResolveConstant(c constant, valPrincipalState principalState) value {
 	return valPrincipalState.assigned[i]
 }
 
-func sanityResolveValueInternalValuesFromKnowledgeMap(a value, valKnowledgeMap knowledgeMap) (value, []value) {
+func sanityResolveValueInternalValuesFromKnowledgeMap(
+	a value, valKnowledgeMap knowledgeMap,
+) (value, []value) {
 	var v []value
 	switch a.kind {
 	case "constant":
@@ -801,7 +819,9 @@ func sanityResolveValueInternalValuesFromKnowledgeMap(a value, valKnowledgeMap k
 	return a, v
 }
 
-func sanityResolveValueInternalValuesFromPrincipalState(a value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool) (value, []value) {
+func sanityResolveValueInternalValuesFromPrincipalState(
+	a value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) (value, []value) {
 	var v []value
 	switch a.kind {
 	case "constant":
@@ -827,11 +847,15 @@ func sanityResolveValueInternalValuesFromPrincipalState(a value, rootIndex int, 
 	return a, v
 }
 
-func sanityResolveConstantInternalValuesFromPrincipalState(a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool) (value, []value) {
+func sanityResolveConstantInternalValuesFromPrincipalState(
+	a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) (value, []value) {
 	return a, v
 }
 
-func sanityResolvePrimitiveInternalValuesFromPrincipalState(a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool) (value, []value) {
+func sanityResolvePrimitiveInternalValuesFromPrincipalState(
+	a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) (value, []value) {
 	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
 		forceBeforeMutate = false
 	}
@@ -852,7 +876,9 @@ func sanityResolvePrimitiveInternalValuesFromPrincipalState(a value, v []value, 
 	return r, v
 }
 
-func sanityResolveEquationInternalValuesFromPrincipalState(a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool) (value, []value) {
+func sanityResolveEquationInternalValuesFromPrincipalState(
+	a value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) (value, []value) {
 	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
 		forceBeforeMutate = false
 	}
@@ -884,10 +910,14 @@ func sanityResolveEquationInternalValuesFromPrincipalState(a value, v []value, r
 		case "constant":
 			r.equation.values = append(r.equation.values, aa[aai])
 		case "primitive":
-			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(aa[aai], rootIndex, valPrincipalState, forceBeforeMutate)
+			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(
+				aa[aai], rootIndex, valPrincipalState, forceBeforeMutate,
+			)
 			r.equation.values = append(r.equation.values, aaa)
 		case "equation":
-			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(aa[aai], rootIndex, valPrincipalState, forceBeforeMutate)
+			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(
+				aa[aai], rootIndex, valPrincipalState, forceBeforeMutate,
+			)
 			if aai == 0 {
 				r.equation.values = aaa.equation.values
 			} else {
@@ -920,7 +950,9 @@ func sanityConstantIsUsedByPrincipal(valKnowledgeMap knowledgeMap, name string, 
 	return false
 }
 
-func sanityResolveAllPrincipalStateValues(valPrincipalState principalState, valKnowledgeMap knowledgeMap) principalState {
+func sanityResolveAllPrincipalStateValues(
+	valPrincipalState principalState, valKnowledgeMap knowledgeMap,
+) principalState {
 	var resolvesGroup sync.WaitGroup
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.assigned {

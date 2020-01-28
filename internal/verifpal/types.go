@@ -61,11 +61,11 @@ type value struct {
 }
 
 type constant struct {
-	name        string
 	guard       bool
+	fresh       bool
+	name        string
 	declaration string
 	qualifier   string
-	fresh       bool
 }
 
 type primitive struct {
@@ -170,10 +170,10 @@ type attackerStateMutatedToUpdate struct {
 
 type replacementMap struct {
 	initialized       bool
+	outOfReplacements bool
+	lastIncrement     int
 	constants         []constant
 	replacements      [][]value
 	combination       []value
 	depthIndex        []int
-	lastIncrement     int
-	outOfReplacements bool
 }

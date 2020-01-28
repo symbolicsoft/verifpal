@@ -8,7 +8,10 @@ import (
 	"fmt"
 )
 
-func queryStart(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
+func queryStart(
+	query query, valKnowledgeMap knowledgeMap,
+	valPrincipalState principalState, valAttackerState attackerState,
+) {
 	switch query.kind {
 	case "confidentiality":
 		queryConfidentiality(query, valPrincipalState, valAttackerState)
@@ -17,7 +20,10 @@ func queryStart(query query, valKnowledgeMap knowledgeMap, valPrincipalState pri
 	}
 }
 
-func queryConfidentiality(query query, valPrincipalState principalState, valAttackerState attackerState) {
+func queryConfidentiality(
+	query query,
+	valPrincipalState principalState, valAttackerState attackerState,
+) {
 	var mutated string
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState),
@@ -53,7 +59,10 @@ func queryConfidentiality(query query, valPrincipalState principalState, valAtta
 	}
 }
 
-func queryAuthentication(query query, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
+func queryAuthentication(
+	query query, valKnowledgeMap knowledgeMap,
+	valPrincipalState principalState, valAttackerState attackerState,
+) {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool

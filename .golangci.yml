@@ -1,0 +1,96 @@
+run:
+    skip-files:
+        - parser.go
+
+linters:
+    enable:
+        - govet
+        - errcheck
+        - staticcheck
+        - unused
+        - gosimple
+        - gofmt
+        - structcheck
+        - varcheck
+        - ineffassign
+        - deadcode
+        - typecheck
+        - depguard
+        - dogsled
+        - dupl
+        - funlen
+        - gochecknoinits
+        - gocritic
+        - gocyclo
+        - godox
+        - gosec
+        - interfacer
+        - lll
+        - maligned
+        - misspell
+        - nakedret
+        - prealloc
+        - scopelint
+        - unconvert
+        - unparam
+        - whitespace
+
+linters-settings:
+    gocritic:
+        enabled-checks:
+            - appendAssign
+            - caseOrder
+            - dupArg
+            - dupBranchBody
+            - dupCase
+            - dupSubExpr
+            - flagDeref
+            - captLocal
+            - defaultCaseOrder
+            - elseif
+            - ifElseChain
+            - regexpMust
+            - sloppyLen
+            - switchTrue
+            - typeSwitchVar
+            - underef
+            - unlambda
+            - unslice
+            - argOrder
+            - badCall
+            - badCond
+            - commentedOutCode
+            - evalOrder
+            - exitAfterDefer
+            - flagName
+            - mapKey
+            - nilValReturn
+            - octalLiteral
+            - offBy1
+            - regexpPattern
+            - sloppyReassign
+            - truncateCmp
+            - weakCond
+            - boolExprSimplify
+            - builtinShadow
+            - dupImport
+            - methodExprCall
+            - initClause
+            - newDeref
+            - nestingReduce
+            - stringXbytes
+            - unlabelStmt
+            - typeUnparen
+            - unnecessaryBlock
+            - valSwap
+            - wrapperFunc
+            - yodaStyleExpr
+    goconst:
+        min-len: 12
+    funlen:
+        statements: 64
+        lines: 128
+    gocyclo:
+        min-complexity: 20
+    govet:
+        enable-all: true

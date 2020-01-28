@@ -8,10 +8,7 @@ import (
 	"sync"
 )
 
-func verifyActive(
-	m Model,
-	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
-) {
+func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	prettyMessage("Attacker is configured as active.", "info", false)
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 	verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
@@ -79,7 +76,10 @@ func verifyActiveScan(
 	cg.Done()
 }
 
-func verifyActiveMutatePrincipalState(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, valReplacementMap replacementMap) (principalState, bool) {
+func verifyActiveMutatePrincipalState(
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
+	valAttackerState attackerState, valReplacementMap replacementMap,
+) (principalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valReplacementMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)

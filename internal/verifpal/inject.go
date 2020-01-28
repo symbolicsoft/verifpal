@@ -101,7 +101,6 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 		return false
 	}
 	return prettyPrimitive(injectPrimitiveSkeleton(p)) == prettyPrimitive(skeleton)
-
 }
 
 func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
@@ -141,7 +140,10 @@ SkeletonSearch:
 	}
 }
 
-func injectPrimitive(p primitive, rootPrimitive primitive, valPrincipalState principalState, valAttackerState attackerState, includeHashes bool) []value {
+func injectPrimitive(
+	p primitive, rootPrimitive primitive,
+	valPrincipalState principalState, valAttackerState attackerState, includeHashes bool,
+) []value {
 	var injectsGroup sync.WaitGroup
 	var injectants []value
 	if p.name == "HASH" && !includeHashes {

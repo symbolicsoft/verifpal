@@ -22,9 +22,9 @@ func Verify(filePath string) {
 	), "verifpal", false)
 	switch m.attacker {
 	case "passive":
-		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
+		verifyPassive(valKnowledgeMap, valPrincipalStates)
 	case "active":
-		verifyActive(m, valKnowledgeMap, valPrincipalStates)
+		verifyActive(valKnowledgeMap, valPrincipalStates)
 	default:
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
@@ -32,7 +32,9 @@ func Verify(filePath string) {
 	verifyEnd()
 }
 
-func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState) {
+func verifyResolveQueries(
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState,
+) {
 	valVerifyResults, _ := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if !verifyResult.resolved {
@@ -43,8 +45,8 @@ func verifyResolveQueries(valKnowledgeMap knowledgeMap, valPrincipalState princi
 
 func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
 	var scanGroup sync.WaitGroup
-	for _, valPrincipalState := range valPrincipalStates {
-		valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
+	for _, state := range valPrincipalStates {
+		valPrincipalState := sanityResolveAllPrincipalStateValues(state, valKnowledgeMap)
 		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 		sanityFailOnFailedRewrite(failedRewrites)
 		for i := range valPrincipalState.assigned {
@@ -56,7 +58,7 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 	}
 }
 
-func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	prettyMessage("Attacker is configured as passive.", "info", false)
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 }
