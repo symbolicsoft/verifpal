@@ -1,0 +1,13 @@
+pipeline:
+  prerequisites:
+    image: "golang:latest"
+    commands: 
+      - go version
+      - make dependencies
+      - make all
+
+  linter:
+    image: "golang:latest"
+    commands:
+      - go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
+      - golangci-lint run
