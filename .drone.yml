@@ -1,13 +1,17 @@
-pipeline:
-  prerequisites:
-    image: "golang:latest"
-    commands: 
-      - go version
-      - make dependencies
-      - make all
+kind: pipeline
+type: docker
+name: drone
 
-  linter:
-    image: "golang:latest"
-    commands:
-      - go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
-      - golangci-lint run
+steps:
+- name: build
+  image: golang:latest
+  commands:
+  - go version
+  - make dependencies
+  - make all
+- name: lint
+  image: golangci/golangci-lint:latest
+  commands:
+  - golangci-lint run
+
+
