@@ -1,14 +1,22 @@
+---
 kind: pipeline
 type: docker
-name: drone
+name: default
 
-clone:
-  path: source.symbolic.software/verifpal/verifpal
+platform:
+  arch: amd64
+  os: linux
 
-build:
-  image: golang:latest
-  commands:
+steps:
+  - name: build
+    image: golang:latest
+    commands:
     - go get ./...
     - go build ./...
+  - name: lint
+    image: golangci/golangci-lint:latest
+    commands:
+    - golangci-lint run
+  
 
 
