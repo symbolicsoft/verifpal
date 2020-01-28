@@ -9,6 +9,8 @@ steps:
 - name: build
   image: golang:latest
   commands:
-  - go version
   - make dependencies
-  - make all
+  - go version
+  - go get ./...
+  - go build verifpal.com/cmd/verifpal
+  - go run verifpal.com/cmd/verifpal
