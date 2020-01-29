@@ -169,7 +169,9 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 					recipientKnows = true
 				}
 			}
-			constantUsedByPrincipal := sanityConstantIsUsedByPrincipal(valKnowledgeMap, query.message.recipient, c)
+			constantUsedByPrincipal := sanityConstantIsUsedByPrincipal(
+				valKnowledgeMap, query.message.recipient, c, i,
+			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		}
 	}
@@ -756,71 +758,102 @@ func sanityResolveValueInternalValuesFromKnowledgeMap(
 	var v []value
 	switch a.kind {
 	case "constant":
-		v = append(v, a)
+		if sanityExactSameValueInValues(a, v) < 0 {
+			v = append(v, a)
+		}
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
 		a = valKnowledgeMap.assigned[i]
 	}
 	switch a.kind {
 	case "constant":
-		return a, v
+		return sanityResolveConstantInternalValuesFromKnowledgeMap(
+			a, v, valKnowledgeMap,
+		)
 	case "primitive":
-		r := value{
-			kind: "primitive",
-			primitive: primitive{
-				name:      a.primitive.name,
-				arguments: []value{},
-				output:    a.primitive.output,
-				check:     a.primitive.check,
-			},
-		}
-		for _, aa := range a.primitive.arguments {
-			s, vv := sanityResolveValueInternalValuesFromKnowledgeMap(aa, valKnowledgeMap)
-			v = append(v, vv...)
-			r.primitive.arguments = append(r.primitive.arguments, s)
-		}
-		return r, v
+		return sanityResolvePrimitiveInternalValuesFromKnowledgeMap(
+			a, v, valKnowledgeMap,
+		)
 	case "equation":
-		r := value{
-			kind: "equation",
-			equation: equation{
-				values: []value{},
-			},
-		}
-		if len(a.equation.values) > 2 {
-			v = append(v, a.equation.values...)
-			return a, v
-		}
-		aa := []value{}
-		for _, c := range a.equation.values {
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.constant)
-			aa = append(aa, valKnowledgeMap.assigned[i])
-		}
-		for aai := range aa {
-			switch aa[aai].kind {
-			case "constant":
-				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].constant)
-				aa[aai] = valKnowledgeMap.assigned[i]
-			}
-		}
-		for aai := range aa {
-			switch aa[aai].kind {
-			case "constant":
-				r.equation.values = append(r.equation.values, aa[aai])
-			case "primitive":
-				r.equation.values = append(r.equation.values, aa[aai])
-			case "equation":
-				aaa, _ := sanityResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
-				if aai == 0 {
-					r.equation.values = aaa.equation.values
-				} else {
-					r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
-				}
-			}
-		}
-		v = append(v, r.equation.values...)
-		return r, v
+		return sanityResolveEquationInternalValuesFromKnowledgeMap(
+			a, v, valKnowledgeMap,
+		)
 	}
 	return a, v
+}
+
+func sanityResolveConstantInternalValuesFromKnowledgeMap(
+	a value, v []value, valKnowledgeMap knowledgeMap,
+) (value, []value) {
+	return a, v
+}
+
+func sanityResolvePrimitiveInternalValuesFromKnowledgeMap(
+	a value, v []value, valKnowledgeMap knowledgeMap,
+) (value, []value) {
+	r := value{
+		kind: "primitive",
+		primitive: primitive{
+			name:      a.primitive.name,
+			arguments: []value{},
+			output:    a.primitive.output,
+			check:     a.primitive.check,
+		},
+	}
+	for _, aa := range a.primitive.arguments {
+		s, vv := sanityResolveValueInternalValuesFromKnowledgeMap(aa, valKnowledgeMap)
+		for _, vvv := range vv {
+			if sanityExactSameValueInValues(vvv, v) < 0 {
+				v = append(v, vvv)
+			}
+		}
+		r.primitive.arguments = append(r.primitive.arguments, s)
+	}
+	return r, v
+}
+
+func sanityResolveEquationInternalValuesFromKnowledgeMap(
+	a value, v []value, valKnowledgeMap knowledgeMap,
+) (value, []value) {
+	r := value{
+		kind: "equation",
+		equation: equation{
+			values: []value{},
+		},
+	}
+	aa := []value{}
+	for _, c := range a.equation.values {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.constant)
+		aa = append(aa, valKnowledgeMap.assigned[i])
+	}
+	for aai := range aa {
+		switch aa[aai].kind {
+		case "constant":
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].constant)
+			aa[aai] = valKnowledgeMap.assigned[i]
+		}
+	}
+	for aai := range aa {
+		switch aa[aai].kind {
+		case "constant":
+			r.equation.values = append(r.equation.values, aa[aai])
+		case "primitive":
+			r.equation.values = append(r.equation.values, aa[aai])
+		case "equation":
+			aaa, _ := sanityResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
+			if aai == 0 {
+				r.equation.values = aaa.equation.values
+			} else {
+				r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+			}
+			if sanityExactSameValueInValues(r, v) < 0 {
+				v = append(v, r)
+			}
+		}
+	}
+	if sanityExactSameValueInValues(r, v) < 0 {
+		v = append(v, r)
+	}
+	return r, v
 }
 
 func sanityResolveValueInternalValuesFromPrincipalState(
@@ -882,7 +915,11 @@ func sanityResolvePrimitiveInternalValuesFromPrincipalState(
 		s, vv := sanityResolveValueInternalValuesFromPrincipalState(
 			aa, rootIndex, valPrincipalState, forceBeforeMutate,
 		)
-		v = append(v, vv...)
+		for _, vvv := range vv {
+			if sanityExactSameValueInValues(vvv, v) < 0 {
+				v = append(v, vvv)
+			}
+		}
 		r.primitive.arguments = append(r.primitive.arguments, s)
 	}
 	return r, v
@@ -899,10 +936,6 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 		equation: equation{
 			values: []value{},
 		},
-	}
-	if len(a.equation.values) > 2 {
-		v = append(v, a.equation.values...)
-		return a, v
 	}
 	aa := []value{}
 	aa = append(aa, a.equation.values...)
@@ -935,27 +968,32 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 			} else {
 				r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
 			}
+			if sanityExactSameValueInValues(r, v) < 0 {
+				v = append(v, r)
+			}
 		}
 	}
-	v = append(v, r.equation.values...)
+	if sanityExactSameValueInValues(r, v) < 0 {
+		v = append(v, r)
+	}
 	return r, v
 }
 
-func sanityConstantIsUsedByPrincipal(valKnowledgeMap knowledgeMap, name string, c constant) bool {
-	for i, a := range valKnowledgeMap.assigned {
-		if valKnowledgeMap.creator[i] != name {
+func sanityConstantIsUsedByPrincipal(
+	valKnowledgeMap knowledgeMap, name string, c constant, i int,
+) bool {
+	for ii, a := range valKnowledgeMap.assigned {
+		if valKnowledgeMap.creator[ii] != name {
 			continue
 		}
 		switch a.kind {
 		case "primitive":
 			_, v := sanityResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
-			for _, vv := range v {
-				switch vv.kind {
-				case "constant":
-					if vv.constant.name == c.name {
-						return true
-					}
-				}
+			if sanityExactSameValueInValues(valKnowledgeMap.assigned[i], v) >= 0 {
+				return true
+			}
+			if sanityExactSameValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
+				return true
 			}
 		}
 	}
