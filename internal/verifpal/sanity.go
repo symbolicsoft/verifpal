@@ -839,11 +839,10 @@ func sanityResolveEquationInternalValuesFromKnowledgeMap(
 		case "primitive":
 			r.equation.values = append(r.equation.values, aa[aai])
 		case "equation":
-			aaa, _ := sanityResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
 			if aai == 0 {
-				r.equation.values = aaa.equation.values
+				r.equation.values = aa[aai].equation.values
 			} else {
-				r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
 			}
 			if sanityExactSameValueInValues(r, v) < 0 {
 				v = append(v, r)
@@ -960,13 +959,10 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 			)
 			r.equation.values = append(r.equation.values, aaa)
 		case "equation":
-			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(
-				aa[aai], rootIndex, valPrincipalState, forceBeforeMutate,
-			)
 			if aai == 0 {
-				r.equation.values = aaa.equation.values
+				r.equation.values = aa[aai].equation.values
 			} else {
-				r.equation.values = append(r.equation.values, aaa.equation.values[1:]...)
+				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
 			}
 			if sanityExactSameValueInValues(r, v) < 0 {
 				v = append(v, r)

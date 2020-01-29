@@ -157,8 +157,7 @@ func verifyAnalysisReconstruct(
 
 func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint32) uint32 {
 	oo := o
-	for _, c := range valPrincipalState.constants {
-		aa := sanityResolveConstant(c, valPrincipalState)
+	for _, aa := range valPrincipalState.assigned {
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			write := attackerStateWrite{
 				known:     aa,
