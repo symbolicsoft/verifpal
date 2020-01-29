@@ -163,17 +163,13 @@ func constructKnowledgeMapRenderAssignment(
 	case "primitive":
 		prim := primitiveGet(expr.right.primitive.name)
 		if (len(expr.left) != prim.output) && (prim.output >= 0) {
-			plural := ""
 			output := fmt.Sprintf("%d", prim.output)
-			if len(expr.left) > 1 {
-				plural = "s"
-			}
 			if prim.output < 0 {
 				output = "at least 1"
 			}
 			errorCritical(fmt.Sprintf(
-				"primitive %s has %d output%s, expecting %s",
-				prim.name, len(expr.left), plural, output,
+				"primitive %s has %d outputs, expecting %s",
+				prim.name, len(expr.left), output,
 			))
 		}
 		if expr.right.primitive.check && !prim.check {
@@ -191,10 +187,7 @@ func constructKnowledgeMapRenderAssignment(
 				prettyConstant(c),
 			))
 		}
-		knows := false
-		if valKnowledgeMap.creator[i] == blck.principal.name {
-			knows = true
-		}
+		knows := valKnowledgeMap.creator[i] == blck.principal.name
 		for _, m := range valKnowledgeMap.knownBy[i] {
 			if _, ok := m[blck.principal.name]; ok {
 				knows = true

@@ -67,7 +67,8 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valReplacementMap,
+		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
+		valAttackerState, valReplacementMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
@@ -120,7 +121,9 @@ func verifyActiveMutatePrincipalState(
 	failedRewrites, failedRewriteIndices, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 	for i, p := range failedRewrites {
 		if p.check {
-			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(valPrincipalState, failedRewriteIndices[i]+1)
+			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
+				valPrincipalState, failedRewriteIndices[i]+1,
+			)
 			break
 		}
 	}

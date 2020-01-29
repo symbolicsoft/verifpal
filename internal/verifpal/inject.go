@@ -145,9 +145,8 @@ func injectPrimitive(
 	valPrincipalState principalState, valAttackerState attackerState, includeHashes bool,
 ) []value {
 	var injectsGroup sync.WaitGroup
-	var injectants []value
 	if p.name == "HASH" && !includeHashes {
-		return injectants
+		return []value{}
 	}
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
@@ -179,22 +178,27 @@ func injectPrimitive(
 		}(arg)
 	}
 	injectsGroup.Wait()
-	switch len(p.arguments) {
-	case 1:
-		injectants = injectLoop1(p, injectants, kinjectants)
-	case 2:
-		injectants = injectLoop2(p, injectants, kinjectants)
-	case 3:
-		injectants = injectLoop3(p, injectants, kinjectants)
-	case 4:
-		injectants = injectLoop4(p, injectants, kinjectants)
-	case 5:
-		injectants = injectLoop5(p, injectants, kinjectants)
-	}
-	return injectants
+	return injectLoopN(p, kinjectants)
 }
 
-func injectLoop1(p primitive, injectants []value, kinjectants [][]value) []value {
+func injectLoopN(p primitive, kinjectants [][]value) []value {
+	switch len(p.arguments) {
+	case 1:
+		return injectLoop1(p, kinjectants)
+	case 2:
+		return injectLoop2(p, kinjectants)
+	case 3:
+		return injectLoop3(p, kinjectants)
+	case 4:
+		return injectLoop4(p, kinjectants)
+	case 5:
+		return injectLoop5(p, kinjectants)
+	}
+	return []value{}
+}
+
+func injectLoop1(p primitive, kinjectants [][]value) []value {
+	var injectants []value
 	for i := range kinjectants[0] {
 		aa := value{
 			kind: "primitive",
@@ -214,7 +218,8 @@ func injectLoop1(p primitive, injectants []value, kinjectants [][]value) []value
 	return injectants
 }
 
-func injectLoop2(p primitive, injectants []value, kinjectants [][]value) []value {
+func injectLoop2(p primitive, kinjectants [][]value) []value {
+	var injectants []value
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			aa := value{
@@ -237,7 +242,8 @@ func injectLoop2(p primitive, injectants []value, kinjectants [][]value) []value
 	return injectants
 }
 
-func injectLoop3(p primitive, injectants []value, kinjectants [][]value) []value {
+func injectLoop3(p primitive, kinjectants [][]value) []value {
+	var injectants []value
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
@@ -263,7 +269,8 @@ func injectLoop3(p primitive, injectants []value, kinjectants [][]value) []value
 	return injectants
 }
 
-func injectLoop4(p primitive, injectants []value, kinjectants [][]value) []value {
+func injectLoop4(p primitive, kinjectants [][]value) []value {
+	var injectants []value
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
@@ -292,7 +299,8 @@ func injectLoop4(p primitive, injectants []value, kinjectants [][]value) []value
 	return injectants
 }
 
-func injectLoop5(p primitive, injectants []value, kinjectants [][]value) []value {
+func injectLoop5(p primitive, kinjectants [][]value) []value {
+	var injectants []value
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {

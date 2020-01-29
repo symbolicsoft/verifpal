@@ -88,18 +88,18 @@ func queryAuthentication(
 				return
 			}
 			b := valPrincipalState.beforeRewrite[iiii]
-			if primitiveGet(b.primitive.name).rewrite.hasRule {
-				pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
-				forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
-				if pass || forcedPass {
-					indices = append(indices, iiii)
-					passes = append(passes, pass)
-					forcedPasses = append(forcedPasses, forcedPass)
-				}
-			} else {
+			if !primitiveGet(b.primitive.name).rewrite.hasRule {
 				indices = append(indices, iiii)
 				passes = append(passes, true)
 				forcedPasses = append(forcedPasses, false)
+				continue
+			}
+			pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
+			forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
+			if pass || forcedPass {
+				indices = append(indices, iiii)
+				passes = append(passes, pass)
+				forcedPasses = append(forcedPasses, forcedPass)
 			}
 		}
 	}
