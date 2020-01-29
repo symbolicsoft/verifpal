@@ -47,15 +47,23 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 			for _, expr := range blck.principal.expressions {
 				switch expr.kind {
 				case "knows":
-					valKnowledgeMap = constructKnowledgeMapRenderKnows(valKnowledgeMap, blck, expr, phase)
+					valKnowledgeMap = constructKnowledgeMapRenderKnows(
+						valKnowledgeMap, blck, expr, phase,
+					)
 				case "generates":
-					valKnowledgeMap = constructKnowledgeMapRenderGenerates(valKnowledgeMap, blck, expr, phase)
+					valKnowledgeMap = constructKnowledgeMapRenderGenerates(
+						valKnowledgeMap, blck, expr, phase,
+					)
 				case "assignment":
-					valKnowledgeMap = constructKnowledgeMapRenderAssignment(valKnowledgeMap, blck, expr, phase)
+					valKnowledgeMap = constructKnowledgeMapRenderAssignment(
+						valKnowledgeMap, blck, expr, phase,
+					)
 				}
 			}
 		case "message":
-			valKnowledgeMap = constructKnowledgeMapRenderMessage(valKnowledgeMap, blck)
+			valKnowledgeMap = constructKnowledgeMapRenderMessage(
+				valKnowledgeMap, blck,
+			)
 		case "phase":
 			phase = blck.phase.number
 		}
@@ -84,33 +92,33 @@ func constructKnowledgeMapRenderKnows(
 				valKnowledgeMap.knownBy[i],
 				map[string]string{blck.principal.name: blck.principal.name},
 			)
-		} else {
-			c = constant{
-				name:        c.name,
-				guard:       c.guard,
-				fresh:       false,
-				declaration: "knows",
-				qualifier:   expr.qualifier,
-			}
-			valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-			valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-				kind:     "constant",
-				constant: c,
-			})
-			valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
-			valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-			valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
-			l := len(valKnowledgeMap.constants) - 1
-			if expr.qualifier != "public" {
-				continue
-			}
-			for _, principal := range valKnowledgeMap.principals {
-				if principal != blck.principal.name {
-					valKnowledgeMap.knownBy[l] = append(
-						valKnowledgeMap.knownBy[l],
-						map[string]string{principal: principal},
-					)
-				}
+			continue
+		}
+		c = constant{
+			name:        c.name,
+			guard:       c.guard,
+			fresh:       false,
+			declaration: "knows",
+			qualifier:   expr.qualifier,
+		}
+		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
+		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
+			kind:     "constant",
+			constant: c,
+		})
+		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
+		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+		l := len(valKnowledgeMap.constants) - 1
+		if expr.qualifier != "public" {
+			continue
+		}
+		for _, principal := range valKnowledgeMap.principals {
+			if principal != blck.principal.name {
+				valKnowledgeMap.knownBy[l] = append(
+					valKnowledgeMap.knownBy[l],
+					map[string]string{principal: principal},
+				)
 			}
 		}
 	}

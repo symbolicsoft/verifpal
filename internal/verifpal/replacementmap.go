@@ -50,12 +50,14 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 				a, v, ii, stage,
 				valPrincipalState, valAttackerState,
 			)
-			if b {
-				replacementsMutex.Lock()
-				valReplacementMap.constants = append(valReplacementMap.constants, c)
-				valReplacementMap.replacements = append(valReplacementMap.replacements, r)
-				replacementsMutex.Unlock()
+			if !b {
+				replacementsGroup.Done()
+				return
 			}
+			replacementsMutex.Lock()
+			valReplacementMap.constants = append(valReplacementMap.constants, c)
+			valReplacementMap.replacements = append(valReplacementMap.replacements, r)
+			replacementsMutex.Unlock()
 			replacementsGroup.Done()
 		}(v)
 	}
@@ -73,9 +75,11 @@ func replacementMapReplaceValue(
 	valPrincipalState principalState, valAttackerState attackerState,
 ) (constant, []value, bool) {
 	replacements := []value{}
+	gOrNil := ((strings.ToLower(a.constant.name) == "g") ||
+		(a.constant.name == "nil"))
 	switch a.kind {
 	case "constant":
-		if (strings.ToLower(a.constant.name) == "g") || (a.constant.name == "nil") {
+		if gOrNil {
 			return v.constant, replacements, false
 		}
 		replacements = append(replacements, a)
@@ -86,7 +90,7 @@ func replacementMapReplaceValue(
 				cc := sanityResolveConstant(c.constant, valPrincipalState)
 				switch cc.kind {
 				case "constant":
-					if (strings.ToLower(cc.constant.name) == "g") || (cc.constant.name == "nil") {
+					if gOrNil {
 						return v.constant, replacements, false
 					}
 					if sanityExactSameValueInValues(cc, replacements) < 0 {
@@ -101,7 +105,10 @@ func replacementMapReplaceValue(
 			return v.constant, replacements, true
 		}
 		includeHashes := (stage > 2)
-		injectants := inject(a.primitive, a.primitive, true, rootIndex, valPrincipalState, valAttackerState, includeHashes)
+		injectants := inject(
+			a.primitive, a.primitive, true, rootIndex,
+			valPrincipalState, valAttackerState, includeHashes,
+		)
 		for _, aa := range injectants {
 			if sanityExactSameValueInValues(aa, replacements) < 0 {
 				replacements = append(replacements, aa)

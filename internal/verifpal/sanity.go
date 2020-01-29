@@ -313,7 +313,9 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 		case "constant":
 			return false
 		case "primitive":
-			equivPrim, _, _ := sanityEquivalentPrimitives(a1.primitive, a2.primitive, valPrincipalState, true)
+			equivPrim, _, _ := sanityEquivalentPrimitives(
+				a1.primitive, a2.primitive, valPrincipalState, true,
+			)
 			return equivPrim
 		case "equation":
 			return false
@@ -325,7 +327,9 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 		case "primitive":
 			return false
 		case "equation":
-			return sanityEquivalentEquations(a1.equation, a2.equation, valPrincipalState)
+			return sanityEquivalentEquations(
+				a1.equation, a2.equation, valPrincipalState,
+			)
 		}
 	}
 	return true
@@ -524,10 +528,10 @@ func sanityPerformPrimitiveRewrite(
 			if pWasRewritten {
 				wasRewritten = true
 				rewrite.primitive.arguments[i] = pRewrite
-			} else {
-				rewrite.primitive.arguments[i] = p.arguments[i]
-				failedRewrites = append(failedRewrites, pFailedRewrite...)
+				continue
 			}
+			rewrite.primitive.arguments[i] = p.arguments[i]
+			failedRewrites = append(failedRewrites, pFailedRewrite...)
 		case "equation":
 			eFailedRewrite, eWasRewritten, eRewrite, valPrincipalState = sanityPerformEquationRewrite(
 				a.equation, -1, valPrincipalState,
@@ -535,10 +539,10 @@ func sanityPerformPrimitiveRewrite(
 			if eWasRewritten {
 				wasRewritten = true
 				rewrite.primitive.arguments[i] = eRewrite
-			} else {
-				rewrite.primitive.arguments[i] = p.arguments[i]
-				failedRewrites = append(failedRewrites, eFailedRewrite...)
+				continue
 			}
+			rewrite.primitive.arguments[i] = p.arguments[i]
+			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
 	wasRebuilt, rebuild := possibleToRebuild(rewrite.primitive, valPrincipalState)
@@ -600,31 +604,31 @@ func sanityPerformEquationRewrite(
 			pFailedRewrite, pWasRewritten, pRewrite, valPrincipalState = sanityPerformPrimitiveRewrite(
 				a.primitive, -1, valPrincipalState,
 			)
-			if pWasRewritten {
-				wasRewritten = true
-				switch pRewrite.kind {
-				case "constant":
-					rewrite.equation.values = append(rewrite.equation.values, pRewrite)
-				case "primitive":
-					rewrite.equation.values = append(rewrite.equation.values, pRewrite)
-				case "equation":
-					rewrite.equation.values = append(rewrite.equation.values, pRewrite.equation.values...)
-				}
+			if !pWasRewritten {
+				rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+				failedRewrites = append(failedRewrites, pFailedRewrite...)
 				continue
 			}
-			rewrite.equation.values = append(rewrite.equation.values, e.values[i])
-			failedRewrites = append(failedRewrites, pFailedRewrite...)
+			wasRewritten = true
+			switch pRewrite.kind {
+			case "constant":
+				rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+			case "primitive":
+				rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+			case "equation":
+				rewrite.equation.values = append(rewrite.equation.values, pRewrite.equation.values...)
+			}
 		case "equation":
 			eFailedRewrite, eWasRewritten, eRewrite, valPrincipalState = sanityPerformEquationRewrite(
 				a.equation, -1, valPrincipalState,
 			)
-			if eWasRewritten {
-				wasRewritten = true
-				rewrite.equation.values = append(rewrite.equation.values, eRewrite)
+			if !eWasRewritten {
+				rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+				failedRewrites = append(failedRewrites, eFailedRewrite...)
 				continue
 			}
-			rewrite.equation.values = append(rewrite.equation.values, e.values[i])
-			failedRewrites = append(failedRewrites, eFailedRewrite...)
+			wasRewritten = true
+			rewrite.equation.values = append(rewrite.equation.values, eRewrite)
 		}
 	}
 	if wasRewritten && pi >= 0 {
@@ -838,11 +842,17 @@ func sanityResolveValueInternalValuesFromPrincipalState(
 	}
 	switch a.kind {
 	case "constant":
-		return sanityResolveConstantInternalValuesFromPrincipalState(a, v, rootIndex, valPrincipalState, forceBeforeMutate)
+		return sanityResolveConstantInternalValuesFromPrincipalState(
+			a, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		)
 	case "primitive":
-		return sanityResolvePrimitiveInternalValuesFromPrincipalState(a, v, rootIndex, valPrincipalState, forceBeforeMutate)
+		return sanityResolvePrimitiveInternalValuesFromPrincipalState(
+			a, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		)
 	case "equation":
-		return sanityResolveEquationInternalValuesFromPrincipalState(a, v, rootIndex, valPrincipalState, forceBeforeMutate)
+		return sanityResolveEquationInternalValuesFromPrincipalState(
+			a, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		)
 	}
 	return a, v
 }
@@ -869,7 +879,9 @@ func sanityResolvePrimitiveInternalValuesFromPrincipalState(
 		},
 	}
 	for _, aa := range a.primitive.arguments {
-		s, vv := sanityResolveValueInternalValuesFromPrincipalState(aa, rootIndex, valPrincipalState, forceBeforeMutate)
+		s, vv := sanityResolveValueInternalValuesFromPrincipalState(
+			aa, rootIndex, valPrincipalState, forceBeforeMutate,
+		)
 		v = append(v, vv...)
 		r.primitive.arguments = append(r.primitive.arguments, s)
 	}

@@ -77,8 +77,6 @@ func possibleToRecomposePrimitive(
 					v = sanityResolveConstant(v.constant, valPrincipalState)
 				}
 				switch v.kind {
-				case "constant":
-					continue
 				case "primitive":
 					equivPrim, vo, _ := sanityEquivalentPrimitives(v.primitive, p, valPrincipalState, false)
 					if equivPrim && vo == ii {
@@ -87,8 +85,6 @@ func possibleToRecomposePrimitive(
 							return true, p.arguments[prim.recompose.reveal], ar
 						}
 					}
-				case "equation":
-					continue
 				}
 			}
 		}

@@ -42,12 +42,10 @@ func verifyResultsPutWrite(result verifyResult) bool {
 	verifyResultsMutex.Lock()
 	for i, verifyResult := range verifyResultsShared {
 		qv := prettyQuery(verifyResult.query)
-		if qw == qv {
-			if !verifyResultsShared[i].resolved {
-				verifyResultsShared[i].resolved = result.resolved
-				verifyResultsShared[i].summary = result.summary
-				written = true
-			}
+		if qw == qv && !verifyResultsShared[i].resolved {
+			verifyResultsShared[i].resolved = result.resolved
+			verifyResultsShared[i].summary = result.summary
+			written = true
 		}
 	}
 	verifyResultsMutex.Unlock()
