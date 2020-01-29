@@ -25,7 +25,6 @@ steps:
     - make parser
     - go version
     - go get ./...
-    - go build verifpal.com/cmd/verifpal
     - go run verifpal.com/cmd/verifpal verify examples/signal_small.vp
 
 - name: release
