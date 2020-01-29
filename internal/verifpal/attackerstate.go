@@ -9,24 +9,35 @@ import "sync"
 var attackerStateShared attackerState
 var attackerStateMutex sync.Mutex
 
-func attackerStateInit(m Model, valKnowledgeMap knowledgeMap, active bool) bool {
+func attackerStateInit(active bool) {
 	attackerStateMutex.Lock()
 	attackerStateShared = attackerState{
-		active:    active,
-		known:     []value{},
-		wire:      []bool{},
-		mutatedTo: [][]string{},
+		active:       active,
+		currentPhase: 0,
+		known:        []value{},
+		wire:         []bool{},
+		mutatedTo:    [][]string{},
 	}
-	for _, c := range valKnowledgeMap.constants {
-		if c.qualifier == "public" {
-			v := value{
-				kind:     "constant",
-				constant: c,
-			}
-			attackerStateShared.known = append(attackerStateShared.known, v)
-			attackerStateShared.wire = append(attackerStateShared.wire, false)
-			attackerStateShared.mutatedTo = append(attackerStateShared.mutatedTo, []string{})
+	attackerStateMutex.Unlock()
+}
+
+func attackerStateAbsorbPhaseValues(m Model, valKnowledgeMap knowledgeMap) {
+	attackerStateMutex.Lock()
+	for i, c := range valKnowledgeMap.constants {
+		if c.qualifier != "public" {
+			continue
 		}
+		v := value{
+			kind:     "constant",
+			constant: c,
+		}
+		earliestPhase, err := minIntInSlice(valKnowledgeMap.phase[i])
+		if err == nil && earliestPhase > attackerStateShared.currentPhase {
+			continue
+		}
+		attackerStateShared.known = append(attackerStateShared.known, v)
+		attackerStateShared.wire = append(attackerStateShared.wire, false)
+		attackerStateShared.mutatedTo = append(attackerStateShared.mutatedTo, []string{})
 	}
 	for _, blck := range m.blocks {
 		switch blck.kind {
@@ -38,6 +49,13 @@ func attackerStateInit(m Model, valKnowledgeMap knowledgeMap, active bool) bool 
 					constant: valKnowledgeMap.constants[i],
 				}
 				if valKnowledgeMap.constants[i].qualifier != "private" {
+					continue
+				}
+				earliestPhase, err := minIntInSlice(valKnowledgeMap.phase[i])
+				if err != nil {
+					errorCritical(err.Error())
+				}
+				if earliestPhase > attackerStateShared.currentPhase {
 					continue
 				}
 				ii := sanityExactSameValueInValues(v, attackerStateShared.known)
@@ -52,7 +70,6 @@ func attackerStateInit(m Model, valKnowledgeMap knowledgeMap, active bool) bool 
 		}
 	}
 	attackerStateMutex.Unlock()
-	return true
 }
 
 func attackerStateGetRead() attackerState {
@@ -76,14 +93,20 @@ func attackerStatePutWrite(write attackerStateWrite) bool {
 }
 
 func attackerStatePutMutatedToUpdate(update attackerStateMutatedToUpdate) bool {
+	var err error
 	written := false
 	attackerStateMutex.Lock()
-	if !strInSlice(update.principal, attackerStateShared.mutatedTo[update.i]) {
-		written = true
-		attackerStateShared.mutatedTo[update.i] = append(
-			attackerStateShared.mutatedTo[update.i], update.principal,
-		)
-	}
+	attackerStateShared.mutatedTo[update.i], err = appendUniqueString(
+		attackerStateShared.mutatedTo[update.i], update.principal,
+	)
+	written = (err == nil)
 	attackerStateMutex.Unlock()
 	return written
+}
+
+func attackerStatePutPhaseUpdate(m Model, valKnowledgeMap knowledgeMap, phase int) {
+	attackerStateMutex.Lock()
+	attackerStateShared.currentPhase = phase
+	attackerStateMutex.Unlock()
+	attackerStateAbsorbPhaseValues(m, valKnowledgeMap)
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 
 	"github.com/logrusorgru/aurora"
 )
@@ -30,12 +31,39 @@ func strInSlice(x string, a []string) bool {
 	return false
 }
 
-// appendUnique appends a string to a slice only if it is unique within that slice.
-func appendUnique(a []string, x string) ([]string, error) {
+// intInSlice checks if an integer can be found within a slice.
+func intInSlice(x int, a []int) bool {
+	for _, n := range a {
+		if x == n {
+			return true
+		}
+	}
+	return false
+}
+
+// appendUniqueString appends a string to a slice only if it is unique within that slice.
+func appendUniqueString(a []string, x string) ([]string, error) {
 	if !strInSlice(x, a) {
 		return append(a, x), nil
 	}
 	return a, errors.New("string is not unique")
+}
+
+// appendUniqueInt appends an integer to a slice only if it is unique within that slice.
+func appendUniqueInt(a []int, x int) ([]int, error) {
+	if !intInSlice(x, a) {
+		return append(a, x), nil
+	}
+	return a, errors.New("int is not unique")
+}
+
+// minIntInSlice returns the smallest integer in a slice of integers.
+func minIntInSlice(v []int) (int, error) {
+	if len(v) == 0 {
+		return 0, errors.New("slice has no integers")
+	}
+	sort.Ints(v)
+	return v[0], nil
 }
 
 // colorOutputSupport tells us whether color output is supported based on the GOOS build target.

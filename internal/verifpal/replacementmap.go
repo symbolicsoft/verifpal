@@ -43,6 +43,9 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 		if !valPrincipalState.known[ii] {
 			continue
 		}
+		if !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[ii]) {
+			continue
+		}
 		a := valPrincipalState.assigned[ii]
 		replacementsGroup.Add(1)
 		go func(v value) {

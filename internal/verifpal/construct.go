@@ -4,9 +4,7 @@
 
 package verifpal
 
-import (
-	"fmt"
-)
+import "fmt"
 
 func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
@@ -15,15 +13,15 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 		assigned:       []value{},
 		creator:        []string{},
 		knownBy:        [][]map[string]string{},
-		phase:          []int{},
+		phase:          [][]int{},
 		unnamedCounter: 0,
 	}
-	phase := 0
+	currentPhase := 0
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantG.constant)
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantG)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-	valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+	valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{currentPhase})
 	for _, principal := range principals {
 		valKnowledgeMap.knownBy[0] = append(
 			valKnowledgeMap.knownBy[0],
@@ -34,7 +32,7 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantN)
 	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
 	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-	valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+	valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{currentPhase})
 	for _, principal := range principals {
 		valKnowledgeMap.knownBy[1] = append(
 			valKnowledgeMap.knownBy[1],
@@ -48,31 +46,32 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 				switch expr.kind {
 				case "knows":
 					valKnowledgeMap = constructKnowledgeMapRenderKnows(
-						valKnowledgeMap, blck, expr, phase,
+						valKnowledgeMap, blck, expr,
 					)
 				case "generates":
 					valKnowledgeMap = constructKnowledgeMapRenderGenerates(
-						valKnowledgeMap, blck, expr, phase,
+						valKnowledgeMap, blck, expr,
 					)
 				case "assignment":
 					valKnowledgeMap = constructKnowledgeMapRenderAssignment(
-						valKnowledgeMap, blck, expr, phase,
+						valKnowledgeMap, blck, expr,
 					)
 				}
 			}
 		case "message":
 			valKnowledgeMap = constructKnowledgeMapRenderMessage(
-				valKnowledgeMap, blck,
+				valKnowledgeMap, blck, currentPhase,
 			)
 		case "phase":
-			phase = blck.phase.number
+			currentPhase = blck.phase.number
 		}
 	}
+	valKnowledgeMap.maxPhase = currentPhase
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderKnows(
-	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+	valKnowledgeMap knowledgeMap, blck block, expr expression,
 ) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -108,7 +107,7 @@ func constructKnowledgeMapRenderKnows(
 		})
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
 		l := len(valKnowledgeMap.constants) - 1
 		if expr.qualifier != "public" {
 			continue
@@ -126,7 +125,7 @@ func constructKnowledgeMapRenderKnows(
 }
 
 func constructKnowledgeMapRenderGenerates(
-	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+	valKnowledgeMap knowledgeMap, blck block, expr expression,
 ) knowledgeMap {
 	for _, c := range expr.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -151,13 +150,13 @@ func constructKnowledgeMapRenderGenerates(
 		})
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
 	}
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderAssignment(
-	valKnowledgeMap knowledgeMap, blck block, expr expression, phase int,
+	valKnowledgeMap knowledgeMap, blck block, expr expression,
 ) knowledgeMap {
 	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
 	switch expr.right.kind {
@@ -237,12 +236,14 @@ func constructKnowledgeMapRenderAssignment(
 		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expr.right)
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, phase)
+		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
 	}
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block) knowledgeMap {
+func constructKnowledgeMapRenderMessage(
+	valKnowledgeMap knowledgeMap, blck block, currentPhase int,
+) knowledgeMap {
 	for _, c := range blck.message.constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
@@ -252,7 +253,6 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block
 				blck.message.recipient,
 				prettyConstant(c),
 			))
-			continue
 		}
 		c = valKnowledgeMap.constants[i]
 		senderKnows := false
@@ -286,12 +286,12 @@ func constructKnowledgeMapRenderMessage(valKnowledgeMap knowledgeMap, blck block
 				blck.message.recipient,
 				prettyConstant(c),
 			))
-		default:
-			valKnowledgeMap.knownBy[i] = append(
-				valKnowledgeMap.knownBy[i],
-				map[string]string{blck.message.recipient: blck.message.sender},
-			)
 		}
+		valKnowledgeMap.knownBy[i] = append(
+			valKnowledgeMap.knownBy[i],
+			map[string]string{blck.message.recipient: blck.message.sender},
+		)
+		valKnowledgeMap.phase[i], _ = appendUniqueInt(valKnowledgeMap.phase[i], currentPhase)
 	}
 	return valKnowledgeMap
 }
@@ -312,7 +312,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			beforeRewrite: []value{},
 			wasMutated:    []bool{},
 			beforeMutate:  []value{},
-			phase:         []int{},
+			phase:         [][]int{},
 			lock:          0,
 		}
 		for i, c := range valKnowledgeMap.constants {
@@ -373,7 +373,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
 		wasMutated:    make([]bool, len(valPrincipalState.wasMutated)),
 		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
-		phase:         make([]int, len(valPrincipalState.phase)),
+		phase:         make([][]int, len(valPrincipalState.phase)),
 		lock:          valPrincipalState.lock,
 	}
 	copy(valPrincipalStateClone.constants, valPrincipalState.constants)

@@ -15,16 +15,15 @@ import (
 func Verify(filePath string) {
 	m, valKnowledgeMap, valPrincipalStates := parserParseModel(filePath)
 	initiated := time.Now().Format("03:04:05 PM")
-	attackerStateInit(m, valKnowledgeMap, m.attacker == "active")
 	verifyResultsInit(m)
 	prettyMessage(fmt.Sprintf(
 		"Verification initiated for '%s' at %s.", m.fileName, initiated,
 	), "verifpal", false)
 	switch m.attacker {
 	case "passive":
-		verifyPassive(valKnowledgeMap, valPrincipalStates)
+		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
 	case "active":
-		verifyActive(valKnowledgeMap, valPrincipalStates)
+		verifyActive(m, valKnowledgeMap, valPrincipalStates)
 	default:
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
@@ -58,15 +57,19 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 	}
 }
 
-func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	prettyMessage("Attacker is configured as passive.", "info", false)
+	attackerStateInit(false)
+	attackerStatePutPhaseUpdate(m, valKnowledgeMap, 0)
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 }
 
 func verifyEnd() {
+	exitCode := 0
 	valVerifyResults, fileName := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.resolved {
+			exitCode = 1
 			prettyMessage(fmt.Sprintf(
 				"%s: %s",
 				prettyQuery(verifyResult.query),
@@ -79,5 +82,5 @@ func verifyEnd() {
 		"Verification completed for '%s' at %s.", fileName, completed,
 	), "verifpal", false)
 	prettyMessage("Thank you for using Verifpal.", "verifpal", false)
-	os.Exit(0)
+	os.Exit(exitCode)
 }

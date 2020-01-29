@@ -3,7 +3,7 @@
 
 attacker[active]
 
-// Setup phase
+// Setup
 
 principal Alice[
 	knows public n

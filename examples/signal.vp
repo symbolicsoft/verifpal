@@ -88,6 +88,11 @@ principal Bob[
 	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))
 ]
 
+phase[1]
+
+Alice -> Bob: alongterm
+Bob -> Alice: blongterm
+
 queries[
 	confidentiality? m1
 	authentication? Alice -> Bob: e1

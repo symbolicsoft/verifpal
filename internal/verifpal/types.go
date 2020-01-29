@@ -85,7 +85,8 @@ type knowledgeMap struct {
 	assigned       []value
 	creator        []string
 	knownBy        [][]map[string]string
-	phase          []int
+	phase          [][]int
+	maxPhase       int
 	unnamedCounter int
 }
 
@@ -146,15 +147,16 @@ type principalState struct {
 	beforeRewrite []value
 	wasMutated    []bool
 	beforeMutate  []value
-	phase         []int
+	phase         [][]int
 	lock          int
 }
 
 type attackerState struct {
-	active    bool
-	known     []value
-	wire      []bool
-	mutatedTo [][]string
+	active       bool
+	currentPhase int
+	known        []value
+	wire         []bool
+	mutatedTo    [][]string
 }
 
 type attackerStateWrite struct {

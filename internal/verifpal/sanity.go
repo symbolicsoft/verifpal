@@ -26,6 +26,8 @@ func sanityPhases(m Model) {
 		switch blck.kind {
 		case "phase":
 			switch {
+			case m.attacker == "passive":
+				errorCritical("phases may only be used for analysis with an active attacker")
 			case blck.phase.number <= phase:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) must be superior to last declared phase (%d)",
@@ -255,7 +257,7 @@ func sanityDeclaredPrincipals(m Model) []string {
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
-			principals, _ = appendUnique(principals, block.principal.name)
+			principals, _ = appendUniqueString(principals, block.principal.name)
 		case "message":
 			if !strInSlice(block.message.sender, principals) {
 				errorCritical(fmt.Sprintf(
