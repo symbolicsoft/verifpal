@@ -11,7 +11,8 @@ import (
 
 func verifyActive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	prettyMessage("Attacker is configured as active.", "info", false)
-	for phase := 0; phase <= valKnowledgeMap.maxPhase; phase++ {
+	phase := 0
+	for phase <= valKnowledgeMap.maxPhase {
 		prettyMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
 		attackerStatePutPhaseUpdate(m, valKnowledgeMap, phase)
@@ -19,6 +20,7 @@ func verifyActive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []pr
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
+		phase = phase + 1
 	}
 }
 
