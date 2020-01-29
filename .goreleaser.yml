@@ -26,10 +26,6 @@ archives:
     - examples/*
     - README.md
   wrap_in_directory: true
-checksum:
-  name_template: 'checksums.txt'
-signs:
-  - artifacts: checksum
 snapshot:
   name_template: "{{ .Tag }}-next"
 changelog:
