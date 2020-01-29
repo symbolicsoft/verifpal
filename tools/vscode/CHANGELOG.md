@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.7
+- Add `phase` block keyword.
+
 ## 0.0.6
 - Added `PW_HASH` and `password` keywords.
 
