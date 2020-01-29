@@ -21,29 +21,8 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 		outOfReplacements: false,
 	}
 	for i, v := range valAttackerState.known {
-		if !valAttackerState.wire[i] || v.kind != "constant" {
-			continue
-		}
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
-		iii := sanityGetAttackerStateIndexFromConstant(valAttackerState, v.constant)
-		mutatedTo := strInSlice(valPrincipalState.sender[ii], valAttackerState.mutatedTo[iii])
-		trulyGuarded := false
-		if valPrincipalState.guard[ii] {
-			trulyGuarded = true
-			if iii >= 0 && mutatedTo {
-				trulyGuarded = false
-			}
-		}
-		if trulyGuarded {
-			continue
-		}
-		if valPrincipalState.creator[ii] == valPrincipalState.name {
-			continue
-		}
-		if !valPrincipalState.known[ii] {
-			continue
-		}
-		if !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[ii]) {
+		if replacementMapSkipValue(v, i, ii, valPrincipalState, valAttackerState) {
 			continue
 		}
 		a := valPrincipalState.assigned[ii]
@@ -71,6 +50,39 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 		valReplacementMap.depthIndex[iiii] = 0
 	}
 	return valReplacementMap
+}
+
+func replacementMapSkipValue(
+	v value, i int, ii int, valPrincipalState principalState, valAttackerState attackerState,
+) bool {
+	switch v.kind {
+	case "primitive":
+		return true
+	case "equation":
+		return true
+	}
+	switch {
+	case !valAttackerState.wire[i]:
+		return true
+	case valPrincipalState.guard[ii]:
+		iii := sanityGetAttackerStateIndexFromConstant(
+			valAttackerState, v.constant,
+		)
+		mutatedTo := strInSlice(
+			valPrincipalState.sender[ii],
+			valAttackerState.mutatedTo[iii],
+		)
+		if iii < 0 || !mutatedTo {
+			return true
+		}
+	case valPrincipalState.creator[ii] == valPrincipalState.name:
+		return true
+	case !valPrincipalState.known[ii]:
+		return true
+	case !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[ii]):
+		return true
+	}
+	return false
 }
 
 func replacementMapReplaceValue(
