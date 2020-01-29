@@ -2,40 +2,44 @@
 
 kind: pipeline
 type: docker
+name: default
 
 steps:
 - name: fetch
-    image: docker:git
-    commands:
-      - git fetch --tags
+  image: docker:git
+  commands:
+    - git fetch --tags
+
 - name: lint
-    image: golangci/golangci-lint:latest
-    commands:
-      - golangci-lint run
+  image: golangci/golangci-lint:latest
+  commands:
+    - golangci-lint run
+
 - name: run
-    image: golang:latest
-    volumes:
-      - name: deps
-        path: /go
-    commands:
-      - make dependencies
-      - make parser
-      - go version
-      - go get ./...
-      - go build verifpal.com/cmd/verifpal
-      - go run verifpal.com/cmd/verifpal verify examples/signal_small.vp
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - make dependencies
+    - make parser
+    - go version
+    - go get ./...
+    - go build verifpal.com/cmd/verifpal
+    - go run verifpal.com/cmd/verifpal verify examples/signal_small.vp
+
 - name: release
-    image: golang:latest
-    volumes:
-      - name: deps
-        path: /go
-    environment:
-      GITEA_TOKEN:
-        from_secret: gitea_token
-    commands:
-      - curl -sL https://git.io/goreleaser | bash
-    when:
-      event: tag
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  environment:
+    GITEA_TOKEN:
+      from_secret: gitea_token
+  commands:
+    - curl -sL https://git.io/goreleaser | bash
+  when:
+    event: tag
 
 volumes:
   - name: deps
