@@ -37,9 +37,33 @@ steps:
       from_secret: gitea_token
   commands:
     - curl -sL https://git.io/goreleaser | bash
+    - curl -SL "https://source.symbolic.software/verifpal/verifpal/archive/$(git describe --abbrev=0).zip" -O
+    - sed -i -e "s/archive\\/v\\([0-9]\\|.\\)\\+.zip/archive\\/$(git describe --abbrev=0).zip/g" HomebrewFormula/verifpal.rb
+    - sed -i -e "s/sha256 \\\"[a-f0-9]\\+\\\"/sha256 \\\"$(sha256sum $(git describe --abbrev=0).zip | cut -d " " -f 1)\\\"/g" HomebrewFormula/verifpal.rb
+    - rm -rf dist $(git describe --abbrev=0).zip
+    - git checkout go.sum go.mod internal/verifpal/parser.go
+  when:
+    event: tag
+
+- name: brew
+  image: appleboy/drone-git-push:latest
+  volumes:
+    - name: deps
+      path: /go
+  environment:
+    GIT_PUSH_SSH_KEY:
+      from_secret: git_push_ssh_key
+  settings:
+    author_name: Drone
+    author_email: drone@symbolic.software
+    remote: git@source.symbolic.software:verifpal/verifpal.git
+    branch: master
+    commit: true
+    commit_message: Update Homebrew formula
   when:
     event: tag
 
 volumes:
   - name: deps
     temp: {}
+ 
