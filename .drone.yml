@@ -54,7 +54,7 @@ steps:
     GIT_PUSH_SSH_KEY:
       from_secret: git_push_ssh_key
   settings:
-    author_name: Drone
+    author_name: drone
     author_email: drone@symbolic.software
     remote: git@source.symbolic.software:verifpal/verifpal.git
     branch: master
