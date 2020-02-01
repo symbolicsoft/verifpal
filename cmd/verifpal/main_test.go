@@ -130,9 +130,7 @@ func testModel(v verifpalTest, t *testing.T) {
 	if resultsCode != v.resultsCode {
 		t.Errorf(
 			"%s: Expecting %s, got %s",
-			v.model,
-			v.resultsCode,
-			resultsCode,
+			v.model, v.resultsCode, resultsCode,
 		)
 	}
 }
