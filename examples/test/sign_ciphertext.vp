@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+// initialisation
+principal Alice[
+    knows public hmac_key
+    knows private a
+    a_public = G^a
+]
+principal Bob[
+    knows public hmac_key 
+    knows private b
+    b_public = G^b
+]
+Alice -> Bob   : [a_public]
+Bob -> Alice : [b_public]
+
+// Key exchange
+principal Alice[
+    generates plaintext
+    key = b_public^a
+    ciphertext = ENC(key, plaintext)
+    signature = SIGN(a, ciphertext)
+]
+Alice -> Bob : signature, ciphertext
+
+principal Bob[
+    key_ = a_public^b
+    vrf = SIGNVERIF(a_public, ciphertext, signature)?
+    plaintext_ = DEC(key_, ciphertext)
+]
+
+queries[
+    confidentiality? plaintext
+    authentication? Alice -> Bob : ciphertext
+]
