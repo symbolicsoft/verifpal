@@ -49,9 +49,6 @@ func verifyResultsPutWrite(result verifyResult) bool {
 		}
 	}
 	verifyResultsMutex.Unlock()
-	if written && verifyResultsAllResolved() {
-		verifyEnd()
-	}
 	return written
 }
 

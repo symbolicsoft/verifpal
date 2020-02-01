@@ -12,9 +12,10 @@ import (
 )
 
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
-func Verify(filePath string) {
+func Verify(filePath string) ([]verifyResult, string) {
 	m, valKnowledgeMap, valPrincipalStates := parserParseModel(filePath)
 	initiated := time.Now().Format("03:04:05 PM")
+	verifyAnalysisCountInit()
 	verifyResultsInit(m)
 	prettyMessage(fmt.Sprintf(
 		"Verification initiated for '%s' at %s.", m.fileName, initiated,
@@ -27,8 +28,8 @@ func Verify(filePath string) {
 	default:
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
-	fmt.Fprint(os.Stdout, "\n")
-	verifyEnd()
+	fmt.Fprint(os.Stdout, "\n\n")
+	return verifyEnd()
 }
 
 func verifyResolveQueries(
@@ -64,12 +65,29 @@ func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []p
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 }
 
-func verifyEnd() {
-	exitCode := 0
+func verifyGetResultsCode(valVerifyResults []verifyResult) string {
+	resultsCode := ""
+	for _, verifyResult := range valVerifyResults {
+		q := "c"
+		r := "0"
+		if verifyResult.query.kind == "authentication" {
+			q = "a"
+		}
+		if verifyResult.resolved {
+			r = "1"
+		}
+		resultsCode = fmt.Sprintf(
+			"%s%s%s",
+			resultsCode, q, r,
+		)
+	}
+	return resultsCode
+}
+
+func verifyEnd() ([]verifyResult, string) {
 	valVerifyResults, fileName := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.resolved {
-			exitCode = 1
 			prettyMessage(fmt.Sprintf(
 				"%s: %s",
 				prettyQuery(verifyResult.query),
@@ -82,5 +100,5 @@ func verifyEnd() {
 		"Verification completed for '%s' at %s.", fileName, completed,
 	), "verifpal", false)
 	prettyMessage("Thank you for using Verifpal.", "verifpal", false)
-	os.Exit(exitCode)
+	return valVerifyResults, verifyGetResultsCode(valVerifyResults)
 }

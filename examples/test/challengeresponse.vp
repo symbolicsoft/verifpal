@@ -28,7 +28,7 @@ principal Client[
 	signed = SIGN(c, attestation)
 ]
 
-Client -> Server: [gc], attestation, signed
+Client -> Server: gc, attestation, signed
 
 principal Server[
 	storage = SIGNVERIF(gc, attestation, signed)?

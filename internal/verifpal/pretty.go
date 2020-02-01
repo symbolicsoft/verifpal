@@ -14,7 +14,7 @@ import (
 func prettyMessage(m string, t string, showAnalysis bool) {
 	analysisCount := 0
 	if showAnalysis {
-		analysisCount = verifyAnalysisGetCount()
+		analysisCount = verifyAnalysisCountGet()
 	}
 	if colorOutputSupport() {
 		prettyMessageColor(m, t, analysisCount)
@@ -300,7 +300,7 @@ func PrettyPrint(modelFile string) string {
 
 func prettyAnalysis(stage int) {
 	var a string
-	analysisCount := verifyAnalysisGetCount()
+	analysisCount := verifyAnalysisCountGet()
 	if analysisCount%10 != 0 {
 		return
 	}

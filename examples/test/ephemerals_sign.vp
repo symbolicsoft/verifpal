@@ -12,7 +12,7 @@ principal Bob[
 	knows private message
 ]
 
-Alice -> Bob: [ga]
+Alice -> Bob: ga
 
 principal Bob[
 	generates be

@@ -13,19 +13,15 @@ steps:
 - name: lint
   image: golangci/golangci-lint:latest
   commands:
-    - golangci-lint run
+    - make lint
 
-- name: run
+- name: test
   image: golang:latest
   volumes:
     - name: deps
       path: /go
   commands:
-    - make dependencies
-    - make parser
-    - go version
-    - go get ./...
-    - go run verifpal.com/cmd/verifpal verify examples/signal_small.vp
+    - make test
 
 - name: release
   image: golang:latest

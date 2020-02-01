@@ -47,6 +47,10 @@ func verifyActiveScan(
 	stage int, cg *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
+	if verifyResultsAllResolved() {
+		cg.Done()
+		return
+	}
 	valAttackerState := attackerStateGetRead()
 	attackerKnown := len(valAttackerState.known)
 	attackerKnowsMore := len(valAttackerState.known) > attackerKnown

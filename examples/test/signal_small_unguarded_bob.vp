@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+	knows private alongterm
+	galongterm = G^alongterm
+]
+
+principal Bob[
+	knows private blongterm, bs
+	generates bo
+	gblongterm = G^blongterm
+	gbs = G^bs
+	gbo = G^bo
+	gbssig = SIGN(blongterm, gbs)
+]
+
+Bob -> Alice: gblongterm, gbssig, gbs, gbo
+
+principal Alice[
+	generates ae1
+	gae1 = G^ae1
+	amaster = HASH(nil, gbs^alongterm, gblongterm^ae1, gbs^ae1, gbo^ae1)
+	arkba1, ackba1 = HKDF(amaster, nil, nil)
+]
+
+principal Alice[
+	generates m1, ae2
+	gae2 = G^ae2
+	valid = SIGNVERIF(gblongterm, gbs, gbssig)?
+	akshared1 = gbs^ae2
+	arkab1, ackab1 = HKDF(akshared1, arkba1, nil)
+	akenc1, akenc2 = HKDF(MAC(ackab1, nil), nil, nil)
+	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
+]
+
+Alice -> Bob: [galongterm], gae1, gae2, e1
+
+principal Bob[
+	bmaster = HASH(nil, galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
+	brkba1, bckba1 = HKDF(bmaster, nil, nil)
+]
+
+principal Bob[
+	bkshared1 = gae2^bs
+	brkab1, bckab1 = HKDF(bkshared1, brkba1, nil)
+	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
+	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
+]
+
+queries[
+	confidentiality? m1
+	authentication? Alice -> Bob: e1
+]

@@ -54,6 +54,13 @@ dependencies:
 lint:
 	@golangci-lint run
 
+test:
+	@make -s dependencies
+	@make -s parser
+	@go get ./...
+	@go version
+	@go test verifpal.com/cmd/verifpal
+
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
 	@$(RM) cmd/verifpal/resource.syso
@@ -64,4 +71,4 @@ clean:
 	@$(RM) build/wasm/verifpal.wasm
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint clean HomebrewFormula LICENSES api build cmd dist examples internal tools
+.PHONY: all parser windows linux macos freebsd wasm dependencies lint test clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools

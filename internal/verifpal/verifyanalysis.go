@@ -41,7 +41,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	aGroup.Wait()
 	pGroup.Wait()
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
-	verifyAnalysisIncrementCount()
+	verifyAnalysisCountIncrement()
 	prettyAnalysis(stage)
 	if atomic.LoadUint32(&o) > 0 {
 		sg.Add(1)
@@ -50,11 +50,16 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	sg.Done()
 }
 
-func verifyAnalysisIncrementCount() {
+func verifyAnalysisCountInit() {
+	analysisCount := atomic.LoadUint32(&verifyAnalysisCount)
+	atomic.AddUint32(&verifyAnalysisCount, -analysisCount)
+}
+
+func verifyAnalysisCountIncrement() {
 	atomic.AddUint32(&verifyAnalysisCount, 1)
 }
 
-func verifyAnalysisGetCount() int {
+func verifyAnalysisCountGet() int {
 	return int(atomic.LoadUint32(&verifyAnalysisCount))
 }
 
