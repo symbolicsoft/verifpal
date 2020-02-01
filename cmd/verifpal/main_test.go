@@ -98,6 +98,34 @@ func TestMain(t *testing.T) {
 			model:       "signal_small_unguarded_bob.vp",
 			resultsCode: "c1a0",
 		},
+		{
+			model:       "auth_with_signing.vp",
+			resultsCode: "c1a1a1",
+		},
+		{
+			model:       "auth_with_signing_false-attack.vp",
+			resultsCode: "c0a0a0",
+		},
+		{
+			model:       "hmac_verif.vp",
+			resultsCode: "a1a1",
+		},
+		{
+			model:       "sign_ciphertext.vp",
+			resultsCode: "c0a0",
+		},
+		{
+			model:       "signature.vp",
+			resultsCode: "c0a0a0",
+		},
+		{
+			model:       "salt_channel.vp",
+			resultsCode: "c1",
+		},
+		{
+			model:       "safing_dh.vp",
+			resultsCode: "c0c1a1a0",
+		},
 	}
 	for _, v := range tests {
 		testModel(v, t)
