@@ -118,14 +118,6 @@ func TestMain(t *testing.T) {
 			model:       "signature.vp",
 			resultsCode: "c0a0a0",
 		},
-		{
-			model:       "salt_channel.vp",
-			resultsCode: "c1",
-		},
-		{
-			model:       "safing_dh.vp",
-			resultsCode: "c0c1a1a0",
-		},
 	}
 	for _, v := range tests {
 		testModel(v, t)
