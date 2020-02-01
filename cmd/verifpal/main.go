@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate goversioninfo -64=true -icon=icon.ico
+//go:generate goversioninfo -64=true -icon=../../assets/icon.ico
 
 package main
 
