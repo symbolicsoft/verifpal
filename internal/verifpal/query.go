@@ -78,6 +78,9 @@ func queryAuthentication(
 	sender := valPrincipalState.sender[ii]
 	for iii := range valKnowledgeMap.constants {
 		a := valKnowledgeMap.assigned[iii]
+		if valKnowledgeMap.creator[iii] != valPrincipalState.name {
+			continue
+		}
 		switch a.kind {
 		case "primitive":
 			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {

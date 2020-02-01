@@ -21,7 +21,7 @@ principal Alice[
     key        = HASH(ss)
     ciphertext = AEAD_ENC(key, plaintext, ad)
 ]
-Alice -> Bob : [ad], ciphertext
+Alice -> Bob : ad, ciphertext
 
 principal Bob[
     ss_        = a_public^b

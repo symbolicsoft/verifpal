@@ -68,7 +68,7 @@ func TestMain(t *testing.T) {
 		},
 		{
 			model:       "unchecked_aead.vp",
-			resultsCode: "c0a0a1",
+			resultsCode: "c0a0a0",
 		},
 		{
 			model:       "unguarded_alice.vp",
@@ -76,7 +76,7 @@ func TestMain(t *testing.T) {
 		},
 		{
 			model:       "unguarded_bob.vp",
-			resultsCode: "c1a0a1",
+			resultsCode: "c1a0a0",
 		},
 		{
 			model:       "signal_small.vp",
