@@ -25,7 +25,7 @@ principal Alice[
 Alice -> Bob: e, h
 
 principal Bob[
-    _ = ASSERT(MAC(ga^b, e), h)?
+    _ = ASSERT(MAC(ga^b, e), h)
     d = PKE_DEC(b, e)
 ]
 

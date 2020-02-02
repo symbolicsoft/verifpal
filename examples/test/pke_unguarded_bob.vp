@@ -14,7 +14,7 @@ principal Bob[
 ]
 
 Alice -> Bob: [ga]
-Bob -> Alice: [gb]
+Bob -> Alice: gb
 
 principal Alice[
     generates m

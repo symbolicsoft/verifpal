@@ -13,7 +13,7 @@ principal Bob[
     gb = G^b
 ]
 
-Alice -> Bob: [ga]
+Alice -> Bob: ga
 Bob -> Alice: [gb]
 
 principal Alice[

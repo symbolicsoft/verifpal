@@ -48,7 +48,19 @@ func TestMain(t *testing.T) {
 		},
 		{
 			model:       "pke.vp",
-			resultsCode: "c1a1",
+			resultsCode: "c0a0",
+		},
+		{
+			model:       "pke_unguarded_alice.vp",
+			resultsCode: "c0a1",
+		},
+		{
+			model:       "pke_unguarded_bob.vp",
+			resultsCode: "c1a0",
+		},
+		{
+			model:       "pke_unchecked_assert.vp",
+			resultsCode: "c0a1",
 		},
 		{
 			model:       "pw_hash.vp",
@@ -129,7 +141,7 @@ func testModel(v verifpalTest, t *testing.T) {
 	_, resultsCode := verifpal.Verify(fileName)
 	if resultsCode != v.resultsCode {
 		t.Errorf(
-			"%s: Expecting %s, got %s",
+			"   FAIL • %s (%s, got %s)\n",
 			v.model, v.resultsCode, resultsCode,
 		)
 	}
