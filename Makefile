@@ -44,11 +44,11 @@ wasm:
 
 dependencies:
 	@/bin/echo -n "[Verifpal] Installing dependencies."
-	@go get -u github.com/mna/pigeon &> /dev/null
+	@go get -u github.com/mna/pigeon
 	@/bin/echo -n "."
-	@go get -u github.com/logrusorgru/aurora &> /dev/null
+	@go get -u github.com/logrusorgru/aurora
 	@/bin/echo -n "."
-	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo &> /dev/null
+	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 	@/bin/echo "       OK"
 
 lint:
@@ -57,7 +57,7 @@ lint:
 test:
 	@make -s dependencies
 	@make -s parser
-	@go get ./... &> /dev/null
+	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal
 
