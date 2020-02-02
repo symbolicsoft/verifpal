@@ -64,15 +64,6 @@ test:
 release:
 	@curl -sL https://git.io/goreleaser | bash
 
-brew:
-	LATEST_RELEASE := $(git describe --abbrev=0)
-	SHA256_SUM := $(sha256sum $(LATEST_RELEASE).zip | cut -d " " -f 1)
-	@curl -SL "https://source.symbolic.software/verifpal/verifpal/archive/$(LATEST_RELEASE).zip" -O
-    @sed -i -e "s/archive\\/v\\([0-9]\\|.\\)\\+.zip/archive\\/$(LATEST_RELEASE).zip/g" HomebrewFormula/verifpal.rb
-    @sed -i -e "s/sha256 \\\"[a-f0-9]\\+\\\"/sha256 \\\"$(SHA256_SUM)\\\"/g" HomebrewFormula/verifpal.rb
-    @$(RM) -rf dist $(LATEST_RELEASE).zip
-    @git checkout go.sum go.mod internal/verifpal/parser.go
-
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
 	@$(RM) cmd/verifpal/resource.syso
@@ -81,6 +72,8 @@ clean:
 	@$(RM) build/macos/verifpal
 	@$(RM) build/freebsd/verifpal
 	@$(RM) build/wasm/verifpal.wasm
+	@$(RM) -r dist
+	@$(RM) *.zip
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint test release brew clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools
+.PHONY: all parser windows linux macos freebsd wasm dependencies lint test release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools
