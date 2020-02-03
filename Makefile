@@ -63,7 +63,6 @@ test:
 
 tag:
 	@make -s lint
-	@make -s test
 	@make -s clean
 	@bash scripts/tag.sh
 

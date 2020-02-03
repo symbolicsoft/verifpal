@@ -6,6 +6,11 @@ name: default
 
 steps:
 
+- name: fetch
+  image: docker:git
+  commands:
+    - git fetch --tags
+
 - name: lint
   image: golangci/golangci-lint:latest
   commands:
