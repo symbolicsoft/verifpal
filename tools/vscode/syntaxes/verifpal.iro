@@ -82,6 +82,15 @@ contexts [] {
          : include "main";
       }
       : inline_push {
+         regex          \= (precondition)
+         styles []       = .meta;
+         : pop {  
+            regex       \= (\[)
+            styles []    = .punctuation;
+         }
+         : include "main";
+      }
+      : inline_push {
          regex          \= (attacker)
          styles []       = .meta;
          : pop {  
