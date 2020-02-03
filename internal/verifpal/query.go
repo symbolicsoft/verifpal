@@ -11,31 +11,43 @@ import (
 func queryStart(
 	query query, valKnowledgeMap knowledgeMap,
 	valPrincipalState principalState, valAttackerState attackerState,
-) {
+) verifyResult {
+	result := verifyResult{
+		query:    query,
+		resolved: false,
+		summary:  "",
+	}
 	switch query.kind {
 	case "confidentiality":
-		queryConfidentiality(query, valPrincipalState, valAttackerState)
+		result = queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
+	return result
 }
 
 func queryConfidentiality(
 	query query,
 	valPrincipalState principalState, valAttackerState attackerState,
-) {
+) verifyResult {
 	var mutated string
+	result := verifyResult{
+		query:    query,
+		resolved: false,
+		summary:  "",
+	}
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState),
 		valAttackerState.known,
 		valPrincipalState,
 	)
 	if ii < 0 {
-		return
+		return result
 	}
 	for i := range valPrincipalState.constants {
 		if valPrincipalState.wasMutated[i] {
-			mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,
+			mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
+				mutated, "           ",
 				prettyConstant(valPrincipalState.constants[i]),
 				prettyValue(valPrincipalState.assigned[i]),
 				prettyValue(valPrincipalState.beforeMutate[i]),
@@ -47,32 +59,39 @@ func queryConfidentiality(
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), true)
-	written := verifyResultsPutWrite(verifyResult{
+	result = verifyResult{
 		query:    query,
 		resolved: true,
 		summary:  summary,
-	})
+	}
+	written := verifyResultsPutWrite(result)
 	if written {
 		prettyMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(query), summary,
 		), "result", true)
 	}
+	return result
 }
 
 func queryAuthentication(
 	query query, valKnowledgeMap knowledgeMap,
 	valPrincipalState principalState, valAttackerState attackerState,
-) {
+) verifyResult {
 	var indices []int
 	var passes []bool
 	var forcedPasses []bool
+	result := verifyResult{
+		query:    query,
+		resolved: false,
+		summary:  "",
+	}
 	if query.message.recipient != valPrincipalState.name {
-		return
+		return result
 	}
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.message.constants[0])
 	ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if ii < 0 {
-		return
+		return result
 	}
 	c := valKnowledgeMap.constants[i]
 	sender := valPrincipalState.sender[ii]
@@ -88,7 +107,7 @@ func queryAuthentication(
 			}
 			iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.constants[iii])
 			if iiii < 0 {
-				return
+				return result
 			}
 			b := valPrincipalState.beforeRewrite[iiii]
 			if !primitiveGet(b.primitive.name).rewrite.hasRule {
@@ -112,7 +131,8 @@ func queryAuthentication(
 		cc := sanityResolveConstant(c, valPrincipalState)
 		for iii := range valPrincipalState.constants {
 			if valPrincipalState.wasMutated[iii] {
-				mutated = fmt.Sprintf("%s\n           %s → %s (originally %s)", mutated,
+				mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
+					mutated, "           ",
 					prettyConstant(valPrincipalState.constants[iii]),
 					prettyValue(valPrincipalState.assigned[iii]),
 					prettyValue(valPrincipalState.beforeMutate[iii]),
@@ -126,34 +146,37 @@ func queryAuthentication(
 				prettyConstant(c), sender, query.message.sender,
 				prettyValue(cc), prettyValue(b), query.message.recipient,
 			), true)
-			written := verifyResultsPutWrite(verifyResult{
+			result = verifyResult{
 				query:    query,
 				resolved: true,
 				summary:  summary,
-			})
+			}
+			written := verifyResultsPutWrite(result)
 			if written {
 				prettyMessage(fmt.Sprintf(
 					"%s: %s", prettyQuery(query), summary,
 				), "result", true)
 			}
-			return
+			return result
 		} else if forcedPasses[f] {
 			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
 				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
 					"%s's state, despite it being vulnerable to tampering by Attacker.",
 				prettyConstant(c), sender, prettyValue(cc), prettyValue(b), query.message.recipient,
 			), true)
-			written := verifyResultsPutWrite(verifyResult{
+			result = verifyResult{
 				query:    query,
 				resolved: true,
 				summary:  summary,
-			})
+			}
+			written := verifyResultsPutWrite(result)
 			if written {
 				prettyMessage(fmt.Sprintf(
 					"%s: %s", prettyQuery(query), summary,
 				), "result", true)
 			}
-			return
+			return result
 		}
 	}
+	return result
 }

@@ -389,6 +389,10 @@ QueryOptions <-
 QueryOption <-
 	OptionName:Identifier _ '[' _ Message:Message _ ']' _
 {
+	kind := strings.ToLower(OptionName.(string))
+	if kind != "precondition" {
+		fmt.Errorf("invalid query option kind: %s", kind)
+	}
 	return queryOption{
 		kind: strings.ToLower(OptionName.(string)),
 		message: (Message.(block)).message,

@@ -176,6 +176,14 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		}
+		for _, option := range query.options {
+			if len(option.message.constants) != 1 {
+				errorCritical(fmt.Sprintf(
+					"precondition option message (%s) has more than one constant",
+					prettyQuery(query),
+				))
+			}
+		}
 	}
 }
 

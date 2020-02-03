@@ -230,6 +230,22 @@ func prettyQuery(query query) string {
 			prettyConstants(query.message.constants),
 		)
 	}
+	if len(query.options) > 0 {
+		output = fmt.Sprintf("%s[", output)
+	}
+	for _, option := range query.options {
+		output = fmt.Sprintf(
+			"%s\n\t\t%s[%s -> %s: %s]",
+			output,
+			option.kind,
+			option.message.sender,
+			option.message.recipient,
+			prettyConstants(option.message.constants),
+		)
+	}
+	if len(query.options) > 0 {
+		output = fmt.Sprintf("%s\n\t]", output)
+	}
 	return output
 }
 

@@ -1281,17 +1281,17 @@ var g = &grammar{
 		},
 		{
 			name: "Identifier",
-			pos:  position{line: 398, col: 1, offset: 7443},
+			pos:  position{line: 402, col: 1, offset: 7573},
 			expr: &actionExpr{
-				pos: position{line: 399, col: 2, offset: 7458},
+				pos: position{line: 403, col: 2, offset: 7588},
 				run: (*parser).callonIdentifier1,
 				expr: &labeledExpr{
-					pos:   position{line: 399, col: 2, offset: 7458},
+					pos:   position{line: 403, col: 2, offset: 7588},
 					label: "Identifier",
 					expr: &oneOrMoreExpr{
-						pos: position{line: 399, col: 13, offset: 7469},
+						pos: position{line: 403, col: 13, offset: 7599},
 						expr: &charClassMatcher{
-							pos:        position{line: 399, col: 13, offset: 7469},
+							pos:        position{line: 403, col: 13, offset: 7599},
 							val:        "[a-zA-Z0-9_]",
 							chars:      []rune{'_'},
 							ranges:     []rune{'a', 'z', 'A', 'Z', '0', '9'},
@@ -1304,26 +1304,26 @@ var g = &grammar{
 		},
 		{
 			name: "Comment",
-			pos:  position{line: 404, col: 1, offset: 7517},
+			pos:  position{line: 408, col: 1, offset: 7647},
 			expr: &actionExpr{
-				pos: position{line: 405, col: 2, offset: 7529},
+				pos: position{line: 409, col: 2, offset: 7659},
 				run: (*parser).callonComment1,
 				expr: &seqExpr{
-					pos: position{line: 405, col: 2, offset: 7529},
+					pos: position{line: 409, col: 2, offset: 7659},
 					exprs: []interface{}{
 						&ruleRefExpr{
-							pos:  position{line: 405, col: 2, offset: 7529},
+							pos:  position{line: 409, col: 2, offset: 7659},
 							name: "_",
 						},
 						&litMatcher{
-							pos:        position{line: 405, col: 4, offset: 7531},
+							pos:        position{line: 409, col: 4, offset: 7661},
 							val:        "//",
 							ignoreCase: false,
 						},
 						&zeroOrMoreExpr{
-							pos: position{line: 405, col: 9, offset: 7536},
+							pos: position{line: 409, col: 9, offset: 7666},
 							expr: &charClassMatcher{
-								pos:        position{line: 405, col: 9, offset: 7536},
+								pos:        position{line: 409, col: 9, offset: 7666},
 								val:        "[^\\n]",
 								chars:      []rune{'\n'},
 								ignoreCase: false,
@@ -1331,7 +1331,7 @@ var g = &grammar{
 							},
 						},
 						&ruleRefExpr{
-							pos:  position{line: 405, col: 16, offset: 7543},
+							pos:  position{line: 409, col: 16, offset: 7673},
 							name: "_",
 						},
 					},
@@ -1341,11 +1341,11 @@ var g = &grammar{
 		{
 			name:        "_",
 			displayName: "\"whitespace\"",
-			pos:         position{line: 410, col: 1, offset: 7567},
+			pos:         position{line: 414, col: 1, offset: 7697},
 			expr: &zeroOrMoreExpr{
-				pos: position{line: 410, col: 19, offset: 7585},
+				pos: position{line: 414, col: 19, offset: 7715},
 				expr: &charClassMatcher{
-					pos:        position{line: 410, col: 19, offset: 7585},
+					pos:        position{line: 414, col: 19, offset: 7715},
 					val:        "[ \\t\\n\\r]",
 					chars:      []rune{' ', '\t', '\n', '\r'},
 					ignoreCase: false,
@@ -1355,11 +1355,11 @@ var g = &grammar{
 		},
 		{
 			name: "EOF",
-			pos:  position{line: 412, col: 1, offset: 7597},
+			pos:  position{line: 416, col: 1, offset: 7727},
 			expr: &notExpr{
-				pos: position{line: 412, col: 8, offset: 7604},
+				pos: position{line: 416, col: 8, offset: 7734},
 				expr: &anyMatcher{
-					line: 412, col: 9, offset: 7605,
+					line: 416, col: 9, offset: 7735,
 				},
 			},
 		},
@@ -1761,6 +1761,10 @@ func (p *parser) callonQueryOptions1() (interface{}, error) {
 }
 
 func (c *current) onQueryOption1(OptionName, Message interface{}) (interface{}, error) {
+	kind := strings.ToLower(OptionName.(string))
+	if kind != "precondition" {
+		fmt.Errorf("invalid query option kind: %s", kind)
+	}
 	return queryOption{
 		kind:    strings.ToLower(OptionName.(string)),
 		message: (Message.(block)).message,
