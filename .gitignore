@@ -10,9 +10,6 @@ build/freebsd/verifpal
 build/wasm/verifpal.wasm
 dist
 
-# Release scripts
-release.sh
-
 # Binaries for programs and plugins
 *.exe
 *.exe~

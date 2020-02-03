@@ -4,12 +4,6 @@ kind: pipeline
 type: docker
 name: default
 
-steps:
-- name: fetch
-  image: docker:git
-  commands:
-    - git fetch --tags
-
 - name: lint
   image: golangci/golangci-lint:latest
   commands:
@@ -31,13 +25,11 @@ steps:
   environment:
     GITEA_TOKEN:
       from_secret: gitea_token
+    MAILGUN_TOKEN:
+      from_secret: mailgun_token
   commands:
     - make release
-    - curl -sL "https://source.symbolic.software/verifpal/verifpal/archive/$(git describe --abbrev=0).zip" -O
-    - sed -i -e "s/archive\\/v\\([0-9]\\|.\\)\\+.zip/archive\\/$(git describe --abbrev=0).zip/g" HomebrewFormula/verifpal.rb
-    - sed -i -e "s/sha256 \\\"[a-f0-9]\\+\\\"/sha256 \\\"$(sha256sum $(git describe --abbrev=0).zip | cut -d " " -f 1)\\\"/g" HomebrewFormula/verifpal.rb
-    - git checkout go.sum go.mod internal/verifpal/parser.go
-    - make clean
+    - make email
   when:
     event: tag
 

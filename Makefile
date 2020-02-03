@@ -61,8 +61,18 @@ test:
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal
 
+tag:
+	@make -s lint
+	@make -s test
+	@make -s clean
+	@bash scripts/tag.sh
+
 release:
 	@curl -sL https://git.io/goreleaser | bash
+	@bash scripts/brew.sh
+	@bash scripts/email.sh
+	@git checkout go.sum go.mod internal/verifpal/parser.go
+	@make -s clean
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
@@ -73,7 +83,6 @@ clean:
 	@$(RM) build/freebsd/verifpal
 	@$(RM) build/wasm/verifpal.wasm
 	@$(RM) -r dist
-	@$(RM) *.zip
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint test release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools
+.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools scripts
