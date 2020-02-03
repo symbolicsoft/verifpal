@@ -258,6 +258,10 @@ func sanityDeclaredPrincipals(m Model) []string {
 		switch block.kind {
 		case "principal":
 			principals, _ = appendUniqueString(principals, block.principal.name)
+		}
+	}
+	for _, block := range m.blocks {
+		switch block.kind {
 		case "message":
 			if !strInSlice(block.message.sender, principals) {
 				errorCritical(fmt.Sprintf(
