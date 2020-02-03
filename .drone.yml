@@ -10,6 +10,8 @@ steps:
   image: docker:git
   commands:
     - git fetch --tags
+  when:
+    event: tag
 
 - name: lint
   image: golangci/golangci-lint:latest
