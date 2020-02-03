@@ -253,52 +253,35 @@ func sanityGetAttackerStateIndexFromConstant(valAttackerState attackerState, c c
 }
 
 func sanityDeclaredPrincipals(m Model) []string {
+	var declared []string
 	var principals []string
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
-			principals, _ = appendUniqueString(principals, block.principal.name)
+			declared, _ = appendUniqueString(declared, block.principal.name)
 		}
 	}
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "message":
-			if !strInSlice(block.message.sender, principals) {
-				errorCritical(fmt.Sprintf(
-					"principal does not exist (%s)",
-					block.message.sender,
-				))
-			}
-			if !strInSlice(block.message.recipient, principals) {
-				errorCritical(fmt.Sprintf(
-					"principal does not exist (%s)",
-					block.message.recipient,
-				))
-			}
+			principals, _ = appendUniqueString(principals, block.message.sender)
+			principals, _ = appendUniqueString(principals, block.message.recipient)
 		}
 	}
 	for _, query := range m.queries {
 		switch query.kind {
 		case "authentication":
-			if !strInSlice(query.message.sender, principals) {
-				errorCritical(fmt.Sprintf(
-					"principal does not exist (%s)",
-					query.message.sender,
-				))
-			}
-			if !strInSlice(query.message.recipient, principals) {
-				errorCritical(fmt.Sprintf(
-					"principal does not exist (%s)",
-					query.message.recipient,
-				))
-			}
+			principals, _ = appendUniqueString(principals, query.message.sender)
+			principals, _ = appendUniqueString(principals, query.message.recipient)
 		}
 	}
-	if len(principals) > 64 {
-		errorCritical(fmt.Sprintf(
-			"more than 64 principals not supported (%d declared)",
-			len(principals),
-		))
+	for _, p := range principals {
+		if !strInSlice(p, declared) {
+			errorCritical(fmt.Sprintf("principal does not exist (%s)", p))
+		}
+	}
+	if len(declared) > 64 {
+		errorCritical(fmt.Sprintf("more than 64 principals (%d) declared", len(declared)))
 	}
 	return principals
 }
