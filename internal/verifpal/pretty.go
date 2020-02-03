@@ -286,6 +286,12 @@ func PrettyPrint(modelFile string) string {
 				block.message.recipient,
 				prettyConstants(block.message.constants),
 			)
+		case "phase":
+			output = fmt.Sprintf(
+				"%sphase[%d]\n\n",
+				output,
+				block.phase.number,
+			)
 		}
 	}
 	output = fmt.Sprintf("%squeries[\n", output)
