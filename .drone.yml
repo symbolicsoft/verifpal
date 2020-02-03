@@ -4,6 +4,7 @@ kind: pipeline
 type: docker
 name: default
 
+steps:
 - name: lint
   image: golangci/golangci-lint:latest
   commands:
