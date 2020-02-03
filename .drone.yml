@@ -5,6 +5,7 @@ type: docker
 name: default
 
 steps:
+
 - name: lint
   image: golangci/golangci-lint:latest
   commands:
@@ -30,7 +31,6 @@ steps:
       from_secret: mailgun_token
   commands:
     - make release
-    - make email
   when:
     event: tag
 
