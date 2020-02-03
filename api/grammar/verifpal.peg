@@ -42,9 +42,8 @@
 		valKnowledgeMap, valPrincipalStates := sanity(m)
 		return m, valKnowledgeMap, valPrincipalStates
 	}
-	
-	func reserved() []string{
-		return []string{
+
+	var parserReserved = []string{
 			"attacker",
 			"passive",
 			"active",
@@ -76,6 +75,21 @@
 			"nil",
 			"unnamed",
 		}
+	
+	func parserCheckIfReserved(s string) error {
+		found := false
+		switch {
+			case strInSlice(s, parserReserved):
+				found = true
+			case strings.HasPrefix(strings.ToLower(s), "attacker"):
+				found = true
+			case strings.HasPrefix(strings.ToLower(s), "unnamed"):
+				found = true
+		}
+		if found {
+			return fmt.Errorf("cannot use reserved keyword in name: %s", s)
+		}
+		return nil
 	}
 }
 
@@ -85,304 +99,313 @@ Verifpal <-
 	Blocks:(Block+)
 	Queries:Queries
 	Comment*
-	EOF {
-		b := Blocks.([]interface{})
-		q := Queries.([]interface{})
-		db := make([]block, len(b))
-		dq := make([]query, len(q))
-		for i, v := range b { db[i] = v.(block) }
-		for i, v := range q { dq[i] = v.(query) }
-		return Model{
-			attacker: Attacker.(string),
-			blocks: db,
-			queries: dq,
-		}, nil
-	}
+	EOF
+{
+	b := Blocks.([]interface{})
+	q := Queries.([]interface{})
+	db := make([]block, len(b))
+	dq := make([]query, len(q))
+	for i, v := range b { db[i] = v.(block) }
+	for i, v := range q { dq[i] = v.(query) }
+	return Model{
+		attacker: Attacker.(string),
+		blocks: db,
+		queries: dq,
+	}, nil
+}
 
 Attacker <-
-	"attacker" _ '[' _
-	Type:AttackerType _
-	']' _ {
-		return Type, nil
-	}
+	"attacker" _ '[' _ Type:AttackerType _ ']' _
+{
+	return Type, nil
+}
 
 AttackerType <-
-	("active"/"passive") {
-		return string(c.text), nil
-	}
+	("active"/"passive")
+{
+	return string(c.text), nil
+}
 
 Block <-
 	Comment*
 	Block:(Principal/Message/Phase) _
-	Comment* {
-		return Block, nil
-	}
+	Comment*
+{
+	return Block, nil
+}
 
 Principal <-
-	"principal" _ Name:PrincipalName _ '[' _
-	Expressions:(Expression*)
-	']' _ {
-		var err error
-		e  := Expressions.([]interface{})
-		de := make([]expression, len(e))
-		for i, v := range e { de[i] = v.(expression) }
-		name := strings.ToLower(Name.(string))
-		if strInSlice(name, reserved()) ||
-			strings.HasPrefix(name, "attacker") ||
-			strings.HasPrefix(name, "unnamed") {
-			err = fmt.Errorf(
-				"cannot use reserved keyword as principal name: %s",
-				name,
-			)
-		}
-		return block{
-			kind: "principal",
-			principal: principal {
-				name: strings.Title(name),
-				expressions: de,
-			},
-		}, err
-	}
+	"principal" _ Name:PrincipalName _ '[' _ Expressions:(Expression*) _ ']' _ 
+{
+	e  := Expressions.([]interface{})
+	de := make([]expression, len(e))
+	for i, v := range e { de[i] = v.(expression) }
+	name := strings.ToLower(Name.(string))
+	err := parserCheckIfReserved(name)
+	return block{
+		kind: "principal",
+		principal: principal {
+			name: strings.Title(name),
+			expressions: de,
+		},
+	}, err
+}
 
 PrincipalName <-
-	Name:[a-zA-Z0-9_]+ {
-		a  := Name.([]interface{})
-		da := make([]uint8, len(a))
-		for i, v := range a { da[i] = v.([]uint8)[0] }
-		return strings.Title(b2s(da)), nil
-	}
+	Name:Identifier
+{
+	return strings.Title(Name.(string)), nil
+}
 
 Qualifier <-
-	("public"/"private"/"password") {
-		return string(c.text), nil
-	}
+	("public"/"private"/"password")
+{
+	return string(c.text), nil
+}
 
 Message <-
-	Sender:PrincipalName _
-	"->" _
-	Recipient:PrincipalName _
-	':' _
-	MessageConstants:MessageConstants {
-		var err error
-		sender := strings.ToLower(Sender.(string))
-		recipient := strings.ToLower(Recipient.(string))
-		for _, s := range []string{sender, recipient} {
-			if strInSlice(s, reserved()) ||
-				strings.HasPrefix(strings.ToLower(s), "attacker") ||
-				strings.HasPrefix(strings.ToLower(s), "unnamed") {
-				err = fmt.Errorf(
-					"cannot use reserved keyword as principal name: %s",
-					s,
-				)
-			}
+	Sender:PrincipalName _ "->" _ Recipient:PrincipalName _ ':' _ MessageConstants:MessageConstants
+{
+	var err error
+	sender := strings.ToLower(Sender.(string))
+	recipient := strings.ToLower(Recipient.(string))
+	for _, s := range []string{sender, recipient} {
+		err = parserCheckIfReserved(s)
+		if err != nil {
+			break
 		}
-		return block{
-			kind: "message",
-			message: message{
-				sender: strings.Title(sender),
-				recipient: strings.Title(recipient),
-				constants: MessageConstants.([]constant),
-			},
-		}, err
 	}
+	return block{
+		kind: "message",
+		message: message{
+			sender: strings.Title(sender),
+			recipient: strings.Title(recipient),
+			constants: MessageConstants.([]constant),
+		},
+	}, err
+}
 
 MessageConstants <-
-	MessageConstants:(GuardedConstant/Constant)+ {
-		var da []constant
-		var err error
-		a  := MessageConstants.([]interface{})
-		for _, v := range a {
-			c := v.(value).constant
-			if strInSlice(c.name, reserved()) ||
-				strings.HasPrefix(c.name, "attacker") ||
-				strings.HasPrefix(c.name, "unnamed") {
-				err = fmt.Errorf(
-					"cannot use reserved keyword as constant name: %s",
-					c.name,
-				)
-			}
-			da = append(da, c)
-		}
-		return da, err
+	MessageConstants:(GuardedConstant/Constant)+
+{
+	var da []constant
+	var err error
+	a  := MessageConstants.([]interface{})
+	for _, v := range a {
+		c := v.(value).constant
+		err = parserCheckIfReserved(c.name)
+		da = append(da, c)
 	}
+	return da, err
+}
 
 Expression <-
 	Comment*
 	Expression:(Assignment/Knows/Generates) _
-	Comment* {
-		return Expression, nil
-	}
+	Comment*
+{
+	return Expression, nil
+}
 
 Knows <-
-	"knows" _ 
-	Qualifier:Qualifier _ 
-	Constants:Constants {
-		return expression{
-			kind: "knows",
-			qualifier: Qualifier.(string),
-			constants: Constants.([]constant),
-		}, nil
-	}
+	"knows" _ Qualifier:Qualifier _ Constants:Constants
+{
+	return expression{
+		kind: "knows",
+		qualifier: Qualifier.(string),
+		constants: Constants.([]constant),
+	}, nil
+}
 
 Generates <-
-	"generates" _ Constants:Constants {
-		return expression{
-			kind: "generates",
-			qualifier: "",
-			constants: Constants.([]constant),
-		}, nil
-	}
+	"generates" _ Constants:Constants
+{
+	return expression{
+		kind: "generates",
+		qualifier: "",
+		constants: Constants.([]constant),
+	}, nil
+}
 
 Assignment <-
-	Left:Constants _ '=' _ Right:(Primitive/Equation/Constant) {
-		var err error
-		right := value{}
-		switch Right.(value).kind {
-		case "constant":
-			err = errors.New("cannot assign value to value")
-		default:
-			right = Right.(value)
-		}
-		return expression{
-			kind: "assignment",
-			left: Left.([]constant),
-			right: right,
-		}, err
+	Left:Constants _ '=' _ Right:(Primitive/Equation/Constant)
+{
+	var err error
+	right := value{}
+	switch Right.(value).kind {
+	case "constant":
+		err = errors.New("cannot assign value to value")
+	default:
+		right = Right.(value)
 	}
+	return expression{
+		kind: "assignment",
+		left: Left.([]constant),
+		right: right,
+	}, err
+}
 
 Constant <-
-	Constant:[a-zA-Z0-9_]+ (_ ',' _)? {
-		a  := Constant.([]interface{})
-		da := make([]uint8, len(a))
-		for i, c := range a { da[i] = c.([]uint8)[0] }
-		return value{
-			kind: "constant",
-			constant: constant{
-				name: strings.ToLower(b2s(da)),
-			},
-		 }, nil
-	}
+	Constant:Identifier (_ ',' _)?
+{
+	return value{
+		kind: "constant",
+		constant: constant{
+			name: strings.ToLower(Constant.(string)),
+		},
+		}, nil
+}
 
 Constants <-
-	Constants:Constant+ {
-		var da []constant
-		var err error
-		a  := Constants.([]interface{})
-		for _, c := range a { da = append(da, c.(value).constant) }
-		for _, c := range da {
-			if strInSlice(c.name, reserved()) ||
-				strings.HasPrefix(c.name, "attacker") ||
-				strings.HasPrefix(c.name, "unnamed") {
-				err = fmt.Errorf("cannot use reserved keyword as constant name: %s", c.name)
-			}
-		}
-		return da, err
+	Constants:Constant+
+{
+	var da []constant
+	var err error
+	a  := Constants.([]interface{})
+	for _, c := range a { da = append(da, c.(value).constant) }
+	for _, c := range da {
+		err = parserCheckIfReserved(c.name)
 	}
+	return da, err
+}
 
 Phase <-
-	"phase" _ '[' _ Number:[0-9]+ _ ']' _ {
-		var err error
-		a  := Number.([]interface{})
-		da := make([]uint8, len(a))
-		for i, v := range a { da[i] = v.([]uint8)[0] }
-		n, err := strconv.Atoi(b2s(da))
-		return block{
-			kind: "phase",
-			phase: phase{
-				number: n,
-			},
-		}, err
-	}
+	"phase" _ '[' _ Number:[0-9]+ _ ']' _
+{
+	var err error
+	a  := Number.([]interface{})
+	da := make([]uint8, len(a))
+	for i, v := range a { da[i] = v.([]uint8)[0] }
+	n, err := strconv.Atoi(b2s(da))
+	return block{
+		kind: "phase",
+		phase: phase{
+			number: n,
+		},
+	}, err
+}
 
 GuardedConstant <-
-	'[' GuardedConstant:[a-zA-Z0-9_]+ ']' (_ ',' _)? {
-		a  := GuardedConstant.([]interface{})
-		da := make([]uint8, len(a))
-		for i, c := range a { da[i] = c.([]uint8)[0] }
-		return value{
-			kind: "constant",
-			constant: constant{
-				name: strings.ToLower(b2s(da)),
-				guard: true,
-			},
-		 }, nil
-	}
+	'[' GuardedConstant:Identifier ']' (_ ',' _)?
+{
+	return value{
+		kind: "constant",
+		constant: constant{
+			name: strings.ToLower(GuardedConstant.(string)),
+			guard: true,
+		},
+	}, nil
+}
 
 Primitive <-
-	Name:PrimitiveName '(' _ Arguments:(Primitive/Equation/Constant)+ _ ')' Check:'?'? (_ ',' _)? {
-		args := []value{}
-		for _, a := range Arguments.([]interface{}) {
-			args = append(args, a.(value))
-		}
-		return value{
-			kind: "primitive",
-			primitive: primitive{
-				name: Name.(string),
-				arguments: args,
-				output: 0,
-				check: Check != nil,
-			},
-		}, nil
+	Name:PrimitiveName '(' _ Arguments:(Primitive/Equation/Constant)+ _ ')' Check:'?'? (_ ',' _)?
+{
+	args := []value{}
+	for _, a := range Arguments.([]interface{}) {
+		args = append(args, a.(value))
 	}
+	return value{
+		kind: "primitive",
+		primitive: primitive{
+			name: Name.(string),
+			arguments: args,
+			output: 0,
+			check: Check != nil,
+		},
+	}, nil
+}
 
 PrimitiveName <-
-	Name:[a-zA-Z0-9_]+ {
-		a  := Name.([]interface{})
-		da := make([]uint8, len(a))
-		for i, v := range a { da[i] = v.([]uint8)[0] }
-		return strings.ToUpper(b2s(da)), nil
-	}
+	Name:Identifier
+{
+	return strings.ToUpper(Name.(string)), nil
+}
 
 Equation <-
-	FirstConstant:Constant (_ '^' _) SecondConstant:Constant {
-		return value{
-			kind: "equation",
-			equation: equation{
-				values: []value{
-					FirstConstant.(value),
-					SecondConstant.(value),
-				},
+	FirstConstant:Constant (_ '^' _) SecondConstant:Constant
+{
+	return value{
+		kind: "equation",
+		equation: equation{
+			values: []value{
+				FirstConstant.(value),
+				SecondConstant.(value),
 			},
-		}, nil
-	}
+		},
+	}, nil
+}
 	
 Queries <-
-	"queries" _
-	'[' _
-	Queries:(Query*)
-	']' _ {
-		return Queries, nil
-	}
+	"queries" _ '[' _ Queries:(Query*) ']' _
+{
+	return Queries, nil
+}
 
 Query <-
 	Comment*
-	Query:(QueryConfidentiality/QueryAuthentication) _
-	Comment* {
-		return Query, nil
-	}
+	Query:(QueryConfidentiality/QueryAuthentication)
+	Comment*
+{
+	return Query, nil
+}
 	
 QueryConfidentiality <-
-	"confidentiality?" _ Constant:Constant {
-		return query{
-			kind: "confidentiality",
-			constant: Constant.(value).constant,
-			message: message{},
-		}, nil
+	"confidentiality?" _ Constant:Constant _ QueryOptions:QueryOptions? _
+{
+	if QueryOptions == nil {
+		QueryOptions = []queryOption{}
 	}
+	return query{
+		kind: "confidentiality",
+		constant: Constant.(value).constant,
+		message: message{},
+		options: QueryOptions.([]queryOption),
+	}, nil
+}
 
 QueryAuthentication <-
-	"authentication?" _ Message:Message {
-		return query{
-			kind: "authentication",
-			constant: constant{},
-			message: (Message.(block)).message,
-		}, nil
+	"authentication?" _ Message:Message _ QueryOptions:QueryOptions? _
+{
+	if QueryOptions == nil {
+		QueryOptions = []queryOption{}
 	}
+	return query{
+		kind: "authentication",
+		constant: constant{},
+		message: (Message.(block)).message,
+		options: QueryOptions.([]queryOption),
+	}, nil
+}
+
+QueryOptions <-
+	'[' _ QueryOptions:(QueryOption*) ']' _
+{
+	o := QueryOptions.([]interface{})
+	do := make([]queryOption, len(o))
+	for i, v := range o { do[i] = v.(queryOption) }
+	return do, nil
+}
+
+QueryOption <-
+	OptionName:Identifier _ '[' _ Message:Message _ ']' _
+{
+	return queryOption{
+		kind: strings.ToLower(OptionName.(string)),
+		message: (Message.(block)).message,
+	}, nil
+}
+
+Identifier <-
+	Identifier:[a-zA-Z0-9_]+
+	{
+	return string(c.text), nil
+}
 
 Comment <-
-	_ "//" [^\n]* _ {
-		return nil, nil
-	}
+	_ "//" [^\n]* _
+{
+	return nil, nil
+}
 
 _ "whitespace" <- [ \t\n\r]*
 

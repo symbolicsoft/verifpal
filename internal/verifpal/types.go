@@ -43,6 +43,12 @@ type query struct {
 	kind     string
 	constant constant
 	message  message
+	options  []queryOption
+}
+
+type queryOption struct {
+	kind    string
+	message message
 }
 
 type expression struct {
