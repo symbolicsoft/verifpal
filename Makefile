@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 all:
-	@make -s parser
 	@make -s windows
 	@make -s linux
 	@make -s macos
@@ -56,7 +55,6 @@ lint:
 
 test:
 	@make -s dependencies
-	@make -s parser
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal

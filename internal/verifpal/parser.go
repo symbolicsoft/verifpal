@@ -2316,7 +2316,6 @@ func (p *parser) parseRule(rule *rule) (interface{}, bool) {
 func (p *parser) parseExpr(expr interface{}) (interface{}, bool) {
 	var pt savepoint
 	var ok bool
-
 	if p.memoize {
 		res, ok := p.getMemoized(expr)
 		if ok {
@@ -2325,7 +2324,6 @@ func (p *parser) parseExpr(expr interface{}) (interface{}, bool) {
 		}
 		pt = p.pt
 	}
-
 	p.exprCnt++
 	var val interface{}
 	switch expr := expr.(type) {
@@ -2341,6 +2339,19 @@ func (p *parser) parseExpr(expr interface{}) (interface{}, bool) {
 		val, ok = p.parseCharClassMatcher(expr)
 	case *choiceExpr:
 		val, ok = p.parseChoiceExpr(expr)
+	default:
+		val, ok = p.parseExprCont(expr)
+	}
+	if p.memoize {
+		p.setMemoized(pt, expr, resultTuple{val, ok, p.pt})
+	}
+	return val, ok
+}
+
+func (p *parser) parseExprCont(expr interface{}) (interface{}, bool) {
+	var ok bool
+	var val interface{}
+	switch expr := expr.(type) {
 	case *labeledExpr:
 		val, ok = p.parseLabeledExpr(expr)
 	case *litMatcher:
@@ -2361,9 +2372,6 @@ func (p *parser) parseExpr(expr interface{}) (interface{}, bool) {
 		val, ok = p.parseZeroOrOneExpr(expr)
 	default:
 		panic(fmt.Sprintf("unknown expression type %T", expr))
-	}
-	if p.memoize {
-		p.setMemoized(pt, expr, resultTuple{val, ok, p.pt})
 	}
 	return val, ok
 }
