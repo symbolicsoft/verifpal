@@ -18,7 +18,7 @@ principal Alice[
 	m2 = DEC(psk, e)
 ]
 
-Alice -> Carol: m2
+Alice -> Carol: [m2]
 
 principal Carol[]
 
