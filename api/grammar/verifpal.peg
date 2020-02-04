@@ -55,6 +55,7 @@
 			"queries",
 			"confidentiality",
 			"authentication",
+			"precondition",
 			"primitive",
 			"pw_hash",
 			"hash",
