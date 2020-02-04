@@ -15,6 +15,7 @@ type verifyResult struct {
 	query    query
 	resolved bool
 	summary  string
+	options  []queryOptionResult
 }
 
 type block struct {
@@ -49,6 +50,12 @@ type query struct {
 type queryOption struct {
 	kind    string
 	message message
+}
+
+type queryOptionResult struct {
+	option   queryOption
+	resolved bool
+	summary  string
 }
 
 type expression struct {

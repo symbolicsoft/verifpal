@@ -98,8 +98,24 @@ func prettyMessageColor(m string, t string, analysisCount int) {
 	}
 }
 
-func prettyVerifyResultSummary(mutated string, summary string, attack bool) string {
+func prettyVerifyResultSummary(mutated string, summary string, oResults []queryOptionResult, attack bool) string {
 	var mutatedIntro string
+	var optionsSummary string
+	for _, oResult := range oResults {
+		if !oResult.resolved {
+			continue
+		}
+		if len(optionsSummary) == 0 {
+			optionsSummary = fmt.Sprintf(
+				"%sFurthermore, the following options are contradicted:\n",
+				"           ",
+			)
+		}
+		optionsSummary = fmt.Sprintf(
+			"%s%s%s\n",
+			optionsSummary, "           - ", oResult.summary,
+		)
+	}
 	if !attack {
 		return summary
 	}
@@ -107,14 +123,15 @@ func prettyVerifyResultSummary(mutated string, summary string, attack bool) stri
 		mutatedIntro = "When the following values are controlled by the attacker:"
 	}
 	if colorOutputSupport() {
-		return fmt.Sprintf("%s%s\n           %s",
+		return fmt.Sprintf("%s%s\n           %s\n%s",
 			aurora.Italic(mutatedIntro).String(),
 			aurora.BrightYellow(mutated).Italic().String(),
 			aurora.BrightRed(summary).Italic().Bold().String(),
+			aurora.Magenta(optionsSummary).Italic().String(),
 		)
 	}
-	return fmt.Sprintf("%s%s\n           %s",
-		mutatedIntro, mutated, summary,
+	return fmt.Sprintf("%s%s\n           %s\n%s",
+		mutatedIntro, mutated, summary, optionsSummary,
 	)
 }
 

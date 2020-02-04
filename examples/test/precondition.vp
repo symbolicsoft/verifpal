@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Bob[
+	knows private psk
+	generates m
+	e = ENC(psk, m)
+	h = MAC(psk, e)
+]
+
+Bob -> Alice: e, h
+
+principal Alice[
+	knows private psk
+	_ = ASSERT(MAC(psk, e), h)
+	m2 = DEC(psk, e)
+]
+
+Alice -> Carol: m2
+
+principal Carol[]
+
+queries[
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Carol: m2]
+	]
+]

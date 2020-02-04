@@ -12,14 +12,10 @@ func queryStart(
 	query query, valKnowledgeMap knowledgeMap,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) verifyResult {
-	result := verifyResult{
-		query:    query,
-		resolved: false,
-		summary:  "",
-	}
+	var result verifyResult
 	switch query.kind {
 	case "confidentiality":
-		result = queryConfidentiality(query, valPrincipalState, valAttackerState)
+		result = queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "authentication":
 		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
@@ -27,7 +23,7 @@ func queryStart(
 }
 
 func queryConfidentiality(
-	query query,
+	query query, valKnowledgeMap knowledgeMap,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) verifyResult {
 	var mutated string
@@ -35,6 +31,7 @@ func queryConfidentiality(
 		query:    query,
 		resolved: false,
 		summary:  "",
+		options:  []queryOptionResult{},
 	}
 	ii := sanityEquivalentValueInValues(
 		sanityResolveConstant(query.constant, valPrincipalState),
@@ -58,12 +55,14 @@ func queryConfidentiality(
 		"%s is obtained by the attacker as %s",
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
-	), true)
+	), result.options, true)
 	result = verifyResult{
 		query:    query,
 		resolved: true,
 		summary:  summary,
+		options:  []queryOptionResult{},
 	}
+	result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
 		prettyMessage(fmt.Sprintf(
@@ -84,6 +83,7 @@ func queryAuthentication(
 		query:    query,
 		resolved: false,
 		summary:  "",
+		options:  []queryOptionResult{},
 	}
 	if query.message.recipient != valPrincipalState.name {
 		return result
@@ -140,43 +140,90 @@ func queryAuthentication(
 			}
 		}
 		if passes[f] && (query.message.sender != sender) {
-			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s, sent by %s and not by %s and resolving to %s, is successfully used in "+
-					"primitive %s in %s's state.",
-				prettyConstant(c), sender, query.message.sender,
-				prettyValue(cc), prettyValue(b), query.message.recipient,
-			), true)
 			result = verifyResult{
 				query:    query,
 				resolved: true,
-				summary:  summary,
+				summary:  "",
+				options:  []queryOptionResult{},
 			}
+			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+			result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+				"%s, sent by %s and not by %s and resolving to %s,"+
+					" is successfully used in primitive %s in %s's state.",
+				prettyConstant(c), sender, query.message.sender,
+				prettyValue(cc), prettyValue(b), query.message.recipient,
+			), result.options, true)
 			written := verifyResultsPutWrite(result)
 			if written {
 				prettyMessage(fmt.Sprintf(
-					"%s: %s", prettyQuery(query), summary,
+					"%s: %s", prettyQuery(query), result.summary,
 				), "result", true)
 			}
 			return result
 		} else if forcedPasses[f] {
-			summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
-					"%s's state, despite it being vulnerable to tampering by Attacker.",
-				prettyConstant(c), sender, prettyValue(cc), prettyValue(b), query.message.recipient,
-			), true)
 			result = verifyResult{
 				query:    query,
 				resolved: true,
-				summary:  summary,
+				summary:  "",
+				options:  []queryOptionResult{},
 			}
+			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+			result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
+					"%s's state, despite it being vulnerable to tampering by Attacker.",
+				prettyConstant(c), sender, prettyValue(cc), prettyValue(b), query.message.recipient,
+			), result.options, true)
 			written := verifyResultsPutWrite(result)
 			if written {
 				prettyMessage(fmt.Sprintf(
-					"%s: %s", prettyQuery(query), summary,
+					"%s: %s", prettyQuery(query), result.summary,
 				), "result", true)
 			}
 			return result
 		}
+	}
+	return result
+}
+
+func queryPrecondition(
+	result verifyResult,
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
+) verifyResult {
+	if !result.resolved {
+		return result
+	}
+	for _, option := range result.query.options {
+		oResult := queryOptionResult{
+			option:   option,
+			resolved: false,
+			summary:  "",
+		}
+		var sender string
+		recipientKnows := false
+		i := sanityGetPrincipalStateIndexFromConstant(
+			valPrincipalState, option.message.constants[0],
+		)
+		if i < 0 {
+			result.options = append(result.options, oResult)
+			continue
+		}
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if s, ok := m[option.message.recipient]; ok {
+				sender = s
+				recipientKnows = true
+				break
+			}
+		}
+		if sender == option.message.sender && recipientKnows {
+			oResult.resolved = true
+			oResult.summary = fmt.Sprintf(
+				"%s sends %s to %s despite the query being contradicted.",
+				option.message.sender,
+				prettyConstant(option.message.constants[0]),
+				option.message.recipient,
+			)
+		}
+		result.options = append(result.options, oResult)
 	}
 	return result
 }

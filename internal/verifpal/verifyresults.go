@@ -20,6 +20,7 @@ func verifyResultsInit(m Model) bool {
 			query:    q,
 			resolved: false,
 			summary:  "",
+			options:  []queryOptionResult{},
 		}
 	}
 	verifyResultsFileNameShared = m.fileName

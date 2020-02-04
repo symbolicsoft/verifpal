@@ -130,6 +130,10 @@ func TestMain(t *testing.T) {
 			model:       "signature.vp",
 			resultsCode: "c0a0a0",
 		},
+		{
+			model:       "precondition.vp",
+			resultsCode: "a1",
+		},
 	}
 	for _, v := range tests {
 		testModel(v, t)
