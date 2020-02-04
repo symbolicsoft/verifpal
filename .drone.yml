@@ -78,7 +78,7 @@ steps:
   - git config --global user.name "Drone"
   - git config --global user.email "drone@drone.symbolic.software"
   - git add HomebrewFormula/verifpal.rb
-  - git commit -am "Update Homebrew formula"
+  - git commit -m "Update Homebrew formula"
   - git push
   when:
     event: tag
