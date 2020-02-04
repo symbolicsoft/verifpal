@@ -60,9 +60,5 @@ steps:
   commands:
   - bash scripts/git.sh
   - make release
-  - git add HomebrewFormula/verifpal.rb
-  - git add bucket/verifpal.json
-  - git commit -m "Update package manager formulas"
-  - git push
   when:
     event: tag

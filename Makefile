@@ -71,6 +71,10 @@ release:
 	@git checkout go.sum go.mod internal/verifpal/parser.go
 	@make -s clean
 	@bash scripts/packages.sh
+	@git add HomebrewFormula/verifpal.rb
+	@git add bucket/verifpal.json
+	@git commit -m "Update package manager formulas"
+	@git push
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
