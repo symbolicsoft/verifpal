@@ -53,23 +53,13 @@ steps:
   environment:
     GITEA_TOKEN:
       from_secret: gitea_token
+    GIT_PUSH_SSH_KEY:
+      from_secret: git_push_ssh_key
     MAILGUN_TOKEN:
       from_secret: mailgun_token
   commands:
-    - make release
-  when:
-    event: tag
-
-- name: push
-  image: alpine/git:latest
-  volumes:
-    - name: deps
-      path: /go
-  environment:
-    GIT_PUSH_SSH_KEY:
-      from_secret: git_push_ssh_key
-  commands:
-  - sh scripts/git.sh
+  - bash scripts/git.sh
+  - make release
   - git add HomebrewFormula/verifpal.rb
   - git add bucket/verifpal.json
   - git commit -m "Update package manager formulas"

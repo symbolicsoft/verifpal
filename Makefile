@@ -68,10 +68,9 @@ tag:
 
 release:
 	@curl -sL https://git.io/goreleaser | bash
-	@bash scripts/packages.sh
-	@bash scripts/email.sh
 	@git checkout go.sum go.mod internal/verifpal/parser.go
 	@make -s clean
+	@bash scripts/packages.sh
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
