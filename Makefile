@@ -73,8 +73,9 @@ release:
 	@bash scripts/packages.sh
 	@git add HomebrewFormula/verifpal.rb
 	@git add bucket/verifpal.json
-	@git commit -m "Update package manager formulas"
+	@git commit -m "Update package manager formulas [CI SKIP]"
 	@git push
+	@bash scripts/email.sh
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
