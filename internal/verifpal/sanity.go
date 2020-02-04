@@ -382,17 +382,7 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState princ
 		return false
 	}
 	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
-		e1Base := sanityDecomposeEquationValues(e1Values[0].equation, valPrincipalState)
-		e2Base := sanityDecomposeEquationValues(e2Values[0].equation, valPrincipalState)
-		if sanityEquivalentValues(e1Base[1], e2Values[1], valPrincipalState) &&
-			sanityEquivalentValues(e1Values[1], e2Base[1], valPrincipalState) {
-			return true
-		}
-		if sanityEquivalentValues(e1Base[1], e2Base[1], valPrincipalState) &&
-			sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
-			return true
-		}
-		return false
+		return sanityEquivalentEquationsFull(e1Values, e2Values, valPrincipalState)
 	}
 	if len(e1Values) > 2 {
 		if sanityEquivalentValues(e1Values[1], e2Values[2], valPrincipalState) &&
@@ -406,6 +396,20 @@ func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState princ
 		return false
 	}
 	if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) &&
+		sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
+		return true
+	}
+	return false
+}
+
+func sanityEquivalentEquationsFull(e1Values []value, e2Values []value, valPrincipalState principalState) bool {
+	e1Base := sanityDecomposeEquationValues(e1Values[0].equation, valPrincipalState)
+	e2Base := sanityDecomposeEquationValues(e2Values[0].equation, valPrincipalState)
+	if sanityEquivalentValues(e1Base[1], e2Values[1], valPrincipalState) &&
+		sanityEquivalentValues(e1Values[1], e2Base[1], valPrincipalState) {
+		return true
+	}
+	if sanityEquivalentValues(e1Base[1], e2Base[1], valPrincipalState) &&
 		sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
 		return true
 	}
