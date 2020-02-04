@@ -7,8 +7,13 @@ https://source.symbolic.software/verifpal/verifpal/releases
 
 Pre-compiled builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm-6 variants.
 
-If you have installed Verifpal via Homebrew, simply run the following command to update to Verifpal 0TAG0:
-brew update && brew upgrade verifpal
+If you have installed Verifpal via the Scoop package manager for Windows, simply run the following commands to update to Verifpal 0TAG0:
+scoop update
+scoop update verifpal
+
+If you have installed Verifpal via the Homebrew package manager on Linux and macOS, simply run the following commands to update to Verifpal 0TAG0:
+brew update
+brew upgrade verifpal
 
 Installing Verifpal via Homebrew is the recommended method. If you have installed Verifpal otherwise, consider switching to Homebrew.
 

@@ -60,7 +60,7 @@ steps:
   when:
     event: tag
 
-- name: brew
+- name: push
   image: alpine/git:latest
   volumes:
     - name: deps
@@ -71,7 +71,8 @@ steps:
   commands:
   - sh scripts/git.sh
   - git add HomebrewFormula/verifpal.rb
-  - git commit -m "Update Homebrew formula"
+  - git add bucket/verifpal.json
+  - git commit -m "Update package manager formulas"
   - git push
   when:
     event: tag

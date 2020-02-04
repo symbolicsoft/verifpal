@@ -44,15 +44,3 @@ release:
     name: verifpal
   name_template: "Verifpal {{.Version}}"
   prerelease: true
-# brews:
-#  gitea:
-#    owner: verifpal
-#    name: verifpal
-#    commit_author:
-#      name: Drone
-#      email: drone@symbolic.software
-#    folder: HomebrewFormula
-#    homepage: "https://verifpal.com"
-#    description: "Cryptographic protocol analysis for students and engineers."
-#    install: |
-#      bin.install "verifpal"

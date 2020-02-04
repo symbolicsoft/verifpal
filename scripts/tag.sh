@@ -6,9 +6,9 @@ echo -n "[Verifpal] Enter version: "
 read VERSION
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-	gsed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
+	gsed -i -e "s/version = \"\d{1,3}\.\d{1,3}\.\d{1,3}\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
 else
-	sed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
+	sed -i -e "s/version = \"\d{1,3}\.\d{1,3}\.\d{1,3}\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
 fi
 
 git commit -am "Verifpal ${VERSION}"
