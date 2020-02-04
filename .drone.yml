@@ -17,7 +17,7 @@ clone:
 
 steps:
 - name: clone
-  image: alpine/git
+  image: alpine/git:latest
   volumes:
     - name: deps
       path: /go
@@ -61,7 +61,7 @@ steps:
     event: tag
 
 - name: brew
-  image: alpine/git
+  image: alpine/git:latest
   volumes:
     - name: deps
       path: /go
