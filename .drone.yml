@@ -63,19 +63,22 @@ steps:
     event: tag
 
 - name: brew
-  image: appleboy/drone-git-push:latest
+  image: alpine/git
   volumes:
     - name: deps
       path: /go
   environment:
     GIT_PUSH_SSH_KEY:
       from_secret: git_push_ssh_key
-  settings:
-    author_name: drone
-    author_email: drone@drone.symbolic.software
-    remote: git@source.symbolic.software:verifpal/verifpal.git
-    branch: master
-    commit: true
-    commit_message: Update Homebrew formula
+  commands:
+  - mkdir -p $HOME/.ssh
+  - echo "$GIT_PUSH_SSH_KEY" > $HOME/.ssh/id_ed25519
+  - chmod -R 700 $HOME/.ssh
+  - ssh-keyscan source.symbolic.software > $HOME/.ssh/known_hosts
+  - git config --global user.name "Drone"
+  - git config --global user.email "drone@drone.symbolic.software"
+  - git add HomebrewFormula/verifpal.rb
+  - git commit -am "Update Homebrew formula"
+  - git push
   when:
     event: tag
