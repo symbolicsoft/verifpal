@@ -2,42 +2,6 @@
 
 kind: pipeline
 type: docker
-name: linux-arm64
-
-platform:
-  os: linux
-  arch: arm64
-
-steps:
-- name: test
-  image: golang:latest
-  volumes:
-    - name: deps
-      path: /go
-  commands:
-    - make test
-
----
-kind: pipeline
-type: docker
-name: windows-amd64
-
-platform:
-  os: windows
-  arch: amd64
-
-steps:
-- name: test
-  image: golang:latest
-  volumes:
-    - name: deps
-      path: /go
-  commands:
-    - make test
-
----
-kind: pipeline
-type: docker
 name: linux-amd64
 
 platform:
@@ -54,10 +18,16 @@ clone:
 steps:
 - name: clone
   image: alpine/git
+  volumes:
+    - name: deps
+      path: /go
+  environment:
+    GIT_PUSH_SSH_KEY:
+      from_secret: git_push_ssh_key
   commands:
   - git config --global user.name "Drone"
   - git config --global user.email "drone@drone.symbolic.software"
-  - git clone https://source.symbolic.software/verifpal/verifpal.git .
+  - git clone git@source.symbolic.software:verifpal/verifpal.git .
   - git fetch --tags
 
 - name: lint
