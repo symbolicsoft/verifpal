@@ -11,7 +11,6 @@ sed -i -e "s/[a-f0-9]{64}/${SCOOP_HASH}/g" bucket/verifpal.json
 echo "[Verifpal] Scoop bucket updated."
 
 # Homebrew
-
 curl -sL "https://source.symbolic.software/verifpal/verifpal/archive/${DRONE_TAG}.zip" -O
 BREW_HASH=$(sha256sum ${DRONE_TAG}.zip | cut -d " " -f 1)
 rm -f "${DRONE_TAG}.zip"

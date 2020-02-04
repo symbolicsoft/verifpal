@@ -15,7 +15,7 @@ If you have installed Verifpal via the Homebrew package manager on Linux and mac
 brew update
 brew upgrade verifpal
 
-Installing Verifpal via Homebrew is the recommended method. If you have installed Verifpal otherwise, consider switching to Homebrew.
+Installing Verifpal via Homebrew is the recommended method. If you have installed Verifpal otherwise, consider switching to Scoop or Homebrew. Instructions on how to do so are available at https://verifpal.com/software.
 
 To receive more information about Verifpal, please visit https://verifpal.com.
 
