@@ -52,7 +52,7 @@ func queryConfidentiality(
 		}
 	}
 	summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
-		"%s is obtained by the attacker as %s",
+		"%s (%s) is obtained by Attacker.",
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), result.options, true)
@@ -148,10 +148,9 @@ func queryAuthentication(
 			}
 			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
 			result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s, sent by %s and not by %s and resolving to %s,"+
-					" is successfully used in primitive %s in %s's state.",
-				prettyConstant(c), sender, query.message.sender,
-				prettyValue(cc), prettyValue(b), query.message.recipient,
+				"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
+				prettyConstant(c), prettyValue(cc), sender, query.message.sender,
+				prettyValue(b), query.message.recipient,
 			), result.options, true)
 			written := verifyResultsPutWrite(result)
 			if written {
@@ -169,9 +168,8 @@ func queryAuthentication(
 			}
 			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
 			result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-				"%s, sent by %s and resolving to %s, is successfully used in primitive %s in "+
-					"%s's state, despite it being vulnerable to tampering by Attacker.",
-				prettyConstant(c), sender, prettyValue(cc), prettyValue(b), query.message.recipient,
+				"%s (%s), sent by %s, is successfully used in %s within %s's state, despite being vulnerable to tampering.",
+				prettyConstant(c), prettyValue(cc), sender, prettyValue(b), query.message.recipient,
 			), result.options, true)
 			written := verifyResultsPutWrite(result)
 			if written {

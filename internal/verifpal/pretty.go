@@ -60,7 +60,7 @@ func prettyMessageRegular(m string, t string, analysisCount int) {
 func prettyMessageColor(m string, t string, analysisCount int) {
 	var infoString string
 	if analysisCount > 0 {
-		infoString = aurora.Gray(15, fmt.Sprintf(
+		infoString = aurora.Faint(fmt.Sprintf(
 			"(Analysis %d)", analysisCount,
 		)).Italic().String()
 	}
@@ -113,21 +113,21 @@ func prettyVerifyResultSummary(mutated string, summary string, oResults []queryO
 		}
 		optionsSummary = fmt.Sprintf(
 			"%s%s%s\n",
-			optionsSummary, "           - ", oResult.summary,
+			optionsSummary, "             - ", oResult.summary,
 		)
 	}
 	if !attack {
 		return summary
 	}
 	if len(mutated) > 0 {
-		mutatedIntro = "When the following values are controlled by the attacker:"
+		mutatedIntro = "When the following values are controlled by Attacker:"
 	}
 	if colorOutputSupport() {
 		return fmt.Sprintf("%s%s\n           %s\n%s",
 			aurora.Italic(mutatedIntro).String(),
 			aurora.BrightYellow(mutated).Italic().String(),
-			aurora.BrightRed(summary).Italic().Bold().String(),
-			aurora.Magenta(optionsSummary).Italic().String(),
+			aurora.BgRed(summary).White().Italic().Bold().String(),
+			aurora.Red(optionsSummary).Italic().String(),
 		)
 	}
 	return fmt.Sprintf("%s%s\n           %s\n%s",
@@ -344,7 +344,7 @@ func prettyAnalysis(stage int) {
 		return
 	}
 	if colorOutputSupport() {
-		a = aurora.Gray(15, fmt.Sprintf(
+		a = aurora.Faint(fmt.Sprintf(
 			" Stage %d, Analysis %d...", stage, analysisCount,
 		)).Italic().String()
 	} else {
