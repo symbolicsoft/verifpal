@@ -16,7 +16,7 @@ builds:
     goarch:
       - amd64
       - 386
-      - arm
+      - arm64
 archives:
 - replacements:
     darwin: macos

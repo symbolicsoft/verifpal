@@ -1,17 +1,29 @@
 # .drone.yml
 
+---
 kind: pipeline
 type: docker
-name: default
+name: linux-amd64
+
+platform:
+  os: linux
+  arch: amd64
+
+volumes:
+  - name: deps
+    temp: {}
+
+clone:
+  disable: true
 
 steps:
-
-- name: fetch
-  image: docker:git
+- name: clone
+  image: alpine/git
   commands:
-    - git fetch --tags
-  when:
-    event: tag
+  - git config --global user.name "Drone"
+  - git config --global user.email "drone@drone.symbolic.software"
+  - git clone https://source.symbolic.software/verifpal/verifpal.git .
+  - git fetch --tags
 
 - name: lint
   image: golangci/golangci-lint:latest
@@ -59,7 +71,38 @@ steps:
   when:
     event: tag
 
-volumes:
-  - name: deps
-    temp: {}
- 
+---
+kind: pipeline
+type: docker
+name: linux-arm64
+
+platform:
+  os: linux
+  arch: arm64
+
+steps:
+- name: test
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - make test
+
+---
+kind: pipeline
+type: docker
+name: windows-amd64
+
+platform:
+  os: windows
+  arch: amd64
+
+steps:
+- name: test
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - make test
