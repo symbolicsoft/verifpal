@@ -161,23 +161,7 @@ func constructKnowledgeMapRenderAssignment(
 	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
 	switch expr.right.kind {
 	case "primitive":
-		prim := primitiveGet(expr.right.primitive.name)
-		if (len(expr.left) != prim.output) && (prim.output >= 0) {
-			output := fmt.Sprintf("%d", prim.output)
-			if prim.output < 0 {
-				output = "at least 1"
-			}
-			errorCritical(fmt.Sprintf(
-				"primitive %s has %d outputs, expecting %s",
-				prim.name, len(expr.left), output,
-			))
-		}
-		if expr.right.primitive.check && !prim.check {
-			errorCritical(fmt.Sprintf(
-				"primitive %s is checked but does not support checking",
-				prim.name,
-			))
-		}
+		sanityPrimitive(expr.right.primitive, expr.left)
 	}
 	for _, c := range constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)

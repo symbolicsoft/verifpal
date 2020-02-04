@@ -128,6 +128,26 @@ func sanityAssignmentConstantsFromEquation(right value, constants []constant) []
 	return constants
 }
 
+func sanityPrimitive(p primitive, outputs []constant) {
+	prim := primitiveGet(p.name)
+	if (len(outputs) != prim.output) && (prim.output >= 0) {
+		output := fmt.Sprintf("%d", prim.output)
+		if prim.output < 0 {
+			output = "at least 1"
+		}
+		errorCritical(fmt.Sprintf(
+			"primitive %s has %d outputs, expecting %s",
+			prim.name, len(outputs), output,
+		))
+	}
+	if p.check && !prim.check {
+		errorCritical(fmt.Sprintf(
+			"primitive %s is checked but does not support checking",
+			prim.name,
+		))
+	}
+}
+
 func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 	for _, query := range m.queries {
 		switch query.kind {
@@ -434,25 +454,35 @@ func sanityFindConstantInPrimitive(
 				return true
 			}
 		case "equation":
-			switch a.kind {
-			case "equation":
-				if sanityEquivalentEquations(a.equation, aa.equation, valPrincipalState) {
-					return true
-				}
+			if sanityFindConstantInEquation(c, aa.equation, valPrincipalState) {
+				return true
 			}
-			v := sanityDecomposeEquationValues(aa.equation, valPrincipalState)
-			for _, vv := range v {
-				switch vv.kind {
-				case "constant":
-					if c.name == vv.constant.name {
-						return true
-					}
-					switch a.kind {
-					case "constant":
-						if a.constant.name == vv.constant.name {
-							return true
-						}
-					}
+		}
+	}
+	return false
+}
+
+func sanityFindConstantInEquation(
+	c constant, e equation, valPrincipalState principalState,
+) bool {
+	a := sanityResolveConstant(c, valPrincipalState)
+	switch a.kind {
+	case "equation":
+		if sanityEquivalentEquations(a.equation, e, valPrincipalState) {
+			return true
+		}
+	}
+	v := sanityDecomposeEquationValues(e, valPrincipalState)
+	for _, vv := range v {
+		switch vv.kind {
+		case "constant":
+			if c.name == vv.constant.name {
+				return true
+			}
+			switch a.kind {
+			case "constant":
+				if a.constant.name == vv.constant.name {
+					return true
 				}
 			}
 		}
