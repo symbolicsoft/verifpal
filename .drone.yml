@@ -25,7 +25,7 @@ steps:
     GIT_PUSH_SSH_KEY:
       from_secret: git_push_ssh_key
   commands:
-  - bash scripts/git.sh
+  - sh scripts/git.sh
   - git clone git@source.symbolic.software:verifpal/verifpal.git .
   - git fetch --tags
 
@@ -66,7 +66,7 @@ steps:
     GIT_PUSH_SSH_KEY:
       from_secret: git_push_ssh_key
   commands:
-  - bash scripts/git.sh
+  - sh scripts/git.sh
   - git add HomebrewFormula/verifpal.rb
   - git commit -m "Update Homebrew formula"
   - git push
