@@ -94,14 +94,12 @@ func attackerStatePutWrite(write attackerStateWrite) bool {
 
 func attackerStatePutMutatedToUpdate(update attackerStateMutatedToUpdate) bool {
 	var err error
-	written := false
 	attackerStateMutex.Lock()
 	attackerStateShared.mutatedTo[update.i], err = appendUniqueString(
 		attackerStateShared.mutatedTo[update.i], update.principal,
 	)
-	written = (err == nil)
 	attackerStateMutex.Unlock()
-	return written
+	return (err == nil)
 }
 
 func attackerStatePutPhaseUpdate(m Model, valKnowledgeMap knowledgeMap, phase int) {
