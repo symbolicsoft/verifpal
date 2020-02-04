@@ -2,6 +2,42 @@
 
 kind: pipeline
 type: docker
+name: linux-arm64
+
+platform:
+  os: linux
+  arch: arm64
+
+steps:
+- name: test
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - make test
+
+---
+kind: pipeline
+type: docker
+name: windows-amd64
+
+platform:
+  os: windows
+  arch: amd64
+
+steps:
+- name: test
+  image: golang:latest
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - make test
+
+---
+kind: pipeline
+type: docker
 name: linux-amd64
 
 platform:
@@ -69,39 +105,3 @@ steps:
     commit_message: Update Homebrew formula
   when:
     event: tag
-
----
-kind: pipeline
-type: docker
-name: linux-arm64
-
-platform:
-  os: linux
-  arch: arm64
-
-steps:
-- name: test
-  image: golang:latest
-  volumes:
-    - name: deps
-      path: /go
-  commands:
-    - make test
-
----
-kind: pipeline
-type: docker
-name: windows-amd64
-
-platform:
-  os: windows
-  arch: amd64
-
-steps:
-- name: test
-  image: golang:latest
-  volumes:
-    - name: deps
-      path: /go
-  commands:
-    - make test
