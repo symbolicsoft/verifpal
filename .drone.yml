@@ -25,7 +25,10 @@ steps:
     GIT_PUSH_SSH_KEY:
       from_secret: git_push_ssh_key
   commands:
-  - sh scripts/git.sh
+  - mkdir -p $HOME/.ssh
+  - echo "$GIT_PUSH_SSH_KEY" > $HOME/.ssh/id_ed25519
+  - chmod -R 700 $HOME/.ssh
+  - ssh-keyscan source.symbolic.software > $HOME/.ssh/known_hosts
   - git clone git@source.symbolic.software:verifpal/verifpal.git .
   - git fetch --tags
 
