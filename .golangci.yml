@@ -24,7 +24,6 @@ linters:
         - gocyclo
         - godox
         - gosec
-        - interfacer
         - lll
         - maligned
         - misspell
