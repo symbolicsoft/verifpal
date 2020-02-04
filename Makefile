@@ -51,10 +51,11 @@ dependencies:
 	@/bin/echo "       OK"
 
 lint:
+	@/bin/echo -n "[Verifpal] Linting..."
 	@golangci-lint run
+	@/bin/echo "                       OK"
 
 test:
-	@make -s dependencies
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal
@@ -65,6 +66,7 @@ tag:
 	@bash scripts/tag.sh
 
 release:
+	@make -s dependencies
 	@curl -sL https://git.io/goreleaser | bash
 	@git checkout go.sum go.mod internal/verifpal/parser.go
 	@make -s clean

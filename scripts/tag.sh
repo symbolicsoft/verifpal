@@ -11,9 +11,9 @@ else
 	sed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
 fi
 
-git commit -am "Verifpal ${VERSION}"
-git push
-git tag -a "v${VERSION}" -m "Verifpal ${VERSION}"
-git push origin "v${VERSION}"
+git commit -am "Verifpal ${VERSION}" &> /dev/null
+git push &> /dev/null
+git tag -a "v${VERSION}" -m "Verifpal ${VERSION}" &> /dev/null
+git push origin "v${VERSION}" &> /dev/null
 
 echo "[Verifpal] Verifpal ${VERSION} tagged."
