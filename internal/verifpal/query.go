@@ -58,7 +58,7 @@ func queryConfidentiality(
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), result.options, true)
-	result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
 		prettyMessage(fmt.Sprintf(
@@ -100,11 +100,11 @@ func queryAuthentication(
 		}
 		if passes[f] && (query.message.sender != sender) {
 			result.resolved = true
-			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+			result = queryPrecondition(result, valPrincipalState)
 			return queryAuthenticationHandlePass(result, c, b, mutated, sender, valPrincipalState)
 		} else if forcedPasses[f] {
 			result.resolved = true
-			result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+			result = queryPrecondition(result, valPrincipalState)
 			return queryAuthenticationHandleForcedPass(result, c, b, mutated, sender, valKnowledgeMap, valPrincipalState)
 		}
 	}
@@ -185,7 +185,7 @@ func queryAuthenticationHandleForcedPass(
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
 ) verifyResult {
 	cc := sanityResolveConstant(c, valPrincipalState)
-	result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
+	result = queryPrecondition(result, valPrincipalState)
 	result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s (%s), sent by %s, is successfully used in %s within %s's state, despite being vulnerable to tampering.",
 		prettyConstant(c), prettyValue(cc), sender, prettyValue(b), result.query.message.recipient,
@@ -200,8 +200,7 @@ func queryAuthenticationHandleForcedPass(
 }
 
 func queryPrecondition(
-	result verifyResult,
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
+	result verifyResult, valPrincipalState principalState,
 ) verifyResult {
 	if !result.resolved {
 		return result
@@ -221,7 +220,7 @@ func queryPrecondition(
 			result.options = append(result.options, oResult)
 			continue
 		}
-		for _, m := range valKnowledgeMap.knownBy[i] {
+		for _, m := range valPrincipalState.knownBy[i] {
 			if s, ok := m[option.message.recipient]; ok {
 				sender = s
 				recipientKnows = true
