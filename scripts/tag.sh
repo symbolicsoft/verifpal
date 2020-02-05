@@ -5,6 +5,9 @@
 echo -n "[Verifpal] Enter version: "
 read VERSION
 
+echo "In this release, " > assets/releasenotes.txt
+vim assets/releasenotes.txt
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
 	gsed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
 else

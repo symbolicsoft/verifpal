@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 EMAIL_TEXT="$(cat assets/email.txt)"
+RELEASE_NOTES="$(cat assets/releasenotes.txt)"
 EMAIL_TEXT="${EMAIL_TEXT//0TAG0/${DRONE_TAG}}"
+EMAIL_TEXT="${EMAIL_TEXT//1RELEASENOTES1/${RELEASE_NOTES}}"
 
 curl -s --user "api:${MAILGUN_TOKEN}" \
     https://api.eu.mailgun.net/v3/drone.symbolic.software/messages \

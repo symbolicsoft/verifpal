@@ -2,6 +2,8 @@ Hello,
 
 Verifpal 0TAG0 is now available. Verifpal updates bring new features, performance improvements and/or bug fixes.
 
+1RELEASENOTES1
+
 Check out the list of changes in Verifpal 0TAG0, and download pre-compiled binary builds, here:
 https://source.symbolic.software/verifpal/verifpal/releases
 
