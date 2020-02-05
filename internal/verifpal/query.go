@@ -133,28 +133,29 @@ func queryAuthenticationGetPassIndices(
 			continue
 		}
 		switch a.kind {
-		case "primitive":
-			if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
-				continue
-			}
-			iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.constants[iii])
-			if iiii < 0 {
-				return indices, passes, forcedPasses, sender, c
-			}
-			b := valPrincipalState.beforeRewrite[iiii]
-			if !primitiveGet(b.primitive.name).rewrite.hasRule {
-				indices = append(indices, iiii)
-				passes = append(passes, true)
-				forcedPasses = append(forcedPasses, false)
-				continue
-			}
-			pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
-			forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
-			if pass || forcedPass {
-				indices = append(indices, iiii)
-				passes = append(passes, pass)
-				forcedPasses = append(forcedPasses, forcedPass)
-			}
+		case "constant", "equation":
+			continue
+		}
+		if !sanityFindConstantInPrimitive(c, a.primitive, valPrincipalState) {
+			continue
+		}
+		iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.constants[iii])
+		if iiii < 0 {
+			return indices, passes, forcedPasses, sender, c
+		}
+		b := valPrincipalState.beforeRewrite[iiii]
+		if !primitiveGet(b.primitive.name).rewrite.hasRule {
+			indices = append(indices, iiii)
+			passes = append(passes, true)
+			forcedPasses = append(forcedPasses, false)
+			continue
+		}
+		pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
+		forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
+		if pass || forcedPass {
+			indices = append(indices, iiii)
+			passes = append(passes, pass)
+			forcedPasses = append(forcedPasses, forcedPass)
 		}
 	}
 	return indices, passes, forcedPasses, sender, c
