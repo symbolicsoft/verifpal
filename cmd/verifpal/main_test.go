@@ -91,6 +91,18 @@ func TestMain(t *testing.T) {
 			resultsCode: "c1a0a0",
 		},
 		{
+			model:       "signal_small.vp",
+			resultsCode: "c0a0",
+		},
+		{
+			model:       "signal_small_unguarded_alice.vp",
+			resultsCode: "c0a1",
+		},
+		{
+			model:       "signal_small_unguarded_bob.vp",
+			resultsCode: "c1a0",
+		},
+		{
 			model:       "signal_small_nophase.vp",
 			resultsCode: "c1a1",
 		},
