@@ -4,6 +4,8 @@
 
 package verifpal
 
+import "strings"
+
 var constantG = value{
 	kind: "constant",
 	constant: constant{
@@ -31,4 +33,12 @@ var constantGN = value{
 	equation: equation{
 		values: []value{constantG, constantN},
 	},
+}
+
+func constantIsGOrNil(c constant) bool {
+	switch strings.ToLower(c.name) {
+	case "g", "nil":
+		return true
+	}
+	return false
 }

@@ -5,7 +5,6 @@
 package verifpal
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -28,11 +27,11 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 		a := valPrincipalState.assigned[ii]
 		replacementsGroup.Add(1)
 		go func(v value) {
-			c, r, b := replacementMapReplaceValue(
+			c, r := replacementMapReplaceValue(
 				a, v, ii, stage,
 				valPrincipalState, valAttackerState,
 			)
-			if !b {
+			if len(r) == 0 {
 				replacementsGroup.Done()
 				return
 			}
@@ -88,26 +87,24 @@ func replacementMapSkipValue(
 func replacementMapReplaceValue(
 	a value, v value, rootIndex int, stage int,
 	valPrincipalState principalState, valAttackerState attackerState,
-) (constant, []value, bool) {
+) (constant, []value) {
 	replacements := []value{}
-	gOrNil := ((strings.ToLower(a.constant.name) == "g") ||
-		(a.constant.name == "nil"))
 	switch a.kind {
 	case "constant":
-		if gOrNil {
-			return v.constant, replacements, false
+		if constantIsGOrNil(a.constant) {
+			return v.constant, replacements
 		}
 		replacements = append(replacements, a)
 		replacements = append(replacements, constantN)
 		for _, c := range valAttackerState.known {
 			switch c.kind {
 			case "constant":
+				if constantIsGOrNil(c.constant) {
+					continue
+				}
 				cc := sanityResolveConstant(c.constant, valPrincipalState)
 				switch cc.kind {
 				case "constant":
-					if gOrNil {
-						return v.constant, replacements, false
-					}
 					if sanityExactSameValueInValues(cc, replacements) < 0 {
 						replacements = append(replacements, cc)
 					}
@@ -129,7 +126,7 @@ func replacementMapReplaceValue(
 		replacements = append(replacements, a)
 		replacements = append(replacements, constantGN)
 	}
-	return v.constant, replacements, true
+	return v.constant, replacements
 }
 
 func replacementMapNext(valReplacementMap replacementMap) replacementMap {

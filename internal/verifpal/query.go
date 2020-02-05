@@ -15,7 +15,7 @@ func queryStart(
 	var result verifyResult
 	switch query.kind {
 	case "confidentiality":
-		result = queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		result = queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
 		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
@@ -23,8 +23,8 @@ func queryStart(
 }
 
 func queryConfidentiality(
-	query query, valKnowledgeMap knowledgeMap,
-	valPrincipalState principalState, valAttackerState attackerState,
+	query query, valPrincipalState principalState,
+	valAttackerState attackerState,
 ) verifyResult {
 	var mutated string
 	result := verifyResult{
@@ -105,7 +105,7 @@ func queryAuthentication(
 		} else if forcedPasses[f] {
 			result.resolved = true
 			result = queryPrecondition(result, valPrincipalState)
-			return queryAuthenticationHandleForcedPass(result, c, b, mutated, sender, valKnowledgeMap, valPrincipalState)
+			return queryAuthenticationHandleForcedPass(result, c, b, mutated, sender, valPrincipalState)
 		}
 	}
 	return result
@@ -182,7 +182,7 @@ func queryAuthenticationHandlePass(
 
 func queryAuthenticationHandleForcedPass(
 	result verifyResult, c constant, b value, mutated string, sender string,
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
+	valPrincipalState principalState,
 ) verifyResult {
 	cc := sanityResolveConstant(c, valPrincipalState)
 	result = queryPrecondition(result, valPrincipalState)

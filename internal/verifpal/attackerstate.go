@@ -4,7 +4,9 @@
 
 package verifpal
 
-import "sync"
+import (
+	"sync"
+)
 
 var attackerStateShared attackerState
 var attackerStateMutex sync.Mutex

@@ -30,7 +30,10 @@ func inject(
 	return injectants
 }
 
-func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, valPrincipalState principalState) bool {
+func injectValueRules(
+	k value, arg int, p primitive, rootPrimitive primitive,
+	valPrincipalState principalState, stage int,
+) bool {
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: p,
@@ -45,29 +48,49 @@ func injectValueRules(k value, arg int, p primitive, rootPrimitive primitive, va
 	}
 	switch k.kind {
 	case "constant":
-		if p.arguments[arg].kind != "constant" {
-			return false
-		}
-		if strings.ToLower(k.constant.name) == "g" {
-			return false
-		}
+		return injectConstantRules(k.constant, arg, p, valPrincipalState)
 	case "primitive":
-		if p.arguments[arg].kind != "primitive" {
-			return false
-		}
-		if k.primitive.name != p.arguments[arg].primitive.name {
-			return false
-		}
-		if len(k.primitive.arguments) != len(p.arguments[arg].primitive.arguments) {
-			return false
-		}
+		return injectPrimitiveRules(k.primitive, arg, p, stage)
 	case "equation":
-		if p.arguments[arg].kind != "equation" {
+		return injectEquationRules(k.equation, arg, p)
+	}
+	return true
+}
+
+func injectConstantRules(c constant, arg int, p primitive, valPrincipalState principalState) bool {
+	switch {
+	case p.arguments[arg].kind != "constant":
+		return false
+	case strings.ToLower(c.name) == "g":
+		return false
+	case !sanityConstantIsUsedByPrincipalInPrincipalState(valPrincipalState, c):
+		if strings.ToLower(c.name) != "nil" {
 			return false
 		}
-		if len(k.equation.values) != len(p.arguments[arg].equation.values) {
-			return false
-		}
+	}
+	return true
+}
+
+func injectPrimitiveRules(k primitive, arg int, p primitive, stage int) bool {
+	switch {
+	case injectPrimitiveStageRestricted(k, stage):
+		return false
+	case p.arguments[arg].kind != "primitive":
+		return false
+	case k.name != p.arguments[arg].primitive.name:
+		return false
+	case len(k.arguments) != len(p.arguments[arg].primitive.arguments):
+		return false
+	}
+	return true
+}
+
+func injectEquationRules(e equation, arg int, p primitive) bool {
+	switch {
+	case p.arguments[arg].kind != "equation":
+		return false
+	case len(e.values) != len(p.arguments[arg].equation.values):
+		return false
 	}
 	return true
 }
@@ -181,14 +204,17 @@ func injectPrimitive(
 					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
 					k = valPrincipalState.beforeMutate[i]
 				}
-				if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState) {
+				if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState, stage) {
 					continue
 				}
 				switch k.kind {
 				case "constant":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
-					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, stage)
+					kprims := inject(
+						k.primitive, rootPrimitive, false, -1,
+						valPrincipalState, valAttackerState, stage,
+					)
 					if len(kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], kprims...)
 					}

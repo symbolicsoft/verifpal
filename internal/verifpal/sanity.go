@@ -191,7 +191,7 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 					recipientKnows = true
 				}
 			}
-			constantUsedByPrincipal := sanityConstantIsUsedByPrincipal(
+			constantUsedByPrincipal := sanityConstantIsUsedByPrincipalInKnowledgeMap(
 				valKnowledgeMap, query.message.recipient, c, i,
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
@@ -1002,7 +1002,7 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 	return r, v
 }
 
-func sanityConstantIsUsedByPrincipal(
+func sanityConstantIsUsedByPrincipalInKnowledgeMap(
 	valKnowledgeMap knowledgeMap, name string, c constant, i int,
 ) bool {
 	for ii, a := range valKnowledgeMap.assigned {
@@ -1018,6 +1018,26 @@ func sanityConstantIsUsedByPrincipal(
 			if sanityExactSameValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func sanityConstantIsUsedByPrincipalInPrincipalState(valPrincipalState principalState, c constant) bool {
+	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+	for ii, a := range valPrincipalState.assigned {
+		switch {
+		case !valPrincipalState.known[ii]:
+			if ii == i {
+				break
+			}
+			continue
+		case valPrincipalState.creator[ii] != valPrincipalState.name:
+			continue
+		}
+		_, v := sanityResolveValueInternalValuesFromPrincipalState(a, ii, valPrincipalState, false)
+		if sanityExactSameValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
+			return true
 		}
 	}
 	return false
