@@ -64,7 +64,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		check:           false,
-		injectable:      false,
+		injectable:      true,
 		passwordHashing: false,
 	},
 	{
