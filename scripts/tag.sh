@@ -7,6 +7,7 @@ read VERSION
 
 echo "In this release, " > assets/releasenotes.txt
 vim assets/releasenotes.txt
+RELEASE_NOTES="$(cat assets/releasenotes.txt)"
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
 	gsed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
@@ -16,7 +17,7 @@ fi
 
 git commit -am "Verifpal ${VERSION}" &> /dev/null
 git push &> /dev/null
-git tag -a "v${VERSION}" -m "Verifpal ${VERSION}" &> /dev/null
+git tag -a "v${VERSION}" -m "Verifpal ${VERSION}" -m "${RELEASE_NOTES}" &> /dev/null
 git push origin "v${VERSION}" &> /dev/null
 
 echo "[Verifpal] Verifpal ${VERSION} tagged."
