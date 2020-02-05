@@ -29,14 +29,7 @@ archives:
 snapshot:
   name_template: "{{ .Tag }}-next"
 changelog:
-  skip: false
-  sort: asc
-  filters:
-    exclude:
-    - '^docs:'
-    - '^test:'
-    - 'typo'
-    - '[CI SKIP]'
+  skip: true
 gitea_urls:
   api: https://source.symbolic.software/api/v1/
   skip_tls_verify: false
