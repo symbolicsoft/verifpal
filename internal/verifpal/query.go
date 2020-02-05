@@ -52,17 +52,17 @@ func queryConfidentiality(
 			prettyValue(valPrincipalState.beforeMutate[i]),
 		)
 	}
-	summary := prettyVerifyResultSummary(mutated, fmt.Sprintf(
+	result.resolved = true
+	result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
 		prettyConstant(query.constant),
 		prettyValue(valAttackerState.known[ii]),
 	), result.options, true)
-	result.resolved = true
 	result = queryPrecondition(result, valKnowledgeMap, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
 		prettyMessage(fmt.Sprintf(
-			"%s: %s", prettyQuery(query), summary,
+			"%s: %s", prettyQuery(query), result.summary,
 		), "result", true)
 	}
 	return result
