@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Authenticator[
+	knows private k
+	knows public c0
+]
+
+principal Client[
+	generates m1
+	h1 = HASH(m1)
+]
+
+Client -> Authenticator: h1
+
+principal Authenticator[
+	a1 = MAC(k, h1)
+	k2 = MAC(k, HASH(c0))
+]
+
+Authenticator -> Client: a1
+
+queries[
+	confidentiality? k2
+]

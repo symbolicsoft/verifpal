@@ -75,6 +75,14 @@ func TestMain(t *testing.T) {
 			resultsCode: "c1",
 		},
 		{
+			model:       "subkey_hash.vp",
+			resultsCode: "c1",
+		},
+		{
+			model:       "subkey_hkdf.vp",
+			resultsCode: "c1",
+		},
+		{
 			model:       "trivial.vp",
 			resultsCode: "c1a1",
 		},

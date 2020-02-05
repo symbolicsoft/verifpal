@@ -67,10 +67,6 @@ func injectConstantRules(c constant, arg int, p primitive, valPrincipalState pri
 		if strings.ToLower(c.name) != "nil" {
 			return false
 		}
-	case p.name == "HASH", p.name == "HKDF":
-		if c.name != "nil" {
-			return false
-		}
 	}
 	return true
 }
@@ -197,12 +193,6 @@ func injectPrimitive(
 	for arg := range p.arguments {
 		injectsGroup.Add(1)
 		go func(arg int) {
-			switch p.name {
-			case "HASH", "HKDF":
-				kinjectants[arg] = append(kinjectants[arg], constantN)
-				injectsGroup.Done()
-				return
-			}
 			for _, k := range valAttackerState.known {
 				switch k.kind {
 				case "constant":
@@ -216,15 +206,26 @@ func injectPrimitive(
 				case "constant":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
-					kprims := inject(
-						k.primitive, rootPrimitive, false, -1,
-						valPrincipalState, valAttackerState, stage,
-					)
+					var kprims []value
+					switch p.name {
+					case "HKDF", "HASH":
+						kprims = []value{constantN}
+					default:
+						kprims = inject(
+							k.primitive, rootPrimitive, false, -1,
+							valPrincipalState, valAttackerState, stage,
+						)
+					}
 					if len(kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], kprims...)
 					}
 				case "equation":
-					kinjectants[arg] = append(kinjectants[arg], k)
+					switch p.name {
+					case "HKDF", "HASH":
+						kinjectants[arg] = append(kinjectants[arg], constantN)
+					default:
+						kinjectants[arg] = append(kinjectants[arg], k)
+					}
 				}
 			}
 			injectsGroup.Done()
