@@ -69,7 +69,6 @@ func verifyAnalysisDecompose(
 	var r bool
 	var revealed value
 	var ar []value
-	oo := o
 	switch a.kind {
 	case "primitive":
 		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
@@ -88,9 +87,6 @@ func verifyAnalysisDecompose(
 			o = o + 1
 		}
 	}
-	if o > oo {
-		return verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, o)
-	}
 	return o
 }
 
@@ -100,7 +96,6 @@ func verifyAnalysisRecompose(
 	var r bool
 	var revealed value
 	var ar []value
-	oo := o
 	switch a.kind {
 	case "primitive":
 		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
@@ -119,9 +114,6 @@ func verifyAnalysisRecompose(
 			o = o + 1
 		}
 	}
-	if o > oo {
-		return verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, o)
-	}
 	return o
 }
 
@@ -130,7 +122,6 @@ func verifyAnalysisReconstruct(
 ) uint32 {
 	var r bool
 	var ar []value
-	oo := o
 	switch a.kind {
 	case "primitive":
 		r, ar = possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
@@ -154,14 +145,10 @@ func verifyAnalysisReconstruct(
 			o = o + 1
 		}
 	}
-	if o > oo {
-		return verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, o)
-	}
 	return o
 }
 
 func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint32) uint32 {
-	oo := o
 	for _, aa := range valPrincipalState.assigned {
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			write := attackerStateWrite{
@@ -189,14 +176,10 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint3
 			}
 		}
 	}
-	if o > oo {
-		return verifyAnalysisEquivalize(a, valPrincipalState, o)
-	}
 	return o
 }
 
 func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32) uint32 {
-	oo := o
 	passwords := possibleToObtainPasswords(a, valPrincipalState)
 	for _, password := range passwords {
 		write := attackerStateWrite{
@@ -211,9 +194,6 @@ func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32
 			), "deduction", true)
 			o = o + 1
 		}
-	}
-	if o > oo {
-		return verifyAnalysisPasswords(a, valPrincipalState, o)
 	}
 	return o
 }
