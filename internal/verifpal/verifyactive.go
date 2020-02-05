@@ -20,13 +20,6 @@ func verifyActive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []pr
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
-		PrettyMessage(fmt.Sprintf("%s %s %s %s",
-			"Stage 4 analysis Reached.",
-			"Analysis is likely to slow down radically during this stage.",
-			"If the analysis does not complete, consider restricting",
-			"or simplifying your model.",
-		), "warning", false)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4)
 		phase = phase + 1
 	}
 }

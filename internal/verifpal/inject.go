@@ -67,6 +67,10 @@ func injectConstantRules(c constant, arg int, p primitive, valPrincipalState pri
 		if strings.ToLower(c.name) != "nil" {
 			return false
 		}
+	case p.name == "HASH", p.name == "HKDF":
+		if c.name != "nil" {
+			return false
+		}
 	}
 	return true
 }
@@ -93,6 +97,23 @@ func injectEquationRules(e equation, arg int, p primitive) bool {
 		return false
 	}
 	return true
+}
+
+func injectPrimitiveStageRestricted(p primitive, stage int) bool {
+	switch stage {
+	case 0:
+		return true
+	case 1:
+		return true
+	case 2:
+		switch p.name {
+		case "HASH", "HKDF":
+			return true
+		}
+	case 3:
+		return false
+	}
+	return false
 }
 
 func injectPrimitiveSkeleton(p primitive) primitive {
@@ -163,28 +184,6 @@ SkeletonSearch:
 	}
 }
 
-func injectPrimitiveStageRestricted(p primitive, stage int) bool {
-	switch stage {
-	case 0:
-		return true
-	case 1:
-		return true
-	case 2:
-		switch p.name {
-		case "HASH", "HKDF":
-			return true
-		}
-	case 3:
-		switch p.name {
-		case "HKDF":
-			return true
-		}
-	case 4:
-		return false
-	}
-	return false
-}
-
 func injectPrimitive(
 	p primitive, rootPrimitive primitive,
 	valPrincipalState principalState, valAttackerState attackerState, stage int,
@@ -198,6 +197,12 @@ func injectPrimitive(
 	for arg := range p.arguments {
 		injectsGroup.Add(1)
 		go func(arg int) {
+			switch p.name {
+			case "HASH", "HKDF":
+				kinjectants[arg] = append(kinjectants[arg], constantN)
+				injectsGroup.Done()
+				return
+			}
 			for _, k := range valAttackerState.known {
 				switch k.kind {
 				case "constant":
