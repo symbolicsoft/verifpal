@@ -12,7 +12,7 @@ import (
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
-	valPrincipalState principalState, valAttackerState attackerState, includeHashes bool,
+	valPrincipalState principalState, valAttackerState attackerState, stage int,
 ) []value {
 	prim := primitiveGet(p.name)
 	injectants := ([]value{})
@@ -26,7 +26,7 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, includeHashes)
+	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, stage)
 	return injectants
 }
 
@@ -140,12 +140,34 @@ SkeletonSearch:
 	}
 }
 
+func injectPrimitiveStageRestricted(p primitive, stage int) bool {
+	switch stage {
+	case 0:
+		return true
+	case 1:
+		return true
+	case 2:
+		switch p.name {
+		case "HASH", "HKDF":
+			return true
+		}
+	case 3:
+		switch p.name {
+		case "HKDF":
+			return true
+		}
+	case 4:
+		return false
+	}
+	return false
+}
+
 func injectPrimitive(
 	p primitive, rootPrimitive primitive,
-	valPrincipalState principalState, valAttackerState attackerState, includeHashes bool,
+	valPrincipalState principalState, valAttackerState attackerState, stage int,
 ) []value {
 	var injectsGroup sync.WaitGroup
-	if p.name == "HASH" && !includeHashes {
+	if injectPrimitiveStageRestricted(p, stage) {
 		return []value{}
 	}
 	kinjectants := make([][]value, len(p.arguments))
@@ -166,7 +188,7 @@ func injectPrimitive(
 				case "constant":
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
-					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, includeHashes)
+					kprims := inject(k.primitive, rootPrimitive, false, -1, valPrincipalState, valAttackerState, stage)
 					if len(kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], kprims...)
 					}

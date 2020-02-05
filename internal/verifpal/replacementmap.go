@@ -116,13 +116,9 @@ func replacementMapReplaceValue(
 		}
 	case "primitive":
 		replacements = append(replacements, a)
-		if stage < 2 {
-			return v.constant, replacements, true
-		}
-		includeHashes := (stage > 2)
 		injectants := inject(
 			a.primitive, a.primitive, true, rootIndex,
-			valPrincipalState, valAttackerState, includeHashes,
+			valPrincipalState, valAttackerState, stage,
 		)
 		for _, aa := range injectants {
 			if sanityExactSameValueInValues(aa, replacements) < 0 {

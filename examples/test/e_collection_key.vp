@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+	knows password a_pass
+	derived = PW_HASH(a_pass)
+	generates a
+	ga = G^a
+	generates collection_uid
+	collection_key = HKDF(collection_uid, derived, nil)
+]
+
+Alice -> Bob: collection_uid
+
+principal Bob[
+	// Keypair
+	generates b
+	gb = G^b
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	e_collection_key = PKE_ENC(gb, collection_key)
+]
+
+Alice -> Bob: e_collection_key
+
+principal Bob[
+	b_collection_key = PKE_DEC(b, e_collection_key)
+]
+
+queries[
+	confidentiality? collection_key
+	authentication? Alice -> Bob: e_collection_key
+]

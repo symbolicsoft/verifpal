@@ -20,6 +20,7 @@ func verifyActive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []pr
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4)
 		phase = phase + 1
 	}
 }
