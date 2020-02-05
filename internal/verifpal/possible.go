@@ -50,7 +50,7 @@ func possibleToDecomposePrimitive(
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
 			), "deduction", true)
@@ -132,7 +132,7 @@ func possibleToReconstructPrimitive(
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
 				prettyValue(vp), prettyValues(has),
 			), "deduction", true)

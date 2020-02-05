@@ -11,7 +11,8 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-func prettyMessage(m string, t string, showAnalysis bool) {
+// PrettyMessage prints a Verifpal status message.
+func PrettyMessage(m string, t string, showAnalysis bool) {
 	analysisCount := 0
 	if showAnalysis {
 		analysisCount = verifyAnalysisCountGet()
@@ -48,6 +49,10 @@ func prettyMessageRegular(m string, t string, analysisCount int) {
 	case "result":
 		fmt.Fprintf(os.Stdout,
 			"   Result • %s %s\n", m, infoString,
+		)
+	case "warning":
+		fmt.Fprintf(os.Stdout,
+			"  Warning • %s %s\n", m, infoString,
 		)
 	default:
 		errorCritical(fmt.Sprintf(
@@ -89,6 +94,11 @@ func prettyMessageColor(m string, t string, analysisCount int) {
 		fmt.Fprintf(os.Stdout,
 			"%s%s%s %s %s\n",
 			"   ", aurora.Red("Result").Bold(), " •", m, infoString,
+		)
+	case "warning":
+		fmt.Fprintf(os.Stdout,
+			"%s%s%s %s %s\n",
+			"  ", aurora.Red("Warning").Bold(), " •", m, infoString,
 		)
 	default:
 		errorCritical(fmt.Sprintf(

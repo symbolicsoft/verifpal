@@ -10,15 +10,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/logrusorgru/aurora"
 	"verifpal.com/internal/verifpal"
 )
 
 var version = "0.10.2"
 
 func main() {
-	fmt.Fprintf(os.Stdout, "Verifpal %s - %s\n%s\n\n",
+	fmt.Fprintf(os.Stdout,
+		aurora.Bold("Verifpal %s - %s\n").String(),
 		version, "https://verifpal.com",
-		"WARNING: Verifpal is experimental software.",
+	)
+	verifpal.PrettyMessage(
+		"Verifpal is experimental software.",
+		"warning", false,
 	)
 	if len(os.Args) != 3 {
 		verifpal.Help()

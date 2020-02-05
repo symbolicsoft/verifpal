@@ -149,7 +149,7 @@ SkeletonSearch:
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"Constructed skeleton %s.",
 				prettyPrimitive(skeleton),
 			), "analysis", true)

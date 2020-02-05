@@ -80,7 +80,7 @@ func verifyAnalysisDecompose(
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
 			), "deduction", true)
@@ -107,7 +107,7 @@ func verifyAnalysisRecompose(
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained by recomposing %s with %s.",
 				prettyValue(revealed), prettyValue(a), prettyValues(ar),
 			), "deduction", true)
@@ -138,7 +138,7 @@ func verifyAnalysisReconstruct(
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
 				prettyValue(a), prettyValues(ar),
 			), "deduction", true)
@@ -188,7 +188,7 @@ func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32
 			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
-			prettyMessage(fmt.Sprintf(
+			PrettyMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
 				prettyValue(password), prettyValue(a),
 			), "deduction", true)

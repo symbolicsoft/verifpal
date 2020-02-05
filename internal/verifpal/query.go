@@ -61,7 +61,7 @@ func queryConfidentiality(
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
-		prettyMessage(fmt.Sprintf(
+		PrettyMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(query), result.summary,
 		), "result", true)
 	}
@@ -173,7 +173,7 @@ func queryAuthenticationHandlePass(
 	), result.options, true)
 	written := verifyResultsPutWrite(result)
 	if written {
-		prettyMessage(fmt.Sprintf(
+		PrettyMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(result.query), result.summary,
 		), "result", true)
 	}
@@ -192,7 +192,7 @@ func queryAuthenticationHandleForcedPass(
 	), result.options, true)
 	written := verifyResultsPutWrite(result)
 	if written {
-		prettyMessage(fmt.Sprintf(
+		PrettyMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(result.query), result.summary,
 		), "result", true)
 	}

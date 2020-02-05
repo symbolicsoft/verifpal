@@ -29,7 +29,7 @@ func parserParseModel(filePath string) (Model, knowledgeMap, []principalState) {
 	if filepath.Ext(fileName) != ".vp" {
 		errorCritical("model file name must have a '.vp' extension")
 	}
-	prettyMessage(fmt.Sprintf(
+	PrettyMessage(fmt.Sprintf(
 		"Parsing model '%s'...", fileName,
 	), "verifpal", false)
 	parsed, err := ParseFile(filePath)
