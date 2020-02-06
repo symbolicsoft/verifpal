@@ -9,13 +9,13 @@ import (
 	"sync"
 )
 
-func verifyActive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	PrettyMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.maxPhase {
 		PrettyMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
-		attackerStatePutPhaseUpdate(m, valKnowledgeMap, phase)
+		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
 		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)

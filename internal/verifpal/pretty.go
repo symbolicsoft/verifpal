@@ -307,6 +307,12 @@ func PrettyPrint(modelFile string) string {
 						output,
 						prettyConstants(expression.constants),
 					)
+				case "leaks":
+					output = fmt.Sprintf(
+						"%s\tleaks %s\n",
+						output,
+						prettyConstants(expression.constants),
+					)
 				case "assignment":
 					var right string
 					right = fmt.Sprintf("%s%s",

@@ -76,6 +76,7 @@ type value struct {
 type constant struct {
 	guard       bool
 	fresh       bool
+	leaked      bool
 	name        string
 	declaration string
 	qualifier   string
@@ -153,6 +154,7 @@ type principalState struct {
 	assigned      []value
 	guard         []bool
 	known         []bool
+	wire          []bool
 	knownBy       [][]map[string]string
 	creator       []string
 	sender        []string

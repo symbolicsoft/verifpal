@@ -24,9 +24,9 @@ func Verify(filePath string) ([]verifyResult, string) {
 	), "verifpal", false)
 	switch m.attacker {
 	case "passive":
-		verifyPassive(m, valKnowledgeMap, valPrincipalStates)
+		verifyPassive(valKnowledgeMap, valPrincipalStates)
 	case "active":
-		verifyActive(m, valKnowledgeMap, valPrincipalStates)
+		verifyActive(valKnowledgeMap, valPrincipalStates)
 	default:
 		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
 	}
@@ -60,10 +60,10 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 	}
 }
 
-func verifyPassive(m Model, valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	PrettyMessage("Attacker is configured as passive.", "info", false)
 	attackerStateInit(false)
-	attackerStatePutPhaseUpdate(m, valKnowledgeMap, 0)
+	attackerStatePutPhaseUpdate(valPrincipalStates[0], 0)
 	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
 }
 

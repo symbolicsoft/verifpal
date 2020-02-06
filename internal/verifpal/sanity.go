@@ -1034,6 +1034,38 @@ func sanityConstantIsUsedByPrincipalInKnowledgeMap(
 	return false
 }
 
+/*
+func sanityValueHasFreshValues(valPrincipalState principalState, a value) bool {
+	switch a.kind {
+	case "constant":
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+		if i < 0 {
+			return false
+		}
+		a = valPrincipalState.beforeMutate[i]
+	}
+	switch a.kind {
+	case "constant":
+		if a.constant.fresh {
+			return true
+		}
+	case "primitive":
+		for _, aa := range a.primitive.arguments {
+			if sanityValueHasFreshValues(valPrincipalState, aa) {
+				return true
+			}
+		}
+	case "equation":
+		for _, aa := range a.equation.values {
+			if sanityValueHasFreshValues(valPrincipalState, aa) {
+				return true
+			}
+		}
+	}
+	return false
+}
+*/
+
 func sanityConstantIsUsedByPrincipalInPrincipalState(valPrincipalState principalState, c constant) bool {
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	for ii, a := range valPrincipalState.assigned {

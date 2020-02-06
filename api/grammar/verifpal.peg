@@ -139,7 +139,7 @@ MessageConstants <- MessageConstants:(GuardedConstant/Constant)+ {
 	return da, nil
 }
 
-Expression <- Comment* Expression:(Assignment/Knows/Generates) _ Comment* {
+Expression <- Comment* Expression:(Knows/Generates/Leaks/Assignment) _ Comment* {
 	return Expression, nil
 }
 
@@ -154,6 +154,14 @@ Knows <- "knows" _ Qualifier:Qualifier _ Constants:Constants {
 Generates <- "generates" _ Constants:Constants {
 	return expression{
 		kind: "generates",
+		qualifier: "",
+		constants: Constants.([]constant),
+	}, nil
+}
+
+Leaks <- "leaks" _ Constants:Constants {
+	return expression{
+		kind: "leaks",
 		qualifier: "",
 		constants: Constants.([]constant),
 	}, nil
@@ -217,7 +225,7 @@ GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
 	}, err
 }
 
-Primitive <- Name:PrimitiveName '(' _ Arguments:(Value)+ _ ')' Check:'?'? (_ ',' _)? {
+Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _)? {
 	args := []value{}
 	for _, a := range Arguments.([]interface{}) {
 		args = append(args, a.(value))

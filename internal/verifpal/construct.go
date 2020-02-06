@@ -52,6 +52,10 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 					valKnowledgeMap = constructKnowledgeMapRenderGenerates(
 						valKnowledgeMap, blck, expr,
 					)
+				case "leaks":
+					valKnowledgeMap = constructKnowledgeMapRenderLeaks(
+						valKnowledgeMap, blck, expr, currentPhase,
+					)
 				case "assignment":
 					valKnowledgeMap = constructKnowledgeMapRenderAssignment(
 						valKnowledgeMap, blck, expr,
@@ -97,6 +101,7 @@ func constructKnowledgeMapRenderKnows(
 			name:        c.name,
 			guard:       c.guard,
 			fresh:       false,
+			leaked:      false,
 			declaration: "knows",
 			qualifier:   expr.qualifier,
 		}
@@ -134,12 +139,12 @@ func constructKnowledgeMapRenderGenerates(
 				"generated constant already exists (%s)",
 				prettyConstant(c),
 			))
-			continue
 		}
 		c = constant{
 			name:        c.name,
 			guard:       c.guard,
 			fresh:       true,
+			leaked:      false,
 			declaration: "generates",
 			qualifier:   "private",
 		}
@@ -151,6 +156,40 @@ func constructKnowledgeMapRenderGenerates(
 		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
 		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
 		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
+	}
+	return valKnowledgeMap
+}
+
+func constructKnowledgeMapRenderLeaks(
+	valKnowledgeMap knowledgeMap, blck block, expr expression, currentPhase int,
+) knowledgeMap {
+	for _, c := range expr.constants {
+		i := sanityGetKnowledgeMapIndexFromConstant(
+			valKnowledgeMap, c,
+		)
+		if i < 0 {
+			errorCritical(fmt.Sprintf(
+				"leaked constant does not exist (%s)",
+				prettyConstant(c),
+			))
+		}
+		known := valKnowledgeMap.creator[i] == blck.principal.name
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if _, ok := m[blck.principal.name]; ok {
+				known = true
+				break
+			}
+		}
+		if !known {
+			errorCritical(fmt.Sprintf(
+				"%s leaks a constant that they do not know (%s)",
+				blck.principal.name, prettyConstant(c),
+			))
+		}
+		valKnowledgeMap.constants[i].leaked = true
+		valKnowledgeMap.phase[i], _ = appendUniqueInt(
+			valKnowledgeMap.phase[i], currentPhase,
+		)
 	}
 	return valKnowledgeMap
 }
@@ -202,6 +241,7 @@ func constructKnowledgeMapRenderAssignment(
 			name:        c.name,
 			guard:       c.guard,
 			fresh:       false,
+			leaked:      false,
 			declaration: "assignment",
 			qualifier:   "private",
 		}
@@ -265,10 +305,13 @@ func constructKnowledgeMapRenderMessage(
 			))
 		}
 		valKnowledgeMap.knownBy[i] = append(
-			valKnowledgeMap.knownBy[i],
-			map[string]string{blck.message.recipient: blck.message.sender},
+			valKnowledgeMap.knownBy[i], map[string]string{
+				blck.message.recipient: blck.message.sender,
+			},
 		)
-		valKnowledgeMap.phase[i], _ = appendUniqueInt(valKnowledgeMap.phase[i], currentPhase)
+		valKnowledgeMap.phase[i], _ = appendUniqueInt(
+			valKnowledgeMap.phase[i], currentPhase,
+		)
 	}
 	return valKnowledgeMap
 }
@@ -282,6 +325,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			assigned:      []value{},
 			guard:         []bool{},
 			known:         []bool{},
+			wire:          []bool{},
 			knownBy:       [][]map[string]string{},
 			creator:       []string{},
 			sender:        []string{},
@@ -295,25 +339,30 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 		for i, c := range valKnowledgeMap.constants {
 			guard := false
 			knows := false
+			wire := false
 			sender := valKnowledgeMap.creator[i]
 			assigned := valKnowledgeMap.assigned[i]
 			if valKnowledgeMap.creator[i] == principal {
 				knows = true
 			}
 			for _, m := range valKnowledgeMap.knownBy[i] {
-				if realSender, ok := m[principal]; ok {
-					sender = realSender
+				if precedingSender, ok := m[principal]; ok {
+					sender = precedingSender
 					knows = true
+					break
 				}
 			}
+		BlocksLoop:
 			for _, blck := range m.blocks {
 				switch blck.kind {
 				case "message":
+					roc := ((blck.message.recipient == principal) ||
+						(valKnowledgeMap.creator[i] == principal))
 					for _, cc := range blck.message.constants {
-						if ((c.name == cc.name) && cc.guard) &&
-							((blck.message.recipient == principal) ||
-								(valKnowledgeMap.creator[i] == principal)) {
-							guard = true
+						if c.name == cc.name {
+							wire = true
+							guard = cc.guard && roc
+							break BlocksLoop
 						}
 					}
 				}
@@ -322,6 +371,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			valPrincipalState.assigned = append(valPrincipalState.assigned, assigned)
 			valPrincipalState.guard = append(valPrincipalState.guard, guard)
 			valPrincipalState.known = append(valPrincipalState.known, knows)
+			valPrincipalState.wire = append(valPrincipalState.wire, wire)
 			valPrincipalState.knownBy = append(valPrincipalState.knownBy, valKnowledgeMap.knownBy[i])
 			valPrincipalState.creator = append(valPrincipalState.creator, valKnowledgeMap.creator[i])
 			valPrincipalState.sender = append(valPrincipalState.sender, sender)
@@ -343,6 +393,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		assigned:      make([]value, len(valPrincipalState.assigned)),
 		guard:         make([]bool, len(valPrincipalState.guard)),
 		known:         make([]bool, len(valPrincipalState.known)),
+		wire:          make([]bool, len(valPrincipalState.wire)),
 		knownBy:       make([][]map[string]string, len(valPrincipalState.knownBy)),
 		creator:       make([]string, len(valPrincipalState.creator)),
 		sender:        make([]string, len(valPrincipalState.sender)),
@@ -361,6 +412,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	}
 	copy(valPrincipalStateClone.guard, valPrincipalState.guard)
 	copy(valPrincipalStateClone.known, valPrincipalState.known)
+	copy(valPrincipalStateClone.wire, valPrincipalState.wire)
 	copy(valPrincipalStateClone.knownBy, valPrincipalState.knownBy)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
 	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
