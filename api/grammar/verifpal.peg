@@ -1,73 +1,73 @@
 {
-	/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
-	 * SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
 
-	// This file is generated automatically from api/grammar/verifpal.peg. Do not modify.
-	
-	package verifpal
+// This file is generated automatically from verifpal.peg.
+// Do not modify.
 
-	import(
-		"bytes"
-		"errors"
-		"fmt"
-		"io"
-		"io/ioutil"
-		"os"
-		"path"
-		"path/filepath"
-		"strconv"
-		"strings"
-		"unicode"
-		"unicode/utf8"
-	)
+package verifpal
 
-	var parserReserved = []string{
-		"attacker", "passive", "active", "principal",
-		"phase, public", "private", "password",
-		"confidentiality", "authentication", "precondition",
-		"primitive", "pw_hash", "hash", "hkdf",
-		"aead_enc", "aead_dec", "enc", "dec",
-		"mac", "assert", "sign", "signverif",
-		"pke_enc", "pke_dec", "shamir_split",
-		"shamir_join", "g", "nil", "unnamed",
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+var parserReserved = []string{
+	"attacker", "passive", "active", "principal",
+	"phase, public", "private", "password",
+	"confidentiality", "authentication", "precondition",
+	"primitive", "pw_hash", "hash", "hkdf",
+	"aead_enc", "aead_dec", "enc", "dec",
+	"mac", "assert", "sign", "signverif",
+	"pke_enc", "pke_dec", "shamir_split",
+	"shamir_join", "g", "nil", "unnamed",
+}
+
+func parserCheckIfReserved(s string) error {
+	found := false
+	switch {
+	case strInSlice(s, parserReserved):
+		found = true
+	case strings.HasPrefix(s, "attacker"):
+		found = true
+	case strings.HasPrefix(s, "unnamed"):
+		found = true
 	}
-	
-	func parserCheckIfReserved(s string) error {
-		found := false
-		switch {
-			case strInSlice(s, parserReserved):
-				found = true
-			case strings.HasPrefix(s, "attacker"):
-				found = true
-			case strings.HasPrefix(s, "unnamed"):
-				found = true
-		}
-		if found {
-			return fmt.Errorf("cannot use reserved keyword in name: %s", s)
-		}
-		return nil
+	if found {
+		return fmt.Errorf("cannot use reserved keyword in name: %s", s)
 	}
+	return nil
+}
 
-	func parserParseModel(filePath string) Model {
-		var m Model
-		fileName := path.Base(filePath)
-		if len(fileName) > 64 {
-			errorCritical("model file name must be 64 characters or less")
-		}
-		if filepath.Ext(fileName) != ".vp" {
-			errorCritical("model file name must have a '.vp' extension")
-		}
-		PrettyMessage(fmt.Sprintf(
-			"Parsing model '%s'...", fileName,
-		), "verifpal", false)
-		parsed, err := ParseFile(filePath)
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		m = parsed.(Model)
-		m.fileName = fileName
-		return m
+func parserParseModel(filePath string) Model {
+	fileName := path.Base(filePath)
+	if len(fileName) > 64 {
+		errorCritical("model file name must be 64 characters or less")
 	}
+	if filepath.Ext(fileName) != ".vp" {
+		errorCritical("model file name must have a '.vp' extension")
+	}
+	PrettyMessage(fmt.Sprintf(
+		"Parsing model '%s'...", fileName,
+	), "verifpal", false)
+	parsed, err := ParseFile(filePath)
+	if err != nil {
+		errorCritical(err.Error())
+	}
+	m := parsed.(Model)
+	m.fileName = fileName
+	return m
+}
 }
 
 Verifpal <- Comment* Attacker:Attacker Blocks:(Block+) Queries:Queries Comment* EOF {
@@ -118,13 +118,13 @@ Qualifier <- ("public"/"private"/"password") {
 	return string(c.text), nil
 }
 
-Message <- Sender:PrincipalName _ "->" _ Recipient:PrincipalName _ ':' _ MessageConstants:MessageConstants {
+Message <- Sender:PrincipalName _ "->" _ Recipient:PrincipalName _ ':' _ Constants:MessageConstants {
 	return block{
 		kind: "message",
 		message: message{
 			sender: Sender.(string),
 			recipient: Recipient.(string),
-			constants: MessageConstants.([]constant),
+			constants: Constants.([]constant),
 		},
 	}, nil
 }
@@ -159,7 +159,7 @@ Generates <- "generates" _ Constants:Constants {
 	}, nil
 }
 
-Assignment <- Left:Constants _ '=' _ Right:(Primitive/Equation/Constant) {
+Assignment <- Left:Constants _ '=' _ Right:Value {
 	switch Right.(value).kind {
 	case "constant":
 		err := errors.New("cannot assign value to value")
@@ -217,7 +217,7 @@ GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
 	}, err
 }
 
-Primitive <- Name:PrimitiveName '(' _ Arguments:(Primitive/Equation/Constant)+ _ ')' Check:'?'? (_ ',' _)? {
+Primitive <- Name:PrimitiveName '(' _ Arguments:(Value)+ _ ')' Check:'?'? (_ ',' _)? {
 	args := []value{}
 	for _, a := range Arguments.([]interface{}) {
 		args = append(args, a.(value))
@@ -237,17 +237,19 @@ PrimitiveName <- Name:Identifier {
 	return strings.ToUpper(Name.(string)), nil
 }
 
-Equation <- FirstConstant:Constant (_ '^' _) SecondConstant:Constant {
+Equation <- First:Constant (_ '^' _) Second:Constant {
 	return value{
 		kind: "equation",
 		equation: equation{
 			values: []value{
-				FirstConstant.(value),
-				SecondConstant.(value),
+				First.(value),
+				Second.(value),
 			},
 		},
 	}, nil
 }
+
+Value <- Primitive/Equation/Constant
 	
 Queries <- "queries" _ '[' _ Queries:(Query*) ']' _ {
 	return Queries, nil
@@ -257,32 +259,32 @@ Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication) Comment* {
 	return Query, nil
 }
 	
-QueryConfidentiality <- "confidentiality?" _ Constant:Constant _ QueryOptions:QueryOptions? _ {
-	if QueryOptions == nil {
-		QueryOptions = []queryOption{}
+QueryConfidentiality <- "confidentiality?" _ Constant:Constant _ Options:QueryOptions? _ {
+	if Options == nil {
+		Options = []queryOption{}
 	}
 	return query{
 		kind: "confidentiality",
 		constant: Constant.(value).constant,
 		message: message{},
-		options: QueryOptions.([]queryOption),
+		options: Options.([]queryOption),
 	}, nil
 }
 
-QueryAuthentication <- "authentication?" _ Message:Message _ QueryOptions:QueryOptions? _ {
-	if QueryOptions == nil {
-		QueryOptions = []queryOption{}
+QueryAuthentication <- "authentication?" _ Message:Message _ Options:QueryOptions? _ {
+	if Options == nil {
+		Options = []queryOption{}
 	}
 	return query{
 		kind: "authentication",
 		constant: constant{},
 		message: (Message.(block)).message,
-		options: QueryOptions.([]queryOption),
+		options: Options.([]queryOption),
 	}, nil
 }
 
-QueryOptions <- '[' _ QueryOptions:(QueryOption*) ']' _ {
-	o := QueryOptions.([]interface{})
+QueryOptions <- '[' _ Options:(QueryOption*) ']' _ {
+	o := Options.([]interface{})
 	do := make([]queryOption, len(o))
 	for i, v := range o { do[i] = v.(queryOption) }
 	return do, nil
