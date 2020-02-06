@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.8
+- Add `leaks` declaration keyword.
+
 ## 0.0.7
 - Add `phase` block keyword.
 

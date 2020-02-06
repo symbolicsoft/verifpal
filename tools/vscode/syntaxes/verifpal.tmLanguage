@@ -220,7 +220,7 @@
         </dict>
         <dict>
           <key>begin</key>
-          <string>((generates|knows)\s)</string>
+          <string>((generates|knows|leaks)\s)</string>
           <key>beginCaptures</key>
           <dict>
             <key>1</key>

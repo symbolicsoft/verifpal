@@ -129,7 +129,7 @@ contexts [] {
          styles []       = .function;
       }
       : inline_push {
-         regex          \= ((generates|knows)\s)
+         regex          \= ((generates|knows|leaks)\s)
          styles []       = .keyword;
          : pop {  
             regex       \= (\s)
