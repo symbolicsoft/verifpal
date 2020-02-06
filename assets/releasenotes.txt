@@ -1,1 +1,10 @@
-In this release, the heuristics added in 0.10.3 to constrain HKDF mutation state explosion are relaxed in order to reduce missed attacks. Two new tests, subkey_hash.vp and subkey_hkdf.vp, are added in order to ensure that these missed attacks do not recur.
+In this release, we add the new "leaks" expression, which allows principals to leak values to the attacker without necessarily sending them to one another over the network, like this:
+
+principal Alice[
+    knows private verySecretSecret
+    leaks verySecretSecret
+]
+
+The attacker now knows verySecretSecret.
+
+Other minor improvements and optimizations are included.
