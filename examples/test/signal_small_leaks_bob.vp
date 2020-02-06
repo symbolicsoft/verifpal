@@ -39,6 +39,7 @@ principal Alice[
 Alice -> Bob: [galongterm], gae1, gae2, e1
 
 principal Bob[
+	leaks blongterm
 	bmaster = HASH(nil, galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
 	brkba1, bckba1 = HKDF(bmaster, nil, nil)
 ]
@@ -49,6 +50,8 @@ principal Bob[
 	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
 	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
 ]
+
+phase[1]
 
 principal Alice[leaks alongterm]
 principal Bob[leaks blongterm]

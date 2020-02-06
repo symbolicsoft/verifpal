@@ -52,8 +52,8 @@ principal Bob[
 
 phase[1]
 
-Alice ->Bob: alongterm
-Bob -> Alice: blongterm
+principal Alice[leaks alongterm]
+principal Bob[leaks blongterm]
 
 queries[
 	confidentiality? m1
