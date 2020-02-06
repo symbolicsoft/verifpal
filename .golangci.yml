@@ -59,7 +59,6 @@ linters-settings:
             - argOrder
             - badCall
             - badCond
-            - commentedOutCode
             - evalOrder
             - exitAfterDefer
             - flagName
