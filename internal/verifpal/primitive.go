@@ -465,7 +465,7 @@ func primitiveGet(name string) primitiveSpec {
 		}
 	}
 	if !found {
-		errorCritical(fmt.Sprintf("invalid primitive (%s)", name))
+		errorCritical(fmt.Sprintf("unknown primitive (%s)", name))
 	}
 	return p
 }

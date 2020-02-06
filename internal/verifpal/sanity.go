@@ -196,13 +196,24 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		}
-		for _, option := range query.options {
+		sanityQueryOptions(query)
+	}
+}
+
+func sanityQueryOptions(query query) {
+	for _, option := range query.options {
+		switch option.kind {
+		case "precondition":
 			if len(option.message.constants) != 1 {
 				errorCritical(fmt.Sprintf(
 					"precondition option message (%s) has more than one constant",
 					prettyQuery(query),
 				))
 			}
+		default:
+			errorCritical(fmt.Sprintf(
+				"invalid query option kind (%s)", option.kind,
+			))
 		}
 	}
 }
