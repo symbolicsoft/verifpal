@@ -5,7 +5,6 @@
 echo -n "[Verifpal] Enter version: "
 read VERSION
 
-echo "In this release, " > assets/releasenotes.txt
 vim assets/releasenotes.txt
 RELEASE_NOTES="$(cat assets/releasenotes.txt)"
 
