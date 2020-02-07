@@ -424,7 +424,7 @@ var primitiveSpecs = []primitiveSpec{
 		arity:  2,
 		output: 1,
 		decompose: decomposeRule{
-			hasRule: true,
+			hasRule: false,
 		},
 		recompose: recomposeRule{
 			hasRule: false,

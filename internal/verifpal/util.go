@@ -68,10 +68,10 @@ func minIntInSlice(v []int) (int, error) {
 
 // colorOutputSupport tells us whether color output is supported based on the GOOS build target.
 func colorOutputSupport() bool {
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		return false
-	}
-	if runtime.GOOS == "js" {
+	case "js":
 		return false
 	}
 	return true
