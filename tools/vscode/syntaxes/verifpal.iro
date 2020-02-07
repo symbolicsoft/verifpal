@@ -125,7 +125,7 @@ contexts [] {
          styles []       = .keyword;
       }
       : pattern {
-         regex          \= (PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)
+         regex          \= (RINGSIGNVERIF|RINGSIGN|PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)
          styles []       = .function;
       }
       : inline_push {

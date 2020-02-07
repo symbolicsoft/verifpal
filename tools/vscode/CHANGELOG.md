@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.9
+- Add `RINGSIGN` and `RINGSIGNVERIF` keywords.
+
 ## 0.0.8
 - Add `leaks` declaration keyword.
 
