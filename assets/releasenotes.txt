@@ -1,10 +1,8 @@
-In this release, we add the new "leaks" expression, which allows principals to leak values to the attacker without necessarily sending them to one another over the network, like this:
+In this release, we add experimental support for a new ring signatures primitive, as suggested by Sebastian R. Verschoor:
+https://lists.symbolic.software/pipermail/verifpal/2020/000157.html
 
-principal Alice[
-    knows private verySecretSecret
-    leaks verySecretSecret
-]
+Two primitives are added:
 
-The attacker now knows verySecretSecret.
+	- RINGSIGN(key_a, G^key_b, G^key_c, message): signature. In ring signatures, one of three parties (Alice, Bob and Charlie) signs a message. The resulting signature can be verified using the public key of any of the three parties, and the signature does not reveal the signatory, only that they are a member of the signing ring (Alice, Bob or Charlie). The first key must be the private key of the actual signer, while the subsequent two keys must be the public keys of the other potential signers.
 
-Other minor improvements and optimizations are included.
+	- RINGSIGNVERIF(G^a, G^b, G^c, m, RINGSIGN(a, G^b, G^c, m)). Verifies if a ring signature can be authenticated. The signer's public key must match one or more of the public keys provided, but the public keys may be provided in any order and not necessarily in the order used during the RINGSIGN operation.
