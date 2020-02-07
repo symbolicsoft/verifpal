@@ -158,6 +158,14 @@ func TestMain(t *testing.T) {
 			model:       "e_collection_key.vp",
 			resultsCode: "c0a1",
 		},
+		{
+			model:       "ringsign.vp",
+			resultsCode: "a0",
+		},
+		{
+			model:       "ringsign_unguarded.vp",
+			resultsCode: "a1",
+		},
 	}
 	for _, v := range tests {
 		testModel(v, t)

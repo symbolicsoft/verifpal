@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = G^a
+]
+
+principal Bob[
+	knows private b
+	gb = G^b
+]
+
+principal Carol[
+	knows private c
+	gc = G^c
+]
+
+principal Damian[
+	knows private d
+	gd = G^d
+]
+
+Alice -> Bob: [ga]
+Carol -> Bob: gc
+
+Alice -> Damian: [ga]
+Bob -> Damian: [gc]
+
+principal Bob[
+	knows private m
+	s = RINGSIGN(b, ga, gc, m)
+]
+
+Bob -> Damian: [gb], m, s
+
+principal Damian[
+	_ = RINGSIGNVERIF(ga, gb, gc, m, s)?
+	_ = HASH(m)
+]
+
+queries[
+	authentication? Bob->Damian: m
+]
