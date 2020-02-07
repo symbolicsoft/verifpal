@@ -5,7 +5,6 @@
 package verifpal
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -26,7 +25,6 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 			continue
 		}
 		a := valPrincipalState.assigned[ii]
-		fmt.Println(prettyValue(v))
 		replacementsGroup.Add(1)
 		go func(v value) {
 			c, r := replacementMapReplaceValue(
