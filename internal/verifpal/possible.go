@@ -205,12 +205,28 @@ func possibleToRewrite(
 		if from.primitive.name != prim.rewrite.name {
 			return (false || !prim.check), value{kind: "primitive", primitive: p}
 		}
-		for _, m := range prim.rewrite.matching {
-			var valid bool
-			ax := []value{p.arguments[m], from.primitive.arguments[m]}
-			ax[0], valid = prim.rewrite.filter(ax[0], m, valPrincipalState)
+		if !possibleToRewritePrim(p, valPrincipalState) {
+			return (false || !prim.check), value{kind: "primitive", primitive: p}
+		}
+		rewrite := value{kind: "primitive", primitive: p}
+		if prim.rewrite.to > 0 {
+			rewrite = from.primitive.arguments[prim.rewrite.to]
+		}
+		return true, rewrite
+	}
+	return (false || !prim.check), value{kind: "primitive", primitive: p}
+}
+
+func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
+	prim := primitiveGet(p.name)
+	from := p.arguments[prim.rewrite.from]
+	for a, m := range prim.rewrite.matching {
+		valid := false
+		for _, mm := range m {
+			ax := []value{p.arguments[a], from.primitive.arguments[mm]}
+			ax[0], valid = prim.rewrite.filter(ax[0], mm, valPrincipalState)
 			if !valid {
-				return (false || !prim.check), value{kind: "primitive", primitive: p}
+				continue
 			}
 			for i := range ax {
 				switch ax[i].kind {
@@ -221,17 +237,16 @@ func possibleToRewrite(
 					}
 				}
 			}
-			if !sanityEquivalentValues(ax[0], ax[1], valPrincipalState) {
-				return (false || !prim.check), value{kind: "primitive", primitive: p}
+			valid = sanityEquivalentValues(ax[0], ax[1], valPrincipalState)
+			if valid {
+				break
 			}
 		}
-		rewrite := value{kind: "primitive", primitive: p}
-		if prim.rewrite.to > 0 {
-			rewrite = from.primitive.arguments[prim.rewrite.to]
+		if !valid {
+			return false
 		}
-		return true, rewrite
 	}
-	return (false || !prim.check), value{kind: "primitive", primitive: p}
+	return true
 }
 
 func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {

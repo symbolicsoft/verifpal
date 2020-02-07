@@ -123,7 +123,7 @@ type rewriteRule struct {
 	name     string
 	from     int
 	to       int
-	matching []int
+	matching map[int][]int
 	filter   func(value, int, principalState) (value, bool)
 }
 
@@ -154,7 +154,7 @@ type principalState struct {
 	assigned      []value
 	guard         []bool
 	known         []bool
-	wire          []bool
+	wire          [][]string
 	knownBy       [][]map[string]string
 	creator       []string
 	sender        []string

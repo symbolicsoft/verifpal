@@ -42,7 +42,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 		attackerStateShared.mutatedTo = append(attackerStateShared.mutatedTo, []string{})
 	}
 	for i, c := range valPrincipalState.constants {
-		if !valPrincipalState.wire[i] && !valPrincipalState.constants[i].leaked {
+		if !strInSlice(valPrincipalState.name, valPrincipalState.wire[i]) && !valPrincipalState.constants[i].leaked {
 			continue
 		}
 		if valPrincipalState.constants[i].qualifier != "private" {

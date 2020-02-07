@@ -5,6 +5,7 @@
 package verifpal
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -25,6 +26,7 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 			continue
 		}
 		a := valPrincipalState.assigned[ii]
+		fmt.Println(prettyValue(v))
 		replacementsGroup.Add(1)
 		go func(v value) {
 			c, r := replacementMapReplaceValue(
@@ -62,6 +64,8 @@ func replacementMapSkipValue(
 	}
 	switch {
 	case !valAttackerState.wire[i]:
+		return true
+	case !strInSlice(valPrincipalState.name, valPrincipalState.wire[ii]):
 		return true
 	case valPrincipalState.guard[ii]:
 		iii := sanityGetAttackerStateIndexFromConstant(

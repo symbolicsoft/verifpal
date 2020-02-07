@@ -108,11 +108,14 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "AEAD_ENC",
-			from:     1,
-			to:       1,
-			matching: []int{0, 2},
+			hasRule: true,
+			name:    "AEAD_ENC",
+			from:    1,
+			to:      1,
+			matching: map[int][]int{
+				0: {0},
+				2: {2},
+			},
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -171,11 +174,13 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "ENC",
-			from:     1,
-			to:       1,
-			matching: []int{0},
+			hasRule: true,
+			name:    "ENC",
+			from:    1,
+			to:      1,
+			matching: map[int][]int{
+				0: {0},
+			},
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -263,11 +268,14 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "SIGN",
-			from:     2,
-			to:       -1,
-			matching: []int{0, 1},
+			hasRule: true,
+			name:    "SIGN",
+			from:    2,
+			to:      -1,
+			matching: map[int][]int{
+				0: {0},
+				1: {1},
+			},
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -278,13 +286,14 @@ var primitiveSpecs = []primitiveSpec{
 						return x, false
 					case "equation":
 						values := sanityDecomposeEquationValues(
-							x.equation,
-							valPrincipalState,
+							x.equation, valPrincipalState,
 						)
-						if len(values) == 2 {
+						switch len(values) {
+						case 2:
 							return values[1], true
+						default:
+							return x, false
 						}
-						return x, false
 					}
 				case 1:
 					return x, true
@@ -360,11 +369,13 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: false,
 		},
 		rewrite: rewriteRule{
-			hasRule:  true,
-			name:     "PKE_ENC",
-			from:     1,
-			to:       1,
-			matching: []int{0},
+			hasRule: true,
+			name:    "PKE_ENC",
+			from:    1,
+			to:      1,
+			matching: map[int][]int{
+				0: {0},
+			},
 			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
 				switch i {
 				case 0:
@@ -449,6 +460,86 @@ var primitiveSpecs = []primitiveSpec{
 			},
 		},
 		check:           false,
+		injectable:      false,
+		passwordHashing: false,
+	},
+	{
+		name:   "RINGSIGN",
+		arity:  4,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: false,
+		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
+		rewrite: rewriteRule{
+			hasRule: false,
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
+		check:           false,
+		injectable:      true,
+		passwordHashing: false,
+	},
+	{
+		name:   "RINGSIGNVERIF",
+		arity:  5,
+		output: 1,
+		decompose: decomposeRule{
+			hasRule: false,
+		},
+		recompose: recomposeRule{
+			hasRule: false,
+		},
+		rewrite: rewriteRule{
+			hasRule: true,
+			name:    "RINGSIGN",
+			from:    4,
+			to:      -1,
+			matching: map[int][]int{
+				0: {0, 1, 2},
+				1: {0, 1, 2},
+				2: {0, 1, 2},
+				3: {3},
+			},
+			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+				switch i {
+				case 0:
+					switch x.kind {
+					case "constant":
+						return x, false
+					case "primitive":
+						return x, false
+					case "equation":
+						values := sanityDecomposeEquationValues(
+							x.equation,
+							valPrincipalState,
+						)
+						switch len(values) {
+						case 2:
+							return values[1], true
+						default:
+							return x, false
+						}
+					}
+				case 1:
+					return x, true
+				case 2:
+					return x, true
+				case 3:
+					return x, true
+				case 4:
+					return x, true
+				}
+				return x, false
+			},
+		},
+		rebuild: rebuildRule{
+			hasRule: false,
+		},
+		check:           true,
 		injectable:      false,
 		passwordHashing: false,
 	},

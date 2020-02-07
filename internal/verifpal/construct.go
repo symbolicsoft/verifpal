@@ -325,7 +325,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			assigned:      []value{},
 			guard:         []bool{},
 			known:         []bool{},
-			wire:          []bool{},
+			wire:          [][]string{},
 			knownBy:       [][]map[string]string{},
 			creator:       []string{},
 			sender:        []string{},
@@ -339,7 +339,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 		for i, c := range valKnowledgeMap.constants {
 			guard := false
 			knows := false
-			wire := false
+			wire := []string{}
 			sender := valKnowledgeMap.creator[i]
 			assigned := valKnowledgeMap.assigned[i]
 			if valKnowledgeMap.creator[i] == principal {
@@ -352,17 +352,17 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 					break
 				}
 			}
-		BlocksLoop:
 			for _, blck := range m.blocks {
 				switch blck.kind {
 				case "message":
-					roc := ((blck.message.recipient == principal) ||
-						(valKnowledgeMap.creator[i] == principal))
+					ir := (blck.message.recipient == principal)
+					ic := (valKnowledgeMap.creator[i] == principal)
 					for _, cc := range blck.message.constants {
 						if c.name == cc.name {
-							wire = true
-							guard = cc.guard && roc
-							break BlocksLoop
+							wire = append(wire, principal)
+							if !guard {
+								guard = cc.guard && (ir || ic)
+							}
 						}
 					}
 				}
@@ -393,7 +393,7 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		assigned:      make([]value, len(valPrincipalState.assigned)),
 		guard:         make([]bool, len(valPrincipalState.guard)),
 		known:         make([]bool, len(valPrincipalState.known)),
-		wire:          make([]bool, len(valPrincipalState.wire)),
+		wire:          make([][]string, len(valPrincipalState.wire)),
 		knownBy:       make([][]map[string]string, len(valPrincipalState.knownBy)),
 		creator:       make([]string, len(valPrincipalState.creator)),
 		sender:        make([]string, len(valPrincipalState.sender)),
