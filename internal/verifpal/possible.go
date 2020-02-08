@@ -251,15 +251,13 @@ func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
 
 func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
 	switch p.name {
-	case "DEC", "AEAD_DEC":
-		return possibleToForceRewriteDECandAEADDEC(p, valPrincipalState, valAttackerState)
-	case "SIGNVERIF":
-		return possibleToForceRewriteSIGNVERIF(p, valPrincipalState, valAttackerState)
+	case "DEC", "AEAD_DEC", "PKE_DEC":
+		return possibleToForceRewriteDecryption(p, valPrincipalState, valAttackerState)
 	}
 	return false
 }
 
-func possibleToForceRewriteDECandAEADDEC(
+func possibleToForceRewriteDecryption(
 	p primitive, valPrincipalState principalState, valAttackerState attackerState,
 ) bool {
 	prim := primitiveGet(p.name)
@@ -281,24 +279,6 @@ func possibleToForceRewriteDECandAEADDEC(
 		if r {
 			return true
 		}
-	case "equation":
-		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState, valAttackerState)
-		if r {
-			return true
-		}
-	}
-	return false
-}
-
-func possibleToForceRewriteSIGNVERIF(
-	p primitive, valPrincipalState principalState, valAttackerState attackerState,
-) bool {
-	k := p.arguments[0]
-	switch k.kind {
-	case "constant":
-		return false
-	case "primitive":
-		return false
 	case "equation":
 		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState, valAttackerState)
 		if r {
