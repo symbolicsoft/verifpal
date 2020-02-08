@@ -10,14 +10,14 @@ principal Authenticator[
 
 principal Client[
 	generates m1
-	h1 = HKDF(m1, m1, m1)
+	h1 = HASH(HASH(HKDF(m1, m1, m1)))
 ]
 
 Client -> Authenticator: h1
 
 principal Authenticator[
 	a1 = MAC(k, h1)
-	k2 = MAC(k, HKDF(c0, c0, c0))
+	k2 = MAC(k, HASH(HASH(HKDF(c0, c0, c0))))
 ]
 
 Authenticator -> Client: a1

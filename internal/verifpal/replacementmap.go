@@ -117,7 +117,8 @@ func replacementMapReplaceValue(
 		replacements = append(replacements, a)
 		injectants := inject(
 			a.primitive, a.primitive, true, rootIndex,
-			valPrincipalState, valAttackerState, stage,
+			valPrincipalState, valAttackerState,
+			stage, 0,
 		)
 		for _, aa := range injectants {
 			if sanityExactSameValueInValues(aa, replacements) < 0 {

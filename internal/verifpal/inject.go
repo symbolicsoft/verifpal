@@ -12,12 +12,12 @@ import (
 
 func inject(
 	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
-	valPrincipalState principalState, valAttackerState attackerState, stage int,
+	valPrincipalState principalState, valAttackerState attackerState,
+	stage int, depth int,
 ) []value {
 	prim := primitiveGet(p.name)
-	injectants := ([]value{})
 	if !prim.injectable {
-		return injectants
+		return []value{}
 	}
 	if isRootPrimitive {
 		pp, _ := sanityResolveValueInternalValuesFromPrincipalState(value{
@@ -26,13 +26,15 @@ func inject(
 		p = pp.primitive
 		rootPrimitive = p
 	}
-	injectants = injectPrimitive(p, rootPrimitive, valPrincipalState, valAttackerState, stage)
-	return injectants
+	return injectPrimitive(
+		p, rootPrimitive, valPrincipalState, valAttackerState,
+		stage, depth,
+	)
 }
 
 func injectValueRules(
 	k value, arg int, p primitive, rootPrimitive primitive,
-	valPrincipalState principalState, stage int,
+	valPrincipalState principalState, stage int, depth int,
 ) bool {
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
@@ -50,7 +52,7 @@ func injectValueRules(
 	case "constant":
 		return injectConstantRules(k.constant, arg, p, valPrincipalState)
 	case "primitive":
-		return injectPrimitiveRules(k.primitive, arg, p, stage)
+		return injectPrimitiveRules(k.primitive, arg, p, stage, depth)
 	case "equation":
 		return injectEquationRules(k.equation, arg, p)
 	}
@@ -71,9 +73,9 @@ func injectConstantRules(c constant, arg int, p primitive, valPrincipalState pri
 	return true
 }
 
-func injectPrimitiveRules(k primitive, arg int, p primitive, stage int) bool {
+func injectPrimitiveRules(k primitive, arg int, p primitive, stage int, depth int) bool {
 	switch {
-	case injectPrimitiveStageRestricted(k, stage):
+	case injectPrimitiveStageRestricted(k, stage, depth):
 		return false
 	case p.arguments[arg].kind != "primitive":
 		return false
@@ -95,19 +97,23 @@ func injectEquationRules(e equation, arg int, p primitive) bool {
 	return true
 }
 
-func injectPrimitiveStageRestricted(p primitive, stage int) bool {
+func injectPrimitiveStageRestricted(p primitive, stage int, depth int) bool {
 	switch stage {
 	case 0:
 		return true
 	case 1:
 		return true
 	case 2:
-		switch p.name {
-		case "HASH", "HKDF":
+		if depth > 2 {
 			return true
 		}
 	case 3:
-		return false
+		switch p.name {
+		case "HKDF":
+			if depth > 2 {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -182,10 +188,11 @@ SkeletonSearch:
 
 func injectPrimitive(
 	p primitive, rootPrimitive primitive,
-	valPrincipalState principalState, valAttackerState attackerState, stage int,
+	valPrincipalState principalState, valAttackerState attackerState,
+	stage int, depth int,
 ) []value {
 	var injectsGroup sync.WaitGroup
-	if injectPrimitiveStageRestricted(p, stage) {
+	if injectPrimitiveStageRestricted(p, stage, depth) {
 		return []value{}
 	}
 	kinjectants := make([][]value, len(p.arguments))
@@ -196,10 +203,15 @@ func injectPrimitive(
 			for _, k := range valAttackerState.known {
 				switch k.kind {
 				case "constant":
-					i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, k.constant)
+					i := sanityGetPrincipalStateIndexFromConstant(
+						valPrincipalState, k.constant,
+					)
 					k = valPrincipalState.beforeMutate[i]
 				}
-				if !injectValueRules(k, arg, p, rootPrimitive, valPrincipalState, stage) {
+				if !injectValueRules(
+					k, arg, p, rootPrimitive, valPrincipalState,
+					stage, depth,
+				) {
 					continue
 				}
 				switch k.kind {
@@ -207,25 +219,16 @@ func injectPrimitive(
 					kinjectants[arg] = append(kinjectants[arg], k)
 				case "primitive":
 					var kprims []value
-					switch p.name {
-					case "HKDF", "HASH":
-						kprims = []value{constantN}
-					default:
-						kprims = inject(
-							k.primitive, rootPrimitive, false, -1,
-							valPrincipalState, valAttackerState, stage,
-						)
-					}
+					kprims = inject(
+						k.primitive, rootPrimitive, false, -1,
+						valPrincipalState, valAttackerState,
+						stage, injectIncrementDepth(depth),
+					)
 					if len(kprims) > 0 {
 						kinjectants[arg] = append(kinjectants[arg], kprims...)
 					}
 				case "equation":
-					switch p.name {
-					case "HKDF", "HASH":
-						kinjectants[arg] = append(kinjectants[arg], constantN)
-					default:
-						kinjectants[arg] = append(kinjectants[arg], k)
-					}
+					kinjectants[arg] = append(kinjectants[arg], k)
 				}
 			}
 			injectsGroup.Done()
@@ -233,6 +236,10 @@ func injectPrimitive(
 	}
 	injectsGroup.Wait()
 	return injectLoopN(p, kinjectants)
+}
+
+func injectIncrementDepth(depth int) int {
+	return depth + 1
 }
 
 func injectLoopN(p primitive, kinjectants [][]value) []value {

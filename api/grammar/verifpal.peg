@@ -25,7 +25,8 @@ import (
 var parserReserved = []string{
 	"attacker", "passive", "active", "principal",
 	"phase, public", "private", "password",
-	"confidentiality", "authentication", "precondition", "ringsign", "ringsignverif",
+	"confidentiality", "authentication", "precondition",
+	"ringsign", "ringsignverif",
 	"primitive", "pw_hash", "hash", "hkdf",
 	"aead_enc", "aead_dec", "enc", "dec",
 	"mac", "assert", "sign", "signverif",
