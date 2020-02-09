@@ -38,7 +38,7 @@ steps:
     - make lint
 
 - name: test
-  image: golang:latest
+  image: golang:1.13
   volumes:
     - name: deps
       path: /go
@@ -46,7 +46,7 @@ steps:
     - make test
 
 - name: release
-  image: golang:latest
+  image: golang:1.13
   volumes:
     - name: deps
       path: /go
