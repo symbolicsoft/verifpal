@@ -90,20 +90,19 @@ func replacementMapReplaceValue(
 	a value, v value, rootIndex int, stage int,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) (constant, []value) {
-	var replacements []value
 	switch a.kind {
 	case "constant":
-		replacements = replacementMapReplaceConstant(
+		return v.constant, replacementMapReplaceConstant(
 			a, stage, valPrincipalState, valAttackerState,
 		)
 	case "primitive":
-		replacements = replacementMapReplacePrimitive(
+		return v.constant, replacementMapReplacePrimitive(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
 	case "equation":
-		replacements = replacementMapReplaceEquation(a)
+		return v.constant, replacementMapReplaceEquation(a)
 	}
-	return v.constant, replacements
+	return v.constant, []value{}
 }
 
 func replacementMapReplaceConstant(
@@ -114,7 +113,6 @@ func replacementMapReplaceConstant(
 	if constantIsGOrNil(a.constant) {
 		return replacements
 	}
-	replacements = append(replacements, a)
 	replacements = append(replacements, constantN)
 	if stage <= 3 {
 		return replacements
@@ -141,7 +139,7 @@ func replacementMapReplacePrimitive(
 	a value, rootIndex int, stage int,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) []value {
-	replacements := []value{a}
+	replacements := []value{}
 	injectants := inject(
 		a.primitive, a.primitive, true, rootIndex,
 		valPrincipalState, valAttackerState,
@@ -156,7 +154,7 @@ func replacementMapReplacePrimitive(
 }
 
 func replacementMapReplaceEquation(a value) []value {
-	return []value{a, constantGN}
+	return []value{constantGN}
 }
 
 func replacementMapNext(valReplacementMap replacementMap) replacementMap {
