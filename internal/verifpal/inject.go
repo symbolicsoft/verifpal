@@ -7,7 +7,6 @@ package verifpal
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 func inject(
@@ -15,6 +14,9 @@ func inject(
 	valPrincipalState principalState, valAttackerState attackerState,
 	stage int, depth int,
 ) []value {
+	if verifyResultsAllResolved() {
+		return []value{}
+	}
 	prim := primitiveGet(p.name)
 	if !prim.injectable {
 		return []value{}
@@ -114,6 +116,13 @@ func injectPrimitiveStageRestricted(p primitive, stage int, depth int) bool {
 				return true
 			}
 		}
+	case 4:
+		switch p.name {
+		case "HKDF":
+			if depth > 2 {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -191,50 +200,45 @@ func injectPrimitive(
 	valPrincipalState principalState, valAttackerState attackerState,
 	stage int, depth int,
 ) []value {
-	var injectsGroup sync.WaitGroup
 	if injectPrimitiveStageRestricted(p, stage, depth) {
 		return []value{}
 	}
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.arguments {
-		injectsGroup.Add(1)
-		go func(arg int) {
-			for _, k := range valAttackerState.known {
-				switch k.kind {
-				case "constant":
-					i := sanityGetPrincipalStateIndexFromConstant(
-						valPrincipalState, k.constant,
-					)
-					k = valPrincipalState.beforeMutate[i]
-				}
-				if !injectValueRules(
-					k, arg, p, rootPrimitive, valPrincipalState,
-					stage, depth,
-				) {
-					continue
-				}
-				switch k.kind {
-				case "constant":
-					kinjectants[arg] = append(kinjectants[arg], k)
-				case "primitive":
-					var kprims []value
-					kprims = inject(
-						k.primitive, rootPrimitive, false, -1,
-						valPrincipalState, valAttackerState,
-						stage, injectIncrementDepth(depth),
-					)
-					if len(kprims) > 0 {
-						kinjectants[arg] = append(kinjectants[arg], kprims...)
-					}
-				case "equation":
-					kinjectants[arg] = append(kinjectants[arg], k)
-				}
+		for _, k := range valAttackerState.known {
+			switch k.kind {
+			case "constant":
+				i := sanityGetPrincipalStateIndexFromConstant(
+					valPrincipalState, k.constant,
+				)
+				k = valPrincipalState.beforeMutate[i]
 			}
-			injectsGroup.Done()
-		}(arg)
+			if !injectValueRules(
+				k, arg, p, rootPrimitive, valPrincipalState,
+				stage, depth,
+			) {
+				continue
+			}
+			switch k.kind {
+			case "constant":
+				kinjectants[arg] = append(kinjectants[arg], k)
+			case "primitive":
+				var kprims []value
+				kprims = inject(
+					k.primitive, rootPrimitive, false, -1,
+					valPrincipalState, valAttackerState,
+					stage, injectIncrementDepth(depth),
+				)
+				if len(kprims) > 0 {
+					kinjectants[arg] = append(kinjectants[arg], kprims...)
+				}
+			case "equation":
+				kinjectants[arg] = append(kinjectants[arg], k)
+			}
+		}
 	}
-	injectsGroup.Wait()
+
 	return injectLoopN(p, kinjectants)
 }
 

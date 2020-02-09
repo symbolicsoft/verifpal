@@ -90,46 +90,73 @@ func replacementMapReplaceValue(
 	a value, v value, rootIndex int, stage int,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) (constant, []value) {
-	replacements := []value{}
+	var replacements []value
 	switch a.kind {
 	case "constant":
-		if constantIsGOrNil(a.constant) {
-			return v.constant, replacements
-		}
-		replacements = append(replacements, a)
-		replacements = append(replacements, constantN)
-		for _, c := range valAttackerState.known {
-			switch c.kind {
-			case "constant":
-				if constantIsGOrNil(c.constant) {
-					continue
-				}
-				cc := sanityResolveConstant(c.constant, valPrincipalState)
-				switch cc.kind {
-				case "constant":
-					if sanityExactSameValueInValues(cc, replacements) < 0 {
-						replacements = append(replacements, cc)
-					}
-				}
-			}
-		}
-	case "primitive":
-		replacements = append(replacements, a)
-		injectants := inject(
-			a.primitive, a.primitive, true, rootIndex,
-			valPrincipalState, valAttackerState,
-			stage, 0,
+		replacements = replacementMapReplaceConstant(
+			a, stage, valPrincipalState, valAttackerState,
 		)
-		for _, aa := range injectants {
-			if sanityExactSameValueInValues(aa, replacements) < 0 {
-				replacements = append(replacements, aa)
-			}
-		}
+	case "primitive":
+		replacements = replacementMapReplacePrimitive(
+			a, rootIndex, stage, valPrincipalState, valAttackerState,
+		)
 	case "equation":
-		replacements = append(replacements, a)
-		replacements = append(replacements, constantGN)
+		replacements = replacementMapReplaceEquation(a)
 	}
 	return v.constant, replacements
+}
+
+func replacementMapReplaceConstant(
+	a value, stage int,
+	valPrincipalState principalState, valAttackerState attackerState,
+) []value {
+	replacements := []value{}
+	if constantIsGOrNil(a.constant) {
+		return replacements
+	}
+	replacements = append(replacements, a)
+	replacements = append(replacements, constantN)
+	if stage <= 3 {
+		return replacements
+	}
+	for _, c := range valAttackerState.known {
+		switch c.kind {
+		case "constant":
+			if constantIsGOrNil(c.constant) {
+				continue
+			}
+			cc := sanityResolveConstant(c.constant, valPrincipalState)
+			switch cc.kind {
+			case "constant":
+				if sanityExactSameValueInValues(cc, replacements) < 0 {
+					replacements = append(replacements, cc)
+				}
+			}
+		}
+	}
+	return replacements
+}
+
+func replacementMapReplacePrimitive(
+	a value, rootIndex int, stage int,
+	valPrincipalState principalState, valAttackerState attackerState,
+) []value {
+	replacements := []value{a}
+	injectants := inject(
+		a.primitive, a.primitive, true, rootIndex,
+		valPrincipalState, valAttackerState,
+		stage, 0,
+	)
+	for _, aa := range injectants {
+		if sanityExactSameValueInValues(aa, replacements) < 0 {
+			replacements = append(replacements, aa)
+		}
+	}
+	return replacements
+}
+
+func replacementMapReplaceEquation(a value) []value {
+	return []value{a, constantGN}
 }
 
 func replacementMapNext(valReplacementMap replacementMap) replacementMap {

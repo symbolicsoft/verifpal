@@ -10,6 +10,7 @@ import (
 )
 
 func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+	var stagesGroup sync.WaitGroup
 	PrettyMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.maxPhase {
@@ -17,14 +18,20 @@ func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalSt
 		attackerStateInit(true)
 		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
 		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
+		stagesGroup.Add(4)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1, &stagesGroup)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2, &stagesGroup)
+		go verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3, &stagesGroup)
+		go verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4, &stagesGroup)
+		stagesGroup.Wait()
 		phase = phase + 1
 	}
 }
 
-func verifyActiveStages(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
+func verifyActiveStages(
+	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
+	stage int, sg *sync.WaitGroup,
+) {
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
@@ -40,6 +47,7 @@ func verifyActiveStages(valKnowledgeMap knowledgeMap, valPrincipalStates []princ
 		}(valPrincipalState, &principalsGroup)
 	}
 	principalsGroup.Wait()
+	sg.Done()
 }
 
 func verifyActiveScan(
