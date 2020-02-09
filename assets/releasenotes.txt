@@ -1,1 +1,1 @@
-In this release, we attempt a new approach at dealing with state space explosions: bounding the analysis exclusively on HKDF primitive mutations, while keeping the analysis unbounded on everything else.
+In this release, improvements are made to the heuristics that Verifpal uses in order to attempt to shorten analysis time and avoid state space explosions. The result should be significantly faster analysis for most models.
