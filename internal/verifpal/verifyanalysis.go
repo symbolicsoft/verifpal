@@ -61,17 +61,18 @@ func verifyAnalysisDecompose(
 	case "primitive":
 		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 	}
-	if r {
-		write := attackerStateWrite{
-			known: revealed,
-		}
-		if attackerStatePutWrite(write) {
-			PrettyMessage(fmt.Sprintf(
-				"%s obtained by decomposing %s with %s.",
-				prettyValue(revealed), prettyValue(a), prettyValues(ar),
-			), "deduction", true)
-			o = o + 1
-		}
+	if !r {
+		return o
+	}
+	write := attackerStateWrite{
+		known: revealed,
+	}
+	if attackerStatePutWrite(write) {
+		PrettyMessage(fmt.Sprintf(
+			"%s obtained by decomposing %s with %s.",
+			prettyValue(revealed), prettyValue(a), prettyValues(ar),
+		), "deduction", true)
+		o = o + 1
 	}
 	return o
 }
@@ -86,17 +87,18 @@ func verifyAnalysisRecompose(
 	case "primitive":
 		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
 	}
-	if r {
-		write := attackerStateWrite{
-			known: revealed,
-		}
-		if attackerStatePutWrite(write) {
-			PrettyMessage(fmt.Sprintf(
-				"%s obtained by recomposing %s with %s.",
-				prettyValue(revealed), prettyValue(a), prettyValues(ar),
-			), "deduction", true)
-			o = o + 1
-		}
+	if !r {
+		return o
+	}
+	write := attackerStateWrite{
+		known: revealed,
+	}
+	if attackerStatePutWrite(write) {
+		PrettyMessage(fmt.Sprintf(
+			"%s obtained by recomposing %s with %s.",
+			prettyValue(revealed), prettyValue(a), prettyValues(ar),
+		), "deduction", true)
+		o = o + 1
 	}
 	return o
 }
@@ -115,17 +117,18 @@ func verifyAnalysisReconstruct(
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
 	}
-	if r {
-		write := attackerStateWrite{
-			known: a,
-		}
-		if attackerStatePutWrite(write) {
-			PrettyMessage(fmt.Sprintf(
-				"%s obtained by reconstructing with %s.",
-				prettyValue(a), prettyValues(ar),
-			), "deduction", true)
-			o = o + 1
-		}
+	if !r {
+		return o
+	}
+	write := attackerStateWrite{
+		known: a,
+	}
+	if attackerStatePutWrite(write) {
+		PrettyMessage(fmt.Sprintf(
+			"%s obtained by reconstructing with %s.",
+			prettyValue(a), prettyValues(ar),
+		), "deduction", true)
+		o = o + 1
 	}
 	return o
 }
