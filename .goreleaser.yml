@@ -18,14 +18,14 @@ builds:
       - 386
       - arm64
 archives:
-- replacements:
-    darwin: macos
-  format: zip
-  files:
-    - LICENSES/*
-    - examples/*
-    - README.md
-  wrap_in_directory: true
+  - replacements:
+      darwin: macos
+    format: zip
+    files:
+      - LICENSES/*
+      - examples/*
+      - README.md
+    wrap_in_directory: true
 snapshot:
   name_template: "{{ .Tag }}-next"
 changelog:
