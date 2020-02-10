@@ -21,8 +21,8 @@ func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalSt
 		stagesGroup.Add(4)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1, &stagesGroup)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2, &stagesGroup)
-		go verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3, &stagesGroup)
-		go verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4, &stagesGroup)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3, &stagesGroup)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4, &stagesGroup)
 		stagesGroup.Wait()
 		phase = phase + 1
 	}

@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 func inject(
@@ -106,23 +107,19 @@ func injectPrimitiveStageRestricted(p primitive, stage int, depth int) bool {
 	case 1:
 		return true
 	case 2:
-		if depth > 2 {
+		switch p.name {
+		case "HASH", "HKDF":
+			return true
+		}
+		if depth > 5 {
 			return true
 		}
 	case 3:
-		switch p.name {
-		case "HASH", "HKDF":
-			if depth > 2 {
-				return true
-			}
+		if depth > 5 {
+			return true
 		}
 	case 4:
-		switch p.name {
-		case "HASH", "HKDF":
-			if depth > 2 {
-				return true
-			}
-		}
+		return false
 	}
 	return false
 }
@@ -198,50 +195,36 @@ func injectPrimitive(
 	valPrincipalState principalState, valAttackerState attackerState,
 	stage int, depth int,
 ) []value {
+	var injectsGroup sync.WaitGroup
 	if injectPrimitiveStageRestricted(p, stage, depth) {
 		return []value{}
 	}
 	kinjectants := make([][]value, len(p.arguments))
 	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.arguments {
-		for _, k := range valAttackerState.known {
-			switch k.kind {
-			case "constant":
-				i := sanityGetPrincipalStateIndexFromConstant(
-					valPrincipalState, k.constant,
-				)
-				k = valPrincipalState.beforeMutate[i]
-			}
-			if !injectValueRules(
-				k, arg, p, rootPrimitive, valPrincipalState,
-				stage, depth,
-			) {
-				continue
-			}
-			switch k.kind {
-			case "constant":
-				kinjectants[arg] = append(kinjectants[arg], k)
-			case "primitive":
-				var kprims []value
-				kprims = inject(
-					k.primitive, rootPrimitive, false, -1,
-					valPrincipalState, valAttackerState,
-					stage, injectIncrementDepth(depth),
-				)
-				if len(kprims) > 0 {
-					kinjectants[arg] = append(kinjectants[arg], kprims...)
+		injectsGroup.Add(1)
+		go func(arg int) {
+			for _, k := range valAttackerState.known {
+				switch k.kind {
+				case "constant":
+					i := sanityGetPrincipalStateIndexFromConstant(
+						valPrincipalState, k.constant,
+					)
+					k = valPrincipalState.beforeMutate[i]
 				}
-			case "equation":
+				if !injectValueRules(
+					k, arg, p, rootPrimitive, valPrincipalState,
+					stage, depth,
+				) {
+					continue
+				}
 				kinjectants[arg] = append(kinjectants[arg], k)
 			}
-		}
+			injectsGroup.Done()
+		}(arg)
 	}
-
+	injectsGroup.Wait()
 	return injectLoopN(p, kinjectants)
-}
-
-func injectIncrementDepth(depth int) int {
-	return depth + 1
 }
 
 func injectLoopN(p primitive, kinjectants [][]value) []value {
