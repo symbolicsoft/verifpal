@@ -80,7 +80,7 @@ func verifyActiveScan(
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
 		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
-		valAttackerState, valReplacementMap,
+		valReplacementMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
@@ -99,12 +99,11 @@ func verifyActiveScan(
 
 func verifyActiveMutatePrincipalState(
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
-	valAttackerState attackerState, valReplacementMap replacementMap,
+	valReplacementMap replacementMap,
 ) (principalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valReplacementMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-		iii := sanityGetAttackerStateIndexFromConstant(valAttackerState, c)
 		ac := valReplacementMap.combination[i]
 		ar := valPrincipalState.assigned[ii]
 		switch ar.kind {
@@ -117,14 +116,9 @@ func verifyActiveMutatePrincipalState(
 		}
 		valPrincipalState.creator[ii] = "Attacker"
 		valPrincipalState.sender[ii] = "Attacker"
-		valPrincipalState.wasMutated[ii] = true
+		valPrincipalState.mutated[ii] = true
 		valPrincipalState.assigned[ii] = ac
 		valPrincipalState.beforeRewrite[ii] = ac
-		update := attackerStateMutatedToUpdate{
-			i:         iii,
-			principal: valPrincipalState.name,
-		}
-		attackerStatePutMutatedToUpdate(update)
 		if i >= valReplacementMap.lastIncrement {
 			isWorthwhileMutation = true
 		}
@@ -150,9 +144,9 @@ func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState principalState, 
 	valPrincipalState.knownBy = valPrincipalState.knownBy[:f]
 	valPrincipalState.creator = valPrincipalState.creator[:f]
 	valPrincipalState.sender = valPrincipalState.sender[:f]
-	valPrincipalState.wasRewritten = valPrincipalState.wasRewritten[:f]
+	valPrincipalState.rewritten = valPrincipalState.rewritten[:f]
 	valPrincipalState.beforeRewrite = valPrincipalState.beforeRewrite[:f]
-	valPrincipalState.wasMutated = valPrincipalState.wasMutated[:f]
+	valPrincipalState.mutated = valPrincipalState.mutated[:f]
 	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
 	valPrincipalState.phase = valPrincipalState.phase[:f]
 	return valPrincipalState

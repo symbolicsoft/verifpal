@@ -13,37 +13,25 @@ import (
 var verifyAnalysisCount uint32
 
 func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
-	var aGroup sync.WaitGroup
-	var pGroup sync.WaitGroup
-	var o uint32
+	var o int
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.known {
-		aGroup.Add(1)
-		go func(a value) {
-			switch a.kind {
-			case "constant":
-				a = sanityResolveConstant(a.constant, valPrincipalState)
-			}
-			atomic.AddUint32(&o, verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0))
-			atomic.AddUint32(&o, verifyAnalysisEquivalize(a, valPrincipalState, 0))
-			atomic.AddUint32(&o, verifyAnalysisPasswords(a, valPrincipalState, 0))
-			aGroup.Done()
-		}(a)
+		switch a.kind {
+		case "constant":
+			a = sanityResolveConstant(a.constant, valPrincipalState)
+		}
+		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
+		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
+		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
 	}
 	for _, a := range valPrincipalState.assigned {
-		pGroup.Add(1)
-		go func(a value) {
-			atomic.AddUint32(&o, verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0))
-			atomic.AddUint32(&o, verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0))
-			pGroup.Done()
-		}(a)
+		o = o + verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0)
+		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
 	}
-	aGroup.Wait()
-	pGroup.Wait()
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
 	verifyAnalysisCountIncrement()
 	prettyAnalysis(stage)
-	if atomic.LoadUint32(&o) > 0 {
+	if o > 0 {
 		sg.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
 	}
@@ -64,8 +52,8 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
-) uint32 {
+	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+) int {
 	var r bool
 	var revealed value
 	var ar []value
@@ -75,9 +63,7 @@ func verifyAnalysisDecompose(
 	}
 	if r {
 		write := attackerStateWrite{
-			known:     revealed,
-			wire:      false,
-			mutatedTo: []string{},
+			known: revealed,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(
@@ -91,8 +77,8 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
-) uint32 {
+	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+) int {
 	var r bool
 	var revealed value
 	var ar []value
@@ -102,9 +88,7 @@ func verifyAnalysisRecompose(
 	}
 	if r {
 		write := attackerStateWrite{
-			known:     revealed,
-			wire:      false,
-			mutatedTo: []string{},
+			known: revealed,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(
@@ -118,8 +102,8 @@ func verifyAnalysisRecompose(
 }
 
 func verifyAnalysisReconstruct(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o uint32,
-) uint32 {
+	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+) int {
 	var r bool
 	var ar []value
 	switch a.kind {
@@ -133,9 +117,7 @@ func verifyAnalysisReconstruct(
 	}
 	if r {
 		write := attackerStateWrite{
-			known:     a,
-			wire:      false,
-			mutatedTo: []string{},
+			known: a,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(
@@ -148,13 +130,11 @@ func verifyAnalysisReconstruct(
 	return o
 }
 
-func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint32) uint32 {
+func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) int {
 	for _, aa := range valPrincipalState.assigned {
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
 			write := attackerStateWrite{
-				known:     aa,
-				wire:      false,
-				mutatedTo: []string{},
+				known: aa,
 			}
 			if attackerStatePutWrite(write) {
 				o = o + 1
@@ -165,9 +145,7 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint3
 			for _, aaa := range aa.primitive.arguments {
 				if sanityEquivalentValues(a, aaa, valPrincipalState) {
 					write := attackerStateWrite{
-						known:     aaa,
-						wire:      false,
-						mutatedTo: []string{},
+						known: aaa,
 					}
 					if attackerStatePutWrite(write) {
 						o = o + 1
@@ -179,13 +157,11 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o uint3
 	return o
 }
 
-func verifyAnalysisPasswords(a value, valPrincipalState principalState, o uint32) uint32 {
+func verifyAnalysisPasswords(a value, valPrincipalState principalState, o int) int {
 	passwords := possibleToObtainPasswords(a, valPrincipalState)
 	for _, password := range passwords {
 		write := attackerStateWrite{
-			known:     password,
-			wire:      false,
-			mutatedTo: []string{},
+			known: password,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(

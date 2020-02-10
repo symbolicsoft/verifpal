@@ -45,9 +45,7 @@ func possibleToDecomposePrimitive(
 	if len(has) >= len(prim.decompose.given) {
 		revealed := p.arguments[prim.decompose.reveal]
 		write := attackerStateWrite{
-			known:     revealed,
-			wire:      false,
-			mutatedTo: []string{},
+			known: revealed,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(
@@ -127,9 +125,7 @@ func possibleToReconstructPrimitive(
 			primitive: p,
 		}
 		write := attackerStateWrite{
-			known:     vp,
-			wire:      false,
-			mutatedTo: []string{},
+			known: vp,
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(

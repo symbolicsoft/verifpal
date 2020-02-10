@@ -111,14 +111,14 @@ func injectPrimitiveStageRestricted(p primitive, stage int, depth int) bool {
 		}
 	case 3:
 		switch p.name {
-		case "HKDF":
+		case "HASH", "HKDF":
 			if depth > 2 {
 				return true
 			}
 		}
 	case 4:
 		switch p.name {
-		case "HKDF":
+		case "HASH", "HKDF":
 			if depth > 2 {
 				return true
 			}
@@ -177,8 +177,6 @@ SkeletonSearch:
 				kind:      "primitive",
 				primitive: skeleton,
 			},
-			wire:      false,
-			mutatedTo: []string{},
 		}
 		if attackerStatePutWrite(write) {
 			PrettyMessage(fmt.Sprintf(

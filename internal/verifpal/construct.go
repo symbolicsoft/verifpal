@@ -329,17 +329,19 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			knownBy:       [][]map[string]string{},
 			creator:       []string{},
 			sender:        []string{},
-			wasRewritten:  []bool{},
+			rewritten:     []bool{},
 			beforeRewrite: []value{},
-			wasMutated:    []bool{},
+			mutated:       []bool{},
+			mutatableTo:   [][]string{},
 			beforeMutate:  []value{},
 			phase:         [][]int{},
 			lock:          0,
 		}
 		for i, c := range valKnowledgeMap.constants {
-			guard := false
-			knows := false
 			wire := []string{}
+			guard := false
+			mutatableTo := []string{}
+			knows := false
 			sender := valKnowledgeMap.creator[i]
 			assigned := valKnowledgeMap.assigned[i]
 			if valKnowledgeMap.creator[i] == principal {
@@ -353,19 +355,10 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 				}
 			}
 			for _, blck := range m.blocks {
-				switch blck.kind {
-				case "message":
-					ir := (blck.message.recipient == principal)
-					ic := (valKnowledgeMap.creator[i] == principal)
-					for _, cc := range blck.message.constants {
-						if c.name == cc.name {
-							wire = append(wire, principal)
-							if !guard {
-								guard = cc.guard && (ir || ic)
-							}
-						}
-					}
-				}
+				wire, guard, mutatableTo = constructPrincipalStatesGetValueMutatability(
+					c, blck, principal, valKnowledgeMap.creator[i],
+					wire, guard, mutatableTo,
+				)
 			}
 			valPrincipalState.constants = append(valPrincipalState.constants, c)
 			valPrincipalState.assigned = append(valPrincipalState.assigned, assigned)
@@ -375,15 +368,43 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 			valPrincipalState.knownBy = append(valPrincipalState.knownBy, valKnowledgeMap.knownBy[i])
 			valPrincipalState.creator = append(valPrincipalState.creator, valKnowledgeMap.creator[i])
 			valPrincipalState.sender = append(valPrincipalState.sender, sender)
-			valPrincipalState.wasRewritten = append(valPrincipalState.wasRewritten, false)
+			valPrincipalState.rewritten = append(valPrincipalState.rewritten, false)
 			valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, assigned)
-			valPrincipalState.wasMutated = append(valPrincipalState.wasMutated, false)
+			valPrincipalState.mutated = append(valPrincipalState.mutated, false)
+			valPrincipalState.mutatableTo = append(valPrincipalState.mutatableTo, mutatableTo)
 			valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, assigned)
 			valPrincipalState.phase = append(valPrincipalState.phase, valKnowledgeMap.phase[i])
 		}
 		valPrincipalStates = append(valPrincipalStates, valPrincipalState)
 	}
 	return valPrincipalStates
+}
+
+func constructPrincipalStatesGetValueMutatability(
+	c constant, blck block, principal string, creator string,
+	wire []string, guard bool, mutatableTo []string,
+) ([]string, bool, []string) {
+	switch blck.kind {
+	case "primitive", "equation":
+		return wire, guard, mutatableTo
+	}
+	ir := (blck.message.recipient == principal)
+	ic := (creator == principal)
+	for _, cc := range blck.message.constants {
+		if c.name != cc.name {
+			continue
+		}
+		wire, _ = appendUniqueString(wire, principal)
+		if !guard {
+			guard = cc.guard && (ir || ic)
+		}
+		if !cc.guard {
+			mutatableTo, _ = appendUniqueString(
+				mutatableTo, blck.message.recipient,
+			)
+		}
+	}
+	return wire, guard, mutatableTo
 }
 
 func constructPrincipalStateClone(valPrincipalState principalState, purify bool) principalState {
@@ -397,9 +418,10 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 		knownBy:       make([][]map[string]string, len(valPrincipalState.knownBy)),
 		creator:       make([]string, len(valPrincipalState.creator)),
 		sender:        make([]string, len(valPrincipalState.sender)),
-		wasRewritten:  make([]bool, len(valPrincipalState.wasRewritten)),
+		rewritten:     make([]bool, len(valPrincipalState.rewritten)),
 		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
-		wasMutated:    make([]bool, len(valPrincipalState.wasMutated)),
+		mutated:       make([]bool, len(valPrincipalState.mutated)),
+		mutatableTo:   make([][]string, len(valPrincipalState.mutatableTo)),
 		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
 		phase:         make([][]int, len(valPrincipalState.phase)),
 		lock:          valPrincipalState.lock,
@@ -416,13 +438,14 @@ func constructPrincipalStateClone(valPrincipalState principalState, purify bool)
 	copy(valPrincipalStateClone.knownBy, valPrincipalState.knownBy)
 	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
 	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
-	copy(valPrincipalStateClone.wasRewritten, valPrincipalState.wasRewritten)
+	copy(valPrincipalStateClone.rewritten, valPrincipalState.rewritten)
 	if purify {
 		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeMutate)
 	} else {
 		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
 	}
-	copy(valPrincipalStateClone.wasMutated, valPrincipalState.wasMutated)
+	copy(valPrincipalStateClone.mutated, valPrincipalState.mutated)
+	copy(valPrincipalStateClone.mutatableTo, valPrincipalState.mutatableTo)
 	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
 	copy(valPrincipalStateClone.phase, valPrincipalState.phase)
 	return valPrincipalStateClone

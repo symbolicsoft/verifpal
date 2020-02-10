@@ -158,9 +158,10 @@ type principalState struct {
 	knownBy       [][]map[string]string
 	creator       []string
 	sender        []string
-	wasRewritten  []bool
+	rewritten     []bool
 	beforeRewrite []value
-	wasMutated    []bool
+	mutated       []bool
+	mutatableTo   [][]string
 	beforeMutate  []value
 	phase         [][]int
 	lock          int
@@ -170,19 +171,10 @@ type attackerState struct {
 	active       bool
 	currentPhase int
 	known        []value
-	wire         []bool
-	mutatedTo    [][]string
 }
 
 type attackerStateWrite struct {
-	known     value
-	wire      bool
-	mutatedTo []string
-}
-
-type attackerStateMutatedToUpdate struct {
-	i         int
-	principal string
+	known value
 }
 
 type replacementMap struct {

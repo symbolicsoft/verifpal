@@ -42,7 +42,7 @@ func queryConfidentiality(
 		return result
 	}
 	for i := range valPrincipalState.constants {
-		if !valPrincipalState.wasMutated[i] {
+		if !valPrincipalState.mutated[i] {
 			continue
 		}
 		mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
@@ -88,7 +88,7 @@ func queryAuthentication(
 		var mutated string
 		b := valPrincipalState.beforeRewrite[index]
 		for i := range valPrincipalState.constants {
-			if !valPrincipalState.wasMutated[i] {
+			if !valPrincipalState.mutated[i] {
 				continue
 			}
 			mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",

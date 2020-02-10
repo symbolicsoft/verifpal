@@ -19,16 +19,16 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 		depthIndex:        []int{},
 		outOfReplacements: false,
 	}
-	for i, v := range valAttackerState.known {
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
-		if replacementMapSkipValue(v, i, ii, valPrincipalState, valAttackerState) {
+	for _, v := range valAttackerState.known {
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
+		if replacementMapSkipValue(v, i, valPrincipalState, valAttackerState) {
 			continue
 		}
-		a := valPrincipalState.assigned[ii]
+		a := valPrincipalState.assigned[i]
 		replacementsGroup.Add(1)
 		go func(v value) {
 			c, r := replacementMapReplaceValue(
-				a, v, ii, stage,
+				a, v, i, stage,
 				valPrincipalState, valAttackerState,
 			)
 			if len(r) == 0 {
@@ -52,7 +52,7 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 }
 
 func replacementMapSkipValue(
-	v value, i int, ii int, valPrincipalState principalState, valAttackerState attackerState,
+	v value, i int, valPrincipalState principalState, valAttackerState attackerState,
 ) bool {
 	switch v.kind {
 	case "primitive":
@@ -61,26 +61,17 @@ func replacementMapSkipValue(
 		return true
 	}
 	switch {
-	case !valAttackerState.wire[i]:
+	case !strInSlice(valPrincipalState.name, valPrincipalState.wire[i]):
 		return true
-	case !strInSlice(valPrincipalState.name, valPrincipalState.wire[ii]):
-		return true
-	case valPrincipalState.guard[ii]:
-		iii := sanityGetAttackerStateIndexFromConstant(
-			valAttackerState, v.constant,
-		)
-		mutatedTo := strInSlice(
-			valPrincipalState.sender[ii],
-			valAttackerState.mutatedTo[iii],
-		)
-		if iii < 0 || !mutatedTo {
+	case valPrincipalState.guard[i]:
+		if !strInSlice(valPrincipalState.sender[i], valPrincipalState.mutatableTo[i]) {
 			return true
 		}
-	case valPrincipalState.creator[ii] == valPrincipalState.name:
+	case valPrincipalState.creator[i] == valPrincipalState.name:
 		return true
-	case !valPrincipalState.known[ii]:
+	case !valPrincipalState.known[i]:
 		return true
-	case !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[ii]):
+	case !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[i]):
 		return true
 	}
 	return false
