@@ -1,1 +1,1 @@
-In this release, major improvements are made to Verifpal's stability and performance, thanks to analysis code optimizations and the elimination of some race conditions that could appear in rare conditions.
+This release brings bug fixes to the analysis methodology.
