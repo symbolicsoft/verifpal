@@ -108,7 +108,9 @@ func prettyMessageColor(m string, t string, analysisCount int) {
 	}
 }
 
-func prettyVerifyResultSummary(mutated string, summary string, oResults []queryOptionResult, attack bool) string {
+func prettyVerifyResultSummary(
+	mutated string, summary string, oResults []queryOptionResult, attack bool,
+) string {
 	var mutatedIntro string
 	var optionsSummary string
 	for _, oResult := range oResults {

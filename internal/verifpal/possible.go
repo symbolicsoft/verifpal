@@ -69,13 +69,17 @@ func possibleToRecomposePrimitive(
 				vb := v
 				switch v.kind {
 				case "primitive":
-					equivPrim, vo, _ := sanityEquivalentPrimitives(v.primitive, p, valPrincipalState, false)
-					if equivPrim && vo == ii {
-						ar = append(ar, vb)
-						if len(ar) >= len(i) {
-							return true, p.arguments[prim.recompose.reveal], ar
-						}
+					equivPrim, vo, _ := sanityEquivalentPrimitives(
+						v.primitive, p, valPrincipalState, false,
+					)
+					if !equivPrim || vo != ii {
+						continue
 					}
+					ar = append(ar, vb)
+					if len(ar) < len(i) {
+						continue
+					}
+					return true, p.arguments[prim.recompose.reveal], ar
 				}
 			}
 		}
@@ -112,20 +116,20 @@ func possibleToReconstructPrimitive(
 			}
 		}
 	}
-	if len(has) >= len(p.arguments) {
-		revealed := value{
-			kind:      "primitive",
-			primitive: p,
-		}
-		if attackerStatePutWrite(revealed) {
-			PrettyMessage(fmt.Sprintf(
-				"%s obtained by reconstructing with %s.",
-				prettyValue(revealed), prettyValues(has),
-			), "deduction", true)
-		}
-		return true, has
+	if len(has) < len(p.arguments) {
+		return false, []value{}
 	}
-	return false, []value{}
+	revealed := value{
+		kind:      "primitive",
+		primitive: p,
+	}
+	if attackerStatePutWrite(revealed) {
+		PrettyMessage(fmt.Sprintf(
+			"%s obtained by reconstructing with %s.",
+			prettyValue(revealed), prettyValues(has),
+		), "deduction", true)
+	}
+	return true, has
 }
 
 func possibleToReconstructEquation(
@@ -141,6 +145,9 @@ func possibleToReconstructEquation(
 		s1 := eValues[2]
 		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known, valPrincipalState) >= 0
 		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.known, valPrincipalState) >= 0
+		if hs0 && hs1 {
+			return true, []value{s0, s1}
+		}
 		p0 := value{
 			kind: "equation",
 			equation: equation{
@@ -155,9 +162,6 @@ func possibleToReconstructEquation(
 		}
 		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.known, valPrincipalState) >= 0
 		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.known, valPrincipalState) >= 0
-		if hs0 && hs1 {
-			return true, []value{s0, s1}
-		}
 		if hs0 && hp1 {
 			return true, []value{s0, p1}
 		}
@@ -257,16 +261,22 @@ func possibleToForceRewriteDecryption(
 	}
 	switch k.kind {
 	case "constant":
-		if sanityEquivalentValueInValues(k, valAttackerState.known, valPrincipalState) >= 0 {
+		if sanityEquivalentValueInValues(
+			k, valAttackerState.known, valPrincipalState,
+		) >= 0 {
 			return true
 		}
 	case "primitive":
-		r, _ := possibleToReconstructPrimitive(k.primitive, valPrincipalState, valAttackerState)
+		r, _ := possibleToReconstructPrimitive(
+			k.primitive, valPrincipalState, valAttackerState,
+		)
 		if r {
 			return true
 		}
 	case "equation":
-		r, _ := possibleToReconstructEquation(k.equation, valPrincipalState, valAttackerState)
+		r, _ := possibleToReconstructEquation(
+			k.equation, valPrincipalState, valAttackerState,
+		)
 		if r {
 			return true
 		}
@@ -328,12 +338,16 @@ func possibleToObtainPasswords(a value, valPrincipalState principalState) []valu
 			return passwords
 		}
 		for _, aa := range a.primitive.arguments {
-			passwords = append(passwords, possibleToObtainPasswords(aa, valPrincipalState)...)
+			passwords = append(passwords,
+				possibleToObtainPasswords(aa, valPrincipalState)...,
+			)
 		}
 	case "equation":
 		e := sanityDecomposeEquationValues(a.equation, valPrincipalState)
 		for _, ee := range e {
-			passwords = append(passwords, possibleToObtainPasswords(ee, valPrincipalState)...)
+			passwords = append(passwords,
+				possibleToObtainPasswords(ee, valPrincipalState)...,
+			)
 		}
 	}
 	return passwords

@@ -192,16 +192,16 @@ func replacementMapNext(valReplacementMap replacementMap) replacementMap {
 		valReplacementMap.depthIndex[i] = valReplacementMap.depthIndex[i] + 1
 		valReplacementMap.lastIncrement = i
 		for ii := i; ii >= 0; ii-- {
-			if valReplacementMap.depthIndex[ii] == len(valReplacementMap.replacements[ii]) {
-				if ii > 0 {
-					valReplacementMap.depthIndex[ii] = 0
-					valReplacementMap.depthIndex[ii-1] = valReplacementMap.depthIndex[ii-1] + 1
-					valReplacementMap.lastIncrement = ii - 1
-				} else {
-					valReplacementMap.outOfReplacements = true
-					break
-				}
+			if valReplacementMap.depthIndex[ii] != len(valReplacementMap.replacements[ii]) {
+				continue
 			}
+			if ii <= 0 {
+				valReplacementMap.outOfReplacements = true
+				break
+			}
+			valReplacementMap.depthIndex[ii] = 0
+			valReplacementMap.depthIndex[ii-1] = valReplacementMap.depthIndex[ii-1] + 1
+			valReplacementMap.lastIncrement = ii - 1
 		}
 	}
 	return valReplacementMap
