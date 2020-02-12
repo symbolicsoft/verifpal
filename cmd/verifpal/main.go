@@ -14,7 +14,7 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-var version = "0.11.1"
+var version = "0.11.2"
 
 func main() {
 	fmt.Fprintf(os.Stdout,
