@@ -54,6 +54,8 @@ queries[
     authentication? Alice -> Damian: m
     authentication? Bob -> Damian: m
     authentication? Carol -> Damian: m
-    authentication? Bob -> Damian: sb
+    authentication? Bob -> Damian: sb[
+        precondition[Bob -> Damian: m]
+    ]
 ]
 
