@@ -16,10 +16,6 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	var o int
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.known {
-		switch a.kind {
-		case "constant":
-			a = sanityResolveConstant(a.constant, valPrincipalState)
-		}
 		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
 		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
@@ -64,10 +60,7 @@ func verifyAnalysisDecompose(
 	if !r {
 		return o
 	}
-	write := attackerStateWrite{
-		known: revealed,
-	}
-	if attackerStatePutWrite(write) {
+	if attackerStatePutWrite(revealed) {
 		PrettyMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
 			prettyValue(revealed), prettyValue(a), prettyValues(ar),
@@ -90,10 +83,7 @@ func verifyAnalysisRecompose(
 	if !r {
 		return o
 	}
-	write := attackerStateWrite{
-		known: revealed,
-	}
-	if attackerStatePutWrite(write) {
+	if attackerStatePutWrite(revealed) {
 		PrettyMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
 			prettyValue(revealed), prettyValue(a), prettyValues(ar),
@@ -120,10 +110,7 @@ func verifyAnalysisReconstruct(
 	if !r {
 		return o
 	}
-	write := attackerStateWrite{
-		known: a,
-	}
-	if attackerStatePutWrite(write) {
+	if attackerStatePutWrite(a) {
 		PrettyMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			prettyValue(a), prettyValues(ar),
@@ -134,26 +121,14 @@ func verifyAnalysisReconstruct(
 }
 
 func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) int {
+	switch a.kind {
+	case "constant":
+		a = sanityResolveConstant(a.constant, valPrincipalState)
+	}
 	for _, aa := range valPrincipalState.assigned {
 		if sanityEquivalentValues(a, aa, valPrincipalState) {
-			write := attackerStateWrite{
-				known: aa,
-			}
-			if attackerStatePutWrite(write) {
+			if attackerStatePutWrite(aa) {
 				o = o + 1
-			}
-		}
-		switch aa.kind {
-		case "primitive":
-			for _, aaa := range aa.primitive.arguments {
-				if sanityEquivalentValues(a, aaa, valPrincipalState) {
-					write := attackerStateWrite{
-						known: aaa,
-					}
-					if attackerStatePutWrite(write) {
-						o = o + 1
-					}
-				}
 			}
 		}
 	}
@@ -162,14 +137,11 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) 
 
 func verifyAnalysisPasswords(a value, valPrincipalState principalState, o int) int {
 	passwords := possibleToObtainPasswords(a, valPrincipalState)
-	for _, password := range passwords {
-		write := attackerStateWrite{
-			known: password,
-		}
-		if attackerStatePutWrite(write) {
+	for _, revealed := range passwords {
+		if attackerStatePutWrite(revealed) {
 			PrettyMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
-				prettyValue(password), prettyValue(a),
+				prettyValue(revealed), prettyValue(a),
 			), "deduction", true)
 			o = o + 1
 		}

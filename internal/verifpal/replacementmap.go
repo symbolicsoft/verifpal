@@ -91,7 +91,9 @@ func replacementMapReplaceValue(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
 	case "equation":
-		return v.constant, replacementMapReplaceEquation(a)
+		return v.constant, replacementMapReplaceEquation(
+			a, stage, valAttackerState,
+		)
 	}
 	return v.constant, []value{}
 }
@@ -108,17 +110,17 @@ func replacementMapReplaceConstant(
 	if stage <= 3 {
 		return replacements
 	}
-	for _, c := range valAttackerState.known {
-		switch c.kind {
+	for _, v := range valAttackerState.known {
+		switch v.kind {
 		case "constant":
-			if constantIsGOrNil(c.constant) {
+			if constantIsGOrNil(v.constant) {
 				continue
 			}
-			cc := sanityResolveConstant(c.constant, valPrincipalState)
-			switch cc.kind {
+			c := sanityResolveConstant(v.constant, valPrincipalState)
+			switch c.kind {
 			case "constant":
-				if sanityExactSameValueInValues(cc, replacements) < 0 {
-					replacements = append(replacements, cc)
+				if sanityExactSameValueInValues(c, replacements) < 0 {
+					replacements = append(replacements, c)
 				}
 			}
 		}
@@ -131,8 +133,23 @@ func replacementMapReplacePrimitive(
 	valPrincipalState principalState, valAttackerState attackerState,
 ) []value {
 	replacements := []value{}
+	for _, v := range valAttackerState.known {
+		switch v.kind {
+		case "primitive":
+			a, _ = sanityResolveValueInternalValuesFromPrincipalState(a, a, rootIndex, valPrincipalState, false)
+			if sanityEquivalentValues(a, v, valPrincipalState) {
+				continue
+			}
+			if !injectMatchSkeletons(v.primitive, injectPrimitiveSkeleton(a.primitive)) {
+				continue
+			}
+			if sanityExactSameValueInValues(v, replacements) < 0 {
+				replacements = append(replacements, v)
+			}
+		}
+	}
 	injectants := inject(
-		a.primitive, a.primitive, true, rootIndex,
+		a.primitive, a.primitive, true,
 		valPrincipalState, valAttackerState, stage,
 	)
 	for _, aa := range injectants {
@@ -143,8 +160,23 @@ func replacementMapReplacePrimitive(
 	return replacements
 }
 
-func replacementMapReplaceEquation(a value) []value {
-	return []value{constantGN}
+func replacementMapReplaceEquation(a value, stage int, valAttackerState attackerState) []value {
+	replacements := []value{}
+	if stage <= 3 {
+		return []value{constantGN}
+	}
+	for _, v := range valAttackerState.known {
+		switch v.kind {
+		case "equation":
+			switch len(v.equation.values) {
+			case len(a.equation.values):
+				if sanityExactSameValueInValues(v, replacements) < 0 {
+					replacements = append(replacements, v)
+				}
+			}
+		}
+	}
+	return replacements
 }
 
 func replacementMapNext(valReplacementMap replacementMap) replacementMap {

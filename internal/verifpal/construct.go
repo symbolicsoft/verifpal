@@ -385,23 +385,22 @@ func constructPrincipalStatesGetValueMutatability(
 	wire []string, guard bool, mutatableTo []string,
 ) ([]string, bool, []string) {
 	switch blck.kind {
-	case "primitive", "equation":
-		return wire, guard, mutatableTo
-	}
-	ir := (blck.message.recipient == principal)
-	ic := (creator == principal)
-	for _, cc := range blck.message.constants {
-		if c.name != cc.name {
-			continue
-		}
-		wire, _ = appendUniqueString(wire, principal)
-		if !guard {
-			guard = cc.guard && (ir || ic)
-		}
-		if !cc.guard {
-			mutatableTo, _ = appendUniqueString(
-				mutatableTo, blck.message.recipient,
-			)
+	case "message":
+		ir := (blck.message.recipient == principal)
+		ic := (creator == principal)
+		for _, cc := range blck.message.constants {
+			if c.name != cc.name {
+				continue
+			}
+			wire, _ = appendUniqueString(wire, blck.message.recipient)
+			if !guard {
+				guard = cc.guard && (ir || ic)
+			}
+			if !cc.guard || ic {
+				mutatableTo, _ = appendUniqueString(
+					mutatableTo, blck.message.recipient,
+				)
+			}
 		}
 	}
 	return wire, guard, mutatableTo

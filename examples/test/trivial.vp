@@ -3,7 +3,6 @@
 
 attacker [active]
 principal Alice [ generates e ]
-principal Bob   [             ]
 Alice -> Bob: e
 principal Bob   [ H = HASH(e) ]
 

@@ -143,6 +143,10 @@ func TestMain(t *testing.T) {
 			resultsCode: "a0",
 		},
 		{
+			model:       "ringsign_substitute.vp",
+			resultsCode: "a1a0a1a1",
+		},
+		{
 			model:       "ringsign_unguarded.vp",
 			resultsCode: "a1",
 		},

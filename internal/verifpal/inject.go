@@ -10,7 +10,7 @@ import (
 )
 
 func inject(
-	p primitive, rootPrimitive primitive, isRootPrimitive bool, rootIndex int,
+	p primitive, rootPrimitive primitive, isRootPrimitive bool,
 	valPrincipalState principalState, valAttackerState attackerState, stage int,
 ) []value {
 	if verifyResultsAllResolved() {
@@ -21,10 +21,6 @@ func inject(
 		return []value{}
 	}
 	if isRootPrimitive {
-		pp, _ := sanityResolveValueInternalValuesFromPrincipalState(value{
-			kind: "primitive", primitive: p,
-		}, rootIndex, valPrincipalState, false)
-		p = pp.primitive
 		rootPrimitive = p
 	}
 	return injectPrimitive(
@@ -159,13 +155,11 @@ SkeletonSearch:
 		}
 	}
 	if !matchingSkeleton {
-		write := attackerStateWrite{
-			known: value{
-				kind:      "primitive",
-				primitive: skeleton,
-			},
+		known := value{
+			kind:      "primitive",
+			primitive: skeleton,
 		}
-		if attackerStatePutWrite(write) {
+		if attackerStatePutWrite(known) {
 			PrettyMessage(fmt.Sprintf(
 				"Constructed skeleton %s.",
 				prettyPrimitive(skeleton),
@@ -213,7 +207,7 @@ func injectPrimitive(
 					continue
 				}
 				kinjectants[arg] = append(kinjectants[arg], inject(
-					k.primitive, rootPrimitive, false, -1,
+					k.primitive, rootPrimitive, false,
 					valPrincipalState, valAttackerState, stage,
 				)...)
 			case "equation":

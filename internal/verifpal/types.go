@@ -173,10 +173,6 @@ type attackerState struct {
 	known        []value
 }
 
-type attackerStateWrite struct {
-	known value
-}
-
 type replacementMap struct {
 	initialized       bool
 	outOfReplacements bool

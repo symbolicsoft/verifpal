@@ -24,21 +24,26 @@ func attackerStateInit(active bool) {
 func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 	attackerStateMutex.Lock()
 	for i, c := range valPrincipalState.constants {
+		cc := value{kind: "constant", constant: c}
+		v := valPrincipalState.assigned[i]
 		if c.qualifier != "public" {
 			continue
-		}
-		v := value{
-			kind:     "constant",
-			constant: c,
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.phase[i])
 		if err == nil && earliestPhase > attackerStateShared.currentPhase {
 			continue
 		}
-		attackerStateShared.known = append(attackerStateShared.known, v)
+		if sanityExactSameValueInValues(cc, attackerStateShared.known) < 0 {
+			attackerStateShared.known = append(attackerStateShared.known, cc)
+		}
+		if sanityExactSameValueInValues(v, attackerStateShared.known) < 0 {
+			attackerStateShared.known = append(attackerStateShared.known, v)
+		}
 	}
 	for i, c := range valPrincipalState.constants {
-		if !strInSlice(valPrincipalState.name, valPrincipalState.wire[i]) && !valPrincipalState.constants[i].leaked {
+		cc := value{kind: "constant", constant: c}
+		v := valPrincipalState.assigned[i]
+		if len(valPrincipalState.wire[i]) == 0 && !valPrincipalState.constants[i].leaked {
 			continue
 		}
 		if valPrincipalState.constants[i].qualifier != "private" {
@@ -51,15 +56,12 @@ func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 		if earliestPhase > attackerStateShared.currentPhase {
 			continue
 		}
-		v := value{
-			kind:     "constant",
-			constant: c,
+		if sanityExactSameValueInValues(cc, attackerStateShared.known) < 0 {
+			attackerStateShared.known = append(attackerStateShared.known, cc)
 		}
-		ii := sanityExactSameValueInValues(v, attackerStateShared.known)
-		if ii >= 0 {
-			continue
+		if sanityExactSameValueInValues(v, attackerStateShared.known) < 0 {
+			attackerStateShared.known = append(attackerStateShared.known, v)
 		}
-		attackerStateShared.known = append(attackerStateShared.known, v)
 	}
 	attackerStateMutex.Unlock()
 }
@@ -71,11 +73,11 @@ func attackerStateGetRead() attackerState {
 	return valAttackerState
 }
 
-func attackerStatePutWrite(write attackerStateWrite) bool {
+func attackerStatePutWrite(known value) bool {
 	written := false
 	attackerStateMutex.Lock()
-	if sanityExactSameValueInValues(write.known, attackerStateShared.known) < 0 {
-		attackerStateShared.known = append(attackerStateShared.known, write.known)
+	if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
+		attackerStateShared.known = append(attackerStateShared.known, known)
 		written = true
 	}
 	attackerStateMutex.Unlock()

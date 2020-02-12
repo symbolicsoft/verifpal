@@ -44,10 +44,7 @@ func possibleToDecomposePrimitive(
 	}
 	if len(has) >= len(prim.decompose.given) {
 		revealed := p.arguments[prim.decompose.reveal]
-		write := attackerStateWrite{
-			known: revealed,
-		}
-		if attackerStatePutWrite(write) {
+		if attackerStatePutWrite(revealed) {
 			PrettyMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
@@ -70,10 +67,6 @@ func possibleToRecomposePrimitive(
 		for _, ii := range i {
 			for _, v := range valAttackerState.known {
 				vb := v
-				switch v.kind {
-				case "constant":
-					v = sanityResolveConstant(v.constant, valPrincipalState)
-				}
 				switch v.kind {
 				case "primitive":
 					equivPrim, vo, _ := sanityEquivalentPrimitives(v.primitive, p, valPrincipalState, false)
@@ -120,17 +113,14 @@ func possibleToReconstructPrimitive(
 		}
 	}
 	if len(has) >= len(p.arguments) {
-		vp := value{
+		revealed := value{
 			kind:      "primitive",
 			primitive: p,
 		}
-		write := attackerStateWrite{
-			known: vp,
-		}
-		if attackerStatePutWrite(write) {
+		if attackerStatePutWrite(revealed) {
 			PrettyMessage(fmt.Sprintf(
 				"%s obtained by reconstructing with %s.",
-				prettyValue(vp), prettyValues(has),
+				prettyValue(revealed), prettyValues(has),
 			), "deduction", true)
 		}
 		return true, has
