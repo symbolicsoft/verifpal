@@ -7,7 +7,6 @@ package verifpal
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 func sanity(m Model) (knowledgeMap, []principalState) {
@@ -192,7 +191,7 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 				}
 			}
 			constantUsedByPrincipal := sanityConstantIsUsedByPrincipalInKnowledgeMap(
-				valKnowledgeMap, query.message.recipient, c, i,
+				valKnowledgeMap, query.message.recipient, c,
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		}
@@ -890,8 +889,7 @@ func sanityResolveEquationInternalValuesFromKnowledgeMap(
 
 func sanityResolveValueInternalValuesFromPrincipalState(
 	a value, rootValue value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
-) (value, []value) {
-	var v []value
+) value {
 	switch a.kind {
 	case "constant":
 		nextRootIndex := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
@@ -925,34 +923,33 @@ func sanityResolveValueInternalValuesFromPrincipalState(
 			rootIndex = nextRootIndex
 			rootValue = a
 		}
-		v = append(v, a)
 	}
 	switch a.kind {
 	case "constant":
-		return sanityResolveConstantInternalValuesFromPrincipalState(
-			a, rootValue, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		a = sanityResolveConstantInternalValuesFromPrincipalState(
+			a, rootValue, rootIndex, valPrincipalState, forceBeforeMutate,
 		)
 	case "primitive":
-		return sanityResolvePrimitiveInternalValuesFromPrincipalState(
-			a, rootValue, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		a = sanityResolvePrimitiveInternalValuesFromPrincipalState(
+			a, rootValue, rootIndex, valPrincipalState, forceBeforeMutate,
 		)
 	case "equation":
-		return sanityResolveEquationInternalValuesFromPrincipalState(
-			a, rootValue, v, rootIndex, valPrincipalState, forceBeforeMutate,
+		a = sanityResolveEquationInternalValuesFromPrincipalState(
+			a, rootValue, rootIndex, valPrincipalState, forceBeforeMutate,
 		)
 	}
-	return a, v
+	return a
 }
 
 func sanityResolveConstantInternalValuesFromPrincipalState(
-	a value, rootValue value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
-) (value, []value) {
-	return a, v
+	a value, rootValue value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) value {
+	return a
 }
 
 func sanityResolvePrimitiveInternalValuesFromPrincipalState(
-	a value, rootValue value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
-) (value, []value) {
+	a value, rootValue value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) value {
 	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
 		forceBeforeMutate = false
 	}
@@ -966,22 +963,17 @@ func sanityResolvePrimitiveInternalValuesFromPrincipalState(
 		},
 	}
 	for _, aa := range a.primitive.arguments {
-		s, vv := sanityResolveValueInternalValuesFromPrincipalState(
+		s := sanityResolveValueInternalValuesFromPrincipalState(
 			aa, rootValue, rootIndex, valPrincipalState, forceBeforeMutate,
 		)
-		for _, vvv := range vv {
-			if sanityExactSameValueInValues(vvv, v) < 0 {
-				v = append(v, vvv)
-			}
-		}
 		r.primitive.arguments = append(r.primitive.arguments, s)
 	}
-	return r, v
+	return r
 }
 
 func sanityResolveEquationInternalValuesFromPrincipalState(
-	a value, rootValue value, v []value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
-) (value, []value) {
+	a value, rootValue value, rootIndex int, valPrincipalState principalState, forceBeforeMutate bool,
+) value {
 	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
 		forceBeforeMutate = false
 	}
@@ -1009,7 +1001,7 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 		case "constant":
 			r.equation.values = append(r.equation.values, aa[aai])
 		case "primitive":
-			aaa, _ := sanityResolveValueInternalValuesFromPrincipalState(
+			aaa := sanityResolveValueInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex, valPrincipalState, forceBeforeMutate,
 			)
 			r.equation.values = append(r.equation.values, aaa)
@@ -1019,20 +1011,15 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 			} else {
 				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
 			}
-			if sanityExactSameValueInValues(r, v) < 0 {
-				v = append(v, r)
-			}
 		}
 	}
-	if sanityExactSameValueInValues(r, v) < 0 {
-		v = append(v, r)
-	}
-	return r, v
+	return r
 }
 
 func sanityConstantIsUsedByPrincipalInKnowledgeMap(
-	valKnowledgeMap knowledgeMap, name string, c constant, i int,
+	valKnowledgeMap knowledgeMap, name string, c constant,
 ) bool {
+	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	for ii, a := range valKnowledgeMap.assigned {
 		if valKnowledgeMap.creator[ii] != name {
 			continue
@@ -1051,48 +1038,17 @@ func sanityConstantIsUsedByPrincipalInKnowledgeMap(
 	return false
 }
 
-func sanityConstantIsUsedByPrincipalInPrincipalState(valPrincipalState principalState, c constant) bool {
-	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-	for ii, a := range valPrincipalState.assigned {
-		switch {
-		case !valPrincipalState.known[ii]:
-			if ii == i {
-				break
-			}
-			continue
-		case valPrincipalState.creator[ii] != valPrincipalState.name:
-			continue
-		}
-		_, v := sanityResolveValueInternalValuesFromPrincipalState(a, a, ii, valPrincipalState, false)
-		if sanityExactSameValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func sanityResolveAllPrincipalStateValues(
-	valPrincipalState principalState, valKnowledgeMap knowledgeMap,
-) principalState {
-	var resolvesGroup sync.WaitGroup
+func sanityResolveAllPrincipalStateValues(valPrincipalState principalState) principalState {
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.assigned {
-		resolvesGroup.Add(1)
-		go func(i int) {
-			valPrincipalStateClone.assigned[i], _ = sanityResolveValueInternalValuesFromPrincipalState(
-				valPrincipalState.assigned[i], valPrincipalState.assigned[i], i, valPrincipalState,
-				sanityShouldResolveToBeforeMutate(i, valPrincipalState),
-			)
-			valPrincipalStateClone.beforeRewrite[i], _ = sanityResolveValueInternalValuesFromPrincipalState(
-				valPrincipalState.beforeRewrite[i], valPrincipalState.beforeRewrite[i], i, valPrincipalState,
-				sanityShouldResolveToBeforeMutate(i, valPrincipalState),
-			)
-			valPrincipalStateClone.beforeMutate[i], _ = sanityResolveValueInternalValuesFromKnowledgeMap(
-				valPrincipalState.beforeMutate[i], valKnowledgeMap,
-			)
-			resolvesGroup.Done()
-		}(i)
+		valPrincipalStateClone.assigned[i] = sanityResolveValueInternalValuesFromPrincipalState(
+			valPrincipalState.assigned[i], valPrincipalState.assigned[i], i, valPrincipalState,
+			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+		)
+		valPrincipalStateClone.beforeRewrite[i] = sanityResolveValueInternalValuesFromPrincipalState(
+			valPrincipalState.beforeRewrite[i], valPrincipalState.beforeRewrite[i], i, valPrincipalState,
+			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
+		)
 	}
-	resolvesGroup.Wait()
 	return valPrincipalStateClone
 }

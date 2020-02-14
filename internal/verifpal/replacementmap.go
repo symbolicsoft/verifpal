@@ -8,7 +8,9 @@ import (
 	"sync"
 )
 
-func replacementMapInit(valPrincipalState principalState, valAttackerState attackerState, stage int) replacementMap {
+func replacementMapInit(
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int,
+) replacementMap {
 	var replacementsGroup sync.WaitGroup
 	var replacementsMutex sync.Mutex
 	valReplacementMap := replacementMap{
@@ -21,10 +23,10 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 	}
 	for _, v := range valAttackerState.known {
 		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
-		if replacementMapSkipValue(v, i, valPrincipalState, valAttackerState) {
+		if replacementMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
-		a := valPrincipalState.assigned[i]
+		a := valPrincipalState.beforeMutate[i]
 		replacementsGroup.Add(1)
 		go func(v value) {
 			c, r := replacementMapReplaceValue(
@@ -52,7 +54,7 @@ func replacementMapInit(valPrincipalState principalState, valAttackerState attac
 }
 
 func replacementMapSkipValue(
-	v value, i int, valPrincipalState principalState, valAttackerState attackerState,
+	v value, i int, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState,
 ) bool {
 	switch v.kind {
 	case "primitive":
@@ -70,6 +72,8 @@ func replacementMapSkipValue(
 	case valPrincipalState.creator[i] == valPrincipalState.name:
 		return true
 	case !valPrincipalState.known[i]:
+		return true
+	case !sanityConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.name, v.constant):
 		return true
 	case !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[i]):
 		return true
@@ -136,7 +140,7 @@ func replacementMapReplacePrimitive(
 	for _, v := range valAttackerState.known {
 		switch v.kind {
 		case "primitive":
-			a, _ = sanityResolveValueInternalValuesFromPrincipalState(a, a, rootIndex, valPrincipalState, false)
+			a = sanityResolveValueInternalValuesFromPrincipalState(a, a, rootIndex, valPrincipalState, false)
 			if sanityEquivalentValues(a, v, valPrincipalState) {
 				continue
 			}

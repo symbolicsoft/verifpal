@@ -46,7 +46,7 @@ func injectValueRules(
 	}
 	switch k.kind {
 	case "constant":
-		return injectConstantRules(k.constant, arg, p, valPrincipalState)
+		return injectConstantRules(k.constant, arg, p)
 	case "primitive":
 		return injectPrimitiveRules(k.primitive, arg, p, stage)
 	case "equation":
@@ -55,25 +55,21 @@ func injectValueRules(
 	return true
 }
 
-func injectConstantRules(c constant, arg int, p primitive, valPrincipalState principalState) bool {
+func injectConstantRules(c constant, arg int, p primitive) bool {
 	switch {
 	case p.arguments[arg].kind != "constant":
 		return false
 	case strings.ToLower(c.name) == "g":
 		return false
-	case !sanityConstantIsUsedByPrincipalInPrincipalState(valPrincipalState, c):
-		if strings.ToLower(c.name) != "nil" {
-			return false
-		}
 	}
 	return true
 }
 
 func injectPrimitiveRules(k primitive, arg int, p primitive, stage int) bool {
 	switch {
-	case injectPrimitiveStageRestricted(k, stage):
-		return false
 	case p.arguments[arg].kind != "primitive":
+		return false
+	case injectPrimitiveStageRestricted(k, stage):
 		return false
 	case !injectMatchSkeletons(k, injectPrimitiveSkeleton(p.arguments[arg].primitive)):
 		return false
@@ -87,6 +83,11 @@ func injectEquationRules(e equation, arg int, p primitive) bool {
 		return false
 	case len(e.values) != len(p.arguments[arg].equation.values):
 		return false
+	}
+	for i := range e.values {
+		if e.values[i].kind != p.arguments[arg].equation.values[i].kind {
+			return false
+		}
 	}
 	return true
 }

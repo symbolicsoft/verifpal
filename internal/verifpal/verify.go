@@ -48,7 +48,7 @@ func verifyResolveQueries(
 func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
 	var scanGroup sync.WaitGroup
 	for _, state := range valPrincipalStates {
-		valPrincipalState := sanityResolveAllPrincipalStateValues(state, valKnowledgeMap)
+		valPrincipalState := sanityResolveAllPrincipalStateValues(state)
 		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 		sanityFailOnFailedRewrite(failedRewrites)
 		for i := range valPrincipalState.assigned {

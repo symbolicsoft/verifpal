@@ -69,7 +69,7 @@ func verifyActiveScan(
 	if (goodLock && !valReplacementMap.initialized) || attackerKnowsMore {
 		cg.Add(1)
 		go func() {
-			valReplacementMap = replacementMapInit(valPrincipalState, valAttackerState, stage)
+			valReplacementMap = replacementMapInit(valKnowledgeMap, valPrincipalState, valAttackerState, stage)
 			verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
 				stage, cg,
@@ -79,8 +79,7 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
-		valReplacementMap,
+		constructPrincipalStateClone(valPrincipalState, true), valReplacementMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
@@ -98,8 +97,7 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
-	valReplacementMap replacementMap,
+	valPrincipalState principalState, valReplacementMap replacementMap,
 ) (principalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valReplacementMap.constants {
@@ -123,7 +121,7 @@ func verifyActiveMutatePrincipalState(
 			isWorthwhileMutation = true
 		}
 	}
-	valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valKnowledgeMap)
+	valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 	for i, p := range failedRewrites {
 		if p.check {
