@@ -3,7 +3,6 @@
 
 @echo off
 @setx GOOS "windows" >nul
-@setx GOARCH "amd64" >nul
 
 @echo|set /p="[Verifpal] Installing dependencies..."
 @go get -u github.com/mna/pigeon
