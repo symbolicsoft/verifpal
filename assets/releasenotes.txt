@@ -1,1 +1,1 @@
-This release brings bug fixes to the analysis methodology.
+Verifpal 0.11.3 brings dramatic analysis speed improvements across the board, thanks to some optimizations to the heuristics logic and the rewriting of some core functions.

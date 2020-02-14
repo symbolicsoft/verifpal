@@ -494,21 +494,46 @@ func sanityFindConstantInEquation(
 
 func sanityExactSameValueInValues(v value, assigneds []value) int {
 	index := -1
+assignedsLoop:
 	for i, a := range assigneds {
-		vs := prettyValue(v)
-		as := prettyValue(a)
+		if v.kind != a.kind {
+			continue
+		}
 		switch v.kind {
+		case "constant":
+			if v.constant.name != a.constant.name {
+				continue
+			}
 		case "primitive":
-			vs = fmt.Sprintf("%s|%d", vs, v.primitive.output)
+			if len(v.primitive.arguments) != len(a.primitive.arguments) {
+				continue
+			}
+			if v.primitive.output != a.primitive.output {
+				continue
+			}
+			for i := range v.primitive.arguments {
+				if sanityExactSameValueInValues(
+					v.primitive.arguments[i],
+					[]value{a.primitive.arguments[i]},
+				) < 0 {
+					continue assignedsLoop
+				}
+			}
+		case "equation":
+			if len(v.equation.values) != len(a.equation.values) {
+				continue
+			}
+			for i := range v.equation.values {
+				if sanityExactSameValueInValues(
+					v.equation.values[i],
+					[]value{a.equation.values[i]},
+				) < 0 {
+					continue assignedsLoop
+				}
+			}
 		}
-		switch a.kind {
-		case "primitive":
-			as = fmt.Sprintf("%s|%d", as, a.primitive.output)
-		}
-		if vs == as {
-			index = i
-			break
-		}
+		index = i
+		break
 	}
 	return index
 }

@@ -139,7 +139,9 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 	if p.name != skeleton.name {
 		return false
 	}
-	return prettyPrimitive(injectPrimitiveSkeleton(p)) == prettyPrimitive(skeleton)
+	pv := value{kind: "primitive", primitive: injectPrimitiveSkeleton(p)}
+	sv := value{kind: "primitive", primitive: skeleton}
+	return sanityExactSameValueInValues(pv, []value{sv}) >= 0
 }
 
 func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
