@@ -75,12 +75,14 @@ func attackerStateGetRead() attackerState {
 
 func attackerStatePutWrite(known value) bool {
 	written := false
-	attackerStateMutex.Lock()
 	if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
-		attackerStateShared.known = append(attackerStateShared.known, known)
+		attackerStateMutex.Lock()
+		if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
+			attackerStateShared.known = append(attackerStateShared.known, known)
+		}
+		attackerStateMutex.Unlock()
 		written = true
 	}
-	attackerStateMutex.Unlock()
 	return written
 }
 

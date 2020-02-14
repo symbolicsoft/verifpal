@@ -55,13 +55,11 @@ func verifyResultsPutWrite(result verifyResult) bool {
 
 func verifyResultsAllResolved() bool {
 	allResolved := true
-	verifyResultsMutex.Lock()
 	for _, verifyResult := range verifyResultsShared {
 		if !verifyResult.resolved {
 			allResolved = false
 			break
 		}
 	}
-	verifyResultsMutex.Unlock()
 	return allResolved
 }

@@ -58,7 +58,7 @@ lint:
 test:
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
-	@go test -race verifpal.com/cmd/verifpal
+	@go test verifpal.com/cmd/verifpal
 
 tag:
 	@make -s lint
