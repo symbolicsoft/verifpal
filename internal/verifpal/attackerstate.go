@@ -79,9 +79,9 @@ func attackerStatePutWrite(known value) bool {
 		attackerStateMutex.Lock()
 		if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
 			attackerStateShared.known = append(attackerStateShared.known, known)
+			written = true
 		}
 		attackerStateMutex.Unlock()
-		written = true
 	}
 	return written
 }
