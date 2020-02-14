@@ -4,15 +4,9 @@
 
 package verifpal
 
-import (
-	"sync"
-)
-
 func replacementMapInit(
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int,
 ) replacementMap {
-	var replacementsGroup sync.WaitGroup
-	var replacementsMutex sync.Mutex
 	valReplacementMap := replacementMap{
 		initialized:       true,
 		constants:         []constant{},
@@ -27,24 +21,16 @@ func replacementMapInit(
 			continue
 		}
 		a := valPrincipalState.beforeMutate[i]
-		replacementsGroup.Add(1)
-		go func(v value) {
-			c, r := replacementMapReplaceValue(
-				a, v, i, stage,
-				valPrincipalState, valAttackerState,
-			)
-			if len(r) == 0 {
-				replacementsGroup.Done()
-				return
-			}
-			replacementsMutex.Lock()
-			valReplacementMap.constants = append(valReplacementMap.constants, c)
-			valReplacementMap.replacements = append(valReplacementMap.replacements, r)
-			replacementsMutex.Unlock()
-			replacementsGroup.Done()
-		}(v)
+		c, r := replacementMapReplaceValue(
+			a, v, i, stage,
+			valPrincipalState, valAttackerState,
+		)
+		if len(r) == 0 {
+			continue
+		}
+		valReplacementMap.constants = append(valReplacementMap.constants, c)
+		valReplacementMap.replacements = append(valReplacementMap.replacements, r)
 	}
-	replacementsGroup.Wait()
 	valReplacementMap.combination = make([]value, len(valReplacementMap.constants))
 	valReplacementMap.depthIndex = make([]int, len(valReplacementMap.constants))
 	for iiii := range valReplacementMap.constants {
@@ -140,7 +126,9 @@ func replacementMapReplacePrimitive(
 	for _, v := range valAttackerState.known {
 		switch v.kind {
 		case "primitive":
-			a = sanityResolveValueInternalValuesFromPrincipalState(a, a, rootIndex, valPrincipalState, false)
+			a = sanityResolveValueInternalValuesFromPrincipalState(
+				a, a, rootIndex, valPrincipalState, valAttackerState, false,
+			)
 			if sanityEquivalentValues(a, v, valPrincipalState) {
 				continue
 			}
