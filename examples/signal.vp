@@ -31,7 +31,7 @@ principal Alice[
 principal Alice[
 	generates m1, ae2
 	gae2 = G^ae2
-	valid = SIGNVERIF(gblongterm, gbs, gbssig)
+	valid = SIGNVERIF(gblongterm, gbs, gbssig)?
 	akshared1 = gbs^ae2
 	arkab1, ackab1 = HKDF(akshared1, arkba1, c2)
 	akenc1, akenc2 = HKDF(MAC(ackab1, c3), c1, c4)
