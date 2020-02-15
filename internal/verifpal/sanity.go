@@ -312,7 +312,7 @@ func sanityDeclaredPrincipals(m Model) []string {
 	return principals
 }
 
-func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState) bool {
+func sanityEquivalentValues(a1 value, a2 value) bool {
 	switch a1.kind {
 	case "constant":
 		switch a2.kind {
@@ -331,7 +331,7 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 			return false
 		case "primitive":
 			equivPrim, _, _ := sanityEquivalentPrimitives(
-				a1.primitive, a2.primitive, valPrincipalState, true,
+				a1.primitive, a2.primitive, true,
 			)
 			return equivPrim
 		case "equation":
@@ -345,7 +345,7 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 			return false
 		case "equation":
 			return sanityEquivalentEquations(
-				a1.equation, a2.equation, valPrincipalState,
+				a1.equation, a2.equation,
 			)
 		}
 	}
@@ -353,7 +353,7 @@ func sanityEquivalentValues(a1 value, a2 value, valPrincipalState principalState
 }
 
 func sanityEquivalentPrimitives(
-	p1 primitive, p2 primitive, valPrincipalState principalState, considerOutput bool,
+	p1 primitive, p2 primitive, considerOutput bool,
 ) (bool, int, int) {
 	if p1.name != p2.name {
 		return false, 0, 0
@@ -365,7 +365,7 @@ func sanityEquivalentPrimitives(
 		return false, 0, 0
 	}
 	for i := range p1.arguments {
-		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i], valPrincipalState)
+		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i])
 		if !equiv {
 			return false, 0, 0
 		}
@@ -373,57 +373,39 @@ func sanityEquivalentPrimitives(
 	return true, p1.output, p2.output
 }
 
-func sanityEquivalentEquations(e1 equation, e2 equation, valPrincipalState principalState) bool {
-	e1Values := sanityDecomposeEquationValues(e1, valPrincipalState)
-	e2Values := sanityDecomposeEquationValues(e2, valPrincipalState)
-	if len(e1Values) != len(e2Values) || len(e1Values) == 0 {
+func sanityEquivalentEquations(e1 equation, e2 equation) bool {
+	e1Base := e1.values[0].equation.values
+	e2Base := e2.values[0].equation.values
+	if len(e1.values) != len(e2.values) || len(e1.values) == 0 {
 		return false
 	}
-	if e1Values[0].kind == "equation" && e2Values[0].kind == "equation" {
-		return sanityEquivalentEquationsFull(e1Values, e2Values, valPrincipalState)
-	}
-	if len(e1Values) > 2 {
-		if sanityEquivalentValues(e1Values[1], e2Values[2], valPrincipalState) &&
-			sanityEquivalentValues(e1Values[2], e2Values[1], valPrincipalState) {
+	if e1.values[0].kind == "equation" && e2.values[0].kind == "equation" {
+		if sanityEquivalentValues(e1Base[1], e2.values[1]) &&
+			sanityEquivalentValues(e1.values[1], e2Base[1]) {
 			return true
 		}
-		if sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) &&
-			sanityEquivalentValues(e1Values[2], e2Values[2], valPrincipalState) {
+		if sanityEquivalentValues(e1Base[1], e2Base[1]) &&
+			sanityEquivalentValues(e1.values[1], e2.values[1]) {
 			return true
 		}
 		return false
 	}
-	if sanityEquivalentValues(e1Values[0], e2Values[0], valPrincipalState) &&
-		sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
-		return true
-	}
-	return false
-}
-
-func sanityEquivalentEquationsFull(e1Values []value, e2Values []value, valPrincipalState principalState) bool {
-	e1Base := sanityDecomposeEquationValues(e1Values[0].equation, valPrincipalState)
-	e2Base := sanityDecomposeEquationValues(e2Values[0].equation, valPrincipalState)
-	if sanityEquivalentValues(e1Base[1], e2Values[1], valPrincipalState) &&
-		sanityEquivalentValues(e1Values[1], e2Base[1], valPrincipalState) {
-		return true
-	}
-	if sanityEquivalentValues(e1Base[1], e2Base[1], valPrincipalState) &&
-		sanityEquivalentValues(e1Values[1], e2Values[1], valPrincipalState) {
-		return true
-	}
-	return false
-}
-
-func sanityDecomposeEquationValues(e equation, valPrincipalState principalState) []value {
-	values := []value{}
-	for _, v := range e.values {
-		switch v.kind {
-		case "constant":
-			v = sanityResolveConstant(v.constant, valPrincipalState)
+	if len(e1.values) > 2 {
+		if sanityEquivalentValues(e1.values[1], e2.values[2]) &&
+			sanityEquivalentValues(e1.values[2], e2.values[1]) {
+			return true
 		}
-		values = append(values, v)
+		if sanityEquivalentValues(e1.values[1], e2.values[1]) &&
+			sanityEquivalentValues(e1.values[2], e2.values[2]) {
+			return true
+		}
+		return false
 	}
-	return values
+	if sanityEquivalentValues(e1.values[0], e2.values[0]) &&
+		sanityEquivalentValues(e1.values[1], e2.values[1]) {
+		return true
+	}
+	return false
 }
 
 func sanityFindConstantInPrimitive(
@@ -446,7 +428,7 @@ func sanityFindConstantInPrimitive(
 			switch a.kind {
 			case "primitive":
 				equivPrim, _, _ := sanityEquivalentPrimitives(
-					a.primitive, aa.primitive, valPrincipalState, true,
+					a.primitive, aa.primitive, true,
 				)
 				if equivPrim {
 					return true
@@ -470,20 +452,19 @@ func sanityFindConstantInEquation(
 	a := sanityResolveConstant(c, valPrincipalState)
 	switch a.kind {
 	case "equation":
-		if sanityEquivalentEquations(a.equation, e, valPrincipalState) {
+		if sanityEquivalentEquations(a.equation, e) {
 			return true
 		}
 	}
-	v := sanityDecomposeEquationValues(e, valPrincipalState)
-	for _, vv := range v {
-		switch vv.kind {
+	for _, ee := range e.values {
+		switch ee.kind {
 		case "constant":
-			if c.name == vv.constant.name {
+			if c.name == ee.constant.name {
 				return true
 			}
 			switch a.kind {
 			case "constant":
-				if a.constant.name == vv.constant.name {
+				if a.constant.name == ee.constant.name {
 					return true
 				}
 			}
@@ -492,56 +473,10 @@ func sanityFindConstantInEquation(
 	return false
 }
 
-func sanityExactSameValueInValues(v value, assigneds []value) int {
+func sanityEquivalentValueInValues(v value, a []value) int {
 	index := -1
-assignedsLoop:
-	for i, a := range assigneds {
-		if v.kind != a.kind {
-			continue
-		}
-		switch v.kind {
-		case "constant":
-			if v.constant.name != a.constant.name {
-				continue
-			}
-		case "primitive":
-			if len(v.primitive.arguments) != len(a.primitive.arguments) {
-				continue
-			}
-			if v.primitive.output != a.primitive.output {
-				continue
-			}
-			for i := range v.primitive.arguments {
-				if sanityExactSameValueInValues(
-					v.primitive.arguments[i],
-					[]value{a.primitive.arguments[i]},
-				) < 0 {
-					continue assignedsLoop
-				}
-			}
-		case "equation":
-			if len(v.equation.values) != len(a.equation.values) {
-				continue
-			}
-			for i := range v.equation.values {
-				if sanityExactSameValueInValues(
-					v.equation.values[i],
-					[]value{a.equation.values[i]},
-				) < 0 {
-					continue assignedsLoop
-				}
-			}
-		}
-		index = i
-		break
-	}
-	return index
-}
-
-func sanityEquivalentValueInValues(v value, assigneds []value, valPrincipalState principalState) int {
-	index := -1
-	for i, a := range assigneds {
-		if sanityEquivalentValues(v, a, valPrincipalState) {
+	for i, aa := range a {
+		if sanityEquivalentValues(v, aa) {
 			index = i
 			break
 		}
@@ -597,7 +532,7 @@ func sanityPerformPrimitiveRewrite(
 			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
-	wasRebuilt, rebuild := possibleToRebuild(rewrite.primitive, valPrincipalState)
+	wasRebuilt, rebuild := possibleToRebuild(rewrite.primitive)
 	if wasRebuilt {
 		rewrite = rebuild
 		if pi >= 0 {
@@ -815,7 +750,7 @@ func sanityResolveValueInternalValuesFromKnowledgeMap(
 	var v []value
 	switch a.kind {
 	case "constant":
-		if sanityExactSameValueInValues(a, v) < 0 {
+		if sanityEquivalentValueInValues(a, v) < 0 {
 			v = append(v, a)
 		}
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
@@ -859,7 +794,7 @@ func sanityResolvePrimitiveInternalValuesFromKnowledgeMap(
 	for _, aa := range a.primitive.arguments {
 		s, vv := sanityResolveValueInternalValuesFromKnowledgeMap(aa, valKnowledgeMap)
 		for _, vvv := range vv {
-			if sanityExactSameValueInValues(vvv, v) < 0 {
+			if sanityEquivalentValueInValues(vvv, v) < 0 {
 				v = append(v, vvv)
 			}
 		}
@@ -901,12 +836,12 @@ func sanityResolveEquationInternalValuesFromKnowledgeMap(
 			} else {
 				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
 			}
-			if sanityExactSameValueInValues(r, v) < 0 {
+			if sanityEquivalentValueInValues(r, v) < 0 {
 				v = append(v, r)
 			}
 		}
 	}
-	if sanityExactSameValueInValues(r, v) < 0 {
+	if sanityEquivalentValueInValues(r, v) < 0 {
 		v = append(v, r)
 	}
 	return r, v
@@ -1047,10 +982,10 @@ func sanityConstantIsUsedByPrincipalInKnowledgeMap(
 		switch a.kind {
 		case "primitive":
 			_, v := sanityResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
-			if sanityExactSameValueInValues(valKnowledgeMap.assigned[i], v) >= 0 {
+			if sanityEquivalentValueInValues(valKnowledgeMap.assigned[i], v) >= 0 {
 				return true
 			}
-			if sanityExactSameValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
+			if sanityEquivalentValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
 				return true
 			}
 		}

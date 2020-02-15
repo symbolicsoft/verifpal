@@ -33,11 +33,8 @@ func queryConfidentiality(
 		summary:  "",
 		options:  []queryOptionResult{},
 	}
-	ii := sanityEquivalentValueInValues(
-		sanityResolveConstant(query.constant, valPrincipalState),
-		valAttackerState.known,
-		valPrincipalState,
-	)
+	c := sanityResolveConstant(query.constant, valPrincipalState)
+	ii := sanityEquivalentValueInValues(c, valAttackerState.known)
 	if ii < 0 {
 		return result
 	}

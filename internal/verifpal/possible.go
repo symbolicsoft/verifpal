@@ -17,7 +17,7 @@ func possibleToDecomposePrimitive(
 	for i, g := range prim.decompose.given {
 		a := p.arguments[g]
 		a, valid := prim.decompose.filter(a, i, valPrincipalState)
-		ii := sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState)
+		ii := sanityEquivalentValueInValues(a, valAttackerState.known)
 		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
@@ -55,9 +55,7 @@ func possibleToDecomposePrimitive(
 	return false, value{}, has
 }
 
-func possibleToRecomposePrimitive(
-	p primitive, valPrincipalState principalState, valAttackerState attackerState,
-) (bool, value, []value) {
+func possibleToRecomposePrimitive(p primitive, valAttackerState attackerState) (bool, value, []value) {
 	prim := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
 		return false, value{}, []value{}
@@ -70,7 +68,7 @@ func possibleToRecomposePrimitive(
 				switch v.kind {
 				case "primitive":
 					equivPrim, vo, _ := sanityEquivalentPrimitives(
-						v.primitive, p, valPrincipalState, false,
+						v.primitive, p, false,
 					)
 					if !equivPrim || vo != ii {
 						continue
@@ -92,7 +90,7 @@ func possibleToReconstructPrimitive(
 ) (bool, []value) {
 	has := []value{}
 	for _, a := range p.arguments {
-		if sanityEquivalentValueInValues(a, valAttackerState.known, valPrincipalState) >= 0 {
+		if sanityEquivalentValueInValues(a, valAttackerState.known) >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -135,16 +133,15 @@ func possibleToReconstructPrimitive(
 func possibleToReconstructEquation(
 	e equation, valPrincipalState principalState, valAttackerState attackerState,
 ) (bool, []value) {
-	eValues := sanityDecomposeEquationValues(e, valPrincipalState)
-	if len(eValues) > 2 {
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, eValues[2].constant)
+	if len(e.values) > 2 {
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, e.values[2].constant)
 		if i < 0 {
 			return false, []value{}
 		}
-		s0 := eValues[1]
-		s1 := eValues[2]
-		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known, valPrincipalState) >= 0
-		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.known, valPrincipalState) >= 0
+		s0 := e.values[1]
+		s1 := e.values[2]
+		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known) >= 0
+		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.known) >= 0
 		if hs0 && hs1 {
 			return true, []value{s0, s1}
 		}
@@ -160,8 +157,8 @@ func possibleToReconstructEquation(
 				values: []value{e.values[0], e.values[2]},
 			},
 		}
-		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.known, valPrincipalState) >= 0
-		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.known, valPrincipalState) >= 0
+		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.known) >= 0
+		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.known) >= 0
 		if hs0 && hp1 {
 			return true, []value{s0, p1}
 		}
@@ -169,14 +166,14 @@ func possibleToReconstructEquation(
 			return true, []value{p0, s1}
 		}
 	}
-	if sanityEquivalentValueInValues(eValues[1], valAttackerState.known, valPrincipalState) >= 0 {
-		return true, []value{eValues[1]}
+	if sanityEquivalentValueInValues(e.values[1], valAttackerState.known) >= 0 {
+		return true, []value{e.values[1]}
 	}
 	return false, []value{}
 }
 
-func possibleToPassAssert(p primitive, valPrincipalState principalState) (bool, value) {
-	if sanityEquivalentValues(p.arguments[0], p.arguments[1], valPrincipalState) {
+func possibleToPassAssert(p primitive) (bool, value) {
+	if sanityEquivalentValues(p.arguments[0], p.arguments[1]) {
 		return true, value{kind: "primitive", primitive: p}
 	}
 	return false, value{kind: "primitive", primitive: p}
@@ -186,7 +183,7 @@ func possibleToRewrite(
 	p primitive, valPrincipalState principalState,
 ) (bool, value) {
 	if p.name == "ASSERT" {
-		return possibleToPassAssert(p, valPrincipalState)
+		return possibleToPassAssert(p)
 	}
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
@@ -227,7 +224,7 @@ func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
 					}
 				}
 			}
-			valid = sanityEquivalentValues(ax[0], ax[1], valPrincipalState)
+			valid = sanityEquivalentValues(ax[0], ax[1])
 			if valid {
 				break
 			}
@@ -261,9 +258,7 @@ func possibleToForceRewriteDecryption(
 	}
 	switch k.kind {
 	case "constant":
-		if sanityEquivalentValueInValues(
-			k, valAttackerState.known, valPrincipalState,
-		) >= 0 {
+		if sanityEquivalentValueInValues(k, valAttackerState.known) >= 0 {
 			return true
 		}
 	case "primitive":
@@ -284,7 +279,7 @@ func possibleToForceRewriteDecryption(
 	return false
 }
 
-func possibleToRebuild(p primitive, valPrincipalState principalState) (bool, value) {
+func possibleToRebuild(p primitive) (bool, value) {
 	prim := primitiveGet(p.name)
 	if !prim.rebuild.hasRule {
 		return false, value{}
@@ -308,8 +303,7 @@ func possibleToRebuild(p primitive, valPrincipalState principalState) (bool, val
 			}
 			for ai := 1; ai < len(has); ai++ {
 				equivPrim, o1, o2 := sanityEquivalentPrimitives(
-					has[0].primitive, has[ai].primitive,
-					valPrincipalState, false,
+					has[0].primitive, has[ai].primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
 					continue aLoop
@@ -343,10 +337,9 @@ func possibleToObtainPasswords(a value, valPrincipalState principalState) []valu
 			)
 		}
 	case "equation":
-		e := sanityDecomposeEquationValues(a.equation, valPrincipalState)
-		for _, ee := range e {
+		for _, aa := range a.equation.values {
 			passwords = append(passwords,
-				possibleToObtainPasswords(ee, valPrincipalState)...,
+				possibleToObtainPasswords(aa, valPrincipalState)...,
 			)
 		}
 	}

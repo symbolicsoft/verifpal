@@ -285,12 +285,9 @@ var primitiveSpecs = []primitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						values := sanityDecomposeEquationValues(
-							x.equation, valPrincipalState,
-						)
-						switch len(values) {
+						switch len(x.equation.values) {
 						case 2:
-							return values[1], true
+							return x.equation.values[1], true
 						default:
 							return x, false
 						}
@@ -325,12 +322,8 @@ var primitiveSpecs = []primitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						values := sanityDecomposeEquationValues(
-							x.equation,
-							valPrincipalState,
-						)
-						if len(values) == 2 {
-							return values[1], true
+						if len(x.equation.values) == 2 {
+							return x.equation.values[1], true
 						}
 						return x, false
 					}
@@ -513,13 +506,9 @@ var primitiveSpecs = []primitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						values := sanityDecomposeEquationValues(
-							x.equation,
-							valPrincipalState,
-						)
-						switch len(values) {
+						switch len(x.equation.values) {
 						case 2:
-							return values[1], true
+							return x.equation.values[1], true
 						default:
 							return x, false
 						}

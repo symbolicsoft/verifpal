@@ -25,7 +25,6 @@ func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 	attackerStateMutex.Lock()
 	for i, c := range valPrincipalState.constants {
 		cc := value{kind: "constant", constant: c}
-		v := valPrincipalState.assigned[i]
 		if c.qualifier != "public" {
 			continue
 		}
@@ -33,16 +32,12 @@ func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 		if err == nil && earliestPhase > attackerStateShared.currentPhase {
 			continue
 		}
-		if sanityExactSameValueInValues(cc, attackerStateShared.known) < 0 {
+		if sanityEquivalentValueInValues(cc, attackerStateShared.known) < 0 {
 			attackerStateShared.known = append(attackerStateShared.known, cc)
-		}
-		if sanityExactSameValueInValues(v, attackerStateShared.known) < 0 {
-			attackerStateShared.known = append(attackerStateShared.known, v)
 		}
 	}
 	for i, c := range valPrincipalState.constants {
 		cc := value{kind: "constant", constant: c}
-		v := valPrincipalState.assigned[i]
 		if len(valPrincipalState.wire[i]) == 0 && !valPrincipalState.constants[i].leaked {
 			continue
 		}
@@ -56,11 +51,8 @@ func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
 		if earliestPhase > attackerStateShared.currentPhase {
 			continue
 		}
-		if sanityExactSameValueInValues(cc, attackerStateShared.known) < 0 {
+		if sanityEquivalentValueInValues(cc, attackerStateShared.known) < 0 {
 			attackerStateShared.known = append(attackerStateShared.known, cc)
-		}
-		if sanityExactSameValueInValues(v, attackerStateShared.known) < 0 {
-			attackerStateShared.known = append(attackerStateShared.known, v)
 		}
 	}
 	attackerStateMutex.Unlock()
@@ -75,9 +67,9 @@ func attackerStateGetRead() attackerState {
 
 func attackerStatePutWrite(known value) bool {
 	written := false
-	if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
+	if sanityEquivalentValueInValues(known, attackerStateShared.known) < 0 {
 		attackerStateMutex.Lock()
-		if sanityExactSameValueInValues(known, attackerStateShared.known) < 0 {
+		if sanityEquivalentValueInValues(known, attackerStateShared.known) < 0 {
 			attackerStateShared.known = append(attackerStateShared.known, known)
 			written = true
 		}

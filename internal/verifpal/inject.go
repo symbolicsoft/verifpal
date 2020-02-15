@@ -29,19 +29,18 @@ func inject(
 }
 
 func injectValueRules(
-	k value, arg int, p primitive, rootPrimitive primitive,
-	valPrincipalState principalState, stage int,
+	k value, arg int, p primitive, rootPrimitive primitive, stage int,
 ) bool {
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: p,
-	}, valPrincipalState) {
+	}) {
 		return false
 	}
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: rootPrimitive,
-	}, valPrincipalState) {
+	}) {
 		return false
 	}
 	switch k.kind {
@@ -141,7 +140,7 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 	}
 	pv := value{kind: "primitive", primitive: injectPrimitiveSkeleton(p)}
 	sv := value{kind: "primitive", primitive: skeleton}
-	return sanityExactSameValueInValues(pv, []value{sv}) >= 0
+	return sanityEquivalentValues(pv, sv)
 }
 
 func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
@@ -196,9 +195,7 @@ func injectPrimitive(
 				)
 				k = valPrincipalState.beforeMutate[i]
 			}
-			if !injectValueRules(
-				k, arg, p, rootPrimitive, valPrincipalState, stage,
-			) {
+			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
 				continue
 			}
 			switch k.kind {
@@ -240,6 +237,9 @@ func injectLoopN(p primitive, kinjectants [][]value) []value {
 func injectLoop1(p primitive, kinjectants [][]value) []value {
 	var injectants []value
 	for i := range kinjectants[0] {
+		if verifyResultsAllResolved() {
+			return []value{}
+		}
 		aa := value{
 			kind: "primitive",
 			primitive: primitive{
@@ -251,7 +251,7 @@ func injectLoop1(p primitive, kinjectants [][]value) []value {
 				check:  p.check,
 			},
 		}
-		if sanityExactSameValueInValues(aa, injectants) < 0 {
+		if sanityEquivalentValueInValues(aa, injectants) < 0 {
 			injectants = append(injectants, aa)
 		}
 	}
@@ -261,6 +261,9 @@ func injectLoop1(p primitive, kinjectants [][]value) []value {
 func injectLoop2(p primitive, kinjectants [][]value) []value {
 	var injectants []value
 	for i := range kinjectants[0] {
+		if verifyResultsAllResolved() {
+			return []value{}
+		}
 		for ii := range kinjectants[1] {
 			aa := value{
 				kind: "primitive",
@@ -274,7 +277,7 @@ func injectLoop2(p primitive, kinjectants [][]value) []value {
 					check:  p.check,
 				},
 			}
-			if sanityExactSameValueInValues(aa, injectants) < 0 {
+			if sanityEquivalentValueInValues(aa, injectants) < 0 {
 				injectants = append(injectants, aa)
 			}
 		}
@@ -285,6 +288,9 @@ func injectLoop2(p primitive, kinjectants [][]value) []value {
 func injectLoop3(p primitive, kinjectants [][]value) []value {
 	var injectants []value
 	for i := range kinjectants[0] {
+		if verifyResultsAllResolved() {
+			return []value{}
+		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				aa := value{
@@ -300,7 +306,7 @@ func injectLoop3(p primitive, kinjectants [][]value) []value {
 						check:  p.check,
 					},
 				}
-				if sanityExactSameValueInValues(aa, injectants) < 0 {
+				if sanityEquivalentValueInValues(aa, injectants) < 0 {
 					injectants = append(injectants, aa)
 				}
 			}
@@ -312,6 +318,9 @@ func injectLoop3(p primitive, kinjectants [][]value) []value {
 func injectLoop4(p primitive, kinjectants [][]value) []value {
 	var injectants []value
 	for i := range kinjectants[0] {
+		if verifyResultsAllResolved() {
+			return []value{}
+		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
@@ -329,7 +338,7 @@ func injectLoop4(p primitive, kinjectants [][]value) []value {
 							check:  p.check,
 						},
 					}
-					if sanityExactSameValueInValues(aa, injectants) < 0 {
+					if sanityEquivalentValueInValues(aa, injectants) < 0 {
 						injectants = append(injectants, aa)
 					}
 				}
@@ -342,6 +351,9 @@ func injectLoop4(p primitive, kinjectants [][]value) []value {
 func injectLoop5(p primitive, kinjectants [][]value) []value {
 	var injectants []value
 	for i := range kinjectants[0] {
+		if verifyResultsAllResolved() {
+			return []value{}
+		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
@@ -361,7 +373,7 @@ func injectLoop5(p primitive, kinjectants [][]value) []value {
 								check:  p.check,
 							},
 						}
-						if sanityExactSameValueInValues(aa, injectants) < 0 {
+						if sanityEquivalentValueInValues(aa, injectants) < 0 {
 							injectants = append(injectants, aa)
 						}
 					}

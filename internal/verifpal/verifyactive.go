@@ -112,9 +112,7 @@ func verifyActiveMutatePrincipalState(
 			ac.primitive.output = ar.primitive.output
 			ac.primitive.check = ar.primitive.check
 		}
-		if sanityEquivalentValues(ar, ac, valPrincipalState) {
-			continue
-		}
+
 		valPrincipalState.creator[ii] = "Attacker"
 		valPrincipalState.sender[ii] = "Attacker"
 		valPrincipalState.mutated[ii] = true

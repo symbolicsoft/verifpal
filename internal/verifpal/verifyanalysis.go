@@ -21,7 +21,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
 	}
 	for _, a := range valPrincipalState.assigned {
-		o = o + verifyAnalysisRecompose(a, valPrincipalState, valAttackerState, 0)
+		o = o + verifyAnalysisRecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
 	}
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
@@ -71,14 +71,14 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+	a value, valAttackerState attackerState, o int,
 ) int {
 	var r bool
 	var revealed value
 	var ar []value
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
+		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valAttackerState)
 	}
 	if !r {
 		return o
@@ -126,7 +126,7 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) 
 		a = sanityResolveConstant(a.constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.assigned {
-		if sanityEquivalentValues(a, aa, valPrincipalState) {
+		if sanityEquivalentValues(a, aa) {
 			if attackerStatePutWrite(aa) {
 				o = o + 1
 			}

@@ -109,7 +109,7 @@ func replacementMapReplaceConstant(
 			c := sanityResolveConstant(v.constant, valPrincipalState)
 			switch c.kind {
 			case "constant":
-				if sanityExactSameValueInValues(c, replacements) < 0 {
+				if sanityEquivalentValueInValues(c, replacements) < 0 {
 					replacements = append(replacements, c)
 				}
 			}
@@ -129,13 +129,13 @@ func replacementMapReplacePrimitive(
 			a = sanityResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
 			)
-			if sanityEquivalentValues(a, v, valPrincipalState) {
+			if sanityEquivalentValues(a, v) {
 				continue
 			}
 			if !injectMatchSkeletons(v.primitive, injectPrimitiveSkeleton(a.primitive)) {
 				continue
 			}
-			if sanityExactSameValueInValues(v, replacements) < 0 {
+			if sanityEquivalentValueInValues(v, replacements) < 0 {
 				replacements = append(replacements, v)
 			}
 		}
@@ -145,7 +145,7 @@ func replacementMapReplacePrimitive(
 		valPrincipalState, valAttackerState, stage,
 	)
 	for _, aa := range injectants {
-		if sanityExactSameValueInValues(aa, replacements) < 0 {
+		if sanityEquivalentValueInValues(aa, replacements) < 0 {
 			replacements = append(replacements, aa)
 		}
 	}
@@ -162,7 +162,7 @@ func replacementMapReplaceEquation(a value, stage int, valAttackerState attacker
 		case "equation":
 			switch len(v.equation.values) {
 			case len(a.equation.values):
-				if sanityExactSameValueInValues(v, replacements) < 0 {
+				if sanityEquivalentValueInValues(v, replacements) < 0 {
 					replacements = append(replacements, v)
 				}
 			}
