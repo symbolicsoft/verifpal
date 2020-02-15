@@ -1,1 +1,1 @@
-Verifpal 0.11.3 brings dramatic analysis speed improvements across the board, thanks to some optimizations to the heuristics logic and the rewriting of some core functions.
+In this release, we build upon the performance improvements introduced in Verifpal 0.11.3 and offer even faster analysis. Overall, Verifpal 0.11.4 is dramatically, almost incomparably faster than Verifpal 0.11.2 and previous versions.
