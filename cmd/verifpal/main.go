@@ -17,6 +17,16 @@ import (
 var version = "0.11.4"
 
 func main() {
+	mainIntro()
+	switch len(os.Args) {
+	case 3:
+		mainGanbatte(os.Args)
+	default:
+		verifpal.Help()
+	}
+}
+
+func mainIntro() {
 	fmt.Fprintf(os.Stdout,
 		aurora.Bold("Verifpal %s - %s\n").String(),
 		version, "https://verifpal.com",
@@ -25,20 +35,16 @@ func main() {
 		"Verifpal is experimental software.",
 		"warning", false,
 	)
-	if len(os.Args) != 3 {
-		verifpal.Help()
-		return
-	}
-	switch os.Args[1] {
+}
+
+func mainGanbatte(args []string) {
+	switch args[1] {
 	case "verify":
-		verifpal.Verify(os.Args[2])
+		verifpal.Verify(args[2])
 	case "implement":
 		verifpal.Implement()
 	case "pretty":
-		prettyModel := verifpal.PrettyPrint(os.Args[2])
-		fmt.Fprint(os.Stdout, prettyModel)
-	case "help":
-		verifpal.Help()
+		verifpal.PrettyPrint(args[2])
 	default:
 		verifpal.Help()
 	}

@@ -279,7 +279,7 @@ func prettyQuery(query query) string {
 }
 
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
-func PrettyPrint(modelFile string) string {
+func PrettyPrint(modelFile string) {
 	m := parserParseModel(modelFile)
 	sanity(m)
 	var output string
@@ -353,7 +353,7 @@ func PrettyPrint(modelFile string) string {
 		)
 	}
 	output = fmt.Sprintf("%s]", output)
-	return output
+	fmt.Fprint(os.Stdout, output)
 }
 
 func prettyAnalysis(stage int) {
