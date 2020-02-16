@@ -108,14 +108,14 @@ type decomposeRule struct {
 	hasRule bool
 	given   []int
 	reveal  int
-	filter  func(value, int, principalState) (value, bool)
+	filter  func(value, int) (value, bool)
 }
 
 type recomposeRule struct {
 	hasRule bool
 	given   [][]int
 	reveal  int
-	filter  func(value, int, principalState) (value, bool)
+	filter  func(value, int) (value, bool)
 }
 
 type rewriteRule struct {
@@ -124,7 +124,7 @@ type rewriteRule struct {
 	from     int
 	to       int
 	matching map[int][]int
-	filter   func(value, int, principalState) (value, bool)
+	filter   func(value, int) (value, bool)
 }
 
 type rebuildRule struct {
@@ -132,7 +132,7 @@ type rebuildRule struct {
 	name    string
 	given   [][]int
 	reveal  int
-	filter  func(value, int, principalState) (value, bool)
+	filter  func(value, int) (value, bool)
 }
 
 type primitiveSpec struct {

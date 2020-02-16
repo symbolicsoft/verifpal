@@ -16,7 +16,7 @@ func possibleToDecomposePrimitive(
 	}
 	for i, g := range prim.decompose.given {
 		a := p.arguments[g]
-		a, valid := prim.decompose.filter(a, i, valPrincipalState)
+		a, valid := prim.decompose.filter(a, i)
 		ii := sanityEquivalentValueInValues(a, valAttackerState.known)
 		if valid && ii >= 0 {
 			has = append(has, a)
@@ -211,7 +211,7 @@ func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
 		valid := false
 		for _, mm := range m {
 			ax := []value{p.arguments[a], from.primitive.arguments[mm]}
-			ax[0], valid = prim.rewrite.filter(ax[0], mm, valPrincipalState)
+			ax[0], valid = prim.rewrite.filter(ax[0], mm)
 			if !valid {
 				continue
 			}

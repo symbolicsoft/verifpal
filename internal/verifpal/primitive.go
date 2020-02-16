@@ -75,7 +75,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -100,7 +100,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -116,7 +116,7 @@ var primitiveSpecs = []primitiveSpec{
 				0: {0},
 				2: {2},
 			},
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -141,7 +141,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -166,7 +166,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -181,7 +181,7 @@ var primitiveSpecs = []primitiveSpec{
 			matching: map[int][]int{
 				0: {0},
 			},
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -276,7 +276,7 @@ var primitiveSpecs = []primitiveSpec{
 				0: {0},
 				1: {1},
 			},
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -313,7 +313,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -354,7 +354,7 @@ var primitiveSpecs = []primitiveSpec{
 			hasRule: true,
 			given:   []int{0},
 			reveal:  1,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -369,7 +369,7 @@ var primitiveSpecs = []primitiveSpec{
 			matching: map[int][]int{
 				0: {0},
 			},
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
@@ -409,7 +409,7 @@ var primitiveSpecs = []primitiveSpec{
 				{1, 2},
 			},
 			reveal: 0,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -448,7 +448,7 @@ var primitiveSpecs = []primitiveSpec{
 				{2, 1},
 			},
 			reveal: 0,
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				return x, true
 			},
 		},
@@ -497,7 +497,7 @@ var primitiveSpecs = []primitiveSpec{
 				2: {0, 1, 2},
 				3: {3},
 			},
-			filter: func(x value, i int, valPrincipalState principalState) (value, bool) {
+			filter: func(x value, i int) (value, bool) {
 				switch i {
 				case 0:
 					switch x.kind {
