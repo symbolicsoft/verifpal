@@ -54,7 +54,7 @@ principal Bob[
 
 phase[1]
 
-Alice ->Bob: alongterm
+Alice -> Bob: alongterm
 Bob -> Alice: blongterm
 
 queries[
