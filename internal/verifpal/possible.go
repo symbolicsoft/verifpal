@@ -22,6 +22,25 @@ func possibleToDecomposePrimitive(
 			has = append(has, a)
 			continue
 		}
+		switch a.kind {
+		case "primitive":
+			r, _ := possibleToReconstructPrimitive(a.primitive, valAttackerState)
+			if r {
+				has = append(has, a)
+				continue
+			}
+			r, _, _ = possibleToDecomposePrimitive(a.primitive, valAttackerState)
+			if r {
+				has = append(has, a)
+				continue
+			}
+		case "equation":
+			r, _ := possibleToReconstructEquation(a.equation, valAttackerState)
+			if r {
+				has = append(has, a)
+				continue
+			}
+		}
 	}
 	if len(has) >= len(prim.decompose.given) {
 		revealed := p.arguments[prim.decompose.reveal]
