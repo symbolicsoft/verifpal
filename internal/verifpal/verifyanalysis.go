@@ -16,7 +16,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 	var o int
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.known {
-		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
+		o = o + verifyAnalysisDecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
 	}
@@ -48,14 +48,14 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+	a value, valAttackerState attackerState, o int,
 ) int {
 	var r bool
 	var revealed value
 	var ar []value
 	switch a.kind {
 	case "primitive":
-		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valAttackerState)
 	}
 	if !r {
 		return o
@@ -100,12 +100,12 @@ func verifyAnalysisReconstruct(
 	var ar []value
 	switch a.kind {
 	case "primitive":
-		r, ar = possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
+		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState)
 		for _, aa := range a.primitive.arguments {
 			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
+		r, ar = possibleToReconstructEquation(a.equation, valAttackerState)
 	}
 	if !r {
 		return o

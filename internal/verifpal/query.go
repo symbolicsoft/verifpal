@@ -17,7 +17,7 @@ func queryStart(
 	case "confidentiality":
 		result = queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	}
 	return result
 }
@@ -67,7 +67,7 @@ func queryConfidentiality(
 
 func queryAuthentication(
 	query query, valKnowledgeMap knowledgeMap,
-	valPrincipalState principalState, valAttackerState attackerState,
+	valPrincipalState principalState,
 ) verifyResult {
 	result := verifyResult{
 		query:    query,
@@ -78,8 +78,8 @@ func queryAuthentication(
 	if query.message.recipient != valPrincipalState.name {
 		return result
 	}
-	indices, passes, forcedPasses, sender, c := queryAuthenticationGetPassIndices(
-		query, valKnowledgeMap, valPrincipalState, valAttackerState,
+	indices, passes, sender, c := queryAuthenticationGetPassIndices(
+		query, valKnowledgeMap, valPrincipalState,
 	)
 	for f, index := range indices {
 		var mutated string
@@ -99,10 +99,6 @@ func queryAuthentication(
 			result.resolved = true
 			result = queryPrecondition(result, valPrincipalState)
 			return queryAuthenticationHandlePass(result, c, b, mutated, sender, valPrincipalState)
-		} else if forcedPasses[f] {
-			result.resolved = true
-			result = queryPrecondition(result, valPrincipalState)
-			return queryAuthenticationHandleForcedPass(result, c, b, mutated, sender, valPrincipalState)
 		}
 	}
 	return result
@@ -110,17 +106,16 @@ func queryAuthentication(
 
 func queryAuthenticationGetPassIndices(
 	query query,
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState,
-) ([]int, []bool, []bool, string, constant) {
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
+) ([]int, []bool, string, constant) {
 	var indices []int
 	var passes []bool
-	var forcedPasses []bool
 	var sender string
 	var c constant
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.message.constants[0])
 	ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if ii < 0 {
-		return indices, passes, forcedPasses, sender, c
+		return indices, passes, sender, c
 	}
 	c = valKnowledgeMap.constants[i]
 	sender = valPrincipalState.sender[ii]
@@ -138,24 +133,21 @@ func queryAuthenticationGetPassIndices(
 		}
 		iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.constants[iii])
 		if iiii < 0 {
-			return indices, passes, forcedPasses, sender, c
+			return indices, passes, sender, c
 		}
 		b := valPrincipalState.beforeRewrite[iiii]
 		if !primitiveGet(b.primitive.name).rewrite.hasRule {
 			indices = append(indices, iiii)
 			passes = append(passes, true)
-			forcedPasses = append(forcedPasses, false)
 			continue
 		}
 		pass, _ := possibleToRewrite(b.primitive, valPrincipalState)
-		forcedPass := possibleToForceRewrite(b.primitive, valPrincipalState, valAttackerState)
-		if pass || forcedPass {
+		if pass {
 			indices = append(indices, iiii)
 			passes = append(passes, pass)
-			forcedPasses = append(forcedPasses, forcedPass)
 		}
 	}
-	return indices, passes, forcedPasses, sender, c
+	return indices, passes, sender, c
 }
 
 func queryAuthenticationHandlePass(
@@ -167,25 +159,6 @@ func queryAuthenticationHandlePass(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), sender, result.query.message.sender,
 		prettyValue(b), result.query.message.recipient,
-	), result.options, true)
-	written := verifyResultsPutWrite(result)
-	if written {
-		PrettyMessage(fmt.Sprintf(
-			"%s: %s", prettyQuery(result.query), result.summary,
-		), "result", true)
-	}
-	return result
-}
-
-func queryAuthenticationHandleForcedPass(
-	result verifyResult, c constant, b value, mutated string, sender string,
-	valPrincipalState principalState,
-) verifyResult {
-	cc := sanityResolveConstant(c, valPrincipalState)
-	result = queryPrecondition(result, valPrincipalState)
-	result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
-		"%s (%s), sent by %s, is successfully used in %s within %s's state, despite being vulnerable to tampering.",
-		prettyConstant(c), prettyValue(cc), sender, prettyValue(b), result.query.message.recipient,
 	), result.options, true)
 	written := verifyResultsPutWrite(result)
 	if written {

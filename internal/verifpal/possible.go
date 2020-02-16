@@ -7,7 +7,7 @@ package verifpal
 import "fmt"
 
 func possibleToDecomposePrimitive(
-	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+	p primitive, valAttackerState attackerState,
 ) (bool, value, []value) {
 	has := []value{}
 	prim := primitiveGet(p.name)
@@ -21,25 +21,6 @@ func possibleToDecomposePrimitive(
 		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
-		}
-		switch a.kind {
-		case "primitive":
-			r, _ := possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
-			if r {
-				has = append(has, a)
-				continue
-			}
-			r, _, _ = possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
-			if r {
-				has = append(has, a)
-				continue
-			}
-		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
-			if r {
-				has = append(has, a)
-				continue
-			}
 		}
 	}
 	if len(has) >= len(prim.decompose.given) {
@@ -55,7 +36,9 @@ func possibleToDecomposePrimitive(
 	return false, value{}, has
 }
 
-func possibleToRecomposePrimitive(p primitive, valAttackerState attackerState) (bool, value, []value) {
+func possibleToRecomposePrimitive(
+	p primitive, valAttackerState attackerState,
+) (bool, value, []value) {
 	prim := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
 		return false, value{}, []value{}
@@ -86,7 +69,7 @@ func possibleToRecomposePrimitive(p primitive, valAttackerState attackerState) (
 }
 
 func possibleToReconstructPrimitive(
-	p primitive, valPrincipalState principalState, valAttackerState attackerState,
+	p primitive, valAttackerState attackerState,
 ) (bool, []value) {
 	has := []value{}
 	for _, a := range p.arguments {
@@ -96,18 +79,18 @@ func possibleToReconstructPrimitive(
 		}
 		switch a.kind {
 		case "primitive":
-			r, _, _ := possibleToDecomposePrimitive(a.primitive, valPrincipalState, valAttackerState)
+			r, _, _ := possibleToDecomposePrimitive(a.primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.primitive, valPrincipalState, valAttackerState)
+			r, _ = possibleToReconstructPrimitive(a.primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valPrincipalState, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.equation, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -131,13 +114,9 @@ func possibleToReconstructPrimitive(
 }
 
 func possibleToReconstructEquation(
-	e equation, valPrincipalState principalState, valAttackerState attackerState,
+	e equation, valAttackerState attackerState,
 ) (bool, []value) {
 	if len(e.values) > 2 {
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, e.values[2].constant)
-		if i < 0 {
-			return false, []value{}
-		}
 		s0 := e.values[1]
 		s1 := e.values[2]
 		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known) >= 0
@@ -204,7 +183,9 @@ func possibleToRewrite(
 	return (false || !prim.check), value{kind: "primitive", primitive: p}
 }
 
-func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
+func possibleToRewritePrim(
+	p primitive, valPrincipalState principalState,
+) bool {
 	prim := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	for a, m := range prim.rewrite.matching {
@@ -234,49 +215,6 @@ func possibleToRewritePrim(p primitive, valPrincipalState principalState) bool {
 		}
 	}
 	return true
-}
-
-func possibleToForceRewrite(p primitive, valPrincipalState principalState, valAttackerState attackerState) bool {
-	switch p.name {
-	case "DEC", "AEAD_DEC", "PKE_DEC":
-		return possibleToForceRewriteDecryption(p, valPrincipalState, valAttackerState)
-	}
-	return false
-}
-
-func possibleToForceRewriteDecryption(
-	p primitive, valPrincipalState principalState, valAttackerState attackerState,
-) bool {
-	prim := primitiveGet(p.name)
-	k := p.arguments[prim.decompose.given[0]]
-	switch k.kind {
-	case "primitive":
-		r, v := possibleToRewrite(k.primitive, valPrincipalState)
-		if r {
-			k = v
-		}
-	}
-	switch k.kind {
-	case "constant":
-		if sanityEquivalentValueInValues(k, valAttackerState.known) >= 0 {
-			return true
-		}
-	case "primitive":
-		r, _ := possibleToReconstructPrimitive(
-			k.primitive, valPrincipalState, valAttackerState,
-		)
-		if r {
-			return true
-		}
-	case "equation":
-		r, _ := possibleToReconstructEquation(
-			k.equation, valPrincipalState, valAttackerState,
-		)
-		if r {
-			return true
-		}
-	}
-	return false
 }
 
 func possibleToRebuild(p primitive) (bool, value) {
@@ -315,7 +253,9 @@ func possibleToRebuild(p primitive) (bool, value) {
 	return false, value{}
 }
 
-func possibleToObtainPasswords(a value, valPrincipalState principalState) []value {
+func possibleToObtainPasswords(
+	a value, valPrincipalState principalState,
+) []value {
 	var passwords []value
 	switch a.kind {
 	case "constant":

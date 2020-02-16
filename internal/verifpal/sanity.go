@@ -867,7 +867,7 @@ func sanityResolveValueInternalValuesFromPrincipalState(
 		default:
 			switch rootValue.kind {
 			case "primitive":
-				x, _ := possibleToReconstructPrimitive(rootValue.primitive, valPrincipalState, valAttackerState)
+				x, _ := possibleToReconstructPrimitive(rootValue.primitive, valAttackerState)
 				if !x && valPrincipalState.creator[rootIndex] != valPrincipalState.name {
 					forceBeforeMutate = true
 				}

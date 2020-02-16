@@ -193,7 +193,7 @@ func injectPrimitive(
 				i := sanityGetPrincipalStateIndexFromConstant(
 					valPrincipalState, k.constant,
 				)
-				k = valPrincipalState.beforeMutate[i]
+				k = valPrincipalState.assigned[i]
 			}
 			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
 				continue
