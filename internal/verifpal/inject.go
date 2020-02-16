@@ -98,8 +98,8 @@ func injectPrimitiveStageRestricted(p primitive, stage int) bool {
 	case 1:
 		return true
 	case 2:
-		switch p.name {
-		case "HASH", "HKDF":
+		switch primitiveGet(p.name).explosive {
+		case true:
 			return true
 		}
 	case 3:

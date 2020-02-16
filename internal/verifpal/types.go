@@ -145,6 +145,7 @@ type primitiveSpec struct {
 	rebuild         rebuildRule
 	check           bool
 	injectable      bool
+	explosive       bool
 	passwordHashing bool
 }
 

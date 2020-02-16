@@ -247,35 +247,21 @@ func sanityQueriesCheckKnown(
 }
 
 func sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap knowledgeMap, c constant) int {
-	var index int
-	found := false
 	for i := range valKnowledgeMap.constants {
 		if valKnowledgeMap.constants[i].name == c.name {
-			found = true
-			index = i
-			break
+			return i
 		}
 	}
-	if !found {
-		index = -1
-	}
-	return index
+	return -1
 }
 
 func sanityGetPrincipalStateIndexFromConstant(valPrincipalState principalState, c constant) int {
-	var index int
-	found := false
 	for i := range valPrincipalState.constants {
 		if valPrincipalState.constants[i].name == c.name {
-			found = true
-			index = i
-			break
+			return i
 		}
 	}
-	if !found {
-		index = -1
-	}
-	return index
+	return -1
 }
 
 func sanityDeclaredPrincipals(m Model) []string {

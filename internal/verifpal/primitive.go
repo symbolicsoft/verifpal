@@ -25,6 +25,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: true,
 	},
 	{
@@ -45,6 +46,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       true,
 		passwordHashing: false,
 	},
 	{
@@ -65,6 +67,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       true,
 		passwordHashing: false,
 	},
 	{
@@ -90,6 +93,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -131,6 +135,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           true,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -156,6 +161,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -194,6 +200,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -214,6 +221,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -235,6 +243,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           true,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -255,6 +264,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -303,6 +313,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           true,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -344,6 +355,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -392,6 +404,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -421,6 +434,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -454,6 +468,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -474,6 +489,7 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
+		explosive:       false,
 		passwordHashing: false,
 	},
 	{
@@ -530,22 +546,17 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           true,
 		injectable:      false,
+		explosive:       false,
 		passwordHashing: false,
 	},
 }
 
 func primitiveGet(name string) primitiveSpec {
-	var p primitiveSpec
-	found := false
 	for _, v := range primitiveSpecs {
 		if v.name == name {
-			found = true
-			p = v
-			break
+			return v
 		}
 	}
-	if !found {
-		errorCritical(fmt.Sprintf("unknown primitive (%s)", name))
-	}
-	return p
+	errorCritical(fmt.Sprintf("unknown primitive (%s)", name))
+	return primitiveSpec{}
 }
