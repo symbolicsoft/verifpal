@@ -647,7 +647,7 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 	return failedRewrites, failedRewriteIndices, valPrincipalState
 }
 
-func sanityFailOnFailedRewrite(failedRewrites []primitive) {
+func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []primitive) {
 	for _, p := range failedRewrites {
 		if !p.check {
 			continue

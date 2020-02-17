@@ -51,7 +51,7 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 	for _, state := range valPrincipalStates {
 		valPrincipalState := sanityResolveAllPrincipalStateValues(state, valAttackerState)
 		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
-		sanityFailOnFailedRewrite(failedRewrites)
+		sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
 		for i := range valPrincipalState.assigned {
 			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
 		}
