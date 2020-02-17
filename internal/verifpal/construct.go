@@ -396,7 +396,7 @@ func constructPrincipalStatesGetValueMutatability(
 			if !guard {
 				guard = cc.guard && (ir || ic)
 			}
-			if !cc.guard || ic {
+			if !cc.guard {
 				mutatableTo, _ = appendUniqueString(
 					mutatableTo, blck.message.recipient,
 				)
