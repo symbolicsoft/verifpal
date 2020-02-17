@@ -174,12 +174,12 @@ type attackerState struct {
 	known        []value
 }
 
-type replacementMap struct {
-	initialized       bool
-	outOfReplacements bool
-	lastIncrement     int
-	constants         []constant
-	replacements      [][]value
-	combination       []value
-	depthIndex        []int
+type MutationMap struct {
+	initialized    bool
+	outOfMutations bool
+	lastIncrement  int
+	constants      []constant
+	mutations      [][]value
+	combination    []value
+	depthIndex     []int
 }

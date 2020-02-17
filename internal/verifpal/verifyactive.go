@@ -39,7 +39,7 @@ func verifyActiveStages(
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			go verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, replacementMap{initialized: false},
+				valKnowledgeMap, valPrincipalState, MutationMap{initialized: false},
 				stage, &combinationsGroup,
 			)
 			combinationsGroup.Wait()
@@ -51,7 +51,7 @@ func verifyActiveStages(
 }
 
 func verifyActiveScan(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valReplacementMap replacementMap,
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valMutationMap MutationMap,
 	stage int, cg *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
@@ -66,14 +66,14 @@ func verifyActiveScan(
 	if attackerKnowsMore {
 		valPrincipalState.lock = attackerKnown
 	}
-	if (goodLock && !valReplacementMap.initialized) || attackerKnowsMore {
+	if (goodLock && !valMutationMap.initialized) || attackerKnowsMore {
 		cg.Add(1)
 		go func() {
-			valReplacementMap = replacementMapInit(
+			valMutationMap = mutationMapInit(
 				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 			)
 			verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
+				valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
 				stage, cg,
 			)
 		}()
@@ -81,16 +81,16 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valReplacementMap,
+		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
 	}
-	if goodLock && !valReplacementMap.outOfReplacements {
+	if goodLock && !valMutationMap.outOfMutations {
 		cg.Add(1)
 		go verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, replacementMapNext(valReplacementMap),
+			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
 			stage, cg,
 		)
 	}
@@ -100,12 +100,12 @@ func verifyActiveScan(
 
 func verifyActiveMutatePrincipalState(
 	valPrincipalState principalState, valAttackerState attackerState,
-	valReplacementMap replacementMap,
+	valMutationMap MutationMap,
 ) (principalState, bool) {
 	isWorthwhileMutation := false
-	for i, c := range valReplacementMap.constants {
+	for i, c := range valMutationMap.constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-		ac := valReplacementMap.combination[i]
+		ac := valMutationMap.combination[i]
 		ar := valPrincipalState.assigned[ii]
 		switch ar.kind {
 		case "primitive":
@@ -117,7 +117,7 @@ func verifyActiveMutatePrincipalState(
 		valPrincipalState.mutated[ii] = true
 		valPrincipalState.assigned[ii] = ac
 		valPrincipalState.beforeRewrite[ii] = ac
-		if i >= valReplacementMap.lastIncrement {
+		if i >= valMutationMap.lastIncrement {
 			isWorthwhileMutation = true
 		}
 	}
