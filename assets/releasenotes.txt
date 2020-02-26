@@ -1,1 +1,1 @@
-In this release, we build upon the performance improvements introduced in Verifpal 0.11.3 and offer even faster analysis. Overall, Verifpal 0.11.4 is dramatically, almost incomparably faster than Verifpal 0.11.2 and previous versions.
+This minor update provides Verifpal built with the latest Go 1.14 runtime, bringing performance improvements.
