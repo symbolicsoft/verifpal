@@ -1,0 +1,20 @@
+name: verifpal
+version: git
+summary: Cryptographic protocol analysis for students and engineers.
+description: |
+  Verifpal is new software for verifying the security of cryptographic protocols. Building upon contemporary research in symbolic formal verification, Verifpal’s main aim is to appeal more to real-world practitioners, students and engineers without sacrificing comprehensive formal verification features.
+icon: assets/icon.png
+license: GPL-3.0
+confinement: strict
+base: core18
+
+parts:
+  verifpal:
+    plugin: go
+    go-importpath: verifpal.com
+    source: .
+    source-type: git
+
+apps:
+  verifpal:
+    command: verifpal
