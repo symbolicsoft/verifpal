@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.10
+- Add `CONCAT` and `JOIN` keywords.
+
 ## 0.0.9
 - Add `RINGSIGN` and `RINGSIGNVERIF` keywords.
 

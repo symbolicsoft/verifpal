@@ -214,7 +214,7 @@
         </dict>
         <dict>
           <key>match</key>
-          <string>(RINGSIGNVERIF|RINGSIGN|PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)</string>
+          <string>(RINGSIGNVERIF|RINGSIGN|PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|CONCAT|JOIN|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)</string>
           <key>name</key>
           <string>support.function.verifpal</string>
         </dict>
@@ -375,7 +375,7 @@
       <array> 
         <dict>
           <key>match</key>
-          <string>(RINGSIGNVERIF|RINGSIGN|PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)</string>
+          <string>(RINGSIGNVERIF|RINGSIGN|PW_HASH|HASH|HKDF|AEAD_ENC|AEAD_DEC|ENC|DEC|ASSERT|CONCAT|JOIN|MAC|SIGNVERIF|SIGN|PKE_ENC|PKE_DEC|SHAMIR_SPLIT|SHAMIR_JOIN|G|nil|_)</string>
           <key>name</key>
           <string>support.function.verifpal</string>
         </dict>
