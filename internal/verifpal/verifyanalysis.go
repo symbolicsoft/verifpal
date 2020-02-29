@@ -19,6 +19,7 @@ func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalSta
 		o = o + verifyAnalysisDecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
+		o = o + verifyAnalysisConcat(a, 0)
 	}
 	for _, a := range valPrincipalState.assigned {
 		o = o + verifyAnalysisRecompose(a, valAttackerState, 0)
@@ -144,6 +145,25 @@ func verifyAnalysisPasswords(a value, valPrincipalState principalState, o int) i
 				prettyValue(revealed), prettyValue(a),
 			), "deduction", true)
 			o = o + 1
+		}
+	}
+	return o
+}
+
+func verifyAnalysisConcat(a value, o int) int {
+	switch a.kind {
+	case "primitive":
+		switch a.primitive.name {
+		case "CONCAT":
+			for _, revealed := range a.primitive.arguments {
+				if attackerStatePutWrite(revealed) {
+					PrettyMessage(fmt.Sprintf(
+						"%s obtained as a concatenated fragment of %s.",
+						prettyValue(revealed), prettyValue(a),
+					), "deduction", true)
+					o = o + 1
+				}
+			}
 		}
 	}
 	return o

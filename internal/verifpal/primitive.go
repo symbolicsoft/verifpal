@@ -4,7 +4,71 @@
 
 package verifpal
 
-import "fmt"
+import (
+	"fmt"
+)
+
+var primitiveCoreSpecs = []primitiveCoreSpec{
+	{
+		name:    "ASSERT",
+		arity:   2,
+		output:  1,
+		hasRule: true,
+		coreRule: func(p primitive) (bool, []value) {
+			v := []value{{kind: "primitive", primitive: p}}
+			if sanityEquivalentValues(p.arguments[0], p.arguments[1]) {
+				return true, v
+			}
+			return false, v
+		},
+		check:      true,
+		injectable: false,
+		explosive:  false,
+	},
+	{
+		name:    "CONCAT",
+		arity:   -1,
+		output:  1,
+		hasRule: false,
+		coreRule: func(p primitive) (bool, []value) {
+			v := []value{{kind: "primitive", primitive: p}}
+			return false, v
+		},
+		check:      false,
+		injectable: true,
+		explosive:  true,
+	},
+	{
+		name:    "SPLIT",
+		arity:   1,
+		output:  -1,
+		hasRule: true,
+		coreRule: func(p primitive) (bool, []value) {
+			v := []value{{kind: "primitive", primitive: p}}
+			switch p.arguments[0].kind {
+			case "constant":
+				return false, v
+			case "primitive":
+				pp := p.arguments[0].primitive
+				switch pp.name {
+				case "CONCAT":
+					return true, pp.arguments
+				}
+				errorCritical(fmt.Sprintf(
+					"SPLIT must have CONCAT as input but instead has %s",
+					prettyPrimitive(pp),
+				))
+				return false, v
+			case "equation":
+				return false, v
+			}
+			return false, v
+		},
+		check:      true,
+		injectable: false,
+		explosive:  false,
+	},
+}
 
 var primitiveSpecs = []primitiveSpec{
 	{
@@ -221,28 +285,6 @@ var primitiveSpecs = []primitiveSpec{
 		},
 		check:           false,
 		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
-	},
-	{
-		name:   "ASSERT",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
-		},
-		recompose: recomposeRule{
-			hasRule: false,
-		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			to:      -1,
-		},
-		rebuild: rebuildRule{
-			hasRule: false,
-		},
-		check:           true,
-		injectable:      false,
 		explosive:       false,
 		passwordHashing: false,
 	},
@@ -551,12 +593,30 @@ var primitiveSpecs = []primitiveSpec{
 	},
 }
 
-func primitiveGet(name string) primitiveSpec {
-	for _, v := range primitiveSpecs {
+func primitiveIsCorePrim(name string) bool {
+	switch name {
+	case "ASSERT", "CONCAT", "SPLIT":
+		return true
+	}
+	return false
+}
+
+func primitiveCoreGet(name string) (primitiveCoreSpec, error) {
+	for _, v := range primitiveCoreSpecs {
 		if v.name == name {
-			return v
+			return v, nil
 		}
 	}
-	errorCritical(fmt.Sprintf("unknown primitive (%s)", name))
-	return primitiveSpec{}
+	err := fmt.Errorf("unknown primitive (%s)", name)
+	return primitiveCoreSpec{}, err
+}
+
+func primitiveGet(name string) (primitiveSpec, error) {
+	for _, v := range primitiveSpecs {
+		if v.name == name {
+			return v, nil
+		}
+	}
+	err := fmt.Errorf("unknown primitive (%s)", name)
+	return primitiveSpec{}, err
 }

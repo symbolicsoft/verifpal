@@ -10,7 +10,10 @@ func possibleToDecomposePrimitive(
 	p primitive, valAttackerState attackerState,
 ) (bool, value, []value) {
 	has := []value{}
-	prim := primitiveGet(p.name)
+	if primitiveIsCorePrim(p.name) {
+		return false, value{}, has
+	}
+	prim, _ := primitiveGet(p.name)
 	if !prim.decompose.hasRule {
 		return false, value{}, has
 	}
@@ -58,7 +61,10 @@ func possibleToDecomposePrimitive(
 func possibleToRecomposePrimitive(
 	p primitive, valAttackerState attackerState,
 ) (bool, value, []value) {
-	prim := primitiveGet(p.name)
+	if primitiveIsCorePrim(p.name) {
+		return false, value{}, []value{}
+	}
+	prim, _ := primitiveGet(p.name)
 	if !prim.recompose.hasRule {
 		return false, value{}, []value{}
 	}
@@ -170,42 +176,40 @@ func possibleToReconstructEquation(
 	return false, []value{}
 }
 
-func possibleToPassAssert(p primitive) (bool, value) {
-	if sanityEquivalentValues(p.arguments[0], p.arguments[1]) {
-		return true, value{kind: "primitive", primitive: p}
-	}
-	return false, value{kind: "primitive", primitive: p}
-}
-
 func possibleToRewrite(
 	p primitive, valPrincipalState principalState,
-) (bool, value) {
-	if p.name == "ASSERT" {
-		return possibleToPassAssert(p)
+) (bool, []value) {
+	v := []value{{kind: "primitive", primitive: p}}
+	if primitiveIsCorePrim(p.name) {
+		prim, _ := primitiveCoreGet(p.name)
+		if prim.hasRule {
+			return prim.coreRule(p)
+		}
+		return (false || !prim.check), v
 	}
-	prim := primitiveGet(p.name)
+	prim, _ := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	switch from.kind {
 	case "primitive":
 		if from.primitive.name != prim.rewrite.name {
-			return (false || !prim.check), value{kind: "primitive", primitive: p}
+			return (false || !prim.check), v
 		}
 		if !possibleToRewritePrim(p, valPrincipalState) {
-			return (false || !prim.check), value{kind: "primitive", primitive: p}
+			return (false || !prim.check), v
 		}
 		rewrite := value{kind: "primitive", primitive: p}
 		if prim.rewrite.to > 0 {
 			rewrite = from.primitive.arguments[prim.rewrite.to]
 		}
-		return true, rewrite
+		return true, []value{rewrite}
 	}
-	return (false || !prim.check), value{kind: "primitive", primitive: p}
+	return (false || !prim.check), v
 }
 
 func possibleToRewritePrim(
 	p primitive, valPrincipalState principalState,
 ) bool {
-	prim := primitiveGet(p.name)
+	prim, _ := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	for a, m := range prim.rewrite.matching {
 		valid := false
@@ -220,7 +224,7 @@ func possibleToRewritePrim(
 				case "primitive":
 					r, v := possibleToRewrite(ax[i].primitive, valPrincipalState)
 					if r {
-						ax[i] = v
+						ax[i] = v[0]
 					}
 				}
 			}
@@ -237,7 +241,10 @@ func possibleToRewritePrim(
 }
 
 func possibleToRebuild(p primitive) (bool, value) {
-	prim := primitiveGet(p.name)
+	if primitiveIsCorePrim(p.name) {
+		return false, value{}
+	}
+	prim, _ := primitiveGet(p.name)
 	if !prim.rebuild.hasRule {
 		return false, value{}
 	}
@@ -286,9 +293,12 @@ func possibleToObtainPasswords(
 			}
 		}
 	case "primitive":
-		prim := primitiveGet(a.primitive.name)
-		if prim.passwordHashing {
-			return passwords
+		isCorePrim := primitiveIsCorePrim(a.primitive.name)
+		if !isCorePrim {
+			prim, _ := primitiveGet(a.primitive.name)
+			if prim.passwordHashing {
+				return passwords
+			}
 		}
 		for _, aa := range a.primitive.arguments {
 			passwords = append(passwords,

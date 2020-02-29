@@ -135,6 +135,17 @@ type rebuildRule struct {
 	filter  func(value, int) (value, bool)
 }
 
+type primitiveCoreSpec struct {
+	name       string
+	arity      int
+	output     int
+	hasRule    bool
+	coreRule   func(primitive) (bool, []value)
+	check      bool
+	injectable bool
+	explosive  bool
+}
+
 type primitiveSpec struct {
 	name            string
 	arity           int

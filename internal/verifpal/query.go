@@ -120,6 +120,7 @@ func queryAuthenticationGetPassIndices(
 	c = valKnowledgeMap.constants[i]
 	sender = valPrincipalState.sender[ii]
 	for iii := range valKnowledgeMap.constants {
+		var hasRule bool
 		a := valKnowledgeMap.assigned[iii]
 		if valKnowledgeMap.creator[iii] != valPrincipalState.name {
 			continue
@@ -136,7 +137,15 @@ func queryAuthenticationGetPassIndices(
 			return indices, passes, sender, c
 		}
 		b := valPrincipalState.beforeRewrite[iiii]
-		if !primitiveGet(b.primitive.name).rewrite.hasRule {
+		isCorePrim := primitiveIsCorePrim(b.primitive.name)
+		if isCorePrim {
+			prim, _ := primitiveCoreGet(b.primitive.name)
+			hasRule = prim.hasRule
+		} else {
+			prim, _ := primitiveGet(b.primitive.name)
+			hasRule = prim.rewrite.hasRule
+		}
+		if !hasRule {
 			indices = append(indices, iiii)
 			passes = append(passes, true)
 			continue

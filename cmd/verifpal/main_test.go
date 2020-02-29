@@ -154,6 +154,10 @@ func TestMain(t *testing.T) {
 			model:       "saltchannel.vp",
 			resultsCode: "c1",
 		},
+		{
+			model:       "concat.vp",
+			resultsCode: "c1",
+		},
 	}
 	for _, v := range tests {
 		testModel(v, t)

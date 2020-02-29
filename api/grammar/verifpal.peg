@@ -31,7 +31,8 @@ var parserReserved = []string{
 	"aead_enc", "aead_dec", "enc", "dec",
 	"mac", "assert", "sign", "signverif",
 	"pke_enc", "pke_dec", "shamir_split",
-	"shamir_join", "g", "nil", "unnamed",
+	"shamir_join", "concat", "split",
+	"g", "nil", "unnamed",
 }
 
 func parserCheckIfReserved(s string) error {

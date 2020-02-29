@@ -16,9 +16,17 @@ func inject(
 	if verifyResultsAllResolved() {
 		return []value{}
 	}
-	prim := primitiveGet(p.name)
-	if !prim.injectable {
-		return []value{}
+	isCorePrim := primitiveIsCorePrim(p.name)
+	if isCorePrim {
+		prim, _ := primitiveCoreGet(p.name)
+		if !prim.injectable {
+			return []value{}
+		}
+	} else {
+		prim, _ := primitiveGet(p.name)
+		if !prim.injectable {
+			return []value{}
+		}
 	}
 	if isRootPrimitive {
 		rootPrimitive = p
@@ -98,10 +106,16 @@ func injectPrimitiveStageRestricted(p primitive, stage int) bool {
 	case 1:
 		return true
 	case 2:
-		switch primitiveGet(p.name).explosive {
-		case true:
-			return true
+		var explosive bool
+		isCorePrim := primitiveIsCorePrim(p.name)
+		if isCorePrim {
+			prim, _ := primitiveCoreGet(p.name)
+			explosive = prim.explosive
+		} else {
+			prim, _ := primitiveGet(p.name)
+			explosive = prim.explosive
 		}
+		return explosive
 	case 3:
 		return false
 	case 4:
