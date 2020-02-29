@@ -14,7 +14,7 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-var version = "0.11.5"
+var version = "0.11.6"
 
 func main() {
 	mainIntro()
