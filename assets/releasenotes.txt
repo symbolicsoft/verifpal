@@ -1,3 +1,1 @@
-This release brings support for value concatenation! Learn more by reading the following commit notes: https://source.symbolic.software/verifpal/verifpal/commit/87eb78885212c8a40d42696a8156bc8b8cfc121b
-
-Also, parser error messages are improved to be more informative.
+This update fixes some bugs with concatenation support.
