@@ -54,10 +54,6 @@ var primitiveCoreSpecs = []primitiveCoreSpec{
 				case "CONCAT":
 					return true, pp.arguments
 				}
-				errorCritical(fmt.Sprintf(
-					"SPLIT must have CONCAT as input but instead has %s",
-					prettyPrimitive(pp),
-				))
 				return false, v
 			case "equation":
 				return false, v

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+    knows private k_ab
+]
+principal Bob[
+    knows private k_ab
+]
+
+principal Alice[
+    generates Na
+    generates m1
+    m = CONCAT(Na, m1)
+    e_m = AEAD_ENC(k_ab, m, nil)
+]
+
+Alice -> Bob: e_m
+
+principal Bob[
+    m_dec = AEAD_DEC(k_ab, e_m, nil)?
+    Na_dec, m1_dec = SPLIT(m_dec)?
+]
+
+queries[
+    confidentiality? m
+]
