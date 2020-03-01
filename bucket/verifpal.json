@@ -2,10 +2,10 @@
 	"description": "Verifpal",
 	"homepage": "https://verifpal.com",
 	"license": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-	"version": "0.11.6",
-	"url": "https://source.symbolic.software/verifpal/verifpal/releases/download/v0.11.6/verifpal_0.11.6_windows_amd64.zip",
-	"hash": "0ed0c30093e4f49eec28774730b2a9862b7779b922d82fb9ab008f59d236d219",
-	"extract_dir": "verifpal_0.11.6_windows_amd64",
+	"version": "0.11.7",
+	"url": "https://source.symbolic.software/verifpal/verifpal/releases/download/v0.11.7/verifpal_0.11.7_windows_amd64.zip",
+	"hash": "3e0d89acf7c0983a4e7bc82d7c1f029bfe1f310d7d16b6a623fedc2f56db6d33",
+	"extract_dir": "verifpal_0.11.7_windows_amd64",
 	"bin": [
 		"verifpal.exe"
 	]
