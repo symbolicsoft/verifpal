@@ -89,4 +89,10 @@ clean:
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools scripts
+snap:
+	@snapcraft clean
+	@snapcraft
+	@snapcraft push --release=stable *.snap
+	@$(RM) *.snap
+
+.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean snap HomebrewFormula LICENSES api assets build bucket cmd dist examples internal tools scripts
