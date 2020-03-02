@@ -282,7 +282,7 @@ func possibleToRebuild(p primitive) (bool, value) {
 func possibleToObtainPasswords(
 	a value, valPrincipalState principalState,
 ) []value {
-	var passwords []value
+	passwords := []value{}
 	switch a.kind {
 	case "constant":
 		aa := sanityResolveConstant(a.constant, valPrincipalState)
@@ -293,8 +293,7 @@ func possibleToObtainPasswords(
 			}
 		}
 	case "primitive":
-		isCorePrim := primitiveIsCorePrim(a.primitive.name)
-		if !isCorePrim {
+		if !primitiveIsCorePrim(a.primitive.name) {
 			prim, _ := primitiveGet(a.primitive.name)
 			if prim.passwordHashing {
 				return passwords

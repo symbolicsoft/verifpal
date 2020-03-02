@@ -25,7 +25,7 @@ func PrettyMessage(m string, t string, showAnalysis bool) {
 }
 
 func prettyMessageRegular(m string, t string, analysisCount int) {
-	var infoString string
+	infoString := ""
 	if analysisCount > 0 {
 		infoString = fmt.Sprintf("(Analysis %d)", analysisCount)
 	}
@@ -63,7 +63,7 @@ func prettyMessageRegular(m string, t string, analysisCount int) {
 }
 
 func prettyMessageColor(m string, t string, analysisCount int) {
-	var infoString string
+	infoString := ""
 	if analysisCount > 0 {
 		infoString = aurora.Faint(fmt.Sprintf(
 			"(Analysis %d)", analysisCount,
@@ -111,8 +111,8 @@ func prettyMessageColor(m string, t string, analysisCount int) {
 func prettyVerifyResultSummary(
 	mutated string, summary string, oResults []queryOptionResult, attack bool,
 ) string {
-	var mutatedIntro string
-	var optionsSummary string
+	mutatedIntro := ""
+	optionsSummary := ""
 	for _, oResult := range oResults {
 		if !oResult.resolved {
 			continue
@@ -158,12 +158,10 @@ func prettyConstant(c constant) string {
 }
 
 func prettyConstants(c []constant) string {
-	var pretty string
+	pretty := ""
 	for i, v := range c {
-		var sep string
-		if i == (len(c) - 1) {
-			sep = ""
-		} else {
+		sep := ""
+		if i != (len(c) - 1) {
 			sep = ", "
 		}
 		pretty = fmt.Sprintf("%s%s%s",
@@ -176,8 +174,7 @@ func prettyConstants(c []constant) string {
 }
 
 func prettyEquation(e equation) string {
-	var pretty string
-	pretty = ""
+	pretty := ""
 	for i, c := range e.values {
 		if i == 0 {
 			pretty = prettyValue(c)
@@ -192,17 +189,14 @@ func prettyEquation(e equation) string {
 }
 
 func prettyPrimitive(p primitive) string {
-	var pretty string
-	var check string
-	pretty = fmt.Sprintf("%s(", p.name)
+	pretty := fmt.Sprintf("%s(", p.name)
+	check := ""
 	if p.check {
 		check = "?"
 	}
 	for i, arg := range p.arguments {
-		var sep string
-		if i == (len(p.arguments) - 1) {
-			sep = ""
-		} else {
+		sep := ""
+		if i != (len(p.arguments) - 1) {
 			sep = ", "
 		}
 		pretty = fmt.Sprintf("%s%s%s",
@@ -244,7 +238,7 @@ func prettyValues(a []value) string {
 }
 
 func prettyQuery(query query) string {
-	var output string
+	output := ""
 	switch query.kind {
 	case "confidentiality":
 		output = fmt.Sprintf(
@@ -282,8 +276,7 @@ func prettyQuery(query query) string {
 func PrettyPrint(modelFile string) {
 	m := parserParseModel(modelFile)
 	sanity(m)
-	var output string
-	output = fmt.Sprintf(
+	output := fmt.Sprintf(
 		"attacker [\n\t%s\n]\n\n",
 		m.attacker,
 	)
@@ -316,11 +309,7 @@ func PrettyPrint(modelFile string) {
 						prettyConstants(expression.constants),
 					)
 				case "assignment":
-					var right string
-					right = fmt.Sprintf("%s%s",
-						right,
-						prettyValue(expression.right),
-					)
+					right := prettyValue(expression.right)
 					output = fmt.Sprintf(
 						"%s\t%s = %s\n",
 						output,
@@ -357,7 +346,7 @@ func PrettyPrint(modelFile string) {
 }
 
 func prettyAnalysis(stage int) {
-	var a string
+	a := ""
 	analysisCount := verifyAnalysisCountGet()
 	if analysisCount%10 != 0 {
 		return

@@ -13,7 +13,7 @@ import (
 var verifyAnalysisCount uint32
 
 func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
-	var o int
+	o := 0
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.known {
 		o = o + verifyAnalysisDecompose(a, valAttackerState, 0)
@@ -51,9 +51,9 @@ func verifyAnalysisCountGet() int {
 func verifyAnalysisDecompose(
 	a value, valAttackerState attackerState, o int,
 ) int {
-	var r bool
-	var revealed value
-	var ar []value
+	r := false
+	revealed := value{}
+	ar := []value{}
 	switch a.kind {
 	case "primitive":
 		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valAttackerState)
@@ -74,9 +74,9 @@ func verifyAnalysisDecompose(
 func verifyAnalysisRecompose(
 	a value, valAttackerState attackerState, o int,
 ) int {
-	var r bool
-	var revealed value
-	var ar []value
+	r := false
+	revealed := value{}
+	ar := []value{}
 	switch a.kind {
 	case "primitive":
 		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valAttackerState)
@@ -97,8 +97,8 @@ func verifyAnalysisRecompose(
 func verifyAnalysisReconstruct(
 	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
 ) int {
-	var r bool
-	var ar []value
+	r := false
+	ar := []value{}
 	switch a.kind {
 	case "primitive":
 		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState)

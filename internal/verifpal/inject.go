@@ -16,8 +16,7 @@ func inject(
 	if verifyResultsAllResolved() {
 		return []value{}
 	}
-	isCorePrim := primitiveIsCorePrim(p.name)
-	if isCorePrim {
+	if primitiveIsCorePrim(p.name) {
 		prim, _ := primitiveCoreGet(p.name)
 		if !prim.injectable {
 			return []value{}
@@ -106,9 +105,8 @@ func injectPrimitiveStageRestricted(p primitive, stage int) bool {
 	case 1:
 		return true
 	case 2:
-		var explosive bool
-		isCorePrim := primitiveIsCorePrim(p.name)
-		if isCorePrim {
+		explosive := false
+		if primitiveIsCorePrim(p.name) {
 			prim, _ := primitiveCoreGet(p.name)
 			explosive = prim.explosive
 		} else {
@@ -249,7 +247,7 @@ func injectLoopN(p primitive, kinjectants [][]value) []value {
 }
 
 func injectLoop1(p primitive, kinjectants [][]value) []value {
-	var injectants []value
+	injectants := []value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
 			return []value{}
@@ -273,7 +271,7 @@ func injectLoop1(p primitive, kinjectants [][]value) []value {
 }
 
 func injectLoop2(p primitive, kinjectants [][]value) []value {
-	var injectants []value
+	injectants := []value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
 			return []value{}
@@ -300,7 +298,7 @@ func injectLoop2(p primitive, kinjectants [][]value) []value {
 }
 
 func injectLoop3(p primitive, kinjectants [][]value) []value {
-	var injectants []value
+	injectants := []value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
 			return []value{}
@@ -330,7 +328,7 @@ func injectLoop3(p primitive, kinjectants [][]value) []value {
 }
 
 func injectLoop4(p primitive, kinjectants [][]value) []value {
-	var injectants []value
+	injectants := []value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
 			return []value{}
@@ -363,7 +361,7 @@ func injectLoop4(p primitive, kinjectants [][]value) []value {
 }
 
 func injectLoop5(p primitive, kinjectants [][]value) []value {
-	var injectants []value
+	injectants := []value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
 			return []value{}

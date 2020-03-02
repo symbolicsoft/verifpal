@@ -12,21 +12,21 @@ func queryStart(
 	query query, valKnowledgeMap knowledgeMap,
 	valPrincipalState principalState, valAttackerState attackerState,
 ) verifyResult {
-	var result verifyResult
 	switch query.kind {
 	case "confidentiality":
-		result = queryConfidentiality(query, valPrincipalState, valAttackerState)
+		return queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		result = queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+		return queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	}
-	return result
+	errorCritical(fmt.Sprintf("invalid query kind (%s)", query.kind))
+	return verifyResult{}
 }
 
 func queryConfidentiality(
 	query query, valPrincipalState principalState,
 	valAttackerState attackerState,
 ) verifyResult {
-	var mutated string
+	mutated := ""
 	result := verifyResult{
 		query:    query,
 		resolved: false,
@@ -82,7 +82,7 @@ func queryAuthentication(
 		query, valKnowledgeMap, valPrincipalState,
 	)
 	for f, index := range indices {
-		var mutated string
+		mutated := ""
 		b := valPrincipalState.beforeRewrite[index]
 		for i := range valPrincipalState.constants {
 			if !valPrincipalState.mutated[i] {
@@ -108,10 +108,10 @@ func queryAuthenticationGetPassIndices(
 	query query,
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState,
 ) ([]int, []bool, string, constant) {
-	var indices []int
-	var passes []bool
-	var sender string
-	var c constant
+	indices := []int{}
+	passes := []bool{}
+	sender := ""
+	c := constant{}
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.message.constants[0])
 	ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.message.constants[0])
 	if ii < 0 {
@@ -120,7 +120,7 @@ func queryAuthenticationGetPassIndices(
 	c = valKnowledgeMap.constants[i]
 	sender = valPrincipalState.sender[ii]
 	for iii := range valKnowledgeMap.constants {
-		var hasRule bool
+		hasRule := false
 		a := valKnowledgeMap.assigned[iii]
 		if valKnowledgeMap.creator[iii] != valPrincipalState.name {
 			continue
@@ -137,8 +137,7 @@ func queryAuthenticationGetPassIndices(
 			return indices, passes, sender, c
 		}
 		b := valPrincipalState.beforeRewrite[iiii]
-		isCorePrim := primitiveIsCorePrim(b.primitive.name)
-		if isCorePrim {
+		if primitiveIsCorePrim(b.primitive.name) {
 			prim, _ := primitiveCoreGet(b.primitive.name)
 			hasRule = prim.hasRule
 		} else {
@@ -190,7 +189,7 @@ func queryPrecondition(
 			resolved: false,
 			summary:  "",
 		}
-		var sender string
+		sender := ""
 		recipientKnows := false
 		i := sanityGetPrincipalStateIndexFromConstant(
 			valPrincipalState, option.message.constants[0],
