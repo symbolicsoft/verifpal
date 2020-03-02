@@ -22,6 +22,7 @@ Alice -> Bob: e_m
 principal Bob[
     m_dec = AEAD_DEC(k_ab, e_m, nil)?
     Na_dec, m1_dec = SPLIT(m_dec)?
+    _ = ASSERT(Na_dec, m1_dec)
 ]
 
 queries[

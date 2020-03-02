@@ -563,13 +563,10 @@ func sanityPerformPrimitiveRewrite(
 		failedRewrites = append(failedRewrites, rewrites[rIndex].primitive)
 	}
 	isCorePrim := primitiveIsCorePrim(p.name)
-	if isCorePrim && rewritten {
+	if isCorePrim && p.output < len(rewrites) {
 		rIndex = p.output
 	}
 	if rewritten && pi >= 0 {
-		if rIndex >= len(rewrites) {
-			return failedRewrites, rewritten, rewrites[0], valPrincipalState
-		}
 		valPrincipalState.rewritten[pi] = true
 		valPrincipalState.assigned[pi] = rewrites[rIndex]
 		if !valPrincipalState.mutated[pi] {
