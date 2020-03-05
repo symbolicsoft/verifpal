@@ -185,17 +185,17 @@ func possibleToRewrite(
 		if prim.hasRule {
 			return prim.coreRule(p)
 		}
-		return (false || !prim.check), v
+		return !prim.check, v
 	}
 	prim, _ := primitiveGet(p.name)
 	from := p.arguments[prim.rewrite.from]
 	switch from.kind {
 	case "primitive":
 		if from.primitive.name != prim.rewrite.name {
-			return (false || !prim.check), v
+			return !prim.check, v
 		}
 		if !possibleToRewritePrim(p, valPrincipalState) {
-			return (false || !prim.check), v
+			return !prim.check, v
 		}
 		rewrite := value{kind: "primitive", primitive: p}
 		if prim.rewrite.to > 0 {
@@ -203,7 +203,7 @@ func possibleToRewrite(
 		}
 		return true, []value{rewrite}
 	}
-	return (false || !prim.check), v
+	return !prim.check, v
 }
 
 func possibleToRewritePrim(

@@ -29,3 +29,6 @@ dist
 
 # Visual Studio Code
 .vscode
+
+# SonarQube
+.scannerwork
