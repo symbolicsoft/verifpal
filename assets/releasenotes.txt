@@ -1,1 +1,1 @@
-This update fixes some bugs with concatenation support.
+This update brings no new changes and is purely meant to ensure that the new release pipeline functions correctly.
