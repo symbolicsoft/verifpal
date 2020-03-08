@@ -1,29 +1,36 @@
 stages:
+  - test
   - release
+
+lint:
+  image: registry.gitlab.com/gitlab-org/gitlab-build-images:golangci-lint-alpine
+  stage: test
+  script:
+    - make lint
+
+test:
+  image: golang:latest
+  stage: test
+  script:
+    - make test
 
 release:
   stage: release
   image: docker:stable
   services:
     - docker:dind
-
   variables:
     GORELEASER_IMAGE: goreleaser/goreleaser:latest
     DOCKER_REGISTRY: https://index.docker.io/v1/
     GIT_DEPTH: 0
-
   only:
     refs:
       - tags
-
   script: |
     docker pull $GORELEASER_IMAGE
-
-    # GITLAB_TOKEN is needed to create GitLab releases.
-    # DOCKER_* are needed to push Docker images.
     docker run --pull --rm --privileged \
-      -v $PWD:/go/src/gitlab.com/YourGitLabUser/YourGitLabRepo \
-      -w /go/src/gitlab.com/YourGitLabUser/YourGitLabRepo \
+      -v $PWD:/go/src/gitlab.com/symbolicsoft/verifpal \
+      -w /go/src/gitlab.com/symbolicsoft/verifpal \
       -v /var/run/docker.sock:/var/run/docker.sock \
       -e DOCKER_USERNAME -e DOCKER_PASSWORD -e DOCKER_REGISTRY  \
       -e GITLAB_TOKEN \
