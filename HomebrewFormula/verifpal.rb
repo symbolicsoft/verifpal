@@ -6,29 +6,25 @@ class Verifpal < Formula
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/a3621c002d0dc39191c50d4bf0ff66b9/verifpal_0.11.9_macos_amd64.zip"
-    sha256 "527c8dc3eb82dd9efe867c2952baeac3222397a4593b39fc2ec3e7312ca0c1af"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/227649cc16426ad2338adc2c6c8f4872/verifpal_0.11.9_macos_amd64.zip"
+    sha256 "8dca5d47137bbdbddaa562913c96715899578bc8e9cb109e02513c9abc2ea3af"
   elsif OS.linux?
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/uploads/f9bd8db841db526d1a986c9c408bf372/verifpal_0.11.9_linux_amd64.zip"
-      sha256 "9ec1dfba8279210658a6fade8080e9754f73fa8c886737923d1654c0c163564a"
+      url "https://source.symbolic.software/verifpal/verifpal/uploads/a2dea23ab95889c7ec8b6ab59b0f1447/verifpal_0.11.9_linux_amd64.zip"
+      sha256 "734b0310d1b44978f2617edfcb78027c555a7f39daad382fd341db90c393f8d4"
     end
     if Hardware::CPU.arm?
       if Hardware::CPU.is_64_bit?
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/bf00ab97dd0cc748c1da37fd497bb992/verifpal_0.11.9_linux_arm64.zip"
-        sha256 "f9d339c1ef7dc53b9db5a34c5039dfdd38f7157a74c6b8a41a2569f418c20337"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/df0c81546cd7a6f94118177cd9f7dd3d/verifpal_0.11.9_linux_arm64.zip"
+        sha256 "dd0b3d774686e2ab0f72e1638e1cda7740d1eaee756cf3545c6b148e20c54a6a"
       else
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/64dacd32a2f0f5c0b4c1e05749761f1b/verifpal_0.11.9_linux_armv6.zip"
-        sha256 "5c76cfefdceb4115e8092c36c71da78b8f42cf03df1132af366109e92a4093c5"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/4c075a941519b0fcd761e53e08158344/verifpal_0.11.9_linux_armv6.zip"
+        sha256 "07622c20de66d2733a237d0744e2bc32d7c62fd32257807cf54e401a5a8487fe"
       end
     end
   end
-  
-  depends_on "go"
 
   def install
-    mkdir bin
-    system "go", "build", "-trimpath", "-gcflags", "-e", "-ldflags", "-s -w", "-o", bin, "verifpal.com/cmd/..."
-    prefix.install_metafiles
+    bin.install "verifpal"
   end
 end
