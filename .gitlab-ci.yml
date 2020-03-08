@@ -18,8 +18,7 @@ release:
   image: docker:stable
   stage: release
   only:
-    refs:
-      - tags
+    - tags
   services:
     - docker:dind
   variables:
@@ -40,12 +39,10 @@ snapcraft:
   image: ubuntu:18.04
   stage: release
   only:
-    refs:
-      - tags
+    - tags
   script:
     - apt-get update -qy
     - apt-get install -y snapcraft 
-    - snapcraft
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode --ignore-garbage > snapcraft.login
     - snapcraft login --with snapcraft.login
     - snapcraft push --release=stable *.snap
