@@ -31,8 +31,8 @@ snapcraft:
     - tags
   script:
     - apt-get update -qy
-    - apt-get install -y snapcraft 
-    - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode --ignore-garbage > snapcraft.login
+    - apt-get install -y snapcraft
+    - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
     - snapcraft login --with snapcraft.login
     - rm snapcraft.login
     - snapcraft
