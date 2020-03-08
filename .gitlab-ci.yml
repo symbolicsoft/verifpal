@@ -1,10 +1,12 @@
 stages:
+  - lint
   - test
   - release
+  - snapcraft
 
 lint:
   image: golangci/golangci-lint:latest
-  stage: test
+  stage: lint
   script:
     - golangci-lint run
 
@@ -26,7 +28,7 @@ release:
 
 snapcraft:
   image: ubuntu:18.04
-  stage: release
+  stage: snapcraft
   only:
     - tags
   script:

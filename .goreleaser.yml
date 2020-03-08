@@ -1,4 +1,10 @@
 project_name: verifpal
+
+gitlab_urls:
+  api: https://source.symbolic.software/api/v4/
+  download: https://source.symbolic.software
+  skip_tls_verify: false
+
 before:
   hooks:
     - go generate ./...
