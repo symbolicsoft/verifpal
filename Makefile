@@ -59,7 +59,6 @@ test:
 tag:
 	@make -s clean
 	@bash scripts/tag.sh
-	@bash scripts/email.sh
 
 release:
 	@make -s dependencies
