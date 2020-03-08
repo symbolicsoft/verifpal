@@ -57,7 +57,7 @@ On Linux, Verifpal is also available via Snap:
 
 Otherwise, you can:
 
-- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/releases).
+- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/-/tags).
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source

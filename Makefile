@@ -63,7 +63,6 @@ tag:
 release:
 	@make -s dependencies
 	@curl -sL https://git.io/goreleaser | bash
-	@bash scripts/email.sh
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
