@@ -50,11 +50,6 @@ dependencies:
 	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 	@/bin/echo "       OK"
 
-lint:
-	@/bin/echo -n "[Verifpal] Linting..."
-	@golangci-lint run
-	@/bin/echo "                       OK"
-
 test:
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
@@ -62,7 +57,6 @@ test:
 	@go test verifpal.com/cmd/verifpal
 
 tag:
-	@make -s lint
 	@make -s clean
 	@bash scripts/tag.sh
 
@@ -95,4 +89,4 @@ snap:
 	@snapcraft push --release=stable *.snap
 	@$(RM) *.snap
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean snap HomebrewFormula LICENSES api assets build bucket cmd dist examples internal tools scripts
+.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean snap HomebrewFormula LICENSES api assets build bucket cmd dist examples internal tools scripts

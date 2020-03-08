@@ -3,10 +3,10 @@ stages:
   - release
 
 lint:
-  image: golang:latest
+  image: registry.gitlab.com/gitlab-org/gitlab-build-images:golangci-lint-alpine
   stage: test
   script:
-    - make lint
+    - golangci-lint run
 
 test:
   image: golang:latest
