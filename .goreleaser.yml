@@ -1,9 +1,8 @@
-# .goreleaser.yml
-
 project_name: verifpal
 before:
   hooks:
     - go generate ./...
+
 builds:
   - main: ./cmd/verifpal/main.go
     gcflags:
@@ -18,6 +17,7 @@ builds:
       - 386
       - arm64
       - arm
+
 archives:
   - replacements:
       darwin: macos
@@ -27,17 +27,40 @@ archives:
       - examples/*
       - README.md
     wrap_in_directory: true
-snapshot:
-  name_template: "{{ .Tag }}-next"
+
 changelog:
   skip: false
   sort: asc
-gitea_urls:
-  api: https://source.symbolic.software/api/v1/
-  skip_tls_verify: false
+
 release:
-  gitea:
-    owner: verifpal
+  gitlab:
+    owner: symbolicsoft
     name: verifpal
-  name_template: "Verifpal {{.Version}}"
-  prerelease: true
+
+brews:
+  gitlab:
+    owner: symbolicsoft
+    name: verifpal
+  commit_author:
+    name: drone
+    email: drone@symbolic.software
+  folder: HomebrewFormula
+  homepage: "https://verifpal.com"
+  description: "Cryptographic protocol analysis for students and engineers."
+  dependencies:
+    - go
+  install: |
+    mkdir bin
+		system "go", "build", "-trimpath", "-gcflags", "-e", "-ldflags", "-s -w", "-o", bin, "verifpal.com/cmd/..."
+		prefix.install_metafiles
+    
+scoop:
+  bucket:
+    owner: symbolicsoft
+    name: verifpal
+  commit_author:
+    name: drone
+    email: drone@symbolic.software
+  homepage: "https://verifpal.com"
+  description: "Cryptographic protocol analysis for students and engineers."
+  license: "https://www.gnu.org/licenses/gpl-3.0.en.html",
