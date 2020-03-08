@@ -75,4 +75,4 @@ clean:
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean HomebrewFormula LICENSES api assets build bucket cmd dist examples internal tools scripts
+.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools scripts

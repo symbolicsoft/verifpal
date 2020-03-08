@@ -54,12 +54,6 @@ brews:
     folder: HomebrewFormula
     homepage: "https://verifpal.com"
     description: "Cryptographic protocol analysis for students and engineers."
-    dependencies:
-      - go
-    install: |
-      mkdir bin
-      system "go", "build", "-trimpath", "-gcflags", "-e", "-ldflags", "-s -w", "-o", bin, "verifpal.com/cmd/..."
-      prefix.install_metafiles
 
 scoop:
   bucket:

@@ -38,7 +38,7 @@ The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essent
 On Windows, the best way to install Verifpal is through the [Scoop](https://scoop.sh) package manager, since you'll also get automatic updates:
 
 ```
-scoop bucket add verifpal https://source.symbolic.software/verifpal/verifpal
+scoop bucket add verifpal https://source.symbolic.software/verifpal/verifpal.git
 scoop install verifpal
 ```
 
@@ -57,7 +57,7 @@ On Linux, Verifpal is also available via Snap:
 
 Otherwise, you can:
 
-- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/-/tags).
+- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/-/releases).
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source
