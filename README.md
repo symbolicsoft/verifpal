@@ -5,10 +5,6 @@
 
 # [Verifpal](https://verifpal.com)
 
-<a href="https://drone.symbolic.software/verifpal/verifpal"><img src="https://drone.symbolic.software/api/badges/verifpal/verifpal/status.svg" height="25" /></a>
-<a href="https://goreportcard.com/report/verifpal.com"><img src="https://goreportcard.com/badge/verifpal.com" height="25" /></a>
-<a href="https://www.gnu.org/licenses/gpl-3.0.en.html"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" height="25" /></a>
-
 ## What is Verifpal?
 <img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="400">
 
