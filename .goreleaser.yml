@@ -63,4 +63,4 @@ scoop:
     email: drone@symbolic.software
   homepage: "https://verifpal.com"
   description: "Cryptographic protocol analysis for students and engineers."
-  license: "https://www.gnu.org/licenses/gpl-3.0.en.html",
+  license: "https://www.gnu.org/licenses/gpl-3.0.en.html"

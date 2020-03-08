@@ -15,17 +15,17 @@ test:
     - make test
 
 release:
-  stage: release
   image: docker:stable
+  stage: release
+  only:
+    refs:
+      - tags
   services:
     - docker:dind
   variables:
     GORELEASER_IMAGE: goreleaser/goreleaser:latest
     DOCKER_REGISTRY: https://index.docker.io/v1/
     GIT_DEPTH: 0
-  only:
-    refs:
-      - tags
   script: |
     docker pull $GORELEASER_IMAGE
     docker run --pull --rm --privileged \
@@ -35,3 +35,19 @@ release:
       -e DOCKER_USERNAME -e DOCKER_PASSWORD -e DOCKER_REGISTRY  \
       -e GITLAB_TOKEN \
       $GORELEASER_IMAGE release --rm-dist
+
+snapcraft:
+  image: ubuntu:18.04
+  stage: release
+  only:
+    refs:
+      - tags
+  script:
+    - apt-get update -qy
+    - apt-get install -y snapcraft 
+    - snapcraft
+    - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode --ignore-garbage > snapcraft.login
+    - snapcraft login --with snapcraft.login
+    - snapcraft push --release=stable *.snap
+  only:
+    - master
