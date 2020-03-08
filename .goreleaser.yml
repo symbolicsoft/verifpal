@@ -41,6 +41,7 @@ brews:
   gitlab:
     owner: symbolicsoft
     name: verifpal
+  url_template: "https://source.symbolic.software/verifpal/verifpal/uploads/{{ .ArtifactUploadHash }}/{{ .ArtifactName }}"
   commit_author:
     name: drone
     email: drone@symbolic.software
@@ -51,13 +52,14 @@ brews:
     - go
   install: |
     mkdir bin
-		system "go", "build", "-trimpath", "-gcflags", "-e", "-ldflags", "-s -w", "-o", bin, "verifpal.com/cmd/..."
-		prefix.install_metafiles
-    
+    system "go", "build", "-trimpath", "-gcflags", "-e", "-ldflags", "-s -w", "-o", bin, "verifpal.com/cmd/..."
+    prefix.install_metafiles
+
 scoop:
   bucket:
     owner: symbolicsoft
     name: verifpal
+  url_template: "https://source.symbolic.software/verifpal/verifpal/uploads/{{ .ArtifactUploadHash }}/{{ .ArtifactName }}"
   commit_author:
     name: drone
     email: drone@symbolic.software
