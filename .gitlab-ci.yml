@@ -15,25 +15,14 @@ test:
     - make test
 
 release:
-  image: docker:stable
+  image: golang:latest
   stage: release
   only:
     - tags
-  services:
-    - docker:dind
   variables:
-    GORELEASER_IMAGE: goreleaser/goreleaser:latest
-    DOCKER_REGISTRY: https://index.docker.io/v1/
     GIT_DEPTH: 0
-  script: |
-    docker pull $GORELEASER_IMAGE
-    docker run --pull --rm --privileged \
-      -v $PWD:/go/src/gitlab.com/symbolicsoft/verifpal \
-      -w /go/src/gitlab.com/symbolicsoft/verifpal \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -e DOCKER_USERNAME -e DOCKER_PASSWORD -e DOCKER_REGISTRY  \
-      -e GITLAB_TOKEN \
-      $GORELEASER_IMAGE release --rm-dist
+  script:
+    - make release
 
 snapcraft:
   image: ubuntu:18.04

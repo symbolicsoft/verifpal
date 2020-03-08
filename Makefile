@@ -63,13 +63,6 @@ tag:
 release:
 	@make -s dependencies
 	@curl -sL https://git.io/goreleaser | bash
-	@git checkout go.sum go.mod internal/verifpal/parser.go
-	@make -s clean
-	@bash scripts/packages.sh
-	@git add HomebrewFormula/verifpal.rb
-	@git add bucket/verifpal.json
-	@git commit -m "Update package manager formulas [CI SKIP]"
-	@git push
 	@bash scripts/email.sh
 
 clean:
