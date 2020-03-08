@@ -63,6 +63,7 @@ tag:
 release:
 	@make -s dependencies
 	@curl -sL https://git.io/goreleaser | bash
+	@bash scripts/email.sh
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
@@ -75,4 +76,4 @@ clean:
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean HomebrewFormula LICENSES api assets build cmd dist examples internal tools scripts
+.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean HomebrewFormula api assets build cmd dist examples internal tools scripts

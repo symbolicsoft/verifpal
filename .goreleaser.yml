@@ -29,7 +29,7 @@ archives:
       darwin: macos
     format: zip
     files:
-      - LICENSES/*
+      - LICENSE
       - examples/*
       - README.md
     wrap_in_directory: true
