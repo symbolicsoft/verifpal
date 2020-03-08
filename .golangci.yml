@@ -61,7 +61,6 @@ linters-settings:
             - evalOrder
             - exitAfterDefer
             - flagName
-            - mapKey
             - nilValReturn
             - octalLiteral
             - offBy1
