@@ -14,7 +14,7 @@ else
 	sed -i -e "s/version = \"\([0-9]\|.\)\+\"/version = \"${VERSION}\"/g" cmd/verifpal/main.go
 fi
 
-git commit -am "Verifpal ${VERSION} [CI SKIP]" &> /dev/null
+git commit -am "Verifpal ${VERSION}" &> /dev/null
 git push &> /dev/null
 git tag -a "v${VERSION}" -m "Verifpal ${VERSION}" -m "${RELEASE_NOTES}" &> /dev/null
 git push origin "v${VERSION}" &> /dev/null
