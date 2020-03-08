@@ -32,3 +32,6 @@ dist
 
 # SonarQube
 .scannerwork
+
+# Snapcraft
+snapcraft.login
