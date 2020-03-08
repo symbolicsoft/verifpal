@@ -1,0 +1,22 @@
+{
+    "version": "0.11.9",
+    "architecture": {
+        "32bit": {
+            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/57d5a4b82fd05b1709d5df46925884ac/verifpal_0.11.9_windows_386.zip",
+            "bin": [
+                "verifpal.exe"
+            ],
+            "hash": "06c83d6629af2942dea50ff5c5c09dab257ec7f7110bdb8f29ff6d31ada1e025"
+        },
+        "64bit": {
+            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/3591c3f7d2f4cc409729559ba738a697/verifpal_0.11.9_windows_amd64.zip",
+            "bin": [
+                "verifpal.exe"
+            ],
+            "hash": "62a21d463cabf6ed5d27d459cfcd296cf0894875cd344f9b600e54765dad7ab3"
+        }
+    },
+    "homepage": "https://verifpal.com",
+    "license": "https://www.gnu.org/licenses/gpl-3.0.en.html",
+    "description": "Cryptographic protocol analysis for students and engineers."
+}
