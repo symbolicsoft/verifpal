@@ -36,6 +36,6 @@ snapcraft:
     - apt-get install -y snapcraft
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
     - snapcraft login --with snapcraft.login
-    - rm snapcraft.login
+    - rm -f snapcraft.login *.snap
     - snapcraft
     - snapcraft push --release=stable *.snap
