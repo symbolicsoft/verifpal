@@ -82,12 +82,12 @@ func colorOutputSupport() bool {
 func errorCritical(errText string) {
 	err := errors.New(errText)
 	if colorOutputSupport() {
-		log.Fatal(fmt.Sprintf(" %s! %s: %v.\n",
+		log.Fatal(fmt.Errorf(" %s! %s: %v.\n",
 			aurora.Red("Verifpal").Bold(),
 			aurora.Red("Error"), err,
 		))
 	} else {
-		log.Fatal(fmt.Sprintf("Verifpal! Error: %v.\n", err))
+		log.Fatal(fmt.Errorf("Verifpal! Error: %v.\n", err))
 	}
 }
 
