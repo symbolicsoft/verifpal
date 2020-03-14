@@ -21,8 +21,10 @@ func main() {
 	switch len(os.Args) {
 	case 3:
 		mainGanbatte(os.Args)
+	case 2:
+		verifpal.Help(os.Args[1])
 	default:
-		verifpal.Help()
+		verifpal.Help("")
 	}
 }
 
@@ -46,6 +48,6 @@ func mainGanbatte(args []string) {
 	case "pretty":
 		verifpal.PrettyPrint(args[2])
 	default:
-		verifpal.Help()
+		verifpal.Help(args[1])
 	}
 }
