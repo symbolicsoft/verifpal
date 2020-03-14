@@ -19,12 +19,12 @@ func Help(a string) {
 		"pretty    [file]: Pretty-print Verifpal model.",
 		"help:             Show this help text.",
 	)
-	x := make([]byte, 7)
-	y := make([]byte, len(x)*6)
+	x := make([]byte, 07)
+	y := make([]byte, 38)
 	hex.Decode(x, []byte("667269656e6473"))
 	hex.Decode(y, []byte(strings.Join([]string{
-		"68747470733a2f2f766572696670616c2e636f6d2f",
-		"7265732f65787472612f667269656e64732e706e67",
+		"68747470733a2f2f766572696670616c2e636f",
+		"6d2f7265732f65787472612f667269656e6473",
 	}, "")))
 	switch a {
 	case string(x):
