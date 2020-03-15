@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.11
+- `SPLIT` keyword incorrectly added as `JOIN`.
+
 ## 0.0.10
 - Add `CONCAT` and `JOIN` keywords.
 
