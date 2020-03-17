@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+    knows private A
+    knows private B
+    knows private k_as
+    generates n_a
+]
+
+principal Bob[
+    knows private B
+    knows private k_bs
+    generates n_b
+]
+
+principal Server[
+    knows private k_as
+    knows private k_bs
+]
+
+principal Carol[]
+
+Alice -> Server: A, B, n_a
+
+principal Server[
+    generates k_ab
+    e_bob = AEAD_ENC(k_bs, CONCAT(k_ab, A), nil)
+    e_alice = AEAD_ENC(k_as, CONCAT(n_a, k_ab, B, e_bob), nil)
+]
+
+Server -> Alice: [e_alice]
+
+principal Alice[
+    e_alice_dec = AEAD_DEC(k_as, e_alice, nil)
+    n_a_response, k_ab_alice, B_alice, e_bob_alice = SPLIT(e_alice_dec)
+    _ = ASSERT(n_a, n_a_response)
+]
+
+Alice -> Bob: e_bob_alice
+
+principal Bob[
+    e_bob_dec = AEAD_DEC(k_bs, e_bob_alice, nil)
+    k_ab_bob, A_bob = SPLIT(e_bob_dec)
+    e_n_b = AEAD_ENC(k_ab_bob, n_b, nil)
+]
+
+Bob -> Alice: e_n_b
+
+principal Alice[
+    n_b_alice = AEAD_DEC(k_ab_alice, e_n_b, nil)
+    n_b_minus_one = HASH(n_b_alice)
+    e_n_b_minus_one = AEAD_ENC(k_ab_alice, n_b_minus_one, nil)
+]
+
+Alice -> Bob: e_n_b_minus_one
+
+principal Bob[
+    n_b_minus_one_bob = AEAD_DEC(k_ab_bob, e_n_b_minus_one, nil)
+    _ = ASSERT(n_b_minus_one_bob, HASH(n_b))
+]
+
+phase[1]
+
+principal Server[
+    leaks k_ab
+]
+
+queries[
+    confidentiality? k_ab
+    confidentiality? n_b
+    authentication? Alice -> Bob: e_bob_alice
+    authentication? Alice -> Bob: e_n_b_minus_one
+    authentication? Bob -> Alice: e_n_b
+]

@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+    generates a
+    generates na
+    ga = G^a
+]
+
+principal Bob[
+    generates b
+    generates nb
+    gb = G^b
+]
+
+Alice -> Bob: ga
+
+Bob -> Alice: gb
+
+principal Alice[
+    e1 = PKE_ENC(gb, na)
+]
+
+Alice -> Bob: e1
+
+principal Bob[
+    na_bob = PKE_DEC(b, e1)
+    e2 = PKE_ENC(ga, CONCAT(na_bob, nb))
+]
+
+Bob -> Alice: e2
+
+principal Alice[
+    m2 = PKE_DEC(a, e2)
+    na_bob_alice, nb_alice = SPLIT(m2)
+    _ = ASSERT(na, na_bob_alice)?
+    e3 = PKE_ENC(gb, nb_alice)
+]
+
+Alice -> Bob: e3
+
+principal Bob[
+    nb_alice_bob = PKE_DEC(b, e3)
+    _ = ASSERT(nb, nb_alice_bob)?
+]
+
+queries[
+    authentication? Alice -> Bob: e3
+    confidentiality? nb
+]
