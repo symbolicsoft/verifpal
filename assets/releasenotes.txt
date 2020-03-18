@@ -1,1 +1,1 @@
-This update brings no new changes and is purely meant to ensure that the new release pipeline functions correctly.
+This update brings minor improvements and the addition of two new example models focusing on the Needham-Schroeder protocol.
