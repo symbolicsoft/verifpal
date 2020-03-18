@@ -57,6 +57,7 @@ test:
 	@go test verifpal.com/cmd/verifpal
 
 tag:
+	@make -s dependencies
 	@make -s clean
 	@bash scripts/tag.sh
 
