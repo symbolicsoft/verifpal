@@ -4,6 +4,7 @@ run:
         - main_test.go
         - help.go
         - coq.go
+        - proverif.go
 
 linters:
     enable:
