@@ -290,6 +290,7 @@ func sanityDeclaredPrincipals(m Model) []string {
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
+			principals, _ = appendUniqueString(principals, block.principal.name)
 			declared, _ = appendUniqueString(declared, block.principal.name)
 		}
 	}
