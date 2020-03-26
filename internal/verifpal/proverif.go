@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// ProVerif translates a Verifpal model into a ProVerif model.
 func ProVerif(modelFile string) {
 	m := parserParseModel(modelFile, false)
 	sanity(m)

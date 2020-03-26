@@ -4,6 +4,7 @@
 
 package verifpal
 
-func coq(m Model) {
-
+// Coq translates a Verifpal model into a representation that fits into the Coq model of the Verifpal verification methodology.
+func Coq(modelFile string) {
+	errorCritical("this feature does not exist yet")
 }

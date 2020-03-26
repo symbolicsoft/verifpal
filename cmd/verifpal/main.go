@@ -45,6 +45,8 @@ func mainGanbatte(args []string) {
 		verifpal.Verify(args[2])
 	case "proverif":
 		verifpal.ProVerif(args[2])
+	case "coq":
+		verifpal.Coq(args[2])
 	case "pretty":
 		verifpal.PrettyPrint(args[2])
 	case "implement":
