@@ -17,7 +17,6 @@ import (
 var version = "0.11.10"
 
 func main() {
-	mainIntro()
 	switch len(os.Args) {
 	case 3:
 		mainGanbatte(os.Args)
@@ -42,12 +41,16 @@ func mainIntro() {
 func mainGanbatte(args []string) {
 	switch args[1] {
 	case "verify":
+		mainIntro()
 		verifpal.Verify(args[2])
-	case "implement":
-		verifpal.Implement()
+	case "proverif":
+		verifpal.ProVerif(args[2])
 	case "pretty":
 		verifpal.PrettyPrint(args[2])
+	case "implement":
+		verifpal.Implement()
 	default:
+		mainIntro()
 		verifpal.Help(args[1])
 	}
 }

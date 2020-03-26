@@ -51,7 +51,7 @@ func parserCheckIfReserved(s string) error {
 	return nil
 }
 
-func parserParseModel(filePath string) Model {
+func parserParseModel(filePath string, verbose bool) Model {
 	fileName := path.Base(filePath)
 	if len(fileName) > 64 {
 		errorCritical("model file name must be 64 characters or less")
@@ -59,9 +59,11 @@ func parserParseModel(filePath string) Model {
 	if filepath.Ext(fileName) != ".vp" {
 		errorCritical("model file name must have a '.vp' extension")
 	}
-	PrettyMessage(fmt.Sprintf(
-		"Parsing model '%s'...", fileName,
-	), "verifpal", false)
+	if verbose {
+		PrettyMessage(fmt.Sprintf(
+			"Parsing model '%s'...", fileName,
+		), "verifpal", false)
+	}
 	parsed, err := ParseFile(filePath)
 	if err != nil {
 		errorCritical(err.Error())

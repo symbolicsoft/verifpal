@@ -39,7 +39,7 @@ func verifyActiveStages(
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			go verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, MutationMap{initialized: false},
+				valKnowledgeMap, valPrincipalState, mutationMap{initialized: false},
 				stage, &combinationsGroup,
 			)
 			combinationsGroup.Wait()
@@ -51,7 +51,7 @@ func verifyActiveStages(
 }
 
 func verifyActiveScan(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valMutationMap MutationMap,
+	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valMutationMap mutationMap,
 	stage int, cg *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
@@ -100,7 +100,7 @@ func verifyActiveScan(
 
 func verifyActiveMutatePrincipalState(
 	valPrincipalState principalState, valAttackerState attackerState,
-	valMutationMap MutationMap,
+	valMutationMap mutationMap,
 ) (principalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.constants {

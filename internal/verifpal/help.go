@@ -13,10 +13,11 @@ import (
 
 // Help displays Verifpal command-line usage instructions.
 func Help(a string) {
-	fmt.Fprintf(os.Stdout, "%s\n%s\n%s\n%s\n",
+	fmt.Fprintf(os.Stdout, "%s\n%s\n%s\n%s\n%s\n",
 		"verify    [file]: Load and analyze Verifpal model from file.",
-		"implement [file]: Implement Verifpal model in Go.",
+		"proverif  [file]: Translate a Verifpal model into a ProVerif model.",
 		"pretty    [file]: Pretty-print Verifpal model.",
+		"implement [file]: Implement Verifpal model in Go.",
 		"help:             Show this help text.",
 	)
 	x := make([]byte, 07)

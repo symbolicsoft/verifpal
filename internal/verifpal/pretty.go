@@ -173,21 +173,6 @@ func prettyConstants(c []constant) string {
 	return pretty
 }
 
-func prettyEquation(e equation) string {
-	pretty := ""
-	for i, c := range e.values {
-		if i == 0 {
-			pretty = prettyValue(c)
-		} else {
-			pretty = fmt.Sprintf(
-				"%s^%s",
-				pretty, prettyValue(c),
-			)
-		}
-	}
-	return pretty
-}
-
 func prettyPrimitive(p primitive) string {
 	pretty := fmt.Sprintf("%s(", p.name)
 	check := ""
@@ -208,6 +193,21 @@ func prettyPrimitive(p primitive) string {
 	return fmt.Sprintf("%s)%s",
 		pretty, check,
 	)
+}
+
+func prettyEquation(e equation) string {
+	pretty := ""
+	for i, c := range e.values {
+		if i == 0 {
+			pretty = prettyValue(c)
+		} else {
+			pretty = fmt.Sprintf(
+				"%s^%s",
+				pretty, prettyValue(c),
+			)
+		}
+	}
+	return pretty
 }
 
 func prettyValue(a value) string {
@@ -274,7 +274,7 @@ func prettyQuery(query query) string {
 
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
 func PrettyPrint(modelFile string) {
-	m := parserParseModel(modelFile)
+	m := parserParseModel(modelFile, false)
 	sanity(m)
 	output := fmt.Sprintf(
 		"attacker [\n\t%s\n]\n\n",

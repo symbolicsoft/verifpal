@@ -185,7 +185,7 @@ type attackerState struct {
 	known        []value
 }
 
-type MutationMap struct {
+type mutationMap struct {
 	initialized    bool
 	outOfMutations bool
 	lastIncrement  int
@@ -193,4 +193,16 @@ type MutationMap struct {
 	mutations      [][]value
 	combination    []value
 	depthIndex     []int
+}
+
+type proverifTemplate struct {
+	parameters func(string) string
+	types      func() string
+	constants  func() string
+	coreprims  func() string
+	prims      func() string
+	channels   func() string
+	queries    func([]query) string
+	procs      func() string
+	toplevel   func() string
 }

@@ -14,7 +14,7 @@ import (
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
 func Verify(filePath string) ([]verifyResult, string) {
-	m := parserParseModel(filePath)
+	m := parserParseModel(filePath, true)
 	valKnowledgeMap, valPrincipalStates := sanity(m)
 	initiated := time.Now().Format("03:04:05 PM")
 	verifyAnalysisCountInit()

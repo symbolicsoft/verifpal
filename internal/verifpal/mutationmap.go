@@ -6,8 +6,8 @@ package verifpal
 
 func mutationMapInit(
 	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int,
-) MutationMap {
-	valMutationMap := MutationMap{
+) mutationMap {
+	valMutationMap := mutationMap{
 		initialized:    true,
 		constants:      []constant{},
 		mutations:      [][]value{},
@@ -171,7 +171,7 @@ func mutationMapReplaceEquation(a value, stage int, valAttackerState attackerSta
 	return mutations
 }
 
-func mutationMapNext(valMutationMap MutationMap) MutationMap {
+func mutationMapNext(valMutationMap mutationMap) mutationMap {
 	if len(valMutationMap.combination) == 0 {
 		valMutationMap.outOfMutations = true
 		return valMutationMap
