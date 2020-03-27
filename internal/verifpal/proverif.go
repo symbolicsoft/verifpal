@@ -44,14 +44,6 @@ func proverifEquation(e equation) string {
 	return ""
 }
 
-func proverifValue(a value) string {
-	return ""
-}
-
-func proverifValues(a []value) string {
-	return ""
-}
-
 func proverifQuery(query query) string {
 	output := ""
 	switch query.kind {
