@@ -198,11 +198,10 @@ type mutationMap struct {
 type proverifTemplate struct {
 	parameters func(string) string
 	types      func() string
-	constants  func() string
+	constants  func(knowledgeMap, string) string
 	coreprims  func() string
 	prims      func() string
-	channels   func() string
+	channels   func(knowledgeMap) string
 	queries    func([]query) string
-	procs      func() string
-	toplevel   func() string
+	toplevel   func([]block) string
 }

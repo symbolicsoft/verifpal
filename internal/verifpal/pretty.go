@@ -11,20 +11,20 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-// PrettyMessage prints a Verifpal status message.
-func PrettyMessage(m string, t string, showAnalysis bool) {
+// PrettyInfo prints a Verifpal status message.
+func PrettyInfo(m string, t string, showAnalysis bool) {
 	analysisCount := 0
 	if showAnalysis {
 		analysisCount = verifyAnalysisCountGet()
 	}
 	if colorOutputSupport() {
-		prettyMessageColor(m, t, analysisCount)
+		PrettyInfoColor(m, t, analysisCount)
 	} else {
-		prettyMessageRegular(m, t, analysisCount)
+		PrettyInfoRegular(m, t, analysisCount)
 	}
 }
 
-func prettyMessageRegular(m string, t string, analysisCount int) {
+func PrettyInfoRegular(m string, t string, analysisCount int) {
 	infoString := ""
 	if analysisCount > 0 {
 		infoString = fmt.Sprintf("(Analysis %d)", analysisCount)
@@ -62,7 +62,7 @@ func prettyMessageRegular(m string, t string, analysisCount int) {
 	}
 }
 
-func prettyMessageColor(m string, t string, analysisCount int) {
+func PrettyInfoColor(m string, t string, analysisCount int) {
 	infoString := ""
 	if analysisCount > 0 {
 		infoString = aurora.Faint(fmt.Sprintf(
@@ -165,9 +165,7 @@ func prettyConstants(c []constant) string {
 			sep = ", "
 		}
 		pretty = fmt.Sprintf("%s%s%s",
-			pretty,
-			prettyConstant(v),
-			sep,
+			pretty, prettyConstant(v), sep,
 		)
 	}
 	return pretty
@@ -272,6 +270,64 @@ func prettyQuery(query query) string {
 	return output
 }
 
+func prettyPrincipal(block block) string {
+	output := fmt.Sprintf(
+		"principal %s[\n",
+		block.principal.name,
+	)
+	for _, expression := range block.principal.expressions {
+		switch expression.kind {
+		case "knows":
+			output = fmt.Sprintf(
+				"%s\tknows %s %s\n",
+				output,
+				expression.qualifier,
+				prettyConstants(expression.constants),
+			)
+		case "generates":
+			output = fmt.Sprintf(
+				"%s\tgenerates %s\n",
+				output,
+				prettyConstants(expression.constants),
+			)
+		case "leaks":
+			output = fmt.Sprintf(
+				"%s\tleaks %s\n",
+				output,
+				prettyConstants(expression.constants),
+			)
+		case "assignment":
+			right := prettyValue(expression.right)
+			output = fmt.Sprintf(
+				"%s\t%s = %s\n",
+				output,
+				prettyConstants(expression.left),
+				right,
+			)
+		}
+	}
+	output = fmt.Sprintf("%s]\n\n", output)
+	return output
+}
+
+func prettyMessage(block block) string {
+	output := fmt.Sprintf(
+		"%s -> %s: %s\n\n",
+		block.message.sender,
+		block.message.recipient,
+		prettyConstants(block.message.constants),
+	)
+	return output
+}
+
+func prettyPhase(block block) string {
+	output := fmt.Sprintf(
+		"phase[%d]\n\n",
+		block.phase.number,
+	)
+	return output
+}
+
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
 func PrettyPrint(modelFile string) {
 	m := parserParseModel(modelFile, false)
@@ -283,56 +339,11 @@ func PrettyPrint(modelFile string) {
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
-			output = fmt.Sprintf(
-				"%sprincipal %s[\n",
-				output, block.principal.name,
-			)
-			for _, expression := range block.principal.expressions {
-				switch expression.kind {
-				case "knows":
-					output = fmt.Sprintf(
-						"%s\tknows %s %s\n",
-						output,
-						expression.qualifier,
-						prettyConstants(expression.constants),
-					)
-				case "generates":
-					output = fmt.Sprintf(
-						"%s\tgenerates %s\n",
-						output,
-						prettyConstants(expression.constants),
-					)
-				case "leaks":
-					output = fmt.Sprintf(
-						"%s\tleaks %s\n",
-						output,
-						prettyConstants(expression.constants),
-					)
-				case "assignment":
-					right := prettyValue(expression.right)
-					output = fmt.Sprintf(
-						"%s\t%s = %s\n",
-						output,
-						prettyConstants(expression.left),
-						right,
-					)
-				}
-			}
-			output = fmt.Sprintf("%s]\n\n", output)
+			output = output + prettyPrincipal(block)
 		case "message":
-			output = fmt.Sprintf(
-				"%s%s -> %s: %s\n\n",
-				output,
-				block.message.sender,
-				block.message.recipient,
-				prettyConstants(block.message.constants),
-			)
+			output = output + prettyMessage(block)
 		case "phase":
-			output = fmt.Sprintf(
-				"%sphase[%d]\n\n",
-				output,
-				block.phase.number,
-			)
+			output = output + prettyPhase(block)
 		}
 	}
 	output = fmt.Sprintf("%squeries[\n", output)

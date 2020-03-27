@@ -32,7 +32,7 @@ func mainIntro() {
 		aurora.Bold("Verifpal %s - %s\n").String(),
 		version, "https://verifpal.com",
 	)
-	verifpal.PrettyMessage(
+	verifpal.PrettyInfo(
 		"Verifpal is experimental software.",
 		"warning", false,
 	)

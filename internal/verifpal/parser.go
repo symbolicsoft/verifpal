@@ -59,7 +59,7 @@ func parserParseModel(filePath string, verbose bool) Model {
 		errorCritical("model file name must have a '.vp' extension")
 	}
 	if verbose {
-		PrettyMessage(fmt.Sprintf(
+		PrettyInfo(fmt.Sprintf(
 			"Parsing model '%s'...", fileName,
 		), "verifpal", false)
 	}
