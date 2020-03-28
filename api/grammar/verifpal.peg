@@ -35,6 +35,8 @@ var parserReserved = []string{
 	"g", "nil", "unnamed",
 }
 
+var parserUnnamedCounter = 0
+
 func parserCheckIfReserved(s string) error {
 	found := false
 	switch {
@@ -185,9 +187,17 @@ Assignment <- Left:Constants _ '=' _ Right:Value {
 		err := errors.New("cannot assign value to value")
 		return nil, err
 	}
+	consts := Left.([]constant)
+	for i, c := range consts {
+		switch c.name {
+			case "_":
+			consts[i].name = fmt.Sprintf("unnamed_%d", parserUnnamedCounter)
+			parserUnnamedCounter = parserUnnamedCounter + 1
+		}
+	}
 	return expression{
 		kind: "assignment",
-		left: Left.([]constant),
+		left: consts,
 		right:  Right.(value),
 	}, nil
 }

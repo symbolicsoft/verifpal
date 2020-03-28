@@ -94,14 +94,13 @@ type equation struct {
 }
 
 type knowledgeMap struct {
-	principals     []string
-	constants      []constant
-	assigned       []value
-	creator        []string
-	knownBy        [][]map[string]string
-	phase          [][]int
-	maxPhase       int
-	unnamedCounter int
+	principals []string
+	constants  []constant
+	assigned   []value
+	creator    []string
+	knownBy    [][]map[string]string
+	phase      [][]int
+	maxPhase   int
 }
 
 type decomposeRule struct {

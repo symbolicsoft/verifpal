@@ -183,9 +183,7 @@ func prettyPrimitive(p primitive) string {
 			sep = ", "
 		}
 		pretty = fmt.Sprintf("%s%s%s",
-			pretty,
-			prettyValue(arg),
-			sep,
+			pretty, prettyValue(arg), sep,
 		)
 	}
 	return fmt.Sprintf("%s)%s",

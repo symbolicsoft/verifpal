@@ -8,13 +8,12 @@ import "fmt"
 
 func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 	valKnowledgeMap := knowledgeMap{
-		principals:     principals,
-		constants:      []constant{},
-		assigned:       []value{},
-		creator:        []string{},
-		knownBy:        [][]map[string]string{},
-		phase:          [][]int{},
-		unnamedCounter: 0,
+		principals: principals,
+		constants:  []constant{},
+		assigned:   []value{},
+		creator:    []string{},
+		knownBy:    [][]map[string]string{},
+		phase:      [][]int{},
 	}
 	currentPhase := 0
 	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantG.constant)
@@ -226,10 +225,6 @@ func constructKnowledgeMapRenderAssignment(
 		}
 	}
 	for i, c := range expr.left {
-		if c.name == "_" {
-			c.name = fmt.Sprintf("unnamed_%d", valKnowledgeMap.unnamedCounter)
-			valKnowledgeMap.unnamedCounter = valKnowledgeMap.unnamedCounter + 1
-		}
 		ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if ii >= 0 {
 			errorCritical(fmt.Sprintf(

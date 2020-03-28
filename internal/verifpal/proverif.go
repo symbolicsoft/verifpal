@@ -37,11 +37,66 @@ func proverifConstants(c []constant) string {
 }
 
 func proverifPrimitive(p primitive) string {
-	return ""
+	prim := fmt.Sprintf("%s(", p.name)
+	check := ""
+	if p.check {
+		errorCritical("UNSUPPORTED")
+		check = "?"
+	}
+	for i, arg := range p.arguments {
+		sep := ""
+		if i != (len(p.arguments) - 1) {
+			sep = ", "
+		}
+		prim = fmt.Sprintf("%s%s%s",
+			prim, proverifValue(arg), sep,
+		)
+	}
+	return fmt.Sprintf("%s)%s",
+		prim, check,
+	)
 }
 
 func proverifEquation(e equation) string {
+	eq := ""
+	for i, c := range e.values {
+		if i == 0 {
+			eq = proverifValue(c)
+		} else {
+			eq = fmt.Sprintf(
+				"%s^%s",
+				eq, proverifValue(c),
+			)
+		}
+	}
+	return eq
+}
+
+func proverifValue(a value) string {
+	switch a.kind {
+	case "constant":
+		return proverifConstant(a.constant)
+	case "primitive":
+		return proverifPrimitive(a.primitive)
+	case "equation":
+		return proverifEquation(a.equation)
+	}
 	return ""
+}
+
+func proverifValues(a []value) string {
+	values := ""
+	for i, v := range a {
+		sep := ", "
+		if i == len(a)-1 {
+			sep = ""
+		}
+		values = fmt.Sprintf(
+			"%s%s%s",
+			values, proverifValue(v), sep,
+		)
+	}
+	return values
 }
 
 func proverifQuery(query query) string {
@@ -53,7 +108,11 @@ func proverifQuery(query query) string {
 			proverifConstant(query.constant),
 		)
 	case "authentication":
-		errorCritical("UNSUPPORTED")
+		output = fmt.Sprintf(
+			"query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s)) ==> event(SendMsg(principal_%s, principal_%s, phase_%d, %s)).",
+			query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+			query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+		)
 	}
 	if len(query.options) > 0 {
 		errorCritical("UNSUPPORTED")
@@ -61,8 +120,7 @@ func proverifQuery(query query) string {
 	return output
 }
 
-// Process, constants, counter
-func proverifPrincipal(block block, procs string, consts string, pc int) (string, string, int) {
+func proverifPrincipal(block block, procs string, consts string, pc int, cc int) (string, string, int, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_%d() =\n",
 		procs, block.principal.name, pc,
@@ -88,31 +146,21 @@ func proverifPrincipal(block block, procs string, consts string, pc int) (string
 				)
 			}
 		case "generates":
-			procs = fmt.Sprintf(
-				"%s\tknows %s %s\n",
-				procs,
-				expression.qualifier,
-				prettyConstants(expression.constants),
-			)
+			procs = procs + ""
 		case "leaks":
-			procs = fmt.Sprintf(
-				"%s\tknows %s %s\n",
-				procs,
-				expression.qualifier,
-				prettyConstants(expression.constants),
-			)
+			procs = procs + ""
 		case "assignment":
 			procs = fmt.Sprintf(
-				"%s\tknows %s %s\n",
+				"%s\tlet %s = %s in\n",
 				procs,
-				expression.qualifier,
-				prettyConstants(expression.constants),
+				proverifConstants(expression.left),
+				proverifValue(expression.right),
 			)
 		}
 	}
 	procs = procs + "\t0.\n"
 	pc = pc + 1
-	return procs, consts, pc
+	return procs, consts, pc, cc
 }
 
 func proverifMessage(block block, procs string, pc int) (string, int) {
@@ -172,11 +220,12 @@ func proverifModel(m Model) string {
 	procs := ""
 	consts := ""
 	pc := 0
+	cc := 0
 	valKnowledgeMap := constructKnowledgeMap(m, sanityDeclaredPrincipals(m))
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
-			procs, consts, pc = proverifPrincipal(block, procs, consts, pc)
+			procs, consts, pc, cc = proverifPrincipal(block, procs, consts, pc, cc)
 		case "message":
 			procs, pc = proverifMessage(block, procs, pc)
 		case "phase":
@@ -257,7 +306,7 @@ var proverifTemplates = proverifTemplate{
 			"\texp(b, exp(a, generator)) = exp(a, exp(b, generator)).",
 			"letfun G(basis:key) =",
 			"\texp(basis, generator).",
-			"fun HASH(bitstring, bitstring):bitstring.",
+			"fun HASH(bitstring):bitstring.",
 			"fun MAC(key, bitstring): bitstring.",
 			"fun hmac_hash1(key, key):key.",
 			"fun hmac_hash2(key, key):key.",

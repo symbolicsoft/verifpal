@@ -7,10 +7,13 @@ principal Alice[
 	knows private x
 ]
 
-principal Bob[]
-
 Alice -> Bob: x
+
+principal Bob[
+	_ = HASH(x)
+]
 
 queries[
 	confidentiality? x
+	authentication? Alice -> Bob: x
 ]
