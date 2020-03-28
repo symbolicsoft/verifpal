@@ -129,15 +129,6 @@ func proverifPrincipal(block block, procs string, consts string, pc int, cc int)
 		switch expression.kind {
 		case "knows":
 			for _, c := range expression.constants {
-				priv := ""
-				switch expression.qualifier {
-				case "private":
-					priv = "[private]"
-				}
-				consts = fmt.Sprintf(
-					"%sconst %s:bitstring %s.",
-					consts, proverifConstant(c), priv,
-				)
 				procs = fmt.Sprintf(
 					"%s\t(* knows %s %s. *)\n",
 					procs,
@@ -257,7 +248,6 @@ var proverifTemplates = proverifTemplate{
 		return strings.Join([]string{
 			"type principal.",
 			"type stage.",
-			"type key.",
 		}, "\n") + "\n"
 	},
 	constants: func(valKnowledgeMap knowledgeMap, consts string) string {
@@ -274,11 +264,22 @@ var proverifTemplates = proverifTemplate{
 				output, i,
 			)
 		}
+		for _, c := range valKnowledgeMap.constants {
+			priv := ""
+			switch c.qualifier {
+			case "private":
+				priv = "[private]"
+			}
+			consts = fmt.Sprintf(
+				"%sconst %s:bitstring %s.\n",
+				consts, proverifConstant(c), priv,
+			)
+		}
 		return output + strings.Join([]string{
-			"const generator:key   [data].",
+			"const generator:bitstring [data].",
 			"const empty:bitstring [data].",
-			"fun shamir_keys_pack(key, key, key):bitstring [data].",
-			"reduc forall a:key, b:key, c:key;",
+			"fun shamir_keys_pack(bitstring, bitstring, bitstring):bitstring [data].",
+			"reduc forall a:bitstring, b:bitstring, c:bitstring;",
 			"\tshamir_keys_unpack(shamir_keys_pack(a, b, c)) = (a, b, c).",
 			consts,
 		}, "\n") + "\n"
@@ -301,63 +302,63 @@ var proverifTemplates = proverifTemplate{
 	},
 	prims: func() string {
 		return strings.Join([]string{
-			"fun exp(key, key):key.",
-			"equation forall a:key, b:key;",
+			"fun exp(bitstring, bitstring):bitstring.",
+			"equation forall a:bitstring, b:bitstring;",
 			"\texp(b, exp(a, generator)) = exp(a, exp(b, generator)).",
-			"letfun G(basis:key) =",
+			"letfun G(basis:bitstring) =",
 			"\texp(basis, generator).",
 			"fun HASH(bitstring):bitstring.",
-			"fun MAC(key, bitstring): bitstring.",
-			"fun hmac_hash1(key, key):key.",
-			"fun hmac_hash2(key, key):key.",
-			"fun hmac_hash3(key, key):key.",
-			"letfun HKDF(chaining_key:key, input_key_material:key) =",
-			"\tlet output1 = hmac_hash1(chaining_key, input_key_material) in",
-			"\tlet output2 = hmac_hash2(chaining_key, input_key_material) in",
-			"\tlet output3 = hmac_hash3(chaining_key, input_key_material) in",
+			"fun MAC(bitstring, bitstring): bitstring.",
+			"fun hmac_hash1(bitstring, bitstring):bitstring.",
+			"fun hmac_hash2(bitstring, bitstring):bitstring.",
+			"fun hmac_hash3(bitstring, bitstring):bitstring.",
+			"letfun HKDF(chaining_bitstring:bitstring, input_bitstring_material:bitstring) =",
+			"\tlet output1 = hmac_hash1(chaining_bitstring, input_bitstring_material) in",
+			"\tlet output2 = hmac_hash2(chaining_bitstring, input_bitstring_material) in",
+			"\tlet output3 = hmac_hash3(chaining_bitstring, input_bitstring_material) in",
 			"\t(output1, output2, output3).",
 			"fun PW_HASH(bitstring): bitstring.",
-			"fun ENC(key, bitstring):bitstring.",
-			"fun DEC(key, bitstring):bitstring reduc",
-			"\tforall k:key, m:bitstring;",
+			"fun ENC(bitstring, bitstring):bitstring.",
+			"fun DEC(bitstring, bitstring):bitstring reduc",
+			"\tforall k:bitstring, m:bitstring;",
 			"\tDEC(k, ENC(k, m)) = m",
-			"\totherwise forall k:key, m:bitstring;",
+			"\totherwise forall k:bitstring, m:bitstring;",
 			"\tDEC(k, m) = empty.",
-			"fun AEAD_ENC(key, bitstring, bitstring):bitstring.",
-			"fun AEAD_DEC(key, bitstring, bitstring):bitstring reduc",
-			"\tforall k:key, m:bitstring, ad:bitstring;",
+			"fun AEAD_ENC(bitstring, bitstring, bitstring):bitstring.",
+			"fun AEAD_DEC(bitstring, bitstring, bitstring):bitstring reduc",
+			"\tforall k:bitstring, m:bitstring, ad:bitstring;",
 			"\tAEAD_DEC(k, AEAD_ENC(k, m, ad), ad) = m.",
-			"fun PKE_ENC(key, bitstring):bitstring.",
-			"fun PKE_DEC(key, bitstring):bitstring reduc",
-			"\tforall k:key, m:bitstring;",
+			"fun PKE_ENC(bitstring, bitstring):bitstring.",
+			"fun PKE_DEC(bitstring, bitstring):bitstring reduc",
+			"\tforall k:bitstring, m:bitstring;",
 			"\tPKE_DEC(k, PKE_ENC(exp(k, generator), m)) = m.",
-			"fun SIGN(key, bitstring):bitstring.",
-			"fun SIGNVERIF(key, bitstring, bitstring):bool reduc",
-			"\tforall sk:key, m:bitstring;",
+			"fun SIGN(bitstring, bitstring):bitstring.",
+			"fun SIGNVERIF(bitstring, bitstring, bitstring):bool reduc",
+			"\tforall sk:bitstring, m:bitstring;",
 			"\tSIGNVERIF(exp(sk, generator), SIGN(sk, m), m) = true",
-			"\totherwise forall pk:key, s:bitstring, m:bitstring;",
+			"\totherwise forall pk:bitstring, s:bitstring, m:bitstring;",
 			"\tSIGNVERIF(pk, s, m) = false.",
-			"fun RINGSIGN(key, key, key, bitstring):bitstring.",
-			"fun shamir_split1(key):key.",
-			"fun shamir_split2(key):key.",
-			"fun shamir_split3(key):key.",
-			"letfun SHAMIR_SPLIT(k:key) =",
+			"fun RINGSIGN(bitstring, bitstring, bitstring, bitstring):bitstring.",
+			"fun shamir_split1(bitstring):bitstring.",
+			"fun shamir_split2(bitstring):bitstring.",
+			"fun shamir_split3(bitstring):bitstring.",
+			"letfun SHAMIR_SPLIT(k:bitstring) =",
 			"\tlet k1 = shamir_split1(k) in",
 			"\tlet k2 = shamir_split2(k) in",
 			"\tlet k3 = shamir_split3(k) in",
 			"\t(k1, k2, k3).",
-			"fun SHAMIR_JOIN(key, key):key reduc",
-			"\tforall k:key;",
+			"fun SHAMIR_JOIN(bitstring, bitstring):bitstring reduc",
+			"\tforall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split1(k), shamir_split2(k)) = k",
-			"\totherwise forall k:key;",
+			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split2(k), shamir_split1(k)) = k",
-			"\totherwise forall k:key;",
+			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split1(k), shamir_split3(k)) = k",
-			"\totherwise forall k:key;",
+			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split3(k), shamir_split1(k)) = k",
-			"\totherwise forall k:key;",
+			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split2(k), shamir_split3(k)) = k",
-			"\totherwise forall k:key;",
+			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split3(k), shamir_split2(k)) = k.",
 		}, "\n") + "\n"
 	},
@@ -411,7 +412,7 @@ var proverifTemplates = proverifTemplate{
 				)
 				pc = pc + 1
 				parallel = fmt.Sprintf(
-					"%s | %s_from_%s_%d()%s",
+					"%s%s_from_%s_%d()%s",
 					parallel, block.message.recipient,
 					block.message.sender, pc, sep,
 				)

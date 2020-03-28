@@ -5,15 +5,18 @@ attacker[active]
 
 principal Alice[
 	knows private x
+	knows private k
+	e = ENC(k, x)
 ]
 
-Alice -> Bob: x
+Alice -> Bob: e
 
 principal Bob[
-	_ = HASH(x)
+	knows private k
+	d = DEC(k, e)
 ]
 
 queries[
 	confidentiality? x
-	authentication? Alice -> Bob: x
+	authentication? Alice -> Bob: e
 ]
