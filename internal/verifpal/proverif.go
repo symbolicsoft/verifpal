@@ -38,11 +38,6 @@ func proverifConstants(c []constant) string {
 
 func proverifPrimitive(p primitive) string {
 	prim := fmt.Sprintf("%s(", p.name)
-	check := ""
-	if p.check {
-		errorCritical("UNSUPPORTED")
-		check = "?"
-	}
 	for i, arg := range p.arguments {
 		sep := ""
 		if i != (len(p.arguments) - 1) {
@@ -52,22 +47,28 @@ func proverifPrimitive(p primitive) string {
 			prim, proverifValue(arg), sep,
 		)
 	}
-	return fmt.Sprintf("%s)%s",
-		prim, check,
-	)
+	prim = fmt.Sprintf("%s)", prim)
+	switch p.check {
+	case true:
+		//prim = fmt.Sprintf("if %s = empty then () else (", prim)
+	}
+	return prim
 }
 
 func proverifEquation(e equation) string {
 	eq := ""
-	for i, c := range e.values {
-		if i == 0 {
-			eq = proverifValue(c)
-		} else {
-			eq = fmt.Sprintf(
-				"%s^%s",
-				eq, proverifValue(c),
-			)
-		}
+	switch len(e.values) {
+	case 1:
+		eq = fmt.Sprintf(
+			"G(%s)",
+			proverifValue(e.values[0]),
+		)
+	case 2:
+		eq = fmt.Sprintf(
+			"exp(%s, %s)",
+			proverifValue(e.values[1]),
+			proverifValue(e.values[0]),
+		)
 	}
 	return eq
 }
@@ -108,10 +109,13 @@ func proverifQuery(query query) string {
 			proverifConstant(query.constant),
 		)
 	case "authentication":
-		output = fmt.Sprintf(
-			"query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s)) ==> event(SendMsg(principal_%s, principal_%s, phase_%d, %s)).",
-			query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
-			query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+		output = fmt.Sprintf("%s ==> %s.",
+			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
+				query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+			),
+			fmt.Sprintf("event(SendMsg(principal_%s, principal_%s, phase_%d, %s))",
+				query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+			),
 		)
 	}
 	if len(query.options) > 0 {
@@ -142,10 +146,17 @@ func proverifPrincipal(block block, procs string, consts string, pc int, cc int)
 			procs = procs + ""
 		case "assignment":
 			procs = fmt.Sprintf(
-				"%s\tlet %s = %s in\n",
+				"%s\tlet %s_%s = %s in\n",
 				procs,
+				block.principal.name,
 				proverifConstants(expression.left),
 				proverifValue(expression.right),
+			)
+			procs = fmt.Sprintf(
+				"%s\tinsert valuestore(principal_%s, principal_%s, %s_%s);\n",
+				procs,
+				block.principal.name, block.principal.name, block.principal.name,
+				proverifConstants(expression.left),
 			)
 		}
 	}
@@ -161,13 +172,22 @@ func proverifMessage(block block, procs string, pc int) (string, int) {
 	)
 	for _, c := range block.message.constants {
 		procs = fmt.Sprintf(
-			"%s\tevent SendMsg(principal_%s, principal_%s, %s, %s);\n",
-			procs, block.message.sender, block.message.recipient, "phase_0", proverifConstant(c),
+			"%s\tget valuestore(principal_%s, principal_%s, %s_%s) in\n",
+			procs, block.message.sender, block.message.sender,
+			block.message.sender, proverifConstant(c),
+		)
+	}
+	for _, c := range block.message.constants {
+		procs = fmt.Sprintf(
+			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s_%s);\n",
+			procs, block.message.sender, block.message.recipient,
+			0, block.message.sender, proverifConstant(c),
 		)
 	}
 	procs = fmt.Sprintf(
-		"%s\tout(chan_%s_to_%s, (%s));\n",
-		procs, block.message.sender, block.message.recipient, proverifConstants(block.message.constants),
+		"%s\tout(chan_%s_to_%s, (%s_%s));\n",
+		procs, block.message.sender, block.message.recipient,
+		block.message.sender, proverifConstants(block.message.constants),
 	)
 	procs = procs + "\t0.\n"
 	pc = pc + 1
@@ -193,9 +213,9 @@ func proverifMessage(block block, procs string, pc int) (string, int) {
 		)
 	}
 	procs = fmt.Sprintf(
-		"%s\tin(chan_%s_to_%s, (%s));\n",
+		"%s\tin(chan_%s_to_%s, (%s_%s));\n",
 		procs, block.message.sender, block.message.recipient,
-		consts,
+		block.message.recipient, consts,
 	)
 	procs = procs + "\t0.\n"
 	pc = pc + 1
@@ -268,19 +288,19 @@ var proverifTemplates = proverifTemplate{
 			priv := ""
 			switch c.qualifier {
 			case "private":
-				priv = "[private]"
+				priv = " [private]"
 			}
 			consts = fmt.Sprintf(
-				"%sconst %s:bitstring %s.\n",
+				"%sconst %s:bitstring%s.\n",
 				consts, proverifConstant(c), priv,
 			)
 		}
 		return output + strings.Join([]string{
-			"const generator:bitstring [data].",
 			"const empty:bitstring [data].",
 			"fun shamir_keys_pack(bitstring, bitstring, bitstring):bitstring [data].",
 			"reduc forall a:bitstring, b:bitstring, c:bitstring;",
 			"\tshamir_keys_unpack(shamir_keys_pack(a, b, c)) = (a, b, c).",
+			"table valuestore(principal, principal, bitstring).",
 			consts,
 		}, "\n") + "\n"
 	},
@@ -304,9 +324,7 @@ var proverifTemplates = proverifTemplate{
 		return strings.Join([]string{
 			"fun exp(bitstring, bitstring):bitstring.",
 			"equation forall a:bitstring, b:bitstring;",
-			"\texp(b, exp(a, generator)) = exp(a, exp(b, generator)).",
-			"letfun G(basis:bitstring) =",
-			"\texp(basis, generator).",
+			"\texp(b, exp(a, g)) = exp(a, exp(b, g)).",
 			"fun HASH(bitstring):bitstring.",
 			"fun MAC(bitstring, bitstring): bitstring.",
 			"fun hmac_hash1(bitstring, bitstring):bitstring.",
@@ -327,15 +345,17 @@ var proverifTemplates = proverifTemplate{
 			"fun AEAD_ENC(bitstring, bitstring, bitstring):bitstring.",
 			"fun AEAD_DEC(bitstring, bitstring, bitstring):bitstring reduc",
 			"\tforall k:bitstring, m:bitstring, ad:bitstring;",
-			"\tAEAD_DEC(k, AEAD_ENC(k, m, ad), ad) = m.",
+			"\tAEAD_DEC(k, AEAD_ENC(k, m, ad), ad) = m",
+			"\totherwise forall k:bitstring, m:bitstring, ad:bitstring;",
+			"\tAEAD_DEC(k, m, ad) = empty.",
 			"fun PKE_ENC(bitstring, bitstring):bitstring.",
 			"fun PKE_DEC(bitstring, bitstring):bitstring reduc",
 			"\tforall k:bitstring, m:bitstring;",
-			"\tPKE_DEC(k, PKE_ENC(exp(k, generator), m)) = m.",
+			"\tPKE_DEC(k, PKE_ENC(exp(k, g), m)) = m.",
 			"fun SIGN(bitstring, bitstring):bitstring.",
 			"fun SIGNVERIF(bitstring, bitstring, bitstring):bool reduc",
 			"\tforall sk:bitstring, m:bitstring;",
-			"\tSIGNVERIF(exp(sk, generator), SIGN(sk, m), m) = true",
+			"\tSIGNVERIF(exp(sk, g), SIGN(sk, m), m) = true",
 			"\totherwise forall pk:bitstring, s:bitstring, m:bitstring;",
 			"\tSIGNVERIF(pk, s, m) = false.",
 			"fun RINGSIGN(bitstring, bitstring, bitstring, bitstring):bitstring.",
