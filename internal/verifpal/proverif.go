@@ -18,11 +18,25 @@ func ProVerif(modelFile string) {
 	fmt.Fprint(os.Stdout, pv)
 }
 
-func proverifConstant(c constant) string {
-	return c.name
+func proverifConstant(valKnowledgeMap knowledgeMap, principal string, c constant) string {
+	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+	c = valKnowledgeMap.constants[i]
+	prefix := "const"
+	if valKnowledgeMap.creator[i] == principal && c.declaration == "assignment" {
+		prefix = principal
+	} else {
+		for _, m := range valKnowledgeMap.knownBy[i] {
+			if p, ok := m[principal]; ok {
+				if p != principal {
+					prefix = p
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("%s_%s", prefix, c.name)
 }
 
-func proverifConstants(c []constant) string {
+func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []constant) string {
 	consts := ""
 	for i, v := range c {
 		sep := ""
@@ -30,13 +44,13 @@ func proverifConstants(c []constant) string {
 			sep = ", "
 		}
 		consts = fmt.Sprintf("%s%s%s",
-			consts, proverifConstant(v), sep,
+			consts, proverifConstant(valKnowledgeMap, principal, v), sep,
 		)
 	}
 	return consts
 }
 
-func proverifPrimitive(p primitive) string {
+func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive) string {
 	prim := fmt.Sprintf("%s(", p.name)
 	for i, arg := range p.arguments {
 		sep := ""
@@ -44,7 +58,7 @@ func proverifPrimitive(p primitive) string {
 			sep = ", "
 		}
 		prim = fmt.Sprintf("%s%s%s",
-			prim, proverifValue(arg), sep,
+			prim, proverifValue(valKnowledgeMap, principal, arg), sep,
 		)
 	}
 	prim = fmt.Sprintf("%s)", prim)
@@ -55,36 +69,37 @@ func proverifPrimitive(p primitive) string {
 	return prim
 }
 
-func proverifEquation(e equation) string {
+func proverifEquation(valKnowledgeMap knowledgeMap, principal string, e equation) string {
 	eq := ""
 	switch len(e.values) {
 	case 1:
 		eq = fmt.Sprintf(
 			"G(%s)",
-			proverifValue(e.values[0]),
+			proverifValue(valKnowledgeMap, principal, e.values[0]),
 		)
 	case 2:
 		eq = fmt.Sprintf(
 			"exp(%s, %s)",
-			proverifValue(e.values[1]),
-			proverifValue(e.values[0]),
+			proverifValue(valKnowledgeMap, principal, e.values[1]),
+			proverifValue(valKnowledgeMap, principal, e.values[0]),
 		)
 	}
 	return eq
 }
 
-func proverifValue(a value) string {
+func proverifValue(valKnowledgeMap knowledgeMap, principal string, a value) string {
 	switch a.kind {
 	case "constant":
-		return proverifConstant(a.constant)
+		return proverifConstant(valKnowledgeMap, principal, a.constant)
 	case "primitive":
-		return proverifPrimitive(a.primitive)
+		return proverifPrimitive(valKnowledgeMap, principal, a.primitive)
 	case "equation":
-		return proverifEquation(a.equation)
+		return proverifEquation(valKnowledgeMap, principal, a.equation)
 	}
 	return ""
 }
 
+/*
 func proverifValues(a []value) string {
 	values := ""
 	for i, v := range a {
@@ -99,6 +114,7 @@ func proverifValues(a []value) string {
 	}
 	return values
 }
+*/
 
 func proverifQuery(query query) string {
 	output := ""
@@ -106,15 +122,15 @@ func proverifQuery(query query) string {
 	case "confidentiality":
 		output = fmt.Sprintf(
 			"query attacker(%s).",
-			proverifConstant(query.constant),
+			query.constant.name,
 		)
 	case "authentication":
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+				query.message.sender, query.message.recipient, 0, query.message.constants[0].name,
 			),
 			fmt.Sprintf("event(SendMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0, proverifConstants(query.message.constants),
+				query.message.sender, query.message.recipient, 0, query.message.constants[0].name,
 			),
 		)
 	}
@@ -124,7 +140,10 @@ func proverifQuery(query query) string {
 	return output
 }
 
-func proverifPrincipal(block block, procs string, consts string, pc int, cc int) (string, string, int, int) {
+func proverifPrincipal(
+	valKnowledgeMap knowledgeMap, block block,
+	procs string, consts string, pc int, cc int,
+) (string, string, int, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_%d() =\n",
 		procs, block.principal.name, pc,
@@ -137,26 +156,32 @@ func proverifPrincipal(block block, procs string, consts string, pc int, cc int)
 					"%s\t(* knows %s %s. *)\n",
 					procs,
 					expression.qualifier,
-					proverifConstant(c),
+					c.name,
 				)
 			}
 		case "generates":
-			procs = procs + ""
+			for _, c := range expression.constants {
+				procs = fmt.Sprintf(
+					"%s\t(* generates %s. *)\n",
+					procs,
+					c.name,
+				)
+			}
 		case "leaks":
+			errorCritical("UNSUPPORTED")
 			procs = procs + ""
 		case "assignment":
 			procs = fmt.Sprintf(
-				"%s\tlet %s_%s = %s in\n",
+				"%s\tlet %s = %s in\n",
 				procs,
-				block.principal.name,
-				proverifConstants(expression.left),
-				proverifValue(expression.right),
+				proverifConstants(valKnowledgeMap, block.principal.name, expression.left),
+				proverifValue(valKnowledgeMap, block.principal.name, expression.right),
 			)
 			procs = fmt.Sprintf(
-				"%s\tinsert valuestore(principal_%s, principal_%s, %s_%s);\n",
+				"%s\tinsert valuestore(principal_%s, principal_%s, %s);\n",
 				procs,
-				block.principal.name, block.principal.name, block.principal.name,
-				proverifConstants(expression.left),
+				block.principal.name, block.principal.name,
+				proverifConstants(valKnowledgeMap, block.principal.name, expression.left),
 			)
 		}
 	}
@@ -165,29 +190,32 @@ func proverifPrincipal(block block, procs string, consts string, pc int, cc int)
 	return procs, consts, pc, cc
 }
 
-func proverifMessage(block block, procs string, pc int) (string, int) {
+func proverifMessage(
+	valKnowledgeMap knowledgeMap, block block,
+	procs string, pc int,
+) (string, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_to_%s_%d() =\n",
 		procs, block.message.sender, block.message.recipient, pc,
 	)
 	for _, c := range block.message.constants {
 		procs = fmt.Sprintf(
-			"%s\tget valuestore(principal_%s, principal_%s, %s_%s) in\n",
+			"%s\tget valuestore(=principal_%s, =principal_%s, %s) in\n",
 			procs, block.message.sender, block.message.sender,
-			block.message.sender, proverifConstant(c),
+			proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 	}
 	for _, c := range block.message.constants {
 		procs = fmt.Sprintf(
-			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s_%s);\n",
+			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s);\n",
 			procs, block.message.sender, block.message.recipient,
-			0, block.message.sender, proverifConstant(c),
+			0, proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 	}
 	procs = fmt.Sprintf(
-		"%s\tout(chan_%s_to_%s, (%s_%s));\n",
+		"%s\tout(chan_%s_to_%s, (%s));\n",
 		procs, block.message.sender, block.message.recipient,
-		block.message.sender, proverifConstants(block.message.constants),
+		proverifConstants(valKnowledgeMap, block.message.sender, block.message.constants),
 	)
 	procs = procs + "\t0.\n"
 	pc = pc + 1
@@ -202,21 +230,27 @@ func proverifMessage(block block, procs string, pc int) (string, int) {
 			sep = ", "
 		}
 		consts = fmt.Sprintf("%s%s:bitstring%s",
-			consts, proverifConstant(c), sep,
+			consts, proverifConstant(valKnowledgeMap, block.message.sender, c), sep,
 		)
 	}
+	procs = fmt.Sprintf(
+		"%s\tin(chan_%s_to_%s, (%s));\n",
+		procs, block.message.sender,
+		block.message.recipient, consts,
+	)
 	for _, c := range block.message.constants {
 		procs = fmt.Sprintf(
 			"%s\tevent RecvMsg(principal_%s, principal_%s, phase_%d, %s);\n",
 			procs, block.message.sender, block.message.recipient, 0,
-			proverifConstant(c),
+			proverifConstant(valKnowledgeMap, block.message.sender, c),
+		)
+		procs = fmt.Sprintf(
+			"%s\tinsert valuestore(principal_%s, principal_%s, %s);\n",
+			procs,
+			block.message.sender, block.message.recipient,
+			proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 	}
-	procs = fmt.Sprintf(
-		"%s\tin(chan_%s_to_%s, (%s_%s));\n",
-		procs, block.message.sender, block.message.recipient,
-		block.message.recipient, consts,
-	)
 	procs = procs + "\t0.\n"
 	pc = pc + 1
 	return procs, pc
@@ -236,9 +270,11 @@ func proverifModel(m Model) string {
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
-			procs, consts, pc, cc = proverifPrincipal(block, procs, consts, pc, cc)
+			procs, consts, pc, cc = proverifPrincipal(
+				valKnowledgeMap, block, procs, consts, pc, cc,
+			)
 		case "message":
-			procs, pc = proverifMessage(block, procs, pc)
+			procs, pc = proverifMessage(valKnowledgeMap, block, procs, pc)
 		case "phase":
 			pv = pv + proverifPhase(block)
 		}
@@ -291,8 +327,8 @@ var proverifTemplates = proverifTemplate{
 				priv = " [private]"
 			}
 			consts = fmt.Sprintf(
-				"%sconst %s:bitstring%s.\n",
-				consts, proverifConstant(c), priv,
+				"%sconst const_%s:bitstring%s.\n",
+				consts, c.name, priv,
 			)
 		}
 		return output + strings.Join([]string{
@@ -324,7 +360,7 @@ var proverifTemplates = proverifTemplate{
 		return strings.Join([]string{
 			"fun exp(bitstring, bitstring):bitstring.",
 			"equation forall a:bitstring, b:bitstring;",
-			"\texp(b, exp(a, g)) = exp(a, exp(b, g)).",
+			"\texp(b, exp(a, const_g)) = exp(a, exp(b, const_g)).",
 			"fun HASH(bitstring):bitstring.",
 			"fun MAC(bitstring, bitstring): bitstring.",
 			"fun hmac_hash1(bitstring, bitstring):bitstring.",
@@ -351,11 +387,11 @@ var proverifTemplates = proverifTemplate{
 			"fun PKE_ENC(bitstring, bitstring):bitstring.",
 			"fun PKE_DEC(bitstring, bitstring):bitstring reduc",
 			"\tforall k:bitstring, m:bitstring;",
-			"\tPKE_DEC(k, PKE_ENC(exp(k, g), m)) = m.",
+			"\tPKE_DEC(k, PKE_ENC(exp(k, const_g), m)) = m.",
 			"fun SIGN(bitstring, bitstring):bitstring.",
 			"fun SIGNVERIF(bitstring, bitstring, bitstring):bool reduc",
 			"\tforall sk:bitstring, m:bitstring;",
-			"\tSIGNVERIF(exp(sk, g), SIGN(sk, m), m) = true",
+			"\tSIGNVERIF(exp(sk, const_g), SIGN(sk, m), m) = true",
 			"\totherwise forall pk:bitstring, s:bitstring, m:bitstring;",
 			"\tSIGNVERIF(pk, s, m) = false.",
 			"fun RINGSIGN(bitstring, bitstring, bitstring, bitstring):bitstring.",
