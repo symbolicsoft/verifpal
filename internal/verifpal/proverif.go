@@ -69,7 +69,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	prim = fmt.Sprintf("%s)", prim)
 	switch p.check {
 	case true:
-		//prim = fmt.Sprintf("if %s = empty then () else (", prim)
+		errorCritical("UNSUPPORTED")
 	}
 	return prim
 }
@@ -225,6 +225,9 @@ func proverifMessage(
 		procs, block.message.sender, block.message.recipient, pc,
 	)
 	for _, c := range block.message.constants {
+		if c.guard {
+			errorCritical("UNSUPPORTED")
+		}
 		procs = fmt.Sprintf(
 			"%s\tget valuestore(=principal_%s, =principal_%s, %s) in\n",
 			procs, block.message.sender, block.message.sender,
