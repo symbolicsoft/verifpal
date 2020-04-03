@@ -17,7 +17,7 @@ principal Bob[
 	gbssig = SIGN(blongterm, gbs)
 ]
 
-Bob -> Alice: [gblongterm], gbssig, gbs, gbo
+Bob -> Alice: gblongterm, gbssig, gbs, gbo
 
 principal Alice[
 	generates ae1
@@ -29,14 +29,14 @@ principal Alice[
 principal Alice[
 	generates m1, ae2
 	gae2 = G^ae2
-	valid = SIGNVERIF(gblongterm, gbs, gbssig)?
+	valid = SIGNVERIF(gblongterm, gbs, gbssig)
 	akshared1 = gbs^ae2
 	arkab1, ackab1 = HKDF(akshared1, arkba1, nil)
 	akenc1, akenc2 = HKDF(MAC(ackab1, nil), nil, nil)
 	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: [galongterm], gae1, gae2, e1
+Alice -> Bob: galongterm, gae1, gae2, e1
 
 principal Bob[
 	bmaster = HASH(nil, galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
@@ -49,11 +49,6 @@ principal Bob[
 	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
 	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
 ]
-
-phase[1]
-
-principal Alice[leaks alongterm]
-principal Bob[leaks blongterm]
 
 queries[
 	confidentiality? m1

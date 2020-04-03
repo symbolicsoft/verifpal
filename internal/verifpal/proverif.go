@@ -2,6 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 616bf0023a90ab68ba9e693bf9994779
 
+/* WARNING: The code here is purely a bunch of thought experiments.
+/* It is in no way ready for anything. */
+
 package verifpal
 
 import (
@@ -56,7 +59,12 @@ func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []const
 }
 
 func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive) string {
-	prim := fmt.Sprintf("%s(", p.name)
+	pname := p.name
+	switch p.name {
+	case "HASH":
+		pname = fmt.Sprintf("%s%d", p.name, len(p.arguments))
+	}
+	prim := fmt.Sprintf("%s(", pname)
 	for i, arg := range p.arguments {
 		sep := ""
 		if i != (len(p.arguments) - 1) {
@@ -184,9 +192,10 @@ func proverifPrincipal(
 				prefix := proverifConstantPrefix(valKnowledgeMap, block.principal.name, cc)
 				if prefix != "const" && prefix != block.principal.name {
 					get = fmt.Sprintf(
-						"%s\tget valuestore(=principal_%s, =principal_%s, %s) in",
+						"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in",
 						get,
 						prefix, block.principal.name,
+						cc.name,
 						proverifConstant(valKnowledgeMap, block.principal.name, cc),
 					)
 				}
@@ -198,17 +207,20 @@ func proverifPrincipal(
 				)
 			}
 			procs = fmt.Sprintf(
-				"%s\tlet %s = %s in\n",
+				"%s\tlet (%s) = %s in\n",
 				procs,
 				proverifConstants(valKnowledgeMap, block.principal.name, expression.left),
 				proverifValue(valKnowledgeMap, block.principal.name, expression.right),
 			)
-			procs = fmt.Sprintf(
-				"%s\tinsert valuestore(principal_%s, principal_%s, %s);\n",
-				procs,
-				block.principal.name, block.principal.name,
-				proverifConstants(valKnowledgeMap, block.principal.name, expression.left),
-			)
+			for _, l := range expression.left {
+				procs = fmt.Sprintf(
+					"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
+					procs,
+					block.principal.name, block.principal.name,
+					l.name,
+					proverifConstant(valKnowledgeMap, block.principal.name, l),
+				)
+			}
 		}
 	}
 	procs = procs + "\t0.\n"
@@ -229,8 +241,9 @@ func proverifMessage(
 			errorCritical("UNSUPPORTED")
 		}
 		procs = fmt.Sprintf(
-			"%s\tget valuestore(=principal_%s, =principal_%s, %s) in\n",
+			"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
 			procs, block.message.sender, block.message.sender,
+			c.name,
 			proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 	}
@@ -274,9 +287,10 @@ func proverifMessage(
 			proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 		procs = fmt.Sprintf(
-			"%s\tinsert valuestore(principal_%s, principal_%s, %s);\n",
+			"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 			procs,
 			block.message.sender, block.message.recipient,
+			c.name,
 			proverifConstant(valKnowledgeMap, block.message.sender, c),
 		)
 	}
@@ -365,7 +379,7 @@ var proverifTemplates = proverifTemplate{
 			"fun shamir_keys_pack(bitstring, bitstring, bitstring):bitstring [data].",
 			"reduc forall a:bitstring, b:bitstring, c:bitstring;",
 			"\tshamir_keys_unpack(shamir_keys_pack(a, b, c)) = (a, b, c).",
-			"table valuestore(principal, principal, bitstring).",
+			"table valuestore(principal, principal, bitstring, bitstring).",
 			consts,
 		}, "\n") + "\n"
 	},
@@ -390,15 +404,19 @@ var proverifTemplates = proverifTemplate{
 			"fun exp(bitstring, bitstring):bitstring.",
 			"equation forall a:bitstring, b:bitstring;",
 			"\texp(b, exp(a, const_g)) = exp(a, exp(b, const_g)).",
-			"fun HASH(bitstring):bitstring.",
+			"fun HASH1(bitstring):bitstring.",
+			"fun HASH2(bitstring, bitstring):bitstring.",
+			"fun HASH3(bitstring, bitstring, bitstring):bitstring.",
+			"fun HASH4(bitstring, bitstring, bitstring, bitstring):bitstring.",
+			"fun HASH5(bitstring, bitstring, bitstring, bitstring, bitstring):bitstring.",
 			"fun MAC(bitstring, bitstring): bitstring.",
-			"fun hmac_hash1(bitstring, bitstring):bitstring.",
-			"fun hmac_hash2(bitstring, bitstring):bitstring.",
-			"fun hmac_hash3(bitstring, bitstring):bitstring.",
-			"letfun HKDF(chaining_bitstring:bitstring, input_bitstring_material:bitstring) =",
-			"\tlet output1 = hmac_hash1(chaining_bitstring, input_bitstring_material) in",
-			"\tlet output2 = hmac_hash2(chaining_bitstring, input_bitstring_material) in",
-			"\tlet output3 = hmac_hash3(chaining_bitstring, input_bitstring_material) in",
+			"fun hmac_hash1(bitstring, bitstring, bitstring):bitstring.",
+			"fun hmac_hash2(bitstring, bitstring, bitstring):bitstring.",
+			"fun hmac_hash3(bitstring, bitstring, bitstring):bitstring.",
+			"letfun HKDF(salt:bitstring, ikm:bitstring, info:bitstring) =",
+			"\tlet output1 = hmac_hash1(salt, ikm, info) in",
+			"\tlet output2 = hmac_hash2(salt, ikm, info) in",
+			"\tlet output3 = hmac_hash3(salt, ikm, info) in",
 			"\t(output1, output2, output3).",
 			"fun PW_HASH(bitstring): bitstring.",
 			"fun ENC(bitstring, bitstring):bitstring.",
