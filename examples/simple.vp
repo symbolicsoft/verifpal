@@ -25,7 +25,7 @@ Bob -> Alice: gb, e1
 
 principal Alice[
 	gba = gb^a
-	e1_dec = AEAD_DEC(gba, e1, c0)
+	e1_dec = AEAD_DEC(gba, e1, c0)?
 ]
 
 queries[
