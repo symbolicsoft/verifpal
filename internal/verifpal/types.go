@@ -201,6 +201,6 @@ type proverifTemplate struct {
 	coreprims  func() string
 	prims      func() string
 	channels   func(knowledgeMap) string
-	queries    func([]query) string
+	queries    func(knowledgeMap, []query) string
 	toplevel   func([]block) string
 }

@@ -18,10 +18,10 @@ func ProVerif(modelFile string) {
 	fmt.Fprint(os.Stdout, pv)
 }
 
-func proverifConstant(valKnowledgeMap knowledgeMap, principal string, c constant) string {
+func proverifConstantPrefix(valKnowledgeMap knowledgeMap, principal string, c constant) string {
+	prefix := "const"
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	c = valKnowledgeMap.constants[i]
-	prefix := "const"
 	if valKnowledgeMap.creator[i] == principal && c.declaration == "assignment" {
 		prefix = principal
 	} else {
@@ -33,6 +33,11 @@ func proverifConstant(valKnowledgeMap knowledgeMap, principal string, c constant
 			}
 		}
 	}
+	return prefix
+}
+
+func proverifConstant(valKnowledgeMap knowledgeMap, principal string, c constant) string {
+	prefix := proverifConstantPrefix(valKnowledgeMap, principal, c)
 	return fmt.Sprintf("%s_%s", prefix, c.name)
 }
 
@@ -116,21 +121,23 @@ func proverifValues(a []value) string {
 }
 */
 
-func proverifQuery(query query) string {
+func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 	output := ""
 	switch query.kind {
 	case "confidentiality":
 		output = fmt.Sprintf(
-			"query attacker(%s).",
+			"query attacker(const_%s).",
 			query.constant.name,
 		)
 	case "authentication":
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0, query.message.constants[0].name,
+				query.message.sender, query.message.recipient, 0,
+				proverifConstant(valKnowledgeMap, "attacker", query.message.constants[0]),
 			),
 			fmt.Sprintf("event(SendMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0, query.message.constants[0].name,
+				query.message.sender, query.message.recipient, 0,
+				proverifConstant(valKnowledgeMap, "attacker", query.message.constants[0]),
 			),
 		)
 	}
@@ -171,6 +178,25 @@ func proverifPrincipal(
 			errorCritical("UNSUPPORTED")
 			procs = procs + ""
 		case "assignment":
+			c := sanityGetConstantsFromValue(expression.right)
+			get := ""
+			for _, cc := range c {
+				prefix := proverifConstantPrefix(valKnowledgeMap, block.principal.name, cc)
+				if prefix != "const" && prefix != block.principal.name {
+					get = fmt.Sprintf(
+						"%s\tget valuestore(=principal_%s, =principal_%s, %s) in",
+						get,
+						prefix, block.principal.name,
+						proverifConstant(valKnowledgeMap, block.principal.name, cc),
+					)
+				}
+			}
+			if len(get) > 0 {
+				procs = fmt.Sprintf(
+					"%s%s\n",
+					procs, get,
+				)
+			}
 			procs = fmt.Sprintf(
 				"%s\tlet %s = %s in\n",
 				procs,
@@ -285,7 +311,7 @@ func proverifModel(m Model) string {
 	pv = pv + proverifTemplates.coreprims()
 	pv = pv + proverifTemplates.prims()
 	pv = pv + proverifTemplates.channels(valKnowledgeMap)
-	pv = pv + proverifTemplates.queries(m.queries)
+	pv = pv + proverifTemplates.queries(valKnowledgeMap, m.queries)
 	pv = pv + procs
 	pv = pv + proverifTemplates.toplevel(m.blocks)
 	return pv
@@ -434,13 +460,13 @@ var proverifTemplates = proverifTemplate{
 		}
 		return strings.Join(channels, "\n") + "\n"
 	},
-	queries: func(queries []query) string {
+	queries: func(valKnowledgeMap knowledgeMap, queries []query) string {
 		output := []string{
 			"event SendMsg(principal, principal, stage, bitstring).",
 			"event RecvMsg(principal, principal, stage, bitstring).",
 		}
 		for _, q := range queries {
-			output = append(output, proverifQuery(q))
+			output = append(output, proverifQuery(valKnowledgeMap, q))
 		}
 		return strings.Join(output, "\n") + "\n"
 	},

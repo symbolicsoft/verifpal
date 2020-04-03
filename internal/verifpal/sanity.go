@@ -415,6 +415,49 @@ func sanityEquivalentEquations(e1 equation, e2 equation) bool {
 	return false
 }
 
+func sanityGetConstantsFromValue(v value) []constant {
+	c := []constant{}
+	switch v.kind {
+	case "constant":
+		c = append(c, v.constant)
+	case "primitive":
+		c = append(c, sanityGetConstantsFromPrimitive(v.primitive)...)
+	case "equation":
+		c = append(c, sanityGetConstantsFromEquation(v.equation)...)
+	}
+	return c
+}
+
+func sanityGetConstantsFromPrimitive(p primitive) []constant {
+	c := []constant{}
+	for _, a := range p.arguments {
+		switch a.kind {
+		case "constant":
+			c = append(c, a.constant)
+		case "primitive":
+			c = append(c, sanityGetConstantsFromPrimitive(a.primitive)...)
+		case "equation":
+			c = append(c, sanityGetConstantsFromEquation(a.equation)...)
+		}
+	}
+	return c
+}
+
+func sanityGetConstantsFromEquation(e equation) []constant {
+	c := []constant{}
+	for _, a := range e.values {
+		switch a.kind {
+		case "constant":
+			c = append(c, a.constant)
+		case "primitive":
+			c = append(c, sanityGetConstantsFromPrimitive(a.primitive)...)
+		case "equation":
+			c = append(c, sanityGetConstantsFromEquation(a.equation)...)
+		}
+	}
+	return c
+}
+
 func sanityFindConstantInPrimitive(
 	c constant, p primitive, valPrincipalState principalState,
 ) bool {
