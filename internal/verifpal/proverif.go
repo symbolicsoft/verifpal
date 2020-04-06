@@ -66,6 +66,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	pname := p.name
 	switch p.check {
 	case true:
+		// ASSERT, SPLIT, AEAD_DEC, SIGNVERIF and RINGSIGNVERIF
 		errorCritical("checked primitives are not yet supported in ProVerif model generation")
 	}
 	switch p.name {
@@ -170,6 +171,10 @@ func proverifPrincipal(
 		"%slet %s_%d() =\n",
 		procs, block.principal.name, pc,
 	)
+	procs = fmt.Sprintf(
+		"%s\tlet checkfail:bool = false in\n",
+		procs,
+	)
 	for _, expression := range block.principal.expressions {
 		switch expression.kind {
 		case "leaks":
@@ -194,7 +199,7 @@ func proverifPrincipal(
 			}
 			if len(get) > 0 {
 				procs = fmt.Sprintf(
-					"%s%s\n",
+					"%s%s",
 					procs, get,
 				)
 			}
@@ -206,7 +211,7 @@ func proverifPrincipal(
 			)
 			for _, l := range expression.left {
 				procs = fmt.Sprintf(
-					"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
+					"%s\tif checkfail = false then insert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 					procs,
 					block.principal.name, block.principal.name,
 					l.name,
