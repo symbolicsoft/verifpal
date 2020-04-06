@@ -184,7 +184,7 @@ func proverifPrincipal(
 				prefix := proverifConstantPrefix(valKnowledgeMap, block.principal.name, cc)
 				if prefix != "const" {
 					get = fmt.Sprintf(
-						"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in",
+						"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
 						get,
 						prefix, block.principal.name,
 						cc.name,
@@ -229,9 +229,6 @@ func proverifMessage(
 		procs, block.message.sender, block.message.recipient, pc,
 	)
 	for _, c := range block.message.constants {
-		if c.guard {
-			errorCritical("guarded constants are not yet supported in ProVerif model generation")
-		}
 		procs = fmt.Sprintf(
 			"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
 			procs, block.message.sender, block.message.sender,
@@ -246,32 +243,48 @@ func proverifMessage(
 			0, proverifConstant(valKnowledgeMap, block.message.sender, c, false),
 		)
 	}
-	procs = fmt.Sprintf(
-		"%s\tout(chan_%s_to_%s, (%s));\n",
-		procs, block.message.sender, block.message.recipient,
-		proverifConstants(valKnowledgeMap, block.message.sender, block.message.constants, false),
-	)
+	for _, c := range block.message.constants {
+		switch c.guard {
+		case true:
+			procs = fmt.Sprintf(
+				"%s\tout(pub, %s);\n",
+				procs, proverifConstant(valKnowledgeMap, block.message.sender, c, false),
+			)
+			procs = fmt.Sprintf(
+				"%s\tout(chan_%s_to_%s_private, (%s));\n",
+				procs, block.message.sender, block.message.recipient,
+				proverifConstant(valKnowledgeMap, block.message.sender, c, false),
+			)
+		case false:
+			procs = fmt.Sprintf(
+				"%s\tout(chan_%s_to_%s, (%s));\n",
+				procs, block.message.sender, block.message.recipient,
+				proverifConstant(valKnowledgeMap, block.message.sender, c, false),
+			)
+		}
+	}
 	procs = procs + "\t0.\n"
 	pc = pc + 1
 	procs = fmt.Sprintf(
 		"%slet %s_from_%s_%d() =\n",
 		procs, block.message.recipient, block.message.sender, pc,
 	)
-	consts := ""
-	for i, c := range block.message.constants {
-		sep := ""
-		if i != len(block.message.constants)-1 {
-			sep = ", "
+	for _, c := range block.message.constants {
+		switch c.guard {
+		case true:
+			procs = fmt.Sprintf(
+				"%s\tin(chan_%s_to_%s_private, (%s));\n",
+				procs, block.message.sender, block.message.recipient,
+				proverifConstant(valKnowledgeMap, block.message.sender, c, true),
+			)
+		case false:
+			procs = fmt.Sprintf(
+				"%s\tin(chan_%s_to_%s, (%s));\n",
+				procs, block.message.sender, block.message.recipient,
+				proverifConstant(valKnowledgeMap, block.message.sender, c, true),
+			)
 		}
-		consts = fmt.Sprintf("%s%s:bitstring%s",
-			consts, proverifConstant(valKnowledgeMap, block.message.sender, c, false), sep,
-		)
 	}
-	procs = fmt.Sprintf(
-		"%s\tin(chan_%s_to_%s, (%s));\n",
-		procs, block.message.sender,
-		block.message.recipient, consts,
-	)
 	for _, c := range block.message.constants {
 		procs = fmt.Sprintf(
 			"%s\tevent RecvMsg(principal_%s, principal_%s, phase_%d, %s);\n",
@@ -464,10 +477,13 @@ var proverifTemplates = proverifTemplate{
 				if i == ii {
 					continue
 				}
-				channel := fmt.Sprintf(
+				channel := strings.Join([]string{fmt.Sprintf(
 					"const chan_%s_to_%s:channel.",
 					prin1, prin2,
-				)
+				), fmt.Sprintf(
+					"const chan_%s_to_%s_private:channel [private].",
+					prin1, prin2,
+				)}, "\n")
 				channels = append(channels, channel)
 			}
 		}
