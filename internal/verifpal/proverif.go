@@ -64,16 +64,15 @@ func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []const
 
 func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive) string {
 	pname := p.name
+	switch p.check {
+	case true:
+		errorCritical("checked primitives are not yet supported in ProVerif model generation")
+	}
 	switch p.name {
 	case "HASH":
 		pname = fmt.Sprintf("%s%d", p.name, len(p.arguments))
 	case "ASSERT":
-		switch p.check {
-		case true:
-			errorCritical("UNSUPPORTED")
-		case false:
-			return "const_nil"
-		}
+		return "const_nil"
 	}
 	prim := fmt.Sprintf("%s(", pname)
 	for i, arg := range p.arguments {
@@ -86,10 +85,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 		)
 	}
 	prim = fmt.Sprintf("%s)", prim)
-	switch p.check {
-	case true:
-		errorCritical("UNSUPPORTED")
-	}
+
 	return prim
 }
 
@@ -161,7 +157,7 @@ func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 		)
 	}
 	if len(query.options) > 0 {
-		errorCritical("UNSUPPORTED")
+		errorCritical("UNSUPPORTED2")
 	}
 	return output
 }
@@ -176,26 +172,11 @@ func proverifPrincipal(
 	)
 	for _, expression := range block.principal.expressions {
 		switch expression.kind {
-		case "knows":
-			for _, c := range expression.constants {
-				procs = fmt.Sprintf(
-					"%s\t(* knows %s %s. *)\n",
-					procs,
-					expression.qualifier,
-					c.name,
-				)
-			}
-		case "generates":
-			for _, c := range expression.constants {
-				procs = fmt.Sprintf(
-					"%s\t(* generates %s. *)\n",
-					procs,
-					c.name,
-				)
-			}
 		case "leaks":
-			errorCritical("UNSUPPORTED")
-			procs = procs + ""
+			procs = fmt.Sprintf(
+				"%s\tout(pub, (%s))\n",
+				procs, prettyConstants(expression.constants),
+			)
 		case "assignment":
 			c := sanityGetConstantsFromValue(expression.right)
 			get := ""
@@ -249,7 +230,7 @@ func proverifMessage(
 	)
 	for _, c := range block.message.constants {
 		if c.guard {
-			errorCritical("UNSUPPORTED")
+			errorCritical("guarded constants are not yet supported in ProVerif model generation")
 		}
 		procs = fmt.Sprintf(
 			"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
