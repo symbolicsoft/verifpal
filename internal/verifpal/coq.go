@@ -22,7 +22,7 @@ func coqModel(m Model) string {
 	names := make(map[string]int)
 	messageLog := make(map[string]string)
 	principals := sanityDeclaredPrincipals(m)
-	output = append(output, coqHeader())
+	output = append(output, coqHeader)
 	output = append(output, fmt.Sprintf("\n(* Protocol: %s *)\n", m.fileName))
 	names["kmap"] = 0
 	names["unnamed"] = 0
