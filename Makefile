@@ -50,6 +50,10 @@ dependencies:
 	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 	@/bin/echo "       OK"
 
+lint:
+	@/bin/echo "[Verifpal] Running golangci-lint..."
+	@golangci-lint run
+
 test:
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
@@ -77,4 +81,4 @@ clean:
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies test tag release clean HomebrewFormula api assets build cmd dist examples internal tools scripts
+.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean HomebrewFormula api assets build cmd dist examples internal tools scripts
