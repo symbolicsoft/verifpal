@@ -27,7 +27,7 @@ func coqModel(m Model) string {
 	names["kmap"] = 0
 	names["unnamed"] = 0
 	for _, prin := range principals {
-		names[fmt.Sprintf("principal_%s", prin)] = 0
+		names[fmt.Sprintf("principal_%s", strings.ToLower(prin))] = 0
 		output, names = coqPrincipalInit(prin, output, names)
 	}
 	for _, block := range m.blocks {
@@ -104,7 +104,7 @@ func coqMessageBlock(
 func coqExpressionBlock(
 	expression expression, principalName string, output []string, names map[string]int,
 ) ([]string, map[string]int) {
-	pname := fmt.Sprintf("principal_%s", strings.ToLower(principalName))
+	pname := strings.ToLower(principalName)
 	switch expression.kind {
 	case "knows":
 		for _, constant := range expression.constants {
@@ -216,7 +216,7 @@ func coqValue(
 func coqConstant(constantName string, principalName string, names map[string]int) string {
 	return fmt.Sprintf(
 		"(get %s_%d \"%s\")",
-		principalName, names["principal_"+principalName],
+		principalName, names[principalName]-2,
 		constantName,
 	)
 }
