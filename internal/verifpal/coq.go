@@ -104,36 +104,37 @@ func coqMessageBlock(
 func coqExpressionBlock(
 	expression expression, principalName string, output []string, names map[string]int,
 ) ([]string, map[string]int) {
+	pname := fmt.Sprintf("principal_%s", strings.ToLower(principalName))
 	switch expression.kind {
 	case "knows":
 		for _, constant := range expression.constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := know_value %s_%d \"%s\" %s.",
-				principalName, names["kmap"],
-				principalName, names["kmap"]-1,
+				principalName, names[pname],
+				principalName, names[pname]-1,
 				constant.name, expression.qualifier,
 			))
-			names["kmap"]++
+			names[pname]++
 		}
 	case "generates":
 		for _, constant := range expression.constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := generate_value %s_%d \"%s\".",
-				principalName, names["kmap"],
-				principalName, names["kmap"]-1,
+				principalName, names[pname],
+				principalName, names[pname]-1,
 				constant.name,
 			))
-			names["kmap"]++
+			names[pname]++
 		}
 	case "leaks":
 		for _, constant := range expression.constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := leak_value %s_%d \"%s\".",
-				principalName, names["kmap"],
-				principalName, names["kmap"]-1,
+				principalName, names[pname],
+				principalName, names[pname]-1,
 				constant.name,
 			))
-			names["kmap"]++
+			names[pname]++
 		}
 	case "assignment":
 		update := ""
@@ -141,11 +142,11 @@ func coqExpressionBlock(
 			update, output, names = coqValue(expression.right, principalName, n+1, output, names)
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := assign_value %s_%d %s \"%s\".",
-				principalName, names["kmap"],
-				principalName, names["kmap"]-1,
+				principalName, names[pname],
+				principalName, names[pname]-1,
 				update, e.name,
 			))
-			names["kmap"]++
+			names[pname]++
 		}
 	}
 	return output, names
