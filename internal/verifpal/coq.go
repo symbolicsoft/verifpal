@@ -21,11 +21,15 @@ func coqModel(m Model) string {
 	output := []string{}
 	names := make(map[string]int)
 	messageLog := make(map[string]string)
+	principals := sanityDeclaredPrincipals(m)
+	output = append(output, coqHeader())
+	output = append(output, fmt.Sprintf("\n(* Protocol: %s *)\n", m.fileName))
 	names["kmap"] = 0
 	names["unnamed"] = 0
-	output = append(output, coqHeader())
-	// attacker := m.attacker
-	output = append(output, fmt.Sprintf("\n\n\n\t(* Protocol: %s *)\n", m.fileName))
+	for _, prin := range principals {
+		names[fmt.Sprintf("principal_%s", prin)] = 0
+		output, names = coqPrincipalInit(prin, output, names)
+	}
 	for _, block := range m.blocks {
 		switch block.kind {
 		case "principal":
@@ -37,36 +41,39 @@ func coqModel(m Model) string {
 	return strings.Join(output, "\n")
 }
 
-func coqPrincipalBlock(block block, output []string, names map[string]int) ([]string, map[string]int) {
+func coqPrincipalInit(principal string, output []string, names map[string]int) ([]string, map[string]int) {
 	if names["kmap"] == 0 {
 		output = append(output, fmt.Sprintf(
 			"Definition kmap_%d := knowledgemap_constructor \"%s\".",
-			names["kmap"], block.principal.name,
-		))
-		names["kmap"]++
-	} else if _, isFound := names[(strings.ToLower(block.principal.name))]; !isFound {
-		names[(strings.ToLower(block.principal.name))] = 0
-		output = append(output, fmt.Sprintf(
-			"Definition kmap_%d := add_principal_knowledgemap kmap_%d \"%s\".",
-			names["kmap"], names["kmap"]-1, block.principal.name,
+			names["kmap"], principal,
 		))
 		names["kmap"]++
 	}
+	output = append(output, fmt.Sprintf(
+		"Definition kmap_%d := add_principal_knowledgemap kmap_%d \"%s\".",
+		names["kmap"], names["kmap"]-1, principal,
+	))
+	names["kmap"]++
+	return output, names
+}
+
+func coqPrincipalBlock(block block, output []string, names map[string]int) ([]string, map[string]int) {
+	pname := fmt.Sprintf("principal_%s", strings.ToLower(block.principal.name))
 	for i, expression := range block.principal.expressions {
 		if i == 0 {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := get_principal_knowledgemap kmap_%d \"%s\".",
-				strings.ToLower(block.principal.name), names[(strings.ToLower(block.principal.name))],
+				pname, names[pname],
 				names["kmap"]-1, block.principal.name,
 			))
-			names[(strings.ToLower(block.principal.name))]++
+			names[pname]++
 		}
-		output, names = coqExpressionBlock(expression, strings.ToLower(block.principal.name), output, names)
+		output, names = coqExpressionBlock(expression, pname, output, names)
 		if i == len(block.principal.expressions)-1 {
 			output = append(output, fmt.Sprintf(
 				"Definition kmap_%d := update_principal_knowledgemap kmap_%d %s_%d.",
 				names["kmap"], (names["kmap"]-1),
-				strings.ToLower(block.principal.name), (names[(strings.ToLower(block.principal.name))]-1),
+				pname, (names[pname]-1),
 			))
 			names["kmap"]++
 		}
@@ -167,17 +174,20 @@ func coqValue(
 			if argument.kind != "constant" {
 				newConstName := fmt.Sprintf("unnamed_%d", names["unnamed"])
 				exp := expression{
-					argument.kind,
-					"private",
-					[]constant{},
-					[]constant{
+					kind:      "assignment",
+					qualifier: "private",
+					constants: []constant{},
+					left: []constant{
 						{
-							false, false, false,
-							newConstName,
-							"assignment", "private",
+							guard:       false,
+							fresh:       false,
+							leaked:      false,
+							name:        newConstName,
+							declaration: "assignment",
+							qualifier:   "private",
 						},
 					},
-					argument,
+					right: argument,
 				}
 				output, names = coqExpressionBlock(exp, principalName, output, names)
 				update += coqConstant(newConstName, principalName, names)
@@ -205,7 +215,7 @@ func coqValue(
 func coqConstant(constantName string, principalName string, names map[string]int) string {
 	return fmt.Sprintf(
 		"(get %s_%d \"%s\")",
-		principalName, names[principalName],
+		principalName, names["principal_"+principalName],
 		constantName,
 	)
 }

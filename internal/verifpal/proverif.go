@@ -17,8 +17,7 @@ import (
 func ProVerif(modelFile string) {
 	m := parserParseModel(modelFile, false)
 	sanity(m)
-	pv := proverifModel(m)
-	fmt.Fprint(os.Stdout, pv)
+	fmt.Fprint(os.Stdout, proverifModel(m))
 }
 
 func proverifConstantPrefix(valKnowledgeMap knowledgeMap, principal string, c constant) string {
