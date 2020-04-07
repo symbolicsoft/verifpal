@@ -66,6 +66,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	pname := p.name
 	switch p.check {
 	case true:
+		// TODO
 		// ASSERT, SPLIT, AEAD_DEC, SIGNVERIF and RINGSIGNVERIF
 		errorCritical("checked primitives are not yet supported in ProVerif model generation")
 	}
@@ -158,6 +159,7 @@ func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 		)
 	}
 	if len(query.options) > 0 {
+		// TODO
 		errorCritical("UNSUPPORTED2")
 	}
 	return output

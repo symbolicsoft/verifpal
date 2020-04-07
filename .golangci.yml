@@ -3,6 +3,7 @@ run:
         - parser.go
         - main_test.go
         - help.go
+        - coqheader.go
 
 linters:
     enable:
