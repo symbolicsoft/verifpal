@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+// Day 0, setup
+principal Server[
+	// constants that represent day numbers
+	knows public i0, i1, i2
+]
+principal Alice[
+	knows public i0, i1, i2
+	// report authorization key
+	generates rakA
+	// report verification key
+	rvkA = G^rakA
+	// report verification key
+	// initial contact event key
+	cek_0A = HASH(rakA)
+	// contact event number
+	cen_0A = HASH(i0, cek_0A)
+]
+principal Bob[
+	knows public i0, i1, i2
+	generates rakB
+	rvkB = G^rakB
+	cek_0B = HASH(rakB)
+	cen_0B = HASH(i0, cek_0B)
+]
+principal Charlie[
+	knows public i0, i1, i2
+	generates rakC
+	rvkC = G^rakC
+	cek_0C = HASH(rakC)
+	cen_0C = HASH(i0, cek_0C)
+]
+
+// Day 1, Alice meets Bob, Bob meets Charlie
+principal Alice[
+	// contact event key
+	cek_1A = HASH(CONCAT(rvkA, cek_0A))
+	cen_1A = HASH(CONCAT(i1, cek_1A))
+]
+principal Bob[
+	cek_1B = HASH(CONCAT(rvkB, cek_0B))
+	cen_1B = HASH(CONCAT(i1, cek_1B))
+]
+principal Charlie[
+	cek_1C = HASH(CONCAT(rvkC, cek_0C))
+	cen_1C = HASH(CONCAT(i1, cek_1C))
+]
+
+Alice -> Bob: cen_1A
+Bob -> Alice: cen_1B
+
+Bob -> Charlie: cen_1B
+Charlie -> Bob: cen_1C
+
+phase[1]
+
+// Day 2, Alice is diagnosed
+principal Alice [
+	knows private memo_type
+	knows private memo_len
+	knows private memo_data
+	memo = CONCAT(memo_type, memo_len, memo_data)
+	cek_2A = HASH(CONCAT(rvkA, cek_1A))
+	cen_2A = HASH(CONCAT(i1, cek_2A))
+	report = CONCAT(rvkA, cek_1A, i1, i2, memo)
+	sig = SIGN(rakA, report)
+	m1 = CONCAT(report, sig)
+]
+
+Alice -> Server: [m1]
+
+Server -> Bob: [m1]
+Server -> Charlie: [m1]
+
+queries[
+	confidentiality? cek_0A
+	confidentiality? cek_1A
+	confidentiality? cen_0C
+]
+
