@@ -21,8 +21,10 @@ func main() {
 	case 3:
 		mainGanbatte(os.Args)
 	case 2:
+		mainIntro()
 		verifpal.Help(os.Args[1])
 	default:
+		mainIntro()
 		verifpal.Help("")
 	}
 }
