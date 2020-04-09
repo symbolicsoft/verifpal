@@ -25,7 +25,6 @@ linters:
         - gochecknoinits
         - gocritic
         - gocyclo
-        - godox
         - gosec
         - lll
         - misspell
