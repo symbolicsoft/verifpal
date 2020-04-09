@@ -72,7 +72,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 		}
 	}
 	switch p.name {
-	case "HASH":
+	case "HASH", "CONCAT", "SPLIT":
 		pname = fmt.Sprintf("%s%d", p.name, len(p.arguments))
 	}
 	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
