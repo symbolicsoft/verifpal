@@ -74,8 +74,6 @@ principal SmartphoneA[
 	EphID20A, EphID21A, EphID22A = HKDF(nil, SK2A, BroadcastKey)
 ]
 
-phase[1]
-
 principal HealthCareAuthority[
 	generates triggerToken
 	knows private ephemeral_sk
@@ -90,14 +88,14 @@ HealthCareAuthority -> SmartphoneA : m1
 principal SmartphoneA[
 	knows private ephemeral_sk
 	m1_dec = DEC(ephemeral_sk, m1)
-	m2 = AEAD_ENC(ephemeral_sk, SK1A, m1_dec)
+	m2 = ENC(ephemeral_sk, SK1A)
 ]
 
 SmartphoneA -> BackendServer: m2
 
 principal BackendServer [
 	knows private ephemeral_sk
-	m2_dec = AEAD_DEC(ephemeral_sk, m2, DEC(ephemeral_sk, m1))?
+	m2_dec = DEC(ephemeral_sk, m2)
 	infectedPatients1 = CONCAT(infectedPatients0, m2_dec)
 ]
 
@@ -108,13 +106,6 @@ BackendServer -> SmartphoneC: infectedPatients1
 queries[
 	// Would someone who shared a value 15 days before they got tested get flagged?
 	confidentiality? EphID02A
-	// Will people who came in contact with Alice be able to compare 
-	confidentiality? EphID10A
-	confidentiality? EphID11A
-	confidentiality? EphID12A
-	confidentiality? EphID20A
-	confidentiality? EphID21A
-	confidentiality? EphID22A
-	// Is the server able to Authenticate Alice as the sender of m2
+	// Is the server able to Authenticate Alice as the sender of m2?
 	authentication? SmartphoneA -> BackendServer: m2
 ]
