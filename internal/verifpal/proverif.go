@@ -74,8 +74,6 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	switch p.name {
 	case "HASH":
 		pname = fmt.Sprintf("%s%d", p.name, len(p.arguments))
-	case "ASSERT":
-		return "const_nil"
 	}
 	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
 	for i, arg := range p.arguments {
@@ -121,23 +119,6 @@ func proverifValue(valKnowledgeMap knowledgeMap, principal string, a value) stri
 	return ""
 }
 
-/*
-func proverifValues(a []value) string {
-	values := ""
-	for i, v := range a {
-		sep := ", "
-		if i == len(a)-1 {
-			sep = ""
-		}
-		values = fmt.Sprintf(
-			"%s%s%s",
-			values, proverifValue(v), sep,
-		)
-	}
-	return values
-}
-*/
-
 func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 	output := ""
 	switch query.kind {
@@ -175,10 +156,12 @@ func proverifPrincipal(
 	for _, expression := range block.principal.expressions {
 		switch expression.kind {
 		case "leaks":
-			procs = fmt.Sprintf(
-				"%s\tout(pub, (%s));\n",
-				procs, prettyConstants(expression.constants),
-			)
+			for _, c := range expression.constants {
+				procs = fmt.Sprintf(
+					"%s\tout(pub, (%s));\n",
+					procs, proverifConstant(valKnowledgeMap, block.principal.name, c, ""),
+				)
+			}
 		case "assignment":
 			c := sanityGetConstantsFromValue(expression.right)
 			get := ""
@@ -207,6 +190,10 @@ func proverifPrincipal(
 			valType := "bitstring"
 			switch expression.right.kind {
 			case "primitive":
+				switch expression.right.primitive.name {
+				case "SIGNVERIF", "RINGSIGNVERIF":
+					valType = "bool"
+				}
 				switch expression.right.primitive.check {
 				case true:
 					procs = fmt.Sprintf("%s\tif %s = true then\n",
@@ -325,7 +312,8 @@ func proverifMessage(
 }
 
 func proverifPhase(block block) string {
-	return ""
+	errorCritical("phases are not yet supported in ProVerif model generation")
+	return fmt.Sprintf("phase %d;", block.phase.number)
 }
 
 func proverifModel(m Model) string {
