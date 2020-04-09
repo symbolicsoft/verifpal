@@ -61,12 +61,15 @@ func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []const
 	return consts
 }
 
-func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive) string {
+func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive, check bool) string {
 	pname := p.name
-	switch p.check {
+	checksuffix := ""
+	switch check {
 	case true:
-		// ASSERT, SPLIT, AEAD_DEC, SIGNVERIF and RINGSIGNVERIF
-		//errorCritical("checked primitives are not yet supported in ProVerif model generation")
+		switch p.name {
+		case "AEAD_DEC":
+			checksuffix = "_check"
+		}
 	}
 	switch p.name {
 	case "HASH":
@@ -74,7 +77,7 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	case "ASSERT":
 		return "const_nil"
 	}
-	prim := fmt.Sprintf("%s(", pname)
+	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
 	for i, arg := range p.arguments {
 		sep := ""
 		if i != (len(p.arguments) - 1) {
@@ -85,7 +88,6 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 		)
 	}
 	prim = fmt.Sprintf("%s)", prim)
-
 	return prim
 }
 
@@ -112,7 +114,7 @@ func proverifValue(valKnowledgeMap knowledgeMap, principal string, a value) stri
 	case "constant":
 		return proverifConstant(valKnowledgeMap, principal, a.constant, "")
 	case "primitive":
-		return proverifPrimitive(valKnowledgeMap, principal, a.primitive)
+		return proverifPrimitive(valKnowledgeMap, principal, a.primitive, false)
 	case "equation":
 		return proverifEquation(valKnowledgeMap, principal, a.equation)
 	}
@@ -170,10 +172,6 @@ func proverifPrincipal(
 		"%slet %s_%d() =\n",
 		procs, block.principal.name, pc,
 	)
-	procs = fmt.Sprintf(
-		"%s\tlet checkpass:bool = true in\n",
-		procs,
-	)
 	for _, expression := range block.principal.expressions {
 		switch expression.kind {
 		case "leaks":
@@ -209,9 +207,12 @@ func proverifPrincipal(
 			valType := "bitstring"
 			switch expression.right.kind {
 			case "primitive":
-				prim, _ := primitiveGet(expression.right.primitive.name)
-				if prim.check {
-					valType = "bool"
+				switch expression.right.primitive.check {
+				case true:
+					procs = fmt.Sprintf("%s\tif %s = true then\n",
+						procs,
+						proverifPrimitive(valKnowledgeMap, block.principal.name, expression.right.primitive, true),
+					)
 				}
 			}
 			procs = fmt.Sprintf(
@@ -225,7 +226,7 @@ func proverifPrincipal(
 					continue
 				}
 				procs = fmt.Sprintf(
-					"%s\tif checkpass = true then insert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
+					"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 					procs,
 					block.principal.name, block.principal.name,
 					l.name,
@@ -259,7 +260,7 @@ func proverifMessage(
 		procs = fmt.Sprintf(
 			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s);\n",
 			procs, block.message.sender, block.message.recipient,
-			0, proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+			0, proverifConstant(valKnowledgeMap, "", c, ""),
 		)
 	}
 	for _, c := range block.message.constants {
@@ -308,7 +309,7 @@ func proverifMessage(
 		procs = fmt.Sprintf(
 			"%s\tevent RecvMsg(principal_%s, principal_%s, phase_%d, %s);\n",
 			procs, block.message.sender, block.message.recipient, 0,
-			proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+			proverifConstant(valKnowledgeMap, "", c, ""),
 		)
 		procs = fmt.Sprintf(
 			"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
@@ -456,6 +457,11 @@ var proverifTemplates = proverifTemplate{
 			"\tAEAD_DEC(k, AEAD_ENC(k, m, ad), ad) = m",
 			"\totherwise forall k:bitstring, m:bitstring, ad:bitstring;",
 			"\tAEAD_DEC(k, m, ad) = empty.",
+			"fun AEAD_DEC_check(bitstring, bitstring, bitstring):bool reduc",
+			"\tforall k:bitstring, m:bitstring, ad:bitstring;",
+			"\tAEAD_DEC_check(k, AEAD_ENC(k, m, ad), ad) = true",
+			"\totherwise forall k:bitstring, m:bitstring, ad:bitstring;",
+			"\tAEAD_DEC_check(k, m, ad) = false.",
 			"fun PKE_ENC(bitstring, bitstring):bitstring.",
 			"fun PKE_DEC(bitstring, bitstring):bitstring reduc",
 			"\tforall k:bitstring, m:bitstring;",
