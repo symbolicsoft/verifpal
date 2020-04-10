@@ -161,9 +161,10 @@ func coqValue(
 		return coqConstant(v.constant.name, principalName, names), output, names
 	case "primitive":
 		update = "(" + v.primitive.name
-		if v.primitive.name == "HKDF" || v.primitive.name == "SHAMIR_SPLIT" || v.primitive.name == "SPLIT" {
+		switch v.primitive.name {
+		case "HKDF", "SHAMIR_SPLIT", "SPLIT":
 			update += fmt.Sprintf("%d", n)
-		} else if v.primitive.name == "CONCAT" || v.primitive.name == "HASH" {
+		case "CONCAT", "HASH":
 			update += fmt.Sprintf("%d", len(v.primitive.arguments))
 		}
 		update += " "
