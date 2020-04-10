@@ -159,16 +159,12 @@ func coqValue(
 	switch v.kind {
 	case "constant":
 		return coqConstant(v.constant.name, principalName, names), output, names
-		// TODO: Checked primitives
-		// TODO: HASH, concat problem
 	case "primitive":
 		update = "(" + v.primitive.name
-		if v.primitive.name == "HKDF" || v.primitive.name == "SHAMIR_SPLIT" {
-			if n > 3 {
-				errorCritical("Only 3 outputs are allowed for " + v.primitive.name)
-			} else {
-				update += fmt.Sprintf("_%d", n)
-			}
+		if v.primitive.name == "HKDF" || v.primitive.name == "SHAMIR_SPLIT" || v.primitive.name == "SPLIT" {
+			update += fmt.Sprintf("%d", n)
+		} else if v.primitive.name == "CONCAT" || v.primitive.name == "HASH" {
+			update += fmt.Sprintf("%d", len(v.primitive.arguments))
 		}
 		update += " "
 		for i, argument := range v.primitive.arguments {
@@ -216,7 +212,7 @@ func coqValue(
 func coqConstant(constantName string, principalName string, names map[string]int) string {
 	return fmt.Sprintf(
 		"(get %s_%d \"%s\")",
-		principalName, names[principalName]-2,
+		principalName, names[principalName]-1,
 		constantName,
 	)
 }
