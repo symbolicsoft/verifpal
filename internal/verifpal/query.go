@@ -17,6 +17,10 @@ func queryStart(
 		return queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
 		return queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+	case "freshness":
+		return queryFreshness(query, valPrincipalState)
+	case "unlinkability":
+		return queryUnlinkability(query, valPrincipalState, valAttackerState)
 	}
 	errorCritical(fmt.Sprintf("invalid query kind (%s)", query.kind))
 	return verifyResult{}
@@ -26,33 +30,22 @@ func queryConfidentiality(
 	query query, valPrincipalState principalState,
 	valAttackerState attackerState,
 ) verifyResult {
-	mutated := ""
 	result := verifyResult{
 		query:    query,
 		resolved: false,
 		summary:  "",
 		options:  []queryOptionResult{},
 	}
-	c := sanityResolveConstant(query.constant, valPrincipalState)
-	ii := sanityEquivalentValueInValues(c, valAttackerState.known)
+	v := sanityResolveConstant(query.constants[0], valPrincipalState)
+	ii := sanityEquivalentValueInValues(v, valAttackerState.known)
 	if ii < 0 {
 		return result
 	}
-	for i := range valPrincipalState.constants {
-		if !valPrincipalState.mutated[i] {
-			continue
-		}
-		mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
-			mutated, "           ",
-			prettyConstant(valPrincipalState.constants[i]),
-			prettyValue(valPrincipalState.assigned[i]),
-			prettyValue(valPrincipalState.beforeMutate[i]),
-		)
-	}
+	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 	result.resolved = true
-	result.summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+	result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
-		prettyConstant(query.constant),
+		prettyConstant(query.constants[0]),
 		prettyValue(valAttackerState.known[ii]),
 	), result.options, true)
 	result = queryPrecondition(result, valPrincipalState)
@@ -82,23 +75,12 @@ func queryAuthentication(
 		query, valKnowledgeMap, valPrincipalState,
 	)
 	for f, index := range indices {
-		mutated := ""
 		b := valPrincipalState.beforeRewrite[index]
-		for i := range valPrincipalState.constants {
-			if !valPrincipalState.mutated[i] {
-				continue
-			}
-			mutated = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
-				mutated, "           ",
-				prettyConstant(valPrincipalState.constants[i]),
-				prettyValue(valPrincipalState.assigned[i]),
-				prettyValue(valPrincipalState.beforeMutate[i]),
-			)
-		}
+		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 		if passes[f] && (query.message.sender != sender) {
 			result.resolved = true
 			result = queryPrecondition(result, valPrincipalState)
-			return queryAuthenticationHandlePass(result, c, b, mutated, sender, valPrincipalState)
+			return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState)
 		}
 	}
 	return result
@@ -177,6 +159,55 @@ func queryAuthenticationHandlePass(
 	return result
 }
 
+func queryFreshness(
+	query query, valPrincipalState principalState,
+) verifyResult {
+	result := verifyResult{
+		query:    query,
+		resolved: false,
+		summary:  "",
+		options:  []queryOptionResult{},
+	}
+
+	v := sanityResolveConstant(query.constants[0], valPrincipalState)
+	c := sanityGetConstantsFromValue(v)
+	for _, cc := range c {
+		fmt.Println(prettyConstant(cc))
+		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, cc)
+		if ii >= 0 {
+			cc = valPrincipalState.constants[ii]
+			if cc.declaration == "generates" {
+				return result
+			}
+		}
+	}
+	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+	result.resolved = true
+	result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
+		prettyConstant(query.constants[0]),
+		prettyValue(v),
+	), result.options, true)
+	result = queryPrecondition(result, valPrincipalState)
+	written := verifyResultsPutWrite(result)
+	if written {
+		PrettyInfo(fmt.Sprintf(
+			"%s: %s", prettyQuery(query), result.summary,
+		), "result", true)
+	}
+	return result
+}
+
+func queryUnlinkability(
+	query query, valPrincipalState principalState,
+	valAttackerState attackerState,
+) verifyResult {
+	/*
+	 * We're doing unlinkability in terms of *values*, not processes
+	 */
+	return verifyResult{}
+}
+
 func queryPrecondition(
 	result verifyResult, valPrincipalState principalState,
 ) verifyResult {
@@ -217,4 +248,20 @@ func queryPrecondition(
 		result.options = append(result.options, oResult)
 	}
 	return result
+}
+
+func queryGetMutatedInfo(valPrincipalState principalState) string {
+	mutatedInfo := ""
+	for i := range valPrincipalState.constants {
+		if !valPrincipalState.mutated[i] {
+			continue
+		}
+		mutatedInfo = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
+			mutatedInfo, "           ",
+			prettyConstant(valPrincipalState.constants[i]),
+			prettyValue(valPrincipalState.assigned[i]),
+			prettyValue(valPrincipalState.beforeMutate[i]),
+		)
+	}
+	return mutatedInfo
 }

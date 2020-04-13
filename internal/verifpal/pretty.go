@@ -238,15 +238,29 @@ func prettyQuery(query query) string {
 	switch query.kind {
 	case "confidentiality":
 		output = fmt.Sprintf(
-			"confidentiality? %s",
-			prettyConstant(query.constant),
+			"%s? %s",
+			query.kind,
+			prettyConstants(query.constants),
 		)
 	case "authentication":
 		output = fmt.Sprintf(
-			"authentication? %s -> %s: %s",
+			"%s? %s -> %s: %s",
+			query.kind,
 			query.message.sender,
 			query.message.recipient,
 			prettyConstants(query.message.constants),
+		)
+	case "freshness":
+		output = fmt.Sprintf(
+			"%s? %s",
+			query.kind,
+			prettyConstants(query.constants),
+		)
+	case "unlinkability":
+		output = fmt.Sprintf(
+			"%s %s",
+			query.kind,
+			prettyConstants(query.constants),
 		)
 	}
 	if len(query.options) > 0 {
@@ -277,20 +291,23 @@ func prettyPrincipal(block block) string {
 		switch expression.kind {
 		case "knows":
 			output = fmt.Sprintf(
-				"%s\tknows %s %s\n",
+				"%s\t%s %s %s\n",
+				expression.kind,
 				output,
 				expression.qualifier,
 				prettyConstants(expression.constants),
 			)
 		case "generates":
 			output = fmt.Sprintf(
-				"%s\tgenerates %s\n",
+				"%s\t%s %s\n",
+				expression.kind,
 				output,
 				prettyConstants(expression.constants),
 			)
 		case "leaks":
 			output = fmt.Sprintf(
-				"%s\tleaks %s\n",
+				"%s\t%s %s\n",
+				expression.kind,
 				output,
 				prettyConstants(expression.constants),
 			)

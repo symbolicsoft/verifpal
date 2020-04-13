@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker [active]
+
+principal Alice[
+    knows private a
+	generates b
+    ha = HASH(a)
+	hb = HASH(b)
+]
+
+Alice -> Bob: ha, hb
+
+principal Bob[
+    knows private a
+    _ = ASSERT(ha, HASH(a))
+]
+
+queries[
+	freshness? ha
+	freshness? hb
+]

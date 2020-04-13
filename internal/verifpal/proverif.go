@@ -125,7 +125,7 @@ func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 	case "confidentiality":
 		output = fmt.Sprintf(
 			"query attacker(const_%s).",
-			query.constant.name,
+			query.constants[0].name,
 		)
 	case "authentication":
 		output = fmt.Sprintf("%s ==> %s.",
@@ -138,6 +138,10 @@ func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 				proverifConstant(valKnowledgeMap, "attacker", query.message.constants[0], ""),
 			),
 		)
+	case "freshness":
+		errorCritical("freshness queries are not yet supported in ProVerif model generation")
+	case "unlinkability":
+		errorCritical("unlinkability queries are not yet supported in ProVerif model generation")
 	}
 	if len(query.options) > 0 {
 		errorCritical("query options are not yet supported in ProVerif model generation")

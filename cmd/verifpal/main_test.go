@@ -161,6 +161,10 @@ var verifpalTests = []verifpalTest{
 		model:       "concat2.vp",
 		resultsCode: "c0",
 	},
+	{
+		model:       "freshness.vp",
+		resultsCode: "f1f0",
+	},
 }
 
 func TestMain(t *testing.T) {

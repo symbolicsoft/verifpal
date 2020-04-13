@@ -41,10 +41,10 @@ type phase struct {
 }
 
 type query struct {
-	kind     string
-	constant constant
-	message  message
-	options  []queryOption
+	kind      string
+	constants []constant
+	message   message
+	options   []queryOption
 }
 
 type queryOption struct {

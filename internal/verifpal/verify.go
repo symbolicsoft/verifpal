@@ -63,21 +63,35 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 
 func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
 	PrettyInfo("Attacker is configured as passive.", "info", false)
-	attackerStateInit(false)
-	attackerStatePutPhaseUpdate(valPrincipalStates[0], 0)
-	verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+	phase := 0
+	for phase <= valKnowledgeMap.maxPhase {
+		attackerStateInit(false)
+		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
+		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+		phase = phase + 1
+	}
 }
 
 func verifyGetResultsCode(valVerifyResults []verifyResult) string {
 	resultsCode := ""
 	for _, verifyResult := range valVerifyResults {
-		q := "c"
-		r := "0"
-		if verifyResult.query.kind == "authentication" {
+		q := ""
+		r := ""
+		switch verifyResult.query.kind {
+		case "confidentiality":
+			q = "c"
+		case "authentication":
 			q = "a"
+		case "freshness":
+			q = "f"
+		case "unlinkability":
+			q = "u"
 		}
-		if verifyResult.resolved {
+		switch verifyResult.resolved {
+		case true:
 			r = "1"
+		case false:
+			r = "0"
 		}
 		resultsCode = fmt.Sprintf(
 			"%s%s%s",

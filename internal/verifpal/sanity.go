@@ -24,8 +24,6 @@ func sanityPhases(m Model) {
 		switch blck.kind {
 		case "phase":
 			switch {
-			case m.attacker == "passive":
-				errorCritical("phases may only be used for analysis with an active attacker")
 			case blck.phase.number <= phase:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) must be superior to last declared phase (%d)",
@@ -171,12 +169,12 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 	for _, query := range m.queries {
 		switch query.kind {
 		case "confidentiality":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constant)
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constants[0])
 			if i < 0 {
 				errorCritical(fmt.Sprintf(
-					"confidentiality query (%s) refers to unknown value (%s)",
+					"confidentiality query (%s) refers to unknown constant (%s)",
 					prettyQuery(query),
-					prettyConstant(query.constant),
+					prettyConstant(query.constants[0]),
 				))
 			}
 		case "authentication":
@@ -214,6 +212,32 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 				valKnowledgeMap, query.message.recipient, c,
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
+		case "freshness":
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constants[0])
+			if i < 0 {
+				errorCritical(fmt.Sprintf(
+					"freshness query (%s) refers to unknown constant (%s)",
+					prettyQuery(query),
+					prettyConstant(query.constants[0]),
+				))
+			}
+		case "unlinkability":
+			if len(query.constants) < 2 {
+				errorCritical(fmt.Sprintf(
+					"unlinkability query (%s) must specify at least two constants",
+					prettyQuery(query),
+				))
+			}
+			for _, c := range query.constants {
+				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+				if i < 0 {
+					errorCritical(fmt.Sprintf(
+						"unlinkability query (%s) refers to unknown value (%s)",
+						prettyQuery(query),
+						prettyConstant(c),
+					))
+				}
+			}
 		}
 		sanityQueryOptions(query)
 	}
