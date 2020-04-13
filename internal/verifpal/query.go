@@ -267,26 +267,27 @@ func queryUnlinkability(
 				ok1, _, _ := possibleToRecomposePrimitive(a.primitive, valAttackerState)
 				obtainable = ok0 || ok1
 			}
-			if obtainable {
-				mutatedInfo := queryGetMutatedInfo(valPrincipalState)
-				result.resolved = true
-				result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
-					"%s and %s %s (%s), %s.",
-					prettyConstant(constants[i]),
-					prettyConstant(constants[ii]),
-					"are not unlinkable since they are the output of the same primitive",
-					prettyValue(a),
-					"which can be obtained by Attacker",
-				), result.options)
-				result = queryPrecondition(result, valPrincipalState)
-				written := verifyResultsPutWrite(result)
-				if written {
-					PrettyInfo(fmt.Sprintf(
-						"%s: %s", prettyQuery(query), result.summary,
-					), "result", true)
-				}
-				return result
+			if !obtainable {
+				continue
 			}
+			mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+			result.resolved = true
+			result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+				"%s and %s %s (%s), %s.",
+				prettyConstant(constants[i]),
+				prettyConstant(constants[ii]),
+				"are not unlinkable since they are the output of the same primitive",
+				prettyValue(a),
+				"which can be obtained by Attacker",
+			), result.options)
+			result = queryPrecondition(result, valPrincipalState)
+			written := verifyResultsPutWrite(result)
+			if written {
+				PrettyInfo(fmt.Sprintf(
+					"%s: %s", prettyQuery(query), result.summary,
+				), "result", true)
+			}
+			return result
 		}
 	}
 	return result
