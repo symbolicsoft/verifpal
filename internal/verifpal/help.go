@@ -16,6 +16,7 @@ func Help(a string) {
 	fmt.Fprintf(os.Stdout, strings.Join([]string{
 		"verify    [file]: Analyze Verifpal model.",
 		"proverif  [file]: Translate Verifpal model into ProVerif model.",
+		"coq       [file]: Translate Verifpal model into Coq model.",
 		"pretty    [file]: Pretty-print Verifpal model.",
 		"implement [file]: Translate Verifpal model into Go implementation.",
 		"help            : Show this help text.",
