@@ -26,6 +26,12 @@ func coqModel(m Model) string {
 	output = append(output, fmt.Sprintf("\n(* Protocol: %s *)\n", m.fileName))
 	names["kmap"] = 0
 	names["unnamed"] = 0
+	names["attacker"] = 0
+	output = append(output, fmt.Sprintf(
+		"Definition attacker_%d := attacker_constructor %s attacker_knowledge_empty.",
+		names["attacker"], m.attacker,
+	))
+	names["attacker"]++
 	for _, prin := range principals {
 		names[fmt.Sprintf("principal_%s", strings.ToLower(prin))] = 0
 		output, names = coqPrincipalInit(prin, output, names)
@@ -96,6 +102,11 @@ func coqMessageBlock(
 			names["kmap"], (names["kmap"]-1),
 		))
 		messageLog[constant.name] = fmt.Sprintf("kmap_%d", names["kmap"])
+		output = append(output, fmt.Sprintf(
+			"Definition attacker_%d := send_message_attacker kmap_%d attacker_%d.",
+			names["attacker"], (names["kmap"]-1), (names["attacker"]-1),
+		))
+		names["attacker"]++
 		names["kmap"]++
 	}
 	return output, names, messageLog
