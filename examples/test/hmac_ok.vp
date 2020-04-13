@@ -4,34 +4,35 @@
 attacker[active]
 
 principal Alice[
-    knows private a
-    a_public = G^a
+	knows private a
+	a_public = G^a
 ]
 principal Bob[
-    knows private b
-    b_public = G^b
+	knows private b
+	b_public = G^b
 ]
 
 Alice -> Bob   : [a_public]
 Bob   -> Alice : [b_public]
 
 principal Alice[
-    generates plaintext
-    ss         = b_public^a
-    key        = HASH(ss)
-    ciphertext = ENC(key, plaintext)
-    tag        = MAC(key, ciphertext)
+	generates plaintext
+	ss         = b_public^a
+	key        = HASH(ss)
+	ciphertext = ENC(key, plaintext)
+	tag        = MAC(key, ciphertext)
 ]
+
 Alice -> Bob : ciphertext, tag
 
 principal Bob[
-    ss_        = a_public^b
-    key_       = HASH(ss_) 
-    _          = ASSERT(tag, MAC(key_, ciphertext))?
-    plaintext_ = DEC(key_, ciphertext)
+	ss_        = a_public^b
+	key_       = HASH(ss_) 
+	_          = ASSERT(tag, MAC(key_, ciphertext))?
+	plaintext_ = DEC(key_, ciphertext)
 ]
 
 queries[
-    confidentiality? plaintext
-    authentication? Alice -> Bob : ciphertext
+	confidentiality? plaintext
+	authentication? Alice -> Bob : ciphertext
 ]

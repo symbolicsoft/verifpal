@@ -5,23 +5,24 @@ attacker[active]
 
 // initialisation
 principal Alice[
-    knows public hmac_key
+	knows public hmac_key
 ]
 principal Bob[
-    knows public hmac_key 
+	knows public hmac_key 
 ]
 
 principal Alice[
-    generates value
-    chain_verif = MAC(hmac_key, value)
+	generates value
+	chain_verif = MAC(hmac_key, value)
 ]
+
 Alice -> Bob : value, chain_verif
 
 principal Bob[
-    hmac_vrf = ASSERT(chain_verif, MAC(hmac_key, value))?
+	hmac_vrf = ASSERT(chain_verif, MAC(hmac_key, value))?
 ]
 
 queries[
-    authentication? Alice -> Bob : chain_verif
-    authentication? Alice -> Bob : value
+	authentication? Alice -> Bob : chain_verif
+	authentication? Alice -> Bob : value
 ]

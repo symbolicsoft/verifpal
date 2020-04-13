@@ -4,33 +4,33 @@
 attacker[active]
 
 principal Alice[
-    knows private a
-    a_public = G^a
+	knows private a
+	a_public = G^a
 ]
 principal Bob[
-    knows private b
-    b_public = G^b
+	knows private b
+	b_public = G^b
 ]
 Alice -> Bob   : a_public
 Bob   -> Alice : [b_public]
 
 principal Alice[
-    generates plaintext
-    generates ad
-    ss         = b_public^a
-    key        = HASH(ss)
-    ciphertext = AEAD_ENC(key, plaintext, ad)
+	generates plaintext
+	generates ad
+	ss         = b_public^a
+	key        = HASH(ss)
+	ciphertext = AEAD_ENC(key, plaintext, ad)
 ]
 Alice -> Bob : ad, ciphertext
 
 principal Bob[
-    ss_        = a_public^b
-    key_       = HASH(ss_)
-    plaintext_ = AEAD_DEC(key_, ciphertext, ad)?
+	ss_        = a_public^b
+	key_       = HASH(ss_)
+	plaintext_ = AEAD_DEC(key_, ciphertext, ad)?
 ]
 
 queries[
-    confidentiality? plaintext
-    authentication? Alice -> Bob : ciphertext
-    authentication? Alice -> Bob : ad
+	confidentiality? plaintext
+	authentication? Alice -> Bob : ciphertext
+	authentication? Alice -> Bob : ad
 ]

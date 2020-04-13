@@ -4,37 +4,37 @@
 attacker[active]
 
 principal Server [
-    knows private s // Server private key
-    gs = G^s        // Server public key
+	knows private s // Server private key
+	gs = G^s        // Server public key
 ]
 
 principal Client [
-    knows private c // Client private key
-    gc = G^c        // Client public key
-    generates ec    // Ephemeral client key
-    m1 = G^ec       // Ephemeral client public key (is m1)
+	knows private c // Client private key
+	gc = G^c        // Client public key
+	generates ec    // Ephemeral client key
+	m1 = G^ec       // Ephemeral client public key (is m1)
 ]
 
 Client -> Server: [m1]
 
 principal Server [
-    generates es    // Ephemeral server key
-    m2 = G^es       // Ephemeral server public key (is m2)
-    shared_s = m1^es
-    m3a = AEAD_ENC(shared_s, gs, nil)
-    m3b = AEAD_ENC(shared_s, SIGN(s, HASH(m1, m2)), nil)
+	generates es    // Ephemeral server key
+	m2 = G^es       // Ephemeral server public key (is m2)
+	shared_s = m1^es
+	m3a = AEAD_ENC(shared_s, gs, nil)
+	m3b = AEAD_ENC(shared_s, SIGN(s, HASH(m1, m2)), nil)
 ]
 
 Server -> Client: m2, m3a, m3b
 
 principal Client [
-    shared_c = m2^ec
-    gs_dec = AEAD_DEC(shared_c, m3a, nil) // Decrypted server public key
-    m3b_dec = AEAD_DEC(shared_c, m3b, nil)
-    valid_c = SIGNVERIF(gs_dec, HASH(m1, m2), m3b_dec)?
-    m4a = AEAD_ENC(shared_c, gc, nil)
-    knows private pt1
-    req = AEAD_ENC(shared_c, pt1, nil)
+	shared_c = m2^ec
+	gs_dec = AEAD_DEC(shared_c, m3a, nil) // Decrypted server public key
+	m3b_dec = AEAD_DEC(shared_c, m3b, nil)
+	valid_c = SIGNVERIF(gs_dec, HASH(m1, m2), m3b_dec)?
+	m4a = AEAD_ENC(shared_c, gc, nil)
+	knows private pt1
+	req = AEAD_ENC(shared_c, pt1, nil)
 ]
 
 Client -> Server: [m4a], [req]

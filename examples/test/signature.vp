@@ -5,32 +5,32 @@ attacker[active]
 
 // initialisation
 principal Alice[
-    knows public hmac_key
-    knows private key
-    knows private sk
-    pk = G^sk
+	knows public hmac_key
+	knows private key
+	knows private sk
+	pk = G^sk
 ]
 
 principal Bob[
-    knows private key
+	knows private key
 ]
 
 Alice -> Bob : [pk]
 //
 principal Alice[
-    generates plaintext
-    ciphertext = ENC(key, plaintext)
-    signature = SIGN(sk, ciphertext)
+	generates plaintext
+	ciphertext = ENC(key, plaintext)
+	signature = SIGN(sk, ciphertext)
 ]
 Alice -> Bob : signature, ciphertext
 
 principal Bob[
-    vrf = SIGNVERIF(pk, ciphertext, signature)?
-    plaintext_ = DEC(key, ciphertext)
+	vrf = SIGNVERIF(pk, ciphertext, signature)?
+	plaintext_ = DEC(key, ciphertext)
 ]
 
 queries[
-    confidentiality? plaintext
-    authentication? Alice -> Bob : ciphertext
-    authentication? Alice -> Bob : signature
+	confidentiality? plaintext
+	authentication? Alice -> Bob : ciphertext
+	authentication? Alice -> Bob : signature
 ]

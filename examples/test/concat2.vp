@@ -4,27 +4,27 @@
 attacker[active]
 
 principal Alice[
-    knows private k_ab
+	knows private k_ab
 ]
 principal Bob[
-    knows private k_ab
+	knows private k_ab
 ]
 
 principal Alice[
-    generates Na
-    generates m1
-    m = CONCAT(Na, m1)
-    e_m = AEAD_ENC(k_ab, m, nil)
+	generates Na
+	generates m1
+	m = CONCAT(Na, m1)
+	e_m = AEAD_ENC(k_ab, m, nil)
 ]
 
 Alice -> Bob: e_m
 
 principal Bob[
-    m_dec = AEAD_DEC(k_ab, e_m, nil)?
-    Na_dec, m1_dec = SPLIT(m_dec)?
-    _ = ASSERT(Na_dec, m1_dec)
+	m_dec = AEAD_DEC(k_ab, e_m, nil)?
+	Na_dec, m1_dec = SPLIT(m_dec)?
+	_ = ASSERT(Na_dec, m1_dec)
 ]
 
 queries[
-    confidentiality? m
+	confidentiality? m
 ]
