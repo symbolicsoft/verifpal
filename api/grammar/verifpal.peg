@@ -25,7 +25,8 @@ import (
 var parserReserved = []string{
 	"attacker", "passive", "active", "principal",
 	"phase, public", "private", "password",
-	"confidentiality", "authentication", "precondition",
+	"confidentiality", "authentication",
+	"freshness", "unlinkability", "precondition",
 	"ringsign", "ringsignverif",
 	"primitive", "pw_hash", "hash", "hkdf",
 	"aead_enc", "aead_dec", "enc", "dec",
@@ -285,7 +286,7 @@ Queries <- "queries" _ '[' _ Queries:(Query*) ']' _ {
 	return Queries, nil
 }
 
-Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication) Comment* {
+Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication/QueryFreshness/QueryUnlinkability) Comment* {
 	return Query, nil
 }
 	
@@ -295,7 +296,7 @@ QueryConfidentiality <- "confidentiality?" _ Constant:Constant _ Options:QueryOp
 	}
 	return query{
 		kind: "confidentiality",
-		constant: Constant.(value).constant,
+		constants: []constant{Constant.(value).constant},
 		message: message{},
 		options: Options.([]queryOption),
 	}, nil
@@ -307,8 +308,32 @@ QueryAuthentication <- "authentication?" _ Message:Message _ Options:QueryOption
 	}
 	return query{
 		kind: "authentication",
-		constant: constant{},
+		constants: []constant{},
 		message: (Message.(block)).message,
+		options: Options.([]queryOption),
+	}, nil
+}
+
+QueryFreshness <- "freshness?" _ Constant:Constant _ Options:QueryOptions? _ {
+	if Options == nil {
+		Options = []queryOption{}
+	}
+	return query{
+		kind: "freshness",
+		constants: []constant{Constant.(value).constant},
+		message: message{},
+		options: Options.([]queryOption),
+	}, nil
+}
+
+QueryUnlinkability <- "unlinkability?" _ Constants:Constants _ Options:QueryOptions? _ {
+	if Options == nil {
+		Options = []queryOption{}
+	}
+	return query{
+		kind: "unlinkability",
+		constants: Constants.([]constant),
+		message: message{},
 		options: Options.([]queryOption),
 	}, nil
 }
