@@ -47,7 +47,7 @@ func queryConfidentiality(
 		"%s (%s) is obtained by Attacker.",
 		prettyConstant(query.constants[0]),
 		prettyValue(valAttackerState.known[ii]),
-	), result.options, true)
+	), result.options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
@@ -149,7 +149,7 @@ func queryAuthenticationHandlePass(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), sender, result.query.message.sender,
 		prettyValue(b), result.query.message.recipient,
-	), result.options, true)
+	), result.options)
 	written := verifyResultsPutWrite(result)
 	if written {
 		PrettyInfo(fmt.Sprintf(
@@ -168,26 +168,17 @@ func queryFreshness(
 		summary:  "",
 		options:  []queryOptionResult{},
 	}
-
-	v := sanityResolveConstant(query.constants[0], valPrincipalState)
-	c := sanityGetConstantsFromValue(v)
-	for _, cc := range c {
-		fmt.Println(prettyConstant(cc))
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, cc)
-		if ii >= 0 {
-			cc = valPrincipalState.constants[ii]
-			if cc.declaration == "generates" {
-				return result
-			}
-		}
+	freshnessFound := queryFreshnessCheck(query.constants[0], valPrincipalState)
+	if freshnessFound {
+		return result
 	}
 	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 	result.resolved = true
 	result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
 		prettyConstant(query.constants[0]),
-		prettyValue(v),
-	), result.options, true)
+		prettyValue(sanityResolveConstant(query.constants[0], valPrincipalState)),
+	), result.options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
@@ -198,14 +189,107 @@ func queryFreshness(
 	return result
 }
 
+func queryFreshnessCheck(c constant, valPrincipalState principalState) bool {
+	v := sanityResolveConstant(c, valPrincipalState)
+	cc := sanityGetConstantsFromValue(v)
+	for _, ccc := range cc {
+		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
+		if ii >= 0 {
+			ccc = valPrincipalState.constants[ii]
+			if ccc.fresh {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+/*
+ * We're doing unlinkability in terms of *values*, not processes.
+ * Unlinkability fails if:
+ * - A value is non-fresh, or,
+ * - Attacker can obtain a primitive that produces both values.
+ * This definition of unlinkability on values is almost certainly
+ * incomplete.
+ */
 func queryUnlinkability(
 	query query, valPrincipalState principalState,
 	valAttackerState attackerState,
 ) verifyResult {
-	/*
-	 * We're doing unlinkability in terms of *values*, not processes
-	 */
-	return verifyResult{}
+	result := verifyResult{
+		query:    query,
+		resolved: false,
+		summary:  "",
+		options:  []queryOptionResult{},
+	}
+	noFreshness := []constant{}
+	for _, c := range query.constants {
+		if !queryFreshnessCheck(c, valPrincipalState) {
+			noFreshness = append(noFreshness, c)
+		}
+	}
+	if len(noFreshness) > 0 {
+		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+		result.resolved = true
+		result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
+			prettyConstant(noFreshness[0]),
+			prettyValue(sanityResolveConstant(noFreshness[0], valPrincipalState)),
+		), result.options)
+		result = queryPrecondition(result, valPrincipalState)
+		written := verifyResultsPutWrite(result)
+		if written {
+			PrettyInfo(fmt.Sprintf(
+				"%s: %s", prettyQuery(query), result.summary,
+			), "result", true)
+		}
+		return result
+	}
+	constants := []constant{}
+	assigneds := []value{}
+	for _, c := range query.constants {
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		constants = append(constants, c)
+		assigneds = append(assigneds, valPrincipalState.assigned[i])
+	}
+	for i, a := range assigneds {
+		for ii, aa := range assigneds {
+			if i == ii {
+				continue
+			}
+			if !sanityEquivalentValues(a, aa, false) {
+				continue
+			}
+			obtainable := false
+			switch a.kind {
+			case "primitive":
+				ok0, _ := possibleToReconstructPrimitive(a.primitive, valAttackerState)
+				ok1, _, _ := possibleToRecomposePrimitive(a.primitive, valAttackerState)
+				obtainable = ok0 || ok1
+			}
+			if obtainable {
+				mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+				result.resolved = true
+				result.summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+					"%s and %s %s (%s), %s.",
+					prettyConstant(constants[i]),
+					prettyConstant(constants[ii]),
+					"are not unlinkable since they are the output of the same primitive",
+					prettyValue(a),
+					"which can be obtained by Attacker",
+				), result.options)
+				result = queryPrecondition(result, valPrincipalState)
+				written := verifyResultsPutWrite(result)
+				if written {
+					PrettyInfo(fmt.Sprintf(
+						"%s: %s", prettyQuery(query), result.summary,
+					), "result", true)
+				}
+				return result
+			}
+		}
+	}
+	return result
 }
 
 func queryPrecondition(

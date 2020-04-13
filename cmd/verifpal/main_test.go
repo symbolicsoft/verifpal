@@ -165,6 +165,10 @@ var verifpalTests = []verifpalTest{
 		model:       "freshness.vp",
 		resultsCode: "f1f0",
 	},
+	{
+		model:       "unlinkability.vp",
+		resultsCode: "u1u1u0",
+	},
 }
 
 func TestMain(t *testing.T) {

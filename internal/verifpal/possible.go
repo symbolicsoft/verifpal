@@ -228,7 +228,7 @@ func possibleToRewritePrim(
 					}
 				}
 			}
-			valid = sanityEquivalentValues(ax[0], ax[1])
+			valid = sanityEquivalentValues(ax[0], ax[1], true)
 			if valid {
 				break
 			}

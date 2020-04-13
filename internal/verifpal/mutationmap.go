@@ -129,7 +129,7 @@ func mutationMapReplacePrimitive(
 			a = sanityResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
 			)
-			if sanityEquivalentValues(a, v) {
+			if sanityEquivalentValues(a, v, true) {
 				continue
 			}
 			if !injectMatchSkeletons(v.primitive, injectPrimitiveSkeleton(a.primitive)) {

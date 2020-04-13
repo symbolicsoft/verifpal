@@ -16,7 +16,7 @@ var primitiveCoreSpecs = []primitiveCoreSpec{
 		hasRule: true,
 		coreRule: func(p primitive) (bool, []value) {
 			v := []value{{kind: "primitive", primitive: p}}
-			if sanityEquivalentValues(p.arguments[0], p.arguments[1]) {
+			if sanityEquivalentValues(p.arguments[0], p.arguments[1], true) {
 				return true, v
 			}
 			return false, v

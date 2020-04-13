@@ -4,20 +4,23 @@
 attacker [active]
 
 principal Alice[
-	knows private a
 	generates b
-	ha = HASH(a)
-	hb = HASH(b)
 ]
 
-Alice -> Bob: ha, hb
+Alice -> Bob: b
 
 principal Bob[
 	knows private a
-	_ = ASSERT(ha, HASH(a))
+	generates c
+	generates d
+	leaks c
+	h1, h2, h3 = HKDF(a, b, nil)
+	h4, h5, h6 = HKDF(c, c, nil)
+	h7, h8, h9 = HKDF(a, c, d)
 ]
 
 queries[
-	freshness? ha
-	freshness? hb
+	unlinkability? h1, h2, h3
+	unlinkability? h4, h5, h6
+	unlinkability? h7, h8, h9
 ]

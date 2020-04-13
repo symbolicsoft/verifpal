@@ -127,7 +127,7 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) 
 		a = sanityResolveConstant(a.constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.assigned {
-		if sanityEquivalentValues(a, aa) {
+		if sanityEquivalentValues(a, aa, true) {
 			if attackerStatePutWrite(aa) {
 				o = o + 1
 			}

@@ -343,7 +343,7 @@ func sanityDeclaredPrincipals(m Model) []string {
 	return principals
 }
 
-func sanityEquivalentValues(a1 value, a2 value) bool {
+func sanityEquivalentValues(a1 value, a2 value, considerOutput bool) bool {
 	switch a1.kind {
 	case "constant":
 		switch a2.kind {
@@ -362,7 +362,7 @@ func sanityEquivalentValues(a1 value, a2 value) bool {
 			return false
 		case "primitive":
 			equivPrim, _, _ := sanityEquivalentPrimitives(
-				a1.primitive, a2.primitive, true,
+				a1.primitive, a2.primitive, considerOutput,
 			)
 			return equivPrim
 		case "equation":
@@ -396,7 +396,7 @@ func sanityEquivalentPrimitives(
 		return false, 0, 0
 	}
 	for i := range p1.arguments {
-		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i])
+		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i], true)
 		if !equiv {
 			return false, 0, 0
 		}
@@ -411,29 +411,29 @@ func sanityEquivalentEquations(e1 equation, e2 equation) bool {
 		return false
 	}
 	if e1.values[0].kind == "equation" && e2.values[0].kind == "equation" {
-		if sanityEquivalentValues(e1Base[1], e2.values[1]) &&
-			sanityEquivalentValues(e1.values[1], e2Base[1]) {
+		if sanityEquivalentValues(e1Base[1], e2.values[1], true) &&
+			sanityEquivalentValues(e1.values[1], e2Base[1], true) {
 			return true
 		}
-		if sanityEquivalentValues(e1Base[1], e2Base[1]) &&
-			sanityEquivalentValues(e1.values[1], e2.values[1]) {
+		if sanityEquivalentValues(e1Base[1], e2Base[1], true) &&
+			sanityEquivalentValues(e1.values[1], e2.values[1], true) {
 			return true
 		}
 		return false
 	}
 	if len(e1.values) > 2 {
-		if sanityEquivalentValues(e1.values[1], e2.values[2]) &&
-			sanityEquivalentValues(e1.values[2], e2.values[1]) {
+		if sanityEquivalentValues(e1.values[1], e2.values[2], true) &&
+			sanityEquivalentValues(e1.values[2], e2.values[1], true) {
 			return true
 		}
-		if sanityEquivalentValues(e1.values[1], e2.values[1]) &&
-			sanityEquivalentValues(e1.values[2], e2.values[2]) {
+		if sanityEquivalentValues(e1.values[1], e2.values[1], true) &&
+			sanityEquivalentValues(e1.values[2], e2.values[2], true) {
 			return true
 		}
 		return false
 	}
-	if sanityEquivalentValues(e1.values[0], e2.values[0]) &&
-		sanityEquivalentValues(e1.values[1], e2.values[1]) {
+	if sanityEquivalentValues(e1.values[0], e2.values[0], true) &&
+		sanityEquivalentValues(e1.values[1], e2.values[1], true) {
 		return true
 	}
 	return false
@@ -550,7 +550,7 @@ func sanityFindConstantInEquation(
 func sanityEquivalentValueInValues(v value, a []value) int {
 	index := -1
 	for i, aa := range a {
-		if sanityEquivalentValues(v, aa) {
+		if sanityEquivalentValues(v, aa, true) {
 			index = i
 			break
 		}

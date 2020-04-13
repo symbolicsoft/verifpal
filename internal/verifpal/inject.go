@@ -41,13 +41,13 @@ func injectValueRules(
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: p,
-	}) {
+	}, true) {
 		return false
 	}
 	if sanityEquivalentValues(k, value{
 		kind:      "primitive",
 		primitive: rootPrimitive,
-	}) {
+	}, true) {
 		return false
 	}
 	switch k.kind {
@@ -152,7 +152,7 @@ func injectMatchSkeletons(p primitive, skeleton primitive) bool {
 	}
 	pv := value{kind: "primitive", primitive: injectPrimitiveSkeleton(p)}
 	sv := value{kind: "primitive", primitive: skeleton}
-	return sanityEquivalentValues(pv, sv)
+	return sanityEquivalentValues(pv, sv, true)
 }
 
 func injectMissingSkeletons(p primitive, valAttackerState attackerState) {

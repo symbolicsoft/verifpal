@@ -109,7 +109,7 @@ func PrettyInfoColor(m string, t string, analysisCount int) {
 }
 
 func prettyVerifyResultSummary(
-	mutated string, summary string, oResults []queryOptionResult, attack bool,
+	mutated string, summary string, oResults []queryOptionResult,
 ) string {
 	mutatedIntro := ""
 	optionsSummary := ""
@@ -127,9 +127,6 @@ func prettyVerifyResultSummary(
 			"%s%s%s\n",
 			optionsSummary, "             - ", oResult.summary,
 		)
-	}
-	if !attack {
-		return summary
 	}
 	if len(mutated) > 0 {
 		mutatedIntro = "When the following values are controlled by Attacker:"
