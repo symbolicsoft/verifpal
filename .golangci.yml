@@ -23,6 +23,7 @@ linters:
         - dupl
         - funlen
         - gochecknoinits
+        - godox
         - gocritic
         - gocyclo
         - gosec
