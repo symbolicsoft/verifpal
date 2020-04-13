@@ -121,7 +121,7 @@ contexts [] {
          styles []       = .punctuation;
       }
       : pattern {
-         regex          \= (confidentiality\?|authentication\?)
+         regex          \= (confidentiality\?|authentication\?|freshness\?|unlinkability\?)
          styles []       = .keyword;
       }
       : pattern {
@@ -142,7 +142,7 @@ contexts [] {
          : include "main";
       }
       : inline_push {
-         regex          \= (((confidentiality)|(authentication))\?)
+         regex          \= (((confidentiality)|(authentication)|(freshness)|(unlinkability))\?)
          styles []       = .keyword;
          : pop {  
             regex       \= (\s\-\>\s)
