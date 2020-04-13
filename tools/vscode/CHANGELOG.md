@@ -5,6 +5,9 @@
 
 # Change Log
 
+## 0.0.12
+- Add `freshness` and `unlinkability` query keywords.
+
 ## 0.0.11
 - `SPLIT` keyword incorrectly added as `JOIN`.
 
