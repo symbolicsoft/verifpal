@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
 # SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
 
 echo -n "[Verifpal] Enter version: "
 read VERSION
