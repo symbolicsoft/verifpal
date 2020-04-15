@@ -1,1 +1,1 @@
-This update brings minor improvements and the addition of two new example models focusing on the Needham-Schroeder protocol.
+Verifpal 0.12.0 introduces freshness queries, unlinkability queries and highly experimental ProVerif and Coq model generation. For more information, please read the blog post at: https://blog.symbolic.software/2020/04/14/freshness-unlinkability-model-semantics-verifpal/
