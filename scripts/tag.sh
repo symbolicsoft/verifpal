@@ -5,7 +5,7 @@
 echo -n "[Verifpal] Enter version: "
 read VERSION
 
-vim assets/releasenotes.txt
+$EDITOR assets/releasenotes.txt
 RELEASE_NOTES="$(cat assets/releasenotes.txt)"
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
