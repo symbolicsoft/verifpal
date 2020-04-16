@@ -32,7 +32,6 @@ archives:
       - LICENSE
       - examples/*
       - README.md
-    wrap_in_directory: true
 
 changelog:
   skip: false

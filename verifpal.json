@@ -4,14 +4,14 @@
         "32bit": {
             "url": "https://source.symbolic.software/verifpal/verifpal/uploads/a8617519bd67db32435e40aa0b9b210c/verifpal_0.12.0_windows_386.zip",
             "bin": [
-                "verifpal.exe"
+                "verifpal_0.12.0_windows_386/verifpal.exe"
             ],
             "hash": "95a47575ebf7b0aba004e2a7e6132d513af7e764d1d7aa6ce22eb0f2d4caa963"
         },
         "64bit": {
             "url": "https://source.symbolic.software/verifpal/verifpal/uploads/c705b25aefa0bc7ed0f0457eebe2fbe3/verifpal_0.12.0_windows_amd64.zip",
             "bin": [
-                "verifpal.exe"
+                "verifpal_0.12.0_windows_amd64/verifpal.exe"
             ],
             "hash": "01c0d84c959bcef424dce5d7c8796b974b5e0426f91ab1673b4526378f470e21"
         }
