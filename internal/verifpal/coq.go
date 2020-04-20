@@ -23,10 +23,14 @@ func coqModel(m Model) string {
 	messageLog := make(map[string]string)
 	principals := sanityDeclaredPrincipals(m)
 	output = append(output, coqHeader)
-	output = append(output, fmt.Sprintf("\n(* Protocol: %s *)\n", m.fileName))
+	output = append(output, fmt.Sprintf(
+		"\n(* Protocol: %s *)\n\n(* Phase 0: *)\n",
+		m.fileName))
 	names["kmap"] = 0
 	names["unnamed"] = 0
 	names["attacker"] = 0
+	names["queries"] = 0
+	phase := 0
 	output = append(output, fmt.Sprintf(
 		"Definition attacker_%d := attacker_constructor %s attacker_knowledge_empty.",
 		names["attacker"], m.attacker,
@@ -37,6 +41,14 @@ func coqModel(m Model) string {
 		output, names = coqPrincipalInit(prin, output, names)
 	}
 	for _, block := range m.blocks {
+		if block.phase.number > phase {
+			output = append(output, coqQuery(m.queries, names, phase))
+			phase = block.phase.number
+			output = append(output, fmt.Sprintf(
+				"\n(* Phase %d: *)\n",
+				phase,
+			))
+		}
 		switch block.kind {
 		case "principal":
 			output, names = coqPrincipalBlock(block, output, names)
@@ -44,6 +56,7 @@ func coqModel(m Model) string {
 			output, names, messageLog = coqMessageBlock(block.message, output, names, messageLog)
 		}
 	}
+	output = append(output, coqQuery(m.queries, names, phase))
 	return strings.Join(output, "\n")
 }
 
@@ -82,6 +95,11 @@ func coqPrincipalBlock(block block, output []string, names map[string]int) ([]st
 				pname, (names[pname]-1),
 			))
 			names["kmap"]++
+			output = append(output, fmt.Sprintf(
+				"Definition attacker_%d := absorb_knowledgemap_attacker attacker_%d kmap_%d.",
+				names["attacker"], (names["attacker"]-1), (names["kmap"]-1),
+			))
+			names["attacker"]++
 		}
 	}
 	return output, names
@@ -96,19 +114,39 @@ func coqMessageBlock(
 			names["kmap"], (names["kmap"]-1),
 			message.sender, message.recipient, constant.name, coqGuard(constant.guard),
 		))
+		messageLog[constant.name] = fmt.Sprintf("kmap_%d", names["kmap"])
+		output = append(output, fmt.Sprintf(
+			"Definition attacker_%d := absorb_knowledgemap_attacker attacker_%d kmap_%d.",
+			names["attacker"], (names["attacker"]-1), (names["kmap"]),
+		))
 		names["kmap"]++
+		names["attacker"]++
 		output = append(output, fmt.Sprintf(
 			"Definition kmap_%d := send_message kmap_%d.",
 			names["kmap"], (names["kmap"]-1),
 		))
-		messageLog[constant.name] = fmt.Sprintf("kmap_%d", names["kmap"])
-		output = append(output, fmt.Sprintf(
-			"Definition attacker_%d := send_message_attacker kmap_%d attacker_%d.",
-			names["attacker"], (names["kmap"]-1), (names["attacker"]-1),
-		))
-		names["attacker"]++
 		names["kmap"]++
 	}
+	// Ideally this function should look like this
+	// for _, constant := range message.constants {
+	// 	output = append(output, fmt.Sprintf(
+	// 		"Definition kmap_%d := add_message_knowledgemap kmap_%d (message_constructor \"%s\" \"%s\" \"%s\" %s).",
+	// 		names["kmap"], (names["kmap"]-1),
+	// 		message.sender, message.recipient, constant.name, coqGuard(constant.guard),
+	// 	))
+	// 	names["kmap"]++
+	// 	messageLog[constant.name] = fmt.Sprintf("kmap_%d", names["kmap"])
+	// }
+	// output = append(output, fmt.Sprintf(
+	// 	"Definition attacker_%d := absorb_knowledgemap_attacker attacker_%d kmap_%d.",
+	// 	names["attacker"], (names["attacker"]-1), (names["kmap"]-1),
+	// ))
+	// names["attacker"]++
+	// output = append(output, fmt.Sprintf(
+	// 	"Definition kmap_%d := send_messages kmap_%d.",
+	// 	names["kmap"], (names["kmap"]-1),
+	// ))
+	// names["kmap"]++
 	return output, names, messageLog
 }
 
@@ -234,4 +272,34 @@ func coqGuard(guard bool) string {
 		return "guarded"
 	}
 	return "unguarded"
+}
+
+func coqQuery(queries []query, names map[string]int, phase int) string {
+	queryOutput := []string{}
+
+	queryOutput = append(queryOutput, fmt.Sprintf(
+		"\n(* Phase %d queries *)",
+		phase,
+	))
+	for _, q := range queries {
+		switch q.kind {
+		case "confidentiality":
+			for _, constant := range q.constants {
+				queryOutput = append(queryOutput, fmt.Sprintf(
+					"Compute(query_confidentiality attacker_%d \"%s\").",
+					names["attacker"]-1, constant.name,
+				))
+			}
+		// case "authentication":
+		// 	for _, constant := range q.message.constants {
+		// 		queryOutput = append(queryOutput, fmt.Sprintf(
+		// 			"Compute(query_authentication attacker_%d \"%s\" \"%s\" \"%s\").",
+		// 			names["attacker"]-1, q.message.sender, q.message.recipient, constant.name,
+		// 		))
+		// 	}
+		default:
+			queryOutput = append(queryOutput, "(* Query not supported *)")
+		}
+	}
+	return strings.Join(queryOutput, "\n")
 }
