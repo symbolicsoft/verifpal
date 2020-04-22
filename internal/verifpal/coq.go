@@ -25,7 +25,7 @@ func coqModel(m Model) string {
 	output = append(output, coqHeader)
 	output = append(output, fmt.Sprintf(
 		"\n(* Protocol: %s *)\n\n(* Phase 0: *)\n",
-		m.fileName))
+		m.FileName))
 	names["kmap"] = 0
 	names["unnamed"] = 0
 	names["attacker"] = 0
@@ -33,30 +33,30 @@ func coqModel(m Model) string {
 	phase := 0
 	output = append(output, fmt.Sprintf(
 		"Definition attacker_%d := attacker_constructor %s attacker_knowledge_empty.",
-		names["attacker"], m.attacker,
+		names["attacker"], m.Attacker,
 	))
 	names["attacker"]++
 	for _, prin := range principals {
 		names[fmt.Sprintf("principal_%s", strings.ToLower(prin))] = 0
 		output, names = coqPrincipalInit(prin, output, names)
 	}
-	for _, block := range m.blocks {
-		if block.phase.number > phase {
-			output = append(output, coqQuery(m.queries, names, phase))
-			phase = block.phase.number
+	for _, block := range m.Blocks {
+		if block.Phase.Number > phase {
+			output = append(output, coqQuery(m.Queries, names, phase))
+			phase = block.Phase.Number
 			output = append(output, fmt.Sprintf(
 				"\n(* Phase %d: *)\n",
 				phase,
 			))
 		}
-		switch block.kind {
+		switch block.Kind {
 		case "principal":
 			output, names = coqPrincipalBlock(block, output, names)
 		case "message":
-			output, names, messageLog = coqMessageBlock(block.message, output, names, messageLog)
+			output, names, messageLog = coqMessageBlock(block.Message, output, names, messageLog)
 		}
 	}
-	output = append(output, coqQuery(m.queries, names, phase))
+	output = append(output, coqQuery(m.Queries, names, phase))
 	return strings.Join(output, "\n")
 }
 
@@ -76,19 +76,19 @@ func coqPrincipalInit(principal string, output []string, names map[string]int) (
 	return output, names
 }
 
-func coqPrincipalBlock(block block, output []string, names map[string]int) ([]string, map[string]int) {
-	pname := fmt.Sprintf("principal_%s", strings.ToLower(block.principal.name))
-	for i, expression := range block.principal.expressions {
+func coqPrincipalBlock(block Block, output []string, names map[string]int) ([]string, map[string]int) {
+	pname := fmt.Sprintf("principal_%s", strings.ToLower(block.Principal.Name))
+	for i, expression := range block.Principal.Expressions {
 		if i == 0 {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := get_principal_knowledgemap kmap_%d \"%s\".",
 				pname, names[pname],
-				names["kmap"]-1, block.principal.name,
+				names["kmap"]-1, block.Principal.Name,
 			))
 			names[pname]++
 		}
 		output, names = coqExpressionBlock(expression, pname, output, names)
-		if i == len(block.principal.expressions)-1 {
+		if i == len(block.Principal.Expressions)-1 {
 			output = append(output, fmt.Sprintf(
 				"Definition kmap_%d := update_principal_knowledgemap kmap_%d %s_%d.",
 				names["kmap"], (names["kmap"]-1),
@@ -106,15 +106,15 @@ func coqPrincipalBlock(block block, output []string, names map[string]int) ([]st
 }
 
 func coqMessageBlock(
-	message message, output []string, names map[string]int, messageLog map[string]string,
+	message Message, output []string, names map[string]int, messageLog map[string]string,
 ) ([]string, map[string]int, map[string]string) {
-	for _, constant := range message.constants {
+	for _, constant := range message.Constants {
 		output = append(output, fmt.Sprintf(
 			"Definition kmap_%d := add_message_knowledgemap kmap_%d (message_constructor \"%s\" \"%s\" \"%s\" %s).",
 			names["kmap"], (names["kmap"]-1),
-			message.sender, message.recipient, constant.name, coqGuard(constant.guard),
+			message.Sender, message.Recipient, constant.Name, coqGuard(constant.Guard),
 		))
-		messageLog[constant.name] = fmt.Sprintf("kmap_%d", names["kmap"])
+		messageLog[constant.Name] = fmt.Sprintf("kmap_%d", names["kmap"])
 		output = append(output, fmt.Sprintf(
 			"Definition attacker_%d := absorb_knowledgemap_attacker attacker_%d kmap_%d.",
 			names["attacker"], (names["attacker"]-1), (names["kmap"]),
@@ -151,49 +151,49 @@ func coqMessageBlock(
 }
 
 func coqExpressionBlock(
-	expression expression, principalName string, output []string, names map[string]int,
+	expression Expression, principalName string, output []string, names map[string]int,
 ) ([]string, map[string]int) {
 	pname := strings.ToLower(principalName)
-	switch expression.kind {
+	switch expression.Kind {
 	case "knows":
-		for _, constant := range expression.constants {
+		for _, constant := range expression.Constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := know_value %s_%d \"%s\" %s.",
 				principalName, names[pname],
 				principalName, names[pname]-1,
-				constant.name, expression.qualifier,
+				constant.Name, expression.Qualifier,
 			))
 			names[pname]++
 		}
 	case "generates":
-		for _, constant := range expression.constants {
+		for _, constant := range expression.Constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := generate_value %s_%d \"%s\".",
 				principalName, names[pname],
 				principalName, names[pname]-1,
-				constant.name,
+				constant.Name,
 			))
 			names[pname]++
 		}
 	case "leaks":
-		for _, constant := range expression.constants {
+		for _, constant := range expression.Constants {
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := leak_value %s_%d \"%s\".",
 				principalName, names[pname],
 				principalName, names[pname]-1,
-				constant.name,
+				constant.Name,
 			))
 			names[pname]++
 		}
 	case "assignment":
 		update := ""
-		for n, e := range expression.left {
-			update, output, names = coqValue(expression.right, principalName, n+1, output, names)
+		for n, e := range expression.Left {
+			update, output, names = coqValue(expression.Right, principalName, n+1, output, names)
 			output = append(output, fmt.Sprintf(
 				"Definition %s_%d := assign_value %s_%d %s \"%s\".",
 				principalName, names[pname],
 				principalName, names[pname]-1,
-				update, e.name,
+				update, e.Name,
 			))
 			names[pname]++
 		}
@@ -202,59 +202,59 @@ func coqExpressionBlock(
 }
 
 func coqValue(
-	v value, principalName string, n int, output []string, names map[string]int,
+	v Value, principalName string, n int, output []string, names map[string]int,
 ) (string, []string, map[string]int) {
 	update := ""
-	switch v.kind {
+	switch v.Kind {
 	case "constant":
-		return coqConstant(v.constant.name, principalName, names), output, names
+		return coqConstant(v.Constant.Name, principalName, names), output, names
 	case "primitive":
-		update = "(" + v.primitive.name
-		switch v.primitive.name {
+		update = "(" + v.Primitive.Name
+		switch v.Primitive.Name {
 		case "HKDF", "SHAMIR_SPLIT", "SPLIT":
 			update += fmt.Sprintf("%d", n)
 		case "CONCAT", "HASH":
-			update += fmt.Sprintf("%d", len(v.primitive.arguments))
+			update += fmt.Sprintf("%d", len(v.Primitive.Arguments))
 		}
 		update += " "
-		for i, argument := range v.primitive.arguments {
-			if argument.kind != "constant" {
+		for i, argument := range v.Primitive.Arguments {
+			if argument.Kind != "constant" {
 				newConstName := fmt.Sprintf("unnamed_%d", names["unnamed"])
-				exp := expression{
-					kind:      "assignment",
-					qualifier: "private",
-					constants: []constant{},
-					left: []constant{
+				exp := Expression{
+					Kind:      "assignment",
+					Qualifier: "private",
+					Constants: []Constant{},
+					Left: []Constant{
 						{
-							guard:       false,
-							fresh:       false,
-							leaked:      false,
-							name:        newConstName,
-							declaration: "assignment",
-							qualifier:   "private",
+							Guard:       false,
+							Fresh:       false,
+							Leaked:      false,
+							Name:        newConstName,
+							Declaration: "assignment",
+							Qualifier:   "private",
 						},
 					},
-					right: argument,
+					Right: argument,
 				}
 				output, names = coqExpressionBlock(exp, principalName, output, names)
 				update += coqConstant(newConstName, principalName, names)
 				names["unnamed"]++
 			} else {
-				update += coqConstant(argument.constant.name, principalName, names)
+				update += coqConstant(argument.Constant.Name, principalName, names)
 			}
-			if i == len(v.primitive.arguments)-1 {
+			if i == len(v.Primitive.Arguments)-1 {
 				update += ")"
 			} else {
 				update += " "
 			}
 		}
 	case "equation":
-		if v.equation.values[0].constant.name == "g" {
+		if v.Equation.Values[0].Constant.Name == "g" {
 			update = "(public_key "
 		} else {
-			update = "(DH " + coqConstant(v.equation.values[0].constant.name, principalName, names)
+			update = "(DH " + coqConstant(v.Equation.Values[0].Constant.Name, principalName, names)
 		}
-		update += coqConstant(v.equation.values[1].constant.name, principalName, names) + ")"
+		update += coqConstant(v.Equation.Values[1].Constant.Name, principalName, names) + ")"
 	}
 	return update, output, names
 }
@@ -274,7 +274,7 @@ func coqGuard(guard bool) string {
 	return "unguarded"
 }
 
-func coqQuery(queries []query, names map[string]int, phase int) string {
+func coqQuery(queries []Query, names map[string]int, phase int) string {
 	queryOutput := []string{}
 
 	queryOutput = append(queryOutput, fmt.Sprintf(
@@ -282,12 +282,12 @@ func coqQuery(queries []query, names map[string]int, phase int) string {
 		phase,
 	))
 	for _, q := range queries {
-		switch q.kind {
+		switch q.Kind {
 		case "confidentiality":
-			for _, constant := range q.constants {
+			for _, constant := range q.Constants {
 				queryOutput = append(queryOutput, fmt.Sprintf(
 					"Compute(query_confidentiality attacker_%d \"%s\").",
-					names["attacker"]-1, constant.name,
+					names["attacker"]-1, constant.Name,
 				))
 			}
 		// case "authentication":

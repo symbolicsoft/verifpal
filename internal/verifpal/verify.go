@@ -13,47 +13,47 @@ import (
 
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
-func Verify(filePath string) ([]verifyResult, string) {
+func Verify(filePath string) ([]VerifyResult, string) {
 	m := parserParseModel(filePath, true)
 	valKnowledgeMap, valPrincipalStates := sanity(m)
 	initiated := time.Now().Format("03:04:05 PM")
 	verifyAnalysisCountInit()
 	verifyResultsInit(m)
 	PrettyInfo(fmt.Sprintf(
-		"Verification initiated for '%s' at %s.", m.fileName, initiated,
+		"Verification initiated for '%s' at %s.", m.FileName, initiated,
 	), "verifpal", false)
-	switch m.attacker {
+	switch m.Attacker {
 	case "passive":
 		verifyPassive(valKnowledgeMap, valPrincipalStates)
 	case "active":
 		verifyActive(valKnowledgeMap, valPrincipalStates)
 	default:
-		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.attacker))
+		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.Attacker))
 	}
 	fmt.Fprint(os.Stdout, "\n\n")
 	return verifyEnd()
 }
 
 func verifyResolveQueries(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState,
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) {
 	valVerifyResults, _ := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
-		if !verifyResult.resolved {
-			queryStart(verifyResult.query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		if !verifyResult.Resolved {
+			queryStart(verifyResult.Query, valKnowledgeMap, valPrincipalState, valAttackerState)
 		}
 	}
 }
 
-func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState, stage int) {
+func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) {
 	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
 		valPrincipalState := sanityResolveAllPrincipalStateValues(state, valAttackerState)
 		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 		sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
-		for i := range valPrincipalState.assigned {
-			sanityCheckEquationGenerators(valPrincipalState.assigned[i], valPrincipalState)
+		for i := range valPrincipalState.Assigned {
+			sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)
 		}
 		scanGroup.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
@@ -61,10 +61,10 @@ func verifyStandardRun(valKnowledgeMap knowledgeMap, valPrincipalStates []princi
 	}
 }
 
-func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
 	PrettyInfo("Attacker is configured as passive.", "info", false)
 	phase := 0
-	for phase <= valKnowledgeMap.maxPhase {
+	for phase <= valKnowledgeMap.MaxPhase {
 		attackerStateInit(false)
 		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
 		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
@@ -72,12 +72,12 @@ func verifyPassive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalS
 	}
 }
 
-func verifyGetResultsCode(valVerifyResults []verifyResult) string {
+func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 	resultsCode := ""
 	for _, verifyResult := range valVerifyResults {
 		q := ""
 		r := ""
-		switch verifyResult.query.kind {
+		switch verifyResult.Query.Kind {
 		case "confidentiality":
 			q = "c"
 		case "authentication":
@@ -87,7 +87,7 @@ func verifyGetResultsCode(valVerifyResults []verifyResult) string {
 		case "unlinkability":
 			q = "u"
 		}
-		switch verifyResult.resolved {
+		switch verifyResult.Resolved {
 		case true:
 			r = "1"
 		case false:
@@ -101,14 +101,14 @@ func verifyGetResultsCode(valVerifyResults []verifyResult) string {
 	return resultsCode
 }
 
-func verifyEnd() ([]verifyResult, string) {
+func verifyEnd() ([]VerifyResult, string) {
 	valVerifyResults, fileName := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
-		if verifyResult.resolved {
+		if verifyResult.Resolved {
 			PrettyInfo(fmt.Sprintf(
 				"%s: %s",
-				prettyQuery(verifyResult.query),
-				verifyResult.summary,
+				prettyQuery(verifyResult.Query),
+				verifyResult.Summary,
 			), "result", false)
 		}
 	}

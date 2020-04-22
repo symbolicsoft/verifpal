@@ -18,7 +18,7 @@ var version = "0.12.0"
 
 func main() {
 	switch len(os.Args) {
-	case 3:
+	case 3, 4:
 		mainGanbatte(os.Args)
 	case 2:
 		mainIntro()
@@ -53,6 +53,10 @@ func mainGanbatte(args []string) {
 		verifpal.PrettyPrint(args[2])
 	case "implement":
 		verifpal.Implement()
+	case "json":
+		if len(args) == 4 {
+			verifpal.Json(args[2], args[3])
+		}
 	default:
 		mainIntro()
 		verifpal.Help(args[1])

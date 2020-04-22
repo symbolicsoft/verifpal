@@ -109,12 +109,12 @@ func PrettyInfoColor(m string, t string, analysisCount int) {
 }
 
 func prettyVerifyResultSummary(
-	mutated string, summary string, oResults []queryOptionResult,
+	mutated string, summary string, oResults []QueryOptionResult,
 ) string {
 	mutatedIntro := ""
 	optionsSummary := ""
 	for _, oResult := range oResults {
-		if !oResult.resolved {
+		if !oResult.Resolved {
 			continue
 		}
 		if len(optionsSummary) == 0 {
@@ -125,7 +125,7 @@ func prettyVerifyResultSummary(
 		}
 		optionsSummary = fmt.Sprintf(
 			"%s%s%s\n",
-			optionsSummary, "             - ", oResult.summary,
+			optionsSummary, "             - ", oResult.Summary,
 		)
 	}
 	if len(mutated) > 0 {
@@ -144,17 +144,17 @@ func prettyVerifyResultSummary(
 	)
 }
 
-func prettyConstant(c constant) string {
-	if c.guard {
-		return fmt.Sprintf("[%s]", c.name)
+func prettyConstant(c Constant) string {
+	if c.Guard {
+		return fmt.Sprintf("[%s]", c.Name)
 	}
-	if c.name == "g" {
+	if c.Name == "g" {
 		return "G"
 	}
-	return c.name
+	return c.Name
 }
 
-func prettyConstants(c []constant) string {
+func prettyConstants(c []Constant) string {
 	pretty := ""
 	for i, v := range c {
 		sep := ""
@@ -168,15 +168,15 @@ func prettyConstants(c []constant) string {
 	return pretty
 }
 
-func prettyPrimitive(p primitive) string {
-	pretty := fmt.Sprintf("%s(", p.name)
+func prettyPrimitive(p Primitive) string {
+	pretty := fmt.Sprintf("%s(", p.Name)
 	check := ""
-	if p.check {
+	if p.Check {
 		check = "?"
 	}
-	for i, arg := range p.arguments {
+	for i, arg := range p.Arguments {
 		sep := ""
-		if i != (len(p.arguments) - 1) {
+		if i != (len(p.Arguments) - 1) {
 			sep = ", "
 		}
 		pretty = fmt.Sprintf("%s%s%s",
@@ -188,9 +188,9 @@ func prettyPrimitive(p primitive) string {
 	)
 }
 
-func prettyEquation(e equation) string {
+func prettyEquation(e Equation) string {
 	pretty := ""
-	for i, c := range e.values {
+	for i, c := range e.Values {
 		if i == 0 {
 			pretty = prettyValue(c)
 		} else {
@@ -203,19 +203,19 @@ func prettyEquation(e equation) string {
 	return pretty
 }
 
-func prettyValue(a value) string {
-	switch a.kind {
+func prettyValue(a Value) string {
+	switch a.Kind {
 	case "constant":
-		return prettyConstant(a.constant)
+		return prettyConstant(a.Constant)
 	case "primitive":
-		return prettyPrimitive(a.primitive)
+		return prettyPrimitive(a.Primitive)
 	case "equation":
-		return prettyEquation(a.equation)
+		return prettyEquation(a.Equation)
 	}
 	return ""
 }
 
-func prettyValues(a []value) string {
+func prettyValues(a []Value) string {
 	pretty := ""
 	for i, v := range a {
 		sep := ", "
@@ -230,90 +230,90 @@ func prettyValues(a []value) string {
 	return pretty
 }
 
-func prettyQuery(query query) string {
+func prettyQuery(query Query) string {
 	output := ""
-	switch query.kind {
+	switch query.Kind {
 	case "confidentiality":
 		output = fmt.Sprintf(
 			"%s? %s",
-			query.kind,
-			prettyConstants(query.constants),
+			query.Kind,
+			prettyConstants(query.Constants),
 		)
 	case "authentication":
 		output = fmt.Sprintf(
 			"%s? %s -> %s: %s",
-			query.kind,
-			query.message.sender,
-			query.message.recipient,
-			prettyConstants(query.message.constants),
+			query.Kind,
+			query.Message.Sender,
+			query.Message.Recipient,
+			prettyConstants(query.Message.Constants),
 		)
 	case "freshness":
 		output = fmt.Sprintf(
 			"%s? %s",
-			query.kind,
-			prettyConstants(query.constants),
+			query.Kind,
+			prettyConstants(query.Constants),
 		)
 	case "unlinkability":
 		output = fmt.Sprintf(
 			"%s %s",
-			query.kind,
-			prettyConstants(query.constants),
+			query.Kind,
+			prettyConstants(query.Constants),
 		)
 	}
-	if len(query.options) > 0 {
+	if len(query.Options) > 0 {
 		output = fmt.Sprintf("%s[", output)
 	}
-	for _, option := range query.options {
+	for _, option := range query.Options {
 		output = fmt.Sprintf(
 			"%s\n\t\t%s[%s -> %s: %s]",
 			output,
-			option.kind,
-			option.message.sender,
-			option.message.recipient,
-			prettyConstants(option.message.constants),
+			option.Kind,
+			option.Message.Sender,
+			option.Message.Recipient,
+			prettyConstants(option.Message.Constants),
 		)
 	}
-	if len(query.options) > 0 {
+	if len(query.Options) > 0 {
 		output = fmt.Sprintf("%s\n\t]", output)
 	}
 	return output
 }
 
-func prettyPrincipal(block block) string {
+func prettyPrincipal(block Block) string {
 	output := fmt.Sprintf(
 		"principal %s[\n",
-		block.principal.name,
+		block.Principal.Name,
 	)
-	for _, expression := range block.principal.expressions {
-		switch expression.kind {
+	for _, expression := range block.Principal.Expressions {
+		switch expression.Kind {
 		case "knows":
 			output = fmt.Sprintf(
 				"%s\t%s %s %s\n",
-				expression.kind,
+				expression.Kind,
 				output,
-				expression.qualifier,
-				prettyConstants(expression.constants),
+				expression.Qualifier,
+				prettyConstants(expression.Constants),
 			)
 		case "generates":
 			output = fmt.Sprintf(
 				"%s\t%s %s\n",
-				expression.kind,
+				expression.Kind,
 				output,
-				prettyConstants(expression.constants),
+				prettyConstants(expression.Constants),
 			)
 		case "leaks":
 			output = fmt.Sprintf(
 				"%s\t%s %s\n",
-				expression.kind,
+				expression.Kind,
 				output,
-				prettyConstants(expression.constants),
+				prettyConstants(expression.Constants),
 			)
 		case "assignment":
-			right := prettyValue(expression.right)
+			right := prettyValue(expression.Right)
 			output = fmt.Sprintf(
 				"%s\t%s = %s\n",
 				output,
-				prettyConstants(expression.left),
+				prettyConstants(expression.Left),
 				right,
 			)
 		}
@@ -322,20 +322,20 @@ func prettyPrincipal(block block) string {
 	return output
 }
 
-func prettyMessage(block block) string {
+func prettyMessage(block Block) string {
 	output := fmt.Sprintf(
 		"%s -> %s: %s\n\n",
-		block.message.sender,
-		block.message.recipient,
-		prettyConstants(block.message.constants),
+		block.Message.Sender,
+		block.Message.Recipient,
+		prettyConstants(block.Message.Constants),
 	)
 	return output
 }
 
-func prettyPhase(block block) string {
+func prettyPhase(block Block) string {
 	output := fmt.Sprintf(
 		"phase[%d]\n\n",
-		block.phase.number,
+		block.Phase.Number,
 	)
 	return output
 }
@@ -346,10 +346,10 @@ func PrettyPrint(modelFile string) {
 	sanity(m)
 	output := fmt.Sprintf(
 		"attacker [\n\t%s\n]\n\n",
-		m.attacker,
+		m.Attacker,
 	)
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, block := range m.Blocks {
+		switch block.Kind {
 		case "principal":
 			output = output + prettyPrincipal(block)
 		case "message":
@@ -359,7 +359,7 @@ func PrettyPrint(modelFile string) {
 		}
 	}
 	output = fmt.Sprintf("%squeries[\n", output)
-	for _, query := range m.queries {
+	for _, query := range m.Queries {
 		output = fmt.Sprintf(
 			"%s\t%s\n", output, prettyQuery(query),
 		)

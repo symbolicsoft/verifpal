@@ -8,44 +8,44 @@ import (
 	"sync"
 )
 
-var verifyResultsShared []verifyResult
+var verifyResultsShared []VerifyResult
 var verifyResultsFileNameShared string
 var verifyResultsMutex sync.Mutex
 
 func verifyResultsInit(m Model) bool {
 	verifyResultsMutex.Lock()
-	verifyResultsShared = make([]verifyResult, len(m.queries))
-	for i, q := range m.queries {
-		verifyResultsShared[i] = verifyResult{
-			query:    q,
-			resolved: false,
-			summary:  "",
-			options:  []queryOptionResult{},
+	verifyResultsShared = make([]VerifyResult, len(m.Queries))
+	for i, q := range m.Queries {
+		verifyResultsShared[i] = VerifyResult{
+			Query:    q,
+			Resolved: false,
+			Summary:  "",
+			Options:  []QueryOptionResult{},
 		}
 	}
-	verifyResultsFileNameShared = m.fileName
+	verifyResultsFileNameShared = m.FileName
 	verifyResultsMutex.Unlock()
 	return true
 }
 
-func verifyResultsGetRead() ([]verifyResult, string) {
+func verifyResultsGetRead() ([]VerifyResult, string) {
 	verifyResultsMutex.Lock()
-	valVerifyResults := make([]verifyResult, len(verifyResultsShared))
+	valVerifyResults := make([]VerifyResult, len(verifyResultsShared))
 	copy(valVerifyResults, verifyResultsShared)
 	fileName := verifyResultsFileNameShared
 	verifyResultsMutex.Unlock()
 	return valVerifyResults, fileName
 }
 
-func verifyResultsPutWrite(result verifyResult) bool {
+func verifyResultsPutWrite(result VerifyResult) bool {
 	written := false
-	qw := prettyQuery(result.query)
+	qw := prettyQuery(result.Query)
 	verifyResultsMutex.Lock()
 	for i, verifyResult := range verifyResultsShared {
-		qv := prettyQuery(verifyResult.query)
-		if qw == qv && !verifyResultsShared[i].resolved {
-			verifyResultsShared[i].resolved = result.resolved
-			verifyResultsShared[i].summary = result.summary
+		qv := prettyQuery(verifyResult.Query)
+		if qw == qv && !verifyResultsShared[i].Resolved {
+			verifyResultsShared[i].Resolved = result.Resolved
+			verifyResultsShared[i].Summary = result.Summary
 			written = true
 		}
 	}
@@ -57,7 +57,7 @@ func verifyResultsAllResolved() bool {
 	allResolved := true
 	verifyResultsMutex.Lock()
 	for _, verifyResult := range verifyResultsShared {
-		if !verifyResult.resolved {
+		if !verifyResult.Resolved {
 			allResolved = false
 			break
 		}

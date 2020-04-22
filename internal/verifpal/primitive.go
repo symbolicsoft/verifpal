@@ -8,51 +8,51 @@ import (
 	"fmt"
 )
 
-var primitiveCoreSpecs = []primitiveCoreSpec{
+var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
-		name:    "ASSERT",
-		arity:   2,
-		output:  1,
-		hasRule: true,
-		coreRule: func(p primitive) (bool, []value) {
-			v := []value{{kind: "primitive", primitive: p}}
-			if sanityEquivalentValues(p.arguments[0], p.arguments[1], true) {
+		Name:    "ASSERT",
+		Arity:   2,
+		Output:  1,
+		HasRule: true,
+		CoreRule: func(p Primitive) (bool, []Value) {
+			v := []Value{{Kind: "primitive", Primitive: p}}
+			if sanityEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
 				return true, v
 			}
 			return false, v
 		},
-		check:      true,
-		injectable: false,
-		explosive:  false,
+		Check:      true,
+		Injectable: false,
+		Explosive:  false,
 	},
 	{
-		name:    "CONCAT",
-		arity:   -1,
-		output:  1,
-		hasRule: false,
-		coreRule: func(p primitive) (bool, []value) {
-			v := []value{{kind: "primitive", primitive: p}}
+		Name:    "CONCAT",
+		Arity:   -1,
+		Output:  1,
+		HasRule: false,
+		CoreRule: func(p Primitive) (bool, []Value) {
+			v := []Value{{Kind: "primitive", Primitive: p}}
 			return false, v
 		},
-		check:      false,
-		injectable: true,
-		explosive:  true,
+		Check:      false,
+		Injectable: true,
+		Explosive:  true,
 	},
 	{
-		name:    "SPLIT",
-		arity:   1,
-		output:  -1,
-		hasRule: true,
-		coreRule: func(p primitive) (bool, []value) {
-			v := []value{{kind: "primitive", primitive: p}}
-			switch p.arguments[0].kind {
+		Name:    "SPLIT",
+		Arity:   1,
+		Output:  -1,
+		HasRule: true,
+		CoreRule: func(p Primitive) (bool, []Value) {
+			v := []Value{{Kind: "primitive", Primitive: p}}
+			switch p.Arguments[0].Kind {
 			case "constant":
 				return false, v
 			case "primitive":
-				pp := p.arguments[0].primitive
-				switch pp.name {
+				pp := p.Arguments[0].Primitive
+				switch pp.Name {
 				case "CONCAT":
-					return true, pp.arguments
+					return true, pp.Arguments
 				}
 				return false, v
 			case "equation":
@@ -60,127 +60,127 @@ var primitiveCoreSpecs = []primitiveCoreSpec{
 			}
 			return false, v
 		},
-		check:      true,
-		injectable: false,
-		explosive:  false,
+		Check:      true,
+		Injectable: false,
+		Explosive:  false,
 	},
 }
 
-var primitiveSpecs = []primitiveSpec{
+var primitiveSpecs = []PrimitiveSpec{
 	{
-		name:   "PW_HASH",
-		arity:  -1,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "PW_HASH",
+		Arity:  -1,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: true,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: true,
 	},
 	{
-		name:   "HASH",
-		arity:  -1,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "HASH",
+		Arity:  -1,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       true,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       true,
+		PasswordHashing: false,
 	},
 	{
-		name:   "HKDF",
-		arity:  3,
-		output: -1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "HKDF",
+		Arity:  3,
+		Output: -1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       true,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       true,
+		PasswordHashing: false,
 	},
 	{
-		name:   "AEAD_ENC",
-		arity:  3,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "AEAD_ENC",
+		Arity:  3,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "AEAD_DEC",
-		arity:  3,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "AEAD_DEC",
+		Arity:  3,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			name:    "AEAD_ENC",
-			from:    1,
-			to:      1,
-			matching: map[int][]int{
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "AEAD_ENC",
+			From:    1,
+			To:      1,
+			Matching: map[int][]int{
 				0: {0},
 				2: {2},
 			},
-			filter: func(x value, i int) (value, bool) {
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -190,64 +190,64 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           true,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           true,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "ENC",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "ENC",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "DEC",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "DEC",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			name:    "ENC",
-			from:    1,
-			to:      1,
-			matching: map[int][]int{
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "ENC",
+			From:    1,
+			To:      1,
+			Matching: map[int][]int{
 				0: {0},
 			},
-			filter: func(x value, i int) (value, bool) {
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -255,87 +255,87 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "MAC",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "MAC",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "SIGN",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "SIGN",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "SIGNVERIF",
-		arity:  3,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "SIGNVERIF",
+		Arity:  3,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			name:    "SIGN",
-			from:    2,
-			to:      -1,
-			matching: map[int][]int{
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "SIGN",
+			From:    2,
+			To:      -1,
+			Matching: map[int][]int{
 				0: {0},
 				1: {1},
 			},
-			filter: func(x value, i int) (value, bool) {
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
-					switch x.kind {
+					switch x.Kind {
 					case "constant":
 						return x, false
 					case "primitive":
 						return x, false
 					case "equation":
-						switch len(x.equation.values) {
+						switch len(x.Equation.Values) {
 						case 2:
-							return x.equation.values[1], true
+							return x.Equation.Values[1], true
 						default:
 							return x, false
 						}
@@ -346,33 +346,33 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           true,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           true,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "PKE_ENC",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "PKE_ENC",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
-					switch x.kind {
+					switch x.Kind {
 					case "constant":
 						return x, false
 					case "primitive":
 						return x, false
 					case "equation":
-						if len(x.equation.values) == 2 {
-							return x.equation.values[1], true
+						if len(x.Equation.Values) == 2 {
+							return x.Equation.Values[1], true
 						}
 						return x, false
 					}
@@ -382,52 +382,52 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "PKE_DEC",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: true,
-			given:   []int{0},
-			reveal:  1,
-			filter: func(x value, i int) (value, bool) {
+		Name:   "PKE_DEC",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			name:    "PKE_ENC",
-			from:    1,
-			to:      1,
-			matching: map[int][]int{
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "PKE_ENC",
+			From:    1,
+			To:      1,
+			Matching: map[int][]int{
 				0: {0},
 			},
-			filter: func(x value, i int) (value, bool) {
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
-					switch x.kind {
+					switch x.Kind {
 					case "constant", "primitive":
-						return value{
-							kind: "equation",
-							equation: equation{
-								values: []value{constantG, x},
+						return Value{
+							Kind: "equation",
+							Equation: Equation{
+								Values: []Value{constantG, x},
 							},
 						}, true
 					case "equation":
@@ -437,61 +437,61 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "SHAMIR_SPLIT",
-		arity:  1,
-		output: 3,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "SHAMIR_SPLIT",
+		Arity:  1,
+		Output: 3,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: true,
-			given: [][]int{
+		Recompose: RecomposeRule{
+			HasRule: true,
+			Given: [][]int{
 				{0, 1},
 				{0, 2},
 				{1, 2},
 			},
-			reveal: 0,
-			filter: func(x value, i int) (value, bool) {
+			Reveal: 0,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "SHAMIR_JOIN",
-		arity:  2,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "SHAMIR_JOIN",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: true,
-			name:    "SHAMIR_SPLIT",
-			given: [][]int{
+		Rebuild: RebuildRule{
+			HasRule: true,
+			Name:    "SHAMIR_SPLIT",
+			Given: [][]int{
 				{0, 1},
 				{1, 0},
 				{0, 2},
@@ -499,70 +499,70 @@ var primitiveSpecs = []primitiveSpec{
 				{1, 2},
 				{2, 1},
 			},
-			reveal: 0,
-			filter: func(x value, i int) (value, bool) {
+			Reveal: 0,
+			Filter: func(x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
-		check:           false,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "RINGSIGN",
-		arity:  4,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "RINGSIGN",
+		Arity:  4,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: false,
+		Rewrite: RewriteRule{
+			HasRule: false,
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           false,
-		injectable:      true,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 	{
-		name:   "RINGSIGNVERIF",
-		arity:  5,
-		output: 1,
-		decompose: decomposeRule{
-			hasRule: false,
+		Name:   "RINGSIGNVERIF",
+		Arity:  5,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
 		},
-		recompose: recomposeRule{
-			hasRule: false,
+		Recompose: RecomposeRule{
+			HasRule: false,
 		},
-		rewrite: rewriteRule{
-			hasRule: true,
-			name:    "RINGSIGN",
-			from:    4,
-			to:      -1,
-			matching: map[int][]int{
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "RINGSIGN",
+			From:    4,
+			To:      -1,
+			Matching: map[int][]int{
 				0: {0, 1, 2},
 				1: {0, 1, 2},
 				2: {0, 1, 2},
 				3: {3},
 			},
-			filter: func(x value, i int) (value, bool) {
+			Filter: func(x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
-					switch x.kind {
+					switch x.Kind {
 					case "constant":
 						return x, false
 					case "primitive":
 						return x, false
 					case "equation":
-						switch len(x.equation.values) {
+						switch len(x.Equation.Values) {
 						case 2:
-							return x.equation.values[1], true
+							return x.Equation.Values[1], true
 						default:
 							return x, false
 						}
@@ -579,13 +579,13 @@ var primitiveSpecs = []primitiveSpec{
 				return x, false
 			},
 		},
-		rebuild: rebuildRule{
-			hasRule: false,
+		Rebuild: RebuildRule{
+			HasRule: false,
 		},
-		check:           true,
-		injectable:      false,
-		explosive:       false,
-		passwordHashing: false,
+		Check:           true,
+		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
 	},
 }
 
@@ -597,22 +597,22 @@ func primitiveIsCorePrim(name string) bool {
 	return false
 }
 
-func primitiveCoreGet(name string) (primitiveCoreSpec, error) {
+func primitiveCoreGet(name string) (PrimitiveCoreSpec, error) {
 	for _, v := range primitiveCoreSpecs {
-		if v.name == name {
+		if v.Name == name {
 			return v, nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive (%s)", name)
-	return primitiveCoreSpec{}, err
+	return PrimitiveCoreSpec{}, err
 }
 
-func primitiveGet(name string) (primitiveSpec, error) {
+func primitiveGet(name string) (PrimitiveSpec, error) {
 	for _, v := range primitiveSpecs {
-		if v.name == name {
+		if v.Name == name {
 			return v, nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive (%s)", name)
-	return primitiveSpec{}, err
+	return PrimitiveSpec{}, err
 }

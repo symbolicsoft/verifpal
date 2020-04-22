@@ -10,21 +10,21 @@ import (
 )
 
 func inject(
-	p primitive, rootPrimitive primitive, isRootPrimitive bool,
-	valPrincipalState principalState, valAttackerState attackerState, stage int,
-) []value {
+	p Primitive, rootPrimitive Primitive, isRootPrimitive bool,
+	valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
+) []Value {
 	if verifyResultsAllResolved() {
-		return []value{}
+		return []Value{}
 	}
-	if primitiveIsCorePrim(p.name) {
-		prim, _ := primitiveCoreGet(p.name)
-		if !prim.injectable {
-			return []value{}
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		if !prim.Injectable {
+			return []Value{}
 		}
 	} else {
-		prim, _ := primitiveGet(p.name)
-		if !prim.injectable {
-			return []value{}
+		prim, _ := primitiveGet(p.Name)
+		if !prim.Injectable {
+			return []Value{}
 		}
 	}
 	if isRootPrimitive {
@@ -36,69 +36,69 @@ func inject(
 }
 
 func injectValueRules(
-	k value, arg int, p primitive, rootPrimitive primitive, stage int,
+	k Value, arg int, p Primitive, rootPrimitive Primitive, stage int,
 ) bool {
-	if sanityEquivalentValues(k, value{
-		kind:      "primitive",
-		primitive: p,
+	if sanityEquivalentValues(k, Value{
+		Kind:      "primitive",
+		Primitive: p,
 	}, true) {
 		return false
 	}
-	if sanityEquivalentValues(k, value{
-		kind:      "primitive",
-		primitive: rootPrimitive,
+	if sanityEquivalentValues(k, Value{
+		Kind:      "primitive",
+		Primitive: rootPrimitive,
 	}, true) {
 		return false
 	}
-	switch k.kind {
+	switch k.Kind {
 	case "constant":
-		return injectConstantRules(k.constant, arg, p)
+		return injectConstantRules(k.Constant, arg, p)
 	case "primitive":
-		return injectPrimitiveRules(k.primitive, arg, p, stage)
+		return injectPrimitiveRules(k.Primitive, arg, p, stage)
 	case "equation":
-		return injectEquationRules(k.equation, arg, p)
+		return injectEquationRules(k.Equation, arg, p)
 	}
 	return true
 }
 
-func injectConstantRules(c constant, arg int, p primitive) bool {
+func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	switch {
-	case p.arguments[arg].kind != "constant":
+	case p.Arguments[arg].Kind != "constant":
 		return false
-	case strings.ToLower(c.name) == "g":
+	case strings.ToLower(c.Name) == "g":
 		return false
 	}
 	return true
 }
 
-func injectPrimitiveRules(k primitive, arg int, p primitive, stage int) bool {
+func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 	switch {
-	case p.arguments[arg].kind != "primitive":
+	case p.Arguments[arg].Kind != "primitive":
 		return false
 	case injectPrimitiveStageRestricted(k, stage):
 		return false
-	case !injectMatchSkeletons(k, injectPrimitiveSkeleton(p.arguments[arg].primitive)):
+	case !injectMatchSkeletons(k, injectPrimitiveSkeleton(p.Arguments[arg].Primitive)):
 		return false
 	}
 	return true
 }
 
-func injectEquationRules(e equation, arg int, p primitive) bool {
+func injectEquationRules(e Equation, arg int, p Primitive) bool {
 	switch {
-	case p.arguments[arg].kind != "equation":
+	case p.Arguments[arg].Kind != "equation":
 		return false
-	case len(e.values) != len(p.arguments[arg].equation.values):
+	case len(e.Values) != len(p.Arguments[arg].Equation.Values):
 		return false
 	}
-	for i := range e.values {
-		if e.values[i].kind != p.arguments[arg].equation.values[i].kind {
+	for i := range e.Values {
+		if e.Values[i].Kind != p.Arguments[arg].Equation.Values[i].Kind {
 			return false
 		}
 	}
 	return true
 }
 
-func injectPrimitiveStageRestricted(p primitive, stage int) bool {
+func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 	switch stage {
 	case 0:
 		return true
@@ -106,12 +106,12 @@ func injectPrimitiveStageRestricted(p primitive, stage int) bool {
 		return true
 	case 2:
 		explosive := false
-		if primitiveIsCorePrim(p.name) {
-			prim, _ := primitiveCoreGet(p.name)
-			explosive = prim.explosive
+		if primitiveIsCorePrim(p.Name) {
+			prim, _ := primitiveCoreGet(p.Name)
+			explosive = prim.Explosive
 		} else {
-			prim, _ := primitiveGet(p.name)
-			explosive = prim.explosive
+			prim, _ := primitiveGet(p.Name)
+			explosive = prim.Explosive
 		}
 		return explosive
 	case 3:
@@ -122,56 +122,56 @@ func injectPrimitiveStageRestricted(p primitive, stage int) bool {
 	return false
 }
 
-func injectPrimitiveSkeleton(p primitive) primitive {
-	skeleton := primitive{
-		name:      p.name,
-		arguments: make([]value, len(p.arguments)),
-		output:    p.output,
-		check:     false,
+func injectPrimitiveSkeleton(p Primitive) Primitive {
+	skeleton := Primitive{
+		Name:      p.Name,
+		Arguments: make([]Value, len(p.Arguments)),
+		Output:    p.Output,
+		Check:     false,
 	}
-	for i, a := range p.arguments {
-		switch a.kind {
+	for i, a := range p.Arguments {
+		switch a.Kind {
 		case "constant":
-			skeleton.arguments[i] = constantN
+			skeleton.Arguments[i] = constantN
 		case "primitive":
-			aa := value{
-				kind:      "primitive",
-				primitive: injectPrimitiveSkeleton(a.primitive),
+			aa := Value{
+				Kind:      "primitive",
+				Primitive: injectPrimitiveSkeleton(a.Primitive),
 			}
-			skeleton.arguments[i] = aa
+			skeleton.Arguments[i] = aa
 		case "equation":
-			skeleton.arguments[i] = constantN
+			skeleton.Arguments[i] = constantN
 		}
 	}
 	return skeleton
 }
 
-func injectMatchSkeletons(p primitive, skeleton primitive) bool {
-	if p.name != skeleton.name {
+func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
+	if p.Name != skeleton.Name {
 		return false
 	}
-	pv := value{kind: "primitive", primitive: injectPrimitiveSkeleton(p)}
-	sv := value{kind: "primitive", primitive: skeleton}
+	pv := Value{Kind: "primitive", Primitive: injectPrimitiveSkeleton(p)}
+	sv := Value{Kind: "primitive", Primitive: skeleton}
 	return sanityEquivalentValues(pv, sv, true)
 }
 
-func injectMissingSkeletons(p primitive, valAttackerState attackerState) {
+func injectMissingSkeletons(p Primitive, valAttackerState AttackerState) {
 	skeleton := injectPrimitiveSkeleton(p)
 	matchingSkeleton := false
 SkeletonSearch:
-	for _, a := range valAttackerState.known {
-		switch a.kind {
+	for _, a := range valAttackerState.Known {
+		switch a.Kind {
 		case "primitive":
-			if injectMatchSkeletons(a.primitive, skeleton) {
+			if injectMatchSkeletons(a.Primitive, skeleton) {
 				matchingSkeleton = true
 				break SkeletonSearch
 			}
 		}
 	}
 	if !matchingSkeleton {
-		known := value{
-			kind:      "primitive",
-			primitive: skeleton,
+		known := Value{
+			Kind:      "primitive",
+			Primitive: skeleton,
 		}
 		if attackerStatePutWrite(known) {
 			PrettyInfo(fmt.Sprintf(
@@ -180,37 +180,37 @@ SkeletonSearch:
 			), "analysis", true)
 		}
 	}
-	for _, a := range p.arguments {
-		switch a.kind {
+	for _, a := range p.Arguments {
+		switch a.Kind {
 		case "primitive":
-			injectMissingSkeletons(a.primitive, valAttackerState)
+			injectMissingSkeletons(a.Primitive, valAttackerState)
 		}
 	}
 }
 
 func injectPrimitive(
-	p primitive, rootPrimitive primitive,
-	valPrincipalState principalState, valAttackerState attackerState,
+	p Primitive, rootPrimitive Primitive,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 	stage int,
-) []value {
+) []Value {
 	if injectPrimitiveStageRestricted(p, stage) {
-		return []value{}
+		return []Value{}
 	}
-	kinjectants := make([][]value, len(p.arguments))
+	kinjectants := make([][]Value, len(p.Arguments))
 	injectMissingSkeletons(p, valAttackerState)
-	for arg := range p.arguments {
-		for _, k := range valAttackerState.known {
-			switch k.kind {
+	for arg := range p.Arguments {
+		for _, k := range valAttackerState.Known {
+			switch k.Kind {
 			case "constant":
 				i := sanityGetPrincipalStateIndexFromConstant(
-					valPrincipalState, k.constant,
+					valPrincipalState, k.Constant,
 				)
-				k = valPrincipalState.assigned[i]
+				k = valPrincipalState.Assigned[i]
 			}
 			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
 				continue
 			}
-			switch k.kind {
+			switch k.Kind {
 			case "constant":
 				kinjectants[arg] = append(kinjectants[arg], k)
 			case "primitive":
@@ -219,7 +219,7 @@ func injectPrimitive(
 					continue
 				}
 				kinjectants[arg] = append(kinjectants[arg], inject(
-					k.primitive, rootPrimitive, false,
+					k.Primitive, rootPrimitive, false,
 					valPrincipalState, valAttackerState, stage,
 				)...)
 			case "equation":
@@ -230,8 +230,8 @@ func injectPrimitive(
 	return injectLoopN(p, kinjectants)
 }
 
-func injectLoopN(p primitive, kinjectants [][]value) []value {
-	switch len(p.arguments) {
+func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
+	switch len(p.Arguments) {
 	case 1:
 		return injectLoop1(p, kinjectants)
 	case 2:
@@ -243,24 +243,24 @@ func injectLoopN(p primitive, kinjectants [][]value) []value {
 	case 5:
 		return injectLoop5(p, kinjectants)
 	}
-	return []value{}
+	return []Value{}
 }
 
-func injectLoop1(p primitive, kinjectants [][]value) []value {
-	injectants := []value{}
+func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
+	injectants := []Value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
-			return []value{}
+			return []Value{}
 		}
-		aa := value{
-			kind: "primitive",
-			primitive: primitive{
-				name: p.name,
-				arguments: []value{
+		aa := Value{
+			Kind: "primitive",
+			Primitive: Primitive{
+				Name: p.Name,
+				Arguments: []Value{
 					kinjectants[0][i],
 				},
-				output: p.output,
-				check:  p.check,
+				Output: p.Output,
+				Check:  p.Check,
 			},
 		}
 		if sanityEquivalentValueInValues(aa, injectants) < 0 {
@@ -270,23 +270,23 @@ func injectLoop1(p primitive, kinjectants [][]value) []value {
 	return injectants
 }
 
-func injectLoop2(p primitive, kinjectants [][]value) []value {
-	injectants := []value{}
+func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
+	injectants := []Value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
-			return []value{}
+			return []Value{}
 		}
 		for ii := range kinjectants[1] {
-			aa := value{
-				kind: "primitive",
-				primitive: primitive{
-					name: p.name,
-					arguments: []value{
+			aa := Value{
+				Kind: "primitive",
+				Primitive: Primitive{
+					Name: p.Name,
+					Arguments: []Value{
 						kinjectants[0][i],
 						kinjectants[1][ii],
 					},
-					output: p.output,
-					check:  p.check,
+					Output: p.Output,
+					Check:  p.Check,
 				},
 			}
 			if sanityEquivalentValueInValues(aa, injectants) < 0 {
@@ -297,25 +297,25 @@ func injectLoop2(p primitive, kinjectants [][]value) []value {
 	return injectants
 }
 
-func injectLoop3(p primitive, kinjectants [][]value) []value {
-	injectants := []value{}
+func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
+	injectants := []Value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
-			return []value{}
+			return []Value{}
 		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
-				aa := value{
-					kind: "primitive",
-					primitive: primitive{
-						name: p.name,
-						arguments: []value{
+				aa := Value{
+					Kind: "primitive",
+					Primitive: Primitive{
+						Name: p.Name,
+						Arguments: []Value{
 							kinjectants[0][i],
 							kinjectants[1][ii],
 							kinjectants[2][iii],
 						},
-						output: p.output,
-						check:  p.check,
+						Output: p.Output,
+						Check:  p.Check,
 					},
 				}
 				if sanityEquivalentValueInValues(aa, injectants) < 0 {
@@ -327,27 +327,27 @@ func injectLoop3(p primitive, kinjectants [][]value) []value {
 	return injectants
 }
 
-func injectLoop4(p primitive, kinjectants [][]value) []value {
-	injectants := []value{}
+func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
+	injectants := []Value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
-			return []value{}
+			return []Value{}
 		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
-					aa := value{
-						kind: "primitive",
-						primitive: primitive{
-							name: p.name,
-							arguments: []value{
+					aa := Value{
+						Kind: "primitive",
+						Primitive: Primitive{
+							Name: p.Name,
+							Arguments: []Value{
 								kinjectants[0][i],
 								kinjectants[1][ii],
 								kinjectants[2][iii],
 								kinjectants[3][iiii],
 							},
-							output: p.output,
-							check:  p.check,
+							Output: p.Output,
+							Check:  p.Check,
 						},
 					}
 					if sanityEquivalentValueInValues(aa, injectants) < 0 {
@@ -360,29 +360,29 @@ func injectLoop4(p primitive, kinjectants [][]value) []value {
 	return injectants
 }
 
-func injectLoop5(p primitive, kinjectants [][]value) []value {
-	injectants := []value{}
+func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
+	injectants := []Value{}
 	for i := range kinjectants[0] {
 		if verifyResultsAllResolved() {
-			return []value{}
+			return []Value{}
 		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
 					for iiiii := range kinjectants[4] {
-						aa := value{
-							kind: "primitive",
-							primitive: primitive{
-								name: p.name,
-								arguments: []value{
+						aa := Value{
+							Kind: "primitive",
+							Primitive: Primitive{
+								Name: p.Name,
+								Arguments: []Value{
 									kinjectants[0][i],
 									kinjectants[1][ii],
 									kinjectants[2][iii],
 									kinjectants[3][iiii],
 									kinjectants[4][iiiii],
 								},
-								output: p.output,
-								check:  p.check,
+								Output: p.Output,
+								Check:  p.Check,
 							},
 						}
 						if sanityEquivalentValueInValues(aa, injectants) < 0 {

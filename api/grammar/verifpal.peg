@@ -49,7 +49,7 @@ func parserCheckIfReserved(s string) error {
 		found = true
 	}
 	if found {
-		return fmt.Errorf("cannot use reserved keyword in name: %s", s)
+		return fmt.Errorf("cannot use reserved keyword in Name: %s", s)
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func parserParseModel(filePath string, verbose bool) Model {
 		errorCritical(err.Error())
 	}
 	m := parsed.(Model)
-	m.fileName = fileName
+	m.FileName = fileName
 	return m
 }
 }
@@ -88,14 +88,14 @@ Model <- Comment* Attacker:Attacker? Blocks:(Block+)? Queries:Queries? Comment* 
 	}
 	b := Blocks.([]interface{})
 	q := Queries.([]interface{})
-	db := make([]block, len(b))
-	dq := make([]query, len(q))
-	for i, v := range b { db[i] = v.(block) }
-	for i, v := range q { dq[i] = v.(query) }
+	db := make([]Block, len(b))
+	dq := make([]Query, len(q))
+	for i, v := range b { db[i] = v.(Block) }
+	for i, v := range q { dq[i] = v.(Query) }
 	return Model{
-		attacker: Attacker.(string),
-		blocks: db,
-		queries: dq,
+		Attacker: Attacker.(string),
+		Blocks: db,
+		Queries: dq,
 	}, nil
 }
 
@@ -113,13 +113,13 @@ Block <- Comment* Block:(Principal/Message/Phase) _ Comment* {
 
 Principal <- "principal" _ Name:PrincipalName _ '[' _ Expressions:(Expression*) _ ']' _ {
 	e  := Expressions.([]interface{})
-	de := make([]expression, len(e))
-	for i, v := range e { de[i] = v.(expression) }
-	return block{
-		kind: "principal",
-		principal: principal {
-			name: Name.(string),
-			expressions: de,
+	de := make([]Expression, len(e))
+	for i, v := range e { de[i] = v.(Expression) }
+	return Block{
+		Kind: "principal",
+		Principal: Principal{
+			Name: Name.(string),
+			Expressions: de,
 		},
 	}, nil
 }
@@ -134,21 +134,21 @@ Qualifier <- ("public"/"private"/"password") {
 }
 
 Message <- Sender:PrincipalName _ "->" _ Recipient:PrincipalName _ ':' _ Constants:MessageConstants {
-	return block{
-		kind: "message",
-		message: message{
-			sender: Sender.(string),
-			recipient: Recipient.(string),
-			constants: Constants.([]constant),
+	return Block{
+		Kind: "message",
+		Message: Message{
+			Sender: Sender.(string),
+			Recipient: Recipient.(string),
+			Constants: Constants.([]Constant),
 		},
 	}, nil
 }
 
 MessageConstants <- MessageConstants:(GuardedConstant/Constant)+ {
-	var da []constant
+	var da []Constant
 	a  := MessageConstants.([]interface{})
 	for _, v := range a {
-		c := v.(value).constant
+		c := v.(Value).Constant
 		da = append(da, c)
 	}
 	return da, nil
@@ -159,67 +159,67 @@ Expression <- Comment* Expression:(Knows/Generates/Leaks/Assignment) _ Comment* 
 }
 
 Knows <- "knows" _ Qualifier:Qualifier _ Constants:Constants {
-	return expression{
-		kind: "knows",
-		qualifier: Qualifier.(string),
-		constants: Constants.([]constant),
+	return Expression{
+		Kind: "knows",
+		Qualifier: Qualifier.(string),
+		Constants: Constants.([]Constant),
 	}, nil
 }
 
 Generates <- "generates" _ Constants:Constants {
-	return expression{
-		kind: "generates",
-		qualifier: "",
-		constants: Constants.([]constant),
+	return Expression{
+		Kind: "generates",
+		Qualifier: "",
+		Constants: Constants.([]Constant),
 	}, nil
 }
 
 Leaks <- "leaks" _ Constants:Constants {
-	return expression{
-		kind: "leaks",
-		qualifier: "",
-		constants: Constants.([]constant),
+	return Expression{
+		Kind: "leaks",
+		Qualifier: "",
+		Constants: Constants.([]Constant),
 	}, nil
 }
 
 Assignment <- Left:Constants _ '=' _ Right:Value {
-	switch Right.(value).kind {
+	switch Right.(Value).Kind {
 	case "constant":
 		err := errors.New("cannot assign value to value")
 		return nil, err
 	}
-	consts := Left.([]constant)
+	consts := Left.([]Constant)
 	for i, c := range consts {
-		switch c.name {
+		switch c.Name {
 			case "_":
-			consts[i].name = fmt.Sprintf("unnamed_%d", parserUnnamedCounter)
+			consts[i].Name = fmt.Sprintf("unnamed_%d", parserUnnamedCounter)
 			parserUnnamedCounter = parserUnnamedCounter + 1
 		}
 	}
-	return expression{
-		kind: "assignment",
-		left: consts,
-		right:  Right.(value),
+	return Expression{
+		Kind: "assignment",
+		Left: consts,
+		Right:  Right.(Value),
 	}, nil
 }
 
-Constant <- Constant:Identifier (_ ',' _)? {
-	return value{
-		kind: "constant",
-		constant: constant{
-			name: Constant.(string),
+Constant <- Const:Identifier (_ ',' _)? {
+	return Value{
+		Kind: "constant",
+		Constant: Constant{
+			Name: Const.(string),
 		},
 	}, nil
 }
 
 Constants <- Constants:Constant+ {
-	var da []constant
+	var da []Constant
 	var err error
 	a  := Constants.([]interface{})
 	for _, c := range a {
-		err = parserCheckIfReserved(c.(value).constant.name)
+		err = parserCheckIfReserved(c.(Value).Constant.Name)
 		if err != nil { break }
-		da = append(da, c.(value).constant)
+		da = append(da, c.(Value).Constant)
 	}
 	return da, err
 }
@@ -229,37 +229,37 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 	da := make([]uint8, len(a))
 	for i, v := range a { da[i] = v.([]uint8)[0] }
 	n, err := strconv.Atoi(b2s(da))
-	return block{
-		kind: "phase",
-		phase: phase{
-			number: n,
+	return Block{
+		Kind: "phase",
+		Phase: Phase{
+			Number: n,
 		},
 	}, err
 }
 
 GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
 	err := parserCheckIfReserved(Guarded.(string))
-	return value{
-		kind: "constant",
-		constant: constant{
-			name: Guarded.(string),
-			guard: true,
+	return Value{
+		Kind: "constant",
+		Constant: Constant{
+			Name: Guarded.(string),
+			Guard: true,
 		},
 	}, err
 }
 
 Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _)? {
-	args := []value{}
+	args := []Value{}
 	for _, a := range Arguments.([]interface{}) {
-		args = append(args, a.(value))
+		args = append(args, a.(Value))
 	}
-	return value{
-		kind: "primitive",
-		primitive: primitive{
-			name: Name.(string),
-			arguments: args,
-			output: 0,
-			check: Check != nil,
+	return Value{
+		Kind: "primitive",
+		Primitive: Primitive{
+			Name: Name.(string),
+			Arguments: args,
+			Output: 0,
+			Check: Check != nil,
 		},
 	}, nil
 }
@@ -269,12 +269,12 @@ PrimitiveName <- Name:Identifier {
 }
 
 Equation <- First:Constant (_ '^' _) Second:Constant {
-	return value{
-		kind: "equation",
-		equation: equation{
-			values: []value{
-				First.(value),
-				Second.(value),
+	return Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{
+				First.(Value),
+				Second.(Value),
 			},
 		},
 	}, nil
@@ -290,65 +290,65 @@ Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication/QueryFreshness
 	return Query, nil
 }
 	
-QueryConfidentiality <- "confidentiality?" _ Constant:Constant _ Options:QueryOptions? _ {
+QueryConfidentiality <- "confidentiality?" _ Const:Constant _ Options:QueryOptions? _ {
 	if Options == nil {
-		Options = []queryOption{}
+		Options = []QueryOption{}
 	}
-	return query{
-		kind: "confidentiality",
-		constants: []constant{Constant.(value).constant},
-		message: message{},
-		options: Options.([]queryOption),
+	return Query{
+		Kind: "confidentiality",
+		Constants: []Constant{Const.(Value).Constant},
+		Message: Message{},
+		Options: Options.([]QueryOption),
 	}, nil
 }
 
 QueryAuthentication <- "authentication?" _ Message:Message _ Options:QueryOptions? _ {
 	if Options == nil {
-		Options = []queryOption{}
+		Options = []QueryOption{}
 	}
-	return query{
-		kind: "authentication",
-		constants: []constant{},
-		message: (Message.(block)).message,
-		options: Options.([]queryOption),
+	return Query{
+		Kind: "authentication",
+		Constants: []Constant{},
+		Message: (Message.(Block)).Message,
+		Options: Options.([]QueryOption),
 	}, nil
 }
 
-QueryFreshness <- "freshness?" _ Constant:Constant _ Options:QueryOptions? _ {
+QueryFreshness <- "freshness?" _ Const:Constant _ Options:QueryOptions? _ {
 	if Options == nil {
-		Options = []queryOption{}
+		Options = []QueryOption{}
 	}
-	return query{
-		kind: "freshness",
-		constants: []constant{Constant.(value).constant},
-		message: message{},
-		options: Options.([]queryOption),
+	return Query{
+		Kind: "freshness",
+		Constants: []Constant{Const.(Value).Constant},
+		Message: Message{},
+		Options: Options.([]QueryOption),
 	}, nil
 }
 
 QueryUnlinkability <- "unlinkability?" _ Constants:Constants _ Options:QueryOptions? _ {
 	if Options == nil {
-		Options = []queryOption{}
+		Options = []QueryOption{}
 	}
-	return query{
-		kind: "unlinkability",
-		constants: Constants.([]constant),
-		message: message{},
-		options: Options.([]queryOption),
+	return Query{
+		Kind: "unlinkability",
+		Constants: Constants.([]Constant),
+		Message: Message{},
+		Options: Options.([]QueryOption),
 	}, nil
 }
 
 QueryOptions <- '[' _ Options:(QueryOption*) ']' _ {
 	o := Options.([]interface{})
-	do := make([]queryOption, len(o))
-	for i, v := range o { do[i] = v.(queryOption) }
+	do := make([]QueryOption, len(o))
+	for i, v := range o { do[i] = v.(QueryOption) }
 	return do, nil
 }
 
 QueryOption <- OptionName:Identifier _ '[' _ Message:Message _ ']' _ {
-	return queryOption{
-		kind: OptionName.(string),
-		message: (Message.(block)).message,
+	return QueryOption{
+		Kind: OptionName.(string),
+		Message: (Message.(Block)).Message,
 	}, nil
 }
 

@@ -8,69 +8,69 @@ import (
 	"sync"
 )
 
-var attackerStateShared attackerState
+var attackerStateShared AttackerState
 var attackerStateMutex sync.Mutex
 
 func attackerStateInit(active bool) {
 	attackerStateMutex.Lock()
-	attackerStateShared = attackerState{
-		active:       active,
-		currentPhase: 0,
-		known:        []value{},
+	attackerStateShared = AttackerState{
+		Active:       active,
+		CurrentPhase: 0,
+		Known:        []Value{},
 	}
 	attackerStateMutex.Unlock()
 }
 
-func attackerStateAbsorbPhaseValues(valPrincipalState principalState) {
+func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
 	attackerStateMutex.Lock()
-	for i, c := range valPrincipalState.constants {
-		cc := value{kind: "constant", constant: c}
-		if c.qualifier != "public" {
+	for i, c := range valPrincipalState.Constants {
+		cc := Value{Kind: "constant", Constant: c}
+		if c.Qualifier != "public" {
 			continue
 		}
-		earliestPhase, err := minIntInSlice(valPrincipalState.phase[i])
-		if err == nil && earliestPhase > attackerStateShared.currentPhase {
+		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
+		if err == nil && earliestPhase > attackerStateShared.CurrentPhase {
 			continue
 		}
-		if sanityEquivalentValueInValues(cc, attackerStateShared.known) < 0 {
-			attackerStateShared.known = append(attackerStateShared.known, cc)
+		if sanityEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 		}
 	}
-	for i, c := range valPrincipalState.constants {
-		cc := value{kind: "constant", constant: c}
-		if len(valPrincipalState.wire[i]) == 0 && !valPrincipalState.constants[i].leaked {
+	for i, c := range valPrincipalState.Constants {
+		cc := Value{Kind: "constant", Constant: c}
+		if len(valPrincipalState.Wire[i]) == 0 && !valPrincipalState.Constants[i].Leaked {
 			continue
 		}
-		if valPrincipalState.constants[i].qualifier != "private" {
+		if valPrincipalState.Constants[i].Qualifier != "private" {
 			continue
 		}
-		earliestPhase, err := minIntInSlice(valPrincipalState.phase[i])
+		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
 		if err != nil {
 			errorCritical(err.Error())
 		}
-		if earliestPhase > attackerStateShared.currentPhase {
+		if earliestPhase > attackerStateShared.CurrentPhase {
 			continue
 		}
-		if sanityEquivalentValueInValues(cc, attackerStateShared.known) < 0 {
-			attackerStateShared.known = append(attackerStateShared.known, cc)
+		if sanityEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 		}
 	}
 	attackerStateMutex.Unlock()
 }
 
-func attackerStateGetRead() attackerState {
+func attackerStateGetRead() AttackerState {
 	attackerStateMutex.Lock()
 	valAttackerState := attackerStateShared
 	attackerStateMutex.Unlock()
 	return valAttackerState
 }
 
-func attackerStatePutWrite(known value) bool {
+func attackerStatePutWrite(known Value) bool {
 	written := false
-	if sanityEquivalentValueInValues(known, attackerStateShared.known) < 0 {
+	if sanityEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
 		attackerStateMutex.Lock()
-		if sanityEquivalentValueInValues(known, attackerStateShared.known) < 0 {
-			attackerStateShared.known = append(attackerStateShared.known, known)
+		if sanityEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
+			attackerStateShared.Known = append(attackerStateShared.Known, known)
 			written = true
 		}
 		attackerStateMutex.Unlock()
@@ -78,9 +78,9 @@ func attackerStatePutWrite(known value) bool {
 	return written
 }
 
-func attackerStatePutPhaseUpdate(valPrincipalState principalState, phase int) {
+func attackerStatePutPhaseUpdate(valPrincipalState PrincipalState, phase int) {
 	attackerStateMutex.Lock()
-	attackerStateShared.currentPhase = phase
+	attackerStateShared.CurrentPhase = phase
 	attackerStateMutex.Unlock()
 	attackerStateAbsorbPhaseValues(valPrincipalState)
 }

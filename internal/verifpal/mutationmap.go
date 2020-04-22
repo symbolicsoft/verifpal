@@ -5,22 +5,22 @@
 package verifpal
 
 func mutationMapInit(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState, stage int,
-) mutationMap {
-	valMutationMap := mutationMap{
-		initialized:    true,
-		constants:      []constant{},
-		mutations:      [][]value{},
-		combination:    []value{},
-		depthIndex:     []int{},
-		outOfMutations: false,
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
+) MutationMap {
+	valMutationMap := MutationMap{
+		Initialized:    true,
+		Constants:      []Constant{},
+		Mutations:      [][]Value{},
+		Combination:    []Value{},
+		DepthIndex:     []int{},
+		OutOfMutations: false,
 	}
-	for _, v := range valAttackerState.known {
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.constant)
+	for _, v := range valAttackerState.Known {
+		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.Constant)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
-		a := valPrincipalState.beforeMutate[i]
+		a := valPrincipalState.BeforeMutate[i]
 		c, r := mutationMapReplaceValue(
 			a, v, i, stage,
 			valPrincipalState, valAttackerState,
@@ -28,86 +28,86 @@ func mutationMapInit(
 		if len(r) == 0 {
 			continue
 		}
-		valMutationMap.constants = append(valMutationMap.constants, c)
-		valMutationMap.mutations = append(valMutationMap.mutations, r)
+		valMutationMap.Constants = append(valMutationMap.Constants, c)
+		valMutationMap.Mutations = append(valMutationMap.Mutations, r)
 	}
-	valMutationMap.combination = make([]value, len(valMutationMap.constants))
-	valMutationMap.depthIndex = make([]int, len(valMutationMap.constants))
-	for iiii := range valMutationMap.constants {
-		valMutationMap.depthIndex[iiii] = 0
+	valMutationMap.Combination = make([]Value, len(valMutationMap.Constants))
+	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants))
+	for iiii := range valMutationMap.Constants {
+		valMutationMap.DepthIndex[iiii] = 0
 	}
 	return valMutationMap
 }
 
 func mutationMapSkipValue(
-	v value, i int, valKnowledgeMap knowledgeMap, valPrincipalState principalState, valAttackerState attackerState,
+	v Value, i int, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) bool {
-	switch v.kind {
+	switch v.Kind {
 	case "primitive":
 		return true
 	case "equation":
 		return true
 	}
 	switch {
-	case !strInSlice(valPrincipalState.name, valPrincipalState.wire[i]):
+	case !strInSlice(valPrincipalState.Name, valPrincipalState.Wire[i]):
 		return true
-	case valPrincipalState.guard[i]:
-		if !strInSlice(valPrincipalState.sender[i], valPrincipalState.mutatableTo[i]) {
+	case valPrincipalState.Guard[i]:
+		if !strInSlice(valPrincipalState.Sender[i], valPrincipalState.MutatableTo[i]) {
 			return true
 		}
-	case valPrincipalState.creator[i] == valPrincipalState.name:
+	case valPrincipalState.Creator[i] == valPrincipalState.Name:
 		return true
-	case !valPrincipalState.known[i]:
+	case !valPrincipalState.Known[i]:
 		return true
-	case !sanityConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.name, v.constant):
+	case !sanityConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
 		return true
-	case !intInSlice(valAttackerState.currentPhase, valPrincipalState.phase[i]):
+	case !intInSlice(valAttackerState.CurrentPhase, valPrincipalState.Phase[i]):
 		return true
 	}
 	return false
 }
 
 func mutationMapReplaceValue(
-	a value, v value, rootIndex int, stage int,
-	valPrincipalState principalState, valAttackerState attackerState,
-) (constant, []value) {
-	switch a.kind {
+	a Value, v Value, rootIndex int, stage int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+) (Constant, []Value) {
+	switch a.Kind {
 	case "constant":
-		return v.constant, mutationMapReplaceConstant(
+		return v.Constant, mutationMapReplaceConstant(
 			a, stage, valPrincipalState, valAttackerState,
 		)
 	case "primitive":
-		return v.constant, mutationMapReplacePrimitive(
+		return v.Constant, mutationMapReplacePrimitive(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
 	case "equation":
-		return v.constant, mutationMapReplaceEquation(
+		return v.Constant, mutationMapReplaceEquation(
 			a, stage, valAttackerState,
 		)
 	}
-	return v.constant, []value{}
+	return v.Constant, []Value{}
 }
 
 func mutationMapReplaceConstant(
-	a value, stage int,
-	valPrincipalState principalState, valAttackerState attackerState,
-) []value {
-	mutations := []value{}
-	if constantIsGOrNil(a.constant) {
+	a Value, stage int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+) []Value {
+	mutations := []Value{}
+	if constantIsGOrNil(a.Constant) {
 		return mutations
 	}
 	mutations = append(mutations, constantN)
 	if stage <= 3 {
 		return mutations
 	}
-	for _, v := range valAttackerState.known {
-		switch v.kind {
+	for _, v := range valAttackerState.Known {
+		switch v.Kind {
 		case "constant":
-			if constantIsGOrNil(v.constant) {
+			if constantIsGOrNil(v.Constant) {
 				continue
 			}
-			c := sanityResolveConstant(v.constant, valPrincipalState)
-			switch c.kind {
+			c := sanityResolveConstant(v.Constant, valPrincipalState)
+			switch c.Kind {
 			case "constant":
 				if sanityEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
@@ -119,12 +119,12 @@ func mutationMapReplaceConstant(
 }
 
 func mutationMapReplacePrimitive(
-	a value, rootIndex int, stage int,
-	valPrincipalState principalState, valAttackerState attackerState,
-) []value {
-	mutations := []value{}
-	for _, v := range valAttackerState.known {
-		switch v.kind {
+	a Value, rootIndex int, stage int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+) []Value {
+	mutations := []Value{}
+	for _, v := range valAttackerState.Known {
+		switch v.Kind {
 		case "primitive":
 			a = sanityResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
@@ -132,7 +132,7 @@ func mutationMapReplacePrimitive(
 			if sanityEquivalentValues(a, v, true) {
 				continue
 			}
-			if !injectMatchSkeletons(v.primitive, injectPrimitiveSkeleton(a.primitive)) {
+			if !injectMatchSkeletons(v.Primitive, injectPrimitiveSkeleton(a.Primitive)) {
 				continue
 			}
 			if sanityEquivalentValueInValues(v, mutations) < 0 {
@@ -141,7 +141,7 @@ func mutationMapReplacePrimitive(
 		}
 	}
 	injectants := inject(
-		a.primitive, a.primitive, true,
+		a.Primitive, a.Primitive, true,
 		valPrincipalState, valAttackerState, stage,
 	)
 	for _, aa := range injectants {
@@ -152,16 +152,16 @@ func mutationMapReplacePrimitive(
 	return mutations
 }
 
-func mutationMapReplaceEquation(a value, stage int, valAttackerState attackerState) []value {
-	mutations := []value{}
+func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
+	mutations := []Value{}
 	if stage <= 3 {
-		return []value{constantGN}
+		return []Value{constantGN}
 	}
-	for _, v := range valAttackerState.known {
-		switch v.kind {
+	for _, v := range valAttackerState.Known {
+		switch v.Kind {
 		case "equation":
-			switch len(v.equation.values) {
-			case len(a.equation.values):
+			switch len(v.Equation.Values) {
+			case len(a.Equation.Values):
 				if sanityEquivalentValueInValues(v, mutations) < 0 {
 					mutations = append(mutations, v)
 				}
@@ -171,29 +171,29 @@ func mutationMapReplaceEquation(a value, stage int, valAttackerState attackerSta
 	return mutations
 }
 
-func mutationMapNext(valMutationMap mutationMap) mutationMap {
-	if len(valMutationMap.combination) == 0 {
-		valMutationMap.outOfMutations = true
+func mutationMapNext(valMutationMap MutationMap) MutationMap {
+	if len(valMutationMap.Combination) == 0 {
+		valMutationMap.OutOfMutations = true
 		return valMutationMap
 	}
-	for i := 0; i < len(valMutationMap.combination); i++ {
-		valMutationMap.combination[i] = valMutationMap.mutations[i][valMutationMap.depthIndex[i]]
-		if i != len(valMutationMap.combination)-1 {
+	for i := 0; i < len(valMutationMap.Combination); i++ {
+		valMutationMap.Combination[i] = valMutationMap.Mutations[i][valMutationMap.DepthIndex[i]]
+		if i != len(valMutationMap.Combination)-1 {
 			continue
 		}
-		valMutationMap.depthIndex[i] = valMutationMap.depthIndex[i] + 1
-		valMutationMap.lastIncrement = i
+		valMutationMap.DepthIndex[i] = valMutationMap.DepthIndex[i] + 1
+		valMutationMap.LastIncrement = i
 		for ii := i; ii >= 0; ii-- {
-			if valMutationMap.depthIndex[ii] != len(valMutationMap.mutations[ii]) {
+			if valMutationMap.DepthIndex[ii] != len(valMutationMap.Mutations[ii]) {
 				continue
 			}
 			if ii <= 0 {
-				valMutationMap.outOfMutations = true
+				valMutationMap.OutOfMutations = true
 				break
 			}
-			valMutationMap.depthIndex[ii] = 0
-			valMutationMap.depthIndex[ii-1] = valMutationMap.depthIndex[ii-1] + 1
-			valMutationMap.lastIncrement = ii - 1
+			valMutationMap.DepthIndex[ii] = 0
+			valMutationMap.DepthIndex[ii-1] = valMutationMap.DepthIndex[ii-1] + 1
+			valMutationMap.LastIncrement = ii - 1
 		}
 	}
 	return valMutationMap

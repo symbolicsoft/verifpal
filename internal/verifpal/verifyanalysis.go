@@ -12,16 +12,16 @@ import (
 
 var verifyAnalysisCount uint32
 
-func verifyAnalysis(valKnowledgeMap knowledgeMap, valPrincipalState principalState, stage int, sg *sync.WaitGroup) {
+func verifyAnalysis(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, stage int, sg *sync.WaitGroup) {
 	o := 0
 	valAttackerState := attackerStateGetRead()
-	for _, a := range valAttackerState.known {
+	for _, a := range valAttackerState.Known {
 		o = o + verifyAnalysisDecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
 		o = o + verifyAnalysisConcat(a, 0)
 	}
-	for _, a := range valPrincipalState.assigned {
+	for _, a := range valPrincipalState.Assigned {
 		o = o + verifyAnalysisRecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
 	}
@@ -49,14 +49,14 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a value, valAttackerState attackerState, o int,
+	a Value, valAttackerState AttackerState, o int,
 ) int {
 	r := false
-	revealed := value{}
-	ar := []value{}
-	switch a.kind {
+	revealed := Value{}
+	ar := []Value{}
+	switch a.Kind {
 	case "primitive":
-		r, revealed, ar = possibleToDecomposePrimitive(a.primitive, valAttackerState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valAttackerState)
 	}
 	if !r {
 		return o
@@ -72,14 +72,14 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a value, valAttackerState attackerState, o int,
+	a Value, valAttackerState AttackerState, o int,
 ) int {
 	r := false
-	revealed := value{}
-	ar := []value{}
-	switch a.kind {
+	revealed := Value{}
+	ar := []Value{}
+	switch a.Kind {
 	case "primitive":
-		r, revealed, ar = possibleToRecomposePrimitive(a.primitive, valAttackerState)
+		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
 	}
 	if !r {
 		return o
@@ -95,18 +95,18 @@ func verifyAnalysisRecompose(
 }
 
 func verifyAnalysisReconstruct(
-	a value, valPrincipalState principalState, valAttackerState attackerState, o int,
+	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState, o int,
 ) int {
 	r := false
-	ar := []value{}
-	switch a.kind {
+	ar := []Value{}
+	switch a.Kind {
 	case "primitive":
-		r, ar = possibleToReconstructPrimitive(a.primitive, valAttackerState)
-		for _, aa := range a.primitive.arguments {
+		r, ar = possibleToReconstructPrimitive(a.Primitive, valAttackerState)
+		for _, aa := range a.Primitive.Arguments {
 			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.equation, valAttackerState)
+		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
 	if !r {
 		return o
@@ -121,12 +121,12 @@ func verifyAnalysisReconstruct(
 	return o
 }
 
-func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) int {
-	switch a.kind {
+func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState, o int) int {
+	switch a.Kind {
 	case "constant":
-		a = sanityResolveConstant(a.constant, valPrincipalState)
+		a = sanityResolveConstant(a.Constant, valPrincipalState)
 	}
-	for _, aa := range valPrincipalState.assigned {
+	for _, aa := range valPrincipalState.Assigned {
 		if sanityEquivalentValues(a, aa, true) {
 			if attackerStatePutWrite(aa) {
 				o = o + 1
@@ -136,7 +136,7 @@ func verifyAnalysisEquivalize(a value, valPrincipalState principalState, o int) 
 	return o
 }
 
-func verifyAnalysisPasswords(a value, valPrincipalState principalState, o int) int {
+func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) int {
 	passwords := possibleToObtainPasswords(a, valPrincipalState)
 	for _, revealed := range passwords {
 		if attackerStatePutWrite(revealed) {
@@ -150,12 +150,12 @@ func verifyAnalysisPasswords(a value, valPrincipalState principalState, o int) i
 	return o
 }
 
-func verifyAnalysisConcat(a value, o int) int {
-	switch a.kind {
+func verifyAnalysisConcat(a Value, o int) int {
+	switch a.Kind {
 	case "primitive":
-		switch a.primitive.name {
+		switch a.Primitive.Name {
 		case "CONCAT":
-			for _, revealed := range a.primitive.arguments {
+			for _, revealed := range a.Primitive.Arguments {
 				if attackerStatePutWrite(revealed) {
 					PrettyInfo(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",

@@ -6,43 +6,43 @@ package verifpal
 
 import "fmt"
 
-func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
-	valKnowledgeMap := knowledgeMap{
-		principals: principals,
-		constants:  []constant{},
-		assigned:   []value{},
-		creator:    []string{},
-		knownBy:    [][]map[string]string{},
-		phase:      [][]int{},
+func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
+	valKnowledgeMap := KnowledgeMap{
+		Principals: principals,
+		Constants:  []Constant{},
+		Assigned:   []Value{},
+		Creator:    []string{},
+		KnownBy:    [][]map[string]string{},
+		Phase:      [][]int{},
 	}
 	currentPhase := 0
-	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantG.constant)
-	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantG)
-	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
-	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-	valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{currentPhase})
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, constantG.Constant)
+	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, constantG)
+	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
+	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
 	for _, principal := range principals {
-		valKnowledgeMap.knownBy[0] = append(
-			valKnowledgeMap.knownBy[0],
+		valKnowledgeMap.KnownBy[0] = append(
+			valKnowledgeMap.KnownBy[0],
 			map[string]string{principal: principal},
 		)
 	}
-	valKnowledgeMap.constants = append(valKnowledgeMap.constants, constantN.constant)
-	valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, constantN)
-	valKnowledgeMap.creator = append(valKnowledgeMap.creator, principals[0])
-	valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-	valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{currentPhase})
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, constantN.Constant)
+	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, constantN)
+	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
+	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
 	for _, principal := range principals {
-		valKnowledgeMap.knownBy[1] = append(
-			valKnowledgeMap.knownBy[1],
+		valKnowledgeMap.KnownBy[1] = append(
+			valKnowledgeMap.KnownBy[1],
 			map[string]string{principal: principal},
 		)
 	}
-	for _, blck := range m.blocks {
-		switch blck.kind {
+	for _, blck := range m.Blocks {
+		switch blck.Kind {
 		case "principal":
-			for _, expr := range blck.principal.expressions {
-				switch expr.kind {
+			for _, expr := range blck.Principal.Expressions {
+				switch expr.Kind {
 				case "knows":
 					valKnowledgeMap = constructKnowledgeMapRenderKnows(
 						valKnowledgeMap, blck, expr,
@@ -66,60 +66,60 @@ func constructKnowledgeMap(m Model, principals []string) knowledgeMap {
 				valKnowledgeMap, blck, currentPhase,
 			)
 		case "phase":
-			currentPhase = blck.phase.number
+			currentPhase = blck.Phase.Number
 		}
 	}
-	valKnowledgeMap.maxPhase = currentPhase
+	valKnowledgeMap.MaxPhase = currentPhase
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderKnows(
-	valKnowledgeMap knowledgeMap, blck block, expr expression,
-) knowledgeMap {
-	for _, c := range expr.constants {
+	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+) KnowledgeMap {
+	for _, c := range expr.Constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
-			d1 := valKnowledgeMap.constants[i].declaration
+			d1 := valKnowledgeMap.Constants[i].Declaration
 			d2 := "knows"
-			q1 := valKnowledgeMap.constants[i].qualifier
-			q2 := expr.qualifier
-			fresh := valKnowledgeMap.constants[i].fresh
+			q1 := valKnowledgeMap.Constants[i].Qualifier
+			q2 := expr.Qualifier
+			fresh := valKnowledgeMap.Constants[i].Fresh
 			if d1 != d2 || q1 != q2 || fresh {
 				errorCritical(fmt.Sprintf(
 					"constant is known more than once and in different ways (%s)",
 					prettyConstant(c),
 				))
 			}
-			valKnowledgeMap.knownBy[i] = append(
-				valKnowledgeMap.knownBy[i],
-				map[string]string{blck.principal.name: blck.principal.name},
+			valKnowledgeMap.KnownBy[i] = append(
+				valKnowledgeMap.KnownBy[i],
+				map[string]string{blck.Principal.Name: blck.Principal.Name},
 			)
 			continue
 		}
-		c = constant{
-			name:        c.name,
-			guard:       c.guard,
-			fresh:       false,
-			leaked:      false,
-			declaration: "knows",
-			qualifier:   expr.qualifier,
+		c = Constant{
+			Name:        c.Name,
+			Guard:       c.Guard,
+			Fresh:       false,
+			Leaked:      false,
+			Declaration: "knows",
+			Qualifier:   expr.Qualifier,
 		}
-		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-			kind:     "constant",
-			constant: c,
+		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
+			Kind:     "constant",
+			Constant: c,
 		})
-		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
-		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
-		l := len(valKnowledgeMap.constants) - 1
-		if expr.qualifier != "public" {
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
+		l := len(valKnowledgeMap.Constants) - 1
+		if expr.Qualifier != "public" {
 			continue
 		}
-		for _, principal := range valKnowledgeMap.principals {
-			if principal != blck.principal.name {
-				valKnowledgeMap.knownBy[l] = append(
-					valKnowledgeMap.knownBy[l],
+		for _, principal := range valKnowledgeMap.Principals {
+			if principal != blck.Principal.Name {
+				valKnowledgeMap.KnownBy[l] = append(
+					valKnowledgeMap.KnownBy[l],
 					map[string]string{principal: principal},
 				)
 			}
@@ -129,9 +129,9 @@ func constructKnowledgeMapRenderKnows(
 }
 
 func constructKnowledgeMapRenderGenerates(
-	valKnowledgeMap knowledgeMap, blck block, expr expression,
-) knowledgeMap {
-	for _, c := range expr.constants {
+	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+) KnowledgeMap {
+	for _, c := range expr.Constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
 			errorCritical(fmt.Sprintf(
@@ -139,30 +139,30 @@ func constructKnowledgeMapRenderGenerates(
 				prettyConstant(c),
 			))
 		}
-		c = constant{
-			name:        c.name,
-			guard:       c.guard,
-			fresh:       true,
-			leaked:      false,
-			declaration: "generates",
-			qualifier:   "private",
+		c = Constant{
+			Name:        c.Name,
+			Guard:       c.Guard,
+			Fresh:       true,
+			Leaked:      false,
+			Declaration: "generates",
+			Qualifier:   "private",
 		}
-		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, value{
-			kind:     "constant",
-			constant: c,
+		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
+			Kind:     "constant",
+			Constant: c,
 		})
-		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
-		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderLeaks(
-	valKnowledgeMap knowledgeMap, blck block, expr expression, currentPhase int,
-) knowledgeMap {
-	for _, c := range expr.constants {
+	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
+) KnowledgeMap {
+	for _, c := range expr.Constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(
 			valKnowledgeMap, c,
 		)
@@ -172,9 +172,9 @@ func constructKnowledgeMapRenderLeaks(
 				prettyConstant(c),
 			))
 		}
-		known := valKnowledgeMap.creator[i] == blck.principal.name
-		for _, m := range valKnowledgeMap.knownBy[i] {
-			if _, ok := m[blck.principal.name]; ok {
+		known := valKnowledgeMap.Creator[i] == blck.Principal.Name
+		for _, m := range valKnowledgeMap.KnownBy[i] {
+			if _, ok := m[blck.Principal.Name]; ok {
 				known = true
 				break
 			}
@@ -182,24 +182,24 @@ func constructKnowledgeMapRenderLeaks(
 		if !known {
 			errorCritical(fmt.Sprintf(
 				"%s leaks a constant that they do not know (%s)",
-				blck.principal.name, prettyConstant(c),
+				blck.Principal.Name, prettyConstant(c),
 			))
 		}
-		valKnowledgeMap.constants[i].leaked = true
-		valKnowledgeMap.phase[i], _ = appendUniqueInt(
-			valKnowledgeMap.phase[i], currentPhase,
+		valKnowledgeMap.Constants[i].Leaked = true
+		valKnowledgeMap.Phase[i], _ = appendUniqueInt(
+			valKnowledgeMap.Phase[i], currentPhase,
 		)
 	}
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderAssignment(
-	valKnowledgeMap knowledgeMap, blck block, expr expression,
-) knowledgeMap {
-	constants := sanityAssignmentConstants(expr.right, []constant{}, valKnowledgeMap)
-	switch expr.right.kind {
+	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+) KnowledgeMap {
+	constants := sanityAssignmentConstants(expr.Right, []Constant{}, valKnowledgeMap)
+	switch expr.Right.Kind {
 	case "primitive":
-		sanityPrimitive(expr.right.primitive, expr.left)
+		sanityPrimitive(expr.Right.Primitive, expr.Left)
 	}
 	for _, c := range constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -209,9 +209,9 @@ func constructKnowledgeMapRenderAssignment(
 				prettyConstant(c),
 			))
 		}
-		knows := valKnowledgeMap.creator[i] == blck.principal.name
-		for _, m := range valKnowledgeMap.knownBy[i] {
-			if _, ok := m[blck.principal.name]; ok {
+		knows := valKnowledgeMap.Creator[i] == blck.Principal.Name
+		for _, m := range valKnowledgeMap.KnownBy[i] {
+			if _, ok := m[blck.Principal.Name]; ok {
 				knows = true
 				break
 			}
@@ -219,12 +219,12 @@ func constructKnowledgeMapRenderAssignment(
 		if !knows {
 			errorCritical(fmt.Sprintf(
 				"%s is using constant (%s) despite not knowing it",
-				blck.principal.name,
+				blck.Principal.Name,
 				prettyConstant(c),
 			))
 		}
 	}
-	for i, c := range expr.left {
+	for i, c := range expr.Left {
 		ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if ii >= 0 {
 			errorCritical(fmt.Sprintf(
@@ -232,56 +232,56 @@ func constructKnowledgeMapRenderAssignment(
 				prettyConstant(c),
 			))
 		}
-		c = constant{
-			name:        c.name,
-			guard:       c.guard,
-			fresh:       false,
-			leaked:      false,
-			declaration: "assignment",
-			qualifier:   "private",
+		c = Constant{
+			Name:        c.Name,
+			Guard:       c.Guard,
+			Fresh:       false,
+			Leaked:      false,
+			Declaration: "assignment",
+			Qualifier:   "private",
 		}
-		switch expr.right.kind {
+		switch expr.Right.Kind {
 		case "primitive":
-			expr.right.primitive.output = i
+			expr.Right.Primitive.Output = i
 		}
-		valKnowledgeMap.constants = append(valKnowledgeMap.constants, c)
-		valKnowledgeMap.assigned = append(valKnowledgeMap.assigned, expr.right)
-		valKnowledgeMap.creator = append(valKnowledgeMap.creator, blck.principal.name)
-		valKnowledgeMap.knownBy = append(valKnowledgeMap.knownBy, []map[string]string{{}})
-		valKnowledgeMap.phase = append(valKnowledgeMap.phase, []int{})
+		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Right)
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
 	return valKnowledgeMap
 }
 
 func constructKnowledgeMapRenderMessage(
-	valKnowledgeMap knowledgeMap, blck block, currentPhase int,
-) knowledgeMap {
-	for _, c := range blck.message.constants {
+	valKnowledgeMap KnowledgeMap, blck Block, currentPhase int,
+) KnowledgeMap {
+	for _, c := range blck.Message.Constants {
 		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
 			errorCritical(fmt.Sprintf(
 				"%s sends unknown constant to %s (%s)",
-				blck.message.sender,
-				blck.message.recipient,
+				blck.Message.Sender,
+				blck.Message.Recipient,
 				prettyConstant(c),
 			))
 		}
-		c = valKnowledgeMap.constants[i]
+		c = valKnowledgeMap.Constants[i]
 		senderKnows := false
 		recipientKnows := false
-		if valKnowledgeMap.creator[i] == blck.message.sender {
+		if valKnowledgeMap.Creator[i] == blck.Message.Sender {
 			senderKnows = true
 		}
-		for _, m := range valKnowledgeMap.knownBy[i] {
-			if _, ok := m[blck.message.sender]; ok {
+		for _, m := range valKnowledgeMap.KnownBy[i] {
+			if _, ok := m[blck.Message.Sender]; ok {
 				senderKnows = true
 			}
 		}
-		if valKnowledgeMap.creator[i] == blck.message.recipient {
+		if valKnowledgeMap.Creator[i] == blck.Message.Recipient {
 			recipientKnows = true
 		}
-		for _, m := range valKnowledgeMap.knownBy[i] {
-			if _, ok := m[blck.message.recipient]; ok {
+		for _, m := range valKnowledgeMap.KnownBy[i] {
+			if _, ok := m[blck.Message.Recipient]; ok {
 				recipientKnows = true
 			}
 		}
@@ -289,86 +289,86 @@ func constructKnowledgeMapRenderMessage(
 		case !senderKnows:
 			errorCritical(fmt.Sprintf(
 				"%s is sending constant (%s) despite not knowing it",
-				blck.message.sender,
+				blck.Message.Sender,
 				prettyConstant(c),
 			))
 		case recipientKnows:
 			errorCritical(fmt.Sprintf(
 				"%s is receiving constant (%s) despite already knowing it",
-				blck.message.recipient,
+				blck.Message.Recipient,
 				prettyConstant(c),
 			))
 		}
-		valKnowledgeMap.knownBy[i] = append(
-			valKnowledgeMap.knownBy[i], map[string]string{
-				blck.message.recipient: blck.message.sender,
+		valKnowledgeMap.KnownBy[i] = append(
+			valKnowledgeMap.KnownBy[i], map[string]string{
+				blck.Message.Recipient: blck.Message.Sender,
 			},
 		)
-		valKnowledgeMap.phase[i], _ = appendUniqueInt(
-			valKnowledgeMap.phase[i], currentPhase,
+		valKnowledgeMap.Phase[i], _ = appendUniqueInt(
+			valKnowledgeMap.Phase[i], currentPhase,
 		)
 	}
 	return valKnowledgeMap
 }
 
-func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principalState {
-	valPrincipalStates := []principalState{}
-	for _, principal := range valKnowledgeMap.principals {
-		valPrincipalState := principalState{
-			name:          principal,
-			constants:     []constant{},
-			assigned:      []value{},
-			guard:         []bool{},
-			known:         []bool{},
-			wire:          [][]string{},
-			knownBy:       [][]map[string]string{},
-			creator:       []string{},
-			sender:        []string{},
-			rewritten:     []bool{},
-			beforeRewrite: []value{},
-			mutated:       []bool{},
-			mutatableTo:   [][]string{},
-			beforeMutate:  []value{},
-			phase:         [][]int{},
-			lock:          0,
+func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []PrincipalState {
+	valPrincipalStates := []PrincipalState{}
+	for _, principal := range valKnowledgeMap.Principals {
+		valPrincipalState := PrincipalState{
+			Name:          principal,
+			Constants:     []Constant{},
+			Assigned:      []Value{},
+			Guard:         []bool{},
+			Known:         []bool{},
+			Wire:          [][]string{},
+			KnownBy:       [][]map[string]string{},
+			Creator:       []string{},
+			Sender:        []string{},
+			Rewritten:     []bool{},
+			BeforeRewrite: []Value{},
+			Mutated:       []bool{},
+			MutatableTo:   [][]string{},
+			BeforeMutate:  []Value{},
+			Phase:         [][]int{},
+			Lock:          0,
 		}
-		for i, c := range valKnowledgeMap.constants {
+		for i, c := range valKnowledgeMap.Constants {
 			wire := []string{}
 			guard := false
 			mutatableTo := []string{}
 			knows := false
-			sender := valKnowledgeMap.creator[i]
-			assigned := valKnowledgeMap.assigned[i]
-			if valKnowledgeMap.creator[i] == principal {
+			sender := valKnowledgeMap.Creator[i]
+			assigned := valKnowledgeMap.Assigned[i]
+			if valKnowledgeMap.Creator[i] == principal {
 				knows = true
 			}
-			for _, m := range valKnowledgeMap.knownBy[i] {
+			for _, m := range valKnowledgeMap.KnownBy[i] {
 				if precedingSender, ok := m[principal]; ok {
 					sender = precedingSender
 					knows = true
 					break
 				}
 			}
-			for _, blck := range m.blocks {
+			for _, blck := range m.Blocks {
 				wire, guard, mutatableTo = constructPrincipalStatesGetValueMutatability(
-					c, blck, principal, valKnowledgeMap.creator[i],
+					c, blck, principal, valKnowledgeMap.Creator[i],
 					wire, guard, mutatableTo,
 				)
 			}
-			valPrincipalState.constants = append(valPrincipalState.constants, c)
-			valPrincipalState.assigned = append(valPrincipalState.assigned, assigned)
-			valPrincipalState.guard = append(valPrincipalState.guard, guard)
-			valPrincipalState.known = append(valPrincipalState.known, knows)
-			valPrincipalState.wire = append(valPrincipalState.wire, wire)
-			valPrincipalState.knownBy = append(valPrincipalState.knownBy, valKnowledgeMap.knownBy[i])
-			valPrincipalState.creator = append(valPrincipalState.creator, valKnowledgeMap.creator[i])
-			valPrincipalState.sender = append(valPrincipalState.sender, sender)
-			valPrincipalState.rewritten = append(valPrincipalState.rewritten, false)
-			valPrincipalState.beforeRewrite = append(valPrincipalState.beforeRewrite, assigned)
-			valPrincipalState.mutated = append(valPrincipalState.mutated, false)
-			valPrincipalState.mutatableTo = append(valPrincipalState.mutatableTo, mutatableTo)
-			valPrincipalState.beforeMutate = append(valPrincipalState.beforeMutate, assigned)
-			valPrincipalState.phase = append(valPrincipalState.phase, valKnowledgeMap.phase[i])
+			valPrincipalState.Constants = append(valPrincipalState.Constants, c)
+			valPrincipalState.Assigned = append(valPrincipalState.Assigned, assigned)
+			valPrincipalState.Guard = append(valPrincipalState.Guard, guard)
+			valPrincipalState.Known = append(valPrincipalState.Known, knows)
+			valPrincipalState.Wire = append(valPrincipalState.Wire, wire)
+			valPrincipalState.KnownBy = append(valPrincipalState.KnownBy, valKnowledgeMap.KnownBy[i])
+			valPrincipalState.Creator = append(valPrincipalState.Creator, valKnowledgeMap.Creator[i])
+			valPrincipalState.Sender = append(valPrincipalState.Sender, sender)
+			valPrincipalState.Rewritten = append(valPrincipalState.Rewritten, false)
+			valPrincipalState.BeforeRewrite = append(valPrincipalState.BeforeRewrite, assigned)
+			valPrincipalState.Mutated = append(valPrincipalState.Mutated, false)
+			valPrincipalState.MutatableTo = append(valPrincipalState.MutatableTo, mutatableTo)
+			valPrincipalState.BeforeMutate = append(valPrincipalState.BeforeMutate, assigned)
+			valPrincipalState.Phase = append(valPrincipalState.Phase, valKnowledgeMap.Phase[i])
 		}
 		valPrincipalStates = append(valPrincipalStates, valPrincipalState)
 	}
@@ -376,24 +376,24 @@ func constructPrincipalStates(m Model, valKnowledgeMap knowledgeMap) []principal
 }
 
 func constructPrincipalStatesGetValueMutatability(
-	c constant, blck block, principal string, creator string,
+	c Constant, blck Block, principal string, creator string,
 	wire []string, guard bool, mutatableTo []string,
 ) ([]string, bool, []string) {
-	switch blck.kind {
+	switch blck.Kind {
 	case "message":
-		ir := (blck.message.recipient == principal)
+		ir := (blck.Message.Recipient == principal)
 		ic := (creator == principal)
-		for _, cc := range blck.message.constants {
-			if c.name != cc.name {
+		for _, cc := range blck.Message.Constants {
+			if c.Name != cc.Name {
 				continue
 			}
-			wire, _ = appendUniqueString(wire, blck.message.recipient)
+			wire, _ = appendUniqueString(wire, blck.Message.Recipient)
 			if !guard {
-				guard = cc.guard && (ir || ic)
+				guard = cc.Guard && (ir || ic)
 			}
-			if !cc.guard {
+			if !cc.Guard {
 				mutatableTo, _ = appendUniqueString(
-					mutatableTo, blck.message.recipient,
+					mutatableTo, blck.Message.Recipient,
 				)
 			}
 		}
@@ -401,46 +401,46 @@ func constructPrincipalStatesGetValueMutatability(
 	return wire, guard, mutatableTo
 }
 
-func constructPrincipalStateClone(valPrincipalState principalState, purify bool) principalState {
-	valPrincipalStateClone := principalState{
-		name:          valPrincipalState.name,
-		constants:     make([]constant, len(valPrincipalState.constants)),
-		assigned:      make([]value, len(valPrincipalState.assigned)),
-		guard:         make([]bool, len(valPrincipalState.guard)),
-		known:         make([]bool, len(valPrincipalState.known)),
-		wire:          make([][]string, len(valPrincipalState.wire)),
-		knownBy:       make([][]map[string]string, len(valPrincipalState.knownBy)),
-		creator:       make([]string, len(valPrincipalState.creator)),
-		sender:        make([]string, len(valPrincipalState.sender)),
-		rewritten:     make([]bool, len(valPrincipalState.rewritten)),
-		beforeRewrite: make([]value, len(valPrincipalState.beforeRewrite)),
-		mutated:       make([]bool, len(valPrincipalState.mutated)),
-		mutatableTo:   make([][]string, len(valPrincipalState.mutatableTo)),
-		beforeMutate:  make([]value, len(valPrincipalState.beforeMutate)),
-		phase:         make([][]int, len(valPrincipalState.phase)),
-		lock:          valPrincipalState.lock,
+func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool) PrincipalState {
+	valPrincipalStateClone := PrincipalState{
+		Name:          valPrincipalState.Name,
+		Constants:     make([]Constant, len(valPrincipalState.Constants)),
+		Assigned:      make([]Value, len(valPrincipalState.Assigned)),
+		Guard:         make([]bool, len(valPrincipalState.Guard)),
+		Known:         make([]bool, len(valPrincipalState.Known)),
+		Wire:          make([][]string, len(valPrincipalState.Wire)),
+		KnownBy:       make([][]map[string]string, len(valPrincipalState.KnownBy)),
+		Creator:       make([]string, len(valPrincipalState.Creator)),
+		Sender:        make([]string, len(valPrincipalState.Sender)),
+		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),
+		BeforeRewrite: make([]Value, len(valPrincipalState.BeforeRewrite)),
+		Mutated:       make([]bool, len(valPrincipalState.Mutated)),
+		MutatableTo:   make([][]string, len(valPrincipalState.MutatableTo)),
+		BeforeMutate:  make([]Value, len(valPrincipalState.BeforeMutate)),
+		Phase:         make([][]int, len(valPrincipalState.Phase)),
+		Lock:          valPrincipalState.Lock,
 	}
-	copy(valPrincipalStateClone.constants, valPrincipalState.constants)
+	copy(valPrincipalStateClone.Constants, valPrincipalState.Constants)
 	if purify {
-		copy(valPrincipalStateClone.assigned, valPrincipalState.beforeMutate)
+		copy(valPrincipalStateClone.Assigned, valPrincipalState.BeforeMutate)
 	} else {
-		copy(valPrincipalStateClone.assigned, valPrincipalState.assigned)
+		copy(valPrincipalStateClone.Assigned, valPrincipalState.Assigned)
 	}
-	copy(valPrincipalStateClone.guard, valPrincipalState.guard)
-	copy(valPrincipalStateClone.known, valPrincipalState.known)
-	copy(valPrincipalStateClone.wire, valPrincipalState.wire)
-	copy(valPrincipalStateClone.knownBy, valPrincipalState.knownBy)
-	copy(valPrincipalStateClone.creator, valPrincipalState.creator)
-	copy(valPrincipalStateClone.sender, valPrincipalState.sender)
-	copy(valPrincipalStateClone.rewritten, valPrincipalState.rewritten)
+	copy(valPrincipalStateClone.Guard, valPrincipalState.Guard)
+	copy(valPrincipalStateClone.Known, valPrincipalState.Known)
+	copy(valPrincipalStateClone.Wire, valPrincipalState.Wire)
+	copy(valPrincipalStateClone.KnownBy, valPrincipalState.KnownBy)
+	copy(valPrincipalStateClone.Creator, valPrincipalState.Creator)
+	copy(valPrincipalStateClone.Sender, valPrincipalState.Sender)
+	copy(valPrincipalStateClone.Rewritten, valPrincipalState.Rewritten)
 	if purify {
-		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeMutate)
+		copy(valPrincipalStateClone.BeforeRewrite, valPrincipalState.BeforeMutate)
 	} else {
-		copy(valPrincipalStateClone.beforeRewrite, valPrincipalState.beforeRewrite)
+		copy(valPrincipalStateClone.BeforeRewrite, valPrincipalState.BeforeRewrite)
 	}
-	copy(valPrincipalStateClone.mutated, valPrincipalState.mutated)
-	copy(valPrincipalStateClone.mutatableTo, valPrincipalState.mutatableTo)
-	copy(valPrincipalStateClone.beforeMutate, valPrincipalState.beforeMutate)
-	copy(valPrincipalStateClone.phase, valPrincipalState.phase)
+	copy(valPrincipalStateClone.Mutated, valPrincipalState.Mutated)
+	copy(valPrincipalStateClone.MutatableTo, valPrincipalState.MutatableTo)
+	copy(valPrincipalStateClone.BeforeMutate, valPrincipalState.BeforeMutate)
+	copy(valPrincipalStateClone.Phase, valPrincipalState.Phase)
 	return valPrincipalStateClone
 }

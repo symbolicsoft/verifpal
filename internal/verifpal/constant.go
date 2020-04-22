@@ -6,39 +6,39 @@ package verifpal
 
 import "strings"
 
-var constantG = value{
-	kind: "constant",
-	constant: constant{
-		name:        "g",
-		guard:       false,
-		fresh:       false,
-		leaked:      false,
-		declaration: "knows",
-		qualifier:   "public",
+var constantG = Value{
+	Kind: "constant",
+	Constant: Constant{
+		Name:        "g",
+		Guard:       false,
+		Fresh:       false,
+		Leaked:      false,
+		Declaration: "knows",
+		Qualifier:   "public",
 	},
 }
 
-var constantN = value{
-	kind: "constant",
-	constant: constant{
-		name:        "nil",
-		guard:       false,
-		fresh:       false,
-		leaked:      false,
-		declaration: "knows",
-		qualifier:   "public",
+var constantN = Value{
+	Kind: "constant",
+	Constant: Constant{
+		Name:        "nil",
+		Guard:       false,
+		Fresh:       false,
+		Leaked:      false,
+		Declaration: "knows",
+		Qualifier:   "public",
 	},
 }
 
-var constantGN = value{
-	kind: "equation",
-	equation: equation{
-		values: []value{constantG, constantN},
+var constantGN = Value{
+	Kind: "equation",
+	Equation: Equation{
+		Values: []Value{constantG, constantN},
 	},
 }
 
-func constantIsGOrNil(c constant) bool {
-	switch strings.ToLower(c.name) {
+func constantIsGOrNil(c Constant) bool {
+	switch strings.ToLower(c.Name) {
 	case "g", "nil":
 		return true
 	}

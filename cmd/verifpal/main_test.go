@@ -11,163 +11,163 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-type verifpalTest struct {
-	model       string
-	resultsCode string
+type VerifpalTest struct {
+	Model       string
+	ResultsCode string
 }
 
-var verifpalTests = []verifpalTest{
+var verifpalTests = []VerifpalTest{
 	{
-		model:       "challengeresponse.vp",
-		resultsCode: "a0a1",
+		Model:       "challengeresponse.vp",
+		ResultsCode: "a0a1",
 	},
 	{
-		model:       "ephemerals_sign.vp",
-		resultsCode: "c1a0",
+		Model:       "ephemerals_sign.vp",
+		ResultsCode: "c1a0",
 	},
 	{
-		model:       "hmac_ok.vp",
-		resultsCode: "c0a0",
+		Model:       "hmac_ok.vp",
+		ResultsCode: "c0a0",
 	},
 	{
-		model:       "hmac_unchecked_assert.vp",
-		resultsCode: "c0a1",
+		Model:       "hmac_unchecked_assert.vp",
+		ResultsCode: "c0a1",
 	},
 	{
-		model:       "hmac_unguarded_alice.vp",
-		resultsCode: "c0a1",
+		Model:       "hmac_unguarded_alice.vp",
+		ResultsCode: "c0a1",
 	},
 	{
-		model:       "hmac_unguarded_bob.vp",
-		resultsCode: "c1a0",
+		Model:       "hmac_unguarded_bob.vp",
+		ResultsCode: "c1a0",
 	},
 	{
-		model:       "ok.vp",
-		resultsCode: "c0a0a0",
+		Model:       "ok.vp",
+		ResultsCode: "c0a0a0",
 	},
 	{
-		model:       "pke.vp",
-		resultsCode: "c0a0",
+		Model:       "pke.vp",
+		ResultsCode: "c0a0",
 	},
 	{
-		model:       "pke_unguarded_alice.vp",
-		resultsCode: "c0a1",
+		Model:       "pke_unguarded_alice.vp",
+		ResultsCode: "c0a1",
 	},
 	{
-		model:       "pke_unguarded_bob.vp",
-		resultsCode: "c1a0",
+		Model:       "pke_unguarded_bob.vp",
+		ResultsCode: "c1a0",
 	},
 	{
-		model:       "pke_unchecked_assert.vp",
-		resultsCode: "c0a1",
+		Model:       "pke_unchecked_assert.vp",
+		ResultsCode: "c0a1",
 	},
 	{
-		model:       "pw_hash.vp",
-		resultsCode: "c1c0c0c0c1c1",
+		Model:       "pw_hash.vp",
+		ResultsCode: "c1c0c0c0c1c1",
 	},
 	{
-		model:       "shamir.vp",
-		resultsCode: "c1",
+		Model:       "shamir.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "subkey.vp",
-		resultsCode: "c1",
+		Model:       "subkey.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "subkey_hash.vp",
-		resultsCode: "c1",
+		Model:       "subkey_hash.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "subkey_hkdf.vp",
-		resultsCode: "c1",
+		Model:       "subkey_hkdf.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "trivial.vp",
-		resultsCode: "c1a1",
+		Model:       "trivial.vp",
+		ResultsCode: "c1a1",
 	},
 	{
-		model:       "unchecked_aead.vp",
-		resultsCode: "c0a0a0",
+		Model:       "unchecked_aead.vp",
+		ResultsCode: "c0a0a0",
 	},
 	{
-		model:       "unguarded_alice.vp",
-		resultsCode: "c0a1a1",
+		Model:       "unguarded_alice.vp",
+		ResultsCode: "c0a1a1",
 	},
 	{
-		model:       "unguarded_bob.vp",
-		resultsCode: "c1a0a0",
+		Model:       "unguarded_bob.vp",
+		ResultsCode: "c1a0a0",
 	},
 	{
-		model:       "signal_small_leaks.vp",
-		resultsCode: "c1a1",
+		Model:       "signal_small_leaks.vp",
+		ResultsCode: "c1a1",
 	},
 	{
-		model:       "signal_small_nophase.vp",
-		resultsCode: "c1a1",
+		Model:       "signal_small_nophase.vp",
+		ResultsCode: "c1a1",
 	},
 	{
-		model:       "signal_small_unguarded.vp",
-		resultsCode: "c1a1",
+		Model:       "signal_small_unguarded.vp",
+		ResultsCode: "c1a1",
 	},
 	{
-		model:       "auth_with_signing.vp",
-		resultsCode: "c1a1a1",
+		Model:       "auth_with_signing.vp",
+		ResultsCode: "c1a1a1",
 	},
 	{
-		model:       "auth_with_signing_false-attack.vp",
-		resultsCode: "c0a0a0",
+		Model:       "auth_with_signing_false-attack.vp",
+		ResultsCode: "c0a0a0",
 	},
 	{
-		model:       "hmac_verif.vp",
-		resultsCode: "a1a1",
+		Model:       "hmac_verif.vp",
+		ResultsCode: "a1a1",
 	},
 	{
-		model:       "sign_ciphertext.vp",
-		resultsCode: "c0a0",
+		Model:       "sign_ciphertext.vp",
+		ResultsCode: "c0a0",
 	},
 	{
-		model:       "signature.vp",
-		resultsCode: "c0a0a0",
+		Model:       "signature.vp",
+		ResultsCode: "c0a0a0",
 	},
 	{
-		model:       "precondition.vp",
-		resultsCode: "a1",
+		Model:       "precondition.vp",
+		ResultsCode: "a1",
 	},
 	{
-		model:       "e_collection_key.vp",
-		resultsCode: "c0a1",
+		Model:       "e_collection_key.vp",
+		ResultsCode: "c0a1",
 	},
 	{
-		model:       "ringsign.vp",
-		resultsCode: "a0",
+		Model:       "ringsign.vp",
+		ResultsCode: "a0",
 	},
 	{
-		model:       "ringsign_substitute.vp",
-		resultsCode: "a1a1a1a1",
+		Model:       "ringsign_substitute.vp",
+		ResultsCode: "a1a1a1a1",
 	},
 	{
-		model:       "ringsign_unguarded.vp",
-		resultsCode: "a1",
+		Model:       "ringsign_unguarded.vp",
+		ResultsCode: "a1",
 	},
 	{
-		model:       "saltchannel.vp",
-		resultsCode: "c1",
+		Model:       "saltchannel.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "concat1.vp",
-		resultsCode: "c1",
+		Model:       "concat1.vp",
+		ResultsCode: "c1",
 	},
 	{
-		model:       "concat2.vp",
-		resultsCode: "c0",
+		Model:       "concat2.vp",
+		ResultsCode: "c0",
 	},
 	{
-		model:       "freshness.vp",
-		resultsCode: "f1f0",
+		Model:       "freshness.vp",
+		ResultsCode: "f1f0",
 	},
 	{
-		model:       "unlinkability.vp",
-		resultsCode: "u1u1u0",
+		Model:       "unlinkability.vp",
+		ResultsCode: "u1u1u0",
 	},
 }
 
@@ -177,13 +177,13 @@ func TestMain(t *testing.T) {
 	}
 }
 
-func testModel(v verifpalTest, t *testing.T) {
-	fileName := fmt.Sprintf("../../examples/test/%s", v.model)
+func testModel(v VerifpalTest, t *testing.T) {
+	fileName := fmt.Sprintf("../../examples/test/%s", v.Model)
 	_, resultsCode := verifpal.Verify(fileName)
-	if resultsCode != v.resultsCode {
+	if resultsCode != v.ResultsCode {
 		t.Errorf(
 			"   FAIL • %s (%s, got %s)\n",
-			v.model, v.resultsCode, resultsCode,
+			v.Model, v.ResultsCode, resultsCode,
 		)
 	}
 }

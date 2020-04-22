@@ -9,11 +9,11 @@ import (
 	"sync"
 )
 
-func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalState) {
+func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
 	var stagesGroup sync.WaitGroup
 	PrettyInfo("Attacker is configured as active.", "info", false)
 	phase := 0
-	for phase <= valKnowledgeMap.maxPhase {
+	for phase <= valKnowledgeMap.MaxPhase {
 		PrettyInfo(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
 		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
@@ -29,17 +29,17 @@ func verifyActive(valKnowledgeMap knowledgeMap, valPrincipalStates []principalSt
 }
 
 func verifyActiveStages(
-	valKnowledgeMap knowledgeMap, valPrincipalStates []principalState,
+	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
 	stage int, sg *sync.WaitGroup,
 ) {
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
-		go func(valPrincipalState principalState, pg *sync.WaitGroup) {
+		go func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			go verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, mutationMap{initialized: false},
+				valKnowledgeMap, valPrincipalState, MutationMap{Initialized: false},
 				stage, &combinationsGroup,
 			)
 			combinationsGroup.Wait()
@@ -51,7 +51,7 @@ func verifyActiveStages(
 }
 
 func verifyActiveScan(
-	valKnowledgeMap knowledgeMap, valPrincipalState principalState, valMutationMap mutationMap,
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valMutationMap MutationMap,
 	stage int, cg *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
@@ -60,13 +60,13 @@ func verifyActiveScan(
 		return
 	}
 	valAttackerState := attackerStateGetRead()
-	attackerKnown := len(valAttackerState.known)
-	attackerKnowsMore := len(valAttackerState.known) > attackerKnown
-	goodLock := valPrincipalState.lock == 0 || valPrincipalState.lock >= attackerKnown
+	attackerKnown := len(valAttackerState.Known)
+	attackerKnowsMore := len(valAttackerState.Known) > attackerKnown
+	goodLock := valPrincipalState.Lock == 0 || valPrincipalState.Lock >= attackerKnown
 	if attackerKnowsMore {
-		valPrincipalState.lock = attackerKnown
+		valPrincipalState.Lock = attackerKnown
 	}
-	if (goodLock && !valMutationMap.initialized) || attackerKnowsMore {
+	if (goodLock && !valMutationMap.Initialized) || attackerKnowsMore {
 		cg.Add(1)
 		go func() {
 			valMutationMap = mutationMapInit(
@@ -87,7 +87,7 @@ func verifyActiveScan(
 		scanGroup.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
 	}
-	if goodLock && !valMutationMap.outOfMutations {
+	if goodLock && !valMutationMap.OutOfMutations {
 		cg.Add(1)
 		go verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
@@ -99,32 +99,32 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valPrincipalState principalState, valAttackerState attackerState,
-	valMutationMap mutationMap,
-) (principalState, bool) {
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	valMutationMap MutationMap,
+) (PrincipalState, bool) {
 	isWorthwhileMutation := false
-	for i, c := range valMutationMap.constants {
+	for i, c := range valMutationMap.Constants {
 		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-		ac := valMutationMap.combination[i]
-		ar := valPrincipalState.assigned[ii]
-		switch ar.kind {
+		ac := valMutationMap.Combination[i]
+		ar := valPrincipalState.Assigned[ii]
+		switch ar.Kind {
 		case "primitive":
-			ac.primitive.output = ar.primitive.output
-			ac.primitive.check = ar.primitive.check
+			ac.Primitive.Output = ar.Primitive.Output
+			ac.Primitive.Check = ar.Primitive.Check
 		}
-		valPrincipalState.creator[ii] = "Attacker"
-		valPrincipalState.sender[ii] = "Attacker"
-		valPrincipalState.mutated[ii] = true
-		valPrincipalState.assigned[ii] = ac
-		valPrincipalState.beforeRewrite[ii] = ac
-		if i >= valMutationMap.lastIncrement {
+		valPrincipalState.Creator[ii] = "Attacker"
+		valPrincipalState.Sender[ii] = "Attacker"
+		valPrincipalState.Mutated[ii] = true
+		valPrincipalState.Assigned[ii] = ac
+		valPrincipalState.BeforeRewrite[ii] = ac
+		if i >= valMutationMap.LastIncrement {
 			isWorthwhileMutation = true
 		}
 	}
 	valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
 	for i, p := range failedRewrites {
-		if p.check {
+		if p.Check {
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 				valPrincipalState, failedRewriteIndices[i]+1,
 			)
@@ -134,18 +134,18 @@ func verifyActiveMutatePrincipalState(
 	return valPrincipalState, isWorthwhileMutation
 }
 
-func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState principalState, f int) principalState {
-	valPrincipalState.constants = valPrincipalState.constants[:f]
-	valPrincipalState.assigned = valPrincipalState.assigned[:f]
-	valPrincipalState.guard = valPrincipalState.guard[:f]
-	valPrincipalState.known = valPrincipalState.known[:f]
-	valPrincipalState.knownBy = valPrincipalState.knownBy[:f]
-	valPrincipalState.creator = valPrincipalState.creator[:f]
-	valPrincipalState.sender = valPrincipalState.sender[:f]
-	valPrincipalState.rewritten = valPrincipalState.rewritten[:f]
-	valPrincipalState.beforeRewrite = valPrincipalState.beforeRewrite[:f]
-	valPrincipalState.mutated = valPrincipalState.mutated[:f]
-	valPrincipalState.beforeMutate = valPrincipalState.beforeMutate[:f]
-	valPrincipalState.phase = valPrincipalState.phase[:f]
+func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState PrincipalState, f int) PrincipalState {
+	valPrincipalState.Constants = valPrincipalState.Constants[:f]
+	valPrincipalState.Assigned = valPrincipalState.Assigned[:f]
+	valPrincipalState.Guard = valPrincipalState.Guard[:f]
+	valPrincipalState.Known = valPrincipalState.Known[:f]
+	valPrincipalState.KnownBy = valPrincipalState.KnownBy[:f]
+	valPrincipalState.Creator = valPrincipalState.Creator[:f]
+	valPrincipalState.Sender = valPrincipalState.Sender[:f]
+	valPrincipalState.Rewritten = valPrincipalState.Rewritten[:f]
+	valPrincipalState.BeforeRewrite = valPrincipalState.BeforeRewrite[:f]
+	valPrincipalState.Mutated = valPrincipalState.Mutated[:f]
+	valPrincipalState.BeforeMutate = valPrincipalState.BeforeMutate[:f]
+	valPrincipalState.Phase = valPrincipalState.Phase[:f]
 	return valPrincipalState
 }

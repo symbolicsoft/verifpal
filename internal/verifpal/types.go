@@ -6,201 +6,201 @@ package verifpal
 
 // Model is the main parsed representation of the Verifpal model.
 type Model struct {
-	fileName string
-	attacker string
-	blocks   []block
-	queries  []query
+	FileName string
+	Attacker string
+	Blocks   []Block
+	Queries  []Query
 }
-type verifyResult struct {
-	query    query
-	resolved bool
-	summary  string
-	options  []queryOptionResult
-}
-
-type block struct {
-	kind      string
-	principal principal
-	message   message
-	phase     phase
+type VerifyResult struct {
+	Query    Query
+	Resolved bool
+	Summary  string
+	Options  []QueryOptionResult
 }
 
-type principal struct {
-	name        string
-	expressions []expression
+type Block struct {
+	Kind      string
+	Principal Principal
+	Message   Message
+	Phase     Phase
 }
 
-type message struct {
-	sender    string
-	recipient string
-	constants []constant
+type Principal struct {
+	Name        string
+	Expressions []Expression
 }
 
-type phase struct {
-	number int
+type Message struct {
+	Sender    string
+	Recipient string
+	Constants []Constant
 }
 
-type query struct {
-	kind      string
-	constants []constant
-	message   message
-	options   []queryOption
+type Phase struct {
+	Number int
 }
 
-type queryOption struct {
-	kind    string
-	message message
+type Query struct {
+	Kind      string
+	Constants []Constant
+	Message   Message
+	Options   []QueryOption
 }
 
-type queryOptionResult struct {
-	option   queryOption
-	resolved bool
-	summary  string
+type QueryOption struct {
+	Kind    string
+	Message Message
 }
 
-type expression struct {
-	kind      string
-	qualifier string
-	constants []constant
-	left      []constant
-	right     value
+type QueryOptionResult struct {
+	Option   QueryOption
+	Resolved bool
+	Summary  string
 }
 
-type value struct {
-	kind      string
-	constant  constant
-	primitive primitive
-	equation  equation
+type Expression struct {
+	Kind      string
+	Qualifier string
+	Constants []Constant
+	Left      []Constant
+	Right     Value
 }
 
-type constant struct {
-	guard       bool
-	fresh       bool
-	leaked      bool
-	name        string
-	declaration string
-	qualifier   string
+type Value struct {
+	Kind      string
+	Constant  Constant
+	Primitive Primitive
+	Equation  Equation
 }
 
-type primitive struct {
-	name      string
-	arguments []value
-	output    int
-	check     bool
+type Constant struct {
+	Guard       bool
+	Fresh       bool
+	Leaked      bool
+	Name        string
+	Declaration string
+	Qualifier   string
 }
 
-type equation struct {
-	values []value
+type Primitive struct {
+	Name      string
+	Arguments []Value
+	Output    int
+	Check     bool
 }
 
-type knowledgeMap struct {
-	principals []string
-	constants  []constant
-	assigned   []value
-	creator    []string
-	knownBy    [][]map[string]string
-	phase      [][]int
-	maxPhase   int
+type Equation struct {
+	Values []Value
 }
 
-type decomposeRule struct {
-	hasRule bool
-	given   []int
-	reveal  int
-	filter  func(value, int) (value, bool)
+type KnowledgeMap struct {
+	Principals []string
+	Constants  []Constant
+	Assigned   []Value
+	Creator    []string
+	KnownBy    [][]map[string]string
+	Phase      [][]int
+	MaxPhase   int
 }
 
-type recomposeRule struct {
-	hasRule bool
-	given   [][]int
-	reveal  int
-	filter  func(value, int) (value, bool)
+type DecomposeRule struct {
+	HasRule bool
+	Given   []int
+	Reveal  int
+	Filter  func(Value, int) (Value, bool)
 }
 
-type rewriteRule struct {
-	hasRule  bool
-	name     string
-	from     int
-	to       int
-	matching map[int][]int
-	filter   func(value, int) (value, bool)
+type RecomposeRule struct {
+	HasRule bool
+	Given   [][]int
+	Reveal  int
+	Filter  func(Value, int) (Value, bool)
 }
 
-type rebuildRule struct {
-	hasRule bool
-	name    string
-	given   [][]int
-	reveal  int
-	filter  func(value, int) (value, bool)
+type RewriteRule struct {
+	HasRule  bool
+	Name     string
+	From     int
+	To       int
+	Matching map[int][]int
+	Filter   func(Value, int) (Value, bool)
 }
 
-type primitiveCoreSpec struct {
-	name       string
-	arity      int
-	output     int
-	hasRule    bool
-	coreRule   func(primitive) (bool, []value)
-	check      bool
-	injectable bool
-	explosive  bool
+type RebuildRule struct {
+	HasRule bool
+	Name    string
+	Given   [][]int
+	Reveal  int
+	Filter  func(Value, int) (Value, bool)
 }
 
-type primitiveSpec struct {
-	name            string
-	arity           int
-	output          int
-	decompose       decomposeRule
-	recompose       recomposeRule
-	rewrite         rewriteRule
-	rebuild         rebuildRule
-	check           bool
-	injectable      bool
-	explosive       bool
-	passwordHashing bool
+type PrimitiveCoreSpec struct {
+	Name       string
+	Arity      int
+	Output     int
+	HasRule    bool
+	CoreRule   func(Primitive) (bool, []Value)
+	Check      bool
+	Injectable bool
+	Explosive  bool
 }
 
-type principalState struct {
-	name          string
-	constants     []constant
-	assigned      []value
-	guard         []bool
-	known         []bool
-	wire          [][]string
-	knownBy       [][]map[string]string
-	creator       []string
-	sender        []string
-	rewritten     []bool
-	beforeRewrite []value
-	mutated       []bool
-	mutatableTo   [][]string
-	beforeMutate  []value
-	phase         [][]int
-	lock          int
+type PrimitiveSpec struct {
+	Name            string
+	Arity           int
+	Output          int
+	Decompose       DecomposeRule
+	Recompose       RecomposeRule
+	Rewrite         RewriteRule
+	Rebuild         RebuildRule
+	Check           bool
+	Injectable      bool
+	Explosive       bool
+	PasswordHashing bool
 }
 
-type attackerState struct {
-	active       bool
-	currentPhase int
-	known        []value
+type PrincipalState struct {
+	Name          string
+	Constants     []Constant
+	Assigned      []Value
+	Guard         []bool
+	Known         []bool
+	Wire          [][]string
+	KnownBy       [][]map[string]string
+	Creator       []string
+	Sender        []string
+	Rewritten     []bool
+	BeforeRewrite []Value
+	Mutated       []bool
+	MutatableTo   [][]string
+	BeforeMutate  []Value
+	Phase         [][]int
+	Lock          int
 }
 
-type mutationMap struct {
-	initialized    bool
-	outOfMutations bool
-	lastIncrement  int
-	constants      []constant
-	mutations      [][]value
-	combination    []value
-	depthIndex     []int
+type AttackerState struct {
+	Active       bool
+	CurrentPhase int
+	Known        []Value
 }
 
-type proverifTemplate struct {
-	parameters func(string) string
-	types      func() string
-	constants  func(knowledgeMap, string) string
-	coreprims  func() string
-	prims      func() string
-	channels   func(knowledgeMap) string
-	queries    func(knowledgeMap, []query) string
-	toplevel   func([]block) string
+type MutationMap struct {
+	Initialized    bool
+	OutOfMutations bool
+	LastIncrement  int
+	Constants      []Constant
+	Mutations      [][]Value
+	Combination    []Value
+	DepthIndex     []int
+}
+
+type ProverifTemplate struct {
+	Parameters func(string) string
+	Types      func() string
+	Constants  func(KnowledgeMap, string) string
+	CorePrims  func() string
+	Prims      func() string
+	Channels   func(KnowledgeMap) string
+	Queries    func(KnowledgeMap, []Query) string
+	TopLevel   func([]Block) string
 }

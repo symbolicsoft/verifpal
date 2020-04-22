@@ -7,46 +7,46 @@ package verifpal
 import "fmt"
 
 func possibleToDecomposePrimitive(
-	p primitive, valAttackerState attackerState,
-) (bool, value, []value) {
-	has := []value{}
-	if primitiveIsCorePrim(p.name) {
-		return false, value{}, has
+	p Primitive, valAttackerState AttackerState,
+) (bool, Value, []Value) {
+	has := []Value{}
+	if primitiveIsCorePrim(p.Name) {
+		return false, Value{}, has
 	}
-	prim, _ := primitiveGet(p.name)
-	if !prim.decompose.hasRule {
-		return false, value{}, has
+	prim, _ := primitiveGet(p.Name)
+	if !prim.Decompose.HasRule {
+		return false, Value{}, has
 	}
-	for i, g := range prim.decompose.given {
-		a := p.arguments[g]
-		a, valid := prim.decompose.filter(a, i)
-		ii := sanityEquivalentValueInValues(a, valAttackerState.known)
+	for i, g := range prim.Decompose.Given {
+		a := p.Arguments[g]
+		a, valid := prim.Decompose.Filter(a, i)
+		ii := sanityEquivalentValueInValues(a, valAttackerState.Known)
 		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
 		}
-		switch a.kind {
+		switch a.Kind {
 		case "primitive":
-			r, _ := possibleToReconstructPrimitive(a.primitive, valAttackerState)
+			r, _ := possibleToReconstructPrimitive(a.Primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDecomposePrimitive(a.primitive, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		}
 	}
-	if len(has) >= len(prim.decompose.given) {
-		revealed := p.arguments[prim.decompose.reveal]
+	if len(has) >= len(prim.Decompose.Given) {
+		revealed := p.Arguments[prim.Decompose.Reveal]
 		if attackerStatePutWrite(revealed) {
 			PrettyInfo(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
@@ -55,28 +55,28 @@ func possibleToDecomposePrimitive(
 		}
 		return true, revealed, has
 	}
-	return false, value{}, has
+	return false, Value{}, has
 }
 
 func possibleToRecomposePrimitive(
-	p primitive, valAttackerState attackerState,
-) (bool, value, []value) {
-	if primitiveIsCorePrim(p.name) {
-		return false, value{}, []value{}
+	p Primitive, valAttackerState AttackerState,
+) (bool, Value, []Value) {
+	if primitiveIsCorePrim(p.Name) {
+		return false, Value{}, []Value{}
 	}
-	prim, _ := primitiveGet(p.name)
-	if !prim.recompose.hasRule {
-		return false, value{}, []value{}
+	prim, _ := primitiveGet(p.Name)
+	if !prim.Recompose.HasRule {
+		return false, Value{}, []Value{}
 	}
-	for _, i := range prim.recompose.given {
-		ar := []value{}
+	for _, i := range prim.Recompose.Given {
+		ar := []Value{}
 		for _, ii := range i {
-			for _, v := range valAttackerState.known {
+			for _, v := range valAttackerState.Known {
 				vb := v
-				switch v.kind {
+				switch v.Kind {
 				case "primitive":
 					equivPrim, vo, _ := sanityEquivalentPrimitives(
-						v.primitive, p, false,
+						v.Primitive, p, false,
 					)
 					if !equivPrim || vo != ii {
 						continue
@@ -85,49 +85,49 @@ func possibleToRecomposePrimitive(
 					if len(ar) < len(i) {
 						continue
 					}
-					return true, p.arguments[prim.recompose.reveal], ar
+					return true, p.Arguments[prim.Recompose.Reveal], ar
 				}
 			}
 		}
 	}
-	return false, value{}, []value{}
+	return false, Value{}, []Value{}
 }
 
 func possibleToReconstructPrimitive(
-	p primitive, valAttackerState attackerState,
-) (bool, []value) {
-	has := []value{}
-	for _, a := range p.arguments {
-		if sanityEquivalentValueInValues(a, valAttackerState.known) >= 0 {
+	p Primitive, valAttackerState AttackerState,
+) (bool, []Value) {
+	has := []Value{}
+	for _, a := range p.Arguments {
+		if sanityEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
 			has = append(has, a)
 			continue
 		}
-		switch a.kind {
+		switch a.Kind {
 		case "primitive":
-			r, _, _ := possibleToDecomposePrimitive(a.primitive, valAttackerState)
+			r, _, _ := possibleToDecomposePrimitive(a.Primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.primitive, valAttackerState)
+			r, _ = possibleToReconstructPrimitive(a.Primitive, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		}
 	}
-	if len(has) < len(p.arguments) {
-		return false, []value{}
+	if len(has) < len(p.Arguments) {
+		return false, []Value{}
 	}
-	revealed := value{
-		kind:      "primitive",
-		primitive: p,
+	revealed := Value{
+		Kind:      "primitive",
+		Primitive: p,
 	}
 	if attackerStatePutWrite(revealed) {
 		PrettyInfo(fmt.Sprintf(
@@ -139,90 +139,90 @@ func possibleToReconstructPrimitive(
 }
 
 func possibleToReconstructEquation(
-	e equation, valAttackerState attackerState,
-) (bool, []value) {
-	if len(e.values) > 2 {
-		s0 := e.values[1]
-		s1 := e.values[2]
-		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.known) >= 0
-		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.known) >= 0
+	e Equation, valAttackerState AttackerState,
+) (bool, []Value) {
+	if len(e.Values) > 2 {
+		s0 := e.Values[1]
+		s1 := e.Values[2]
+		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.Known) >= 0
+		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.Known) >= 0
 		if hs0 && hs1 {
-			return true, []value{s0, s1}
+			return true, []Value{s0, s1}
 		}
-		p0 := value{
-			kind: "equation",
-			equation: equation{
-				values: []value{e.values[0], e.values[1]},
+		p0 := Value{
+			Kind: "equation",
+			Equation: Equation{
+				Values: []Value{e.Values[0], e.Values[1]},
 			},
 		}
-		p1 := value{
-			kind: "equation",
-			equation: equation{
-				values: []value{e.values[0], e.values[2]},
+		p1 := Value{
+			Kind: "equation",
+			Equation: Equation{
+				Values: []Value{e.Values[0], e.Values[2]},
 			},
 		}
-		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.known) >= 0
-		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.known) >= 0
+		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.Known) >= 0
+		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.Known) >= 0
 		if hs0 && hp1 {
-			return true, []value{s0, p1}
+			return true, []Value{s0, p1}
 		}
 		if hp0 && hs1 {
-			return true, []value{p0, s1}
+			return true, []Value{p0, s1}
 		}
 	}
-	if sanityEquivalentValueInValues(e.values[1], valAttackerState.known) >= 0 {
-		return true, []value{e.values[1]}
+	if sanityEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
+		return true, []Value{e.Values[1]}
 	}
-	return false, []value{}
+	return false, []Value{}
 }
 
 func possibleToRewrite(
-	p primitive, valPrincipalState principalState,
-) (bool, []value) {
-	v := []value{{kind: "primitive", primitive: p}}
-	if primitiveIsCorePrim(p.name) {
-		prim, _ := primitiveCoreGet(p.name)
-		if prim.hasRule {
-			return prim.coreRule(p)
+	p Primitive, valPrincipalState PrincipalState,
+) (bool, []Value) {
+	v := []Value{{Kind: "primitive", Primitive: p}}
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		if prim.HasRule {
+			return prim.CoreRule(p)
 		}
-		return !prim.check, v
+		return !prim.Check, v
 	}
-	prim, _ := primitiveGet(p.name)
-	from := p.arguments[prim.rewrite.from]
-	switch from.kind {
+	prim, _ := primitiveGet(p.Name)
+	from := p.Arguments[prim.Rewrite.From]
+	switch from.Kind {
 	case "primitive":
-		if from.primitive.name != prim.rewrite.name {
-			return !prim.check, v
+		if from.Primitive.Name != prim.Rewrite.Name {
+			return !prim.Check, v
 		}
 		if !possibleToRewritePrim(p, valPrincipalState) {
-			return !prim.check, v
+			return !prim.Check, v
 		}
-		rewrite := value{kind: "primitive", primitive: p}
-		if prim.rewrite.to > 0 {
-			rewrite = from.primitive.arguments[prim.rewrite.to]
+		rewrite := Value{Kind: "primitive", Primitive: p}
+		if prim.Rewrite.To > 0 {
+			rewrite = from.Primitive.Arguments[prim.Rewrite.To]
 		}
-		return true, []value{rewrite}
+		return true, []Value{rewrite}
 	}
-	return !prim.check, v
+	return !prim.Check, v
 }
 
 func possibleToRewritePrim(
-	p primitive, valPrincipalState principalState,
+	p Primitive, valPrincipalState PrincipalState,
 ) bool {
-	prim, _ := primitiveGet(p.name)
-	from := p.arguments[prim.rewrite.from]
-	for a, m := range prim.rewrite.matching {
+	prim, _ := primitiveGet(p.Name)
+	from := p.Arguments[prim.Rewrite.From]
+	for a, m := range prim.Rewrite.Matching {
 		valid := false
 		for _, mm := range m {
-			ax := []value{p.arguments[a], from.primitive.arguments[mm]}
-			ax[0], valid = prim.rewrite.filter(ax[0], mm)
+			ax := []Value{p.Arguments[a], from.Primitive.Arguments[mm]}
+			ax[0], valid = prim.Rewrite.Filter(ax[0], mm)
 			if !valid {
 				continue
 			}
 			for i := range ax {
-				switch ax[i].kind {
+				switch ax[i].Kind {
 				case "primitive":
-					r, v := possibleToRewrite(ax[i].primitive, valPrincipalState)
+					r, v := possibleToRewrite(ax[i].Primitive, valPrincipalState)
 					if r {
 						ax[i] = v[0]
 					}
@@ -240,23 +240,23 @@ func possibleToRewritePrim(
 	return true
 }
 
-func possibleToRebuild(p primitive) (bool, value) {
-	if primitiveIsCorePrim(p.name) {
-		return false, value{}
+func possibleToRebuild(p Primitive) (bool, Value) {
+	if primitiveIsCorePrim(p.Name) {
+		return false, Value{}
 	}
-	prim, _ := primitiveGet(p.name)
-	if !prim.rebuild.hasRule {
-		return false, value{}
+	prim, _ := primitiveGet(p.Name)
+	if !prim.Rebuild.HasRule {
+		return false, Value{}
 	}
-	for _, g := range prim.rebuild.given {
-		has := []value{}
+	for _, g := range prim.Rebuild.Given {
+		has := []Value{}
 	aLoop:
-		for _, a := range p.arguments {
-			switch a.kind {
+		for _, a := range p.Arguments {
+			switch a.Kind {
 			case "constant":
 				continue aLoop
 			case "primitive":
-				if a.primitive.name == prim.rebuild.name {
+				if a.Primitive.Name == prim.Rebuild.Name {
 					has = append(has, a)
 				}
 			case "equation":
@@ -267,45 +267,45 @@ func possibleToRebuild(p primitive) (bool, value) {
 			}
 			for ai := 1; ai < len(has); ai++ {
 				equivPrim, o1, o2 := sanityEquivalentPrimitives(
-					has[0].primitive, has[ai].primitive, false,
+					has[0].Primitive, has[ai].Primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
 					continue aLoop
 				}
 			}
-			return true, has[0].primitive.arguments[prim.rebuild.reveal]
+			return true, has[0].Primitive.Arguments[prim.Rebuild.Reveal]
 		}
 	}
-	return false, value{}
+	return false, Value{}
 }
 
 func possibleToObtainPasswords(
-	a value, valPrincipalState principalState,
-) []value {
-	passwords := []value{}
-	switch a.kind {
+	a Value, valPrincipalState PrincipalState,
+) []Value {
+	passwords := []Value{}
+	switch a.Kind {
 	case "constant":
-		aa := sanityResolveConstant(a.constant, valPrincipalState)
-		switch aa.kind {
+		aa := sanityResolveConstant(a.Constant, valPrincipalState)
+		switch aa.Kind {
 		case "constant":
-			if aa.constant.qualifier == "password" {
+			if aa.Constant.Qualifier == "password" {
 				passwords = append(passwords, aa)
 			}
 		}
 	case "primitive":
-		if !primitiveIsCorePrim(a.primitive.name) {
-			prim, _ := primitiveGet(a.primitive.name)
-			if prim.passwordHashing {
+		if !primitiveIsCorePrim(a.Primitive.Name) {
+			prim, _ := primitiveGet(a.Primitive.Name)
+			if prim.PasswordHashing {
 				return passwords
 			}
 		}
-		for _, aa := range a.primitive.arguments {
+		for _, aa := range a.Primitive.Arguments {
 			passwords = append(passwords,
 				possibleToObtainPasswords(aa, valPrincipalState)...,
 			)
 		}
 	case "equation":
-		for _, aa := range a.equation.values {
+		for _, aa := range a.Equation.Values {
 			passwords = append(passwords,
 				possibleToObtainPasswords(aa, valPrincipalState)...,
 			)

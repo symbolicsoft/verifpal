@@ -20,14 +20,14 @@ func ProVerif(modelFile string) {
 	fmt.Fprint(os.Stdout, proverifModel(m))
 }
 
-func proverifConstantPrefix(valKnowledgeMap knowledgeMap, principal string, c constant) string {
+func proverifConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant) string {
 	prefix := "const"
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-	c = valKnowledgeMap.constants[i]
-	if valKnowledgeMap.creator[i] == principal && c.declaration == "assignment" {
+	c = valKnowledgeMap.Constants[i]
+	if valKnowledgeMap.Creator[i] == principal && c.Declaration == "assignment" {
 		prefix = principal
 	} else {
-		for _, m := range valKnowledgeMap.knownBy[i] {
+		for _, m := range valKnowledgeMap.KnownBy[i] {
 			if p, ok := m[principal]; ok {
 				if p != principal {
 					prefix = p
@@ -38,16 +38,16 @@ func proverifConstantPrefix(valKnowledgeMap knowledgeMap, principal string, c co
 	return prefix
 }
 
-func proverifConstant(valKnowledgeMap knowledgeMap, principal string, c constant, valType string) string {
+func proverifConstant(valKnowledgeMap KnowledgeMap, principal string, c Constant, valType string) string {
 	prefix := proverifConstantPrefix(valKnowledgeMap, principal, c)
 	t := ""
 	if len(valType) > 0 {
 		t = fmt.Sprintf(":%s", valType)
 	}
-	return fmt.Sprintf("%s_%s%s", prefix, c.name, t)
+	return fmt.Sprintf("%s_%s%s", prefix, c.Name, t)
 }
 
-func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []constant, valType string) string {
+func proverifConstants(valKnowledgeMap KnowledgeMap, principal string, c []Constant, valType string) string {
 	consts := ""
 	for i, v := range c {
 		sep := ""
@@ -61,24 +61,24 @@ func proverifConstants(valKnowledgeMap knowledgeMap, principal string, c []const
 	return consts
 }
 
-func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primitive, check bool) string {
-	pname := p.name
+func proverifPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, check bool) string {
+	pname := p.Name
 	checksuffix := ""
 	switch check {
 	case true:
-		switch p.name {
+		switch p.Name {
 		case "AEAD_DEC":
 			checksuffix = "_check"
 		}
 	}
-	switch p.name {
+	switch p.Name {
 	case "HASH", "CONCAT", "SPLIT":
-		pname = fmt.Sprintf("%s%d", p.name, len(p.arguments))
+		pname = fmt.Sprintf("%s%d", p.Name, len(p.Arguments))
 	}
 	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
-	for i, arg := range p.arguments {
+	for i, arg := range p.Arguments {
 		sep := ""
-		if i != (len(p.arguments) - 1) {
+		if i != (len(p.Arguments) - 1) {
 			sep = ", "
 		}
 		prim = fmt.Sprintf("%s%s%s",
@@ -89,53 +89,53 @@ func proverifPrimitive(valKnowledgeMap knowledgeMap, principal string, p primiti
 	return prim
 }
 
-func proverifEquation(valKnowledgeMap knowledgeMap, principal string, e equation) string {
+func proverifEquation(valKnowledgeMap KnowledgeMap, principal string, e Equation) string {
 	eq := ""
-	switch len(e.values) {
+	switch len(e.Values) {
 	case 1:
 		eq = fmt.Sprintf(
 			"G(%s)",
-			proverifValue(valKnowledgeMap, principal, e.values[0]),
+			proverifValue(valKnowledgeMap, principal, e.Values[0]),
 		)
 	case 2:
 		eq = fmt.Sprintf(
 			"exp(%s, %s)",
-			proverifValue(valKnowledgeMap, principal, e.values[1]),
-			proverifValue(valKnowledgeMap, principal, e.values[0]),
+			proverifValue(valKnowledgeMap, principal, e.Values[1]),
+			proverifValue(valKnowledgeMap, principal, e.Values[0]),
 		)
 	}
 	return eq
 }
 
-func proverifValue(valKnowledgeMap knowledgeMap, principal string, a value) string {
-	switch a.kind {
+func proverifValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
+	switch a.Kind {
 	case "constant":
-		return proverifConstant(valKnowledgeMap, principal, a.constant, "")
+		return proverifConstant(valKnowledgeMap, principal, a.Constant, "")
 	case "primitive":
-		return proverifPrimitive(valKnowledgeMap, principal, a.primitive, false)
+		return proverifPrimitive(valKnowledgeMap, principal, a.Primitive, false)
 	case "equation":
-		return proverifEquation(valKnowledgeMap, principal, a.equation)
+		return proverifEquation(valKnowledgeMap, principal, a.Equation)
 	}
 	return ""
 }
 
-func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
+func proverifQuery(valKnowledgeMap KnowledgeMap, query Query) string {
 	output := ""
-	switch query.kind {
+	switch query.Kind {
 	case "confidentiality":
 		output = fmt.Sprintf(
 			"query attacker(const_%s).",
-			query.constants[0].name,
+			query.Constants[0].Name,
 		)
 	case "authentication":
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0,
-				proverifConstant(valKnowledgeMap, "attacker", query.message.constants[0], ""),
+				query.Message.Sender, query.Message.Recipient, 0,
+				proverifConstant(valKnowledgeMap, "attacker", query.Message.Constants[0], ""),
 			),
 			fmt.Sprintf("event(SendMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.message.sender, query.message.recipient, 0,
-				proverifConstant(valKnowledgeMap, "attacker", query.message.constants[0], ""),
+				query.Message.Sender, query.Message.Recipient, 0,
+				proverifConstant(valKnowledgeMap, "attacker", query.Message.Constants[0], ""),
 			),
 		)
 	case "freshness":
@@ -143,46 +143,46 @@ func proverifQuery(valKnowledgeMap knowledgeMap, query query) string {
 	case "unlinkability":
 		errorCritical("unlinkability queries are not yet supported in ProVerif model generation")
 	}
-	if len(query.options) > 0 {
+	if len(query.Options) > 0 {
 		errorCritical("query options are not yet supported in ProVerif model generation")
 	}
 	return output
 }
 
 func proverifPrincipal(
-	valKnowledgeMap knowledgeMap, block block,
+	valKnowledgeMap KnowledgeMap, block Block,
 	procs string, consts string, pc int, cc int,
 ) (string, string, int, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_%d() =\n",
-		procs, block.principal.name, pc,
+		procs, block.Principal.Name, pc,
 	)
-	for _, expression := range block.principal.expressions {
-		switch expression.kind {
+	for _, expression := range block.Principal.Expressions {
+		switch expression.Kind {
 		case "leaks":
-			for _, c := range expression.constants {
+			for _, c := range expression.Constants {
 				procs = fmt.Sprintf(
 					"%s\tout(pub, (%s));\n",
-					procs, proverifConstant(valKnowledgeMap, block.principal.name, c, ""),
+					procs, proverifConstant(valKnowledgeMap, block.Principal.Name, c, ""),
 				)
 			}
 		case "assignment":
-			c := sanityGetConstantsFromValue(expression.right)
+			c := sanityGetConstantsFromValue(expression.Right)
 			get := ""
 			for _, cc := range c {
-				prefix := proverifConstantPrefix(valKnowledgeMap, block.principal.name, cc)
+				prefix := proverifConstantPrefix(valKnowledgeMap, block.Principal.Name, cc)
 				if prefix == "const" {
 					continue
 				}
-				if strings.HasPrefix(cc.name, "unnamed_") {
+				if strings.HasPrefix(cc.Name, "unnamed_") {
 					continue
 				}
 				get = fmt.Sprintf(
 					"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
 					get,
-					prefix, block.principal.name,
-					cc.name,
-					proverifConstant(valKnowledgeMap, block.principal.name, cc, ""),
+					prefix, block.Principal.Name,
+					cc.Name,
+					proverifConstant(valKnowledgeMap, block.Principal.Name, cc, ""),
 				)
 			}
 			if len(get) > 0 {
@@ -192,36 +192,36 @@ func proverifPrincipal(
 				)
 			}
 			valType := "bitstring"
-			switch expression.right.kind {
+			switch expression.Right.Kind {
 			case "primitive":
-				switch expression.right.primitive.name {
+				switch expression.Right.Primitive.Name {
 				case "SIGNVERIF", "RINGSIGNVERIF":
 					valType = "bool"
 				}
-				switch expression.right.primitive.check {
+				switch expression.Right.Primitive.Check {
 				case true:
 					procs = fmt.Sprintf("%s\tif %s = true then\n",
 						procs,
-						proverifPrimitive(valKnowledgeMap, block.principal.name, expression.right.primitive, true),
+						proverifPrimitive(valKnowledgeMap, block.Principal.Name, expression.Right.Primitive, true),
 					)
 				}
 			}
 			procs = fmt.Sprintf(
 				"%s\tlet (%s) = %s in\n",
 				procs,
-				proverifConstants(valKnowledgeMap, block.principal.name, expression.left, valType),
-				proverifValue(valKnowledgeMap, block.principal.name, expression.right),
+				proverifConstants(valKnowledgeMap, block.Principal.Name, expression.Left, valType),
+				proverifValue(valKnowledgeMap, block.Principal.Name, expression.Right),
 			)
-			for _, l := range expression.left {
-				if strings.HasPrefix(l.name, "unnamed_") {
+			for _, l := range expression.Left {
+				if strings.HasPrefix(l.Name, "unnamed_") {
 					continue
 				}
 				procs = fmt.Sprintf(
 					"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 					procs,
-					block.principal.name, block.principal.name,
-					l.name,
-					proverifConstant(valKnowledgeMap, block.principal.name, l, ""),
+					block.Principal.Name, block.Principal.Name,
+					l.Name,
+					proverifConstant(valKnowledgeMap, block.Principal.Name, l, ""),
 				)
 			}
 		}
@@ -232,45 +232,45 @@ func proverifPrincipal(
 }
 
 func proverifMessage(
-	valKnowledgeMap knowledgeMap, block block,
+	valKnowledgeMap KnowledgeMap, block Block,
 	procs string, pc int,
 ) (string, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_to_%s_%d() =\n",
-		procs, block.message.sender, block.message.recipient, pc,
+		procs, block.Message.Sender, block.Message.Recipient, pc,
 	)
-	for _, c := range block.message.constants {
+	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
-			procs, block.message.sender, block.message.sender,
-			c.name,
-			proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+			procs, block.Message.Sender, block.Message.Sender,
+			c.Name,
+			proverifConstant(valKnowledgeMap, block.Message.Sender, c, ""),
 		)
 	}
-	for _, c := range block.message.constants {
+	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s);\n",
-			procs, block.message.sender, block.message.recipient,
+			procs, block.Message.Sender, block.Message.Recipient,
 			0, proverifConstant(valKnowledgeMap, "", c, ""),
 		)
 	}
-	for _, c := range block.message.constants {
-		switch c.guard {
+	for _, c := range block.Message.Constants {
+		switch c.Guard {
 		case true:
 			procs = fmt.Sprintf(
 				"%s\tout(pub, %s);\n",
-				procs, proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+				procs, proverifConstant(valKnowledgeMap, block.Message.Sender, c, ""),
 			)
 			procs = fmt.Sprintf(
 				"%s\tout(chan_%s_to_%s_private, (%s));\n",
-				procs, block.message.sender, block.message.recipient,
-				proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+				procs, block.Message.Sender, block.Message.Recipient,
+				proverifConstant(valKnowledgeMap, block.Message.Sender, c, ""),
 			)
 		case false:
 			procs = fmt.Sprintf(
 				"%s\tout(chan_%s_to_%s, (%s));\n",
-				procs, block.message.sender, block.message.recipient,
-				proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+				procs, block.Message.Sender, block.Message.Recipient,
+				proverifConstant(valKnowledgeMap, block.Message.Sender, c, ""),
 			)
 		}
 	}
@@ -278,36 +278,36 @@ func proverifMessage(
 	pc = pc + 1
 	procs = fmt.Sprintf(
 		"%slet %s_from_%s_%d() =\n",
-		procs, block.message.recipient, block.message.sender, pc,
+		procs, block.Message.Recipient, block.Message.Sender, pc,
 	)
-	for _, c := range block.message.constants {
-		switch c.guard {
+	for _, c := range block.Message.Constants {
+		switch c.Guard {
 		case true:
 			procs = fmt.Sprintf(
 				"%s\tin(chan_%s_to_%s_private, (%s));\n",
-				procs, block.message.sender, block.message.recipient,
-				proverifConstant(valKnowledgeMap, block.message.sender, c, "bitstring"),
+				procs, block.Message.Sender, block.Message.Recipient,
+				proverifConstant(valKnowledgeMap, block.Message.Sender, c, "bitstring"),
 			)
 		case false:
 			procs = fmt.Sprintf(
 				"%s\tin(chan_%s_to_%s, (%s));\n",
-				procs, block.message.sender, block.message.recipient,
-				proverifConstant(valKnowledgeMap, block.message.sender, c, "bitstring"),
+				procs, block.Message.Sender, block.Message.Recipient,
+				proverifConstant(valKnowledgeMap, block.Message.Sender, c, "bitstring"),
 			)
 		}
 	}
-	for _, c := range block.message.constants {
+	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tevent RecvMsg(principal_%s, principal_%s, phase_%d, %s);\n",
-			procs, block.message.sender, block.message.recipient, 0,
+			procs, block.Message.Sender, block.Message.Recipient, 0,
 			proverifConstant(valKnowledgeMap, "", c, ""),
 		)
 		procs = fmt.Sprintf(
 			"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 			procs,
-			block.message.sender, block.message.recipient,
-			c.name,
-			proverifConstant(valKnowledgeMap, block.message.sender, c, ""),
+			block.Message.Sender, block.Message.Recipient,
+			c.Name,
+			proverifConstant(valKnowledgeMap, block.Message.Sender, c, ""),
 		)
 	}
 	procs = procs + "\t0.\n"
@@ -315,9 +315,9 @@ func proverifMessage(
 	return procs, pc
 }
 
-func proverifPhase(block block) string {
+func proverifPhase(block Block) string {
 	errorCritical("phases are not yet supported in ProVerif model generation")
-	return fmt.Sprintf("phase %d;", block.phase.number)
+	return fmt.Sprintf("phase %d;", block.Phase.Number)
 }
 
 func proverifModel(m Model) string {
@@ -327,8 +327,8 @@ func proverifModel(m Model) string {
 	pc := 0
 	cc := 0
 	valKnowledgeMap := constructKnowledgeMap(m, sanityDeclaredPrincipals(m))
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, block := range m.Blocks {
+		switch block.Kind {
 		case "principal":
 			procs, consts, pc, cc = proverifPrincipal(
 				valKnowledgeMap, block, procs, consts, pc, cc,
@@ -339,20 +339,20 @@ func proverifModel(m Model) string {
 			pv = pv + proverifPhase(block)
 		}
 	}
-	pv = pv + proverifTemplates.parameters(m.attacker)
-	pv = pv + proverifTemplates.types()
-	pv = pv + proverifTemplates.constants(valKnowledgeMap, consts)
-	pv = pv + proverifTemplates.coreprims()
-	pv = pv + proverifTemplates.prims()
-	pv = pv + proverifTemplates.channels(valKnowledgeMap)
-	pv = pv + proverifTemplates.queries(valKnowledgeMap, m.queries)
+	pv = pv + proverifTemplates.Parameters(m.Attacker)
+	pv = pv + proverifTemplates.Types()
+	pv = pv + proverifTemplates.Constants(valKnowledgeMap, consts)
+	pv = pv + proverifTemplates.CorePrims()
+	pv = pv + proverifTemplates.Prims()
+	pv = pv + proverifTemplates.Channels(valKnowledgeMap)
+	pv = pv + proverifTemplates.Queries(valKnowledgeMap, m.Queries)
 	pv = pv + procs
-	pv = pv + proverifTemplates.toplevel(m.blocks)
+	pv = pv + proverifTemplates.TopLevel(m.Blocks)
 	return pv
 }
 
-var proverifTemplates = proverifTemplate{
-	parameters: func(attacker string) string {
+var proverifTemplates = ProverifTemplate{
+	Parameters: func(attacker string) string {
 		return strings.Join([]string{
 			"set expandIfTermsToTerms = true.",
 			"set traceBacktracking = false.",
@@ -360,35 +360,35 @@ var proverifTemplates = proverifTemplate{
 			fmt.Sprintf("set attacker = %s.", attacker),
 		}, "\n") + "\n"
 	},
-	types: func() string {
+	Types: func() string {
 		return strings.Join([]string{
 			"type principal.",
 			"type stage.",
 		}, "\n") + "\n"
 	},
-	constants: func(valKnowledgeMap knowledgeMap, consts string) string {
+	Constants: func(valKnowledgeMap KnowledgeMap, consts string) string {
 		output := ""
-		for _, principal := range valKnowledgeMap.principals {
+		for _, principal := range valKnowledgeMap.Principals {
 			output = fmt.Sprintf(
 				"%sconst principal_%s:principal.\n",
 				output, principal,
 			)
 		}
-		for i := 0; i <= valKnowledgeMap.maxPhase; i++ {
+		for i := 0; i <= valKnowledgeMap.MaxPhase; i++ {
 			output = fmt.Sprintf(
 				"%sconst phase_%d:stage.\n",
 				output, i,
 			)
 		}
-		for _, c := range valKnowledgeMap.constants {
+		for _, c := range valKnowledgeMap.Constants {
 			priv := ""
-			switch c.qualifier {
+			switch c.Qualifier {
 			case "private":
 				priv = " [private]"
 			}
 			consts = fmt.Sprintf(
 				"%sconst const_%s:bitstring%s.\n",
-				consts, c.name, priv,
+				consts, c.Name, priv,
 			)
 		}
 		return output + strings.Join([]string{
@@ -400,7 +400,7 @@ var proverifTemplates = proverifTemplate{
 			consts,
 		}, "\n") + "\n"
 	},
-	coreprims: func() string {
+	CorePrims: func() string {
 		return strings.Join([]string{
 			"letfun ASSERT(a:bitstring, b:bitstring) = a = b.",
 			"fun CONCAT2(bitstring, bitstring):bitstring [data].",
@@ -417,7 +417,7 @@ var proverifTemplates = proverifTemplate{
 			"\tSPLIT5(CONCAT5(a, b, c, d, e)) = (a, b, c, d, e).",
 		}, "\n") + "\n"
 	},
-	prims: func() string {
+	Prims: func() string {
 		return strings.Join([]string{
 			"fun exp(bitstring, bitstring):bitstring.",
 			"equation forall a:bitstring, b:bitstring;",
@@ -488,10 +488,10 @@ var proverifTemplates = proverifTemplate{
 			"\tSHAMIR_JOIN(shamir_split3(k), shamir_split2(k)) = k.",
 		}, "\n") + "\n"
 	},
-	channels: func(valKnowledgeMap knowledgeMap) string {
+	Channels: func(valKnowledgeMap KnowledgeMap) string {
 		channels := []string{"const pub:channel."}
-		for i, prin1 := range valKnowledgeMap.principals {
-			for ii, prin2 := range valKnowledgeMap.principals {
+		for i, prin1 := range valKnowledgeMap.Principals {
+			for ii, prin2 := range valKnowledgeMap.Principals {
 				if i == ii {
 					continue
 				}
@@ -507,7 +507,7 @@ var proverifTemplates = proverifTemplate{
 		}
 		return strings.Join(channels, "\n") + "\n"
 	},
-	queries: func(valKnowledgeMap knowledgeMap, queries []query) string {
+	Queries: func(valKnowledgeMap KnowledgeMap, queries []Query) string {
 		output := []string{
 			"event SendMsg(principal, principal, stage, bitstring).",
 			"event RecvMsg(principal, principal, stage, bitstring).",
@@ -517,7 +517,7 @@ var proverifTemplates = proverifTemplate{
 		}
 		return strings.Join(output, "\n") + "\n"
 	},
-	toplevel: func(blocks []block) string {
+	TopLevel: func(blocks []Block) string {
 		pc := 0
 		parallel := ""
 		for i, block := range blocks {
@@ -525,25 +525,25 @@ var proverifTemplates = proverifTemplate{
 			if i == len(blocks)-1 {
 				sep = ""
 			}
-			switch block.kind {
+			switch block.Kind {
 			case "principal":
 				parallel = fmt.Sprintf(
 					"%s%s_%d()%s",
-					parallel, block.principal.name,
+					parallel, block.Principal.Name,
 					pc, sep,
 				)
 				pc = pc + 1
 			case "message":
 				parallel = fmt.Sprintf(
 					"%s%s_to_%s_%d()%s",
-					parallel, block.message.sender,
-					block.message.recipient, pc, sep,
+					parallel, block.Message.Sender,
+					block.Message.Recipient, pc, sep,
 				)
 				pc = pc + 1
 				parallel = fmt.Sprintf(
 					"%s%s_from_%s_%d()%s",
-					parallel, block.message.recipient,
-					block.message.sender, pc, sep,
+					parallel, block.Message.Recipient,
+					block.Message.Sender, pc, sep,
 				)
 				pc = pc + 1
 			}

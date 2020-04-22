@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func sanity(m Model) (knowledgeMap, []principalState) {
+func sanity(m Model) (KnowledgeMap, []PrincipalState) {
 	sanityPhases(m)
 	principals := sanityDeclaredPrincipals(m)
 	valKnowledgeMap := constructKnowledgeMap(m, principals)
@@ -20,41 +20,41 @@ func sanity(m Model) (knowledgeMap, []principalState) {
 
 func sanityPhases(m Model) {
 	phase := 0
-	for _, blck := range m.blocks {
-		switch blck.kind {
+	for _, blck := range m.Blocks {
+		switch blck.Kind {
 		case "phase":
 			switch {
-			case blck.phase.number <= phase:
+			case blck.Phase.Number <= phase:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) must be superior to last declared phase (%d)",
-					blck.phase.number, phase,
+					blck.Phase.Number, phase,
 				))
-			case blck.phase.number != phase+1:
+			case blck.Phase.Number != phase+1:
 				errorCritical(fmt.Sprintf(
 					"phase being declared (%d) skips phases since last declared phase (%d)",
-					blck.phase.number, phase,
+					blck.Phase.Number, phase,
 				))
 			default:
-				phase = blck.phase.number
+				phase = blck.Phase.Number
 			}
 		}
 	}
 }
 
 func sanityAssignmentConstants(
-	right value, constants []constant, valKnowledgeMap knowledgeMap,
-) []constant {
-	switch right.kind {
+	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
+) []Constant {
+	switch right.Kind {
 	case "constant":
 		unique := true
 		for _, c := range constants {
-			if right.constant.name == c.name {
+			if right.Constant.Name == c.Name {
 				unique = false
 				break
 			}
 		}
 		if unique {
-			constants = append(constants, right.constant)
+			constants = append(constants, right.Constant)
 		}
 	case "primitive":
 		constants = append(constants, sanityAssignmentConstantsFromPrimitive(
@@ -69,43 +69,43 @@ func sanityAssignmentConstants(
 }
 
 func sanityAssignmentConstantsFromPrimitive(
-	right value, constants []constant, valKnowledgeMap knowledgeMap,
-) []constant {
+	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
+) []Constant {
 	arity := 0
-	if primitiveIsCorePrim(right.primitive.name) {
-		prim, _ := primitiveCoreGet(right.primitive.name)
-		arity = prim.arity
+	if primitiveIsCorePrim(right.Primitive.Name) {
+		prim, _ := primitiveCoreGet(right.Primitive.Name)
+		arity = prim.Arity
 	} else {
-		prim, err := primitiveGet(right.primitive.name)
+		prim, err := primitiveGet(right.Primitive.Name)
 		if err != nil {
 			errorCritical(err.Error())
 		}
-		arity = prim.arity
+		arity = prim.Arity
 	}
-	if (len(right.primitive.arguments) == 0) ||
-		(len(right.primitive.arguments) > 5) ||
-		((arity >= 0) && (len(right.primitive.arguments) != arity)) {
+	if (len(right.Primitive.Arguments) == 0) ||
+		(len(right.Primitive.Arguments) > 5) ||
+		((arity >= 0) && (len(right.Primitive.Arguments) != arity)) {
 		arityString := fmt.Sprintf("%d", arity)
 		if arity < 0 {
 			arityString = "between 1 and 5"
 		}
 		errorCritical(fmt.Sprintf(
 			"primitive %s has %d inputs, expecting %s",
-			right.primitive.name, len(right.primitive.arguments), arityString,
+			right.Primitive.Name, len(right.Primitive.Arguments), arityString,
 		))
 	}
-	for _, a := range right.primitive.arguments {
-		switch a.kind {
+	for _, a := range right.Primitive.Arguments {
+		switch a.Kind {
 		case "constant":
 			unique := true
 			for _, c := range constants {
-				if a.constant.name == c.name {
+				if a.Constant.Name == c.Name {
 					unique = false
 					break
 				}
 			}
 			if unique {
-				constants = append(constants, a.constant)
+				constants = append(constants, a.Constant)
 			}
 		case "primitive":
 			constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
@@ -116,36 +116,36 @@ func sanityAssignmentConstantsFromPrimitive(
 	return constants
 }
 
-func sanityAssignmentConstantsFromEquation(right value, constants []constant) []constant {
-	for _, v := range right.equation.values {
+func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []Constant {
+	for _, v := range right.Equation.Values {
 		unique := true
 		for _, c := range constants {
-			if v.constant.name == c.name {
+			if v.Constant.Name == c.Name {
 				unique = false
 				break
 			}
 		}
 		if unique {
-			constants = append(constants, v.constant)
+			constants = append(constants, v.Constant)
 		}
 	}
 	return constants
 }
 
-func sanityPrimitive(p primitive, outputs []constant) {
+func sanityPrimitive(p Primitive, outputs []Constant) {
 	output := 0
 	check := false
-	if primitiveIsCorePrim(p.name) {
-		prim, _ := primitiveCoreGet(p.name)
-		output = prim.output
-		check = prim.check
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		output = prim.Output
+		check = prim.Check
 	} else {
-		prim, err := primitiveGet(p.name)
+		prim, err := primitiveGet(p.Name)
 		if err != nil {
 			errorCritical(err.Error())
 		}
-		output = prim.output
-		check = prim.check
+		output = prim.Output
+		check = prim.Check
 	}
 	if (len(outputs) != output) && (output >= 0) {
 		outputString := fmt.Sprintf("%d", output)
@@ -154,37 +154,37 @@ func sanityPrimitive(p primitive, outputs []constant) {
 		}
 		errorCritical(fmt.Sprintf(
 			"primitive %s has %d outputs, expecting %s",
-			p.name, len(outputs), outputString,
+			p.Name, len(outputs), outputString,
 		))
 	}
-	if p.check && !check {
+	if p.Check && !check {
 		errorCritical(fmt.Sprintf(
 			"primitive %s is checked but does not support checking",
-			p.name,
+			p.Name,
 		))
 	}
 }
 
-func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
-	for _, query := range m.queries {
-		switch query.kind {
+func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) {
+	for _, query := range m.Queries {
+		switch query.Kind {
 		case "confidentiality":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constants[0])
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 			if i < 0 {
 				errorCritical(fmt.Sprintf(
 					"confidentiality query (%s) refers to unknown constant (%s)",
 					prettyQuery(query),
-					prettyConstant(query.constants[0]),
+					prettyConstant(query.Constants[0]),
 				))
 			}
 		case "authentication":
-			if len(query.message.constants) != 1 {
+			if len(query.Message.Constants) != 1 {
 				errorCritical(fmt.Sprintf(
 					"authentication query (%s) has more than one constant",
 					prettyQuery(query),
 				))
 			}
-			c := query.message.constants[0]
+			c := query.Message.Constants[0]
 			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 			if i < 0 {
 				errorCritical(fmt.Sprintf(
@@ -194,41 +194,41 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 			}
 			senderKnows := false
 			recipientKnows := false
-			if valKnowledgeMap.creator[i] == query.message.sender {
+			if valKnowledgeMap.Creator[i] == query.Message.Sender {
 				senderKnows = true
 			}
-			if valKnowledgeMap.creator[i] == query.message.recipient {
+			if valKnowledgeMap.Creator[i] == query.Message.Recipient {
 				recipientKnows = true
 			}
-			for _, m := range valKnowledgeMap.knownBy[i] {
-				if _, ok := m[query.message.sender]; ok {
+			for _, m := range valKnowledgeMap.KnownBy[i] {
+				if _, ok := m[query.Message.Sender]; ok {
 					senderKnows = true
 				}
-				if _, ok := m[query.message.recipient]; ok {
+				if _, ok := m[query.Message.Recipient]; ok {
 					recipientKnows = true
 				}
 			}
 			constantUsedByPrincipal := sanityConstantIsUsedByPrincipalInKnowledgeMap(
-				valKnowledgeMap, query.message.recipient, c,
+				valKnowledgeMap, query.Message.Recipient, c,
 			)
 			sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
 		case "freshness":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.constants[0])
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 			if i < 0 {
 				errorCritical(fmt.Sprintf(
 					"freshness query (%s) refers to unknown constant (%s)",
 					prettyQuery(query),
-					prettyConstant(query.constants[0]),
+					prettyConstant(query.Constants[0]),
 				))
 			}
 		case "unlinkability":
-			if len(query.constants) < 2 {
+			if len(query.Constants) < 2 {
 				errorCritical(fmt.Sprintf(
 					"unlinkability query (%s) must specify at least two constants",
 					prettyQuery(query),
 				))
 			}
-			for _, c := range query.constants {
+			for _, c := range query.Constants {
 				i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 				if i < 0 {
 					errorCritical(fmt.Sprintf(
@@ -243,11 +243,11 @@ func sanityQueries(m Model, valKnowledgeMap knowledgeMap) {
 	}
 }
 
-func sanityQueryOptions(query query) {
-	for _, option := range query.options {
-		switch option.kind {
+func sanityQueryOptions(query Query) {
+	for _, option := range query.Options {
+		switch option.Kind {
 		case "precondition":
-			if len(option.message.constants) != 1 {
+			if len(option.Message.Constants) != 1 {
 				errorCritical(fmt.Sprintf(
 					"precondition option message (%s) has more than one constant",
 					prettyQuery(query),
@@ -255,20 +255,20 @@ func sanityQueryOptions(query query) {
 			}
 		default:
 			errorCritical(fmt.Sprintf(
-				"invalid query option kind (%s)", option.kind,
+				"invalid query option kind (%s)", option.Kind,
 			))
 		}
 	}
 }
 
 func sanityQueriesCheckKnown(
-	query query, c constant, senderKnows bool, recipientKnows bool, constantUsedByPrincipal bool,
+	query Query, c Constant, senderKnows bool, recipientKnows bool, constantUsedByPrincipal bool,
 ) {
 	if !senderKnows {
 		errorCritical(fmt.Sprintf(
 			"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
 			prettyQuery(query),
-			query.message.sender,
+			query.Message.Sender,
 			prettyConstant(c),
 		))
 	}
@@ -276,7 +276,7 @@ func sanityQueriesCheckKnown(
 		errorCritical(fmt.Sprintf(
 			"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
 			prettyQuery(query),
-			query.message.recipient,
+			query.Message.Recipient,
 			prettyConstant(c),
 		))
 	}
@@ -284,24 +284,24 @@ func sanityQueriesCheckKnown(
 		errorCritical(fmt.Sprintf(
 			"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
 			prettyQuery(query),
-			query.message.recipient,
+			query.Message.Recipient,
 			prettyConstant(c),
 		))
 	}
 }
 
-func sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap knowledgeMap, c constant) int {
-	for i := range valKnowledgeMap.constants {
-		if valKnowledgeMap.constants[i].name == c.name {
+func sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap KnowledgeMap, c Constant) int {
+	for i := range valKnowledgeMap.Constants {
+		if valKnowledgeMap.Constants[i].Name == c.Name {
 			return i
 		}
 	}
 	return -1
 }
 
-func sanityGetPrincipalStateIndexFromConstant(valPrincipalState principalState, c constant) int {
-	for i := range valPrincipalState.constants {
-		if valPrincipalState.constants[i].name == c.name {
+func sanityGetPrincipalStateIndexFromConstant(valPrincipalState PrincipalState, c Constant) int {
+	for i := range valPrincipalState.Constants {
+		if valPrincipalState.Constants[i].Name == c.Name {
 			return i
 		}
 	}
@@ -311,25 +311,25 @@ func sanityGetPrincipalStateIndexFromConstant(valPrincipalState principalState, 
 func sanityDeclaredPrincipals(m Model) []string {
 	declared := []string{}
 	principals := []string{}
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, block := range m.Blocks {
+		switch block.Kind {
 		case "principal":
-			principals, _ = appendUniqueString(principals, block.principal.name)
-			declared, _ = appendUniqueString(declared, block.principal.name)
+			principals, _ = appendUniqueString(principals, block.Principal.Name)
+			declared, _ = appendUniqueString(declared, block.Principal.Name)
 		}
 	}
-	for _, block := range m.blocks {
-		switch block.kind {
+	for _, block := range m.Blocks {
+		switch block.Kind {
 		case "message":
-			principals, _ = appendUniqueString(principals, block.message.sender)
-			principals, _ = appendUniqueString(principals, block.message.recipient)
+			principals, _ = appendUniqueString(principals, block.Message.Sender)
+			principals, _ = appendUniqueString(principals, block.Message.Recipient)
 		}
 	}
-	for _, query := range m.queries {
-		switch query.kind {
+	for _, query := range m.Queries {
+		switch query.Kind {
 		case "authentication":
-			principals, _ = appendUniqueString(principals, query.message.sender)
-			principals, _ = appendUniqueString(principals, query.message.recipient)
+			principals, _ = appendUniqueString(principals, query.Message.Sender)
+			principals, _ = appendUniqueString(principals, query.Message.Recipient)
 		}
 	}
 	for _, p := range principals {
@@ -343,12 +343,12 @@ func sanityDeclaredPrincipals(m Model) []string {
 	return principals
 }
 
-func sanityEquivalentValues(a1 value, a2 value, considerOutput bool) bool {
-	switch a1.kind {
+func sanityEquivalentValues(a1 Value, a2 Value, considerOutput bool) bool {
+	switch a1.Kind {
 	case "constant":
-		switch a2.kind {
+		switch a2.Kind {
 		case "constant":
-			if a1.constant.name != a2.constant.name {
+			if a1.Constant.Name != a2.Constant.Name {
 				return false
 			}
 		case "primitive":
@@ -357,26 +357,26 @@ func sanityEquivalentValues(a1 value, a2 value, considerOutput bool) bool {
 			return false
 		}
 	case "primitive":
-		switch a2.kind {
+		switch a2.Kind {
 		case "constant":
 			return false
 		case "primitive":
 			equivPrim, _, _ := sanityEquivalentPrimitives(
-				a1.primitive, a2.primitive, considerOutput,
+				a1.Primitive, a2.Primitive, considerOutput,
 			)
 			return equivPrim
 		case "equation":
 			return false
 		}
 	case "equation":
-		switch a2.kind {
+		switch a2.Kind {
 		case "constant":
 			return false
 		case "primitive":
 			return false
 		case "equation":
 			return sanityEquivalentEquations(
-				a1.equation, a2.equation,
+				a1.Equation, a2.Equation,
 			)
 		}
 	}
@@ -384,135 +384,135 @@ func sanityEquivalentValues(a1 value, a2 value, considerOutput bool) bool {
 }
 
 func sanityEquivalentPrimitives(
-	p1 primitive, p2 primitive, considerOutput bool,
+	p1 Primitive, p2 Primitive, considerOutput bool,
 ) (bool, int, int) {
-	if p1.name != p2.name {
+	if p1.Name != p2.Name {
 		return false, 0, 0
 	}
-	if len(p1.arguments) != len(p2.arguments) {
+	if len(p1.Arguments) != len(p2.Arguments) {
 		return false, 0, 0
 	}
-	if considerOutput && (p1.output != p2.output) {
+	if considerOutput && (p1.Output != p2.Output) {
 		return false, 0, 0
 	}
-	for i := range p1.arguments {
-		equiv := sanityEquivalentValues(p1.arguments[i], p2.arguments[i], true)
+	for i := range p1.Arguments {
+		equiv := sanityEquivalentValues(p1.Arguments[i], p2.Arguments[i], true)
 		if !equiv {
 			return false, 0, 0
 		}
 	}
-	return true, p1.output, p2.output
+	return true, p1.Output, p2.Output
 }
 
-func sanityEquivalentEquations(e1 equation, e2 equation) bool {
-	e1Base := e1.values[0].equation.values
-	e2Base := e2.values[0].equation.values
-	if len(e1.values) != len(e2.values) || len(e1.values) == 0 {
+func sanityEquivalentEquations(e1 Equation, e2 Equation) bool {
+	e1Base := e1.Values[0].Equation.Values
+	e2Base := e2.Values[0].Equation.Values
+	if len(e1.Values) != len(e2.Values) || len(e1.Values) == 0 {
 		return false
 	}
-	if e1.values[0].kind == "equation" && e2.values[0].kind == "equation" {
-		if sanityEquivalentValues(e1Base[1], e2.values[1], true) &&
-			sanityEquivalentValues(e1.values[1], e2Base[1], true) {
+	if e1.Values[0].Kind == "equation" && e2.Values[0].Kind == "equation" {
+		if sanityEquivalentValues(e1Base[1], e2.Values[1], true) &&
+			sanityEquivalentValues(e1.Values[1], e2Base[1], true) {
 			return true
 		}
 		if sanityEquivalentValues(e1Base[1], e2Base[1], true) &&
-			sanityEquivalentValues(e1.values[1], e2.values[1], true) {
+			sanityEquivalentValues(e1.Values[1], e2.Values[1], true) {
 			return true
 		}
 		return false
 	}
-	if len(e1.values) > 2 {
-		if sanityEquivalentValues(e1.values[1], e2.values[2], true) &&
-			sanityEquivalentValues(e1.values[2], e2.values[1], true) {
+	if len(e1.Values) > 2 {
+		if sanityEquivalentValues(e1.Values[1], e2.Values[2], true) &&
+			sanityEquivalentValues(e1.Values[2], e2.Values[1], true) {
 			return true
 		}
-		if sanityEquivalentValues(e1.values[1], e2.values[1], true) &&
-			sanityEquivalentValues(e1.values[2], e2.values[2], true) {
+		if sanityEquivalentValues(e1.Values[1], e2.Values[1], true) &&
+			sanityEquivalentValues(e1.Values[2], e2.Values[2], true) {
 			return true
 		}
 		return false
 	}
-	if sanityEquivalentValues(e1.values[0], e2.values[0], true) &&
-		sanityEquivalentValues(e1.values[1], e2.values[1], true) {
+	if sanityEquivalentValues(e1.Values[0], e2.Values[0], true) &&
+		sanityEquivalentValues(e1.Values[1], e2.Values[1], true) {
 		return true
 	}
 	return false
 }
 
-func sanityGetConstantsFromValue(v value) []constant {
-	c := []constant{}
-	switch v.kind {
+func sanityGetConstantsFromValue(v Value) []Constant {
+	c := []Constant{}
+	switch v.Kind {
 	case "constant":
-		c = append(c, v.constant)
+		c = append(c, v.Constant)
 	case "primitive":
-		c = append(c, sanityGetConstantsFromPrimitive(v.primitive)...)
+		c = append(c, sanityGetConstantsFromPrimitive(v.Primitive)...)
 	case "equation":
-		c = append(c, sanityGetConstantsFromEquation(v.equation)...)
+		c = append(c, sanityGetConstantsFromEquation(v.Equation)...)
 	}
 	return c
 }
 
-func sanityGetConstantsFromPrimitive(p primitive) []constant {
-	c := []constant{}
-	for _, a := range p.arguments {
-		switch a.kind {
+func sanityGetConstantsFromPrimitive(p Primitive) []Constant {
+	c := []Constant{}
+	for _, a := range p.Arguments {
+		switch a.Kind {
 		case "constant":
-			c = append(c, a.constant)
+			c = append(c, a.Constant)
 		case "primitive":
-			c = append(c, sanityGetConstantsFromPrimitive(a.primitive)...)
+			c = append(c, sanityGetConstantsFromPrimitive(a.Primitive)...)
 		case "equation":
-			c = append(c, sanityGetConstantsFromEquation(a.equation)...)
+			c = append(c, sanityGetConstantsFromEquation(a.Equation)...)
 		}
 	}
 	return c
 }
 
-func sanityGetConstantsFromEquation(e equation) []constant {
-	c := []constant{}
-	for _, a := range e.values {
-		switch a.kind {
+func sanityGetConstantsFromEquation(e Equation) []Constant {
+	c := []Constant{}
+	for _, a := range e.Values {
+		switch a.Kind {
 		case "constant":
-			c = append(c, a.constant)
+			c = append(c, a.Constant)
 		case "primitive":
-			c = append(c, sanityGetConstantsFromPrimitive(a.primitive)...)
+			c = append(c, sanityGetConstantsFromPrimitive(a.Primitive)...)
 		case "equation":
-			c = append(c, sanityGetConstantsFromEquation(a.equation)...)
+			c = append(c, sanityGetConstantsFromEquation(a.Equation)...)
 		}
 	}
 	return c
 }
 
 func sanityFindConstantInPrimitive(
-	c constant, p primitive, valPrincipalState principalState,
+	c Constant, p Primitive, valPrincipalState PrincipalState,
 ) bool {
 	a := sanityResolveConstant(c, valPrincipalState)
-	for _, aa := range p.arguments {
-		switch aa.kind {
+	for _, aa := range p.Arguments {
+		switch aa.Kind {
 		case "constant":
-			if c.name == aa.constant.name {
+			if c.Name == aa.Constant.Name {
 				return true
 			}
-			switch a.kind {
+			switch a.Kind {
 			case "constant":
-				if a.constant.name == aa.constant.name {
+				if a.Constant.Name == aa.Constant.Name {
 					return true
 				}
 			}
 		case "primitive":
-			switch a.kind {
+			switch a.Kind {
 			case "primitive":
 				equivPrim, _, _ := sanityEquivalentPrimitives(
-					a.primitive, aa.primitive, true,
+					a.Primitive, aa.Primitive, true,
 				)
 				if equivPrim {
 					return true
 				}
 			}
-			if sanityFindConstantInPrimitive(c, aa.primitive, valPrincipalState) {
+			if sanityFindConstantInPrimitive(c, aa.Primitive, valPrincipalState) {
 				return true
 			}
 		case "equation":
-			if sanityFindConstantInEquation(c, aa.equation, valPrincipalState) {
+			if sanityFindConstantInEquation(c, aa.Equation, valPrincipalState) {
 				return true
 			}
 		}
@@ -521,24 +521,24 @@ func sanityFindConstantInPrimitive(
 }
 
 func sanityFindConstantInEquation(
-	c constant, e equation, valPrincipalState principalState,
+	c Constant, e Equation, valPrincipalState PrincipalState,
 ) bool {
 	a := sanityResolveConstant(c, valPrincipalState)
-	switch a.kind {
+	switch a.Kind {
 	case "equation":
-		if sanityEquivalentEquations(a.equation, e) {
+		if sanityEquivalentEquations(a.Equation, e) {
 			return true
 		}
 	}
-	for _, ee := range e.values {
-		switch ee.kind {
+	for _, ee := range e.Values {
+		switch ee.Kind {
 		case "constant":
-			if c.name == ee.constant.name {
+			if c.Name == ee.Constant.Name {
 				return true
 			}
-			switch a.kind {
+			switch a.Kind {
 			case "constant":
-				if a.constant.name == ee.constant.name {
+				if a.Constant.Name == ee.Constant.Name {
 					return true
 				}
 			}
@@ -547,7 +547,7 @@ func sanityFindConstantInEquation(
 	return false
 }
 
-func sanityEquivalentValueInValues(v value, a []value) int {
+func sanityEquivalentValueInValues(v Value, a []Value) int {
 	index := -1
 	for i, aa := range a {
 		if sanityEquivalentValues(v, aa, true) {
@@ -559,153 +559,153 @@ func sanityEquivalentValueInValues(v value, a []value) int {
 }
 
 func sanityPerformPrimitiveRewrite(
-	p primitive, pi int, valPrincipalState principalState,
-) ([]primitive, bool, value) {
+	p Primitive, pi int, valPrincipalState PrincipalState,
+) ([]Primitive, bool, Value) {
 	rewritten := false
-	failedRewrites := []primitive{}
+	failedRewrites := []Primitive{}
 	rIndex := 0
-	rewrites := []value{{
-		kind: "primitive",
-		primitive: primitive{
-			name:      p.name,
-			arguments: make([]value, len(p.arguments)),
-			output:    p.output,
-			check:     p.check,
+	rewrites := []Value{{
+		Kind: "primitive",
+		Primitive: Primitive{
+			Name:      p.Name,
+			Arguments: make([]Value, len(p.Arguments)),
+			Output:    p.Output,
+			Check:     p.Check,
 		},
 	}}
-	for i, a := range p.arguments {
-		switch a.kind {
+	for i, a := range p.Arguments {
+		switch a.Kind {
 		case "constant":
-			rewrites[0].primitive.arguments[i] = p.arguments[i]
+			rewrites[0].Primitive.Arguments[i] = p.Arguments[i]
 		case "primitive":
 			pFailedRewrite, pRewritten, pRewrite := sanityPerformPrimitiveRewrite(
-				a.primitive, -1, valPrincipalState,
+				a.Primitive, -1, valPrincipalState,
 			)
 			if pRewritten {
 				rewritten = true
-				rewrites[rIndex].primitive.arguments[i] = pRewrite
+				rewrites[rIndex].Primitive.Arguments[i] = pRewrite
 				continue
 			}
-			rewrites[rIndex].primitive.arguments[i] = p.arguments[i]
+			rewrites[rIndex].Primitive.Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, pFailedRewrite...)
 		case "equation":
 			eFailedRewrite, eRewritten, eRewrite := sanityPerformEquationRewrite(
-				a.equation, -1, valPrincipalState,
+				a.Equation, -1, valPrincipalState,
 			)
 			if eRewritten {
 				rewritten = true
-				rewrites[rIndex].primitive.arguments[i] = eRewrite
+				rewrites[rIndex].Primitive.Arguments[i] = eRewrite
 				continue
 			}
-			rewrites[rIndex].primitive.arguments[i] = p.arguments[i]
+			rewrites[rIndex].Primitive.Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
-	wasRebuilt, rebuild := possibleToRebuild(rewrites[rIndex].primitive)
+	wasRebuilt, rebuild := possibleToRebuild(rewrites[rIndex].Primitive)
 	if wasRebuilt {
 		rewrites[0] = rebuild
 		if pi >= 0 {
-			valPrincipalState.assigned[pi] = rebuild
-			if !valPrincipalState.mutated[pi] {
-				valPrincipalState.beforeMutate[pi] = rebuild
+			valPrincipalState.Assigned[pi] = rebuild
+			if !valPrincipalState.Mutated[pi] {
+				valPrincipalState.BeforeMutate[pi] = rebuild
 			}
 		}
-		switch rebuild.kind {
+		switch rebuild.Kind {
 		case "constant", "equation":
 			return failedRewrites, rewritten, rewrites[rIndex]
 		}
 	}
-	rewrittenRoot, rewrites := possibleToRewrite(rewrites[rIndex].primitive, valPrincipalState)
+	rewrittenRoot, rewrites := possibleToRewrite(rewrites[rIndex].Primitive, valPrincipalState)
 	if !rewrittenRoot {
-		failedRewrites = append(failedRewrites, rewrites[rIndex].primitive)
-	} else if primitiveIsCorePrim(p.name) {
-		rIndex = p.output
+		failedRewrites = append(failedRewrites, rewrites[rIndex].Primitive)
+	} else if primitiveIsCorePrim(p.Name) {
+		rIndex = p.Output
 	}
 	if (rewritten || rewrittenRoot) && pi >= 0 {
-		valPrincipalState.rewritten[pi] = true
-		valPrincipalState.assigned[pi] = rewrites[rIndex]
-		if !valPrincipalState.mutated[pi] {
-			valPrincipalState.beforeMutate[pi] = rewrites[rIndex]
+		valPrincipalState.Rewritten[pi] = true
+		valPrincipalState.Assigned[pi] = rewrites[rIndex]
+		if !valPrincipalState.Mutated[pi] {
+			valPrincipalState.BeforeMutate[pi] = rewrites[rIndex]
 		}
 	}
 	return failedRewrites, (rewritten || rewrittenRoot), rewrites[rIndex]
 }
 
 func sanityPerformEquationRewrite(
-	e equation, pi int, valPrincipalState principalState,
-) ([]primitive, bool, value) {
+	e Equation, pi int, valPrincipalState PrincipalState,
+) ([]Primitive, bool, Value) {
 	rewritten := false
-	failedRewrites := []primitive{}
-	rewrite := value{
-		kind: "equation",
-		equation: equation{
-			values: []value{},
+	failedRewrites := []Primitive{}
+	rewrite := Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{},
 		},
 	}
-	for i, a := range e.values {
-		switch a.kind {
+	for i, a := range e.Values {
+		switch a.Kind {
 		case "constant":
-			rewrite.equation.values = append(rewrite.equation.values, a)
+			rewrite.Equation.Values = append(rewrite.Equation.Values, a)
 		case "primitive":
 			hasRule := false
-			if primitiveIsCorePrim(a.primitive.name) {
-				prim, _ := primitiveCoreGet(a.primitive.name)
-				hasRule = prim.hasRule
+			if primitiveIsCorePrim(a.Primitive.Name) {
+				prim, _ := primitiveCoreGet(a.Primitive.Name)
+				hasRule = prim.HasRule
 			} else {
-				prim, _ := primitiveGet(a.primitive.name)
-				hasRule = prim.rewrite.hasRule
+				prim, _ := primitiveGet(a.Primitive.Name)
+				hasRule = prim.Rewrite.HasRule
 			}
 			if !hasRule {
 				continue
 			}
 			pFailedRewrite, pRewritten, pRewrite := sanityPerformPrimitiveRewrite(
-				a.primitive, -1, valPrincipalState,
+				a.Primitive, -1, valPrincipalState,
 			)
 			if !pRewritten {
-				rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+				rewrite.Equation.Values = append(rewrite.Equation.Values, e.Values[i])
 				failedRewrites = append(failedRewrites, pFailedRewrite...)
 				continue
 			}
 			rewritten = true
-			switch pRewrite.kind {
+			switch pRewrite.Kind {
 			case "constant":
-				rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite)
 			case "primitive":
-				rewrite.equation.values = append(rewrite.equation.values, pRewrite)
+				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite)
 			case "equation":
-				rewrite.equation.values = append(rewrite.equation.values, pRewrite.equation.values...)
+				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite.Equation.Values...)
 			}
 		case "equation":
 			eFailedRewrite, eRewritten, eRewrite := sanityPerformEquationRewrite(
-				a.equation, -1, valPrincipalState,
+				a.Equation, -1, valPrincipalState,
 			)
 			if !eRewritten {
-				rewrite.equation.values = append(rewrite.equation.values, e.values[i])
+				rewrite.Equation.Values = append(rewrite.Equation.Values, e.Values[i])
 				failedRewrites = append(failedRewrites, eFailedRewrite...)
 				continue
 			}
 			rewritten = true
-			rewrite.equation.values = append(rewrite.equation.values, eRewrite)
+			rewrite.Equation.Values = append(rewrite.Equation.Values, eRewrite)
 		}
 	}
 	if rewritten && pi >= 0 {
-		valPrincipalState.rewritten[pi] = true
-		valPrincipalState.assigned[pi] = rewrite
-		if !valPrincipalState.mutated[pi] {
-			valPrincipalState.beforeMutate[pi] = rewrite
+		valPrincipalState.Rewritten[pi] = true
+		valPrincipalState.Assigned[pi] = rewrite
+		if !valPrincipalState.Mutated[pi] {
+			valPrincipalState.BeforeMutate[pi] = rewrite
 		}
 	}
 	return failedRewrites, rewritten, rewrite
 }
 
-func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []int, principalState) {
-	failedRewrites := []primitive{}
+func sanityPerformAllRewrites(valPrincipalState PrincipalState) ([]Primitive, []int, PrincipalState) {
+	failedRewrites := []Primitive{}
 	failedRewriteIndices := []int{}
-	for i := range valPrincipalState.assigned {
-		switch valPrincipalState.assigned[i].kind {
+	for i := range valPrincipalState.Assigned {
+		switch valPrincipalState.Assigned[i].Kind {
 		case "primitive":
 			failedRewrite, _, _ := sanityPerformPrimitiveRewrite(
-				valPrincipalState.assigned[i].primitive, i, valPrincipalState,
+				valPrincipalState.Assigned[i].Primitive, i, valPrincipalState,
 			)
 			if len(failedRewrite) == 0 {
 				continue
@@ -716,7 +716,7 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 			}
 		case "equation":
 			failedRewrite, _, _ := sanityPerformEquationRewrite(
-				valPrincipalState.assigned[i].equation, i, valPrincipalState,
+				valPrincipalState.Assigned[i].Equation, i, valPrincipalState,
 			)
 			if len(failedRewrite) == 0 {
 				continue
@@ -730,9 +730,9 @@ func sanityPerformAllRewrites(valPrincipalState principalState) ([]primitive, []
 	return failedRewrites, failedRewriteIndices, valPrincipalState
 }
 
-func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []primitive) {
+func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []Primitive) {
 	for _, p := range failedRewrites {
-		if !p.check {
+		if !p.Check {
 			continue
 		}
 		errorCritical(fmt.Sprintf(
@@ -742,16 +742,16 @@ func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []primitive) {
 	}
 }
 
-func sanityCheckEquationRootGenerator(e equation) {
-	if len(e.values) > 3 {
+func sanityCheckEquationRootGenerator(e Equation) {
+	if len(e.Values) > 3 {
 		errorCritical(fmt.Sprintf(
 			"too many layers in equation (%s), maximum is 2",
 			prettyEquation(e),
 		))
 	}
-	for i, c := range e.values {
+	for i, c := range e.Values {
 		if i == 0 {
-			if strings.ToLower(c.constant.name) != "g" {
+			if strings.ToLower(c.Constant.Name) != "g" {
 				errorCritical(fmt.Sprintf(
 					"equation (%s) does not use 'g' as generator",
 					prettyEquation(e),
@@ -759,7 +759,7 @@ func sanityCheckEquationRootGenerator(e equation) {
 			}
 		}
 		if i > 0 {
-			if strings.ToLower(c.constant.name) == "g" {
+			if strings.ToLower(c.Constant.Name) == "g" {
 				errorCritical(fmt.Sprintf(
 					"equation (%s) uses 'g' not as a generator",
 					prettyEquation(e),
@@ -769,63 +769,63 @@ func sanityCheckEquationRootGenerator(e equation) {
 	}
 }
 
-func sanityCheckEquationGenerators(a value, valPrincipalState principalState) {
-	switch a.kind {
+func sanityCheckEquationGenerators(a Value, valPrincipalState PrincipalState) {
+	switch a.Kind {
 	case "primitive":
-		for _, va := range a.primitive.arguments {
-			switch va.kind {
+		for _, va := range a.Primitive.Arguments {
+			switch va.Kind {
 			case "primitive":
 				sanityCheckEquationGenerators(va, valPrincipalState)
 			case "equation":
-				sanityCheckEquationRootGenerator(va.equation)
+				sanityCheckEquationRootGenerator(va.Equation)
 			}
 		}
 	case "equation":
-		sanityCheckEquationRootGenerator(a.equation)
+		sanityCheckEquationRootGenerator(a.Equation)
 	}
 }
 
-func sanityShouldResolveToBeforeMutate(i int, valPrincipalState principalState) bool {
-	if valPrincipalState.creator[i] == valPrincipalState.name {
+func sanityShouldResolveToBeforeMutate(i int, valPrincipalState PrincipalState) bool {
+	if valPrincipalState.Creator[i] == valPrincipalState.Name {
 		return true
 	}
-	if !valPrincipalState.known[i] {
+	if !valPrincipalState.Known[i] {
 		return true
 	}
-	if !strInSlice(valPrincipalState.name, valPrincipalState.wire[i]) {
+	if !strInSlice(valPrincipalState.Name, valPrincipalState.Wire[i]) {
 		return true
 	}
-	if !valPrincipalState.mutated[i] {
+	if !valPrincipalState.Mutated[i] {
 		return true
 	}
 
 	return false
 }
 
-func sanityResolveConstant(c constant, valPrincipalState principalState) value {
+func sanityResolveConstant(c Constant, valPrincipalState PrincipalState) Value {
 	i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	if i < 0 {
-		return value{kind: "constant", constant: c}
+		return Value{Kind: "constant", Constant: c}
 	}
 	if sanityShouldResolveToBeforeMutate(i, valPrincipalState) {
-		return valPrincipalState.beforeMutate[i]
+		return valPrincipalState.BeforeMutate[i]
 	}
-	return valPrincipalState.assigned[i]
+	return valPrincipalState.Assigned[i]
 }
 
 func sanityResolveValueInternalValuesFromKnowledgeMap(
-	a value, valKnowledgeMap knowledgeMap,
-) (value, []value) {
-	var v []value
-	switch a.kind {
+	a Value, valKnowledgeMap KnowledgeMap,
+) (Value, []Value) {
+	var v []Value
+	switch a.Kind {
 	case "constant":
 		if sanityEquivalentValueInValues(a, v) < 0 {
 			v = append(v, a)
 		}
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.constant)
-		a = valKnowledgeMap.assigned[i]
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.Constant)
+		a = valKnowledgeMap.Assigned[i]
 	}
-	switch a.kind {
+	switch a.Kind {
 	case "constant":
 		return sanityResolveConstantInternalValuesFromKnowledgeMap(
 			a, v, valKnowledgeMap,
@@ -843,67 +843,67 @@ func sanityResolveValueInternalValuesFromKnowledgeMap(
 }
 
 func sanityResolveConstantInternalValuesFromKnowledgeMap(
-	a value, v []value, valKnowledgeMap knowledgeMap,
-) (value, []value) {
+	a Value, v []Value, valKnowledgeMap KnowledgeMap,
+) (Value, []Value) {
 	return a, v
 }
 
 func sanityResolvePrimitiveInternalValuesFromKnowledgeMap(
-	a value, v []value, valKnowledgeMap knowledgeMap,
-) (value, []value) {
-	r := value{
-		kind: "primitive",
-		primitive: primitive{
-			name:      a.primitive.name,
-			arguments: []value{},
-			output:    a.primitive.output,
-			check:     a.primitive.check,
+	a Value, v []Value, valKnowledgeMap KnowledgeMap,
+) (Value, []Value) {
+	r := Value{
+		Kind: "primitive",
+		Primitive: Primitive{
+			Name:      a.Primitive.Name,
+			Arguments: []Value{},
+			Output:    a.Primitive.Output,
+			Check:     a.Primitive.Check,
 		},
 	}
-	for _, aa := range a.primitive.arguments {
+	for _, aa := range a.Primitive.Arguments {
 		s, vv := sanityResolveValueInternalValuesFromKnowledgeMap(aa, valKnowledgeMap)
 		for _, vvv := range vv {
 			if sanityEquivalentValueInValues(vvv, v) < 0 {
 				v = append(v, vvv)
 			}
 		}
-		r.primitive.arguments = append(r.primitive.arguments, s)
+		r.Primitive.Arguments = append(r.Primitive.Arguments, s)
 	}
 	return r, v
 }
 
 func sanityResolveEquationInternalValuesFromKnowledgeMap(
-	a value, v []value, valKnowledgeMap knowledgeMap,
-) (value, []value) {
-	r := value{
-		kind: "equation",
-		equation: equation{
-			values: []value{},
+	a Value, v []Value, valKnowledgeMap KnowledgeMap,
+) (Value, []Value) {
+	r := Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{},
 		},
 	}
-	aa := []value{}
-	for _, c := range a.equation.values {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.constant)
-		aa = append(aa, valKnowledgeMap.assigned[i])
+	aa := []Value{}
+	for _, c := range a.Equation.Values {
+		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.Constant)
+		aa = append(aa, valKnowledgeMap.Assigned[i])
 	}
 	for aai := range aa {
-		switch aa[aai].kind {
+		switch aa[aai].Kind {
 		case "constant":
-			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].constant)
-			aa[aai] = valKnowledgeMap.assigned[i]
+			i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].Constant)
+			aa[aai] = valKnowledgeMap.Assigned[i]
 		}
 	}
 	for aai := range aa {
-		switch aa[aai].kind {
+		switch aa[aai].Kind {
 		case "constant":
-			r.equation.values = append(r.equation.values, aa[aai])
+			r.Equation.Values = append(r.Equation.Values, aa[aai])
 		case "primitive":
-			r.equation.values = append(r.equation.values, aa[aai])
+			r.Equation.Values = append(r.Equation.Values, aa[aai])
 		case "equation":
 			if aai == 0 {
-				r.equation.values = aa[aai].equation.values
+				r.Equation.Values = aa[aai].Equation.Values
 			} else {
-				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
+				r.Equation.Values = append(r.Equation.Values, aa[aai].Equation.Values[1:]...)
 			}
 			if sanityEquivalentValueInValues(r, v) < 0 {
 				v = append(v, r)
@@ -917,27 +917,27 @@ func sanityResolveEquationInternalValuesFromKnowledgeMap(
 }
 
 func sanityResolveValueInternalValuesFromPrincipalState(
-	a value, rootValue value, rootIndex int,
-	valPrincipalState principalState, valAttackerState attackerState, forceBeforeMutate bool,
-) value {
-	switch a.kind {
+	a Value, rootValue Value, rootIndex int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
+) Value {
+	switch a.Kind {
 	case "constant":
-		nextRootIndex := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.constant)
+		nextRootIndex := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, a.Constant)
 		switch nextRootIndex {
 		case rootIndex:
 			if !forceBeforeMutate {
 				forceBeforeMutate = sanityShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
 			if forceBeforeMutate {
-				a = valPrincipalState.beforeMutate[nextRootIndex]
+				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a = sanityResolveConstant(a.constant, valPrincipalState)
+				a = sanityResolveConstant(a.Constant, valPrincipalState)
 			}
 		default:
-			switch rootValue.kind {
+			switch rootValue.Kind {
 			case "primitive":
-				x, _ := possibleToReconstructPrimitive(rootValue.primitive, valAttackerState)
-				if !x && valPrincipalState.creator[rootIndex] != valPrincipalState.name {
+				x, _ := possibleToReconstructPrimitive(rootValue.Primitive, valAttackerState)
+				if !x && valPrincipalState.Creator[rootIndex] != valPrincipalState.Name {
 					forceBeforeMutate = true
 				}
 			}
@@ -945,15 +945,15 @@ func sanityResolveValueInternalValuesFromPrincipalState(
 				forceBeforeMutate = sanityShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
 			if forceBeforeMutate {
-				a = valPrincipalState.beforeMutate[nextRootIndex]
+				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a = sanityResolveConstant(a.constant, valPrincipalState)
+				a = sanityResolveConstant(a.Constant, valPrincipalState)
 			}
 			rootIndex = nextRootIndex
 			rootValue = a
 		}
 	}
-	switch a.kind {
+	switch a.Kind {
 	case "constant":
 		return a
 	case "primitive":
@@ -969,71 +969,71 @@ func sanityResolveValueInternalValuesFromPrincipalState(
 }
 
 func sanityResolvePrimitiveInternalValuesFromPrincipalState(
-	a value, rootValue value, rootIndex int,
-	valPrincipalState principalState, valAttackerState attackerState, forceBeforeMutate bool,
-) value {
-	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
+	a Value, rootValue Value, rootIndex int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
+) Value {
+	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
 		forceBeforeMutate = false
 	}
-	r := value{
-		kind: "primitive",
-		primitive: primitive{
-			name:      a.primitive.name,
-			arguments: []value{},
-			output:    a.primitive.output,
-			check:     a.primitive.check,
+	r := Value{
+		Kind: "primitive",
+		Primitive: Primitive{
+			Name:      a.Primitive.Name,
+			Arguments: []Value{},
+			Output:    a.Primitive.Output,
+			Check:     a.Primitive.Check,
 		},
 	}
-	for _, aa := range a.primitive.arguments {
+	for _, aa := range a.Primitive.Arguments {
 		s := sanityResolveValueInternalValuesFromPrincipalState(
 			aa, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate,
 		)
-		r.primitive.arguments = append(r.primitive.arguments, s)
+		r.Primitive.Arguments = append(r.Primitive.Arguments, s)
 	}
 	return r
 }
 
 func sanityResolveEquationInternalValuesFromPrincipalState(
-	a value, rootValue value, rootIndex int,
-	valPrincipalState principalState, valAttackerState attackerState, forceBeforeMutate bool,
-) value {
-	if valPrincipalState.creator[rootIndex] == valPrincipalState.name {
+	a Value, rootValue Value, rootIndex int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
+) Value {
+	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
 		forceBeforeMutate = false
 	}
-	r := value{
-		kind: "equation",
-		equation: equation{
-			values: []value{},
+	r := Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{},
 		},
 	}
-	aa := []value{}
-	aa = append(aa, a.equation.values...)
+	aa := []Value{}
+	aa = append(aa, a.Equation.Values...)
 	for aai := range aa {
-		switch aa[aai].kind {
+		switch aa[aai].Kind {
 		case "constant":
 			if forceBeforeMutate {
-				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[aai].constant)
-				aa[aai] = valPrincipalState.beforeMutate[i]
+				i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, aa[aai].Constant)
+				aa[aai] = valPrincipalState.BeforeMutate[i]
 			} else {
-				aa[aai] = sanityResolveConstant(aa[aai].constant, valPrincipalState)
+				aa[aai] = sanityResolveConstant(aa[aai].Constant, valPrincipalState)
 			}
 		}
 	}
 	for aai := range aa {
-		switch aa[aai].kind {
+		switch aa[aai].Kind {
 		case "constant":
-			r.equation.values = append(r.equation.values, aa[aai])
+			r.Equation.Values = append(r.Equation.Values, aa[aai])
 		case "primitive":
 			aaa := sanityResolveValueInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex,
 				valPrincipalState, valAttackerState, forceBeforeMutate,
 			)
-			r.equation.values = append(r.equation.values, aaa)
+			r.Equation.Values = append(r.Equation.Values, aaa)
 		case "equation":
 			if aai == 0 {
-				r.equation.values = aa[aai].equation.values
+				r.Equation.Values = aa[aai].Equation.Values
 			} else {
-				r.equation.values = append(r.equation.values, aa[aai].equation.values[1:]...)
+				r.Equation.Values = append(r.Equation.Values, aa[aai].Equation.Values[1:]...)
 			}
 		}
 	}
@@ -1041,20 +1041,20 @@ func sanityResolveEquationInternalValuesFromPrincipalState(
 }
 
 func sanityConstantIsUsedByPrincipalInKnowledgeMap(
-	valKnowledgeMap knowledgeMap, name string, c constant,
+	valKnowledgeMap KnowledgeMap, name string, c Constant,
 ) bool {
 	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-	for ii, a := range valKnowledgeMap.assigned {
-		if valKnowledgeMap.creator[ii] != name {
+	for ii, a := range valKnowledgeMap.Assigned {
+		if valKnowledgeMap.Creator[ii] != name {
 			continue
 		}
-		switch a.kind {
+		switch a.Kind {
 		case "primitive":
 			_, v := sanityResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
-			if sanityEquivalentValueInValues(valKnowledgeMap.assigned[i], v) >= 0 {
+			if sanityEquivalentValueInValues(valKnowledgeMap.Assigned[i], v) >= 0 {
 				return true
 			}
-			if sanityEquivalentValueInValues(value{kind: "constant", constant: c}, v) >= 0 {
+			if sanityEquivalentValueInValues(Value{Kind: "constant", Constant: c}, v) >= 0 {
 				return true
 			}
 		}
@@ -1063,16 +1063,16 @@ func sanityConstantIsUsedByPrincipalInKnowledgeMap(
 }
 
 func sanityResolveAllPrincipalStateValues(
-	valPrincipalState principalState, valAttackerState attackerState,
-) principalState {
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+) PrincipalState {
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
-	for i := range valPrincipalState.assigned {
-		valPrincipalStateClone.assigned[i] = sanityResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.assigned[i], valPrincipalState.assigned[i], i, valPrincipalState, valAttackerState,
+	for i := range valPrincipalState.Assigned {
+		valPrincipalStateClone.Assigned[i] = sanityResolveValueInternalValuesFromPrincipalState(
+			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
 			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
 		)
-		valPrincipalStateClone.beforeRewrite[i] = sanityResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.beforeRewrite[i], valPrincipalState.beforeRewrite[i], i, valPrincipalState, valAttackerState,
+		valPrincipalStateClone.BeforeRewrite[i] = sanityResolveValueInternalValuesFromPrincipalState(
+			valPrincipalState.BeforeRewrite[i], valPrincipalState.BeforeRewrite[i], i, valPrincipalState, valAttackerState,
 			sanityShouldResolveToBeforeMutate(i, valPrincipalState),
 		)
 	}
