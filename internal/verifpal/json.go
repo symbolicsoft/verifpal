@@ -37,7 +37,6 @@ func Json(request string) {
 			errorCritical(err.Error())
 		}
 		fmt.Fprint(os.Stdout, prettyValue(a))
-
 	}
 	fmt.Fprint(os.Stdout, string(j))
 }
