@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/logrusorgru/aurora"
 )
@@ -289,31 +290,38 @@ func prettyPrincipal(block Block) string {
 		case "knows":
 			output = fmt.Sprintf(
 				"%s\t%s %s %s\n",
-				expression.Kind,
 				output,
+				expression.Kind,
 				expression.Qualifier,
 				prettyConstants(expression.Constants),
 			)
 		case "generates":
 			output = fmt.Sprintf(
 				"%s\t%s %s\n",
-				expression.Kind,
 				output,
+				expression.Kind,
 				prettyConstants(expression.Constants),
 			)
 		case "leaks":
 			output = fmt.Sprintf(
 				"%s\t%s %s\n",
-				expression.Kind,
 				output,
+				expression.Kind,
 				prettyConstants(expression.Constants),
 			)
 		case "assignment":
 			right := prettyValue(expression.Right)
+			left := []Constant{}
+			for i, c := range expression.Left {
+				left = append(left, c)
+				if strings.HasPrefix(c.Name, "unnamed") {
+					left[i].Name = "_"
+				}
+			}
 			output = fmt.Sprintf(
 				"%s\t%s = %s\n",
 				output,
-				prettyConstants(expression.Left),
+				prettyConstants(left),
 				right,
 			)
 		}
@@ -343,9 +351,13 @@ func prettyPhase(block Block) string {
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
 func PrettyPrint(modelFile string) {
 	m := parserParseModel(modelFile, false)
+	fmt.Fprint(os.Stdout, prettyModel(m))
+}
+
+func prettyModel(m Model) string {
 	sanity(m)
 	output := fmt.Sprintf(
-		"attacker [\n\t%s\n]\n\n",
+		"attacker[%s]\n\n",
 		m.Attacker,
 	)
 	for _, block := range m.Blocks {
@@ -364,8 +376,8 @@ func PrettyPrint(modelFile string) {
 			"%s\t%s\n", output, prettyQuery(query),
 		)
 	}
-	output = fmt.Sprintf("%s]", output)
-	fmt.Fprint(os.Stdout, output)
+	output = fmt.Sprintf("%s]\n", output)
+	return output
 }
 
 func prettyAnalysis(stage int) {

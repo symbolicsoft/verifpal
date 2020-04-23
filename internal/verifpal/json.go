@@ -37,6 +37,12 @@ func Json(request string) {
 			errorCritical(err.Error())
 		}
 		fmt.Fprint(os.Stdout, prettyValue(a))
+	case "prettyPrint":
+		m, err := Parse("model.vp", []byte(inputString))
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		fmt.Fprint(os.Stdout, prettyModel(m.(Model)))
 	}
 	fmt.Fprint(os.Stdout, string(j))
 }
