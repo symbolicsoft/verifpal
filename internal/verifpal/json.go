@@ -4,21 +4,40 @@
 package verifpal
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 )
 
-func Json(request string, filePath string) {
-	m := parserParseModel(filePath, false)
+func Json(request string) {
+	reader := bufio.NewReader(os.Stdin)
+	inputString, _ := reader.ReadString(byte(0x04))
+	inputString = inputString[:len(inputString)-1]
 	j := []byte{}
 	switch request {
 	case "knowledgeMap":
-		valKnowledgeMap, _ := sanity(m)
+		m, err := Parse("model.vp", []byte(inputString))
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		valKnowledgeMap, _ := sanity(m.(Model))
 		j, _ = json.Marshal(valKnowledgeMap)
 	case "principalStates":
-		_, valPrincipalStates := sanity(m)
+		m, err := Parse("model.vp", []byte(inputString))
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		_, valPrincipalStates := sanity(m.(Model))
 		j, _ = json.Marshal(valPrincipalStates)
+	case "prettyValue":
+		a := Value{}
+		err := json.Unmarshal([]byte(inputString), &a)
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		fmt.Fprint(os.Stdout, prettyValue(a))
+
 	}
 	fmt.Fprint(os.Stdout, string(j))
 }
