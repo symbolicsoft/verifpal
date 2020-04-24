@@ -12,6 +12,12 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
+// PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
+func PrettyPrint(modelFile string) {
+	m := parserParseModel(modelFile, false)
+	fmt.Fprint(os.Stdout, prettyModel(m))
+}
+
 // PrettyInfo prints a Verifpal status message.
 func PrettyInfo(m string, t string, showAnalysis bool) {
 	analysisCount := 0
@@ -286,47 +292,52 @@ func prettyPrincipal(block Block) string {
 		block.Principal.Name,
 	)
 	for _, expression := range block.Principal.Expressions {
-		switch expression.Kind {
-		case "knows":
-			output = fmt.Sprintf(
-				"%s\t%s %s %s\n",
-				output,
-				expression.Kind,
-				expression.Qualifier,
-				prettyConstants(expression.Constants),
-			)
-		case "generates":
-			output = fmt.Sprintf(
-				"%s\t%s %s\n",
-				output,
-				expression.Kind,
-				prettyConstants(expression.Constants),
-			)
-		case "leaks":
-			output = fmt.Sprintf(
-				"%s\t%s %s\n",
-				output,
-				expression.Kind,
-				prettyConstants(expression.Constants),
-			)
-		case "assignment":
-			right := prettyValue(expression.Right)
-			left := []Constant{}
-			for i, c := range expression.Left {
-				left = append(left, c)
-				if strings.HasPrefix(c.Name, "unnamed") {
-					left[i].Name = "_"
-				}
-			}
-			output = fmt.Sprintf(
-				"%s\t%s = %s\n",
-				output,
-				prettyConstants(left),
-				right,
-			)
-		}
+		output = fmt.Sprintf(
+			"%s\t%s\n",
+			output, prettyExpression(expression),
+		)
 	}
 	output = fmt.Sprintf("%s]\n\n", output)
+	return output
+}
+
+func prettyExpression(expression Expression) string {
+	output := ""
+	switch expression.Kind {
+	case "knows":
+		output = fmt.Sprintf(
+			"%s %s %s",
+			expression.Kind,
+			expression.Qualifier,
+			prettyConstants(expression.Constants),
+		)
+	case "generates":
+		output = fmt.Sprintf(
+			"%s %s",
+			expression.Kind,
+			prettyConstants(expression.Constants),
+		)
+	case "leaks":
+		output = fmt.Sprintf(
+			"%s %s",
+			expression.Kind,
+			prettyConstants(expression.Constants),
+		)
+	case "assignment":
+		right := prettyValue(expression.Right)
+		left := []Constant{}
+		for i, c := range expression.Left {
+			left = append(left, c)
+			if strings.HasPrefix(c.Name, "unnamed") {
+				left[i].Name = "_"
+			}
+		}
+		output = fmt.Sprintf(
+			"%s = %s",
+			prettyConstants(left),
+			right,
+		)
+	}
 	return output
 }
 
@@ -346,12 +357,6 @@ func prettyPhase(block Block) string {
 		block.Phase.Number,
 	)
 	return output
-}
-
-// PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
-func PrettyPrint(modelFile string) {
-	m := parserParseModel(modelFile, false)
-	fmt.Fprint(os.Stdout, prettyModel(m))
 }
 
 func prettyModel(m Model) string {
@@ -377,6 +382,39 @@ func prettyModel(m Model) string {
 		)
 	}
 	output = fmt.Sprintf("%s]\n", output)
+	return output
+}
+
+func prettyDiagram(m Model) string {
+	sanity(m)
+	output := ""
+	firstPrincipal := ""
+	for _, block := range m.Blocks {
+		switch block.Kind {
+		case "principal":
+			output = fmt.Sprintf(
+				"%sNote over %s: ",
+				output, block.Principal.Name,
+			)
+			if len(firstPrincipal) == 0 {
+				firstPrincipal = block.Principal.Name
+			}
+			for _, expression := range block.Principal.Expressions {
+				output = fmt.Sprintf(
+					"%s\t%s\\n",
+					output, prettyExpression(expression),
+				)
+			}
+			output = fmt.Sprintf("%s\n", output)
+		case "message":
+			output = output + prettyMessage(block)
+		case "phase":
+			output = fmt.Sprintf(
+				"%sNote left of %s:phase %d\n",
+				output, firstPrincipal, block.Phase.Number,
+			)
+		}
+	}
 	return output
 }
 

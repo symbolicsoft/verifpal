@@ -14,7 +14,6 @@ func Json(request string) {
 	reader := bufio.NewReader(os.Stdin)
 	inputString, _ := reader.ReadString(byte(0x04))
 	inputString = inputString[:len(inputString)-1]
-	j := []byte{}
 	switch request {
 	case "knowledgeMap":
 		m, err := Parse("model.vp", []byte(inputString))
@@ -22,14 +21,16 @@ func Json(request string) {
 			errorCritical(err.Error())
 		}
 		valKnowledgeMap, _ := sanity(m.(Model))
-		j, _ = json.Marshal(valKnowledgeMap)
+		j, _ := json.Marshal(valKnowledgeMap)
+		fmt.Fprint(os.Stdout, string(j))
 	case "principalStates":
 		m, err := Parse("model.vp", []byte(inputString))
 		if err != nil {
 			errorCritical(err.Error())
 		}
 		_, valPrincipalStates := sanity(m.(Model))
-		j, _ = json.Marshal(valPrincipalStates)
+		j, _ := json.Marshal(valPrincipalStates)
+		fmt.Fprint(os.Stdout, string(j))
 	case "prettyValue":
 		a := Value{}
 		err := json.Unmarshal([]byte(inputString), &a)
@@ -37,12 +38,32 @@ func Json(request string) {
 			errorCritical(err.Error())
 		}
 		fmt.Fprint(os.Stdout, prettyValue(a))
+	case "prettyQuery":
+		q := Query{}
+		err := json.Unmarshal([]byte(inputString), &q)
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		fmt.Fprint(os.Stdout, prettyQuery(q))
 	case "prettyPrint":
 		m, err := Parse("model.vp", []byte(inputString))
 		if err != nil {
 			errorCritical(err.Error())
 		}
 		fmt.Fprint(os.Stdout, prettyModel(m.(Model)))
+	case "prettyDiagram":
+		m, err := Parse("model.vp", []byte(inputString))
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		fmt.Fprint(os.Stdout, prettyDiagram(m.(Model)))
+	case "verify":
+		m, err := Parse("model.vp", []byte(inputString))
+		if err != nil {
+			errorCritical(err.Error())
+		}
+		valVerifyResults, _ := verifyModel(m.(Model))
+		j, _ := json.Marshal(valVerifyResults)
+		fmt.Fprint(os.Stdout, string(j))
 	}
-	fmt.Fprint(os.Stdout, string(j))
 }

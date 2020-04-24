@@ -15,6 +15,10 @@ import (
 // It returns a slice of verifyResults and a "results code".
 func Verify(filePath string) ([]VerifyResult, string) {
 	m := parserParseModel(filePath, true)
+	return verifyModel(m)
+}
+
+func verifyModel(m Model) ([]VerifyResult, string) {
 	valKnowledgeMap, valPrincipalStates := sanity(m)
 	initiated := time.Now().Format("03:04:05 PM")
 	verifyAnalysisCountInit()
