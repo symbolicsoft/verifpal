@@ -24,7 +24,7 @@ Verifpal does not allow users to define their own cryptographic primitives. Inst
 When a contradiction is found for a query, the result is related in a readable format that ties the attack to a real-world scenario. This is done by using terminology to indicate how the attack could have been possible, such as through a man-in-the-middle on ephemeral keys.
 
 #### Friendly and Integrated Software
-Verifpal comes with a Visual Studio Code extension that offers syntax highlighting and, soon, live query verification within Visual Studio Code, allowing developers to obtain insights on their model as they are writing it.
+Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it.
 
 ## Verifpal is Experimental Software
 Verifpal is still highly experimental software. Using it in a classroom or learning environment is welcome, but it should not yet be relied upon for academic formal verification work. For that, check out ProVerif: https://proverif.inria.fr.
@@ -73,7 +73,7 @@ Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser genera
 Builds will be available under `build/`.
 
 ### Verifpal for Visual Studio Code
-Verifpal offers an extension for Visual Studio Code that currently supports syntax highlighting for Verifpal models, and will soon support more advanced features. To install it, simply search for "Verifpal" from inside Visual Studio Code.
+Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code.
 
 ## Discussion
 Sign up to the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal) to stay informed on the latest news and announcements regarding Verifpal, and to participate in Verifpal discussions.
