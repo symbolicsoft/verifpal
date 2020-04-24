@@ -6,7 +6,7 @@ module verifpal.com
 go 1.14
 
 require (
-	github.com/akavel/rsrc v0.8.0 // indirect
+	github.com/akavel/rsrc v0.9.0 // indirect
 	github.com/josephspurrier/goversioninfo v0.0.0-20200309025242-14b0ab84c6ca // indirect
 	github.com/logrusorgru/aurora v0.0.0-20200102142835-e9ef32dff381
 	github.com/mna/pigeon v1.0.0 // indirect

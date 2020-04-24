@@ -1,1 +1,3 @@
-Verifpal 0.12.0 introduces freshness queries, unlinkability queries and highly experimental ProVerif and Coq model generation. For more information, please read the blog post at: https://blog.symbolic.software/2020/04/14/freshness-unlinkability-model-semantics-verifpal/
+Verifpal 0.13.0 introduces support for the Verifpal for Visual Studio Code IDE, a video of which can be viewed here: https://twitter.com/verifpal/status/1253679064742756352
+
+This update also includes bug fixes to the Verifpal Coq implementation generator and the Verifpal pretty-printer.
