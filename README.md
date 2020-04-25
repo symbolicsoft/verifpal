@@ -73,7 +73,7 @@ Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser genera
 Builds will be available under `build/`.
 
 ### Verifpal for Visual Studio Code
-Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code.
+Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code. More information available [here](https://source.symbolic.software/verifpal/verifpal-vscode/-/blob/master/README.md).
 
 ## Discussion
 Sign up to the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal) to stay informed on the latest news and announcements regarding Verifpal, and to participate in Verifpal discussions.
