@@ -6,19 +6,19 @@ class Verifpal < Formula
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads//verifpal_0.13.1_macos_amd64.zip"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/8c2ada3d8bfe7ce61aebd1c2d982e2a0/verifpal_0.13.1_macos_amd64.zip"
     sha256 "b93cf10c49094913120c7cecfe8a70c7ff4f93f248bdfb00aa79f5d6ca7fc538"
   elsif OS.linux?
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/uploads//verifpal_0.13.1_linux_amd64.zip"
+      url "https://source.symbolic.software/verifpal/verifpal/uploads/5427bb06a82be372b3a4bef6b0e116ab/verifpal_0.13.1_linux_amd64.zip"
       sha256 "690cfefb4644fe64b536eed85909ec7b5c5a3ee760771b6d727142bac96d8201"
     end
     if Hardware::CPU.arm?
       if Hardware::CPU.is_64_bit?
-        url "https://source.symbolic.software/verifpal/verifpal/uploads//verifpal_0.13.1_linux_arm64.zip"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/c1a0444b863602c82abdf997ac1cca35/verifpal_0.13.1_linux_arm64.zip"
         sha256 "07d5acd7422bd2e4c781ad09c3eb6e2d70383409f807d332d79c7ef7f2dae7bf"
       else
-        url "https://source.symbolic.software/verifpal/verifpal/uploads//verifpal_0.13.1_linux_armv6.zip"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/ea23e9c00326f8254178d615b9cf9420/verifpal_0.13.1_linux_armv6.zip"
         sha256 "30ddf0e8e6183e0bf13be582dde352cb68740956ecdbaa8506c13f02c2eff9a7"
       end
     end
