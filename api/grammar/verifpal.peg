@@ -14,7 +14,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,7 +54,7 @@ func parserCheckIfReserved(s string) error {
 }
 
 func parserParseModel(filePath string, verbose bool) Model {
-	fileName := path.Base(filePath)
+	fileName := filepath.Base(filePath)
 	if len(fileName) > 64 {
 		errorCritical("model file name must be 64 characters or less")
 	}

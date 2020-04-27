@@ -13,7 +13,7 @@ principal Alice[
 
 Alice -> Bob: ga
 
-principal Bob[
+principal Bob[a
 	knows public c0
 	generates m1, b
 	gb = G^b

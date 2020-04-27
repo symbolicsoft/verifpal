@@ -1,3 +1,1 @@
-Verifpal 0.13.0 introduces support for the Verifpal for Visual Studio Code IDE, a video of which can be viewed here: https://twitter.com/verifpal/status/1253679064742756352
-
-This update also includes bug fixes to the Verifpal Coq implementation generator and the Verifpal pretty-printer.
+Verifpal 0.13.1 fixes a bug that would incorrectly deem some model filenames to be too long. This bug only affected Verifpal on Microsoft Windows.
