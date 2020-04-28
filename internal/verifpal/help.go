@@ -19,7 +19,7 @@ func Help(a string) {
 		"coq       [file]: Translate Verifpal model into Coq model.",
 		"pretty    [file]: Pretty-print Verifpal model.",
 		"implement [file]: Translate Verifpal model into Go implementation.",
-		"help            : Show this help text.",
+		"help            : Show this help text.\n",
 	}, "\n"))
 	x := make([]byte, 07)
 	y := make([]byte, 38)
