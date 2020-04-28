@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
-// SPDX-License-Identifier: GPL-3.0-only
-
 attacker[active]
 
 principal Bob[]
@@ -13,7 +10,7 @@ principal Alice[
 
 Alice -> Bob: ga
 
-principal Bob[a
+principal Bob[
 	knows public c0
 	generates m1, b
 	gb = G^b
