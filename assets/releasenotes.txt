@@ -1,1 +1,1 @@
-Verifpal 0.13.1 fixes a bug that would incorrectly deem some model filenames to be too long. This bug only affected Verifpal on Microsoft Windows.
+Verifpal 0.13.2 provides some minor bug fixes.
