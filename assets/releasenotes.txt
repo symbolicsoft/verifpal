@@ -1,1 +1,5 @@
-Verifpal 0.13.2 provides some minor bug fixes.
+Verifpal 0.13.3 introduces two new primitives, BLIND and UNBLIND, which can be used to implement ring signatures.
+
+More information about BLIND and UNBLIND is available in the latest version (print 12) of the Verifpal User Manual, as well as in this commit log: https://source.symbolic.software/verifpal/verifpal/-/commit/d2261c6b0daddbdccee9ef72e06604ede463d405
+
+Verifpal for Visual Studio Code version 1.0.8 supports BLIND and UNBLIND.
