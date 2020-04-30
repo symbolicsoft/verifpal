@@ -138,7 +138,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -164,7 +164,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -175,12 +175,14 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Name:    "AEAD_ENC",
 			From:    1,
-			To:      1,
+			To: func(p Primitive) Value {
+				return p.Arguments[1]
+			},
 			Matching: map[int][]int{
 				0: {0},
 				2: {2},
 			},
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -206,7 +208,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -232,7 +234,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -243,11 +245,13 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Name:    "ENC",
 			From:    1,
-			To:      1,
+			To: func(p Primitive) Value {
+				return p.Arguments[1]
+			},
 			Matching: map[int][]int{
 				0: {0},
 			},
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -319,12 +323,14 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Name:    "SIGN",
 			From:    2,
-			To:      -1,
+			To: func(p Primitive) Value {
+				return constantN
+			},
 			Matching: map[int][]int{
 				0: {0},
 				1: {1},
 			},
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -362,7 +368,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -404,7 +410,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -415,11 +421,13 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Name:    "PKE_ENC",
 			From:    1,
-			To:      1,
+			To: func(p Primitive) Value {
+				return p.Arguments[1]
+			},
 			Matching: map[int][]int{
 				0: {0},
 			},
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -460,7 +468,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				{1, 2},
 			},
 			Reveal: 0,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -500,7 +508,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				{2, 1},
 			},
 			Reveal: 0,
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				return x, true
 			},
 		},
@@ -544,14 +552,16 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Name:    "RINGSIGN",
 			From:    4,
-			To:      -1,
+			To: func(p Primitive) Value {
+				return constantN
+			},
 			Matching: map[int][]int{
 				0: {0, 1, 2},
 				1: {0, 1, 2},
 				2: {0, 1, 2},
 				3: {3},
 			},
-			Filter: func(x Value, i int) (Value, bool) {
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -584,6 +594,90 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Check:           true,
 		Injectable:      false,
+		Explosive:       false,
+		PasswordHashing: false,
+	},
+	{
+		Name:   "BLIND",
+		Arity:  2,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: true,
+			Given:   []int{0},
+			Reveal:  1,
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+				return x, true
+			},
+		},
+		Recompose: RecomposeRule{
+			HasRule: false,
+		},
+		Rewrite: RewriteRule{
+			HasRule: false,
+		},
+		Rebuild: RebuildRule{
+			HasRule: false,
+		},
+		Check:           false,
+		Injectable:      true,
+		Explosive:       false,
+		PasswordHashing: false,
+	},
+	{
+		Name:   "UNBLIND",
+		Arity:  3,
+		Output: 1,
+		Decompose: DecomposeRule{
+			HasRule: false,
+		},
+		Recompose: RecomposeRule{
+			HasRule: false,
+		},
+		Rewrite: RewriteRule{
+			HasRule: true,
+			Name:    "SIGN",
+			From:    2,
+			To: func(p Primitive) Value {
+				return Value{
+					Kind: "primitive",
+					Primitive: Primitive{
+						Name: "SIGN",
+						Arguments: []Value{
+							p.Arguments[0],
+							p.Arguments[1].Primitive.Arguments[1],
+						},
+						Output: 0,
+						Check:  false,
+					},
+				}
+			},
+			Matching: map[int][]int{
+				0: {1},
+			},
+			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+				switch i {
+				case 1:
+					blindPrim := Value{
+						Kind: "primitive",
+						Primitive: Primitive{
+							Name: "BLIND",
+							Arguments: []Value{
+								p.Arguments[0], p.Arguments[1],
+							},
+							Output: 0,
+							Check:  false,
+						},
+					}
+					return blindPrim, true
+				}
+				return x, false
+			},
+		},
+		Rebuild: RebuildRule{
+			HasRule: false,
+		},
+		Check:           false,
+		Injectable:      true,
 		Explosive:       false,
 		PasswordHashing: false,
 	},

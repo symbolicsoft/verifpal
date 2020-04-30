@@ -107,23 +107,23 @@ type DecomposeRule struct {
 	HasRule bool
 	Given   []int
 	Reveal  int
-	Filter  func(Value, int) (Value, bool)
+	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
 type RecomposeRule struct {
 	HasRule bool
 	Given   [][]int
 	Reveal  int
-	Filter  func(Value, int) (Value, bool)
+	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
 type RewriteRule struct {
 	HasRule  bool
 	Name     string
 	From     int
-	To       int
+	To       func(Primitive) Value
 	Matching map[int][]int
-	Filter   func(Value, int) (Value, bool)
+	Filter   func(Primitive, Value, int) (Value, bool)
 }
 
 type RebuildRule struct {
@@ -131,7 +131,7 @@ type RebuildRule struct {
 	Name    string
 	Given   [][]int
 	Reveal  int
-	Filter  func(Value, int) (Value, bool)
+	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
 type PrimitiveCoreSpec struct {

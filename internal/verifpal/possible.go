@@ -19,7 +19,7 @@ func possibleToDecomposePrimitive(
 	}
 	for i, g := range prim.Decompose.Given {
 		a := p.Arguments[g]
-		a, valid := prim.Decompose.Filter(a, i)
+		a, valid := prim.Decompose.Filter(p, a, i)
 		ii := sanityEquivalentValueInValues(a, valAttackerState.Known)
 		if valid && ii >= 0 {
 			has = append(has, a)
@@ -197,10 +197,7 @@ func possibleToRewrite(
 		if !possibleToRewritePrim(p, valPrincipalState) {
 			return !prim.Check, v
 		}
-		rewrite := Value{Kind: "primitive", Primitive: p}
-		if prim.Rewrite.To > 0 {
-			rewrite = from.Primitive.Arguments[prim.Rewrite.To]
-		}
+		rewrite := prim.Rewrite.To(from.Primitive)
 		return true, []Value{rewrite}
 	}
 	return !prim.Check, v
@@ -215,7 +212,7 @@ func possibleToRewritePrim(
 		valid := false
 		for _, mm := range m {
 			ax := []Value{p.Arguments[a], from.Primitive.Arguments[mm]}
-			ax[0], valid = prim.Rewrite.Filter(ax[0], mm)
+			ax[0], valid = prim.Rewrite.Filter(p, ax[0], mm)
 			if !valid {
 				continue
 			}

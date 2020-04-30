@@ -27,7 +27,7 @@ syn match verifpalDelim ")"
 syn match verifpalDelim "\["
 syn match verifpalDelim "]"
 syn keyword verifpalKeywrd knows generates leaks
-syn keyword verifpalConstr RINGSIGNVERIF RINGSIGN PW_HASH HASH HKDF AEAD_ENC AEAD_DEC ENC DEC ASSERT CONCAT SPLIT MAC SIGNVERIF SIGN PKE_ENC PKE_DEC SHAMIR_SPLIT SHAMIR_JOIN G nil _
+syn keyword verifpalConstr UNBLIND BLIND RINGSIGNVERIF RINGSIGN PW_HASH HASH HKDF AEAD_ENC AEAD_DEC ENC DEC ASSERT CONCAT SPLIT MAC SIGNVERIF SIGN PKE_ENC PKE_DEC SHAMIR_SPLIT SHAMIR_JOIN G nil _
 syn match verifpalConstr "\^"
 syn keyword verifpalDecl principal phase queries attacker confidentiality authentication freshness unlinkability precondition
 syn match verifpalTransfer "->"
