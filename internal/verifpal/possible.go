@@ -247,30 +247,31 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 	}
 	for _, g := range prim.Rebuild.Given {
 		has := []Value{}
-	aLoop:
-		for _, a := range p.Arguments {
-			switch a.Kind {
-			case "constant":
-				continue aLoop
+	ggLoop:
+		for _, gg := range g {
+			if len(p.Arguments) <= gg {
+				continue ggLoop
+			}
+			switch p.Arguments[gg].Kind {
 			case "primitive":
-				if a.Primitive.Name == prim.Rebuild.Name {
-					has = append(has, a)
+				if p.Arguments[gg].Primitive.Name == prim.Rebuild.Name {
+					has = append(has, p.Arguments[gg])
 				}
-			case "equation":
-				continue aLoop
 			}
 			if len(has) < len(g) {
-				continue aLoop
+				continue ggLoop
 			}
-			for ai := 1; ai < len(has); ai++ {
+			for hasP := 1; hasP < len(has); hasP++ {
 				equivPrim, o1, o2 := sanityEquivalentPrimitives(
-					has[0].Primitive, has[ai].Primitive, false,
+					has[0].Primitive, has[hasP].Primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
-					continue aLoop
+					continue ggLoop
 				}
 			}
-			return true, has[0].Primitive.Arguments[prim.Rebuild.Reveal]
+			if len(has) == len(g) {
+				return true, has[0].Primitive.Arguments[prim.Rebuild.Reveal]
+			}
 		}
 	}
 	return false, Value{}
