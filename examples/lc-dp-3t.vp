@@ -108,4 +108,5 @@ queries[
 	confidentiality? EphID02A
 	// Is the server able to Authenticate Alice as the sender of m2?
 	authentication? SmartphoneA -> BackendServer: m2
+	unlinkability? EphID02A, EphID00A, EphID01A
 ]
