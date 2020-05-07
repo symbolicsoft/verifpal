@@ -32,7 +32,7 @@ func coqModel(m Model) string {
 	names["queries"] = 0
 	phase := 0
 	output = append(output, fmt.Sprintf(
-		"Definition attacker_%d := attacker_constructor %s attacker_knowledge_empty.",
+		"Definition attacker_%d := attacker_constructor %s 0 attacker_knowledge_empty.",
 		names["attacker"], m.Attacker,
 	))
 	names["attacker"]++
