@@ -2,9 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 616bf0023a90ab68ba9e693bf9994779
 
-/* WARNING: The code here is purely a bunch of thought experiments.
-/* It is in no way ready for anything. */
-
 package verifpal
 
 import (
