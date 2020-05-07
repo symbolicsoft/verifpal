@@ -483,6 +483,12 @@ var proverifTemplates = ProverifTemplate{
 			"\tSHAMIR_JOIN(shamir_split2(k), shamir_split3(k)) = k",
 			"\totherwise forall k:bitstring;",
 			"\tSHAMIR_JOIN(shamir_split3(k), shamir_split2(k)) = k.",
+			"fun BLIND(bitstring, bitstring):bitstring.",
+			"fun UNBLIND(bitstring, bitstring, bitstring):bitstring reduc",
+			"\tforall k:bitstring, m:bitstring, a:bitstring;",
+			"\tUNBLIND(k, m, SIGN(a, BLIND(k, m))) = SIGN(a, m)",
+			"\totherwise forall k:bitstring, m:bitstring, a:bitstring;",
+			"\tUNBLIND(k, m, a) = const_nil.",
 		}, "\n") + "\n"
 	},
 	Channels: func(valKnowledgeMap KnowledgeMap) string {
