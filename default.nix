@@ -11,7 +11,7 @@ in unstable.buildGoPackage rec {
   goPackagePath = "verifpal.com";
 
   src = ./.;
-  goDeps = ./nix/deps.nix;
+  goDeps = ./tools/nix/deps.nix;
 
   nativeBuildInputs = [ pigeon ];
 

@@ -14,7 +14,7 @@ import (
 
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
 func PrettyPrint(modelFile string) {
-	m := parserParseModel(modelFile, false)
+	m := libpegParseModel(modelFile, false)
 	fmt.Fprint(os.Stdout, prettyModel(m))
 }
 

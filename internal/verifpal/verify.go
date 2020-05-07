@@ -14,7 +14,7 @@ import (
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
 func Verify(filePath string) ([]VerifyResult, string) {
-	m := parserParseModel(filePath, true)
+	m := libpegParseModel(filePath, true)
 	return verifyModel(m)
 }
 

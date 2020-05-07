@@ -2,43 +2,43 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 all:
+	@make -s dependencies
 	@make -s windows
 	@make -s linux
 	@make -s macos
 	@make -s freebsd
 
-parser:
-	@/bin/echo -n "[Verifpal] Generating parser..."
-	@$(RM) internal/verifpal/parser.go
-	@pigeon -o internal/verifpal/parser.go api/grammar/verifpal.peg
-	@gofmt -s -w internal/verifpal/parser.go
-	@/bin/echo "             OK"
+lib:
+	@$(RM) internal/verifpal/libpeg.go
+	@pigeon -o internal/verifpal/libpeg.go internal/libpeg/libpeg.peg
+	@gofmt -s -w internal/verifpal/libpeg.go
+	@$(RM) internal/verifpal/libcoq.go
+	@cd internal/libcoq; go run libcoqgen.go
+	@gofmt -s -w internal/verifpal/libcoq.go
 
 windows:
+	@make -s lib
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
 	@GOOS="windows" go generate ./...
-	@GOOS="windows" go build -gcflags="-e" -ldflags="-s -w" -o build/windows verifpal.com/...
+	@GOOS="windows" go build -gcflags="-e" -ldflags="-s -w" -o build/windows verifpal.com/cmd/verifpal
 	@/bin/echo " OK"
 
 linux:
+	@make -s lib
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
-	@GOOS="linux" go build -gcflags="-e" -ldflags="-s -w" -o build/linux verifpal.com/...
+	@GOOS="linux" go build -gcflags="-e" -ldflags="-s -w" -o build/linux verifpal.com/cmd/verifpal
 	@/bin/echo "   OK"
 
 macos:
+	@make -s lib
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
-	@GOOS="darwin" go build -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/...
+	@GOOS="darwin" go build -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
 	@/bin/echo "   OK"
 
 freebsd:
+	@make -s lib
 	@/bin/echo -n "[Verifpal] Building Verifpal for FreeBSD..."
-	@GOOS="freebsd" go build -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/...
-	@/bin/echo " OK"
-
-wasm:
-	@/bin/echo -n "[Verifpal] Building Verifpal for WebAssembly..."
-	@GOOS="js" GOARCH="wasm" go build -gcflags="-e" -ldflags="-s -w" -o build/wasm verifpal.com/...
-	@mv build/wasm/verifpal build/wasm/verifpal.wasm
+	@GOOS="freebsd" go build -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/cmd/verifpal
 	@/bin/echo " OK"
 
 dependencies:
@@ -51,22 +51,25 @@ dependencies:
 	@/bin/echo "       OK"
 
 lint:
+	@make -s lib
 	@/bin/echo "[Verifpal] Running golangci-lint..."
 	@golangci-lint run
 
 test:
+	@make -s dependencies
+	@make -s lib
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go clean -testcache
 	@go test verifpal.com/cmd/verifpal
 
 tag:
-	@make -s dependencies
-	@make -s clean
+	@make -s lib
 	@bash scripts/tag.sh
 
 release:
 	@make -s dependencies
+	@make -s lib
 	@curl -sL https://git.io/goreleaser | bash
 	@bash scripts/email.sh
 
@@ -77,8 +80,9 @@ clean:
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
 	@$(RM) build/freebsd/verifpal
-	@$(RM) build/wasm/verifpal.wasm
+	@$(RM) internal/verifpal/libpeg.go
+	@$(RM) internal/verifpal/libcoq.go
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all parser windows linux macos freebsd wasm dependencies lint test tag release clean HomebrewFormula api assets build cmd dist examples internal tools scripts
+.PHONY: all lib windows linux macos freebsd dependencies lint test tag release clean HomebrewFormula api assets build cmd dist examples internal tools scripts

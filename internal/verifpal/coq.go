@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 // 806d8db3ce9f3ded40fd35fdba02fb84
+
 package verifpal
 
 import (
@@ -12,7 +13,7 @@ import (
 // Coq translates a Verifpal model into a representation that fits
 // into the Coq model of the Verifpal verification methodology.
 func Coq(modelFile string) {
-	m := parserParseModel(modelFile, false)
+	m := libpegParseModel(modelFile, false)
 	sanity(m)
 	fmt.Fprint(os.Stdout, coqModel(m))
 }
@@ -22,7 +23,7 @@ func coqModel(m Model) string {
 	names := make(map[string]int)
 	messageLog := make(map[string]string)
 	principals := sanityDeclaredPrincipals(m)
-	output = append(output, coqHeader)
+	output = append(output, libcoq)
 	output = append(output, fmt.Sprintf(
 		"\n(* Protocol: %s *)\n\n(* Phase 0: *)\n",
 		m.FileName))

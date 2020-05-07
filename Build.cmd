@@ -11,29 +11,32 @@
 @echo        OK
 
 @echo|set /p="[Verifpal] Generating parser..."
-@del internal\verifpal\parser.go
-@pigeon -o internal\verifpal\parser.go api\grammar\verifpal.peg
-@gofmt -s -w internal\verifpal\parser.go
+@pigeon -o internal\verifpal\libpeg.go internal\libpeg\libpeg.peg
+@gofmt -s -w internal\verifpal\libpeg.go
+@cd internal\libcoq
+@go run libcoqgen.go
+@cd ..\..
+@gofmt -s -w internal\verifpal\libcoq.go
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
 @go generate ./...
-@go build -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/cmd/verifpal
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
 @setx GOOS "linux" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
 @setx GOOS "darwin" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for FreeBSD..."
 @setx GOOS "freebsd" >nul
-@go build -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/...
+@go build -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/cmd/verifpal
 @echo  OK
 
 @echo|set /p="[Verifpal] Cleaning up..."

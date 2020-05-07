@@ -10,7 +10,7 @@
 let
   pkgs = import <nixpkgs> { };
   unstable = import (fetchTarball https://nixos.org/channels/nixos-unstable/nixexprs.tar.xz) { };
-  sources = import ./nix/sources.nix;
+  sources = import ./tools/nix/sources.nix;
   vgo2nix = (import sources.vgo2nix { });
 in
   pkgs.mkShell {

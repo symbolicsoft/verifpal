@@ -1,9 +1,9 @@
 run:
     skip-files:
-        - parser.go
         - main_test.go
         - help.go
-        - coqheader.go
+        - libpeg.go
+        - libcoq.go
 
 linters:
     enable:

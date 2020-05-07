@@ -14,6 +14,7 @@ test:
   image: golang:latest
   stage: test
   script:
+    - make dependencies
     - make test
 
 release:

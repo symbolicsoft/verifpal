@@ -7,7 +7,6 @@ build/windows/verifpal.exe
 build/linux/verifpal
 build/macos/verifpal
 build/freebsd/verifpal
-build/wasm/verifpal.wasm
 dist
 
 # Binaries for programs and plugins

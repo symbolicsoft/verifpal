@@ -2,7 +2,7 @@
 /* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-// This file is generated automatically from verifpal.peg.
+// This file is generated automatically from libpeg.peg.
 // Do not modify.
 
 package verifpal
@@ -21,7 +21,7 @@ import (
 	"unicode/utf8"
 )
 
-var parserReserved = []string{
+var libpegReserved = []string{
 	"attacker", "passive", "active", "principal",
 	"phase, public", "private", "password",
 	"confidentiality", "authentication",
@@ -35,12 +35,12 @@ var parserReserved = []string{
 	"g", "nil", "unnamed",
 }
 
-var parserUnnamedCounter = 0
+var libpegUnnamedCounter = 0
 
-func parserCheckIfReserved(s string) error {
+func libpegCheckIfReserved(s string) error {
 	found := false
 	switch {
-	case strInSlice(s, parserReserved):
+	case strInSlice(s, libpegReserved):
 		found = true
 	case strings.HasPrefix(s, "attacker"):
 		found = true
@@ -53,7 +53,7 @@ func parserCheckIfReserved(s string) error {
 	return nil
 }
 
-func parserParseModel(filePath string, verbose bool) Model {
+func libpegParseModel(filePath string, verbose bool) Model {
 	fileName := filepath.Base(filePath)
 	if len(fileName) > 64 {
 		errorCritical("model file name must be 64 characters or less")
@@ -124,7 +124,7 @@ Principal <- "principal" _ Name:PrincipalName _ '[' _ Expressions:(Expression*) 
 }
 
 PrincipalName <- Name:Identifier {
-	err := parserCheckIfReserved(Name.(string))
+	err := libpegCheckIfReserved(Name.(string))
 	return strings.Title(Name.(string)), err
 }
 
@@ -191,8 +191,8 @@ Assignment <- Left:Constants _ '=' _ Right:Value {
 	for i, c := range consts {
 		switch c.Name {
 			case "_":
-			consts[i].Name = fmt.Sprintf("unnamed_%d", parserUnnamedCounter)
-			parserUnnamedCounter = parserUnnamedCounter + 1
+			consts[i].Name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
+			libpegUnnamedCounter = libpegUnnamedCounter + 1
 		}
 	}
 	return Expression{
@@ -216,7 +216,7 @@ Constants <- Constants:Constant+ {
 	var err error
 	a  := Constants.([]interface{})
 	for _, c := range a {
-		err = parserCheckIfReserved(c.(Value).Constant.Name)
+		err = libpegCheckIfReserved(c.(Value).Constant.Name)
 		if err != nil { break }
 		da = append(da, c.(Value).Constant)
 	}
@@ -237,7 +237,7 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 }
 
 GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
-	err := parserCheckIfReserved(Guarded.(string))
+	err := libpegCheckIfReserved(Guarded.(string))
 	return Value{
 		Kind: "constant",
 		Constant: Constant{
