@@ -8,7 +8,7 @@ lint:
   image: golangci/golangci-lint:latest
   stage: lint
   script:
-    - golangci-lint run
+    - make lint
 
 test:
   image: golang:latest
@@ -33,6 +33,7 @@ snapcraft:
   only:
     - tags
   script:
+    - make lib
     - apt-get update -qy
     - apt-get install -y snapcraft
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login

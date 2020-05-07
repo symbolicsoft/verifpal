@@ -56,7 +56,6 @@ lint:
 	@golangci-lint run
 
 test:
-	@make -s dependencies
 	@make -s lib
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
