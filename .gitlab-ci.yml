@@ -8,6 +8,7 @@ lint:
   image: golangci/golangci-lint:latest
   stage: lint
   script:
+    - make dependencies
     - make lint
 
 test:
@@ -33,6 +34,7 @@ snapcraft:
   only:
     - tags
   script:
+    - make dependencies
     - make lib
     - apt-get update -qy
     - apt-get install -y snapcraft
