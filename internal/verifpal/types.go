@@ -194,7 +194,7 @@ type MutationMap struct {
 	DepthIndex     []int
 }
 
-type ProverifTemplate struct {
+type PvTemplate struct {
 	Parameters func(string) string
 	Types      func() string
 	Constants  func(KnowledgeMap, string) string

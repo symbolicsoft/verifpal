@@ -15,10 +15,10 @@ import (
 func Help(a string) {
 	fmt.Fprintf(os.Stdout, strings.Join([]string{
 		"verify    [file]: Analyze Verifpal model.",
-		"proverif  [file]: Translate Verifpal model into ProVerif model.",
+		"pv        [file]: Translate Verifpal model into ProVerif model.",
 		"coq       [file]: Translate Verifpal model into Coq model.",
+		"go        [file]: Translate Verifpal model into a Go implementation.",
 		"pretty    [file]: Pretty-print Verifpal model.",
-		"implement [file]: Translate Verifpal model into Go implementation.",
 		"help            : Show this help text.\n",
 	}, "\n"))
 	x := make([]byte, 07)

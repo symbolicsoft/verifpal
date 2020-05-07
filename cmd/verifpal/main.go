@@ -45,14 +45,14 @@ func mainGanbatte(args []string) {
 	case "verify":
 		mainIntro()
 		verifpal.Verify(args[2])
-	case "proverif":
-		verifpal.ProVerif(args[2])
+	case "pv":
+		verifpal.Pv(args[2])
 	case "coq":
 		verifpal.Coq(args[2])
 	case "pretty":
 		verifpal.PrettyPrint(args[2])
-	case "implement":
-		verifpal.Implement()
+	case "go":
+		verifpal.Go()
 	case "internal-json":
 		verifpal.Json(args[2])
 	default:

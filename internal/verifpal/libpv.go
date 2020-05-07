@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var libpv = ProverifTemplate{
+var libpv = PvTemplate{
 	Parameters: func(attacker string) string {
 		return strings.Join([]string{
 			"set expandIfTermsToTerms = true.",
@@ -177,7 +177,7 @@ var libpv = ProverifTemplate{
 			"event RecvMsg(principal, principal, stage, bitstring).",
 		}
 		for _, q := range queries {
-			output = append(output, proverifQuery(valKnowledgeMap, q))
+			output = append(output, pvQuery(valKnowledgeMap, q))
 		}
 		return strings.Join(output, "\n") + "\n"
 	},
