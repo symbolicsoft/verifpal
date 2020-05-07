@@ -11,7 +11,7 @@ import (
 var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
 		Name:    "ASSERT",
-		Arity:   2,
+		Arity:   []int{2},
 		Output:  1,
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
@@ -27,7 +27,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	},
 	{
 		Name:    "CONCAT",
-		Arity:   -1,
+		Arity:   []int{2, 3, 4, 5},
 		Output:  1,
 		HasRule: false,
 		CoreRule: func(p Primitive) (bool, []Value) {
@@ -40,7 +40,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	},
 	{
 		Name:    "SPLIT",
-		Arity:   1,
+		Arity:   []int{1},
 		Output:  -1,
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
@@ -69,7 +69,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "PW_HASH",
-		Arity:  -1,
+		Arity:  []int{1, 2, 3, 4, 5},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -90,7 +90,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "HASH",
-		Arity:  -1,
+		Arity:  []int{1, 2, 3, 4, 5},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -111,7 +111,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "HKDF",
-		Arity:  3,
+		Arity:  []int{3},
 		Output: -1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -132,7 +132,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "AEAD_ENC",
-		Arity:  3,
+		Arity:  []int{3},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -158,7 +158,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "AEAD_DEC",
-		Arity:  3,
+		Arity:  []int{3},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -202,7 +202,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "ENC",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -228,7 +228,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "DEC",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -269,7 +269,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "MAC",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -290,7 +290,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "SIGN",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -311,7 +311,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "SIGNVERIF",
-		Arity:  3,
+		Arity:  []int{3},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -362,7 +362,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "PKE_ENC",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -404,7 +404,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "PKE_DEC",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -455,7 +455,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "SHAMIR_SPLIT",
-		Arity:  1,
+		Arity:  []int{1},
 		Output: 3,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -485,7 +485,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "SHAMIR_JOIN",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -519,7 +519,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "RINGSIGN",
-		Arity:  4,
+		Arity:  []int{4},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -540,7 +540,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "RINGSIGNVERIF",
-		Arity:  5,
+		Arity:  []int{5},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -599,7 +599,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "BLIND",
-		Arity:  2,
+		Arity:  []int{2},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: true,
@@ -625,7 +625,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 	{
 		Name:   "UNBLIND",
-		Arity:  3,
+		Arity:  []int{3},
 		Output: 1,
 		Decompose: DecomposeRule{
 			HasRule: false,
@@ -709,4 +709,19 @@ func primitiveGet(name string) (PrimitiveSpec, error) {
 	}
 	err := fmt.Errorf("unknown primitive (%s)", name)
 	return PrimitiveSpec{}, err
+}
+
+func primitiveGetArity(p Primitive) ([]int, error) {
+	if primitiveIsCorePrim(p.Name) {
+		prim, err := primitiveCoreGet(p.Name)
+		if err != nil {
+			return []int{}, err
+		}
+		return prim.Arity, nil
+	}
+	prim, err := primitiveGet(p.Name)
+	if err != nil {
+		return []int{}, err
+	}
+	return prim.Arity, nil
 }

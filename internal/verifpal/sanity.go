@@ -71,27 +71,21 @@ func sanityAssignmentConstants(
 func sanityAssignmentConstantsFromPrimitive(
 	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
 ) []Constant {
-	arity := 0
-	if primitiveIsCorePrim(right.Primitive.Name) {
-		prim, _ := primitiveCoreGet(right.Primitive.Name)
-		arity = prim.Arity
-	} else {
-		prim, err := primitiveGet(right.Primitive.Name)
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		arity = prim.Arity
+	primArguments := len(right.Primitive.Arguments)
+	specArity, err := primitiveGetArity(right.Primitive)
+	if err != nil {
+		errorCritical(err.Error())
 	}
-	if (len(right.Primitive.Arguments) == 0) ||
-		(len(right.Primitive.Arguments) > 5) ||
-		((arity >= 0) && (len(right.Primitive.Arguments) != arity)) {
-		arityString := fmt.Sprintf("%d", arity)
-		if arity < 0 {
-			arityString = "between 1 and 5"
-		}
+	if primArguments == 0 {
+		errorCritical(fmt.Sprintf(
+			"primitive %s has no inputs.", right.Primitive.Name,
+		))
+	}
+	if !intInSlice(primArguments, specArity) {
+		arityString := prettyArity(specArity)
 		errorCritical(fmt.Sprintf(
 			"primitive %s has %d inputs, expecting %s",
-			right.Primitive.Name, len(right.Primitive.Arguments), arityString,
+			right.Primitive.Name, primArguments, arityString,
 		))
 	}
 	for _, a := range right.Primitive.Arguments {

@@ -434,3 +434,19 @@ func prettyAnalysis(stage int) {
 	fmt.Fprint(os.Stdout, a)
 	fmt.Fprint(os.Stdout, "\r \r")
 }
+
+func prettyArity(specArity []int) string {
+	arityString := ""
+	if len(specArity) == 1 {
+		arityString = fmt.Sprintf("%d", specArity[0])
+	} else {
+		for i, a := range specArity {
+			if i != len(specArity)-1 {
+				arityString = fmt.Sprintf("%s%d, ", arityString, a)
+			} else {
+				arityString = fmt.Sprintf("%sor %d", arityString, a)
+			}
+		}
+	}
+	return arityString
+}
