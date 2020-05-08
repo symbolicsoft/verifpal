@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
+	"strings"
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
@@ -54,29 +56,54 @@ func errorCritical(errText string) {
 	log.Fatal(fmt.Errorf("Error: %v.\n", err))
 }
 
-func dh(private_key []byte, public_key []byte) []byte {
-	var ss [32]byte
+/* ---------------------------------------------------------------- *
+ * ELLIPTIC CURVE CRYPTOGRAPHY                                      *
+ * ---------------------------------------------------------------- */
+
+func x25519DhFromEd25519PublicKey(private_key []byte, public_key []byte) []byte {
 	var priv32 [32]byte
 	var pub32 [32]byte
+	var ss [32]byte
 	copy(priv32[:], private_key)
-	copy(pub32[:], public_key)
+	copy(pub32[:], ed25519PublicKeyToCurve25519(public_key))
 	curve25519.ScalarMult(&ss, &priv32, &pub32)
 	return ss[:]
 }
 
-func generateKeypair() ([]byte, []byte) {
-	var private_key []byte
-	_, _ = rand.Read(private_key)
-	public_key := generatePublicKey(private_key)
+func ed25519Gen() ([]byte, []byte) {
+	public_key, private_key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		errorCritical(err.Error())
+	}
 	return private_key, public_key
 }
 
-func generatePublicKey(private_key []byte) []byte {
-	var public_key [32]byte
-	var priv32 [32]byte
-	copy(priv32[:], private_key)
-	curve25519.ScalarBaseMult(&public_key, &priv32)
-	return public_key[:]
+func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
+	// This function is based on code written by Filippo Valsorda
+	// as part of the following project:
+	// https://github.com/FiloSottile/age
+	// The license for the age source code is visible here:
+	// https://github.com/FiloSottile/age/blob/master/LICENSE
+	var curve25519P, _ = new(big.Int).SetString(strings.Join([]string{
+		"578960446186580977117854925043439539266",
+		"34992332820282019728792003956564819949",
+	}, ""), 10)
+	bigEndianY := make([]byte, ed25519.PublicKeySize)
+	for i, b := range pk {
+		bigEndianY[ed25519.PublicKeySize-i-1] = b
+	}
+	bigEndianY[0] &= 0b0111_1111
+	y := new(big.Int).SetBytes(bigEndianY)
+	denom := big.NewInt(1)
+	denom.ModInverse(denom.Sub(denom, y), curve25519P)
+	u := y.Mul(y.Add(y, big.NewInt(1)), denom)
+	u.Mod(u, curve25519P)
+	out := make([]byte, curve25519.PointSize)
+	uBytes := u.Bytes()
+	for i, b := range uBytes {
+		out[len(uBytes)-i-1] = b
+	}
+	return out
 }
 
 /* ---------------------------------------------------------------- *
@@ -270,8 +297,8 @@ func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) (bool, []byte) {
 }
 
 func PKE_ENC(pk []byte, plaintext []byte) []byte {
-	esk, epk := generateKeypair()
-	ss := dh(esk, pk)
+	esk, epk := ed25519Gen()
+	ss := x25519DhFromEd25519PublicKey(esk, pk)
 	ciphertext := ENC(ss, plaintext)
 	return append(epk, ciphertext...)
 }
@@ -281,7 +308,7 @@ func PKE_DEC(k []byte, ciphertext []byte) []byte {
 		errorCritical("invalid ciphertext")
 	}
 	epk := ciphertext[:32]
-	ss := dh(k, epk)
+	ss := x25519DhFromEd25519PublicKey(k, epk)
 	plaintext := DEC(ss, ciphertext)
 	return plaintext
 }
@@ -291,35 +318,32 @@ func SIGN(k []byte, message []byte) []byte {
 }
 
 func SIGNVERIF(pk []byte, message []byte, signature []byte) bool {
-	// TODO: Translate Curve25519 keys
 	return ed25519.Verify(pk, message, signature)
 }
 
-/*
 func RINGSIGN(ka []byte, kb []byte, kc []byte, message []byte) []byte {
-
+	return []byte{}
 }
 
 func RINGSIGNVERIF(pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte) bool {
-
+	return false
 }
 
 func BLIND(k []byte, message []byte) []byte {
-
+	return []byte{}
 }
 
 func UNBLIND(k []byte, message []byte, signature []byte) []byte {
-
+	return []byte{}
 }
 
 func SHAMIR_SPLIT(x []byte) []byte {
-
+	return []byte{}
 }
 
 func SHAMIR_JOIN(a []byte, b []byte, c []byte) []byte {
-
+	return []byte{}
 }
-*/
 
 /* ---------------------------------------------------------------- *
  * STATE MANAGEMENT                                                 *
