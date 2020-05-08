@@ -1,3 +1,0 @@
-func HASH(a []byte, b []byte) [32]byte {
-	return blake2s.Sum256(append(a, b...))
-}
