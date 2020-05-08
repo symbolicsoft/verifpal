@@ -34,7 +34,7 @@ func mainIntro() {
 		aurora.Bold("Verifpal %s - %s\n").String(),
 		version, "https://verifpal.com",
 	)
-	verifpal.PrettyInfo(
+	verifpal.InfoMessage(
 		"Verifpal is experimental software.",
 		"warning", false,
 	)
@@ -52,7 +52,7 @@ func mainGanbatte(args []string) {
 	case "pretty":
 		verifpal.PrettyPrint(args[2])
 	case "go":
-		verifpal.Go()
+		verifpal.Go(args[2])
 	case "internal-json":
 		verifpal.Json(args[2])
 	default:

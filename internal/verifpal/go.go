@@ -4,7 +4,13 @@
 
 package verifpal
 
+import (
+	"fmt"
+	"os"
+)
+
 // Go is supposed to implement Golang generation from Verifpal models. It does not exist yet.
-func Go() {
-	errorCritical("this feature does not exist yet")
+func Go(modelFile string) {
+	m := libpegParseModel(modelFile, false)
+	fmt.Fprint(os.Stdout, prettyModel(m))
 }

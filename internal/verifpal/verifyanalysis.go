@@ -27,7 +27,7 @@ func verifyAnalysis(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalSta
 	}
 	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
 	verifyAnalysisCountIncrement()
-	prettyAnalysis(stage)
+	infoAnalysis(stage)
 	if o > 0 {
 		sg.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
@@ -62,7 +62,7 @@ func verifyAnalysisDecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
 			prettyValue(revealed), prettyValue(a), prettyValues(ar),
 		), "deduction", true)
@@ -85,7 +85,7 @@ func verifyAnalysisRecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
 			prettyValue(revealed), prettyValue(a), prettyValues(ar),
 		), "deduction", true)
@@ -112,7 +112,7 @@ func verifyAnalysisReconstruct(
 		return o
 	}
 	if attackerStatePutWrite(a) {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			prettyValue(a), prettyValues(ar),
 		), "deduction", true)
@@ -140,7 +140,7 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) i
 	passwords := possibleToObtainPasswords(a, valPrincipalState)
 	for _, revealed := range passwords {
 		if attackerStatePutWrite(revealed) {
-			PrettyInfo(fmt.Sprintf(
+			InfoMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
 				prettyValue(revealed), prettyValue(a),
 			), "deduction", true)
@@ -157,7 +157,7 @@ func verifyAnalysisConcat(a Value, o int) int {
 		case "CONCAT":
 			for _, revealed := range a.Primitive.Arguments {
 				if attackerStatePutWrite(revealed) {
-					PrettyInfo(fmt.Sprintf(
+					InfoMessage(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",
 						prettyValue(revealed), prettyValue(a),
 					), "deduction", true)

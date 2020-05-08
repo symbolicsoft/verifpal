@@ -11,10 +11,10 @@ import (
 
 func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
 	var stagesGroup sync.WaitGroup
-	PrettyInfo("Attacker is configured as active.", "info", false)
+	InfoMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
-		PrettyInfo(fmt.Sprintf("Running at phase %d.", phase), "info", false)
+		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
 		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
 		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)

@@ -8,147 +8,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/logrusorgru/aurora"
 )
 
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
 func PrettyPrint(modelFile string) {
 	m := libpegParseModel(modelFile, false)
 	fmt.Fprint(os.Stdout, prettyModel(m))
-}
-
-// PrettyInfo prints a Verifpal status message.
-func PrettyInfo(m string, t string, showAnalysis bool) {
-	analysisCount := 0
-	if showAnalysis {
-		analysisCount = verifyAnalysisCountGet()
-	}
-	if colorOutputSupport() {
-		PrettyInfoColor(m, t, analysisCount)
-	} else {
-		PrettyInfoRegular(m, t, analysisCount)
-	}
-}
-
-func PrettyInfoRegular(m string, t string, analysisCount int) {
-	infoString := ""
-	if analysisCount > 0 {
-		infoString = fmt.Sprintf("(Analysis %d)", analysisCount)
-	}
-	switch t {
-	case "verifpal":
-		fmt.Fprintf(os.Stdout,
-			" Verifpal • %s %s\n", m, infoString,
-		)
-	case "info":
-		fmt.Fprintf(os.Stdout,
-			"     Info • %s %s\n", m, infoString,
-		)
-	case "analysis":
-		fmt.Fprintf(os.Stdout,
-			" Analysis • %s %s\n", m, infoString,
-		)
-	case "deduction":
-		fmt.Fprintf(os.Stdout,
-			"Deduction • %s %s\n", m, infoString,
-		)
-	case "result":
-		fmt.Fprintf(os.Stdout,
-			"   Result • %s %s\n", m, infoString,
-		)
-	case "warning":
-		fmt.Fprintf(os.Stdout,
-			"  Warning • %s %s\n", m, infoString,
-		)
-	default:
-		errorCritical(fmt.Sprintf(
-			"invalid log message type (%s)",
-			t,
-		))
-	}
-}
-
-func PrettyInfoColor(m string, t string, analysisCount int) {
-	infoString := ""
-	if analysisCount > 0 {
-		infoString = aurora.Faint(fmt.Sprintf(
-			"(Analysis %d)", analysisCount,
-		)).Italic().String()
-	}
-	switch t {
-	case "verifpal":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			" ", aurora.Green("Verifpal").Bold(), " •", m, infoString,
-		)
-	case "info":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			"     ", aurora.Blue("Info").Bold(), " •", m, infoString,
-		)
-	case "analysis":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			" ", aurora.Blue("Analysis").Bold(), " •", m, infoString,
-		)
-	case "deduction":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			"", aurora.Magenta("Deduction").Bold(), " •", m, infoString,
-		)
-	case "result":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			"   ", aurora.Red("Result").Bold(), " •", m, infoString,
-		)
-	case "warning":
-		fmt.Fprintf(os.Stdout,
-			"%s%s%s %s %s\n",
-			"  ", aurora.Red("Warning").Bold(), " •", m, infoString,
-		)
-	default:
-		errorCritical(fmt.Sprintf(
-			"invalid log message type (%s)",
-			t,
-		))
-	}
-}
-
-func prettyVerifyResultSummary(
-	mutated string, summary string, oResults []QueryOptionResult,
-) string {
-	mutatedIntro := ""
-	optionsSummary := ""
-	for _, oResult := range oResults {
-		if !oResult.Resolved {
-			continue
-		}
-		if len(optionsSummary) == 0 {
-			optionsSummary = fmt.Sprintf(
-				"%sFurthermore, the following options are contradicted:\n",
-				"           ",
-			)
-		}
-		optionsSummary = fmt.Sprintf(
-			"%s%s%s\n",
-			optionsSummary, "             - ", oResult.Summary,
-		)
-	}
-	if len(mutated) > 0 {
-		mutatedIntro = "When the following values are controlled by Attacker:"
-	}
-	if colorOutputSupport() {
-		return fmt.Sprintf("%s%s\n           %s\n%s",
-			aurora.Italic(mutatedIntro).String(),
-			aurora.BrightYellow(mutated).Italic().String(),
-			aurora.BgRed(summary).White().Italic().Bold().String(),
-			aurora.Red(optionsSummary).Italic().String(),
-		)
-	}
-	return fmt.Sprintf("%s%s\n           %s\n%s",
-		mutatedIntro, mutated, summary, optionsSummary,
-	)
 }
 
 func prettyConstant(c Constant) string {
@@ -416,23 +281,6 @@ func prettyDiagram(m Model) string {
 		}
 	}
 	return output
-}
-
-func prettyAnalysis(stage int) {
-	a := ""
-	analysisCount := verifyAnalysisCountGet()
-	if analysisCount%10 != 0 {
-		return
-	}
-	if colorOutputSupport() {
-		a = aurora.Faint(fmt.Sprintf(
-			" Stage %d, Analysis %d...", stage, analysisCount,
-		)).Italic().String()
-	} else {
-		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysisCount)
-	}
-	fmt.Fprint(os.Stdout, a)
-	fmt.Fprint(os.Stdout, "\r \r")
 }
 
 func prettyArity(specArity []int) string {

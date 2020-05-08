@@ -43,7 +43,7 @@ func queryConfidentiality(
 	}
 	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 	result.Resolved = true
-	result.Summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
 		prettyConstant(query.Constants[0]),
 		prettyValue(valAttackerState.Known[ii]),
@@ -51,7 +51,7 @@ func queryConfidentiality(
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
@@ -145,14 +145,14 @@ func queryAuthenticationHandlePass(
 	valPrincipalState PrincipalState,
 ) VerifyResult {
 	cc := sanityResolveConstant(c, valPrincipalState)
-	result.Summary = prettyVerifyResultSummary(mutated, fmt.Sprintf(
+	result.Summary = infoVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), sender, result.Query.Message.Sender,
 		prettyValue(b), result.Query.Message.Recipient,
 	), result.Options)
 	written := verifyResultsPutWrite(result)
 	if written {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(result.Query), result.Summary,
 		), "result", true)
 	}
@@ -174,7 +174,7 @@ func queryFreshness(
 	}
 	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 	result.Resolved = true
-	result.Summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
 		prettyConstant(query.Constants[0]),
 		prettyValue(sanityResolveConstant(query.Constants[0], valPrincipalState)),
@@ -182,7 +182,7 @@ func queryFreshness(
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
 	if written {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s: %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
@@ -231,7 +231,7 @@ func queryUnlinkability(
 	if len(noFreshness) > 0 {
 		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 		result.Resolved = true
-		result.Summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
 			prettyConstant(noFreshness[0]),
 			prettyValue(sanityResolveConstant(noFreshness[0], valPrincipalState)),
@@ -239,7 +239,7 @@ func queryUnlinkability(
 		result = queryPrecondition(result, valPrincipalState)
 		written := verifyResultsPutWrite(result)
 		if written {
-			PrettyInfo(fmt.Sprintf(
+			InfoMessage(fmt.Sprintf(
 				"%s: %s", prettyQuery(query), result.Summary,
 			), "result", true)
 		}
@@ -272,7 +272,7 @@ func queryUnlinkability(
 			}
 			mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 			result.Resolved = true
-			result.Summary = prettyVerifyResultSummary(mutatedInfo, fmt.Sprintf(
+			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 				"%s and %s %s (%s), %s.",
 				prettyConstant(constants[i]),
 				prettyConstant(constants[ii]),
@@ -283,7 +283,7 @@ func queryUnlinkability(
 			result = queryPrecondition(result, valPrincipalState)
 			written := verifyResultsPutWrite(result)
 			if written {
-				PrettyInfo(fmt.Sprintf(
+				InfoMessage(fmt.Sprintf(
 					"%s: %s", prettyQuery(query), result.Summary,
 				), "result", true)
 			}

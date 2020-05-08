@@ -48,7 +48,7 @@ func possibleToDecomposePrimitive(
 	if len(has) >= len(prim.Decompose.Given) {
 		revealed := p.Arguments[prim.Decompose.Reveal]
 		if attackerStatePutWrite(revealed) {
-			PrettyInfo(fmt.Sprintf(
+			InfoMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
 				prettyValue(revealed), prettyPrimitive(p), prettyValues(has),
 			), "deduction", true)
@@ -130,7 +130,7 @@ func possibleToReconstructPrimitive(
 		Primitive: p,
 	}
 	if attackerStatePutWrite(revealed) {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			prettyValue(revealed), prettyValues(has),
 		), "deduction", true)

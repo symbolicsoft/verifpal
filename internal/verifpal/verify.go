@@ -23,7 +23,7 @@ func verifyModel(m Model) ([]VerifyResult, string) {
 	initiated := time.Now().Format("03:04:05 PM")
 	verifyAnalysisCountInit()
 	verifyResultsInit(m)
-	PrettyInfo(fmt.Sprintf(
+	InfoMessage(fmt.Sprintf(
 		"Verification initiated for '%s' at %s.", m.FileName, initiated,
 	), "verifpal", false)
 	switch m.Attacker {
@@ -66,7 +66,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 }
 
 func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
-	PrettyInfo("Attacker is configured as passive.", "info", false)
+	InfoMessage("Attacker is configured as passive.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
 		attackerStateInit(false)
@@ -109,7 +109,7 @@ func verifyEnd() ([]VerifyResult, string) {
 	valVerifyResults, fileName := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
-			PrettyInfo(fmt.Sprintf(
+			InfoMessage(fmt.Sprintf(
 				"%s: %s",
 				prettyQuery(verifyResult.Query),
 				verifyResult.Summary,
@@ -117,9 +117,9 @@ func verifyEnd() ([]VerifyResult, string) {
 		}
 	}
 	completed := time.Now().Format("03:04:05 PM")
-	PrettyInfo(fmt.Sprintf(
+	InfoMessage(fmt.Sprintf(
 		"Verification completed for '%s' at %s.", fileName, completed,
 	), "verifpal", false)
-	PrettyInfo("Thank you for using Verifpal.", "verifpal", false)
+	InfoMessage("Thank you for using Verifpal.", "verifpal", false)
 	return valVerifyResults, verifyGetResultsCode(valVerifyResults)
 }

@@ -62,7 +62,7 @@ func libpegParseModel(filePath string, verbose bool) Model {
 		errorCritical("model file name must have a '.vp' extension")
 	}
 	if verbose {
-		PrettyInfo(fmt.Sprintf(
+		InfoMessage(fmt.Sprintf(
 			"Parsing model '%s'...", fileName,
 		), "verifpal", false)
 	}

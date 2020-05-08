@@ -174,7 +174,7 @@ SkeletonSearch:
 			Primitive: skeleton,
 		}
 		if attackerStatePutWrite(known) {
-			PrettyInfo(fmt.Sprintf(
+			InfoMessage(fmt.Sprintf(
 				"Constructed skeleton %s.",
 				prettyPrimitive(skeleton),
 			), "analysis", true)
