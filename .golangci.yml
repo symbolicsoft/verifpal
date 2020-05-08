@@ -4,6 +4,7 @@ run:
         - help.go
         - libpeg.go
         - libcoq.go
+        - libgo.go
 
 linters:
     enable:

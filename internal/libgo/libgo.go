@@ -7,19 +7,21 @@
 package main
 
 import (
+	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/subtle"
-	"encoding/binary"
-	"golang.org/x/crypto/blake2s"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/scrypt"
-	"hash"
-	"io"
-	"math"
 )
 
 /* ---------------------------------------------------------------- *
@@ -47,46 +49,39 @@ var minNonce = uint32(0)
  * UTILITY FUNCTIONS                                                *
  * ---------------------------------------------------------------- */
 
-func getPublicKey(kp *keypair) []byte {
-	return kp.public_key
-}
-
-func isEmptyKey(k []byte) bool {
-	return subtle.ConstantTimeCompare(k[:], emptyKey[:]) == 1
-}
-
 func errorCritical(errText string) {
 	err := errors.New(errText)
 	log.Fatal(fmt.Errorf("Error: %v.\n", err))
 }
 
-func validatePublicKey(k []byte) bool {
-	forbiddenCurveValues := [12][]byte{
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		{224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0},
-		{95, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92, 196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 87},
-		{236, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127},
-		{237, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127},
-		{238, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127},
-		{205, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 128},
-		{76, 156, 149, 188, 163, 80, 140, 36, 177, 208, 177, 85, 156, 131, 239, 91, 4, 68, 92, 196, 88, 28, 142, 134, 216, 34, 78, 221, 208, 159, 17, 215},
-		{217, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-		{218, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-		{219, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 25},
-	}
-	for _, testValue := range forbiddenCurveValues {
-		if subtle.ConstantTimeCompare(k[:], testValue[:]) == 1 {
-			panic("Invalid public key")
-		}
-	}
-	return true
+func dh(private_key []byte, public_key []byte) []byte {
+	var ss [32]byte
+	var priv32 [32]byte
+	var pub32 [32]byte
+	copy(priv32[:], private_key)
+	copy(pub32[:], public_key)
+	curve25519.ScalarMult(&ss, &priv32, &pub32)
+	return ss[:]
+}
+
+func generateKeypair() ([]byte, []byte) {
+	var private_key []byte
+	_, _ = rand.Read(private_key)
+	public_key := generatePublicKey(private_key)
+	return private_key, public_key
+}
+
+func generatePublicKey(private_key []byte) []byte {
+	var public_key [32]byte
+	var priv32 [32]byte
+	copy(priv32[:], private_key)
+	curve25519.ScalarBaseMult(&public_key, &priv32)
+	return public_key[:]
 }
 
 /* ---------------------------------------------------------------- *
  * PRIMITIVES                                                       *
  * ---------------------------------------------------------------- */
-
 
 func ASSERT(a []byte, b []byte) bool {
 	return hmac.Equal(a, b)
@@ -100,8 +95,34 @@ func CONCAT(a ...[]byte) []byte {
 	return b
 }
 
-func SPLIT(b []byte) []byte {
-	return b...
+func SPLIT2(b []byte) ([]byte, []byte) {
+	a1 := b[00:32]
+	a2 := b[32:64]
+	return a1, a2
+}
+
+func SPLIT3(b []byte) ([]byte, []byte, []byte) {
+	a1 := b[00:32]
+	a2 := b[32:64]
+	a3 := b[64:96]
+	return a1, a2, a3
+}
+
+func SPLIT4(b []byte) ([]byte, []byte, []byte, []byte) {
+	a1 := b[00:32]
+	a2 := b[32:64]
+	a3 := b[64:96]
+	a4 := b[96:128]
+	return a1, a2, a3, a4
+}
+
+func SPLIT5(b []byte) ([]byte, []byte, []byte, []byte, []byte) {
+	a1 := b[00:32]
+	a2 := b[32:64]
+	a3 := b[64:96]
+	a4 := b[96:128]
+	a5 := b[128:160]
+	return a1, a2, a3, a4, a5
 }
 
 func HASH(a ...[]byte) []byte {
@@ -109,39 +130,37 @@ func HASH(a ...[]byte) []byte {
 	for _, aa := range a {
 		b = append(b, aa...)
 	}
-	return blake2s.Sum256(b)
+	h := sha256.Sum256(b)
+	return h[:]
 }
 
-func MAC(k []byte, message []byte) bool {
-	mac := hmac.New(blake2s.New, key)
+func MAC(k []byte, message []byte) []byte {
+	mac := hmac.New(sha256.New, k)
 	mac.Write(message)
 	return mac.Sum(nil)
 }
 
-func HKDF1(ck []byte, ikm []byte) ([]byte) {
-	h, _ := blake2s.New256([]byte{})
+func HKDF1(ck []byte, ikm []byte) []byte {
 	var k1 []byte
-	output := hkdf.New(h, ikm[:], ck[:], []byte{})
+	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
 	io.ReadFull(output, k1[:])
 	return k1
 }
 
 func HKDF2(ck []byte, ikm []byte) ([]byte, []byte) {
-	h, _ := blake2s.New256([]byte{})
 	var k1 []byte
 	var k2 []byte
-	output := hkdf.New(h, ikm[:], ck[:], []byte{})
+	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
 	io.ReadFull(output, k1[:])
 	io.ReadFull(output, k2[:])
 	return k1, k2
 }
 
 func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte) {
-	h, _ := blake2s.New256([]byte{})
 	var k1 []byte
 	var k2 []byte
 	var k3 []byte
-	output := hkdf.New(h, ikm[:], ck[:], []byte{})
+	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
 	io.ReadFull(output, k1[:])
 	io.ReadFull(output, k2[:])
 	io.ReadFull(output, k3[:])
@@ -149,12 +168,11 @@ func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte) {
 }
 
 func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte) {
-	h, _ := blake2s.New256([]byte{})
 	var k1 []byte
 	var k2 []byte
 	var k3 []byte
 	var k4 []byte
-	output := hkdf.New(h, ikm[:], ck[:], []byte{})
+	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
 	io.ReadFull(output, k1[:])
 	io.ReadFull(output, k2[:])
 	io.ReadFull(output, k3[:])
@@ -163,13 +181,12 @@ func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte) {
 }
 
 func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte) {
-	h, _ := blake2s.New256([]byte{})
 	var k1 []byte
 	var k2 []byte
 	var k3 []byte
 	var k4 []byte
 	var k5 []byte
-	output := hkdf.New(h, ikm[:], ck[:], []byte{})
+	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
 	io.ReadFull(output, k1[:])
 	io.ReadFull(output, k2[:])
 	io.ReadFull(output, k3[:])
@@ -179,7 +196,7 @@ func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte) {
 }
 
 func PW_HASH(a ...[]byte) []byte {
-	h := HASH(a)
+	h := HASH(a...)
 	salt := make([]byte, 16)
 	_, err := rand.Read(salt)
 	if err != nil {
@@ -193,10 +210,6 @@ func PW_HASH(a ...[]byte) []byte {
 }
 
 func ENC(k []byte, plaintext []byte) []byte {
-	plaintext, err := pkcs7.Pad(plaintext, aes.BlockSize)
-	if err =! nil {
-		errorCritical(err.Error())
-	}
 	block, err := aes.NewCipher(k)
 	if err != nil {
 		errorCritical(err.Error())
@@ -217,7 +230,7 @@ func DEC(k []byte, ciphertext []byte) []byte {
 	if err != nil {
 		errorCritical(err.Error())
 	}
-	if len(ciphertext) % aes.BlockSize != 0 {
+	if len(ciphertext)%aes.BlockSize != 0 {
 		errorCritical("invalid ciphertext")
 	}
 	if len(ciphertext) < aes.BlockSize {
@@ -227,7 +240,6 @@ func DEC(k []byte, ciphertext []byte) []byte {
 	mode := cipher.NewCBCDecrypter(block, iv)
 	plaintext := make([]byte, len(ciphertext[aes.BlockSize:]))
 	mode.CryptBlocks(plaintext, ciphertext)
-	plaintext, _ = pkcs7.Unpad(plaintext, aes.BlockSize)
 	return plaintext
 }
 
@@ -247,8 +259,8 @@ func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) (bool, []byte) {
 	plaintext := []byte{}
 	enc, err := chacha20poly1305.NewX(k[:])
 	nonce := ciphertext[:chacha20poly1305.NonceSizeX]
-	if len(ciphertext) < chacha20poly1305.NonceSizeX + 1 {
-		return err.Error("invalid ciphertext"), plaintext
+	if len(ciphertext) <= chacha20poly1305.NonceSizeX {
+		return false, plaintext
 	}
 	plaintext, err = enc.Open(
 		nil, nonce,
@@ -257,27 +269,38 @@ func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) (bool, []byte) {
 	return (err == nil), plaintext
 }
 
-func PKE_ENC(k []byte, plaintext []byte) []byte {
-
+func PKE_ENC(pk []byte, plaintext []byte) []byte {
+	esk, epk := generateKeypair()
+	ss := dh(esk, pk)
+	ciphertext := ENC(ss, plaintext)
+	return append(epk, ciphertext...)
 }
 
 func PKE_DEC(k []byte, ciphertext []byte) []byte {
-
+	if len(ciphertext) <= 32 {
+		errorCritical("invalid ciphertext")
+	}
+	epk := ciphertext[:32]
+	ss := dh(k, epk)
+	plaintext := DEC(ss, ciphertext)
+	return plaintext
 }
 
 func SIGN(k []byte, message []byte) []byte {
-
+	return ed25519.Sign(k, message)
 }
 
-func SIGNVERIF(k []byte, message []byte, signature []byte) bool {
-
+func SIGNVERIF(pk []byte, message []byte, signature []byte) bool {
+	// TODO: Translate Curve25519 keys
+	return ed25519.Verify(pk, message, signature)
 }
 
+/*
 func RINGSIGN(ka []byte, kb []byte, kc []byte, message []byte) []byte {
 
 }
 
-func RINGSIGNVERIF(ka []byte, kb []byte, kc []byte, message []byte, signature []byte) bool {
+func RINGSIGNVERIF(pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte) bool {
 
 }
 
@@ -296,34 +319,11 @@ func SHAMIR_SPLIT(x []byte) []byte {
 func SHAMIR_JOIN(a []byte, b []byte, c []byte) []byte {
 
 }
-
-func dh(private_key []byte, public_key []byte) []byte {
-	var ss []byte
-	curve25519.ScalarMult(&ss, &private_key, &public_key)
-	return ss
-}
-
-func generateKeypair() keypair {
-	var public_key []byte
-	var private_key []byte
-	_, _ = rand.Read(private_key[:])
-	curve25519.ScalarBaseMult(&public_key, &private_key)
-	if validatePublicKey(public_key[:]) {
-		return keypair{public_key, private_key}
-	}
-	return generateKeypair()
-}
-
-func generatePublicKey(private_key []byte) []byte {
-	var public_key []byte
-	curve25519.ScalarBaseMult(&public_key, &private_key)
-	return public_key
-}
+*/
 
 /* ---------------------------------------------------------------- *
  * STATE MANAGEMENT                                                 *
  * ---------------------------------------------------------------- */
-
 
 /* ---------------------------------------------------------------- *
  * PROCESSES                                                        *

@@ -10,4 +10,5 @@ require (
 	github.com/josephspurrier/goversioninfo v0.0.0-20200309025242-14b0ab84c6ca // indirect
 	github.com/logrusorgru/aurora v0.0.0-20200102142835-e9ef32dff381
 	github.com/mna/pigeon v1.0.0 // indirect
+	golang.org/x/crypto v0.0.0-20200429183012-4b2356b1ed79
 )
