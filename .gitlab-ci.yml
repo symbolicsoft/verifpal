@@ -29,7 +29,7 @@ release:
     - make release
 
 snapcraft:
-  image: ubuntu:18.04
+  image: ubuntu:20.04
   stage: snapcraft
   script:
     - apt-get update -qy
