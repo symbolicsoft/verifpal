@@ -5,7 +5,7 @@ description: |
   Verifpal is new software for verifying the security of cryptographic protocols. Building upon contemporary research in symbolic formal verification, Verifpal’s main aim is to appeal more to real-world practitioners, students and engineers without sacrificing comprehensive formal verification features.
 icon: assets/icon.png
 confinement: strict
-base: core20
+base: core18
 
 parts:
   verifpal:
