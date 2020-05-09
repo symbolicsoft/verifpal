@@ -92,7 +92,7 @@ func errorCritical(errText string) {
 }
 
 // openBrowser opens a URI using the appropriate binding for the host operating system.
-func openBrowser(url string) {
+func OpenBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
 	case "linux":
