@@ -29,14 +29,13 @@ release:
     - make release
 
 snapcraft:
-  image: ubuntu:18.04
+  image: ubuntu:20.04
   stage: snapcraft
   script:
     - apt-get update -qy
-    - apt-get install -y make
+    - apt-get install -y make golang snapcraft
     - make dependencies
     - make lib
-    - apt-get install -y snapcraft
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
     - snapcraft login --with snapcraft.login
     - rm -f snapcraft.login *.snap
