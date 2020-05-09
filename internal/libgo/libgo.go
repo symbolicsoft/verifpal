@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
 // Implementation Version: 1.0.0
 
 /* ---------------------------------------------------------------- *
@@ -79,11 +82,8 @@ func ed25519Gen() ([]byte, []byte) {
 }
 
 func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
-	// This function is based on code written by Filippo Valsorda
-	// as part of the following project:
-	// https://github.com/FiloSottile/age
-	// The license for the age source code is visible here:
-	// https://github.com/FiloSottile/age/blob/master/LICENSE
+	/* SPDX-PackageCopyrightText: Copyright 2019 Google LLC
+	 * SPDX-License-Identifier: BSD-3-Clause */
 	var curve25519P, _ = new(big.Int).SetString(strings.Join([]string{
 		"578960446186580977117854925043439539266",
 		"34992332820282019728792003956564819949",
