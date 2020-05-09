@@ -29,11 +29,14 @@ release:
     - make release
 
 snapcraft:
-  image: golang:latest
+  image: ubuntu:18.04
   stage: snapcraft
   script:
     - apt-get update -qy
-    - apt-get install -y make git snapcraft
+    - apt-get install -y make git wget tar snapcraft 
+    - wget "https://dl.google.com/go/go1.14.2.linux-amd64.tar.gz"
+    - tar -C /usr/local -xzf go1.14.2.linux-amd64.tar.gz
+    - export PATH=$PATH:/usr/local/go/bin
     - make dependencies
     - make lib
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
