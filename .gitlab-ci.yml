@@ -34,9 +34,10 @@ snapcraft:
   only:
     - tags
   script:
+    - apt-get update -qy
+    - apt-get install -y make
     - make dependencies
     - make lib
-    - apt-get update -qy
     - apt-get install -y snapcraft
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
     - snapcraft login --with snapcraft.login
