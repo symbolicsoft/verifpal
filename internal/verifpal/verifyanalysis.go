@@ -124,10 +124,10 @@ func verifyAnalysisReconstruct(
 func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState, o int) int {
 	switch a.Kind {
 	case "constant":
-		a = sanityResolveConstant(a.Constant, valPrincipalState)
+		a = valueResolveConstant(a.Constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.Assigned {
-		if sanityEquivalentValues(a, aa, true) {
+		if valueEquivalentValues(a, aa, true) {
 			if attackerStatePutWrite(aa) {
 				o = o + 1
 			}

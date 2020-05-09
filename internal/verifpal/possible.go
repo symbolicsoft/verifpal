@@ -20,7 +20,7 @@ func possibleToDecomposePrimitive(
 	for i, g := range prim.Decompose.Given {
 		a := p.Arguments[g]
 		a, valid := prim.Decompose.Filter(p, a, i)
-		ii := sanityEquivalentValueInValues(a, valAttackerState.Known)
+		ii := valueEquivalentValueInValues(a, valAttackerState.Known)
 		if valid && ii >= 0 {
 			has = append(has, a)
 			continue
@@ -75,7 +75,7 @@ func possibleToRecomposePrimitive(
 				vb := v
 				switch v.Kind {
 				case "primitive":
-					equivPrim, vo, _ := sanityEquivalentPrimitives(
+					equivPrim, vo, _ := valueEquivalentPrimitives(
 						v.Primitive, p, false,
 					)
 					if !equivPrim || vo != ii {
@@ -98,7 +98,7 @@ func possibleToReconstructPrimitive(
 ) (bool, []Value) {
 	has := []Value{}
 	for _, a := range p.Arguments {
-		if sanityEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
+		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -144,8 +144,8 @@ func possibleToReconstructEquation(
 	if len(e.Values) > 2 {
 		s0 := e.Values[1]
 		s1 := e.Values[2]
-		hs0 := sanityEquivalentValueInValues(s0, valAttackerState.Known) >= 0
-		hs1 := sanityEquivalentValueInValues(s1, valAttackerState.Known) >= 0
+		hs0 := valueEquivalentValueInValues(s0, valAttackerState.Known) >= 0
+		hs1 := valueEquivalentValueInValues(s1, valAttackerState.Known) >= 0
 		if hs0 && hs1 {
 			return true, []Value{s0, s1}
 		}
@@ -161,8 +161,8 @@ func possibleToReconstructEquation(
 				Values: []Value{e.Values[0], e.Values[2]},
 			},
 		}
-		hp0 := sanityEquivalentValueInValues(p0, valAttackerState.Known) >= 0
-		hp1 := sanityEquivalentValueInValues(p1, valAttackerState.Known) >= 0
+		hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
+		hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
 		if hs0 && hp1 {
 			return true, []Value{s0, p1}
 		}
@@ -170,7 +170,7 @@ func possibleToReconstructEquation(
 			return true, []Value{p0, s1}
 		}
 	}
-	if sanityEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
+	if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
 		return true, []Value{e.Values[1]}
 	}
 	return false, []Value{}
@@ -225,7 +225,7 @@ func possibleToRewritePrim(
 					}
 				}
 			}
-			valid = sanityEquivalentValues(ax[0], ax[1], true)
+			valid = valueEquivalentValues(ax[0], ax[1], true)
 			if valid {
 				break
 			}
@@ -262,7 +262,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 				continue ggLoop
 			}
 			for hasP := 1; hasP < len(has); hasP++ {
-				equivPrim, o1, o2 := sanityEquivalentPrimitives(
+				equivPrim, o1, o2 := valueEquivalentPrimitives(
 					has[0].Primitive, has[hasP].Primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
@@ -283,7 +283,7 @@ func possibleToObtainPasswords(
 	passwords := []Value{}
 	switch a.Kind {
 	case "constant":
-		aa := sanityResolveConstant(a.Constant, valPrincipalState)
+		aa := valueResolveConstant(a.Constant, valPrincipalState)
 		switch aa.Kind {
 		case "constant":
 			if aa.Constant.Qualifier == "password" {

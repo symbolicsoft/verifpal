@@ -260,11 +260,11 @@ func coqValue(
 	return update, output, names
 }
 
-func coqConstant(constantName string, principalName string, names map[string]int) string {
+func coqConstant(valueName string, principalName string, names map[string]int) string {
 	return fmt.Sprintf(
 		"(get %s_%d \"%s\")",
 		principalName, names[principalName]-1,
-		constantName,
+		valueName,
 	)
 }
 

@@ -92,6 +92,6 @@ linters-settings:
         statements: 64
         lines: 128
     gocyclo:
-        min-complexity: 18
+        min-complexity: 15
     govet:
         enable-all: true

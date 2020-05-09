@@ -36,8 +36,8 @@ func queryConfidentiality(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	v := sanityResolveConstant(query.Constants[0], valPrincipalState)
-	ii := sanityEquivalentValueInValues(v, valAttackerState.Known)
+	v := valueResolveConstant(query.Constants[0], valPrincipalState)
+	ii := valueEquivalentValueInValues(v, valAttackerState.Known)
 	if ii < 0 {
 		return result
 	}
@@ -94,8 +94,8 @@ func queryAuthenticationGetPassIndices(
 	passes := []bool{}
 	sender := ""
 	c := Constant{}
-	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
-	ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, query.Message.Constants[0])
+	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
+	ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, query.Message.Constants[0])
 	if ii < 0 {
 		return indices, passes, sender, c
 	}
@@ -111,10 +111,10 @@ func queryAuthenticationGetPassIndices(
 		case "constant", "equation":
 			continue
 		}
-		if !sanityFindConstantInPrimitive(c, a.Primitive, valPrincipalState) {
+		if !valueFindConstantInPrimitive(c, a.Primitive, valPrincipalState) {
 			continue
 		}
-		iiii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.Constants[iii])
+		iiii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.Constants[iii])
 		if iiii < 0 {
 			return indices, passes, sender, c
 		}
@@ -144,7 +144,7 @@ func queryAuthenticationHandlePass(
 	result VerifyResult, c Constant, b Value, mutated string, sender string,
 	valPrincipalState PrincipalState,
 ) VerifyResult {
-	cc := sanityResolveConstant(c, valPrincipalState)
+	cc := valueResolveConstant(c, valPrincipalState)
 	result.Summary = infoVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), sender, result.Query.Message.Sender,
@@ -177,7 +177,7 @@ func queryFreshness(
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
 		prettyConstant(query.Constants[0]),
-		prettyValue(sanityResolveConstant(query.Constants[0], valPrincipalState)),
+		prettyValue(valueResolveConstant(query.Constants[0], valPrincipalState)),
 	), result.Options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
@@ -190,10 +190,10 @@ func queryFreshness(
 }
 
 func queryFreshnessCheck(c Constant, valPrincipalState PrincipalState) bool {
-	v := sanityResolveConstant(c, valPrincipalState)
-	cc := sanityGetConstantsFromValue(v)
+	v := valueResolveConstant(c, valPrincipalState)
+	cc := valueGetConstantsFromValue(v)
 	for _, ccc := range cc {
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
+		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
 		if ii >= 0 {
 			ccc = valPrincipalState.Constants[ii]
 			if ccc.Fresh {
@@ -234,7 +234,7 @@ func queryUnlinkability(
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
 			prettyConstant(noFreshness[0]),
-			prettyValue(sanityResolveConstant(noFreshness[0], valPrincipalState)),
+			prettyValue(valueResolveConstant(noFreshness[0], valPrincipalState)),
 		), result.Options)
 		result = queryPrecondition(result, valPrincipalState)
 		written := verifyResultsPutWrite(result)
@@ -248,7 +248,7 @@ func queryUnlinkability(
 	constants := []Constant{}
 	assigneds := []Value{}
 	for _, c := range query.Constants {
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 		constants = append(constants, c)
 		assigneds = append(assigneds, valPrincipalState.Assigned[i])
 	}
@@ -257,7 +257,7 @@ func queryUnlinkability(
 			if i == ii {
 				continue
 			}
-			if !sanityEquivalentValues(a, aa, false) {
+			if !valueEquivalentValues(a, aa, false) {
 				continue
 			}
 			obtainable := false
@@ -307,7 +307,7 @@ func queryPrecondition(
 		}
 		sender := ""
 		recipientKnows := false
-		i := sanityGetPrincipalStateIndexFromConstant(
+		i := valueGetPrincipalStateIndexFromConstant(
 			valPrincipalState, option.Message.Constants[0],
 		)
 		if i < 0 {

@@ -53,8 +53,8 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
-		valPrincipalState := sanityResolveAllPrincipalStateValues(state, valAttackerState)
-		failedRewrites, _, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
+		valPrincipalState := valueResolveAllPrincipalStateValues(state, valAttackerState)
+		failedRewrites, _, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 		sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
 		for i := range valPrincipalState.Assigned {
 			sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)

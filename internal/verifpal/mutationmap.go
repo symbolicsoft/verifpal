@@ -16,7 +16,7 @@ func mutationMapInit(
 		OutOfMutations: false,
 	}
 	for _, v := range valAttackerState.Known {
-		i := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, v.Constant)
+		i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, v.Constant)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
@@ -59,7 +59,7 @@ func mutationMapSkipValue(
 		return true
 	case !valPrincipalState.Known[i]:
 		return true
-	case !sanityConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
+	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
 		return true
 	case !intInSlice(valAttackerState.CurrentPhase, valPrincipalState.Phase[i]):
 		return true
@@ -93,23 +93,23 @@ func mutationMapReplaceConstant(
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) []Value {
 	mutations := []Value{}
-	if constantIsGOrNil(a.Constant) {
+	if valueIsGOrNil(a.Constant) {
 		return mutations
 	}
-	mutations = append(mutations, constantN)
+	mutations = append(mutations, valueN)
 	if stage <= 3 {
 		return mutations
 	}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "constant":
-			if constantIsGOrNil(v.Constant) {
+			if valueIsGOrNil(v.Constant) {
 				continue
 			}
-			c := sanityResolveConstant(v.Constant, valPrincipalState)
+			c := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
-				if sanityEquivalentValueInValues(c, mutations) < 0 {
+				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
 			}
@@ -126,16 +126,16 @@ func mutationMapReplacePrimitive(
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "primitive":
-			a = sanityResolveValueInternalValuesFromPrincipalState(
+			a = valueResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
 			)
-			if sanityEquivalentValues(a, v, true) {
+			if valueEquivalentValues(a, v, true) {
 				continue
 			}
 			if !injectMatchSkeletons(v.Primitive, injectPrimitiveSkeleton(a.Primitive)) {
 				continue
 			}
-			if sanityEquivalentValueInValues(v, mutations) < 0 {
+			if valueEquivalentValueInValues(v, mutations) < 0 {
 				mutations = append(mutations, v)
 			}
 		}
@@ -145,7 +145,7 @@ func mutationMapReplacePrimitive(
 		valPrincipalState, valAttackerState, stage,
 	)
 	for _, aa := range injectants {
-		if sanityEquivalentValueInValues(aa, mutations) < 0 {
+		if valueEquivalentValueInValues(aa, mutations) < 0 {
 			mutations = append(mutations, aa)
 		}
 	}
@@ -155,14 +155,14 @@ func mutationMapReplacePrimitive(
 func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
 	mutations := []Value{}
 	if stage <= 3 {
-		return []Value{constantGN}
+		return []Value{valueGN}
 	}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "equation":
 			switch len(v.Equation.Values) {
 			case len(a.Equation.Values):
-				if sanityEquivalentValueInValues(v, mutations) < 0 {
+				if valueEquivalentValueInValues(v, mutations) < 0 {
 					mutations = append(mutations, v)
 				}
 			}

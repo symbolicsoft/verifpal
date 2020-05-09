@@ -16,7 +16,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: "primitive", Primitive: p}}
-			if sanityEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
+			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
 				return true, v
 			}
 			return false, v
@@ -324,7 +324,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			Name:    "SIGN",
 			From:    2,
 			To: func(p Primitive) Value {
-				return constantN
+				return valueN
 			},
 			Matching: map[int][]int{
 				0: {0},
@@ -435,7 +435,7 @@ var primitiveSpecs = []PrimitiveSpec{
 						return Value{
 							Kind: "equation",
 							Equation: Equation{
-								Values: []Value{constantG, x},
+								Values: []Value{valueG, x},
 							},
 						}, true
 					case "equation":
@@ -553,7 +553,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			Name:    "RINGSIGN",
 			From:    4,
 			To: func(p Primitive) Value {
-				return constantN
+				return valueN
 			},
 			Matching: map[int][]int{
 				0: {0, 1, 2},

@@ -38,13 +38,13 @@ func inject(
 func injectValueRules(
 	k Value, arg int, p Primitive, rootPrimitive Primitive, stage int,
 ) bool {
-	if sanityEquivalentValues(k, Value{
+	if valueEquivalentValues(k, Value{
 		Kind:      "primitive",
 		Primitive: p,
 	}, true) {
 		return false
 	}
-	if sanityEquivalentValues(k, Value{
+	if valueEquivalentValues(k, Value{
 		Kind:      "primitive",
 		Primitive: rootPrimitive,
 	}, true) {
@@ -132,7 +132,7 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case "constant":
-			skeleton.Arguments[i] = constantN
+			skeleton.Arguments[i] = valueN
 		case "primitive":
 			aa := Value{
 				Kind:      "primitive",
@@ -140,7 +140,7 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 			}
 			skeleton.Arguments[i] = aa
 		case "equation":
-			skeleton.Arguments[i] = constantN
+			skeleton.Arguments[i] = valueN
 		}
 	}
 	return skeleton
@@ -152,7 +152,7 @@ func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 	}
 	pv := Value{Kind: "primitive", Primitive: injectPrimitiveSkeleton(p)}
 	sv := Value{Kind: "primitive", Primitive: skeleton}
-	return sanityEquivalentValues(pv, sv, true)
+	return valueEquivalentValues(pv, sv, true)
 }
 
 func injectMissingSkeletons(p Primitive, valAttackerState AttackerState) {
@@ -202,7 +202,7 @@ func injectPrimitive(
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
 			case "constant":
-				i := sanityGetPrincipalStateIndexFromConstant(
+				i := valueGetPrincipalStateIndexFromConstant(
 					valPrincipalState, k.Constant,
 				)
 				k = valPrincipalState.Assigned[i]
@@ -263,7 +263,7 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 				Check:  p.Check,
 			},
 		}
-		if sanityEquivalentValueInValues(aa, injectants) < 0 {
+		if valueEquivalentValueInValues(aa, injectants) < 0 {
 			injectants = append(injectants, aa)
 		}
 	}
@@ -289,7 +289,7 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 					Check:  p.Check,
 				},
 			}
-			if sanityEquivalentValueInValues(aa, injectants) < 0 {
+			if valueEquivalentValueInValues(aa, injectants) < 0 {
 				injectants = append(injectants, aa)
 			}
 		}
@@ -318,7 +318,7 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 						Check:  p.Check,
 					},
 				}
-				if sanityEquivalentValueInValues(aa, injectants) < 0 {
+				if valueEquivalentValueInValues(aa, injectants) < 0 {
 					injectants = append(injectants, aa)
 				}
 			}
@@ -350,7 +350,7 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 							Check:  p.Check,
 						},
 					}
-					if sanityEquivalentValueInValues(aa, injectants) < 0 {
+					if valueEquivalentValueInValues(aa, injectants) < 0 {
 						injectants = append(injectants, aa)
 					}
 				}
@@ -385,7 +385,7 @@ func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 								Check:  p.Check,
 							},
 						}
-						if sanityEquivalentValueInValues(aa, injectants) < 0 {
+						if valueEquivalentValueInValues(aa, injectants) < 0 {
 							injectants = append(injectants, aa)
 						}
 					}

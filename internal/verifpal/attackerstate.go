@@ -32,7 +32,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
 		if err == nil && earliestPhase > attackerStateShared.CurrentPhase {
 			continue
 		}
-		if sanityEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 		}
 	}
@@ -51,7 +51,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
 		if earliestPhase > attackerStateShared.CurrentPhase {
 			continue
 		}
-		if sanityEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 		}
 	}
@@ -67,9 +67,9 @@ func attackerStateGetRead() AttackerState {
 
 func attackerStatePutWrite(known Value) bool {
 	written := false
-	if sanityEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
+	if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
 		attackerStateMutex.Lock()
-		if sanityEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
+		if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
 			attackerStateShared.Known = append(attackerStateShared.Known, known)
 			written = true
 		}

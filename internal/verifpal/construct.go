@@ -16,8 +16,8 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 		Phase:      [][]int{},
 	}
 	currentPhase := 0
-	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, constantG.Constant)
-	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, constantG)
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Constant)
+	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueG)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
@@ -27,8 +27,8 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 			map[string]string{principal: principal},
 		)
 	}
-	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, constantN.Constant)
-	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, constantN)
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueN.Constant)
+	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueN)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
@@ -77,7 +77,7 @@ func constructKnowledgeMapRenderKnows(
 	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
 ) KnowledgeMap {
 	for _, c := range expr.Constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
 			d1 := valKnowledgeMap.Constants[i].Declaration
 			d2 := "knows"
@@ -132,7 +132,7 @@ func constructKnowledgeMapRenderGenerates(
 	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
 ) KnowledgeMap {
 	for _, c := range expr.Constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
 			errorCritical(fmt.Sprintf(
 				"generated constant already exists (%s)",
@@ -163,7 +163,7 @@ func constructKnowledgeMapRenderLeaks(
 	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
 ) KnowledgeMap {
 	for _, c := range expr.Constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(
+		i := valueGetKnowledgeMapIndexFromConstant(
 			valKnowledgeMap, c,
 		)
 		if i < 0 {
@@ -202,7 +202,7 @@ func constructKnowledgeMapRenderAssignment(
 		sanityPrimitive(expr.Right.Primitive, expr.Left)
 	}
 	for _, c := range constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
 			errorCritical(fmt.Sprintf(
 				"constant does not exist (%s)",
@@ -225,7 +225,7 @@ func constructKnowledgeMapRenderAssignment(
 		}
 	}
 	for i, c := range expr.Left {
-		ii := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if ii >= 0 {
 			errorCritical(fmt.Sprintf(
 				"constant assigned twice (%s)",
@@ -257,7 +257,7 @@ func constructKnowledgeMapRenderMessage(
 	valKnowledgeMap KnowledgeMap, blck Block, currentPhase int,
 ) KnowledgeMap {
 	for _, c := range blck.Message.Constants {
-		i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
 			errorCritical(fmt.Sprintf(
 				"%s sends unknown constant to %s (%s)",

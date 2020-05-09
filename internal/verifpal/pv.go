@@ -19,7 +19,7 @@ func Pv(modelFile string) {
 
 func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant) string {
 	prefix := "const"
-	i := sanityGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	c = valKnowledgeMap.Constants[i]
 	if valKnowledgeMap.Creator[i] == principal && c.Declaration == "assignment" {
 		prefix = principal
@@ -164,7 +164,7 @@ func pvPrincipal(
 				)
 			}
 		case "assignment":
-			c := sanityGetConstantsFromValue(expression.Right)
+			c := valueGetConstantsFromValue(expression.Right)
 			get := ""
 			for _, cc := range c {
 				prefix := pvConstantPrefix(valKnowledgeMap, block.Principal.Name, cc)

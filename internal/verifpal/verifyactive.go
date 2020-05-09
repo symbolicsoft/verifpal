@@ -104,7 +104,7 @@ func verifyActiveMutatePrincipalState(
 ) (PrincipalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.Constants {
-		ii := sanityGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 		ac := valMutationMap.Combination[i]
 		ar := valPrincipalState.Assigned[ii]
 		switch ar.Kind {
@@ -121,8 +121,8 @@ func verifyActiveMutatePrincipalState(
 			isWorthwhileMutation = true
 		}
 	}
-	valPrincipalState = sanityResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
-	failedRewrites, failedRewriteIndices, valPrincipalState := sanityPerformAllRewrites(valPrincipalState)
+	valPrincipalState = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
+	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 	for i, p := range failedRewrites {
 		if p.Check {
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
