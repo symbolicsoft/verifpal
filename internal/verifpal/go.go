@@ -11,6 +11,7 @@ import (
 
 // Go is supposed to implement Golang generation from Verifpal models. It does not exist yet.
 func Go(modelFile string) {
+	errorCritical("feature not yet implemented")
 	m := libpegParseModel(modelFile, false)
 	fmt.Fprint(os.Stdout, prettyModel(m))
 }
