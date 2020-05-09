@@ -92,7 +92,7 @@ func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
 	for i, b := range pk {
 		bigEndianY[ed25519.PublicKeySize-i-1] = b
 	}
-	bigEndianY[0] &= 0b0111_1111
+	bigEndianY[0] &= 127
 	y := new(big.Int).SetBytes(bigEndianY)
 	denom := big.NewInt(1)
 	denom.ModInverse(denom.Sub(denom, y), curve25519P)
