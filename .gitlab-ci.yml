@@ -33,7 +33,7 @@ snapcraft:
   stage: snapcraft
   script:
     - apt-get update -qy
-    - apt-get install -y make golang snapcraft
+    - apt-get install -y make git golang snapcraft
     - make dependencies
     - make lib
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
