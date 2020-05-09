@@ -29,11 +29,13 @@ release:
     - make release
 
 snapcraft:
-  image: ubuntu:18.04
+  image: golang:latest
   stage: snapcraft
   script:
     - apt-get update -qy
-    - apt-get install -y snapcraft
+    - apt-get install -y make git snapcraft
+    - make dependencies
+    - make lib
     - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
     - snapcraft login --with snapcraft.login
     - rm -f snapcraft.login *.snap
