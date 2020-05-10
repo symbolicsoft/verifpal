@@ -49,11 +49,13 @@ dep:
 
 lint:
 	@/bin/echo "[Verifpal] Running golangci-lint..."
+	@GOOS="" go generate verifpal.com/cmd/verifpal
 	@golangci-lint run
 
 test:
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
+	@GOOS="" go generate verifpal.com/cmd/verifpal
 	@go clean -testcache
 	@go test verifpal.com/cmd/verifpal
 
