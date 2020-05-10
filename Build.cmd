@@ -2,7 +2,6 @@
 @REM SPDX-License-Identifier: GPL-3.0-only
 
 @echo off
-@setx GOOS "windows" >nul
 
 @echo|set /p="[Verifpal] Installing dependencies..."
 @go get -u github.com/mna/pigeon
@@ -20,32 +19,36 @@
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@setx GOOS "windows" >nul
+@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
+@setx GOOS "windows" >nul
 @go build -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/cmd/verifpal
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
-@setx GOOS "linux" >nul
+@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
+@setx GOOS "linux" >nul
 @go build -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
-@setx GOOS "darwin" >nul
+@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
+@setx GOOS "darwin" >nul
 @go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for FreeBSD..."
-@setx GOOS "freebsd" >nul
+@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
+@setx GOOS "freebsd" >nul
 @go build -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/cmd/verifpal
 @echo  OK
 
 @echo|set /p="[Verifpal] Cleaning up..."
+@setx GOOS "" >nul
 @del cmd\verifpal\resource.syso
-@setx GOOS "windows" >nul
 @echo                    OK
 
 @exit /b

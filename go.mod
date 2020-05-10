@@ -11,6 +11,7 @@ require (
 	github.com/logrusorgru/aurora v0.0.0-20200102142835-e9ef32dff381
 	github.com/mna/pigeon v1.0.0 // indirect
 	github.com/spf13/cobra v1.0.0
+	github.com/spf13/pflag v1.0.5 // indirect
 	golang.org/dl v0.0.0-20200414231856-f86334ee252a // indirect
 	golang.org/x/crypto v0.0.0-20200429183012-4b2356b1ed79
 )
