@@ -55,8 +55,8 @@ lint:
 test:
 	@go get ./...
 	@/bin/echo "[Verifpal] Running test battery..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
 	@go clean -testcache
+	@GOOS="" go generate verifpal.com/cmd/verifpal
 	@go test verifpal.com/cmd/verifpal
 
 tag:
