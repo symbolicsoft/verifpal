@@ -18,9 +18,13 @@ var header = []string{
 }
 
 func main() {
-	r, err := os.Open(filepath.Join(".", "libcoq.v"))
+	r, err := os.Open(filepath.Join(
+		"..", "..", "internal", "libcoq", "libcoq.v",
+	))
 	check(err)
-	w, err := os.Create(filepath.Join("..", "verifpal", "libcoq.go"))
+	w, err := os.Create(filepath.Join(
+		"..", "..", "internal", "verifpal", "libcoq.go",
+	))
 	check(err)
 	_, err = w.WriteString(strings.Join(header, "\n"))
 	check(err)

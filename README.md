@@ -64,7 +64,7 @@ Otherwise, you can:
 You must have [Go](https://golang.org) installed in order to build Verifpal. Please review the [Go Getting Started](https://golang.org/doc/install) instructions in order to understand how to best install Go for your computer and operating system.
 
 #### Installing Dependencies
-Verifpal relies on the [Pigeon](https://github.com/mna/pigeon) PEG parser generator and the [Aurora](https://github.com/logrusorgru/aurora) ANSI color printer. you can easily install them by typing `make dependencies`.
+Verifpal relies on the [Aurora](https://github.com/logrusorgru/aurora) ANSI color printer, the [Cobra](https://github.com/spf13/cobra) CLI application library and the [Pigeon](https://github.com/mna/pigeon) PEG parser generator. you can easily install them by typing `make dep`. 
 
 #### Compiling Verifpal
 - *Windows*: Simply type `Build` to build Verifpal for Windows, Linux, macOS and FreeBSD. This will also install dependencies.

@@ -3,6 +3,8 @@
 
 # Verifpal
 cmd/verifpal/resource.syso
+internal/verifpal/libpeg.go
+internal/verifpal/libcoq.go
 build/windows/verifpal.exe
 build/linux/verifpal
 build/macos/verifpal

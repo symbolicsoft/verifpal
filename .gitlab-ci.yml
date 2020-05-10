@@ -8,14 +8,14 @@ lint:
   image: golangci/golangci-lint:latest
   stage: lint
   script:
-    - make dependencies
+    - make dep
     - make lint
 
 test:
   image: golang:latest
   stage: test
   script:
-    - make dependencies
+    - make dep
     - make test
 
 release:

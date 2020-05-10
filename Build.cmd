@@ -20,22 +20,26 @@
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@go generate ./...
+@setx GOOS "windows" >nul
+@go generate verifpal.com/cmd/verifpal
 @go build -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/cmd/verifpal
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
 @setx GOOS "linux" >nul
+@go generate verifpal.com/cmd/verifpal
 @go build -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
 @setx GOOS "darwin" >nul
+@go generate verifpal.com/cmd/verifpal
 @go build -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/cmd/verifpal
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for FreeBSD..."
 @setx GOOS "freebsd" >nul
+@go generate verifpal.com/cmd/verifpal
 @go build -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/cmd/verifpal
 @echo  OK
 
