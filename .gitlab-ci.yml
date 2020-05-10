@@ -31,6 +31,8 @@ release:
 snapcraft:
   image: ubuntu:18.04
   stage: snapcraft
+  only:
+    - tags
   script:
     - apt-get update -qy
     - apt-get install -y snapcraft 
