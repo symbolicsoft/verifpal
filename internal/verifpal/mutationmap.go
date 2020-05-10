@@ -110,9 +110,6 @@ func mutationMapReplaceConstant(
 			c := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
-				if valueEquivalentValues(a, c, true) {
-					continue
-				}
 				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
@@ -133,9 +130,6 @@ func mutationMapReplacePrimitive(
 			a = valueResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
 			)
-			if valueEquivalentValues(a, v, true) {
-				continue
-			}
 			if !injectMatchSkeletons(v.Primitive, injectPrimitiveSkeleton(a.Primitive)) {
 				continue
 			}

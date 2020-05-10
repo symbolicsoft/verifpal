@@ -216,8 +216,8 @@ func injectPrimitive(
 				kinjectants[arg] = append(kinjectants[arg], k)
 			case "primitive":
 				// STAGE USED
+				kinjectants[arg] = append(kinjectants[arg], k)
 				if stage <= 3 {
-					kinjectants[arg] = append(kinjectants[arg], k)
 					continue
 				}
 				kinjectants[arg] = append(kinjectants[arg], inject(

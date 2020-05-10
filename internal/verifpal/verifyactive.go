@@ -106,7 +106,13 @@ func verifyActiveMutatePrincipalState(
 	for i, c := range valMutationMap.Constants {
 		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 		ac := valMutationMap.Combination[i]
-		ar := valPrincipalState.Assigned[ii]
+		ar := valueResolveValueInternalValuesFromPrincipalState(
+			valPrincipalState.Assigned[ii], valPrincipalState.Assigned[ii],
+			ii, valPrincipalState, valAttackerState, true,
+		)
+		if valueEquivalentValues(ac, ar, true) {
+			continue
+		}
 		switch ar.Kind {
 		case "primitive":
 			ac.Primitive.Output = ar.Primitive.Output

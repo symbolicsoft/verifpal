@@ -143,7 +143,7 @@ var verifpalTests = []VerifpalTest{
 	},
 	{
 		Model:       "ringsign_substitute.vp",
-		ResultsCode: "a1a1a1a1",
+		ResultsCode: "a1a0a1a1",
 	},
 	{
 		Model:       "ringsign_unguarded.vp",
