@@ -10,28 +10,28 @@ all:
 
 windows:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
 	@GOOS="windows" go build -gcflags="-e" -ldflags="-s -w" -o build/windows verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo " OK"
 
 linux:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
 	@GOOS="linux" go build -gcflags="-e" -ldflags="-s -w" -o build/linux verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo "   OK"
 
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
 	@GOOS="darwin" go build -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo "   OK"
 
 freebsd:
 	@/bin/echo -n "[Verifpal] Building Verifpal for FreeBSD..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
 	@GOOS="freebsd" go build -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo " OK"
@@ -49,14 +49,14 @@ dep:
 
 lint:
 	@/bin/echo "[Verifpal] Running golangci-lint..."
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
 	@golangci-lint run
 
 test:
-	@go get ./...
-	@/bin/echo "[Verifpal] Running test battery..."
+	@make -s dep
 	@go clean -testcache
-	@GOOS="" go generate verifpal.com/cmd/verifpal
+	@go generate verifpal.com/cmd/verifpal
+	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal
 
 tag:
