@@ -53,7 +53,6 @@ lint:
 	@golangci-lint run
 
 test:
-	@make -s dep
 	@go clean -testcache
 	@go generate verifpal.com/cmd/verifpal
 	@/bin/echo "[Verifpal] Running test battery..."
