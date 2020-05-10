@@ -41,12 +41,19 @@ func verifyModel(m Model) ([]VerifyResult, string) {
 func verifyResolveQueries(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) {
+	var queryGroup sync.WaitGroup
 	valVerifyResults, _ := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if !verifyResult.Resolved {
-			queryStart(verifyResult.Query, valKnowledgeMap, valPrincipalState, valAttackerState)
+			queryGroup.Add(1)
+			queryStart(
+				verifyResult.Query, valKnowledgeMap,
+				valPrincipalState, valAttackerState,
+				&queryGroup,
+			)
 		}
 	}
+	queryGroup.Wait()
 }
 
 func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) {
@@ -61,8 +68,8 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 		}
 		scanGroup.Add(1)
 		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
-		scanGroup.Wait()
 	}
+	scanGroup.Wait()
 }
 
 func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {

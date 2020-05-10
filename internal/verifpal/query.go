@@ -6,24 +6,26 @@ package verifpal
 
 import (
 	"fmt"
+	"sync"
 )
 
 func queryStart(
 	query Query, valKnowledgeMap KnowledgeMap,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) VerifyResult {
+	valPrincipalState PrincipalState, valAttackerState AttackerState, qg *sync.WaitGroup,
+) {
 	switch query.Kind {
 	case "confidentiality":
-		return queryConfidentiality(query, valPrincipalState, valAttackerState)
+		queryConfidentiality(query, valPrincipalState, valAttackerState)
 	case "authentication":
-		return queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	case "freshness":
-		return queryFreshness(query, valPrincipalState)
+		queryFreshness(query, valPrincipalState)
 	case "unlinkability":
-		return queryUnlinkability(query, valPrincipalState, valAttackerState)
+		queryUnlinkability(query, valPrincipalState, valAttackerState)
+	default:
+		errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
 	}
-	errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
-	return VerifyResult{}
+	qg.Done()
 }
 
 func queryConfidentiality(

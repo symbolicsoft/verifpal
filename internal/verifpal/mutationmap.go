@@ -97,6 +97,7 @@ func mutationMapReplaceConstant(
 		return mutations
 	}
 	mutations = append(mutations, valueN)
+	// STAGE USED
 	if stage <= 3 {
 		return mutations
 	}
@@ -109,6 +110,9 @@ func mutationMapReplaceConstant(
 			c := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
+				if valueEquivalentValues(a, c, true) {
+					continue
+				}
 				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
@@ -154,6 +158,7 @@ func mutationMapReplacePrimitive(
 
 func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
 	mutations := []Value{}
+	// STAGE USED
 	if stage <= 3 {
 		return []Value{valueGN}
 	}
