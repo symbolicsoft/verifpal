@@ -160,3 +160,20 @@ func infoAnalysis(stage int) {
 	fmt.Fprint(os.Stdout, a)
 	fmt.Fprint(os.Stdout, "\r \r")
 }
+
+func infoLiteralNumber(n int) string {
+	switch n {
+	case 0:
+		return "first"
+	case 1:
+		return "second"
+	case 2:
+		return "third"
+	case 3:
+		return "fourth"
+	case 4:
+		return "fifth"
+	}
+	errorCritical("invalid infoLiteralNumber request")
+	return ""
+}

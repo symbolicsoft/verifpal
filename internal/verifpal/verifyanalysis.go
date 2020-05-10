@@ -6,6 +6,7 @@ package verifpal
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -62,9 +63,17 @@ func verifyAnalysisDecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
+		valueText := prettyValue(revealed)
+		if revealed.Kind == "primitive" {
+			valueText = fmt.Sprintf(
+				"%s output of %s",
+				strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
+				valueText,
+			)
+		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
-			prettyValue(revealed), prettyValue(a), prettyValues(ar),
+			valueText, prettyValue(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
@@ -85,9 +94,17 @@ func verifyAnalysisRecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
+		valueText := prettyValue(revealed)
+		if revealed.Kind == "primitive" {
+			valueText = fmt.Sprintf(
+				"%s output of %s",
+				strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
+				valueText,
+			)
+		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
-			prettyValue(revealed), prettyValue(a), prettyValues(ar),
+			valueText, prettyValue(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
@@ -112,9 +129,17 @@ func verifyAnalysisReconstruct(
 		return o
 	}
 	if attackerStatePutWrite(a) {
+		valueText := prettyValue(a)
+		if a.Kind == "primitve" {
+			valueText = fmt.Sprintf(
+				"%s output of %s",
+				strings.Title(infoLiteralNumber(a.Primitive.Output)),
+				valueText,
+			)
+		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
-			prettyValue(a), prettyValues(ar),
+			valueText, prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
