@@ -299,7 +299,7 @@ func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) (bool, []byte) {
 func PKE_ENC(pk []byte, plaintext []byte) []byte {
 	esk, epk := ed25519Gen()
 	ss := x25519DhFromEd25519PublicKey(esk, pk)
-	ciphertext := ENC(ss, plaintext)
+	ciphertext := ENC(HASH(ss), plaintext)
 	return append(epk, ciphertext...)
 }
 
@@ -309,7 +309,7 @@ func PKE_DEC(k []byte, ciphertext []byte) []byte {
 	}
 	epk := ciphertext[:32]
 	ss := x25519DhFromEd25519PublicKey(k, epk)
-	plaintext := DEC(ss, ciphertext)
+	plaintext := DEC(HASH(ss), ciphertext)
 	return plaintext
 }
 
