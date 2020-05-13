@@ -295,7 +295,7 @@ func valueEquivalentValueInValues(v Value, a []Value) int {
 func valuePerformPrimitiveRebuild(
 	rewrites []Value, rIndex int, pi int,
 	rebuild Value, valPrincipalState PrincipalState,
-) {
+) []Value {
 	rewrites[rIndex] = rebuild
 	if pi >= 0 {
 		valPrincipalState.Assigned[pi] = rebuild
@@ -303,6 +303,7 @@ func valuePerformPrimitiveRebuild(
 			valPrincipalState.BeforeMutate[pi] = rebuild
 		}
 	}
+	return rewrites
 }
 
 func valuePerformPrimitiveRewrite(
@@ -314,13 +315,17 @@ func valuePerformPrimitiveRewrite(
 	)
 	rebuilt, rebuild := possibleToRebuild(rewrites[rIndex].Primitive)
 	if rebuilt {
-		valuePerformPrimitiveRebuild(rewrites, rIndex, pi, rebuild, valPrincipalState)
+		rewrites = valuePerformPrimitiveRebuild(
+			rewrites, rIndex, pi, rebuild, valPrincipalState,
+		)
 		switch rebuild.Kind {
 		case "constant", "equation":
 			return failedRewrites, rewritten, rewrites[rIndex]
 		}
 	}
-	rewrittenRoot, rewrites := possibleToRewrite(rewrites[rIndex].Primitive, valPrincipalState)
+	rewrittenRoot, rewrites := possibleToRewrite(
+		rewrites[rIndex].Primitive, valPrincipalState,
+	)
 	if !rewrittenRoot {
 		failedRewrites = append(failedRewrites, rewrites[rIndex].Primitive)
 	} else if primitiveIsCorePrim(p.Name) {
