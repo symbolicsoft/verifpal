@@ -172,48 +172,31 @@ func valueEquivalentEquations(e1 Equation, e2 Equation) bool {
 	e2Base := e2.Values[0].Equation.Values
 	e1Kind := e1.Values[0].Kind
 	e2Kind := e2.Values[0].Kind
-	if len(e1.Values) != len(e2.Values) || len(e1.Values) == 0 {
-		return false
-	}
 	switch {
+	case len(e1.Values) != len(e2.Values), len(e1.Values) == 0:
+		return false
 	case e1Kind == "equation" && e2Kind == "equation":
-		if valueEquivalentEquationsRule(
+		return valueEquivalentEquationsRule(
 			e1Base[1], e2Base[1], e1.Values[1], e2.Values[1],
-		) {
-			return true
-		}
-		if valueEquivalentEquationsRule(
+		) || valueEquivalentEquationsRule(
 			e1Base[1], e2.Values[1], e1.Values[1], e2Base[1],
-		) {
-			return true
-		}
+		)
 	case len(e1.Values) > 2:
-		if valueEquivalentEquationsRule(
+		return valueEquivalentEquationsRule(
 			e1.Values[1], e2.Values[1], e1.Values[2], e2.Values[2],
-		) {
-			return true
-		}
-		if valueEquivalentEquationsRule(
+		) || valueEquivalentEquationsRule(
 			e1.Values[1], e2.Values[2], e1.Values[2], e2.Values[1],
-		) {
-			return true
-		}
-	case valueEquivalentEquationsRule(
-		e1.Values[0], e2.Values[1], e1.Values[1], e2.Values[0],
-	):
-		return true
+		)
+	default:
+		return valueEquivalentEquationsRule(
+			e1.Values[0], e2.Values[1], e1.Values[1], e2.Values[0],
+		)
 	}
-	return false
 }
 
 func valueEquivalentEquationsRule(base1 Value, base2 Value, exp1 Value, exp2 Value) bool {
-	if !valueEquivalentValues(base1, exp2, true) {
-		return false
-	}
-	if !valueEquivalentValues(exp1, base2, true) {
-		return false
-	}
-	return true
+	return (valueEquivalentValues(base1, exp2, true) &&
+		valueEquivalentValues(exp1, base2, true))
 }
 
 func valueFindConstantInPrimitive(
@@ -603,7 +586,9 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 			if aai == 0 {
 				r.Equation.Values = aa[aai].Equation.Values
 			} else {
-				r.Equation.Values = append(r.Equation.Values, aa[aai].Equation.Values[1:]...)
+				r.Equation.Values = append(
+					r.Equation.Values, aa[aai].Equation.Values[1:]...,
+				)
 			}
 			if valueEquivalentValueInValues(r, v) < 0 {
 				v = append(v, r)
