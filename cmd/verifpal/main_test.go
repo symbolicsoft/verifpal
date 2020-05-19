@@ -173,6 +173,10 @@ var verifpalTests = []VerifpalTest{
 		Model:       "needham-schroeder-pk.vp",
 		ResultsCode: "a1a1c1c1",
 	},
+	{
+		Model:       "needham-schroeder-pk-withfix.vp",
+		ResultsCode: "a1a1c1c0",
+	},
 }
 
 func TestMain(t *testing.T) {
