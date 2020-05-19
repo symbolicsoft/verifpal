@@ -99,7 +99,6 @@ func injectEquationRules(e Equation, arg int, p Primitive) bool {
 }
 
 func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
-	// STAGE USED
 	switch stage {
 	case 0:
 		return true
@@ -215,7 +214,6 @@ func injectPrimitive(
 			case "constant":
 				kinjectants[arg] = append(kinjectants[arg], k)
 			case "primitive":
-				// STAGE USED
 				kinjectants[arg] = append(kinjectants[arg], k)
 				if stage <= 3 {
 					continue

@@ -343,7 +343,7 @@ func queryGetMutatedInfo(valPrincipalState PrincipalState) string {
 		if !valPrincipalState.Mutated[i] {
 			continue
 		}
-		mutatedInfo = fmt.Sprintf("%s\n%s%s → %s (originally %s)",
+		mutatedInfo = fmt.Sprintf("%s\n %s%s → %s (originally %s)",
 			mutatedInfo, "           ",
 			prettyConstant(valPrincipalState.Constants[i]),
 			prettyValue(valPrincipalState.Assigned[i]),

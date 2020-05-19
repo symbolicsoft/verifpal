@@ -132,7 +132,7 @@ func infoVerifyResultSummary(
 		mutatedIntro = "When the following values are controlled by Attacker:"
 	}
 	if colorOutputSupport() {
-		return fmt.Sprintf("%s%s\n           %s\n%s",
+		return fmt.Sprintf("%s%s\n            %s\n%s",
 			aurora.Italic(mutatedIntro).String(),
 			aurora.BrightYellow(mutated).Italic().String(),
 			aurora.BgRed(summary).White().Italic().Bold().String(),
