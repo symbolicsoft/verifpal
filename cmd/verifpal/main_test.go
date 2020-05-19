@@ -169,6 +169,10 @@ var verifpalTests = []VerifpalTest{
 		Model:       "unlinkability.vp",
 		ResultsCode: "u1u1u0",
 	},
+	{
+		Model:       "needham-schroeder-pk.vp",
+		ResultsCode: "a1a1c1c1",
+	},
 }
 
 func TestMain(t *testing.T) {

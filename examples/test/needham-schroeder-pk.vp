@@ -4,18 +4,18 @@
 attacker[active]
 
 principal Alice[
-	generates a
+	knows private a
 	generates na
 	ga = G^a
 ]
 
 principal Bob[
-	generates b
+	knows private b
 	generates nb
 	gb = G^b
 ]
 
-Alice -> Bob: ga
+Alice -> Bob: [ga]
 
 Bob -> Alice: gb
 
@@ -39,7 +39,7 @@ principal Alice[
 	e3 = PKE_ENC(gb, nb_alice)
 ]
 
-Alice -> Bob: e3
+Alice -> Bob: [e3]
 
 principal Bob[
 	nb_alice_bob = PKE_DEC(b, e3)
@@ -47,6 +47,8 @@ principal Bob[
 ]
 
 queries[
-	authentication? Alice -> Bob: e3
+	authentication? Alice -> Bob: e1
+	authentication? Bob -> Alice: e2
+	confidentiality? na
 	confidentiality? nb
 ]
