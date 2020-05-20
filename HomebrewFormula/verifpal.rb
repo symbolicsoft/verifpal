@@ -2,24 +2,24 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.13.5"
+  version "0.13.6"
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/09c57c5dc7ac853ec75f2f35ab239d52/verifpal_0.13.5_macos_amd64.zip"
-    sha256 "5edcf24c8043f4b9cc415e39aff917cdb41bec71f1b68c372c399b248fdc0bf6"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/9c62867600a1da0af743fa7503f09f91/verifpal_0.13.6_macos_amd64.zip"
+    sha256 "6a246c353b5fcdc35843ebc81f5903d6bacda77bab566e16df9569bc86c2d832"
   elsif OS.linux?
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/uploads/c2c2253d3d8dd182cd993c94fd16f905/verifpal_0.13.5_linux_amd64.zip"
-      sha256 "dc211c1c36f48943e7ee3bec38f58c06c4cc6a4cdffbbed275cf779f87c5b6a0"
+      url "https://source.symbolic.software/verifpal/verifpal/uploads/91ac2a4ba99747963b6dec105841e128/verifpal_0.13.6_linux_amd64.zip"
+      sha256 "90f81293a1fe094f768637b9c09d7b5f12ea41848520234a4578fd52541e6fe2"
     end
     if Hardware::CPU.arm?
       if Hardware::CPU.is_64_bit?
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/cd3db7e48243f23c6a2282f31c50da20/verifpal_0.13.5_linux_arm64.zip"
-        sha256 "abc188b18768aed58963c39b46abd2b56a9086622ef31e6fde1e57ae048aa1f6"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/b3582ea785bca89f6e4c3dc4c9444aba/verifpal_0.13.6_linux_arm64.zip"
+        sha256 "1210400d8a277ce29b8f2e15688d8607334f6ad33737348cf2af900d6fe85517"
       else
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/cea3e65455977f3e05bc01da6f980dfe/verifpal_0.13.5_linux_armv6.zip"
-        sha256 "b6b49709ac25990a349655db27d1de3f009cfeee925834b5d4aaa1ae2d3f151d"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/601d5bc508dce084ee1814939c2aaaab/verifpal_0.13.6_linux_armv6.zip"
+        sha256 "844a029dbb4c917ffafdec8d0c726f3df74538f50a0642b8e60d0069c78f1383"
       end
     end
   end
