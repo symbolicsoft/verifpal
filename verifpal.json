@@ -1,19 +1,19 @@
 {
-    "version": "0.13.5",
+    "version": "0.13.6",
     "architecture": {
         "32bit": {
-            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/50adcdf09cb43747e191f2484c44a1d7/verifpal_0.13.5_windows_386.zip",
+            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/4a82b7ed964bed8b1328053d90df99c0/verifpal_0.13.6_windows_386.zip",
             "bin": [
-                "verifpal_0.13.5_windows_386/verifpal.exe"
+                "verifpal_0.13.6_windows_386/verifpal.exe"
             ],
-            "hash": "121a23ef2dea1b7bb242e0c543737622d21e603434b80394961134beba875a79"
+            "hash": "d0f30d0994842fdfc6a852a72a404f3b8f0017c8661cb2b6acf6578f47afe026"
         },
         "64bit": {
-            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/a20f9960f1f2c73c6d8c441796b6facd/verifpal_0.13.5_windows_amd64.zip",
+            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/f8c4ef016fae66357910197c1f7f5c06/verifpal_0.13.6_windows_amd64.zip",
             "bin": [
-                "verifpal_0.13.5_windows_amd64/verifpal.exe"
+                "verifpal_0.13.6_windows_amd64/verifpal.exe"
             ],
-            "hash": "033c6bfa57eb603a2b7e1709fcbd234813db128e118f2c4c92ab99e3fae7a919"
+            "hash": "af1f9f7f8bcaa23759738206aaff96eba937fab6a2d50402a6a6a1ec7ff00b54"
         }
     },
     "homepage": "https://verifpal.com",
