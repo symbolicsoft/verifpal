@@ -1,9 +1,1 @@
-Verifpal 0.13.5 introduces many important fixes:
-
-- A class of missed attacks has been resolved. See the discussion here: https://lists.symbolic.software/pipermail/verifpal/2020/000250.html
-
-- In many cases, Verifpal's analysis speed has been sped up significantly. For example, Verifpal's integration test suite now finishes in roughly half the time compared to before.
-
-- Verifpal's analysis output is now significantly improved. For example, Verifpal now mentions which output of a primitive was recovered by the attacker.
-
-- Some minor fixes.
+Verifpal 0.13.6 fixes an issue where attack traces could sometimes mention the wrong values as being implicated in an attack.

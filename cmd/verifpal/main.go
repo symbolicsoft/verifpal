@@ -19,7 +19,7 @@ import (
 	"verifpal.com/internal/verifpal"
 )
 
-var version = "0.13.5"
+var version = "0.13.6"
 
 var rootCmd = &cobra.Command{
 	Use:                   "verifpal",
