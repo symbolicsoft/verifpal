@@ -26,7 +26,7 @@ func verifyAnalysis(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalSta
 		o = o + verifyAnalysisRecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
 	}
-	verifyResolveQueries(valKnowledgeMap, valPrincipalState, valAttackerState)
+	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	verifyAnalysisCountIncrement()
 	infoAnalysis(stage)
 	if o > 0 {

@@ -6,13 +6,12 @@ package verifpal
 
 import (
 	"fmt"
-	"sync"
 )
 
 func queryStart(
-	query Query, valKnowledgeMap KnowledgeMap,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, qg *sync.WaitGroup,
+	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 ) {
+	valAttackerState := attackerStateGetRead()
 	switch query.Kind {
 	case "confidentiality":
 		queryConfidentiality(query, valPrincipalState, valAttackerState)
@@ -25,7 +24,6 @@ func queryStart(
 	default:
 		errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
 	}
-	qg.Done()
 }
 
 func queryConfidentiality(
