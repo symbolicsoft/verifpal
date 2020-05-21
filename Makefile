@@ -58,12 +58,10 @@ test:
 	@/bin/echo "[Verifpal] Running test battery..."
 	@go test verifpal.com/cmd/verifpal
 
-tag:
-	@bash scripts/tag.sh
-
 release:
 	@make -s dep
-	@curl -sL https://git.io/goreleaser | bash
+	@bash scripts/tag.sh
+	@goreleaser
 	@bash scripts/email.sh
 
 clean:

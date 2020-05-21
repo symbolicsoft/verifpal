@@ -1,7 +1,6 @@
 stages:
   - lint
   - test
-  - release
   - snapcraft
 
 lint:
@@ -18,16 +17,6 @@ test:
     - make dep
     - go generate verifpal.com/cmd/verifpal
     - make test
-
-release:
-  image: golang:latest
-  stage: release
-  only:
-    - tags
-  variables:
-    GIT_DEPTH: 0
-  script:
-    - make release
 
 snapcraft:
   image: ubuntu:18.04
