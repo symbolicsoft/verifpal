@@ -76,4 +76,4 @@ clean:
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
-.PHONY: all lib windows linux macos freebsd dep lint test tag release clean HomebrewFormula assets build cmd dist examples internal scripts tools
+.PHONY: all lib windows linux macos freebsd dep lint test release clean HomebrewFormula assets build cmd dist examples internal tools
