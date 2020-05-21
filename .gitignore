@@ -34,3 +34,6 @@ dist
 
 # Snapcraft
 snapcraft.login
+
+# Scripts
+scripts/tag.sh
