@@ -26,8 +26,8 @@ When a contradiction is found for a query, the result is related in a readable f
 #### Friendly and Integrated Software
 Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it.
 
-## Verifpal is Experimental Software
-Verifpal is still highly experimental software. Using it in a classroom or learning environment is welcome, but it should not yet be relied upon for academic formal verification work. For that, check out [ProVerif](https://proverif.inria.fr).
+## Verifpal is Beta Software
+Verifpal now benefits from a higher level of assurance due to the formalization of its syntax, semantics and analysis methodology, both by hand and using the Coq theorem prover. However, it remains classified as beta software due to its relatively young age, especially when compared to similar tools, such as [ProVerif](https://proverif.inria.fr), that have been in development for more than twenty years.
 
 ## Getting Started
 

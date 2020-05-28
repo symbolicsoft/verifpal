@@ -42,7 +42,7 @@ var cmdVerify = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stdout, "Verifpal %s - https://verifpal.com", version)
 		fmt.Fprintf(os.Stdout, "\n")
-		verifpal.InfoMessage("Verifpal is experimental software.",
+		verifpal.InfoMessage("Verifpal is Beta software.",
 			"warning", false,
 		)
 		verifpal.Verify(args[0])
