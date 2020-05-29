@@ -1,19 +1,19 @@
 Hello,
 
-Verifpal 0TAG0 is now available. Verifpal updates bring new features, performance improvements and/or bug fixes.
+Verifpal 0VERSION0 is now available. Verifpal updates bring new features, performance improvements and/or bug fixes.
 
 1RELEASENOTES1
 
-Check out the list of changes in Verifpal 0TAG0, and download pre-compiled binary builds, here:
+Check out the list of changes in Verifpal 0VERSION0, and download pre-compiled binary builds, here:
 https://source.symbolic.software/verifpal/verifpal/-/releases
 
 Pre-compiled builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm64 variants.
 
-If you have installed Verifpal via the Scoop package manager for Windows, simply run the following commands to update to Verifpal 0TAG0:
+If you have installed Verifpal via the Scoop package manager for Windows, simply run the following commands to update to Verifpal 0VERSION0:
 scoop update
 scoop update verifpal
 
-If you have installed Verifpal via the Homebrew package manager on Linux and macOS, simply run the following commands to update to Verifpal 0TAG0:
+If you have installed Verifpal via the Homebrew package manager on Linux and macOS, simply run the following commands to update to Verifpal 0VERSION0:
 brew update
 brew upgrade verifpal
 

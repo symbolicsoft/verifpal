@@ -61,7 +61,6 @@ test:
 release:
 	@make -s dep
 	@bash scripts/tag.sh
-	@goreleaser
 	@bash scripts/email.sh
 
 clean:
