@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = G^a
+	h = HASH(a)
+	leaks a
+]
+
+principal Bob[
+	knows private b
+	gb = G^b
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	gba = gb^a
+]
+
+principal Bob[
+	gab = ga^b
+]
+
+queries[
+	confidentiality? gba
+	confidentiality? gab
+	confidentiality? h
+	confidentiality? a
+	confidentiality? b
+]

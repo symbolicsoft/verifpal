@@ -14,7 +14,7 @@ func queryStart(
 	valAttackerState := attackerStateGetRead()
 	switch query.Kind {
 	case "confidentiality":
-		queryConfidentiality(query, valPrincipalState, valAttackerState)
+		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "authentication":
 		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	case "freshness":
@@ -27,7 +27,7 @@ func queryStart(
 }
 
 func queryConfidentiality(
-	query Query, valPrincipalState PrincipalState,
+	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
@@ -36,7 +36,10 @@ func queryConfidentiality(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	v := valueResolveConstant(query.Constants[0], valPrincipalState)
+	v, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
+		Kind:     "constant",
+		Constant: query.Constants[0],
+	}, valKnowledgeMap)
 	ii := valueEquivalentValueInValues(v, valAttackerState.Known)
 	if ii < 0 {
 		return result
