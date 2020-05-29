@@ -2,24 +2,24 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.13.6"
+  version "0.13.7"
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/9c62867600a1da0af743fa7503f09f91/verifpal_0.13.6_macos_amd64.zip"
-    sha256 "6a246c353b5fcdc35843ebc81f5903d6bacda77bab566e16df9569bc86c2d832"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/fd284ae9b1cb23351435213606193036/verifpal_0.13.7_macos_amd64.zip"
+    sha256 "76f1c4f5b63b881188d5fd33a3e844501711a5d38b2a11ab4e048a87f33ebf1e"
   elsif OS.linux?
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/uploads/91ac2a4ba99747963b6dec105841e128/verifpal_0.13.6_linux_amd64.zip"
-      sha256 "90f81293a1fe094f768637b9c09d7b5f12ea41848520234a4578fd52541e6fe2"
+      url "https://source.symbolic.software/verifpal/verifpal/uploads/02623ff19f2c87c99c675c6d75887a13/verifpal_0.13.7_linux_amd64.zip"
+      sha256 "c216d7f471066d3bad94d539bc70795cc802bdc49861f86de0226fd3e557eee8"
     end
     if Hardware::CPU.arm?
       if Hardware::CPU.is_64_bit?
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/b3582ea785bca89f6e4c3dc4c9444aba/verifpal_0.13.6_linux_arm64.zip"
-        sha256 "1210400d8a277ce29b8f2e15688d8607334f6ad33737348cf2af900d6fe85517"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/90c269172d626185a8a857a507839a63/verifpal_0.13.7_linux_arm64.zip"
+        sha256 "56f33e6091c49ecc038474b8b073688efa5141d8b2cb0ecac3f4d7ad1afc15ad"
       else
-        url "https://source.symbolic.software/verifpal/verifpal/uploads/601d5bc508dce084ee1814939c2aaaab/verifpal_0.13.6_linux_armv6.zip"
-        sha256 "844a029dbb4c917ffafdec8d0c726f3df74538f50a0642b8e60d0069c78f1383"
+        url "https://source.symbolic.software/verifpal/verifpal/uploads/8d70723b5eb191fda23d00a8f4fb5528/verifpal_0.13.7_linux_armv6.zip"
+        sha256 "700df2cd6a0fa1c8435e654c85a636c8830b9d5cde3d1f7a274fb77d9910f25a"
       end
     end
   end
