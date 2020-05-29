@@ -162,7 +162,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState, o int) 
 }
 
 func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) int {
-	passwords := possibleToObtainPasswords(a, valPrincipalState)
+	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
 	for _, revealed := range passwords {
 		if attackerStatePutWrite(revealed) {
 			InfoMessage(fmt.Sprintf(

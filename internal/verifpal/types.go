@@ -156,7 +156,7 @@ type PrimitiveSpec struct {
 	Check           bool
 	Injectable      bool
 	Explosive       bool
-	PasswordHashing bool
+	PasswordHashing []int
 }
 
 type PrincipalState struct {

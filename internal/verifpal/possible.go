@@ -297,7 +297,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 }
 
 func possibleToObtainPasswords(
-	a Value, valPrincipalState PrincipalState,
+	a Value, aParent Value, aIndex int, valPrincipalState PrincipalState,
 ) []Value {
 	passwords := []Value{}
 	switch a.Kind {
@@ -306,25 +306,33 @@ func possibleToObtainPasswords(
 		switch aa.Kind {
 		case "constant":
 			if aa.Constant.Qualifier == "password" {
+				if aIndex >= 0 {
+					if !primitiveIsCorePrim(aParent.Primitive.Name) {
+						prim, _ := primitiveGet(aParent.Primitive.Name)
+						if intInSlice(aIndex, prim.PasswordHashing) {
+							return passwords
+						}
+					}
+				}
 				passwords = append(passwords, aa)
 			}
 		}
 	case "primitive":
-		if !primitiveIsCorePrim(a.Primitive.Name) {
-			prim, _ := primitiveGet(a.Primitive.Name)
-			if prim.PasswordHashing {
-				return passwords
+		for ii, aa := range a.Primitive.Arguments {
+			if !primitiveIsCorePrim(a.Primitive.Name) {
+				prim, _ := primitiveGet(a.Primitive.Name)
+				if intInSlice(aIndex, prim.PasswordHashing) {
+					aParent = a
+				}
 			}
-		}
-		for _, aa := range a.Primitive.Arguments {
 			passwords = append(passwords,
-				possibleToObtainPasswords(aa, valPrincipalState)...,
+				possibleToObtainPasswords(aa, aParent, ii, valPrincipalState)...,
 			)
 		}
 	case "equation":
 		for _, aa := range a.Equation.Values {
 			passwords = append(passwords,
-				possibleToObtainPasswords(aa, valPrincipalState)...,
+				possibleToObtainPasswords(aa, a, -1, valPrincipalState)...,
 			)
 		}
 	}

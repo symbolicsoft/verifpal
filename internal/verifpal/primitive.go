@@ -86,7 +86,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: true,
+		PasswordHashing: []int{0, 1, 2, 3, 4},
 	},
 	{
 		Name:   "HASH",
@@ -107,7 +107,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       true,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "HKDF",
@@ -128,7 +128,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       true,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "AEAD_ENC",
@@ -154,7 +154,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "AEAD_DEC",
@@ -198,7 +198,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           true,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "ENC",
@@ -224,7 +224,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "DEC",
@@ -265,7 +265,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "MAC",
@@ -286,7 +286,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "SIGN",
@@ -307,7 +307,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "SIGNVERIF",
@@ -358,7 +358,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           true,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "PKE_ENC",
@@ -400,7 +400,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "PKE_DEC",
@@ -451,7 +451,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "SHAMIR_SPLIT",
@@ -481,7 +481,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "SHAMIR_JOIN",
@@ -515,7 +515,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "RINGSIGN",
@@ -536,7 +536,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{3},
 	},
 	{
 		Name:   "RINGSIGNVERIF",
@@ -595,7 +595,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           true,
 		Injectable:      false,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 	{
 		Name:   "BLIND",
@@ -621,7 +621,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{1},
 	},
 	{
 		Name:   "UNBLIND",
@@ -679,7 +679,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		Check:           false,
 		Injectable:      true,
 		Explosive:       false,
-		PasswordHashing: false,
+		PasswordHashing: []int{},
 	},
 }
 

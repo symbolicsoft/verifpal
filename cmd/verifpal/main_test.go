@@ -66,6 +66,10 @@ var verifpalTests = []VerifpalTest{
 		ResultsCode: "c1c0c0c0c1c1",
 	},
 	{
+		Model:       "pw_hash2.vp",
+		ResultsCode: "c0",
+	},
+	{
 		Model:       "shamir.vp",
 		ResultsCode: "c1",
 	},
