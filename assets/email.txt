@@ -2,13 +2,27 @@ Hello,
 
 Verifpal 0VERSION0 is now available. Verifpal updates bring new features, performance improvements and/or bug fixes.
 
+-------------------------------
+1. Release Notes
+-------------------------------
 1RELEASENOTES1
 
-Check out the list of changes in Verifpal 0VERSION0, and download pre-compiled binary builds, here:
-https://source.symbolic.software/verifpal/verifpal/-/releases
+-------------------------------
+2. PGP-Signed Releases
+-------------------------------
+Official signed, pre-compiled release builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm64 variants, here:
+https://source.symbolic.software/verifpal/verifpal/-/releases/v0VERSION0
 
-Pre-compiled builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm64 variants.
+Verifpal releases are signed using the following PGP key:
+https://source.symbolic.software/verifpal/verifpal/-/blob/master/assets/pgp.txt
 
+In order to verify the PGP signature of your downloaded Verifpal release binary, please first verify the signature of the checksum file, verifpal_0VERSION0_checksums.txt, against its signature, verifpal_0VERSION0_checksums.txt.sig. Both files are located in the releases directory linked above.
+
+Once the signature of the checksum file is verified, ensure that the SHA256SUM of your downloaded release archive matches the one listed inside the checksum file for your chosen platform.
+
+-------------------------------
+3. Updating Via Package Manager
+-------------------------------
 If you have installed Verifpal via the Scoop package manager for Windows, simply run the following commands to update to Verifpal 0VERSION0:
 scoop update
 scoop update verifpal
@@ -19,7 +33,14 @@ brew upgrade verifpal
 
 On Linux, Verifpal is also available via the Snap Store: https://snapcraft.io/verifpal
 
-To receive more information about Verifpal, please visit https://verifpal.com.
+-------------------------------
+4. More Information
+-------------------------------
+Verifpal is supported by research grants as well as contributions from its users. If you have found Verifpal to be useful, please consider contributing via a donation: https://verifpal.com/donate
+
+Don't forget to join the conversation on the official Verifpal Discord: https://verifpal.com/discord
+
+For more general information about Verifpal, please visit: https://verifpal.com
 
 Thank you,
 Symbolic Software Drone
