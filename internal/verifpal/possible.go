@@ -160,37 +160,38 @@ func possibleToReconstructPrimitive(
 func possibleToReconstructEquation(
 	e Equation, valAttackerState AttackerState,
 ) (bool, []Value) {
-	if len(e.Values) > 2 {
-		s0 := e.Values[1]
-		s1 := e.Values[2]
-		hs0 := valueEquivalentValueInValues(s0, valAttackerState.Known) >= 0
-		hs1 := valueEquivalentValueInValues(s1, valAttackerState.Known) >= 0
-		if hs0 && hs1 {
-			return true, []Value{s0, s1}
+	if len(e.Values) <= 2 {
+		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
+			return true, []Value{e.Values[1]}
 		}
-		p0 := Value{
-			Kind: "equation",
-			Equation: Equation{
-				Values: []Value{e.Values[0], e.Values[1]},
-			},
-		}
-		p1 := Value{
-			Kind: "equation",
-			Equation: Equation{
-				Values: []Value{e.Values[0], e.Values[2]},
-			},
-		}
-		hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
-		hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
-		if hs0 && hp1 {
-			return true, []Value{s0, p1}
-		}
-		if hp0 && hs1 {
-			return true, []Value{p0, s1}
-		}
+		return false, []Value{}
 	}
-	if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
-		return true, []Value{e.Values[1]}
+	s0 := e.Values[1]
+	s1 := e.Values[2]
+	hs0 := valueEquivalentValueInValues(s0, valAttackerState.Known) >= 0
+	hs1 := valueEquivalentValueInValues(s1, valAttackerState.Known) >= 0
+	if hs0 && hs1 {
+		return true, []Value{s0, s1}
+	}
+	p0 := Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{e.Values[0], e.Values[1]},
+		},
+	}
+	p1 := Value{
+		Kind: "equation",
+		Equation: Equation{
+			Values: []Value{e.Values[0], e.Values[2]},
+		},
+	}
+	hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
+	hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
+	if hs0 && hp1 {
+		return true, []Value{s0, p1}
+	}
+	if hp0 && hs1 {
+		return true, []Value{p0, s1}
 	}
 	return false, []Value{}
 }
