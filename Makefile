@@ -60,7 +60,7 @@ test:
 
 release:
 	@make -s dep
-	@bash scripts/tag.sh
+	@bash scripts/release.sh
 	@bash scripts/email.sh
 
 clean:
