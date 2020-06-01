@@ -35,5 +35,12 @@ dist
 # Snapcraft
 snapcraft.login
 
+#Coq
+*.glob
+*.vo
+*.vok
+*.vos
+*.aux
+
 # Scripts
 scripts
