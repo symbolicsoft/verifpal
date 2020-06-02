@@ -763,3 +763,19 @@ func valueResolveAllPrincipalStateValues(
 	}
 	return valPrincipalStateClone
 }
+
+func valueContainsFreshValues(v Value, c Constant, valPrincipalState PrincipalState, valAttackerState AttackerState) bool {
+	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+	v = valueResolveValueInternalValuesFromPrincipalState(v, v, i, valPrincipalState, valAttackerState, false)
+	cc := valueGetConstantsFromValue(v)
+	for _, ccc := range cc {
+		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
+		if ii >= 0 {
+			ccc = valPrincipalState.Constants[ii]
+			if ccc.Fresh {
+				return true
+			}
+		}
+	}
+	return false
+}

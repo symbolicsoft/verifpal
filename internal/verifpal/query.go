@@ -18,9 +18,9 @@ func queryStart(
 	case "authentication":
 		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	case "freshness":
-		queryFreshness(query, valPrincipalState)
+		queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "unlinkability":
-		queryUnlinkability(query, valPrincipalState, valAttackerState)
+		queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	default:
 		errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
 	}
@@ -163,7 +163,7 @@ func queryAuthenticationHandlePass(
 }
 
 func queryFreshness(
-	query Query, valPrincipalState PrincipalState,
+	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -171,7 +171,10 @@ func queryFreshness(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	freshnessFound := queryFreshnessCheck(query.Constants[0], valPrincipalState)
+	freshnessFound := valueContainsFreshValues(Value{
+		Kind:     "constant",
+		Constant: query.Constants[0],
+	}, query.Constants[0], valPrincipalState, valAttackerState)
 	if freshnessFound {
 		return result
 	}
@@ -192,21 +195,6 @@ func queryFreshness(
 	return result
 }
 
-func queryFreshnessCheck(c Constant, valPrincipalState PrincipalState) bool {
-	v := valueResolveConstant(c, valPrincipalState)
-	cc := valueGetConstantsFromValue(v)
-	for _, ccc := range cc {
-		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
-		if ii >= 0 {
-			ccc = valPrincipalState.Constants[ii]
-			if ccc.Fresh {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 /*
  * We're doing unlinkability in terms of *values*, not processes.
  * Unlinkability fails if:
@@ -216,8 +204,8 @@ func queryFreshnessCheck(c Constant, valPrincipalState PrincipalState) bool {
  * incomplete.
  */
 func queryUnlinkability(
-	query Query, valPrincipalState PrincipalState,
-	valAttackerState AttackerState,
+	query Query, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -227,7 +215,10 @@ func queryUnlinkability(
 	}
 	noFreshness := []Constant{}
 	for _, c := range query.Constants {
-		if !queryFreshnessCheck(c, valPrincipalState) {
+		if !valueContainsFreshValues(Value{
+			Kind:     "constant",
+			Constant: c,
+		}, c, valPrincipalState, valAttackerState) {
 			noFreshness = append(noFreshness, c)
 		}
 	}
