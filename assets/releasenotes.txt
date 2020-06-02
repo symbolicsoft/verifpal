@@ -1,8 +1,59 @@
-Verifpal 0.13.7 fixes two bugs in Verifpal's analysis, both identified and reported by Georgio Nicolas:
+Verifpal 0.14.0 is a major release that brings a variety of exciting improvements and additions:
 
-- Values declared using Verifpal's password qualifier may result in false positives being identified by Verifpal despite no such attack having taken place in the model.
+*** Verifpal Reaches Beta Software Stage ***
 
-- Partial resolutions of targeted values in confidentiality queries may have led to missed attacks in certain scenarios.
+Verifpal now benefits from a higher level of assurance due to the formalization of its syntax, semantics and analysis methodology, both by hand and using the Coq theorem prover. However, it remains classified as beta software due to its relatively young age, especially when compared to similar tools, such as ProVerif, that have been in development for more than twenty years.
 
-This release also improves the reproducibility of Verifpal builds and introduces code-signed releases, as discussed on this mailing list thread:
-https://lists.symbolic.software/pipermail/verifpal/2020/000255.html
+Aside from the soundness and Coq translation improvements, Verifpal has also seen an increasingly large and exciting feature set, including full Visual Studio Code integration (https://www.youtube.com/watch?v=it_hJkVU-UA), translation to ProVerif and soon also translation to full prototype implementations in Go.
+
+I am still very proud to announce that Verifpal is now in its beta stage, with this release bolstering the reliability of its analysis, its Coq translation and more. Verifpal is now almost one year old (!!!) and it's incredibly exciting to arrive to this milestone, which would not have been possible without the help of more than a dozen individuals. In no particular order: Loup Vaillant David, Bruno Blanchet, Mike, Jason Donenfeld, Jean-Philippe Aumasson, Georgio Nicolas, Mukesh Tiwari, Benjamin Lipp, Sasha Lapiha, and many many more.
+
+We'd like to especially thank our sponsors, NLnet and Cure53, for their support.
+
+*** Coq Translation Major Improvements ***
+
+The semantics, lemmas and proofs for all primitivies in the Coq translation component of Verifpal have been radically deepened and improved, with further improvements to come in the future, including support for active attacker analysis in Coq. Currently, only passive attacker analysis is supported. This was accomplished via the Herculean work of Georgio Nicolas and Mukesh Tiwari.
+
+*** Fix a Class of False Positives ***
+
+A class of false positives, initially reported in Verifpal by Max Krohn (Keybase/Zoom) has been fixed. 
+
+Consider the following two scenarios:
+
+```
+// Example A
+Alice -> Bob: [ga_enc]
+principal Bob[
+    _ = SIGNVERIF(ga, gea, siga)?
+    ga_dec = AEAD_DEC(gea^eb, ga_enc, c1)?
+    _ = ASSERT(ga, ga_dec)?
+]
+principal Alice[
+    generates sesskey
+    enc_sesskey = AEAD_ENC(kb, sesskey, c2)
+]
+Alice -> Bob: enc_sesskey
+```
+
+```
+// Example B
+Alice -> Bob: [ga_enc]
+principal Alice[
+    generates sesskey
+    enc_sesskey = AEAD_ENC(kb, sesskey, c2)
+]
+principal Bob[
+    _ = SIGNVERIF(ga, gea, siga)?
+    ga_dec = AEAD_DEC(gea^eb, ga_enc, c1)?
+    _ = ASSERT(ga, ga_dec)?
+]
+Alice -> Bob: enc_sesskey
+```
+
+Previously, depending on the rest of the model, Verifpal would find a false attack in Example B whereas it would not in Example A, because in Example A, the failed checked primitives in Bob's principal Block would correctly prevent `enc_sesskey` from being communicated. In Example B, Verifpal would still consider `enc_sesskey` being communicated despite the protocol execution supposedly halted.
+
+The reason for this was due to some parallel protocol execution logic that allowed to find some pretty crafty attacks but was still not sufficiently refined to avoid this kind of false attack. This commit provides the required refinements.
+
+*** Improvements to Analysis and Performance ***
+
+Some minor analysis bugs have been fixed, the clarity of the analysis output has been improved and general analysis speed appears to have been boosted by around 15%.
