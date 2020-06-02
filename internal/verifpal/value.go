@@ -764,7 +764,10 @@ func valueResolveAllPrincipalStateValues(
 	return valPrincipalStateClone
 }
 
-func valueContainsFreshValues(v Value, c Constant, valPrincipalState PrincipalState, valAttackerState AttackerState) bool {
+func valueContainsFreshValues(
+	v Value, c Constant,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+) bool {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	v = valueResolveValueInternalValuesFromPrincipalState(v, v, i, valPrincipalState, valAttackerState, false)
 	cc := valueGetConstantsFromValue(v)

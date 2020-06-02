@@ -18,9 +18,9 @@ func queryStart(
 	case "authentication":
 		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	case "freshness":
-		queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		queryFreshness(query, valPrincipalState, valAttackerState)
 	case "unlinkability":
-		queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		queryUnlinkability(query, valPrincipalState, valAttackerState)
 	default:
 		errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
 	}
@@ -163,7 +163,7 @@ func queryAuthenticationHandlePass(
 }
 
 func queryFreshness(
-	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -204,8 +204,7 @@ func queryFreshness(
  * incomplete.
  */
 func queryUnlinkability(
-	query Query, valKnowledgeMap KnowledgeMap,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,

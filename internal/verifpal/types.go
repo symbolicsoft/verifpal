@@ -99,6 +99,7 @@ type KnowledgeMap struct {
 	Assigned   []Value
 	Creator    []string
 	KnownBy    [][]map[string]string
+	DeclaredAt []int
 	Phase      [][]int
 	MaxPhase   int
 }

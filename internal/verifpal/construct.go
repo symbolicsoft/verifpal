@@ -13,13 +13,17 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 		Assigned:   []Value{},
 		Creator:    []string{},
 		KnownBy:    [][]map[string]string{},
+		DeclaredAt: []int{},
 		Phase:      [][]int{},
+		MaxPhase:   0,
 	}
+	declaredAt := 0
 	currentPhase := 0
 	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Constant)
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueG)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
 	for _, principal := range principals {
 		valKnowledgeMap.KnownBy[0] = append(
@@ -31,6 +35,7 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueN)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
 	for _, principal := range principals {
 		valKnowledgeMap.KnownBy[1] = append(
@@ -45,23 +50,25 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 				switch expr.Kind {
 				case "knows":
 					valKnowledgeMap = constructKnowledgeMapRenderKnows(
-						valKnowledgeMap, blck, expr,
+						valKnowledgeMap, blck, declaredAt, expr,
 					)
 				case "generates":
 					valKnowledgeMap = constructKnowledgeMapRenderGenerates(
-						valKnowledgeMap, blck, expr,
-					)
-				case "leaks":
-					valKnowledgeMap = constructKnowledgeMapRenderLeaks(
-						valKnowledgeMap, blck, expr, currentPhase,
+						valKnowledgeMap, blck, declaredAt, expr,
 					)
 				case "assignment":
 					valKnowledgeMap = constructKnowledgeMapRenderAssignment(
-						valKnowledgeMap, blck, expr,
+						valKnowledgeMap, blck, declaredAt, expr,
+					)
+				case "leaks":
+					declaredAt = declaredAt + 1
+					valKnowledgeMap = constructKnowledgeMapRenderLeaks(
+						valKnowledgeMap, blck, expr, currentPhase,
 					)
 				}
 			}
 		case "message":
+			declaredAt = declaredAt + 1
 			valKnowledgeMap = constructKnowledgeMapRenderMessage(
 				valKnowledgeMap, blck, currentPhase,
 			)
@@ -74,7 +81,7 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 }
 
 func constructKnowledgeMapRenderKnows(
-	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
 ) KnowledgeMap {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -111,6 +118,7 @@ func constructKnowledgeMapRenderKnows(
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 		l := len(valKnowledgeMap.Constants) - 1
 		if expr.Qualifier != "public" {
@@ -129,7 +137,7 @@ func constructKnowledgeMapRenderKnows(
 }
 
 func constructKnowledgeMapRenderGenerates(
-	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
 ) KnowledgeMap {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
@@ -154,47 +162,14 @@ func constructKnowledgeMapRenderGenerates(
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
 	return valKnowledgeMap
 }
 
-func constructKnowledgeMapRenderLeaks(
-	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
-) KnowledgeMap {
-	for _, c := range expr.Constants {
-		i := valueGetKnowledgeMapIndexFromConstant(
-			valKnowledgeMap, c,
-		)
-		if i < 0 {
-			errorCritical(fmt.Sprintf(
-				"leaked constant does not exist (%s)",
-				prettyConstant(c),
-			))
-		}
-		known := valKnowledgeMap.Creator[i] == blck.Principal.Name
-		for _, m := range valKnowledgeMap.KnownBy[i] {
-			if _, ok := m[blck.Principal.Name]; ok {
-				known = true
-				break
-			}
-		}
-		if !known {
-			errorCritical(fmt.Sprintf(
-				"%s leaks a constant that they do not know (%s)",
-				blck.Principal.Name, prettyConstant(c),
-			))
-		}
-		valKnowledgeMap.Constants[i].Leaked = true
-		valKnowledgeMap.Phase[i], _ = appendUniqueInt(
-			valKnowledgeMap.Phase[i], currentPhase,
-		)
-	}
-	return valKnowledgeMap
-}
-
 func constructKnowledgeMapRenderAssignment(
-	valKnowledgeMap KnowledgeMap, blck Block, expr Expression,
+	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
 ) KnowledgeMap {
 	constants := sanityAssignmentConstants(expr.Right, []Constant{}, valKnowledgeMap)
 	switch expr.Right.Kind {
@@ -248,7 +223,42 @@ func constructKnowledgeMapRenderAssignment(
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Right)
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
+	}
+	return valKnowledgeMap
+}
+
+func constructKnowledgeMapRenderLeaks(
+	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
+) KnowledgeMap {
+	for _, c := range expr.Constants {
+		i := valueGetKnowledgeMapIndexFromConstant(
+			valKnowledgeMap, c,
+		)
+		if i < 0 {
+			errorCritical(fmt.Sprintf(
+				"leaked constant does not exist (%s)",
+				prettyConstant(c),
+			))
+		}
+		known := valKnowledgeMap.Creator[i] == blck.Principal.Name
+		for _, m := range valKnowledgeMap.KnownBy[i] {
+			if _, ok := m[blck.Principal.Name]; ok {
+				known = true
+				break
+			}
+		}
+		if !known {
+			errorCritical(fmt.Sprintf(
+				"%s leaks a constant that they do not know (%s)",
+				blck.Principal.Name, prettyConstant(c),
+			))
+		}
+		valKnowledgeMap.Constants[i].Leaked = true
+		valKnowledgeMap.Phase[i], _ = appendUniqueInt(
+			valKnowledgeMap.Phase[i], currentPhase,
+		)
 	}
 	return valKnowledgeMap
 }
