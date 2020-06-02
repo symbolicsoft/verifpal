@@ -277,11 +277,9 @@ func queryUnlinkability(
 			result.Resolved = true
 			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 				"%s and %s %s (%s), %s.",
-				prettyConstant(constants[i]),
-				prettyConstant(constants[ii]),
+				prettyConstant(constants[i]), prettyConstant(constants[ii]),
 				"are not unlinkable since they are the output of the same primitive",
-				prettyValue(a),
-				"which can be obtained by Attacker",
+				prettyValue(a), "which can be obtained by Attacker",
 			), result.Options)
 			result = queryPrecondition(result, valPrincipalState)
 			written := verifyResultsPutWrite(result)

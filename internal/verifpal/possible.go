@@ -6,7 +6,6 @@ package verifpal
 
 import (
 	"fmt"
-	"strings"
 )
 
 func possibleToDecomposePrimitive(
@@ -51,17 +50,9 @@ func possibleToDecomposePrimitive(
 	if len(has) >= len(prim.Decompose.Given) {
 		revealed := p.Arguments[prim.Decompose.Reveal]
 		if attackerStatePutWrite(revealed) {
-			valueText := prettyValue(revealed)
-			if revealed.Kind == "primitive" {
-				valueText = fmt.Sprintf(
-					"%s output of %s",
-					strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
-					valueText,
-				)
-			}
 			InfoMessage(fmt.Sprintf(
 				"%s obtained by decomposing %s with %s.",
-				valueText, prettyPrimitive(p), prettyValues(has),
+				infoOutputText(revealed), prettyPrimitive(p), prettyValues(has),
 			), "deduction", true)
 		}
 		return true, revealed, has
@@ -141,17 +132,9 @@ func possibleToReconstructPrimitive(
 		Primitive: p,
 	}
 	if attackerStatePutWrite(revealed) {
-		valueText := prettyValue(revealed)
-		if revealed.Kind == "primitive" {
-			valueText = fmt.Sprintf(
-				"%s output of %s",
-				strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
-				valueText,
-			)
-		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
-			valueText, prettyValues(has),
+			infoOutputText(revealed), prettyValues(has),
 		), "deduction", true)
 	}
 	return true, has

@@ -7,6 +7,7 @@ package verifpal
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/logrusorgru/aurora"
 )
@@ -176,4 +177,32 @@ func infoLiteralNumber(n int) string {
 	}
 	errorCritical("invalid infoLiteralNumber request")
 	return ""
+}
+
+func infoOutputText(revealed Value) string {
+	outputText := prettyValue(revealed)
+	switch revealed.Kind {
+	case "constant":
+		return outputText
+	case "primitive":
+		oneOutput := false
+		if primitiveIsCorePrim(revealed.Primitive.Name) {
+			prim, _ := primitiveCoreGet(revealed.Primitive.Name)
+			oneOutput = prim.Output == 1
+		} else {
+			prim, _ := primitiveGet(revealed.Primitive.Name)
+			oneOutput = prim.Output == 1
+		}
+		if oneOutput {
+			return fmt.Sprintf("Output of %s", outputText)
+		}
+		prefix := fmt.Sprintf("%s output",
+			strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
+		)
+		return fmt.Sprintf("%s of %s", prefix, outputText)
+	case "equation":
+		return outputText
+	default:
+		return outputText
+	}
 }

@@ -6,7 +6,6 @@ package verifpal
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -63,17 +62,9 @@ func verifyAnalysisDecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
-		valueText := prettyValue(revealed)
-		if revealed.Kind == "primitive" {
-			valueText = fmt.Sprintf(
-				"%s output of %s",
-				strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
-				valueText,
-			)
-		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
-			valueText, prettyValue(a), prettyValues(ar),
+			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
@@ -94,17 +85,9 @@ func verifyAnalysisRecompose(
 		return o
 	}
 	if attackerStatePutWrite(revealed) {
-		valueText := prettyValue(revealed)
-		if revealed.Kind == "primitive" {
-			valueText = fmt.Sprintf(
-				"%s output of %s",
-				strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
-				valueText,
-			)
-		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
-			valueText, prettyValue(a), prettyValues(ar),
+			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
@@ -129,17 +112,9 @@ func verifyAnalysisReconstruct(
 		return o
 	}
 	if attackerStatePutWrite(a) {
-		valueText := prettyValue(a)
-		if a.Kind == "primitve" {
-			valueText = fmt.Sprintf(
-				"%s output of %s",
-				strings.Title(infoLiteralNumber(a.Primitive.Output)),
-				valueText,
-			)
-		}
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
-			valueText, prettyValues(ar),
+			infoOutputText(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
 	}
@@ -167,7 +142,7 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) i
 		if attackerStatePutWrite(revealed) {
 			InfoMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
-				prettyValue(revealed), prettyValue(a),
+				infoOutputText(revealed), prettyValue(a),
 			), "deduction", true)
 			o = o + 1
 		}
@@ -184,7 +159,7 @@ func verifyAnalysisConcat(a Value, o int) int {
 				if attackerStatePutWrite(revealed) {
 					InfoMessage(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",
-						prettyValue(revealed), prettyValue(a),
+						infoOutputText(revealed), prettyValue(a),
 					), "deduction", true)
 					o = o + 1
 				}
