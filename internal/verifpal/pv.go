@@ -69,7 +69,7 @@ func pvPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, ch
 		}
 	}
 	switch p.Name {
-	case "HASH", "CONCAT", "SPLIT":
+	case "HASH", "CONCAT":
 		pname = fmt.Sprintf("%s%d", p.Name, len(p.Arguments))
 	}
 	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
@@ -120,10 +120,9 @@ func pvQuery(valKnowledgeMap KnowledgeMap, query Query) string {
 	output := ""
 	switch query.Kind {
 	case "confidentiality":
-		output = fmt.Sprintf(
-			"query attacker(const_%s).",
-			query.Constants[0].Name,
-		)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
+		resolved, _ := valueResolveValueInternalValuesFromKnowledgeMap(valKnowledgeMap.Assigned[i], valKnowledgeMap)
+		output = fmt.Sprintf("query attacker(%s).", pvValue(valKnowledgeMap, "attacker", resolved))
 	case "authentication":
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
