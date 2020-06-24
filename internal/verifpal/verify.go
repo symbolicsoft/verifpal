@@ -60,7 +60,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 			sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)
 		}
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
+		verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
 	}
 	scanGroup.Wait()
 }

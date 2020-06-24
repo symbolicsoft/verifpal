@@ -10,7 +10,6 @@ import (
 )
 
 func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
-	var stagesGroup sync.WaitGroup
 	InfoMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
@@ -18,19 +17,17 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 		attackerStateInit(true)
 		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
 		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
-		stagesGroup.Add(4)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1, &stagesGroup)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2, &stagesGroup)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3, &stagesGroup)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4, &stagesGroup)
-		stagesGroup.Wait()
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4)
 		phase = phase + 1
 	}
 }
 
 func verifyActiveStages(
 	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
-	stage int, sg *sync.WaitGroup,
+	stage int,
 ) {
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
@@ -38,7 +35,7 @@ func verifyActiveStages(
 		go func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
-			go verifyActiveScan(
+			verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, MutationMap{Initialized: false},
 				stage, &combinationsGroup,
 			)
@@ -47,7 +44,6 @@ func verifyActiveStages(
 		}(valPrincipalState, &principalsGroup)
 	}
 	principalsGroup.Wait()
-	sg.Done()
 }
 
 func verifyActiveScan(
@@ -68,15 +64,13 @@ func verifyActiveScan(
 	}
 	if (goodLock && !valMutationMap.Initialized) || attackerKnowsMore {
 		cg.Add(1)
-		go func() {
-			valMutationMap = mutationMapInit(
-				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
-			)
-			verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
-				stage, cg,
-			)
-		}()
+		valMutationMap = mutationMapInit(
+			valKnowledgeMap, valPrincipalState, valAttackerState, stage,
+		)
+		verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
+			stage, cg,
+		)
 		cg.Done()
 		return
 	}
@@ -90,7 +84,7 @@ func verifyActiveScan(
 	}
 	if goodLock && !valMutationMap.OutOfMutations {
 		cg.Add(1)
-		go verifyActiveScan(
+		verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
 			stage, cg,
 		)

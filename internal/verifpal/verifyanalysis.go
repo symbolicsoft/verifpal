@@ -29,7 +29,7 @@ func verifyAnalysis(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalSta
 	verifyAnalysisCountIncrement()
 	infoAnalysis(stage)
 	if o > 0 {
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
+		verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
 	} else {
 		sg.Done()
 	}
