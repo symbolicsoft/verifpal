@@ -36,9 +36,9 @@ var cmdVerify = &cobra.Command{
 		"`verify` loads a Verifpal model from the given file path and analyzes it using Verifpal's analysis logic.",
 		"Output is displayed in the terminal as the model is being analyzed.",
 	}, " "),
-	DisableFlagsInUseLine: true,
-	Args:                  cobra.ExactArgs(1),
-	Hidden:                false,
+	Args:       cobra.ExactArgs(1),
+	Hidden:     false,
+	SuggestFor: []string{"analyze", "run"},
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stdout, "Verifpal %s - https://verifpal.com", version)
 		fmt.Fprintf(os.Stdout, "\n")
@@ -58,11 +58,10 @@ var cmdTranslate = &cobra.Command{
 		"a Coq model or a Go implementation based on the option given.",
 	}, " "),
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
+	ValidArgs:             []string{"coq", "go", "pv"},
 	Hidden:                false,
-	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.Pv(args[0])
-	},
 }
 
 var cmdTranslateCoq = &cobra.Command{
@@ -75,6 +74,7 @@ var cmdTranslateCoq = &cobra.Command{
 		"model of your protocol within the Coq verification framework.",
 	}, " "),
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -93,6 +93,7 @@ var cmdTranslateGo = &cobra.Command{
 		"and test your protocol in a real-world setting.",
 	}, " "),
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -111,6 +112,7 @@ var cmdTranslatePv = &cobra.Command{
 		"model of your protocol within the ProVerif verification framework.",
 	}, " "),
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -127,6 +129,7 @@ var cmdPretty = &cobra.Command{
 		"and outputs a pretty-printed version of that same model.",
 	}, " "),
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -137,6 +140,7 @@ var cmdPretty = &cobra.Command{
 var cmdJson = &cobra.Command{
 	Use:                   "internal-json [requestType]",
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -147,6 +151,7 @@ var cmdJson = &cobra.Command{
 var cmdFriends = &cobra.Command{
 	Use:                   "friends",
 	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
 	Args:                  cobra.NoArgs,
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -161,8 +166,8 @@ var cmdFriends = &cobra.Command{
 }
 
 func main() {
-	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJson, cmdFriends)
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslateGo, cmdTranslatePv)
+	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJson, cmdFriends)
 	// nolint:errcheck
 	rootCmd.Execute()
 }
