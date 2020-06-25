@@ -21,8 +21,6 @@ builds:
     goarch:
       - amd64
       - 386
-      - arm64
-      - arm
 
 archives:
   - replacements:
