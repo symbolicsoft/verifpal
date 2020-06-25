@@ -1,1 +1,1 @@
-Verifpal 0.14.1 fixes a bug in ProVerif model template generation.
+Verifpal 0.14.2 introduces bug fixes and improvements to Verifpal model analysis.
