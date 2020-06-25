@@ -5,7 +5,7 @@
 // This file is generated automatically from libpeg.peg.
 // Do not modify.
 
-package verifpal
+package main
 
 import (
 	"bytes"

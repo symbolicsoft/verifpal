@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // b3217fdc84899bc6c014cee70a82859d
 
-package verifpal
+package main
 
 func mutationMapInit(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,

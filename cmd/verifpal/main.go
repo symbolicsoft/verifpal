@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate pigeon -o ../../internal/verifpal/libpeg.go ../../internal/libpeg/libpeg.peg
-//go:generate gofmt -s -w ../../internal/verifpal/libpeg.go
+//go:generate pigeon -o ../../cmd/verifpal/libpeg.go ../../internal/libpeg/libpeg.peg
+//go:generate gofmt -s -w ../../cmd/verifpal/libpeg.go
 //go:generate go run ../../internal/libcoq/libcoqgen.go
-//go:generate gofmt -s -w ../../internal/verifpal/libcoq.go
+//go:generate gofmt -s -w ../../cmd/verifpal/libcoq.go
 //go:generate goversioninfo -64=true -icon=../../assets/icon.ico ../../assets/versioninfo.json
 
 package main
@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"verifpal.com/internal/verifpal"
 )
 
 var version = "0.14.1"
@@ -42,11 +41,11 @@ var cmdVerify = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stdout, "Verifpal %s - https://verifpal.com", version)
 		fmt.Fprintf(os.Stdout, "\n")
-		verifpal.InfoMessage("Verifpal is Beta software.",
+		InfoMessage("Verifpal is Beta software.",
 			"warning", false,
 		)
-		verifpal.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
-		verifpal.Verify(args[0])
+		VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
+		Verify(args[0])
 	},
 }
 
@@ -79,7 +78,7 @@ var cmdTranslateCoq = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.Coq(args[0])
+		Coq(args[0])
 	},
 }
 
@@ -98,7 +97,7 @@ var cmdTranslateGo = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.Go(args[0])
+		Go(args[0])
 	},
 }
 
@@ -117,7 +116,7 @@ var cmdTranslatePv = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.Pv(args[0])
+		Pv(args[0])
 	},
 }
 
@@ -134,7 +133,7 @@ var cmdPretty = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.PrettyPrint(args[0])
+		PrettyPrint(args[0])
 	},
 }
 
@@ -145,7 +144,7 @@ var cmdJson = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
-		verifpal.Json(args[0])
+		Json(args[0])
 	},
 }
 
@@ -162,7 +161,7 @@ var cmdFriends = &cobra.Command{
 			0x2f, 0x72, 0x65, 0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61,
 			0x2f, 0x66, 0x72, 0x69, 0x65, 0x6e, 0x64, 0x73,
 		}
-		verifpal.OpenBrowser(string(f))
+		OpenBrowser(string(f))
 	},
 }
 

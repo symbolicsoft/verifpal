@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // e7f38dcfcb1b02f4419c2e9e90efa017
 
-package verifpal
+package main
 
 import "fmt"
 

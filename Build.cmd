@@ -10,12 +10,12 @@
 @echo        OK
 
 @echo|set /p="[Verifpal] Generating parser..."
-@pigeon -o internal\verifpal\libpeg.go internal\libpeg\libpeg.peg
-@gofmt -s -w internal\verifpal\libpeg.go
-@cd internal\libcoq
+@pigeon -o cmd\verifpal\libpeg.go cmd\libpeg\libpeg.peg
+@gofmt -s -w cmd\verifpal\libpeg.go
+@cd cmd\libcoq
 @go run libcoqgen.go
 @cd ..\..
-@gofmt -s -w internal\verifpal\libcoq.go
+@gofmt -s -w cmd\verifpal\libcoq.go
 @echo              OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."

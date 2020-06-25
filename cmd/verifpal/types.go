@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 6dc5ca957dc5760bba97d4d8a0fe4adf
 
-package verifpal
+package main
 
 // Model is the main parsed representation of the Verifpal model.
 type Model struct {

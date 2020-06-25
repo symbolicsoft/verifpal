@@ -70,8 +70,8 @@ clean:
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
 	@$(RM) build/freebsd/verifpal
-	@$(RM) internal/verifpal/libpeg.go
-	@$(RM) internal/verifpal/libcoq.go
+	@$(RM) cmd/verifpal/libpeg.go
+	@$(RM) cmd/verifpal/libcoq.go
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 
