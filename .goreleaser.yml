@@ -10,7 +10,7 @@ before:
     - go generate ./...
 
 builds:
-  - main: ./cmd/verifpal
+  - main: ./cmd/verifpal/main.go
     gcflags:
       - -e
     goos:
