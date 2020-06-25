@@ -30,7 +30,7 @@ var rootCmd = &cobra.Command{
 
 var cmdVerify = &cobra.Command{
 	Use:     "verify [model.vp]",
-	Example: "  verifpal verify examples/simple.pv",
+	Example: "  verifpal verify examples/simple.vp",
 	Short:   "Analyze Verifpal model",
 	Long: strings.Join([]string{
 		"`verify` loads a Verifpal model from the given file path and analyzes it using Verifpal's analysis logic.",
@@ -45,13 +45,14 @@ var cmdVerify = &cobra.Command{
 		verifpal.InfoMessage("Verifpal is Beta software.",
 			"warning", false,
 		)
+		verifpal.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
 		verifpal.Verify(args[0])
 	},
 }
 
 var cmdTranslate = &cobra.Command{
 	Use:     "translate [coq|go|pv] [model.vp]",
-	Example: "  verifpal translate coq examples/simple.pv",
+	Example: "  verifpal translate coq examples/simple.vp",
 	Short:   "Translate Verifpal model into another language",
 	Long: strings.Join([]string{
 		"`translate` allows translating a Verifpal model into either a ProVerif model,",
@@ -66,7 +67,7 @@ var cmdTranslate = &cobra.Command{
 
 var cmdTranslateCoq = &cobra.Command{
 	Use:     "coq [model.vp]",
-	Example: "  verifpal translate coq examples/simple.pv",
+	Example: "  verifpal translate coq examples/simple.vp",
 	Short:   "Translate Verifpal model into Coq model",
 	Long: strings.Join([]string{
 		"`translate coq` loads a Verifpal model from the given file path and translates it into a Coq template based",
@@ -84,7 +85,7 @@ var cmdTranslateCoq = &cobra.Command{
 
 var cmdTranslateGo = &cobra.Command{
 	Use:     "go [model.vp]",
-	Example: "  verifpal translate go examples/simple.pv",
+	Example: "  verifpal translate go examples/simple.vp",
 	Short:   "Translate Verifpal model into Go implementation",
 	Long: strings.Join([]string{
 		"`translate go` loads a Verifpal model from the given file path",
@@ -103,7 +104,7 @@ var cmdTranslateGo = &cobra.Command{
 
 var cmdTranslatePv = &cobra.Command{
 	Use:     "pv [model.vp]",
-	Example: "  verifpal translate pv examples/simple.pv",
+	Example: "  verifpal translate pv examples/simple.vp",
 	Short:   "Translate Verifpal model into ProVerif model",
 	Long: strings.Join([]string{
 		"`translate pv` loads a Verifpal model from the given file path",
@@ -122,7 +123,7 @@ var cmdTranslatePv = &cobra.Command{
 
 var cmdPretty = &cobra.Command{
 	Use:     "pretty [model.vp]",
-	Example: "  verifpal pretty examples/simple.pv",
+	Example: "  verifpal pretty examples/simple.vp",
 	Short:   "Pretty-print Verifpal model",
 	Long: strings.Join([]string{
 		"`pretty` loads a Verifpal model from the given file path",
@@ -166,6 +167,7 @@ var cmdFriends = &cobra.Command{
 }
 
 func main() {
+	cmdVerify.Flags().BoolP("verifhub", "", false, "Submit to VerifHub on Analysis Completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslateGo, cmdTranslatePv)
 	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJson, cmdFriends)
 	// nolint:errcheck
