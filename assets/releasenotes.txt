@@ -1,1 +1,1 @@
-Verifpal 0.14.3 renders Verifpal usable as a Go library within other go applications, by exposing a "vplogic" package available through importing "verifpal.com/cmd/vplogic".
+Verifpal 0.14.3 renders Verifpal usable as a Go library within other go applications, by exposing a vplogic package.
