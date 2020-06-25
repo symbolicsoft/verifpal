@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 00000000000000000000000000000000
 
-package main
+package vplogic
 
 import (
 	"fmt"

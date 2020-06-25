@@ -65,13 +65,13 @@ release:
 
 clean:
 	@/bin/echo -n "[Verifpal] Cleaning up..."
-	@$(RM) cmd/verifpal/resource.syso
+	@$(RM) cmd/vplogic/resource.syso
 	@$(RM) build/windows/verifpal.exe
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
 	@$(RM) build/freebsd/verifpal
-	@$(RM) cmd/verifpal/libpeg.go
-	@$(RM) cmd/verifpal/libcoq.go
+	@$(RM) cmd/vplogic/libpeg.go
+	@$(RM) cmd/vplogic/libcoq.go
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 

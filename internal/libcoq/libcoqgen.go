@@ -12,7 +12,7 @@ var header = []string{
 	"/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>",
 	"* SPDX-License-Identifier: GPL-3.0-only */",
 	"// 806d8db3ce9f3ded40fd35fdba02fb84",
-	"package main\n",
+	"package vplogic\n",
 	"import \"strings\"\n",
 	"var libcoq = strings.Join([]string{\n",
 }
@@ -23,7 +23,7 @@ func main() {
 	))
 	check(err)
 	w, err := os.Create(filepath.Join(
-		"..", "..", "cmd", "verifpal", "libcoq.go",
+		"..", "..", "cmd", "vplogic", "libcoq.go",
 	))
 	check(err)
 	_, err = w.WriteString(strings.Join(header, "\n"))

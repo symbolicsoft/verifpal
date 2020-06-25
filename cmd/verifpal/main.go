@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate pigeon -o ../../cmd/verifpal/libpeg.go ../../internal/libpeg/libpeg.peg
-//go:generate gofmt -s -w ../../cmd/verifpal/libpeg.go
+//go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
+//go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
 //go:generate go run ../../internal/libcoq/libcoqgen.go
-//go:generate gofmt -s -w ../../cmd/verifpal/libcoq.go
+//go:generate gofmt -s -w ../../cmd/vplogic/libcoq.go
 //go:generate goversioninfo -64=true -icon=../../assets/icon.ico ../../assets/versioninfo.json
 
 package main
@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"verifpal.com/cmd/vplogic"
 )
 
 var version = "0.14.2"
@@ -41,11 +42,11 @@ var cmdVerify = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stdout, "Verifpal %s - https://verifpal.com", version)
 		fmt.Fprintf(os.Stdout, "\n")
-		InfoMessage("Verifpal is Beta software.",
+		vplogic.InfoMessage("Verifpal is Beta software.",
 			"warning", false,
 		)
-		VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
-		Verify(args[0])
+		vplogic.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
+		vplogic.Verify(args[0])
 	},
 }
 
@@ -78,7 +79,7 @@ var cmdTranslateCoq = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		Coq(args[0])
+		vplogic.Coq(args[0])
 	},
 }
 
@@ -97,7 +98,7 @@ var cmdTranslateGo = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		Go(args[0])
+		vplogic.Go(args[0])
 	},
 }
 
@@ -116,7 +117,7 @@ var cmdTranslatePv = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		Pv(args[0])
+		vplogic.Pv(args[0])
 	},
 }
 
@@ -133,7 +134,7 @@ var cmdPretty = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		PrettyPrint(args[0])
+		vplogic.PrettyPrint(args[0])
 	},
 }
 
@@ -144,7 +145,7 @@ var cmdJson = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
-		Json(args[0])
+		vplogic.Json(args[0])
 	},
 }
 
@@ -161,7 +162,7 @@ var cmdFriends = &cobra.Command{
 			0x2f, 0x72, 0x65, 0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61,
 			0x2f, 0x66, 0x72, 0x69, 0x65, 0x6e, 0x64, 0x73,
 		}
-		OpenBrowser(string(f))
+		vplogic.OpenBrowser(string(f))
 	},
 }
 

@@ -1,1 +1,1 @@
-libpv currently does not need to be generated, and so is just included as libpv inside cmd/verifpal.
+libpv currently does not need to be generated, and so is just included as libpv inside cmd/vplogic.

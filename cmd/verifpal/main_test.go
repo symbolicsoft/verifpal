@@ -7,6 +7,8 @@ package main
 import (
 	"fmt"
 	"testing"
+
+	"verifpal.com/cmd/vplogic"
 )
 
 type VerifpalTest struct {
@@ -193,7 +195,7 @@ func TestMain(t *testing.T) {
 
 func testModel(v VerifpalTest, t *testing.T) {
 	fileName := fmt.Sprintf("../../examples/test/%s", v.Model)
-	_, resultsCode := Verify(fileName)
+	_, resultsCode := vplogic.Verify(fileName)
 	if resultsCode != v.ResultsCode {
 		t.Errorf(
 			"   FAIL • %s (%s, got %s)\n",

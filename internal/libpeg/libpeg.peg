@@ -5,7 +5,7 @@
 // This file is generated automatically from libpeg.peg.
 // Do not modify.
 
-package main
+package vplogic
 
 import (
 	"bytes"
