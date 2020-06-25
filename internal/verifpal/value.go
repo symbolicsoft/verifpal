@@ -4,7 +4,9 @@
 
 package verifpal
 
-import "strings"
+import (
+	"strings"
+)
 
 var valueG = Value{
 	Kind: "constant",
@@ -621,8 +623,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 		default:
 			switch rootValue.Kind {
 			case "primitive":
-				x, _ := possibleToReconstructPrimitive(rootValue.Primitive, valAttackerState)
-				if !x && valPrincipalState.Creator[rootIndex] != valPrincipalState.Name {
+				if valPrincipalState.Creator[rootIndex] != valPrincipalState.Name {
 					forceBeforeMutate = true
 				}
 			}
