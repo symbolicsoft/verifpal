@@ -135,7 +135,7 @@ func prettyQuery(query Query) string {
 		)
 	case "unlinkability":
 		output = fmt.Sprintf(
-			"%s %s",
+			"%s? %s",
 			query.Kind,
 			prettyConstants(query.Constants),
 		)

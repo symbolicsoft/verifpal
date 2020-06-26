@@ -1,1 +1,1 @@
-Verifpal 0.14.6 introduces VerifHub support. For more information, visit https://verifhub.verifpal.com.
+Verifpal 0.14.7 fixes a bug with the Verifpal pretty-printer.
