@@ -1,1 +1,1 @@
-Verifpal 0.14.4 is an internal release meant to prepare Verifpal for use with VerifHub, an upcoming service. There is no benefit for users to update to Verifpal 0.14.4. Users should wait for 0.14.5, which will provide new functionality.
+Verifpal 0.14.5 is an internal release meant to prepare Verifpal for use with VerifHub, an upcoming service. There is no benefit for users to update to Verifpal 0.14.5. Users should wait for 0.14.6, which will provide new functionality.

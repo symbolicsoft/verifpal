@@ -86,7 +86,7 @@ func JsonPrettyPrint(inputString string) error {
 	if err != nil {
 		return err
 	}
-	pretty, err := prettyModel(m.(Model))
+	pretty, err := PrettyModel(m.(Model))
 	if err != nil {
 		return err
 	}

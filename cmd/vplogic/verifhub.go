@@ -14,7 +14,7 @@ var VerifHubScheduledShared bool
 func VerifHub(m Model, fileName string, resultsCode string) error {
 	InfoMessage("Your model will now be submitted to VerifHub.", "verifpal", false)
 	submitUri := "http://localhost:8080/submit"
-	pretty, err := prettyModel(m)
+	pretty, err := PrettyModel(m)
 	if err != nil {
 		return err
 	}

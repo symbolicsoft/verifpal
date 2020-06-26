@@ -16,7 +16,7 @@ func PrettyPrint(modelFile string) error {
 	if err != nil {
 		return err
 	}
-	pretty, err := prettyModel(m)
+	pretty, err := PrettyModel(m)
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func prettyPhase(block Block) string {
 	return output
 }
 
-func prettyModel(m Model) (string, error) {
+func PrettyModel(m Model) (string, error) {
 	_, _, err := sanity(m)
 	if err != nil {
 		return "", err
