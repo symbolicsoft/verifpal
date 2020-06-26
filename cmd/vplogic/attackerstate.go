@@ -21,7 +21,7 @@ func attackerStateInit(active bool) {
 	attackerStateMutex.Unlock()
 }
 
-func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
+func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 	attackerStateMutex.Lock()
 	for i, c := range valPrincipalState.Constants {
 		cc := Value{Kind: "constant", Constant: c}
@@ -46,7 +46,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
 		if err != nil {
-			errorCritical(err.Error())
+			return err
 		}
 		if earliestPhase > attackerStateShared.CurrentPhase {
 			continue
@@ -56,6 +56,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) {
 		}
 	}
 	attackerStateMutex.Unlock()
+	return nil
 }
 
 func attackerStateGetRead() AttackerState {
@@ -78,9 +79,10 @@ func attackerStatePutWrite(known Value) bool {
 	return written
 }
 
-func attackerStatePutPhaseUpdate(valPrincipalState PrincipalState, phase int) {
+func attackerStatePutPhaseUpdate(valPrincipalState PrincipalState, phase int) error {
 	attackerStateMutex.Lock()
 	attackerStateShared.CurrentPhase = phase
 	attackerStateMutex.Unlock()
-	attackerStateAbsorbPhaseValues(valPrincipalState)
+	err := attackerStateAbsorbPhaseValues(valPrincipalState)
+	return err
 }

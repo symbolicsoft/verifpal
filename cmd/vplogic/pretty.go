@@ -11,9 +11,17 @@ import (
 )
 
 // PrettyPrint pretty-prints a Verifpal model based on a model loaded from a file.
-func PrettyPrint(modelFile string) {
-	m := libpegParseModel(modelFile, false)
-	fmt.Fprint(os.Stdout, prettyModel(m))
+func PrettyPrint(modelFile string) error {
+	m, err := libpegParseModel(modelFile, false)
+	if err != nil {
+		return err
+	}
+	pretty, err := prettyModel(m)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, pretty)
+	return nil
 }
 
 func prettyConstant(c Constant) string {
@@ -224,8 +232,11 @@ func prettyPhase(block Block) string {
 	return output
 }
 
-func prettyModel(m Model) string {
-	sanity(m)
+func prettyModel(m Model) (string, error) {
+	_, _, err := sanity(m)
+	if err != nil {
+		return "", err
+	}
 	output := fmt.Sprintf(
 		"attacker[%s]\n\n",
 		m.Attacker,
@@ -247,11 +258,14 @@ func prettyModel(m Model) string {
 		)
 	}
 	output = fmt.Sprintf("%s]\n", output)
-	return output
+	return output, nil
 }
 
-func prettyDiagram(m Model) string {
-	sanity(m)
+func prettyDiagram(m Model) (string, error) {
+	_, _, err := sanity(m)
+	if err != nil {
+		return "", err
+	}
 	output := ""
 	firstPrincipal := ""
 	for _, block := range m.Blocks {
@@ -280,7 +294,7 @@ func prettyDiagram(m Model) string {
 			)
 		}
 	}
-	return output
+	return output, nil
 }
 
 func prettyArity(specArity []int) string {

@@ -6,13 +6,9 @@ package vplogic
 
 import (
 	"errors"
-	"fmt"
-	"log"
 	"os/exec"
 	"runtime"
 	"sort"
-
-	"github.com/logrusorgru/aurora"
 )
 
 // b2s converts a byte array to a string.
@@ -78,22 +74,10 @@ func colorOutputSupport() bool {
 	return true
 }
 
-// errorCritical declares an unrecoverable error and ends the Verifpal program.
-func errorCritical(errText string) {
-	err := errors.New(errText)
-	if colorOutputSupport() {
-		log.Fatal(fmt.Errorf(" %s! %s: %v.\n",
-			aurora.Red("Verifpal").Bold(),
-			aurora.Red("Error"), err,
-		))
-	} else {
-		log.Fatal(fmt.Errorf("Verifpal! Error: %v.\n", err))
-	}
-}
-
 // openBrowser opens a URI using the appropriate binding for the host operating system.
-func OpenBrowser(url string) {
+func OpenBrowser(url string) error {
 	var err error
+	err = nil
 	switch runtime.GOOS {
 	case "linux":
 		err = exec.Command("xdg-open", url).Start()
@@ -101,10 +85,6 @@ func OpenBrowser(url string) {
 		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	case "darwin":
 		err = exec.Command("open", url).Start()
-	default:
-		err = fmt.Errorf("unsupported platform")
 	}
-	if err != nil {
-		log.Fatal(err)
-	}
+	return err
 }

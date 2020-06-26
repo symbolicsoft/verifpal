@@ -53,13 +53,13 @@ func libpegCheckIfReserved(s string) error {
 	return nil
 }
 
-func libpegParseModel(filePath string, verbose bool) Model {
+func libpegParseModel(filePath string, verbose bool) (Model, error) {
 	fileName := filepath.Base(filePath)
 	if len(fileName) > 64 {
-		errorCritical("model file name must be 64 characters or less")
+		return Model{}, fmt.Errorf("model file name must be 64 characters or less")
 	}
 	if filepath.Ext(fileName) != ".vp" {
-		errorCritical("model file name must have a '.vp' extension")
+		return Model{}, fmt.Errorf("model file name must have a '.vp' extension")
 	}
 	if verbose {
 		InfoMessage(fmt.Sprintf(
@@ -68,11 +68,11 @@ func libpegParseModel(filePath string, verbose bool) Model {
 	}
 	parsed, err := ParseFile(filePath)
 	if err != nil {
-		errorCritical(err.Error())
+		return Model{}, err
 	}
 	m := parsed.(Model)
 	m.FileName = fileName
-	return m
+	return m, nil
 }
 }
 

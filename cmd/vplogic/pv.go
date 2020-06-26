@@ -11,10 +11,21 @@ import (
 )
 
 // Pv translates a Verifpal model into a ProVerif model.
-func Pv(modelFile string) {
-	m := libpegParseModel(modelFile, false)
-	sanity(m)
-	fmt.Fprint(os.Stdout, pvModel(m))
+func Pv(modelFile string) error {
+	m, err := libpegParseModel(modelFile, false)
+	if err != nil {
+		return err
+	}
+	valKnowledgeMap, _, err := sanity(m)
+	if err != nil {
+		return err
+	}
+	pvm, err := pvModel(m, valKnowledgeMap)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, pvm)
+	return nil
 }
 
 func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant) string {
@@ -116,7 +127,7 @@ func pvValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
 	return ""
 }
 
-func pvQuery(valKnowledgeMap KnowledgeMap, query Query) string {
+func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
 	output := ""
 	switch query.Kind {
 	case "confidentiality":
@@ -135,14 +146,14 @@ func pvQuery(valKnowledgeMap KnowledgeMap, query Query) string {
 			),
 		)
 	case "freshness":
-		errorCritical("freshness queries are not yet supported in ProVerif model generation")
+		return "", fmt.Errorf("freshness queries are not yet supported in ProVerif model generation")
 	case "unlinkability":
-		errorCritical("unlinkability queries are not yet supported in ProVerif model generation")
+		return "", fmt.Errorf("unlinkability queries are not yet supported in ProVerif model generation")
 	}
 	if len(query.Options) > 0 {
-		errorCritical("query options are not yet supported in ProVerif model generation")
+		return "", fmt.Errorf("query options are not yet supported in ProVerif model generation")
 	}
-	return output
+	return output, nil
 }
 
 func pvPrincipal(
@@ -311,18 +322,17 @@ func pvMessage(
 	return procs, pc
 }
 
-func pvPhase(block Block) string {
-	errorCritical("phases are not yet supported in ProVerif model generation")
-	return fmt.Sprintf("phase %d;", block.Phase.Number)
+func pvPhase(block Block) (string, error) {
+	return "", fmt.Errorf("phases are not yet supported in ProVerif model generation")
+	// return fmt.Sprintf("phase %d;", block.Phase.Number)
 }
 
-func pvModel(m Model) string {
+func pvModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
 	pv := ""
 	procs := ""
 	consts := ""
 	pc := 0
 	cc := 0
-	valKnowledgeMap := constructKnowledgeMap(m, sanityDeclaredPrincipals(m))
 	for _, block := range m.Blocks {
 		switch block.Kind {
 		case "principal":
@@ -332,8 +342,16 @@ func pvModel(m Model) string {
 		case "message":
 			procs, pc = pvMessage(valKnowledgeMap, block, procs, pc)
 		case "phase":
-			pv = pv + pvPhase(block)
+			pvp, err := pvPhase(block)
+			if err != nil {
+				return "", err
+			}
+			pv = pv + pvp
 		}
+	}
+	queries, err := libpv.Queries(valKnowledgeMap, m.Queries)
+	if err != nil {
+		return "", err
 	}
 	pv = pv + libpv.Parameters(m.Attacker)
 	pv = pv + libpv.Types()
@@ -341,8 +359,8 @@ func pvModel(m Model) string {
 	pv = pv + libpv.CorePrims()
 	pv = pv + libpv.Prims()
 	pv = pv + libpv.Channels(valKnowledgeMap)
-	pv = pv + libpv.Queries(valKnowledgeMap, m.Queries)
+	pv = pv + queries
 	pv = pv + procs
 	pv = pv + libpv.TopLevel(m.Blocks)
-	return pv
+	return pv, nil
 }

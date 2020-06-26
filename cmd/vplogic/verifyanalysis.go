@@ -12,7 +12,10 @@ import (
 
 var verifyAnalysisCount uint32
 
-func verifyAnalysis(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, stage int, sg *sync.WaitGroup) {
+func verifyAnalysis(
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	stage int, sg *sync.WaitGroup,
+) {
 	o := 0
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.Known {

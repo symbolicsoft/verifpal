@@ -6,12 +6,11 @@ package vplogic
 
 import (
 	"fmt"
-	"os"
 )
 
 // Go is supposed to implement Golang generation from Verifpal models. It does not exist yet.
-func Go(modelFile string) {
-	errorCritical("feature not yet implemented")
-	m := libpegParseModel(modelFile, false)
-	fmt.Fprint(os.Stdout, prettyModel(m))
+func Go(modelFile string) error {
+	return fmt.Errorf("feature not yet implemented")
+	// m := libpegParseModel(modelFile, false)
+	// fmt.Fprint(os.Stdout, prettyModel(m))
 }

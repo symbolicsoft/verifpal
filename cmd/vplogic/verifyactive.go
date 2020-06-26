@@ -9,20 +9,27 @@ import (
 	"sync"
 )
 
-func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
+func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) error {
 	InfoMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
 		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
-		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
-		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+		err := attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
+		if err != nil {
+			return err
+		}
+		err = verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+		if err != nil {
+			return err
+		}
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
 		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4)
 		phase = phase + 1
 	}
+	return nil
 }
 
 func verifyActiveStages(

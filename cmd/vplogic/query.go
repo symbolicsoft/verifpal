@@ -21,8 +21,6 @@ func queryStart(
 		queryFreshness(query, valPrincipalState, valAttackerState)
 	case "unlinkability":
 		queryUnlinkability(query, valPrincipalState, valAttackerState)
-	default:
-		errorCritical(fmt.Sprintf("invalid query kind (%s)", query.Kind))
 	}
 }
 

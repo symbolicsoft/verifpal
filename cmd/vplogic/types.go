@@ -202,6 +202,6 @@ type PvTemplate struct {
 	CorePrims  func() string
 	Prims      func() string
 	Channels   func(KnowledgeMap) string
-	Queries    func(KnowledgeMap, []Query) string
+	Queries    func(KnowledgeMap, []Query) (string, error)
 	TopLevel   func([]Block) string
 }

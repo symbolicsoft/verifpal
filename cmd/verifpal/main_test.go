@@ -195,7 +195,10 @@ func TestMain(t *testing.T) {
 
 func testModel(v VerifpalTest, t *testing.T) {
 	fileName := fmt.Sprintf("../../examples/test/%s", v.Model)
-	_, resultsCode := vplogic.Verify(fileName)
+	_, resultsCode, err := vplogic.Verify(fileName)
+	if err != nil {
+		t.Error(err)
+	}
 	if resultsCode != v.ResultsCode {
 		t.Errorf(
 			"   FAIL • %s (%s, got %s)\n",

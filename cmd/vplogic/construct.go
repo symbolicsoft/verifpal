@@ -6,7 +6,8 @@ package vplogic
 
 import "fmt"
 
-func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
+func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
+	var err error
 	valKnowledgeMap := KnowledgeMap{
 		Principals: principals,
 		Constants:  []Constant{},
@@ -46,43 +47,71 @@ func constructKnowledgeMap(m Model, principals []string) KnowledgeMap {
 	for _, blck := range m.Blocks {
 		switch blck.Kind {
 		case "principal":
-			for _, expr := range blck.Principal.Expressions {
-				switch expr.Kind {
-				case "knows":
-					valKnowledgeMap = constructKnowledgeMapRenderKnows(
-						valKnowledgeMap, blck, declaredAt, expr,
-					)
-				case "generates":
-					valKnowledgeMap = constructKnowledgeMapRenderGenerates(
-						valKnowledgeMap, blck, declaredAt, expr,
-					)
-				case "assignment":
-					valKnowledgeMap = constructKnowledgeMapRenderAssignment(
-						valKnowledgeMap, blck, declaredAt, expr,
-					)
-				case "leaks":
-					declaredAt = declaredAt + 1
-					valKnowledgeMap = constructKnowledgeMapRenderLeaks(
-						valKnowledgeMap, blck, expr, currentPhase,
-					)
-				}
+			valKnowledgeMap, declaredAt, err = constructKnowledgeMapRenderPrincipal(
+				valKnowledgeMap, blck, declaredAt, currentPhase,
+			)
+			if err != nil {
+				return KnowledgeMap{}, err
 			}
 		case "message":
 			declaredAt = declaredAt + 1
-			valKnowledgeMap = constructKnowledgeMapRenderMessage(
+			valKnowledgeMap, err = constructKnowledgeMapRenderMessage(
 				valKnowledgeMap, blck, currentPhase,
 			)
+			if err != nil {
+				return KnowledgeMap{}, err
+			}
 		case "phase":
 			currentPhase = blck.Phase.Number
 		}
 	}
 	valKnowledgeMap.MaxPhase = currentPhase
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
+}
+
+func constructKnowledgeMapRenderPrincipal(
+	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, currentPhase int,
+) (KnowledgeMap, int, error) {
+	var err error
+	for _, expr := range blck.Principal.Expressions {
+		switch expr.Kind {
+		case "knows":
+			valKnowledgeMap, err = constructKnowledgeMapRenderKnows(
+				valKnowledgeMap, blck, declaredAt, expr,
+			)
+			if err != nil {
+				return KnowledgeMap{}, 0, err
+			}
+		case "generates":
+			valKnowledgeMap, err = constructKnowledgeMapRenderGenerates(
+				valKnowledgeMap, blck, declaredAt, expr,
+			)
+			if err != nil {
+				return KnowledgeMap{}, 0, err
+			}
+		case "assignment":
+			valKnowledgeMap, err = constructKnowledgeMapRenderAssignment(
+				valKnowledgeMap, blck, declaredAt, expr,
+			)
+			if err != nil {
+				return KnowledgeMap{}, 0, err
+			}
+		case "leaks":
+			declaredAt = declaredAt + 1
+			valKnowledgeMap, err = constructKnowledgeMapRenderLeaks(
+				valKnowledgeMap, blck, expr, currentPhase,
+			)
+			if err != nil {
+				return KnowledgeMap{}, 0, err
+			}
+		}
+	}
+	return valKnowledgeMap, declaredAt, nil
 }
 
 func constructKnowledgeMapRenderKnows(
 	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) KnowledgeMap {
+) (KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -92,10 +121,10 @@ func constructKnowledgeMapRenderKnows(
 			q2 := expr.Qualifier
 			fresh := valKnowledgeMap.Constants[i].Fresh
 			if d1 != d2 || q1 != q2 || fresh {
-				errorCritical(fmt.Sprintf(
+				return valKnowledgeMap, fmt.Errorf(
 					"constant is known more than once and in different ways (%s)",
 					prettyConstant(c),
-				))
+				)
 			}
 			valKnowledgeMap.KnownBy[i] = append(
 				valKnowledgeMap.KnownBy[i],
@@ -133,19 +162,19 @@ func constructKnowledgeMapRenderKnows(
 			}
 		}
 	}
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
 }
 
 func constructKnowledgeMapRenderGenerates(
 	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) KnowledgeMap {
+) (KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"generated constant already exists (%s)",
 				prettyConstant(c),
-			))
+			)
 		}
 		c = Constant{
 			Name:        c.Name,
@@ -165,24 +194,30 @@ func constructKnowledgeMapRenderGenerates(
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
 }
 
 func constructKnowledgeMapRenderAssignment(
 	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) KnowledgeMap {
-	constants := sanityAssignmentConstants(expr.Right, []Constant{}, valKnowledgeMap)
+) (KnowledgeMap, error) {
+	constants, err := sanityAssignmentConstants(expr.Right, []Constant{}, valKnowledgeMap)
+	if err != nil {
+		return KnowledgeMap{}, err
+	}
 	switch expr.Right.Kind {
 	case "primitive":
-		sanityPrimitive(expr.Right.Primitive, expr.Left)
+		err := sanityPrimitive(expr.Right.Primitive, expr.Left)
+		if err != nil {
+			return KnowledgeMap{}, err
+		}
 	}
 	for _, c := range constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"constant does not exist (%s)",
 				prettyConstant(c),
-			))
+			)
 		}
 		knows := valKnowledgeMap.Creator[i] == blck.Principal.Name
 		for _, m := range valKnowledgeMap.KnownBy[i] {
@@ -192,20 +227,20 @@ func constructKnowledgeMapRenderAssignment(
 			}
 		}
 		if !knows {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"%s is using constant (%s) despite not knowing it",
 				blck.Principal.Name,
 				prettyConstant(c),
-			))
+			)
 		}
 	}
 	for i, c := range expr.Left {
 		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if ii >= 0 {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"constant assigned twice (%s)",
 				prettyConstant(c),
-			))
+			)
 		}
 		c = Constant{
 			Name:        c.Name,
@@ -226,21 +261,21 @@ func constructKnowledgeMapRenderAssignment(
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
 }
 
 func constructKnowledgeMapRenderLeaks(
 	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
-) KnowledgeMap {
+) (KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(
 			valKnowledgeMap, c,
 		)
 		if i < 0 {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"leaked constant does not exist (%s)",
 				prettyConstant(c),
-			))
+			)
 		}
 		known := valKnowledgeMap.Creator[i] == blck.Principal.Name
 		for _, m := range valKnowledgeMap.KnownBy[i] {
@@ -250,26 +285,26 @@ func constructKnowledgeMapRenderLeaks(
 			}
 		}
 		if !known {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"%s leaks a constant that they do not know (%s)",
 				blck.Principal.Name, prettyConstant(c),
-			))
+			)
 		}
 		valKnowledgeMap.Constants[i].Leaked = true
 		valKnowledgeMap.Phase[i], _ = appendUniqueInt(
 			valKnowledgeMap.Phase[i], currentPhase,
 		)
 	}
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
 }
 
 func constructKnowledgeMapRenderMessage(
 	valKnowledgeMap KnowledgeMap, blck Block, currentPhase int,
-) KnowledgeMap {
+) (KnowledgeMap, error) {
 	for _, c := range blck.Message.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(fmt.Sprintf(
 				"%s sends unknown constant to %s (%s)",
 				blck.Message.Sender,
 				blck.Message.Recipient,
@@ -297,17 +332,17 @@ func constructKnowledgeMapRenderMessage(
 		}
 		switch {
 		case !senderKnows:
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"%s is sending constant (%s) despite not knowing it",
 				blck.Message.Sender,
 				prettyConstant(c),
-			))
+			)
 		case recipientKnows:
-			errorCritical(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"%s is receiving constant (%s) despite already knowing it",
 				blck.Message.Recipient,
 				prettyConstant(c),
-			))
+			)
 		}
 		valKnowledgeMap.KnownBy[i] = append(
 			valKnowledgeMap.KnownBy[i], map[string]string{
@@ -318,7 +353,7 @@ func constructKnowledgeMapRenderMessage(
 			valKnowledgeMap.Phase[i], currentPhase,
 		)
 	}
-	return valKnowledgeMap
+	return valKnowledgeMap, nil
 }
 
 func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []PrincipalState {

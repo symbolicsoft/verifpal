@@ -171,15 +171,19 @@ var libpv = PvTemplate{
 		}
 		return strings.Join(channels, "\n") + "\n"
 	},
-	Queries: func(valKnowledgeMap KnowledgeMap, queries []Query) string {
+	Queries: func(valKnowledgeMap KnowledgeMap, queries []Query) (string, error) {
 		output := []string{
 			"event SendMsg(principal, principal, stage, bitstring).",
 			"event RecvMsg(principal, principal, stage, bitstring).",
 		}
 		for _, q := range queries {
-			output = append(output, pvQuery(valKnowledgeMap, q))
+			pvq, err := pvQuery(valKnowledgeMap, q)
+			if err != nil {
+				return "", err
+			}
+			output = append(output, pvq)
 		}
-		return strings.Join(output, "\n") + "\n"
+		return strings.Join(output, "\n") + "\n", nil
 	},
 	TopLevel: func(blocks []Block) string {
 		pc := 0

@@ -9,41 +9,54 @@ import (
 	"strings"
 )
 
-func sanity(m Model) (KnowledgeMap, []PrincipalState) {
-	sanityPhases(m)
-	principals := sanityDeclaredPrincipals(m)
-	valKnowledgeMap := constructKnowledgeMap(m, principals)
-	sanityQueries(m, valKnowledgeMap)
+func sanity(m Model) (KnowledgeMap, []PrincipalState, error) {
+	err := sanityPhases(m)
+	if err != nil {
+		return KnowledgeMap{}, []PrincipalState{}, err
+	}
+	principals, err := sanityDeclaredPrincipals(m)
+	if err != nil {
+		return KnowledgeMap{}, []PrincipalState{}, err
+	}
+	valKnowledgeMap, err := constructKnowledgeMap(m, principals)
+	if err != nil {
+		return KnowledgeMap{}, []PrincipalState{}, err
+	}
+	err = sanityQueries(m, valKnowledgeMap)
+	if err != nil {
+		return KnowledgeMap{}, []PrincipalState{}, err
+	}
 	valPrincipalStates := constructPrincipalStates(m, valKnowledgeMap)
-	return valKnowledgeMap, valPrincipalStates
+	return valKnowledgeMap, valPrincipalStates, nil
 }
 
-func sanityPhases(m Model) {
+func sanityPhases(m Model) error {
 	phase := 0
 	for _, blck := range m.Blocks {
 		switch blck.Kind {
 		case "phase":
 			switch {
 			case blck.Phase.Number <= phase:
-				errorCritical(fmt.Sprintf(
+				return fmt.Errorf(
 					"phase being declared (%d) must be superior to last declared phase (%d)",
 					blck.Phase.Number, phase,
-				))
+				)
 			case blck.Phase.Number != phase+1:
-				errorCritical(fmt.Sprintf(
+				return fmt.Errorf(
 					"phase being declared (%d) skips phases since last declared phase (%d)",
 					blck.Phase.Number, phase,
-				))
+				)
 			default:
 				phase = blck.Phase.Number
 			}
 		}
 	}
+	return nil
 }
 
 func sanityAssignmentConstants(
 	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
-) []Constant {
+) ([]Constant, error) {
 	switch right.Kind {
 	case "constant":
 		unique := true
@@ -57,36 +70,40 @@ func sanityAssignmentConstants(
 			constants = append(constants, right.Constant)
 		}
 	case "primitive":
-		constants = append(constants, sanityAssignmentConstantsFromPrimitive(
+		sacfp, err := sanityAssignmentConstantsFromPrimitive(
 			right, constants, valKnowledgeMap,
-		)...)
+		)
+		if err != nil {
+			return []Constant{}, err
+		}
+		constants = append(constants, sacfp...)
 	case "equation":
 		constants = append(constants, sanityAssignmentConstantsFromEquation(
 			right, constants,
 		)...)
 	}
-	return constants
+	return constants, nil
 }
 
 func sanityAssignmentConstantsFromPrimitive(
 	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
-) []Constant {
+) ([]Constant, error) {
 	primArguments := len(right.Primitive.Arguments)
 	specArity, err := primitiveGetArity(right.Primitive)
 	if err != nil {
-		errorCritical(err.Error())
+		return []Constant{}, err
 	}
 	if primArguments == 0 {
-		errorCritical(fmt.Sprintf(
+		return []Constant{}, fmt.Errorf(
 			"primitive %s has no inputs.", right.Primitive.Name,
-		))
+		)
 	}
 	if !intInSlice(primArguments, specArity) {
 		arityString := prettyArity(specArity)
-		errorCritical(fmt.Sprintf(
+		return []Constant{}, fmt.Errorf(
 			"primitive %s has %d inputs, expecting %s",
 			right.Primitive.Name, primArguments, arityString,
-		))
+		)
 	}
 	for _, a := range right.Primitive.Arguments {
 		switch a.Kind {
@@ -102,12 +119,18 @@ func sanityAssignmentConstantsFromPrimitive(
 				constants = append(constants, a.Constant)
 			}
 		case "primitive":
-			constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+			if err != nil {
+				return []Constant{}, err
+			}
 		case "equation":
-			constants = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
+			if err != nil {
+				return []Constant{}, err
+			}
 		}
 	}
-	return constants
+	return constants, nil
 }
 
 func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []Constant {
@@ -126,7 +149,7 @@ func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []
 	return constants
 }
 
-func sanityPrimitive(p Primitive, outputs []Constant) {
+func sanityPrimitive(p Primitive, outputs []Constant) error {
 	output := 0
 	check := false
 	if primitiveIsCorePrim(p.Name) {
@@ -136,7 +159,7 @@ func sanityPrimitive(p Primitive, outputs []Constant) {
 	} else {
 		prim, err := primitiveGet(p.Name)
 		if err != nil {
-			errorCritical(err.Error())
+			return err
 		}
 		output = prim.Output
 		check = prim.Check
@@ -146,60 +169,72 @@ func sanityPrimitive(p Primitive, outputs []Constant) {
 		if output < 0 {
 			outputString = "at least 1"
 		}
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"primitive %s has %d outputs, expecting %s",
 			p.Name, len(outputs), outputString,
-		))
+		)
 	}
 	if p.Check && !check {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"primitive %s is checked but does not support checking",
 			p.Name,
-		))
+		)
 	}
+	return nil
 }
 
-func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) {
+func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) error {
+	var err error
 	for _, query := range m.Queries {
 		switch query.Kind {
 		case "confidentiality":
-			sanityQueriesConfidentiality(query, valKnowledgeMap)
+			err = sanityQueriesConfidentiality(query, valKnowledgeMap)
 		case "authentication":
-			sanityQueriesAuthentication(query, valKnowledgeMap)
+			err = sanityQueriesAuthentication(query, valKnowledgeMap)
 		case "freshness":
-			sanityQueriesFreshness(query, valKnowledgeMap)
+			err = sanityQueriesFreshness(query, valKnowledgeMap)
 		case "unlinkability":
-			sanityQueriesUnlinkability(query, valKnowledgeMap)
+			err = sanityQueriesUnlinkability(query, valKnowledgeMap)
+		default:
+			return fmt.Errorf("invalid query kind")
 		}
-		sanityQueryOptions(query)
+		if err != nil {
+			return err
+		}
+		err = sanityQueryOptions(query)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func sanityQueriesConfidentiality(query Query, valKnowledgeMap KnowledgeMap) {
+func sanityQueriesConfidentiality(query Query, valKnowledgeMap KnowledgeMap) error {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 	if i < 0 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"confidentiality query (%s) refers to unknown constant (%s)",
 			prettyQuery(query),
 			prettyConstant(query.Constants[0]),
-		))
+		)
 	}
+	return nil
 }
 
-func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) {
+func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) error {
 	if len(query.Message.Constants) != 1 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"authentication query (%s) has more than one constant",
 			prettyQuery(query),
-		))
+		)
 	}
 	c := query.Message.Constants[0]
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	if i < 0 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"authentication query refers to unknown constant (%s)",
 			prettyConstant(c),
-		))
+		)
 	}
 	senderKnows := false
 	recipientKnows := false
@@ -220,87 +255,93 @@ func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) {
 	constantUsedByPrincipal := valueConstantIsUsedByPrincipalInKnowledgeMap(
 		valKnowledgeMap, query.Message.Recipient, c,
 	)
-	sanityQueriesCheckKnown(query, c, senderKnows, recipientKnows, constantUsedByPrincipal)
+	return sanityQueriesCheckKnown(
+		query, c, senderKnows, recipientKnows, constantUsedByPrincipal,
+	)
 }
 
-func sanityQueriesFreshness(query Query, valKnowledgeMap KnowledgeMap) {
+func sanityQueriesFreshness(query Query, valKnowledgeMap KnowledgeMap) error {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 	if i < 0 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"freshness query (%s) refers to unknown constant (%s)",
 			prettyQuery(query),
 			prettyConstant(query.Constants[0]),
-		))
+		)
 	}
+	return nil
 }
 
-func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) {
+func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error {
 	if len(query.Constants) < 2 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"unlinkability query (%s) must specify at least two constants",
 			prettyQuery(query),
-		))
+		)
 	}
 	for _, c := range query.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
-			errorCritical(fmt.Sprintf(
+			return fmt.Errorf(
 				"unlinkability query (%s) refers to unknown value (%s)",
 				prettyQuery(query),
 				prettyConstant(c),
-			))
+			)
 		}
 	}
+	return nil
 }
 
-func sanityQueryOptions(query Query) {
+func sanityQueryOptions(query Query) error {
 	for _, option := range query.Options {
 		switch option.Kind {
 		case "precondition":
 			if len(option.Message.Constants) != 1 {
-				errorCritical(fmt.Sprintf(
+				return fmt.Errorf(
 					"precondition option message (%s) has more than one constant",
 					prettyQuery(query),
-				))
+				)
 			}
 		default:
-			errorCritical(fmt.Sprintf(
+			return fmt.Errorf(
 				"invalid query option kind (%s)", option.Kind,
-			))
+			)
 		}
 	}
+	return nil
 }
 
 func sanityQueriesCheckKnown(
 	query Query, c Constant, senderKnows bool, recipientKnows bool, constantUsedByPrincipal bool,
-) {
+) error {
 	if !senderKnows {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
 			prettyQuery(query),
 			query.Message.Sender,
 			prettyConstant(c),
-		))
+		)
 	}
 	if !recipientKnows {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
 			prettyQuery(query),
 			query.Message.Recipient,
 			prettyConstant(c),
-		))
+		)
 	}
 	if !constantUsedByPrincipal {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
 			prettyQuery(query),
 			query.Message.Recipient,
 			prettyConstant(c),
-		))
+		)
 	}
+	return nil
 }
 
-func sanityDeclaredPrincipals(m Model) []string {
+func sanityDeclaredPrincipals(m Model) ([]string, error) {
 	declared := []string{}
 	principals := []string{}
 	for _, block := range m.Blocks {
@@ -326,66 +367,76 @@ func sanityDeclaredPrincipals(m Model) []string {
 	}
 	for _, p := range principals {
 		if !strInSlice(p, declared) {
-			errorCritical(fmt.Sprintf("principal does not exist (%s)", p))
+			return []string{}, fmt.Errorf("principal does not exist (%s)", p)
 		}
 	}
 	if len(declared) > 64 {
-		errorCritical(fmt.Sprintf("more than 64 principals (%d) declared", len(declared)))
+		return []string{}, fmt.Errorf("more than 64 principals (%d) declared", len(declared))
 	}
-	return principals
+	return principals, nil
 }
 
-func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []Primitive) {
+func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []Primitive) error {
 	for _, p := range failedRewrites {
 		if !p.Check {
 			continue
 		}
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"checked primitive fails: %s",
 			prettyPrimitive(p),
-		))
+		)
 	}
+	return nil
 }
 
-func sanityCheckEquationRootGenerator(e Equation) {
+func sanityCheckEquationRootGenerator(e Equation) error {
 	if len(e.Values) > 3 {
-		errorCritical(fmt.Sprintf(
+		return fmt.Errorf(
 			"too many layers in equation (%s), maximum is 2",
 			prettyEquation(e),
-		))
+		)
 	}
 	for i, c := range e.Values {
 		if i == 0 {
 			if strings.ToLower(c.Constant.Name) != "g" {
-				errorCritical(fmt.Sprintf(
+				return fmt.Errorf(
 					"equation (%s) does not use 'g' as generator",
 					prettyEquation(e),
-				))
+				)
 			}
 		}
 		if i > 0 {
 			if strings.ToLower(c.Constant.Name) == "g" {
-				errorCritical(fmt.Sprintf(
+				return fmt.Errorf(
 					"equation (%s) uses 'g' not as a generator",
 					prettyEquation(e),
-				))
+				)
 			}
 		}
 	}
+	return nil
 }
 
-func sanityCheckEquationGenerators(a Value, valPrincipalState PrincipalState) {
+func sanityCheckEquationGenerators(a Value, valPrincipalState PrincipalState) error {
+	var err error
 	switch a.Kind {
 	case "primitive":
 		for _, va := range a.Primitive.Arguments {
 			switch va.Kind {
 			case "primitive":
-				sanityCheckEquationGenerators(va, valPrincipalState)
+				err = sanityCheckEquationGenerators(va, valPrincipalState)
 			case "equation":
-				sanityCheckEquationRootGenerator(va.Equation)
+				err = sanityCheckEquationRootGenerator(va.Equation)
+			}
+			if err != nil {
+				return err
 			}
 		}
 	case "equation":
-		sanityCheckEquationRootGenerator(a.Equation)
+		err = sanityCheckEquationRootGenerator(a.Equation)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }

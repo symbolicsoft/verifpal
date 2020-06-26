@@ -13,13 +13,19 @@ import (
 
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
-func Verify(filePath string) ([]VerifyResult, string) {
-	m := libpegParseModel(filePath, true)
+func Verify(filePath string) ([]VerifyResult, string, error) {
+	m, err := libpegParseModel(filePath, true)
+	if err != nil {
+		return []VerifyResult{}, "", err
+	}
 	return verifyModel(m)
 }
 
-func verifyModel(m Model) ([]VerifyResult, string) {
-	valKnowledgeMap, valPrincipalStates := sanity(m)
+func verifyModel(m Model) ([]VerifyResult, string, error) {
+	valKnowledgeMap, valPrincipalStates, err := sanity(m)
+	if err != nil {
+		return []VerifyResult{}, "", err
+	}
 	initiated := time.Now().Format("03:04:05 PM")
 	verifyAnalysisCountInit()
 	verifyResultsInit(m)
@@ -28,11 +34,17 @@ func verifyModel(m Model) ([]VerifyResult, string) {
 	), "verifpal", false)
 	switch m.Attacker {
 	case "passive":
-		verifyPassive(valKnowledgeMap, valPrincipalStates)
+		err := verifyPassive(valKnowledgeMap, valPrincipalStates)
+		if err != nil {
+			return []VerifyResult{}, "", err
+		}
 	case "active":
-		verifyActive(valKnowledgeMap, valPrincipalStates)
+		err := verifyActive(valKnowledgeMap, valPrincipalStates)
+		if err != nil {
+			return []VerifyResult{}, "", err
+		}
 	default:
-		errorCritical(fmt.Sprintf("invalid attacker (%s)", m.Attacker))
+		return []VerifyResult{}, "", fmt.Errorf("invalid attacker (%s)", m.Attacker)
 	}
 	fmt.Fprint(os.Stdout, "\n\n")
 	return verifyEnd(m)
@@ -49,31 +61,49 @@ func verifyResolveQueries(
 	}
 }
 
-func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) {
+func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) error {
 	var scanGroup sync.WaitGroup
+	var err error
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
 		valPrincipalState := valueResolveAllPrincipalStateValues(state, valAttackerState)
 		failedRewrites, _, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
-		sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
+		err = sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
+		if err != nil {
+			return err
+		}
 		for i := range valPrincipalState.Assigned {
-			sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)
+			err = sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)
+			if err != nil {
+				return err
+			}
 		}
 		scanGroup.Add(1)
 		verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
+		if err != nil {
+			return err
+		}
 	}
 	scanGroup.Wait()
+	return err
 }
 
-func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) {
+func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) error {
 	InfoMessage("Attacker is configured as passive.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
 		attackerStateInit(false)
-		attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
-		verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+		err := attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
+		if err != nil {
+			return err
+		}
+		err = verifyStandardRun(valKnowledgeMap, valPrincipalStates, 0)
+		if err != nil {
+			return err
+		}
 		phase = phase + 1
 	}
+	return nil
 }
 
 func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
@@ -105,7 +135,8 @@ func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 	return resultsCode
 }
 
-func verifyEnd(m Model) ([]VerifyResult, string) {
+func verifyEnd(m Model) ([]VerifyResult, string, error) {
+	var err error
 	valVerifyResults, fileName := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
@@ -123,7 +154,7 @@ func verifyEnd(m Model) ([]VerifyResult, string) {
 	InfoMessage("Thank you for using Verifpal.", "verifpal", false)
 	resultsCode := verifyGetResultsCode(valVerifyResults)
 	if VerifHubScheduledShared {
-		VerifHub(m, fileName, resultsCode)
+		err = VerifHub(m, fileName, resultsCode)
 	}
-	return valVerifyResults, resultsCode
+	return valVerifyResults, resultsCode, err
 }

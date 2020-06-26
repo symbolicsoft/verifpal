@@ -12,6 +12,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -46,7 +47,10 @@ var cmdVerify = &cobra.Command{
 			"warning", false,
 		)
 		vplogic.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
-		vplogic.Verify(args[0])
+		_, _, err := vplogic.Verify(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -79,7 +83,10 @@ var cmdTranslateCoq = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		vplogic.Coq(args[0])
+		err := vplogic.Coq(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -98,7 +105,10 @@ var cmdTranslateGo = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		vplogic.Go(args[0])
+		err := vplogic.Go(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -117,7 +127,10 @@ var cmdTranslatePv = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		vplogic.Pv(args[0])
+		err := vplogic.Pv(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -134,7 +147,10 @@ var cmdPretty = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
-		vplogic.PrettyPrint(args[0])
+		err := vplogic.PrettyPrint(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -145,7 +161,10 @@ var cmdJson = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
-		vplogic.Json(args[0])
+		err := vplogic.Json(args[0])
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -162,7 +181,10 @@ var cmdFriends = &cobra.Command{
 			0x2f, 0x72, 0x65, 0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61,
 			0x2f, 0x66, 0x72, 0x69, 0x65, 0x6e, 0x64, 0x73,
 		}
-		vplogic.OpenBrowser(string(f))
+		err := vplogic.OpenBrowser(string(f))
+		if err != nil {
+			cmdErrorFatal(err)
+		}
 	},
 }
 
@@ -172,4 +194,8 @@ func main() {
 	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJson, cmdFriends)
 	// nolint:errcheck
 	rootCmd.Execute()
+}
+
+func cmdErrorFatal(err error) {
+	log.Fatal(fmt.Errorf("Verifpal! Error: %v.\n", err))
 }

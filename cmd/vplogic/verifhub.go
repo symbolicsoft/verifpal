@@ -11,13 +11,18 @@ import (
 
 var VerifHubScheduledShared bool
 
-func VerifHub(m Model, fileName string, resultsCode string) {
+func VerifHub(m Model, fileName string, resultsCode string) error {
 	InfoMessage("Your model will now be submitted to VerifHub.", "verifpal", false)
 	submitUri := "http://localhost:8080/submit"
-	model := url.PathEscape(prettyModel(m))
+	pretty, err := prettyModel(m)
+	if err != nil {
+		return err
+	}
+	model := url.PathEscape(pretty)
 	link := fmt.Sprintf(
 		"%s?name=%s&model=%s&results=%s",
 		submitUri, fileName, model, resultsCode,
 	)
-	OpenBrowser(link)
+	err = OpenBrowser(link)
+	return err
 }

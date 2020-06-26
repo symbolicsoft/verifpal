@@ -10,60 +10,113 @@ import (
 	"os"
 )
 
-func Json(request string) {
+func Json(request string) error {
 	reader := bufio.NewReader(os.Stdin)
 	inputString, _ := reader.ReadString(byte(0x04))
 	inputString = inputString[:len(inputString)-1]
 	switch request {
 	case "knowledgeMap":
-		m, err := Parse("model.vp", []byte(inputString))
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		valKnowledgeMap, _ := sanity(m.(Model))
-		j, _ := json.Marshal(valKnowledgeMap)
-		fmt.Fprint(os.Stdout, string(j))
+		return JsonKnowledgeMap(inputString)
 	case "principalStates":
-		m, err := Parse("model.vp", []byte(inputString))
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		_, valPrincipalStates := sanity(m.(Model))
-		j, _ := json.Marshal(valPrincipalStates)
-		fmt.Fprint(os.Stdout, string(j))
+		return JsonPrincipalStates(inputString)
 	case "prettyValue":
-		a := Value{}
-		err := json.Unmarshal([]byte(inputString), &a)
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		fmt.Fprint(os.Stdout, prettyValue(a))
+		return JsonPrettyValue(inputString)
 	case "prettyQuery":
-		q := Query{}
-		err := json.Unmarshal([]byte(inputString), &q)
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		fmt.Fprint(os.Stdout, prettyQuery(q))
+		return JsonPrettyQuery(inputString)
 	case "prettyPrint":
-		m, err := Parse("model.vp", []byte(inputString))
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		fmt.Fprint(os.Stdout, prettyModel(m.(Model)))
+		return JsonPrettyPrint(inputString)
 	case "prettyDiagram":
-		m, err := Parse("model.vp", []byte(inputString))
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		fmt.Fprint(os.Stdout, prettyDiagram(m.(Model)))
+		return JsonPrettyDiagram(inputString)
 	case "verify":
-		m, err := Parse("model.vp", []byte(inputString))
-		if err != nil {
-			errorCritical(err.Error())
-		}
-		valVerifyResults, _ := verifyModel(m.(Model))
-		j, _ := json.Marshal(valVerifyResults)
-		fmt.Fprint(os.Stdout, string(j))
+		return JsonVerify(inputString)
 	}
+	return fmt.Errorf("invalid json subcommand")
+}
+
+func JsonKnowledgeMap(inputString string) error {
+	m, err := Parse("model.vp", []byte(inputString))
+	if err != nil {
+		return err
+	}
+	valKnowledgeMap, _, err := sanity(m.(Model))
+	if err != nil {
+		return err
+	}
+	j, _ := json.Marshal(valKnowledgeMap)
+	fmt.Fprint(os.Stdout, string(j))
+	return nil
+}
+
+func JsonPrincipalStates(inputString string) error {
+	m, err := Parse("model.vp", []byte(inputString))
+	if err != nil {
+		return err
+	}
+	_, valPrincipalStates, err := sanity(m.(Model))
+	if err != nil {
+		return err
+	}
+	j, _ := json.Marshal(valPrincipalStates)
+	fmt.Fprint(os.Stdout, string(j))
+	return nil
+}
+
+func JsonPrettyValue(inputString string) error {
+	a := Value{}
+	err := json.Unmarshal([]byte(inputString), &a)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, prettyValue(a))
+	return nil
+}
+
+func JsonPrettyQuery(inputString string) error {
+	q := Query{}
+	err := json.Unmarshal([]byte(inputString), &q)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, prettyQuery(q))
+	return nil
+}
+
+func JsonPrettyPrint(inputString string) error {
+	m, err := Parse("model.vp", []byte(inputString))
+	if err != nil {
+		return err
+	}
+	pretty, err := prettyModel(m.(Model))
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, pretty)
+	return nil
+}
+
+func JsonPrettyDiagram(inputString string) error {
+	m, err := Parse("model.vp", []byte(inputString))
+	if err != nil {
+		return err
+	}
+	pretty, err := prettyDiagram(m.(Model))
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(os.Stdout, pretty)
+	return nil
+}
+
+func JsonVerify(inputString string) error {
+	m, err := Parse("model.vp", []byte(inputString))
+	if err != nil {
+		return err
+	}
+	valVerifyResults, _, err := verifyModel(m.(Model))
+	if err != nil {
+		return err
+	}
+	j, _ := json.Marshal(valVerifyResults)
+	fmt.Fprint(os.Stdout, string(j))
+	return nil
 }

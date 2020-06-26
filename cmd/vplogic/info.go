@@ -55,11 +55,6 @@ func InfoMessageRegular(m string, t string, analysisCount int) {
 		fmt.Fprintf(os.Stdout,
 			"  Warning • %s %s\n", m, infoString,
 		)
-	default:
-		errorCritical(fmt.Sprintf(
-			"invalid log message type (%s)",
-			t,
-		))
 	}
 }
 
@@ -101,11 +96,6 @@ func InfoMessageColor(m string, t string, analysisCount int) {
 			"%s%s%s %s %s\n",
 			"  ", aurora.Red("Warning").Bold(), " •", m, infoString,
 		)
-	default:
-		errorCritical(fmt.Sprintf(
-			"invalid log message type (%s)",
-			t,
-		))
 	}
 }
 
@@ -174,9 +164,9 @@ func infoLiteralNumber(n int) string {
 		return "fourth"
 	case 4:
 		return "fifth"
+	default:
+		return fmt.Sprintf("%dth", n)
 	}
-	errorCritical("invalid infoLiteralNumber request")
-	return ""
 }
 
 func infoOutputText(revealed Value) string {
