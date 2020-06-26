@@ -99,7 +99,7 @@ func JsonPrettyDiagram(inputString string) error {
 	if err != nil {
 		return err
 	}
-	pretty, err := prettyDiagram(m.(Model))
+	pretty, err := PrettyDiagram(m.(Model))
 	if err != nil {
 		return err
 	}

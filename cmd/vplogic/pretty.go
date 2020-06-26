@@ -261,7 +261,7 @@ func PrettyModel(m Model) (string, error) {
 	return output, nil
 }
 
-func prettyDiagram(m Model) (string, error) {
+func PrettyDiagram(m Model) (string, error) {
 	_, _, err := sanity(m)
 	if err != nil {
 		return "", err
