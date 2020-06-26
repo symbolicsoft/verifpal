@@ -1,1 +1,1 @@
-Verifpal 0.14.3 renders Verifpal usable as a Go library within other go applications, by exposing a vplogic package.
+Verifpal 0.14.4 is an internal release meant to prepare Verifpal for use with VerifHub, an upcoming service. There is no benefit for users to update to Verifpal 0.14.4. Users should wait for 0.14.5, which will provide new functionality.
