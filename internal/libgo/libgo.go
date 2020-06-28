@@ -7,6 +7,7 @@
  * PARAMETERS                                                       *
  * ---------------------------------------------------------------- */
 
+// nolint:deadcode,unused
 package main
 
 import (
@@ -15,10 +16,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"strings"
 
@@ -37,7 +36,7 @@ import (
  * CONSTANTS                                                        *
  * ---------------------------------------------------------------- */
 
-var emptyKey = []byte{
+var emptyKey = []byte{ //nolint:varcheck
 	0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00,
@@ -48,37 +47,26 @@ var emptyKey = []byte{
 	0x00, 0x00, 0x00, 0x00,
 }
 
-var minNonce = uint32(0)
+var minNonce = uint32(0) //nolint:varcheck
 
 /* ---------------------------------------------------------------- *
  * UTILITY FUNCTIONS                                                *
  * ---------------------------------------------------------------- */
 
-func errorCritical(errText string) {
-	err := errors.New(errText)
-	log.Fatal(fmt.Errorf("Error: %v.\n", err))
-}
-
 /* ---------------------------------------------------------------- *
  * ELLIPTIC CURVE CRYPTOGRAPHY                                      *
  * ---------------------------------------------------------------- */
 
-func x25519DhFromEd25519PublicKey(private_key []byte, public_key []byte) []byte {
-	var priv32 [32]byte
-	var pub32 [32]byte
-	var ss [32]byte
-	copy(priv32[:], private_key)
-	copy(pub32[:], ed25519PublicKeyToCurve25519(public_key))
-	curve25519.ScalarMult(&ss, &priv32, &pub32)
-	return ss[:]
+func x25519DhFromEd25519PublicKey(private_key []byte, public_key []byte) ([]byte, error) {
+	return curve25519.X25519(private_key, public_key)
 }
 
-func ed25519Gen() ([]byte, []byte) {
+func ed25519Gen() ([]byte, []byte, error) {
 	public_key, private_key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		errorCritical(err.Error())
+		return public_key, private_key, err
 	}
-	return private_key, public_key
+	return private_key, public_key, nil
 }
 
 func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
@@ -161,156 +149,193 @@ func HASH(a ...[]byte) []byte {
 	return h[:]
 }
 
-func MAC(k []byte, message []byte) []byte {
+func MAC(k []byte, message []byte) ([]byte, error) {
 	mac := hmac.New(sha256.New, k)
-	mac.Write(message)
-	return mac.Sum(nil)
+	_, err := mac.Write(message)
+	return mac.Sum(nil), err
 }
 
-func HKDF1(ck []byte, ikm []byte) []byte {
-	var k1 []byte
-	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
-	io.ReadFull(output, k1[:])
-	return k1
+func HKDF1(ck []byte, ikm []byte) ([]byte, error) {
+	k1 := make([]byte, 32)
+	output := hkdf.New(sha256.New, ikm, ck, []byte{})
+	_, err := io.ReadFull(output, k1)
+	return k1, err
 }
 
-func HKDF2(ck []byte, ikm []byte) ([]byte, []byte) {
-	var k1 []byte
-	var k2 []byte
-	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
-	io.ReadFull(output, k1[:])
-	io.ReadFull(output, k2[:])
-	return k1, k2
+func HKDF2(ck []byte, ikm []byte) ([]byte, []byte, error) {
+	k1 := make([]byte, 32)
+	k2 := make([]byte, 32)
+	output := hkdf.New(sha256.New, ikm, ck, []byte{})
+	_, err := io.ReadFull(output, k1)
+	if err != nil {
+		return []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k2)
+	return k1, k2, err
 }
 
-func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte) {
-	var k1 []byte
-	var k2 []byte
-	var k3 []byte
-	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
-	io.ReadFull(output, k1[:])
-	io.ReadFull(output, k2[:])
-	io.ReadFull(output, k3[:])
-	return k1, k2, k3
+func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte, error) {
+	k1 := make([]byte, 32)
+	k2 := make([]byte, 32)
+	k3 := make([]byte, 32)
+	output := hkdf.New(sha256.New, ikm, ck, []byte{})
+	_, err := io.ReadFull(output, k1)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k2)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k3)
+	return k1, k2, k3, err
 }
 
-func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte) {
-	var k1 []byte
-	var k2 []byte
-	var k3 []byte
-	var k4 []byte
-	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
-	io.ReadFull(output, k1[:])
-	io.ReadFull(output, k2[:])
-	io.ReadFull(output, k3[:])
-	io.ReadFull(output, k4[:])
-	return k1, k2, k3, k4
+func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, error) {
+	k1 := make([]byte, 32)
+	k2 := make([]byte, 32)
+	k3 := make([]byte, 32)
+	k4 := make([]byte, 32)
+	output := hkdf.New(sha256.New, ikm, ck, []byte{})
+	_, err := io.ReadFull(output, k1)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k2)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k3)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k4)
+	return k1, k2, k3, k4, err
 }
 
-func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte) {
-	var k1 []byte
-	var k2 []byte
-	var k3 []byte
-	var k4 []byte
-	var k5 []byte
-	output := hkdf.New(sha256.New, ikm[:], ck[:], []byte{})
-	io.ReadFull(output, k1[:])
-	io.ReadFull(output, k2[:])
-	io.ReadFull(output, k3[:])
-	io.ReadFull(output, k4[:])
-	io.ReadFull(output, k5[:])
-	return k1, k2, k3, k4, k5
+func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte, error) {
+	k1 := make([]byte, 32)
+	k2 := make([]byte, 32)
+	k3 := make([]byte, 32)
+	k4 := make([]byte, 32)
+	k5 := make([]byte, 32)
+	output := hkdf.New(sha256.New, ikm, ck, []byte{})
+	_, err := io.ReadFull(output, k1)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k2)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k3)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k4)
+	if err != nil {
+		return []byte{}, []byte{}, []byte{}, []byte{}, []byte{}, err
+	}
+	_, err = io.ReadFull(output, k5)
+	return k1, k2, k3, k4, k5, err
 }
 
-func PW_HASH(a ...[]byte) []byte {
+func PW_HASH(a ...[]byte) ([]byte, error) {
 	h := HASH(a...)
 	salt := make([]byte, 16)
 	_, err := rand.Read(salt)
 	if err != nil {
-		errorCritical(err.Error())
+		return []byte{}, err
 	}
 	dk, err := scrypt.Key(h, salt, 32768, 8, 1, 32)
-	if err != nil {
-		errorCritical(err.Error())
-	}
-	return dk
+	return dk, err
 }
 
-func ENC(k []byte, plaintext []byte) []byte {
+func ENC(k []byte, plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(k)
 	if err != nil {
-		errorCritical(err.Error())
+		return []byte{}, err
 	}
 	iv := make([]byte, aes.BlockSize)
 	_, err = rand.Read(iv)
 	if err != nil {
-		errorCritical(err.Error())
+		return []byte{}, err
 	}
 	mode := cipher.NewCBCEncrypter(block, iv)
 	ciphertext := make([]byte, len(plaintext))
 	mode.CryptBlocks(ciphertext, plaintext)
-	return append(iv, ciphertext...)
+	return append(iv, ciphertext...), nil
 }
 
-func DEC(k []byte, ciphertext []byte) []byte {
+func DEC(k []byte, ciphertext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(k)
 	if err != nil {
-		errorCritical(err.Error())
+		return []byte{}, err
 	}
 	if len(ciphertext)%aes.BlockSize != 0 {
-		errorCritical("invalid ciphertext")
+		return []byte{}, fmt.Errorf("invalid ciphertext")
 	}
 	if len(ciphertext) < aes.BlockSize {
-		errorCritical("invalid ciphertext")
+		return []byte{}, fmt.Errorf("invalid ciphertext")
 	}
 	iv := ciphertext[:aes.BlockSize]
 	mode := cipher.NewCBCDecrypter(block, iv)
 	plaintext := make([]byte, len(ciphertext[aes.BlockSize:]))
 	mode.CryptBlocks(plaintext, ciphertext)
-	return plaintext
+	return plaintext, nil
 }
 
-func AEAD_ENC(k []byte, plaintext []byte, ad []byte) []byte {
-	ciphertext := []byte{}
+func AEAD_ENC(k []byte, plaintext []byte, ad []byte) ([]byte, error) {
 	nonce := make([]byte, chacha20poly1305.NonceSizeX)
 	_, err := rand.Read(nonce)
 	if err != nil {
-		errorCritical(err.Error())
+		return []byte{}, err
 	}
-	enc, _ := chacha20poly1305.NewX(k[:])
-	ciphertext = enc.Seal(nil, nonce, plaintext, ad)
-	return append(nonce, ciphertext...)
+	enc, _ := chacha20poly1305.NewX(k)
+	ciphertext := enc.Seal(nil, nonce, plaintext, ad)
+	return append(nonce, ciphertext...), nil
 }
 
-func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) (bool, []byte) {
-	plaintext := []byte{}
-	enc, err := chacha20poly1305.NewX(k[:])
+func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) ([]byte, error) {
+	enc, err := chacha20poly1305.NewX(k)
+	if err != nil {
+		return []byte{}, err
+	}
 	nonce := ciphertext[:chacha20poly1305.NonceSizeX]
 	if len(ciphertext) <= chacha20poly1305.NonceSizeX {
-		return false, plaintext
+		return []byte{}, fmt.Errorf("authenticated decryption failed")
 	}
-	plaintext, err = enc.Open(
+	plaintext, err := enc.Open(
 		nil, nonce,
 		ciphertext[chacha20poly1305.NonceSizeX:], ad,
 	)
-	return (err == nil), plaintext
+	return plaintext, err
 }
 
-func PKE_ENC(pk []byte, plaintext []byte) []byte {
-	esk, epk := ed25519Gen()
-	ss := x25519DhFromEd25519PublicKey(esk, pk)
-	ciphertext := ENC(HASH(ss), plaintext)
-	return append(epk, ciphertext...)
+func PKE_ENC(pk []byte, plaintext []byte) ([]byte, error) {
+	esk, epk, err := ed25519Gen()
+	if err != nil {
+		return []byte{}, err
+	}
+	ss, err := x25519DhFromEd25519PublicKey(esk, pk)
+	if err != nil {
+		return []byte{}, err
+	}
+	ciphertext, err := ENC(HASH(ss), plaintext)
+	return append(epk, ciphertext...), err
 }
 
-func PKE_DEC(k []byte, ciphertext []byte) []byte {
+func PKE_DEC(k []byte, ciphertext []byte) ([]byte, error) {
 	if len(ciphertext) <= 32 {
-		errorCritical("invalid ciphertext")
+		return []byte{}, fmt.Errorf("invalid ciphertext")
 	}
 	epk := ciphertext[:32]
-	ss := x25519DhFromEd25519PublicKey(k, epk)
-	plaintext := DEC(HASH(ss), ciphertext)
-	return plaintext
+	ss, err := x25519DhFromEd25519PublicKey(k, epk)
+	if err != nil {
+		return []byte{}, err
+	}
+	plaintext, err := DEC(HASH(ss), ciphertext)
+	return plaintext, err
 }
 
 func SIGN(k []byte, message []byte) []byte {
