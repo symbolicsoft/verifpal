@@ -1,1 +1,1 @@
-Verifpal 0.14.7 fixes a bug with the Verifpal pretty-printer.
+Verifpal 0.14.8 fixes a bug in Verifpal analysis reported by our friends at Quarkslab.
