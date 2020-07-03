@@ -61,10 +61,7 @@ func verifyAnalysisDecompose(
 	case "primitive":
 		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valAttackerState)
 	}
-	if !r {
-		return o
-	}
-	if attackerStatePutWrite(revealed) {
+	if r && attackerStatePutWrite(revealed) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
 			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
@@ -84,10 +81,7 @@ func verifyAnalysisRecompose(
 	case "primitive":
 		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
 	}
-	if !r {
-		return o
-	}
-	if attackerStatePutWrite(revealed) {
+	if r && attackerStatePutWrite(revealed) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
 			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
@@ -111,10 +105,7 @@ func verifyAnalysisReconstruct(
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
-	if !r {
-		return o
-	}
-	if attackerStatePutWrite(a) {
+	if r && attackerStatePutWrite(a) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			infoOutputText(a), prettyValues(ar),

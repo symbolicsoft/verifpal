@@ -1,0 +1,23 @@
+attacker[passive]
+
+principal Token [
+    knows private m
+    knows public dk
+    e = ENC(dk, m)
+]
+
+principal Platform [
+    knows public dk
+]
+
+principal Token [
+    //tmp0 = DEC(dk, e)
+    //tmp1 = HASH(dk)
+    tmp2 = HASH(e)
+    // So far it's ok then with this one it fails:
+    // tmp3 = HASH(DEC(dk, e))
+]
+
+queries [
+    confidentiality? e
+]

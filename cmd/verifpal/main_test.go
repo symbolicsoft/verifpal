@@ -185,6 +185,10 @@ var verifpalTests = []VerifpalTest{
 		Model:       "fullresolution.vp",
 		ResultsCode: "c1c1c1c1c0",
 	},
+	{
+		Model:       "ql.vp",
+		ResultsCode: "c0",
+	},
 }
 
 func TestMain(t *testing.T) {

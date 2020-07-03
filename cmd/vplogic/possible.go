@@ -4,10 +4,6 @@
 
 package vplogic
 
-import (
-	"fmt"
-)
-
 func possibleToDecomposePrimitive(
 	p Primitive, valAttackerState AttackerState,
 ) (bool, Value, []Value) {
@@ -49,12 +45,6 @@ func possibleToDecomposePrimitive(
 	}
 	if len(has) >= len(prim.Decompose.Given) {
 		revealed := p.Arguments[prim.Decompose.Reveal]
-		if attackerStatePutWrite(revealed) {
-			InfoMessage(fmt.Sprintf(
-				"%s obtained by decomposing %s with %s.",
-				infoOutputText(revealed), prettyPrimitive(p), prettyValues(has),
-			), "deduction", true)
-		}
 		return true, revealed, has
 	}
 	return false, Value{}, has
@@ -126,16 +116,6 @@ func possibleToReconstructPrimitive(
 	}
 	if len(has) < len(p.Arguments) {
 		return false, []Value{}
-	}
-	revealed := Value{
-		Kind:      "primitive",
-		Primitive: p,
-	}
-	if attackerStatePutWrite(revealed) {
-		InfoMessage(fmt.Sprintf(
-			"%s obtained by reconstructing with %s.",
-			infoOutputText(revealed), prettyValues(has),
-		), "deduction", true)
 	}
 	return true, has
 }
