@@ -345,6 +345,15 @@ func SHAMIR_JOIN(a []byte, b []byte, c []byte) []byte {
 	return []byte{}
 }
 
+func GENERATES() ([]byte, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return []byte{}, err
+	}
+	return b, nil
+}
+
 /* ---------------------------------------------------------------- *
  * STATE MANAGEMENT                                                 *
  * ---------------------------------------------------------------- */
@@ -352,5 +361,3 @@ func SHAMIR_JOIN(a []byte, b []byte, c []byte) []byte {
 /* ---------------------------------------------------------------- *
  * PROCESSES                                                        *
  * ---------------------------------------------------------------- */
-
-func main() {}

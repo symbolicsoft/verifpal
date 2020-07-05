@@ -1,5 +1,5 @@
 /* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
-* SPDX-License-Identifier: GPL-3.0-only */
+ * SPDX-License-Identifier: GPL-3.0-only */
 // 00000000000000000000000000000000
 
 package vplogic
@@ -354,6 +354,15 @@ var libgo = strings.Join([]string{
 	"\treturn []byte{}",
 	"}",
 	"",
+	"func GENERATES() ([]byte, error) {",
+	"\tb := make([]byte, 32)",
+	"\t_, err := rand.Read(b)",
+	"\tif err != nil {",
+	"\t\treturn []byte{}, err",
+	"\t}",
+	"\treturn b, nil",
+	"}",
+	"",
 	"/* ---------------------------------------------------------------- *",
 	" * STATE MANAGEMENT                                                 *",
 	" * ---------------------------------------------------------------- */",
@@ -361,7 +370,5 @@ var libgo = strings.Join([]string{
 	"/* ---------------------------------------------------------------- *",
 	" * PROCESSES                                                        *",
 	" * ---------------------------------------------------------------- */",
-	"",
-	"func main() {}",
 	""},
 	"\n")
