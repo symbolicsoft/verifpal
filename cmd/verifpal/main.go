@@ -2,10 +2,12 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
-//go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
 //go:generate go run ../../internal/libcoq/libcoqgen.go
+//go:generate go run ../../internal/libgo/libgogen.go
+//go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
 //go:generate gofmt -s -w ../../cmd/vplogic/libcoq.go
+//go:generate gofmt -s -w ../../cmd/vplogic/libgo.go
+//go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
 //go:generate goversioninfo -64=true -icon=../../assets/icon.ico ../../assets/versioninfo.json
 
 package main
