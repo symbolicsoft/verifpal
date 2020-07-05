@@ -3,8 +3,6 @@
 
 attacker[active]
 
-principal Bob[]
-
 principal Alice[
 	knows public c0
 	generates a
