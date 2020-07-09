@@ -595,8 +595,8 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 					r.Equation.Values, aaa.Equation.Values[1:]...,
 				)
 			}
-			if valueEquivalentValueInValues(r, v) < 0 {
-				v = append(v, r)
+			if valueEquivalentValueInValues(aa[aai], v) < 0 {
+				v = append(v, aa[aai])
 			}
 		}
 	}
@@ -742,7 +742,7 @@ func valueConstantIsUsedByPrincipalInKnowledgeMap(
 			continue
 		}
 		switch a.Kind {
-		case "primitive":
+		case "primitive", "equation":
 			_, v := valueResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
 			if valueEquivalentValueInValues(valKnowledgeMap.Assigned[i], v) >= 0 {
 				return true
