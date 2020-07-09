@@ -1,1 +1,2 @@
-Verifpal 0.14.9 fixes a bug in Verifpal analysis detected by Sasha Lapiha.
+Verifpal 0.15.0 fixes even more bugs in Verifpal analysis detected by Sasha Lapiha.
+
