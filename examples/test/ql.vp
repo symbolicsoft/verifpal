@@ -1,21 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
 attacker[passive]
 
-principal Token [
+principal Token[
     knows private m
     knows public dk
     e = ENC(dk, m)
 ]
 
-principal Platform [
+principal Platform[
     knows public dk
 ]
 
 principal Token [
-    //tmp0 = DEC(dk, e)
-    //tmp1 = HASH(dk)
+    tmp0 = DEC(dk, e)
+    tmp1 = HASH(dk)
     tmp2 = HASH(e)
-    // So far it's ok then with this one it fails:
-    // tmp3 = HASH(DEC(dk, e))
+    tmp3 = HASH(DEC(dk, e))
 ]
 
 queries [

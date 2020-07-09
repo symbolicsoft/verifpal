@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+    knows private Alice_pass
+    knows public Alice_id
+    Alice_priv = PW_HASH(Alice_pass)
+    Alice_pub = G^Alice_priv
+]
+
+principal Bob[
+    knows private Bob_pass
+    knows public Bob_id
+    Bob_priv = PW_HASH(Bob_pass)
+    Bob_pub = G^Bob_priv
+]
+
+principal Server[
+    knows private server_secret
+    server_priv = HKDF(nil, HASH(server_secret, Alice_id), nil)
+    server_pub = G^server_priv
+]
+
+Alice -> Server: Alice_pub
+
+principal Server[
+    knows private escoreA
+    ss_serverA = Alice_pub^server_priv
+    sym_key_serverA = HKDF(Alice_id, ss_serverA, nil)
+    encrypted_escoreA = AEAD_ENC(sym_key_serverA, escoreA, nil)
+]
+
+Server -> Alice: encrypted_escoreA, server_pub
+
+principal Alice[
+    ss_Alice = server_pub^Alice_priv
+    sym_key_Alice = HKDF(Alice_id, ss_Alice, nil)
+    decrypted_escoreA = AEAD_DEC(sym_key_Alice, encrypted_escoreA, nil)?
+]
+
+Bob -> Server: Bob_pub
+
+principal Server[
+    knows private escoreB
+    ss_serverB = Bob_pub^server_priv
+    sym_key_serverB = HKDF(Bob_id, ss_serverB, nil)
+    encrypted_escoreB = AEAD_ENC(sym_key_serverB, escoreB, nil)
+]
+
+Server -> Bob: encrypted_escoreB, server_pub
+
+principal Bob[
+    ss_Bob = server_pub^Bob_priv
+    sym_key_Bob = HKDF(Bob_id, ss_Bob, nil)
+    decrypted_escoreB = AEAD_DEC(sym_key_Bob, encrypted_escoreB, nil)?
+]
+
+queries[
+    confidentiality? escoreA
+    confidentiality? escoreB
+    authentication? Server -> Alice: encrypted_escoreA
+    authentication? Server -> Bob: encrypted_escoreB
+]
+
