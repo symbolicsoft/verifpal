@@ -1,1 +1,1 @@
-Verifpal 0.14.8 fixes a bug in Verifpal analysis reported by our friends at Quarkslab.
+Verifpal 0.14.9 fixes a bug in Verifpal analysis detected by Sasha Lapiha.
