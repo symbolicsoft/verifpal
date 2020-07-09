@@ -583,13 +583,16 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 		case "constant":
 			r.Equation.Values = append(r.Equation.Values, aa[aai])
 		case "primitive":
-			r.Equation.Values = append(r.Equation.Values, aa[aai])
+			aaa, _ := valueResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
+			r.Equation.Values = append(r.Equation.Values, aaa)
 		case "equation":
+			aaa, _ := valueResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
+			r.Equation.Values = append(r.Equation.Values, aaa)
 			if aai == 0 {
-				r.Equation.Values = aa[aai].Equation.Values
+				r.Equation.Values = aaa.Equation.Values
 			} else {
 				r.Equation.Values = append(
-					r.Equation.Values, aa[aai].Equation.Values[1:]...,
+					r.Equation.Values, aaa.Equation.Values[1:]...,
 				)
 			}
 			if valueEquivalentValueInValues(r, v) < 0 {
@@ -716,10 +719,14 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 			)
 			r.Equation.Values = append(r.Equation.Values, aaa)
 		case "equation":
+			aaa := valueResolveEquationInternalValuesFromPrincipalState(
+				aa[aai], rootValue, rootIndex,
+				valPrincipalState, valAttackerState, forceBeforeMutate,
+			)
 			if aai == 0 {
-				r.Equation.Values = aa[aai].Equation.Values
+				r.Equation.Values = aaa.Equation.Values
 			} else {
-				r.Equation.Values = append(r.Equation.Values, aa[aai].Equation.Values[1:]...)
+				r.Equation.Values = append(r.Equation.Values, aaa.Equation.Values[1:]...)
 			}
 		}
 	}
@@ -775,6 +782,12 @@ func valueResolveAllPrincipalStateValues(
 		}
 	}
 	for i := range valPrincipalState.Assigned {
+		switch valPrincipalStateClone.Assigned[i].Kind {
+		case "primitive":
+			if valPrincipalStateClone.Assigned[i].Primitive.Name == "SPLIT" {
+				continue
+			}
+		}
 		valPrincipalStateClone.Assigned[i] = valueResolveValueInternalValuesFromPrincipalState(
 			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
 			valueShouldResolveToBeforeMutate(i, valPrincipalState),
