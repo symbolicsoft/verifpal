@@ -45,7 +45,7 @@ release:
     name: verifpal
 
 brews:
-  - gitlab:
+  - tap:
       owner: verifpal
       name: verifpal
     url_template: "https://source.symbolic.software/verifpal/verifpal/uploads/{{ .ArtifactUploadHash }}/{{ .ArtifactName }}"
