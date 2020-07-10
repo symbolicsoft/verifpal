@@ -44,6 +44,12 @@ func mutationMapInit(
 func mutationMapSkipValue(
 	v Value, i int, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) bool {
+	switch v.Kind {
+	case "primitive":
+		return true
+	case "equation":
+		return true
+	}
 	switch {
 	case i < 0:
 		return true
