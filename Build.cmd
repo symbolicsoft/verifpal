@@ -9,15 +9,6 @@
 @go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 @echo        OK
 
-@echo|set /p="[Verifpal] Generating parser..."
-@pigeon -o cmd\verifpal\libpeg.go cmd\libpeg\libpeg.peg
-@gofmt -s -w cmd\verifpal\libpeg.go
-@cd cmd\libcoq
-@go run libcoqgen.go
-@cd ..\..
-@gofmt -s -w cmd\verifpal\libcoq.go
-@echo              OK
-
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
 @setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
