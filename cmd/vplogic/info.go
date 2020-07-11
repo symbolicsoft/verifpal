@@ -138,7 +138,7 @@ func infoVerifyResultSummary(
 func infoAnalysis(stage int) {
 	a := ""
 	analysisCount := verifyAnalysisCountGet()
-	if analysisCount%10 != 0 {
+	if analysisCount%500 != 0 {
 		return
 	}
 	if colorOutputSupport() {
