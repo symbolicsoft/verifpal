@@ -1,1 +1,1 @@
-Verifpal 0.15.1 fixes an infinite recursion bug in Verifpal analysis.
+Verifpal 0.15.2 is the result of a large amount of testing dedicated to allowing the Go runtime to manage stack allocations optimally for very large Verifpal models.
