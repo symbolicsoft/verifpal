@@ -32,7 +32,7 @@ principal Server[
     encrypted_escoreA = AEAD_ENC(sym_key_serverA, escoreA, nil)
 ]
 
-Server -> Alice: encrypted_escoreA, server_pub
+Server -> Alice: [encrypted_escoreA], server_pub
 
 principal Alice[
     ss_Alice = server_pub^Alice_priv
@@ -49,7 +49,7 @@ principal Server[
     encrypted_escoreB = AEAD_ENC(sym_key_serverB, escoreB, nil)
 ]
 
-Server -> Bob: encrypted_escoreB, server_pub
+Server -> Bob: [encrypted_escoreB], server_pub
 
 principal Bob[
     ss_Bob = server_pub^Bob_priv
@@ -60,7 +60,5 @@ principal Bob[
 queries[
     confidentiality? escoreA
     confidentiality? escoreB
-    authentication? Server -> Alice: encrypted_escoreA
-    authentication? Server -> Bob: encrypted_escoreB
 ]
 

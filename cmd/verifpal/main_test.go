@@ -191,7 +191,7 @@ var verifpalTests = []VerifpalTest{
 	},
 	{
 		Model:       "escore_old.vp",
-		ResultsCode: "c1c1a0a0",
+		ResultsCode: "c1c1",
 	},
 }
 
