@@ -483,7 +483,6 @@ func valueShouldResolveToBeforeMutate(i int, valPrincipalState PrincipalState) b
 	if !valPrincipalState.Mutated[i] {
 		return true
 	}
-
 	return false
 }
 
