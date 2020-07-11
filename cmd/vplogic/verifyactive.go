@@ -39,7 +39,7 @@ func verifyActiveStages(
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
-		func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
+		go func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			verifyActiveScan(
@@ -91,7 +91,7 @@ func verifyActiveScan(
 	}
 	if goodLock && !valMutationMap.OutOfMutations {
 		cg.Add(1)
-		verifyActiveScan(
+		go verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
 			stage, cg,
 		)
