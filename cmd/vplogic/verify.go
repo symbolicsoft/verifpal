@@ -7,6 +7,7 @@ package vplogic
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -14,6 +15,7 @@ import (
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
 func Verify(filePath string) ([]VerifyResult, string, error) {
+	debug.SetMaxStack(8589934592)
 	m, err := libpegParseModel(filePath, true)
 	if err != nil {
 		return []VerifyResult{}, "", err
