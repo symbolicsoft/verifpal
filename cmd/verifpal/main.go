@@ -25,10 +25,9 @@ import (
 var version = "0.15.1"
 
 var rootCmd = &cobra.Command{
-	Use:                   "verifpal",
-	Short:                 fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
-	Long:                  fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
-	DisableFlagsInUseLine: true,
+	Use:   "verifpal",
+	Short: fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
+	Long:  fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
 }
 
 var cmdVerify = &cobra.Command{
