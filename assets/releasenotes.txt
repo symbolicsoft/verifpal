@@ -1,2 +1,1 @@
-Verifpal 0.15.0 fixes even more bugs in Verifpal analysis detected by Sasha Lapiha.
-
+Verifpal 0.15.1 fixes an infinite recursion bug in Verifpal analysis.

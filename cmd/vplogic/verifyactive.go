@@ -39,7 +39,7 @@ func verifyActiveStages(
 	var principalsGroup sync.WaitGroup
 	for _, valPrincipalState := range valPrincipalStates {
 		principalsGroup.Add(1)
-		go func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
+		func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
 			var combinationsGroup sync.WaitGroup
 			combinationsGroup.Add(1)
 			verifyActiveScan(
