@@ -38,6 +38,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 	}
 	for i, c := range valPrincipalState.Constants {
 		cc := Value{Kind: "constant", Constant: c}
+		a := valPrincipalState.Assigned[i]
 		if len(valPrincipalState.Wire[i]) == 0 && !valPrincipalState.Constants[i].Leaked {
 			continue
 		}
@@ -53,6 +54,10 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 		}
 		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
+		}
+		aa := valueResolveValueInternalValuesFromPrincipalState(a, a, i, valPrincipalState, attackerStateShared, true)
+		if valueEquivalentValueInValues(aa, attackerStateShared.Known) < 0 {
+			attackerStateShared.Known = append(attackerStateShared.Known, aa)
 		}
 	}
 	attackerStateMutex.Unlock()

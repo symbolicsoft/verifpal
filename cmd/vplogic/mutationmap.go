@@ -160,10 +160,6 @@ func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerSta
 	}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
-		case "constant":
-			if valueEquivalentValueInValues(v, mutations) < 0 {
-				mutations = append(mutations, v)
-			}
 		case "equation":
 			switch len(v.Equation.Values) {
 			case len(a.Equation.Values):
