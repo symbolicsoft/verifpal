@@ -231,19 +231,26 @@ func injectPrimitive(
 }
 
 func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
+	allInjectants := []Value{}
+	uniqueInjectants := []Value{}
 	switch len(p.Arguments) {
 	case 1:
-		return injectLoop1(p, kinjectants)
+		allInjectants = injectLoop1(p, kinjectants)
 	case 2:
-		return injectLoop2(p, kinjectants)
+		allInjectants = injectLoop2(p, kinjectants)
 	case 3:
-		return injectLoop3(p, kinjectants)
+		allInjectants = injectLoop3(p, kinjectants)
 	case 4:
-		return injectLoop4(p, kinjectants)
+		allInjectants = injectLoop4(p, kinjectants)
 	case 5:
-		return injectLoop5(p, kinjectants)
+		allInjectants = injectLoop5(p, kinjectants)
 	}
-	return []Value{}
+	for _, a := range allInjectants {
+		if valueEquivalentValueInValues(a, uniqueInjectants) < 0 {
+			uniqueInjectants = append(uniqueInjectants, a)
+		}
+	}
+	return uniqueInjectants
 }
 
 func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
@@ -263,9 +270,7 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 				Check:  p.Check,
 			},
 		}
-		if valueEquivalentValueInValues(aa, injectants) < 0 {
-			injectants = append(injectants, aa)
-		}
+		injectants = append(injectants, aa)
 	}
 	return injectants
 }
@@ -289,9 +294,7 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 					Check:  p.Check,
 				},
 			}
-			if valueEquivalentValueInValues(aa, injectants) < 0 {
-				injectants = append(injectants, aa)
-			}
+			injectants = append(injectants, aa)
 		}
 	}
 	return injectants
@@ -318,9 +321,7 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 						Check:  p.Check,
 					},
 				}
-				if valueEquivalentValueInValues(aa, injectants) < 0 {
-					injectants = append(injectants, aa)
-				}
+				injectants = append(injectants, aa)
 			}
 		}
 	}
@@ -350,9 +351,7 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 							Check:  p.Check,
 						},
 					}
-					if valueEquivalentValueInValues(aa, injectants) < 0 {
-						injectants = append(injectants, aa)
-					}
+					injectants = append(injectants, aa)
 				}
 			}
 		}
@@ -385,9 +384,7 @@ func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 								Check:  p.Check,
 							},
 						}
-						if valueEquivalentValueInValues(aa, injectants) < 0 {
-							injectants = append(injectants, aa)
-						}
+						injectants = append(injectants, aa)
 					}
 				}
 			}
