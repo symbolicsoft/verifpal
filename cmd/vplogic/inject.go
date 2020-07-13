@@ -140,7 +140,14 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 			}
 			skeleton.Arguments[i] = aa
 		case "equation":
-			skeleton.Arguments[i] = valueN
+			switch len(a.Equation.Values) {
+			case 1:
+				skeleton.Arguments[i] = valueG
+			case 2:
+				skeleton.Arguments[i] = valueGN
+			case 3:
+				skeleton.Arguments[i] = valueGNN
+			}
 		}
 	}
 	return skeleton
@@ -175,8 +182,8 @@ SkeletonSearch:
 		}
 		if attackerStatePutWrite(known) {
 			InfoMessage(fmt.Sprintf(
-				"Constructed skeleton %s.",
-				prettyPrimitive(skeleton),
+				"Constructed skeleton %s based on %s.",
+				prettyPrimitive(skeleton), prettyPrimitive(p),
 			), "analysis", true)
 		}
 	}

@@ -39,6 +39,13 @@ var valueGN = Value{
 	},
 }
 
+var valueGNN = Value{
+	Kind: "equation",
+	Equation: Equation{
+		Values: []Value{valueG, valueN, valueN},
+	},
+}
+
 func valueIsGOrNil(c Constant) bool {
 	switch strings.ToLower(c.Name) {
 	case "g", "nil":
