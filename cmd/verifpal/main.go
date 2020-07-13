@@ -22,7 +22,7 @@ import (
 	"verifpal.com/cmd/vplogic"
 )
 
-var version = "0.15.2"
+var version = "0.15.3"
 
 var rootCmd = &cobra.Command{
 	Use:   "verifpal",

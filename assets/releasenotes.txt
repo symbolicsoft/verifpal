@@ -1,1 +1,1 @@
-Verifpal 0.15.2 is the result of a large amount of testing dedicated to allowing the Go runtime to manage stack allocations optimally for very large Verifpal models.
+Verifpal 0.15.3 contains some minor performance improvements.
