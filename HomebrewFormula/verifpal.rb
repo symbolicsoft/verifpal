@@ -2,16 +2,16 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.15.3"
+  version "0.15.4"
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/62c6383d306199c21f0af3eb53b778d5/verifpal_0.15.3_macos_amd64.zip"
-    sha256 "be3a3532534fe26bcaf3b010acc4d04f8bd1ab1d87293d4daa3fff355fed3c0d"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/e5eb6e332650589fb74f7bc4d6a09357/verifpal_0.15.4_macos_amd64.zip"
+    sha256 "c1272880ffb6cbdab63cb288ab845b89f7bcb851457d0a91262745017c8a96bd"
   elsif OS.linux?
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/uploads/d31110fd0f809ebd719940288d3f4bfb/verifpal_0.15.3_linux_amd64.zip"
-      sha256 "3a2fdf6ce90ec7ef5d59a2c5ac1597154c11a1dfbd3c931d26e81042186a513a"
+      url "https://source.symbolic.software/verifpal/verifpal/uploads/128e4cc0ece4e78dae1cb3f56425f8e6/verifpal_0.15.4_linux_amd64.zip"
+      sha256 "c65bedfc8c96be0a2be3d10007fe68391c20dd4d1b3f54c1e8a6da61b47f3653"
     end
   end
 
