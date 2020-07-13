@@ -1,1 +1,1 @@
-Verifpal 0.15.4 contains some minor performance improvements.
+Verifpal 0.15.5 brings further improvements and optimizations to analysis logic.
