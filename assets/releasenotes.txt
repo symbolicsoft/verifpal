@@ -1,1 +1,1 @@
-Verifpal 0.15.3 contains some minor performance improvements.
+Verifpal 0.15.4 contains some minor performance improvements.
