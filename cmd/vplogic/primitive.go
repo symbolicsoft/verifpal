@@ -17,7 +17,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: "primitive", Primitive: p}}
 			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
-				return true, []Value{p.Arguments[0]}
+				return true, v
 			}
 			return false, v
 		},
