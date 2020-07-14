@@ -22,7 +22,7 @@ Bob -> Alice: gblongterm, gbssig, gbs, gbo
 principal Alice[
 	generates ae1
 	gae1 = G^ae1
-	amaster = HASH(nil, gbs^alongterm, gblongterm^ae1, gbs^ae1, gbo^ae1)
+	amaster = HASH(gbs^alongterm, gblongterm^ae1, gbs^ae1, gbo^ae1)
 	arkba1, ackba1 = HKDF(amaster, nil, nil)
 ]
 
@@ -39,7 +39,7 @@ principal Alice[
 Alice -> Bob: galongterm, gae1, gae2, e1
 
 principal Bob[
-	bmaster = HASH(nil, galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
+	bmaster = HASH(galongterm^bs, gae1^blongterm, gae1^bs, gae1^bo)
 	brkba1, bckba1 = HKDF(bmaster, nil, nil)
 ]
 

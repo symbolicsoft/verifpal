@@ -212,7 +212,6 @@ func injectPrimitive(
 				i := valueGetPrincipalStateIndexFromConstant(
 					valPrincipalState, k.Constant,
 				)
-
 				k = valPrincipalState.Assigned[i]
 			}
 			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
