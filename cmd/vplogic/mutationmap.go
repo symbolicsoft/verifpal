@@ -154,10 +154,17 @@ func mutationMapReplacePrimitive(
 }
 
 func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
-	mutations := []Value{}
 	if stage <= 3 {
-		return []Value{valueGN}
+		switch len(a.Equation.Values) {
+		case 1:
+			return []Value{valueG}
+		case 2:
+			return []Value{valueGN}
+		case 3:
+			return []Value{valueGNN}
+		}
 	}
+	mutations := []Value{}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "equation":

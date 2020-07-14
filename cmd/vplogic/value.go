@@ -177,30 +177,23 @@ func valueEquivalentPrimitives(
 }
 
 func valueEquivalentEquations(e1 Equation, e2 Equation) bool {
-	e1Base := e1.Values[0].Equation.Values
-	e2Base := e2.Values[0].Equation.Values
-	e1Kind := e1.Values[0].Kind
-	e2Kind := e2.Values[0].Kind
-	switch {
-	case len(e1.Values) != len(e2.Values), len(e1.Values) == 0:
+	if (len(e1.Values) == 0) || (len(e1.Values) != len(e2.Values)) {
 		return false
-	case e1Kind == "equation" && e2Kind == "equation":
-		return valueEquivalentEquationsRule(
-			e1Base[1], e2Base[1], e1.Values[1], e2.Values[1],
-		) || valueEquivalentEquationsRule(
-			e1Base[1], e2.Values[1], e1.Values[1], e2Base[1],
-		)
-	case len(e1.Values) > 2:
+	}
+	switch len(e1.Values) {
+	case 1:
+		return valueEquivalentValues(e1.Values[0], e2.Values[0], true)
+	case 2:
+		return valueEquivalentValues(e1.Values[0], e2.Values[0], true) &&
+			valueEquivalentValues(e1.Values[1], e2.Values[1], true)
+	case 3:
 		return valueEquivalentEquationsRule(
 			e1.Values[1], e2.Values[1], e1.Values[2], e2.Values[2],
 		) || valueEquivalentEquationsRule(
 			e1.Values[1], e2.Values[2], e1.Values[2], e2.Values[1],
 		)
-	default:
-		return valueEquivalentEquationsRule(
-			e1.Values[0], e2.Values[1], e1.Values[1], e2.Values[0],
-		)
 	}
+	return false
 }
 
 func valueEquivalentEquationsRule(base1 Value, base2 Value, exp1 Value, exp2 Value) bool {
