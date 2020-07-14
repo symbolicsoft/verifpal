@@ -105,6 +105,28 @@ var verifpalTests = []VerifpalTest{
 		Model:       "signal_small_leaks.vp",
 		ResultsCode: "c1a1",
 	},
+	/*
+		{
+			Model:       "signal_small.vp",
+			ResultsCode: "c1a1",
+		},
+		{
+			Model:       "signal_small_leaks_alice.vp",
+			ResultsCode: "c1a1",
+		},
+		{
+			Model:       "signal_small_leaks_bob.vp",
+			ResultsCode: "c1a1",
+		},
+		{
+			Model:       "signal_small_unguarded_alice.vp",
+			ResultsCode: "c1a1",
+		},
+		{
+			Model:       "signal_small_unguarded_bob.vp",
+			ResultsCode: "c1a1",
+		},
+	*/
 	{
 		Model:       "signal_small_nophase.vp",
 		ResultsCode: "c1a1",
