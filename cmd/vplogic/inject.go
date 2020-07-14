@@ -38,23 +38,11 @@ func inject(
 func injectValueRules(
 	k Value, arg int, p Primitive, rootPrimitive Primitive, stage int,
 ) bool {
-	if valueEquivalentValues(k, Value{
-		Kind:      "primitive",
-		Primitive: p,
-	}, true) {
-		return false
-	}
-	if valueEquivalentValues(k, Value{
-		Kind:      "primitive",
-		Primitive: rootPrimitive,
-	}, true) {
-		return false
-	}
 	switch k.Kind {
 	case "constant":
 		return injectConstantRules(k.Constant, arg, p)
 	case "primitive":
-		return injectPrimitiveRules(k.Primitive, arg, p, stage)
+		return injectPrimitiveRules(k.Primitive, arg, p, rootPrimitive, stage)
 	case "equation":
 		return injectEquationRules(k.Equation, arg, p)
 	}
@@ -71,8 +59,12 @@ func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	return true
 }
 
-func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
+func injectPrimitiveRules(k Primitive, arg int, p Primitive, rootPrimitive Primitive, stage int) bool {
+	ep, _, _ := valueEquivalentPrimitives(k, p, true)
+	erp, _, _ := valueEquivalentPrimitives(k, rootPrimitive, true)
 	switch {
+	case ep || erp:
+		return false
 	case p.Arguments[arg].Kind != "primitive":
 		return false
 	case injectPrimitiveStageRestricted(k, stage):
@@ -249,6 +241,9 @@ func injectPrimitive(
 }
 
 func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
+	if verifyResultsAllResolved() {
+		return []Value{}
+	}
 	switch len(p.Arguments) {
 	case 1:
 		return injectLoop1(p, kinjectants)
@@ -266,10 +261,10 @@ func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
 
 func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
+	if verifyResultsAllResolved() {
+		return []Value{}
+	}
 	for i := range kinjectants[0] {
-		if verifyResultsAllResolved() {
-			return []Value{}
-		}
 		aa := Value{
 			Kind: "primitive",
 			Primitive: Primitive{
@@ -289,9 +284,6 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
 	for i := range kinjectants[0] {
-		if verifyResultsAllResolved() {
-			return []Value{}
-		}
 		for ii := range kinjectants[1] {
 			aa := Value{
 				Kind: "primitive",
@@ -314,9 +306,6 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
 	for i := range kinjectants[0] {
-		if verifyResultsAllResolved() {
-			return []Value{}
-		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				aa := Value{
@@ -342,9 +331,6 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
 	for i := range kinjectants[0] {
-		if verifyResultsAllResolved() {
-			return []Value{}
-		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
@@ -373,9 +359,6 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
 	for i := range kinjectants[0] {
-		if verifyResultsAllResolved() {
-			return []Value{}
-		}
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
