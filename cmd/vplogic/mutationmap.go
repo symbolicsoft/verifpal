@@ -145,9 +145,11 @@ func mutationMapReplacePrimitive(
 		a.Primitive, a.Primitive, true,
 		valPrincipalState, valAttackerState, stage,
 	)
-	for _, aa := range injectants {
-		if valueEquivalentValueInValues(aa, mutations) < 0 {
-			mutations = append(mutations, aa)
+	uinjectants := []Value{}
+	for _, a := range injectants {
+		if valueEquivalentValueInValues(a, uinjectants) < 0 {
+			uinjectants = append(uinjectants, a)
+			mutations = append(mutations, a)
 		}
 	}
 	return mutations
