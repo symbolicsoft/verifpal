@@ -212,6 +212,7 @@ func injectPrimitive(
 				i := valueGetPrincipalStateIndexFromConstant(
 					valPrincipalState, k.Constant,
 				)
+
 				k = valPrincipalState.Assigned[i]
 			}
 			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
@@ -219,18 +220,29 @@ func injectPrimitive(
 			}
 			switch k.Kind {
 			case "constant":
-				kinjectants[arg] = append(kinjectants[arg], k)
+				if valueEquivalentValueInValues(k, kinjectants[arg]) < 0 {
+					kinjectants[arg] = append(kinjectants[arg], k)
+				}
 			case "primitive":
-				kinjectants[arg] = append(kinjectants[arg], k)
+				if valueEquivalentValueInValues(k, kinjectants[arg]) < 0 {
+					kinjectants[arg] = append(kinjectants[arg], k)
+				}
 				if stage <= 3 {
 					continue
 				}
-				kinjectants[arg] = append(kinjectants[arg], inject(
+				kp := inject(
 					k.Primitive, rootPrimitive, false,
 					valPrincipalState, valAttackerState, stage,
-				)...)
+				)
+				for _, kkp := range kp {
+					if valueEquivalentValueInValues(kkp, kinjectants[arg]) < 0 {
+						kinjectants[arg] = append(kinjectants[arg], kkp)
+					}
+				}
 			case "equation":
-				kinjectants[arg] = append(kinjectants[arg], k)
+				if valueEquivalentValueInValues(k, kinjectants[arg]) < 0 {
+					kinjectants[arg] = append(kinjectants[arg], k)
+				}
 			}
 		}
 	}
@@ -238,26 +250,19 @@ func injectPrimitive(
 }
 
 func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
-	allInjectants := []Value{}
-	uniqueInjectants := []Value{}
 	switch len(p.Arguments) {
 	case 1:
-		allInjectants = injectLoop1(p, kinjectants)
+		return injectLoop1(p, kinjectants)
 	case 2:
-		allInjectants = injectLoop2(p, kinjectants)
+		return injectLoop2(p, kinjectants)
 	case 3:
-		allInjectants = injectLoop3(p, kinjectants)
+		return injectLoop3(p, kinjectants)
 	case 4:
-		allInjectants = injectLoop4(p, kinjectants)
+		return injectLoop4(p, kinjectants)
 	case 5:
-		allInjectants = injectLoop5(p, kinjectants)
+		return injectLoop5(p, kinjectants)
 	}
-	for _, a := range allInjectants {
-		if valueEquivalentValueInValues(a, uniqueInjectants) < 0 {
-			uniqueInjectants = append(uniqueInjectants, a)
-		}
-	}
-	return uniqueInjectants
+	return []Value{}
 }
 
 func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
