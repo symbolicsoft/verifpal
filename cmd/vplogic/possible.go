@@ -36,7 +36,7 @@ func possibleToDecomposePrimitive(
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -111,7 +111,7 @@ func possibleToReconstructPrimitive(
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -124,9 +124,7 @@ func possibleToReconstructPrimitive(
 	return true, has
 }
 
-func possibleToReconstructEquation(
-	e Equation, valPrincipalState PrincipalState, valAttackerState AttackerState,
-) (bool, []Value) {
+func possibleToReconstructEquation(e Equation, valAttackerState AttackerState) (bool, []Value) {
 	if len(e.Values) <= 2 {
 		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
 			return true, []Value{e.Values[1]}

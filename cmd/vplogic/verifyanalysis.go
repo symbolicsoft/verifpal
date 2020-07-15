@@ -105,7 +105,7 @@ func verifyAnalysisReconstruct(
 			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
+		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
 	if r && !isCorePrim && attackerStatePutWrite(a) {
 		InfoMessage(fmt.Sprintf(

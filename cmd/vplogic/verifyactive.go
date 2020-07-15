@@ -109,7 +109,7 @@ func verifyActiveMutatePrincipalState(
 		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 		ac := valMutationMap.Combination[i]
 		ar := valueResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.Assigned[ii], valPrincipalState.Assigned[ii],
+			valPrincipalState.BeforeMutate[ii], valPrincipalState.BeforeMutate[ii],
 			ii, valPrincipalState, valAttackerState, true,
 		)
 		if valueEquivalentValues(ac, ar, true) {
