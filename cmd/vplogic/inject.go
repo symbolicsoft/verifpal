@@ -36,13 +36,13 @@ func inject(
 }
 
 func injectValueRules(
-	k Value, arg int, p Primitive, rootPrimitive Primitive, stage int,
+	k Value, arg int, p Primitive, stage int,
 ) bool {
 	switch k.Kind {
 	case "constant":
 		return injectConstantRules(k.Constant, arg, p)
 	case "primitive":
-		return injectPrimitiveRules(k.Primitive, arg, p, rootPrimitive, stage)
+		return injectPrimitiveRules(k.Primitive, arg, p, stage)
 	case "equation":
 		return injectEquationRules(k.Equation, arg, p)
 	}
@@ -59,12 +59,8 @@ func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	return true
 }
 
-func injectPrimitiveRules(k Primitive, arg int, p Primitive, rootPrimitive Primitive, stage int) bool {
-	ep, _, _ := valueEquivalentPrimitives(k, p, true)
-	erp, _, _ := valueEquivalentPrimitives(k, rootPrimitive, true)
+func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 	switch {
-	case ep || erp:
-		return false
 	case p.Arguments[arg].Kind != "primitive":
 		return false
 	case injectPrimitiveStageRestricted(k, stage):
@@ -81,11 +77,6 @@ func injectEquationRules(e Equation, arg int, p Primitive) bool {
 		return false
 	case len(e.Values) != len(p.Arguments[arg].Equation.Values):
 		return false
-	}
-	for i := range e.Values {
-		if e.Values[i].Kind != p.Arguments[arg].Equation.Values[i].Kind {
-			return false
-		}
 	}
 	return true
 }
@@ -132,14 +123,7 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 			}
 			skeleton.Arguments[i] = aa
 		case "equation":
-			switch len(a.Equation.Values) {
-			case 1:
-				skeleton.Arguments[i] = valueG
-			case 2:
-				skeleton.Arguments[i] = valueGN
-			case 3:
-				skeleton.Arguments[i] = valueGNN
-			}
+			skeleton.Arguments[i] = valueGN
 		}
 	}
 	return skeleton
@@ -207,7 +191,7 @@ func injectPrimitive(
 				)
 				k = valPrincipalState.Assigned[i]
 			}
-			if !injectValueRules(k, arg, p, rootPrimitive, stage) {
+			if !injectValueRules(k, arg, p, stage) {
 				continue
 			}
 			switch k.Kind {

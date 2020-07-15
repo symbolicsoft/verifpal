@@ -211,6 +211,14 @@ var verifpalTests = []VerifpalTest{
 		Model:       "escore_old.vp",
 		ResultsCode: "c1c1",
 	},
+	{
+		Model:       "test1.vp",
+		ResultsCode: "c1c1c1a1a1a1",
+	},
+	{
+		Model:       "test2.vp",
+		ResultsCode: "c0c0c0a0a1a1",
+	},
 }
 
 func TestMain(t *testing.T) {

@@ -19,7 +19,7 @@ func verifyAnalysis(
 	o := 0
 	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.Known {
-		o = o + verifyAnalysisDecompose(a, valAttackerState, 0)
+		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
 		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
 		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
 		o = o + verifyAnalysisConcat(a, 0)
@@ -52,14 +52,14 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a Value, valAttackerState AttackerState, o int,
+	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState, o int,
 ) int {
 	r := false
 	revealed := Value{}
 	ar := []Value{}
 	switch a.Kind {
 	case "primitive":
-		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valAttackerState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 	}
 	if r && attackerStatePutWrite(revealed) {
 		InfoMessage(fmt.Sprintf(
@@ -100,12 +100,12 @@ func verifyAnalysisReconstruct(
 	switch a.Kind {
 	case "primitive":
 		isCorePrim = primitiveIsCorePrim(a.Primitive.Name)
-		r, ar = possibleToReconstructPrimitive(a.Primitive, valAttackerState)
+		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 		for _, aa := range a.Primitive.Arguments {
 			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case "equation":
-		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
+		r, ar = possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
 	}
 	if r && !isCorePrim && attackerStatePutWrite(a) {
 		InfoMessage(fmt.Sprintf(

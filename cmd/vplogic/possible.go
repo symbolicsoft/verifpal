@@ -5,7 +5,7 @@
 package vplogic
 
 func possibleToDecomposePrimitive(
-	p Primitive, valAttackerState AttackerState,
+	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (bool, Value, []Value) {
 	has := []Value{}
 	if primitiveIsCorePrim(p.Name) {
@@ -25,18 +25,18 @@ func possibleToDecomposePrimitive(
 		}
 		switch a.Kind {
 		case "primitive":
-			r, _ := possibleToReconstructPrimitive(a.Primitive, valAttackerState)
+			r, _ := possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -86,9 +86,13 @@ func possibleToRecomposePrimitive(
 }
 
 func possibleToReconstructPrimitive(
-	p Primitive, valAttackerState AttackerState,
+	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (bool, []Value) {
 	has := []Value{}
+	r, _ := possibleToRewrite(p, valPrincipalState)
+	if !r {
+		return false, []Value{}
+	}
 	for _, a := range p.Arguments {
 		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
 			has = append(has, a)
@@ -96,18 +100,18 @@ func possibleToReconstructPrimitive(
 		}
 		switch a.Kind {
 		case "primitive":
-			r, _, _ := possibleToDecomposePrimitive(a.Primitive, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.Primitive, valAttackerState)
+			r, _ = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case "equation":
-			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Equation, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -121,7 +125,7 @@ func possibleToReconstructPrimitive(
 }
 
 func possibleToReconstructEquation(
-	e Equation, valAttackerState AttackerState,
+	e Equation, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (bool, []Value) {
 	if len(e.Values) <= 2 {
 		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
@@ -171,6 +175,9 @@ func possibleToRewrite(
 		return !prim.Check, v
 	}
 	prim, _ := primitiveGet(p.Name)
+	if !prim.Rewrite.HasRule {
+		return true, v
+	}
 	from := p.Arguments[prim.Rewrite.From]
 	switch from.Kind {
 	case "primitive":
