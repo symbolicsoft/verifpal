@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = G^b
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private a
+	knows private aa
+	ga = G^a
+	gaa = G^aa
+	egaa = AEAD_ENC(gb^a, gaa, nil)
+]
+
+Alice -> Bob: [ga], [egaa]
+
+principal Bob[
+	b_gaa = AEAD_DEC(ga^b, egaa, nil)?
+	knows private m
+	em = AEAD_ENC(b_gaa^b, m, nil)
+]
+
+Bob -> Alice: em
+
+principal Alice[
+	x = AEAD_DEC(gb^aa, em, nil)?
+	knows private m2
+	em2 = AEAD_ENC(gb^aa, m2, nil)
+]
+
+Alice -> Bob: em2
+
+principal Bob[
+	_ = AEAD_DEC(b_gaa^b, em2, nil)?
+]
+
+queries[
+	confidentiality? gaa
+	confidentiality? m
+	confidentiality? m2
+	authentication? Alice -> Bob: egaa
+	authentication? Bob -> Alice: em
+	authentication? Alice -> Bob: em2
+]

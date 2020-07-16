@@ -23,7 +23,7 @@ var verifpalTests = []VerifpalTest{
 	},
 	{
 		Model:       "ephemerals_sign.vp",
-		ResultsCode: "c1a0",
+		ResultsCode: "c1a1",
 	},
 	{
 		Model:       "hmac_ok.vp",
@@ -221,7 +221,11 @@ var verifpalTests = []VerifpalTest{
 	},
 	{
 		Model:       "test3.vp",
-		ResultsCode: "c1c1c0a1a1a1",
+		ResultsCode: "c1c1c1a1a1a1",
+	},
+	{
+		Model:       "test4.vp",
+		ResultsCode: "c0c0c0a0a1a1",
 	},
 }
 
