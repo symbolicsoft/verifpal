@@ -1,1 +1,1 @@
-Verifpal 0.15.6 continues the analysis performance improvements bonanza of the past few days. Consider donating to offset the ridiculous Google Compute Engine bill for the 96-CPU machine that was rented to perform the tests that are leading to this series of improvement updates.
+Verifpal 0.17.0 brings improvements to analysis that depends on interleaving sessions.
