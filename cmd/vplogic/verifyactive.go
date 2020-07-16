@@ -136,6 +136,9 @@ FailedRewritesLoop:
 		if !p.Check {
 			continue
 		}
+		if valPrincipalState.Creator[failedRewriteIndices[i]] != valPrincipalState.Name {
+			continue
+		}
 		ii := valueGetKnowledgeMapIndexFromConstant(
 			valKnowledgeMap, valPrincipalState.Constants[failedRewriteIndices[i]],
 		)
