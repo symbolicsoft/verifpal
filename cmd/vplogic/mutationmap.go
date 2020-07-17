@@ -21,6 +21,12 @@ func mutationMapInit(
 		OutOfMutations: false,
 	}
 	for _, v := range valAttackerState.Known {
+		switch v.Kind {
+		case "primitive":
+			continue
+		case "equation":
+			continue
+		}
 		i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, v.Constant)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
@@ -49,12 +55,6 @@ func mutationMapInit(
 func mutationMapSkipValue(
 	v Value, i int, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) bool {
-	switch v.Kind {
-	case "primitive":
-		return true
-	case "equation":
-		return true
-	}
 	switch {
 	case i < 0:
 		return true

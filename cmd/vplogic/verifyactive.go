@@ -84,7 +84,7 @@ func verifyActiveScan(
 		scanGroup.Done()
 		return
 	}
-	verifyActiveScan(
+	go verifyActiveScan(
 		valKnowledgeMap, valPrincipalState, valAttackerState,
 		mutationMapNext(valMutationMap), stage, scanGroup,
 	)
