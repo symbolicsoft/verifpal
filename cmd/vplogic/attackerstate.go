@@ -6,15 +6,12 @@ package vplogic
 
 import (
 	"sync"
-	"sync/atomic"
 )
 
 var attackerStateShared AttackerState
 var attackerStateMutex sync.Mutex
-var attackerStateKnownLock uint32
 
 func attackerStateInit(active bool) {
-	attackerStateKnownLockInit()
 	attackerStateMutex.Lock()
 	attackerStateShared = AttackerState{
 		Active:       active,
@@ -22,18 +19,6 @@ func attackerStateInit(active bool) {
 		Known:        []Value{},
 	}
 	attackerStateMutex.Unlock()
-}
-
-func attackerStateKnownLockInit() {
-	atomic.StoreUint32(&attackerStateKnownLock, uint32(0))
-}
-
-func attackerStateKnownLockSet(i int) {
-	atomic.StoreUint32(&attackerStateKnownLock, uint32(i))
-}
-
-func attackerStateKnownLockGet() int {
-	return int(atomic.LoadUint32(&attackerStateKnownLock))
 }
 
 func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
@@ -92,7 +77,6 @@ func attackerStatePutWrite(known Value) bool {
 		attackerStateMutex.Lock()
 		if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
 			attackerStateShared.Known = append(attackerStateShared.Known, known)
-			attackerStateKnownLockSet(len(attackerStateShared.Known))
 			written = true
 		}
 		attackerStateMutex.Unlock()

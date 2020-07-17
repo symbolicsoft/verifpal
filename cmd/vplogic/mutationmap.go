@@ -4,9 +4,14 @@
 
 package vplogic
 
+import "fmt"
+
 func mutationMapInit(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
 ) MutationMap {
+	InfoMessage(fmt.Sprintf(
+		"Initializing Stage %d mutation map for %s...", stage, valPrincipalState.Name,
+	), "analysis", false)
 	valMutationMap := MutationMap{
 		Initialized:    true,
 		Constants:      []Constant{},

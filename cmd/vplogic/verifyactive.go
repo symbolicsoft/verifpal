@@ -23,10 +23,7 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 		if err != nil {
 			return err
 		}
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 1)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 2)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 3)
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates, 4)
+		verifyActiveStages(valKnowledgeMap, valPrincipalStates)
 		phase = phase + 1
 	}
 	return nil
@@ -34,18 +31,33 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 
 func verifyActiveStages(
 	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
-	stage int,
 ) {
 	var scanGroup sync.WaitGroup
+	stage := 1
 	valAttackerState := attackerStateGetRead()
-	for _, valPrincipalState := range valPrincipalStates {
-		scanGroup.Add(1)
-		go verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, valAttackerState,
-			MutationMap{Initialized: false}, stage, &scanGroup,
-		)
+	for {
+		oldKnown := len(valAttackerState.Known)
+		valAttackerState = attackerStateGetRead()
+		known := len(valAttackerState.Known)
+		for _, valPrincipalState := range valPrincipalStates {
+			scanGroup.Add(1)
+			go func(valPrincipalState PrincipalState, valAttackerState AttackerState, stage int) {
+				valMutationMap := mutationMapInit(
+					valKnowledgeMap, valPrincipalState, valAttackerState, stage,
+				)
+				verifyActiveScan(
+					valKnowledgeMap, valPrincipalState, valAttackerState,
+					valMutationMap, stage, &scanGroup,
+				)
+			}(valPrincipalState, valAttackerState, stage)
+		}
+		scanGroup.Wait()
+		exhaustion := (stage >= 4 && (oldKnown == known))
+		if verifyResultsAllResolved() || exhaustion {
+			break
+		}
+		stage = stage + 1
 	}
-	scanGroup.Wait()
 }
 
 func verifyActiveScan(
@@ -55,22 +67,6 @@ func verifyActiveScan(
 ) {
 	if verifyResultsAllResolved() {
 		scanGroup.Done()
-		return
-	}
-	attackerStateKnownLock := attackerStateKnownLockGet()
-	attackerKnewMore := false
-	if attackerStateKnownLock > len(valAttackerState.Known) {
-		valAttackerState = attackerStateGetRead()
-		attackerKnewMore = true
-	}
-	if !valMutationMap.Initialized || attackerKnewMore {
-		valMutationMap = mutationMapInit(
-			valKnowledgeMap, valPrincipalState, valAttackerState, stage,
-		)
-		verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, valAttackerState, mutationMapNext(valMutationMap),
-			stage, scanGroup,
-		)
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(

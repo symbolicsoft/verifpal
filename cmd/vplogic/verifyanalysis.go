@@ -15,10 +15,6 @@ func verifyAnalysis(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, stage int,
 ) {
-	attackerStateKnownLock := attackerStateKnownLockGet()
-	if attackerStateKnownLock > len(valAttackerState.Known) {
-		valAttackerState = attackerStateGetRead()
-	}
 	o := 0
 	for _, a := range valAttackerState.Known {
 		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState)
@@ -51,6 +47,7 @@ func verifyAnalysis(
 		}
 	}
 	if o > 0 {
+		valAttackerState = attackerStateGetRead()
 		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage)
 	} else {
 		verifyAnalysisCountIncrement()
