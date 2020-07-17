@@ -6,6 +6,7 @@ package vplogic
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -13,7 +14,7 @@ var verifyAnalysisCount uint32
 
 func verifyAnalysis(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	valAttackerState AttackerState, stage int,
+	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
 ) {
 	o := 0
 	for _, a := range valAttackerState.Known {
@@ -48,11 +49,12 @@ func verifyAnalysis(
 	}
 	if o > 0 {
 		valAttackerState = attackerStateGetRead()
-		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
 	} else {
 		verifyAnalysisCountIncrement()
 		infoAnalysis(stage)
 		verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+		scanGroup.Done()
 	}
 }
 
