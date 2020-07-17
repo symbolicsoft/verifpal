@@ -176,7 +176,6 @@ type PrincipalState struct {
 	MutatableTo   [][]string
 	BeforeMutate  []Value
 	Phase         [][]int
-	Lock          int
 }
 
 type AttackerState struct {

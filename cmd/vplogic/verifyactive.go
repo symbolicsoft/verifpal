@@ -36,49 +36,41 @@ func verifyActiveStages(
 	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
 	stage int,
 ) {
-	var principalsGroup sync.WaitGroup
+	var scanGroup sync.WaitGroup
+	valAttackerState := attackerStateGetRead()
 	for _, valPrincipalState := range valPrincipalStates {
-		principalsGroup.Add(1)
-		go func(valPrincipalState PrincipalState, pg *sync.WaitGroup) {
-			var combinationsGroup sync.WaitGroup
-			combinationsGroup.Add(1)
-			verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, MutationMap{Initialized: false},
-				stage, &combinationsGroup,
-			)
-			combinationsGroup.Wait()
-			pg.Done()
-		}(valPrincipalState, &principalsGroup)
+		scanGroup.Add(1)
+		go verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, valAttackerState,
+			MutationMap{Initialized: false}, stage, &scanGroup,
+		)
 	}
-	principalsGroup.Wait()
+	scanGroup.Wait()
 }
 
 func verifyActiveScan(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valMutationMap MutationMap,
-	stage int, cg *sync.WaitGroup,
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valAttackerState AttackerState, valMutationMap MutationMap,
+	stage int, scanGroup *sync.WaitGroup,
 ) {
-	var scanGroup sync.WaitGroup
 	if verifyResultsAllResolved() {
-		cg.Done()
+		scanGroup.Done()
 		return
 	}
-	valAttackerState := attackerStateGetRead()
-	attackerKnown := len(valAttackerState.Known)
-	attackerKnowsMore := len(valAttackerState.Known) > attackerKnown
-	goodLock := valPrincipalState.Lock == 0 || valPrincipalState.Lock >= attackerKnown
-	if attackerKnowsMore {
-		valPrincipalState.Lock = attackerKnown
+	attackerStateKnownLock := attackerStateKnownLockGet()
+	attackerKnewMore := false
+	if attackerStateKnownLock > len(valAttackerState.Known) {
+		valAttackerState = attackerStateGetRead()
+		attackerKnewMore = true
 	}
-	if (goodLock && !valMutationMap.Initialized) || attackerKnowsMore {
-		cg.Add(1)
+	if !valMutationMap.Initialized || attackerKnewMore {
 		valMutationMap = mutationMapInit(
 			valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 		)
 		verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
-			stage, cg,
+			valKnowledgeMap, valPrincipalState, valAttackerState, mutationMapNext(valMutationMap),
+			stage, scanGroup,
 		)
-		cg.Done()
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
@@ -87,17 +79,19 @@ func verifyActiveScan(
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, stage, &scanGroup)
+		go func() {
+			verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage)
+			scanGroup.Done()
+		}()
 	}
-	if goodLock && !valMutationMap.OutOfMutations {
-		cg.Add(1)
-		go verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, mutationMapNext(valMutationMap),
-			stage, cg,
-		)
+	if valMutationMap.OutOfMutations {
+		scanGroup.Done()
+		return
 	}
-	scanGroup.Wait()
-	cg.Done()
+	verifyActiveScan(
+		valKnowledgeMap, valPrincipalState, valAttackerState,
+		mutationMapNext(valMutationMap), stage, scanGroup,
+	)
 }
 
 func verifyActiveMutatePrincipalState(
@@ -128,6 +122,9 @@ func verifyActiveMutatePrincipalState(
 		if i >= valMutationMap.LastIncrement {
 			isWorthwhileMutation = true
 		}
+	}
+	if !isWorthwhileMutation {
+		return valPrincipalState, isWorthwhileMutation
 	}
 	valPrincipalState = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)

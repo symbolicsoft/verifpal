@@ -7,7 +7,6 @@ package vplogic
 import (
 	"fmt"
 	"os"
-	"sync"
 	"time"
 )
 
@@ -62,7 +61,6 @@ func verifyResolveQueries(
 }
 
 func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) error {
-	var scanGroup sync.WaitGroup
 	var err error
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
@@ -78,13 +76,9 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 				return err
 			}
 		}
-		scanGroup.Add(1)
-		verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, &scanGroup)
-		if err != nil {
-			return err
-		}
+		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage)
+		verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	}
-	scanGroup.Wait()
 	return err
 }
 

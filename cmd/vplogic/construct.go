@@ -375,7 +375,6 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			MutatableTo:   [][]string{},
 			BeforeMutate:  []Value{},
 			Phase:         [][]int{},
-			Lock:          0,
 		}
 		for i, c := range valKnowledgeMap.Constants {
 			wire := []string{}
@@ -463,7 +462,6 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 		MutatableTo:   make([][]string, len(valPrincipalState.MutatableTo)),
 		BeforeMutate:  make([]Value, len(valPrincipalState.BeforeMutate)),
 		Phase:         make([][]int, len(valPrincipalState.Phase)),
-		Lock:          valPrincipalState.Lock,
 	}
 	copy(valPrincipalStateClone.Constants, valPrincipalState.Constants)
 	if purify {

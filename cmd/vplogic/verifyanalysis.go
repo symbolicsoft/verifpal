@@ -6,7 +6,6 @@ package vplogic
 
 import (
 	"fmt"
-	"sync"
 	"sync/atomic"
 )
 
@@ -14,33 +13,54 @@ var verifyAnalysisCount uint32
 
 func verifyAnalysis(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	stage int, sg *sync.WaitGroup,
+	valAttackerState AttackerState, stage int,
 ) {
+	attackerStateKnownLock := attackerStateKnownLockGet()
+	if attackerStateKnownLock > len(valAttackerState.Known) {
+		valAttackerState = attackerStateGetRead()
+	}
 	o := 0
-	valAttackerState := attackerStateGetRead()
 	for _, a := range valAttackerState.Known {
-		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState, 0)
-		o = o + verifyAnalysisEquivalize(a, valPrincipalState, 0)
-		o = o + verifyAnalysisPasswords(a, valPrincipalState, 0)
-		o = o + verifyAnalysisConcat(a, 0)
+		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState)
+		if o > 0 {
+			break
+		}
 	}
 	for _, a := range valPrincipalState.Assigned {
-		o = o + verifyAnalysisRecompose(a, valAttackerState, 0)
 		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
+		if o > 0 {
+			break
+		}
+		o = o + verifyAnalysisRecompose(a, valAttackerState)
+		if o > 0 {
+			break
+		}
 	}
-	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
-	verifyAnalysisCountIncrement()
-	infoAnalysis(stage)
+	for _, a := range valAttackerState.Known {
+		o = o + verifyAnalysisEquivalize(a, valPrincipalState)
+		if o > 0 {
+			break
+		}
+		o = o + verifyAnalysisPasswords(a, valPrincipalState)
+		if o > 0 {
+			break
+		}
+		o = o + verifyAnalysisConcat(a)
+		if o > 0 {
+			break
+		}
+	}
 	if o > 0 {
-		verifyAnalysis(valKnowledgeMap, valPrincipalState, stage, sg)
+		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage)
 	} else {
-		sg.Done()
+		verifyAnalysisCountIncrement()
+		infoAnalysis(stage)
+		verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	}
 }
 
 func verifyAnalysisCountInit() {
-	analysisCount := atomic.LoadUint32(&verifyAnalysisCount)
-	atomic.AddUint32(&verifyAnalysisCount, -analysisCount)
+	atomic.StoreUint32(&verifyAnalysisCount, uint32(0))
 }
 
 func verifyAnalysisCountIncrement() {
@@ -52,8 +72,9 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState, o int,
+	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) int {
+	o := 0
 	r := false
 	revealed := Value{}
 	ar := []Value{}
@@ -72,8 +93,9 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a Value, valAttackerState AttackerState, o int,
+	a Value, valAttackerState AttackerState,
 ) int {
+	o := 0
 	r := false
 	revealed := Value{}
 	ar := []Value{}
@@ -102,7 +124,7 @@ func verifyAnalysisReconstruct(
 		isCorePrim = primitiveIsCorePrim(a.Primitive.Name)
 		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 		for _, aa := range a.Primitive.Arguments {
-			verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
+			o = o + verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
@@ -117,7 +139,8 @@ func verifyAnalysisReconstruct(
 	return o
 }
 
-func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState, o int) int {
+func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
+	o := 0
 	switch a.Kind {
 	case "constant":
 		a = valueResolveConstant(a.Constant, valPrincipalState)
@@ -132,7 +155,8 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState, o int) 
 	return o
 }
 
-func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) int {
+func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState) int {
+	o := 0
 	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
 	for _, revealed := range passwords {
 		if attackerStatePutWrite(revealed) {
@@ -146,7 +170,8 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState, o int) i
 	return o
 }
 
-func verifyAnalysisConcat(a Value, o int) int {
+func verifyAnalysisConcat(a Value) int {
+	o := 0
 	switch a.Kind {
 	case "primitive":
 		switch a.Primitive.Name {

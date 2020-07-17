@@ -13,31 +13,40 @@ Bob -> Alice: gb
 principal Alice[
 	knows private a
 	knows private aa
-	knows private p
 	ga = G^a
 	gaa = G^aa
-	egaa = AEAD_ENC(HASH(gb^a, gb, ga), gaa, nil)
-	s = SIGN(aa, p)
-	es = AEAD_ENC(HASH(gb^aa, gb^a), s, nil)
+	egaa = AEAD_ENC(gb^a, gaa, nil)
+	s = SIGN(aa, HASH(ga, gb))
 ]
 
-Alice -> Bob: ga, egaa, es, p
+Alice -> Bob: ga, egaa, s
 
 principal Bob[
-	b_gaa = AEAD_DEC(HASH(ga^b, gb, ga), egaa, nil)?
-	b_s = AEAD_DEC(HASH(b_gaa^b, ga^b), es, nil)?
-	_ = SIGNVERIF(b_gaa, p, b_s)?
+	b_gaa = AEAD_DEC(ga^b, egaa, nil)?
 	knows private m
-	em = AEAD_ENC(HASH(b_gaa^b, ga^b), m, nil)
+	em = AEAD_ENC(HASH(ga^b, b_gaa^b), m, nil)
+	_ = SIGNVERIF(b_gaa, HASH(ga, gb), s)?
 ]
 
 Bob -> Alice: em
 
 principal Alice[
-	_ = AEAD_DEC(HASH(gb^aa, gb^a), em, nil)?
+	x = AEAD_DEC(HASH(gb^a, gb^aa), em, nil)?
+	knows private m2
+	em2 = AEAD_ENC(HASH(gb^a, gb^aa), m2, nil)
+]
+
+Alice -> Bob: em2
+
+principal Bob[
+	_ = AEAD_DEC(HASH(ga^b, b_gaa^b), em2, nil)?
 ]
 
 queries[
+	confidentiality? gaa
 	confidentiality? m
+	confidentiality? m2
+	authentication? Alice -> Bob: egaa
 	authentication? Bob -> Alice: em
+	authentication? Alice -> Bob: em2
 ]
