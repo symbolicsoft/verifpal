@@ -1,1 +1,1 @@
-Verifpal 0.17.0 brings improvements to analysis that depends on interleaving sessions.
+Verifpal 0.17.1 brings performance and speed improvements to Verifpal analysis.
