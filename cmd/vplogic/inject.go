@@ -99,12 +99,9 @@ func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 			explosive = prim.Explosive
 		}
 		return explosive
-	case 3:
-		return false
-	case 4:
+	default:
 		return false
 	}
-	return false
 }
 
 func injectPrimitiveSkeleton(p Primitive) Primitive {

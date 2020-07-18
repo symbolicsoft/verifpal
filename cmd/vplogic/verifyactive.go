@@ -52,7 +52,7 @@ func verifyActiveStages(
 			}(valPrincipalState, valAttackerState, stage)
 		}
 		scanGroup.Wait()
-		exhaustion := (stage >= 4 && (oldKnown == known))
+		exhaustion := (stage >= 5 && (oldKnown == known))
 		if verifyResultsAllResolved() || exhaustion {
 			break
 		}
