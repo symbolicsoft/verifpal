@@ -271,7 +271,7 @@ func possibleToObtainPasswords(
 	passwords := []Value{}
 	switch a.Kind {
 	case "constant":
-		aa := valueResolveConstant(a.Constant, valPrincipalState)
+		aa, _ := valueResolveConstant(a.Constant, valPrincipalState)
 		switch aa.Kind {
 		case "constant":
 			if aa.Constant.Qualifier == "password" {

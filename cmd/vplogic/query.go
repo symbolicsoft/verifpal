@@ -97,7 +97,7 @@ func queryAuthenticationGetPassIndices(
 	sender := ""
 	c := Constant{}
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
-	ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, query.Message.Constants[0])
+	_, ii := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
 	if ii < 0 {
 		return indices, passes, sender, c
 	}
@@ -126,7 +126,7 @@ func queryAuthenticationGetPassIndices(
 		if !valueFindConstantInPrimitive(c, a.Primitive, valPrincipalState) {
 			continue
 		}
-		iiii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, valKnowledgeMap.Constants[iii])
+		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
 		if iiii < 0 {
 			return indices, passes, sender, c
 		}
@@ -156,7 +156,7 @@ func queryAuthenticationHandlePass(
 	result VerifyResult, c Constant, b Value, mutated string, sender string,
 	valPrincipalState PrincipalState,
 ) VerifyResult {
-	cc := valueResolveConstant(c, valPrincipalState)
+	cc, _ := valueResolveConstant(c, valPrincipalState)
 	result.Summary = infoVerifyResultSummary(mutated, fmt.Sprintf(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), sender, result.Query.Message.Sender,
@@ -188,11 +188,12 @@ func queryFreshness(
 		return result
 	}
 	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
 		prettyConstant(query.Constants[0]),
-		prettyValue(valueResolveConstant(query.Constants[0], valPrincipalState)),
+		prettyValue(resolved),
 	), result.Options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
@@ -232,11 +233,12 @@ func queryUnlinkability(
 	}
 	if len(noFreshness) > 0 {
 		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
 			prettyConstant(noFreshness[0]),
-			prettyValue(valueResolveConstant(noFreshness[0], valPrincipalState)),
+			prettyValue(resolved),
 		), result.Options)
 		result = queryPrecondition(result, valPrincipalState)
 		written := verifyResultsPutWrite(result)
@@ -250,9 +252,9 @@ func queryUnlinkability(
 	constants := []Constant{}
 	assigneds := []Value{}
 	for _, c := range query.Constants {
-		i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		a, _ := valueResolveConstant(c, valPrincipalState)
 		constants = append(constants, c)
-		assigneds = append(assigneds, valPrincipalState.Assigned[i])
+		assigneds = append(assigneds, a)
 	}
 	for i, a := range assigneds {
 		for ii, aa := range assigneds {
@@ -307,9 +309,7 @@ func queryPrecondition(
 		}
 		sender := ""
 		recipientKnows := false
-		i := valueGetPrincipalStateIndexFromConstant(
-			valPrincipalState, option.Message.Constants[0],
-		)
+		_, i := valueResolveConstant(option.Message.Constants[0], valPrincipalState)
 		if i < 0 {
 			result.Options = append(result.Options, oResult)
 			continue

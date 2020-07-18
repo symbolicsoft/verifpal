@@ -36,11 +36,11 @@ func inject(
 }
 
 func injectValueRules(
-	k Value, arg int, p Primitive, stage int,
+	k Value, arg int, p Primitive, valPrincipalState PrincipalState, stage int,
 ) bool {
 	switch k.Kind {
 	case "constant":
-		return injectConstantRules(k.Constant, arg, p)
+		return injectConstantRules(k.Constant, arg, p, valPrincipalState)
 	case "primitive":
 		return injectPrimitiveRules(k.Primitive, arg, p, stage)
 	case "equation":
@@ -49,14 +49,16 @@ func injectValueRules(
 	return true
 }
 
-func injectConstantRules(c Constant, arg int, p Primitive) bool {
+func injectConstantRules(c Constant, arg int, p Primitive, valPrincipalState PrincipalState) bool {
 	switch {
 	case p.Arguments[arg].Kind != "constant":
 		return false
 	case strings.ToLower(c.Name) == "g":
 		return false
 	}
-	return true
+	_, i := valueResolveConstant(p.Arguments[arg].Constant, valPrincipalState)
+	_, ii := valueResolveConstant(c, valPrincipalState)
+	return valPrincipalState.DeclaredAt[i] >= valPrincipalState.DeclaredAt[ii]
 }
 
 func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
@@ -191,12 +193,9 @@ func injectPrimitive(
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
 			case "constant":
-				i := valueGetPrincipalStateIndexFromConstant(
-					valPrincipalState, k.Constant,
-				)
-				k = valPrincipalState.Assigned[i]
+				k, _ = valueResolveConstant(k.Constant, valPrincipalState)
 			}
-			if !injectValueRules(k, arg, p, stage) {
+			if !injectValueRules(k, arg, p, valPrincipalState, stage) {
 				continue
 			}
 			switch k.Kind {

@@ -204,7 +204,7 @@ func valueEquivalentEquationsRule(base1 Value, base2 Value, exp1 Value, exp2 Val
 func valueFindConstantInPrimitive(
 	c Constant, p Primitive, valPrincipalState PrincipalState,
 ) bool {
-	a := valueResolveConstant(c, valPrincipalState)
+	a, _ := valueResolveConstant(c, valPrincipalState)
 	for _, aa := range p.Arguments {
 		switch aa.Kind {
 		case "constant":
@@ -242,7 +242,7 @@ func valueFindConstantInPrimitive(
 func valueFindConstantInEquation(
 	c Constant, e Equation, valPrincipalState PrincipalState,
 ) bool {
-	a := valueResolveConstant(c, valPrincipalState)
+	a, _ := valueResolveConstant(c, valPrincipalState)
 	switch a.Kind {
 	case "equation":
 		if valueEquivalentEquations(a.Equation, e) {
@@ -486,15 +486,15 @@ func valueShouldResolveToBeforeMutate(i int, valPrincipalState PrincipalState) b
 	return false
 }
 
-func valueResolveConstant(c Constant, valPrincipalState PrincipalState) Value {
+func valueResolveConstant(c Constant, valPrincipalState PrincipalState) (Value, int) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	if i < 0 {
-		return Value{Kind: "constant", Constant: c}
+		return Value{Kind: "constant", Constant: c}, i
 	}
 	if valueShouldResolveToBeforeMutate(i, valPrincipalState) {
-		return valPrincipalState.BeforeMutate[i]
+		return valPrincipalState.BeforeMutate[i], i
 	}
-	return valPrincipalState.Assigned[i]
+	return valPrincipalState.Assigned[i], i
 }
 
 func valueResolveValueInternalValuesFromKnowledgeMap(
@@ -620,7 +620,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 			if forceBeforeMutate {
 				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a = valueResolveConstant(a.Constant, valPrincipalState)
+				a, _ = valueResolveConstant(a.Constant, valPrincipalState)
 			}
 		default:
 			switch rootValue.Kind {
@@ -635,7 +635,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 			if forceBeforeMutate {
 				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a = valueResolveConstant(a.Constant, valPrincipalState)
+				a, _ = valueResolveConstant(a.Constant, valPrincipalState)
 			}
 			rootIndex = nextRootIndex
 			rootValue = a
@@ -699,11 +699,10 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 	for aai := range aa {
 		switch aa[aai].Kind {
 		case "constant":
+			var i int
+			aa[aai], i = valueResolveConstant(aa[aai].Constant, valPrincipalState)
 			if forceBeforeMutate {
-				i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, aa[aai].Constant)
 				aa[aai] = valPrincipalState.BeforeMutate[i]
-			} else {
-				aa[aai] = valueResolveConstant(aa[aai].Constant, valPrincipalState)
 			}
 		}
 	}

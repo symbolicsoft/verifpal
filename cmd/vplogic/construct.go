@@ -367,6 +367,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			Known:         []bool{},
 			Wire:          [][]string{},
 			KnownBy:       [][]map[string]string{},
+			DeclaredAt:    []int{},
 			Creator:       []string{},
 			Sender:        []string{},
 			Rewritten:     []bool{},
@@ -405,6 +406,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			valPrincipalState.Known = append(valPrincipalState.Known, knows)
 			valPrincipalState.Wire = append(valPrincipalState.Wire, wire)
 			valPrincipalState.KnownBy = append(valPrincipalState.KnownBy, valKnowledgeMap.KnownBy[i])
+			valPrincipalState.DeclaredAt = append(valPrincipalState.DeclaredAt, valKnowledgeMap.DeclaredAt[i])
 			valPrincipalState.Creator = append(valPrincipalState.Creator, valKnowledgeMap.Creator[i])
 			valPrincipalState.Sender = append(valPrincipalState.Sender, sender)
 			valPrincipalState.Rewritten = append(valPrincipalState.Rewritten, false)
@@ -454,6 +456,7 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 		Known:         make([]bool, len(valPrincipalState.Known)),
 		Wire:          make([][]string, len(valPrincipalState.Wire)),
 		KnownBy:       make([][]map[string]string, len(valPrincipalState.KnownBy)),
+		DeclaredAt:    make([]int, len(valPrincipalState.DeclaredAt)),
 		Creator:       make([]string, len(valPrincipalState.Creator)),
 		Sender:        make([]string, len(valPrincipalState.Sender)),
 		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),
@@ -473,6 +476,7 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 	copy(valPrincipalStateClone.Known, valPrincipalState.Known)
 	copy(valPrincipalStateClone.Wire, valPrincipalState.Wire)
 	copy(valPrincipalStateClone.KnownBy, valPrincipalState.KnownBy)
+	copy(valPrincipalStateClone.DeclaredAt, valPrincipalState.DeclaredAt)
 	copy(valPrincipalStateClone.Creator, valPrincipalState.Creator)
 	copy(valPrincipalStateClone.Sender, valPrincipalState.Sender)
 	copy(valPrincipalStateClone.Rewritten, valPrincipalState.Rewritten)

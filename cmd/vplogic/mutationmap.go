@@ -27,14 +27,12 @@ func mutationMapInit(
 		case "equation":
 			continue
 		}
-		i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, v.Constant)
+		a, i := valueResolveConstant(v.Constant, valPrincipalState)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
-		a := valPrincipalState.BeforeMutate[i]
 		c, r := mutationMapReplaceValue(
-			a, v, i, stage,
-			valPrincipalState, valAttackerState,
+			a, v, i, stage, valPrincipalState, valAttackerState,
 		)
 		if len(r) == 0 {
 			continue
@@ -81,7 +79,7 @@ func mutationMapReplaceValue(
 	switch a.Kind {
 	case "constant":
 		return v.Constant, mutationMapReplaceConstant(
-			a, stage, valPrincipalState, valAttackerState,
+			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
 	case "primitive":
 		return v.Constant, mutationMapReplacePrimitive(
@@ -96,8 +94,7 @@ func mutationMapReplaceValue(
 }
 
 func mutationMapReplaceConstant(
-	a Value, stage int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	a Value, rootIndex int, stage int, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) []Value {
 	mutations := []Value{}
 	if valueIsGOrNil(a.Constant) {
@@ -113,9 +110,12 @@ func mutationMapReplaceConstant(
 			if valueIsGOrNil(v.Constant) {
 				continue
 			}
-			c := valueResolveConstant(v.Constant, valPrincipalState)
+			c, i := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
+				if valPrincipalState.DeclaredAt[rootIndex] > valPrincipalState.DeclaredAt[i] {
+					continue
+				}
 				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
@@ -159,17 +159,18 @@ func mutationMapReplacePrimitive(
 }
 
 func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
-	if stage <= 3 {
-		switch len(a.Equation.Values) {
-		case 1:
-			return []Value{valueG}
-		case 2:
-			return []Value{valueGN}
-		case 3:
-			return []Value{valueGNN}
-		}
-	}
 	mutations := []Value{}
+	switch len(a.Equation.Values) {
+	case 1:
+		mutations = append(mutations, valueG)
+	case 2:
+		mutations = append(mutations, valueGN)
+	case 3:
+		mutations = append(mutations, valueGNN)
+	}
+	if stage <= 3 {
+		return mutations
+	}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "equation":

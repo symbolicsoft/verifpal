@@ -70,12 +70,13 @@ func verifyActiveScan(
 		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
-		valAttackerState, valMutationMap,
+		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go verifyAnalysis(valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup)
+		go verifyAnalysis(
+			valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup,
+		)
 	}
 	if valMutationMap.OutOfMutations {
 		scanGroup.Done()
@@ -88,16 +89,15 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valPrincipalState PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
 ) (PrincipalState, bool) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.Constants {
-		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		ai, ii := valueResolveConstant(c, valPrincipalState)
 		ac := valMutationMap.Combination[i]
 		ar := valueResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.BeforeMutate[ii], valPrincipalState.BeforeMutate[ii],
-			ii, valPrincipalState, valAttackerState, true,
+			ai, ai, ii, valPrincipalState, valAttackerState, true,
 		)
 		if valueEquivalentValues(ac, ar, true) {
 			continue
@@ -129,20 +129,17 @@ FailedRewritesLoop:
 		if valPrincipalState.Creator[failedRewriteIndices[i]] != valPrincipalState.Name {
 			continue
 		}
-		ii := valueGetKnowledgeMapIndexFromConstant(
-			valKnowledgeMap, valPrincipalState.Constants[failedRewriteIndices[i]],
-		)
-		declaredAt := valKnowledgeMap.DeclaredAt[ii]
-		maxDeclaredAt := valKnowledgeMap.DeclaredAt[len(valKnowledgeMap.Constants)-1]
+		declaredAt := valPrincipalState.DeclaredAt[failedRewriteIndices[i]]
+		maxDeclaredAt := valPrincipalState.DeclaredAt[len(valPrincipalState.Constants)-1]
 		if declaredAt == maxDeclaredAt {
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 				valPrincipalState, failedRewriteIndices[i]+1,
 			)
 			break FailedRewritesLoop
 		}
-		for iii, c := range valKnowledgeMap.Constants {
-			if valKnowledgeMap.DeclaredAt[iii] == declaredAt {
-				iiii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+		for iii, c := range valPrincipalState.Constants {
+			if valPrincipalState.DeclaredAt[iii] == declaredAt {
+				_, iiii := valueResolveConstant(c, valPrincipalState)
 				valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 					valPrincipalState, iiii+1,
 				)

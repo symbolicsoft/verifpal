@@ -142,7 +142,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	switch a.Kind {
 	case "constant":
-		a = valueResolveConstant(a.Constant, valPrincipalState)
+		a, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.Assigned {
 		if valueEquivalentValues(a, aa, true) {

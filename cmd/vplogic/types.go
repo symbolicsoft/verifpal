@@ -104,6 +104,25 @@ type KnowledgeMap struct {
 	MaxPhase   int
 }
 
+type PrincipalState struct {
+	Name          string
+	Constants     []Constant
+	Assigned      []Value
+	Guard         []bool
+	Known         []bool
+	Wire          [][]string
+	KnownBy       [][]map[string]string
+	DeclaredAt    []int
+	Creator       []string
+	Sender        []string
+	Rewritten     []bool
+	BeforeRewrite []Value
+	Mutated       []bool
+	MutatableTo   [][]string
+	BeforeMutate  []Value
+	Phase         [][]int
+}
+
 type DecomposeRule struct {
 	HasRule bool
 	Given   []int
@@ -158,24 +177,6 @@ type PrimitiveSpec struct {
 	Injectable      bool
 	Explosive       bool
 	PasswordHashing []int
-}
-
-type PrincipalState struct {
-	Name          string
-	Constants     []Constant
-	Assigned      []Value
-	Guard         []bool
-	Known         []bool
-	Wire          [][]string
-	KnownBy       [][]map[string]string
-	Creator       []string
-	Sender        []string
-	Rewritten     []bool
-	BeforeRewrite []Value
-	Mutated       []bool
-	MutatableTo   [][]string
-	BeforeMutate  []Value
-	Phase         [][]int
 }
 
 type AttackerState struct {
