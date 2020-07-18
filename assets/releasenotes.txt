@@ -1,1 +1,1 @@
-Verifpal 0.17.2 brings performance and speed improvements to Verifpal analysis.
+Verifpal 0.17.3 brings performance and speed improvements to Verifpal analysis.
