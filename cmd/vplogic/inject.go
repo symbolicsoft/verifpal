@@ -123,7 +123,12 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 			}
 			skeleton.Arguments[i] = aa
 		case "equation":
-			skeleton.Arguments[i] = valueGN
+			switch len(a.Equation.Values) {
+			case 1:
+				skeleton.Arguments[i] = valueG
+			default:
+				skeleton.Arguments[i] = valueGN
+			}
 		}
 	}
 	return skeleton
@@ -208,16 +213,10 @@ func injectPrimitive(
 				if stage <= 3 {
 					continue
 				}
-				kp := inject(
+				kinjectants[arg] = append(kinjectants[arg], inject(
 					k.Primitive, rootPrimitive, false,
 					valPrincipalState, valAttackerState, stage,
-				)
-				for _, kkp := range kp {
-					if valueEquivalentValueInValues(kkp, uinjectants[arg]) < 0 {
-						uinjectants[arg] = append(uinjectants[arg], kkp)
-						kinjectants[arg] = append(kinjectants[arg], kkp)
-					}
-				}
+				)...)
 			case "equation":
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
 					uinjectants[arg] = append(uinjectants[arg], k)
@@ -250,7 +249,6 @@ func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
 
 func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
-	uinjectants := []Value{}
 	if verifyResultsAllResolved() {
 		return []Value{}
 	}
@@ -266,17 +264,13 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 				Check:  p.Check,
 			},
 		}
-		if valueEquivalentValueInValues(aa, uinjectants) < 0 {
-			uinjectants = append(uinjectants, aa)
-			injectants = append(injectants, aa)
-		}
+		injectants = append(injectants, aa)
 	}
 	return injectants
 }
 
 func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
-	uinjectants := []Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			aa := Value{
@@ -291,10 +285,7 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 					Check:  p.Check,
 				},
 			}
-			if valueEquivalentValueInValues(aa, uinjectants) < 0 {
-				uinjectants = append(uinjectants, aa)
-				injectants = append(injectants, aa)
-			}
+			injectants = append(injectants, aa)
 		}
 	}
 	return injectants
@@ -302,7 +293,6 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 
 func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
-	uinjectants := []Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
@@ -319,10 +309,7 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 						Check:  p.Check,
 					},
 				}
-				if valueEquivalentValueInValues(aa, uinjectants) < 0 {
-					uinjectants = append(uinjectants, aa)
-					injectants = append(injectants, aa)
-				}
+				injectants = append(injectants, aa)
 			}
 		}
 	}
@@ -331,7 +318,6 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 
 func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
-	uinjectants := []Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
@@ -350,10 +336,7 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 							Check:  p.Check,
 						},
 					}
-					if valueEquivalentValueInValues(aa, uinjectants) < 0 {
-						uinjectants = append(uinjectants, aa)
-						injectants = append(injectants, aa)
-					}
+					injectants = append(injectants, aa)
 				}
 			}
 		}
@@ -363,7 +346,6 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 
 func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 	injectants := []Value{}
-	uinjectants := []Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
@@ -384,10 +366,7 @@ func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 								Check:  p.Check,
 							},
 						}
-						if valueEquivalentValueInValues(aa, uinjectants) < 0 {
-							uinjectants = append(uinjectants, aa)
-							injectants = append(injectants, aa)
-						}
+						injectants = append(injectants, aa)
 					}
 				}
 			}

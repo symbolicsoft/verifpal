@@ -39,8 +39,6 @@ func mutationMapInit(
 		if len(r) == 0 {
 			continue
 		}
-		aa := valueResolveValueInternalValuesFromPrincipalState(a, a, i, valPrincipalState, valAttackerState, true)
-		r = append([]Value{aa}, r...)
 		valMutationMap.Constants = append(valMutationMap.Constants, c)
 		valMutationMap.Mutations = append(valMutationMap.Mutations, r)
 	}
