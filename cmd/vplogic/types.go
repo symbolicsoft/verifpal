@@ -94,14 +94,15 @@ type Equation struct {
 }
 
 type KnowledgeMap struct {
-	Principals []string
-	Constants  []Constant
-	Assigned   []Value
-	Creator    []string
-	KnownBy    [][]map[string]string
-	DeclaredAt []int
-	Phase      [][]int
-	MaxPhase   int
+	Principals    []string
+	Constants     []Constant
+	Assigned      []Value
+	Creator       []string
+	KnownBy       [][]map[string]string
+	DeclaredAt    []int
+	MaxDeclaredAt int
+	Phase         [][]int
+	MaxPhase      int
 }
 
 type PrincipalState struct {
@@ -113,6 +114,7 @@ type PrincipalState struct {
 	Wire          [][]string
 	KnownBy       [][]map[string]string
 	DeclaredAt    []int
+	MaxDeclaredAt int
 	Creator       []string
 	Sender        []string
 	Rewritten     []bool

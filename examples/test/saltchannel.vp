@@ -15,7 +15,7 @@ principal Client [
 	m1 = G^ec       // Ephemeral client public key (is m1)
 ]
 
-Client -> Server: [m1]
+Client -> Server: m1
 
 principal Server [
 	generates es    // Ephemeral server key

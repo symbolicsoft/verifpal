@@ -130,18 +130,16 @@ FailedRewritesLoop:
 			continue
 		}
 		declaredAt := valPrincipalState.DeclaredAt[failedRewriteIndices[i]]
-		maxDeclaredAt := valPrincipalState.DeclaredAt[len(valPrincipalState.Constants)-1]
-		if declaredAt == maxDeclaredAt {
+		if declaredAt == valPrincipalState.MaxDeclaredAt {
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 				valPrincipalState, failedRewriteIndices[i]+1,
 			)
 			break FailedRewritesLoop
 		}
-		for iii, c := range valPrincipalState.Constants {
+		for iii := range valPrincipalState.Constants {
 			if valPrincipalState.DeclaredAt[iii] == declaredAt {
-				_, iiii := valueResolveConstant(c, valPrincipalState)
 				valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
-					valPrincipalState, iiii+1,
+					valPrincipalState, iii+1,
 				)
 				break FailedRewritesLoop
 			}

@@ -9,14 +9,15 @@ import "fmt"
 func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
 	var err error
 	valKnowledgeMap := KnowledgeMap{
-		Principals: principals,
-		Constants:  []Constant{},
-		Assigned:   []Value{},
-		Creator:    []string{},
-		KnownBy:    [][]map[string]string{},
-		DeclaredAt: []int{},
-		Phase:      [][]int{},
-		MaxPhase:   0,
+		Principals:    principals,
+		Constants:     []Constant{},
+		Assigned:      []Value{},
+		Creator:       []string{},
+		KnownBy:       [][]map[string]string{},
+		DeclaredAt:    []int{},
+		MaxDeclaredAt: 0,
+		Phase:         [][]int{},
+		MaxPhase:      0,
 	}
 	declaredAt := 0
 	currentPhase := 0
@@ -55,6 +56,7 @@ func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
 			}
 		case "message":
 			declaredAt = declaredAt + 1
+			valKnowledgeMap.MaxDeclaredAt = declaredAt
 			valKnowledgeMap, err = constructKnowledgeMapRenderMessage(
 				valKnowledgeMap, blck, currentPhase,
 			)
@@ -368,6 +370,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			Wire:          [][]string{},
 			KnownBy:       [][]map[string]string{},
 			DeclaredAt:    []int{},
+			MaxDeclaredAt: 0,
 			Creator:       []string{},
 			Sender:        []string{},
 			Rewritten:     []bool{},
@@ -407,6 +410,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			valPrincipalState.Wire = append(valPrincipalState.Wire, wire)
 			valPrincipalState.KnownBy = append(valPrincipalState.KnownBy, valKnowledgeMap.KnownBy[i])
 			valPrincipalState.DeclaredAt = append(valPrincipalState.DeclaredAt, valKnowledgeMap.DeclaredAt[i])
+			valPrincipalState.MaxDeclaredAt = valKnowledgeMap.MaxDeclaredAt
 			valPrincipalState.Creator = append(valPrincipalState.Creator, valKnowledgeMap.Creator[i])
 			valPrincipalState.Sender = append(valPrincipalState.Sender, sender)
 			valPrincipalState.Rewritten = append(valPrincipalState.Rewritten, false)
@@ -457,6 +461,7 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 		Wire:          make([][]string, len(valPrincipalState.Wire)),
 		KnownBy:       make([][]map[string]string, len(valPrincipalState.KnownBy)),
 		DeclaredAt:    make([]int, len(valPrincipalState.DeclaredAt)),
+		MaxDeclaredAt: valPrincipalState.MaxDeclaredAt,
 		Creator:       make([]string, len(valPrincipalState.Creator)),
 		Sender:        make([]string, len(valPrincipalState.Sender)),
 		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),

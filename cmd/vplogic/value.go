@@ -758,34 +758,6 @@ func valueResolveAllPrincipalStateValues(
 ) PrincipalState {
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.Assigned {
-		switch valPrincipalStateClone.Assigned[i].Kind {
-		case "primitive":
-			if valPrincipalStateClone.Assigned[i].Primitive.Name != "SPLIT" {
-				continue
-			}
-			valPrincipalStateClone.Assigned[i] = valueResolveValueInternalValuesFromPrincipalState(
-				valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
-				valueShouldResolveToBeforeMutate(i, valPrincipalState),
-			)
-			valPrincipalStateClone.BeforeRewrite[i] = valueResolveValueInternalValuesFromPrincipalState(
-				valPrincipalState.BeforeRewrite[i], valPrincipalState.BeforeRewrite[i], i, valPrincipalState, valAttackerState,
-				valueShouldResolveToBeforeMutate(i, valPrincipalState),
-			)
-			_, _, valPrincipalStateClone.Assigned[i] = valuePerformPrimitiveRewrite(
-				valPrincipalStateClone.Assigned[i].Primitive, i, valPrincipalState,
-			)
-			_, _, valPrincipalStateClone.BeforeRewrite[i] = valuePerformPrimitiveRewrite(
-				valPrincipalStateClone.BeforeRewrite[i].Primitive, i, valPrincipalState,
-			)
-		}
-	}
-	for i := range valPrincipalState.Assigned {
-		switch valPrincipalStateClone.Assigned[i].Kind {
-		case "primitive":
-			if valPrincipalStateClone.Assigned[i].Primitive.Name == "SPLIT" {
-				continue
-			}
-		}
 		valPrincipalStateClone.Assigned[i] = valueResolveValueInternalValuesFromPrincipalState(
 			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
 			valueShouldResolveToBeforeMutate(i, valPrincipalState),
