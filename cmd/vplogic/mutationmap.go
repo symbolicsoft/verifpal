@@ -13,8 +13,8 @@ func mutationMapInit(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, stage int,
 ) MutationMap {
-	var mutationGroup sync.WaitGroup
-	var valMutationMapMutex sync.Mutex
+	var mutationMapGroup sync.WaitGroup
+	var mutationMapMutex sync.Mutex
 	valMutationMap := MutationMap{
 		Initialized:    true,
 		Constants:      []Constant{},
@@ -27,38 +27,38 @@ func mutationMapInit(
 		"Initializing Stage %d mutation map for %s...", stage, valPrincipalState.Name,
 	), "analysis", false)
 	for _, v := range valAttackerState.Known {
-		mutationGroup.Add(1)
+		mutationMapGroup.Add(1)
 		go func(v Value, valKnowledgeMap KnowledgeMap,
 			valPrincipalState PrincipalState, valAttackerState AttackerState,
 		) {
 			switch v.Kind {
 			case "primitive":
-				mutationGroup.Done()
+				mutationMapGroup.Done()
 				return
 			case "equation":
-				mutationGroup.Done()
+				mutationMapGroup.Done()
 				return
 			}
 			a, i := valueResolveConstant(v.Constant, valPrincipalState)
 			if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
-				mutationGroup.Done()
+				mutationMapGroup.Done()
 				return
 			}
 			c, r := mutationMapReplaceValue(
 				a, v, i, stage, valPrincipalState, valAttackerState,
 			)
 			if len(r) == 0 {
-				mutationGroup.Done()
+				mutationMapGroup.Done()
 				return
 			}
-			valMutationMapMutex.Lock()
+			mutationMapMutex.Lock()
 			valMutationMap.Constants = append(valMutationMap.Constants, c)
 			valMutationMap.Mutations = append(valMutationMap.Mutations, r)
-			valMutationMapMutex.Unlock()
-			mutationGroup.Done()
+			mutationMapMutex.Unlock()
+			mutationMapGroup.Done()
 		}(v, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
-	mutationGroup.Wait()
+	mutationMapGroup.Wait()
 	valMutationMap.Combination = make([]Value, len(valMutationMap.Constants))
 	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants))
 	for iiii := range valMutationMap.Constants {
