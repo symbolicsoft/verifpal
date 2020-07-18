@@ -10,7 +10,7 @@ import (
 )
 
 func inject(
-	p Primitive, rootPrimitive Primitive, isRootPrimitive bool,
+	p Primitive, rootPrimitive Primitive, isRootPrimitive bool, injectDepth int,
 	valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
 ) []Value {
 	if verifyResultsAllResolved() {
@@ -31,7 +31,7 @@ func inject(
 		rootPrimitive = p
 	}
 	return injectPrimitive(
-		p, rootPrimitive, valPrincipalState, valAttackerState, stage,
+		p, rootPrimitive, valPrincipalState, valAttackerState, injectDepth, stage,
 	)
 }
 
@@ -181,7 +181,7 @@ SkeletonSearch:
 func injectPrimitive(
 	p Primitive, rootPrimitive Primitive,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-	stage int,
+	injectDepth int, stage int,
 ) []Value {
 	if injectPrimitiveStageRestricted(p, stage) {
 		return []Value{}
@@ -209,13 +209,12 @@ func injectPrimitive(
 					uinjectants[arg] = append(uinjectants[arg], k)
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
-				if stage <= 3 {
-					continue
+				if stage >= 5 && injectDepth <= stage-5 {
+					kinjectants[arg] = append(kinjectants[arg], inject(
+						k.Primitive, rootPrimitive, false, injectDepth+1,
+						valPrincipalState, valAttackerState, stage,
+					)...)
 				}
-				kinjectants[arg] = append(kinjectants[arg], inject(
-					k.Primitive, rootPrimitive, false,
-					valPrincipalState, valAttackerState, stage,
-				)...)
 			case "equation":
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
 					uinjectants[arg] = append(uinjectants[arg], k)

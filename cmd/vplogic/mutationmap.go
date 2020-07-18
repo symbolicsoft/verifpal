@@ -145,7 +145,7 @@ func mutationMapReplacePrimitive(
 		}
 	}
 	injectants := inject(
-		a.Primitive, a.Primitive, true,
+		a.Primitive, a.Primitive, true, 0,
 		valPrincipalState, valAttackerState, stage,
 	)
 	uinjectants := []Value{}

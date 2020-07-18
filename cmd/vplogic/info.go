@@ -138,8 +138,23 @@ func infoVerifyResultSummary(
 func infoAnalysis(stage int) {
 	a := ""
 	analysisCount := verifyAnalysisCountGet()
-	if analysisCount%500 != 0 {
-		return
+	switch {
+	case analysisCount > 100000:
+		if analysisCount%500 != 0 {
+			return
+		}
+	case analysisCount > 10000:
+		if analysisCount%100 != 0 {
+			return
+		}
+	case analysisCount > 1000:
+		if analysisCount%50 != 0 {
+			return
+		}
+	case analysisCount > 100:
+		if analysisCount%10 != 0 {
+			return
+		}
 	}
 	if colorOutputSupport() {
 		a = aurora.Faint(fmt.Sprintf(
@@ -149,7 +164,7 @@ func infoAnalysis(stage int) {
 		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysisCount)
 	}
 	fmt.Fprint(os.Stdout, a)
-	fmt.Fprint(os.Stdout, "\r \r")
+	fmt.Fprint(os.Stdout, "\r\r\r\r")
 }
 
 func infoLiteralNumber(n int) string {
