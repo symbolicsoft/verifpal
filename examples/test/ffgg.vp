@@ -1,0 +1,38 @@
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = G^skb
+]
+
+principal Alice[
+	knows private m
+]
+
+Bob -> Alice: [pkb]
+
+principal Bob[
+	generates n1
+	generates n2
+]
+
+Bob -> Alice: n1, n2
+
+principal Alice[
+	msg = PKE_ENC(pkb, CONCAT(n1, n2, m))
+]
+
+Alice -> Bob: msg
+
+principal Bob[
+	clear = PKE_DEC(skb, msg)
+	x, y1, y2 = SPLIT(clear)?
+	_ = ASSERT(x, n1)?
+	msg2 = PKE_ENC(pkb, CONCAT(y1, y2, n1))
+]
+
+Bob -> Alice: y1, msg2
+
+queries[
+	confidentiality? m
+]
