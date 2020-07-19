@@ -633,13 +633,15 @@ func valueResolveValueInternalValuesFromPrincipalState(
 					forceBeforeMutate = true
 				}
 			}
-			if !forceBeforeMutate {
+			if forceBeforeMutate {
+				forceBeforeMutate = !strInSlice(valPrincipalState.Creator[rootIndex], valPrincipalState.MutatableTo[nextRootIndex])
+			} else {
 				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
 			if forceBeforeMutate {
 				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a, _ = valueResolveConstant(a.Constant, valPrincipalState)
+				a = valPrincipalState.Assigned[nextRootIndex]
 			}
 			rootIndex = nextRootIndex
 			rootValue = a
@@ -773,15 +775,15 @@ func valueResolveAllPrincipalStateValues(
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.Assigned {
 		valPrincipalStateClone.Assigned[i], err = valueResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
-			valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
+			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState,
+			valAttackerState, valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
 		if err != nil {
 			return PrincipalState{}, err
 		}
 		valPrincipalStateClone.BeforeRewrite[i], err = valueResolveValueInternalValuesFromPrincipalState(
-			valPrincipalState.BeforeRewrite[i], valPrincipalState.BeforeRewrite[i], i, valPrincipalState, valAttackerState,
-			valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
+			valPrincipalState.BeforeRewrite[i], valPrincipalState.BeforeRewrite[i], i, valPrincipalState,
+			valAttackerState, valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
 		if err != nil {
 			return PrincipalState{}, err

@@ -157,7 +157,7 @@ func verifyEnd(m Model) ([]VerifyResult, string, error) {
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
 			InfoMessage(fmt.Sprintf(
-				"%s: %s",
+				"%s — %s",
 				prettyQuery(verifyResult.Query),
 				verifyResult.Summary,
 			), "result", false)

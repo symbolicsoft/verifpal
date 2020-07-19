@@ -25,14 +25,14 @@ Bob -> Carol: [gb]
 Carol -> Alice: [gc]
 Carol -> Bob: [gc]
 
-principal Bob[
-	knows private m
-	sb = RINGSIGN(b, ga, gc, m)
-]
-
 principal Alice[
 	knows private m
 	sa = RINGSIGN(a, gb, gc, m)
+]
+
+principal Bob[
+	knows private m
+	sb = RINGSIGN(b, ga, gc, m)
 ]
 
 principal Carol[
@@ -40,11 +40,11 @@ principal Carol[
 	sc = RINGSIGN(c, ga, gb, m)
 ]
 
-Alice -> Damian: [sa]
+Alice -> Damian: [ga], [sa]
 
-Carol -> Damian: [sc]
+Bob -> Damian: [gb], m, sb
 
-Bob -> Damian: [ga], [gb], [gc], m, sb
+Carol -> Damian: [gc], [sc]
 
 principal Damian[
 	_ = RINGSIGNVERIF(ga, gb, gc, m, sb)?

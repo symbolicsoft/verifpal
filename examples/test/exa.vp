@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal P1[
+   knows private k1
+   knows private M
+   knows public c
+   key = AEAD_ENC(k1, c, c)
+   // AEAD_ENC(AEAD_ENC(k1, c, c), m, c)
+   msg1 = AEAD_ENC(key, M, c)
+   msg3 = AEAD_ENC(AEAD_ENC(k1,msg1,c),c,c)
+]
+
+P1 -> P2: msg1
+
+principal P2[
+   knows private k1
+   knows private k2
+   knows public c
+   msg2 = AEAD_ENC(k2,AEAD_ENC(k1,msg1,c),c)
+]
+
+P2 -> P3: [msg2]
+
+P1 -> P3: msg3
+
+principal P3[
+   knows private k2
+   knows public c
+   clear = AEAD_DEC(k2,msg2,c)?
+   msg4 = AEAD_DEC(clear,msg3,c)?
+]
+
+P3 -> P1: [msg4]
+
+queries[
+	confidentiality? M
+]

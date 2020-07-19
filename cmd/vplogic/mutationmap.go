@@ -6,15 +6,12 @@ package vplogic
 
 import (
 	"fmt"
-	"sync"
 )
 
 func mutationMapInit(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, stage int,
 ) (MutationMap, error) {
-	var mutationMapGroup sync.WaitGroup
-	var mutationMapMutex sync.Mutex
 	var err error
 	valMutationMap := MutationMap{
 		Initialized:    true,
@@ -28,44 +25,28 @@ func mutationMapInit(
 		"Initializing Stage %d mutation map for %s...", stage, valPrincipalState.Name,
 	), "analysis", false)
 	for _, v := range valAttackerState.Known {
-		mutationMapGroup.Add(1)
-		go func(v Value, valKnowledgeMap KnowledgeMap,
-			valPrincipalState PrincipalState, valAttackerState AttackerState,
-		) {
-			switch v.Kind {
-			case "primitive":
-				mutationMapGroup.Done()
-				return
-			case "equation":
-				mutationMapGroup.Done()
-				return
-			}
-			a, i := valueResolveConstant(v.Constant, valPrincipalState)
-			if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
-				mutationMapGroup.Done()
-				return
-			}
-			var c Constant
-			var r []Value
-			c, r, err = mutationMapReplaceValue(
-				a, v, i, stage, valPrincipalState, valAttackerState,
-			)
-			if err != nil {
-				mutationMapGroup.Done()
-				return
-			}
-			if len(r) == 0 {
-				mutationMapGroup.Done()
-				return
-			}
-			mutationMapMutex.Lock()
-			valMutationMap.Constants = append(valMutationMap.Constants, c)
-			valMutationMap.Mutations = append(valMutationMap.Mutations, r)
-			mutationMapMutex.Unlock()
-			mutationMapGroup.Done()
-		}(v, valKnowledgeMap, valPrincipalState, valAttackerState)
+		switch v.Kind {
+		case "primitive":
+			continue
+		case "equation":
+			continue
+		}
+		a, i := valueResolveConstant(v.Constant, valPrincipalState)
+		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
+			continue
+		}
+		var c Constant
+		var r []Value
+		c, r, err = mutationMapReplaceValue(
+			a, v, i, stage, valPrincipalState, valAttackerState,
+		)
+
+		if len(r) == 0 {
+			continue
+		}
+		valMutationMap.Constants = append(valMutationMap.Constants, c)
+		valMutationMap.Mutations = append(valMutationMap.Mutations, r)
 	}
-	mutationMapGroup.Wait()
 	valMutationMap.Combination = make([]Value, len(valMutationMap.Constants))
 	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants))
 	for iiii := range valMutationMap.Constants {
@@ -81,15 +62,11 @@ func mutationMapSkipValue(
 	switch {
 	case i < 0:
 		return true
-	case !strInSlice(valPrincipalState.Name, valPrincipalState.Wire[i]):
-		return true
 	case valPrincipalState.Guard[i]:
 		if !strInSlice(valPrincipalState.Sender[i], valPrincipalState.MutatableTo[i]) {
 			return true
 		}
 	case valPrincipalState.Creator[i] == valPrincipalState.Name:
-		return true
-	case !valPrincipalState.Known[i]:
 		return true
 	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
 		return true

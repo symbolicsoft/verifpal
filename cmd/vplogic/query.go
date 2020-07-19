@@ -55,7 +55,7 @@ func queryConfidentiality(
 	written := verifyResultsPutWrite(result)
 	if written {
 		InfoMessage(fmt.Sprintf(
-			"%s: %s", prettyQuery(query), result.Summary,
+			"%s — %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
 	return result
@@ -175,7 +175,7 @@ func queryAuthenticationHandlePass(
 	written := verifyResultsPutWrite(result)
 	if written {
 		InfoMessage(fmt.Sprintf(
-			"%s: %s", prettyQuery(result.Query), result.Summary,
+			"%s — %s", prettyQuery(result.Query), result.Summary,
 		), "result", true)
 	}
 	return result
@@ -212,7 +212,7 @@ func queryFreshness(
 	written := verifyResultsPutWrite(result)
 	if written {
 		InfoMessage(fmt.Sprintf(
-			"%s: %s", prettyQuery(query), result.Summary,
+			"%s — %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
 	return result, nil
@@ -261,7 +261,7 @@ func queryUnlinkability(
 		written := verifyResultsPutWrite(result)
 		if written {
 			InfoMessage(fmt.Sprintf(
-				"%s: %s", prettyQuery(query), result.Summary,
+				"%s — %s", prettyQuery(query), result.Summary,
 			), "result", true)
 		}
 		return result, nil
@@ -303,7 +303,7 @@ func queryUnlinkability(
 			written := verifyResultsPutWrite(result)
 			if written {
 				InfoMessage(fmt.Sprintf(
-					"%s: %s", prettyQuery(query), result.Summary,
+					"%s — %s", prettyQuery(query), result.Summary,
 				), "result", true)
 			}
 			return result, nil

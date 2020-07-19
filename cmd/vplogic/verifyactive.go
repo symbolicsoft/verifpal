@@ -118,8 +118,7 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valPrincipalState PrincipalState,
-	valAttackerState AttackerState, valMutationMap MutationMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
 ) (PrincipalState, bool, error) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.Constants {
