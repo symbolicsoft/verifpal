@@ -17,6 +17,7 @@ func verifyAnalysis(
 	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
 ) {
 	o := 0
+	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	for _, a := range valAttackerState.Known {
 		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState)
 		if o > 0 {
@@ -49,11 +50,10 @@ func verifyAnalysis(
 	}
 	if o > 0 {
 		valAttackerState = attackerStateGetRead()
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
+		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
 	} else {
 		verifyAnalysisCountIncrement()
 		infoAnalysis(stage)
-		verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 		scanGroup.Done()
 	}
 }

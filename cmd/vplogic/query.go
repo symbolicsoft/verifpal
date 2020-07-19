@@ -338,14 +338,17 @@ func queryPrecondition(
 func queryGetMutatedInfo(valPrincipalState PrincipalState) string {
 	mutatedInfo := ""
 	for i := range valPrincipalState.Constants {
-		if !valPrincipalState.Mutated[i] {
+		v := Value{
+			Kind:     "constant",
+			Constant: valPrincipalState.Constants[i],
+		}
+		if valueEquivalentValues(v, valPrincipalState.Assigned[i], false) {
 			continue
 		}
-		mutatedInfo = fmt.Sprintf("%s\n %s%s → %s (originally %s)",
+		mutatedInfo = fmt.Sprintf("%s\n %s%s → %s",
 			mutatedInfo, "           ",
 			prettyConstant(valPrincipalState.Constants[i]),
 			prettyValue(valPrincipalState.Assigned[i]),
-			prettyValue(valPrincipalState.BeforeMutate[i]),
 		)
 	}
 	return mutatedInfo

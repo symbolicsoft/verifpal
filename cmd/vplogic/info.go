@@ -120,7 +120,7 @@ func infoVerifyResultSummary(
 		)
 	}
 	if len(mutated) > 0 {
-		mutatedIntro = "When the following values are controlled by Attacker:"
+		mutatedIntro = "When:"
 	}
 	if colorOutputSupport() {
 		return fmt.Sprintf("%s%s\n            %s\n%s",

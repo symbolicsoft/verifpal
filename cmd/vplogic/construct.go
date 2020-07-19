@@ -4,7 +4,9 @@
 
 package vplogic
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
 	var err error
