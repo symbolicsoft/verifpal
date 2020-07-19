@@ -74,7 +74,7 @@ func verifyActiveScan(
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		verifyAnalysis(
+		go verifyAnalysis(
 			valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup,
 		)
 	}

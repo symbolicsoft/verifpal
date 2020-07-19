@@ -50,7 +50,7 @@ func verifyAnalysis(
 	}
 	if o > 0 {
 		valAttackerState = attackerStateGetRead()
-		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
+		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
 	} else {
 		verifyAnalysisCountIncrement()
 		infoAnalysis(stage)
