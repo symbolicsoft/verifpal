@@ -1,1 +1,1 @@
-Verifpal 0.17.3 brings performance and speed improvements to Verifpal analysis.
+Verifpal 0.17.4 fixes a bug in Verifpal analysis logic reported by Bruno Blanchet.
