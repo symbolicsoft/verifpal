@@ -23,7 +23,10 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 		if err != nil {
 			return err
 		}
-		verifyActiveStages(valKnowledgeMap, valPrincipalStates)
+		err = verifyActiveStages(valKnowledgeMap, valPrincipalStates)
+		if err != nil {
+			return err
+		}
 		phase = phase + 1
 	}
 	return nil
@@ -31,8 +34,9 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 
 func verifyActiveStages(
 	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
-) {
+) error {
 	var scanGroup sync.WaitGroup
+	var err error
 	stage := 1
 	valAttackerState := attackerStateGetRead()
 	for {
@@ -42,13 +46,21 @@ func verifyActiveStages(
 		for _, valPrincipalState := range valPrincipalStates {
 			scanGroup.Add(1)
 			go func(valPrincipalState PrincipalState, valAttackerState AttackerState, stage int) {
-				valMutationMap := mutationMapInit(
+				var valMutationMap MutationMap
+				valMutationMap, err = mutationMapInit(
 					valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 				)
-				verifyActiveScan(
+				if err != nil {
+					scanGroup.Done()
+					return
+				}
+				err = verifyActiveScan(
 					valKnowledgeMap, valPrincipalState, valAttackerState,
 					valMutationMap, stage, &scanGroup,
 				)
+				if err != nil {
+					scanGroup.Done()
+				}
 			}(valPrincipalState, valAttackerState, stage)
 		}
 		scanGroup.Wait()
@@ -58,47 +70,67 @@ func verifyActiveStages(
 		}
 		stage = stage + 1
 	}
+	return nil
 }
 
 func verifyActiveScan(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
 	stage int, scanGroup *sync.WaitGroup,
-) {
+) error {
+	var err error
 	if verifyResultsAllResolved() {
 		scanGroup.Done()
-		return
+		return nil
 	}
-	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
+	valPrincipalStateMutated, isWorthwhileMutation, err := verifyActiveMutatePrincipalState(
 		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
 	)
+	if err != nil {
+		return err
+	}
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
-		go verifyAnalysis(
-			valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup,
-		)
+		go func() {
+			err = verifyAnalysis(
+				valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup,
+			)
+			if err != nil {
+				scanGroup.Done()
+				return
+			}
+		}()
 	}
 	if valMutationMap.OutOfMutations {
 		scanGroup.Done()
-		return
+		return nil
 	}
-	go verifyActiveScan(
-		valKnowledgeMap, valPrincipalState, valAttackerState,
-		mutationMapNext(valMutationMap), stage, scanGroup,
-	)
+	go func() {
+		err := verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, valAttackerState,
+			mutationMapNext(valMutationMap), stage, scanGroup,
+		)
+		if err != nil {
+			scanGroup.Done()
+		}
+	}()
+	return nil
 }
 
 func verifyActiveMutatePrincipalState(
 	valPrincipalState PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
-) (PrincipalState, bool) {
+) (PrincipalState, bool, error) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.Constants {
 		ai, ii := valueResolveConstant(c, valPrincipalState)
 		ac := valMutationMap.Combination[i]
-		ar := valueResolveValueInternalValuesFromPrincipalState(
-			ai, ai, ii, valPrincipalState, valAttackerState, true,
+		ar, err := valueResolveValueInternalValuesFromPrincipalState(
+			ai, ai, ii, valPrincipalState, valAttackerState, true, 0,
 		)
+		if err != nil {
+			return valPrincipalState, false, err
+		}
 		if valueEquivalentValues(ac, ar, true) {
 			continue
 		}
@@ -117,9 +149,12 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	if !isWorthwhileMutation {
-		return valPrincipalState, isWorthwhileMutation
+		return valPrincipalState, isWorthwhileMutation, nil
 	}
-	valPrincipalState = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
+	valPrincipalState, err := valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
+	if err != nil {
+		return valPrincipalState, false, err
+	}
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 FailedRewritesLoop:
 	for i, p := range failedRewrites {
@@ -145,7 +180,7 @@ FailedRewritesLoop:
 			}
 		}
 	}
-	return valPrincipalState, isWorthwhileMutation
+	return valPrincipalState, isWorthwhileMutation, nil
 }
 
 func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState PrincipalState, f int) PrincipalState {

@@ -15,9 +15,12 @@ var verifyAnalysisCount uint32
 func verifyAnalysis(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
-) {
+) error {
 	o := 0
-	verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+	err := verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+	if err != nil {
+		return err
+	}
 	for _, a := range valAttackerState.Known {
 		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState)
 		if o > 0 {
@@ -29,7 +32,7 @@ func verifyAnalysis(
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisRecompose(a, valAttackerState)
+		o = o + verifyAnalysisRecompose(a, valPrincipalState, valAttackerState)
 		if o > 0 {
 			break
 		}
@@ -43,19 +46,25 @@ func verifyAnalysis(
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisConcat(a)
+		o = o + verifyAnalysisConcat(a, valPrincipalState)
 		if o > 0 {
 			break
 		}
 	}
 	if o > 0 {
 		valAttackerState = attackerStateGetRead()
-		go verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
+		go func() {
+			err := verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
+			if err != nil {
+				scanGroup.Done()
+			}
+		}()
 	} else {
 		verifyAnalysisCountIncrement()
 		infoAnalysis(stage)
 		scanGroup.Done()
 	}
+	return nil
 }
 
 func verifyAnalysisCountInit() {
@@ -81,7 +90,7 @@ func verifyAnalysisDecompose(
 	case "primitive":
 		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 	}
-	if r && attackerStatePutWrite(revealed) {
+	if r && attackerStatePutWrite(revealed, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by decomposing %s with %s.",
 			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
@@ -92,7 +101,7 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a Value, valAttackerState AttackerState,
+	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) int {
 	o := 0
 	r := false
@@ -102,7 +111,7 @@ func verifyAnalysisRecompose(
 	case "primitive":
 		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
 	}
-	if r && attackerStatePutWrite(revealed) {
+	if r && attackerStatePutWrite(revealed, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by recomposing %s with %s.",
 			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
@@ -128,7 +137,7 @@ func verifyAnalysisReconstruct(
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
-	if r && !isCorePrim && attackerStatePutWrite(a) {
+	if r && !isCorePrim && attackerStatePutWrite(a, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			infoOutputText(a), prettyValues(ar),
@@ -147,7 +156,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	}
 	for _, aa := range valPrincipalState.Assigned {
 		if valueEquivalentValues(ar, aa, true) {
-			if attackerStatePutWrite(aa) {
+			if attackerStatePutWrite(aa, valPrincipalState) {
 				InfoMessage(fmt.Sprintf(
 					"%s obtained by equivalizing with the current resolution of %s.",
 					infoOutputText(aa), prettyValue(a),
@@ -163,7 +172,7 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
 	for _, revealed := range passwords {
-		if attackerStatePutWrite(revealed) {
+		if attackerStatePutWrite(revealed, valPrincipalState) {
 			InfoMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
 				infoOutputText(revealed), prettyValue(a),
@@ -174,14 +183,14 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState) int {
 	return o
 }
 
-func verifyAnalysisConcat(a Value) int {
+func verifyAnalysisConcat(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	switch a.Kind {
 	case "primitive":
 		switch a.Primitive.Name {
 		case "CONCAT":
 			for _, revealed := range a.Primitive.Arguments {
-				if attackerStatePutWrite(revealed) {
+				if attackerStatePutWrite(revealed, valPrincipalState) {
 					InfoMessage(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",
 						infoOutputText(revealed), prettyValue(a),

@@ -12,9 +12,10 @@ import (
 func mutationMapInit(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, stage int,
-) MutationMap {
+) (MutationMap, error) {
 	var mutationMapGroup sync.WaitGroup
 	var mutationMapMutex sync.Mutex
+	var err error
 	valMutationMap := MutationMap{
 		Initialized:    true,
 		Constants:      []Constant{},
@@ -44,9 +45,15 @@ func mutationMapInit(
 				mutationMapGroup.Done()
 				return
 			}
-			c, r := mutationMapReplaceValue(
+			var c Constant
+			var r []Value
+			c, r, err = mutationMapReplaceValue(
 				a, v, i, stage, valPrincipalState, valAttackerState,
 			)
+			if err != nil {
+				mutationMapGroup.Done()
+				return
+			}
 			if len(r) == 0 {
 				mutationMapGroup.Done()
 				return
@@ -64,7 +71,7 @@ func mutationMapInit(
 	for iiii := range valMutationMap.Constants {
 		valMutationMap.DepthIndex[iiii] = 0
 	}
-	return valMutationMap
+	return valMutationMap, err
 }
 
 func mutationMapSkipValue(
@@ -94,22 +101,23 @@ func mutationMapSkipValue(
 func mutationMapReplaceValue(
 	a Value, v Value, rootIndex int, stage int,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) (Constant, []Value) {
+) (Constant, []Value, error) {
 	switch a.Kind {
 	case "constant":
 		return v.Constant, mutationMapReplaceConstant(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
-		)
+		), nil
 	case "primitive":
-		return v.Constant, mutationMapReplacePrimitive(
+		p, err := mutationMapReplacePrimitive(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
+		return v.Constant, p, err
 	case "equation":
 		return v.Constant, mutationMapReplaceEquation(
 			a, stage, valAttackerState,
-		)
+		), nil
 	}
-	return v.Constant, []Value{}
+	return v.Constant, []Value{}, nil
 }
 
 func mutationMapReplaceConstant(
@@ -147,14 +155,18 @@ func mutationMapReplaceConstant(
 func mutationMapReplacePrimitive(
 	a Value, rootIndex int, stage int,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) []Value {
+) ([]Value, error) {
+	var err error
 	mutations := []Value{}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case "primitive":
-			a = valueResolveValueInternalValuesFromPrincipalState(
-				a, a, rootIndex, valPrincipalState, valAttackerState, false,
+			a, err = valueResolveValueInternalValuesFromPrincipalState(
+				a, a, rootIndex, valPrincipalState, valAttackerState, false, 0,
 			)
+			if err != nil {
+				return []Value{}, err
+			}
 			if !injectMatchSkeletons(v.Primitive, injectPrimitiveSkeleton(a.Primitive)) {
 				continue
 			}
@@ -174,7 +186,7 @@ func mutationMapReplacePrimitive(
 			mutations = append(mutations, a)
 		}
 	}
-	return mutations
+	return mutations, nil
 }
 
 func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {

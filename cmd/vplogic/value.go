@@ -5,6 +5,7 @@
 package vplogic
 
 import (
+	"errors"
 	"strings"
 )
 
@@ -607,8 +608,11 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 
 func valueResolveValueInternalValuesFromPrincipalState(
 	a Value, rootValue Value, rootIndex int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
-) Value {
+	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
+) (Value, error) {
+	if depth > 65535 {
+		return a, errors.New("invalid depth")
+	}
 	switch a.Kind {
 	case "constant":
 		nextRootIndex := valueGetPrincipalStateIndexFromConstant(valPrincipalState, a.Constant)
@@ -643,23 +647,23 @@ func valueResolveValueInternalValuesFromPrincipalState(
 	}
 	switch a.Kind {
 	case "constant":
-		return a
+		return a, nil
 	case "primitive":
 		return valueResolvePrimitiveInternalValuesFromPrincipalState(
-			a, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate,
+			a, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate, depth+1,
 		)
 	case "equation":
 		return valueResolveEquationInternalValuesFromPrincipalState(
-			a, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate,
+			a, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate, depth+1,
 		)
 	}
-	return a
+	return a, nil
 }
 
 func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	a Value, rootValue Value, rootIndex int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
-) Value {
+	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
+) (Value, error) {
 	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
 		forceBeforeMutate = false
 	}
@@ -673,18 +677,21 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 		},
 	}
 	for _, aa := range a.Primitive.Arguments {
-		s := valueResolveValueInternalValuesFromPrincipalState(
-			aa, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate,
+		s, err := valueResolveValueInternalValuesFromPrincipalState(
+			aa, rootValue, rootIndex, valPrincipalState, valAttackerState, forceBeforeMutate, depth+1,
 		)
+		if err != nil {
+			return Value{}, err
+		}
 		r.Primitive.Arguments = append(r.Primitive.Arguments, s)
 	}
-	return r
+	return r, nil
 }
 
 func valueResolveEquationInternalValuesFromPrincipalState(
-	a Value, rootValue Value, rootIndex int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool,
-) Value {
+	a Value, rootValue Value, rootIndex int, valPrincipalState PrincipalState,
+	valAttackerState AttackerState, forceBeforeMutate bool, depth int,
+) (Value, error) {
 	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
 		forceBeforeMutate = false
 	}
@@ -711,16 +718,22 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 		case "constant":
 			r.Equation.Values = append(r.Equation.Values, aa[aai])
 		case "primitive":
-			aaa := valueResolveValueInternalValuesFromPrincipalState(
+			aaa, err := valueResolveValueInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex,
-				valPrincipalState, valAttackerState, forceBeforeMutate,
+				valPrincipalState, valAttackerState, forceBeforeMutate, depth+1,
 			)
+			if err != nil {
+				return Value{}, err
+			}
 			r.Equation.Values = append(r.Equation.Values, aaa)
 		case "equation":
-			aaa := valueResolveEquationInternalValuesFromPrincipalState(
+			aaa, err := valueResolveEquationInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex,
-				valPrincipalState, valAttackerState, forceBeforeMutate,
+				valPrincipalState, valAttackerState, forceBeforeMutate, depth+1,
 			)
+			if err != nil {
+				return Value{}, err
+			}
 			if aai == 0 {
 				r.Equation.Values = aaa.Equation.Values
 			} else {
@@ -728,7 +741,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 			}
 		}
 	}
-	return r
+	return r, nil
 }
 
 func valueConstantIsUsedByPrincipalInKnowledgeMap(
@@ -755,36 +768,48 @@ func valueConstantIsUsedByPrincipalInKnowledgeMap(
 
 func valueResolveAllPrincipalStateValues(
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) PrincipalState {
+) (PrincipalState, error) {
+	var err error
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	for i := range valPrincipalState.Assigned {
-		valPrincipalStateClone.Assigned[i] = valueResolveValueInternalValuesFromPrincipalState(
+		valPrincipalStateClone.Assigned[i], err = valueResolveValueInternalValuesFromPrincipalState(
 			valPrincipalState.Assigned[i], valPrincipalState.Assigned[i], i, valPrincipalState, valAttackerState,
-			valueShouldResolveToBeforeMutate(i, valPrincipalState),
+			valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
-		valPrincipalStateClone.BeforeRewrite[i] = valueResolveValueInternalValuesFromPrincipalState(
+		if err != nil {
+			return PrincipalState{}, err
+		}
+		valPrincipalStateClone.BeforeRewrite[i], err = valueResolveValueInternalValuesFromPrincipalState(
 			valPrincipalState.BeforeRewrite[i], valPrincipalState.BeforeRewrite[i], i, valPrincipalState, valAttackerState,
-			valueShouldResolveToBeforeMutate(i, valPrincipalState),
+			valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
+		if err != nil {
+			return PrincipalState{}, err
+		}
 	}
-	return valPrincipalStateClone
+	return valPrincipalStateClone, nil
 }
 
 func valueContainsFreshValues(
 	v Value, c Constant,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) bool {
+) (bool, error) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-	v = valueResolveValueInternalValuesFromPrincipalState(v, v, i, valPrincipalState, valAttackerState, false)
+	v, err := valueResolveValueInternalValuesFromPrincipalState(
+		v, v, i, valPrincipalState, valAttackerState, false, 0,
+	)
+	if err != nil {
+		return false, err
+	}
 	cc := valueGetConstantsFromValue(v)
 	for _, ccc := range cc {
 		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, ccc)
 		if ii >= 0 {
 			ccc = valPrincipalState.Constants[ii]
 			if ccc.Fresh {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }

@@ -182,9 +182,10 @@ type PrimitiveSpec struct {
 }
 
 type AttackerState struct {
-	Active       bool
-	CurrentPhase int
-	Known        []Value
+	Active         bool
+	CurrentPhase   int
+	Known          []Value
+	PrincipalState []PrincipalState
 }
 
 type MutationMap struct {

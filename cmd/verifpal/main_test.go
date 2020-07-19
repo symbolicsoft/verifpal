@@ -137,7 +137,7 @@ var verifpalTests = []VerifpalTest{
 	},
 	{
 		Model:       "auth_with_signing_false-attack.vp",
-		ResultsCode: "c0a0a0",
+		ResultsCode: "c0a1a0",
 	},
 	{
 		Model:       "hmac_verif.vp",

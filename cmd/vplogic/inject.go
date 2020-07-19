@@ -142,7 +142,7 @@ func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 	return valueEquivalentValues(pv, sv, true)
 }
 
-func injectMissingSkeletons(p Primitive, valAttackerState AttackerState) {
+func injectMissingSkeletons(p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState) {
 	skeleton := injectPrimitiveSkeleton(p)
 	matchingSkeleton := false
 SkeletonSearch:
@@ -160,17 +160,11 @@ SkeletonSearch:
 			Kind:      "primitive",
 			Primitive: skeleton,
 		}
-		if attackerStatePutWrite(known) {
+		if attackerStatePutWrite(known, valPrincipalState) {
 			InfoMessage(fmt.Sprintf(
 				"Constructed skeleton %s based on %s.",
 				prettyPrimitive(skeleton), prettyPrimitive(p),
 			), "analysis", true)
-		}
-	}
-	for _, a := range p.Arguments {
-		switch a.Kind {
-		case "primitive":
-			injectMissingSkeletons(a.Primitive, valAttackerState)
 		}
 	}
 }
@@ -185,7 +179,6 @@ func injectPrimitive(
 	}
 	kinjectants := make([][]Value, len(p.Arguments))
 	uinjectants := make([][]Value, len(p.Arguments))
-	injectMissingSkeletons(p, valAttackerState)
 	for arg := range p.Arguments {
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {

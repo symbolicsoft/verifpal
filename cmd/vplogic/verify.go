@@ -52,21 +52,33 @@ func verifyModel(m Model) ([]VerifyResult, string, error) {
 
 func verifyResolveQueries(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-) {
+) error {
 	valVerifyResults, _ := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
 		if !verifyResult.Resolved {
-			queryStart(verifyResult.Query, valKnowledgeMap, valPrincipalState)
+			err := queryStart(verifyResult.Query, valKnowledgeMap, valPrincipalState)
+			if err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) error {
 	var scanGroup sync.WaitGroup
-	var err error
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
-		valPrincipalState := valueResolveAllPrincipalStateValues(state, valAttackerState)
+		valPrincipalState, err := valueResolveAllPrincipalStateValues(state, valAttackerState)
+		if err != nil {
+			return err
+		}
+		for _, a := range valPrincipalState.Assigned {
+			switch a.Kind {
+			case "primitive":
+				injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
+			}
+		}
 		failedRewrites, _, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 		err = sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
 		if err != nil {
@@ -79,11 +91,17 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 			}
 		}
 		scanGroup.Add(1)
-		verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, &scanGroup)
+		err = verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, &scanGroup)
+		if err != nil {
+			return err
+		}
 		scanGroup.Wait()
-		verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+		err = verifyResolveQueries(valKnowledgeMap, valPrincipalState)
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) error {

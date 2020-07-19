@@ -10,18 +10,20 @@ import (
 
 func queryStart(
 	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-) {
+) error {
 	valAttackerState := attackerStateGetRead()
+	var err error
 	switch query.Kind {
 	case "confidentiality":
 		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		_, err = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "freshness":
-		queryFreshness(query, valPrincipalState, valAttackerState)
+		_, err = queryFreshness(query, valPrincipalState, valAttackerState)
 	case "unlinkability":
-		queryUnlinkability(query, valPrincipalState, valAttackerState)
+		_, err = queryUnlinkability(query, valPrincipalState, valAttackerState)
 	}
+	return err
 }
 
 func queryConfidentiality(
@@ -42,7 +44,7 @@ func queryConfidentiality(
 	if ii < 0 {
 		return result
 	}
-	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+	mutatedInfo := queryGetMutatedInfo(valAttackerState.PrincipalState[ii])
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
@@ -62,7 +64,7 @@ func queryConfidentiality(
 func queryAuthentication(
 	query Query, valKnowledgeMap KnowledgeMap,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) VerifyResult {
+) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
 		Resolved: false,
@@ -70,11 +72,14 @@ func queryAuthentication(
 		Options:  []QueryOptionResult{},
 	}
 	if query.Message.Recipient != valPrincipalState.Name {
-		return result
+		return result, nil
 	}
-	indices, passes, sender, c := queryAuthenticationGetPassIndices(
+	indices, passes, sender, c, err := queryAuthenticationGetPassIndices(
 		query, valKnowledgeMap, valPrincipalState, valAttackerState,
 	)
+	if err != nil {
+		return result, err
+	}
 	for f, index := range indices {
 		if !passes[f] || (query.Message.Sender == sender) {
 			continue
@@ -83,15 +88,15 @@ func queryAuthentication(
 		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 		result = queryPrecondition(result, valPrincipalState)
 		b := valPrincipalState.BeforeRewrite[index]
-		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState)
+		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState), nil
 	}
-	return result
+	return result, nil
 }
 
 func queryAuthenticationGetPassIndices(
 	query Query, valKnowledgeMap KnowledgeMap,
 	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) ([]int, []bool, string, Constant) {
+) ([]int, []bool, string, Constant, error) {
 	indices := []int{}
 	passes := []bool{}
 	sender := ""
@@ -99,7 +104,7 @@ func queryAuthenticationGetPassIndices(
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
 	_, ii := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
 	if ii < 0 {
-		return indices, passes, sender, c
+		return indices, passes, sender, c, nil
 	}
 	cv := Value{
 		Kind:     "constant",
@@ -108,9 +113,14 @@ func queryAuthenticationGetPassIndices(
 	c = valKnowledgeMap.Constants[i]
 	sender = valPrincipalState.Sender[ii]
 	if sender == "Attacker" {
-		v := valueResolveValueInternalValuesFromPrincipalState(cv, cv, i, valPrincipalState, valAttackerState, true)
+		v, err := valueResolveValueInternalValuesFromPrincipalState(
+			cv, cv, i, valPrincipalState, valAttackerState, true, 0,
+		)
+		if err != nil {
+			return indices, passes, sender, c, err
+		}
 		if valueEquivalentValues(v, valPrincipalState.Assigned[i], true) {
-			return indices, passes, sender, c
+			return indices, passes, sender, c, nil
 		}
 	}
 	for iii := range valKnowledgeMap.Constants {
@@ -128,7 +138,7 @@ func queryAuthenticationGetPassIndices(
 		}
 		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
 		if iiii < 0 {
-			return indices, passes, sender, c
+			return indices, passes, sender, c, nil
 		}
 		b := valPrincipalState.BeforeRewrite[iiii]
 		if primitiveIsCorePrim(b.Primitive.Name) {
@@ -149,7 +159,7 @@ func queryAuthenticationGetPassIndices(
 			passes = append(passes, pass)
 		}
 	}
-	return indices, passes, sender, c
+	return indices, passes, sender, c, nil
 }
 
 func queryAuthenticationHandlePass(
@@ -173,19 +183,22 @@ func queryAuthenticationHandlePass(
 
 func queryFreshness(
 	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
-) VerifyResult {
+) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
 		Resolved: false,
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	freshnessFound := valueContainsFreshValues(Value{
+	freshnessFound, err := valueContainsFreshValues(Value{
 		Kind:     "constant",
 		Constant: query.Constants[0],
 	}, query.Constants[0], valPrincipalState, valAttackerState)
+	if err != nil {
+		return result, err
+	}
 	if freshnessFound {
-		return result
+		return result, nil
 	}
 	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
@@ -202,7 +215,7 @@ func queryFreshness(
 			"%s: %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
-	return result
+	return result, nil
 }
 
 /*
@@ -215,7 +228,7 @@ func queryFreshness(
  */
 func queryUnlinkability(
 	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
-) VerifyResult {
+) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
 		Resolved: false,
@@ -224,10 +237,14 @@ func queryUnlinkability(
 	}
 	noFreshness := []Constant{}
 	for _, c := range query.Constants {
-		if !valueContainsFreshValues(Value{
+		freshnessFound, err := valueContainsFreshValues(Value{
 			Kind:     "constant",
 			Constant: c,
-		}, c, valPrincipalState, valAttackerState) {
+		}, c, valPrincipalState, valAttackerState)
+		if err != nil {
+			return result, err
+		}
+		if !freshnessFound {
 			noFreshness = append(noFreshness, c)
 		}
 	}
@@ -247,7 +264,7 @@ func queryUnlinkability(
 				"%s: %s", prettyQuery(query), result.Summary,
 			), "result", true)
 		}
-		return result
+		return result, nil
 	}
 	constants := []Constant{}
 	assigneds := []Value{}
@@ -289,10 +306,10 @@ func queryUnlinkability(
 					"%s: %s", prettyQuery(query), result.Summary,
 				), "result", true)
 			}
-			return result
+			return result, nil
 		}
 	}
-	return result
+	return result, nil
 }
 
 func queryPrecondition(
