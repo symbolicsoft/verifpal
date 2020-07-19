@@ -75,7 +75,8 @@ func mutationMapInit(
 }
 
 func mutationMapSkipValue(
-	v Value, i int, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	v Value, i int, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) bool {
 	switch {
 	case i < 0:
@@ -160,6 +161,20 @@ func mutationMapReplacePrimitive(
 	mutations := []Value{}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
+		case "constant":
+			if valueIsGOrNil(v.Constant) {
+				continue
+			}
+			c, i := valueResolveConstant(v.Constant, valPrincipalState)
+			switch c.Kind {
+			case "constant":
+				if valPrincipalState.DeclaredAt[rootIndex] > valPrincipalState.DeclaredAt[i] {
+					continue
+				}
+				if valueEquivalentValueInValues(c, mutations) < 0 {
+					mutations = append(mutations, c)
+				}
+			}
 		case "primitive":
 			a, err = valueResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false, 0,
@@ -167,7 +182,7 @@ func mutationMapReplacePrimitive(
 			if err != nil {
 				return []Value{}, err
 			}
-			if !injectMatchSkeletons(v.Primitive, injectPrimitiveSkeleton(a.Primitive)) {
+			if !injectSkeletonNotDeeper(v.Primitive, a.Primitive) {
 				continue
 			}
 			if valueEquivalentValueInValues(v, mutations) < 0 {
@@ -176,7 +191,7 @@ func mutationMapReplacePrimitive(
 		}
 	}
 	injectants := inject(
-		a.Primitive, a.Primitive, true, 0,
+		a.Primitive, 0,
 		valPrincipalState, valAttackerState, stage,
 	)
 	uinjectants := []Value{}
@@ -189,7 +204,9 @@ func mutationMapReplacePrimitive(
 	return mutations, nil
 }
 
-func mutationMapReplaceEquation(a Value, stage int, valAttackerState AttackerState) []Value {
+func mutationMapReplaceEquation(
+	a Value, stage int, valAttackerState AttackerState,
+) []Value {
 	mutations := []Value{}
 	switch len(a.Equation.Values) {
 	case 1:

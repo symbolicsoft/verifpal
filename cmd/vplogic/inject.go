@@ -10,7 +10,7 @@ import (
 )
 
 func inject(
-	p Primitive, rootPrimitive Primitive, isRootPrimitive bool, injectDepth int,
+	p Primitive, injectDepth int,
 	valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
 ) []Value {
 	if verifyResultsAllResolved() {
@@ -27,11 +27,8 @@ func inject(
 			return []Value{}
 		}
 	}
-	if isRootPrimitive {
-		rootPrimitive = p
-	}
 	return injectPrimitive(
-		p, rootPrimitive, valPrincipalState, valAttackerState, injectDepth, stage,
+		p, valPrincipalState, valAttackerState, injectDepth, stage,
 	)
 }
 
@@ -67,10 +64,8 @@ func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 		return false
 	case injectPrimitiveStageRestricted(k, stage):
 		return false
-	case !injectMatchSkeletons(k, injectPrimitiveSkeleton(p.Arguments[arg].Primitive)):
-		return false
 	}
-	return true
+	return injectSkeletonNotDeeper(k, p.Arguments[arg].Primitive)
 }
 
 func injectEquationRules(e Equation, arg int, p Primitive) bool {
@@ -104,7 +99,7 @@ func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 	}
 }
 
-func injectPrimitiveSkeleton(p Primitive) Primitive {
+func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 	skeleton := Primitive{
 		Name:      p.Name,
 		Arguments: make([]Value, len(p.Arguments)),
@@ -116,9 +111,13 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 		case "constant":
 			skeleton.Arguments[i] = valueN
 		case "primitive":
+			pp, dd := injectPrimitiveSkeleton(a.Primitive, depth)
+			if dd > depth {
+				depth = dd
+			}
 			aa := Value{
 				Kind:      "primitive",
-				Primitive: injectPrimitiveSkeleton(a.Primitive),
+				Primitive: pp,
 			}
 			skeleton.Arguments[i] = aa
 		case "equation":
@@ -130,20 +129,30 @@ func injectPrimitiveSkeleton(p Primitive) Primitive {
 			}
 		}
 	}
-	return skeleton
+	return skeleton, depth + 1
+}
+
+func injectSkeletonNotDeeper(p Primitive, reference Primitive) bool {
+	if p.Name != reference.Name {
+		return false
+	}
+	_, pd := injectPrimitiveSkeleton(p, 0)
+	_, sd := injectPrimitiveSkeleton(reference, 0)
+	return pd <= sd
 }
 
 func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 	if p.Name != skeleton.Name {
 		return false
 	}
-	pv := Value{Kind: "primitive", Primitive: injectPrimitiveSkeleton(p)}
+	ps, _ := injectPrimitiveSkeleton(p, 0)
+	pv := Value{Kind: "primitive", Primitive: ps}
 	sv := Value{Kind: "primitive", Primitive: skeleton}
 	return valueEquivalentValues(pv, sv, true)
 }
 
 func injectMissingSkeletons(p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState) {
-	skeleton := injectPrimitiveSkeleton(p)
+	skeleton, _ := injectPrimitiveSkeleton(p, 0)
 	matchingSkeleton := false
 SkeletonSearch:
 	for _, a := range valAttackerState.Known {
@@ -167,11 +176,16 @@ SkeletonSearch:
 			), "analysis", true)
 		}
 	}
+	for _, a := range p.Arguments {
+		switch a.Kind {
+		case "primitive":
+			injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
+		}
+	}
 }
 
 func injectPrimitive(
-	p Primitive, rootPrimitive Primitive,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
 	injectDepth int, stage int,
 ) []Value {
 	if injectPrimitiveStageRestricted(p, stage) {
@@ -200,10 +214,16 @@ func injectPrimitive(
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
 				if stage >= 5 && injectDepth <= stage-5 {
-					kinjectants[arg] = append(kinjectants[arg], inject(
-						k.Primitive, rootPrimitive, false, injectDepth+1,
+					kp := inject(
+						k.Primitive, injectDepth+1,
 						valPrincipalState, valAttackerState, stage,
-					)...)
+					)
+					for _, kkp := range kp {
+						if valueEquivalentValueInValues(kkp, uinjectants[arg]) < 0 {
+							uinjectants[arg] = append(uinjectants[arg], kkp)
+							kinjectants[arg] = append(kinjectants[arg], kkp)
+						}
+					}
 				}
 			case "equation":
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
