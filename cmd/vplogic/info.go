@@ -110,7 +110,7 @@ func infoVerifyResultSummary(
 		}
 		if len(optionsSummary) == 0 {
 			optionsSummary = fmt.Sprintf(
-				"%sFurthermore, the following options are contradicted:\n",
+				"%s Furthermore, the following options are contradicted:\n",
 				"           ",
 			)
 		}
