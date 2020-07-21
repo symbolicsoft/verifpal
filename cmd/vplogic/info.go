@@ -103,9 +103,9 @@ func InfoMessageColor(m string, t string, analysisCount int) {
 }
 
 func infoVerifyResultSummary(
-	mutated string, summary string, oResults []QueryOptionResult,
+	mutatedInfo string, summary string, oResults []QueryOptionResult,
 ) string {
-	mutatedIntro := ""
+	intro := ""
 	optionsSummary := ""
 	for _, oResult := range oResults {
 		if !oResult.Resolved {
@@ -122,19 +122,18 @@ func infoVerifyResultSummary(
 			optionsSummary, "             - ", oResult.Summary,
 		)
 	}
-	if len(mutated) > 0 {
-		mutatedIntro = "When:"
+	if len(mutatedInfo) > 0 {
+		intro = "When:"
 	}
 	if colorOutputSupport() {
 		return fmt.Sprintf("%s%s\n            %s\n%s",
-			aurora.Italic(mutatedIntro).String(),
-			aurora.BrightYellow(mutated).Italic().String(),
+			aurora.Italic(intro).String(), mutatedInfo,
 			aurora.BgRed(summary).White().Italic().Bold().String(),
 			aurora.Red(optionsSummary).Italic().String(),
 		)
 	}
 	return fmt.Sprintf("%s%s\n           %s\n%s",
-		mutatedIntro, mutated, summary, optionsSummary,
+		intro, mutatedInfo, summary, optionsSummary,
 	)
 }
 
@@ -213,4 +212,44 @@ func infoOutputText(revealed Value) string {
 	default:
 		return outputText
 	}
+}
+
+func infoQueryMutatedValues(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState) string {
+	mutatedInfo := ""
+	for i, a := range valPrincipalState.BeforeRewrite {
+		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
+			continue
+		}
+		pc := prettyConstant(valPrincipalState.Constants[i])
+		pa := prettyValue(valPrincipalState.Assigned[i])
+		if colorOutputSupport() {
+			if valPrincipalState.Mutated[i] {
+				mutatedInfo = fmt.Sprintf("%s\n            %s%s%s %s",
+					mutatedInfo,
+					aurora.BrightYellow(pc).Italic().Underline().String(),
+					aurora.BrightYellow(" → ").Italic().Underline().String(),
+					aurora.BrightYellow(pa).Italic().Underline().String(),
+					aurora.Red("(mutated by attacker)").Italic().String(),
+				)
+			} else {
+				mutatedInfo = fmt.Sprintf("%s\n            %s%s%s",
+					mutatedInfo,
+					aurora.BrightYellow(pc).Italic().String(),
+					aurora.BrightYellow(" → ").Italic().String(),
+					aurora.BrightYellow(pa).Italic().String(),
+				)
+			}
+		} else {
+			if valPrincipalState.Mutated[i] {
+				mutatedInfo = fmt.Sprintf("%s\n            %s%s%s %s",
+					mutatedInfo, pc, " → ", pa, "(mutated by attacker)",
+				)
+			} else {
+				mutatedInfo = fmt.Sprintf("%s\n            %s%s%s",
+					mutatedInfo, pc, " → ", pa,
+				)
+			}
+		}
+	}
+	return mutatedInfo
 }

@@ -44,7 +44,7 @@ func queryConfidentiality(
 	if ii < 0 {
 		return result
 	}
-	mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valAttackerState.PrincipalState[ii])
+	mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valAttackerState.PrincipalState[ii])
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
@@ -81,7 +81,7 @@ func queryAuthentication(
 			continue
 		}
 		result.Resolved = true
-		mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
+		mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 		result = queryPrecondition(result, valPrincipalState)
 		b := valPrincipalState.BeforeRewrite[index]
 		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState)
@@ -184,7 +184,7 @@ func queryFreshness(
 	if freshnessFound {
 		return result, nil
 	}
-	mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
+	mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -234,7 +234,7 @@ func queryUnlinkability(
 		}
 	}
 	if len(noFreshness) > 0 {
-		mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
+		mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -276,7 +276,7 @@ func queryUnlinkability(
 			if !obtainable {
 				continue
 			}
-			mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
+			mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 			result.Resolved = true
 			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 				"%s and %s %s (%s), %s.",
@@ -335,19 +335,4 @@ func queryPrecondition(
 		result.Options = append(result.Options, oResult)
 	}
 	return result
-}
-
-func queryGetMutatedInfo(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState) string {
-	mutatedInfo := ""
-	for i, a := range valPrincipalState.BeforeRewrite {
-		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
-			continue
-		}
-		mutatedInfo = fmt.Sprintf("%s\n %s%s → %s",
-			mutatedInfo, "           ",
-			prettyConstant(valPrincipalState.Constants[i]),
-			prettyValue(valPrincipalState.Assigned[i]),
-		)
-	}
-	return mutatedInfo
 }
