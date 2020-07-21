@@ -219,6 +219,7 @@ func infoQueryMutatedValues(
 	valAttackerState AttackerState, targetValue Value,
 ) string {
 	mutated := []Value{}
+	targetInfo := "In another session:"
 	mutatedInfo := ""
 	for i, a := range valPrincipalState.BeforeRewrite {
 		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
@@ -226,19 +227,33 @@ func infoQueryMutatedValues(
 		}
 		pc := prettyConstant(valPrincipalState.Constants[i])
 		pa := prettyValue(valPrincipalState.Assigned[i])
-		isTarget := valueEquivalentValues(targetValue, valPrincipalState.Assigned[i], false)
-		if !isTarget && valPrincipalState.Mutated[i] {
+		pn := make([]string, 4)
+		isTargetValue := valueEquivalentValues(
+			targetValue, valPrincipalState.Assigned[i], false,
+		)
+		if isTargetValue {
+			if colorOutputSupport() {
+				targetInfo = fmt.Sprintf(
+					"%s %s",
+					aurora.Italic(prettyValue(targetValue)).String(),
+					aurora.Italic("is obtained:").String(),
+				)
+			} else {
+				targetInfo = fmt.Sprintf(
+					"%s %s", prettyValue(targetValue), "is obtained:",
+				)
+			}
+		} else if valPrincipalState.Mutated[i] {
 			if valueEquivalentValueInValues(valPrincipalState.Assigned[i], mutated) < 0 {
 				mutated = append(mutated, valPrincipalState.Assigned[i])
 			}
 		}
-		pn := make([]string, 4)
 		if colorOutputSupport() {
 			pn[0] = aurora.BrightYellow(pc).Italic().String()
 			pn[1] = aurora.BrightYellow(" → ").Italic().String()
 			pn[2] = aurora.BrightYellow(pa).Italic().String()
 			pn[3] = ""
-			if isTarget && !valPrincipalState.Mutated[i] {
+			if isTargetValue && !valPrincipalState.Mutated[i] {
 				pn[0] = aurora.BrightYellow(pc).Italic().Underline().String()
 				pn[1] = aurora.BrightYellow(" → ").Italic().Underline().String()
 				pn[2] = aurora.BrightYellow(pa).Italic().Underline().String()
@@ -251,7 +266,7 @@ func infoQueryMutatedValues(
 			pn[1] = " → "
 			pn[2] = pa
 			pn[3] = ""
-			if isTarget && !valPrincipalState.Mutated[i] {
+			if isTargetValue && !valPrincipalState.Mutated[i] {
 				pn[3] = "← obtained by Attacker"
 			} else if valPrincipalState.Mutated[i] {
 				pn[3] = "← mutated by Attacker"
@@ -267,26 +282,7 @@ func infoQueryMutatedValues(
 			continue
 		}
 		mmInfo := infoQueryMutatedValues(valKnowledgeMap, valAttackerState.PrincipalState[ai], valAttackerState, m)
-		if len(mmInfo) == 0 {
-			continue
-		}
-		if colorOutputSupport() {
-			mutatedInfo = fmt.Sprintf(
-				"%s\n\n            %s%s\n%s",
-				mutatedInfo,
-				aurora.Italic(prettyValue(m)).String(),
-				aurora.Italic(", used above, is obtained when, in a previous session:").String(),
-				mmInfo,
-			)
-		} else {
-			mutatedInfo = fmt.Sprintf(
-				"%s\n\n            %s%s\n%s",
-				mutatedInfo,
-				prettyValue(m),
-				", used above, is obtained when, in a previous session:",
-				mmInfo,
-			)
-		}
+		mutatedInfo = fmt.Sprintf("%s\n\n            %s%s", mmInfo, targetInfo, mutatedInfo)
 	}
 	return mutatedInfo
 }
