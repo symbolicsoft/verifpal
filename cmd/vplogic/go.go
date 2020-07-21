@@ -137,9 +137,9 @@ func goExpression(expression Expression) (string, error) {
 			"in an implementation template",
 		)
 	case "assignment":
-		right := goValue(expression.Right)
+		right := goValue(expression.Assigned)
 		left := []Constant{}
-		for i, c := range expression.Left {
+		for i, c := range expression.Constants {
 			left = append(left, c)
 			if strings.HasPrefix(c.Name, "unnamed") {
 				left[i].Name = "_"

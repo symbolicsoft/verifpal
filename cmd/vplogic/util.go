@@ -74,7 +74,7 @@ func colorOutputSupport() bool {
 	return true
 }
 
-// openBrowser opens a URI using the appropriate binding for the host operating system.
+// OpenBrowser opens a URI using the appropriate binding for the host operating system.
 func OpenBrowser(url string) error {
 	var err error
 	err = nil

@@ -197,9 +197,9 @@ func prettyExpression(expression Expression) string {
 			prettyConstants(expression.Constants),
 		)
 	case "assignment":
-		right := prettyValue(expression.Right)
+		right := prettyValue(expression.Assigned)
 		left := []Constant{}
-		for i, c := range expression.Left {
+		for i, c := range expression.Constants {
 			left = append(left, c)
 			if strings.HasPrefix(c.Name, "unnamed") {
 				left[i].Name = "_"
@@ -232,6 +232,8 @@ func prettyPhase(block Block) string {
 	return output
 }
 
+// PrettyModel pretty-prints a Verifpal model that has already
+// been parsed into the Model struct.
 func PrettyModel(m Model) (string, error) {
 	_, _, err := sanity(m)
 	if err != nil {
@@ -261,6 +263,7 @@ func PrettyModel(m Model) (string, error) {
 	return output, nil
 }
 
+// PrettyDiagram generates a sequence diagram format based on a Verifpal model.
 func PrettyDiagram(m Model) (string, error) {
 	_, _, err := sanity(m)
 	if err != nil {

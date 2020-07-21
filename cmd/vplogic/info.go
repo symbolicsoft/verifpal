@@ -12,7 +12,8 @@ import (
 	"github.com/logrusorgru/aurora"
 )
 
-// InfoMessage prints a Verifpal status message.
+// InfoMessage prints a Verifpal status message either in color or non-color format,
+// depending on what is supported by the terminal.
 func InfoMessage(m string, t string, showAnalysis bool) {
 	analysisCount := 0
 	if showAnalysis {
@@ -25,6 +26,7 @@ func InfoMessage(m string, t string, showAnalysis bool) {
 	}
 }
 
+// InfoMessageRegular prints a Verifpal status message in non-color format.
 func InfoMessageRegular(m string, t string, analysisCount int) {
 	infoString := ""
 	if analysisCount > 0 {
@@ -58,6 +60,7 @@ func InfoMessageRegular(m string, t string, analysisCount int) {
 	}
 }
 
+// InfoMessageColor prints a Verifpal status message in color format.
 func InfoMessageColor(m string, t string, analysisCount int) {
 	infoString := ""
 	if analysisCount > 0 {

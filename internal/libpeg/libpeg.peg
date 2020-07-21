@@ -197,8 +197,8 @@ Assignment <- Left:Constants _ '=' _ Right:Value {
 	}
 	return Expression{
 		Kind: "assignment",
-		Left: consts,
-		Right:  Right.(Value),
+		Constants: consts,
+		Assigned:  Right.(Value),
 	}, nil
 }
 

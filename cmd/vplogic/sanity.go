@@ -95,7 +95,7 @@ func sanityAssignmentConstantsFromPrimitive(
 	}
 	if primArguments == 0 {
 		return []Constant{}, fmt.Errorf(
-			"primitive %s has no inputs.", right.Primitive.Name,
+			"primitive %s has no inputs", right.Primitive.Name,
 		)
 	}
 	if !intInSlice(primArguments, specArity) {

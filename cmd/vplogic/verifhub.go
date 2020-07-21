@@ -9,11 +9,15 @@ import (
 	"net/url"
 )
 
+// VerifHubScheduledShared is a global variable that tracks whether
+// VerifHub submission has been enabled for this analysis.
 var VerifHubScheduledShared bool
 
+// VerifHub submits the given Verifpal model to VerifHub by opening
+// the user's browser with the formatted model submission URI.
 func VerifHub(m Model, fileName string, resultsCode string) error {
 	InfoMessage("Your model will now be submitted to VerifHub.", "verifpal", false)
-	submitUri := "https://verifhub.verifpal.com/submit"
+	submitURI := "https://verifhub.verifpal.com/submit"
 	pretty, err := PrettyModel(m)
 	if err != nil {
 		return err
@@ -21,7 +25,7 @@ func VerifHub(m Model, fileName string, resultsCode string) error {
 	model := url.PathEscape(pretty)
 	link := fmt.Sprintf(
 		"%s?name=%s&model=%s&results=%s",
-		submitUri, fileName, model, resultsCode,
+		submitURI, fileName, model, resultsCode,
 	)
 	err = OpenBrowser(link)
 	return err

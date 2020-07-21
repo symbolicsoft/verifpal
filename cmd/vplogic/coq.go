@@ -191,9 +191,9 @@ func coqPrincipalBlock(block Block, valKnowledgeMap KnowledgeMap) (string, error
 
 func coqAssignemntExpression(expression Expression, valKnowledgeMap KnowledgeMap) ([]string, error) {
 	expressions := []string{}
-	switch expression.Right.Kind {
+	switch expression.Assigned.Kind {
 	case "equation":
-		cre, err := coqResolveEquation(expression.Right.Equation, valKnowledgeMap)
+		cre, err := coqResolveEquation(expression.Assigned.Equation, valKnowledgeMap)
 		if err != nil {
 			return []string{}, err
 		}
@@ -201,13 +201,13 @@ func coqAssignemntExpression(expression Expression, valKnowledgeMap KnowledgeMap
 			"EXP assignment private %s unleaked;", cre,
 		))
 	case "primitive":
-		switch expression.Right.Primitive.Name {
+		switch expression.Assigned.Primitive.Name {
 		case "HASH", "PW_HASH", "CONCAT":
 			exp := fmt.Sprintf(
 				"EXP assignment private (prim(%s%d ",
-				expression.Right.Primitive.Name,
-				len(expression.Right.Primitive.Arguments))
-			for _, argument := range expression.Right.Primitive.Arguments {
+				expression.Assigned.Primitive.Name,
+				len(expression.Assigned.Primitive.Arguments))
+			for _, argument := range expression.Assigned.Primitive.Arguments {
 				crv, err := coqResolveValue(argument, valKnowledgeMap)
 				if err != nil {
 					return []string{}, err
@@ -216,14 +216,14 @@ func coqAssignemntExpression(expression Expression, valKnowledgeMap KnowledgeMap
 			}
 			expressions = append(expressions, fmt.Sprintf("%s)) unleaked;", exp))
 		case "SPLIT", "SHAMIR_SPLIT", "HKDF":
-			for i, lhs := range expression.Left {
+			for i, lhs := range expression.Constants {
 				if strings.HasPrefix(lhs.Name, "unnamed_") {
 					continue
 				} else {
 					exp := fmt.Sprintf(
 						"EXP assignment private (prim(%s%d ",
-						expression.Right.Primitive.Name, (i + 1))
-					for _, argument := range expression.Right.Primitive.Arguments {
+						expression.Assigned.Primitive.Name, (i + 1))
+					for _, argument := range expression.Assigned.Primitive.Arguments {
 						crv, err := coqResolveValue(argument, valKnowledgeMap)
 						if err != nil {
 							return []string{}, err
@@ -234,7 +234,7 @@ func coqAssignemntExpression(expression Expression, valKnowledgeMap KnowledgeMap
 				}
 			}
 		default:
-			crp, err := coqResolvePrimitive(expression.Right.Primitive, valKnowledgeMap)
+			crp, err := coqResolvePrimitive(expression.Assigned.Primitive, valKnowledgeMap)
 			if err != nil {
 				return nil, err
 			}

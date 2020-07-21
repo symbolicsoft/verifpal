@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+    knows public const_e
+    knows public alice_username
+    knows password alice_password
+    alice_master_decryption, alice_master_auth = HKDF(alice_username, PW_HASH(alice_password), const_e)
+    knows private alice_private_key
+    e_alice_private_key = AEAD_ENC(alice_master_decryption, alice_private_key, alice_username)
+    alice_public_key = G^alice_private_key
+]
+
+Alice -> Server: [e_alice_private_key], [alice_master_auth], [alice_public_key]
+
+principal Alice[
+    generates e_a
+    e_e_a = AEAD_ENC(alice_private_key, e_a, alice_username)
+]
+
+Alice -> Server: e_e_a
+
+principal AlicePhone[
+    knows public const_e
+    knows public alice_username
+    knows password alice_password
+    alicephone_master_decryption, alicephone_master_auth = HKDF(alice_username, PW_HASH(alice_password), const_e)
+]
+
+AlicePhone -> Server: alicephone_master_auth
+
+principal Server[
+    _ = ASSERT(alicephone_master_auth, alice_master_auth)?
+]
+
+Server -> AlicePhone: e_alice_private_key
+
+principal AlicePhone[
+	alicephone_private_key = AEAD_DEC(alicephone_master_decryption, e_alice_private_key, alice_username)?
+]
+
+queries[
+    authentication? Server -> AlicePhone: e_alice_private_key
+]

@@ -17,18 +17,18 @@ func queryStart(
 	case "confidentiality":
 		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "authentication":
-		_, err = queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
 	case "freshness":
-		_, err = queryFreshness(query, valPrincipalState, valAttackerState)
+		_, err = queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "unlinkability":
-		_, err = queryUnlinkability(query, valPrincipalState, valAttackerState)
+		_, err = queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 	return err
 }
 
 func queryConfidentiality(
-	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	valAttackerState AttackerState,
+	query Query, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -44,7 +44,7 @@ func queryConfidentiality(
 	if ii < 0 {
 		return result
 	}
-	mutatedInfo := queryGetMutatedInfo(valAttackerState.PrincipalState[ii])
+	mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valAttackerState.PrincipalState[ii])
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
@@ -62,9 +62,8 @@ func queryConfidentiality(
 }
 
 func queryAuthentication(
-	query Query, valKnowledgeMap KnowledgeMap,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) (VerifyResult, error) {
+	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
 		Resolved: false,
@@ -72,73 +71,57 @@ func queryAuthentication(
 		Options:  []QueryOptionResult{},
 	}
 	if query.Message.Recipient != valPrincipalState.Name {
-		return result, nil
+		return result
 	}
-	indices, passes, sender, c, err := queryAuthenticationGetPassIndices(
-		query, valKnowledgeMap, valPrincipalState, valAttackerState,
+	indices, passes, sender, c := queryAuthenticationGetPassIndices(
+		query, valKnowledgeMap, valPrincipalState,
 	)
-	if err != nil {
-		return result, err
-	}
 	for f, index := range indices {
 		if !passes[f] || (query.Message.Sender == sender) {
 			continue
 		}
 		result.Resolved = true
-		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+		mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
 		result = queryPrecondition(result, valPrincipalState)
 		b := valPrincipalState.BeforeRewrite[index]
-		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState), nil
+		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState)
 	}
-	return result, nil
+	return result
 }
 
 func queryAuthenticationGetPassIndices(
-	query Query, valKnowledgeMap KnowledgeMap,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
-) ([]int, []bool, string, Constant, error) {
+	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+) ([]int, []bool, string, Constant) {
 	indices := []int{}
 	passes := []bool{}
-	sender := ""
-	c := Constant{}
-	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
-	_, ii := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
-	if ii < 0 {
-		return indices, passes, sender, c, nil
+	_, i := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
+	if i < 0 {
+		return indices, passes, "", Constant{}
 	}
-	cv := Value{
-		Kind:     "constant",
-		Constant: query.Message.Constants[0],
-	}
-	c = valKnowledgeMap.Constants[i]
-	sender = valPrincipalState.Sender[ii]
+	c := valKnowledgeMap.Constants[i]
+	sender := valPrincipalState.Sender[i]
 	if sender == "Attacker" {
-		v, err := valueResolveValueInternalValuesFromPrincipalState(
-			cv, cv, i, valPrincipalState, valAttackerState, true, 0,
-		)
-		if err != nil {
-			return indices, passes, sender, c, err
-		}
+		v := valPrincipalState.BeforeMutate[i]
 		if valueEquivalentValues(v, valPrincipalState.Assigned[i], true) {
-			return indices, passes, sender, c, nil
+			return indices, passes, sender, c
 		}
 	}
 	for iii := range valKnowledgeMap.Constants {
-		hasRule := false
-		a := valKnowledgeMap.Assigned[iii]
 		if valKnowledgeMap.Creator[iii] != valPrincipalState.Name {
 			continue
 		}
+		hasRule := false
+		a := valKnowledgeMap.Assigned[iii]
 		switch a.Kind {
 		case "constant", "equation":
 			continue
 		}
-		if !valueFindConstantInPrimitive(c, a.Primitive, valPrincipalState) {
+		if !valueFindConstantInPrimitive(c, a, valKnowledgeMap) {
 			continue
 		}
 		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
 		if iiii < 0 {
-			return indices, passes, sender, c, nil
+			return indices, passes, sender, c
 		}
 		b := valPrincipalState.BeforeRewrite[iiii]
 		if primitiveIsCorePrim(b.Primitive.Name) {
@@ -159,7 +142,7 @@ func queryAuthenticationGetPassIndices(
 			passes = append(passes, pass)
 		}
 	}
-	return indices, passes, sender, c, nil
+	return indices, passes, sender, c
 }
 
 func queryAuthenticationHandlePass(
@@ -182,7 +165,8 @@ func queryAuthenticationHandlePass(
 }
 
 func queryFreshness(
-	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	query Query, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
@@ -200,7 +184,7 @@ func queryFreshness(
 	if freshnessFound {
 		return result, nil
 	}
-	mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+	mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -227,7 +211,8 @@ func queryFreshness(
  * incomplete.
  */
 func queryUnlinkability(
-	query Query, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	query Query, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
@@ -249,7 +234,7 @@ func queryUnlinkability(
 		}
 	}
 	if len(noFreshness) > 0 {
-		mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+		mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
 		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -291,7 +276,7 @@ func queryUnlinkability(
 			if !obtainable {
 				continue
 			}
-			mutatedInfo := queryGetMutatedInfo(valPrincipalState)
+			mutatedInfo := queryGetMutatedInfo(valKnowledgeMap, valPrincipalState)
 			result.Resolved = true
 			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 				"%s and %s %s (%s), %s.",
@@ -352,14 +337,10 @@ func queryPrecondition(
 	return result
 }
 
-func queryGetMutatedInfo(valPrincipalState PrincipalState) string {
+func queryGetMutatedInfo(valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState) string {
 	mutatedInfo := ""
-	for i := range valPrincipalState.Constants {
-		v := Value{
-			Kind:     "constant",
-			Constant: valPrincipalState.Constants[i],
-		}
-		if valueEquivalentValues(v, valPrincipalState.Assigned[i], false) {
+	for i, a := range valPrincipalState.BeforeRewrite {
+		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
 			continue
 		}
 		mutatedInfo = fmt.Sprintf("%s\n %s%s → %s",

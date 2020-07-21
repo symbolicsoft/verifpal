@@ -1,6 +1,9 @@
 /* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 // 806d8db3ce9f3ded40fd35fdba02fb84
+
+// Package vplogic provides the core logic for all of Verifpal, allowing it to
+// be imported as a package for use within other software.
 package vplogic
 
 import (
@@ -10,30 +13,32 @@ import (
 	"os"
 )
 
-func Json(request string) error {
+// JSON processes JSON requests made to Verifpal via the Visual Studio Code extension.
+func JSON(request string) error {
 	reader := bufio.NewReader(os.Stdin)
 	inputString, _ := reader.ReadString(byte(0x04))
 	inputString = inputString[:len(inputString)-1]
 	switch request {
 	case "knowledgeMap":
-		return JsonKnowledgeMap(inputString)
+		return JSONKnowledgeMap(inputString)
 	case "principalStates":
-		return JsonPrincipalStates(inputString)
+		return JSONPrincipalStates(inputString)
 	case "prettyValue":
-		return JsonPrettyValue(inputString)
+		return JSONPrettyValue(inputString)
 	case "prettyQuery":
-		return JsonPrettyQuery(inputString)
+		return JSONPrettyQuery(inputString)
 	case "prettyPrint":
-		return JsonPrettyPrint(inputString)
+		return JSONPrettyPrint(inputString)
 	case "prettyDiagram":
-		return JsonPrettyDiagram(inputString)
+		return JSONPrettyDiagram(inputString)
 	case "verify":
-		return JsonVerify(inputString)
+		return JSONVerify(inputString)
 	}
 	return fmt.Errorf("invalid json subcommand")
 }
 
-func JsonKnowledgeMap(inputString string) error {
+// JSONKnowledgeMap returns the KnowledgeMap struct for a given model in JSON format.
+func JSONKnowledgeMap(inputString string) error {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
 		return err
@@ -47,7 +52,8 @@ func JsonKnowledgeMap(inputString string) error {
 	return nil
 }
 
-func JsonPrincipalStates(inputString string) error {
+// JSONPrincipalStates returns the KnowledgeMap struct for a given model in JSON format.
+func JSONPrincipalStates(inputString string) error {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
 		return err
@@ -61,7 +67,8 @@ func JsonPrincipalStates(inputString string) error {
 	return nil
 }
 
-func JsonPrettyValue(inputString string) error {
+// JSONPrettyValue pretty-prints a Verifpal value expression and returns the result in JSON format.
+func JSONPrettyValue(inputString string) error {
 	a := Value{}
 	err := json.Unmarshal([]byte(inputString), &a)
 	if err != nil {
@@ -71,7 +78,8 @@ func JsonPrettyValue(inputString string) error {
 	return nil
 }
 
-func JsonPrettyQuery(inputString string) error {
+// JSONPrettyQuery pretty-prints a Verifpal query expression and returns the result in JSON format.
+func JSONPrettyQuery(inputString string) error {
 	q := Query{}
 	err := json.Unmarshal([]byte(inputString), &q)
 	if err != nil {
@@ -81,7 +89,8 @@ func JsonPrettyQuery(inputString string) error {
 	return nil
 }
 
-func JsonPrettyPrint(inputString string) error {
+// JSONPrettyPrint pretty-prints a Verifpal model and returns the result in JSON format.
+func JSONPrettyPrint(inputString string) error {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
 		return err
@@ -94,7 +103,8 @@ func JsonPrettyPrint(inputString string) error {
 	return nil
 }
 
-func JsonPrettyDiagram(inputString string) error {
+// JSONPrettyDiagram formats a Verifpal model into a sequence diagram and returns the result in JSON format.
+func JSONPrettyDiagram(inputString string) error {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
 		return err
@@ -107,7 +117,8 @@ func JsonPrettyDiagram(inputString string) error {
 	return nil
 }
 
-func JsonVerify(inputString string) error {
+// JSONVerify returns the verification result of a Verifpal model in JSON format.
+func JSONVerify(inputString string) error {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
 		return err

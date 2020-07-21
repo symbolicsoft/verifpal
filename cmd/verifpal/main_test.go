@@ -239,6 +239,10 @@ var verifpalTests = []VerifpalTest{
 		Model:       "exa.vp",
 		ResultsCode: "c1",
 	},
+	{
+		Model:       "fakeauth.vp",
+		ResultsCode: "a0",
+	},
 }
 
 func TestMain(t *testing.T) {

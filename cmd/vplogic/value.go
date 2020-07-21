@@ -202,69 +202,13 @@ func valueEquivalentEquationsRule(base1 Value, base2 Value, exp1 Value, exp2 Val
 		valueEquivalentValues(exp1, base2, true))
 }
 
-func valueFindConstantInPrimitive(
-	c Constant, p Primitive, valPrincipalState PrincipalState,
-) bool {
-	a, _ := valueResolveConstant(c, valPrincipalState)
-	for _, aa := range p.Arguments {
-		switch aa.Kind {
-		case "constant":
-			if c.Name == aa.Constant.Name {
-				return true
-			}
-			switch a.Kind {
-			case "constant":
-				if a.Constant.Name == aa.Constant.Name {
-					return true
-				}
-			}
-		case "primitive":
-			switch a.Kind {
-			case "primitive":
-				equivPrim, _, _ := valueEquivalentPrimitives(
-					a.Primitive, aa.Primitive, true,
-				)
-				if equivPrim {
-					return true
-				}
-			}
-			if valueFindConstantInPrimitive(c, aa.Primitive, valPrincipalState) {
-				return true
-			}
-		case "equation":
-			if valueFindConstantInEquation(c, aa.Equation, valPrincipalState) {
-				return true
-			}
-		}
+func valueFindConstantInPrimitive(c Constant, a Value, valKnowledgeMap KnowledgeMap) bool {
+	v := Value{
+		Kind:     "constant",
+		Constant: c,
 	}
-	return false
-}
-
-func valueFindConstantInEquation(
-	c Constant, e Equation, valPrincipalState PrincipalState,
-) bool {
-	a, _ := valueResolveConstant(c, valPrincipalState)
-	switch a.Kind {
-	case "equation":
-		if valueEquivalentEquations(a.Equation, e) {
-			return true
-		}
-	}
-	for _, ee := range e.Values {
-		switch ee.Kind {
-		case "constant":
-			if c.Name == ee.Constant.Name {
-				return true
-			}
-			switch a.Kind {
-			case "constant":
-				if a.Constant.Name == ee.Constant.Name {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	_, vv := valueResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
+	return valueEquivalentValueInValues(v, vv) >= 0
 }
 
 func valueEquivalentValueInValues(v Value, a []Value) int {

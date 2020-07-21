@@ -204,13 +204,13 @@ func constructKnowledgeMapRenderGenerates(
 func constructKnowledgeMapRenderAssignment(
 	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
 ) (KnowledgeMap, error) {
-	constants, err := sanityAssignmentConstants(expr.Right, []Constant{}, valKnowledgeMap)
+	constants, err := sanityAssignmentConstants(expr.Assigned, []Constant{}, valKnowledgeMap)
 	if err != nil {
 		return KnowledgeMap{}, err
 	}
-	switch expr.Right.Kind {
+	switch expr.Assigned.Kind {
 	case "primitive":
-		err := sanityPrimitive(expr.Right.Primitive, expr.Left)
+		err := sanityPrimitive(expr.Assigned.Primitive, expr.Constants)
 		if err != nil {
 			return KnowledgeMap{}, err
 		}
@@ -238,7 +238,7 @@ func constructKnowledgeMapRenderAssignment(
 			)
 		}
 	}
-	for i, c := range expr.Left {
+	for i, c := range expr.Constants {
 		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if ii >= 0 {
 			return valKnowledgeMap, fmt.Errorf(
@@ -254,12 +254,12 @@ func constructKnowledgeMapRenderAssignment(
 			Declaration: "assignment",
 			Qualifier:   "private",
 		}
-		switch expr.Right.Kind {
+		switch expr.Assigned.Kind {
 		case "primitive":
-			expr.Right.Primitive.Output = i
+			expr.Assigned.Primitive.Output = i
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
-		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Right)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Assigned)
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)

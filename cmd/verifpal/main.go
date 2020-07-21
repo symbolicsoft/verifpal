@@ -162,7 +162,7 @@ var cmdJson = &cobra.Command{
 	Args:                  cobra.ExactArgs(1),
 	Hidden:                true,
 	Run: func(cmd *cobra.Command, args []string) {
-		err := vplogic.Json(args[0])
+		err := vplogic.JSON(args[0])
 		if err != nil {
 			cmdErrorFatal(err)
 		}

@@ -174,7 +174,7 @@ func pvPrincipal(
 				)
 			}
 		case "assignment":
-			c := valueGetConstantsFromValue(expression.Right)
+			c := valueGetConstantsFromValue(expression.Assigned)
 			get := ""
 			for _, cc := range c {
 				prefix := pvConstantPrefix(valKnowledgeMap, block.Principal.Name, cc)
@@ -199,27 +199,27 @@ func pvPrincipal(
 				)
 			}
 			valType := "bitstring"
-			switch expression.Right.Kind {
+			switch expression.Assigned.Kind {
 			case "primitive":
-				switch expression.Right.Primitive.Name {
+				switch expression.Assigned.Primitive.Name {
 				case "SIGNVERIF", "RINGSIGNVERIF":
 					valType = "bool"
 				}
-				switch expression.Right.Primitive.Check {
+				switch expression.Assigned.Primitive.Check {
 				case true:
 					procs = fmt.Sprintf("%s\tif %s = true then\n",
 						procs,
-						pvPrimitive(valKnowledgeMap, block.Principal.Name, expression.Right.Primitive, true),
+						pvPrimitive(valKnowledgeMap, block.Principal.Name, expression.Assigned.Primitive, true),
 					)
 				}
 			}
 			procs = fmt.Sprintf(
 				"%s\tlet (%s) = %s in\n",
 				procs,
-				pvConstants(valKnowledgeMap, block.Principal.Name, expression.Left, valType),
-				pvValue(valKnowledgeMap, block.Principal.Name, expression.Right),
+				pvConstants(valKnowledgeMap, block.Principal.Name, expression.Constants, valType),
+				pvValue(valKnowledgeMap, block.Principal.Name, expression.Assigned),
 			)
-			for _, l := range expression.Left {
+			for _, l := range expression.Constants {
 				if strings.HasPrefix(l.Name, "unnamed_") {
 					continue
 				}

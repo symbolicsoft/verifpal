@@ -11,6 +11,8 @@ type Model struct {
 	Blocks   []Block
 	Queries  []Query
 }
+
+//VerifyResult contains the verification results for a particular query.
 type VerifyResult struct {
 	Query    Query
 	Resolved bool
@@ -18,6 +20,7 @@ type VerifyResult struct {
 	Options  []QueryOptionResult
 }
 
+// Block represents a principal, message or phase declaration in a Verifpal model.
 type Block struct {
 	Kind      string
 	Principal Principal
@@ -25,21 +28,25 @@ type Block struct {
 	Phase     Phase
 }
 
+// Principal represents a principal declaration in a Verifpal model.
 type Principal struct {
 	Name        string
 	Expressions []Expression
 }
 
+// Message represents a message declaration in a Verifpal model.
 type Message struct {
 	Sender    string
 	Recipient string
 	Constants []Constant
 }
 
+// Phase represents a phase declaration in a Verifpal model.
 type Phase struct {
 	Number int
 }
 
+// Query represents a query declaration in a Verifpal model.
 type Query struct {
 	Kind      string
 	Constants []Constant
@@ -47,25 +54,32 @@ type Query struct {
 	Options   []QueryOption
 }
 
+// QueryOption represents a query option (i.e. precondition) declaration in a Verifpal model.
 type QueryOption struct {
 	Kind    string
 	Message Message
 }
 
+// QueryOptionResult represents the analysis result of a QueryOption.
 type QueryOptionResult struct {
 	Option   QueryOption
 	Resolved bool
 	Summary  string
 }
 
+// Expression represents one of the following kinds of expressions:
+// - "knows": `knows [qualifier] [constants]`, eg. "knows private x"
+// - "generates": `generates [constants]`, eg. "generates x, y"
+// - "assignment": `[constants] = [value]`, eg. "x, y = HKDF(a, b, c)"
+// - "leaks": `leaks [constants]`, eg. "leaks x"
 type Expression struct {
 	Kind      string
 	Qualifier string
 	Constants []Constant
-	Left      []Constant
-	Right     Value
+	Assigned  Value
 }
 
+// Value represents either a constant, primitive or equation expression.
 type Value struct {
 	Kind      string
 	Constant  Constant
@@ -73,6 +87,13 @@ type Value struct {
 	Equation  Equation
 }
 
+// Constant represents a constant expression:
+// - Guard indicates if this is a guarded constant.
+// - Fresh indicates if this is a "fresh" (i.e. generated) constant.
+// - Leaked indicates if this constant has been leaked.
+// - Name indicates the name of the constant.
+// - Declaration indicates how the constant was declared.
+// - Qualifier indicates the "knows" qualifier (eg. "private").
 type Constant struct {
 	Guard       bool
 	Fresh       bool
@@ -82,6 +103,11 @@ type Constant struct {
 	Qualifier   string
 }
 
+// Primitive represents a primitive expression:
+// - Name indicates the name of the primitives.
+// - Arguments indicates the arguments of the primitive.
+// - Output indicates the number of outputs from the primitive.
+// - Check indicates whether this has been a checked primitive.
 type Primitive struct {
 	Name      string
 	Arguments []Value
@@ -89,10 +115,27 @@ type Primitive struct {
 	Check     bool
 }
 
+// Equation represents an equation expression.
 type Equation struct {
 	Values []Value
 }
 
+// KnowledgeMap represents Verifpal's internal map of knowledge of the model.
+// It is constructed at the very beginning before Verifpal analysis commences
+// and after the model is checked to be parseable, sane and error-free.
+// After it is created, the KnowledgeMap structure is never changed.
+// In what follows, Constants, Assigned, Creator, KnownBy, DeclaredAt and Phase
+// operate as related columns, i.e. the n'th slice element in each of them
+// corresponds to the n'th slice element in the other.
+// - Principals contains the names of all model principals.
+// - Constants contains all the constants within the model.
+// - Assigned represents the values to which constants are assigned.
+// - Creator represents the name of the principal who first declared the constant.
+// - KnownBy is a map documenting from whom each principal came to know the constant.
+// - DeclaredAt documents how many messages had passed before the constant was declared.
+// - MaxDeclaredAt documents the maximum possible value for DeclaredAt.
+// - Phase documents at which phase the constant was declared.
+// - MaxPhase documents the maximum possible phase in the model.
 type KnowledgeMap struct {
 	Principals    []string
 	Constants     []Constant
@@ -105,6 +148,34 @@ type KnowledgeMap struct {
 	MaxPhase      int
 }
 
+// PrincipalState represents the discrete state of each principal in a model.
+// Each principal has their own PrincipalState, which continuously may be mutated
+// by the active attacker under a set of rules as analysis progresses.
+// Verifpal generates a new PrincipalState for each principal at each stage of the analysis.
+// In that follows, Constants, Assigned, Guard, Known, Wire, KnownBy, DeclaredAt,
+// Creator, Sender, Rewritten, BeforeRewrite, Mutated, MutatableTo, BeforeMutate and Phase
+// operate as related columns, i.e. the n'th slice element in each of them
+// corresponds to the n'th slice element in the other.
+// - Name contains the name of the principal for whom this PrincipalState belongs to.
+// - Constants contains all the constants within the model.
+// - Assigned represents the values to which constants are assigned.
+//   This may be mutated by the active attacker during analysis.
+// - Guard represents whether this value was guarded when this principal received it.
+// - Known represents whether this principal ever gains knowledge of this value.
+// - Wire represents the list of principals who received this constant over the wire (as a message).
+// - KnownBy is a map documenting from whom each principal came to know the constant.
+// - DeclaredAt documents how many messages had passed before the constant was declared.
+// - MaxDeclaredAt documents the maximum possible value for DeclaredAt.
+// - Creator represents the name of the principal who first declared the constant.
+// - Sender represents which principal it was who sent this constant to this principal.
+// - Rewritten tracks whether this value could be rewritten (eg. from `DEC(k,ENC(k,m))` to `m`).
+//   The rewritten value is then stored in Assigned.
+// - BeforeRewrite tracks the value before it was rewritten.
+// - Mutated tracks whether this value could be mutated by the active attacker (eg. from `G^a` to `G^nil`).
+//   The mutated value is then stored in Assigned.
+// - MutatableTo tracks the principal for whom it is possible for this value to ever be mutated.
+// - BeforeMutate tracks the value before it was mutated.
+// - Phase documents at which phase the constant was declared.
 type PrincipalState struct {
 	Name          string
 	Constants     []Constant
@@ -125,6 +196,7 @@ type PrincipalState struct {
 	Phase         [][]int
 }
 
+// DecomposeRule contains a primitive's DecomposeRule.
 type DecomposeRule struct {
 	HasRule bool
 	Given   []int
@@ -132,6 +204,7 @@ type DecomposeRule struct {
 	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
+// RecomposeRule contains a primitive's RecomposeRule.
 type RecomposeRule struct {
 	HasRule bool
 	Given   [][]int
@@ -139,6 +212,7 @@ type RecomposeRule struct {
 	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
+// RewriteRule contains a primitive's RewriteRule.
 type RewriteRule struct {
 	HasRule  bool
 	Name     string
@@ -148,6 +222,7 @@ type RewriteRule struct {
 	Filter   func(Primitive, Value, int) (Value, bool)
 }
 
+// RebuildRule contains a primitive's RebuildRule.
 type RebuildRule struct {
 	HasRule bool
 	Name    string
@@ -156,6 +231,7 @@ type RebuildRule struct {
 	Filter  func(Primitive, Value, int) (Value, bool)
 }
 
+// PrimitiveCoreSpec contains the definition of a core primitive.
 type PrimitiveCoreSpec struct {
 	Name       string
 	Arity      []int
@@ -167,6 +243,7 @@ type PrimitiveCoreSpec struct {
 	Explosive  bool
 }
 
+// PrimitiveSpec contains the definition of a primitive.
 type PrimitiveSpec struct {
 	Name            string
 	Arity           []int
@@ -181,6 +258,15 @@ type PrimitiveSpec struct {
 	PasswordHashing []int
 }
 
+// AttackerState contains the attacker's state during model analysis.
+// In what follows, Known and PrincipalState operate as related columns,
+// i.e. the n'th slice element in each of them corresponds to the n'th
+// slice element in the other:
+// - Active tracks whether this is an active attacker.
+// - CurrentPhase tracks the phase at which the analysis is currently occurring.
+// - Known tracks the values learned by the attacker.
+// - PrincipalState contains a snapshot of the principal's PrincipalState at the moment
+//   where the corresponding value in Known was learned by the attacker.
 type AttackerState struct {
 	Active         bool
 	CurrentPhase   int
@@ -188,6 +274,19 @@ type AttackerState struct {
 	PrincipalState []PrincipalState
 }
 
+// MutationMap contains the map of mutations that the attacker plans to
+// apply to a PrincipalState.
+// In what follows, Constants, Mutations and Combination operate as
+// related columns, i.e. the n'th slice element in each of them
+// corresponds to the n'th slice element in the other:
+// - Initialized tracks whether this MutationMap has been populated.
+// - OutOfMutations tracks whether all of the mutations in this map
+//   have been applied to its corresponding PrincipalState.
+// - Constants tracks the constant which will be mutated.
+// - Mutations tracks the possible mutations for this constant in
+//   the PrincipalState.
+// Combination and DepthIndex are internal values to track the
+// combinatorial state of the MutationMAp.
 type MutationMap struct {
 	Initialized    bool
 	OutOfMutations bool
@@ -198,6 +297,8 @@ type MutationMap struct {
 	DepthIndex     []int
 }
 
+// PvTemplate is a structure that helps contain parts of the
+// ProVerif model which may be generated by Verifpal.
 type PvTemplate struct {
 	Parameters func(string) string
 	Types      func() string
