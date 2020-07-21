@@ -46,7 +46,6 @@ func verifyModel(m Model) ([]VerifyResult, string, error) {
 	default:
 		return []VerifyResult{}, "", fmt.Errorf("invalid attacker (%s)", m.Attacker)
 	}
-	fmt.Fprint(os.Stdout, "\n\n")
 	return verifyEnd(m)
 }
 
@@ -154,6 +153,15 @@ func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 func verifyEnd(m Model) ([]VerifyResult, string, error) {
 	var err error
 	valVerifyResults, fileName := verifyResultsGetRead()
+	completed := time.Now().Format("03:04:05 PM")
+	fmt.Fprint(os.Stdout, "\n\n")
+	InfoMessage(fmt.Sprintf(
+		"Verification completed for '%s' at %s.", fileName, completed,
+	), "verifpal", false)
+	InfoMessage(fmt.Sprintf(
+		"Summary of contradicted queries, if any, will follow.",
+	), "verifpal", false)
+	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
 			InfoMessage(fmt.Sprintf(
@@ -163,10 +171,6 @@ func verifyEnd(m Model) ([]VerifyResult, string, error) {
 			), "result", false)
 		}
 	}
-	completed := time.Now().Format("03:04:05 PM")
-	InfoMessage(fmt.Sprintf(
-		"Verification completed for '%s' at %s.", fileName, completed,
-	), "verifpal", false)
 	InfoMessage("Thank you for using Verifpal.", "verifpal", false)
 	resultsCode := verifyGetResultsCode(valVerifyResults)
 	if VerifHubScheduledShared {

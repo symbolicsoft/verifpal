@@ -17,7 +17,7 @@ func queryStart(
 	case "confidentiality":
 		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "authentication":
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "freshness":
 		_, err = queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case "unlinkability":
@@ -44,7 +44,9 @@ func queryConfidentiality(
 	if ii < 0 {
 		return result
 	}
-	mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valAttackerState.PrincipalState[ii])
+	mutatedInfo := infoQueryMutatedValues(
+		valKnowledgeMap, valAttackerState.PrincipalState[ii], valAttackerState, v,
+	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s) is obtained by Attacker.",
@@ -62,7 +64,8 @@ func queryConfidentiality(
 }
 
 func queryAuthentication(
-	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	query Query, valKnowledgeMap KnowledgeMap,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -81,10 +84,15 @@ func queryAuthentication(
 			continue
 		}
 		result.Resolved = true
-		mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
-		result = queryPrecondition(result, valPrincipalState)
+		a := valPrincipalState.Assigned[index]
 		b := valPrincipalState.BeforeRewrite[index]
-		return queryAuthenticationHandlePass(result, c, b, mutatedInfo, sender, valPrincipalState)
+		mutatedInfo := infoQueryMutatedValues(
+			valKnowledgeMap, valPrincipalState, valAttackerState, a,
+		)
+		result = queryPrecondition(result, valPrincipalState)
+		return queryAuthenticationHandlePass(
+			result, c, b, mutatedInfo, sender, valPrincipalState,
+		)
 	}
 	return result
 }
@@ -184,13 +192,16 @@ func queryFreshness(
 	if freshnessFound {
 		return result, nil
 	}
-	mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
+	mutatedInfo := infoQueryMutatedValues(
+		valKnowledgeMap, valPrincipalState, valAttackerState, resolved,
+	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
-		"%s (%s) is not a fresh value. If used as a message, it could be replayed, leading to potential replay attacks.",
+		"%s (%s) is not a fresh value. If used as a message, %s",
 		prettyConstant(query.Constants[0]),
 		prettyValue(resolved),
+		"it could be replayed, leading to potential replay attacks.",
 	), result.Options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
@@ -234,8 +245,10 @@ func queryUnlinkability(
 		}
 	}
 	if len(noFreshness) > 0 {
-		mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
 		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
+		mutatedInfo := infoQueryMutatedValues(
+			valKnowledgeMap, valPrincipalState, valAttackerState, resolved,
+		)
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
@@ -276,7 +289,9 @@ func queryUnlinkability(
 			if !obtainable {
 				continue
 			}
-			mutatedInfo := infoQueryMutatedValues(valKnowledgeMap, valPrincipalState)
+			mutatedInfo := infoQueryMutatedValues(
+				valKnowledgeMap, valPrincipalState, valAttackerState, Value{},
+			)
 			result.Resolved = true
 			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 				"%s and %s %s (%s), %s.",
