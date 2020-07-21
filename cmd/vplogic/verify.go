@@ -158,9 +158,7 @@ func verifyEnd(m Model) ([]VerifyResult, string, error) {
 	InfoMessage(fmt.Sprintf(
 		"Verification completed for '%s' at %s.", fileName, completed,
 	), "verifpal", false)
-	InfoMessage(fmt.Sprintf(
-		"Summary of contradicted queries, if any, will follow.",
-	), "verifpal", false)
+	InfoMessage("Summary of contradicted queries, if any, will follow.", "verifpal", false)
 	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
