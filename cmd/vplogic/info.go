@@ -288,7 +288,9 @@ func infoQueryMutatedValues(
 			continue
 		}
 		mmInfo := infoQueryMutatedValues(valKnowledgeMap, valAttackerState.PrincipalState[ai], valAttackerState, m)
-		mutatedInfo = fmt.Sprintf("%s\n\n            %s%s", mmInfo, targetInfo, mutatedInfo)
+		if len(mmInfo) > 0 {
+			mutatedInfo = fmt.Sprintf("%s\n\n            %s%s", mmInfo, targetInfo, mutatedInfo)
+		}
 	}
 	return mutatedInfo
 }
