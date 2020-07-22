@@ -117,43 +117,23 @@ func valueGetConstantsFromEquation(e Equation) []Constant {
 }
 
 func valueEquivalentValues(a1 Value, a2 Value, considerOutput bool) bool {
+	if a1.Kind != a2.Kind {
+		return false
+	}
 	switch a1.Kind {
 	case "constant":
-		switch a2.Kind {
-		case "constant":
-			if a1.Constant.Name != a2.Constant.Name {
-				return false
-			}
-		case "primitive":
-			return false
-		case "equation":
-			return false
-		}
+		return a1.Constant.Name == a2.Constant.Name
 	case "primitive":
-		switch a2.Kind {
-		case "constant":
-			return false
-		case "primitive":
-			equivPrim, _, _ := valueEquivalentPrimitives(
-				a1.Primitive, a2.Primitive, considerOutput,
-			)
-			return equivPrim
-		case "equation":
-			return false
-		}
+		equivPrim, _, _ := valueEquivalentPrimitives(
+			a1.Primitive, a2.Primitive, considerOutput,
+		)
+		return equivPrim
 	case "equation":
-		switch a2.Kind {
-		case "constant":
-			return false
-		case "primitive":
-			return false
-		case "equation":
-			return valueEquivalentEquations(
-				a1.Equation, a2.Equation,
-			)
-		}
+		return valueEquivalentEquations(
+			a1.Equation, a2.Equation,
+		)
 	}
-	return true
+	return false
 }
 
 func valueEquivalentPrimitives(
@@ -212,14 +192,12 @@ func valueFindConstantInPrimitive(c Constant, a Value, valKnowledgeMap Knowledge
 }
 
 func valueEquivalentValueInValues(v Value, a []Value) int {
-	index := -1
-	for i, aa := range a {
-		if valueEquivalentValues(v, aa, true) {
-			index = i
-			break
+	for i := 0; i < len(a); i++ {
+		if valueEquivalentValues(v, a[i], true) {
+			return i
 		}
 	}
-	return index
+	return -1
 }
 
 func valuePerformPrimitiveRebuild(

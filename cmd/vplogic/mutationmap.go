@@ -40,7 +40,9 @@ func mutationMapInit(
 		c, r, err = mutationMapReplaceValue(
 			a, v, i, stage, valPrincipalState, valAttackerState,
 		)
-
+		if err != nil {
+			return MutationMap{}, err
+		}
 		if len(r) == 0 {
 			continue
 		}

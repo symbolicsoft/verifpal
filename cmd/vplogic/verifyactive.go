@@ -56,7 +56,7 @@ func verifyActiveStages(
 				}
 				err = verifyActiveScan(
 					valKnowledgeMap, valPrincipalState, valAttackerState,
-					valMutationMap, stage, &scanGroup,
+					mutationMapNext(valMutationMap), stage, &scanGroup,
 				)
 				if err != nil {
 					scanGroup.Done()
