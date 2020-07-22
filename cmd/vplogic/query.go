@@ -341,7 +341,7 @@ func queryPrecondition(
 		if sender == option.Message.Sender && recipientKnows {
 			oResult.Resolved = true
 			oResult.Summary = fmt.Sprintf(
-				"%s sends %s to %s despite the query being contradicted.",
+				"%s sends %s to %s despite the query failing.",
 				option.Message.Sender,
 				prettyConstant(option.Message.Constants[0]),
 				option.Message.Recipient,

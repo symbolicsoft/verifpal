@@ -113,7 +113,7 @@ func infoVerifyResultSummary(
 		}
 		if len(optionsSummary) == 0 {
 			optionsSummary = fmt.Sprintf(
-				"%s Furthermore, the following options are contradicted:\n",
+				"%s Furthermore, the following query options fail:\n",
 				"           ",
 			)
 		}
@@ -259,7 +259,11 @@ func infoQueryMutatedValues(
 				pn[2] = aurora.BrightYellow(pa).Italic().Underline().String()
 				pn[3] = aurora.Red("← obtained by Attacker").Italic().String()
 			} else if valPrincipalState.Mutated[i] {
-				pn[3] = aurora.Red("← mutated by Attacker").Italic().String()
+				pn[3] = aurora.Red(
+					fmt.Sprintf("← mutated by Attacker (originally %s)",
+						prettyValue(valKnowledgeMap.Assigned[i]),
+					),
+				).Italic().String()
 			}
 		} else {
 			pn[0] = pc
@@ -269,7 +273,9 @@ func infoQueryMutatedValues(
 			if isTargetValue && !valPrincipalState.Mutated[i] {
 				pn[3] = "← obtained by Attacker"
 			} else if valPrincipalState.Mutated[i] {
-				pn[3] = "← mutated by Attacker"
+				pn[3] = fmt.Sprintf("← mutated by Attacker (originally %s)",
+					prettyValue(valKnowledgeMap.Assigned[i]),
+				)
 			}
 		}
 		mutatedInfo = fmt.Sprintf("%s\n            %s%s%s %s",

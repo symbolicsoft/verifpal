@@ -153,19 +153,28 @@ func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 func verifyEnd(m Model) ([]VerifyResult, string, error) {
 	var err error
 	valVerifyResults, fileName := verifyResultsGetRead()
-	completed := time.Now().Format("03:04:05 PM")
+	noResolved := true
+	for _, verifyResult := range valVerifyResults {
+		if verifyResult.Resolved {
+			noResolved = false
+			break
+		}
+	}
 	fmt.Fprint(os.Stdout, "\n\n")
 	InfoMessage(fmt.Sprintf(
-		"Verification completed for '%s' at %s.", fileName, completed,
+		"Verification completed for '%s' at %s.",
+		fileName, time.Now().Format("03:04:05 PM"),
 	), "verifpal", false)
-	InfoMessage("Summary of contradicted queries, if any, will follow.", "verifpal", false)
+	if noResolved {
+		InfoMessage("All queries pass.", "verifpal", false)
+	} else {
+		InfoMessage("Summary of failed queries will follow.", "verifpal", false)
+	}
 	fmt.Fprint(os.Stdout, "\n")
 	for _, verifyResult := range valVerifyResults {
 		if verifyResult.Resolved {
-			InfoMessage(fmt.Sprintf(
-				"%s — %s",
-				prettyQuery(verifyResult.Query),
-				verifyResult.Summary,
+			InfoMessage(fmt.Sprintf("%s — %s",
+				prettyQuery(verifyResult.Query), verifyResult.Summary,
 			), "result", false)
 		}
 	}
