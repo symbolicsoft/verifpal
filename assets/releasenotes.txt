@@ -1,1 +1,1 @@
-Verifpal 0.17.5 fixes a bug in Verifpal analysis logic reported by Bruno Blanchet.
+Verifpal 0.17.6 brings big improvements to the way Verifpal describes query results. Failed queries now show a lot more information on how the attack was possible.
