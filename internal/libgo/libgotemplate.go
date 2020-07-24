@@ -32,16 +32,16 @@ import (
  * ELLIPTIC CURVE CRYPTOGRAPHY                                      *
  * ---------------------------------------------------------------- */
 
-func x25519DhFromEd25519PublicKey(private_key []byte, public_key []byte) ([]byte, error) {
-	return curve25519.X25519(private_key, public_key)
+func x25519DhFromEd25519PublicKey(privateKey []byte, publicKey []byte) ([]byte, error) {
+	return curve25519.X25519(privateKey, publicKey)
 }
 
 func ed25519Gen() ([]byte, []byte, error) {
-	public_key, private_key, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return public_key, private_key, err
+		return publicKey, privateKey, err
 	}
-	return private_key, public_key, nil
+	return privateKey, publicKey, nil
 }
 
 func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
@@ -73,11 +73,11 @@ func ed25519PublicKeyToCurve25519(pk ed25519.PublicKey) []byte {
  * PRIMITIVES                                                       *
  * ---------------------------------------------------------------- */
 
-func ASSERT(a []byte, b []byte) bool {
+func assert(a []byte, b []byte) bool {
 	return hmac.Equal(a, b)
 }
 
-func CONCAT(a ...[]byte) []byte {
+func concat(a ...[]byte) []byte {
 	b := []byte{}
 	for _, aa := range a {
 		b = append(b, aa...)
@@ -85,20 +85,20 @@ func CONCAT(a ...[]byte) []byte {
 	return b
 }
 
-func SPLIT2(b []byte) ([]byte, []byte) {
+func split2(b []byte) ([]byte, []byte) {
 	a1 := b[00:32]
 	a2 := b[32:64]
 	return a1, a2
 }
 
-func SPLIT3(b []byte) ([]byte, []byte, []byte) {
+func split3(b []byte) ([]byte, []byte, []byte) {
 	a1 := b[00:32]
 	a2 := b[32:64]
 	a3 := b[64:96]
 	return a1, a2, a3
 }
 
-func SPLIT4(b []byte) ([]byte, []byte, []byte, []byte) {
+func split4(b []byte) ([]byte, []byte, []byte, []byte) {
 	a1 := b[00:32]
 	a2 := b[32:64]
 	a3 := b[64:96]
@@ -106,7 +106,7 @@ func SPLIT4(b []byte) ([]byte, []byte, []byte, []byte) {
 	return a1, a2, a3, a4
 }
 
-func SPLIT5(b []byte) ([]byte, []byte, []byte, []byte, []byte) {
+func split5(b []byte) ([]byte, []byte, []byte, []byte, []byte) {
 	a1 := b[00:32]
 	a2 := b[32:64]
 	a3 := b[64:96]
@@ -115,7 +115,7 @@ func SPLIT5(b []byte) ([]byte, []byte, []byte, []byte, []byte) {
 	return a1, a2, a3, a4, a5
 }
 
-func HASH(a ...[]byte) []byte {
+func hash(a ...[]byte) []byte {
 	b := []byte{}
 	for _, aa := range a {
 		b = append(b, aa...)
@@ -124,20 +124,20 @@ func HASH(a ...[]byte) []byte {
 	return h[:]
 }
 
-func MAC(k []byte, message []byte) ([]byte, error) {
+func mac(k []byte, message []byte) ([]byte, error) {
 	mac := hmac.New(sha256.New, k)
 	_, err := mac.Write(message)
 	return mac.Sum(nil), err
 }
 
-func HKDF1(ck []byte, ikm []byte) ([]byte, error) {
+func hkdf1(ck []byte, ikm []byte) ([]byte, error) {
 	k1 := make([]byte, 32)
 	output := hkdf.New(sha256.New, ikm, ck, []byte{})
 	_, err := io.ReadFull(output, k1)
 	return k1, err
 }
 
-func HKDF2(ck []byte, ikm []byte) ([]byte, []byte, error) {
+func hkdf2(ck []byte, ikm []byte) ([]byte, []byte, error) {
 	k1 := make([]byte, 32)
 	k2 := make([]byte, 32)
 	output := hkdf.New(sha256.New, ikm, ck, []byte{})
@@ -149,7 +149,7 @@ func HKDF2(ck []byte, ikm []byte) ([]byte, []byte, error) {
 	return k1, k2, err
 }
 
-func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte, error) {
+func hkdf3(ck []byte, ikm []byte) ([]byte, []byte, []byte, error) {
 	k1 := make([]byte, 32)
 	k2 := make([]byte, 32)
 	k3 := make([]byte, 32)
@@ -166,7 +166,7 @@ func HKDF3(ck []byte, ikm []byte) ([]byte, []byte, []byte, error) {
 	return k1, k2, k3, err
 }
 
-func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, error) {
+func hkdf4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, error) {
 	k1 := make([]byte, 32)
 	k2 := make([]byte, 32)
 	k3 := make([]byte, 32)
@@ -188,7 +188,7 @@ func HKDF4(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, error) {
 	return k1, k2, k3, k4, err
 }
 
-func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte, error) {
+func hkdf5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte, error) {
 	k1 := make([]byte, 32)
 	k2 := make([]byte, 32)
 	k3 := make([]byte, 32)
@@ -215,8 +215,8 @@ func HKDF5(ck []byte, ikm []byte) ([]byte, []byte, []byte, []byte, []byte, error
 	return k1, k2, k3, k4, k5, err
 }
 
-func PW_HASH(a ...[]byte) ([]byte, error) {
-	h := HASH(a...)
+func pwHash(a ...[]byte) ([]byte, error) {
+	h := hash(a...)
 	salt := make([]byte, 16)
 	_, err := rand.Read(salt)
 	if err != nil {
@@ -226,7 +226,7 @@ func PW_HASH(a ...[]byte) ([]byte, error) {
 	return dk, err
 }
 
-func ENC(k []byte, plaintext []byte) ([]byte, error) {
+func enc(k []byte, plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(k)
 	if err != nil {
 		return []byte{}, err
@@ -242,7 +242,7 @@ func ENC(k []byte, plaintext []byte) ([]byte, error) {
 	return append(iv, ciphertext...), nil
 }
 
-func DEC(k []byte, ciphertext []byte) ([]byte, error) {
+func dec(k []byte, ciphertext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(k)
 	if err != nil {
 		return []byte{}, err
@@ -260,7 +260,7 @@ func DEC(k []byte, ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-func AEAD_ENC(k []byte, plaintext []byte, ad []byte) ([]byte, error) {
+func aeadEnc(k []byte, plaintext []byte, ad []byte) ([]byte, error) {
 	nonce := make([]byte, chacha20poly1305.NonceSizeX)
 	_, err := rand.Read(nonce)
 	if err != nil {
@@ -271,7 +271,7 @@ func AEAD_ENC(k []byte, plaintext []byte, ad []byte) ([]byte, error) {
 	return append(nonce, ciphertext...), nil
 }
 
-func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) ([]byte, error) {
+func aeadDec(k []byte, ciphertext []byte, ad []byte) ([]byte, error) {
 	enc, err := chacha20poly1305.NewX(k)
 	if err != nil {
 		return []byte{}, err
@@ -287,7 +287,7 @@ func AEAD_DEC(k []byte, ciphertext []byte, ad []byte) ([]byte, error) {
 	return plaintext, err
 }
 
-func PKE_ENC(pk []byte, plaintext []byte) ([]byte, error) {
+func pkeEnc(pk []byte, plaintext []byte) ([]byte, error) {
 	esk, epk, err := ed25519Gen()
 	if err != nil {
 		return []byte{}, err
@@ -296,11 +296,11 @@ func PKE_ENC(pk []byte, plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	ciphertext, err := ENC(HASH(ss), plaintext)
+	ciphertext, err := enc(hash(ss), plaintext)
 	return append(epk, ciphertext...), err
 }
 
-func PKE_DEC(k []byte, ciphertext []byte) ([]byte, error) {
+func pkeDec(k []byte, ciphertext []byte) ([]byte, error) {
 	if len(ciphertext) <= 32 {
 		return []byte{}, fmt.Errorf("invalid ciphertext")
 	}
@@ -309,43 +309,43 @@ func PKE_DEC(k []byte, ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	plaintext, err := DEC(HASH(ss), ciphertext)
+	plaintext, err := dec(hash(ss), ciphertext)
 	return plaintext, err
 }
 
-func SIGN(k []byte, message []byte) []byte {
+func sign(k []byte, message []byte) []byte {
 	return ed25519.Sign(k, message)
 }
 
-func SIGNVERIF(pk []byte, message []byte, signature []byte) bool {
+func signverif(pk []byte, message []byte, signature []byte) bool {
 	return ed25519.Verify(pk, message, signature)
 }
 
-func RINGSIGN(ka []byte, kb []byte, kc []byte, message []byte) []byte {
+func ringsign(ka []byte, kb []byte, kc []byte, message []byte) []byte {
 	return []byte{}
 }
 
-func RINGSIGNVERIF(pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte) bool {
+func ringsignverif(pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte) bool {
 	return false
 }
 
-func BLIND(k []byte, message []byte) []byte {
+func blind(k []byte, message []byte) []byte {
 	return []byte{}
 }
 
-func UNBLIND(k []byte, message []byte, signature []byte) []byte {
+func unblind(k []byte, message []byte, signature []byte) []byte {
 	return []byte{}
 }
 
-func SHAMIR_SPLIT(x []byte) []byte {
+func shamirSplit(x []byte) []byte {
 	return []byte{}
 }
 
-func SHAMIR_JOIN(a []byte, b []byte, c []byte) []byte {
+func shamirJoin(a []byte, b []byte, c []byte) []byte {
 	return []byte{}
 }
 
-func GENERATES() ([]byte, error) {
+func generates() ([]byte, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
