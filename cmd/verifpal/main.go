@@ -50,7 +50,7 @@ var cmdVerify = &cobra.Command{
 		vplogic.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
 		_, _, err := vplogic.Verify(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
@@ -86,7 +86,7 @@ var cmdTranslateCoq = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.Coq(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
@@ -108,7 +108,7 @@ var cmdTranslateGo = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.Go(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
@@ -130,7 +130,7 @@ var cmdTranslatePv = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.Pv(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
@@ -150,12 +150,12 @@ var cmdPretty = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.PrettyPrint(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
 
-var cmdJson = &cobra.Command{
+var cmdJSON = &cobra.Command{
 	Use:                   "internal-json [requestType]",
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
@@ -164,7 +164,7 @@ var cmdJson = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.JSON(args[0])
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
@@ -184,19 +184,15 @@ var cmdFriends = &cobra.Command{
 		}
 		err := vplogic.OpenBrowser(string(f))
 		if err != nil {
-			cmdErrorFatal(err)
+			log.Fatal(err)
 		}
 	},
 }
 
 func main() {
-	cmdVerify.Flags().BoolP("verifhub", "", false, "Submit to VerifHub on Analysis Completion")
+	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslateGo, cmdTranslatePv)
-	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJson, cmdFriends)
+	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJSON, cmdFriends)
 	// nolint:errcheck
 	rootCmd.Execute()
-}
-
-func cmdErrorFatal(err error) {
-	log.Fatal(fmt.Errorf("Verifpal! Error: %v.\n", err))
 }
