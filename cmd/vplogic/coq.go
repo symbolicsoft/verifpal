@@ -89,7 +89,7 @@ func coqBlockByPhase(valKnowledgeMap KnowledgeMap, phase []Block, output []strin
 	for _, block := range phase {
 		switch block.Kind {
 		case "principal":
-			cpb, err = coqPrincipalBlock(block, valKnowledgeMap)
+			cpb, err = coqPrincipal(block, valKnowledgeMap)
 			if err != nil {
 				return []string{}, err
 			}
@@ -127,7 +127,8 @@ func coqPrincipalNames(principals []string) string {
 	return output + "]."
 }
 
-func coqPrincipalBlock(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
+func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
+	var err error
 	expressions := []string{""}
 	for i, expression := range block.Principal.Expressions {
 		switch expression.Kind {
@@ -142,10 +143,8 @@ func coqPrincipalBlock(block Block, valKnowledgeMap KnowledgeMap) (string, error
 				}
 			default:
 				for _, c := range expression.Constants {
-					crc, err := coqResolveConstant(c, valKnowledgeMap)
-					if err != nil {
-						return "", err
-					}
+					var crc string
+					crc, err = coqResolveConstant(c, valKnowledgeMap)
 					expressions = append(expressions, fmt.Sprintf(
 						"EXP knowledge %s %s unleaked;",
 						expression.Qualifier, crc,
@@ -154,29 +153,23 @@ func coqPrincipalBlock(block Block, valKnowledgeMap KnowledgeMap) (string, error
 			}
 		case "generates":
 			for _, c := range expression.Constants {
-				crv, err := coqResolveConstant(c, valKnowledgeMap)
-				if err != nil {
-					return "", err
-				}
+				var crv string
+				crv, err = coqResolveConstant(c, valKnowledgeMap)
 				expressions = append(expressions, fmt.Sprintf(
 					"EXP generation private %s unleaked;", crv,
 				))
 			}
 		case "leaks":
 			for _, c := range expression.Constants {
-				crc, err := coqResolveConstant(c, valKnowledgeMap)
-				if err != nil {
-					return "", err
-				}
+				var crc string
+				crc, err = coqResolveConstant(c, valKnowledgeMap)
 				expressions = append(expressions, fmt.Sprintf(
 					"EXP knows public %s leaked;", crc,
 				))
 			}
 		case "assignment":
-			cae, err := coqAssignemntExpression(expression, valKnowledgeMap)
-			if err != nil {
-				return "", err
-			}
+			var cae []string
+			cae, err = coqAssignemntExpression(expression, valKnowledgeMap)
 			expressions = append(expressions, cae...)
 		}
 		if len(block.Principal.Expressions) == i+1 {
@@ -184,6 +177,9 @@ func coqPrincipalBlock(block Block, valKnowledgeMap KnowledgeMap) (string, error
 				expressions[len(expressions)-1], ";",
 			)
 			expressions = append(expressions, "")
+		}
+		if err != nil {
+			return "", err
 		}
 	}
 	return strings.Join(expressions, "\n\t\t\t\t"), nil

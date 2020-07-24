@@ -221,13 +221,11 @@ func infoQueryMutatedValues(
 	mutated := []Value{}
 	targetInfo := "In another session:"
 	mutatedInfo := ""
+	relevant := false
 	for i, a := range valPrincipalState.BeforeRewrite {
 		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
 			continue
 		}
-		pc := prettyConstant(valPrincipalState.Constants[i])
-		pa := prettyValue(valPrincipalState.Assigned[i])
-		pn := make([]string, 4)
 		isTargetValue := valueEquivalentValues(
 			targetValue, valPrincipalState.Assigned[i], false,
 		)
@@ -248,49 +246,77 @@ func infoQueryMutatedValues(
 				mutated = append(mutated, valPrincipalState.Assigned[i])
 			}
 		}
-		if colorOutputSupport() {
-			pn[0] = aurora.BrightYellow(pc).Italic().String()
-			pn[1] = aurora.BrightYellow(" → ").Italic().String()
-			pn[2] = aurora.BrightYellow(pa).Italic().String()
-			pn[3] = ""
-			if isTargetValue && !valPrincipalState.Mutated[i] {
-				pn[0] = aurora.BrightYellow(pc).Italic().Underline().String()
-				pn[1] = aurora.BrightYellow(" → ").Italic().Underline().String()
-				pn[2] = aurora.BrightYellow(pa).Italic().Underline().String()
-				pn[3] = aurora.Red("← obtained by Attacker").Italic().String()
-			} else if valPrincipalState.Mutated[i] {
-				pn[3] = aurora.Red(
-					fmt.Sprintf("← mutated by Attacker (originally %s)",
-						prettyValue(valKnowledgeMap.Assigned[i]),
-					),
-				).Italic().String()
-			}
-		} else {
-			pn[0] = pc
-			pn[1] = " → "
-			pn[2] = pa
-			pn[3] = ""
-			if isTargetValue && !valPrincipalState.Mutated[i] {
-				pn[3] = "← obtained by Attacker"
-			} else if valPrincipalState.Mutated[i] {
-				pn[3] = fmt.Sprintf("← mutated by Attacker (originally %s)",
-					prettyValue(valKnowledgeMap.Assigned[i]),
-				)
-			}
-		}
-		mutatedInfo = fmt.Sprintf("%s\n            %s%s%s %s",
-			mutatedInfo, pn[0], pn[1], pn[2], pn[3],
+		mInfo, mRelevant := infoQueryMutatedValue(
+			valKnowledgeMap, valPrincipalState, i, isTargetValue,
 		)
+		if mRelevant {
+			relevant = true
+		}
+		mutatedInfo = fmt.Sprintf("%s\n            %s", mutatedInfo, mInfo)
+	}
+	if !relevant {
+		return ""
 	}
 	for _, m := range mutated {
 		ai := valueEquivalentValueInValues(m, valAttackerState.Known)
 		if ai < 0 {
 			continue
 		}
-		mmInfo := infoQueryMutatedValues(valKnowledgeMap, valAttackerState.PrincipalState[ai], valAttackerState, m)
+		mmInfo := infoQueryMutatedValues(
+			valKnowledgeMap, valAttackerState.PrincipalState[ai],
+			valAttackerState, m,
+		)
 		if len(mmInfo) > 0 {
-			mutatedInfo = fmt.Sprintf("%s\n\n            %s%s", mmInfo, targetInfo, mutatedInfo)
+			mutatedInfo = fmt.Sprintf(
+				"%s\n\n            %s%s",
+				mmInfo, targetInfo, mutatedInfo,
+			)
 		}
 	}
 	return mutatedInfo
+}
+
+func infoQueryMutatedValue(
+	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	index int, isTargetValue bool,
+) (string, bool) {
+	pc := prettyConstant(valPrincipalState.Constants[index])
+	pa := prettyValue(valPrincipalState.Assigned[index])
+	relevant := false
+	pn := make([]string, 4)
+	if colorOutputSupport() {
+		pn[0] = aurora.BrightYellow(pc).Italic().String()
+		pn[1] = aurora.BrightYellow(" → ").Italic().String()
+		pn[2] = aurora.BrightYellow(pa).Italic().String()
+		pn[3] = ""
+		if isTargetValue && !valPrincipalState.Mutated[index] {
+			relevant = true
+			pn[0] = aurora.BrightYellow(pc).Italic().Underline().String()
+			pn[1] = aurora.BrightYellow(" → ").Italic().Underline().String()
+			pn[2] = aurora.BrightYellow(pa).Italic().Underline().String()
+			pn[3] = aurora.Red(" ← obtained by Attacker").Italic().String()
+		} else if valPrincipalState.Mutated[index] {
+			relevant = true
+			pn[3] = aurora.Red(
+				fmt.Sprintf(" ← mutated by Attacker (originally %s)",
+					prettyValue(valKnowledgeMap.Assigned[index]),
+				),
+			).Italic().String()
+		}
+	} else {
+		pn[0] = pc
+		pn[1] = " → "
+		pn[2] = pa
+		pn[3] = ""
+		if isTargetValue && !valPrincipalState.Mutated[index] {
+			relevant = true
+			pn[3] = " ← obtained by Attacker"
+		} else if valPrincipalState.Mutated[index] {
+			relevant = true
+			pn[3] = fmt.Sprintf(" ← mutated by Attacker (originally %s)",
+				prettyValue(valKnowledgeMap.Assigned[index]),
+			)
+		}
+	}
+	return strings.Join(pn, ""), relevant
 }

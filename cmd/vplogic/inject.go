@@ -214,16 +214,10 @@ func injectPrimitive(
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
 				if stage >= 5 && injectDepth <= stage-5 {
-					kp := inject(
-						k.Primitive, injectDepth+1,
-						valPrincipalState, valAttackerState, stage,
+					uinjectants, kinjectants = injectPrimitiveRecursively(
+						k, arg, uinjectants, kinjectants,
+						valPrincipalState, valAttackerState, injectDepth, stage,
 					)
-					for _, kkp := range kp {
-						if valueEquivalentValueInValues(kkp, uinjectants[arg]) < 0 {
-							uinjectants[arg] = append(uinjectants[arg], kkp)
-							kinjectants[arg] = append(kinjectants[arg], kkp)
-						}
-					}
 				}
 			case "equation":
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
@@ -234,6 +228,24 @@ func injectPrimitive(
 		}
 	}
 	return injectLoopN(p, kinjectants)
+}
+
+func injectPrimitiveRecursively(
+	k Value, arg int, uinjectants [][]Value, kinjectants [][]Value,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	injectDepth int, stage int,
+) ([][]Value, [][]Value) {
+	kp := inject(
+		k.Primitive, injectDepth+1,
+		valPrincipalState, valAttackerState, stage,
+	)
+	for _, kkp := range kp {
+		if valueEquivalentValueInValues(kkp, uinjectants[arg]) < 0 {
+			uinjectants[arg] = append(uinjectants[arg], kkp)
+			kinjectants[arg] = append(kinjectants[arg], kkp)
+		}
+	}
+	return uinjectants, kinjectants
 }
 
 func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
