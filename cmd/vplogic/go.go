@@ -52,7 +52,9 @@ func goPrimitiveName(p Primitive) string {
 	goName := strings.ToLower(p.Name)
 	switch goName {
 	case "split", "hkdf":
-		return fmt.Sprintf("%s%d", p.Name, len(p.Arguments))
+		return fmt.Sprintf("%s%d",
+			p.Name, len(p.Arguments),
+		)
 	case "pw_hash":
 		return "pwHash"
 	case "aead_enc":
@@ -77,9 +79,6 @@ func goPrimitive(p Primitive) string {
 		goPrimitiveName(p),
 	)
 	check := ""
-	if p.Check {
-		check = "?"
-	}
 	for i, arg := range p.Arguments {
 		sep := ""
 		if i != (len(p.Arguments) - 1) {
@@ -89,22 +88,25 @@ func goPrimitive(p Primitive) string {
 			goString, goValue(arg), sep,
 		)
 	}
-	return fmt.Sprintf("%s)%s",
+	goString = fmt.Sprintf("%s)%s",
 		goString, check,
 	)
+	if p.Check {
+		goString = fmt.Sprintf(
+			"%s\n\tif err != nil {\n\t\treturn err\n\t}",
+			goString,
+		)
+	}
+	return goString
 }
 
 func goEquation(e Equation) string {
 	goString := ""
-	for i, c := range e.Values {
-		if i == 0 {
-			goString = goValue(c)
-		} else {
-			goString = fmt.Sprintf(
-				"%s^%s",
-				goString, goValue(c),
-			)
-		}
+	switch len(e.Values) {
+	case 2:
+		return "dh()"
+	case 3:
+		return "dh()"
 	}
 	return goString
 }
@@ -123,7 +125,7 @@ func goValue(a Value) string {
 
 func goPrincipal(block Block, pc int) (string, int, error) {
 	output := fmt.Sprintf(
-		"func %s%d() error {\n",
+		"func %s%d() error {\n\tvar err error\n",
 		block.Principal.Name, pc,
 	)
 	for _, expression := range block.Principal.Expressions {
@@ -144,16 +146,16 @@ func goExpression(expression Expression) (string, error) {
 	output := ""
 	switch expression.Kind {
 	case "knows":
-		output = fmt.Sprintf(
-			"%s %s %s",
-			expression.Kind,
-			expression.Qualifier,
-			goConstants(expression.Constants),
-		)
+		for _, c := range expression.Constants {
+			output = fmt.Sprintf(
+				"%s_%s := \"%s\"",
+				expression.Qualifier, c.Name, c.Name,
+			)
+		}
 	case "generates":
 		for _, c := range expression.Constants {
 			output = fmt.Sprintf(
-				"%s := generates()\n\tif err != nil {\n\t\treturn err\n\t}",
+				"%s, _, err := ed25519Gen()\n\tif err != nil {\n\t\treturn err\n\t}",
 				c.Name,
 			)
 		}
@@ -172,7 +174,7 @@ func goExpression(expression Expression) (string, error) {
 			}
 		}
 		output = fmt.Sprintf(
-			"%s = %s",
+			"%s, err := %s",
 			goConstants(left),
 			right,
 		)
