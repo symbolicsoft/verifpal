@@ -48,8 +48,34 @@ func goConstants(c []Constant) string {
 	return goString
 }
 
+func goPrimitiveName(p Primitive) string {
+	goName := strings.ToLower(p.Name)
+	switch goName {
+	case "split", "hkdf":
+		return fmt.Sprintf("%s%d", p.Name, len(p.Arguments))
+	case "pw_hash":
+		return "pwHash"
+	case "aead_enc":
+		return "aeadEnc"
+	case "aead_dec":
+		return "aeadDec"
+	case "pke_enc":
+		return "pkeEnc"
+	case "pke_dec":
+		return "pkeDec"
+	case "shamir_split":
+		return "shamirSplit"
+	case "shamir_join":
+		return "shamirJoin"
+	default:
+		return goName
+	}
+}
+
 func goPrimitive(p Primitive) string {
-	goString := fmt.Sprintf("%s(", p.Name)
+	goString := fmt.Sprintf("%s(",
+		goPrimitiveName(p),
+	)
 	check := ""
 	if p.Check {
 		check = "?"
@@ -127,7 +153,7 @@ func goExpression(expression Expression) (string, error) {
 	case "generates":
 		for _, c := range expression.Constants {
 			output = fmt.Sprintf(
-				"%s := GENERATES()\n\tif err != nil {\n\t\treturn err\n\t}",
+				"%s := generates()\n\tif err != nil {\n\t\treturn err\n\t}",
 				c.Name,
 			)
 		}

@@ -325,7 +325,9 @@ func ringsign(ka []byte, kb []byte, kc []byte, message []byte) []byte {
 	return []byte{}
 }
 
-func ringsignverif(pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte) bool {
+func ringsignverif(
+	pka []byte, pkb []byte, pkc []byte, message []byte, signature []byte,
+) bool {
 	return false
 }
 
