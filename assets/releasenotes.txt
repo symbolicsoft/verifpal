@@ -1,1 +1,1 @@
-Verifpal 0.17.7 brings minor bug fixes.
+Verifpal 0.17.8 brings minor bug fixes and improvements.
