@@ -19,6 +19,7 @@ var header = []string{
 	"",
 	"package vplogic\n",
 	"import \"strings\"\n",
+	"// nolint:unused",
 	"var libgo = strings.Join([]string{\n",
 }
 

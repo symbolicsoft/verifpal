@@ -6,12 +6,14 @@ package vplogic
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
 
 // Go translates a Verifpal model to a prototype implementation written in Go.
 func Go(modelFile string) error {
+	log.Fatal("go translation not yet implemented")
 	m, err := libpegParseModel(modelFile, false)
 	if err != nil {
 		return err
@@ -24,6 +26,7 @@ func Go(modelFile string) error {
 	return nil
 }
 
+// nolint:unused
 func goConstant(c Constant) string {
 	if c.Guard {
 		return fmt.Sprintf("[%s]", c.Name)
@@ -34,6 +37,7 @@ func goConstant(c Constant) string {
 	return c.Name
 }
 
+// nolint:unused
 func goConstants(c []Constant) string {
 	goString := ""
 	for i, v := range c {
@@ -48,6 +52,7 @@ func goConstants(c []Constant) string {
 	return goString
 }
 
+// nolint:unused
 func goPrimitiveName(p Primitive) string {
 	goName := strings.ToLower(p.Name)
 	switch goName {
@@ -74,6 +79,7 @@ func goPrimitiveName(p Primitive) string {
 	}
 }
 
+// nolint:unused
 func goPrimitive(p Primitive) string {
 	goString := fmt.Sprintf("%s(",
 		goPrimitiveName(p),
@@ -100,6 +106,7 @@ func goPrimitive(p Primitive) string {
 	return goString
 }
 
+// nolint:unused
 func goEquation(e Equation) string {
 	goString := ""
 	switch len(e.Values) {
@@ -111,6 +118,7 @@ func goEquation(e Equation) string {
 	return goString
 }
 
+// nolint:unused
 func goValue(a Value) string {
 	switch a.Kind {
 	case "constant":
@@ -123,6 +131,7 @@ func goValue(a Value) string {
 	return ""
 }
 
+// nolint:unused
 func goPrincipal(block Block, pc int) (string, int, error) {
 	output := fmt.Sprintf(
 		"func %s%d() error {\n\tvar err error\n",
@@ -142,6 +151,7 @@ func goPrincipal(block Block, pc int) (string, int, error) {
 	return output, pc + 1, nil
 }
 
+// nolint:unused
 func goExpression(expression Expression) (string, error) {
 	output := ""
 	switch expression.Kind {
@@ -182,6 +192,7 @@ func goExpression(expression Expression) (string, error) {
 	return output, nil
 }
 
+// nolint:unused
 func goMessage(block Block) string {
 	output := fmt.Sprintf(
 		"%s -> %s: %s\n\n",
@@ -192,6 +203,7 @@ func goMessage(block Block) string {
 	return output
 }
 
+// nolint:unused
 func goPhase(block Block) string {
 	output := fmt.Sprintf(
 		"phase[%d]\n\n",
@@ -200,6 +212,7 @@ func goPhase(block Block) string {
 	return output
 }
 
+// nolint:unused
 func goModel(m Model) (string, error) {
 	pc := 0
 	_, _, err := sanity(m)

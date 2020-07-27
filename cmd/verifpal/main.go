@@ -193,6 +193,8 @@ func main() {
 	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslateGo, cmdTranslatePv)
 	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJSON, cmdFriends)
-	// nolint:errcheck
-	rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
