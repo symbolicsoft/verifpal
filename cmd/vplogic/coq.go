@@ -169,7 +169,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 			}
 		case "assignment":
 			var cae []string
-			cae, err = coqAssignemntExpression(expression, valKnowledgeMap)
+			cae, err = coqAssignmentExpression(expression, valKnowledgeMap)
 			expressions = append(expressions, cae...)
 		}
 		if len(block.Principal.Expressions) == i+1 {
@@ -185,7 +185,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 	return strings.Join(expressions, "\n\t\t\t\t"), nil
 }
 
-func coqAssignemntExpression(expression Expression, valKnowledgeMap KnowledgeMap) ([]string, error) {
+func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap) ([]string, error) {
 	expressions := []string{}
 	switch expression.Assigned.Kind {
 	case "equation":
