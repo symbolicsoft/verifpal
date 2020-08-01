@@ -229,7 +229,8 @@ func infoQueryMutatedValues(
 		isTargetValue := valueEquivalentValues(
 			targetValue, valPrincipalState.Assigned[i], false,
 		)
-		if isTargetValue {
+		attackerKnows := valueEquivalentValueInValues(targetValue, valAttackerState.Known) >= 0
+		if isTargetValue && attackerKnows {
 			if colorOutputSupport() {
 				targetInfo = fmt.Sprintf(
 					"%s %s",
@@ -247,7 +248,7 @@ func infoQueryMutatedValues(
 			}
 		}
 		mInfo, mRelevant := infoQueryMutatedValue(
-			valKnowledgeMap, valPrincipalState, i, isTargetValue,
+			valKnowledgeMap, valPrincipalState, i, isTargetValue, attackerKnows,
 		)
 		if mRelevant {
 			relevant = true
@@ -278,7 +279,7 @@ func infoQueryMutatedValues(
 
 func infoQueryMutatedValue(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	index int, isTargetValue bool,
+	index int, isTargetValue bool, attackerKnows bool,
 ) (string, bool) {
 	pc := prettyConstant(valPrincipalState.Constants[index])
 	pa := prettyValue(valPrincipalState.Assigned[index])
@@ -289,7 +290,7 @@ func infoQueryMutatedValue(
 		pn[1] = aurora.BrightYellow(" → ").Italic().String()
 		pn[2] = aurora.BrightYellow(pa).Italic().String()
 		pn[3] = ""
-		if isTargetValue && !valPrincipalState.Mutated[index] {
+		if isTargetValue && attackerKnows && !valPrincipalState.Mutated[index] {
 			relevant = true
 			pn[0] = aurora.BrightYellow(pc).Italic().Underline().String()
 			pn[1] = aurora.BrightYellow(" → ").Italic().Underline().String()
