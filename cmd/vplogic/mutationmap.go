@@ -85,7 +85,7 @@ func mutationMapReplaceValue(
 	switch a.Kind {
 	case "constant":
 		return v.Constant, mutationMapReplaceConstant(
-			a, rootIndex, stage, valPrincipalState, valAttackerState,
+			a, stage, valPrincipalState, valAttackerState,
 		), nil
 	case "primitive":
 		p, err := mutationMapReplacePrimitive(
@@ -101,7 +101,8 @@ func mutationMapReplaceValue(
 }
 
 func mutationMapReplaceConstant(
-	a Value, rootIndex int, stage int, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	a Value, stage int,
+	valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) []Value {
 	mutations := []Value{}
 	if valueIsGOrNil(a.Constant) {
@@ -117,12 +118,9 @@ func mutationMapReplaceConstant(
 			if valueIsGOrNil(v.Constant) {
 				continue
 			}
-			c, i := valueResolveConstant(v.Constant, valPrincipalState)
+			c, _ := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
-				if valPrincipalState.DeclaredAt[rootIndex] > valPrincipalState.DeclaredAt[i] {
-					continue
-				}
 				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
@@ -144,12 +142,9 @@ func mutationMapReplacePrimitive(
 			if valueIsGOrNil(v.Constant) {
 				continue
 			}
-			c, i := valueResolveConstant(v.Constant, valPrincipalState)
+			c, _ := valueResolveConstant(v.Constant, valPrincipalState)
 			switch c.Kind {
 			case "constant":
-				if valPrincipalState.DeclaredAt[rootIndex] > valPrincipalState.DeclaredAt[i] {
-					continue
-				}
 				if valueEquivalentValueInValues(c, mutations) < 0 {
 					mutations = append(mutations, c)
 				}
