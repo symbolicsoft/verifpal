@@ -1,1 +1,2 @@
 Verifpal 0.18.0 removes some misguided "optimizations" to Verifpal's analysis that reduced analysis time but which also led to some missed attacks. As a result, analysis time is now significantly greater.
+Verifpal 0.18.1 brings more accurate attack traces.
