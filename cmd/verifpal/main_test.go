@@ -240,6 +240,10 @@ var verifpalTests = []VerifpalTest{
 		ResultsCode: "c1",
 	},
 	{
+		Model:       "exa2.vp",
+		ResultsCode: "c1",
+	},
+	{
 		Model:       "fakeauth.vp",
 		ResultsCode: "a0",
 	},
