@@ -17,4 +17,4 @@ parts:
 apps:
   verifpal:
     command: verifpal
-    plugs: [home]
+    plugs: [home, desktop]
