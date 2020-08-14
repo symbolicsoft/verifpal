@@ -538,6 +538,9 @@ func valueResolveValueInternalValuesFromPrincipalState(
 	switch a.Kind {
 	case "constant":
 		nextRootIndex := valueGetPrincipalStateIndexFromConstant(valPrincipalState, a.Constant)
+		if nextRootIndex < 0 {
+			return a, errors.New("invalid index")
+		}
 		switch nextRootIndex {
 		case rootIndex:
 			if !forceBeforeMutate {

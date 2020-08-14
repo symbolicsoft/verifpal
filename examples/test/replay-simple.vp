@@ -1,0 +1,37 @@
+attacker[active]
+
+principal Alice[
+	knows private psk
+]
+
+principal Bob[
+	knows private psk
+]
+
+principal Alice[
+	generates anonce
+]
+
+Alice -> Bob: anonce
+
+principal Bob[
+	br = MAC(psk, anonce)
+]
+
+Bob -> Alice: br
+
+principal Alice[
+	br_expected = MAC(psk, anonce)
+	_ = ASSERT(br, br_expected)?
+	_ = HASH(br)
+	generates done
+]
+
+Alice -> Bob: done
+
+queries[
+	authentication? Bob -> Alice: br
+	freshness? br[
+		precondition[Alice -> Bob: done]
+	]
+]

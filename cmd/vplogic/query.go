@@ -76,11 +76,11 @@ func queryAuthentication(
 	if query.Message.Recipient != valPrincipalState.Name {
 		return result
 	}
-	indices, passes, sender, c := queryAuthenticationGetPassIndices(
+	indices, sender, c := queryAuthenticationGetPassIndices(
 		query, valKnowledgeMap, valPrincipalState,
 	)
-	for f, index := range indices {
-		if !passes[f] || (query.Message.Sender == sender) {
+	for _, index := range indices {
+		if query.Message.Sender == sender {
 			continue
 		}
 		result.Resolved = true
@@ -99,19 +99,18 @@ func queryAuthentication(
 
 func queryAuthenticationGetPassIndices(
 	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-) ([]int, []bool, string, Constant) {
+) ([]int, string, Constant) {
 	indices := []int{}
-	passes := []bool{}
 	_, i := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
 	if i < 0 {
-		return indices, passes, "", Constant{}
+		return indices, "", Constant{}
 	}
 	c := valKnowledgeMap.Constants[i]
 	sender := valPrincipalState.Sender[i]
 	if sender == "Attacker" {
 		v := valPrincipalState.BeforeMutate[i]
 		if valueEquivalentValues(v, valPrincipalState.Assigned[i], true) {
-			return indices, passes, sender, c
+			return indices, sender, c
 		}
 	}
 	for iii := range valKnowledgeMap.Constants {
@@ -129,7 +128,7 @@ func queryAuthenticationGetPassIndices(
 		}
 		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
 		if iiii < 0 {
-			return indices, passes, sender, c
+			return indices, sender, c
 		}
 		b := valPrincipalState.BeforeRewrite[iiii]
 		if primitiveIsCorePrim(b.Primitive.Name) {
@@ -141,16 +140,14 @@ func queryAuthenticationGetPassIndices(
 		}
 		if !hasRule {
 			indices = append(indices, iiii)
-			passes = append(passes, true)
 			continue
 		}
 		pass, _ := possibleToRewrite(b.Primitive, valPrincipalState)
 		if pass {
 			indices = append(indices, iiii)
-			passes = append(passes, pass)
 		}
 	}
-	return indices, passes, sender, c
+	return indices, sender, c
 }
 
 func queryAuthenticationHandlePass(
@@ -182,6 +179,7 @@ func queryFreshness(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
+	indices := []int{}
 	freshnessFound, err := valueContainsFreshValues(Value{
 		Kind:     "constant",
 		Constant: query.Constants[0],
@@ -192,16 +190,52 @@ func queryFreshness(
 	if freshnessFound {
 		return result, nil
 	}
+	for i := range valKnowledgeMap.Constants {
+		if valKnowledgeMap.Creator[i] != valPrincipalState.Name {
+			continue
+		}
+		hasRule := false
+		a := valKnowledgeMap.Assigned[i]
+		switch a.Kind {
+		case "constant", "equation":
+			continue
+		}
+		if !valueFindConstantInPrimitive(query.Constants[0], a, valKnowledgeMap) {
+			continue
+		}
+		_, ii := valueResolveConstant(valKnowledgeMap.Constants[i], valPrincipalState)
+		if ii < 0 {
+			return result, nil
+		}
+		b := valPrincipalState.BeforeRewrite[ii]
+		if primitiveIsCorePrim(b.Primitive.Name) {
+			prim, _ := primitiveCoreGet(b.Primitive.Name)
+			hasRule = prim.HasRule
+		} else {
+			prim, _ := primitiveGet(b.Primitive.Name)
+			hasRule = prim.Rewrite.HasRule
+		}
+		if !hasRule {
+			indices = append(indices, ii)
+			continue
+		}
+		pass, _ := possibleToRewrite(b.Primitive, valPrincipalState)
+		if pass {
+			indices = append(indices, ii)
+		}
+	}
+	if len(indices) == 0 {
+		return result, nil
+	}
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
 	mutatedInfo := infoQueryMutatedValues(
 		valKnowledgeMap, valPrincipalState, valAttackerState, resolved,
 	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
-		"%s (%s) is not a fresh value. If used as a message, %s",
-		prettyConstant(query.Constants[0]),
-		prettyValue(resolved),
-		"it could be replayed, leading to potential replay attacks.",
+		"%s (%s) is used by %s in %s despite not being a fresh value.",
+		prettyConstant(query.Constants[0]), prettyValue(resolved),
+		valPrincipalState.Name, prettyValue(valPrincipalState.BeforeRewrite[indices[0]]),
 	), result.Options)
 	result = queryPrecondition(result, valPrincipalState)
 	written := verifyResultsPutWrite(result)
@@ -252,8 +286,7 @@ func queryUnlinkability(
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 			"%s (%s) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
-			prettyConstant(noFreshness[0]),
-			prettyValue(resolved),
+			prettyConstant(noFreshness[0]), prettyValue(resolved),
 		), result.Options)
 		result = queryPrecondition(result, valPrincipalState)
 		written := verifyResultsPutWrite(result)
