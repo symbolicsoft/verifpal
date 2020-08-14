@@ -1,2 +1,14 @@
-Verifpal 0.18.0 removes some misguided "optimizations" to Verifpal's analysis that reduced analysis time but which also led to some missed attacks. As a result, analysis time is now significantly greater.
-Verifpal 0.18.1 brings more accurate attack traces.
+Verifpal 0.19.0 modifies the behavior of freshness queries.
+Now, freshness queries will check if a value is ever *used* while
+non-fresh, and not simply contradict the query if a value can ever *be*
+non-fresh. This is based on discussions with Eric Simpson.
+
+An example model in examples/test/replay-simple.vp is provided to
+illustrate how this is supposed to work.
+
+Verifpal 0.19.0 also fixes a problem that caused VerifHub submissions not
+to be possible if Verifpal was installed via Snapcraft, thanks to a patch
+submitted by Eric Simpson.
+
+Finally, Verifpal 0.19.0 binaries are built using Go 1.15 (with the exception
+of Snapcraft binaries).
