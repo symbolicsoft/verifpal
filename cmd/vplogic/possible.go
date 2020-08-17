@@ -165,6 +165,13 @@ func possibleToRewrite(
 	p Primitive, valPrincipalState PrincipalState,
 ) (bool, []Value) {
 	v := []Value{{Kind: "primitive", Primitive: p}}
+	for i, a := range p.Arguments {
+		switch a.Kind {
+		case "primitive":
+			_, pp := possibleToRewrite(a.Primitive, valPrincipalState)
+			p.Arguments[i] = pp[0]
+		}
+	}
 	if primitiveIsCorePrim(p.Name) {
 		prim, _ := primitiveCoreGet(p.Name)
 		if prim.HasRule {

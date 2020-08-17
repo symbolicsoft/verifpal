@@ -70,9 +70,9 @@ func mutationMapSkipValue(
 		}
 	case valPrincipalState.Creator[i] == valPrincipalState.Name:
 		return true
-	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
-		return true
 	case !intInSlice(valAttackerState.CurrentPhase, valPrincipalState.Phase[i]):
+		return true
+	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
 		return true
 	}
 	return false

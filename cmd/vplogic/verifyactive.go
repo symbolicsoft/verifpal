@@ -130,13 +130,20 @@ func verifyActiveMutatePrincipalState(
 		if err != nil {
 			return valPrincipalState, false, err
 		}
-		if valueEquivalentValues(ac, ar, true) {
-			continue
-		}
 		switch ar.Kind {
 		case "primitive":
 			ac.Primitive.Output = ar.Primitive.Output
 			ac.Primitive.Check = ar.Primitive.Check
+			_, aar := possibleToRewrite(ar.Primitive, valPrincipalState)
+			ar.Primitive = aar[0].Primitive
+		}
+		switch ac.Kind {
+		case "primitive":
+			_, aac := possibleToRewrite(ac.Primitive, valPrincipalState)
+			ac.Primitive = aac[0].Primitive
+		}
+		if valueEquivalentValues(ac, ar, true) {
+			continue
 		}
 		valPrincipalState.Creator[ii] = "Attacker"
 		valPrincipalState.Sender[ii] = "Attacker"
