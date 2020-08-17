@@ -20,7 +20,9 @@ principal Alice[
 
 Alice -> Carol: [m2]
 
-principal Carol[]
+principal Carol[
+	_ = HASH(m2)
+]
 
 queries[
 	authentication? Bob -> Alice: e[

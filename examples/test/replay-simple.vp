@@ -29,6 +29,10 @@ principal Alice[
 
 Alice -> Bob: done
 
+principal Bob[
+	_ = HASH(done)
+]
+
 queries[
 	authentication? Bob -> Alice: br
 	freshness? br[
