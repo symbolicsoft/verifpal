@@ -201,7 +201,7 @@ func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) error {
 		if err != nil {
 			return err
 		}
-		err = sanityQueryOptions(query)
+		err = sanityQueryOptions(query, valKnowledgeMap)
 		if err != nil {
 			return err
 		}
@@ -229,35 +229,7 @@ func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) erro
 		)
 	}
 	c := query.Message.Constants[0]
-	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-	if i < 0 {
-		return fmt.Errorf(
-			"authentication query refers to unknown constant (%s)",
-			prettyConstant(c),
-		)
-	}
-	senderKnows := false
-	recipientKnows := false
-	if valKnowledgeMap.Creator[i] == query.Message.Sender {
-		senderKnows = true
-	}
-	if valKnowledgeMap.Creator[i] == query.Message.Recipient {
-		recipientKnows = true
-	}
-	for _, m := range valKnowledgeMap.KnownBy[i] {
-		if _, ok := m[query.Message.Sender]; ok {
-			senderKnows = true
-		}
-		if _, ok := m[query.Message.Recipient]; ok {
-			recipientKnows = true
-		}
-	}
-	constantUsedByPrincipal := valueConstantIsUsedByPrincipalInKnowledgeMap(
-		valKnowledgeMap, query.Message.Recipient, c,
-	)
-	return sanityQueriesCheckKnown(
-		query, c, senderKnows, recipientKnows, constantUsedByPrincipal,
-	)
+	return sanityQueriesCheckKnown(query, query.Message, c, valKnowledgeMap)
 }
 
 func sanityQueriesFreshness(query Query, valKnowledgeMap KnowledgeMap) error {
@@ -292,7 +264,7 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error
 	return nil
 }
 
-func sanityQueryOptions(query Query) error {
+func sanityQueryOptions(query Query, valKnowledgeMap KnowledgeMap) error {
 	for _, option := range query.Options {
 		switch option.Kind {
 		case "precondition":
@@ -302,6 +274,8 @@ func sanityQueryOptions(query Query) error {
 					prettyQuery(query),
 				)
 			}
+			c := option.Message.Constants[0]
+			return sanityQueriesCheckKnown(query, option.Message, c, valKnowledgeMap)
 		default:
 			return fmt.Errorf(
 				"invalid query option kind (%s)", option.Kind,
@@ -311,31 +285,45 @@ func sanityQueryOptions(query Query) error {
 	return nil
 }
 
-func sanityQueriesCheckKnown(
-	query Query, c Constant, senderKnows bool, recipientKnows bool, constantUsedByPrincipal bool,
-) error {
+func sanityQueriesCheckKnown(query Query, m Message, c Constant, valKnowledgeMap KnowledgeMap) error {
+	senderKnows := false
+	recipientKnows := false
+	i := valueGetKnowledgeMapIndexFromConstant(
+		valKnowledgeMap, m.Constants[0],
+	)
+	if valKnowledgeMap.Creator[i] == m.Sender {
+		senderKnows = true
+	}
+	if valKnowledgeMap.Creator[i] == m.Recipient {
+		recipientKnows = true
+	}
+	for _, kb := range valKnowledgeMap.KnownBy[i] {
+		if _, ok := kb[m.Sender]; ok {
+			senderKnows = true
+		}
+		if _, ok := kb[m.Recipient]; ok {
+			recipientKnows = true
+		}
+	}
+	constantUsedByPrincipal := valueConstantIsUsedByPrincipalInKnowledgeMap(
+		valKnowledgeMap, m.Recipient, m.Constants[0],
+	)
 	if !senderKnows {
 		return fmt.Errorf(
 			"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
-			prettyQuery(query),
-			query.Message.Sender,
-			prettyConstant(c),
+			prettyQuery(query), m.Sender, prettyConstant(c),
 		)
 	}
 	if !recipientKnows {
 		return fmt.Errorf(
 			"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
-			prettyQuery(query),
-			query.Message.Recipient,
-			prettyConstant(c),
+			prettyQuery(query), m.Recipient, prettyConstant(c),
 		)
 	}
 	if !constantUsedByPrincipal {
 		return fmt.Errorf(
-			"authentication query (%s) depends on %s using (%s) in a primitive, but this never happens",
-			prettyQuery(query),
-			query.Message.Recipient,
-			prettyConstant(c),
+			"authentication query (%s) depends on %s using a constant (%s) in a primitive, but this never happens",
+			prettyQuery(query), m.Recipient, prettyConstant(c),
 		)
 	}
 	return nil
