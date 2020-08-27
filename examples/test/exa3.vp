@@ -1,0 +1,30 @@
+attacker[active]
+ 
+principal P1[
+	knows private k
+	knows private m
+	knows public c
+	generates n1
+	generates n2
+]
+ 
+P1 -> P2: n1, n2
+ 
+principal P2[
+	x1 = HASH(n1)
+	x2 = HASH(n2)
+]
+ 
+P2 -> P1: x1, x2
+ 
+principal P1[
+	k1 = AEAD_ENC(k, HASH(HASH(x1)), c)
+	k2 = AEAD_ENC(k, x2, c)
+	msg = AEAD_DEC(k2, AEAD_ENC(k1, m, c), c)
+]
+ 
+P1 -> P2: msg
+ 
+queries[
+	confidentiality? m
+]
