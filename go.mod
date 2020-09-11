@@ -3,7 +3,7 @@
 
 module verifpal.com
 
-go 1.14
+go 1.15
 
 require (
 	github.com/akavel/rsrc v0.9.0 // indirect
