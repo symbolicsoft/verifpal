@@ -35,8 +35,8 @@ func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
 			map[string]string{principal: principal},
 		)
 	}
-	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueN.Constant)
-	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueN)
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueNil.Constant)
+	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueNil)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
 	valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)

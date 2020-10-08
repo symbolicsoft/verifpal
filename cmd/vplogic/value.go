@@ -21,7 +21,7 @@ var valueG = Value{
 	},
 }
 
-var valueN = Value{
+var valueNil = Value{
 	Kind: "constant",
 	Constant: Constant{
 		Name:        "nil",
@@ -33,17 +33,17 @@ var valueN = Value{
 	},
 }
 
-var valueGN = Value{
+var valueGNil = Value{
 	Kind: "equation",
 	Equation: Equation{
-		Values: []Value{valueG, valueN},
+		Values: []Value{valueG, valueNil},
 	},
 }
 
-var valueGNN = Value{
+var valueGNilNil = Value{
 	Kind: "equation",
 	Equation: Equation{
-		Values: []Value{valueG, valueN, valueN},
+		Values: []Value{valueG, valueNil, valueNil},
 	},
 }
 
@@ -200,59 +200,56 @@ func valueEquivalentValueInValues(v Value, a []Value) int {
 	return -1
 }
 
-func valuePerformPrimitiveRebuild(
-	rewrites []Value, rIndex int, pi int,
-	rebuild Value, valPrincipalState PrincipalState,
-) []Value {
-	rewrites[rIndex] = rebuild
-	if pi >= 0 {
-		valPrincipalState.Assigned[pi] = rebuild
-		if !valPrincipalState.Mutated[pi] {
-			valPrincipalState.BeforeMutate[pi] = rebuild
-		}
-	}
-	return rewrites
-}
-
 func valuePerformPrimitiveRewrite(
 	p Primitive, pi int, valPrincipalState PrincipalState,
 ) ([]Primitive, bool, Value) {
-	rIndex := 0
-	rewrites, failedRewrites, rewritten := valuePerformPrimitiveArgumentsRewrite(
-		p, rIndex, valPrincipalState,
+	rewrite, failedRewrites, rewritten := valuePerformPrimitiveArgumentsRewrite(
+		p, valPrincipalState,
 	)
-	rebuilt, rebuild := possibleToRebuild(rewrites[rIndex].Primitive)
+	rebuilt, rebuild := possibleToRebuild(rewrite.Primitive)
 	if rebuilt {
-		rewrites = valuePerformPrimitiveRebuild(
-			rewrites, rIndex, pi, rebuild, valPrincipalState,
-		)
+		rewrite = rebuild
+		if pi >= 0 {
+			valPrincipalState.Assigned[pi] = rebuild
+			if !valPrincipalState.Mutated[pi] {
+				valPrincipalState.BeforeMutate[pi] = rebuild
+			}
+		}
 		switch rebuild.Kind {
 		case "constant", "equation":
-			return failedRewrites, rewritten, rewrites[rIndex]
+			return failedRewrites, rewritten, rewrite
 		}
 	}
-	rewrittenRoot, rewrites := possibleToRewrite(
-		rewrites[rIndex].Primitive, valPrincipalState,
+	rewrittenRoot, rewrittenValues := possibleToRewrite(
+		rewrite.Primitive, valPrincipalState,
 	)
+	rIndex := 0
 	if !rewrittenRoot {
-		failedRewrites = append(failedRewrites, rewrites[rIndex].Primitive)
+		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Primitive)
 	} else if primitiveIsCorePrim(p.Name) {
 		rIndex = p.Output
 	}
 	if (rewritten || rewrittenRoot) && pi >= 0 {
 		valPrincipalState.Rewritten[pi] = true
-		valPrincipalState.Assigned[pi] = rewrites[rIndex]
+		if rIndex >= len(rewrittenValues) {
+			valPrincipalState.Assigned[pi] = valueNil
+			if !valPrincipalState.Mutated[pi] {
+				valPrincipalState.BeforeMutate[pi] = valueNil
+			}
+			return failedRewrites, (rewritten || rewrittenRoot), valueNil
+		}
+		valPrincipalState.Assigned[pi] = rewrittenValues[rIndex]
 		if !valPrincipalState.Mutated[pi] {
-			valPrincipalState.BeforeMutate[pi] = rewrites[rIndex]
+			valPrincipalState.BeforeMutate[pi] = rewrittenValues[rIndex]
 		}
 	}
-	return failedRewrites, (rewritten || rewrittenRoot), rewrites[rIndex]
+	return failedRewrites, (rewritten || rewrittenRoot), rewrittenValues[rIndex]
 }
 
 func valuePerformPrimitiveArgumentsRewrite(
-	p Primitive, rIndex int, valPrincipalState PrincipalState,
-) ([]Value, []Primitive, bool) {
-	rewrites := []Value{{
+	p Primitive, valPrincipalState PrincipalState,
+) (Value, []Primitive, bool) {
+	rewrite := Value{
 		Kind: "primitive",
 		Primitive: Primitive{
 			Name:      p.Name,
@@ -260,23 +257,23 @@ func valuePerformPrimitiveArgumentsRewrite(
 			Output:    p.Output,
 			Check:     p.Check,
 		},
-	}}
+	}
 	failedRewrites := []Primitive{}
 	rewritten := false
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case "constant":
-			rewrites[rIndex].Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Primitive.Arguments[i] = p.Arguments[i]
 		case "primitive":
 			pFailedRewrite, pRewritten, pRewrite := valuePerformPrimitiveRewrite(
 				a.Primitive, -1, valPrincipalState,
 			)
 			if pRewritten {
 				rewritten = true
-				rewrites[rIndex].Primitive.Arguments[i] = pRewrite
+				rewrite.Primitive.Arguments[i] = pRewrite
 				continue
 			}
-			rewrites[rIndex].Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Primitive.Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, pFailedRewrite...)
 		case "equation":
 			eFailedRewrite, eRewritten, eRewrite := valuePerformEquationRewrite(
@@ -284,14 +281,14 @@ func valuePerformPrimitiveArgumentsRewrite(
 			)
 			if eRewritten {
 				rewritten = true
-				rewrites[rIndex].Primitive.Arguments[i] = eRewrite
+				rewrite.Primitive.Arguments[i] = eRewrite
 				continue
 			}
-			rewrites[rIndex].Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Primitive.Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
-	return rewrites, failedRewrites, rewritten
+	return rewrite, failedRewrites, rewritten
 }
 
 func valuePerformEquationRewrite(

@@ -106,7 +106,7 @@ type Constant struct {
 // Primitive represents a primitive expression:
 // - Name indicates the name of the primitives.
 // - Arguments indicates the arguments of the primitive.
-// - Output indicates the number of outputs from the primitive.
+// - Output indicates which output value of the primitive this copy should rewrite to (starts at 0).
 // - Check indicates whether this has been a checked primitive.
 type Primitive struct {
 	Name      string

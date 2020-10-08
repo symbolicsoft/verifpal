@@ -107,7 +107,7 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case "constant":
-			skeleton.Arguments[i] = valueN
+			skeleton.Arguments[i] = valueNil
 		case "primitive":
 			pp, dd := injectPrimitiveSkeleton(a.Primitive, depth)
 			if dd > depth {
@@ -123,7 +123,7 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 			case 1:
 				skeleton.Arguments[i] = valueG
 			default:
-				skeleton.Arguments[i] = valueGN
+				skeleton.Arguments[i] = valueGNil
 			}
 		}
 	}

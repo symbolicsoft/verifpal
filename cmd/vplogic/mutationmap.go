@@ -108,7 +108,7 @@ func mutationMapReplaceConstant(
 	if valueIsGOrNil(a.Constant) {
 		return mutations
 	}
-	mutations = append(mutations, valueN)
+	mutations = append(mutations, valueNil)
 	if stage <= 3 {
 		return mutations
 	}
@@ -186,9 +186,9 @@ func mutationMapReplaceEquation(
 	case 1:
 		mutations = append(mutations, valueG)
 	case 2:
-		mutations = append(mutations, valueGN)
+		mutations = append(mutations, valueGNil)
 	case 3:
-		mutations = append(mutations, valueGNN)
+		mutations = append(mutations, valueGNilNil)
 	}
 	if stage <= 3 {
 		return mutations
