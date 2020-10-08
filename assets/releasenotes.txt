@@ -1,1 +1,1 @@
-Verifpal 0.19.1 eliminates some false attacks that could appear with authentication queries and improves sanity checks made on query preconditions.
+Verifpal 0.19.2 addresses an issue where a primitive returning more outputs than anticipated could result in undefined behavior, as discussed on the Verifpal Mailing List: https://lists.symbolic.software/pipermail/verifpal/2020/000305.html
