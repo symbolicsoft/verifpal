@@ -230,17 +230,21 @@ func valuePerformPrimitiveRewrite(
 		rIndex = p.Output
 	}
 	if rIndex >= len(rewrittenValues) {
-		valPrincipalState.Assigned[pi] = valueNil
-		if !valPrincipalState.Mutated[pi] {
-			valPrincipalState.BeforeMutate[pi] = valueNil
+		if pi >= 0 {
+			valPrincipalState.Assigned[pi] = valueNil
+			if !valPrincipalState.Mutated[pi] {
+				valPrincipalState.BeforeMutate[pi] = valueNil
+			}
 		}
 		return failedRewrites, (rewritten || rewrittenRoot), valueNil
 	}
-	if (rewritten || rewrittenRoot) && pi >= 0 {
-		valPrincipalState.Rewritten[pi] = true
-		valPrincipalState.Assigned[pi] = rewrittenValues[rIndex]
-		if !valPrincipalState.Mutated[pi] {
-			valPrincipalState.BeforeMutate[pi] = rewrittenValues[rIndex]
+	if rewritten || rewrittenRoot {
+		if pi >= 0 {
+			valPrincipalState.Rewritten[pi] = true
+			valPrincipalState.Assigned[pi] = rewrittenValues[rIndex]
+			if !valPrincipalState.Mutated[pi] {
+				valPrincipalState.BeforeMutate[pi] = rewrittenValues[rIndex]
+			}
 		}
 	}
 	return failedRewrites, (rewritten || rewrittenRoot), rewrittenValues[rIndex]
