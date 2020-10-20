@@ -203,6 +203,7 @@ func valueEquivalentValueInValues(v Value, a []Value) int {
 func valuePerformPrimitiveRewrite(
 	p Primitive, pi int, valPrincipalState PrincipalState,
 ) ([]Primitive, bool, Value) {
+	rIndex := 0
 	rewrite, failedRewrites, rewritten := valuePerformPrimitiveArgumentsRewrite(
 		p, valPrincipalState,
 	)
@@ -223,21 +224,20 @@ func valuePerformPrimitiveRewrite(
 	rewrittenRoot, rewrittenValues := possibleToRewrite(
 		rewrite.Primitive, valPrincipalState,
 	)
-	rIndex := 0
 	if !rewrittenRoot {
 		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Primitive)
 	} else if primitiveIsCorePrim(p.Name) {
 		rIndex = p.Output
 	}
+	if rIndex >= len(rewrittenValues) {
+		valPrincipalState.Assigned[pi] = valueNil
+		if !valPrincipalState.Mutated[pi] {
+			valPrincipalState.BeforeMutate[pi] = valueNil
+		}
+		return failedRewrites, (rewritten || rewrittenRoot), valueNil
+	}
 	if (rewritten || rewrittenRoot) && pi >= 0 {
 		valPrincipalState.Rewritten[pi] = true
-		if rIndex >= len(rewrittenValues) {
-			valPrincipalState.Assigned[pi] = valueNil
-			if !valPrincipalState.Mutated[pi] {
-				valPrincipalState.BeforeMutate[pi] = valueNil
-			}
-			return failedRewrites, (rewritten || rewrittenRoot), valueNil
-		}
 		valPrincipalState.Assigned[pi] = rewrittenValues[rIndex]
 		if !valPrincipalState.Mutated[pi] {
 			valPrincipalState.BeforeMutate[pi] = rewrittenValues[rIndex]
