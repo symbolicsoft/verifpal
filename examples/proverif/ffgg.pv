@@ -1,13 +1,10 @@
 type skey.
 type pkey.
-type host.
 type nonce.
 
 fun pk(skey): pkey.
 fun encrypt(bitstring, pkey): bitstring.
 reduc forall x: bitstring, y: skey; decrypt(encrypt(x,pk(y)),y) = x.
-
-const A, B: host.
 
 free c: channel.
 free M: nonce [private].
@@ -15,17 +12,15 @@ free M: nonce [private].
 query attacker(M).
 
 let processA(pkB: pkey) = 
-	out(c, A);
-	in(c,(=B, n1: nonce, n2: nonce));
-	out(c, (A, encrypt((n1, n2, M ), pkB))).
+	in(c,(n1: nonce, n2: nonce));
+	out(c, encrypt((n1, n2, M ), pkB)).
 
 let processB(skB: skey, pkB: pkey) = 
-	in(c, =A);
-    new n1: nonce; new n2: nonce;
-	out(c, (B, n1, n2));
-	in(c, (=A, mes: bitstring));
+        new n1: nonce; new n2: nonce;
+	out(c, (n1, n2));
+	in(c, mes: bitstring);
 	let (=n1, x1: nonce, x2: nonce) = decrypt(mes, skB) in
-	out(c, (n1, x1, encrypt((x1, x2, n1), pkB))).
+	out(c, (x1, encrypt((x1, x2, n1), pkB))).
 
 process 
     new skB: skey; let pkB = pk(skB) in
