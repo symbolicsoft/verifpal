@@ -1,1 +1,1 @@
-Verifpal 0.19.2 addresses an issue where a primitive returning more outputs than anticipated could result in undefined behavior, as discussed on the Verifpal Mailing List: https://lists.symbolic.software/pipermail/verifpal/2020/000305.html
+Verifpal 0.19.3 includes minor bug fixes to model parsing.
