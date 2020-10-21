@@ -222,6 +222,14 @@ func sanityQueriesConfidentiality(query Query, valKnowledgeMap KnowledgeMap) err
 }
 
 func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) error {
+	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
+	if i < 0 {
+		return fmt.Errorf(
+			"authentication query (%s) refers to unknown constant (%s)",
+			prettyQuery(query),
+			prettyConstant(query.Message.Constants[0]),
+		)
+	}
 	if len(query.Message.Constants) != 1 {
 		return fmt.Errorf(
 			"authentication query (%s) has more than one constant",
@@ -255,7 +263,7 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
 			return fmt.Errorf(
-				"unlinkability query (%s) refers to unknown value (%s)",
+				"unlinkability query (%s) refers to unknown constant (%s)",
 				prettyQuery(query),
 				prettyConstant(c),
 			)
