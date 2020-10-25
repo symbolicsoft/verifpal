@@ -93,4 +93,9 @@ principal Bob[leaks blongterm]
 
 queries[
 	confidentiality? m1
+	authentication? Alice -> Bob: e1
+	confidentiality? m2
+	authentication? Bob -> Alice: e2
+	confidentiality? m3
+	authentication? Alice -> Bob: e3
 ]
