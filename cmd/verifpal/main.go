@@ -3,10 +3,8 @@
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
 //go:generate go run ../../internal/libcoq/libcoqgen.go
-//go:generate go run ../../internal/libgo/libgogen.go
 //go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
 //go:generate gofmt -s -w ../../cmd/vplogic/libcoq.go
-//go:generate gofmt -s -w ../../cmd/vplogic/libgo.go
 //go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
 //go:generate goversioninfo -64=true -icon=../../assets/icon.ico ../../assets/versioninfo.json
 
@@ -56,17 +54,17 @@ var cmdVerify = &cobra.Command{
 }
 
 var cmdTranslate = &cobra.Command{
-	Use:     "translate [coq|go|pv] [model.vp]",
+	Use:     "translate [coq|pv] [model.vp]",
 	Example: "  verifpal translate coq examples/simple.vp",
 	Short:   "Translate Verifpal model into another language",
 	Long: strings.Join([]string{
-		"`translate` allows translating a Verifpal model into either a ProVerif model,",
-		"a Coq model or a Go implementation based on the option given.",
+		"`translate` allows translating a Verifpal model into either a ProVerif model ",
+		"or a Coq model implementation based on the option given.",
 	}, " "),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
-	ValidArgs:             []string{"coq", "go", "pv"},
+	ValidArgs:             []string{"coq", "pv"},
 	Hidden:                false,
 }
 
@@ -85,28 +83,6 @@ var cmdTranslateCoq = &cobra.Command{
 	Hidden:                false,
 	Run: func(cmd *cobra.Command, args []string) {
 		err := vplogic.Coq(args[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-	},
-}
-
-var cmdTranslateGo = &cobra.Command{
-	Use:     "go [model.vp]",
-	Example: "  verifpal translate go examples/simple.vp",
-	Short:   "Translate Verifpal model into Go implementation",
-	Long: strings.Join([]string{
-		"`translate go` loads a Verifpal model from the given file path",
-		"and translates it into a Go implementation based",
-		"on the Verifpal Go library, which can then be used in order to prototype",
-		"and test your protocol in a real-world setting.",
-	}, " "),
-	DisableFlagsInUseLine: true,
-	DisableFlagParsing:    true,
-	Args:                  cobra.ExactArgs(1),
-	Hidden:                false,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := vplogic.Go(args[0])
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -191,7 +167,7 @@ var cmdFriends = &cobra.Command{
 
 func main() {
 	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
-	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslateGo, cmdTranslatePv)
+	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslatePv)
 	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJSON, cmdFriends)
 	err := rootCmd.Execute()
 	if err != nil {
