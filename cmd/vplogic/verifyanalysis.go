@@ -126,10 +126,8 @@ func verifyAnalysisReconstruct(
 ) int {
 	r := false
 	ar := []Value{}
-	isCorePrim := false
 	switch a.Kind {
 	case "primitive":
-		isCorePrim = primitiveIsCorePrim(a.Primitive.Name)
 		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 		for _, aa := range a.Primitive.Arguments {
 			o = o + verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
@@ -137,7 +135,7 @@ func verifyAnalysisReconstruct(
 	case "equation":
 		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
-	if r && !isCorePrim && attackerStatePutWrite(a, valPrincipalState) {
+	if r && attackerStatePutWrite(a, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
 			"%s obtained by reconstructing with %s.",
 			infoOutputText(a), prettyValues(ar),
