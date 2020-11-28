@@ -31,9 +31,6 @@ archives:
       - README.md
     wrap_in_directory: true
 
-signs:
-  - artifacts: checksum
-
 changelog:
   skip: false
   sort: asc
