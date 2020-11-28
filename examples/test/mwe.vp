@@ -1,0 +1,32 @@
+attacker[passive]
+
+principal Alice[
+	knows private ska, sec
+	pka = G^ska
+]
+
+principal Bob[
+	knows private skb, sec
+	pkb = G^skb
+]
+
+Alice -> Bob: pka
+
+principal Bob[
+	sig = SIGN(skb, pkb)
+	cer = CONCAT(pkb, sig)
+]
+
+Bob -> Alice: cer
+
+principal Alice[
+	pkb_a, sig_a = SPLIT(cer)
+	_ = SIGNVERIF(pkb_a, pkb_a, sig_a)?
+	ese = PKE_ENC(pkb_a, sec)
+]
+
+Alice -> Bob: ese
+
+queries[
+	confidentiality? sec
+]
