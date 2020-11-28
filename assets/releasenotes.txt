@@ -1,1 +1,1 @@
-Verifpal 0.19.3 includes minor bug fixes to model parsing.
+Verifpal 0.19.4 includes bug fixes to analysis logic thanks to reports from "Mike" and Angèle Bossuat (Quarkslab).
