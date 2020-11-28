@@ -13,6 +13,7 @@
 @setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
 @setx GOOS "windows" >nul
+@setx GOARCH "amd64" >nul
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/cmd/verifpal
 @echo  OK
 
@@ -20,6 +21,7 @@
 @setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
 @setx GOOS "linux" >nul
+@setx GOARCH "amd64" >nul
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/cmd/verifpal
 @echo    OK
 
@@ -27,6 +29,7 @@
 @setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
 @setx GOOS "darwin" >nul
+@setx GOARCH "amd64" >nul
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/cmd/verifpal
 @echo    OK
 
@@ -34,6 +37,7 @@
 @setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
 @setx GOOS "freebsd" >nul
+@setx GOARCH "amd64" >nul
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/cmd/verifpal
 @echo  OK
 

@@ -11,28 +11,28 @@ all:
 windows:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
 	@go generate verifpal.com/cmd/verifpal
-	@GOOS="windows" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/windows verifpal.com/cmd/verifpal
+	@GOOS="windows" GOARCH="amd64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/windows verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo " OK"
 
 linux:
 	@/bin/echo -n "[Verifpal] Building Verifpal for Linux..."
 	@go generate verifpal.com/cmd/verifpal
-	@GOOS="linux" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/linux verifpal.com/cmd/verifpal
+	@GOOS="linux" GOARCH="amd64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/linux verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo "   OK"
 
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
 	@go generate verifpal.com/cmd/verifpal
-	@GOOS="darwin" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
+	@GOOS="darwin" GOARCH="amd64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo "   OK"
 
 freebsd:
 	@/bin/echo -n "[Verifpal] Building Verifpal for FreeBSD..."
 	@go generate verifpal.com/cmd/verifpal
-	@GOOS="freebsd" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/cmd/verifpal
+	@GOOS="freebsd" GOARCH="amd64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/freebsd verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo " OK"
 
