@@ -150,8 +150,8 @@ func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []
 }
 
 func sanityPrimitive(p Primitive, outputs []Constant) error {
-	output := 0
-	check := false
+	var output []int
+	var check bool
 	if primitiveIsCorePrim(p.Name) {
 		prim, _ := primitiveCoreGet(p.Name)
 		output = prim.Output
@@ -164,11 +164,8 @@ func sanityPrimitive(p Primitive, outputs []Constant) error {
 		output = prim.Output
 		check = prim.Check
 	}
-	if (len(outputs) != output) && (output >= 0) {
-		outputString := fmt.Sprintf("%d", output)
-		if output < 0 {
-			outputString = "at least 1"
-		}
+	if !intInSlice(len(outputs), output) {
+		outputString := prettyArity(output)
 		return fmt.Errorf(
 			"primitive %s has %d outputs, expecting %s",
 			p.Name, len(outputs), outputString,

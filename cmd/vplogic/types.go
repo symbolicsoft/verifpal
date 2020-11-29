@@ -235,7 +235,7 @@ type RebuildRule struct {
 type PrimitiveCoreSpec struct {
 	Name       string
 	Arity      []int
-	Output     int
+	Output     []int
 	HasRule    bool
 	CoreRule   func(Primitive) (bool, []Value)
 	Check      bool
@@ -247,7 +247,7 @@ type PrimitiveCoreSpec struct {
 type PrimitiveSpec struct {
 	Name            string
 	Arity           []int
-	Output          int
+	Output          []int
 	Decompose       DecomposeRule
 	Recompose       RecomposeRule
 	Rewrite         RewriteRule

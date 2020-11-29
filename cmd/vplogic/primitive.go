@@ -12,7 +12,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
 		Name:    "ASSERT",
 		Arity:   []int{2},
-		Output:  1,
+		Output:  []int{1},
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: "primitive", Primitive: p}}
@@ -28,7 +28,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
 		Name:    "CONCAT",
 		Arity:   []int{2, 3, 4, 5},
-		Output:  1,
+		Output:  []int{1},
 		HasRule: false,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: "primitive", Primitive: p}}
@@ -41,7 +41,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
 		Name:    "SPLIT",
 		Arity:   []int{1},
-		Output:  -1,
+		Output:  []int{1, 2, 3, 4, 5},
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: "primitive", Primitive: p}}
@@ -70,7 +70,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "PW_HASH",
 		Arity:  []int{1, 2, 3, 4, 5},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -91,7 +91,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "HASH",
 		Arity:  []int{1, 2, 3, 4, 5},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -112,7 +112,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "HKDF",
 		Arity:  []int{3},
-		Output: -1,
+		Output: []int{1, 2, 3, 4, 5},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -133,7 +133,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "AEAD_ENC",
 		Arity:  []int{3},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -159,7 +159,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "AEAD_DEC",
 		Arity:  []int{3},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -203,7 +203,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "ENC",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -229,7 +229,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "DEC",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -270,7 +270,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "MAC",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -291,7 +291,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "SIGN",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -312,7 +312,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "SIGNVERIF",
 		Arity:  []int{3},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -363,7 +363,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "PKE_ENC",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -405,7 +405,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "PKE_DEC",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -456,7 +456,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "SHAMIR_SPLIT",
 		Arity:  []int{1},
-		Output: 3,
+		Output: []int{3},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -486,7 +486,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "SHAMIR_JOIN",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -520,7 +520,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "RINGSIGN",
 		Arity:  []int{4},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -541,7 +541,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "RINGSIGNVERIF",
 		Arity:  []int{5},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -600,7 +600,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "BLIND",
 		Arity:  []int{2},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -626,7 +626,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	{
 		Name:   "UNBLIND",
 		Arity:  []int{3},
-		Output: 1,
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},

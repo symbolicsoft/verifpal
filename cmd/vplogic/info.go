@@ -195,10 +195,10 @@ func infoOutputText(revealed Value) string {
 		oneOutput := false
 		if primitiveIsCorePrim(revealed.Primitive.Name) {
 			prim, _ := primitiveCoreGet(revealed.Primitive.Name)
-			oneOutput = prim.Output == 1
+			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		} else {
 			prim, _ := primitiveGet(revealed.Primitive.Name)
-			oneOutput = prim.Output == 1
+			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		}
 		if oneOutput {
 			return fmt.Sprintf("Output of %s", outputText)
