@@ -50,20 +50,15 @@ dep:
 	@/bin/echo "       OK"
 
 lint:
-	@make -s dep
 	@/bin/echo "[Verifpal] Running golangci-lint..."
-	@go generate verifpal.com/cmd/verifpal
 	@golangci-lint run
 
 test:
-	@make -s dep
 	@go clean -testcache
 	@/bin/echo "[Verifpal] Running test battery..."
-	@go generate verifpal.com/cmd/verifpal
 	@go test verifpal.com/cmd/verifpal
 
 release:
-	@make -s dep
 	@bash scripts/release.sh
 	@bash scripts/email.sh
 
