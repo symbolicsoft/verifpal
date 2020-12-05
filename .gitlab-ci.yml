@@ -15,7 +15,6 @@ test:
   stage: test
   script:
     - make dep
-    - go generate verifpal.com/cmd/verifpal
     - make test
 
 snapcraft:
