@@ -153,11 +153,11 @@ func possibleToReconstructEquation(e Equation, valAttackerState AttackerState) (
 			Values: []Value{e.Values[0], e.Values[2]},
 		},
 	}
-	hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
 	hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
 	if hs0 && hp1 {
 		return true, []Value{s0, p1}
 	}
+	hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
 	if hp0 && hs1 {
 		return true, []Value{p0, s1}
 	}
