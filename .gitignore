@@ -37,3 +37,6 @@ snapcraft.login
 
 # Scripts
 scripts
+
+# Nova
+.nova
