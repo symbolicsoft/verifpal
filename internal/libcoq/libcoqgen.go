@@ -1,4 +1,4 @@
-/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+/* SPDX-FileCopyrightText: © 2019-2021 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 // 00000000000000000000000000000000
 
@@ -13,7 +13,7 @@ import (
 )
 
 var header = []string{
-	"/* SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>",
+	"/* SPDX-FileCopyrightText: © 2019-2021 Nadim Kobeissi <nadim@symbolic.software>",
 	" * SPDX-License-Identifier: GPL-3.0-only */",
 	"// 806d8db3ce9f3ded40fd35fdba02fb84",
 	"",

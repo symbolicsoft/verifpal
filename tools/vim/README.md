@@ -1,5 +1,5 @@
 <!---
-# SPDX-FileCopyrightText: © 2019-2020 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-FileCopyrightText: © 2019-2021 Nadim Kobeissi <nadim@symbolic.software>
 # SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
