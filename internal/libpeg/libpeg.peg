@@ -110,7 +110,7 @@ Block <- Comment* Block:(Principal/Message/Phase) _ Comment* {
 	return Block, nil
 }
 
-Principal <- "principal" _ Name:PrincipalName _ '[' _ Expressions:(Expression*) _ ']' _ {
+Principal <- "principal" _ Name:PrincipalName _ '[' _ Comment* Expressions:(Expression*) Comment* _ ']' _ {
 	e  := Expressions.([]interface{})
 	de := make([]Expression, len(e))
 	for i, v := range e { de[i] = v.(Expression) }
