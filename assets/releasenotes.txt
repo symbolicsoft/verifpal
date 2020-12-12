@@ -1,1 +1,1 @@
-Verifpal 0.19.5 includes minor bug fixes to analysis logic thanks to reports from "Mike".
+Verifpal 0.20.0 fixes a minor bug regarding comments parsing, reported by "Mike". It also fixes a more impactful bug with the resolution of SIGNVERIF checks, also reported by "Mike". Finally, Verifpal 0.20.0 includes a new command, `verifpal about`, which when executed prints out a list of individuals that have contributed meaningful suggestions, bug reports, ideas or discussions to the Verifpal project.
