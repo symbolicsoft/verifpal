@@ -339,11 +339,13 @@ var primitiveSpecs = []PrimitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						switch len(x.Equation.Values) {
-						case 2:
-							return x.Equation.Values[1], true
-						default:
+						switch {
+						case len(x.Equation.Values) != 2:
 							return x, false
+						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+							return x, false
+						default:
+							return x.Equation.Values[1], true
 						}
 					}
 				case 1:
@@ -377,10 +379,14 @@ var primitiveSpecs = []PrimitiveSpec{
 					case "primitive":
 						return x, false
 					case "equation":
-						if len(x.Equation.Values) == 2 {
+						switch {
+						case len(x.Equation.Values) != 2:
+							return x, false
+						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+							return x, false
+						default:
 							return x.Equation.Values[1], true
 						}
-						return x, false
 					}
 				case 1:
 					return x, true
