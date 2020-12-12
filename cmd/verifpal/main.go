@@ -131,6 +131,44 @@ var cmdPretty = &cobra.Command{
 	},
 }
 
+var cmdAbout = &cobra.Command{
+	Use:     "about",
+	Example: "  verifpal about",
+	Short:   "About information for the Verifpal software",
+	Long: strings.Join([]string{
+		"`about` lists information about the Verifpal software's",
+		"authors, contributors and testers.",
+	}, " "),
+	DisableFlagsInUseLine: true,
+	DisableFlagParsing:    true,
+	Args:                  cobra.ExactArgs(0),
+	Hidden:                false,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprint(os.Stdout, strings.Join([]string{
+			fmt.Sprintf("Verifpal %s - https://verifpal.com\n", version),
+			"Verifpal is authored by Nadim Kobeissi.",
+			"The following individuals, have contributed",
+			"meaningful suggestions, bug reports, ideas",
+			"or discussion to the Verifpal project:",
+			"",
+			"  - Angèle Bossuat",
+			"  - Bruno Blanchet (Prof. Dr.)",
+			"  - Friedrich Wiemer",
+			"  - Georgio Nicolas",
+			"  - Jean-Philippe Aumasson (Dr.)",
+			"  - Laurent Grémy",
+			"  - Loup Vaillant David",
+			"  - Michiel Leenars",
+			"  - \"Mike\" (pseudonym)",
+			"  - Mukesh Tiwari (Dr.)",
+			"  - Oleksandra \"Sasha\" Lapiha",
+			"  - Renaud Lifchitz",
+			"  - Sebastian R. Verschoor",
+			"  - Tom Roeder",
+		}, "\n"))
+	},
+}
+
 var cmdJSON = &cobra.Command{
 	Use:                   "internal-json [requestType]",
 	DisableFlagsInUseLine: true,
@@ -168,7 +206,7 @@ var cmdFriends = &cobra.Command{
 func main() {
 	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslatePv)
-	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdJSON, cmdFriends)
+	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdAbout, cmdJSON, cmdFriends)
 	err := rootCmd.Execute()
 	if err != nil {
 		log.Fatal(err)
