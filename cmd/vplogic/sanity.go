@@ -296,6 +296,13 @@ func sanityQueriesCheckKnown(query Query, m Message, c Constant, valKnowledgeMap
 	i := valueGetKnowledgeMapIndexFromConstant(
 		valKnowledgeMap, m.Constants[0],
 	)
+	if i < 0 {
+		return fmt.Errorf(
+			"query (%s) refers to unknown constant (%s)",
+			prettyQuery(query),
+			prettyConstant(m.Constants[0]),
+		)
+	}
 	if valKnowledgeMap.Creator[i] == m.Sender {
 		senderKnows = true
 	}
