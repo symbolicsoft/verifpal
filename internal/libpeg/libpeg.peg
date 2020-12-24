@@ -23,7 +23,8 @@ import (
 
 var libpegReserved = []string{
 	"attacker", "passive", "active", "principal",
-	"phase, public", "private", "password",
+	"knows", "generates", "leaks",
+	"phase", "public", "private", "password",
 	"confidentiality", "authentication",
 	"freshness", "unlinkability", "precondition",
 	"ringsign", "ringsignverif",
@@ -106,7 +107,7 @@ AttackerType <- ("active"/"passive") {
 	return string(c.text), nil
 }
 
-Block <- Comment* Block:(Principal/Message/Phase) _ Comment* {
+Block <- Comment* Block:(Phase/Principal/Message) _ Comment* {
 	return Block, nil
 }
 
