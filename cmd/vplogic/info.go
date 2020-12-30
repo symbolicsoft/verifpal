@@ -142,15 +142,15 @@ func infoAnalysis(stage int) {
 	analysisCount := verifyAnalysisCountGet()
 	switch {
 	case analysisCount > 100000:
-		if analysisCount%500 != 0 {
+		if analysisCount%10000 != 0 {
 			return
 		}
 	case analysisCount > 10000:
-		if analysisCount%100 != 0 {
+		if analysisCount%1000 != 0 {
 			return
 		}
 	case analysisCount > 1000:
-		if analysisCount%50 != 0 {
+		if analysisCount%100 != 0 {
 			return
 		}
 	case analysisCount > 100:
@@ -222,8 +222,8 @@ func infoQueryMutatedValues(
 	targetInfo := "In another session:"
 	mutatedInfo := ""
 	relevant := false
-	for i, a := range valPrincipalState.BeforeRewrite {
-		if valueEquivalentValues(&a, &valKnowledgeMap.Assigned[i], false) {
+	for i := range valPrincipalState.BeforeRewrite {
+		if valueEquivalentValues(&valPrincipalState.BeforeRewrite[i], &valKnowledgeMap.Assigned[i], false) {
 			continue
 		}
 		isTargetValue := valueEquivalentValues(

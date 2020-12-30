@@ -152,12 +152,12 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	case typesEnumConstant:
 		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
-	for _, aa := range valPrincipalState.Assigned {
-		if valueEquivalentValues(&ar, &aa, true) {
-			if attackerStatePutWrite(aa, valPrincipalState) {
+	for i := range valPrincipalState.Assigned {
+		if valueEquivalentValues(&ar, &valPrincipalState.Assigned[i], true) {
+			if attackerStatePutWrite(valPrincipalState.Assigned[i], valPrincipalState) {
 				InfoMessage(fmt.Sprintf(
 					"%s obtained by equivalizing with the current resolution of %s.",
-					infoOutputText(aa), prettyValue(a),
+					infoOutputText(valPrincipalState.Assigned[i]), prettyValue(a),
 				), "deduction", true)
 				o = o + 1
 			}

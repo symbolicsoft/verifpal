@@ -304,19 +304,19 @@ func queryUnlinkability(
 		constants = append(constants, c)
 		assigneds = append(assigneds, a)
 	}
-	for i, a := range assigneds {
-		for ii, aa := range assigneds {
+	for i := range assigneds {
+		for ii := range assigneds {
 			if i == ii {
 				continue
 			}
-			if !valueEquivalentValues(&a, &aa, false) {
+			if !valueEquivalentValues(&assigneds[i], &assigneds[ii], false) {
 				continue
 			}
 			obtainable := false
-			switch a.Kind {
+			switch assigneds[i].Kind {
 			case typesEnumPrimitive:
-				ok0, _ := possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
-				ok1, _, _ := possibleToRecomposePrimitive(a.Primitive, valAttackerState)
+				ok0, _ := possibleToReconstructPrimitive(assigneds[i].Primitive, valPrincipalState, valAttackerState)
+				ok1, _, _ := possibleToRecomposePrimitive(assigneds[i].Primitive, valAttackerState)
 				obtainable = ok0 || ok1
 			}
 			if !obtainable {
@@ -330,7 +330,7 @@ func queryUnlinkability(
 				"%s and %s %s (%s), %s.",
 				prettyConstant(constants[i]), prettyConstant(constants[ii]),
 				"are not unlinkable since they are the output of the same primitive",
-				prettyValue(a), "which can be obtained by Attacker",
+				prettyValue(assigneds[i]), "which can be obtained by Attacker",
 			), result.Options)
 			result = queryPrecondition(result, valPrincipalState)
 			written := verifyResultsPutWrite(result)
