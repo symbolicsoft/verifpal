@@ -74,7 +74,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 		}
 		for _, a := range valPrincipalState.Assigned {
 			switch a.Kind {
-			case "primitive":
+			case typesEnumPrimitive:
 				injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
 			}
 		}
@@ -127,13 +127,13 @@ func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 		q := ""
 		r := ""
 		switch verifyResult.Query.Kind {
-		case "confidentiality":
+		case typesEnumConfidentiality:
 			q = "c"
-		case "authentication":
+		case typesEnumAuthentication:
 			q = "a"
-		case "freshness":
+		case typesEnumFreshness:
 			q = "f"
-		case "unlinkability":
+		case typesEnumUnlinkability:
 			q = "u"
 		}
 		switch verifyResult.Resolved {

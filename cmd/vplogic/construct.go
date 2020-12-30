@@ -79,28 +79,28 @@ func constructKnowledgeMapRenderPrincipal(
 	var err error
 	for _, expr := range blck.Principal.Expressions {
 		switch expr.Kind {
-		case "knows":
+		case typesEnumKnows:
 			valKnowledgeMap, err = constructKnowledgeMapRenderKnows(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
 				return KnowledgeMap{}, 0, err
 			}
-		case "generates":
+		case typesEnumGenerates:
 			valKnowledgeMap, err = constructKnowledgeMapRenderGenerates(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
 				return KnowledgeMap{}, 0, err
 			}
-		case "assignment":
+		case typesEnumAssignment:
 			valKnowledgeMap, err = constructKnowledgeMapRenderAssignment(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
 				return KnowledgeMap{}, 0, err
 			}
-		case "leaks":
+		case typesEnumLeaks:
 			declaredAt = declaredAt + 1
 			valKnowledgeMap, err = constructKnowledgeMapRenderLeaks(
 				valKnowledgeMap, blck, expr, currentPhase,
@@ -120,7 +120,7 @@ func constructKnowledgeMapRenderKnows(
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
 			d1 := valKnowledgeMap.Constants[i].Declaration
-			d2 := "knows"
+			d2 := typesEnumKnows
 			q1 := valKnowledgeMap.Constants[i].Qualifier
 			q2 := expr.Qualifier
 			fresh := valKnowledgeMap.Constants[i].Fresh
@@ -141,12 +141,12 @@ func constructKnowledgeMapRenderKnows(
 			Guard:       c.Guard,
 			Fresh:       false,
 			Leaked:      false,
-			Declaration: "knows",
+			Declaration: typesEnumKnows,
 			Qualifier:   expr.Qualifier,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
-			Kind:     "constant",
+			Kind:     typesEnumConstant,
 			Constant: c,
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
@@ -154,7 +154,7 @@ func constructKnowledgeMapRenderKnows(
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 		l := len(valKnowledgeMap.Constants) - 1
-		if expr.Qualifier != "public" {
+		if expr.Qualifier != typesEnumPublic {
 			continue
 		}
 		for _, principal := range valKnowledgeMap.Principals {
@@ -185,12 +185,12 @@ func constructKnowledgeMapRenderGenerates(
 			Guard:       c.Guard,
 			Fresh:       true,
 			Leaked:      false,
-			Declaration: "generates",
-			Qualifier:   "private",
+			Declaration: typesEnumGenerates,
+			Qualifier:   typesEnumPrivate,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
-			Kind:     "constant",
+			Kind:     typesEnumConstant,
 			Constant: c,
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
@@ -209,7 +209,7 @@ func constructKnowledgeMapRenderAssignment(
 		return KnowledgeMap{}, err
 	}
 	switch expr.Assigned.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		err := sanityPrimitive(expr.Assigned.Primitive, expr.Constants)
 		if err != nil {
 			return KnowledgeMap{}, err
@@ -251,11 +251,11 @@ func constructKnowledgeMapRenderAssignment(
 			Guard:       c.Guard,
 			Fresh:       false,
 			Leaked:      false,
-			Declaration: "assignment",
-			Qualifier:   "private",
+			Declaration: typesEnumAssignment,
+			Qualifier:   typesEnumPrivate,
 		}
 		switch expr.Assigned.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			expr.Assigned.Primitive.Output = i
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)

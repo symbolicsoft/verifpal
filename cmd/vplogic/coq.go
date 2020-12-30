@@ -62,7 +62,7 @@ func coqModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
 			i, i))
 		for _, q := range m.Queries {
 			switch q.Kind {
-			case "confidentiality":
+			case typesEnumConfidentiality:
 				for _, qc := range q.Constants {
 					crc, err := coqResolveConstant(qc, valKnowledgeMap)
 					if err != nil {
@@ -75,7 +75,7 @@ func coqModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
 						crc, i, i))
 				}
 			default:
-				return "", fmt.Errorf("unsupported query: %s", q.Kind)
+				return "", fmt.Errorf("unsupported query: %s", prettyQuery(q))
 			}
 		}
 	}
@@ -132,9 +132,9 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 	expressions := []string{""}
 	for i, expression := range block.Principal.Expressions {
 		switch expression.Kind {
-		case "knows":
+		case typesEnumKnows:
 			switch expression.Qualifier {
-			case "password":
+			case typesEnumPassword:
 				for _, c := range expression.Constants {
 					expressions = append(expressions, fmt.Sprintf(
 						"EXP knowledge private (pass (cnstn \"%s\")) unleaked;",
@@ -145,13 +145,23 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 				for _, c := range expression.Constants {
 					var crc string
 					crc, err = coqResolveConstant(c, valKnowledgeMap)
-					expressions = append(expressions, fmt.Sprintf(
-						"EXP knowledge %s %s unleaked;",
-						expression.Qualifier, crc,
-					))
+					switch expression.Qualifier {
+					case typesEnumPrivate:
+						expressions = append(expressions, fmt.Sprintf(
+							"EXP knowledge private %s unleaked;", crc,
+						))
+					case typesEnumPublic:
+						expressions = append(expressions, fmt.Sprintf(
+							"EXP knowledge public %s unleaked;", crc,
+						))
+					case typesEnumPassword:
+						expressions = append(expressions, fmt.Sprintf(
+							"EXP knowledge password %s unleaked;", crc,
+						))
+					}
 				}
 			}
-		case "generates":
+		case typesEnumGenerates:
 			for _, c := range expression.Constants {
 				var crv string
 				crv, err = coqResolveConstant(c, valKnowledgeMap)
@@ -159,7 +169,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 					"EXP generation private %s unleaked;", crv,
 				))
 			}
-		case "leaks":
+		case typesEnumLeaks:
 			for _, c := range expression.Constants {
 				var crc string
 				crc, err = coqResolveConstant(c, valKnowledgeMap)
@@ -167,7 +177,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 					"EXP knows public %s leaked;", crc,
 				))
 			}
-		case "assignment":
+		case typesEnumAssignment:
 			var cae []string
 			cae, err = coqAssignmentExpression(expression, valKnowledgeMap)
 			expressions = append(expressions, cae...)
@@ -188,7 +198,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap) ([]string, error) {
 	expressions := []string{}
 	switch expression.Assigned.Kind {
-	case "equation":
+	case typesEnumEquation:
 		cre, err := coqResolveEquation(expression.Assigned.Equation, valKnowledgeMap)
 		if err != nil {
 			return []string{}, err
@@ -196,12 +206,19 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap
 		expressions = append(expressions, fmt.Sprintf(
 			"EXP assignment private %s unleaked;", cre,
 		))
-	case "primitive":
+	case typesEnumPrimitive:
+		primitiveStringName := ""
+		if primitiveIsCorePrim(expression.Assigned.Primitive.Name) {
+			prim, _ := primitiveCoreGet(expression.Assigned.Primitive.Name)
+			primitiveStringName = prim.StringName
+		} else {
+			prim, _ := primitiveGet(expression.Assigned.Primitive.Name)
+			primitiveStringName = prim.StringName
+		}
 		switch expression.Assigned.Primitive.Name {
-		case "HASH", "PW_HASH", "CONCAT":
+		case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT:
 			exp := fmt.Sprintf(
-				"EXP assignment private (prim(%s%d ",
-				expression.Assigned.Primitive.Name,
+				"EXP assignment private (prim(%s%d ", primitiveStringName,
 				len(expression.Assigned.Primitive.Arguments))
 			for _, argument := range expression.Assigned.Primitive.Arguments {
 				crv, err := coqResolveValue(argument, valKnowledgeMap)
@@ -211,14 +228,13 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap
 				exp += crv
 			}
 			expressions = append(expressions, fmt.Sprintf("%s)) unleaked;", exp))
-		case "SPLIT", "SHAMIR_SPLIT", "HKDF":
+		case primitiveEnumSPLIT, primitiveEnumSHAMIRSPLIT, primitiveEnumHKDF:
 			for i, lhs := range expression.Constants {
 				if strings.HasPrefix(lhs.Name, "unnamed_") {
 					continue
 				} else {
 					exp := fmt.Sprintf(
-						"EXP assignment private (prim(%s%d ",
-						expression.Assigned.Primitive.Name, (i + 1))
+						"EXP assignment private (prim(%s%d ", primitiveStringName, (i + 1))
 					for _, argument := range expression.Assigned.Primitive.Arguments {
 						crv, err := coqResolveValue(argument, valKnowledgeMap)
 						if err != nil {
@@ -251,7 +267,7 @@ func coqGuard(guard bool) string {
 
 func coqResolveConstant(c Constant, valKnowledgeMap KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
-		Kind:     "constant",
+		Kind:     typesEnumConstant,
 		Constant: c,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
@@ -259,7 +275,7 @@ func coqResolveConstant(c Constant, valKnowledgeMap KnowledgeMap) (string, error
 
 func coqResolvePrimitive(p Primitive, valKnowledgeMap KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
-		Kind:      "primitive",
+		Kind:      typesEnumPrimitive,
 		Primitive: p,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
@@ -267,7 +283,7 @@ func coqResolvePrimitive(p Primitive, valKnowledgeMap KnowledgeMap) (string, err
 
 func coqResolveEquation(e Equation, valKnowledgeMap KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
-		Kind:     "equation",
+		Kind:     typesEnumEquation,
 		Equation: e,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
@@ -275,11 +291,11 @@ func coqResolveEquation(e Equation, valKnowledgeMap KnowledgeMap) (string, error
 
 func coqResolveValue(v Value, valKnowledgeMap KnowledgeMap) (string, error) {
 	switch v.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return coqResolveConstant(v.Constant, valKnowledgeMap)
-	case "primitive":
+	case typesEnumPrimitive:
 		return coqResolvePrimitive(v.Primitive, valKnowledgeMap)
-	case "equation":
+	case typesEnumEquation:
 		return coqResolveEquation(v.Equation, valKnowledgeMap)
 	}
 	return "", fmt.Errorf("invalid value kind")
@@ -287,11 +303,11 @@ func coqResolveValue(v Value, valKnowledgeMap KnowledgeMap) (string, error) {
 
 func coqPrintValue(a Value) (string, error) {
 	switch a.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return coqPrintConstant(a.Constant)
-	case "primitive":
+	case typesEnumPrimitive:
 		return coqPrintPrimitive(a.Primitive)
-	case "equation":
+	case typesEnumEquation:
 		return coqPrintEquation(a.Equation)
 	}
 	return "", fmt.Errorf("invalid value kind")
@@ -312,15 +328,23 @@ func coqPrintPrimitive(p Primitive) (string, error) {
 		}
 		args = append(args, cpv)
 	}
+	primitiveStringName := ""
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		primitiveStringName = prim.StringName
+	} else {
+		prim, _ := primitiveGet(p.Name)
+		primitiveStringName = prim.StringName
+	}
 	switch p.Name {
-	case "ASSERT":
-		return "", fmt.Errorf("unsupported primitive: %s", p.Name)
-	case "HASH", "PW_HASH", "CONCAT", "SPLIT", "HKDF", "SHAMIR_SPLIT":
+	case primitiveEnumASSERT:
+		return "", fmt.Errorf("unsupported primitive: %s", primitiveStringName)
+	case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT, primitiveEnumSPLIT, primitiveEnumHKDF, primitiveEnumSHAMIRSPLIT:
 		return fmt.Sprintf("(prim(%s%d %s))",
-			p.Name, len(p.Arguments), strings.Join(args, " ")), nil
+			primitiveStringName, len(p.Arguments), strings.Join(args, " ")), nil
 	}
 	return fmt.Sprintf("(prim(%s %s))",
-		p.Name, strings.Join(args, " ")), nil
+		primitiveStringName, strings.Join(args, " ")), nil
 }
 
 func coqPrintEquation(e Equation) (string, error) {

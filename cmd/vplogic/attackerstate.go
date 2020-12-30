@@ -25,8 +25,8 @@ func attackerStateInit(active bool) {
 func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 	attackerStateMutex.Lock()
 	for i, c := range valPrincipalState.Constants {
-		cc := Value{Kind: "constant", Constant: c}
-		if c.Qualifier != "public" {
+		cc := Value{Kind: typesEnumConstant, Constant: c}
+		if c.Qualifier != typesEnumPublic {
 			continue
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
@@ -42,12 +42,12 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 		}
 	}
 	for i, c := range valPrincipalState.Constants {
-		cc := Value{Kind: "constant", Constant: c}
+		cc := Value{Kind: typesEnumConstant, Constant: c}
 		a := valPrincipalState.Assigned[i]
 		if len(valPrincipalState.Wire[i]) == 0 && !valPrincipalState.Constants[i].Leaked {
 			continue
 		}
-		if valPrincipalState.Constants[i].Qualifier == "public" {
+		if valPrincipalState.Constants[i].Qualifier == typesEnumPublic {
 			continue
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])

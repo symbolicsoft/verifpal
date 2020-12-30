@@ -32,7 +32,7 @@ func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant
 	prefix := "const"
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	c = valKnowledgeMap.Constants[i]
-	if valKnowledgeMap.Creator[i] == principal && c.Declaration == "assignment" {
+	if valKnowledgeMap.Creator[i] == principal && c.Declaration == typesEnumAssignment {
 		prefix = principal
 	} else {
 		for _, m := range valKnowledgeMap.KnownBy[i] {
@@ -70,20 +70,27 @@ func pvConstants(valKnowledgeMap KnowledgeMap, principal string, c []Constant, v
 }
 
 func pvPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, check bool) string {
-	pname := p.Name
+	primitiveStringName := ""
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		primitiveStringName = prim.StringName
+	} else {
+		prim, _ := primitiveGet(p.Name)
+		primitiveStringName = prim.StringName
+	}
 	checksuffix := ""
 	switch check {
 	case true:
 		switch p.Name {
-		case "AEAD_DEC":
+		case primitiveEnumAEADDEC:
 			checksuffix = "_check"
 		}
 	}
 	switch p.Name {
-	case "HASH", "CONCAT":
-		pname = fmt.Sprintf("%s%d", p.Name, len(p.Arguments))
+	case primitiveEnumHASH, primitiveEnumCONCAT:
+		primitiveStringName = fmt.Sprintf("%s%d", primitiveStringName, len(p.Arguments))
 	}
-	prim := fmt.Sprintf("%s%s(", pname, checksuffix)
+	prim := fmt.Sprintf("%s%s(", primitiveStringName, checksuffix)
 	for i, arg := range p.Arguments {
 		sep := ""
 		if i != (len(p.Arguments) - 1) {
@@ -117,11 +124,11 @@ func pvEquation(valKnowledgeMap KnowledgeMap, principal string, e Equation) stri
 
 func pvValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
 	switch a.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return pvConstant(valKnowledgeMap, principal, a.Constant, "")
-	case "primitive":
+	case typesEnumPrimitive:
 		return pvPrimitive(valKnowledgeMap, principal, a.Primitive, false)
-	case "equation":
+	case typesEnumEquation:
 		return pvEquation(valKnowledgeMap, principal, a.Equation)
 	}
 	return ""
@@ -130,11 +137,11 @@ func pvValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
 func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
 	output := ""
 	switch query.Kind {
-	case "confidentiality":
+	case typesEnumConfidentiality:
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 		resolved, _ := valueResolveValueInternalValuesFromKnowledgeMap(valKnowledgeMap.Assigned[i], valKnowledgeMap)
 		output = fmt.Sprintf("query attacker(%s).", pvValue(valKnowledgeMap, "attacker", resolved))
-	case "authentication":
+	case typesEnumAuthentication:
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
 				query.Message.Sender, query.Message.Recipient, 0,
@@ -145,9 +152,9 @@ func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
 				pvConstant(valKnowledgeMap, "attacker", query.Message.Constants[0], ""),
 			),
 		)
-	case "freshness":
+	case typesEnumFreshness:
 		return "", fmt.Errorf("freshness queries are not yet supported in ProVerif model generation")
-	case "unlinkability":
+	case typesEnumUnlinkability:
 		return "", fmt.Errorf("unlinkability queries are not yet supported in ProVerif model generation")
 	}
 	if len(query.Options) > 0 {
@@ -166,14 +173,14 @@ func pvPrincipal(
 	)
 	for _, expression := range block.Principal.Expressions {
 		switch expression.Kind {
-		case "leaks":
+		case typesEnumLeaks:
 			for _, c := range expression.Constants {
 				procs = fmt.Sprintf(
 					"%s\tout(pub, (%s));\n",
 					procs, pvConstant(valKnowledgeMap, block.Principal.Name, c, ""),
 				)
 			}
-		case "assignment":
+		case typesEnumAssignment:
 			c := valueGetConstantsFromValue(expression.Assigned)
 			get := ""
 			for _, cc := range c {
@@ -200,9 +207,9 @@ func pvPrincipal(
 			}
 			valType := "bitstring"
 			switch expression.Assigned.Kind {
-			case "primitive":
+			case typesEnumPrimitive:
 				switch expression.Assigned.Primitive.Name {
-				case "SIGNVERIF", "RINGSIGNVERIF":
+				case primitiveEnumSIGNVERIF, primitiveEnumRINGSIGNVERIF:
 					valType = "bool"
 				}
 				switch expression.Assigned.Primitive.Check {

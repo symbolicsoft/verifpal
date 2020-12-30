@@ -58,7 +58,7 @@ func sanityAssignmentConstants(
 	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
 ) ([]Constant, error) {
 	switch right.Kind {
-	case "constant":
+	case typesEnumConstant:
 		unique := true
 		for _, c := range constants {
 			if right.Constant.Name == c.Name {
@@ -69,7 +69,7 @@ func sanityAssignmentConstants(
 		if unique {
 			constants = append(constants, right.Constant)
 		}
-	case "primitive":
+	case typesEnumPrimitive:
 		sacfp, err := sanityAssignmentConstantsFromPrimitive(
 			right, constants, valKnowledgeMap,
 		)
@@ -77,7 +77,7 @@ func sanityAssignmentConstants(
 			return []Constant{}, err
 		}
 		constants = append(constants, sacfp...)
-	case "equation":
+	case typesEnumEquation:
 		constants = append(constants, sanityAssignmentConstantsFromEquation(
 			right, constants,
 		)...)
@@ -94,20 +94,17 @@ func sanityAssignmentConstantsFromPrimitive(
 		return []Constant{}, err
 	}
 	if primArguments == 0 {
-		return []Constant{}, fmt.Errorf(
-			"primitive %s has no inputs", right.Primitive.Name,
-		)
+		return []Constant{}, fmt.Errorf("primitive has no inputs")
 	}
 	if !intInSlice(primArguments, specArity) {
 		arityString := prettyArity(specArity)
 		return []Constant{}, fmt.Errorf(
-			"primitive %s has %d inputs, expecting %s",
-			right.Primitive.Name, primArguments, arityString,
+			"primitive has %d inputs, expecting %s", primArguments, arityString,
 		)
 	}
 	for _, a := range right.Primitive.Arguments {
 		switch a.Kind {
-		case "constant":
+		case typesEnumConstant:
 			unique := true
 			for _, c := range constants {
 				if a.Constant.Name == c.Name {
@@ -118,12 +115,12 @@ func sanityAssignmentConstantsFromPrimitive(
 			if unique {
 				constants = append(constants, a.Constant)
 			}
-		case "primitive":
+		case typesEnumPrimitive:
 			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
 			if err != nil {
 				return []Constant{}, err
 			}
-		case "equation":
+		case typesEnumEquation:
 			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
 			if err != nil {
 				return []Constant{}, err
@@ -167,15 +164,12 @@ func sanityPrimitive(p Primitive, outputs []Constant) error {
 	if !intInSlice(len(outputs), output) {
 		outputString := prettyArity(output)
 		return fmt.Errorf(
-			"primitive %s has %d outputs, expecting %s",
-			p.Name, len(outputs), outputString,
+			"primitive has %d outputs, expecting %s",
+			len(outputs), outputString,
 		)
 	}
 	if p.Check && !check {
-		return fmt.Errorf(
-			"primitive %s is checked but does not support checking",
-			p.Name,
-		)
+		return fmt.Errorf("primitive is checked but does not support checking")
 	}
 	return nil
 }
@@ -184,13 +178,13 @@ func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) error {
 	var err error
 	for _, query := range m.Queries {
 		switch query.Kind {
-		case "confidentiality":
+		case typesEnumConfidentiality:
 			err = sanityQueriesConfidentiality(query, valKnowledgeMap)
-		case "authentication":
+		case typesEnumAuthentication:
 			err = sanityQueriesAuthentication(query, valKnowledgeMap)
-		case "freshness":
+		case typesEnumFreshness:
 			err = sanityQueriesFreshness(query, valKnowledgeMap)
-		case "unlinkability":
+		case typesEnumUnlinkability:
 			err = sanityQueriesUnlinkability(query, valKnowledgeMap)
 		default:
 			return fmt.Errorf("invalid query kind")
@@ -272,7 +266,7 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error
 func sanityQueryOptions(query Query, valKnowledgeMap KnowledgeMap) error {
 	for _, option := range query.Options {
 		switch option.Kind {
-		case "precondition":
+		case typesEnumPrecondition:
 			if len(option.Message.Constants) != 1 {
 				return fmt.Errorf(
 					"precondition option message (%s) has more than one constant",
@@ -282,9 +276,7 @@ func sanityQueryOptions(query Query, valKnowledgeMap KnowledgeMap) error {
 			c := option.Message.Constants[0]
 			return sanityQueriesCheckKnown(query, option.Message, c, valKnowledgeMap)
 		default:
-			return fmt.Errorf(
-				"invalid query option kind (%s)", option.Kind,
-			)
+			return fmt.Errorf("invalid query option kind")
 		}
 	}
 	return nil
@@ -360,7 +352,7 @@ func sanityDeclaredPrincipals(m Model) ([]string, error) {
 	}
 	for _, query := range m.Queries {
 		switch query.Kind {
-		case "authentication":
+		case typesEnumAuthentication:
 			principals, _ = appendUniqueString(principals, query.Message.Sender)
 			principals, _ = appendUniqueString(principals, query.Message.Recipient)
 		}
@@ -420,19 +412,19 @@ func sanityCheckEquationRootGenerator(e Equation) error {
 func sanityCheckEquationGenerators(a Value, valPrincipalState PrincipalState) error {
 	var err error
 	switch a.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		for _, va := range a.Primitive.Arguments {
 			switch va.Kind {
-			case "primitive":
+			case typesEnumPrimitive:
 				err = sanityCheckEquationGenerators(va, valPrincipalState)
-			case "equation":
+			case typesEnumEquation:
 				err = sanityCheckEquationRootGenerator(va.Equation)
 			}
 			if err != nil {
 				return err
 			}
 		}
-	case "equation":
+	case typesEnumEquation:
 		err = sanityCheckEquationRootGenerator(a.Equation)
 		if err != nil {
 			return err

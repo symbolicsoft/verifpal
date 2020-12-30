@@ -14,13 +14,13 @@ func queryStart(
 	valAttackerState := attackerStateGetRead()
 	var err error
 	switch query.Kind {
-	case "confidentiality":
+	case typesEnumConfidentiality:
 		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
-	case "authentication":
+	case typesEnumAuthentication:
 		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
-	case "freshness":
+	case typesEnumFreshness:
 		_, err = queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
-	case "unlinkability":
+	case typesEnumUnlinkability:
 		_, err = queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 	return err
@@ -37,7 +37,7 @@ func queryConfidentiality(
 		Options:  []QueryOptionResult{},
 	}
 	v, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
-		Kind:     "constant",
+		Kind:     typesEnumConstant,
 		Constant: query.Constants[0],
 	}, valKnowledgeMap)
 	ii := valueEquivalentValueInValues(v, valAttackerState.Known)
@@ -120,7 +120,7 @@ func queryAuthenticationGetPassIndices(
 		hasRule := false
 		a := valKnowledgeMap.Assigned[iii]
 		switch a.Kind {
-		case "constant", "equation":
+		case typesEnumConstant, typesEnumEquation:
 			continue
 		}
 		if !valueFindConstantInPrimitive(c, a, valKnowledgeMap) {
@@ -181,7 +181,7 @@ func queryFreshness(
 	}
 	indices := []int{}
 	freshnessFound, err := valueContainsFreshValues(Value{
-		Kind:     "constant",
+		Kind:     typesEnumConstant,
 		Constant: query.Constants[0],
 	}, query.Constants[0], valPrincipalState, valAttackerState)
 	if err != nil {
@@ -197,7 +197,7 @@ func queryFreshness(
 		hasRule := false
 		a := valKnowledgeMap.Assigned[i]
 		switch a.Kind {
-		case "constant", "equation":
+		case typesEnumConstant, typesEnumEquation:
 			continue
 		}
 		if !valueFindConstantInPrimitive(query.Constants[0], a, valKnowledgeMap) {
@@ -268,7 +268,7 @@ func queryUnlinkability(
 	noFreshness := []Constant{}
 	for _, c := range query.Constants {
 		freshnessFound, err := valueContainsFreshValues(Value{
-			Kind:     "constant",
+			Kind:     typesEnumConstant,
 			Constant: c,
 		}, c, valPrincipalState, valAttackerState)
 		if err != nil {
@@ -314,7 +314,7 @@ func queryUnlinkability(
 			}
 			obtainable := false
 			switch a.Kind {
-			case "primitive":
+			case typesEnumPrimitive:
 				ok0, _ := possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 				ok1, _, _ := possibleToRecomposePrimitive(a.Primitive, valAttackerState)
 				obtainable = ok0 || ok1

@@ -87,7 +87,7 @@ func verifyAnalysisDecompose(
 	revealed := Value{}
 	ar := []Value{}
 	switch a.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 	}
 	if r && attackerStatePutWrite(revealed, valPrincipalState) {
@@ -108,7 +108,7 @@ func verifyAnalysisRecompose(
 	revealed := Value{}
 	ar := []Value{}
 	switch a.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
 	}
 	if r && attackerStatePutWrite(revealed, valPrincipalState) {
@@ -127,12 +127,12 @@ func verifyAnalysisReconstruct(
 	r := false
 	ar := []Value{}
 	switch a.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 		for _, aa := range a.Primitive.Arguments {
 			o = o + verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
-	case "equation":
+	case typesEnumEquation:
 		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
 	}
 	if r && attackerStatePutWrite(a, valPrincipalState) {
@@ -149,7 +149,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	ar := a
 	switch a.Kind {
-	case "constant":
+	case typesEnumConstant:
 		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.Assigned {
@@ -184,9 +184,9 @@ func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState) int {
 func verifyAnalysisConcat(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	switch a.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		switch a.Primitive.Name {
-		case "CONCAT":
+		case primitiveEnumCONCAT:
 			for _, revealed := range a.Primitive.Arguments {
 				if attackerStatePutWrite(revealed, valPrincipalState) {
 					InfoMessage(fmt.Sprintf(

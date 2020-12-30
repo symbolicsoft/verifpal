@@ -4,6 +4,27 @@
 
 package vplogic
 
+type typesEnum uint8
+
+const (
+	typesEnumEmpty           typesEnum = iota
+	typesEnumConstant        typesEnum = iota
+	typesEnumPrimitive       typesEnum = iota
+	typesEnumEquation        typesEnum = iota
+	typesEnumPrivate         typesEnum = iota
+	typesEnumPublic          typesEnum = iota
+	typesEnumPassword        typesEnum = iota
+	typesEnumKnows           typesEnum = iota
+	typesEnumGenerates       typesEnum = iota
+	typesEnumAssignment      typesEnum = iota
+	typesEnumLeaks           typesEnum = iota
+	typesEnumConfidentiality typesEnum = iota
+	typesEnumAuthentication  typesEnum = iota
+	typesEnumFreshness       typesEnum = iota
+	typesEnumUnlinkability   typesEnum = iota
+	typesEnumPrecondition    typesEnum = iota
+)
+
 // Model is the main parsed representation of the Verifpal model.
 type Model struct {
 	FileName string
@@ -48,7 +69,7 @@ type Phase struct {
 
 // Query represents a query declaration in a Verifpal model.
 type Query struct {
-	Kind      string
+	Kind      typesEnum
 	Constants []Constant
 	Message   Message
 	Options   []QueryOption
@@ -56,7 +77,7 @@ type Query struct {
 
 // QueryOption represents a query option (i.e. precondition) declaration in a Verifpal model.
 type QueryOption struct {
-	Kind    string
+	Kind    typesEnum
 	Message Message
 }
 
@@ -73,15 +94,15 @@ type QueryOptionResult struct {
 // - "assignment": `[constants] = [value]`, eg. "x, y = HKDF(a, b, c)"
 // - "leaks": `leaks [constants]`, eg. "leaks x"
 type Expression struct {
-	Kind      string
-	Qualifier string
+	Kind      typesEnum
+	Qualifier typesEnum
 	Constants []Constant
 	Assigned  Value
 }
 
 // Value represents either a constant, primitive or equation expression.
 type Value struct {
-	Kind      string
+	Kind      typesEnum
 	Constant  Constant
 	Primitive Primitive
 	Equation  Equation
@@ -99,8 +120,8 @@ type Constant struct {
 	Fresh       bool
 	Leaked      bool
 	Name        string
-	Declaration string
-	Qualifier   string
+	Declaration typesEnum
+	Qualifier   typesEnum
 }
 
 // Primitive represents a primitive expression:
@@ -109,7 +130,7 @@ type Constant struct {
 // - Output indicates which output value of the primitive this copy should rewrite to (starts at 0).
 // - Check indicates whether this has been a checked primitive.
 type Primitive struct {
-	Name      string
+	Name      primitiveEnum
 	Arguments []Value
 	Output    int
 	Check     bool
@@ -215,7 +236,7 @@ type RecomposeRule struct {
 // RewriteRule contains a primitive's RewriteRule.
 type RewriteRule struct {
 	HasRule  bool
-	Name     string
+	Name     primitiveEnum
 	From     int
 	To       func(Primitive) Value
 	Matching map[int][]int
@@ -225,7 +246,7 @@ type RewriteRule struct {
 // RebuildRule contains a primitive's RebuildRule.
 type RebuildRule struct {
 	HasRule bool
-	Name    string
+	Name    primitiveEnum
 	Given   [][]int
 	Reveal  int
 	Filter  func(Primitive, Value, int) (Value, bool)
@@ -233,7 +254,8 @@ type RebuildRule struct {
 
 // PrimitiveCoreSpec contains the definition of a core primitive.
 type PrimitiveCoreSpec struct {
-	Name       string
+	Name       primitiveEnum
+	StringName string
 	Arity      []int
 	Output     []int
 	HasRule    bool
@@ -245,7 +267,8 @@ type PrimitiveCoreSpec struct {
 
 // PrimitiveSpec contains the definition of a primitive.
 type PrimitiveSpec struct {
-	Name            string
+	Name            primitiveEnum
+	StringName      string
 	Arity           []int
 	Output          []int
 	Decompose       DecomposeRule

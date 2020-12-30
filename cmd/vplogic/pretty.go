@@ -49,7 +49,14 @@ func prettyConstants(c []Constant) string {
 }
 
 func prettyPrimitive(p Primitive) string {
-	pretty := fmt.Sprintf("%s(", p.Name)
+	pretty := ""
+	if primitiveIsCorePrim(p.Name) {
+		prim, _ := primitiveCoreGet(p.Name)
+		pretty = fmt.Sprintf("%s(", prim.StringName)
+	} else {
+		prim, _ := primitiveGet(p.Name)
+		pretty = fmt.Sprintf("%s(", prim.StringName)
+	}
 	check := ""
 	if p.Check {
 		check = "?"
@@ -85,11 +92,11 @@ func prettyEquation(e Equation) string {
 
 func prettyValue(a Value) string {
 	switch a.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return prettyConstant(a.Constant)
-	case "primitive":
+	case typesEnumPrimitive:
 		return prettyPrimitive(a.Primitive)
-	case "equation":
+	case typesEnumEquation:
 		return prettyEquation(a.Equation)
 	}
 	return ""
@@ -113,30 +120,26 @@ func prettyValues(a []Value) string {
 func prettyQuery(query Query) string {
 	output := ""
 	switch query.Kind {
-	case "confidentiality":
+	case typesEnumConfidentiality:
 		output = fmt.Sprintf(
-			"%s? %s",
-			query.Kind,
+			"confidentiality? %s",
 			prettyConstants(query.Constants),
 		)
-	case "authentication":
+	case typesEnumAuthentication:
 		output = fmt.Sprintf(
-			"%s? %s -> %s: %s",
-			query.Kind,
+			"confidentiality? %s -> %s: %s",
 			query.Message.Sender,
 			query.Message.Recipient,
 			prettyConstants(query.Message.Constants),
 		)
-	case "freshness":
+	case typesEnumFreshness:
 		output = fmt.Sprintf(
-			"%s? %s",
-			query.Kind,
+			"freshness? %s",
 			prettyConstants(query.Constants),
 		)
-	case "unlinkability":
+	case typesEnumUnlinkability:
 		output = fmt.Sprintf(
-			"%s? %s",
-			query.Kind,
+			"unlinkability? %s",
 			prettyConstants(query.Constants),
 		)
 	}
@@ -144,14 +147,14 @@ func prettyQuery(query Query) string {
 		output = fmt.Sprintf("%s[", output)
 	}
 	for _, option := range query.Options {
-		output = fmt.Sprintf(
-			"%s\n\t\t%s[%s -> %s: %s]",
-			output,
-			option.Kind,
-			option.Message.Sender,
-			option.Message.Recipient,
-			prettyConstants(option.Message.Constants),
-		)
+		switch option.Kind {
+		case typesEnumPrecondition:
+			output = fmt.Sprintf(
+				"%s\n\t\tprecondition[%s -> %s: %s]",
+				output, option.Message.Sender, option.Message.Recipient,
+				prettyConstants(option.Message.Constants),
+			)
+		}
 	}
 	if len(query.Options) > 0 {
 		output = fmt.Sprintf("%s\n\t]", output)
@@ -177,26 +180,35 @@ func prettyPrincipal(block Block) string {
 func prettyExpression(expression Expression) string {
 	output := ""
 	switch expression.Kind {
-	case "knows":
+	case typesEnumKnows:
+		switch expression.Qualifier {
+		case typesEnumPrivate:
+			output = fmt.Sprintf(
+				"knows private %s",
+				prettyConstants(expression.Constants),
+			)
+		case typesEnumPublic:
+			output = fmt.Sprintf(
+				"knows public %s",
+				prettyConstants(expression.Constants),
+			)
+		case typesEnumPassword:
+			output = fmt.Sprintf(
+				"knows password %s",
+				prettyConstants(expression.Constants),
+			)
+		}
+	case typesEnumGenerates:
 		output = fmt.Sprintf(
-			"%s %s %s",
-			expression.Kind,
-			expression.Qualifier,
+			"generates %s",
 			prettyConstants(expression.Constants),
 		)
-	case "generates":
+	case typesEnumLeaks:
 		output = fmt.Sprintf(
-			"%s %s",
-			expression.Kind,
+			"leaks %s",
 			prettyConstants(expression.Constants),
 		)
-	case "leaks":
-		output = fmt.Sprintf(
-			"%s %s",
-			expression.Kind,
-			prettyConstants(expression.Constants),
-		)
-	case "assignment":
+	case typesEnumAssignment:
 		right := prettyValue(expression.Assigned)
 		left := []Constant{}
 		for i, c := range expression.Constants {

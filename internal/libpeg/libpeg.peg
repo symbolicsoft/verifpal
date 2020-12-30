@@ -132,8 +132,15 @@ PrincipalName <- Name:Identifier {
 	return strings.Title(Name.(string)), err
 }
 
-Qualifier <- ("public"/"private"/"password") {
-	return string(c.text), nil
+Qualifier <- ("private"/"public"/"password") {
+	switch string(c.text) {
+		default:
+			return typesEnumPrivate, nil
+		case "public":
+			return typesEnumPublic, nil
+		case "password":
+			return typesEnumPassword, nil
+	}
 }
 
 Message <- Sender:PrincipalName? _ "->" _ Recipient:PrincipalName? _ ':' _ Constants:MessageConstants? {
@@ -177,8 +184,8 @@ Knows <- "knows" _ Qualifier:Qualifier? _ Constants:Constants? {
 			return nil, errors.New("`knows` declaration is missing constant name(s)")
 	}
 	return Expression{
-		Kind: "knows",
-		Qualifier: Qualifier.(string),
+		Kind: typesEnumKnows,
+		Qualifier: Qualifier.(typesEnum),
 		Constants: Constants.([]Constant),
 	}, nil
 }
@@ -188,8 +195,8 @@ Generates <- "generates" _ Constants:Constants? {
 		return nil, errors.New("`generates` declaration is missing constant name(s)")
 	}
 	return Expression{
-		Kind: "generates",
-		Qualifier: "",
+		Kind: typesEnumGenerates,
+		Qualifier: typesEnumEmpty,
 		Constants: Constants.([]Constant),
 	}, nil
 }
@@ -199,8 +206,8 @@ Leaks <- "leaks" _ Constants:Constants? {
 		return nil, errors.New("`leaks` declaration is missing constant name(s)")
 	}
 	return Expression{
-		Kind: "leaks",
-		Qualifier: "",
+		Kind: typesEnumLeaks,
+		Qualifier: typesEnumEmpty,
 		Constants: Constants.([]Constant),
 	}, nil
 }
@@ -210,7 +217,7 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 		return nil, errors.New("invalid value assignment")
 	}
 	switch Right.(Value).Kind {
-	case "constant":
+	case typesEnumConstant:
 		err := errors.New("cannot assign value to value")
 		return nil, err
 	}
@@ -223,7 +230,7 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 		}
 	}
 	return Expression{
-		Kind: "assignment",
+		Kind: typesEnumAssignment,
 		Constants: consts,
 		Assigned:  Right.(Value),
 	}, nil
@@ -231,7 +238,7 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 
 Constant <- Const:Identifier (_ ',' _)? {
 	return Value{
-		Kind: "constant",
+		Kind: typesEnumConstant,
 		Constant: Constant{
 			Name: Const.(string),
 		},
@@ -266,7 +273,7 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
 	err := libpegCheckIfReserved(Guarded.(string))
 	return Value{
-		Kind: "constant",
+		Kind: typesEnumConstant,
 		Constant: Constant{
 			Name: Guarded.(string),
 			Guard: true,
@@ -279,15 +286,16 @@ Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _
 	for _, a := range Arguments.([]interface{}) {
 		args = append(args, a.(Value))
 	}
+	primEnum, err := primitiveGetEnum(Name.(string))
 	return Value{
-		Kind: "primitive",
+		Kind: typesEnumPrimitive,
 		Primitive: Primitive{
-			Name: Name.(string),
+			Name: primEnum,
 			Arguments: args,
 			Output: 0,
 			Check: Check != nil,
 		},
-	}, nil
+	}, err
 }
 
 PrimitiveName <- Name:Identifier {
@@ -296,7 +304,7 @@ PrimitiveName <- Name:Identifier {
 
 Equation <- First:Constant (_ '^' _) Second:Constant {
 	return Value{
-		Kind: "equation",
+		Kind: typesEnumEquation,
 		Equation: Equation{
 			Values: []Value{
 				First.(Value),
@@ -324,7 +332,7 @@ QueryConfidentiality <- "confidentiality?" _ Const:Constant? _ Options:QueryOpti
 			Options = []QueryOption{}
 	}
 	return Query{
-		Kind: "confidentiality",
+		Kind: typesEnumConfidentiality,
 		Constants: []Constant{Const.(Value).Constant},
 		Message: Message{},
 		Options: Options.([]QueryOption),
@@ -339,7 +347,7 @@ QueryAuthentication <- "authentication?" _ Message:Message? _ Options:QueryOptio
 			Options = []QueryOption{}
 	}
 	return Query{
-		Kind: "authentication",
+		Kind: typesEnumAuthentication,
 		Constants: []Constant{},
 		Message: (Message.(Block)).Message,
 		Options: Options.([]QueryOption),
@@ -354,7 +362,7 @@ QueryFreshness <- "freshness?" _ Const:Constant? _ Options:QueryOptions? _ {
 			Options = []QueryOption{}
 	}
 	return Query{
-		Kind: "freshness",
+		Kind: typesEnumFreshness,
 		Constants: []Constant{Const.(Value).Constant},
 		Message: Message{},
 		Options: Options.([]QueryOption),
@@ -369,7 +377,7 @@ QueryUnlinkability <- "unlinkability?" _ Consts:Constants? _ Options:QueryOption
 			Options = []QueryOption{}
 	}
 	return Query{
-		Kind: "unlinkability",
+		Kind: typesEnumUnlinkability,
 		Constants: Consts.([]Constant),
 		Message: Message{},
 		Options: Options.([]QueryOption),
@@ -384,8 +392,13 @@ QueryOptions <- '[' _ Options:(QueryOption*) ']' _ {
 }
 
 QueryOption <- OptionName:Identifier _ '[' _ Message:Message _ ']' _ {
+	optionEnum := typesEnumEmpty
+	switch OptionName.(string) {
+		case "precondition":
+			optionEnum = typesEnumPrecondition
+	}
 	return QueryOption{
-		Kind: OptionName.(string),
+		Kind: optionEnum,
 		Message: (Message.(Block)).Message,
 	}, nil
 }

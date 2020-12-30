@@ -131,14 +131,14 @@ func verifyActiveMutatePrincipalState(
 			return valPrincipalState, false, err
 		}
 		switch ar.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			ac.Primitive.Output = ar.Primitive.Output
 			ac.Primitive.Check = ar.Primitive.Check
 			_, aar := possibleToRewrite(ar.Primitive, valPrincipalState)
 			ar.Primitive = aar[0].Primitive
 		}
 		switch ac.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			_, aac := possibleToRewrite(ac.Primitive, valPrincipalState)
 			ac.Primitive = aac[0].Primitive
 		}

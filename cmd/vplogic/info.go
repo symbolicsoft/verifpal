@@ -189,9 +189,9 @@ func infoLiteralNumber(n int) string {
 func infoOutputText(revealed Value) string {
 	outputText := prettyValue(revealed)
 	switch revealed.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return outputText
-	case "primitive":
+	case typesEnumPrimitive:
 		oneOutput := false
 		if primitiveIsCorePrim(revealed.Primitive.Name) {
 			prim, _ := primitiveCoreGet(revealed.Primitive.Name)
@@ -207,7 +207,7 @@ func infoOutputText(revealed Value) string {
 			strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
 		)
 		return fmt.Sprintf("%s of %s", prefix, outputText)
-	case "equation":
+	case typesEnumEquation:
 		return outputText
 	default:
 		return outputText

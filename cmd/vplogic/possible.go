@@ -27,7 +27,7 @@ func possibleToDecomposePrimitive(
 			continue
 		}
 		switch a.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			r, _ := possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
@@ -38,7 +38,7 @@ func possibleToDecomposePrimitive(
 				has = append(has, a)
 				continue
 			}
-		case "equation":
+		case typesEnumEquation:
 			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
@@ -69,7 +69,7 @@ func possibleToRecomposePrimitive(
 			for _, v := range valAttackerState.Known {
 				vb := v
 				switch v.Kind {
-				case "primitive":
+				case typesEnumPrimitive:
 					equivPrim, vo, _ := valueEquivalentPrimitives(
 						v.Primitive, p, false,
 					)
@@ -102,7 +102,7 @@ func possibleToReconstructPrimitive(
 			continue
 		}
 		switch a.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
@@ -113,7 +113,7 @@ func possibleToReconstructPrimitive(
 				has = append(has, a)
 				continue
 			}
-		case "equation":
+		case typesEnumEquation:
 			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
 			if r {
 				has = append(has, a)
@@ -142,13 +142,13 @@ func possibleToReconstructEquation(e Equation, valAttackerState AttackerState) (
 		return true, []Value{s0, s1}
 	}
 	p0 := Value{
-		Kind: "equation",
+		Kind: typesEnumEquation,
 		Equation: Equation{
 			Values: []Value{e.Values[0], e.Values[1]},
 		},
 	}
 	p1 := Value{
-		Kind: "equation",
+		Kind: typesEnumEquation,
 		Equation: Equation{
 			Values: []Value{e.Values[0], e.Values[2]},
 		},
@@ -167,10 +167,10 @@ func possibleToReconstructEquation(e Equation, valAttackerState AttackerState) (
 func possibleToRewrite(
 	p Primitive, valPrincipalState PrincipalState,
 ) (bool, []Value) {
-	v := []Value{{Kind: "primitive", Primitive: p}}
+	v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
 	for i, a := range p.Arguments {
 		switch a.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			_, pp := possibleToRewrite(a.Primitive, valPrincipalState)
 			p.Arguments[i] = pp[0]
 		}
@@ -188,7 +188,7 @@ func possibleToRewrite(
 	}
 	from := p.Arguments[prim.Rewrite.From]
 	switch from.Kind {
-	case "primitive":
+	case typesEnumPrimitive:
 		if from.Primitive.Name != prim.Rewrite.Name {
 			return !prim.Check, v
 		}
@@ -216,7 +216,7 @@ func possibleToRewritePrim(
 			}
 			for i := range ax {
 				switch ax[i].Kind {
-				case "primitive":
+				case typesEnumPrimitive:
 					r, v := possibleToRewrite(ax[i].Primitive, valPrincipalState)
 					if r {
 						ax[i] = v[0]
@@ -251,7 +251,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 				continue ggLoop
 			}
 			switch p.Arguments[gg].Kind {
-			case "primitive":
+			case typesEnumPrimitive:
 				if p.Arguments[gg].Primitive.Name == prim.Rebuild.Name {
 					has = append(has, p.Arguments[gg])
 				}
@@ -280,11 +280,11 @@ func possibleToObtainPasswords(
 ) []Value {
 	passwords := []Value{}
 	switch a.Kind {
-	case "constant":
+	case typesEnumConstant:
 		aa, _ := valueResolveConstant(a.Constant, valPrincipalState)
 		switch aa.Kind {
-		case "constant":
-			if aa.Constant.Qualifier == "password" {
+		case typesEnumConstant:
+			if aa.Constant.Qualifier == typesEnumPassword {
 				if aIndex >= 0 {
 					if !primitiveIsCorePrim(aParent.Primitive.Name) {
 						prim, _ := primitiveGet(aParent.Primitive.Name)
@@ -296,7 +296,7 @@ func possibleToObtainPasswords(
 				passwords = append(passwords, aa)
 			}
 		}
-	case "primitive":
+	case typesEnumPrimitive:
 		for ii, aa := range a.Primitive.Arguments {
 			if !primitiveIsCorePrim(a.Primitive.Name) {
 				prim, _ := primitiveGet(a.Primitive.Name)
@@ -308,7 +308,7 @@ func possibleToObtainPasswords(
 				possibleToObtainPasswords(aa, aParent, ii, valPrincipalState)...,
 			)
 		}
-	case "equation":
+	case typesEnumEquation:
 		for _, aa := range a.Equation.Values {
 			passwords = append(passwords,
 				possibleToObtainPasswords(aa, a, -1, valPrincipalState)...,

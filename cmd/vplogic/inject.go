@@ -36,11 +36,11 @@ func injectValueRules(
 	k Value, arg int, p Primitive, stage int,
 ) bool {
 	switch k.Kind {
-	case "constant":
+	case typesEnumConstant:
 		return injectConstantRules(k.Constant, arg, p)
-	case "primitive":
+	case typesEnumPrimitive:
 		return injectPrimitiveRules(k.Primitive, arg, p, stage)
-	case "equation":
+	case typesEnumEquation:
 		return injectEquationRules(k.Equation, arg, p)
 	}
 	return true
@@ -48,7 +48,7 @@ func injectValueRules(
 
 func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	switch {
-	case p.Arguments[arg].Kind != "constant":
+	case p.Arguments[arg].Kind != typesEnumConstant:
 		return false
 	case strings.ToLower(c.Name) == "g":
 		return false
@@ -58,7 +58,7 @@ func injectConstantRules(c Constant, arg int, p Primitive) bool {
 
 func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 	switch {
-	case p.Arguments[arg].Kind != "primitive":
+	case p.Arguments[arg].Kind != typesEnumPrimitive:
 		return false
 	case injectPrimitiveStageRestricted(k, stage):
 		return false
@@ -68,7 +68,7 @@ func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 
 func injectEquationRules(e Equation, arg int, p Primitive) bool {
 	switch {
-	case p.Arguments[arg].Kind != "equation":
+	case p.Arguments[arg].Kind != typesEnumEquation:
 		return false
 	case len(e.Values) != len(p.Arguments[arg].Equation.Values):
 		return false
@@ -106,19 +106,19 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 	}
 	for i, a := range p.Arguments {
 		switch a.Kind {
-		case "constant":
+		case typesEnumConstant:
 			skeleton.Arguments[i] = valueNil
-		case "primitive":
+		case typesEnumPrimitive:
 			pp, dd := injectPrimitiveSkeleton(a.Primitive, depth)
 			if dd > depth {
 				depth = dd
 			}
 			aa := Value{
-				Kind:      "primitive",
+				Kind:      typesEnumPrimitive,
 				Primitive: pp,
 			}
 			skeleton.Arguments[i] = aa
-		case "equation":
+		case typesEnumEquation:
 			switch len(a.Equation.Values) {
 			case 1:
 				skeleton.Arguments[i] = valueG
@@ -144,8 +144,8 @@ func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 		return false
 	}
 	ps, _ := injectPrimitiveSkeleton(p, 0)
-	pv := Value{Kind: "primitive", Primitive: ps}
-	sv := Value{Kind: "primitive", Primitive: skeleton}
+	pv := Value{Kind: typesEnumPrimitive, Primitive: ps}
+	sv := Value{Kind: typesEnumPrimitive, Primitive: skeleton}
 	return valueEquivalentValues(pv, sv, true)
 }
 
@@ -155,7 +155,7 @@ func injectMissingSkeletons(p Primitive, valPrincipalState PrincipalState, valAt
 SkeletonSearch:
 	for _, a := range valAttackerState.Known {
 		switch a.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			if injectMatchSkeletons(a.Primitive, skeleton) {
 				matchingSkeleton = true
 				break SkeletonSearch
@@ -164,7 +164,7 @@ SkeletonSearch:
 	}
 	if !matchingSkeleton {
 		known := Value{
-			Kind:      "primitive",
+			Kind:      typesEnumPrimitive,
 			Primitive: skeleton,
 		}
 		if attackerStatePutWrite(known, valPrincipalState) {
@@ -176,7 +176,7 @@ SkeletonSearch:
 	}
 	for _, a := range p.Arguments {
 		switch a.Kind {
-		case "primitive":
+		case typesEnumPrimitive:
 			injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
 		}
 	}
@@ -194,19 +194,19 @@ func injectPrimitive(
 	for arg := range p.Arguments {
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
-			case "constant":
+			case typesEnumConstant:
 				k, _ = valueResolveConstant(k.Constant, valPrincipalState)
 			}
 			if !injectValueRules(k, arg, p, stage) {
 				continue
 			}
 			switch k.Kind {
-			case "constant":
+			case typesEnumConstant:
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
 					uinjectants[arg] = append(uinjectants[arg], k)
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
-			case "primitive":
+			case typesEnumPrimitive:
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
 					uinjectants[arg] = append(uinjectants[arg], k)
 					kinjectants[arg] = append(kinjectants[arg], k)
@@ -217,7 +217,7 @@ func injectPrimitive(
 						valPrincipalState, valAttackerState, injectDepth, stage,
 					)
 				}
-			case "equation":
+			case typesEnumEquation:
 				if valueEquivalentValueInValues(k, uinjectants[arg]) < 0 {
 					uinjectants[arg] = append(uinjectants[arg], k)
 					kinjectants[arg] = append(kinjectants[arg], k)
@@ -272,7 +272,7 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 	}
 	for i := range kinjectants[0] {
 		aa := Value{
-			Kind: "primitive",
+			Kind: typesEnumPrimitive,
 			Primitive: Primitive{
 				Name: p.Name,
 				Arguments: []Value{
@@ -292,7 +292,7 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			aa := Value{
-				Kind: "primitive",
+				Kind: typesEnumPrimitive,
 				Primitive: Primitive{
 					Name: p.Name,
 					Arguments: []Value{
@@ -315,7 +315,7 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				aa := Value{
-					Kind: "primitive",
+					Kind: typesEnumPrimitive,
 					Primitive: Primitive{
 						Name: p.Name,
 						Arguments: []Value{
@@ -341,7 +341,7 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
 					aa := Value{
-						Kind: "primitive",
+						Kind: typesEnumPrimitive,
 						Primitive: Primitive{
 							Name: p.Name,
 							Arguments: []Value{
@@ -370,7 +370,7 @@ func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 				for iiii := range kinjectants[3] {
 					for iiiii := range kinjectants[4] {
 						aa := Value{
-							Kind: "primitive",
+							Kind: typesEnumPrimitive,
 							Primitive: Primitive{
 								Name: p.Name,
 								Arguments: []Value{

@@ -41,7 +41,7 @@ var libpv = PvTemplate{
 		for _, c := range valKnowledgeMap.Constants {
 			priv := ""
 			switch c.Qualifier {
-			case "private":
+			case typesEnumPrivate:
 				priv = " [private]"
 			}
 			consts = fmt.Sprintf(
