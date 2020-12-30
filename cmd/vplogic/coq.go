@@ -208,14 +208,14 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap
 		))
 	case typesEnumPrimitive:
 		primitiveStringName := ""
-		if primitiveIsCorePrim(expression.Assigned.Primitive.Name) {
-			prim, _ := primitiveCoreGet(expression.Assigned.Primitive.Name)
-			primitiveStringName = prim.StringName
+		if primitiveIsCorePrim(expression.Assigned.Primitive.ID) {
+			prim, _ := primitiveCoreGet(expression.Assigned.Primitive.ID)
+			primitiveStringName = prim.Name
 		} else {
-			prim, _ := primitiveGet(expression.Assigned.Primitive.Name)
-			primitiveStringName = prim.StringName
+			prim, _ := primitiveGet(expression.Assigned.Primitive.ID)
+			primitiveStringName = prim.Name
 		}
-		switch expression.Assigned.Primitive.Name {
+		switch expression.Assigned.Primitive.ID {
 		case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT:
 			exp := fmt.Sprintf(
 				"EXP assignment private (prim(%s%d ", primitiveStringName,
@@ -329,14 +329,14 @@ func coqPrintPrimitive(p Primitive) (string, error) {
 		args = append(args, cpv)
 	}
 	primitiveStringName := ""
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
-		primitiveStringName = prim.StringName
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
+		primitiveStringName = prim.Name
 	} else {
-		prim, _ := primitiveGet(p.Name)
-		primitiveStringName = prim.StringName
+		prim, _ := primitiveGet(p.ID)
+		primitiveStringName = prim.Name
 	}
-	switch p.Name {
+	switch p.ID {
 	case primitiveEnumASSERT:
 		return "", fmt.Errorf("unsupported primitive: %s", primitiveStringName)
 	case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT,

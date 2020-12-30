@@ -138,6 +138,7 @@ func constructKnowledgeMapRenderKnows(
 		}
 		c = Constant{
 			Name:        c.Name,
+			ID:          c.ID,
 			Guard:       c.Guard,
 			Fresh:       false,
 			Leaked:      false,
@@ -182,6 +183,7 @@ func constructKnowledgeMapRenderGenerates(
 		}
 		c = Constant{
 			Name:        c.Name,
+			ID:          c.ID,
 			Guard:       c.Guard,
 			Fresh:       true,
 			Leaked:      false,
@@ -248,6 +250,7 @@ func constructKnowledgeMapRenderAssignment(
 		}
 		c = Constant{
 			Name:        c.Name,
+			ID:          c.ID,
 			Guard:       c.Guard,
 			Fresh:       false,
 			Leaked:      false,
@@ -436,7 +439,7 @@ func constructPrincipalStatesGetValueMutatability(
 		ir := (blck.Message.Recipient == principal)
 		ic := (creator == principal)
 		for _, cc := range blck.Message.Constants {
-			if c.Name != cc.Name {
+			if c.ID != cc.ID {
 				continue
 			}
 			wire, _ = appendUniqueString(wire, blck.Message.Recipient)

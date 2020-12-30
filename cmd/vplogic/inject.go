@@ -16,13 +16,13 @@ func inject(
 	if verifyResultsAllResolved() {
 		return []Value{}
 	}
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
 		if !prim.Injectable {
 			return []Value{}
 		}
 	} else {
-		prim, _ := primitiveGet(p.Name)
+		prim, _ := primitiveGet(p.ID)
 		if !prim.Injectable {
 			return []Value{}
 		}
@@ -84,11 +84,11 @@ func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 		return true
 	case 2:
 		explosive := false
-		if primitiveIsCorePrim(p.Name) {
-			prim, _ := primitiveCoreGet(p.Name)
+		if primitiveIsCorePrim(p.ID) {
+			prim, _ := primitiveCoreGet(p.ID)
 			explosive = prim.Explosive
 		} else {
-			prim, _ := primitiveGet(p.Name)
+			prim, _ := primitiveGet(p.ID)
 			explosive = prim.Explosive
 		}
 		return explosive
@@ -99,7 +99,7 @@ func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 
 func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 	skeleton := Primitive{
-		Name:      p.Name,
+		ID:        p.ID,
 		Arguments: make([]Value, len(p.Arguments)),
 		Output:    p.Output,
 		Check:     false,
@@ -131,7 +131,7 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 }
 
 func injectSkeletonNotDeeper(p Primitive, reference Primitive) bool {
-	if p.Name != reference.Name {
+	if p.ID != reference.ID {
 		return false
 	}
 	_, pd := injectPrimitiveSkeleton(p, 0)
@@ -140,7 +140,7 @@ func injectSkeletonNotDeeper(p Primitive, reference Primitive) bool {
 }
 
 func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
-	if p.Name != skeleton.Name {
+	if p.ID != skeleton.ID {
 		return false
 	}
 	ps, _ := injectPrimitiveSkeleton(p, 0)
@@ -274,7 +274,7 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 		aa := Value{
 			Kind: typesEnumPrimitive,
 			Primitive: Primitive{
-				Name: p.Name,
+				ID: p.ID,
 				Arguments: []Value{
 					kinjectants[0][i],
 				},
@@ -294,7 +294,7 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 			aa := Value{
 				Kind: typesEnumPrimitive,
 				Primitive: Primitive{
-					Name: p.Name,
+					ID: p.ID,
 					Arguments: []Value{
 						kinjectants[0][i],
 						kinjectants[1][ii],
@@ -317,7 +317,7 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 				aa := Value{
 					Kind: typesEnumPrimitive,
 					Primitive: Primitive{
-						Name: p.Name,
+						ID: p.ID,
 						Arguments: []Value{
 							kinjectants[0][i],
 							kinjectants[1][ii],
@@ -343,7 +343,7 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 					aa := Value{
 						Kind: typesEnumPrimitive,
 						Primitive: Primitive{
-							Name: p.Name,
+							ID: p.ID,
 							Arguments: []Value{
 								kinjectants[0][i],
 								kinjectants[1][ii],
@@ -372,7 +372,7 @@ func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
 						aa := Value{
 							Kind: typesEnumPrimitive,
 							Primitive: Primitive{
-								Name: p.Name,
+								ID: p.ID,
 								Arguments: []Value{
 									kinjectants[0][i],
 									kinjectants[1][ii],

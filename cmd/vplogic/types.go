@@ -109,28 +109,30 @@ type Value struct {
 }
 
 // Constant represents a constant expression:
+// - Name indicates the name of the constant.
+// - ID indicates an internal ID for the constant.
 // - Guard indicates if this is a guarded constant.
 // - Fresh indicates if this is a "fresh" (i.e. generated) constant.
 // - Leaked indicates if this constant has been leaked.
-// - Name indicates the name of the constant.
 // - Declaration indicates how the constant was declared.
 // - Qualifier indicates the "knows" qualifier (eg. "private").
 type Constant struct {
+	Name        string
+	ID          uint16
 	Guard       bool
 	Fresh       bool
 	Leaked      bool
-	Name        string
 	Declaration typesEnum
 	Qualifier   typesEnum
 }
 
 // Primitive represents a primitive expression:
-// - Name indicates the name of the primitives.
+// - ID indicates the internal enum ID of the primitives.
 // - Arguments indicates the arguments of the primitive.
 // - Output indicates which output value of the primitive this copy should rewrite to (starts at 0).
 // - Check indicates whether this has been a checked primitive.
 type Primitive struct {
-	Name      primitiveEnum
+	ID        primitiveEnum
 	Arguments []Value
 	Output    int
 	Check     bool
@@ -236,7 +238,7 @@ type RecomposeRule struct {
 // RewriteRule contains a primitive's RewriteRule.
 type RewriteRule struct {
 	HasRule  bool
-	Name     primitiveEnum
+	ID       primitiveEnum
 	From     int
 	To       func(Primitive) Value
 	Matching map[int][]int
@@ -246,7 +248,7 @@ type RewriteRule struct {
 // RebuildRule contains a primitive's RebuildRule.
 type RebuildRule struct {
 	HasRule bool
-	Name    primitiveEnum
+	ID      primitiveEnum
 	Given   [][]int
 	Reveal  int
 	Filter  func(Primitive, Value, int) (Value, bool)
@@ -254,8 +256,8 @@ type RebuildRule struct {
 
 // PrimitiveCoreSpec contains the definition of a core primitive.
 type PrimitiveCoreSpec struct {
-	Name       primitiveEnum
-	StringName string
+	Name       string
+	ID         primitiveEnum
 	Arity      []int
 	Output     []int
 	HasRule    bool
@@ -267,8 +269,8 @@ type PrimitiveCoreSpec struct {
 
 // PrimitiveSpec contains the definition of a primitive.
 type PrimitiveSpec struct {
-	Name            primitiveEnum
-	StringName      string
+	Name            string
+	ID              primitiveEnum
 	Arity           []int
 	Output          []int
 	Decompose       DecomposeRule

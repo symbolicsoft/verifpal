@@ -33,7 +33,7 @@ var libpegReserved = []string{
 	"mac", "assert", "sign", "signverif",
 	"pke_enc", "pke_dec", "shamir_split",
 	"shamir_join", "concat", "split",
-	"g", "nil", "unnamed",
+	"g", "nil",
 }
 
 var libpegUnnamedCounter = 0
@@ -44,8 +44,6 @@ func libpegCheckIfReserved(s string) error {
 	case strInSlice(s, libpegReserved):
 		found = true
 	case strings.HasPrefix(s, "attacker"):
-		found = true
-	case strings.HasPrefix(s, "unnamed"):
 		found = true
 	}
 	if found {
@@ -222,13 +220,6 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 		return nil, err
 	}
 	consts := Left.([]Constant)
-	for i, c := range consts {
-		switch c.Name {
-			case "_":
-			consts[i].Name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
-			libpegUnnamedCounter = libpegUnnamedCounter + 1
-		}
-	}
 	return Expression{
 		Kind: typesEnumAssignment,
 		Constants: consts,
@@ -237,10 +228,18 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 }
 
 Constant <- Const:Identifier (_ ',' _)? {
+	name := Const.(string)
+	switch name {
+		case "_":
+		name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
+		libpegUnnamedCounter = libpegUnnamedCounter + 1
+	}
+	i := constantNamesMapAdd(name)
 	return Value{
 		Kind: typesEnumConstant,
 		Constant: Constant{
-			Name: Const.(string),
+			Name: name,
+			ID: i,
 		},
 	}, nil
 }
@@ -270,12 +269,14 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 	}, err
 }
 
-GuardedConstant <- '[' Guarded:Identifier ']' (_ ',' _)? {
-	err := libpegCheckIfReserved(Guarded.(string))
+GuardedConstant <- '[' Guarded:Constant ']' (_ ',' _)? {
+	g := Guarded.(Value)
+	err := libpegCheckIfReserved(g.Constant.Name)
 	return Value{
 		Kind: typesEnumConstant,
 		Constant: Constant{
-			Name: Guarded.(string),
+			Name: g.Constant.Name,
+			ID: g.Constant.ID,
 			Guard: true,
 		},
 	}, err

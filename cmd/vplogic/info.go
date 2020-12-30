@@ -193,11 +193,11 @@ func infoOutputText(revealed Value) string {
 		return outputText
 	case typesEnumPrimitive:
 		oneOutput := false
-		if primitiveIsCorePrim(revealed.Primitive.Name) {
-			prim, _ := primitiveCoreGet(revealed.Primitive.Name)
+		if primitiveIsCorePrim(revealed.Primitive.ID) {
+			prim, _ := primitiveCoreGet(revealed.Primitive.ID)
 			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		} else {
-			prim, _ := primitiveGet(revealed.Primitive.Name)
+			prim, _ := primitiveGet(revealed.Primitive.ID)
 			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		}
 		if oneOutput {

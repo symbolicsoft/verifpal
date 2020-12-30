@@ -131,11 +131,11 @@ func queryAuthenticationGetPassIndices(
 			return indices, sender, c
 		}
 		b := valPrincipalState.BeforeRewrite[iiii]
-		if primitiveIsCorePrim(b.Primitive.Name) {
-			prim, _ := primitiveCoreGet(b.Primitive.Name)
+		if primitiveIsCorePrim(b.Primitive.ID) {
+			prim, _ := primitiveCoreGet(b.Primitive.ID)
 			hasRule = prim.HasRule
 		} else {
-			prim, _ := primitiveGet(b.Primitive.Name)
+			prim, _ := primitiveGet(b.Primitive.ID)
 			hasRule = prim.Rewrite.HasRule
 		}
 		if !hasRule {
@@ -208,11 +208,11 @@ func queryFreshness(
 			return result, nil
 		}
 		b := valPrincipalState.BeforeRewrite[ii]
-		if primitiveIsCorePrim(b.Primitive.Name) {
-			prim, _ := primitiveCoreGet(b.Primitive.Name)
+		if primitiveIsCorePrim(b.Primitive.ID) {
+			prim, _ := primitiveCoreGet(b.Primitive.ID)
 			hasRule = prim.HasRule
 		} else {
-			prim, _ := primitiveGet(b.Primitive.Name)
+			prim, _ := primitiveGet(b.Primitive.ID)
 			hasRule = prim.Rewrite.HasRule
 		}
 		if !hasRule {

@@ -185,7 +185,7 @@ func verifyAnalysisConcat(a Value, valPrincipalState PrincipalState) int {
 	o := 0
 	switch a.Kind {
 	case typesEnumPrimitive:
-		switch a.Primitive.Name {
+		switch a.Primitive.ID {
 		case primitiveEnumCONCAT:
 			for _, revealed := range a.Primitive.Arguments {
 				if attackerStatePutWrite(revealed, valPrincipalState) {

@@ -61,7 +61,7 @@ func sanityAssignmentConstants(
 	case typesEnumConstant:
 		unique := true
 		for _, c := range constants {
-			if right.Constant.Name == c.Name {
+			if right.Constant.ID == c.ID {
 				unique = false
 				break
 			}
@@ -107,7 +107,7 @@ func sanityAssignmentConstantsFromPrimitive(
 		case typesEnumConstant:
 			unique := true
 			for _, c := range constants {
-				if a.Constant.Name == c.Name {
+				if a.Constant.ID == c.ID {
 					unique = false
 					break
 				}
@@ -134,7 +134,7 @@ func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []
 	for _, v := range right.Equation.Values {
 		unique := true
 		for _, c := range constants {
-			if v.Constant.Name == c.Name {
+			if v.Constant.ID == c.ID {
 				unique = false
 				break
 			}
@@ -149,12 +149,12 @@ func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []
 func sanityPrimitive(p Primitive, outputs []Constant) error {
 	var output []int
 	var check bool
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
 		output = prim.Output
 		check = prim.Check
 	} else {
-		prim, err := primitiveGet(p.Name)
+		prim, err := primitiveGet(p.ID)
 		if err != nil {
 			return err
 		}

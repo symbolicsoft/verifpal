@@ -50,12 +50,12 @@ func prettyConstants(c []Constant) string {
 
 func prettyPrimitive(p Primitive) string {
 	pretty := ""
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
-		pretty = fmt.Sprintf("%s(", prim.StringName)
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
+		pretty = fmt.Sprintf("%s(", prim.Name)
 	} else {
-		prim, _ := primitiveGet(p.Name)
-		pretty = fmt.Sprintf("%s(", prim.StringName)
+		prim, _ := primitiveGet(p.ID)
+		pretty = fmt.Sprintf("%s(", prim.Name)
 	}
 	check := ""
 	if p.Check {

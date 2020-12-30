@@ -8,10 +8,10 @@ func possibleToDecomposePrimitive(
 	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
 ) (bool, Value, []Value) {
 	has := []Value{}
-	if primitiveIsCorePrim(p.Name) {
+	if primitiveIsCorePrim(p.ID) {
 		return false, Value{}, has
 	}
-	prim, _ := primitiveGet(p.Name)
+	prim, _ := primitiveGet(p.ID)
 	if !prim.Decompose.HasRule {
 		return false, Value{}, has
 	}
@@ -56,10 +56,10 @@ func possibleToDecomposePrimitive(
 func possibleToRecomposePrimitive(
 	p Primitive, valAttackerState AttackerState,
 ) (bool, Value, []Value) {
-	if primitiveIsCorePrim(p.Name) {
+	if primitiveIsCorePrim(p.ID) {
 		return false, Value{}, []Value{}
 	}
-	prim, _ := primitiveGet(p.Name)
+	prim, _ := primitiveGet(p.ID)
 	if !prim.Recompose.HasRule {
 		return false, Value{}, []Value{}
 	}
@@ -175,21 +175,21 @@ func possibleToRewrite(
 			p.Arguments[i] = pp[0]
 		}
 	}
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
 		if prim.HasRule {
 			return prim.CoreRule(p)
 		}
 		return !prim.Check, v
 	}
-	prim, _ := primitiveGet(p.Name)
+	prim, _ := primitiveGet(p.ID)
 	if !prim.Rewrite.HasRule {
 		return true, v
 	}
 	from := p.Arguments[prim.Rewrite.From]
 	switch from.Kind {
 	case typesEnumPrimitive:
-		if from.Primitive.Name != prim.Rewrite.Name {
+		if from.Primitive.ID != prim.Rewrite.ID {
 			return !prim.Check, v
 		}
 		if !possibleToRewritePrim(p, valPrincipalState) {
@@ -204,7 +204,7 @@ func possibleToRewrite(
 func possibleToRewritePrim(
 	p Primitive, valPrincipalState PrincipalState,
 ) bool {
-	prim, _ := primitiveGet(p.Name)
+	prim, _ := primitiveGet(p.ID)
 	from := p.Arguments[prim.Rewrite.From]
 	for a, m := range prim.Rewrite.Matching {
 		valid := false
@@ -236,10 +236,10 @@ func possibleToRewritePrim(
 }
 
 func possibleToRebuild(p Primitive) (bool, Value) {
-	if primitiveIsCorePrim(p.Name) {
+	if primitiveIsCorePrim(p.ID) {
 		return false, Value{}
 	}
-	prim, _ := primitiveGet(p.Name)
+	prim, _ := primitiveGet(p.ID)
 	if !prim.Rebuild.HasRule {
 		return false, Value{}
 	}
@@ -252,7 +252,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 			}
 			switch p.Arguments[gg].Kind {
 			case typesEnumPrimitive:
-				if p.Arguments[gg].Primitive.Name == prim.Rebuild.Name {
+				if p.Arguments[gg].Primitive.ID == prim.Rebuild.ID {
 					has = append(has, p.Arguments[gg])
 				}
 			}
@@ -286,8 +286,8 @@ func possibleToObtainPasswords(
 		case typesEnumConstant:
 			if aa.Constant.Qualifier == typesEnumPassword {
 				if aIndex >= 0 {
-					if !primitiveIsCorePrim(aParent.Primitive.Name) {
-						prim, _ := primitiveGet(aParent.Primitive.Name)
+					if !primitiveIsCorePrim(aParent.Primitive.ID) {
+						prim, _ := primitiveGet(aParent.Primitive.ID)
 						if intInSlice(aIndex, prim.PasswordHashing) {
 							return passwords
 						}
@@ -298,8 +298,8 @@ func possibleToObtainPasswords(
 		}
 	case typesEnumPrimitive:
 		for ii, aa := range a.Primitive.Arguments {
-			if !primitiveIsCorePrim(a.Primitive.Name) {
-				prim, _ := primitiveGet(a.Primitive.Name)
+			if !primitiveIsCorePrim(a.Primitive.ID) {
+				prim, _ := primitiveGet(a.Primitive.ID)
 				if intInSlice(aIndex, prim.PasswordHashing) {
 					aParent = a
 				}

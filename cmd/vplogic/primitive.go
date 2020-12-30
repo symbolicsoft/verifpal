@@ -37,11 +37,11 @@ const (
 
 var primitiveCoreSpecs = []PrimitiveCoreSpec{
 	{
-		Name:       primitiveEnumASSERT,
-		StringName: "ASSERT",
-		Arity:      []int{2},
-		Output:     []int{1},
-		HasRule:    true,
+		ID:      primitiveEnumASSERT,
+		Name:    "ASSERT",
+		Arity:   []int{2},
+		Output:  []int{1},
+		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
 			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
@@ -54,11 +54,11 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Explosive:  false,
 	},
 	{
-		Name:       primitiveEnumCONCAT,
-		StringName: "CONCAT",
-		Arity:      []int{2, 3, 4, 5},
-		Output:     []int{1},
-		HasRule:    false,
+		ID:      primitiveEnumCONCAT,
+		Name:    "CONCAT",
+		Arity:   []int{2, 3, 4, 5},
+		Output:  []int{1},
+		HasRule: false,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
 			return false, v
@@ -68,11 +68,11 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Explosive:  true,
 	},
 	{
-		Name:       primitiveEnumSPLIT,
-		StringName: "SPLIT",
-		Arity:      []int{1},
-		Output:     []int{1, 2, 3, 4, 5},
-		HasRule:    true,
+		ID:      primitiveEnumSPLIT,
+		Name:    "SPLIT",
+		Arity:   []int{1},
+		Output:  []int{1, 2, 3, 4, 5},
+		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
 			switch p.Arguments[0].Kind {
@@ -80,7 +80,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 				return false, v
 			case typesEnumPrimitive:
 				pp := p.Arguments[0].Primitive
-				switch pp.Name {
+				switch pp.ID {
 				case primitiveEnumCONCAT:
 					return true, pp.Arguments
 				}
@@ -98,10 +98,10 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 
 var primitiveSpecs = []PrimitiveSpec{
 	{
-		Name:       primitiveEnumPWHASH,
-		StringName: "PW_HASH",
-		Arity:      []int{1, 2, 3, 4, 5},
-		Output:     []int{1},
+		ID:     primitiveEnumPWHASH,
+		Name:   "PW_HASH",
+		Arity:  []int{1, 2, 3, 4, 5},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -120,10 +120,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{0, 1, 2, 3, 4},
 	},
 	{
-		Name:       primitiveEnumHASH,
-		StringName: "HASH",
-		Arity:      []int{1, 2, 3, 4, 5},
-		Output:     []int{1},
+		ID:     primitiveEnumHASH,
+		Name:   "HASH",
+		Arity:  []int{1, 2, 3, 4, 5},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -142,10 +142,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumHKDF,
-		StringName: "HKDF",
-		Arity:      []int{3},
-		Output:     []int{1, 2, 3, 4, 5},
+		ID:     primitiveEnumHKDF,
+		Name:   "HKDF",
+		Arity:  []int{3},
+		Output: []int{1, 2, 3, 4, 5},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -164,10 +164,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumAEADENC,
-		StringName: "AEAD_ENC",
-		Arity:      []int{3},
-		Output:     []int{1},
+		ID:     primitiveEnumAEADENC,
+		Name:   "AEAD_ENC",
+		Arity:  []int{3},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -191,10 +191,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumAEADDEC,
-		StringName: "AEAD_DEC",
-		Arity:      []int{3},
-		Output:     []int{1},
+		ID:     primitiveEnumAEADDEC,
+		Name:   "AEAD_DEC",
+		Arity:  []int{3},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -208,7 +208,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumAEADENC,
+			ID:      primitiveEnumAEADENC,
 			From:    1,
 			To: func(p Primitive) Value {
 				return p.Arguments[1]
@@ -236,10 +236,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumENC,
-		StringName: "ENC",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumENC,
+		Name:   "ENC",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -263,10 +263,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumDEC,
-		StringName: "DEC",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumDEC,
+		Name:   "DEC",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -280,7 +280,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumENC,
+			ID:      primitiveEnumENC,
 			From:    1,
 			To: func(p Primitive) Value {
 				return p.Arguments[1]
@@ -305,10 +305,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumMAC,
-		StringName: "MAC",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumMAC,
+		Name:   "MAC",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -327,10 +327,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumSIGN,
-		StringName: "SIGN",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumSIGN,
+		Name:   "SIGN",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -349,10 +349,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumSIGNVERIF,
-		StringName: "SIGNVERIF",
-		Arity:      []int{3},
-		Output:     []int{1},
+		ID:     primitiveEnumSIGNVERIF,
+		Name:   "SIGNVERIF",
+		Arity:  []int{3},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -361,7 +361,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumSIGN,
+			ID:      primitiveEnumSIGN,
 			From:    2,
 			To: func(p Primitive) Value {
 				return valueNil
@@ -403,10 +403,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumPKEENC,
-		StringName: "PKE_ENC",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumPKEENC,
+		Name:   "PKE_ENC",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -450,10 +450,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumPKEDEC,
-		StringName: "PKE_DEC",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumPKEDEC,
+		Name:   "PKE_DEC",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -467,7 +467,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumPKEENC,
+			ID:      primitiveEnumPKEENC,
 			From:    1,
 			To: func(p Primitive) Value {
 				return p.Arguments[1]
@@ -502,10 +502,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumSHAMIRSPLIT,
-		StringName: "SHAMIR_SPLIT",
-		Arity:      []int{1},
-		Output:     []int{3},
+		ID:     primitiveEnumSHAMIRSPLIT,
+		Name:   "SHAMIR_SPLIT",
+		Arity:  []int{1},
+		Output: []int{3},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -533,10 +533,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumSHAMIRJOIN,
-		StringName: "SHAMIR_JOIN",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumSHAMIRJOIN,
+		Name:   "SHAMIR_JOIN",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -548,7 +548,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rebuild: RebuildRule{
 			HasRule: true,
-			Name:    primitiveEnumSHAMIRSPLIT,
+			ID:      primitiveEnumSHAMIRSPLIT,
 			Given: [][]int{
 				{0, 1},
 				{1, 0},
@@ -568,10 +568,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumRINGSIGN,
-		StringName: "RINGSIGN",
-		Arity:      []int{4},
-		Output:     []int{1},
+		ID:     primitiveEnumRINGSIGN,
+		Name:   "RINGSIGN",
+		Arity:  []int{4},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -590,10 +590,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{3},
 	},
 	{
-		Name:       primitiveEnumRINGSIGNVERIF,
-		StringName: "RINGSIGNVERIF",
-		Arity:      []int{5},
-		Output:     []int{1},
+		ID:     primitiveEnumRINGSIGNVERIF,
+		Name:   "RINGSIGNVERIF",
+		Arity:  []int{5},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -602,7 +602,7 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumRINGSIGN,
+			ID:      primitiveEnumRINGSIGN,
 			From:    4,
 			To: func(p Primitive) Value {
 				return valueNil
@@ -650,10 +650,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{},
 	},
 	{
-		Name:       primitiveEnumBLIND,
-		StringName: "BLIND",
-		Arity:      []int{2},
-		Output:     []int{1},
+		ID:     primitiveEnumBLIND,
+		Name:   "BLIND",
+		Arity:  []int{2},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: true,
 			Given:   []int{0},
@@ -677,10 +677,10 @@ var primitiveSpecs = []PrimitiveSpec{
 		PasswordHashing: []int{1},
 	},
 	{
-		Name:       primitiveEnumUNBLIND,
-		StringName: "UNBLIND",
-		Arity:      []int{3},
-		Output:     []int{1},
+		ID:     primitiveEnumUNBLIND,
+		Name:   "UNBLIND",
+		Arity:  []int{3},
+		Output: []int{1},
 		Decompose: DecomposeRule{
 			HasRule: false,
 		},
@@ -689,13 +689,13 @@ var primitiveSpecs = []PrimitiveSpec{
 		},
 		Rewrite: RewriteRule{
 			HasRule: true,
-			Name:    primitiveEnumSIGN,
+			ID:      primitiveEnumSIGN,
 			From:    2,
 			To: func(p Primitive) Value {
 				return Value{
 					Kind: typesEnumPrimitive,
 					Primitive: Primitive{
-						Name: primitiveEnumSIGN,
+						ID: primitiveEnumSIGN,
 						Arguments: []Value{
 							p.Arguments[0],
 							p.Arguments[1].Primitive.Arguments[1],
@@ -714,7 +714,7 @@ var primitiveSpecs = []PrimitiveSpec{
 					blindPrim := Value{
 						Kind: typesEnumPrimitive,
 						Primitive: Primitive{
-							Name: primitiveEnumBLIND,
+							ID: primitiveEnumBLIND,
 							Arguments: []Value{
 								p.Arguments[0], p.Arguments[1],
 							},
@@ -747,7 +747,7 @@ func primitiveIsCorePrim(name primitiveEnum) bool {
 
 func primitiveCoreGet(name primitiveEnum) (PrimitiveCoreSpec, error) {
 	for _, v := range primitiveCoreSpecs {
-		if v.Name == name {
+		if v.ID == name {
 			return v, nil
 		}
 	}
@@ -757,7 +757,7 @@ func primitiveCoreGet(name primitiveEnum) (PrimitiveCoreSpec, error) {
 
 func primitiveGet(name primitiveEnum) (PrimitiveSpec, error) {
 	for _, v := range primitiveSpecs {
-		if v.Name == name {
+		if v.ID == name {
 			return v, nil
 		}
 	}
@@ -767,13 +767,13 @@ func primitiveGet(name primitiveEnum) (PrimitiveSpec, error) {
 
 func primitiveGetEnum(stringName string) (primitiveEnum, error) {
 	for _, v := range primitiveCoreSpecs {
-		if v.StringName == stringName {
-			return v.Name, nil
+		if v.Name == stringName {
+			return v.ID, nil
 		}
 	}
 	for _, v := range primitiveSpecs {
-		if v.StringName == stringName {
-			return v.Name, nil
+		if v.Name == stringName {
+			return v.ID, nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive")
@@ -781,14 +781,14 @@ func primitiveGetEnum(stringName string) (primitiveEnum, error) {
 }
 
 func primitiveGetArity(p Primitive) ([]int, error) {
-	if primitiveIsCorePrim(p.Name) {
-		prim, err := primitiveCoreGet(p.Name)
+	if primitiveIsCorePrim(p.ID) {
+		prim, err := primitiveCoreGet(p.ID)
 		if err != nil {
 			return []int{}, err
 		}
 		return prim.Arity, nil
 	}
-	prim, err := primitiveGet(p.Name)
+	prim, err := primitiveGet(p.ID)
 	if err != nil {
 		return []int{}, err
 	}

@@ -13,6 +13,7 @@ var valueG = Value{
 	Kind: typesEnumConstant,
 	Constant: Constant{
 		Name:        "g",
+		ID:          0,
 		Guard:       false,
 		Fresh:       false,
 		Leaked:      false,
@@ -25,6 +26,7 @@ var valueNil = Value{
 	Kind: typesEnumConstant,
 	Constant: Constant{
 		Name:        "nil",
+		ID:          1,
 		Guard:       false,
 		Fresh:       false,
 		Leaked:      false,
@@ -47,6 +49,9 @@ var valueGNilNil = Value{
 	},
 }
 
+var valueNamesMap map[string]uint16 = make(map[string]uint16)
+var valueNamesMapCounter = uint16(0)
+
 func valueIsGOrNil(c Constant) bool {
 	switch strings.ToLower(c.Name) {
 	case "g", "nil":
@@ -55,9 +60,19 @@ func valueIsGOrNil(c Constant) bool {
 	return false
 }
 
+func valueNamesMapAdd(name string) uint16 {
+	id, exists := valueNamesMap[name]
+	if !exists {
+		id = valueNamesMapCounter
+		valueNamesMap[name] = id
+		valueNamesMapCounter++
+	}
+	return id
+}
+
 func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap KnowledgeMap, c Constant) int {
 	for i := range valKnowledgeMap.Constants {
-		if valKnowledgeMap.Constants[i].Name == c.Name {
+		if valKnowledgeMap.Constants[i].ID == c.ID {
 			return i
 		}
 	}
@@ -66,7 +81,7 @@ func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap KnowledgeMap, c Const
 
 func valueGetPrincipalStateIndexFromConstant(valPrincipalState PrincipalState, c Constant) int {
 	for i := range valPrincipalState.Constants {
-		if valPrincipalState.Constants[i].Name == c.Name {
+		if valPrincipalState.Constants[i].ID == c.ID {
 			return i
 		}
 	}
@@ -122,7 +137,7 @@ func valueEquivalentValues(a1 Value, a2 Value, considerOutput bool) bool {
 	}
 	switch a1.Kind {
 	case typesEnumConstant:
-		return a1.Constant.Name == a2.Constant.Name
+		return a1.Constant.ID == a2.Constant.ID
 	case typesEnumPrimitive:
 		equivPrim, _, _ := valueEquivalentPrimitives(
 			a1.Primitive, a2.Primitive, considerOutput,
@@ -139,7 +154,7 @@ func valueEquivalentValues(a1 Value, a2 Value, considerOutput bool) bool {
 func valueEquivalentPrimitives(
 	p1 Primitive, p2 Primitive, considerOutput bool,
 ) (bool, int, int) {
-	if p1.Name != p2.Name {
+	if p1.ID != p2.ID {
 		return false, 0, 0
 	}
 	if len(p1.Arguments) != len(p2.Arguments) {
@@ -226,7 +241,7 @@ func valuePerformPrimitiveRewrite(
 	)
 	if !rewrittenRoot {
 		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Primitive)
-	} else if primitiveIsCorePrim(p.Name) {
+	} else if primitiveIsCorePrim(p.ID) {
 		rIndex = p.Output
 	}
 	if rIndex >= len(rewrittenValues) {
@@ -256,7 +271,7 @@ func valuePerformPrimitiveArgumentsRewrite(
 	rewrite := Value{
 		Kind: typesEnumPrimitive,
 		Primitive: Primitive{
-			Name:      p.Name,
+			ID:        p.ID,
 			Arguments: make([]Value, len(p.Arguments)),
 			Output:    p.Output,
 			Check:     p.Check,
@@ -312,11 +327,11 @@ func valuePerformEquationRewrite(
 			rewrite.Equation.Values = append(rewrite.Equation.Values, a)
 		case typesEnumPrimitive:
 			hasRule := false
-			if primitiveIsCorePrim(a.Primitive.Name) {
-				prim, _ := primitiveCoreGet(a.Primitive.Name)
+			if primitiveIsCorePrim(a.Primitive.ID) {
+				prim, _ := primitiveCoreGet(a.Primitive.ID)
 				hasRule = prim.HasRule
 			} else {
-				prim, _ := primitiveGet(a.Primitive.Name)
+				prim, _ := primitiveGet(a.Primitive.ID)
 				hasRule = prim.Rewrite.HasRule
 			}
 			if !hasRule {
@@ -462,7 +477,7 @@ func valueResolvePrimitiveInternalValuesFromKnowledgeMap(
 	r := Value{
 		Kind: typesEnumPrimitive,
 		Primitive: Primitive{
-			Name:      a.Primitive.Name,
+			ID:        a.Primitive.ID,
 			Arguments: []Value{},
 			Output:    a.Primitive.Output,
 			Check:     a.Primitive.Check,
@@ -598,7 +613,7 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	r := Value{
 		Kind: typesEnumPrimitive,
 		Primitive: Primitive{
-			Name:      a.Primitive.Name,
+			ID:        a.Primitive.ID,
 			Arguments: []Value{},
 			Output:    a.Primitive.Output,
 			Check:     a.Primitive.Check,

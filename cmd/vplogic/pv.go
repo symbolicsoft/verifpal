@@ -71,22 +71,22 @@ func pvConstants(valKnowledgeMap KnowledgeMap, principal string, c []Constant, v
 
 func pvPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, check bool) string {
 	primitiveStringName := ""
-	if primitiveIsCorePrim(p.Name) {
-		prim, _ := primitiveCoreGet(p.Name)
-		primitiveStringName = prim.StringName
+	if primitiveIsCorePrim(p.ID) {
+		prim, _ := primitiveCoreGet(p.ID)
+		primitiveStringName = prim.Name
 	} else {
-		prim, _ := primitiveGet(p.Name)
-		primitiveStringName = prim.StringName
+		prim, _ := primitiveGet(p.ID)
+		primitiveStringName = prim.Name
 	}
 	checksuffix := ""
 	switch check {
 	case true:
-		switch p.Name {
+		switch p.ID {
 		case primitiveEnumAEADDEC:
 			checksuffix = "_check"
 		}
 	}
-	switch p.Name {
+	switch p.ID {
 	case primitiveEnumHASH, primitiveEnumCONCAT:
 		primitiveStringName = fmt.Sprintf("%s%d", primitiveStringName, len(p.Arguments))
 	}
@@ -208,7 +208,7 @@ func pvPrincipal(
 			valType := "bitstring"
 			switch expression.Assigned.Kind {
 			case typesEnumPrimitive:
-				switch expression.Assigned.Primitive.Name {
+				switch expression.Assigned.Primitive.ID {
 				case primitiveEnumSIGNVERIF, primitiveEnumRINGSIGNVERIF:
 					valType = "bool"
 				}
