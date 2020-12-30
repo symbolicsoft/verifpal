@@ -47,7 +47,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 		if len(valPrincipalState.Wire[i]) == 0 && !valPrincipalState.Constants[i].Leaked {
 			continue
 		}
-		if valPrincipalState.Constants[i].Qualifier != "private" {
+		if valPrincipalState.Constants[i].Qualifier == "public" {
 			continue
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
