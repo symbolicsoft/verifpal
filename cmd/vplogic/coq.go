@@ -339,7 +339,8 @@ func coqPrintPrimitive(p Primitive) (string, error) {
 	switch p.Name {
 	case primitiveEnumASSERT:
 		return "", fmt.Errorf("unsupported primitive: %s", primitiveStringName)
-	case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT, primitiveEnumSPLIT, primitiveEnumHKDF, primitiveEnumSHAMIRSPLIT:
+	case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT,
+		primitiveEnumSPLIT, primitiveEnumHKDF, primitiveEnumSHAMIRSPLIT:
 		return fmt.Sprintf("(prim(%s%d %s))",
 			primitiveStringName, len(p.Arguments), strings.Join(args, " ")), nil
 	}
