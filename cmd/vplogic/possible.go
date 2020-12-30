@@ -223,7 +223,7 @@ func possibleToRewritePrim(
 					}
 				}
 			}
-			valid = valueEquivalentValues(ax[0], ax[1], true)
+			valid = valueEquivalentValues(&ax[0], &ax[1], true)
 			if valid {
 				break
 			}

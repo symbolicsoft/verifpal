@@ -146,7 +146,7 @@ func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 	ps, _ := injectPrimitiveSkeleton(p, 0)
 	pv := Value{Kind: typesEnumPrimitive, Primitive: ps}
 	sv := Value{Kind: typesEnumPrimitive, Primitive: skeleton}
-	return valueEquivalentValues(pv, sv, true)
+	return valueEquivalentValues(&pv, &sv, true)
 }
 
 func injectMissingSkeletons(p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState) {

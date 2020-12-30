@@ -109,7 +109,7 @@ func queryAuthenticationGetPassIndices(
 	sender := valPrincipalState.Sender[i]
 	if sender == "Attacker" {
 		v := valPrincipalState.BeforeMutate[i]
-		if valueEquivalentValues(v, valPrincipalState.Assigned[i], true) {
+		if valueEquivalentValues(&v, &valPrincipalState.Assigned[i], true) {
 			return indices, sender, c
 		}
 	}
@@ -309,7 +309,7 @@ func queryUnlinkability(
 			if i == ii {
 				continue
 			}
-			if !valueEquivalentValues(a, aa, false) {
+			if !valueEquivalentValues(&a, &aa, false) {
 				continue
 			}
 			obtainable := false

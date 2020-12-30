@@ -153,7 +153,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
 	for _, aa := range valPrincipalState.Assigned {
-		if valueEquivalentValues(ar, aa, true) {
+		if valueEquivalentValues(&ar, &aa, true) {
 			if attackerStatePutWrite(aa, valPrincipalState) {
 				InfoMessage(fmt.Sprintf(
 					"%s obtained by equivalizing with the current resolution of %s.",

@@ -234,7 +234,7 @@ Constant <- Const:Identifier (_ ',' _)? {
 		name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
 		libpegUnnamedCounter = libpegUnnamedCounter + 1
 	}
-	i := constantNamesMapAdd(name)
+	i := valueNamesMapAdd(name)
 	return Value{
 		Kind: typesEnumConstant,
 		Constant: Constant{
@@ -291,7 +291,7 @@ Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _
 	return Value{
 		Kind: typesEnumPrimitive,
 		Primitive: Primitive{
-			Name: primEnum,
+			ID: primEnum,
 			Arguments: args,
 			Output: 0,
 			Check: Check != nil,

@@ -223,11 +223,11 @@ func infoQueryMutatedValues(
 	mutatedInfo := ""
 	relevant := false
 	for i, a := range valPrincipalState.BeforeRewrite {
-		if valueEquivalentValues(a, valKnowledgeMap.Assigned[i], false) {
+		if valueEquivalentValues(&a, &valKnowledgeMap.Assigned[i], false) {
 			continue
 		}
 		isTargetValue := valueEquivalentValues(
-			targetValue, valPrincipalState.Assigned[i], false,
+			&targetValue, &valPrincipalState.Assigned[i], false,
 		)
 		attackerKnows := valueEquivalentValueInValues(targetValue, valAttackerState.Known) >= 0
 		if isTargetValue && attackerKnows {

@@ -131,7 +131,7 @@ func valueGetConstantsFromEquation(e Equation) []Constant {
 	return c
 }
 
-func valueEquivalentValues(a1 Value, a2 Value, considerOutput bool) bool {
+func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
 	if a1.Kind != a2.Kind {
 		return false
 	}
@@ -164,7 +164,7 @@ func valueEquivalentPrimitives(
 		return false, 0, 0
 	}
 	for i := range p1.Arguments {
-		equiv := valueEquivalentValues(p1.Arguments[i], p2.Arguments[i], true)
+		equiv := valueEquivalentValues(&p1.Arguments[i], &p2.Arguments[i], true)
 		if !equiv {
 			return false, 0, 0
 		}
@@ -178,10 +178,10 @@ func valueEquivalentEquations(e1 Equation, e2 Equation) bool {
 	}
 	switch len(e1.Values) {
 	case 1:
-		return valueEquivalentValues(e1.Values[0], e2.Values[0], true)
+		return valueEquivalentValues(&e1.Values[0], &e2.Values[0], true)
 	case 2:
-		return valueEquivalentValues(e1.Values[0], e2.Values[0], true) &&
-			valueEquivalentValues(e1.Values[1], e2.Values[1], true)
+		return valueEquivalentValues(&e1.Values[0], &e2.Values[0], true) &&
+			valueEquivalentValues(&e1.Values[1], &e2.Values[1], true)
 	case 3:
 		return valueEquivalentEquationsRule(
 			e1.Values[1], e2.Values[1], e1.Values[2], e2.Values[2],
@@ -193,8 +193,8 @@ func valueEquivalentEquations(e1 Equation, e2 Equation) bool {
 }
 
 func valueEquivalentEquationsRule(base1 Value, base2 Value, exp1 Value, exp2 Value) bool {
-	return (valueEquivalentValues(base1, exp2, true) &&
-		valueEquivalentValues(exp1, base2, true))
+	return (valueEquivalentValues(&base1, &exp2, true) &&
+		valueEquivalentValues(&exp1, &base2, true))
 }
 
 func valueFindConstantInPrimitive(c Constant, a Value, valKnowledgeMap KnowledgeMap) bool {
@@ -208,7 +208,7 @@ func valueFindConstantInPrimitive(c Constant, a Value, valKnowledgeMap Knowledge
 
 func valueEquivalentValueInValues(v Value, a []Value) int {
 	for i := 0; i < len(a); i++ {
-		if valueEquivalentValues(v, a[i], true) {
+		if valueEquivalentValues(&v, &a[i], true) {
 			return i
 		}
 	}

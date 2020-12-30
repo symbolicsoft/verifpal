@@ -142,7 +142,7 @@ func verifyActiveMutatePrincipalState(
 			_, aac := possibleToRewrite(ac.Primitive, valPrincipalState)
 			ac.Primitive = aac[0].Primitive
 		}
-		if valueEquivalentValues(ac, ar, true) {
+		if valueEquivalentValues(&ac, &ar, true) {
 			continue
 		}
 		valPrincipalState.Creator[ii] = "Attacker"

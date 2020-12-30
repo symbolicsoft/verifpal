@@ -44,7 +44,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		HasRule: true,
 		CoreRule: func(p Primitive) (bool, []Value) {
 			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
-			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
+			if valueEquivalentValues(&p.Arguments[0], &p.Arguments[1], true) {
 				return true, v
 			}
 			return false, v
@@ -382,7 +382,7 @@ var primitiveSpecs = []PrimitiveSpec{
 						switch {
 						case len(x.Equation.Values) != 2:
 							return x, false
-						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+						case !valueEquivalentValues(&x.Equation.Values[0], &valueG, true):
 							return x, false
 						default:
 							return x.Equation.Values[1], true
@@ -423,7 +423,7 @@ var primitiveSpecs = []PrimitiveSpec{
 						switch {
 						case len(x.Equation.Values) != 2:
 							return x, false
-						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+						case !valueEquivalentValues(&x.Equation.Values[0], &valueG, true):
 							return x, false
 						default:
 							return x.Equation.Values[1], true
