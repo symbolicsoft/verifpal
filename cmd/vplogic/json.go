@@ -20,7 +20,8 @@ func JSON(request string) error {
 	inputString = inputString[:len(inputString)-1]
 	switch request {
 	case "knowledgeMap":
-		return JSONKnowledgeMap(inputString)
+		_, err := JSONKnowledgeMap(inputString)
+		return err
 	case "principalStates":
 		return JSONPrincipalStates(inputString)
 	case "prettyValue":
@@ -38,18 +39,18 @@ func JSON(request string) error {
 }
 
 // JSONKnowledgeMap returns the KnowledgeMap struct for a given model in JSON format.
-func JSONKnowledgeMap(inputString string) error {
+func JSONKnowledgeMap(inputString string) (KnowledgeMap, error) {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
-		return err
+		return KnowledgeMap{}, err
 	}
 	valKnowledgeMap, _, err := sanity(m.(Model))
 	if err != nil {
-		return err
+		return KnowledgeMap{}, err
 	}
 	j, _ := json.Marshal(valKnowledgeMap)
 	fmt.Fprint(os.Stdout, string(j))
-	return nil
+	return valKnowledgeMap, nil
 }
 
 // JSONPrincipalStates returns the KnowledgeMap struct for a given model in JSON format.

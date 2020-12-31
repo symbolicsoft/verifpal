@@ -6,7 +6,6 @@ package vplogic
 
 import (
 	"fmt"
-	"strings"
 )
 
 func inject(
@@ -50,7 +49,7 @@ func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	switch {
 	case p.Arguments[arg].Kind != typesEnumConstant:
 		return false
-	case strings.ToLower(c.Name) == "g":
+	case c.ID == valueG.Constant.ID:
 		return false
 	}
 	return true

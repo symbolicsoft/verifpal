@@ -65,14 +65,14 @@ func mutationMapSkipValue(
 	case i < 0:
 		return true
 	case valPrincipalState.Guard[i]:
-		if !strInSlice(valPrincipalState.Sender[i], valPrincipalState.MutatableTo[i]) {
+		if !principalEnumInSlice(valPrincipalState.Sender[i], valPrincipalState.MutatableTo[i]) {
 			return true
 		}
-	case valPrincipalState.Creator[i] == valPrincipalState.Name:
+	case valPrincipalState.Creator[i] == valPrincipalState.ID:
 		return true
 	case !intInSlice(valAttackerState.CurrentPhase, valPrincipalState.Phase[i]):
 		return true
-	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.Name, v.Constant):
+	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.ID, v.Constant):
 		return true
 	}
 	return false

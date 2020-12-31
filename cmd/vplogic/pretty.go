@@ -128,8 +128,8 @@ func prettyQuery(query Query) string {
 	case typesEnumAuthentication:
 		output = fmt.Sprintf(
 			"confidentiality? %s -> %s: %s",
-			query.Message.Sender,
-			query.Message.Recipient,
+			principalGetNameFromID(query.Message.Sender),
+			principalGetNameFromID(query.Message.Recipient),
 			prettyConstants(query.Message.Constants),
 		)
 	case typesEnumFreshness:
@@ -151,7 +151,8 @@ func prettyQuery(query Query) string {
 		case typesEnumPrecondition:
 			output = fmt.Sprintf(
 				"%s\n\t\tprecondition[%s -> %s: %s]",
-				output, option.Message.Sender, option.Message.Recipient,
+				output, principalGetNameFromID(option.Message.Sender),
+				principalGetNameFromID(option.Message.Recipient),
 				prettyConstants(option.Message.Constants),
 			)
 		}
@@ -229,8 +230,8 @@ func prettyExpression(expression Expression) string {
 func prettyMessage(block Block) string {
 	output := fmt.Sprintf(
 		"%s -> %s: %s\n\n",
-		block.Message.Sender,
-		block.Message.Recipient,
+		principalGetNameFromID(block.Message.Sender),
+		principalGetNameFromID(block.Message.Recipient),
 		prettyConstants(block.Message.Constants),
 	)
 	return output

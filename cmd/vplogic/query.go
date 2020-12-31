@@ -73,7 +73,7 @@ func queryAuthentication(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	if query.Message.Recipient != valPrincipalState.Name {
+	if query.Message.Recipient != valPrincipalState.ID {
 		return result
 	}
 	indices, sender, c := queryAuthenticationGetPassIndices(
@@ -99,22 +99,22 @@ func queryAuthentication(
 
 func queryAuthenticationGetPassIndices(
 	query Query, valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-) ([]int, string, Constant) {
+) ([]int, principalEnum, Constant) {
 	indices := []int{}
 	_, i := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
 	if i < 0 {
-		return indices, "", Constant{}
+		return indices, 0, Constant{}
 	}
 	c := valKnowledgeMap.Constants[i]
 	sender := valPrincipalState.Sender[i]
-	if sender == "Attacker" {
+	if sender == principalNamesMap["Attacker"] {
 		v := valPrincipalState.BeforeMutate[i]
 		if valueEquivalentValues(&v, &valPrincipalState.Assigned[i], true) {
 			return indices, sender, c
 		}
 	}
 	for iii := range valKnowledgeMap.Constants {
-		if valKnowledgeMap.Creator[iii] != valPrincipalState.Name {
+		if valKnowledgeMap.Creator[iii] != valPrincipalState.ID {
 			continue
 		}
 		hasRule := false
@@ -151,14 +151,15 @@ func queryAuthenticationGetPassIndices(
 }
 
 func queryAuthenticationHandlePass(
-	result VerifyResult, c Constant, b Value, mutated string, sender string,
+	result VerifyResult, c Constant, b Value, mutatedInfo string, sender principalEnum,
 	valPrincipalState PrincipalState,
 ) VerifyResult {
 	cc, _ := valueResolveConstant(c, valPrincipalState)
-	result.Summary = infoVerifyResultSummary(mutated, fmt.Sprintf(
+	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
-		prettyConstant(c), prettyValue(cc), sender, result.Query.Message.Sender,
-		prettyValue(b), result.Query.Message.Recipient,
+		prettyConstant(c), prettyValue(cc), principalGetNameFromID(sender),
+		principalGetNameFromID(result.Query.Message.Sender),
+		prettyValue(b), principalGetNameFromID(result.Query.Message.Recipient),
 	), result.Options)
 	written := verifyResultsPutWrite(result)
 	if written {
@@ -191,7 +192,7 @@ func queryFreshness(
 		return result, nil
 	}
 	for i := range valKnowledgeMap.Constants {
-		if valKnowledgeMap.Creator[i] != valPrincipalState.Name {
+		if valKnowledgeMap.Creator[i] != valPrincipalState.ID {
 			continue
 		}
 		hasRule := false
@@ -352,12 +353,12 @@ func queryPrecondition(
 		return result
 	}
 	for _, option := range result.Query.Options {
+		var sender principalEnum
 		oResult := QueryOptionResult{
 			Option:   option,
 			Resolved: false,
 			Summary:  "",
 		}
-		sender := ""
 		recipientKnows := false
 		_, i := valueResolveConstant(option.Message.Constants[0], valPrincipalState)
 		if i < 0 {
@@ -375,9 +376,9 @@ func queryPrecondition(
 			oResult.Resolved = true
 			oResult.Summary = fmt.Sprintf(
 				"%s sends %s to %s despite the query failing.",
-				option.Message.Sender,
+				principalGetNameFromID(option.Message.Sender),
 				prettyConstant(option.Message.Constants[0]),
-				option.Message.Recipient,
+				principalGetNameFromID(option.Message.Recipient),
 			)
 		}
 		result.Options = append(result.Options, oResult)

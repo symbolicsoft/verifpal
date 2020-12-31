@@ -25,6 +25,10 @@ const (
 	typesEnumPrecondition    typesEnum = iota
 )
 
+type valueEnum uint16
+
+type principalEnum uint8
+
 // Model is the main parsed representation of the Verifpal model.
 type Model struct {
 	FileName string
@@ -52,13 +56,14 @@ type Block struct {
 // Principal represents a principal declaration in a Verifpal model.
 type Principal struct {
 	Name        string
+	ID          principalEnum
 	Expressions []Expression
 }
 
 // Message represents a message declaration in a Verifpal model.
 type Message struct {
-	Sender    string
-	Recipient string
+	Sender    principalEnum
+	Recipient principalEnum
 	Constants []Constant
 }
 
@@ -118,7 +123,7 @@ type Value struct {
 // - Qualifier indicates the "knows" qualifier (eg. "private").
 type Constant struct {
 	Name        string
-	ID          uint16
+	ID          valueEnum
 	Guard       bool
 	Fresh       bool
 	Leaked      bool
@@ -161,10 +166,11 @@ type Equation struct {
 // - MaxPhase documents the maximum possible phase in the model.
 type KnowledgeMap struct {
 	Principals    []string
+	PrincipalIDs  []principalEnum
 	Constants     []Constant
 	Assigned      []Value
-	Creator       []string
-	KnownBy       [][]map[string]string
+	Creator       []principalEnum
+	KnownBy       [][]map[principalEnum]principalEnum
 	DeclaredAt    []int
 	MaxDeclaredAt int
 	Phase         [][]int
@@ -201,20 +207,21 @@ type KnowledgeMap struct {
 // - Phase documents at which phase the constant was declared.
 type PrincipalState struct {
 	Name          string
+	ID            principalEnum
 	Constants     []Constant
 	Assigned      []Value
 	Guard         []bool
 	Known         []bool
-	Wire          [][]string
-	KnownBy       [][]map[string]string
+	Wire          [][]principalEnum
+	KnownBy       [][]map[principalEnum]principalEnum
 	DeclaredAt    []int
 	MaxDeclaredAt int
-	Creator       []string
-	Sender        []string
+	Creator       []principalEnum
+	Sender        []principalEnum
 	Rewritten     []bool
 	BeforeRewrite []Value
 	Mutated       []bool
-	MutatableTo   [][]string
+	MutatableTo   [][]principalEnum
 	BeforeMutate  []Value
 	Phase         [][]int
 }

@@ -6,7 +6,6 @@ package vplogic
 
 import (
 	"fmt"
-	"strings"
 )
 
 func sanity(m Model) (KnowledgeMap, []PrincipalState, error) {
@@ -14,11 +13,11 @@ func sanity(m Model) (KnowledgeMap, []PrincipalState, error) {
 	if err != nil {
 		return KnowledgeMap{}, []PrincipalState{}, err
 	}
-	principals, err := sanityDeclaredPrincipals(m)
+	principals, principalIDs, err := sanityDeclaredPrincipals(m)
 	if err != nil {
 		return KnowledgeMap{}, []PrincipalState{}, err
 	}
-	valKnowledgeMap, err := constructKnowledgeMap(m, principals)
+	valKnowledgeMap, err := constructKnowledgeMap(m, principals, principalIDs)
 	if err != nil {
 		return KnowledgeMap{}, []PrincipalState{}, err
 	}
@@ -315,57 +314,59 @@ func sanityQueriesCheckKnown(query Query, m Message, c Constant, valKnowledgeMap
 	if !senderKnows {
 		return fmt.Errorf(
 			"authentication query (%s) depends on %s sending a constant (%s) that they do not know",
-			prettyQuery(query), m.Sender, prettyConstant(c),
+			prettyQuery(query), principalGetNameFromID(m.Sender), prettyConstant(c),
 		)
 	}
 	if !recipientKnows {
 		return fmt.Errorf(
 			"authentication query (%s) depends on %s receiving a constant (%s) that they never receive",
-			prettyQuery(query), m.Recipient, prettyConstant(c),
+			prettyQuery(query), principalGetNameFromID(m.Recipient), prettyConstant(c),
 		)
 	}
 	if !constantUsedByPrincipal {
 		return fmt.Errorf(
 			"authentication query (%s) depends on %s using a constant (%s) in a primitive, but this never happens",
-			prettyQuery(query), m.Recipient, prettyConstant(c),
+			prettyQuery(query), principalGetNameFromID(m.Recipient), prettyConstant(c),
 		)
 	}
 	return nil
 }
 
-func sanityDeclaredPrincipals(m Model) ([]string, error) {
-	declared := []string{}
-	principals := []string{}
+func sanityDeclaredPrincipals(m Model) ([]string, []principalEnum, error) {
+	declaredNames := []string{}
+	declaredIDs := []principalEnum{}
+	principals := []principalEnum{}
 	for _, block := range m.Blocks {
 		switch block.Kind {
 		case "principal":
-			principals, _ = appendUniqueString(principals, block.Principal.Name)
-			declared, _ = appendUniqueString(declared, block.Principal.Name)
+			principals, _ = appendUniquePrincipalEnum(principals, block.Principal.ID)
+			declaredNames, _ = appendUniqueString(declaredNames, block.Principal.Name)
+			declaredIDs, _ = appendUniquePrincipalEnum(declaredIDs, block.Principal.ID)
 		}
 	}
 	for _, block := range m.Blocks {
 		switch block.Kind {
 		case "message":
-			principals, _ = appendUniqueString(principals, block.Message.Sender)
-			principals, _ = appendUniqueString(principals, block.Message.Recipient)
+			principals, _ = appendUniquePrincipalEnum(principals, block.Message.Sender)
+			principals, _ = appendUniquePrincipalEnum(principals, block.Message.Recipient)
 		}
 	}
 	for _, query := range m.Queries {
 		switch query.Kind {
 		case typesEnumAuthentication:
-			principals, _ = appendUniqueString(principals, query.Message.Sender)
-			principals, _ = appendUniqueString(principals, query.Message.Recipient)
+			principals, _ = appendUniquePrincipalEnum(principals, query.Message.Sender)
+			principals, _ = appendUniquePrincipalEnum(principals, query.Message.Recipient)
 		}
 	}
 	for _, p := range principals {
-		if !strInSlice(p, declared) {
-			return []string{}, fmt.Errorf("principal does not exist (%s)", p)
+		if !principalEnumInSlice(p, declaredIDs) {
+			return []string{}, []principalEnum{}, fmt.Errorf("principal does not exist")
 		}
 	}
-	if len(declared) > 64 {
-		return []string{}, fmt.Errorf("more than 64 principals (%d) declared", len(declared))
+	if len(declaredNames) > 64 {
+		return []string{}, []principalEnum{}, fmt.Errorf("more than 64 principals (%d) declared", len(declaredNames))
 	}
-	return principals, nil
+	return declaredNames, declaredIDs, nil
 }
 
 func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []Primitive) error {
@@ -389,20 +390,23 @@ func sanityCheckEquationRootGenerator(e Equation) error {
 		)
 	}
 	for i, c := range e.Values {
-		if i == 0 {
-			if strings.ToLower(c.Constant.Name) != "g" {
-				return fmt.Errorf(
-					"equation (%s) does not use 'g' as generator",
-					prettyEquation(e),
-				)
+		switch c.Kind {
+		case typesEnumConstant:
+			if i == 0 {
+				if c.Constant.ID != valueG.Constant.ID {
+					return fmt.Errorf(
+						"equation (%s) does not use 'g' as generator",
+						prettyEquation(e),
+					)
+				}
 			}
-		}
-		if i > 0 {
-			if strings.ToLower(c.Constant.Name) == "g" {
-				return fmt.Errorf(
-					"equation (%s) uses 'g' not as a generator",
-					prettyEquation(e),
-				)
+			if i > 0 {
+				if c.Constant.ID == valueG.Constant.ID {
+					return fmt.Errorf(
+						"equation (%s) uses 'g' not as a generator",
+						prettyEquation(e),
+					)
+				}
 			}
 		}
 	}

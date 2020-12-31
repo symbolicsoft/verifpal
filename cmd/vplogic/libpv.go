@@ -204,14 +204,14 @@ var libpv = PvTemplate{
 			case "message":
 				parallel = fmt.Sprintf(
 					"%s%s_to_%s_%d()%s",
-					parallel, block.Message.Sender,
-					block.Message.Recipient, pc, sep,
+					parallel, principalGetNameFromID(block.Message.Sender),
+					principalGetNameFromID(block.Message.Recipient), pc, sep,
 				)
 				pc = pc + 1
 				parallel = fmt.Sprintf(
 					"%s%s_from_%s_%d()%s",
-					parallel, block.Message.Recipient,
-					block.Message.Sender, pc, sep,
+					parallel, principalGetNameFromID(block.Message.Recipient),
+					principalGetNameFromID(block.Message.Sender), pc, sep,
 				)
 				pc = pc + 1
 			}

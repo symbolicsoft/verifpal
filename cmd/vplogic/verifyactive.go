@@ -145,8 +145,8 @@ func verifyActiveMutatePrincipalState(
 		if valueEquivalentValues(&ac, &ar, true) {
 			continue
 		}
-		valPrincipalState.Creator[ii] = "Attacker"
-		valPrincipalState.Sender[ii] = "Attacker"
+		valPrincipalState.Creator[ii] = principalNamesMap["Attacker"]
+		valPrincipalState.Sender[ii] = principalNamesMap["Attacker"]
 		valPrincipalState.Mutated[ii] = true
 		valPrincipalState.Assigned[ii] = ac
 		valPrincipalState.BeforeRewrite[ii] = ac
@@ -167,7 +167,7 @@ FailedRewritesLoop:
 		if !p.Check {
 			continue
 		}
-		if valPrincipalState.Creator[failedRewriteIndices[i]] != valPrincipalState.Name {
+		if valPrincipalState.Creator[failedRewriteIndices[i]] != valPrincipalState.ID {
 			continue
 		}
 		declaredAt := valPrincipalState.DeclaredAt[failedRewriteIndices[i]]

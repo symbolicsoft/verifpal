@@ -31,7 +31,7 @@ func Coq(modelFile string) error {
 
 func coqModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
 	var err error
-	declaredPrincipals, err := sanityDeclaredPrincipals(m)
+	declaredPrincipals, _, err := sanityDeclaredPrincipals(m)
 	if err != nil {
 		return "", err
 	}

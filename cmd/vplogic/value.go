@@ -6,7 +6,6 @@ package vplogic
 
 import (
 	"errors"
-	"strings"
 )
 
 var valueG = Value{
@@ -49,18 +48,14 @@ var valueGNilNil = Value{
 	},
 }
 
-var valueNamesMap map[string]uint16 = make(map[string]uint16)
-var valueNamesMapCounter = uint16(0)
-
-func valueIsGOrNil(c Constant) bool {
-	switch strings.ToLower(c.Name) {
-	case "g", "nil":
-		return true
-	}
-	return false
+var valueNamesMap map[string]valueEnum = map[string]valueEnum{
+	"g":   valueG.Constant.ID,
+	"nil": valueNil.Constant.ID,
 }
 
-func valueNamesMapAdd(name string) uint16 {
+var valueNamesMapCounter valueEnum = 2
+
+func valueNamesMapAdd(name string) valueEnum {
 	id, exists := valueNamesMap[name]
 	if !exists {
 		id = valueNamesMapCounter
@@ -68,6 +63,14 @@ func valueNamesMapAdd(name string) uint16 {
 		valueNamesMapCounter++
 	}
 	return id
+}
+
+func valueIsGOrNil(c Constant) bool {
+	switch c.ID {
+	case valueG.Constant.ID, valueNil.Constant.ID:
+		return true
+	}
+	return false
 }
 
 func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap KnowledgeMap, c Constant) int {
@@ -410,13 +413,13 @@ func valuePerformAllRewrites(valPrincipalState PrincipalState) ([]Primitive, []i
 }
 
 func valueShouldResolveToBeforeMutate(i int, valPrincipalState PrincipalState) bool {
-	if valPrincipalState.Creator[i] == valPrincipalState.Name {
+	if valPrincipalState.Creator[i] == valPrincipalState.ID {
 		return true
 	}
 	if !valPrincipalState.Known[i] {
 		return true
 	}
-	if !strInSlice(valPrincipalState.Name, valPrincipalState.Wire[i]) {
+	if !principalEnumInSlice(valPrincipalState.ID, valPrincipalState.Wire[i]) {
 		return true
 	}
 	if !valPrincipalState.Mutated[i] {
@@ -570,12 +573,15 @@ func valueResolveValueInternalValuesFromPrincipalState(
 		default:
 			switch rootValue.Kind {
 			case typesEnumPrimitive:
-				if valPrincipalState.Creator[rootIndex] != valPrincipalState.Name {
+				if valPrincipalState.Creator[rootIndex] != valPrincipalState.ID {
 					forceBeforeMutate = true
 				}
 			}
 			if forceBeforeMutate {
-				forceBeforeMutate = !strInSlice(valPrincipalState.Creator[rootIndex], valPrincipalState.MutatableTo[nextRootIndex])
+				forceBeforeMutate = !principalEnumInSlice(
+					valPrincipalState.Creator[rootIndex],
+					valPrincipalState.MutatableTo[nextRootIndex],
+				)
 			} else {
 				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
@@ -607,7 +613,7 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	a Value, rootValue Value, rootIndex int,
 	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (Value, error) {
-	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
+	if valPrincipalState.Creator[rootIndex] == valPrincipalState.ID {
 		forceBeforeMutate = false
 	}
 	r := Value{
@@ -635,7 +641,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 	a Value, rootValue Value, rootIndex int, valPrincipalState PrincipalState,
 	valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (Value, error) {
-	if valPrincipalState.Creator[rootIndex] == valPrincipalState.Name {
+	if valPrincipalState.Creator[rootIndex] == valPrincipalState.ID {
 		forceBeforeMutate = false
 	}
 	r := Value{
@@ -688,11 +694,11 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 }
 
 func valueConstantIsUsedByPrincipalInKnowledgeMap(
-	valKnowledgeMap KnowledgeMap, name string, c Constant,
+	valKnowledgeMap KnowledgeMap, principalID principalEnum, c Constant,
 ) bool {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	for ii, a := range valKnowledgeMap.Assigned {
-		if valKnowledgeMap.Creator[ii] != name {
+		if valKnowledgeMap.Creator[ii] != principalID {
 			continue
 		}
 		switch a.Kind {

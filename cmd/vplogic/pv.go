@@ -32,13 +32,13 @@ func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant
 	prefix := "const"
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	c = valKnowledgeMap.Constants[i]
-	if valKnowledgeMap.Creator[i] == principal && c.Declaration == typesEnumAssignment {
+	if principalGetNameFromID(valKnowledgeMap.Creator[i]) == principal && c.Declaration == typesEnumAssignment {
 		prefix = principal
 	} else {
 		for _, m := range valKnowledgeMap.KnownBy[i] {
-			if p, ok := m[principal]; ok {
-				if p != principal {
-					prefix = p
+			if p, ok := m[principalNamesMap[principal]]; ok {
+				if principalGetNameFromID(p) != principal {
+					prefix = principalGetNameFromID(p)
 				}
 			}
 		}
@@ -144,11 +144,11 @@ func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
 	case typesEnumAuthentication:
 		output = fmt.Sprintf("%s ==> %s.",
 			fmt.Sprintf("query event(RecvMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.Message.Sender, query.Message.Recipient, 0,
+				principalGetNameFromID(query.Message.Sender), principalGetNameFromID(query.Message.Recipient), 0,
 				pvConstant(valKnowledgeMap, "attacker", query.Message.Constants[0], ""),
 			),
 			fmt.Sprintf("event(SendMsg(principal_%s, principal_%s, phase_%d, %s))",
-				query.Message.Sender, query.Message.Recipient, 0,
+				principalGetNameFromID(query.Message.Sender), principalGetNameFromID(query.Message.Recipient), 0,
 				pvConstant(valKnowledgeMap, "attacker", query.Message.Constants[0], ""),
 			),
 		)
@@ -251,20 +251,20 @@ func pvMessage(
 ) (string, int) {
 	procs = fmt.Sprintf(
 		"%slet %s_to_%s_%d() =\n",
-		procs, block.Message.Sender, block.Message.Recipient, pc,
+		procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient), pc,
 	)
 	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tget valuestore(=principal_%s, =principal_%s, =const_%s, %s) in\n",
-			procs, block.Message.Sender, block.Message.Sender,
+			procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Sender),
 			c.Name,
-			pvConstant(valKnowledgeMap, block.Message.Sender, c, ""),
+			pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, ""),
 		)
 	}
 	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tevent SendMsg(principal_%s, principal_%s, phase_%d, %s);\n",
-			procs, block.Message.Sender, block.Message.Recipient,
+			procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
 			0, pvConstant(valKnowledgeMap, "", c, ""),
 		)
 	}
@@ -273,18 +273,18 @@ func pvMessage(
 		case true:
 			procs = fmt.Sprintf(
 				"%s\tout(pub, %s);\n",
-				procs, pvConstant(valKnowledgeMap, block.Message.Sender, c, ""),
+				procs, pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, ""),
 			)
 			procs = fmt.Sprintf(
 				"%s\tout(chan_%s_to_%s_private, (%s));\n",
-				procs, block.Message.Sender, block.Message.Recipient,
-				pvConstant(valKnowledgeMap, block.Message.Sender, c, ""),
+				procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
+				pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, ""),
 			)
 		case false:
 			procs = fmt.Sprintf(
 				"%s\tout(chan_%s_to_%s, (%s));\n",
-				procs, block.Message.Sender, block.Message.Recipient,
-				pvConstant(valKnowledgeMap, block.Message.Sender, c, ""),
+				procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
+				pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, ""),
 			)
 		}
 	}
@@ -292,36 +292,36 @@ func pvMessage(
 	pc = pc + 1
 	procs = fmt.Sprintf(
 		"%slet %s_from_%s_%d() =\n",
-		procs, block.Message.Recipient, block.Message.Sender, pc,
+		procs, principalGetNameFromID(block.Message.Recipient), principalGetNameFromID(block.Message.Sender), pc,
 	)
 	for _, c := range block.Message.Constants {
 		switch c.Guard {
 		case true:
 			procs = fmt.Sprintf(
 				"%s\tin(chan_%s_to_%s_private, (%s));\n",
-				procs, block.Message.Sender, block.Message.Recipient,
-				pvConstant(valKnowledgeMap, block.Message.Sender, c, "bitstring"),
+				procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
+				pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, "bitstring"),
 			)
 		case false:
 			procs = fmt.Sprintf(
 				"%s\tin(chan_%s_to_%s, (%s));\n",
-				procs, block.Message.Sender, block.Message.Recipient,
-				pvConstant(valKnowledgeMap, block.Message.Sender, c, "bitstring"),
+				procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
+				pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, "bitstring"),
 			)
 		}
 	}
 	for _, c := range block.Message.Constants {
 		procs = fmt.Sprintf(
 			"%s\tevent RecvMsg(principal_%s, principal_%s, phase_%d, %s);\n",
-			procs, block.Message.Sender, block.Message.Recipient, 0,
+			procs, principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient), 0,
 			pvConstant(valKnowledgeMap, "", c, ""),
 		)
 		procs = fmt.Sprintf(
 			"%s\tinsert valuestore(principal_%s, principal_%s, const_%s, %s);\n",
 			procs,
-			block.Message.Sender, block.Message.Recipient,
+			principalGetNameFromID(block.Message.Sender), principalGetNameFromID(block.Message.Recipient),
 			c.Name,
-			pvConstant(valKnowledgeMap, block.Message.Sender, c, ""),
+			pvConstant(valKnowledgeMap, principalGetNameFromID(block.Message.Sender), c, ""),
 		)
 	}
 	procs = procs + "\t0.\n"

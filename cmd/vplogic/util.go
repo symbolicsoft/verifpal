@@ -38,6 +38,16 @@ func intInSlice(x int, a []int) bool {
 	return false
 }
 
+// principalEnumInSlice checks if a principalEnum can be found within a slice.
+func principalEnumInSlice(x principalEnum, a []principalEnum) bool {
+	for _, n := range a {
+		if x == n {
+			return true
+		}
+	}
+	return false
+}
+
 // appendUniqueString appends a string to a slice only if it is unique within that slice.
 func appendUniqueString(a []string, x string) ([]string, error) {
 	if !strInSlice(x, a) {
@@ -52,6 +62,14 @@ func appendUniqueInt(a []int, x int) ([]int, error) {
 		return append(a, x), nil
 	}
 	return a, errors.New("int is not unique")
+}
+
+// appendUniquePrincipalEnum appends a principalEnum to a slice only if it is unique within that slice.
+func appendUniquePrincipalEnum(a []principalEnum, x principalEnum) ([]principalEnum, error) {
+	if !principalEnumInSlice(x, a) {
+		return append(a, x), nil
+	}
+	return a, errors.New("principalEnum is not unique")
 }
 
 // minIntInSlice returns the smallest integer in a slice of integers.

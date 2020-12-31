@@ -116,10 +116,12 @@ Principal <- "principal" _ Name:PrincipalName _ '[' _ Comment* Expressions:(Expr
 	e  := Expressions.([]interface{})
 	de := make([]Expression, len(e))
 	for i, v := range e { de[i] = v.(Expression) }
+	id := principalNamesMapAdd(Name.(string))
 	return Block{
 		Kind: "principal",
 		Principal: Principal{
 			Name: Name.(string),
+			ID: id,
 			Expressions: de,
 		},
 	}, nil
@@ -150,11 +152,13 @@ Message <- Sender:PrincipalName? _ "->" _ Recipient:PrincipalName? _ ':' _ Const
 		case Constants == nil:
 			return nil, errors.New("message constants are not defined")
 	}
+	senderID := principalNamesMapAdd(Sender.(string))
+	recipientID := principalNamesMapAdd(Recipient.(string))
 	return Block{
 		Kind: "message",
 		Message: Message{
-			Sender: Sender.(string),
-			Recipient: Recipient.(string),
+			Sender: senderID,
+			Recipient: recipientID,
 			Constants: Constants.([]Constant),
 		},
 	}, nil
@@ -234,12 +238,12 @@ Constant <- Const:Identifier (_ ',' _)? {
 		name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
 		libpegUnnamedCounter = libpegUnnamedCounter + 1
 	}
-	i := valueNamesMapAdd(name)
+	id := valueNamesMapAdd(name)
 	return Value{
 		Kind: typesEnumConstant,
 		Constant: Constant{
 			Name: name,
-			ID: i,
+			ID: id,
 		},
 	}, nil
 }

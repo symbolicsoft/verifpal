@@ -8,14 +8,15 @@ import (
 	"fmt"
 )
 
-func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
+func constructKnowledgeMap(m Model, principals []string, principalIDs []principalEnum) (KnowledgeMap, error) {
 	var err error
 	valKnowledgeMap := KnowledgeMap{
 		Principals:    principals,
+		PrincipalIDs:  principalIDs,
 		Constants:     []Constant{},
 		Assigned:      []Value{},
-		Creator:       []string{},
-		KnownBy:       [][]map[string]string{},
+		Creator:       []principalEnum{},
+		KnownBy:       [][]map[principalEnum]principalEnum{},
 		DeclaredAt:    []int{},
 		MaxDeclaredAt: 0,
 		Phase:         [][]int{},
@@ -25,26 +26,26 @@ func constructKnowledgeMap(m Model, principals []string) (KnowledgeMap, error) {
 	currentPhase := 0
 	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Constant)
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueG)
-	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
-	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
+	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
 	valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
-	for _, principal := range principals {
+	for _, principalID := range principalIDs {
 		valKnowledgeMap.KnownBy[0] = append(
 			valKnowledgeMap.KnownBy[0],
-			map[string]string{principal: principal},
+			map[principalEnum]principalEnum{principalID: principalID},
 		)
 	}
 	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueNil.Constant)
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueNil)
-	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principals[0])
-	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
+	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
 	valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 	valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{currentPhase})
-	for _, principal := range principals {
+	for _, principalID := range principalIDs {
 		valKnowledgeMap.KnownBy[1] = append(
 			valKnowledgeMap.KnownBy[1],
-			map[string]string{principal: principal},
+			map[principalEnum]principalEnum{principalID: principalID},
 		)
 	}
 	for _, blck := range m.Blocks {
@@ -132,7 +133,7 @@ func constructKnowledgeMapRenderKnows(
 			}
 			valKnowledgeMap.KnownBy[i] = append(
 				valKnowledgeMap.KnownBy[i],
-				map[string]string{blck.Principal.Name: blck.Principal.Name},
+				map[principalEnum]principalEnum{blck.Principal.ID: blck.Principal.ID},
 			)
 			continue
 		}
@@ -150,19 +151,19 @@ func constructKnowledgeMapRenderKnows(
 			Kind:     typesEnumConstant,
 			Constant: c,
 		})
-		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
-		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{})
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 		l := len(valKnowledgeMap.Constants) - 1
 		if expr.Qualifier != typesEnumPublic {
 			continue
 		}
-		for _, principal := range valKnowledgeMap.Principals {
-			if principal != blck.Principal.Name {
+		for _, principalID := range valKnowledgeMap.PrincipalIDs {
+			if principalID != blck.Principal.ID {
 				valKnowledgeMap.KnownBy[l] = append(
 					valKnowledgeMap.KnownBy[l],
-					map[string]string{principal: principal},
+					map[principalEnum]principalEnum{principalID: principalID},
 				)
 			}
 		}
@@ -195,8 +196,8 @@ func constructKnowledgeMapRenderGenerates(
 			Kind:     typesEnumConstant,
 			Constant: c,
 		})
-		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
-		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
@@ -225,9 +226,9 @@ func constructKnowledgeMapRenderAssignment(
 				prettyConstant(c),
 			)
 		}
-		knows := valKnowledgeMap.Creator[i] == blck.Principal.Name
+		knows := valKnowledgeMap.Creator[i] == blck.Principal.ID
 		for _, m := range valKnowledgeMap.KnownBy[i] {
-			if _, ok := m[blck.Principal.Name]; ok {
+			if _, ok := m[blck.Principal.ID]; ok {
 				knows = true
 				break
 			}
@@ -263,8 +264,8 @@ func constructKnowledgeMapRenderAssignment(
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Assigned)
-		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.Name)
-		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[string]string{{}})
+		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
+		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
 		valKnowledgeMap.Phase = append(valKnowledgeMap.Phase, []int{})
 	}
@@ -284,9 +285,9 @@ func constructKnowledgeMapRenderLeaks(
 				prettyConstant(c),
 			)
 		}
-		known := valKnowledgeMap.Creator[i] == blck.Principal.Name
+		known := valKnowledgeMap.Creator[i] == blck.Principal.ID
 		for _, m := range valKnowledgeMap.KnownBy[i] {
-			if _, ok := m[blck.Principal.Name]; ok {
+			if _, ok := m[blck.Principal.ID]; ok {
 				known = true
 				break
 			}
@@ -313,8 +314,8 @@ func constructKnowledgeMapRenderMessage(
 		if i < 0 {
 			return valKnowledgeMap, fmt.Errorf(fmt.Sprintf(
 				"%s sends unknown constant to %s (%s)",
-				blck.Message.Sender,
-				blck.Message.Recipient,
+				principalGetNameFromID(blck.Message.Sender),
+				principalGetNameFromID(blck.Message.Recipient),
 				prettyConstant(c),
 			))
 		}
@@ -341,18 +342,18 @@ func constructKnowledgeMapRenderMessage(
 		case !senderKnows:
 			return valKnowledgeMap, fmt.Errorf(
 				"%s is sending constant (%s) despite not knowing it",
-				blck.Message.Sender,
+				principalGetNameFromID(blck.Message.Sender),
 				prettyConstant(c),
 			)
 		case recipientKnows:
 			return valKnowledgeMap, fmt.Errorf(
 				"%s is receiving constant (%s) despite already knowing it",
-				blck.Message.Recipient,
+				principalGetNameFromID(blck.Message.Recipient),
 				prettyConstant(c),
 			)
 		}
 		valKnowledgeMap.KnownBy[i] = append(
-			valKnowledgeMap.KnownBy[i], map[string]string{
+			valKnowledgeMap.KnownBy[i], map[principalEnum]principalEnum{
 				blck.Message.Recipient: blck.Message.Sender,
 			},
 		)
@@ -365,38 +366,39 @@ func constructKnowledgeMapRenderMessage(
 
 func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []PrincipalState {
 	valPrincipalStates := []PrincipalState{}
-	for _, principal := range valKnowledgeMap.Principals {
+	for p := range valKnowledgeMap.Principals {
 		valPrincipalState := PrincipalState{
-			Name:          principal,
+			Name:          valKnowledgeMap.Principals[p],
+			ID:            valKnowledgeMap.PrincipalIDs[p],
 			Constants:     []Constant{},
 			Assigned:      []Value{},
 			Guard:         []bool{},
 			Known:         []bool{},
-			Wire:          [][]string{},
-			KnownBy:       [][]map[string]string{},
+			Wire:          [][]principalEnum{},
+			KnownBy:       [][]map[principalEnum]principalEnum{},
 			DeclaredAt:    []int{},
 			MaxDeclaredAt: 0,
-			Creator:       []string{},
-			Sender:        []string{},
+			Creator:       []principalEnum{},
+			Sender:        []principalEnum{},
 			Rewritten:     []bool{},
 			BeforeRewrite: []Value{},
 			Mutated:       []bool{},
-			MutatableTo:   [][]string{},
+			MutatableTo:   [][]principalEnum{},
 			BeforeMutate:  []Value{},
 			Phase:         [][]int{},
 		}
 		for i, c := range valKnowledgeMap.Constants {
-			wire := []string{}
+			wire := []principalEnum{}
 			guard := false
-			mutatableTo := []string{}
+			mutatableTo := []principalEnum{}
 			knows := false
 			sender := valKnowledgeMap.Creator[i]
 			assigned := valKnowledgeMap.Assigned[i]
-			if valKnowledgeMap.Creator[i] == principal {
+			if valKnowledgeMap.Creator[i] == valKnowledgeMap.PrincipalIDs[p] {
 				knows = true
 			}
 			for _, m := range valKnowledgeMap.KnownBy[i] {
-				if precedingSender, ok := m[principal]; ok {
+				if precedingSender, ok := m[valKnowledgeMap.PrincipalIDs[p]]; ok {
 					sender = precedingSender
 					knows = true
 					break
@@ -404,7 +406,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			}
 			for _, blck := range m.Blocks {
 				wire, guard, mutatableTo = constructPrincipalStatesGetValueMutatability(
-					c, blck, principal, valKnowledgeMap.Creator[i],
+					c, blck, valKnowledgeMap.PrincipalIDs[p], valKnowledgeMap.Creator[i],
 					wire, guard, mutatableTo,
 				)
 			}
@@ -431,23 +433,23 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 }
 
 func constructPrincipalStatesGetValueMutatability(
-	c Constant, blck Block, principal string, creator string,
-	wire []string, guard bool, mutatableTo []string,
-) ([]string, bool, []string) {
+	c Constant, blck Block, principalID principalEnum, creator principalEnum,
+	wire []principalEnum, guard bool, mutatableTo []principalEnum,
+) ([]principalEnum, bool, []principalEnum) {
 	switch blck.Kind {
 	case "message":
-		ir := (blck.Message.Recipient == principal)
-		ic := (creator == principal)
+		ir := (blck.Message.Recipient == principalID)
+		ic := (creator == principalID)
 		for _, cc := range blck.Message.Constants {
 			if c.ID != cc.ID {
 				continue
 			}
-			wire, _ = appendUniqueString(wire, blck.Message.Recipient)
+			wire, _ = appendUniquePrincipalEnum(wire, blck.Message.Recipient)
 			if !guard {
 				guard = cc.Guard && (ir || ic)
 			}
 			if !cc.Guard {
-				mutatableTo, _ = appendUniqueString(
+				mutatableTo, _ = appendUniquePrincipalEnum(
 					mutatableTo, blck.Message.Recipient,
 				)
 			}
@@ -459,20 +461,21 @@ func constructPrincipalStatesGetValueMutatability(
 func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool) PrincipalState {
 	valPrincipalStateClone := PrincipalState{
 		Name:          valPrincipalState.Name,
+		ID:            valPrincipalState.ID,
 		Constants:     make([]Constant, len(valPrincipalState.Constants)),
 		Assigned:      make([]Value, len(valPrincipalState.Assigned)),
 		Guard:         make([]bool, len(valPrincipalState.Guard)),
 		Known:         make([]bool, len(valPrincipalState.Known)),
-		Wire:          make([][]string, len(valPrincipalState.Wire)),
-		KnownBy:       make([][]map[string]string, len(valPrincipalState.KnownBy)),
+		Wire:          make([][]principalEnum, len(valPrincipalState.Wire)),
+		KnownBy:       make([][]map[principalEnum]principalEnum, len(valPrincipalState.KnownBy)),
 		DeclaredAt:    make([]int, len(valPrincipalState.DeclaredAt)),
 		MaxDeclaredAt: valPrincipalState.MaxDeclaredAt,
-		Creator:       make([]string, len(valPrincipalState.Creator)),
-		Sender:        make([]string, len(valPrincipalState.Sender)),
+		Creator:       make([]principalEnum, len(valPrincipalState.Creator)),
+		Sender:        make([]principalEnum, len(valPrincipalState.Sender)),
 		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),
 		BeforeRewrite: make([]Value, len(valPrincipalState.BeforeRewrite)),
 		Mutated:       make([]bool, len(valPrincipalState.Mutated)),
-		MutatableTo:   make([][]string, len(valPrincipalState.MutatableTo)),
+		MutatableTo:   make([][]principalEnum, len(valPrincipalState.MutatableTo)),
 		BeforeMutate:  make([]Value, len(valPrincipalState.BeforeMutate)),
 		Phase:         make([][]int, len(valPrincipalState.Phase)),
 	}
