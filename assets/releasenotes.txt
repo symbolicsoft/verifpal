@@ -1,3 +1,5 @@
-Verifpal 0.20.1 fixes a serious bug that prevented attackers from learning values with the `password` qualifiers even when leaked directly. Definitely update.
+Verifpal 0.21.0 brings strong performance improvements due to the elimination of string comparison operations from the analysis logic. Verifpal now assigns uint16 IDs for all string values (constant names, principal names, value qualifiers and attributes, etc.) before analysis and compares those instead of comparing strings.
 
-Thanks to "Mike" for reporting this bug.
+The resulting performance benefits are quite substantial, ranging between 20% and 33% depending on the model being analyzed.
+
+No change was made to the analysis logic itself, aside from eliminating string comparison operations.
