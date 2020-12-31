@@ -147,7 +147,7 @@ var cmdAbout = &cobra.Command{
 		fmt.Fprint(os.Stdout, strings.Join([]string{
 			fmt.Sprintf("Verifpal %s - https://verifpal.com\n", version),
 			"Verifpal is authored by Nadim Kobeissi.",
-			"The following individuals, have contributed",
+			"The following individuals have contributed",
 			"meaningful suggestions, bug reports, ideas",
 			"or discussion to the Verifpal project:",
 			"",
