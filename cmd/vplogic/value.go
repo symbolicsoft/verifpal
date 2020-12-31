@@ -143,19 +143,19 @@ func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
 		return a1.Constant.ID == a2.Constant.ID
 	case typesEnumPrimitive:
 		equivPrim, _, _ := valueEquivalentPrimitives(
-			a1.Primitive, a2.Primitive, considerOutput,
+			&a1.Primitive, &a2.Primitive, considerOutput,
 		)
 		return equivPrim
 	case typesEnumEquation:
 		return valueEquivalentEquations(
-			a1.Equation, a2.Equation,
+			&a1.Equation, &a2.Equation,
 		)
 	}
 	return false
 }
 
 func valueEquivalentPrimitives(
-	p1 Primitive, p2 Primitive, considerOutput bool,
+	p1 *Primitive, p2 *Primitive, considerOutput bool,
 ) (bool, int, int) {
 	if p1.ID != p2.ID {
 		return false, 0, 0
@@ -174,7 +174,7 @@ func valueEquivalentPrimitives(
 	return true, p1.Output, p2.Output
 }
 
-func valueEquivalentEquations(e1 Equation, e2 Equation) bool {
+func valueEquivalentEquations(e1 *Equation, e2 *Equation) bool {
 	if (len(e1.Values) == 0) || (len(e1.Values) != len(e2.Values)) {
 		return false
 	}

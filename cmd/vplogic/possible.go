@@ -71,7 +71,7 @@ func possibleToRecomposePrimitive(
 				switch v.Kind {
 				case typesEnumPrimitive:
 					equivPrim, vo, _ := valueEquivalentPrimitives(
-						v.Primitive, p, false,
+						&v.Primitive, &p, false,
 					)
 					if !equivPrim || vo != ii {
 						continue
@@ -261,7 +261,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 			}
 			for hasP := 1; hasP < len(has); hasP++ {
 				equivPrim, o1, o2 := valueEquivalentPrimitives(
-					has[0].Primitive, has[hasP].Primitive, false,
+					&has[0].Primitive, &has[hasP].Primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
 					continue ggLoop
