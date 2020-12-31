@@ -40,11 +40,11 @@ dep:
 	@/bin/echo -n "[Verifpal] Installing dependencies"
 	@go get -d -u github.com/logrusorgru/aurora
 	@/bin/echo -n "."
-	@go get -d -u github.com/mna/pigeon
+	@go get -u github.com/mna/pigeon
 	@/bin/echo -n "."
 	@go get -d -u github.com/spf13/cobra
 	@/bin/echo -n "."
-	@go get -d -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
+	@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 	@/bin/echo "       OK"
 
 lint:
