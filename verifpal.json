@@ -1,12 +1,12 @@
 {
-    "version": "0.20.1",
+    "version": "0.21.0",
     "architecture": {
         "64bit": {
-            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/1697920e8c299519b9b9724096f14182/verifpal_0.20.1_windows_amd64.zip",
+            "url": "https://source.symbolic.software/verifpal/verifpal/uploads/d45029e7745e634c93cbeb04df9abaec/verifpal_0.21.0_windows_amd64.zip",
             "bin": [
-                "verifpal_0.20.1_windows_amd64/verifpal.exe"
+                "verifpal_0.21.0_windows_amd64/verifpal.exe"
             ],
-            "hash": "0ad91805bc4303bb47893130a40e9b459eaca9cd98257872b2f0c7ed86c81c29"
+            "hash": "0119f7a5d74bfdde7676fbd0c3b5dcd8417f767c7215dc232837dcae42b0940a"
         }
     },
     "homepage": "https://verifpal.com",
