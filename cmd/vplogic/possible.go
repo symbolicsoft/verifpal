@@ -18,10 +18,10 @@ func possibleToDecomposePrimitive(
 	for i, g := range prim.Decompose.Given {
 		a := p.Arguments[g]
 		a, valid := prim.Decompose.Filter(p, a, i)
-		ii := valueEquivalentValueInValues(a, valAttackerState.Known)
 		if !valid {
 			continue
 		}
+		ii := valueEquivalentValueInValues(a, valAttackerState.Known)
 		if ii >= 0 {
 			has = append(has, a)
 			continue

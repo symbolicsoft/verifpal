@@ -160,15 +160,14 @@ func valueEquivalentPrimitives(
 	if p1.ID != p2.ID {
 		return false, 0, 0
 	}
-	if len(p1.Arguments) != len(p2.Arguments) {
-		return false, 0, 0
-	}
 	if considerOutput && (p1.Output != p2.Output) {
 		return false, 0, 0
 	}
+	if len(p1.Arguments) != len(p2.Arguments) {
+		return false, 0, 0
+	}
 	for i := range p1.Arguments {
-		equiv := valueEquivalentValues(&p1.Arguments[i], &p2.Arguments[i], true)
-		if !equiv {
+		if !valueEquivalentValues(&p1.Arguments[i], &p2.Arguments[i], true) {
 			return false, 0, 0
 		}
 	}
