@@ -50,7 +50,7 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 func verifyActiveStages(
 	stage int, valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
 	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
-) error {
+) {
 	var scanGroup sync.WaitGroup
 	var err error
 	oldKnown := len(valAttackerState.Known)
@@ -78,7 +78,6 @@ func verifyActiveStages(
 		attackerStatePutExhausted()
 	}
 	stageGroup.Done()
-	return err
 }
 
 func verifyActiveScan(
