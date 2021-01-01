@@ -127,7 +127,7 @@ func prettyQuery(query Query) string {
 		)
 	case typesEnumAuthentication:
 		output = fmt.Sprintf(
-			"confidentiality? %s -> %s: %s",
+			"authentication? %s -> %s: %s",
 			principalGetNameFromID(query.Message.Sender),
 			principalGetNameFromID(query.Message.Recipient),
 			prettyConstants(query.Message.Constants),
