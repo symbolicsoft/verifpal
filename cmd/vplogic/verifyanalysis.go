@@ -25,32 +25,32 @@ func verifyAnalysis(
 	if err != nil {
 		return err
 	}
-	for _, a := range valAttackerState.Known {
-		o = o + verifyAnalysisDecompose(a, valPrincipalState, valAttackerState)
+	for i := 0; i < len(valAttackerState.Known); i++ {
+		o = o + verifyAnalysisDecompose(valAttackerState.Known[i], valPrincipalState, valAttackerState)
 		if o > 0 {
 			break
 		}
 	}
-	for _, a := range valPrincipalState.Assigned {
-		o = o + verifyAnalysisReconstruct(a, valPrincipalState, valAttackerState, 0)
+	for i := 0; i < len(valPrincipalState.Assigned); i++ {
+		o = o + verifyAnalysisReconstruct(valPrincipalState.Assigned[i], valPrincipalState, valAttackerState, 0)
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisRecompose(a, valPrincipalState, valAttackerState)
+		o = o + verifyAnalysisRecompose(valPrincipalState.Assigned[i], valPrincipalState, valAttackerState)
 		if o > 0 {
 			break
 		}
 	}
-	for _, a := range valAttackerState.Known {
-		o = o + verifyAnalysisEquivalize(a, valPrincipalState)
+	for i := 0; i < len(valAttackerState.Known); i++ {
+		o = o + verifyAnalysisEquivalize(valAttackerState.Known[i], valPrincipalState)
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisPasswords(&a, valPrincipalState)
+		o = o + verifyAnalysisPasswords(&valAttackerState.Known[i], valPrincipalState)
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisConcat(a, valPrincipalState)
+		o = o + verifyAnalysisConcat(valAttackerState.Known[i], valPrincipalState)
 		if o > 0 {
 			break
 		}
@@ -156,7 +156,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	case typesEnumConstant:
 		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
-	for i := range valPrincipalState.Assigned {
+	for i := 0; i < len(valPrincipalState.Assigned); i++ {
 		if valueEquivalentValues(&ar, &valPrincipalState.Assigned[i], true) {
 			if attackerStatePutWrite(valPrincipalState.Assigned[i], valPrincipalState) {
 				InfoMessage(fmt.Sprintf(
@@ -191,11 +191,11 @@ func verifyAnalysisConcat(a Value, valPrincipalState PrincipalState) int {
 	case typesEnumPrimitive:
 		switch a.Primitive.ID {
 		case primitiveEnumCONCAT:
-			for _, revealed := range a.Primitive.Arguments {
-				if attackerStatePutWrite(revealed, valPrincipalState) {
+			for i := 0; i < len(a.Primitive.Arguments); i++ {
+				if attackerStatePutWrite(a.Primitive.Arguments[i], valPrincipalState) {
 					InfoMessage(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",
-						infoOutputText(revealed), prettyValue(a),
+						infoOutputText(a.Primitive.Arguments[i]), prettyValue(a),
 					), "deduction", true)
 					o = o + 1
 				}
