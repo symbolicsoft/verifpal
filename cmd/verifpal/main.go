@@ -153,6 +153,7 @@ var cmdAbout = &cobra.Command{
 			"",
 			"  - Angèle Bossuat",
 			"  - Bruno Blanchet (Prof. Dr.)",
+			"  - Fabian Drinck",
 			"  - Friedrich Wiemer",
 			"  - Georgio Nicolas",
 			"  - Jean-Philippe Aumasson (Dr.)",
