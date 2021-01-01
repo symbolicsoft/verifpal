@@ -45,7 +45,7 @@ func queryConfidentiality(
 		return result
 	}
 	mutatedInfo := infoQueryMutatedValues(
-		valKnowledgeMap, valAttackerState.PrincipalState[ii], valAttackerState, v,
+		valKnowledgeMap, valAttackerState.PrincipalState[ii], valAttackerState, v, 0,
 	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -87,7 +87,7 @@ func queryAuthentication(
 		a := valPrincipalState.Assigned[index]
 		b := valPrincipalState.BeforeRewrite[index]
 		mutatedInfo := infoQueryMutatedValues(
-			valKnowledgeMap, valPrincipalState, valAttackerState, a,
+			valKnowledgeMap, valPrincipalState, valAttackerState, a, 0,
 		)
 		result = queryPrecondition(result, valPrincipalState)
 		return queryAuthenticationHandlePass(
@@ -230,7 +230,7 @@ func queryFreshness(
 	}
 	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
 	mutatedInfo := infoQueryMutatedValues(
-		valKnowledgeMap, valPrincipalState, valAttackerState, resolved,
+		valKnowledgeMap, valPrincipalState, valAttackerState, resolved, 0,
 	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -282,7 +282,7 @@ func queryUnlinkability(
 	if len(noFreshness) > 0 {
 		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
 		mutatedInfo := infoQueryMutatedValues(
-			valKnowledgeMap, valPrincipalState, valAttackerState, resolved,
+			valKnowledgeMap, valPrincipalState, valAttackerState, resolved, 0,
 		)
 		result.Resolved = true
 		result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
@@ -324,7 +324,7 @@ func queryUnlinkability(
 				continue
 			}
 			mutatedInfo := infoQueryMutatedValues(
-				valKnowledgeMap, valPrincipalState, valAttackerState, Value{},
+				valKnowledgeMap, valPrincipalState, valAttackerState, Value{}, 0,
 			)
 			result.Resolved = true
 			result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(

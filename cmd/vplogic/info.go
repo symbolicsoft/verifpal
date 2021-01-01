@@ -139,6 +139,7 @@ func infoVerifyResultSummary(
 
 func infoAnalysis(stage int) {
 	a := ""
+	s := ""
 	analysisCount := verifyAnalysisCountGet()
 	switch {
 	case analysisCount > 100000:
@@ -158,12 +159,22 @@ func infoAnalysis(stage int) {
 			return
 		}
 	}
+	switch {
+	case stage == 1:
+		s = "1"
+	case stage == 2 || stage == 3:
+		s = "2-3"
+	case stage == 4 || stage == 5:
+		s = "4-5"
+	default:
+		s = fmt.Sprintf("%d", stage)
+	}
 	if colorOutputSupport() {
 		a = aurora.Faint(fmt.Sprintf(
-			" Stage %d, Analysis %d...", stage, analysisCount,
+			" Stage %s, Analysis %d...", s, analysisCount,
 		)).Italic().String()
 	} else {
-		a = fmt.Sprintf(" Stage %d, Analysis %d...", stage, analysisCount)
+		a = fmt.Sprintf(" Stage %s, Analysis %d...", s, analysisCount)
 	}
 	fmt.Fprint(os.Stdout, a)
 	fmt.Fprint(os.Stdout, "\r\r\r\r")
@@ -216,7 +227,7 @@ func infoOutputText(revealed Value) string {
 
 func infoQueryMutatedValues(
 	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	valAttackerState AttackerState, targetValue Value,
+	valAttackerState AttackerState, targetValue Value, infoDepth int,
 ) string {
 	mutated := []Value{}
 	targetInfo := "In another session:"
@@ -258,6 +269,9 @@ func infoQueryMutatedValues(
 	if !relevant {
 		return ""
 	}
+	if infoDepth >= 2 {
+		return mutatedInfo
+	}
 	for _, m := range mutated {
 		ai := valueEquivalentValueInValues(m, valAttackerState.Known)
 		if ai < 0 {
@@ -265,7 +279,7 @@ func infoQueryMutatedValues(
 		}
 		mmInfo := infoQueryMutatedValues(
 			valKnowledgeMap, valAttackerState.PrincipalState[ai],
-			valAttackerState, m,
+			valAttackerState, m, infoDepth+1,
 		)
 		if len(mmInfo) > 0 {
 			mutatedInfo = fmt.Sprintf(

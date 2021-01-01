@@ -302,6 +302,7 @@ type PrimitiveSpec struct {
 type AttackerState struct {
 	Active         bool
 	CurrentPhase   int
+	Exhausted      bool
 	Known          []Value
 	PrincipalState []PrincipalState
 }

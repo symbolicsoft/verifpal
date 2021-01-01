@@ -17,6 +17,10 @@ func verifyAnalysis(
 	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
 ) error {
 	o := 0
+	if verifyResultsAllResolved() {
+		scanGroup.Done()
+		return nil
+	}
 	err := verifyResolveQueries(valKnowledgeMap, valPrincipalState)
 	if err != nil {
 		return err

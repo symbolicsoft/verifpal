@@ -16,6 +16,7 @@ func attackerStateInit(active bool) {
 	attackerStateShared = AttackerState{
 		Active:         active,
 		CurrentPhase:   0,
+		Exhausted:      false,
 		Known:          []Value{},
 		PrincipalState: []PrincipalState{},
 	}
@@ -89,6 +90,14 @@ func attackerStateGetRead() AttackerState {
 	return valAttackerState
 }
 
+func attackerStateGetExhausted() bool {
+	var exhausted bool
+	attackerStateMutex.Lock()
+	exhausted = attackerStateShared.Exhausted
+	attackerStateMutex.Unlock()
+	return exhausted
+}
+
 func attackerStatePutWrite(known Value, valPrincipalState PrincipalState) bool {
 	written := false
 	if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
@@ -112,4 +121,11 @@ func attackerStatePutPhaseUpdate(valPrincipalState PrincipalState, phase int) er
 	attackerStateMutex.Unlock()
 	err := attackerStateAbsorbPhaseValues(valPrincipalState)
 	return err
+}
+
+func attackerStatePutExhausted() bool {
+	attackerStateMutex.Lock()
+	attackerStateShared.Exhausted = true
+	attackerStateMutex.Unlock()
+	return true
 }

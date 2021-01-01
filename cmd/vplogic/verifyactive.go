@@ -13,6 +13,7 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 	InfoMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
+		var stageGroup sync.WaitGroup
 		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
 		err := attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
@@ -23,9 +24,23 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 		if err != nil {
 			return err
 		}
-		err = verifyActiveStages(valKnowledgeMap, valPrincipalStates)
-		if err != nil {
-			return err
+		stageGroup.Add(1)
+		go verifyActiveStages(1, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		stageGroup.Wait()
+		stageGroup.Add(2)
+		go verifyActiveStages(2, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		go verifyActiveStages(3, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		stageGroup.Wait()
+		stageGroup.Add(2)
+		go verifyActiveStages(4, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		go verifyActiveStages(5, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		stageGroup.Wait()
+		stage := 6
+		for !verifyResultsAllResolved() && !attackerStateGetExhausted() {
+			stageGroup.Add(1)
+			go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+			stageGroup.Wait()
+			stage = stage + 1
 		}
 		phase = phase + 1
 	}
@@ -33,44 +48,37 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 }
 
 func verifyActiveStages(
-	valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
+	stage int, valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
+	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
 ) error {
 	var scanGroup sync.WaitGroup
 	var err error
-	stage := 1
-	valAttackerState := attackerStateGetRead()
-	for {
-		oldKnown := len(valAttackerState.Known)
-		valAttackerState = attackerStateGetRead()
-		known := len(valAttackerState.Known)
-		for _, valPrincipalState := range valPrincipalStates {
-			scanGroup.Add(1)
-			go func(valPrincipalState PrincipalState, valAttackerState AttackerState, stage int) {
-				var valMutationMap MutationMap
-				valMutationMap, err = mutationMapInit(
-					valKnowledgeMap, valPrincipalState, valAttackerState, stage,
-				)
-				if err != nil {
-					scanGroup.Done()
-					return
-				}
-				err = verifyActiveScan(
-					valKnowledgeMap, valPrincipalState, valAttackerState,
-					mutationMapNext(valMutationMap), stage, &scanGroup,
-				)
-				if err != nil {
-					scanGroup.Done()
-				}
-			}(valPrincipalState, valAttackerState, stage)
-		}
-		scanGroup.Wait()
-		exhaustion := (stage >= 5 && (oldKnown == known))
-		if verifyResultsAllResolved() || exhaustion {
+	oldKnown := len(valAttackerState.Known)
+	valAttackerState = attackerStateGetRead()
+	for _, valPrincipalState := range valPrincipalStates {
+		var valMutationMap MutationMap
+		valMutationMap, err = mutationMapInit(
+			valKnowledgeMap, valPrincipalState, valAttackerState, stage,
+		)
+		if err != nil {
 			break
 		}
-		stage = stage + 1
+		scanGroup.Add(1)
+		err = verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, valAttackerState,
+			mutationMapNext(valMutationMap), stage, &scanGroup,
+		)
+		if err != nil {
+			break
+		}
 	}
-	return nil
+	scanGroup.Wait()
+	exhausted := (stage > 5 && (oldKnown == len(valAttackerState.Known)))
+	if exhausted {
+		attackerStatePutExhausted()
+	}
+	stageGroup.Done()
+	return err
 }
 
 func verifyActiveScan(
@@ -81,7 +89,7 @@ func verifyActiveScan(
 	var err error
 	if verifyResultsAllResolved() {
 		scanGroup.Done()
-		return nil
+		return err
 	}
 	valPrincipalStateMutated, isWorthwhileMutation, err := verifyActiveMutatePrincipalState(
 		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
@@ -103,7 +111,7 @@ func verifyActiveScan(
 	}
 	if valMutationMap.OutOfMutations {
 		scanGroup.Done()
-		return nil
+		return err
 	}
 	go func() {
 		err := verifyActiveScan(
