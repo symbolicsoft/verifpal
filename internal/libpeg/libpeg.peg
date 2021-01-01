@@ -75,7 +75,7 @@ func libpegParseModel(filePath string, verbose bool) (Model, error) {
 }
 }
 
-Model <- Comment* Attacker:Attacker? Blocks:(Block+)? Queries:Queries? Comment* EOF {
+Model <- _ Comment* Attacker:Attacker? Blocks:(Block+)? Queries:Queries? Comment* _ EOF {
 	switch {
 	case Attacker == nil:
 		return nil, errors.New("no `attacker` block defined")
