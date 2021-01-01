@@ -276,7 +276,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 }
 
 func possibleToObtainPasswords(
-	a Value, aParent Value, aIndex int, valPrincipalState PrincipalState,
+	a *Value, aParent *Value, aIndex int, valPrincipalState PrincipalState,
 ) []Value {
 	passwords := []Value{}
 	switch a.Kind {
@@ -297,7 +297,7 @@ func possibleToObtainPasswords(
 			}
 		}
 	case typesEnumPrimitive:
-		for ii, aa := range a.Primitive.Arguments {
+		for i := 0; i < len(a.Primitive.Arguments); i++ {
 			if !primitiveIsCorePrim(a.Primitive.ID) {
 				prim, _ := primitiveGet(a.Primitive.ID)
 				if intInSlice(aIndex, prim.PasswordHashing) {
@@ -305,13 +305,13 @@ func possibleToObtainPasswords(
 				}
 			}
 			passwords = append(passwords,
-				possibleToObtainPasswords(aa, aParent, ii, valPrincipalState)...,
+				possibleToObtainPasswords(&a.Primitive.Arguments[i], aParent, i, valPrincipalState)...,
 			)
 		}
 	case typesEnumEquation:
-		for _, aa := range a.Equation.Values {
+		for i := 0; i < len(a.Equation.Values); i++ {
 			passwords = append(passwords,
-				possibleToObtainPasswords(aa, a, -1, valPrincipalState)...,
+				possibleToObtainPasswords(&a.Equation.Values[i], a, -1, valPrincipalState)...,
 			)
 		}
 	}

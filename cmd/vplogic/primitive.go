@@ -745,35 +745,35 @@ func primitiveIsCorePrim(name primitiveEnum) bool {
 	return false
 }
 
-func primitiveCoreGet(name primitiveEnum) (PrimitiveCoreSpec, error) {
-	for _, v := range primitiveCoreSpecs {
-		if v.ID == name {
-			return v, nil
+func primitiveCoreGet(name primitiveEnum) (*PrimitiveCoreSpec, error) {
+	for i := 0; i < len(primitiveCoreSpecs); i++ {
+		if primitiveCoreSpecs[i].ID == name {
+			return &primitiveCoreSpecs[i], nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive")
-	return PrimitiveCoreSpec{}, err
+	return &PrimitiveCoreSpec{}, err
 }
 
-func primitiveGet(name primitiveEnum) (PrimitiveSpec, error) {
-	for _, v := range primitiveSpecs {
-		if v.ID == name {
-			return v, nil
+func primitiveGet(name primitiveEnum) (*PrimitiveSpec, error) {
+	for i := 0; i < len(primitiveSpecs); i++ {
+		if primitiveSpecs[i].ID == name {
+			return &primitiveSpecs[i], nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive")
-	return PrimitiveSpec{}, err
+	return &PrimitiveSpec{}, err
 }
 
 func primitiveGetEnum(stringName string) (primitiveEnum, error) {
-	for _, v := range primitiveCoreSpecs {
-		if v.Name == stringName {
-			return v.ID, nil
+	for i := 0; i < len(primitiveCoreSpecs); i++ {
+		if primitiveCoreSpecs[i].Name == stringName {
+			return primitiveCoreSpecs[i].ID, nil
 		}
 	}
-	for _, v := range primitiveSpecs {
-		if v.Name == stringName {
-			return v.ID, nil
+	for i := 0; i < len(primitiveSpecs); i++ {
+		if primitiveSpecs[i].Name == stringName {
+			return primitiveSpecs[i].ID, nil
 		}
 	}
 	err := fmt.Errorf("unknown primitive")

@@ -46,7 +46,7 @@ func verifyAnalysis(
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisPasswords(a, valPrincipalState)
+		o = o + verifyAnalysisPasswords(&a, valPrincipalState)
 		if o > 0 {
 			break
 		}
@@ -170,14 +170,14 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	return o
 }
 
-func verifyAnalysisPasswords(a Value, valPrincipalState PrincipalState) int {
+func verifyAnalysisPasswords(a *Value, valPrincipalState PrincipalState) int {
 	o := 0
 	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
-	for _, revealed := range passwords {
-		if attackerStatePutWrite(revealed, valPrincipalState) {
+	for i := 0; i < len(passwords); i++ {
+		if attackerStatePutWrite(passwords[i], valPrincipalState) {
 			InfoMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
-				infoOutputText(revealed), prettyValue(a),
+				infoOutputText(passwords[i]), prettyValue(*a),
 			), "deduction", true)
 			o = o + 1
 		}
