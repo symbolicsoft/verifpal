@@ -1,0 +1,86 @@
+// SPDX-FileCopyrightText: © 2021 Daan Sprenkels <daan@dsprenkels.com>
+// SPDX-License-Identifier: GPL-3.0-only OR CC0-1.0
+//
+// This verifpal example models the security of Frank Denis' 'piknik'
+// copy-paste protocol (<https://github.com/jedisct1/piknik>).
+// It is based on version 00ee34c of the piknik source. Due to
+// limitations in verifpal, only the Copy operation is implemented.
+
+attacker[active]
+
+principal Client1[
+    knows public SK
+    knows public S
+    knows public 0
+    knows public 1
+    knows public 2
+    knows private skk
+    knows private signprivkey
+    knows private keygen
+    knows private ekid
+    signpubkey = G^signprivkey
+
+    leaks skk // Leaking API key simulates a non-honest server.
+    leaks ekid // ekid is an ID, not a key; so it is considered public.
+]
+
+principal Client2[
+    knows private skk
+    knows private ek
+    knows private keygen
+]
+
+// We assume the signing public key is provisioned out-of-band on all the
+// clients.
+Client1 -> Client2: [signpubkey]
+
+principal Client1[
+    knows private k
+    generates r
+
+    h0 = HASH(skk, 0, r)
+]
+
+Client1 -> Client2: r, h0
+
+principal Client2[
+    generates rprime
+    _ = ASSERT(h0, HASH(skk, 0, r))?
+    h1 = HASH(skk, 1, rprime, h0)
+]
+
+Client2 -> Client1: rprime, h1
+
+principal Client1[
+    generates ts
+    generates n
+    generates m
+    // leaks m
+
+    _ = ASSERT(h1, HASH(skk, 1, rprime, h0))?
+
+    gkeygen = G^keygen
+    ct = ENC(gkeygen^ekid, CONCAT(n, m))
+    signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
+    h2 = HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid))
+]
+
+Client1 -> Client2: h2, ts, signature, ekid, n, ct
+
+principal Client2[
+    _ = ASSERT(h2, HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid)))?
+    _ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
+    
+    gkeygen_ = G^keygen
+    nm_ = DEC(gkeygen_^ekid, ct)
+    n_, m_ = SPLIT(nm_)
+]
+
+queries[
+    confidentiality? m
+    authentication? Client1 -> Client2: ekid
+    authentication? Client1 -> Client2: n
+    authentication? Client1 -> Client2: ct
+    freshness? m
+]
+
