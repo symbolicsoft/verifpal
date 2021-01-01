@@ -1,5 +1,1 @@
-Verifpal 0.21.0 brings strong performance improvements due to the elimination of string comparison operations from the analysis logic. Verifpal now assigns uint16 IDs for all string values (constant names, principal names, value qualifiers and attributes, etc.) before analysis and compares those instead of comparing strings.
-
-The resulting performance benefits are quite substantial, ranging between 20% and 33% depending on the model being analyzed.
-
-No change was made to the analysis logic itself, aside from eliminating string comparison operations.
+Verifpal 0.21.1 brings further performance improvements by improving multithreading strategies.
