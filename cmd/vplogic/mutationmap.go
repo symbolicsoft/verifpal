@@ -151,7 +151,7 @@ func mutationMapReplacePrimitive(
 			}
 		case typesEnumPrimitive:
 			a, err = valueResolveValueInternalValuesFromPrincipalState(
-				a, a, rootIndex, valPrincipalState, valAttackerState, false, 0,
+				&a, &a, rootIndex, valPrincipalState, valAttackerState, false, 0,
 			)
 			if err != nil {
 				return []Value{}, err
