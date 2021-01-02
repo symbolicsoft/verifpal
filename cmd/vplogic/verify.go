@@ -72,7 +72,8 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 	valAttackerState := attackerStateGetRead()
 	for _, valPrincipalState := range valPrincipalStates {
 		var err error
-		valPrincipalState, err := valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
+		var failedRewrites []*Primitive
+		valPrincipalState, err = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 		if err != nil {
 			return err
 		}
@@ -82,7 +83,7 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 				injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
 			}
 		}
-		failedRewrites, _, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
+		failedRewrites, _, valPrincipalState = valuePerformAllRewrites(valPrincipalState)
 		err = sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites)
 		if err != nil {
 			return err
