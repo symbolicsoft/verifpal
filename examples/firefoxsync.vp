@@ -20,21 +20,21 @@ principal Server[]
 ComputerA -> Server: username, h2, e1
 
 principal Server[
-	h3 = HASH(username, h2)
+	h3 = HASH(HASH(username), h2)
 ]
 
 principal ComputerB[
 	knows private username
 	knows private pass
 	knows public salt
-	usernameb = DEC(pass, ENC(pass, username)) // Terrible hack
+	usernameb = HASH(username)
 	h1b, h2b = HKDF(pass, salt, nil)
 ]
 
 ComputerB -> Server: usernameb, h2b
 
 principal Server[
-	_ = ASSERT(username, usernameb)?
+	_ = ASSERT(HASH(username), usernameb)?
 	_ = ASSERT(h3, HASH(usernameb, h2b))?
 ]
 

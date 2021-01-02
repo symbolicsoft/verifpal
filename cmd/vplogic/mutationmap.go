@@ -97,7 +97,7 @@ func mutationMapReplaceValue(
 			a, stage, valAttackerState,
 		), nil
 	}
-	return v.Constant, []*Value{}, nil
+	return v.Constant, []*Value{}, fmt.Errorf("invalid value kind")
 }
 
 func mutationMapReplaceConstant(

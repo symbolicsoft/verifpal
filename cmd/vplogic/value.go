@@ -762,3 +762,40 @@ func valueContainsFreshValues(
 	}
 	return false, nil
 }
+
+func valueDeepCopy(v *Value) Value {
+	d := Value{
+		Kind: v.Kind,
+	}
+	switch v.Kind {
+	case typesEnumConstant:
+		d.Constant = &Constant{
+			Name:        v.Constant.Name,
+			ID:          v.Constant.ID,
+			Guard:       v.Constant.Guard,
+			Fresh:       v.Constant.Fresh,
+			Leaked:      v.Constant.Leaked,
+			Declaration: v.Constant.Declaration,
+		}
+	case typesEnumPrimitive:
+		d.Primitive = &Primitive{
+			ID:        v.Primitive.ID,
+			Arguments: []*Value{},
+			Output:    v.Primitive.Output,
+			Check:     v.Primitive.Check,
+		}
+		for i := 0; i < len(v.Primitive.Arguments); i++ {
+			arg := valueDeepCopy(v.Primitive.Arguments[i])
+			d.Primitive.Arguments = append(d.Primitive.Arguments, &arg)
+		}
+	case typesEnumEquation:
+		d.Equation = &Equation{
+			Values: []*Value{},
+		}
+		for i := 0; i < len(v.Equation.Values); i++ {
+			arg := valueDeepCopy(v.Equation.Values[i])
+			d.Equation.Values = append(d.Equation.Values, &arg)
+		}
+	}
+	return d
+}

@@ -258,26 +258,13 @@ func constructKnowledgeMapRenderAssignment(
 			Declaration: typesEnumAssignment,
 			Qualifier:   typesEnumPrivate,
 		}
-		a := &Value{
-			Kind: expr.Assigned.Kind,
-		}
-		switch expr.Assigned.Kind {
-		case typesEnumConstant:
-			a.Constant = expr.Assigned.Constant
+		a := valueDeepCopy(expr.Assigned)
+		switch a.Kind {
 		case typesEnumPrimitive:
-			a.Primitive = &Primitive{
-				ID:        expr.Assigned.Primitive.ID,
-				Arguments: expr.Assigned.Primitive.Arguments,
-				Output:    i,
-				Check:     expr.Assigned.Primitive.Check,
-			}
-		case typesEnumEquation:
-			a.Equation = &Equation{
-				Values: expr.Assigned.Equation.Values,
-			}
+			a.Primitive.Output = i
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
-		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, a)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &a)
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
