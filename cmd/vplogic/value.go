@@ -548,26 +548,26 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 
 func valueResolveValueInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (Value, error) {
 	if depth > 65535 {
 		return *a, errors.New("invalid depth")
 	}
 	switch a.Kind {
 	case typesEnumConstant:
-		nextRootIndex := valueGetPrincipalStateIndexFromConstant(&valPrincipalState, &a.Constant)
+		nextRootIndex := valueGetPrincipalStateIndexFromConstant(valPrincipalState, &a.Constant)
 		if nextRootIndex < 0 {
 			return *a, errors.New("invalid index")
 		}
 		switch nextRootIndex {
 		case rootIndex:
 			if !forceBeforeMutate {
-				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, &valPrincipalState)
+				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
 			if forceBeforeMutate {
 				a = &valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				*a, _ = valueResolveConstant(&a.Constant, &valPrincipalState)
+				*a, _ = valueResolveConstant(&a.Constant, valPrincipalState)
 			}
 		default:
 			switch rootValue.Kind {
@@ -582,7 +582,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 					valPrincipalState.MutatableTo[nextRootIndex],
 				)
 			} else {
-				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, &valPrincipalState)
+				forceBeforeMutate = valueShouldResolveToBeforeMutate(nextRootIndex, valPrincipalState)
 			}
 			if forceBeforeMutate {
 				a = &valPrincipalState.BeforeMutate[nextRootIndex]
@@ -610,7 +610,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 
 func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (Value, error) {
 	if valPrincipalState.Creator[rootIndex] == valPrincipalState.ID {
 		forceBeforeMutate = false
@@ -637,7 +637,7 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 }
 
 func valueResolveEquationInternalValuesFromPrincipalState(
-	a *Value, rootValue *Value, rootIndex int, valPrincipalState PrincipalState,
+	a *Value, rootValue *Value, rootIndex int, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (Value, error) {
 	if valPrincipalState.Creator[rootIndex] == valPrincipalState.ID {
@@ -655,7 +655,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 		switch aa[aai].Kind {
 		case typesEnumConstant:
 			var i int
-			aa[aai], i = valueResolveConstant(&aa[aai].Constant, &valPrincipalState)
+			aa[aai], i = valueResolveConstant(&aa[aai].Constant, valPrincipalState)
 			if forceBeforeMutate {
 				aa[aai] = valPrincipalState.BeforeMutate[i]
 			}
@@ -715,21 +715,21 @@ func valueConstantIsUsedByPrincipalInKnowledgeMap(
 }
 
 func valueResolveAllPrincipalStateValues(
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (PrincipalState, error) {
 	var err error
-	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+	valPrincipalStateClone := constructPrincipalStateClone(*valPrincipalState, false)
 	for i := range valPrincipalState.Assigned {
 		valPrincipalStateClone.Assigned[i], err = valueResolveValueInternalValuesFromPrincipalState(
 			&valPrincipalState.Assigned[i], &valPrincipalState.Assigned[i], i, valPrincipalState,
-			valAttackerState, valueShouldResolveToBeforeMutate(i, &valPrincipalState), 0,
+			valAttackerState, valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
 		if err != nil {
 			return PrincipalState{}, err
 		}
 		valPrincipalStateClone.BeforeRewrite[i], err = valueResolveValueInternalValuesFromPrincipalState(
 			&valPrincipalState.BeforeRewrite[i], &valPrincipalState.BeforeRewrite[i], i, valPrincipalState,
-			valAttackerState, valueShouldResolveToBeforeMutate(i, &valPrincipalState), 0,
+			valAttackerState, valueShouldResolveToBeforeMutate(i, valPrincipalState), 0,
 		)
 		if err != nil {
 			return PrincipalState{}, err
@@ -740,9 +740,9 @@ func valueResolveAllPrincipalStateValues(
 
 func valueContainsFreshValues(
 	v Value, c Constant,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, error) {
-	i := valueGetPrincipalStateIndexFromConstant(&valPrincipalState, &c)
+	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, &c)
 	v, err := valueResolveValueInternalValuesFromPrincipalState(
 		&v, &v, i, valPrincipalState, valAttackerState, false, 0,
 	)
@@ -751,7 +751,7 @@ func valueContainsFreshValues(
 	}
 	cc := valueGetConstantsFromValue(v)
 	for _, ccc := range cc {
-		ii := valueGetPrincipalStateIndexFromConstant(&valPrincipalState, &ccc)
+		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, &ccc)
 		if ii >= 0 {
 			ccc = valPrincipalState.Constants[ii]
 			if ccc.Fresh {

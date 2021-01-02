@@ -71,7 +71,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
 	for _, state := range valPrincipalStates {
-		valPrincipalState, err := valueResolveAllPrincipalStateValues(state, valAttackerState)
+		valPrincipalState, err := valueResolveAllPrincipalStateValues(&state, valAttackerState)
 		if err != nil {
 			return err
 		}

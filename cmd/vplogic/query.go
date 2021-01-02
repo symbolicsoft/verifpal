@@ -184,7 +184,7 @@ func queryFreshness(
 	freshnessFound, err := valueContainsFreshValues(Value{
 		Kind:     typesEnumConstant,
 		Constant: query.Constants[0],
-	}, query.Constants[0], valPrincipalState, valAttackerState)
+	}, query.Constants[0], &valPrincipalState, valAttackerState)
 	if err != nil {
 		return result, err
 	}
@@ -271,7 +271,7 @@ func queryUnlinkability(
 		freshnessFound, err := valueContainsFreshValues(Value{
 			Kind:     typesEnumConstant,
 			Constant: c,
-		}, c, valPrincipalState, valAttackerState)
+		}, c, &valPrincipalState, valAttackerState)
 		if err != nil {
 			return result, err
 		}
