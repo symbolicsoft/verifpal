@@ -550,7 +550,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, forceBeforeMutate bool, depth int,
 ) (*Value, error) {
-	if depth > 65535 {
+	if depth > 512 {
 		return a, errors.New("invalid depth")
 	}
 	switch a.Kind {

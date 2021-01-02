@@ -36,7 +36,7 @@ Server -> Alice: [e_alice]
 principal Alice[
 	e_alice_dec = AEAD_DEC(k_as, e_alice, nil)
 	n_a_response, k_ab_alice, B_alice, e_bob_alice = SPLIT(e_alice_dec)
-	_ = ASSERT(n_a, n_a_response)
+	_ = ASSERT(n_a, n_a_response)?
 ]
 
 Alice -> Bob: e_bob_alice
@@ -59,7 +59,7 @@ Alice -> Bob: e_n_b_minus_one
 
 principal Bob[
 	n_b_minus_one_bob = AEAD_DEC(k_ab_bob, e_n_b_minus_one, nil)
-	_ = ASSERT(n_b_minus_one_bob, HASH(n_b))
+	_ = ASSERT(n_b_minus_one_bob, HASH(n_b))?
 ]
 
 phase[1]
