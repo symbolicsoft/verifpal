@@ -1,1 +1,1 @@
-Verifpal 0.21.1 brings further performance improvements by improving multithreading strategies.
+Verifpal 0.21.2 brings further performance improvements to analysis speeds.
