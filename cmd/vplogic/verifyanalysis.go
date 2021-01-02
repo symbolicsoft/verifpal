@@ -154,7 +154,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	ar := a
 	switch a.Kind {
 	case typesEnumConstant:
-		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
+		ar, _ = valueResolveConstant(&a.Constant, &valPrincipalState)
 	}
 	for i := 0; i < len(valPrincipalState.Assigned); i++ {
 		if valueEquivalentValues(&ar, &valPrincipalState.Assigned[i], true) {
@@ -172,7 +172,7 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 
 func verifyAnalysisPasswords(a *Value, valPrincipalState PrincipalState) int {
 	o := 0
-	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
+	passwords := possibleToObtainPasswords(a, a, -1, &valPrincipalState)
 	for i := 0; i < len(passwords); i++ {
 		if attackerStatePutWrite(passwords[i], valPrincipalState) {
 			InfoMessage(fmt.Sprintf(

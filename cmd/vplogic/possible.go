@@ -276,12 +276,12 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 }
 
 func possibleToObtainPasswords(
-	a *Value, aParent *Value, aIndex int, valPrincipalState PrincipalState,
+	a *Value, aParent *Value, aIndex int, valPrincipalState *PrincipalState,
 ) []Value {
 	passwords := []Value{}
 	switch a.Kind {
 	case typesEnumConstant:
-		aa, _ := valueResolveConstant(a.Constant, valPrincipalState)
+		aa, _ := valueResolveConstant(&a.Constant, valPrincipalState)
 		switch aa.Kind {
 		case typesEnumConstant:
 			if aa.Constant.Qualifier == typesEnumPassword {

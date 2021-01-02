@@ -194,7 +194,7 @@ func injectPrimitive(
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
 			case typesEnumConstant:
-				k, _ = valueResolveConstant(k.Constant, valPrincipalState)
+				k, _ = valueResolveConstant(&k.Constant, &valPrincipalState)
 			}
 			if !injectValueRules(k, arg, p, stage) {
 				continue

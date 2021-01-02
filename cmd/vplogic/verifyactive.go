@@ -129,7 +129,7 @@ func verifyActiveMutatePrincipalState(
 ) (PrincipalState, bool, error) {
 	isWorthwhileMutation := false
 	for i, c := range valMutationMap.Constants {
-		ai, ii := valueResolveConstant(c, valPrincipalState)
+		ai, ii := valueResolveConstant(&c, &valPrincipalState)
 		ac := valMutationMap.Combination[i]
 		ar, err := valueResolveValueInternalValuesFromPrincipalState(
 			ai, ai, ii, valPrincipalState, valAttackerState, true, 0,
