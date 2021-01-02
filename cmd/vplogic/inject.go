@@ -9,21 +9,21 @@ import (
 )
 
 func inject(
-	p Primitive, injectDepth int,
-	valPrincipalState PrincipalState, valAttackerState AttackerState, stage int,
-) []Value {
+	p *Primitive, injectDepth int,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState, stage int,
+) []*Value {
 	if verifyResultsAllResolved() {
-		return []Value{}
+		return []*Value{}
 	}
 	if primitiveIsCorePrim(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
 		if !prim.Injectable {
-			return []Value{}
+			return []*Value{}
 		}
 	} else {
 		prim, _ := primitiveGet(p.ID)
 		if !prim.Injectable {
-			return []Value{}
+			return []*Value{}
 		}
 	}
 	return injectPrimitive(
@@ -32,7 +32,7 @@ func inject(
 }
 
 func injectValueRules(
-	k Value, arg int, p Primitive, stage int,
+	k *Value, arg int, p *Primitive, stage int,
 ) bool {
 	switch k.Kind {
 	case typesEnumConstant:
@@ -45,7 +45,7 @@ func injectValueRules(
 	return true
 }
 
-func injectConstantRules(c Constant, arg int, p Primitive) bool {
+func injectConstantRules(c *Constant, arg int, p *Primitive) bool {
 	switch {
 	case p.Arguments[arg].Kind != typesEnumConstant:
 		return false
@@ -55,7 +55,7 @@ func injectConstantRules(c Constant, arg int, p Primitive) bool {
 	return true
 }
 
-func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
+func injectPrimitiveRules(k *Primitive, arg int, p *Primitive, stage int) bool {
 	switch {
 	case p.Arguments[arg].Kind != typesEnumPrimitive:
 		return false
@@ -65,7 +65,7 @@ func injectPrimitiveRules(k Primitive, arg int, p Primitive, stage int) bool {
 	return injectSkeletonNotDeeper(k, p.Arguments[arg].Primitive)
 }
 
-func injectEquationRules(e Equation, arg int, p Primitive) bool {
+func injectEquationRules(e *Equation, arg int, p *Primitive) bool {
 	switch {
 	case p.Arguments[arg].Kind != typesEnumEquation:
 		return false
@@ -75,7 +75,7 @@ func injectEquationRules(e Equation, arg int, p Primitive) bool {
 	return true
 }
 
-func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
+func injectPrimitiveStageRestricted(p *Primitive, stage int) bool {
 	switch stage {
 	case 0:
 		return true
@@ -96,10 +96,10 @@ func injectPrimitiveStageRestricted(p Primitive, stage int) bool {
 	}
 }
 
-func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
-	skeleton := Primitive{
+func injectPrimitiveSkeleton(p *Primitive, depth int) (*Primitive, int) {
+	skeleton := &Primitive{
 		ID:        p.ID,
-		Arguments: make([]Value, len(p.Arguments)),
+		Arguments: make([]*Value, len(p.Arguments)),
 		Output:    p.Output,
 		Check:     false,
 	}
@@ -112,7 +112,7 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 			if dd > depth {
 				depth = dd
 			}
-			aa := Value{
+			aa := &Value{
 				Kind:      typesEnumPrimitive,
 				Primitive: pp,
 			}
@@ -129,7 +129,7 @@ func injectPrimitiveSkeleton(p Primitive, depth int) (Primitive, int) {
 	return skeleton, depth + 1
 }
 
-func injectSkeletonNotDeeper(p Primitive, reference Primitive) bool {
+func injectSkeletonNotDeeper(p *Primitive, reference *Primitive) bool {
 	if p.ID != reference.ID {
 		return false
 	}
@@ -138,7 +138,7 @@ func injectSkeletonNotDeeper(p Primitive, reference Primitive) bool {
 	return pd <= sd
 }
 
-func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
+func injectMatchSkeletons(p *Primitive, skeleton *Primitive) bool {
 	if p.ID != skeleton.ID {
 		return false
 	}
@@ -148,7 +148,7 @@ func injectMatchSkeletons(p Primitive, skeleton Primitive) bool {
 	return valueEquivalentValues(&pv, &sv, true)
 }
 
-func injectMissingSkeletons(p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState) {
+func injectMissingSkeletons(p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState) {
 	skeleton, _ := injectPrimitiveSkeleton(p, 0)
 	matchingSkeleton := false
 SkeletonSearch:
@@ -162,7 +162,7 @@ SkeletonSearch:
 		}
 	}
 	if !matchingSkeleton {
-		known := Value{
+		known := &Value{
 			Kind:      typesEnumPrimitive,
 			Primitive: skeleton,
 		}
@@ -182,19 +182,19 @@ SkeletonSearch:
 }
 
 func injectPrimitive(
-	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 	injectDepth int, stage int,
-) []Value {
+) []*Value {
 	if injectPrimitiveStageRestricted(p, stage) {
-		return []Value{}
+		return []*Value{}
 	}
-	kinjectants := make([][]Value, len(p.Arguments))
-	uinjectants := make([][]Value, len(p.Arguments))
+	kinjectants := make([][]*Value, len(p.Arguments))
+	uinjectants := make([][]*Value, len(p.Arguments))
 	for arg := range p.Arguments {
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
 			case typesEnumConstant:
-				k, _ = valueResolveConstant(&k.Constant, &valPrincipalState)
+				k, _ = valueResolveConstant(k.Constant, valPrincipalState)
 			}
 			if !injectValueRules(k, arg, p, stage) {
 				continue
@@ -228,10 +228,10 @@ func injectPrimitive(
 }
 
 func injectPrimitiveRecursively(
-	k Value, arg int, uinjectants [][]Value, kinjectants [][]Value,
-	valPrincipalState PrincipalState, valAttackerState AttackerState,
+	k *Value, arg int, uinjectants [][]*Value, kinjectants [][]*Value,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 	injectDepth int, stage int,
-) ([][]Value, [][]Value) {
+) ([][]*Value, [][]*Value) {
 	kp := inject(
 		k.Primitive, injectDepth+1,
 		valPrincipalState, valAttackerState, stage,
@@ -245,9 +245,9 @@ func injectPrimitiveRecursively(
 	return uinjectants, kinjectants
 }
 
-func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
+func injectLoopN(p *Primitive, kinjectants [][]*Value) []*Value {
 	if verifyResultsAllResolved() {
-		return []Value{}
+		return []*Value{}
 	}
 	switch len(p.Arguments) {
 	case 1:
@@ -261,20 +261,20 @@ func injectLoopN(p Primitive, kinjectants [][]Value) []Value {
 	case 5:
 		return injectLoop5(p, kinjectants)
 	}
-	return []Value{}
+	return []*Value{}
 }
 
-func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
-	injectants := []Value{}
+func injectLoop1(p *Primitive, kinjectants [][]*Value) []*Value {
+	injectants := []*Value{}
 	if verifyResultsAllResolved() {
-		return []Value{}
+		return []*Value{}
 	}
 	for i := range kinjectants[0] {
-		aa := Value{
+		aa := &Value{
 			Kind: typesEnumPrimitive,
-			Primitive: Primitive{
+			Primitive: &Primitive{
 				ID: p.ID,
-				Arguments: []Value{
+				Arguments: []*Value{
 					kinjectants[0][i],
 				},
 				Output: p.Output,
@@ -286,15 +286,15 @@ func injectLoop1(p Primitive, kinjectants [][]Value) []Value {
 	return injectants
 }
 
-func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
-	injectants := []Value{}
+func injectLoop2(p *Primitive, kinjectants [][]*Value) []*Value {
+	injectants := []*Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
-			aa := Value{
+			aa := &Value{
 				Kind: typesEnumPrimitive,
-				Primitive: Primitive{
+				Primitive: &Primitive{
 					ID: p.ID,
-					Arguments: []Value{
+					Arguments: []*Value{
 						kinjectants[0][i],
 						kinjectants[1][ii],
 					},
@@ -308,16 +308,16 @@ func injectLoop2(p Primitive, kinjectants [][]Value) []Value {
 	return injectants
 }
 
-func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
-	injectants := []Value{}
+func injectLoop3(p *Primitive, kinjectants [][]*Value) []*Value {
+	injectants := []*Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
-				aa := Value{
+				aa := &Value{
 					Kind: typesEnumPrimitive,
-					Primitive: Primitive{
+					Primitive: &Primitive{
 						ID: p.ID,
-						Arguments: []Value{
+						Arguments: []*Value{
 							kinjectants[0][i],
 							kinjectants[1][ii],
 							kinjectants[2][iii],
@@ -333,17 +333,17 @@ func injectLoop3(p Primitive, kinjectants [][]Value) []Value {
 	return injectants
 }
 
-func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
-	injectants := []Value{}
+func injectLoop4(p *Primitive, kinjectants [][]*Value) []*Value {
+	injectants := []*Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
-					aa := Value{
+					aa := &Value{
 						Kind: typesEnumPrimitive,
-						Primitive: Primitive{
+						Primitive: &Primitive{
 							ID: p.ID,
-							Arguments: []Value{
+							Arguments: []*Value{
 								kinjectants[0][i],
 								kinjectants[1][ii],
 								kinjectants[2][iii],
@@ -361,18 +361,18 @@ func injectLoop4(p Primitive, kinjectants [][]Value) []Value {
 	return injectants
 }
 
-func injectLoop5(p Primitive, kinjectants [][]Value) []Value {
-	injectants := []Value{}
+func injectLoop5(p *Primitive, kinjectants [][]*Value) []*Value {
+	injectants := []*Value{}
 	for i := range kinjectants[0] {
 		for ii := range kinjectants[1] {
 			for iii := range kinjectants[2] {
 				for iiii := range kinjectants[3] {
 					for iiiii := range kinjectants[4] {
-						aa := Value{
+						aa := &Value{
 							Kind: typesEnumPrimitive,
-							Primitive: Primitive{
+							Primitive: &Primitive{
 								ID: p.ID,
-								Arguments: []Value{
+								Arguments: []*Value{
 									kinjectants[0][i],
 									kinjectants[1][ii],
 									kinjectants[2][iii],

@@ -53,7 +53,7 @@ func verifyModel(m Model) ([]VerifyResult, string, error) {
 }
 
 func verifyResolveQueries(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 ) error {
 	valVerifyResults, _ := verifyResultsGetRead()
 	for _, verifyResult := range valVerifyResults {
@@ -67,11 +67,12 @@ func verifyResolveQueries(
 	return nil
 }
 
-func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState, stage int) error {
+func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState, stage int) error {
 	var scanGroup sync.WaitGroup
 	valAttackerState := attackerStateGetRead()
-	for _, state := range valPrincipalStates {
-		valPrincipalState, err := valueResolveAllPrincipalStateValues(&state, valAttackerState)
+	for _, valPrincipalState := range valPrincipalStates {
+		var err error
+		valPrincipalState, err := valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 		if err != nil {
 			return err
 		}
@@ -87,7 +88,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 			return err
 		}
 		for i := range valPrincipalState.Assigned {
-			err = sanityCheckEquationGenerators(valPrincipalState.Assigned[i], valPrincipalState)
+			err = sanityCheckEquationGenerators(valPrincipalState.Assigned[i])
 			if err != nil {
 				return err
 			}
@@ -106,7 +107,7 @@ func verifyStandardRun(valKnowledgeMap KnowledgeMap, valPrincipalStates []Princi
 	return nil
 }
 
-func verifyPassive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) error {
+func verifyPassive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
 	InfoMessage("Attacker is configured as passive.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {

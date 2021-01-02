@@ -8,13 +8,13 @@ import (
 	"fmt"
 )
 
-func constructKnowledgeMap(m Model, principals []string, principalIDs []principalEnum) (KnowledgeMap, error) {
+func constructKnowledgeMap(m Model, principals []string, principalIDs []principalEnum) (*KnowledgeMap, error) {
 	var err error
-	valKnowledgeMap := KnowledgeMap{
+	valKnowledgeMap := &KnowledgeMap{
 		Principals:    principals,
 		PrincipalIDs:  principalIDs,
-		Constants:     []Constant{},
-		Assigned:      []Value{},
+		Constants:     []*Constant{},
+		Assigned:      []*Value{},
 		Creator:       []principalEnum{},
 		KnownBy:       [][]map[principalEnum]principalEnum{},
 		DeclaredAt:    []int{},
@@ -55,7 +55,7 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 				valKnowledgeMap, blck, declaredAt, currentPhase,
 			)
 			if err != nil {
-				return KnowledgeMap{}, err
+				return &KnowledgeMap{}, err
 			}
 		case "message":
 			declaredAt = declaredAt + 1
@@ -64,7 +64,7 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 				valKnowledgeMap, blck, currentPhase,
 			)
 			if err != nil {
-				return KnowledgeMap{}, err
+				return &KnowledgeMap{}, err
 			}
 		case "phase":
 			currentPhase = blck.Phase.Number
@@ -75,8 +75,8 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 }
 
 func constructKnowledgeMapRenderPrincipal(
-	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, currentPhase int,
-) (KnowledgeMap, int, error) {
+	valKnowledgeMap *KnowledgeMap, blck Block, declaredAt int, currentPhase int,
+) (*KnowledgeMap, int, error) {
 	var err error
 	for _, expr := range blck.Principal.Expressions {
 		switch expr.Kind {
@@ -85,21 +85,21 @@ func constructKnowledgeMapRenderPrincipal(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
-				return KnowledgeMap{}, 0, err
+				return &KnowledgeMap{}, 0, err
 			}
 		case typesEnumGenerates:
 			valKnowledgeMap, err = constructKnowledgeMapRenderGenerates(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
-				return KnowledgeMap{}, 0, err
+				return &KnowledgeMap{}, 0, err
 			}
 		case typesEnumAssignment:
 			valKnowledgeMap, err = constructKnowledgeMapRenderAssignment(
 				valKnowledgeMap, blck, declaredAt, expr,
 			)
 			if err != nil {
-				return KnowledgeMap{}, 0, err
+				return &KnowledgeMap{}, 0, err
 			}
 		case typesEnumLeaks:
 			declaredAt = declaredAt + 1
@@ -107,7 +107,7 @@ func constructKnowledgeMapRenderPrincipal(
 				valKnowledgeMap, blck, expr, currentPhase,
 			)
 			if err != nil {
-				return KnowledgeMap{}, 0, err
+				return &KnowledgeMap{}, 0, err
 			}
 		}
 	}
@@ -115,8 +115,8 @@ func constructKnowledgeMapRenderPrincipal(
 }
 
 func constructKnowledgeMapRenderKnows(
-	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) (KnowledgeMap, error) {
+	valKnowledgeMap *KnowledgeMap, blck Block, declaredAt int, expr Expression,
+) (*KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -137,7 +137,7 @@ func constructKnowledgeMapRenderKnows(
 			)
 			continue
 		}
-		c = Constant{
+		c = &Constant{
 			Name:        c.Name,
 			ID:          c.ID,
 			Guard:       c.Guard,
@@ -147,7 +147,7 @@ func constructKnowledgeMapRenderKnows(
 			Qualifier:   expr.Qualifier,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
-		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
 			Kind:     typesEnumConstant,
 			Constant: c,
 		})
@@ -172,8 +172,8 @@ func constructKnowledgeMapRenderKnows(
 }
 
 func constructKnowledgeMapRenderGenerates(
-	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) (KnowledgeMap, error) {
+	valKnowledgeMap *KnowledgeMap, blck Block, declaredAt int, expr Expression,
+) (*KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i >= 0 {
@@ -182,7 +182,7 @@ func constructKnowledgeMapRenderGenerates(
 				prettyConstant(c),
 			)
 		}
-		c = Constant{
+		c = &Constant{
 			Name:        c.Name,
 			ID:          c.ID,
 			Guard:       c.Guard,
@@ -192,7 +192,7 @@ func constructKnowledgeMapRenderGenerates(
 			Qualifier:   typesEnumPrivate,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
-		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, Value{
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
 			Kind:     typesEnumConstant,
 			Constant: c,
 		})
@@ -205,17 +205,17 @@ func constructKnowledgeMapRenderGenerates(
 }
 
 func constructKnowledgeMapRenderAssignment(
-	valKnowledgeMap KnowledgeMap, blck Block, declaredAt int, expr Expression,
-) (KnowledgeMap, error) {
-	constants, err := sanityAssignmentConstants(expr.Assigned, []Constant{}, valKnowledgeMap)
+	valKnowledgeMap *KnowledgeMap, blck Block, declaredAt int, expr Expression,
+) (*KnowledgeMap, error) {
+	constants, err := sanityAssignmentConstants(expr.Assigned, []*Constant{}, valKnowledgeMap)
 	if err != nil {
-		return KnowledgeMap{}, err
+		return &KnowledgeMap{}, err
 	}
 	switch expr.Assigned.Kind {
 	case typesEnumPrimitive:
 		err := sanityPrimitive(expr.Assigned.Primitive, expr.Constants)
 		if err != nil {
-			return KnowledgeMap{}, err
+			return &KnowledgeMap{}, err
 		}
 	}
 	for _, c := range constants {
@@ -249,7 +249,7 @@ func constructKnowledgeMapRenderAssignment(
 				prettyConstant(c),
 			)
 		}
-		c = Constant{
+		c = &Constant{
 			Name:        c.Name,
 			ID:          c.ID,
 			Guard:       c.Guard,
@@ -258,12 +258,26 @@ func constructKnowledgeMapRenderAssignment(
 			Declaration: typesEnumAssignment,
 			Qualifier:   typesEnumPrivate,
 		}
+		a := &Value{
+			Kind: expr.Assigned.Kind,
+		}
 		switch expr.Assigned.Kind {
+		case typesEnumConstant:
+			a.Constant = expr.Assigned.Constant
 		case typesEnumPrimitive:
-			expr.Assigned.Primitive.Output = i
+			a.Primitive = &Primitive{
+				ID:        expr.Assigned.Primitive.ID,
+				Arguments: expr.Assigned.Primitive.Arguments,
+				Output:    i,
+				Check:     expr.Assigned.Primitive.Check,
+			}
+		case typesEnumEquation:
+			a.Equation = &Equation{
+				Values: expr.Assigned.Equation.Values,
+			}
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
-		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, expr.Assigned)
+		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, a)
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
 		valKnowledgeMap.DeclaredAt = append(valKnowledgeMap.DeclaredAt, declaredAt)
@@ -273,8 +287,8 @@ func constructKnowledgeMapRenderAssignment(
 }
 
 func constructKnowledgeMapRenderLeaks(
-	valKnowledgeMap KnowledgeMap, blck Block, expr Expression, currentPhase int,
-) (KnowledgeMap, error) {
+	valKnowledgeMap *KnowledgeMap, blck Block, expr Expression, currentPhase int,
+) (*KnowledgeMap, error) {
 	for _, c := range expr.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(
 			valKnowledgeMap, c,
@@ -307,8 +321,8 @@ func constructKnowledgeMapRenderLeaks(
 }
 
 func constructKnowledgeMapRenderMessage(
-	valKnowledgeMap KnowledgeMap, blck Block, currentPhase int,
-) (KnowledgeMap, error) {
+	valKnowledgeMap *KnowledgeMap, blck Block, currentPhase int,
+) (*KnowledgeMap, error) {
 	for _, c := range blck.Message.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
@@ -364,14 +378,14 @@ func constructKnowledgeMapRenderMessage(
 	return valKnowledgeMap, nil
 }
 
-func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []PrincipalState {
-	valPrincipalStates := []PrincipalState{}
+func constructPrincipalStates(m Model, valKnowledgeMap *KnowledgeMap) []*PrincipalState {
+	valPrincipalStates := []*PrincipalState{}
 	for p := range valKnowledgeMap.Principals {
-		valPrincipalState := PrincipalState{
+		valPrincipalState := &PrincipalState{
 			Name:          valKnowledgeMap.Principals[p],
 			ID:            valKnowledgeMap.PrincipalIDs[p],
-			Constants:     []Constant{},
-			Assigned:      []Value{},
+			Constants:     []*Constant{},
+			Assigned:      []*Value{},
 			Guard:         []bool{},
 			Known:         []bool{},
 			Wire:          [][]principalEnum{},
@@ -381,10 +395,10 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 			Creator:       []principalEnum{},
 			Sender:        []principalEnum{},
 			Rewritten:     []bool{},
-			BeforeRewrite: []Value{},
+			BeforeRewrite: []*Value{},
 			Mutated:       []bool{},
 			MutatableTo:   [][]principalEnum{},
-			BeforeMutate:  []Value{},
+			BeforeMutate:  []*Value{},
 			Phase:         [][]int{},
 		}
 		for i, c := range valKnowledgeMap.Constants {
@@ -433,7 +447,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap KnowledgeMap) []Principal
 }
 
 func constructPrincipalStatesGetValueMutatability(
-	c Constant, blck Block, principalID principalEnum, creator principalEnum,
+	c *Constant, blck Block, principalID principalEnum, creator principalEnum,
 	wire []principalEnum, guard bool, mutatableTo []principalEnum,
 ) ([]principalEnum, bool, []principalEnum) {
 	switch blck.Kind {
@@ -458,12 +472,12 @@ func constructPrincipalStatesGetValueMutatability(
 	return wire, guard, mutatableTo
 }
 
-func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool) PrincipalState {
+func constructPrincipalStateClone(valPrincipalState *PrincipalState, purify bool) *PrincipalState {
 	valPrincipalStateClone := PrincipalState{
 		Name:          valPrincipalState.Name,
 		ID:            valPrincipalState.ID,
-		Constants:     make([]Constant, len(valPrincipalState.Constants)),
-		Assigned:      make([]Value, len(valPrincipalState.Assigned)),
+		Constants:     make([]*Constant, len(valPrincipalState.Constants)),
+		Assigned:      make([]*Value, len(valPrincipalState.Assigned)),
 		Guard:         make([]bool, len(valPrincipalState.Guard)),
 		Known:         make([]bool, len(valPrincipalState.Known)),
 		Wire:          make([][]principalEnum, len(valPrincipalState.Wire)),
@@ -473,10 +487,10 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 		Creator:       make([]principalEnum, len(valPrincipalState.Creator)),
 		Sender:        make([]principalEnum, len(valPrincipalState.Sender)),
 		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),
-		BeforeRewrite: make([]Value, len(valPrincipalState.BeforeRewrite)),
+		BeforeRewrite: make([]*Value, len(valPrincipalState.BeforeRewrite)),
 		Mutated:       make([]bool, len(valPrincipalState.Mutated)),
 		MutatableTo:   make([][]principalEnum, len(valPrincipalState.MutatableTo)),
-		BeforeMutate:  make([]Value, len(valPrincipalState.BeforeMutate)),
+		BeforeMutate:  make([]*Value, len(valPrincipalState.BeforeMutate)),
 		Phase:         make([][]int, len(valPrincipalState.Phase)),
 	}
 	copy(valPrincipalStateClone.Constants, valPrincipalState.Constants)
@@ -502,5 +516,5 @@ func constructPrincipalStateClone(valPrincipalState PrincipalState, purify bool)
 	copy(valPrincipalStateClone.MutatableTo, valPrincipalState.MutatableTo)
 	copy(valPrincipalStateClone.BeforeMutate, valPrincipalState.BeforeMutate)
 	copy(valPrincipalStateClone.Phase, valPrincipalState.Phase)
-	return valPrincipalStateClone
+	return &valPrincipalStateClone
 }

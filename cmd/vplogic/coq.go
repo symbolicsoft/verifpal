@@ -29,7 +29,7 @@ func Coq(modelFile string) error {
 	return err
 }
 
-func coqModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
+func coqModel(m Model, valKnowledgeMap *KnowledgeMap) (string, error) {
 	var err error
 	declaredPrincipals, _, err := sanityDeclaredPrincipals(m)
 	if err != nil {
@@ -82,7 +82,7 @@ func coqModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
 	return strings.Join(output, "\n"), nil
 }
 
-func coqBlockByPhase(valKnowledgeMap KnowledgeMap, phase []Block, output []string) ([]string, error) {
+func coqBlockByPhase(valKnowledgeMap *KnowledgeMap, phase []Block, output []string) ([]string, error) {
 	var cpb string
 	var crc string
 	var err error
@@ -127,7 +127,7 @@ func coqPrincipalNames(principals []string) string {
 	return output + "]."
 }
 
-func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
+func coqPrincipal(block Block, valKnowledgeMap *KnowledgeMap) (string, error) {
 	var err error
 	expressions := []string{""}
 	for i, expression := range block.Principal.Expressions {
@@ -195,7 +195,7 @@ func coqPrincipal(block Block, valKnowledgeMap KnowledgeMap) (string, error) {
 	return strings.Join(expressions, "\n\t\t\t\t"), nil
 }
 
-func coqAssignmentExpression(expression Expression, valKnowledgeMap KnowledgeMap) ([]string, error) {
+func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMap) ([]string, error) {
 	expressions := []string{}
 	switch expression.Assigned.Kind {
 	case typesEnumEquation:
@@ -265,31 +265,31 @@ func coqGuard(guard bool) string {
 	return "unguarded"
 }
 
-func coqResolveConstant(c Constant, valKnowledgeMap KnowledgeMap) (string, error) {
-	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
+func coqResolveConstant(c *Constant, valKnowledgeMap *KnowledgeMap) (string, error) {
+	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
 		Kind:     typesEnumConstant,
 		Constant: c,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
 
-func coqResolvePrimitive(p Primitive, valKnowledgeMap KnowledgeMap) (string, error) {
-	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
+func coqResolvePrimitive(p *Primitive, valKnowledgeMap *KnowledgeMap) (string, error) {
+	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
 		Kind:      typesEnumPrimitive,
 		Primitive: p,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
 
-func coqResolveEquation(e Equation, valKnowledgeMap KnowledgeMap) (string, error) {
-	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(Value{
+func coqResolveEquation(e *Equation, valKnowledgeMap *KnowledgeMap) (string, error) {
+	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
 		Kind:     typesEnumEquation,
 		Equation: e,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
 
-func coqResolveValue(v Value, valKnowledgeMap KnowledgeMap) (string, error) {
+func coqResolveValue(v *Value, valKnowledgeMap *KnowledgeMap) (string, error) {
 	switch v.Kind {
 	case typesEnumConstant:
 		return coqResolveConstant(v.Constant, valKnowledgeMap)
@@ -301,7 +301,7 @@ func coqResolveValue(v Value, valKnowledgeMap KnowledgeMap) (string, error) {
 	return "", fmt.Errorf("invalid value kind")
 }
 
-func coqPrintValue(a Value) (string, error) {
+func coqPrintValue(a *Value) (string, error) {
 	switch a.Kind {
 	case typesEnumConstant:
 		return coqPrintConstant(a.Constant)
@@ -313,13 +313,13 @@ func coqPrintValue(a Value) (string, error) {
 	return "", fmt.Errorf("invalid value kind")
 }
 
-func coqPrintConstant(c Constant) (string, error) {
+func coqPrintConstant(c *Constant) (string, error) {
 	return fmt.Sprintf(
 		"(const (cnstn \"%s\"))",
 		c.Name), nil
 }
 
-func coqPrintPrimitive(p Primitive) (string, error) {
+func coqPrintPrimitive(p *Primitive) (string, error) {
 	args := []string{}
 	for _, arg := range p.Arguments {
 		cpv, err := coqPrintValue(arg)
@@ -348,7 +348,7 @@ func coqPrintPrimitive(p Primitive) (string, error) {
 		primitiveStringName, strings.Join(args, " ")), nil
 }
 
-func coqPrintEquation(e Equation) (string, error) {
+func coqPrintEquation(e *Equation) (string, error) {
 	switch len(e.Values) {
 	case 2:
 		cpv, err := coqPrintValue(e.Values[1])

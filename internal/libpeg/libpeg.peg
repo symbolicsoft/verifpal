@@ -159,16 +159,16 @@ Message <- Sender:PrincipalName? _ "->" _ Recipient:PrincipalName? _ ':' _ Const
 		Message: Message{
 			Sender: senderID,
 			Recipient: recipientID,
-			Constants: Constants.([]Constant),
+			Constants: Constants.([]*Constant),
 		},
 	}, nil
 }
 
 MessageConstants <- MessageConstants:(GuardedConstant/Constant)+ {
-	var da []Constant
+	var da []*Constant
 	a  := MessageConstants.([]interface{})
 	for _, v := range a {
-		c := v.(Value).Constant
+		c := v.(*Value).Constant
 		da = append(da, c)
 	}
 	return da, nil
@@ -188,7 +188,7 @@ Knows <- "knows" _ Qualifier:Qualifier? _ Constants:Constants? {
 	return Expression{
 		Kind: typesEnumKnows,
 		Qualifier: Qualifier.(typesEnum),
-		Constants: Constants.([]Constant),
+		Constants: Constants.([]*Constant),
 	}, nil
 }
 
@@ -199,7 +199,7 @@ Generates <- "generates" _ Constants:Constants? {
 	return Expression{
 		Kind: typesEnumGenerates,
 		Qualifier: typesEnumEmpty,
-		Constants: Constants.([]Constant),
+		Constants: Constants.([]*Constant),
 	}, nil
 }
 
@@ -210,7 +210,7 @@ Leaks <- "leaks" _ Constants:Constants? {
 	return Expression{
 		Kind: typesEnumLeaks,
 		Qualifier: typesEnumEmpty,
-		Constants: Constants.([]Constant),
+		Constants: Constants.([]*Constant),
 	}, nil
 }
 
@@ -218,16 +218,15 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 	if Left == nil || Right == nil {
 		return nil, errors.New("invalid value assignment")
 	}
-	switch Right.(Value).Kind {
+	switch Right.(*Value).Kind {
 	case typesEnumConstant:
 		err := errors.New("cannot assign value to value")
 		return nil, err
 	}
-	consts := Left.([]Constant)
 	return Expression{
 		Kind: typesEnumAssignment,
-		Constants: consts,
-		Assigned:  Right.(Value),
+		Constants: Left.([]*Constant),
+		Assigned:  Right.(*Value),
 	}, nil
 }
 
@@ -239,9 +238,9 @@ Constant <- Const:Identifier (_ ',' _)? {
 		libpegUnnamedCounter = libpegUnnamedCounter + 1
 	}
 	id := valueNamesMapAdd(name)
-	return Value{
+	return &Value{
 		Kind: typesEnumConstant,
-		Constant: Constant{
+		Constant: &Constant{
 			Name: name,
 			ID: id,
 		},
@@ -249,13 +248,13 @@ Constant <- Const:Identifier (_ ',' _)? {
 }
 
 Constants <- Constants:Constant+ {
-	var da []Constant
+	var da []*Constant
 	var err error
 	a  := Constants.([]interface{})
 	for _, c := range a {
-		err = libpegCheckIfReserved(c.(Value).Constant.Name)
+		err = libpegCheckIfReserved(c.(*Value).Constant.Name)
 		if err != nil { break }
-		da = append(da, c.(Value).Constant)
+		da = append(da, c.(*Value).Constant)
 	}
 	return da, err
 }
@@ -274,11 +273,11 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 }
 
 GuardedConstant <- '[' Guarded:Constant ']' (_ ',' _)? {
-	g := Guarded.(Value)
+	g := Guarded.(*Value)
 	err := libpegCheckIfReserved(g.Constant.Name)
-	return Value{
+	return &Value{
 		Kind: typesEnumConstant,
-		Constant: Constant{
+		Constant: &Constant{
 			Name: g.Constant.Name,
 			ID: g.Constant.ID,
 			Guard: true,
@@ -287,14 +286,14 @@ GuardedConstant <- '[' Guarded:Constant ']' (_ ',' _)? {
 }
 
 Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _)? {
-	args := []Value{}
+	args := []*Value{}
 	for _, a := range Arguments.([]interface{}) {
-		args = append(args, a.(Value))
+		args = append(args, a.(*Value))
 	}
 	primEnum, err := primitiveGetEnum(Name.(string))
-	return Value{
+	return &Value{
 		Kind: typesEnumPrimitive,
-		Primitive: Primitive{
+		Primitive: &Primitive{
 			ID: primEnum,
 			Arguments: args,
 			Output: 0,
@@ -308,12 +307,12 @@ PrimitiveName <- Name:Identifier {
 }
 
 Equation <- First:Constant (_ '^' _) Second:Constant {
-	return Value{
+	return &Value{
 		Kind: typesEnumEquation,
-		Equation: Equation{
-			Values: []Value{
-				First.(Value),
-				Second.(Value),
+		Equation: &Equation{
+			Values: []*Value{
+				First.(*Value),
+				Second.(*Value),
 			},
 		},
 	}, nil
@@ -338,7 +337,7 @@ QueryConfidentiality <- "confidentiality?" _ Const:Constant? _ Options:QueryOpti
 	}
 	return Query{
 		Kind: typesEnumConfidentiality,
-		Constants: []Constant{Const.(Value).Constant},
+		Constants: []*Constant{Const.(*Value).Constant},
 		Message: Message{},
 		Options: Options.([]QueryOption),
 	}, nil
@@ -353,7 +352,7 @@ QueryAuthentication <- "authentication?" _ Message:Message? _ Options:QueryOptio
 	}
 	return Query{
 		Kind: typesEnumAuthentication,
-		Constants: []Constant{},
+		Constants: []*Constant{},
 		Message: (Message.(Block)).Message,
 		Options: Options.([]QueryOption),
 	}, nil
@@ -368,7 +367,7 @@ QueryFreshness <- "freshness?" _ Const:Constant? _ Options:QueryOptions? _ {
 	}
 	return Query{
 		Kind: typesEnumFreshness,
-		Constants: []Constant{Const.(Value).Constant},
+		Constants: []*Constant{Const.(*Value).Constant},
 		Message: Message{},
 		Options: Options.([]QueryOption),
 	}, nil
@@ -383,7 +382,7 @@ QueryUnlinkability <- "unlinkability?" _ Consts:Constants? _ Options:QueryOption
 	}
 	return Query{
 		Kind: typesEnumUnlinkability,
-		Constants: Consts.([]Constant),
+		Constants: Consts.([]*Constant),
 		Message: Message{},
 		Options: Options.([]QueryOption),
 	}, nil

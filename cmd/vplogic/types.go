@@ -64,7 +64,7 @@ type Principal struct {
 type Message struct {
 	Sender    principalEnum
 	Recipient principalEnum
-	Constants []Constant
+	Constants []*Constant
 }
 
 // Phase represents a phase declaration in a Verifpal model.
@@ -75,7 +75,7 @@ type Phase struct {
 // Query represents a query declaration in a Verifpal model.
 type Query struct {
 	Kind      typesEnum
-	Constants []Constant
+	Constants []*Constant
 	Message   Message
 	Options   []QueryOption
 }
@@ -101,16 +101,16 @@ type QueryOptionResult struct {
 type Expression struct {
 	Kind      typesEnum
 	Qualifier typesEnum
-	Constants []Constant
-	Assigned  Value
+	Constants []*Constant
+	Assigned  *Value
 }
 
 // Value represents either a constant, primitive or equation expression.
 type Value struct {
 	Kind      typesEnum
-	Constant  Constant
-	Primitive Primitive
-	Equation  Equation
+	Constant  *Constant
+	Primitive *Primitive
+	Equation  *Equation
 }
 
 // Constant represents a constant expression:
@@ -138,14 +138,14 @@ type Constant struct {
 // - Check indicates whether this has been a checked primitive.
 type Primitive struct {
 	ID        primitiveEnum
-	Arguments []Value
+	Arguments []*Value
 	Output    int
 	Check     bool
 }
 
 // Equation represents an equation expression.
 type Equation struct {
-	Values []Value
+	Values []*Value
 }
 
 // KnowledgeMap represents Verifpal's internal map of knowledge of the model.
@@ -167,8 +167,8 @@ type Equation struct {
 type KnowledgeMap struct {
 	Principals    []string
 	PrincipalIDs  []principalEnum
-	Constants     []Constant
-	Assigned      []Value
+	Constants     []*Constant
+	Assigned      []*Value
 	Creator       []principalEnum
 	KnownBy       [][]map[principalEnum]principalEnum
 	DeclaredAt    []int
@@ -208,8 +208,8 @@ type KnowledgeMap struct {
 type PrincipalState struct {
 	Name          string
 	ID            principalEnum
-	Constants     []Constant
-	Assigned      []Value
+	Constants     []*Constant
+	Assigned      []*Value
 	Guard         []bool
 	Known         []bool
 	Wire          [][]principalEnum
@@ -219,10 +219,10 @@ type PrincipalState struct {
 	Creator       []principalEnum
 	Sender        []principalEnum
 	Rewritten     []bool
-	BeforeRewrite []Value
+	BeforeRewrite []*Value
 	Mutated       []bool
 	MutatableTo   [][]principalEnum
-	BeforeMutate  []Value
+	BeforeMutate  []*Value
 	Phase         [][]int
 }
 
@@ -231,7 +231,7 @@ type DecomposeRule struct {
 	HasRule bool
 	Given   []int
 	Reveal  int
-	Filter  func(Primitive, Value, int) (Value, bool)
+	Filter  func(*Primitive, *Value, int) (*Value, bool)
 }
 
 // RecomposeRule contains a primitive's RecomposeRule.
@@ -239,7 +239,7 @@ type RecomposeRule struct {
 	HasRule bool
 	Given   [][]int
 	Reveal  int
-	Filter  func(Primitive, Value, int) (Value, bool)
+	Filter  func(*Primitive, *Value, int) (*Value, bool)
 }
 
 // RewriteRule contains a primitive's RewriteRule.
@@ -247,9 +247,9 @@ type RewriteRule struct {
 	HasRule  bool
 	ID       primitiveEnum
 	From     int
-	To       func(Primitive) Value
+	To       func(*Primitive) *Value
 	Matching map[int][]int
-	Filter   func(Primitive, Value, int) (Value, bool)
+	Filter   func(*Primitive, *Value, int) (*Value, bool)
 }
 
 // RebuildRule contains a primitive's RebuildRule.
@@ -258,7 +258,7 @@ type RebuildRule struct {
 	ID      primitiveEnum
 	Given   [][]int
 	Reveal  int
-	Filter  func(Primitive, Value, int) (Value, bool)
+	Filter  func(*Primitive, *Value, int) (*Value, bool)
 }
 
 // PrimitiveCoreSpec contains the definition of a core primitive.
@@ -268,7 +268,7 @@ type PrimitiveCoreSpec struct {
 	Arity      []int
 	Output     []int
 	HasRule    bool
-	CoreRule   func(Primitive) (bool, []Value)
+	CoreRule   func(*Primitive) (bool, []*Value)
 	Check      bool
 	Injectable bool
 	Explosive  bool
@@ -303,8 +303,8 @@ type AttackerState struct {
 	Active         bool
 	CurrentPhase   int
 	Exhausted      bool
-	Known          []Value
-	PrincipalState []PrincipalState
+	Known          []*Value
+	PrincipalState []*PrincipalState
 }
 
 // MutationMap contains the map of mutations that the attacker plans to
@@ -324,9 +324,9 @@ type MutationMap struct {
 	Initialized    bool
 	OutOfMutations bool
 	LastIncrement  int
-	Constants      []Constant
-	Mutations      [][]Value
-	Combination    []Value
+	Constants      []*Constant
+	Mutations      [][]*Value
+	Combination    []*Value
 	DepthIndex     []int
 }
 
@@ -335,10 +335,10 @@ type MutationMap struct {
 type PvTemplate struct {
 	Parameters func(string) string
 	Types      func() string
-	Constants  func(KnowledgeMap, string) string
+	Constants  func(*KnowledgeMap, string) string
 	CorePrims  func() string
 	Prims      func() string
-	Channels   func(KnowledgeMap) string
-	Queries    func(KnowledgeMap, []Query) (string, error)
+	Channels   func(*KnowledgeMap) string
+	Queries    func(*KnowledgeMap, []Query) (string, error)
 	TopLevel   func([]Block) string
 }

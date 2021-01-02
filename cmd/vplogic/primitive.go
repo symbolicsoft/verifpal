@@ -42,9 +42,9 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Arity:   []int{2},
 		Output:  []int{1},
 		HasRule: true,
-		CoreRule: func(p Primitive) (bool, []Value) {
-			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
-			if valueEquivalentValues(&p.Arguments[0], &p.Arguments[1], true) {
+		CoreRule: func(p *Primitive) (bool, []*Value) {
+			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
+			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
 				return true, v
 			}
 			return false, v
@@ -59,8 +59,8 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Arity:   []int{2, 3, 4, 5},
 		Output:  []int{1},
 		HasRule: false,
-		CoreRule: func(p Primitive) (bool, []Value) {
-			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
+		CoreRule: func(p *Primitive) (bool, []*Value) {
+			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
 			return false, v
 		},
 		Check:      false,
@@ -73,8 +73,8 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Arity:   []int{1},
 		Output:  []int{1, 2, 3, 4, 5},
 		HasRule: true,
-		CoreRule: func(p Primitive) (bool, []Value) {
-			v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
+		CoreRule: func(p *Primitive) (bool, []*Value) {
+			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
 			switch p.Arguments[0].Kind {
 			case typesEnumConstant:
 				return false, v
@@ -172,7 +172,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -199,7 +199,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -210,14 +210,14 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumAEADENC,
 			From:    1,
-			To: func(p Primitive) Value {
+			To: func(p *Primitive) *Value {
 				return p.Arguments[1]
 			},
 			Matching: map[int][]int{
 				0: {0},
 				2: {2},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -244,7 +244,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -271,7 +271,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -282,13 +282,13 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumENC,
 			From:    1,
-			To: func(p Primitive) Value {
+			To: func(p *Primitive) *Value {
 				return p.Arguments[1]
 			},
 			Matching: map[int][]int{
 				0: {0},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					return x, true
@@ -363,14 +363,14 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumSIGN,
 			From:    2,
-			To: func(p Primitive) Value {
+			To: func(p *Primitive) *Value {
 				return valueNil
 			},
 			Matching: map[int][]int{
 				0: {0},
 				1: {1},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -382,7 +382,7 @@ var primitiveSpecs = []PrimitiveSpec{
 						switch {
 						case len(x.Equation.Values) != 2:
 							return x, false
-						case !valueEquivalentValues(&x.Equation.Values[0], &valueG, true):
+						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
 							return x, false
 						default:
 							return x.Equation.Values[1], true
@@ -411,7 +411,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -423,7 +423,7 @@ var primitiveSpecs = []PrimitiveSpec{
 						switch {
 						case len(x.Equation.Values) != 2:
 							return x, false
-						case !valueEquivalentValues(&x.Equation.Values[0], &valueG, true):
+						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
 							return x, false
 						default:
 							return x.Equation.Values[1], true
@@ -458,7 +458,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -469,21 +469,21 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumPKEENC,
 			From:    1,
-			To: func(p Primitive) Value {
+			To: func(p *Primitive) *Value {
 				return p.Arguments[1]
 			},
 			Matching: map[int][]int{
 				0: {0},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
 					case typesEnumConstant, typesEnumPrimitive:
-						return Value{
+						return &Value{
 							Kind: typesEnumEquation,
-							Equation: Equation{
-								Values: []Value{valueG, x},
+							Equation: &Equation{
+								Values: []*Value{valueG, x},
 							},
 						}, true
 					case typesEnumEquation:
@@ -517,7 +517,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				{1, 2},
 			},
 			Reveal: 0,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -558,7 +558,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				{2, 1},
 			},
 			Reveal: 0,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -604,7 +604,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumRINGSIGN,
 			From:    4,
-			To: func(p Primitive) Value {
+			To: func(p *Primitive) *Value {
 				return valueNil
 			},
 			Matching: map[int][]int{
@@ -613,7 +613,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				2: {0, 1, 2},
 				3: {3},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 0:
 					switch x.Kind {
@@ -658,7 +658,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			Given:   []int{0},
 			Reveal:  1,
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
 		},
@@ -691,12 +691,12 @@ var primitiveSpecs = []PrimitiveSpec{
 			HasRule: true,
 			ID:      primitiveEnumSIGN,
 			From:    2,
-			To: func(p Primitive) Value {
-				return Value{
+			To: func(p *Primitive) *Value {
+				return &Value{
 					Kind: typesEnumPrimitive,
-					Primitive: Primitive{
+					Primitive: &Primitive{
 						ID: primitiveEnumSIGN,
-						Arguments: []Value{
+						Arguments: []*Value{
 							p.Arguments[0],
 							p.Arguments[1].Primitive.Arguments[1],
 						},
@@ -708,14 +708,14 @@ var primitiveSpecs = []PrimitiveSpec{
 			Matching: map[int][]int{
 				0: {1},
 			},
-			Filter: func(p Primitive, x Value, i int) (Value, bool) {
+			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				switch i {
 				case 1:
-					blindPrim := Value{
+					blindPrim := &Value{
 						Kind: typesEnumPrimitive,
-						Primitive: Primitive{
+						Primitive: &Primitive{
 							ID: primitiveEnumBLIND,
-							Arguments: []Value{
+							Arguments: []*Value{
 								p.Arguments[0], p.Arguments[1],
 							},
 							Output: 0,
@@ -780,7 +780,7 @@ func primitiveGetEnum(stringName string) (primitiveEnum, error) {
 	return primitiveEnumEmpty, err
 }
 
-func primitiveGetArity(p Primitive) ([]int, error) {
+func primitiveGetArity(p *Primitive) ([]int, error) {
 	if primitiveIsCorePrim(p.ID) {
 		prim, err := primitiveCoreGet(p.ID)
 		if err != nil {

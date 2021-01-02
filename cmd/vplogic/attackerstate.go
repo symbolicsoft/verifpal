@@ -17,16 +17,16 @@ func attackerStateInit(active bool) {
 		Active:         active,
 		CurrentPhase:   0,
 		Exhausted:      false,
-		Known:          []Value{},
-		PrincipalState: []PrincipalState{},
+		Known:          []*Value{},
+		PrincipalState: []*PrincipalState{},
 	}
 	attackerStateMutex.Unlock()
 }
 
-func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
+func attackerStateAbsorbPhaseValues(valPrincipalState *PrincipalState) error {
 	attackerStateMutex.Lock()
 	for i, c := range valPrincipalState.Constants {
-		cc := Value{Kind: typesEnumConstant, Constant: c}
+		cc := &Value{Kind: typesEnumConstant, Constant: c}
 		if c.Qualifier != typesEnumPublic {
 			continue
 		}
@@ -35,15 +35,15 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 			continue
 		}
 		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState,
-				constructPrincipalStateClone(valPrincipalState, false),
+				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 		}
 	}
 	for i, c := range valPrincipalState.Constants {
-		cc := Value{Kind: typesEnumConstant, Constant: c}
+		cc := &Value{Kind: typesEnumConstant, Constant: c}
 		a := valPrincipalState.Assigned[i]
 		if len(valPrincipalState.Wire[i]) == 0 && !valPrincipalState.Constants[i].Leaked {
 			continue
@@ -59,23 +59,23 @@ func attackerStateAbsorbPhaseValues(valPrincipalState PrincipalState) error {
 			continue
 		}
 		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
 			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState,
-				constructPrincipalStateClone(valPrincipalState, false),
+				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 		}
 		aa, err := valueResolveValueInternalValuesFromPrincipalState(
-			&a, &a, i, &valPrincipalState, attackerStateShared, true, 0,
+			a, a, i, valPrincipalState, attackerStateShared, true, 0,
 		)
 		if err != nil {
 			return err
 		}
 		if valueEquivalentValueInValues(aa, attackerStateShared.Known) < 0 {
+			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 			attackerStateShared.Known = append(attackerStateShared.Known, aa)
 			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState,
-				constructPrincipalStateClone(valPrincipalState, false),
+				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 		}
 	}
@@ -98,15 +98,15 @@ func attackerStateGetExhausted() bool {
 	return exhausted
 }
 
-func attackerStatePutWrite(known Value, valPrincipalState PrincipalState) bool {
+func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool {
 	written := false
 	if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
 		attackerStateMutex.Lock()
 		if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
+			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 			attackerStateShared.Known = append(attackerStateShared.Known, known)
 			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState,
-				constructPrincipalStateClone(valPrincipalState, false),
+				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 			written = true
 		}
@@ -115,7 +115,7 @@ func attackerStatePutWrite(known Value, valPrincipalState PrincipalState) bool {
 	return written
 }
 
-func attackerStatePutPhaseUpdate(valPrincipalState PrincipalState, phase int) error {
+func attackerStatePutPhaseUpdate(valPrincipalState *PrincipalState, phase int) error {
 	attackerStateMutex.Lock()
 	attackerStateShared.CurrentPhase = phase
 	attackerStateMutex.Unlock()

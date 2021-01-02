@@ -8,22 +8,22 @@ import (
 	"fmt"
 )
 
-func sanity(m Model) (KnowledgeMap, []PrincipalState, error) {
+func sanity(m Model) (*KnowledgeMap, []*PrincipalState, error) {
 	err := sanityPhases(m)
 	if err != nil {
-		return KnowledgeMap{}, []PrincipalState{}, err
+		return &KnowledgeMap{}, []*PrincipalState{}, err
 	}
 	principals, principalIDs, err := sanityDeclaredPrincipals(m)
 	if err != nil {
-		return KnowledgeMap{}, []PrincipalState{}, err
+		return &KnowledgeMap{}, []*PrincipalState{}, err
 	}
 	valKnowledgeMap, err := constructKnowledgeMap(m, principals, principalIDs)
 	if err != nil {
-		return KnowledgeMap{}, []PrincipalState{}, err
+		return &KnowledgeMap{}, []*PrincipalState{}, err
 	}
 	err = sanityQueries(m, valKnowledgeMap)
 	if err != nil {
-		return KnowledgeMap{}, []PrincipalState{}, err
+		return &KnowledgeMap{}, []*PrincipalState{}, err
 	}
 	valPrincipalStates := constructPrincipalStates(m, valKnowledgeMap)
 	return valKnowledgeMap, valPrincipalStates, nil
@@ -54,8 +54,8 @@ func sanityPhases(m Model) error {
 }
 
 func sanityAssignmentConstants(
-	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
-) ([]Constant, error) {
+	right *Value, constants []*Constant, valKnowledgeMap *KnowledgeMap,
+) ([]*Constant, error) {
 	switch right.Kind {
 	case typesEnumConstant:
 		unique := true
@@ -73,7 +73,7 @@ func sanityAssignmentConstants(
 			right, constants, valKnowledgeMap,
 		)
 		if err != nil {
-			return []Constant{}, err
+			return []*Constant{}, err
 		}
 		constants = append(constants, sacfp...)
 	case typesEnumEquation:
@@ -85,19 +85,19 @@ func sanityAssignmentConstants(
 }
 
 func sanityAssignmentConstantsFromPrimitive(
-	right Value, constants []Constant, valKnowledgeMap KnowledgeMap,
-) ([]Constant, error) {
+	right *Value, constants []*Constant, valKnowledgeMap *KnowledgeMap,
+) ([]*Constant, error) {
 	primArguments := len(right.Primitive.Arguments)
 	specArity, err := primitiveGetArity(right.Primitive)
 	if err != nil {
-		return []Constant{}, err
+		return []*Constant{}, err
 	}
 	if primArguments == 0 {
-		return []Constant{}, fmt.Errorf("primitive has no inputs")
+		return []*Constant{}, fmt.Errorf("primitive has no inputs")
 	}
 	if !intInSlice(primArguments, specArity) {
 		arityString := prettyArity(specArity)
-		return []Constant{}, fmt.Errorf(
+		return []*Constant{}, fmt.Errorf(
 			"primitive has %d inputs, expecting %s", primArguments, arityString,
 		)
 	}
@@ -117,19 +117,19 @@ func sanityAssignmentConstantsFromPrimitive(
 		case typesEnumPrimitive:
 			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
 			if err != nil {
-				return []Constant{}, err
+				return []*Constant{}, err
 			}
 		case typesEnumEquation:
 			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
 			if err != nil {
-				return []Constant{}, err
+				return []*Constant{}, err
 			}
 		}
 	}
 	return constants, nil
 }
 
-func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []Constant {
+func sanityAssignmentConstantsFromEquation(right *Value, constants []*Constant) []*Constant {
 	for _, v := range right.Equation.Values {
 		unique := true
 		for _, c := range constants {
@@ -145,7 +145,7 @@ func sanityAssignmentConstantsFromEquation(right Value, constants []Constant) []
 	return constants
 }
 
-func sanityPrimitive(p Primitive, outputs []Constant) error {
+func sanityPrimitive(p *Primitive, outputs []*Constant) error {
 	var output []int
 	var check bool
 	if primitiveIsCorePrim(p.ID) {
@@ -173,7 +173,7 @@ func sanityPrimitive(p Primitive, outputs []Constant) error {
 	return nil
 }
 
-func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) error {
+func sanityQueries(m Model, valKnowledgeMap *KnowledgeMap) error {
 	var err error
 	for _, query := range m.Queries {
 		switch query.Kind {
@@ -199,7 +199,7 @@ func sanityQueries(m Model, valKnowledgeMap KnowledgeMap) error {
 	return nil
 }
 
-func sanityQueriesConfidentiality(query Query, valKnowledgeMap KnowledgeMap) error {
+func sanityQueriesConfidentiality(query Query, valKnowledgeMap *KnowledgeMap) error {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 	if i < 0 {
 		return fmt.Errorf(
@@ -211,7 +211,7 @@ func sanityQueriesConfidentiality(query Query, valKnowledgeMap KnowledgeMap) err
 	return nil
 }
 
-func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) error {
+func sanityQueriesAuthentication(query Query, valKnowledgeMap *KnowledgeMap) error {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Message.Constants[0])
 	if i < 0 {
 		return fmt.Errorf(
@@ -230,7 +230,7 @@ func sanityQueriesAuthentication(query Query, valKnowledgeMap KnowledgeMap) erro
 	return sanityQueriesCheckKnown(query, query.Message, c, valKnowledgeMap)
 }
 
-func sanityQueriesFreshness(query Query, valKnowledgeMap KnowledgeMap) error {
+func sanityQueriesFreshness(query Query, valKnowledgeMap *KnowledgeMap) error {
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[0])
 	if i < 0 {
 		return fmt.Errorf(
@@ -242,7 +242,7 @@ func sanityQueriesFreshness(query Query, valKnowledgeMap KnowledgeMap) error {
 	return nil
 }
 
-func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error {
+func sanityQueriesUnlinkability(query Query, valKnowledgeMap *KnowledgeMap) error {
 	if len(query.Constants) < 2 {
 		return fmt.Errorf(
 			"unlinkability query (%s) must specify at least two constants",
@@ -262,7 +262,7 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap KnowledgeMap) error
 	return nil
 }
 
-func sanityQueryOptions(query Query, valKnowledgeMap KnowledgeMap) error {
+func sanityQueryOptions(query Query, valKnowledgeMap *KnowledgeMap) error {
 	for _, option := range query.Options {
 		switch option.Kind {
 		case typesEnumPrecondition:
@@ -281,7 +281,7 @@ func sanityQueryOptions(query Query, valKnowledgeMap KnowledgeMap) error {
 	return nil
 }
 
-func sanityQueriesCheckKnown(query Query, m Message, c Constant, valKnowledgeMap KnowledgeMap) error {
+func sanityQueriesCheckKnown(query Query, m Message, c *Constant, valKnowledgeMap *KnowledgeMap) error {
 	senderKnows := false
 	recipientKnows := false
 	i := valueGetKnowledgeMapIndexFromConstant(
@@ -369,20 +369,19 @@ func sanityDeclaredPrincipals(m Model) ([]string, []principalEnum, error) {
 	return declaredNames, declaredIDs, nil
 }
 
-func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []Primitive) error {
+func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []*Primitive) error {
 	for _, p := range failedRewrites {
-		if !p.Check {
-			continue
+		if p.Check {
+			return fmt.Errorf(
+				"checked primitive fails: %s",
+				prettyPrimitive(p),
+			)
 		}
-		return fmt.Errorf(
-			"checked primitive fails: %s",
-			prettyPrimitive(p),
-		)
 	}
 	return nil
 }
 
-func sanityCheckEquationRootGenerator(e Equation) error {
+func sanityCheckEquationRootGenerator(e *Equation) error {
 	if len(e.Values) > 3 {
 		return fmt.Errorf(
 			"too many layers in equation (%s), maximum is 2",
@@ -413,14 +412,14 @@ func sanityCheckEquationRootGenerator(e Equation) error {
 	return nil
 }
 
-func sanityCheckEquationGenerators(a Value, valPrincipalState PrincipalState) error {
+func sanityCheckEquationGenerators(a *Value) error {
 	var err error
 	switch a.Kind {
 	case typesEnumPrimitive:
 		for _, va := range a.Primitive.Arguments {
 			switch va.Kind {
 			case typesEnumPrimitive:
-				err = sanityCheckEquationGenerators(va, valPrincipalState)
+				err = sanityCheckEquationGenerators(va)
 			case typesEnumEquation:
 				err = sanityCheckEquationRootGenerator(va.Equation)
 			}

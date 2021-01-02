@@ -13,7 +13,7 @@ import (
 var verifyAnalysisCount uint32
 
 func verifyAnalysis(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
 ) error {
 	o := 0
@@ -46,7 +46,7 @@ func verifyAnalysis(
 		if o > 0 {
 			break
 		}
-		o = o + verifyAnalysisPasswords(&valAttackerState.Known[i], valPrincipalState)
+		o = o + verifyAnalysisPasswords(valAttackerState.Known[i], valPrincipalState)
 		if o > 0 {
 			break
 		}
@@ -84,12 +84,12 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) int {
 	o := 0
 	r := false
-	revealed := Value{}
-	ar := []Value{}
+	revealed := &Value{}
+	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
 		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
@@ -105,12 +105,12 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) int {
 	o := 0
 	r := false
-	revealed := Value{}
-	ar := []Value{}
+	revealed := &Value{}
+	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
 		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
@@ -126,10 +126,10 @@ func verifyAnalysisRecompose(
 }
 
 func verifyAnalysisReconstruct(
-	a Value, valPrincipalState PrincipalState, valAttackerState AttackerState, o int,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState, o int,
 ) int {
 	r := false
-	ar := []Value{}
+	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
 		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
@@ -149,15 +149,15 @@ func verifyAnalysisReconstruct(
 	return o
 }
 
-func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
+func verifyAnalysisEquivalize(a *Value, valPrincipalState *PrincipalState) int {
 	o := 0
 	ar := a
 	switch a.Kind {
 	case typesEnumConstant:
-		ar, _ = valueResolveConstant(&a.Constant, &valPrincipalState)
+		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
 	}
 	for i := 0; i < len(valPrincipalState.Assigned); i++ {
-		if valueEquivalentValues(&ar, &valPrincipalState.Assigned[i], true) {
+		if valueEquivalentValues(ar, valPrincipalState.Assigned[i], true) {
 			if attackerStatePutWrite(valPrincipalState.Assigned[i], valPrincipalState) {
 				InfoMessage(fmt.Sprintf(
 					"%s obtained by equivalizing with the current resolution of %s.",
@@ -170,14 +170,14 @@ func verifyAnalysisEquivalize(a Value, valPrincipalState PrincipalState) int {
 	return o
 }
 
-func verifyAnalysisPasswords(a *Value, valPrincipalState PrincipalState) int {
+func verifyAnalysisPasswords(a *Value, valPrincipalState *PrincipalState) int {
 	o := 0
-	passwords := possibleToObtainPasswords(a, a, -1, &valPrincipalState)
+	passwords := possibleToObtainPasswords(a, a, -1, valPrincipalState)
 	for i := 0; i < len(passwords); i++ {
 		if attackerStatePutWrite(passwords[i], valPrincipalState) {
 			InfoMessage(fmt.Sprintf(
 				"%s obtained as a password unsafely used within %s.",
-				infoOutputText(passwords[i]), prettyValue(*a),
+				infoOutputText(passwords[i]), prettyValue(a),
 			), "deduction", true)
 			o = o + 1
 		}
@@ -185,7 +185,7 @@ func verifyAnalysisPasswords(a *Value, valPrincipalState PrincipalState) int {
 	return o
 }
 
-func verifyAnalysisConcat(a Value, valPrincipalState PrincipalState) int {
+func verifyAnalysisConcat(a *Value, valPrincipalState *PrincipalState) int {
 	o := 0
 	switch a.Kind {
 	case typesEnumPrimitive:

@@ -28,7 +28,7 @@ func Pv(modelFile string) error {
 	return nil
 }
 
-func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant) string {
+func pvConstantPrefix(valKnowledgeMap *KnowledgeMap, principal string, c *Constant) string {
 	prefix := "const"
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	c = valKnowledgeMap.Constants[i]
@@ -46,7 +46,7 @@ func pvConstantPrefix(valKnowledgeMap KnowledgeMap, principal string, c Constant
 	return prefix
 }
 
-func pvConstant(valKnowledgeMap KnowledgeMap, principal string, c Constant, valType string) string {
+func pvConstant(valKnowledgeMap *KnowledgeMap, principal string, c *Constant, valType string) string {
 	prefix := pvConstantPrefix(valKnowledgeMap, principal, c)
 	t := ""
 	if len(valType) > 0 {
@@ -55,7 +55,7 @@ func pvConstant(valKnowledgeMap KnowledgeMap, principal string, c Constant, valT
 	return fmt.Sprintf("%s_%s%s", prefix, c.Name, t)
 }
 
-func pvConstants(valKnowledgeMap KnowledgeMap, principal string, c []Constant, valType string) string {
+func pvConstants(valKnowledgeMap *KnowledgeMap, principal string, c []*Constant, valType string) string {
 	consts := ""
 	for i, v := range c {
 		sep := ""
@@ -69,7 +69,7 @@ func pvConstants(valKnowledgeMap KnowledgeMap, principal string, c []Constant, v
 	return consts
 }
 
-func pvPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, check bool) string {
+func pvPrimitive(valKnowledgeMap *KnowledgeMap, principal string, p *Primitive, check bool) string {
 	primitiveStringName := ""
 	if primitiveIsCorePrim(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
@@ -104,7 +104,7 @@ func pvPrimitive(valKnowledgeMap KnowledgeMap, principal string, p Primitive, ch
 	return prim
 }
 
-func pvEquation(valKnowledgeMap KnowledgeMap, principal string, e Equation) string {
+func pvEquation(valKnowledgeMap *KnowledgeMap, principal string, e *Equation) string {
 	eq := ""
 	switch len(e.Values) {
 	case 1:
@@ -122,7 +122,7 @@ func pvEquation(valKnowledgeMap KnowledgeMap, principal string, e Equation) stri
 	return eq
 }
 
-func pvValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
+func pvValue(valKnowledgeMap *KnowledgeMap, principal string, a *Value) string {
 	switch a.Kind {
 	case typesEnumConstant:
 		return pvConstant(valKnowledgeMap, principal, a.Constant, "")
@@ -134,7 +134,7 @@ func pvValue(valKnowledgeMap KnowledgeMap, principal string, a Value) string {
 	return ""
 }
 
-func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
+func pvQuery(valKnowledgeMap *KnowledgeMap, query Query) (string, error) {
 	output := ""
 	switch query.Kind {
 	case typesEnumConfidentiality:
@@ -164,7 +164,7 @@ func pvQuery(valKnowledgeMap KnowledgeMap, query Query) (string, error) {
 }
 
 func pvPrincipal(
-	valKnowledgeMap KnowledgeMap, block Block,
+	valKnowledgeMap *KnowledgeMap, block Block,
 	procs string, consts string, pc int, cc int,
 ) (string, string, int, int) {
 	procs = fmt.Sprintf(
@@ -246,7 +246,7 @@ func pvPrincipal(
 }
 
 func pvMessage(
-	valKnowledgeMap KnowledgeMap, block Block,
+	valKnowledgeMap *KnowledgeMap, block Block,
 	procs string, pc int,
 ) (string, int) {
 	procs = fmt.Sprintf(
@@ -334,7 +334,7 @@ func pvPhase(block Block) (string, error) {
 	// return fmt.Sprintf("phase %d;", block.Phase.Number)
 }
 
-func pvModel(m Model, valKnowledgeMap KnowledgeMap) (string, error) {
+func pvModel(m Model, valKnowledgeMap *KnowledgeMap) (string, error) {
 	pv := ""
 	procs := ""
 	consts := ""

@@ -24,7 +24,7 @@ var libpv = PvTemplate{
 			"type stage.",
 		}, "\n") + "\n"
 	},
-	Constants: func(valKnowledgeMap KnowledgeMap, consts string) string {
+	Constants: func(valKnowledgeMap *KnowledgeMap, consts string) string {
 		output := ""
 		for _, principal := range valKnowledgeMap.Principals {
 			output = fmt.Sprintf(
@@ -152,7 +152,7 @@ var libpv = PvTemplate{
 			"\tUNBLIND(k, m, a) = const_nil.",
 		}, "\n") + "\n"
 	},
-	Channels: func(valKnowledgeMap KnowledgeMap) string {
+	Channels: func(valKnowledgeMap *KnowledgeMap) string {
 		channels := []string{"const pub:channel."}
 		for i, prin1 := range valKnowledgeMap.Principals {
 			for ii, prin2 := range valKnowledgeMap.Principals {
@@ -171,7 +171,7 @@ var libpv = PvTemplate{
 		}
 		return strings.Join(channels, "\n") + "\n"
 	},
-	Queries: func(valKnowledgeMap KnowledgeMap, queries []Query) (string, error) {
+	Queries: func(valKnowledgeMap *KnowledgeMap, queries []Query) (string, error) {
 		output := []string{
 			"event SendMsg(principal, principal, stage, bitstring).",
 			"event RecvMsg(principal, principal, stage, bitstring).",

@@ -5,15 +5,15 @@
 package vplogic
 
 func possibleToDecomposePrimitive(
-	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
-) (bool, Value, []Value) {
-	has := []Value{}
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+) (bool, *Value, []*Value) {
+	has := []*Value{}
 	if primitiveIsCorePrim(p.ID) {
-		return false, Value{}, has
+		return false, &Value{}, has
 	}
 	prim, _ := primitiveGet(p.ID)
 	if !prim.Decompose.HasRule {
-		return false, Value{}, has
+		return false, &Value{}, has
 	}
 	for i, g := range prim.Decompose.Given {
 		a := p.Arguments[g]
@@ -50,28 +50,28 @@ func possibleToDecomposePrimitive(
 		revealed := p.Arguments[prim.Decompose.Reveal]
 		return true, revealed, has
 	}
-	return false, Value{}, has
+	return false, &Value{}, has
 }
 
 func possibleToRecomposePrimitive(
-	p Primitive, valAttackerState AttackerState,
-) (bool, Value, []Value) {
+	p *Primitive, valAttackerState AttackerState,
+) (bool, *Value, []*Value) {
 	if primitiveIsCorePrim(p.ID) {
-		return false, Value{}, []Value{}
+		return false, &Value{}, []*Value{}
 	}
 	prim, _ := primitiveGet(p.ID)
 	if !prim.Recompose.HasRule {
-		return false, Value{}, []Value{}
+		return false, &Value{}, []*Value{}
 	}
 	for _, i := range prim.Recompose.Given {
-		ar := []Value{}
+		ar := []*Value{}
 		for _, ii := range i {
 			for _, v := range valAttackerState.Known {
 				vb := v
 				switch v.Kind {
 				case typesEnumPrimitive:
 					equivPrim, vo, _ := valueEquivalentPrimitives(
-						&v.Primitive, &p, false,
+						v.Primitive, p, false,
 					)
 					if !equivPrim || vo != ii {
 						continue
@@ -85,16 +85,16 @@ func possibleToRecomposePrimitive(
 			}
 		}
 	}
-	return false, Value{}, []Value{}
+	return false, &Value{}, []*Value{}
 }
 
 func possibleToReconstructPrimitive(
-	p Primitive, valPrincipalState PrincipalState, valAttackerState AttackerState,
-) (bool, []Value) {
-	has := []Value{}
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+) (bool, []*Value) {
+	has := []*Value{}
 	r, _ := possibleToRewrite(p, valPrincipalState)
 	if !r {
-		return false, []Value{}
+		return false, []*Value{}
 	}
 	for _, a := range p.Arguments {
 		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
@@ -122,52 +122,52 @@ func possibleToReconstructPrimitive(
 		}
 	}
 	if len(has) < len(p.Arguments) {
-		return false, []Value{}
+		return false, []*Value{}
 	}
 	return true, has
 }
 
-func possibleToReconstructEquation(e Equation, valAttackerState AttackerState) (bool, []Value) {
+func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) (bool, []*Value) {
 	if len(e.Values) <= 2 {
 		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
-			return true, []Value{e.Values[1]}
+			return true, []*Value{e.Values[1]}
 		}
-		return false, []Value{}
+		return false, []*Value{}
 	}
 	s0 := e.Values[1]
 	s1 := e.Values[2]
 	hs0 := valueEquivalentValueInValues(s0, valAttackerState.Known) >= 0
 	hs1 := valueEquivalentValueInValues(s1, valAttackerState.Known) >= 0
 	if hs0 && hs1 {
-		return true, []Value{s0, s1}
+		return true, []*Value{s0, s1}
 	}
-	p0 := Value{
+	p0 := &Value{
 		Kind: typesEnumEquation,
-		Equation: Equation{
-			Values: []Value{e.Values[0], e.Values[1]},
+		Equation: &Equation{
+			Values: []*Value{e.Values[0], e.Values[1]},
 		},
 	}
-	p1 := Value{
+	p1 := &Value{
 		Kind: typesEnumEquation,
-		Equation: Equation{
-			Values: []Value{e.Values[0], e.Values[2]},
+		Equation: &Equation{
+			Values: []*Value{e.Values[0], e.Values[2]},
 		},
 	}
 	hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
 	if hs0 && hp1 {
-		return true, []Value{s0, p1}
+		return true, []*Value{s0, p1}
 	}
 	hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
 	if hp0 && hs1 {
-		return true, []Value{p0, s1}
+		return true, []*Value{p0, s1}
 	}
-	return false, []Value{}
+	return false, []*Value{}
 }
 
 func possibleToRewrite(
-	p Primitive, valPrincipalState PrincipalState,
-) (bool, []Value) {
-	v := []Value{{Kind: typesEnumPrimitive, Primitive: p}}
+	p *Primitive, valPrincipalState *PrincipalState,
+) (bool, []*Value) {
+	v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case typesEnumPrimitive:
@@ -196,20 +196,20 @@ func possibleToRewrite(
 			return !prim.Check, v
 		}
 		rewrite := prim.Rewrite.To(from.Primitive)
-		return true, []Value{rewrite}
+		return true, []*Value{rewrite}
 	}
 	return !prim.Check, v
 }
 
 func possibleToRewritePrim(
-	p Primitive, valPrincipalState PrincipalState,
+	p *Primitive, valPrincipalState *PrincipalState,
 ) bool {
 	prim, _ := primitiveGet(p.ID)
 	from := p.Arguments[prim.Rewrite.From]
 	for a, m := range prim.Rewrite.Matching {
 		valid := false
 		for _, mm := range m {
-			ax := []Value{p.Arguments[a], from.Primitive.Arguments[mm]}
+			ax := []*Value{p.Arguments[a], from.Primitive.Arguments[mm]}
 			ax[0], valid = prim.Rewrite.Filter(p, ax[0], mm)
 			if !valid {
 				continue
@@ -223,7 +223,7 @@ func possibleToRewritePrim(
 					}
 				}
 			}
-			valid = valueEquivalentValues(&ax[0], &ax[1], true)
+			valid = valueEquivalentValues(ax[0], ax[1], true)
 			if valid {
 				break
 			}
@@ -235,16 +235,16 @@ func possibleToRewritePrim(
 	return true
 }
 
-func possibleToRebuild(p Primitive) (bool, Value) {
+func possibleToRebuild(p *Primitive) (bool, *Value) {
 	if primitiveIsCorePrim(p.ID) {
-		return false, Value{}
+		return false, &Value{}
 	}
 	prim, _ := primitiveGet(p.ID)
 	if !prim.Rebuild.HasRule {
-		return false, Value{}
+		return false, &Value{}
 	}
 	for _, g := range prim.Rebuild.Given {
-		has := []Value{}
+		has := []*Value{}
 	ggLoop:
 		for _, gg := range g {
 			if len(p.Arguments) <= gg {
@@ -261,7 +261,7 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 			}
 			for hasP := 1; hasP < len(has); hasP++ {
 				equivPrim, o1, o2 := valueEquivalentPrimitives(
-					&has[0].Primitive, &has[hasP].Primitive, false,
+					has[0].Primitive, has[hasP].Primitive, false,
 				)
 				if !equivPrim || (o1 == o2) {
 					continue ggLoop
@@ -272,16 +272,16 @@ func possibleToRebuild(p Primitive) (bool, Value) {
 			}
 		}
 	}
-	return false, Value{}
+	return false, &Value{}
 }
 
 func possibleToObtainPasswords(
 	a *Value, aParent *Value, aIndex int, valPrincipalState *PrincipalState,
-) []Value {
-	passwords := []Value{}
+) []*Value {
+	passwords := []*Value{}
 	switch a.Kind {
 	case typesEnumConstant:
-		aa, _ := valueResolveConstant(&a.Constant, valPrincipalState)
+		aa, _ := valueResolveConstant(a.Constant, valPrincipalState)
 		switch aa.Kind {
 		case typesEnumConstant:
 			if aa.Constant.Qualifier == typesEnumPassword {
@@ -305,13 +305,13 @@ func possibleToObtainPasswords(
 				}
 			}
 			passwords = append(passwords,
-				possibleToObtainPasswords(&a.Primitive.Arguments[i], aParent, i, valPrincipalState)...,
+				possibleToObtainPasswords(a.Primitive.Arguments[i], aParent, i, valPrincipalState)...,
 			)
 		}
 	case typesEnumEquation:
 		for i := 0; i < len(a.Equation.Values); i++ {
 			passwords = append(passwords,
-				possibleToObtainPasswords(&a.Equation.Values[i], a, -1, valPrincipalState)...,
+				possibleToObtainPasswords(a.Equation.Values[i], a, -1, valPrincipalState)...,
 			)
 		}
 	}

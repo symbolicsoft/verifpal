@@ -39,14 +39,14 @@ func JSON(request string) error {
 }
 
 // JSONKnowledgeMap returns the KnowledgeMap struct for a given model in JSON format.
-func JSONKnowledgeMap(inputString string) (KnowledgeMap, error) {
+func JSONKnowledgeMap(inputString string) (*KnowledgeMap, error) {
 	m, err := Parse("model.vp", []byte(inputString))
 	if err != nil {
-		return KnowledgeMap{}, err
+		return &KnowledgeMap{}, err
 	}
 	valKnowledgeMap, _, err := sanity(m.(Model))
 	if err != nil {
-		return KnowledgeMap{}, err
+		return &KnowledgeMap{}, err
 	}
 	j, _ := json.Marshal(valKnowledgeMap)
 	fmt.Fprint(os.Stdout, string(j))
@@ -70,8 +70,8 @@ func JSONPrincipalStates(inputString string) error {
 
 // JSONPrettyValue pretty-prints a Verifpal value expression and returns the result in JSON format.
 func JSONPrettyValue(inputString string) error {
-	a := Value{}
-	err := json.Unmarshal([]byte(inputString), &a)
+	a := &Value{}
+	err := json.Unmarshal([]byte(inputString), a)
 	if err != nil {
 		return err
 	}

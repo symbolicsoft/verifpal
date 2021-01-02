@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState) error {
+func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
 	InfoMessage("Attacker is configured as active.", "info", false)
 	phase := 0
 	for phase <= valKnowledgeMap.MaxPhase {
@@ -48,7 +48,7 @@ func verifyActive(valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalSt
 }
 
 func verifyActiveStages(
-	stage int, valKnowledgeMap KnowledgeMap, valPrincipalStates []PrincipalState,
+	stage int, valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState,
 	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
 ) {
 	var scanGroup sync.WaitGroup
@@ -81,7 +81,7 @@ func verifyActiveStages(
 }
 
 func verifyActiveScan(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
 	stage int, scanGroup *sync.WaitGroup,
 ) error {
@@ -90,8 +90,9 @@ func verifyActiveScan(
 		scanGroup.Done()
 		return err
 	}
+	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, true)
 	valPrincipalStateMutated, isWorthwhileMutation, err := verifyActiveMutatePrincipalState(
-		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
+		valPrincipalStateClone, valAttackerState, valMutationMap,
 	)
 	if err != nil {
 		return err
@@ -125,22 +126,20 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valPrincipalState PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
-) (PrincipalState, bool, error) {
+	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
+) (*PrincipalState, bool, error) {
 	isWorthwhileMutation := false
-	for i, c := range valMutationMap.Constants {
-		ai, ii := valueResolveConstant(&c, &valPrincipalState)
+	for i := 0; i < len(valMutationMap.Constants); i++ {
+		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
 		ac := valMutationMap.Combination[i]
 		ar, err := valueResolveValueInternalValuesFromPrincipalState(
-			&ai, &ai, ii, &valPrincipalState, valAttackerState, true, 0,
+			ai, ai, ii, valPrincipalState, valAttackerState, true, 0,
 		)
 		if err != nil {
 			return valPrincipalState, false, err
 		}
 		switch ar.Kind {
 		case typesEnumPrimitive:
-			ac.Primitive.Output = ar.Primitive.Output
-			ac.Primitive.Check = ar.Primitive.Check
 			_, aar := possibleToRewrite(ar.Primitive, valPrincipalState)
 			ar.Primitive = aar[0].Primitive
 		}
@@ -148,8 +147,13 @@ func verifyActiveMutatePrincipalState(
 		case typesEnumPrimitive:
 			_, aac := possibleToRewrite(ac.Primitive, valPrincipalState)
 			ac.Primitive = aac[0].Primitive
+			switch ar.Kind {
+			case typesEnumPrimitive:
+				ac.Primitive.Output = ar.Primitive.Output
+				ac.Primitive.Check = ar.Primitive.Check
+			}
 		}
-		if valueEquivalentValues(&ac, &ar, true) {
+		if valueEquivalentValues(ac, ar, true) {
 			continue
 		}
 		valPrincipalState.Creator[ii] = principalNamesMap["Attacker"]
@@ -164,7 +168,7 @@ func verifyActiveMutatePrincipalState(
 	if !isWorthwhileMutation {
 		return valPrincipalState, isWorthwhileMutation, nil
 	}
-	valPrincipalState, err := valueResolveAllPrincipalStateValues(&valPrincipalState, valAttackerState)
+	valPrincipalState, err := valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	if err != nil {
 		return valPrincipalState, false, err
 	}
@@ -196,7 +200,7 @@ FailedRewritesLoop:
 	return valPrincipalState, isWorthwhileMutation, nil
 }
 
-func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState PrincipalState, f int) PrincipalState {
+func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *PrincipalState, f int) *PrincipalState {
 	valPrincipalState.Constants = valPrincipalState.Constants[:f]
 	valPrincipalState.Assigned = valPrincipalState.Assigned[:f]
 	valPrincipalState.Guard = valPrincipalState.Guard[:f]

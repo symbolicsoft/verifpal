@@ -197,7 +197,7 @@ func infoLiteralNumber(n int) string {
 	}
 }
 
-func infoOutputText(revealed Value) string {
+func infoOutputText(revealed *Value) string {
 	outputText := prettyValue(revealed)
 	switch revealed.Kind {
 	case typesEnumConstant:
@@ -226,19 +226,19 @@ func infoOutputText(revealed Value) string {
 }
 
 func infoQueryMutatedValues(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
-	valAttackerState AttackerState, targetValue Value, infoDepth int,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
+	valAttackerState AttackerState, targetValue *Value, infoDepth int,
 ) string {
-	mutated := []Value{}
+	mutated := []*Value{}
 	targetInfo := "In another session:"
 	mutatedInfo := ""
 	relevant := false
 	for i := range valPrincipalState.BeforeRewrite {
-		if valueEquivalentValues(&valPrincipalState.BeforeRewrite[i], &valKnowledgeMap.Assigned[i], false) {
+		if valueEquivalentValues(valPrincipalState.BeforeRewrite[i], valKnowledgeMap.Assigned[i], false) {
 			continue
 		}
 		isTargetValue := valueEquivalentValues(
-			&targetValue, &valPrincipalState.Assigned[i], false,
+			targetValue, valPrincipalState.Assigned[i], false,
 		)
 		attackerKnows := valueEquivalentValueInValues(targetValue, valAttackerState.Known) >= 0
 		if isTargetValue && attackerKnows {
@@ -292,7 +292,7 @@ func infoQueryMutatedValues(
 }
 
 func infoQueryMutatedValue(
-	valKnowledgeMap KnowledgeMap, valPrincipalState PrincipalState,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 	index int, isTargetValue bool, attackerKnows bool,
 ) (string, bool) {
 	pc := prettyConstant(valPrincipalState.Constants[index])

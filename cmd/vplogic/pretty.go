@@ -24,7 +24,7 @@ func PrettyPrint(modelFile string) error {
 	return nil
 }
 
-func prettyConstant(c Constant) string {
+func prettyConstant(c *Constant) string {
 	if c.Guard {
 		return fmt.Sprintf("[%s]", c.Name)
 	}
@@ -34,7 +34,7 @@ func prettyConstant(c Constant) string {
 	return c.Name
 }
 
-func prettyConstants(c []Constant) string {
+func prettyConstants(c []*Constant) string {
 	pretty := ""
 	for i, v := range c {
 		sep := ""
@@ -48,7 +48,7 @@ func prettyConstants(c []Constant) string {
 	return pretty
 }
 
-func prettyPrimitive(p Primitive) string {
+func prettyPrimitive(p *Primitive) string {
 	pretty := ""
 	if primitiveIsCorePrim(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
@@ -75,7 +75,7 @@ func prettyPrimitive(p Primitive) string {
 	)
 }
 
-func prettyEquation(e Equation) string {
+func prettyEquation(e *Equation) string {
 	pretty := ""
 	for i, c := range e.Values {
 		if i == 0 {
@@ -90,7 +90,7 @@ func prettyEquation(e Equation) string {
 	return pretty
 }
 
-func prettyValue(a Value) string {
+func prettyValue(a *Value) string {
 	switch a.Kind {
 	case typesEnumConstant:
 		return prettyConstant(a.Constant)
@@ -102,7 +102,7 @@ func prettyValue(a Value) string {
 	return ""
 }
 
-func prettyValues(a []Value) string {
+func prettyValues(a []*Value) string {
 	pretty := ""
 	for i, v := range a {
 		sep := ", "
@@ -211,7 +211,7 @@ func prettyExpression(expression Expression) string {
 		)
 	case typesEnumAssignment:
 		right := prettyValue(expression.Assigned)
-		left := []Constant{}
+		left := []*Constant{}
 		for i, c := range expression.Constants {
 			left = append(left, c)
 			if strings.HasPrefix(c.Name, "unnamed") {
