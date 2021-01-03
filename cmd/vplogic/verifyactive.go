@@ -133,7 +133,7 @@ func verifyActiveMutatePrincipalState(
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
 		ac := valMutationMap.Combination[i]
 		ar, err := valueResolveValueInternalValuesFromPrincipalState(
-			ai, ai, ii, valPrincipalState, valAttackerState, true, 0,
+			ai, ai, ii, valPrincipalState, valAttackerState, true,
 		)
 		if err != nil {
 			return valPrincipalState, false, err
