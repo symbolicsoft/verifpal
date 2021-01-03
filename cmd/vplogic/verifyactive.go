@@ -154,6 +154,14 @@ func verifyActiveMutatePrincipalState(
 				ac.Primitive = aac[0].Primitive
 			}
 		}
+		switch ac.Kind {
+		case typesEnumPrimitive:
+			switch ar.Kind {
+			case typesEnumPrimitive:
+				ac.Primitive.Output = ar.Primitive.Output
+				ac.Primitive.Check = ar.Primitive.Check
+			}
+		}
 		if valueEquivalentValues(ac, ar, true) {
 			continue
 		}
