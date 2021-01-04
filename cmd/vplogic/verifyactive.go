@@ -153,9 +153,6 @@ func verifyActiveMutatePrincipalState(
 			case typesEnumPrimitive:
 				ac.Data = aac[0].Data.(*Primitive)
 			}
-		}
-		switch ac.Kind {
-		case typesEnumPrimitive:
 			switch ar.Kind {
 			case typesEnumPrimitive:
 				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output

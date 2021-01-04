@@ -35,18 +35,15 @@ func mutationMapInit(
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
-		var c *Constant
 		var r []*Value
-		c, r, err = mutationMapReplaceValue(
-			a, v, i, stage, valPrincipalState, valAttackerState,
-		)
+		r, err = mutationMapReplaceValue(a, i, stage, valPrincipalState, valAttackerState)
 		if err != nil {
 			return MutationMap{}, err
 		}
 		if len(r) == 0 {
 			continue
 		}
-		valMutationMap.Constants = append(valMutationMap.Constants, c)
+		valMutationMap.Constants = append(valMutationMap.Constants, v.Data.(*Constant))
 		valMutationMap.Mutations = append(valMutationMap.Mutations, r)
 	}
 	valMutationMap.Combination = make([]*Value, len(valMutationMap.Constants))
@@ -79,25 +76,25 @@ func mutationMapSkipValue(
 }
 
 func mutationMapReplaceValue(
-	a *Value, v *Value, rootIndex int, stage int,
+	a *Value, rootIndex int, stage int,
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
-) (*Constant, []*Value, error) {
+) ([]*Value, error) {
 	switch a.Kind {
 	case typesEnumConstant:
-		return v.Data.(*Constant), mutationMapReplaceConstant(
+		return mutationMapReplaceConstant(
 			a, stage, valPrincipalState, valAttackerState,
 		), nil
 	case typesEnumPrimitive:
 		p, err := mutationMapReplacePrimitive(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
-		return v.Data.(*Constant), p, err
+		return p, err
 	case typesEnumEquation:
-		return v.Data.(*Constant), mutationMapReplaceEquation(
+		return mutationMapReplaceEquation(
 			a, stage, valAttackerState,
 		), nil
 	}
-	return v.Data.(*Constant), []*Value{}, fmt.Errorf("invalid value kind")
+	return []*Value{}, fmt.Errorf("invalid value kind")
 }
 
 func mutationMapReplaceConstant(
