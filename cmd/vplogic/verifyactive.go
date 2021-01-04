@@ -91,12 +91,9 @@ func verifyActiveScan(
 		return err
 	}
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, true)
-	valPrincipalStateMutated, isWorthwhileMutation, err := verifyActiveMutatePrincipalState(
+	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
 		valPrincipalStateClone, valAttackerState, valMutationMap,
 	)
-	if err != nil {
-		return err
-	}
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
 		go func() {
@@ -127,17 +124,14 @@ func verifyActiveScan(
 
 func verifyActiveMutatePrincipalState(
 	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
-) (*PrincipalState, bool, error) {
+) (*PrincipalState, bool) {
 	isWorthwhileMutation := false
 	for i := 0; i < len(valMutationMap.Constants); i++ {
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
 		ac := valMutationMap.Combination[i]
-		ar, err := valueResolveValueInternalValuesFromPrincipalState(
+		ar, _, _ := valueResolveValueInternalValuesFromPrincipalState(
 			ai, ai, ii, valPrincipalState, valAttackerState, true,
 		)
-		if err != nil {
-			return valPrincipalState, false, err
-		}
 		switch ar.Kind {
 		case typesEnumPrimitive:
 			_, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
@@ -159,7 +153,10 @@ func verifyActiveMutatePrincipalState(
 				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check
 			}
 		}
-		if valueEquivalentValues(ac, ar, true) {
+		switch {
+		case valueEquivalentValues(ac, ar, true):
+			continue
+		case valueNestedConstantInResolvedValue(valMutationMap.Constants[i], ac, valPrincipalState, valAttackerState):
 			continue
 		}
 		valPrincipalState.Creator[ii] = principalNamesMap["Attacker"]
@@ -172,12 +169,9 @@ func verifyActiveMutatePrincipalState(
 		}
 	}
 	if !isWorthwhileMutation {
-		return valPrincipalState, isWorthwhileMutation, nil
+		return valPrincipalState, isWorthwhileMutation
 	}
-	valPrincipalState, err := valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
-	if err != nil {
-		return valPrincipalState, false, err
-	}
+	valPrincipalState, _ = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 FailedRewritesLoop:
 	for i, p := range failedRewrites {
@@ -203,7 +197,7 @@ FailedRewritesLoop:
 			}
 		}
 	}
-	return valPrincipalState, isWorthwhileMutation, nil
+	return valPrincipalState, isWorthwhileMutation
 }
 
 func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *PrincipalState, f int) *PrincipalState {

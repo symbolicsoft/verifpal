@@ -123,7 +123,7 @@ func queryAuthenticationGetPassIndices(
 		case typesEnumConstant, typesEnumEquation:
 			continue
 		}
-		if !valueFindConstantInPrimitive(c, a, valKnowledgeMap) {
+		if !valueFindConstantInPrimitiveFromKnowledgeMap(c, a, valKnowledgeMap) {
 			continue
 		}
 		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
@@ -201,7 +201,7 @@ func queryFreshness(
 		case typesEnumConstant, typesEnumEquation:
 			continue
 		}
-		if !valueFindConstantInPrimitive(query.Constants[0], a, valKnowledgeMap) {
+		if !valueFindConstantInPrimitiveFromKnowledgeMap(query.Constants[0], a, valKnowledgeMap) {
 			continue
 		}
 		_, ii := valueResolveConstant(valKnowledgeMap.Constants[i], valPrincipalState)
