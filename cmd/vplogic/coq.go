@@ -199,7 +199,7 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMa
 	expressions := []string{}
 	switch expression.Assigned.Kind {
 	case typesEnumEquation:
-		cre, err := coqResolveEquation(expression.Assigned.Equation, valKnowledgeMap)
+		cre, err := coqResolveEquation(expression.Assigned.Data.(*Equation), valKnowledgeMap)
 		if err != nil {
 			return []string{}, err
 		}
@@ -208,19 +208,19 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMa
 		))
 	case typesEnumPrimitive:
 		primitiveStringName := ""
-		if primitiveIsCorePrim(expression.Assigned.Primitive.ID) {
-			prim, _ := primitiveCoreGet(expression.Assigned.Primitive.ID)
+		if primitiveIsCorePrim(expression.Assigned.Data.(*Primitive).ID) {
+			prim, _ := primitiveCoreGet(expression.Assigned.Data.(*Primitive).ID)
 			primitiveStringName = prim.Name
 		} else {
-			prim, _ := primitiveGet(expression.Assigned.Primitive.ID)
+			prim, _ := primitiveGet(expression.Assigned.Data.(*Primitive).ID)
 			primitiveStringName = prim.Name
 		}
-		switch expression.Assigned.Primitive.ID {
+		switch expression.Assigned.Data.(*Primitive).ID {
 		case primitiveEnumHASH, primitiveEnumPWHASH, primitiveEnumCONCAT:
 			exp := fmt.Sprintf(
 				"EXP assignment private (prim(%s%d ", primitiveStringName,
-				len(expression.Assigned.Primitive.Arguments))
-			for _, argument := range expression.Assigned.Primitive.Arguments {
+				len(expression.Assigned.Data.(*Primitive).Arguments))
+			for _, argument := range expression.Assigned.Data.(*Primitive).Arguments {
 				crv, err := coqResolveValue(argument, valKnowledgeMap)
 				if err != nil {
 					return []string{}, err
@@ -235,7 +235,7 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMa
 				} else {
 					exp := fmt.Sprintf(
 						"EXP assignment private (prim(%s%d ", primitiveStringName, (i + 1))
-					for _, argument := range expression.Assigned.Primitive.Arguments {
+					for _, argument := range expression.Assigned.Data.(*Primitive).Arguments {
 						crv, err := coqResolveValue(argument, valKnowledgeMap)
 						if err != nil {
 							return []string{}, err
@@ -246,7 +246,7 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMa
 				}
 			}
 		default:
-			crp, err := coqResolvePrimitive(expression.Assigned.Primitive, valKnowledgeMap)
+			crp, err := coqResolvePrimitive(expression.Assigned.Data.(*Primitive), valKnowledgeMap)
 			if err != nil {
 				return nil, err
 			}
@@ -267,24 +267,24 @@ func coqGuard(guard bool) string {
 
 func coqResolveConstant(c *Constant, valKnowledgeMap *KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
-		Kind:     typesEnumConstant,
-		Constant: c,
+		Kind: typesEnumConstant,
+		Data: c,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
 
 func coqResolvePrimitive(p *Primitive, valKnowledgeMap *KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
-		Kind:      typesEnumPrimitive,
-		Primitive: p,
+		Kind: typesEnumPrimitive,
+		Data: p,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
 
 func coqResolveEquation(e *Equation, valKnowledgeMap *KnowledgeMap) (string, error) {
 	a, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
-		Kind:     typesEnumEquation,
-		Equation: e,
+		Kind: typesEnumEquation,
+		Data: e,
 	}, valKnowledgeMap)
 	return coqPrintValue(a)
 }
@@ -292,11 +292,11 @@ func coqResolveEquation(e *Equation, valKnowledgeMap *KnowledgeMap) (string, err
 func coqResolveValue(v *Value, valKnowledgeMap *KnowledgeMap) (string, error) {
 	switch v.Kind {
 	case typesEnumConstant:
-		return coqResolveConstant(v.Constant, valKnowledgeMap)
+		return coqResolveConstant(v.Data.(*Constant), valKnowledgeMap)
 	case typesEnumPrimitive:
-		return coqResolvePrimitive(v.Primitive, valKnowledgeMap)
+		return coqResolvePrimitive(v.Data.(*Primitive), valKnowledgeMap)
 	case typesEnumEquation:
-		return coqResolveEquation(v.Equation, valKnowledgeMap)
+		return coqResolveEquation(v.Data.(*Equation), valKnowledgeMap)
 	}
 	return "", fmt.Errorf("invalid value kind")
 }
@@ -304,11 +304,11 @@ func coqResolveValue(v *Value, valKnowledgeMap *KnowledgeMap) (string, error) {
 func coqPrintValue(a *Value) (string, error) {
 	switch a.Kind {
 	case typesEnumConstant:
-		return coqPrintConstant(a.Constant)
+		return coqPrintConstant(a.Data.(*Constant))
 	case typesEnumPrimitive:
-		return coqPrintPrimitive(a.Primitive)
+		return coqPrintPrimitive(a.Data.(*Primitive))
 	case typesEnumEquation:
-		return coqPrintEquation(a.Equation)
+		return coqPrintEquation(a.Data.(*Equation))
 	}
 	return "", fmt.Errorf("invalid value kind")
 }

@@ -168,7 +168,7 @@ MessageConstants <- MessageConstants:(GuardedConstant/Constant)+ {
 	var da []*Constant
 	a  := MessageConstants.([]interface{})
 	for _, v := range a {
-		c := v.(*Value).Constant
+		c := v.(*Value).Data.(*Constant)
 		da = append(da, c)
 	}
 	return da, nil
@@ -240,7 +240,7 @@ Constant <- Const:Identifier (_ ',' _)? {
 	id := valueNamesMapAdd(name)
 	return &Value{
 		Kind: typesEnumConstant,
-		Constant: &Constant{
+		Data: &Constant{
 			Name: name,
 			ID: id,
 		},
@@ -252,9 +252,9 @@ Constants <- Constants:Constant+ {
 	var err error
 	a  := Constants.([]interface{})
 	for _, c := range a {
-		err = libpegCheckIfReserved(c.(*Value).Constant.Name)
+		err = libpegCheckIfReserved(c.(*Value).Data.(*Constant).Name)
 		if err != nil { break }
-		da = append(da, c.(*Value).Constant)
+		da = append(da, c.(*Value).Data.(*Constant))
 	}
 	return da, err
 }
@@ -274,12 +274,12 @@ Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
 
 GuardedConstant <- '[' Guarded:Constant ']' (_ ',' _)? {
 	g := Guarded.(*Value)
-	err := libpegCheckIfReserved(g.Constant.Name)
+	err := libpegCheckIfReserved(g.Data.(*Constant).Name)
 	return &Value{
 		Kind: typesEnumConstant,
-		Constant: &Constant{
-			Name: g.Constant.Name,
-			ID: g.Constant.ID,
+		Data: &Constant{
+			Name: g.Data.(*Constant).Name,
+			ID: g.Data.(*Constant).ID,
 			Guard: true,
 		},
 	}, err
@@ -293,7 +293,7 @@ Primitive <- Name:PrimitiveName '(' _ Arguments:Value+ _ ')' Check:'?'? (_ ',' _
 	primEnum, err := primitiveGetEnum(Name.(string))
 	return &Value{
 		Kind: typesEnumPrimitive,
-		Primitive: &Primitive{
+		Data: &Primitive{
 			ID: primEnum,
 			Arguments: args,
 			Output: 0,
@@ -309,7 +309,7 @@ PrimitiveName <- Name:Identifier {
 Equation <- First:Constant (_ '^' _) Second:Constant {
 	return &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{
 				First.(*Value),
 				Second.(*Value),
@@ -319,7 +319,7 @@ Equation <- First:Constant (_ '^' _) Second:Constant {
 }
 
 Value <- Primitive/Equation/Constant
-	
+
 Queries <- "queries" _ '[' _ Queries:(Query*) ']' _ {
 	return Queries, nil
 }
@@ -327,7 +327,7 @@ Queries <- "queries" _ '[' _ Queries:(Query*) ']' _ {
 Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication/QueryFreshness/QueryUnlinkability) Comment* {
 	return Query, nil
 }
-	
+
 QueryConfidentiality <- "confidentiality?" _ Const:Constant? _ Options:QueryOptions? _ {
 	switch {
 		case Const == nil:
@@ -337,7 +337,7 @@ QueryConfidentiality <- "confidentiality?" _ Const:Constant? _ Options:QueryOpti
 	}
 	return Query{
 		Kind: typesEnumConfidentiality,
-		Constants: []*Constant{Const.(*Value).Constant},
+		Constants: []*Constant{Const.(*Value).Data.(*Constant)},
 		Message: Message{},
 		Options: Options.([]QueryOption),
 	}, nil
@@ -367,7 +367,7 @@ QueryFreshness <- "freshness?" _ Const:Constant? _ Options:QueryOptions? _ {
 	}
 	return Query{
 		Kind: typesEnumFreshness,
-		Constants: []*Constant{Const.(*Value).Constant},
+		Constants: []*Constant{Const.(*Value).Data.(*Constant)},
 		Message: Message{},
 		Options: Options.([]QueryOption),
 	}, nil

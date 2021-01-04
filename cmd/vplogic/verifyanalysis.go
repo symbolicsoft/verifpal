@@ -92,7 +92,7 @@ func verifyAnalysisDecompose(
 	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
-		r, revealed, ar = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 	}
 	if r && attackerStatePutWrite(revealed, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
@@ -113,7 +113,7 @@ func verifyAnalysisRecompose(
 	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
-		r, revealed, ar = possibleToRecomposePrimitive(a.Primitive, valAttackerState)
+		r, revealed, ar = possibleToRecomposePrimitive(a.Data.(*Primitive), valAttackerState)
 	}
 	if r && attackerStatePutWrite(revealed, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
@@ -132,12 +132,12 @@ func verifyAnalysisReconstruct(
 	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
-		r, ar = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
-		for _, aa := range a.Primitive.Arguments {
+		r, ar = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+		for _, aa := range a.Data.(*Primitive).Arguments {
 			o = o + verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}
 	case typesEnumEquation:
-		r, ar = possibleToReconstructEquation(a.Equation, valAttackerState)
+		r, ar = possibleToReconstructEquation(a.Data.(*Equation), valAttackerState)
 	}
 	if r && attackerStatePutWrite(a, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
@@ -154,7 +154,7 @@ func verifyAnalysisEquivalize(a *Value, valPrincipalState *PrincipalState) int {
 	ar := a
 	switch a.Kind {
 	case typesEnumConstant:
-		ar, _ = valueResolveConstant(a.Constant, valPrincipalState)
+		ar, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState)
 	}
 	for i := 0; i < len(valPrincipalState.Assigned); i++ {
 		if valueEquivalentValues(ar, valPrincipalState.Assigned[i], true) {
@@ -189,13 +189,13 @@ func verifyAnalysisConcat(a *Value, valPrincipalState *PrincipalState) int {
 	o := 0
 	switch a.Kind {
 	case typesEnumPrimitive:
-		switch a.Primitive.ID {
+		switch a.Data.(*Primitive).ID {
 		case primitiveEnumCONCAT:
-			for i := 0; i < len(a.Primitive.Arguments); i++ {
-				if attackerStatePutWrite(a.Primitive.Arguments[i], valPrincipalState) {
+			for i := 0; i < len(a.Data.(*Primitive).Arguments); i++ {
+				if attackerStatePutWrite(a.Data.(*Primitive).Arguments[i], valPrincipalState) {
 					InfoMessage(fmt.Sprintf(
 						"%s obtained as a concatenated fragment of %s.",
-						infoOutputText(a.Primitive.Arguments[i]), prettyValue(a),
+						infoOutputText(a.Data.(*Primitive).Arguments[i]), prettyValue(a),
 					), "deduction", true)
 					o = o + 1
 				}

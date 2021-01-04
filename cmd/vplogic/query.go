@@ -37,8 +37,8 @@ func queryConfidentiality(
 		Options:  []QueryOptionResult{},
 	}
 	v, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
-		Kind:     typesEnumConstant,
-		Constant: query.Constants[0],
+		Kind: typesEnumConstant,
+		Data: query.Constants[0],
 	}, valKnowledgeMap)
 	ii := valueEquivalentValueInValues(v, valAttackerState.Known)
 	if ii < 0 {
@@ -131,18 +131,18 @@ func queryAuthenticationGetPassIndices(
 			return indices, sender, c
 		}
 		b := valPrincipalState.BeforeRewrite[iiii]
-		if primitiveIsCorePrim(b.Primitive.ID) {
-			prim, _ := primitiveCoreGet(b.Primitive.ID)
+		if primitiveIsCorePrim(b.Data.(*Primitive).ID) {
+			prim, _ := primitiveCoreGet(b.Data.(*Primitive).ID)
 			hasRule = prim.HasRule
 		} else {
-			prim, _ := primitiveGet(b.Primitive.ID)
+			prim, _ := primitiveGet(b.Data.(*Primitive).ID)
 			hasRule = prim.Rewrite.HasRule
 		}
 		if !hasRule {
 			indices = append(indices, iiii)
 			continue
 		}
-		pass, _ := possibleToRewrite(b.Primitive, valPrincipalState)
+		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState)
 		if pass {
 			indices = append(indices, iiii)
 		}
@@ -182,8 +182,8 @@ func queryFreshness(
 	}
 	indices := []int{}
 	freshnessFound, err := valueContainsFreshValues(&Value{
-		Kind:     typesEnumConstant,
-		Constant: query.Constants[0],
+		Kind: typesEnumConstant,
+		Data: query.Constants[0],
 	}, query.Constants[0], valPrincipalState, valAttackerState)
 	if err != nil {
 		return result, err
@@ -209,18 +209,18 @@ func queryFreshness(
 			return result, nil
 		}
 		b := valPrincipalState.BeforeRewrite[ii]
-		if primitiveIsCorePrim(b.Primitive.ID) {
-			prim, _ := primitiveCoreGet(b.Primitive.ID)
+		if primitiveIsCorePrim(b.Data.(*Primitive).ID) {
+			prim, _ := primitiveCoreGet(b.Data.(*Primitive).ID)
 			hasRule = prim.HasRule
 		} else {
-			prim, _ := primitiveGet(b.Primitive.ID)
+			prim, _ := primitiveGet(b.Data.(*Primitive).ID)
 			hasRule = prim.Rewrite.HasRule
 		}
 		if !hasRule {
 			indices = append(indices, ii)
 			continue
 		}
-		pass, _ := possibleToRewrite(b.Primitive, valPrincipalState)
+		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState)
 		if pass {
 			indices = append(indices, ii)
 		}
@@ -269,8 +269,8 @@ func queryUnlinkability(
 	noFreshness := []*Constant{}
 	for _, c := range query.Constants {
 		freshnessFound, err := valueContainsFreshValues(&Value{
-			Kind:     typesEnumConstant,
-			Constant: c,
+			Kind: typesEnumConstant,
+			Data: c,
 		}, c, valPrincipalState, valAttackerState)
 		if err != nil {
 			return result, err
@@ -316,8 +316,8 @@ func queryUnlinkability(
 			obtainable := false
 			switch assigneds[i].Kind {
 			case typesEnumPrimitive:
-				ok0, _ := possibleToReconstructPrimitive(assigneds[i].Primitive, valPrincipalState, valAttackerState)
-				ok1, _, _ := possibleToRecomposePrimitive(assigneds[i].Primitive, valAttackerState)
+				ok0, _ := possibleToReconstructPrimitive(assigneds[i].Data.(*Primitive), valPrincipalState, valAttackerState)
+				ok1, _, _ := possibleToRecomposePrimitive(assigneds[i].Data.(*Primitive), valAttackerState)
 				obtainable = ok0 || ok1
 			}
 			if !obtainable {

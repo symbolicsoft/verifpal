@@ -24,7 +24,7 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 	}
 	declaredAt := 0
 	currentPhase := 0
-	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Constant)
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Data.(*Constant))
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueG)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
@@ -36,7 +36,7 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 			map[principalEnum]principalEnum{principalID: principalID},
 		)
 	}
-	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueNil.Constant)
+	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueNil.Data.(*Constant))
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueNil)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
@@ -148,8 +148,8 @@ func constructKnowledgeMapRenderKnows(
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
-			Kind:     typesEnumConstant,
-			Constant: c,
+			Kind: typesEnumConstant,
+			Data: c,
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
@@ -193,8 +193,8 @@ func constructKnowledgeMapRenderGenerates(
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
-			Kind:     typesEnumConstant,
-			Constant: c,
+			Kind: typesEnumConstant,
+			Data: c,
 		})
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
@@ -213,7 +213,7 @@ func constructKnowledgeMapRenderAssignment(
 	}
 	switch expr.Assigned.Kind {
 	case typesEnumPrimitive:
-		err := sanityPrimitive(expr.Assigned.Primitive, expr.Constants)
+		err := sanityPrimitive(expr.Assigned.Data.(*Primitive), expr.Constants)
 		if err != nil {
 			return &KnowledgeMap{}, err
 		}
@@ -261,7 +261,7 @@ func constructKnowledgeMapRenderAssignment(
 		a := valueDeepCopy(expr.Assigned)
 		switch a.Kind {
 		case typesEnumPrimitive:
-			a.Primitive.Output = i
+			a.Data.(*Primitive).Output = i
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &a)

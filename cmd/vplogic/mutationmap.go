@@ -31,7 +31,7 @@ func mutationMapInit(
 		case typesEnumEquation:
 			continue
 		}
-		a, i := valueResolveConstant(v.Constant, valPrincipalState)
+		a, i := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
@@ -72,7 +72,7 @@ func mutationMapSkipValue(
 		return true
 	case !intInSlice(valAttackerState.CurrentPhase, valPrincipalState.Phase[i]):
 		return true
-	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.ID, v.Constant):
+	case !valueConstantIsUsedByPrincipalInKnowledgeMap(valKnowledgeMap, valPrincipalState.ID, v.Data.(*Constant)):
 		return true
 	}
 	return false
@@ -84,20 +84,20 @@ func mutationMapReplaceValue(
 ) (*Constant, []*Value, error) {
 	switch a.Kind {
 	case typesEnumConstant:
-		return v.Constant, mutationMapReplaceConstant(
+		return v.Data.(*Constant), mutationMapReplaceConstant(
 			a, stage, valPrincipalState, valAttackerState,
 		), nil
 	case typesEnumPrimitive:
 		p, err := mutationMapReplacePrimitive(
 			a, rootIndex, stage, valPrincipalState, valAttackerState,
 		)
-		return v.Constant, p, err
+		return v.Data.(*Constant), p, err
 	case typesEnumEquation:
-		return v.Constant, mutationMapReplaceEquation(
+		return v.Data.(*Constant), mutationMapReplaceEquation(
 			a, stage, valAttackerState,
 		), nil
 	}
-	return v.Constant, []*Value{}, fmt.Errorf("invalid value kind")
+	return v.Data.(*Constant), []*Value{}, fmt.Errorf("invalid value kind")
 }
 
 func mutationMapReplaceConstant(
@@ -105,7 +105,7 @@ func mutationMapReplaceConstant(
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) []*Value {
 	mutations := []*Value{}
-	if valueIsGOrNil(a.Constant) {
+	if valueIsGOrNil(a.Data.(*Constant)) {
 		return mutations
 	}
 	mutations = append(mutations, valueNil)
@@ -115,10 +115,10 @@ func mutationMapReplaceConstant(
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case typesEnumConstant:
-			if valueIsGOrNil(v.Constant) {
+			if valueIsGOrNil(v.Data.(*Constant)) {
 				continue
 			}
-			c, _ := valueResolveConstant(v.Constant, valPrincipalState)
+			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
 			switch c.Kind {
 			case typesEnumConstant:
 				if valueEquivalentValueInValues(c, mutations) < 0 {
@@ -139,10 +139,10 @@ func mutationMapReplacePrimitive(
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case typesEnumConstant:
-			if valueIsGOrNil(v.Constant) {
+			if valueIsGOrNil(v.Data.(*Constant)) {
 				continue
 			}
-			c, _ := valueResolveConstant(v.Constant, valPrincipalState)
+			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
 			switch c.Kind {
 			case typesEnumConstant:
 				if valueEquivalentValueInValues(c, mutations) < 0 {
@@ -156,7 +156,7 @@ func mutationMapReplacePrimitive(
 			if err != nil {
 				return []*Value{}, err
 			}
-			if !injectSkeletonNotDeeper(v.Primitive, a.Primitive) {
+			if !injectSkeletonNotDeeper(v.Data.(*Primitive), a.Data.(*Primitive)) {
 				continue
 			}
 			if valueEquivalentValueInValues(v, mutations) < 0 {
@@ -165,7 +165,7 @@ func mutationMapReplacePrimitive(
 		}
 	}
 	injectants := inject(
-		a.Primitive, 0,
+		a.Data.(*Primitive), 0,
 		valPrincipalState, valAttackerState, stage,
 	)
 	uinjectants := []*Value{}
@@ -182,7 +182,7 @@ func mutationMapReplaceEquation(
 	a *Value, stage int, valAttackerState AttackerState,
 ) []*Value {
 	mutations := []*Value{}
-	switch len(a.Equation.Values) {
+	switch len(a.Data.(*Equation).Values) {
 	case 1:
 		mutations = append(mutations, valueG)
 	case 2:
@@ -196,8 +196,8 @@ func mutationMapReplaceEquation(
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
 		case typesEnumEquation:
-			switch len(v.Equation.Values) {
-			case len(a.Equation.Values):
+			switch len(v.Data.(*Equation).Values) {
+			case len(a.Data.(*Equation).Values):
 				if valueEquivalentValueInValues(v, mutations) < 0 {
 					mutations = append(mutations, v)
 				}

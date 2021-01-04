@@ -204,18 +204,18 @@ func infoOutputText(revealed *Value) string {
 		return outputText
 	case typesEnumPrimitive:
 		oneOutput := false
-		if primitiveIsCorePrim(revealed.Primitive.ID) {
-			prim, _ := primitiveCoreGet(revealed.Primitive.ID)
+		if primitiveIsCorePrim(revealed.Data.(*Primitive).ID) {
+			prim, _ := primitiveCoreGet(revealed.Data.(*Primitive).ID)
 			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		} else {
-			prim, _ := primitiveGet(revealed.Primitive.ID)
+			prim, _ := primitiveGet(revealed.Data.(*Primitive).ID)
 			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		}
 		if oneOutput {
 			return fmt.Sprintf("Output of %s", outputText)
 		}
 		prefix := fmt.Sprintf("%s output",
-			strings.Title(infoLiteralNumber(revealed.Primitive.Output)),
+			strings.Title(infoLiteralNumber(revealed.Data.(*Primitive).Output)),
 		)
 		return fmt.Sprintf("%s of %s", prefix, outputText)
 	case typesEnumEquation:

@@ -10,7 +10,7 @@ import (
 
 var valueG = &Value{
 	Kind: typesEnumConstant,
-	Constant: &Constant{
+	Data: &Constant{
 		Name:        "g",
 		ID:          0,
 		Guard:       false,
@@ -23,7 +23,7 @@ var valueG = &Value{
 
 var valueNil = &Value{
 	Kind: typesEnumConstant,
-	Constant: &Constant{
+	Data: &Constant{
 		Name:        "nil",
 		ID:          1,
 		Guard:       false,
@@ -36,21 +36,21 @@ var valueNil = &Value{
 
 var valueGNil = &Value{
 	Kind: typesEnumEquation,
-	Equation: &Equation{
+	Data: &Equation{
 		Values: []*Value{valueG, valueNil},
 	},
 }
 
 var valueGNilNil = &Value{
 	Kind: typesEnumEquation,
-	Equation: &Equation{
+	Data: &Equation{
 		Values: []*Value{valueG, valueNil, valueNil},
 	},
 }
 
 var valueNamesMap map[string]valueEnum = map[string]valueEnum{
-	"g":   valueG.Constant.ID,
-	"nil": valueNil.Constant.ID,
+	"g":   valueG.Data.(*Constant).ID,
+	"nil": valueNil.Data.(*Constant).ID,
 }
 
 var valueNamesMapCounter valueEnum = 2
@@ -67,7 +67,7 @@ func valueNamesMapAdd(name string) valueEnum {
 
 func valueIsGOrNil(c *Constant) bool {
 	switch c.ID {
-	case valueG.Constant.ID, valueNil.Constant.ID:
+	case valueG.Data.(*Constant).ID, valueNil.Data.(*Constant).ID:
 		return true
 	}
 	return false
@@ -95,11 +95,11 @@ func valueGetConstantsFromValue(v *Value) []*Constant {
 	c := []*Constant{}
 	switch v.Kind {
 	case typesEnumConstant:
-		c = append(c, v.Constant)
+		c = append(c, v.Data.(*Constant))
 	case typesEnumPrimitive:
-		c = append(c, valueGetConstantsFromPrimitive(v.Primitive)...)
+		c = append(c, valueGetConstantsFromPrimitive(v.Data.(*Primitive))...)
 	case typesEnumEquation:
-		c = append(c, valueGetConstantsFromEquation(v.Equation)...)
+		c = append(c, valueGetConstantsFromEquation(v.Data.(*Equation))...)
 	}
 	return c
 }
@@ -109,11 +109,11 @@ func valueGetConstantsFromPrimitive(p *Primitive) []*Constant {
 	for _, a := range p.Arguments {
 		switch a.Kind {
 		case typesEnumConstant:
-			c = append(c, a.Constant)
+			c = append(c, a.Data.(*Constant))
 		case typesEnumPrimitive:
-			c = append(c, valueGetConstantsFromPrimitive(a.Primitive)...)
+			c = append(c, valueGetConstantsFromPrimitive(a.Data.(*Primitive))...)
 		case typesEnumEquation:
-			c = append(c, valueGetConstantsFromEquation(a.Equation)...)
+			c = append(c, valueGetConstantsFromEquation(a.Data.(*Equation))...)
 		}
 	}
 	return c
@@ -124,11 +124,11 @@ func valueGetConstantsFromEquation(e *Equation) []*Constant {
 	for _, a := range e.Values {
 		switch a.Kind {
 		case typesEnumConstant:
-			c = append(c, a.Constant)
+			c = append(c, a.Data.(*Constant))
 		case typesEnumPrimitive:
-			c = append(c, valueGetConstantsFromPrimitive(a.Primitive)...)
+			c = append(c, valueGetConstantsFromPrimitive(a.Data.(*Primitive))...)
 		case typesEnumEquation:
-			c = append(c, valueGetConstantsFromEquation(a.Equation)...)
+			c = append(c, valueGetConstantsFromEquation(a.Data.(*Equation))...)
 		}
 	}
 	return c
@@ -140,15 +140,15 @@ func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
 	}
 	switch a1.Kind {
 	case typesEnumConstant:
-		return a1.Constant.ID == a2.Constant.ID
+		return a1.Data.(*Constant).ID == a2.Data.(*Constant).ID
 	case typesEnumPrimitive:
 		equivPrim, _, _ := valueEquivalentPrimitives(
-			a1.Primitive, a2.Primitive, considerOutput,
+			a1.Data.(*Primitive), a2.Data.(*Primitive), considerOutput,
 		)
 		return equivPrim
 	case typesEnumEquation:
 		return valueEquivalentEquations(
-			a1.Equation, a2.Equation,
+			a1.Data.(*Equation), a2.Data.(*Equation),
 		)
 	}
 	return false
@@ -201,8 +201,8 @@ func valueEquivalentEquationsRule(base1 *Value, base2 *Value, exp1 *Value, exp2 
 
 func valueFindConstantInPrimitive(c *Constant, a *Value, valKnowledgeMap *KnowledgeMap) bool {
 	v := &Value{
-		Kind:     typesEnumConstant,
-		Constant: c,
+		Kind: typesEnumConstant,
+		Data: c,
 	}
 	_, vv := valueResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
 	return valueEquivalentValueInValues(v, vv) >= 0
@@ -224,7 +224,7 @@ func valuePerformPrimitiveRewrite(
 	rewrite, failedRewrites, rewritten := valuePerformPrimitiveArgumentsRewrite(
 		p, valPrincipalState,
 	)
-	rebuilt, rebuild := possibleToRebuild(rewrite.Primitive)
+	rebuilt, rebuild := possibleToRebuild(rewrite.Data.(*Primitive))
 	if rebuilt {
 		rewrite = rebuild
 		if pi >= 0 {
@@ -239,10 +239,10 @@ func valuePerformPrimitiveRewrite(
 		}
 	}
 	rewrittenRoot, rewrittenValues := possibleToRewrite(
-		rewrite.Primitive, valPrincipalState,
+		rewrite.Data.(*Primitive), valPrincipalState,
 	)
 	if !rewrittenRoot {
-		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Primitive)
+		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Data.(*Primitive))
 	} else if primitiveIsCorePrim(p.ID) {
 		rIndex = p.Output
 	}
@@ -272,7 +272,7 @@ func valuePerformPrimitiveArgumentsRewrite(
 ) (*Value, []*Primitive, bool) {
 	rewrite := &Value{
 		Kind: typesEnumPrimitive,
-		Primitive: &Primitive{
+		Data: &Primitive{
 			ID:        p.ID,
 			Arguments: make([]*Value, len(p.Arguments)),
 			Output:    p.Output,
@@ -284,28 +284,28 @@ func valuePerformPrimitiveArgumentsRewrite(
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case typesEnumConstant:
-			rewrite.Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Data.(*Primitive).Arguments[i] = p.Arguments[i]
 		case typesEnumPrimitive:
 			pFailedRewrite, pRewritten, pRewrite := valuePerformPrimitiveRewrite(
-				a.Primitive, -1, valPrincipalState,
+				a.Data.(*Primitive), -1, valPrincipalState,
 			)
 			if pRewritten {
 				rewritten = true
-				rewrite.Primitive.Arguments[i] = pRewrite
+				rewrite.Data.(*Primitive).Arguments[i] = pRewrite
 				continue
 			}
-			rewrite.Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Data.(*Primitive).Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, pFailedRewrite...)
 		case typesEnumEquation:
 			eFailedRewrite, eRewritten, eRewrite := valuePerformEquationRewrite(
-				a.Equation, -1, valPrincipalState,
+				a.Data.(*Equation), -1, valPrincipalState,
 			)
 			if eRewritten {
 				rewritten = true
-				rewrite.Primitive.Arguments[i] = eRewrite
+				rewrite.Data.(*Primitive).Arguments[i] = eRewrite
 				continue
 			}
-			rewrite.Primitive.Arguments[i] = p.Arguments[i]
+			rewrite.Data.(*Primitive).Arguments[i] = p.Arguments[i]
 			failedRewrites = append(failedRewrites, eFailedRewrite...)
 		}
 	}
@@ -319,54 +319,54 @@ func valuePerformEquationRewrite(
 	failedRewrites := []*Primitive{}
 	rewrite := &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{},
 		},
 	}
 	for i, a := range e.Values {
 		switch a.Kind {
 		case typesEnumConstant:
-			rewrite.Equation.Values = append(rewrite.Equation.Values, a)
+			rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, a)
 		case typesEnumPrimitive:
 			hasRule := false
-			if primitiveIsCorePrim(a.Primitive.ID) {
-				prim, _ := primitiveCoreGet(a.Primitive.ID)
+			if primitiveIsCorePrim(a.Data.(*Primitive).ID) {
+				prim, _ := primitiveCoreGet(a.Data.(*Primitive).ID)
 				hasRule = prim.HasRule
 			} else {
-				prim, _ := primitiveGet(a.Primitive.ID)
+				prim, _ := primitiveGet(a.Data.(*Primitive).ID)
 				hasRule = prim.Rewrite.HasRule
 			}
 			if !hasRule {
 				continue
 			}
 			pFailedRewrite, pRewritten, pRewrite := valuePerformPrimitiveRewrite(
-				a.Primitive, -1, valPrincipalState,
+				a.Data.(*Primitive), -1, valPrincipalState,
 			)
 			if !pRewritten {
-				rewrite.Equation.Values = append(rewrite.Equation.Values, e.Values[i])
+				rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, e.Values[i])
 				failedRewrites = append(failedRewrites, pFailedRewrite...)
 				continue
 			}
 			rewritten = true
 			switch pRewrite.Kind {
 			case typesEnumConstant:
-				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite)
+				rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, pRewrite)
 			case typesEnumPrimitive:
-				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite)
+				rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, pRewrite)
 			case typesEnumEquation:
-				rewrite.Equation.Values = append(rewrite.Equation.Values, pRewrite.Equation.Values...)
+				rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, pRewrite.Data.(*Equation).Values...)
 			}
 		case typesEnumEquation:
 			eFailedRewrite, eRewritten, eRewrite := valuePerformEquationRewrite(
-				a.Equation, -1, valPrincipalState,
+				a.Data.(*Equation), -1, valPrincipalState,
 			)
 			if !eRewritten {
-				rewrite.Equation.Values = append(rewrite.Equation.Values, e.Values[i])
+				rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, e.Values[i])
 				failedRewrites = append(failedRewrites, eFailedRewrite...)
 				continue
 			}
 			rewritten = true
-			rewrite.Equation.Values = append(rewrite.Equation.Values, eRewrite)
+			rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, eRewrite)
 		}
 	}
 	if rewritten && pi >= 0 {
@@ -386,7 +386,7 @@ func valuePerformAllRewrites(valPrincipalState *PrincipalState) ([]*Primitive, [
 		switch valPrincipalState.Assigned[i].Kind {
 		case typesEnumPrimitive:
 			failedRewrite, _, _ := valuePerformPrimitiveRewrite(
-				valPrincipalState.Assigned[i].Primitive, i, valPrincipalState,
+				valPrincipalState.Assigned[i].Data.(*Primitive), i, valPrincipalState,
 			)
 			if len(failedRewrite) == 0 {
 				continue
@@ -397,7 +397,7 @@ func valuePerformAllRewrites(valPrincipalState *PrincipalState) ([]*Primitive, [
 			}
 		case typesEnumEquation:
 			failedRewrite, _, _ := valuePerformEquationRewrite(
-				valPrincipalState.Assigned[i].Equation, i, valPrincipalState,
+				valPrincipalState.Assigned[i].Data.(*Equation), i, valPrincipalState,
 			)
 			if len(failedRewrite) == 0 {
 				continue
@@ -430,7 +430,7 @@ func valueShouldResolveToBeforeMutate(i int, valPrincipalState *PrincipalState) 
 func valueResolveConstant(c *Constant, valPrincipalState *PrincipalState) (*Value, int) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	if i < 0 {
-		return &Value{Kind: typesEnumConstant, Constant: c}, i
+		return &Value{Kind: typesEnumConstant, Data: c}, i
 	}
 	if valueShouldResolveToBeforeMutate(i, valPrincipalState) {
 		return valPrincipalState.BeforeMutate[i], i
@@ -447,7 +447,7 @@ func valueResolveValueInternalValuesFromKnowledgeMap(
 		if valueEquivalentValueInValues(a, v) < 0 {
 			v = append(v, a)
 		}
-		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.Constant)
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, a.Data.(*Constant))
 		a = valKnowledgeMap.Assigned[i]
 	}
 	switch a.Kind {
@@ -478,21 +478,21 @@ func valueResolvePrimitiveInternalValuesFromKnowledgeMap(
 ) (*Value, []*Value) {
 	r := &Value{
 		Kind: typesEnumPrimitive,
-		Primitive: &Primitive{
-			ID:        a.Primitive.ID,
+		Data: &Primitive{
+			ID:        a.Data.(*Primitive).ID,
 			Arguments: []*Value{},
-			Output:    a.Primitive.Output,
-			Check:     a.Primitive.Check,
+			Output:    a.Data.(*Primitive).Output,
+			Check:     a.Data.(*Primitive).Check,
 		},
 	}
-	for _, aa := range a.Primitive.Arguments {
+	for _, aa := range a.Data.(*Primitive).Arguments {
 		s, vv := valueResolveValueInternalValuesFromKnowledgeMap(aa, valKnowledgeMap)
 		for _, vvv := range vv {
 			if valueEquivalentValueInValues(vvv, v) < 0 {
 				v = append(v, vvv)
 			}
 		}
-		r.Primitive.Arguments = append(r.Primitive.Arguments, s)
+		r.Data.(*Primitive).Arguments = append(r.Data.(*Primitive).Arguments, s)
 	}
 	return r, v
 }
@@ -502,37 +502,37 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 ) (*Value, []*Value) {
 	r := &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{},
 		},
 	}
 	aa := []*Value{}
-	for _, c := range a.Equation.Values {
-		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.Constant)
+	for _, c := range a.Data.(*Equation).Values {
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c.Data.(*Constant))
 		aa = append(aa, valKnowledgeMap.Assigned[i])
 	}
 	for aai := range aa {
 		switch aa[aai].Kind {
 		case typesEnumConstant:
-			i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].Constant)
+			i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, aa[aai].Data.(*Constant))
 			aa[aai] = valKnowledgeMap.Assigned[i]
 		}
 	}
 	for aai := range aa {
 		switch aa[aai].Kind {
 		case typesEnumConstant:
-			r.Equation.Values = append(r.Equation.Values, aa[aai])
+			r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aa[aai])
 		case typesEnumPrimitive:
 			aaa, _ := valueResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
-			r.Equation.Values = append(r.Equation.Values, aaa)
+			r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aaa)
 		case typesEnumEquation:
 			aaa, _ := valueResolveValueInternalValuesFromKnowledgeMap(aa[aai], valKnowledgeMap)
-			r.Equation.Values = append(r.Equation.Values, aaa)
+			r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aaa)
 			if aai == 0 {
-				r.Equation.Values = aaa.Equation.Values
+				r.Data.(*Equation).Values = aaa.Data.(*Equation).Values
 			} else {
-				r.Equation.Values = append(
-					r.Equation.Values, aaa.Equation.Values[1:]...,
+				r.Data.(*Equation).Values = append(
+					r.Data.(*Equation).Values, aaa.Data.(*Equation).Values[1:]...,
 				)
 			}
 			if valueEquivalentValueInValues(aa[aai], v) < 0 {
@@ -552,7 +552,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 ) (*Value, error) {
 	switch a.Kind {
 	case typesEnumConstant:
-		nextRootIndex := valueGetPrincipalStateIndexFromConstant(valPrincipalState, a.Constant)
+		nextRootIndex := valueGetPrincipalStateIndexFromConstant(valPrincipalState, a.Data.(*Constant))
 		if nextRootIndex < 0 {
 			return a, errors.New("invalid index")
 		}
@@ -564,7 +564,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 			if forceBeforeMutate {
 				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a, _ = valueResolveConstant(a.Constant, valPrincipalState)
+				a, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState)
 			}
 		default:
 			switch rootValue.Kind {
@@ -614,22 +614,22 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	}
 	r := &Value{
 		Kind: typesEnumPrimitive,
-		Primitive: &Primitive{
-			ID:        a.Primitive.ID,
+		Data: &Primitive{
+			ID:        a.Data.(*Primitive).ID,
 			Arguments: []*Value{},
-			Output:    a.Primitive.Output,
-			Check:     a.Primitive.Check,
+			Output:    a.Data.(*Primitive).Output,
+			Check:     a.Data.(*Primitive).Check,
 		},
 	}
-	for i := 0; i < len(a.Primitive.Arguments); i++ {
+	for i := 0; i < len(a.Data.(*Primitive).Arguments); i++ {
 		s, err := valueResolveValueInternalValuesFromPrincipalState(
-			a.Primitive.Arguments[i], rootValue, rootIndex, valPrincipalState,
+			a.Data.(*Primitive).Arguments[i], rootValue, rootIndex, valPrincipalState,
 			valAttackerState, forceBeforeMutate,
 		)
 		if err != nil {
 			return &Value{}, err
 		}
-		r.Primitive.Arguments = append(r.Primitive.Arguments, s)
+		r.Data.(*Primitive).Arguments = append(r.Data.(*Primitive).Arguments, s)
 	}
 	return r, nil
 }
@@ -643,17 +643,17 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 	}
 	r := &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{},
 		},
 	}
 	aa := []*Value{}
-	aa = append(aa, a.Equation.Values...)
+	aa = append(aa, a.Data.(*Equation).Values...)
 	for aai := range aa {
 		switch aa[aai].Kind {
 		case typesEnumConstant:
 			var i int
-			aa[aai], i = valueResolveConstant(aa[aai].Constant, valPrincipalState)
+			aa[aai], i = valueResolveConstant(aa[aai].Data.(*Constant), valPrincipalState)
 			if forceBeforeMutate {
 				aa[aai] = valPrincipalState.BeforeMutate[i]
 			}
@@ -662,7 +662,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 	for aai := range aa {
 		switch aa[aai].Kind {
 		case typesEnumConstant:
-			r.Equation.Values = append(r.Equation.Values, aa[aai])
+			r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aa[aai])
 		case typesEnumPrimitive:
 			aaa, err := valueResolveValueInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex,
@@ -671,7 +671,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 			if err != nil {
 				return &Value{}, err
 			}
-			r.Equation.Values = append(r.Equation.Values, aaa)
+			r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aaa)
 		case typesEnumEquation:
 			aaa, err := valueResolveEquationInternalValuesFromPrincipalState(
 				aa[aai], rootValue, rootIndex,
@@ -681,9 +681,9 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 				return &Value{}, err
 			}
 			if aai == 0 {
-				r.Equation.Values = aaa.Equation.Values
+				r.Data.(*Equation).Values = aaa.Data.(*Equation).Values
 			} else {
-				r.Equation.Values = append(r.Equation.Values, aaa.Equation.Values[1:]...)
+				r.Data.(*Equation).Values = append(r.Data.(*Equation).Values, aaa.Data.(*Equation).Values[1:]...)
 			}
 		}
 	}
@@ -704,7 +704,7 @@ func valueConstantIsUsedByPrincipalInKnowledgeMap(
 			if valueEquivalentValueInValues(valKnowledgeMap.Assigned[i], v) >= 0 {
 				return true
 			}
-			if valueEquivalentValueInValues(&Value{Kind: typesEnumConstant, Constant: c}, v) >= 0 {
+			if valueEquivalentValueInValues(&Value{Kind: typesEnumConstant, Data: c}, v) >= 0 {
 				return true
 			}
 		}
@@ -766,32 +766,32 @@ func valueDeepCopy(v *Value) Value {
 	}
 	switch v.Kind {
 	case typesEnumConstant:
-		d.Constant = &Constant{
-			Name:        v.Constant.Name,
-			ID:          v.Constant.ID,
-			Guard:       v.Constant.Guard,
-			Fresh:       v.Constant.Fresh,
-			Leaked:      v.Constant.Leaked,
-			Declaration: v.Constant.Declaration,
+		d.Data = &Constant{
+			Name:        v.Data.(*Constant).Name,
+			ID:          v.Data.(*Constant).ID,
+			Guard:       v.Data.(*Constant).Guard,
+			Fresh:       v.Data.(*Constant).Fresh,
+			Leaked:      v.Data.(*Constant).Leaked,
+			Declaration: v.Data.(*Constant).Declaration,
 		}
 	case typesEnumPrimitive:
-		d.Primitive = &Primitive{
-			ID:        v.Primitive.ID,
+		d.Data = &Primitive{
+			ID:        v.Data.(*Primitive).ID,
 			Arguments: []*Value{},
-			Output:    v.Primitive.Output,
-			Check:     v.Primitive.Check,
+			Output:    v.Data.(*Primitive).Output,
+			Check:     v.Data.(*Primitive).Check,
 		}
-		for i := 0; i < len(v.Primitive.Arguments); i++ {
-			arg := valueDeepCopy(v.Primitive.Arguments[i])
-			d.Primitive.Arguments = append(d.Primitive.Arguments, &arg)
+		for i := 0; i < len(v.Data.(*Primitive).Arguments); i++ {
+			arg := valueDeepCopy(v.Data.(*Primitive).Arguments[i])
+			d.Data.(*Primitive).Arguments = append(d.Data.(*Primitive).Arguments, &arg)
 		}
 	case typesEnumEquation:
-		d.Equation = &Equation{
+		d.Data = &Equation{
 			Values: []*Value{},
 		}
-		for i := 0; i < len(v.Equation.Values); i++ {
-			arg := valueDeepCopy(v.Equation.Values[i])
-			d.Equation.Values = append(d.Equation.Values, &arg)
+		for i := 0; i < len(v.Data.(*Equation).Values); i++ {
+			arg := valueDeepCopy(v.Data.(*Equation).Values[i])
+			d.Data.(*Equation).Values = append(d.Data.(*Equation).Values, &arg)
 		}
 	}
 	return d

@@ -140,26 +140,26 @@ func verifyActiveMutatePrincipalState(
 		}
 		switch ar.Kind {
 		case typesEnumPrimitive:
-			_, aar := possibleToRewrite(ar.Primitive, valPrincipalState)
+			_, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
 			switch aar[0].Kind {
 			case typesEnumPrimitive:
-				ar.Primitive = aar[0].Primitive
+				ar.Data = aar[0].Data.(*Primitive)
 			}
 		}
 		switch ac.Kind {
 		case typesEnumPrimitive:
-			_, aac := possibleToRewrite(ac.Primitive, valPrincipalState)
+			_, aac := possibleToRewrite(ac.Data.(*Primitive), valPrincipalState)
 			switch aac[0].Kind {
 			case typesEnumPrimitive:
-				ac.Primitive = aac[0].Primitive
+				ac.Data = aac[0].Data.(*Primitive)
 			}
 		}
 		switch ac.Kind {
 		case typesEnumPrimitive:
 			switch ar.Kind {
 			case typesEnumPrimitive:
-				ac.Primitive.Output = ar.Primitive.Output
-				ac.Primitive.Check = ar.Primitive.Check
+				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output
+				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check
 			}
 		}
 		if valueEquivalentValues(ac, ar, true) {

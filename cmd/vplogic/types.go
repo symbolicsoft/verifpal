@@ -107,10 +107,8 @@ type Expression struct {
 
 // Value represents either a constant, primitive or equation expression.
 type Value struct {
-	Kind      typesEnum
-	Constant  *Constant
-	Primitive *Primitive
-	Equation  *Equation
+	Kind typesEnum
+	Data interface{}
 }
 
 // Constant represents a constant expression:

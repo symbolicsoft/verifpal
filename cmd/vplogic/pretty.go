@@ -93,11 +93,11 @@ func prettyEquation(e *Equation) string {
 func prettyValue(a *Value) string {
 	switch a.Kind {
 	case typesEnumConstant:
-		return prettyConstant(a.Constant)
+		return prettyConstant(a.Data.(*Constant))
 	case typesEnumPrimitive:
-		return prettyPrimitive(a.Primitive)
+		return prettyPrimitive(a.Data.(*Primitive))
 	case typesEnumEquation:
-		return prettyEquation(a.Equation)
+		return prettyEquation(a.Data.(*Equation))
 	}
 	return ""
 }

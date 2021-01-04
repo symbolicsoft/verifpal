@@ -60,13 +60,13 @@ func sanityAssignmentConstants(
 	case typesEnumConstant:
 		unique := true
 		for _, c := range constants {
-			if right.Constant.ID == c.ID {
+			if right.Data.(*Constant).ID == c.ID {
 				unique = false
 				break
 			}
 		}
 		if unique {
-			constants = append(constants, right.Constant)
+			constants = append(constants, right.Data.(*Constant))
 		}
 	case typesEnumPrimitive:
 		sacfp, err := sanityAssignmentConstantsFromPrimitive(
@@ -87,8 +87,8 @@ func sanityAssignmentConstants(
 func sanityAssignmentConstantsFromPrimitive(
 	right *Value, constants []*Constant, valKnowledgeMap *KnowledgeMap,
 ) ([]*Constant, error) {
-	primArguments := len(right.Primitive.Arguments)
-	specArity, err := primitiveGetArity(right.Primitive)
+	primArguments := len(right.Data.(*Primitive).Arguments)
+	specArity, err := primitiveGetArity(right.Data.(*Primitive))
 	if err != nil {
 		return []*Constant{}, err
 	}
@@ -101,18 +101,18 @@ func sanityAssignmentConstantsFromPrimitive(
 			"primitive has %d inputs, expecting %s", primArguments, arityString,
 		)
 	}
-	for _, a := range right.Primitive.Arguments {
+	for _, a := range right.Data.(*Primitive).Arguments {
 		switch a.Kind {
 		case typesEnumConstant:
 			unique := true
 			for _, c := range constants {
-				if a.Constant.ID == c.ID {
+				if a.Data.(*Constant).ID == c.ID {
 					unique = false
 					break
 				}
 			}
 			if unique {
-				constants = append(constants, a.Constant)
+				constants = append(constants, a.Data.(*Constant))
 			}
 		case typesEnumPrimitive:
 			constants, err = sanityAssignmentConstants(a, constants, valKnowledgeMap)
@@ -130,16 +130,16 @@ func sanityAssignmentConstantsFromPrimitive(
 }
 
 func sanityAssignmentConstantsFromEquation(right *Value, constants []*Constant) []*Constant {
-	for _, v := range right.Equation.Values {
+	for _, v := range right.Data.(*Equation).Values {
 		unique := true
 		for _, c := range constants {
-			if v.Constant.ID == c.ID {
+			if v.Data.(*Constant).ID == c.ID {
 				unique = false
 				break
 			}
 		}
 		if unique {
-			constants = append(constants, v.Constant)
+			constants = append(constants, v.Data.(*Constant))
 		}
 	}
 	return constants
@@ -392,7 +392,7 @@ func sanityCheckEquationRootGenerator(e *Equation) error {
 		switch c.Kind {
 		case typesEnumConstant:
 			if i == 0 {
-				if c.Constant.ID != valueG.Constant.ID {
+				if c.Data.(*Constant).ID != valueG.Data.(*Constant).ID {
 					return fmt.Errorf(
 						"equation (%s) does not use 'g' as generator",
 						prettyEquation(e),
@@ -400,7 +400,7 @@ func sanityCheckEquationRootGenerator(e *Equation) error {
 				}
 			}
 			if i > 0 {
-				if c.Constant.ID == valueG.Constant.ID {
+				if c.Data.(*Constant).ID == valueG.Data.(*Constant).ID {
 					return fmt.Errorf(
 						"equation (%s) uses 'g' not as a generator",
 						prettyEquation(e),
@@ -416,19 +416,19 @@ func sanityCheckEquationGenerators(a *Value) error {
 	var err error
 	switch a.Kind {
 	case typesEnumPrimitive:
-		for _, va := range a.Primitive.Arguments {
+		for _, va := range a.Data.(*Primitive).Arguments {
 			switch va.Kind {
 			case typesEnumPrimitive:
 				err = sanityCheckEquationGenerators(va)
 			case typesEnumEquation:
-				err = sanityCheckEquationRootGenerator(va.Equation)
+				err = sanityCheckEquationRootGenerator(va.Data.(*Equation))
 			}
 			if err != nil {
 				return err
 			}
 		}
 	case typesEnumEquation:
-		err = sanityCheckEquationRootGenerator(a.Equation)
+		err = sanityCheckEquationRootGenerator(a.Data.(*Equation))
 		if err != nil {
 			return err
 		}

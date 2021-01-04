@@ -80,7 +80,7 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 		for _, a := range valPrincipalState.Assigned {
 			switch a.Kind {
 			case typesEnumPrimitive:
-				injectMissingSkeletons(a.Primitive, valPrincipalState, valAttackerState)
+				injectMissingSkeletons(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 			}
 		}
 		failedRewrites, _, valPrincipalState = valuePerformAllRewrites(valPrincipalState)

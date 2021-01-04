@@ -43,7 +43,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Output:  []int{1},
 		HasRule: true,
 		CoreRule: func(p *Primitive) (bool, []*Value) {
-			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
+			v := []*Value{{Kind: typesEnumPrimitive, Data: p}}
 			if valueEquivalentValues(p.Arguments[0], p.Arguments[1], true) {
 				return true, v
 			}
@@ -60,7 +60,7 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Output:  []int{1},
 		HasRule: false,
 		CoreRule: func(p *Primitive) (bool, []*Value) {
-			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
+			v := []*Value{{Kind: typesEnumPrimitive, Data: p}}
 			return false, v
 		},
 		Check:      false,
@@ -74,12 +74,12 @@ var primitiveCoreSpecs = []PrimitiveCoreSpec{
 		Output:  []int{1, 2, 3, 4, 5},
 		HasRule: true,
 		CoreRule: func(p *Primitive) (bool, []*Value) {
-			v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
+			v := []*Value{{Kind: typesEnumPrimitive, Data: p}}
 			switch p.Arguments[0].Kind {
 			case typesEnumConstant:
 				return false, v
 			case typesEnumPrimitive:
-				pp := p.Arguments[0].Primitive
+				pp := p.Arguments[0].Data.(*Primitive)
 				switch pp.ID {
 				case primitiveEnumCONCAT:
 					return true, pp.Arguments
@@ -380,12 +380,12 @@ var primitiveSpecs = []PrimitiveSpec{
 						return x, false
 					case typesEnumEquation:
 						switch {
-						case len(x.Equation.Values) != 2:
+						case len(x.Data.(*Equation).Values) != 2:
 							return x, false
-						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+						case !valueEquivalentValues(x.Data.(*Equation).Values[0], valueG, true):
 							return x, false
 						default:
-							return x.Equation.Values[1], true
+							return x.Data.(*Equation).Values[1], true
 						}
 					}
 				case 1:
@@ -421,12 +421,12 @@ var primitiveSpecs = []PrimitiveSpec{
 						return x, false
 					case typesEnumEquation:
 						switch {
-						case len(x.Equation.Values) != 2:
+						case len(x.Data.(*Equation).Values) != 2:
 							return x, false
-						case !valueEquivalentValues(x.Equation.Values[0], valueG, true):
+						case !valueEquivalentValues(x.Data.(*Equation).Values[0], valueG, true):
 							return x, false
 						default:
-							return x.Equation.Values[1], true
+							return x.Data.(*Equation).Values[1], true
 						}
 					}
 				case 1:
@@ -482,7 +482,7 @@ var primitiveSpecs = []PrimitiveSpec{
 					case typesEnumConstant, typesEnumPrimitive:
 						return &Value{
 							Kind: typesEnumEquation,
-							Equation: &Equation{
+							Data: &Equation{
 								Values: []*Value{valueG, x},
 							},
 						}, true
@@ -622,9 +622,9 @@ var primitiveSpecs = []PrimitiveSpec{
 					case typesEnumPrimitive:
 						return x, false
 					case typesEnumEquation:
-						switch len(x.Equation.Values) {
+						switch len(x.Data.(*Equation).Values) {
 						case 2:
-							return x.Equation.Values[1], true
+							return x.Data.(*Equation).Values[1], true
 						default:
 							return x, false
 						}
@@ -694,11 +694,11 @@ var primitiveSpecs = []PrimitiveSpec{
 			To: func(p *Primitive) *Value {
 				return &Value{
 					Kind: typesEnumPrimitive,
-					Primitive: &Primitive{
+					Data: &Primitive{
 						ID: primitiveEnumSIGN,
 						Arguments: []*Value{
 							p.Arguments[0],
-							p.Arguments[1].Primitive.Arguments[1],
+							p.Arguments[1].Data.(*Primitive).Arguments[1],
 						},
 						Output: 0,
 						Check:  false,
@@ -713,7 +713,7 @@ var primitiveSpecs = []PrimitiveSpec{
 				case 1:
 					blindPrim := &Value{
 						Kind: typesEnumPrimitive,
-						Primitive: &Primitive{
+						Data: &Primitive{
 							ID: primitiveEnumBLIND,
 							Arguments: []*Value{
 								p.Arguments[0], p.Arguments[1],

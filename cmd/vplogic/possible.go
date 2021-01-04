@@ -28,18 +28,18 @@ func possibleToDecomposePrimitive(
 		}
 		switch a.Kind {
 		case typesEnumPrimitive:
-			r, _ := possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
+			r, _ := possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case typesEnumEquation:
-			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Data.(*Equation), valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -71,7 +71,7 @@ func possibleToRecomposePrimitive(
 				switch v.Kind {
 				case typesEnumPrimitive:
 					equivPrim, vo, _ := valueEquivalentPrimitives(
-						v.Primitive, p, false,
+						v.Data.(*Primitive), p, false,
 					)
 					if !equivPrim || vo != ii {
 						continue
@@ -103,18 +103,18 @@ func possibleToReconstructPrimitive(
 		}
 		switch a.Kind {
 		case typesEnumPrimitive:
-			r, _, _ = possibleToDecomposePrimitive(a.Primitive, valPrincipalState, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.Primitive, valPrincipalState, valAttackerState)
+			r, _ = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
 			}
 		case typesEnumEquation:
-			r, _ := possibleToReconstructEquation(a.Equation, valAttackerState)
+			r, _ := possibleToReconstructEquation(a.Data.(*Equation), valAttackerState)
 			if r {
 				has = append(has, a)
 				continue
@@ -143,13 +143,13 @@ func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) 
 	}
 	p0 := &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{e.Values[0], e.Values[1]},
 		},
 	}
 	p1 := &Value{
 		Kind: typesEnumEquation,
-		Equation: &Equation{
+		Data: &Equation{
 			Values: []*Value{e.Values[0], e.Values[2]},
 		},
 	}
@@ -167,11 +167,11 @@ func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) 
 func possibleToRewrite(
 	p *Primitive, valPrincipalState *PrincipalState,
 ) (bool, []*Value) {
-	v := []*Value{{Kind: typesEnumPrimitive, Primitive: p}}
+	v := []*Value{{Kind: typesEnumPrimitive, Data: p}}
 	for i, a := range p.Arguments {
 		switch a.Kind {
 		case typesEnumPrimitive:
-			_, pp := possibleToRewrite(a.Primitive, valPrincipalState)
+			_, pp := possibleToRewrite(a.Data.(*Primitive), valPrincipalState)
 			p.Arguments[i] = pp[0]
 		}
 	}
@@ -189,13 +189,13 @@ func possibleToRewrite(
 	from := p.Arguments[prim.Rewrite.From]
 	switch from.Kind {
 	case typesEnumPrimitive:
-		if from.Primitive.ID != prim.Rewrite.ID {
+		if from.Data.(*Primitive).ID != prim.Rewrite.ID {
 			return !prim.Check, v
 		}
 		if !possibleToRewritePrim(p, valPrincipalState) {
 			return !prim.Check, v
 		}
-		rewrite := prim.Rewrite.To(from.Primitive)
+		rewrite := prim.Rewrite.To(from.Data.(*Primitive))
 		return true, []*Value{rewrite}
 	}
 	return !prim.Check, v
@@ -209,7 +209,7 @@ func possibleToRewritePrim(
 	for a, m := range prim.Rewrite.Matching {
 		valid := false
 		for _, mm := range m {
-			ax := []*Value{p.Arguments[a], from.Primitive.Arguments[mm]}
+			ax := []*Value{p.Arguments[a], from.Data.(*Primitive).Arguments[mm]}
 			ax[0], valid = prim.Rewrite.Filter(p, ax[0], mm)
 			if !valid {
 				continue
@@ -217,7 +217,7 @@ func possibleToRewritePrim(
 			for i := range ax {
 				switch ax[i].Kind {
 				case typesEnumPrimitive:
-					r, v := possibleToRewrite(ax[i].Primitive, valPrincipalState)
+					r, v := possibleToRewrite(ax[i].Data.(*Primitive), valPrincipalState)
 					if r {
 						ax[i] = v[0]
 					}
@@ -252,7 +252,7 @@ func possibleToRebuild(p *Primitive) (bool, *Value) {
 			}
 			switch p.Arguments[gg].Kind {
 			case typesEnumPrimitive:
-				if p.Arguments[gg].Primitive.ID == prim.Rebuild.ID {
+				if p.Arguments[gg].Data.(*Primitive).ID == prim.Rebuild.ID {
 					has = append(has, p.Arguments[gg])
 				}
 			}
@@ -261,14 +261,14 @@ func possibleToRebuild(p *Primitive) (bool, *Value) {
 			}
 			for hasP := 1; hasP < len(has); hasP++ {
 				equivPrim, o1, o2 := valueEquivalentPrimitives(
-					has[0].Primitive, has[hasP].Primitive, false,
+					has[0].Data.(*Primitive), has[hasP].Data.(*Primitive), false,
 				)
 				if !equivPrim || (o1 == o2) {
 					continue ggLoop
 				}
 			}
 			if len(has) == len(g) {
-				return true, has[0].Primitive.Arguments[prim.Rebuild.Reveal]
+				return true, has[0].Data.(*Primitive).Arguments[prim.Rebuild.Reveal]
 			}
 		}
 	}
@@ -281,13 +281,13 @@ func possibleToObtainPasswords(
 	passwords := []*Value{}
 	switch a.Kind {
 	case typesEnumConstant:
-		aa, _ := valueResolveConstant(a.Constant, valPrincipalState)
+		aa, _ := valueResolveConstant(a.Data.(*Constant), valPrincipalState)
 		switch aa.Kind {
 		case typesEnumConstant:
-			if aa.Constant.Qualifier == typesEnumPassword {
+			if aa.Data.(*Constant).Qualifier == typesEnumPassword {
 				if aIndex >= 0 {
-					if !primitiveIsCorePrim(aParent.Primitive.ID) {
-						prim, _ := primitiveGet(aParent.Primitive.ID)
+					if !primitiveIsCorePrim(aParent.Data.(*Primitive).ID) {
+						prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
 						if intInSlice(aIndex, prim.PasswordHashing) {
 							return passwords
 						}
@@ -297,21 +297,21 @@ func possibleToObtainPasswords(
 			}
 		}
 	case typesEnumPrimitive:
-		for i := 0; i < len(a.Primitive.Arguments); i++ {
-			if !primitiveIsCorePrim(a.Primitive.ID) {
-				prim, _ := primitiveGet(a.Primitive.ID)
+		for i := 0; i < len(a.Data.(*Primitive).Arguments); i++ {
+			if !primitiveIsCorePrim(a.Data.(*Primitive).ID) {
+				prim, _ := primitiveGet(a.Data.(*Primitive).ID)
 				if intInSlice(aIndex, prim.PasswordHashing) {
 					aParent = a
 				}
 			}
 			passwords = append(passwords,
-				possibleToObtainPasswords(a.Primitive.Arguments[i], aParent, i, valPrincipalState)...,
+				possibleToObtainPasswords(a.Data.(*Primitive).Arguments[i], aParent, i, valPrincipalState)...,
 			)
 		}
 	case typesEnumEquation:
-		for i := 0; i < len(a.Equation.Values); i++ {
+		for i := 0; i < len(a.Data.(*Equation).Values); i++ {
 			passwords = append(passwords,
-				possibleToObtainPasswords(a.Equation.Values[i], a, -1, valPrincipalState)...,
+				possibleToObtainPasswords(a.Data.(*Equation).Values[i], a, -1, valPrincipalState)...,
 			)
 		}
 	}

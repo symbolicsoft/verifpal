@@ -125,11 +125,11 @@ func pvEquation(valKnowledgeMap *KnowledgeMap, principal string, e *Equation) st
 func pvValue(valKnowledgeMap *KnowledgeMap, principal string, a *Value) string {
 	switch a.Kind {
 	case typesEnumConstant:
-		return pvConstant(valKnowledgeMap, principal, a.Constant, "")
+		return pvConstant(valKnowledgeMap, principal, a.Data.(*Constant), "")
 	case typesEnumPrimitive:
-		return pvPrimitive(valKnowledgeMap, principal, a.Primitive, false)
+		return pvPrimitive(valKnowledgeMap, principal, a.Data.(*Primitive), false)
 	case typesEnumEquation:
-		return pvEquation(valKnowledgeMap, principal, a.Equation)
+		return pvEquation(valKnowledgeMap, principal, a.Data.(*Equation))
 	}
 	return ""
 }
@@ -208,15 +208,15 @@ func pvPrincipal(
 			valType := "bitstring"
 			switch expression.Assigned.Kind {
 			case typesEnumPrimitive:
-				switch expression.Assigned.Primitive.ID {
+				switch expression.Assigned.Data.(*Primitive).ID {
 				case primitiveEnumSIGNVERIF, primitiveEnumRINGSIGNVERIF:
 					valType = "bool"
 				}
-				switch expression.Assigned.Primitive.Check {
+				switch expression.Assigned.Data.(*Primitive).Check {
 				case true:
 					procs = fmt.Sprintf("%s\tif %s = true then\n",
 						procs,
-						pvPrimitive(valKnowledgeMap, block.Principal.Name, expression.Assigned.Primitive, true),
+						pvPrimitive(valKnowledgeMap, block.Principal.Name, expression.Assigned.Data.(*Primitive), true),
 					)
 				}
 			}
