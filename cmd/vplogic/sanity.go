@@ -60,7 +60,7 @@ func sanityAssignmentConstants(
 	case typesEnumConstant:
 		unique := true
 		for _, c := range constants {
-			if right.Data.(*Constant).ID == c.ID {
+			if valueEquivalentConstants(right.Data.(*Constant), c) {
 				unique = false
 				break
 			}
@@ -106,7 +106,7 @@ func sanityAssignmentConstantsFromPrimitive(
 		case typesEnumConstant:
 			unique := true
 			for _, c := range constants {
-				if a.Data.(*Constant).ID == c.ID {
+				if valueEquivalentConstants(a.Data.(*Constant), c) {
 					unique = false
 					break
 				}
@@ -133,7 +133,7 @@ func sanityAssignmentConstantsFromEquation(right *Value, constants []*Constant) 
 	for _, v := range right.Data.(*Equation).Values {
 		unique := true
 		for _, c := range constants {
-			if v.Data.(*Constant).ID == c.ID {
+			if valueEquivalentConstants(v.Data.(*Constant), c) {
 				unique = false
 				break
 			}
@@ -431,7 +431,7 @@ func sanityCheckEquationRootGenerator(e *Equation) error {
 				}
 			}
 			if i > 0 {
-				if c.Data.(*Constant).ID == valueG.Data.(*Constant).ID {
+				if valueEquivalentConstants(c.Data.(*Constant), valueG.Data.(*Constant)) {
 					return fmt.Errorf(
 						"equation (%s) uses 'g' not as a generator",
 						prettyEquation(e),

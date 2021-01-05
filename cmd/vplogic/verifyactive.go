@@ -90,10 +90,10 @@ func verifyActiveScan(
 		scanGroup.Done()
 		return err
 	}
-	if valMutationMap.Worthwhile {
-		valPrincipalStateMutated := verifyActiveMutatePrincipalState(
-			constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
-		)
+	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
+		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
+	)
+	if isWorthwhileMutation {
 		scanGroup.Add(1)
 		go func() {
 			err = verifyAnalysis(
@@ -123,7 +123,8 @@ func verifyActiveScan(
 
 func verifyActiveMutatePrincipalState(
 	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
-) *PrincipalState {
+) (*PrincipalState, bool) {
+	isWorthwhileMutation := false
 MutationLoop:
 	for i := 0; i < len(valMutationMap.Constants); i++ {
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
@@ -131,31 +132,17 @@ MutationLoop:
 		ar, _ := valueResolveValueInternalValuesFromPrincipalState(
 			ai, ai, ii, valPrincipalState, valAttackerState, true,
 		)
-		switch ar.Kind {
-		case typesEnumPrimitive:
-			_, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
-			switch aar[0].Kind {
-			case typesEnumPrimitive:
-				ar.Data = aar[0].Data.(*Primitive)
-			}
-		}
 		switch ac.Kind {
 		case typesEnumPrimitive:
-			_, aac := possibleToRewrite(ac.Data.(*Primitive), valPrincipalState)
-			switch aac[0].Kind {
-			case typesEnumPrimitive:
-				ac.Data = aac[0].Data.(*Primitive)
-			}
 			switch ar.Kind {
 			case typesEnumPrimitive:
 				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output
 				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check
 			}
-			acc := valueGetConstantsFromValue(ac)
-			for acci := 0; acci < len(acc); acci++ {
-				if acc[acci].ID == valMutationMap.Constants[i].ID {
-					continue MutationLoop
-				}
+			if valueEquivalentConstantInConstants(
+				valMutationMap.Constants[i], valueGetConstantsFromValue(ac),
+			) >= 0 {
+				continue MutationLoop
 			}
 		}
 		switch {
@@ -167,6 +154,12 @@ MutationLoop:
 		valPrincipalState.Mutated[ii] = true
 		valPrincipalState.Assigned[ii] = ac
 		valPrincipalState.BeforeRewrite[ii] = ac
+		if i >= valMutationMap.LastIncrement {
+			isWorthwhileMutation = true
+		}
+	}
+	if !isWorthwhileMutation {
+		return valPrincipalState, isWorthwhileMutation
 	}
 	valPrincipalState, _ = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
@@ -194,7 +187,7 @@ FailedRewritesLoop:
 			}
 		}
 	}
-	return valPrincipalState
+	return valPrincipalState, isWorthwhileMutation
 }
 
 func verifyActiveDropPrincipalStateAfterIndex(valPrincipalState *PrincipalState, f int) *PrincipalState {

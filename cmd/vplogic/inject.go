@@ -49,7 +49,7 @@ func injectConstantRules(c *Constant, arg int, p *Primitive) bool {
 	switch {
 	case p.Arguments[arg].Kind != typesEnumConstant:
 		return false
-	case c.ID == valueG.Data.(*Constant).ID:
+	case valueEquivalentConstants(c, valueG.Data.(*Constant)):
 		return false
 	}
 	return true

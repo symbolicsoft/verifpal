@@ -15,8 +15,8 @@ func possibleToDecomposePrimitive(
 	if !prim.Decompose.HasRule {
 		return false, &Value{}, has
 	}
-	for i, g := range prim.Decompose.Given {
-		a := p.Arguments[g]
+	for i := 0; i < len(prim.Decompose.Given); i++ {
+		a := p.Arguments[prim.Decompose.Given[i]]
 		a, valid := prim.Decompose.Filter(p, a, i)
 		if !valid {
 			continue

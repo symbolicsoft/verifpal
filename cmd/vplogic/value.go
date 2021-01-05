@@ -75,7 +75,7 @@ func valueIsGOrNil(c *Constant) bool {
 
 func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap *KnowledgeMap, c *Constant) int {
 	for i := range valKnowledgeMap.Constants {
-		if valKnowledgeMap.Constants[i].ID == c.ID {
+		if valueEquivalentConstants(valKnowledgeMap.Constants[i], c) {
 			return i
 		}
 	}
@@ -84,7 +84,7 @@ func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap *KnowledgeMap, c *Con
 
 func valueGetPrincipalStateIndexFromConstant(valPrincipalState *PrincipalState, c *Constant) int {
 	for i := range valPrincipalState.Constants {
-		if valPrincipalState.Constants[i].ID == c.ID {
+		if valueEquivalentConstants(valPrincipalState.Constants[i], c) {
 			return i
 		}
 	}
@@ -140,7 +140,7 @@ func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
 	}
 	switch a1.Kind {
 	case typesEnumConstant:
-		return a1.Data.(*Constant).ID == a2.Data.(*Constant).ID
+		return valueEquivalentConstants(a1.Data.(*Constant), a2.Data.(*Constant))
 	case typesEnumPrimitive:
 		equivPrim, _, _ := valueEquivalentPrimitives(
 			a1.Data.(*Primitive), a2.Data.(*Primitive), considerOutput,
@@ -152,6 +152,10 @@ func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
 		)
 	}
 	return false
+}
+
+func valueEquivalentConstants(c1 *Constant, c2 *Constant) bool {
+	return c1.ID == c2.ID
 }
 
 func valueEquivalentPrimitives(
@@ -211,6 +215,15 @@ func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnow
 func valueEquivalentValueInValues(v *Value, a []*Value) int {
 	for i := 0; i < len(a); i++ {
 		if valueEquivalentValues(v, a[i], true) {
+			return i
+		}
+	}
+	return -1
+}
+
+func valueEquivalentConstantInConstants(c *Constant, a []*Constant) int {
+	for i := 0; i < len(a); i++ {
+		if valueEquivalentConstants(c, a[i]) {
 			return i
 		}
 	}

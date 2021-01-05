@@ -325,7 +325,6 @@ type MutationMap struct {
 	Constants      []*Constant
 	Mutations      [][]*Value
 	Combination    []*Value
-	Worthwhile     bool
 	DepthIndex     []int
 }
 
