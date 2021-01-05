@@ -14,9 +14,11 @@ import (
 // Verify runs the main verification engine for Verifpal on a model loaded from a file.
 // It returns a slice of verifyResults and a "results code".
 func Verify(filePath string) ([]VerifyResult, string, error) {
-	// f, _ := os.Create("cpu.pprof")
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
+	/*
+		f, _ := os.Create("cpu.pprof")
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	*/
 	m, err := libpegParseModel(filePath, true)
 	if err != nil {
 		return []VerifyResult{}, "", err

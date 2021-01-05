@@ -65,7 +65,7 @@ func attackerStateAbsorbPhaseValues(valPrincipalState *PrincipalState) error {
 				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 		}
-		aa, _, err := valueResolveValueInternalValuesFromPrincipalState(
+		aa, err := valueResolveValueInternalValuesFromPrincipalState(
 			a, a, i, valPrincipalState, attackerStateShared, true,
 		)
 		if err != nil {

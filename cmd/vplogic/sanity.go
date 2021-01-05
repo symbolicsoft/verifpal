@@ -170,7 +170,7 @@ func sanityPrimitive(p *Primitive, outputs []*Constant) error {
 	if p.Check && !check {
 		return fmt.Errorf("primitive is checked but does not support checking")
 	}
-	return nil
+	return sanityCheckPrimitiveArgumentOutputs(p)
 }
 
 func sanityQueries(m Model, valKnowledgeMap *KnowledgeMap) error {
@@ -376,6 +376,37 @@ func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []*Primitive) erro
 				"checked primitive fails: %s",
 				prettyPrimitive(p),
 			)
+		}
+	}
+	return nil
+}
+
+func sanityCheckPrimitiveArgumentOutputs(p *Primitive) error {
+	for i := 0; i < len(p.Arguments); i++ {
+		switch p.Arguments[i].Kind {
+		case typesEnumPrimitive:
+			var output []int
+			if primitiveIsCorePrim(p.Arguments[i].Data.(*Primitive).ID) {
+				prim, err := primitiveCoreGet(p.Arguments[i].Data.(*Primitive).ID)
+				if err != nil {
+					return err
+				}
+				output = prim.Output
+			} else {
+				prim, err := primitiveGet(p.Arguments[i].Data.(*Primitive).ID)
+				if err != nil {
+					return err
+				}
+				output = prim.Output
+			}
+			if !intInSlice(1, output) {
+				return fmt.Errorf(
+					"primitive %s cannot have %s as an argument, since %s necessarily produces more than one output",
+					prettyPrimitive(p),
+					prettyPrimitive(p.Arguments[i].Data.(*Primitive)),
+					prettyPrimitive(p.Arguments[i].Data.(*Primitive)),
+				)
+			}
 		}
 	}
 	return nil

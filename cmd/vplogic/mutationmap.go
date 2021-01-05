@@ -19,6 +19,7 @@ func mutationMapInit(
 		Mutations:      [][]*Value{},
 		Combination:    []*Value{},
 		DepthIndex:     []int{},
+		Worthwhile:     false,
 		OutOfMutations: false,
 	}
 	InfoMessage(fmt.Sprintf(
@@ -147,7 +148,7 @@ func mutationMapReplacePrimitive(
 				}
 			}
 		case typesEnumPrimitive:
-			a, _, err = valueResolveValueInternalValuesFromPrincipalState(
+			a, err = valueResolveValueInternalValuesFromPrincipalState(
 				a, a, rootIndex, valPrincipalState, valAttackerState, false,
 			)
 			if err != nil {
@@ -205,11 +206,15 @@ func mutationMapReplaceEquation(
 }
 
 func mutationMapNext(valMutationMap MutationMap) MutationMap {
+	valMutationMap.Worthwhile = false
 	if len(valMutationMap.Combination) == 0 {
 		valMutationMap.OutOfMutations = true
 		return valMutationMap
 	}
 	for i := 0; i < len(valMutationMap.Combination); i++ {
+		if i >= valMutationMap.LastIncrement {
+			valMutationMap.Worthwhile = true
+		}
 		valMutationMap.Combination[i] = valMutationMap.Mutations[i][valMutationMap.DepthIndex[i]]
 		if i != len(valMutationMap.Combination)-1 {
 			continue
