@@ -89,12 +89,5 @@ principal Alice [
 ]
 
 queries[
-	confidentiality? m1
 	confidentiality? m2
-	confidentiality? longTermAPub
-	authentication? Alice -> Bob: secretBox1Alice
-	authentication? Alice -> Bob: secretBox2Alice
-	authentication? Bob -> Alice: secretBox1Bob
-	authentication? Alice -> Bob: secretBoxM1Alice
-	authentication? Bob -> Alice: secretBoxM2Bob
 ]

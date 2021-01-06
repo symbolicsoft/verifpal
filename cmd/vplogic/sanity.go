@@ -226,6 +226,12 @@ func sanityQueriesAuthentication(query Query, valKnowledgeMap *KnowledgeMap) err
 			prettyQuery(query),
 		)
 	}
+	if query.Message.Sender == query.Message.Recipient {
+		return fmt.Errorf(
+			"authentication query (%s) has identical sender and recipient",
+			prettyQuery(query),
+		)
+	}
 	c := query.Message.Constants[0]
 	return sanityQueriesCheckKnown(query, query.Message, c, valKnowledgeMap)
 }
