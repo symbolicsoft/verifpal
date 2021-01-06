@@ -226,13 +226,11 @@ func sanityQueriesAuthentication(query Query, valKnowledgeMap *KnowledgeMap) err
 			prettyQuery(query),
 		)
 	}
-	if query.Message.Sender == query.Message.Recipient {
-		return fmt.Errorf(
-			"authentication query (%s) has identical sender and recipient",
-			prettyQuery(query),
-		)
-	}
 	c := query.Message.Constants[0]
+	err := sanityQueriesCheckMessagePrincipals(query.Message)
+	if err != nil {
+		return err
+	}
 	return sanityQueriesCheckKnown(query, query.Message, c, valKnowledgeMap)
 }
 
@@ -255,13 +253,18 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap *KnowledgeMap) erro
 			prettyQuery(query),
 		)
 	}
-	for _, c := range query.Constants {
-		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
-		if i < 0 {
+	for i := 0; i < len(query.Constants); i++ {
+		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[i])
+		if ii < 0 {
 			return fmt.Errorf(
 				"unlinkability query (%s) refers to unknown constant (%s)",
-				prettyQuery(query),
-				prettyConstant(c),
+				prettyQuery(query), prettyConstant(query.Constants[i]),
+			)
+		}
+		if valueEquivalentConstantInConstants(query.Constants[i], query.Constants[:i]) >= 0 {
+			return fmt.Errorf(
+				"unlinkability query (%s) refers to same constant more than once (%s)",
+				prettyQuery(query), prettyConstant(query.Constants[i]),
 			)
 		}
 	}
@@ -279,10 +282,24 @@ func sanityQueryOptions(query Query, valKnowledgeMap *KnowledgeMap) error {
 				)
 			}
 			c := option.Message.Constants[0]
+			err := sanityQueriesCheckMessagePrincipals(option.Message)
+			if err != nil {
+				return err
+			}
 			return sanityQueriesCheckKnown(query, option.Message, c, valKnowledgeMap)
 		default:
 			return fmt.Errorf("invalid query option kind")
 		}
+	}
+	return nil
+}
+
+func sanityQueriesCheckMessagePrincipals(message Message) error {
+	if message.Sender == message.Recipient {
+		return fmt.Errorf(
+			"query with message (%s) has identical sender and recipient",
+			prettyMessage(Block{Kind: "message", Message: message}),
+		)
 	}
 	return nil
 }

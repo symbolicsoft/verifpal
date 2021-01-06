@@ -229,7 +229,7 @@ func prettyExpression(expression Expression) string {
 
 func prettyMessage(block Block) string {
 	output := fmt.Sprintf(
-		"%s -> %s: %s\n\n",
+		"%s -> %s: %s",
 		principalGetNameFromID(block.Message.Sender),
 		principalGetNameFromID(block.Message.Recipient),
 		prettyConstants(block.Message.Constants),
@@ -261,7 +261,7 @@ func PrettyModel(m Model) (string, error) {
 		case "principal":
 			output = output + prettyPrincipal(block)
 		case "message":
-			output = output + prettyMessage(block)
+			output = output + prettyMessage(block) + "\n\n"
 		case "phase":
 			output = output + prettyPhase(block)
 		}
@@ -302,7 +302,7 @@ func PrettyDiagram(m Model) (string, error) {
 			}
 			output = fmt.Sprintf("%s\n", output)
 		case "message":
-			output = output + prettyMessage(block)
+			output = output + prettyMessage(block) + "\n"
 		case "phase":
 			output = fmt.Sprintf(
 				"%sNote left of %s:phase %d\n",
