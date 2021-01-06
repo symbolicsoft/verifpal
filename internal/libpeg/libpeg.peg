@@ -32,8 +32,7 @@ var libpegReserved = []string{
 	"aead_enc", "aead_dec", "enc", "dec",
 	"mac", "assert", "sign", "signverif",
 	"pke_enc", "pke_dec", "shamir_split",
-	"shamir_join", "concat", "split",
-	"g", "nil",
+	"shamir_join", "concat", "split", "unnamed",
 }
 
 var libpegUnnamedCounter = 0
@@ -44,6 +43,8 @@ func libpegCheckIfReserved(s string) error {
 	case strInSlice(s, libpegReserved):
 		found = true
 	case strings.HasPrefix(s, "attacker"):
+		found = true
+	case strings.HasPrefix(s, "unnamed"):
 		found = true
 	}
 	if found {
@@ -231,7 +232,12 @@ Assignment <- Left:Constants? _ '=' _ Right:Value? {
 }
 
 Constant <- Const:Identifier (_ ',' _)? {
+	var err error
 	name := Const.(string)
+	err = libpegCheckIfReserved(name)
+	if err != nil {
+		return &Value{}, err
+	}
 	switch name {
 		case "_":
 		name = fmt.Sprintf("unnamed_%d", libpegUnnamedCounter)
@@ -244,19 +250,16 @@ Constant <- Const:Identifier (_ ',' _)? {
 			Name: name,
 			ID: id,
 		},
-	}, nil
+	}, err
 }
 
 Constants <- Constants:Constant+ {
 	var da []*Constant
-	var err error
 	a  := Constants.([]interface{})
 	for _, c := range a {
-		err = libpegCheckIfReserved(c.(*Value).Data.(*Constant).Name)
-		if err != nil { break }
 		da = append(da, c.(*Value).Data.(*Constant))
 	}
-	return da, err
+	return da, nil
 }
 
 Phase <- "phase" _ '[' _ Number:[0-9]+ _ ']' _ {
