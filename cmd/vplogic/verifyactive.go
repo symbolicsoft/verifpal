@@ -102,6 +102,15 @@ func verifyActiveScan(
 		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
+		/*
+			fmt.Println("------------------------")
+			for i := 0; i < len(valPrincipalStateMutated.Constants); i++ {
+				if valPrincipalStateMutated.Mutated[i] {
+					fmt.Println(prettyConstant(valPrincipalStateMutated.Constants[i]) + " -> " + prettyValue(valPrincipalStateMutated.Assigned[i]))
+				}
+			}
+			fmt.Println("------------------------")
+		*/
 		scanGroup.Add(1)
 		go func() {
 			err = verifyAnalysis(
@@ -132,6 +141,7 @@ func verifyActiveScan(
 func verifyActiveMutatePrincipalState(
 	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
 ) (*PrincipalState, bool) {
+	earliestMutation := len(valPrincipalState.Constants)
 	isWorthwhileMutation := false
 MutationLoop:
 	for i := 0; i < len(valMutationMap.Constants); i++ {
@@ -162,6 +172,9 @@ MutationLoop:
 		valPrincipalState.Mutated[ii] = true
 		valPrincipalState.Assigned[ii] = ac
 		valPrincipalState.BeforeRewrite[ii] = ac
+		if ii < earliestMutation {
+			earliestMutation = ii
+		}
 		if i >= valMutationMap.LastIncrement {
 			isWorthwhileMutation = true
 		}
@@ -171,7 +184,6 @@ MutationLoop:
 	}
 	valPrincipalState, _ = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
-FailedRewritesLoop:
 	for i := 0; i < len(failedRewrites); i++ {
 		if !failedRewrites[i].Check {
 			continue
@@ -184,14 +196,14 @@ FailedRewritesLoop:
 			valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 				valPrincipalState, failedRewriteIndices[i]+1,
 			)
-			break FailedRewritesLoop
+			return valPrincipalState, isWorthwhileMutation && earliestMutation < failedRewriteIndices[i]
 		}
 		for ii := 0; ii < len(valPrincipalState.Constants); ii++ {
 			if valPrincipalState.DeclaredAt[ii] == declaredAt {
 				valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
 					valPrincipalState, ii+1,
 				)
-				break FailedRewritesLoop
+				return valPrincipalState, isWorthwhileMutation && earliestMutation < failedRewriteIndices[i]
 			}
 		}
 	}
