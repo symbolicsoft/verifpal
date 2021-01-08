@@ -8,10 +8,17 @@ Verifpal 0VERSION0 is now available. Verifpal updates bring new features, perfor
 1RELEASENOTES1
 
 -------------------------------
-2. Pre-compiled Releases
+2. PGP-Signed Releases
 -------------------------------
-Pre-compiled release builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm64 variants, here:
+Official signed, pre-compiled release builds are provided for Windows, Linux, macOS and FreeBSD in x86, amd64 and arm64 variants, here:
 https://source.symbolic.software/verifpal/verifpal/-/releases/v0VERSION0
+
+Verifpal releases are signed using the following PGP key:
+https://source.symbolic.software/verifpal/verifpal/-/blob/master/assets/pgp.txt
+
+In order to verify the PGP signature of your downloaded Verifpal release binary, please first verify the signature of the checksum file, verifpal_0VERSION0_checksums.txt, against its signature, verifpal_0VERSION0_checksums.txt.sig. Both files are located in the releases directory linked above.
+
+Once the signature of the checksum file is verified, ensure that the SHA256SUM of your downloaded release archive matches the one listed inside the checksum file for your chosen platform.
 
 -------------------------------
 3. Updating Via Package Manager
