@@ -97,7 +97,7 @@ func verifyActiveScan(
 		scanGroup.Add(1)
 		go func() {
 			err = verifyAnalysis(
-				valKnowledgeMap, valPrincipalStateMutated, valAttackerState, stage, scanGroup,
+				valKnowledgeMap, valPrincipalStateMutated, attackerStateGetRead(), stage, scanGroup,
 			)
 			if err != nil {
 				scanGroup.Done()
@@ -164,8 +164,8 @@ MutationLoop:
 	valPrincipalState, _ = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
 	failedRewrites, failedRewriteIndices, valPrincipalState := valuePerformAllRewrites(valPrincipalState)
 FailedRewritesLoop:
-	for i, p := range failedRewrites {
-		if !p.Check {
+	for i := 0; i < len(failedRewrites); i++ {
+		if !failedRewrites[i].Check {
 			continue
 		}
 		if valPrincipalState.Creator[failedRewriteIndices[i]] != valPrincipalState.ID {
@@ -178,10 +178,10 @@ FailedRewritesLoop:
 			)
 			break FailedRewritesLoop
 		}
-		for iii := range valPrincipalState.Constants {
-			if valPrincipalState.DeclaredAt[iii] == declaredAt {
+		for ii := 0; ii < len(valPrincipalState.Constants); ii++ {
+			if valPrincipalState.DeclaredAt[ii] == declaredAt {
 				valPrincipalState = verifyActiveDropPrincipalStateAfterIndex(
-					valPrincipalState, iii+1,
+					valPrincipalState, ii+1,
 				)
 				break FailedRewritesLoop
 			}

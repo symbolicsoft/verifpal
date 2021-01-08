@@ -56,9 +56,8 @@ func verifyAnalysis(
 		}
 	}
 	if o > 0 {
-		valAttackerState = attackerStateGetRead()
 		go func() {
-			err := verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, scanGroup)
+			err := verifyAnalysis(valKnowledgeMap, valPrincipalState, attackerStateGetRead(), stage, scanGroup)
 			if err != nil {
 				scanGroup.Done()
 			}
