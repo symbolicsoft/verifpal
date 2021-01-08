@@ -102,15 +102,6 @@ func verifyActiveScan(
 		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
-		/*
-			fmt.Println("------------------------")
-			for i := 0; i < len(valPrincipalStateMutated.Constants); i++ {
-				if valPrincipalStateMutated.Mutated[i] {
-					fmt.Println(prettyConstant(valPrincipalStateMutated.Constants[i]) + " -> " + prettyValue(valPrincipalStateMutated.Assigned[i]))
-				}
-			}
-			fmt.Println("------------------------")
-		*/
 		scanGroup.Add(1)
 		go func() {
 			err = verifyAnalysis(
