@@ -51,13 +51,14 @@ func verifyActiveStages(
 	stage int, valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState,
 	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
 ) {
-	var scanGroup sync.WaitGroup
+	var principalGroup sync.WaitGroup
 	var err error
 	oldKnown := len(valAttackerState.Known)
 	valAttackerState = attackerStateGetRead()
-	scanGroup.Add(len(valPrincipalStates))
+	principalGroup.Add(len(valPrincipalStates))
 	for _, valPrincipalState := range valPrincipalStates {
 		go func(valPrincipalState *PrincipalState) {
+			var scanGroup sync.WaitGroup
 			var valMutationMap MutationMap
 			valMutationMap, err = mutationMapInit(
 				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
@@ -75,10 +76,11 @@ func verifyActiveStages(
 				scanGroup.Done()
 				return
 			}
-			scanGroup.Done()
+			scanGroup.Wait()
+			principalGroup.Done()
 		}(valPrincipalState)
 	}
-	scanGroup.Wait()
+	principalGroup.Wait()
 	exhausted := (stage > 5 && (oldKnown == len(valAttackerState.Known)))
 	if exhausted {
 		attackerStatePutExhausted()

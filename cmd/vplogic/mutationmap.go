@@ -15,11 +15,12 @@ func mutationMapInit(
 	var err error
 	valMutationMap := MutationMap{
 		Initialized:    true,
+		OutOfMutations: false,
+		LastIncrement:  0,
 		Constants:      []*Constant{},
 		Mutations:      [][]*Value{},
 		Combination:    []*Value{},
 		DepthIndex:     []int{},
-		OutOfMutations: false,
 	}
 	InfoMessage(fmt.Sprintf(
 		"Initializing Stage %d mutation map for %s...", stage, valPrincipalState.Name,
@@ -48,8 +49,8 @@ func mutationMapInit(
 	}
 	valMutationMap.Combination = make([]*Value, len(valMutationMap.Constants))
 	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants))
-	for iiii := range valMutationMap.Constants {
-		valMutationMap.DepthIndex[iiii] = 0
+	for ii := 0; ii < len(valMutationMap.Constants); ii++ {
+		valMutationMap.DepthIndex[ii] = 0
 	}
 	return valMutationMap, err
 }
