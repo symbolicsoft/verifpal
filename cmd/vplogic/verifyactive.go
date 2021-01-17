@@ -141,7 +141,6 @@ func verifyActiveMutatePrincipalState(
 ) (*PrincipalState, bool) {
 	earliestMutation := len(valPrincipalState.Constants)
 	isWorthwhileMutation := false
-MutationLoop:
 	for i := 0; i < len(valMutationMap.Constants); i++ {
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
 		ac := valMutationMap.Combination[i]
@@ -154,11 +153,6 @@ MutationLoop:
 			case typesEnumPrimitive:
 				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output
 				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check
-			}
-			if valueEquivalentConstantInConstants(
-				valMutationMap.Constants[i], valueGetConstantsFromValue(ac),
-			) >= 0 {
-				continue MutationLoop
 			}
 		}
 		switch {
