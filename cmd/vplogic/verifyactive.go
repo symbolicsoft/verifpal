@@ -17,7 +17,9 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
 		valPrincipalStatePureResolved := constructPrincipalStateClone(valPrincipalStates[0], true)
-		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(valPrincipalStatePureResolved, attackerStateGetRead())
+		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(
+			valPrincipalStatePureResolved, attackerStateGetRead(),
+		)
 		if err != nil {
 			return err
 		}

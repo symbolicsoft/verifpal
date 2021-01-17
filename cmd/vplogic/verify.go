@@ -116,7 +116,9 @@ func verifyPassive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principa
 	for phase <= valKnowledgeMap.MaxPhase {
 		attackerStateInit(false)
 		valPrincipalStatePureResolved := constructPrincipalStateClone(valPrincipalStates[0], true)
-		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(valPrincipalStatePureResolved, attackerStateGetRead())
+		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(
+			valPrincipalStatePureResolved, attackerStateGetRead(),
+		)
 		if err != nil {
 			return err
 		}
