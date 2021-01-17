@@ -2,20 +2,20 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.21.4"
+  version "0.21.5"
   bottle :unneeded
 
   if OS.mac?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/2d4a89e6fc1b3109d5ef0ae9ca14c119/verifpal_0.21.4_macos_amd64.zip"
-    sha256 "1c91bb9b76f5819650c5c8e696b3855a0647a3efd59fb29a9912e6617470b8c2"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/d3f6f6571050ed4a82eb9d3472698850/verifpal_0.21.5_macos_amd64.zip"
+    sha256 "8176f74c340b349189bbd4b8109629e59139f3bfb8ab93223250d3ba4e339841"
   end
   if OS.linux? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/f3952b53e810a63ec0418488de4e9e8a/verifpal_0.21.4_linux_amd64.zip"
-    sha256 "930af1376610bb5988d5648a1e6a59d6158e9b4240b5b1898f95b987dd2d8369"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/bdb5c4acff5c0210e44ec7c842115f77/verifpal_0.21.5_linux_amd64.zip"
+    sha256 "7897722025bcddb31c2053c7c89d883c3f3d8ffdb7930b984a3a17d9fcdfa497"
   end
   if OS.linux? && Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/72ab647679ffbc3248b14b897828450e/verifpal_0.21.4_linux_arm64.zip"
-    sha256 "26d109a1c71b7542ad971d44be2857007c1298c48737088eca4d181ab9278f0d"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/a2dd1c3be2a1321105c2b348c1ad69ee/verifpal_0.21.5_linux_arm64.zip"
+    sha256 "d2ee840ec348afa18925f578e16b4165d055c0d5c0907831756b60c9cc0608ba"
   end
 
   def install
