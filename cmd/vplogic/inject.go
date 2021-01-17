@@ -15,17 +15,6 @@ func inject(
 	if verifyResultsAllResolved() {
 		return []*Value{}
 	}
-	if primitiveIsCorePrim(p.ID) {
-		prim, _ := primitiveCoreGet(p.ID)
-		if !prim.Injectable {
-			return []*Value{}
-		}
-	} else {
-		prim, _ := primitiveGet(p.ID)
-		if !prim.Injectable {
-			return []*Value{}
-		}
-	}
 	return injectPrimitive(
 		p, valPrincipalState, valAttackerState, injectDepth, stage,
 	)
@@ -62,7 +51,7 @@ func injectPrimitiveRules(k *Primitive, arg int, p *Primitive, stage int) bool {
 	case injectPrimitiveStageRestricted(k, stage):
 		return false
 	}
-	return injectSkeletonNotDeeper(k, p.Arguments[arg].Data.(*Primitive))
+	return injectSkeletonEquivalent(k, p.Arguments[arg].Data.(*Primitive))
 }
 
 func injectEquationRules(e *Equation, arg int, p *Primitive) bool {
@@ -108,10 +97,8 @@ func injectPrimitiveSkeleton(p *Primitive, depth int) (*Primitive, int) {
 		case typesEnumConstant:
 			skeleton.Arguments[i] = valueNil
 		case typesEnumPrimitive:
-			pp, dd := injectPrimitiveSkeleton(a.Data.(*Primitive), depth)
-			if dd > depth {
-				depth = dd
-			}
+			var pp *Primitive
+			pp, depth = injectPrimitiveSkeleton(a.Data.(*Primitive), depth+1)
 			aa := &Value{
 				Kind: typesEnumPrimitive,
 				Data: pp,
@@ -136,6 +123,19 @@ func injectSkeletonNotDeeper(p *Primitive, reference *Primitive) bool {
 	_, pd := injectPrimitiveSkeleton(p, 0)
 	_, sd := injectPrimitiveSkeleton(reference, 0)
 	return pd <= sd
+}
+
+func injectSkeletonEquivalent(p *Primitive, reference *Primitive) bool {
+	if p.ID != reference.ID {
+		return false
+	}
+	p1, pd := injectPrimitiveSkeleton(p, 0)
+	p2, sd := injectPrimitiveSkeleton(reference, 0)
+	if sd > pd {
+		return false
+	}
+	e, _, _ := valueEquivalentPrimitives(p1, p2, false)
+	return e
 }
 
 func injectMatchSkeletons(p *Primitive, skeleton *Primitive) bool {

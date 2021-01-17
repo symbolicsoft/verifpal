@@ -261,15 +261,14 @@ type RebuildRule struct {
 
 // PrimitiveCoreSpec contains the definition of a core primitive.
 type PrimitiveCoreSpec struct {
-	Name       string
-	ID         primitiveEnum
-	Arity      []int
-	Output     []int
-	HasRule    bool
-	CoreRule   func(*Primitive) (bool, []*Value)
-	Check      bool
-	Injectable bool
-	Explosive  bool
+	Name      string
+	ID        primitiveEnum
+	Arity     []int
+	Output    []int
+	HasRule   bool
+	CoreRule  func(*Primitive) (bool, []*Value)
+	Check     bool
+	Explosive bool
 }
 
 // PrimitiveSpec contains the definition of a primitive.
@@ -283,7 +282,6 @@ type PrimitiveSpec struct {
 	Rewrite         RewriteRule
 	Rebuild         RebuildRule
 	Check           bool
-	Injectable      bool
 	Explosive       bool
 	PasswordHashing []int
 }

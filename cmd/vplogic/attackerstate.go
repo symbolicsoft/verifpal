@@ -25,21 +25,23 @@ func attackerStateInit(active bool) {
 
 func attackerStateAbsorbPhaseValues(valPrincipalState *PrincipalState) error {
 	attackerStateMutex.Lock()
-	for i, c := range valPrincipalState.Constants {
-		cc := &Value{Kind: typesEnumConstant, Data: c}
-		if c.Qualifier != typesEnumPublic {
-			continue
-		}
-		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
-		if err == nil && earliestPhase > attackerStateShared.CurrentPhase {
-			continue
-		}
-		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
-			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
-			attackerStateShared.Known = append(attackerStateShared.Known, cc)
-			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState, valPrincipalStateClone,
-			)
+	for i := 0; i < len(valPrincipalState.Constants); i++ {
+		switch valPrincipalState.Assigned[i].Kind {
+		case typesEnumConstant:
+			if valPrincipalState.Assigned[i].Data.(*Constant).Qualifier != typesEnumPublic {
+				continue
+			}
+			earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
+			if err == nil && earliestPhase > attackerStateShared.CurrentPhase {
+				continue
+			}
+			if valueEquivalentValueInValues(valPrincipalState.Assigned[i], attackerStateShared.Known) < 0 {
+				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+				attackerStateShared.Known = append(attackerStateShared.Known, valPrincipalState.Assigned[i])
+				attackerStateShared.PrincipalState = append(
+					attackerStateShared.PrincipalState, valPrincipalStateClone,
+				)
+			}
 		}
 	}
 	for i, c := range valPrincipalState.Constants {

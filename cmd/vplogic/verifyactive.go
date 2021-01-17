@@ -16,7 +16,12 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 		var stageGroup sync.WaitGroup
 		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
-		err := attackerStatePutPhaseUpdate(valPrincipalStates[0], phase)
+		valPrincipalStatePureResolved := constructPrincipalStateClone(valPrincipalStates[0], true)
+		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(valPrincipalStatePureResolved, attackerStateGetRead())
+		if err != nil {
+			return err
+		}
+		err = attackerStatePutPhaseUpdate(valPrincipalStatePureResolved, phase)
 		if err != nil {
 			return err
 		}
