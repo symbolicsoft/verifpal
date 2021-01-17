@@ -1,1 +1,1 @@
-Verifpal 0.21.4 brings analysis bug fixes.
+Verifpal 0.21.5 brings analysis bug fixes thanks to feedback from Friedrich Wiemer.
