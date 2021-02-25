@@ -66,7 +66,6 @@ clean:
 	@$(RM) build/windows/verifpal.exe
 	@$(RM) build/linux/verifpal
 	@$(RM) build/macos/verifpal
-	@$(RM) build/macos/verifpal_applesilicon
 	@$(RM) build/freebsd/verifpal
 	@$(RM) cmd/vplogic/libpeg.go
 	@$(RM) cmd/vplogic/libcoq.go

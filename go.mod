@@ -10,5 +10,5 @@ require (
 	github.com/josephspurrier/goversioninfo v1.2.0 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mna/pigeon v1.0.0 // indirect
-	github.com/spf13/cobra v1.1.1
+	github.com/spf13/cobra v1.1.3
 )
