@@ -20,12 +20,13 @@ import (
 	"verifpal.com/cmd/vplogic"
 )
 
-var version = "0.22.0"
+const version = "0.22.0"
 
 var rootCmd = &cobra.Command{
-	Use:   "verifpal",
-	Short: fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
-	Long:  fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
+	Use:     "verifpal",
+	Version: version,
+	Short:   fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
+	Long:    fmt.Sprintf("Verifpal %s - https://verifpal.com", version),
 }
 
 var cmdVerify = &cobra.Command{
