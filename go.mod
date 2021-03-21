@@ -6,9 +6,12 @@ module verifpal.com
 go 1.15
 
 require (
-	github.com/akavel/rsrc v0.10.1 // indirect
+	github.com/akavel/rsrc v0.10.2 // indirect
 	github.com/josephspurrier/goversioninfo v1.2.0 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/mna/pigeon v1.0.0 // indirect
+	github.com/mna/pigeon v1.1.0 // indirect
 	github.com/spf13/cobra v1.1.3
+	golang.org/x/mod v0.4.2 // indirect
+	golang.org/x/sys v0.0.0-20210320140829-1e4c9ba3b0c4 // indirect
+	golang.org/x/tools v0.1.0 // indirect
 )
