@@ -93,5 +93,7 @@ linters-settings:
         min-complexity: 18
     govet:
         enable-all: true
+        disable:
+            - fieldalignment
     lll:
         line-length: 120
