@@ -185,30 +185,10 @@ var cmdJSON = &cobra.Command{
 	},
 }
 
-var cmdFriends = &cobra.Command{
-	Use:                   "friends",
-	DisableFlagsInUseLine: true,
-	DisableFlagParsing:    true,
-	Args:                  cobra.NoArgs,
-	Hidden:                true,
-	Run: func(cmd *cobra.Command, args []string) {
-		f := []byte{
-			0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f, 0x76, 0x65,
-			0x72, 0x69, 0x66, 0x70, 0x61, 0x6c, 0x2e, 0x63, 0x6f, 0x6d,
-			0x2f, 0x72, 0x65, 0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61,
-			0x2f, 0x66, 0x72, 0x69, 0x65, 0x6e, 0x64, 0x73,
-		}
-		err := vplogic.OpenBrowser(string(f))
-		if err != nil {
-			log.Fatal(err)
-		}
-	},
-}
-
 func main() {
 	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslatePv)
-	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdAbout, cmdJSON, cmdFriends)
+	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdAbout, cmdJSON)
 	err := rootCmd.Execute()
 	if err != nil {
 		log.Fatal(err)
