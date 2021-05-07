@@ -30,7 +30,7 @@ linters:
         - misspell
         - nakedret
         - prealloc
-        - scopelint
+        - exportloopref
         - unconvert
         - unparam
         - whitespace

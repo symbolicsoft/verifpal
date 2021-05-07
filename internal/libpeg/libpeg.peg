@@ -144,7 +144,7 @@ Qualifier <- ("private"/"public"/"password") {
 	}
 }
 
-Message <- Sender:PrincipalName? _ "->" _ Recipient:PrincipalName? _ ':' _ Constants:MessageConstants? {
+Message <- Sender:PrincipalName? _ ("->"/"→") _ Recipient:PrincipalName? _ ':' _ Constants:MessageConstants? {
 	switch {
 		case Sender == nil:
 			return nil, errors.New("message sender is not defined")
