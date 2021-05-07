@@ -10,7 +10,6 @@ base: core20
 parts:
   verifpal:
     plugin: go
-    go-importpath: verifpal.com
     source: .
     source-type: git
 
