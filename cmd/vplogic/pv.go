@@ -156,6 +156,8 @@ func pvQuery(valKnowledgeMap *KnowledgeMap, query Query) (string, error) {
 		return "", fmt.Errorf("freshness queries are not yet supported in ProVerif model generation")
 	case typesEnumUnlinkability:
 		return "", fmt.Errorf("unlinkability queries are not yet supported in ProVerif model generation")
+	case typesEnumEquivalence:
+		return "", fmt.Errorf("equivalence queries are not yet supported in ProVerif model generation")
 	}
 	if len(query.Options) > 0 {
 		return "", fmt.Errorf("query options are not yet supported in ProVerif model generation")

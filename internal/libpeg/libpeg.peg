@@ -26,8 +26,8 @@ var libpegReserved = []string{
 	"knows", "generates", "leaks",
 	"phase", "public", "private", "password",
 	"confidentiality", "authentication",
-	"freshness", "unlinkability", "precondition",
-	"ringsign", "ringsignverif",
+	"freshness", "unlinkability", "equivalence",
+	"precondition", "ringsign", "ringsignverif",
 	"primitive", "pw_hash", "hash", "hkdf",
 	"aead_enc", "aead_dec", "enc", "dec",
 	"mac", "assert", "sign", "signverif",
@@ -327,7 +327,7 @@ Queries <- "queries" _ '[' _ Queries:(Query*) ']' _ {
 	return Queries, nil
 }
 
-Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication/QueryFreshness/QueryUnlinkability) Comment* {
+Query <- Comment* Query:(QueryConfidentiality/QueryAuthentication/QueryFreshness/QueryUnlinkability/QueryEquivalence) Comment* {
 	return Query, nil
 }
 
@@ -385,6 +385,21 @@ QueryUnlinkability <- "unlinkability?" _ Consts:Constants? _ Options:QueryOption
 	}
 	return Query{
 		Kind: typesEnumUnlinkability,
+		Constants: Consts.([]*Constant),
+		Message: Message{},
+		Options: Options.([]QueryOption),
+	}, nil
+}
+
+QueryEquivalence <- "equivalence?" _ Consts:Constants? _ Options:QueryOptions? _ {
+	switch {
+		case Consts == nil:
+			return nil, errors.New("`equivalence` query is missing constants")
+		case Options == nil:
+			Options = []QueryOption{}
+	}
+	return Query{
+		Kind: typesEnumEquivalence,
 		Constants: Consts.([]*Constant),
 		Message: Message{},
 		Options: Options.([]QueryOption),

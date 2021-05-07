@@ -22,6 +22,7 @@ const (
 	typesEnumAuthentication  typesEnum = iota
 	typesEnumFreshness       typesEnum = iota
 	typesEnumUnlinkability   typesEnum = iota
+	typesEnumEquivalence     typesEnum = iota
 	typesEnumPrecondition    typesEnum = iota
 )
 

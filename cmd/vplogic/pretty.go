@@ -142,6 +142,11 @@ func prettyQuery(query Query) string {
 			"unlinkability? %s",
 			prettyConstants(query.Constants),
 		)
+	case typesEnumEquivalence:
+		output = fmt.Sprintf(
+			"equivalence? %s",
+			prettyConstants(query.Constants),
+		)
 	}
 	if len(query.Options) > 0 {
 		output = fmt.Sprintf("%s[", output)

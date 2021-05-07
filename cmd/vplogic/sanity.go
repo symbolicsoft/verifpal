@@ -185,6 +185,8 @@ func sanityQueries(m Model, valKnowledgeMap *KnowledgeMap) error {
 			err = sanityQueriesFreshness(query, valKnowledgeMap)
 		case typesEnumUnlinkability:
 			err = sanityQueriesUnlinkability(query, valKnowledgeMap)
+		case typesEnumEquivalence:
+			err = sanityQueriesEquivalence(query, valKnowledgeMap)
 		default:
 			return fmt.Errorf("invalid query kind")
 		}
@@ -264,6 +266,31 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap *KnowledgeMap) erro
 		if valueEquivalentConstantInConstants(query.Constants[i], query.Constants[:i]) >= 0 {
 			return fmt.Errorf(
 				"unlinkability query (%s) refers to same constant more than once (%s)",
+				prettyQuery(query), prettyConstant(query.Constants[i]),
+			)
+		}
+	}
+	return nil
+}
+
+func sanityQueriesEquivalence(query Query, valKnowledgeMap *KnowledgeMap) error {
+	if len(query.Constants) < 2 {
+		return fmt.Errorf(
+			"equivalence query (%s) must specify at least two constants",
+			prettyQuery(query),
+		)
+	}
+	for i := 0; i < len(query.Constants); i++ {
+		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[i])
+		if ii < 0 {
+			return fmt.Errorf(
+				"equivalence query (%s) refers to unknown constant (%s)",
+				prettyQuery(query), prettyConstant(query.Constants[i]),
+			)
+		}
+		if valueEquivalentConstantInConstants(query.Constants[i], query.Constants[:i]) >= 0 {
+			return fmt.Errorf(
+				"equivalence query (%s) refers to same constant more than once (%s)",
 				prettyQuery(query), prettyConstant(query.Constants[i]),
 			)
 		}

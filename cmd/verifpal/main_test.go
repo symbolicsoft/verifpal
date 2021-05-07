@@ -99,7 +99,7 @@ var verifpalTests = [55]VerifpalTest{
 	},
 	{
 		Model:       "unguarded_bob.vp",
-		ResultsCode: "c1a0a0",
+		ResultsCode: "c1a0a0e1",
 	},
 	/*
 		{
@@ -225,7 +225,7 @@ var verifpalTests = [55]VerifpalTest{
 	},
 	{
 		Model:       "test4.vp",
-		ResultsCode: "c0c0c0a0a1a1",
+		ResultsCode: "c0c0c0a0a1a1e0",
 	},
 	{
 		Model:       "test5.vp",

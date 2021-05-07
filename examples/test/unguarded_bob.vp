@@ -33,4 +33,5 @@ queries[
 	confidentiality? plaintext
 	authentication? Alice -> Bob : ciphertext
 	authentication? Alice -> Bob : ad
+	equivalence? ss, ss_
 ]

@@ -47,4 +47,5 @@ queries[
 	authentication? Alice -> Bob: egaa
 	authentication? Bob -> Alice: em
 	authentication? Alice -> Bob: em2
+	equivalence? gaa, b_gaa
 ]

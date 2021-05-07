@@ -149,6 +149,8 @@ func verifyGetResultsCode(valVerifyResults []VerifyResult) string {
 			q = "f"
 		case typesEnumUnlinkability:
 			q = "u"
+		case typesEnumEquivalence:
+			q = "e"
 		}
 		switch verifyResult.Resolved {
 		case true:
