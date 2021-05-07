@@ -20,6 +20,8 @@ test:
 snapcraft:
   image: ubuntu:20.04
   stage: snapcraft
+  only:
+    - tags
   script:
     - apt-get update -qy
     - apt-get install -y snapcraft 
