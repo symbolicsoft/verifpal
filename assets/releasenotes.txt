@@ -1,1 +1,7 @@
-Verifpal 0.22.0 provides native support for the new Apple Silicon platform.
+Verifpal 0.23.0 introduces equivalence queries.
+
+For many protocols, it could be useful to check whether shared secrets derived between Alice and Bob are equivalent in all completed executions of the protocol. Equivalence queries check whether any protocol scenario can be derived such that the given values are not equivalent to one another.
+
+For example, one could use the following query to check if shared secrets calculated by Alice and Bob will always be equivalent in all protocol executions:
+
+equivalence? ss_a, ss_b
