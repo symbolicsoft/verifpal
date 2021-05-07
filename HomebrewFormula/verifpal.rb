@@ -5,24 +5,24 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.22.0"
+  version "0.23.0"
   bottle :unneeded
 
   if OS.mac? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/6c5652b10e2278adf24ca6a082512d1b/verifpal_0.22.0_macos_amd64.zip"
-    sha256 "1480e45c33f2cd51ad0962228ee88593cda8d6682d23c533ef8c315ba26fccd5"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/70b2cf2da0675ebf3ad21a4f24a1ce27/verifpal_0.23.0_macos_amd64.zip"
+    sha256 "84740640093d7b48e5cbe660e1a3db2851c3724b5a5ad47844d6dafe44aaf6fe"
   end
   if OS.mac? && Hardware::CPU.arm?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/c12ad233d08c8a088a6d79764b9b8d87/verifpal_0.22.0_macos_arm64.zip"
-    sha256 "3fb3d5f8d503aae7e759f4f16effab041e45224a9c6a03bd659a479a23329524"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/cc2ea75f009e3e5464078ea5ab4c9c09/verifpal_0.23.0_macos_arm64.zip"
+    sha256 "d38c0916eb5c3c2f11626e8eee5f3f1dc1b5d934a35db32bdc7a711ff6995576"
   end
   if OS.linux? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/f6c73c7855f86f22f130c3a30f8aef71/verifpal_0.22.0_linux_amd64.zip"
-    sha256 "320fd28b2736936634aaa4001533e52e841fab72ef1f4f577137d1e4f94dca6e"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/1d9d8a8e2f76ed190d649ebf9b9917d4/verifpal_0.23.0_linux_amd64.zip"
+    sha256 "5cdb6cf7f918bb0ca11020e68083ce716672d94d052f09430e1d9e63da098087"
   end
   if OS.linux? && Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/7cbaf9736af840bcef13ab1e3803c842/verifpal_0.22.0_linux_arm64.zip"
-    sha256 "316629304740e26d40677f5c2b48237a85a216f49600440b837c0e3c17269230"
+    url "https://source.symbolic.software/verifpal/verifpal/uploads/3a245d2463d7d59863780a4e963db474/verifpal_0.23.0_linux_arm64.zip"
+    sha256 "66f6efe946fc1a21d64be7ff26951a3e46a64cdc76168ca7fea440341d6191c9"
   end
 
   def install
