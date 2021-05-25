@@ -11,7 +11,8 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mna/pigeon v1.1.0 // indirect
 	github.com/spf13/cobra v1.1.3
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
 	golang.org/x/mod v0.4.2 // indirect
-	golang.org/x/sys v0.0.0-20210507014357-30e306a8bba5 // indirect
-	golang.org/x/tools v0.1.0 // indirect
+	golang.org/x/sys v0.0.0-20210521203332-0cec03c779c1 // indirect
+	golang.org/x/tools v0.1.1 // indirect
 )
