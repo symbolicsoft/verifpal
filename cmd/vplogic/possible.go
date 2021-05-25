@@ -286,10 +286,13 @@ func possibleToObtainPasswords(
 		case typesEnumConstant:
 			if aa.Data.(*Constant).Qualifier == typesEnumPassword {
 				if aIndex >= 0 {
-					if !primitiveIsCorePrim(aParent.Data.(*Primitive).ID) {
-						prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
-						if intInSlice(aIndex, prim.PasswordHashing) {
-							return passwords
+					switch aParent.Kind {
+					case typesEnumPrimitive:
+						if !primitiveIsCorePrim(aParent.Data.(*Primitive).ID) {
+							prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
+							if intInSlice(aIndex, prim.PasswordHashing) {
+								return passwords
+							}
 						}
 					}
 				}
