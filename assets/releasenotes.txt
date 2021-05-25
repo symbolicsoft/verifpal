@@ -1,2 +1,2 @@
-Verifpal 0.23.1 fixes a crash that could sometimes occur with models that use the `password` value type.
+Verifpal 0.23.2 fixes a crash that could sometimes occur with models that use the `password` value type.
 
