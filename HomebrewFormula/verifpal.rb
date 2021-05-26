@@ -5,24 +5,24 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.23.0"
+  version "0.23.3"
   bottle :unneeded
 
   if OS.mac? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/70b2cf2da0675ebf3ad21a4f24a1ce27/verifpal_0.23.0_macos_amd64.zip"
-    sha256 "84740640093d7b48e5cbe660e1a3db2851c3724b5a5ad47844d6dafe44aaf6fe"
+    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_macos_amd64.zip"
+    sha256 "21e47066503d9b4bd8e27f0335534fda779943edafe53f32708a1fc09d3664d6"
   end
   if OS.mac? && Hardware::CPU.arm?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/cc2ea75f009e3e5464078ea5ab4c9c09/verifpal_0.23.0_macos_arm64.zip"
-    sha256 "d38c0916eb5c3c2f11626e8eee5f3f1dc1b5d934a35db32bdc7a711ff6995576"
+    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_macos_arm64.zip"
+    sha256 "b7d4998c973b0256e5ec5c8fdffc44a6a30d0f9ebad5c3d4a9480156fa5c9326"
   end
   if OS.linux? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/1d9d8a8e2f76ed190d649ebf9b9917d4/verifpal_0.23.0_linux_amd64.zip"
-    sha256 "5cdb6cf7f918bb0ca11020e68083ce716672d94d052f09430e1d9e63da098087"
+    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_linux_amd64.zip"
+    sha256 "1c2f857ba9be2a297ddc11b59f651a9a0db97a8023315ce0851057a802240903"
   end
   if OS.linux? && Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-    url "https://source.symbolic.software/verifpal/verifpal/uploads/3a245d2463d7d59863780a4e963db474/verifpal_0.23.0_linux_arm64.zip"
-    sha256 "66f6efe946fc1a21d64be7ff26951a3e46a64cdc76168ca7fea440341d6191c9"
+    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_linux_arm64.zip"
+    sha256 "887ffb5b5d7b50003aa8e37f38e1859ea3a79b7257d362ec32f4133ed49a525d"
   end
 
   def install
