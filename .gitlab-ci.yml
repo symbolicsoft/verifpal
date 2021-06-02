@@ -1,7 +1,6 @@
 stages:
   - lint
   - test
-  - snapcraft
 
 lint:
   image: golangci/golangci-lint:latest
@@ -17,16 +16,3 @@ test:
     - make dep
     - make test
 
-snapcraft:
-  image: ubuntu:20.04
-  stage: snapcraft
-  only:
-    - tags
-  script:
-    - apt-get update -qy
-    - apt-get install -y snapcraft 
-    - echo $SNAPCRAFT_LOGIN_FILE | base64 --decode > snapcraft.login
-    - snapcraft login --with snapcraft.login
-    - rm -f snapcraft.login *.snap
-    - snapcraft
-    - snapcraft push --release=stable *.snap

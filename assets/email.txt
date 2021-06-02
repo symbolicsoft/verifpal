@@ -31,8 +31,6 @@ If you have installed Verifpal via the Homebrew package manager on Linux and mac
 brew update
 brew upgrade verifpal
 
-On Linux, Verifpal is also available via the Snap Store: https://snapcraft.io/verifpal
-
 -------------------------------
 4. More Information
 -------------------------------

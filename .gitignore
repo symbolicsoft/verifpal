@@ -25,9 +25,6 @@ dist
 # Visual Studio Code
 .vscode
 
-# Snapcraft
-snapcraft.login
-
 # Coq
 *.glob
 *.vo

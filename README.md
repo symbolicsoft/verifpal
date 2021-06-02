@@ -49,12 +49,6 @@ brew tap verifpal.com/source https://source.symbolic.software/verifpal/verifpal
 brew install verifpal
 ```
 
-On Linux, Verifpal is also available via Snap:
-
-<a href="https://snapcraft.io/verifpal">
-	<img alt="Get it from the Snap Store" src="https://snapcraft.io/static/images/badges/en/snap-store-white.svg" />
-</a>
-
 Otherwise, you can:
 
 - *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/-/releases).
