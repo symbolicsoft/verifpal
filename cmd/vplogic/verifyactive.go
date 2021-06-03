@@ -23,7 +23,7 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 		if err != nil {
 			return err
 		}
-		err = attackerStatePutPhaseUpdate(valPrincipalStatePureResolved, phase)
+		err = attackerStatePutPhaseUpdate(valKnowledgeMap, valPrincipalStatePureResolved, phase)
 		if err != nil {
 			return err
 		}

@@ -726,6 +726,20 @@ func valueConstantIsUsedByPrincipalInKnowledgeMap(
 	return false
 }
 
+func valueConstantIsUsedByAtLeastOnePrincipalInKnowledgeMap(valKnowledgeMap *KnowledgeMap, c *Constant) bool {
+	if c.Name == "nil" {
+		return true
+	}
+	for ii := 0; ii < len(valKnowledgeMap.PrincipalIDs); ii++ {
+		if valueConstantIsUsedByPrincipalInKnowledgeMap(
+			valKnowledgeMap, valKnowledgeMap.PrincipalIDs[ii], c,
+		) {
+			return true
+		}
+	}
+	return false
+}
+
 func valueResolveAllPrincipalStateValues(
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (*PrincipalState, error) {

@@ -23,7 +23,7 @@ func attackerStateInit(active bool) {
 	attackerStateMutex.Unlock()
 }
 
-func attackerStateAbsorbPhaseValues(valPrincipalState *PrincipalState) error {
+func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState) error {
 	attackerStateMutex.Lock()
 	for i := 0; i < len(valPrincipalState.Constants); i++ {
 		switch valPrincipalState.Assigned[i].Kind {
@@ -33,6 +33,11 @@ func attackerStateAbsorbPhaseValues(valPrincipalState *PrincipalState) error {
 			}
 			earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
 			if err == nil && earliestPhase > attackerStateShared.CurrentPhase {
+				continue
+			}
+			if !valueConstantIsUsedByAtLeastOnePrincipalInKnowledgeMap(
+				valKnowledgeMap, valPrincipalState.Assigned[i].Data.(*Constant),
+			) {
 				continue
 			}
 			if valueEquivalentValueInValues(valPrincipalState.Assigned[i], attackerStateShared.Known) < 0 {
@@ -117,11 +122,11 @@ func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool
 	return written
 }
 
-func attackerStatePutPhaseUpdate(valPrincipalState *PrincipalState, phase int) error {
+func attackerStatePutPhaseUpdate(valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState, phase int) error {
 	attackerStateMutex.Lock()
 	attackerStateShared.CurrentPhase = phase
 	attackerStateMutex.Unlock()
-	err := attackerStateAbsorbPhaseValues(valPrincipalState)
+	err := attackerStateAbsorbPhaseValues(valKnowledgeMap, valPrincipalState)
 	return err
 }
 
