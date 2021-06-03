@@ -730,9 +730,9 @@ func valueConstantIsUsedByAtLeastOnePrincipalInKnowledgeMap(valKnowledgeMap *Kno
 	if c.Name == "nil" {
 		return true
 	}
-	for ii := 0; ii < len(valKnowledgeMap.PrincipalIDs); ii++ {
+	for i := 0; i < len(valKnowledgeMap.PrincipalIDs); i++ {
 		if valueConstantIsUsedByPrincipalInKnowledgeMap(
-			valKnowledgeMap, valKnowledgeMap.PrincipalIDs[ii], c,
+			valKnowledgeMap, valKnowledgeMap.PrincipalIDs[i], c,
 		) {
 			return true
 		}
