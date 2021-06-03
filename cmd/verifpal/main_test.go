@@ -275,7 +275,7 @@ func testModel(v VerifpalTest, t *testing.T) {
 	}
 	if resultsCode != v.ResultsCode {
 		t.Errorf(
-			"   FAIL • %s (%s, got %s)\n",
+			"   FAIL • %s (expected %s, got %s)\n",
 			v.Model, v.ResultsCode, resultsCode,
 		)
 	}
