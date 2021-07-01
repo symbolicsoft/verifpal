@@ -10,7 +10,7 @@ import (
 
 func mutationMapInit(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
-	valAttackerState AttackerState, stage int,
+	valAttackerState *AttackerState, stage int,
 ) (MutationMap, error) {
 	var err error
 	valMutationMap := MutationMap{
@@ -57,7 +57,7 @@ func mutationMapInit(
 
 func mutationMapSkipValue(
 	v *Value, i int, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) bool {
 	switch {
 	case i < 0:
@@ -78,7 +78,7 @@ func mutationMapSkipValue(
 
 func mutationMapReplaceValue(
 	a *Value, rootIndex int, stage int,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) ([]*Value, error) {
 	switch a.Kind {
 	case typesEnumConstant:
@@ -100,7 +100,7 @@ func mutationMapReplaceValue(
 
 func mutationMapReplaceConstant(
 	a *Value, stage int,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) []*Value {
 	mutations := []*Value{}
 	if valueIsGOrNil(a.Data.(*Constant)) {
@@ -130,7 +130,7 @@ func mutationMapReplaceConstant(
 
 func mutationMapReplacePrimitive(
 	a *Value, rootIndex int, stage int,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) ([]*Value, error) {
 	var err error
 	mutations := []*Value{}
@@ -177,7 +177,7 @@ func mutationMapReplacePrimitive(
 }
 
 func mutationMapReplaceEquation(
-	a *Value, stage int, valAttackerState AttackerState,
+	a *Value, stage int, valAttackerState *AttackerState,
 ) []*Value {
 	mutations := []*Value{}
 	switch len(a.Data.(*Equation).Values) {

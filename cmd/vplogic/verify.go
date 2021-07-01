@@ -75,14 +75,14 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 	for _, valPrincipalState := range valPrincipalStates {
 		var err error
 		var failedRewrites []*Primitive
-		valPrincipalState, err = valueResolveAllPrincipalStateValues(valPrincipalState, valAttackerState)
+		valPrincipalState, err = valueResolveAllPrincipalStateValues(valPrincipalState, &valAttackerState)
 		if err != nil {
 			return err
 		}
 		for _, a := range valPrincipalState.Assigned {
 			switch a.Kind {
 			case typesEnumPrimitive:
-				injectMissingSkeletons(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+				injectMissingSkeletons(a.Data.(*Primitive), valPrincipalState, &valAttackerState)
 			}
 		}
 		failedRewrites, _, valPrincipalState = valuePerformAllRewrites(valPrincipalState)
@@ -97,7 +97,7 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 			}
 		}
 		scanGroup.Add(1)
-		err = verifyAnalysis(valKnowledgeMap, valPrincipalState, valAttackerState, stage, &scanGroup)
+		err = verifyAnalysis(valKnowledgeMap, valPrincipalState, &valAttackerState, stage, &scanGroup)
 		if err != nil {
 			return err
 		}
@@ -113,11 +113,12 @@ func verifyStandardRun(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Prin
 func verifyPassive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
 	InfoMessage("Attacker is configured as passive.", "info", false)
 	phase := 0
+	valAttackerState := attackerStateGetRead()
 	for phase <= valKnowledgeMap.MaxPhase {
 		attackerStateInit(false)
 		valPrincipalStatePureResolved := constructPrincipalStateClone(valPrincipalStates[0], true)
 		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(
-			valPrincipalStatePureResolved, attackerStateGetRead(),
+			valPrincipalStatePureResolved, &valAttackerState,
 		)
 		if err != nil {
 			return err

@@ -14,7 +14,7 @@ var verifyAnalysisCount uint32
 
 func verifyAnalysis(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
-	valAttackerState AttackerState, stage int, scanGroup *sync.WaitGroup,
+	valAttackerState *AttackerState, stage int, scanGroup *sync.WaitGroup,
 ) error {
 	o := 0
 	if verifyResultsAllResolved() {
@@ -57,7 +57,8 @@ func verifyAnalysis(
 	}
 	if o > 0 {
 		go func() {
-			err := verifyAnalysis(valKnowledgeMap, valPrincipalState, attackerStateGetRead(), stage, scanGroup)
+			valAttackerState := attackerStateGetRead()
+			err := verifyAnalysis(valKnowledgeMap, valPrincipalState, &valAttackerState, stage, scanGroup)
 			if err != nil {
 				scanGroup.Done()
 			}
@@ -83,7 +84,7 @@ func verifyAnalysisCountGet() int {
 }
 
 func verifyAnalysisDecompose(
-	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) int {
 	o := 0
 	r := false
@@ -104,7 +105,7 @@ func verifyAnalysisDecompose(
 }
 
 func verifyAnalysisRecompose(
-	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 ) int {
 	o := 0
 	r := false
@@ -125,7 +126,7 @@ func verifyAnalysisRecompose(
 }
 
 func verifyAnalysisReconstruct(
-	a *Value, valPrincipalState *PrincipalState, valAttackerState AttackerState, o int,
+	a *Value, valPrincipalState *PrincipalState, valAttackerState *AttackerState, o int,
 ) int {
 	r := false
 	ar := []*Value{}

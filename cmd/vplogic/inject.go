@@ -10,7 +10,7 @@ import (
 
 func inject(
 	p *Primitive, injectDepth int,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState, stage int,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState, stage int,
 ) []*Value {
 	if verifyResultsAllResolved() {
 		return []*Value{}
@@ -148,7 +148,7 @@ func injectMatchSkeletons(p *Primitive, skeleton *Primitive) bool {
 	return valueEquivalentValues(&pv, &sv, true)
 }
 
-func injectMissingSkeletons(p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState) {
+func injectMissingSkeletons(p *Primitive, valPrincipalState *PrincipalState, valAttackerState *AttackerState) {
 	skeleton, _ := injectPrimitiveSkeleton(p, 0)
 	matchingSkeleton := false
 SkeletonSearch:
@@ -182,7 +182,7 @@ SkeletonSearch:
 }
 
 func injectPrimitive(
-	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 	injectDepth int, stage int,
 ) []*Value {
 	if injectPrimitiveStageRestricted(p, stage) {
@@ -229,7 +229,7 @@ func injectPrimitive(
 
 func injectPrimitiveRecursively(
 	k *Value, arg int, uinjectants [][]*Value, kinjectants [][]*Value,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
 	injectDepth int, stage int,
 ) ([][]*Value, [][]*Value) {
 	kp := inject(
