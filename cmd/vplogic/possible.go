@@ -5,7 +5,7 @@
 package vplogic
 
 func possibleToDecomposePrimitive(
-	p *Primitive, valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {
 	has := []*Value{}
 	if primitiveIsCorePrim(p.ID) {
@@ -54,7 +54,7 @@ func possibleToDecomposePrimitive(
 }
 
 func possibleToRecomposePrimitive(
-	p *Primitive, valAttackerState *AttackerState,
+	p *Primitive, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {
 	if primitiveIsCorePrim(p.ID) {
 		return false, &Value{}, []*Value{}
@@ -89,7 +89,7 @@ func possibleToRecomposePrimitive(
 }
 
 func possibleToReconstructPrimitive(
-	p *Primitive, valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, []*Value) {
 	has := []*Value{}
 	r, _ := possibleToRewrite(p, valPrincipalState)
@@ -127,7 +127,7 @@ func possibleToReconstructPrimitive(
 	return true, has
 }
 
-func possibleToReconstructEquation(e *Equation, valAttackerState *AttackerState) (bool, []*Value) {
+func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) (bool, []*Value) {
 	if len(e.Values) <= 2 {
 		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
 			return true, []*Value{e.Values[1]}

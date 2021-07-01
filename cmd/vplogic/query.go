@@ -15,22 +15,22 @@ func queryStart(
 	var err error
 	switch query.Kind {
 	case typesEnumConfidentiality:
-		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, &valAttackerState)
+		queryConfidentiality(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case typesEnumAuthentication:
-		queryAuthentication(query, valKnowledgeMap, valPrincipalState, &valAttackerState)
+		queryAuthentication(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case typesEnumFreshness:
-		_, err = queryFreshness(query, valKnowledgeMap, valPrincipalState, &valAttackerState)
+		_, err = queryFreshness(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case typesEnumUnlinkability:
-		_, err = queryUnlinkability(query, valKnowledgeMap, valPrincipalState, &valAttackerState)
+		_, err = queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case typesEnumEquivalence:
-		_, err = queryEquivalence(query, valKnowledgeMap, valPrincipalState, &valAttackerState)
+		_, err = queryEquivalence(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 	return err
 }
 
 func queryConfidentiality(
 	query Query, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -70,7 +70,7 @@ func queryConfidentiality(
 
 func queryAuthentication(
 	query Query, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
@@ -177,7 +177,7 @@ func queryAuthenticationHandlePass(
 
 func queryFreshness(
 	query Query, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
@@ -263,7 +263,7 @@ func queryFreshness(
  */
 func queryUnlinkability(
 	query Query, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,
@@ -353,7 +353,7 @@ func queryUnlinkability(
 
 func queryEquivalence(
 	query Query, valKnowledgeMap *KnowledgeMap,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (VerifyResult, error) {
 	result := VerifyResult{
 		Query:    query,

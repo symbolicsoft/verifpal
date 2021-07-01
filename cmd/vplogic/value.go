@@ -562,7 +562,7 @@ func valueResolveEquationInternalValuesFromKnowledgeMap(
 
 func valueResolveValueInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int, valPrincipalState *PrincipalState,
-	valAttackerState *AttackerState, forceBeforeMutate bool,
+	valAttackerState AttackerState, forceBeforeMutate bool,
 ) (*Value, error) {
 	switch a.Kind {
 	case typesEnumConstant:
@@ -621,7 +621,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 
 func valueResolvePrimitiveInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int, valPrincipalState *PrincipalState,
-	valAttackerState *AttackerState, forceBeforeMutate bool,
+	valAttackerState AttackerState, forceBeforeMutate bool,
 ) (*Value, error) {
 	if valPrincipalState.Creator[rootIndex] == valPrincipalState.ID {
 		forceBeforeMutate = false
@@ -650,7 +650,7 @@ func valueResolvePrimitiveInternalValuesFromPrincipalState(
 
 func valueResolveEquationInternalValuesFromPrincipalState(
 	a *Value, rootValue *Value, rootIndex int, valPrincipalState *PrincipalState,
-	valAttackerState *AttackerState, forceBeforeMutate bool,
+	valAttackerState AttackerState, forceBeforeMutate bool,
 ) (*Value, error) {
 	r := &Value{
 		Kind: typesEnumEquation,
@@ -741,7 +741,7 @@ func valueConstantIsUsedByAtLeastOnePrincipalInKnowledgeMap(valKnowledgeMap *Kno
 }
 
 func valueResolveAllPrincipalStateValues(
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (*PrincipalState, error) {
 	var err error
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
@@ -766,7 +766,7 @@ func valueResolveAllPrincipalStateValues(
 
 func valueContainsFreshValues(
 	v *Value, c *Constant,
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, error) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	v, err := valueResolveValueInternalValuesFromPrincipalState(

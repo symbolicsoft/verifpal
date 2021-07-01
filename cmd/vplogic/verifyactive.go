@@ -16,10 +16,9 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 		var stageGroup sync.WaitGroup
 		InfoMessage(fmt.Sprintf("Running at phase %d.", phase), "info", false)
 		attackerStateInit(true)
-		valAttackerState := attackerStateGetRead()
 		valPrincipalStatePureResolved := constructPrincipalStateClone(valPrincipalStates[0], true)
 		valPrincipalStatePureResolved, err := valueResolveAllPrincipalStateValues(
-			valPrincipalStatePureResolved, &valAttackerState,
+			valPrincipalStatePureResolved, attackerStateGetRead(),
 		)
 		if err != nil {
 			return err
@@ -33,26 +32,20 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 			return err
 		}
 		stageGroup.Add(1)
-		valAttackerState = attackerStateGetRead()
-		go verifyActiveStages(1, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
+		go verifyActiveStages(1, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
 		stageGroup.Wait()
 		stageGroup.Add(2)
-		valAttackerState = attackerStateGetRead()
-		go verifyActiveStages(2, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
-		valAttackerState = attackerStateGetRead()
-		go verifyActiveStages(3, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
+		go verifyActiveStages(2, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		go verifyActiveStages(3, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
 		stageGroup.Wait()
 		stageGroup.Add(2)
-		valAttackerState = attackerStateGetRead()
-		go verifyActiveStages(4, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
-		valAttackerState = attackerStateGetRead()
-		go verifyActiveStages(5, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
+		go verifyActiveStages(4, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+		go verifyActiveStages(5, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
 		stageGroup.Wait()
 		stage := 6
 		for !verifyResultsAllResolved() && !attackerStateGetExhausted() {
 			stageGroup.Add(1)
-			valAttackerState = attackerStateGetRead()
-			go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, &valAttackerState, &stageGroup)
+			go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
 			stageGroup.Wait()
 			stage = stage + 1
 		}
@@ -63,19 +56,19 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 
 func verifyActiveStages(
 	stage int, valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState,
-	valAttackerState *AttackerState, stageGroup *sync.WaitGroup,
+	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
 ) {
 	var principalGroup sync.WaitGroup
 	var err error
 	oldKnown := len(valAttackerState.Known)
-	valAttackerStateNext := attackerStateGetRead()
+	valAttackerState = attackerStateGetRead()
 	principalGroup.Add(len(valPrincipalStates))
 	for _, valPrincipalState := range valPrincipalStates {
 		func(valPrincipalState *PrincipalState) {
 			var scanGroup sync.WaitGroup
 			var valMutationMap MutationMap
 			valMutationMap, err = mutationMapInit(
-				valKnowledgeMap, valPrincipalState, &valAttackerStateNext, stage,
+				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 			)
 			if err != nil {
 				scanGroup.Done()
@@ -83,7 +76,7 @@ func verifyActiveStages(
 			}
 			scanGroup.Add(1)
 			err = verifyActiveScan(
-				valKnowledgeMap, valPrincipalState, &valAttackerStateNext,
+				valKnowledgeMap, valPrincipalState, valAttackerState,
 				mutationMapNext(valMutationMap), stage, &scanGroup,
 			)
 			if err != nil {
@@ -104,7 +97,7 @@ func verifyActiveStages(
 
 func verifyActiveScan(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
-	valAttackerState *AttackerState, valMutationMap MutationMap,
+	valAttackerState AttackerState, valMutationMap MutationMap,
 	stage int, scanGroup *sync.WaitGroup,
 ) error {
 	var err error
@@ -118,9 +111,8 @@ func verifyActiveScan(
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
 		go func() {
-			valAttackerStateNext := attackerStateGetRead()
 			err = verifyAnalysis(
-				valKnowledgeMap, valPrincipalStateMutated, &valAttackerStateNext, stage, scanGroup,
+				valKnowledgeMap, valPrincipalStateMutated, attackerStateGetRead(), stage, scanGroup,
 			)
 			if err != nil {
 				scanGroup.Done()
@@ -145,7 +137,7 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valPrincipalState *PrincipalState, valAttackerState *AttackerState, valMutationMap MutationMap,
+	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
 ) (*PrincipalState, bool) {
 	earliestMutation := len(valPrincipalState.Constants)
 	isWorthwhileMutation := false

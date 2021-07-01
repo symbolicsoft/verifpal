@@ -227,7 +227,7 @@ func infoOutputText(revealed *Value) string {
 
 func infoQueryMutatedValues(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
-	valAttackerState *AttackerState, targetValue *Value, infoDepth int,
+	valAttackerState AttackerState, targetValue *Value, infoDepth int,
 ) string {
 	mutated := []*Value{}
 	targetInfo := "In another session:"
