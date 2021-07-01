@@ -73,7 +73,7 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 			)
 		}
 		aa, err := valueResolveValueInternalValuesFromPrincipalState(
-			a, a, i, valPrincipalState, attackerStateShared, true,
+			a, a, i, valPrincipalState, &attackerStateShared, true,
 		)
 		if err != nil {
 			return err
