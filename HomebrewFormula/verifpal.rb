@@ -5,28 +5,28 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.24.0"
+  version "0.24.1"
   bottle :unneeded
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_macos_amd64.zip"
-      sha256 "4d209b9a30bfd8d98734a4e30f296455b1eee655e59fca84b78006b773386019"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_macos_amd64.zip"
+      sha256 "9eb4c4c93c16233ff7776fe501b7b88e0b3f3fdf039195928bdc32cbba5a9315"
     end
     if Hardware::CPU.arm?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_macos_arm64.zip"
-      sha256 "d46fe48474fd0bc1a11a263c971b8b83675fe8f220c895520b0cab7da44208b7"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_macos_arm64.zip"
+      sha256 "372f22574e381c8ef15503b4c186d3cd9181e4ebfd4fdcc7e0dbdd7a0ff8ed8d"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_linux_amd64.zip"
-      sha256 "e63136e2942d8858fd38ef54bc1e8353ff52a79c5a59bbc7736c7f1172408b96"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_linux_amd64.zip"
+      sha256 "60927243d112700379453777fcb06171ed6c0c381d243cde6145f8ba62e8de89"
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_linux_arm64.zip"
-      sha256 "6a14cbd5d7ea15cfb1e9dd5cb39ea102c516fd3dbefbff8642afa6dd5e68a26b"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_linux_arm64.zip"
+      sha256 "9f589bcdbc25b04937d4362acc42c023acac3a8e0718cb93a930923f28a314d1"
     end
   end
 
