@@ -187,7 +187,7 @@ var cmdJSON = &cobra.Command{
 }
 
 func main() {
-	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub on analysis completion")
+	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub upon analysis completion")
 	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslatePv)
 	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdAbout, cmdJSON)
 	err := rootCmd.Execute()
