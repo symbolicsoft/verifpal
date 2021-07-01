@@ -32,11 +32,11 @@ var rootCmd = &cobra.Command{
 var cmdVerify = &cobra.Command{
 	Use:     "verify [model.vp]",
 	Example: "  verifpal verify examples/simple.vp",
-	Short:   "Analyze Verifpal model",
+	Short:   "analyze Verifpal model",
 	Long: strings.Join([]string{
 		"`verify` loads a Verifpal model from the given file path and analyzes it using Verifpal's analysis logic.",
 		"Output is displayed in the terminal as the model is being analyzed.",
-	}, " "),
+	}, "\n"),
 	Args:       cobra.ExactArgs(1),
 	Hidden:     false,
 	SuggestFor: []string{"analyze", "run"},
@@ -57,11 +57,11 @@ var cmdVerify = &cobra.Command{
 var cmdTranslate = &cobra.Command{
 	Use:     "translate [coq|pv] [model.vp]",
 	Example: "  verifpal translate coq examples/simple.vp",
-	Short:   "Translate Verifpal model into another language",
+	Short:   "translate Verifpal model into another language",
 	Long: strings.Join([]string{
 		"`translate` allows translating a Verifpal model into either a ProVerif model ",
 		"or a Coq model implementation based on the option given.",
-	}, " "),
+	}, "\n"),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
@@ -72,12 +72,12 @@ var cmdTranslate = &cobra.Command{
 var cmdTranslateCoq = &cobra.Command{
 	Use:     "coq [model.vp]",
 	Example: "  verifpal translate coq examples/simple.vp",
-	Short:   "Translate Verifpal model into Coq model",
+	Short:   "translate Verifpal model into Coq model",
 	Long: strings.Join([]string{
 		"`translate coq` loads a Verifpal model from the given file path and translates it into a Coq template based",
 		"on the Verifpal Coq library, which can then be used in order to produce a more refined and detailed",
 		"model of your protocol within the Coq verification framework.",
-	}, " "),
+	}, "\n"),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
@@ -93,13 +93,13 @@ var cmdTranslateCoq = &cobra.Command{
 var cmdTranslatePv = &cobra.Command{
 	Use:     "pv [model.vp]",
 	Example: "  verifpal translate pv examples/simple.vp",
-	Short:   "Translate Verifpal model into ProVerif model",
+	Short:   "translate Verifpal model into ProVerif model",
 	Long: strings.Join([]string{
 		"`translate pv` loads a Verifpal model from the given file path",
-		"and translates it into a ProVerif model template based",
-		"on the Verifpal ProVerif library, which can then be used in order to produce a more refined and detailed",
+		"and translates it into a ProVerif model template based on the Verifpal ProVerif library,",
+		"which can then be used in order to produce a more refined and detailed",
 		"model of your protocol within the ProVerif verification framework.",
-	}, " "),
+	}, "\n"),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
@@ -115,11 +115,11 @@ var cmdTranslatePv = &cobra.Command{
 var cmdPretty = &cobra.Command{
 	Use:     "pretty [model.vp]",
 	Example: "  verifpal pretty examples/simple.vp",
-	Short:   "Pretty-print Verifpal model",
+	Short:   "pretty-print Verifpal model",
 	Long: strings.Join([]string{
 		"`pretty` loads a Verifpal model from the given file path",
 		"and outputs a pretty-printed version of that same model.",
-	}, " "),
+	}, "\n"),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(1),
@@ -135,11 +135,11 @@ var cmdPretty = &cobra.Command{
 var cmdAbout = &cobra.Command{
 	Use:     "about",
 	Example: "  verifpal about",
-	Short:   "About information for the Verifpal software",
+	Short:   "about information for the Verifpal software",
 	Long: strings.Join([]string{
 		"`about` lists information about the Verifpal software's",
 		"authors, contributors and testers.",
-	}, " "),
+	}, "\n"),
 	DisableFlagsInUseLine: true,
 	DisableFlagParsing:    true,
 	Args:                  cobra.ExactArgs(0),
@@ -167,6 +167,7 @@ var cmdAbout = &cobra.Command{
 			"  - Renaud Lifchitz",
 			"  - Sebastian R. Verschoor",
 			"  - Tom Roeder",
+			" ",
 		}, "\n"))
 	},
 }
