@@ -1,2 +1,1 @@
-Verifpal 0.23.3 fixes a crash that could sometimes occur with models that use the `password` value type.
-
+Verifpal 0.24.0 fixes a bug that could cause misleading confidentiality query outputs.
