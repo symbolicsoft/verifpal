@@ -38,22 +38,19 @@ func queryConfidentiality(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	v, _ := valueResolveValueInternalValuesFromKnowledgeMap(&Value{
-		Kind: typesEnumConstant,
-		Data: query.Constants[0],
-	}, valKnowledgeMap)
-	ii := valueEquivalentValueInValues(v, valAttackerState.Known)
+	resolvedConstant, i := valueResolveConstant(query.Constants[0], valPrincipalState)
+	resolvedValue, err := valueResolveValueInternalValuesFromPrincipalState(
+		resolvedConstant, resolvedConstant, i, valPrincipalState, valAttackerState, false,
+	)
+	if err != nil {
+		return result
+	}
+	ii := valueEquivalentValueInValues(resolvedValue, valAttackerState.Known)
 	if ii < 0 {
-		ii = valueEquivalentValueInValues(&Value{
-			Kind: typesEnumConstant,
-			Data: query.Constants[0],
-		}, valAttackerState.Known)
-		if ii < 0 {
-			return result
-		}
+		return result
 	}
 	mutatedInfo := infoQueryMutatedValues(
-		valKnowledgeMap, valAttackerState.PrincipalState[ii], valAttackerState, v, 0,
+		valKnowledgeMap, valAttackerState.PrincipalState[ii], valAttackerState, resolvedValue, 0,
 	)
 	result.Resolved = true
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(

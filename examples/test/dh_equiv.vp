@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2021 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[passive]
+
+principal Alice[
+	generates m2
+	knows private k
+	e4 = ENC(k, m2)
+]
+
+Alice -> Bob: e4
+
+principal Bob[
+	knows private k
+	m2_b = DEC(k, e4)
+	leaks k
+]
+
+queries[
+	confidentiality? m2_b
+	confidentiality? m2
+	confidentiality? e4
+	equivalence? m2_b, m2
+]
