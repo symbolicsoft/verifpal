@@ -5,24 +5,29 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.23.3"
+  version "0.24.0"
   bottle :unneeded
 
-  if OS.mac? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_macos_amd64.zip"
-    sha256 "21e47066503d9b4bd8e27f0335534fda779943edafe53f32708a1fc09d3664d6"
+  on_macos do
+    if Hardware::CPU.intel?
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_macos_amd64.zip"
+      sha256 "4d209b9a30bfd8d98734a4e30f296455b1eee655e59fca84b78006b773386019"
+    end
+    if Hardware::CPU.arm?
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_macos_arm64.zip"
+      sha256 "d46fe48474fd0bc1a11a263c971b8b83675fe8f220c895520b0cab7da44208b7"
+    end
   end
-  if OS.mac? && Hardware::CPU.arm?
-    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_macos_arm64.zip"
-    sha256 "b7d4998c973b0256e5ec5c8fdffc44a6a30d0f9ebad5c3d4a9480156fa5c9326"
-  end
-  if OS.linux? && Hardware::CPU.intel?
-    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_linux_amd64.zip"
-    sha256 "1c2f857ba9be2a297ddc11b59f651a9a0db97a8023315ce0851057a802240903"
-  end
-  if OS.linux? && Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-    url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.23.3/downloads/verifpal_0.23.3_linux_arm64.zip"
-    sha256 "887ffb5b5d7b50003aa8e37f38e1859ea3a79b7257d362ec32f4133ed49a525d"
+
+  on_linux do
+    if Hardware::CPU.intel?
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_linux_amd64.zip"
+      sha256 "e63136e2942d8858fd38ef54bc1e8353ff52a79c5a59bbc7736c7f1172408b96"
+    end
+    if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.0/downloads/verifpal_0.24.0_linux_arm64.zip"
+      sha256 "6a14cbd5d7ea15cfb1e9dd5cb39ea102c516fd3dbefbff8642afa6dd5e68a26b"
+    end
   end
 
   def install
