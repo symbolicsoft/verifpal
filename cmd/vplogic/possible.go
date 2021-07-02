@@ -8,7 +8,7 @@ func possibleToDecomposePrimitive(
 	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {
 	has := []*Value{}
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		return false, &Value{}, has
 	}
 	prim, _ := primitiveGet(p.ID)
@@ -56,7 +56,7 @@ func possibleToDecomposePrimitive(
 func possibleToRecomposePrimitive(
 	p *Primitive, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		return false, &Value{}, []*Value{}
 	}
 	prim, _ := primitiveGet(p.ID)
@@ -175,7 +175,7 @@ func possibleToRewrite(
 			p.Arguments[i] = pp[0]
 		}
 	}
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
 		if prim.HasRule {
 			return prim.CoreRule(p)
@@ -192,7 +192,7 @@ func possibleToRewrite(
 		if from.Data.(*Primitive).ID != prim.Rewrite.ID {
 			return !prim.Check, v
 		}
-		if !possibleToRewritePrim(p, valPrincipalState) {
+		if !possibleToRewritePrimitive(p, valPrincipalState) {
 			return !prim.Check, v
 		}
 		rewrite := prim.Rewrite.To(from.Data.(*Primitive))
@@ -201,7 +201,7 @@ func possibleToRewrite(
 	return !prim.Check, v
 }
 
-func possibleToRewritePrim(
+func possibleToRewritePrimitive(
 	p *Primitive, valPrincipalState *PrincipalState,
 ) bool {
 	prim, _ := primitiveGet(p.ID)
@@ -236,7 +236,7 @@ func possibleToRewritePrim(
 }
 
 func possibleToRebuild(p *Primitive) (bool, *Value) {
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		return false, &Value{}
 	}
 	prim, _ := primitiveGet(p.ID)
@@ -288,7 +288,7 @@ func possibleToObtainPasswords(
 				if aIndex >= 0 {
 					switch aParent.Kind {
 					case typesEnumPrimitive:
-						if !primitiveIsCorePrim(aParent.Data.(*Primitive).ID) {
+						if !primitiveIsCorePrimitive(aParent.Data.(*Primitive).ID) {
 							prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
 							if intInSlice(aIndex, prim.PasswordHashing) {
 								return passwords
@@ -301,7 +301,7 @@ func possibleToObtainPasswords(
 		}
 	case typesEnumPrimitive:
 		for i := 0; i < len(a.Data.(*Primitive).Arguments); i++ {
-			if !primitiveIsCorePrim(a.Data.(*Primitive).ID) {
+			if !primitiveIsCorePrimitive(a.Data.(*Primitive).ID) {
 				prim, _ := primitiveGet(a.Data.(*Primitive).ID)
 				if intInSlice(aIndex, prim.PasswordHashing) {
 					aParent = a

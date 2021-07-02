@@ -208,7 +208,7 @@ func coqAssignmentExpression(expression Expression, valKnowledgeMap *KnowledgeMa
 		))
 	case typesEnumPrimitive:
 		primitiveStringName := ""
-		if primitiveIsCorePrim(expression.Assigned.Data.(*Primitive).ID) {
+		if primitiveIsCorePrimitive(expression.Assigned.Data.(*Primitive).ID) {
 			prim, _ := primitiveCoreGet(expression.Assigned.Data.(*Primitive).ID)
 			primitiveStringName = prim.Name
 		} else {
@@ -329,7 +329,7 @@ func coqPrintPrimitive(p *Primitive) (string, error) {
 		args = append(args, cpv)
 	}
 	primitiveStringName := ""
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
 		primitiveStringName = prim.Name
 	} else {

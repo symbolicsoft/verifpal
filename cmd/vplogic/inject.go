@@ -72,7 +72,7 @@ func injectPrimitiveStageRestricted(p *Primitive, stage int) bool {
 		return true
 	case 2:
 		explosive := false
-		if primitiveIsCorePrim(p.ID) {
+		if primitiveIsCorePrimitive(p.ID) {
 			prim, _ := primitiveCoreGet(p.ID)
 			explosive = prim.Explosive
 		} else {

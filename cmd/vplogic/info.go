@@ -204,7 +204,7 @@ func infoOutputText(revealed *Value) string {
 		return outputText
 	case typesEnumPrimitive:
 		oneOutput := false
-		if primitiveIsCorePrim(revealed.Data.(*Primitive).ID) {
+		if primitiveIsCorePrimitive(revealed.Data.(*Primitive).ID) {
 			prim, _ := primitiveCoreGet(revealed.Data.(*Primitive).ID)
 			oneOutput = len(prim.Output) == 1 && prim.Output[0] == 1
 		} else {

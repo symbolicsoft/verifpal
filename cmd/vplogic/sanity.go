@@ -148,7 +148,7 @@ func sanityAssignmentConstantsFromEquation(right *Value, constants []*Constant) 
 func sanityPrimitive(p *Primitive, outputs []*Constant) error {
 	var output []int
 	var check bool
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
 		output = prim.Output
 		check = prim.Check
@@ -436,7 +436,7 @@ func sanityCheckPrimitiveArgumentOutputs(p *Primitive) error {
 		switch p.Arguments[i].Kind {
 		case typesEnumPrimitive:
 			var output []int
-			if primitiveIsCorePrim(p.Arguments[i].Data.(*Primitive).ID) {
+			if primitiveIsCorePrimitive(p.Arguments[i].Data.(*Primitive).ID) {
 				prim, err := primitiveCoreGet(p.Arguments[i].Data.(*Primitive).ID)
 				if err != nil {
 					return err

@@ -716,7 +716,7 @@ var primitiveSpecs = []PrimitiveSpec{
 	},
 }
 
-func primitiveIsCorePrim(name primitiveEnum) bool {
+func primitiveIsCorePrimitive(name primitiveEnum) bool {
 	switch name {
 	case primitiveEnumASSERT, primitiveEnumCONCAT, primitiveEnumSPLIT:
 		return true
@@ -760,7 +760,7 @@ func primitiveGetEnum(stringName string) (primitiveEnum, error) {
 }
 
 func primitiveGetArity(p *Primitive) ([]int, error) {
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		prim, err := primitiveCoreGet(p.ID)
 		if err != nil {
 			return []int{}, err

@@ -256,7 +256,7 @@ func valuePerformPrimitiveRewrite(
 	)
 	if !rewrittenRoot {
 		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Data.(*Primitive))
-	} else if primitiveIsCorePrim(p.ID) {
+	} else if primitiveIsCorePrimitive(p.ID) {
 		rIndex = p.Output
 	}
 	if rIndex >= len(rewrittenValues) {
@@ -342,7 +342,7 @@ func valuePerformEquationRewrite(
 			rewrite.Data.(*Equation).Values = append(rewrite.Data.(*Equation).Values, a)
 		case typesEnumPrimitive:
 			hasRule := false
-			if primitiveIsCorePrim(a.Data.(*Primitive).ID) {
+			if primitiveIsCorePrimitive(a.Data.(*Primitive).ID) {
 				prim, _ := primitiveCoreGet(a.Data.(*Primitive).ID)
 				hasRule = prim.HasRule
 			} else {

@@ -71,7 +71,7 @@ func pvConstants(valKnowledgeMap *KnowledgeMap, principal string, c []*Constant,
 
 func pvPrimitive(valKnowledgeMap *KnowledgeMap, principal string, p *Primitive, check bool) string {
 	primitiveStringName := ""
-	if primitiveIsCorePrim(p.ID) {
+	if primitiveIsCorePrimitive(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
 		primitiveStringName = prim.Name
 	} else {
