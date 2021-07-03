@@ -5,28 +5,28 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.24.1"
+  version "0.25.0"
   bottle :unneeded
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_macos_amd64.zip"
-      sha256 "9eb4c4c93c16233ff7776fe501b7b88e0b3f3fdf039195928bdc32cbba5a9315"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_macos_amd64.zip"
+      sha256 "9b75ba444b9b5ad9304da1a4ad758b44cd46f82829db335e66d32c247074c437"
     end
     if Hardware::CPU.arm?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_macos_arm64.zip"
-      sha256 "372f22574e381c8ef15503b4c186d3cd9181e4ebfd4fdcc7e0dbdd7a0ff8ed8d"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_macos_arm64.zip"
+      sha256 "9f3157ffdcedceed1645f030ea69c22a74ae8e6048321ba15e8e005bb1a4b03e"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_linux_amd64.zip"
-      sha256 "60927243d112700379453777fcb06171ed6c0c381d243cde6145f8ba62e8de89"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_linux_amd64.zip"
+      sha256 "b79ddd2d3a7d2751b58e389988fc7a3a95b14e2ee00c8a6e4e2a2de3353941ce"
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.24.1/downloads/verifpal_0.24.1_linux_arm64.zip"
-      sha256 "9f589bcdbc25b04937d4362acc42c023acac3a8e0718cb93a930923f28a314d1"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_linux_arm64.zip"
+      sha256 "6ff25c7f47e1ad9148caa9735105566262e30d507b202570aeb7b19cb5ea8c0c"
     end
   end
 
