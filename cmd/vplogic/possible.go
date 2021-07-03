@@ -221,6 +221,16 @@ func possibleToRewritePrimitive(
 					if r {
 						ax[i] = v[0]
 					}
+				case typesEnumEquation:
+					for ii, a := range ax[i].Data.(*Equation).Values {
+						switch a.Kind {
+						case typesEnumPrimitive:
+							r, v := possibleToRewrite(a.Data.(*Primitive), valPrincipalState)
+							if r {
+								ax[i].Data.(*Equation).Values[ii] = v[0]
+							}
+						}
+					}
 				}
 			}
 			valid = valueEquivalentValues(ax[0], ax[1], true)

@@ -179,20 +179,25 @@ func valueEquivalentPrimitives(
 }
 
 func valueEquivalentEquations(e1 *Equation, e2 *Equation) bool {
-	if (len(e1.Values) == 0) || (len(e1.Values) != len(e2.Values)) {
+	if len(e1.Values) == 0 || len(e2.Values) == 0 {
 		return false
 	}
-	switch len(e1.Values) {
+	e1f := valueFlattenEquation(e1)
+	e2f := valueFlattenEquation(e2)
+	if len(e1f.Values) != len(e2f.Values) {
+		return false
+	}
+	switch len(e1f.Values) {
 	case 1:
-		return valueEquivalentValues(e1.Values[0], e2.Values[0], true)
+		return valueEquivalentValues(e1f.Values[0], e2f.Values[0], true)
 	case 2:
-		return valueEquivalentValues(e1.Values[0], e2.Values[0], true) &&
-			valueEquivalentValues(e1.Values[1], e2.Values[1], true)
+		return valueEquivalentValues(e1f.Values[0], e2f.Values[0], true) &&
+			valueEquivalentValues(e1f.Values[1], e2f.Values[1], true)
 	case 3:
 		return valueEquivalentEquationsRule(
-			e1.Values[1], e2.Values[1], e1.Values[2], e2.Values[2],
+			e1f.Values[1], e2f.Values[1], e1f.Values[2], e2f.Values[2],
 		) || valueEquivalentEquationsRule(
-			e1.Values[1], e2.Values[2], e1.Values[2], e2.Values[1],
+			e1f.Values[1], e2f.Values[2], e1f.Values[2], e2f.Values[1],
 		)
 	}
 	return false
@@ -201,6 +206,24 @@ func valueEquivalentEquations(e1 *Equation, e2 *Equation) bool {
 func valueEquivalentEquationsRule(base1 *Value, base2 *Value, exp1 *Value, exp2 *Value) bool {
 	return (valueEquivalentValues(base1, exp2, true) &&
 		valueEquivalentValues(exp1, base2, true))
+}
+
+func valueFlattenEquation(e *Equation) *Equation {
+	ef := Equation{
+		Values: []*Value{},
+	}
+	for i := 0; i < len(e.Values); i++ {
+		switch e.Values[i].Kind {
+		case typesEnumConstant:
+			ef.Values = append(ef.Values, e.Values[i])
+		case typesEnumPrimitive:
+			ef.Values = append(ef.Values, e.Values[i])
+		case typesEnumEquation:
+			eff := valueFlattenEquation(e.Values[i].Data.(*Equation))
+			ef.Values = append(ef.Values, eff.Values...)
+		}
+	}
+	return &ef
 }
 
 func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnowledgeMap *KnowledgeMap) bool {
