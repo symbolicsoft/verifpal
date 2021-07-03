@@ -1,1 +1,1 @@
-Verifpal 0.24.0 fixes a bug that could cause misleading confidentiality query outputs. Verifpal 0.24.1 is a minor follow-up release with improvements to the command-line interface.
+Verifpal 0.25.0 fixes additional analysis bugs reported by "Melanie" on the Discord chat.
