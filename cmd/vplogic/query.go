@@ -23,7 +23,7 @@ func queryStart(
 	case typesEnumUnlinkability:
 		_, err = queryUnlinkability(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	case typesEnumEquivalence:
-		_, err = queryEquivalence(query, valKnowledgeMap, valPrincipalState, valAttackerState)
+		queryEquivalence(query, valKnowledgeMap, valPrincipalState, valAttackerState)
 	}
 	return err
 }
@@ -354,7 +354,7 @@ func queryUnlinkability(
 func queryEquivalence(
 	query Query, valKnowledgeMap *KnowledgeMap,
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
-) (VerifyResult, error) {
+) VerifyResult {
 	result := VerifyResult{
 		Query:    query,
 		Resolved: false,
@@ -363,12 +363,8 @@ func queryEquivalence(
 	}
 	values := []*Value{}
 	for i := 0; i < len(query.Constants); i++ {
-		a, ii := valueResolveConstant(query.Constants[i], valPrincipalState)
-		v, err := valueResolveValueInternalValuesFromPrincipalState(a, a, ii, valPrincipalState, valAttackerState, false)
-		if err != nil {
-			return result, err
-		}
-		values = append(values, v)
+		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState)
+		values = append(values, a)
 	}
 	brokenEquivalence := false
 OuterLoop:
@@ -384,7 +380,7 @@ OuterLoop:
 		}
 	}
 	if !brokenEquivalence {
-		return result, nil
+		return result
 	}
 	mutatedInfo := infoQueryMutatedValues(
 		valKnowledgeMap, valPrincipalState, valAttackerState, &Value{}, 0,
@@ -401,7 +397,7 @@ OuterLoop:
 			"%s — %s", prettyQuery(query), result.Summary,
 		), "result", true)
 	}
-	return result, nil
+	return result
 }
 
 func queryPrecondition(
