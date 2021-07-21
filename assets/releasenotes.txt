@@ -1,1 +1,1 @@
-Verifpal 0.25.0 fixes additional analysis bugs reported by "Melanie" on the Discord chat.
+Verifpal 0.26.0 fixes analysis unreliabilty that could arise when a Verifpal model contains a very large number of different queries.
