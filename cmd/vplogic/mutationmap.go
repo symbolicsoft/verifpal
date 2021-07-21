@@ -80,14 +80,20 @@ func mutationMapReplaceValue(
 	a *Value, rootIndex int, stage int,
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) ([]*Value, error) {
+	a, err := valueResolveValueInternalValuesFromPrincipalState(
+		a, a, rootIndex, valPrincipalState, valAttackerState, false,
+	)
+	if err != nil {
+		return []*Value{}, err
+	}
 	switch a.Kind {
 	case typesEnumConstant:
 		return mutationMapReplaceConstant(
 			a, stage, valPrincipalState, valAttackerState,
 		), nil
 	case typesEnumPrimitive:
-		p, err := mutationMapReplacePrimitive(
-			a, rootIndex, stage, valPrincipalState, valAttackerState,
+		p := mutationMapReplacePrimitive(
+			a, stage, valPrincipalState, valAttackerState,
 		)
 		return p, err
 	case typesEnumEquation:
@@ -129,10 +135,9 @@ func mutationMapReplaceConstant(
 }
 
 func mutationMapReplacePrimitive(
-	a *Value, rootIndex int, stage int,
+	a *Value, stage int,
 	valPrincipalState *PrincipalState, valAttackerState AttackerState,
-) ([]*Value, error) {
-	var err error
+) []*Value {
 	mutations := []*Value{}
 	for _, v := range valAttackerState.Known {
 		switch v.Kind {
@@ -148,12 +153,6 @@ func mutationMapReplacePrimitive(
 				}
 			}
 		case typesEnumPrimitive:
-			a, err = valueResolveValueInternalValuesFromPrincipalState(
-				a, a, rootIndex, valPrincipalState, valAttackerState, false,
-			)
-			if err != nil {
-				return []*Value{}, err
-			}
 			if !injectSkeletonNotDeeper(v.Data.(*Primitive), a.Data.(*Primitive)) {
 				continue
 			}
@@ -173,7 +172,7 @@ func mutationMapReplacePrimitive(
 			mutations = append(mutations, a)
 		}
 	}
-	return mutations, nil
+	return mutations
 }
 
 func mutationMapReplaceEquation(

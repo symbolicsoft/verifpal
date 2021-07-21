@@ -787,18 +787,14 @@ func valueResolveAllPrincipalStateValues(
 	return valPrincipalStateClone, nil
 }
 
-func valueContainsFreshValues(
-	v *Value, c *Constant,
-	valPrincipalState *PrincipalState, valAttackerState AttackerState,
+func valueConstantContainsFreshValues(
+	c *Constant, valPrincipalState *PrincipalState,
 ) (bool, error) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-	v, err := valueResolveValueInternalValuesFromPrincipalState(
-		v, v, i, valPrincipalState, valAttackerState, false,
-	)
-	if err != nil {
-		return false, err
+	if i < 0 {
+		return false, errors.New("invalid value")
 	}
-	cc := valueGetConstantsFromValue(v)
+	cc := valueGetConstantsFromValue(valPrincipalState.Assigned[i])
 	for i := 0; i < len(cc); i++ {
 		ii := valueGetPrincipalStateIndexFromConstant(valPrincipalState, cc[i])
 		if ii >= 0 {

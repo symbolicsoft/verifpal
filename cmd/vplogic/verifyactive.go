@@ -106,7 +106,8 @@ func verifyActiveScan(
 		return err
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
-		constructPrincipalStateClone(valPrincipalState, true), valAttackerState, valMutationMap,
+		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
+		valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
 		scanGroup.Add(1)
@@ -137,19 +138,18 @@ func verifyActiveScan(
 }
 
 func verifyActiveMutatePrincipalState(
-	valPrincipalState *PrincipalState, valAttackerState AttackerState, valMutationMap MutationMap,
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
+	valAttackerState AttackerState, valMutationMap MutationMap,
 ) (*PrincipalState, bool) {
 	earliestMutation := len(valPrincipalState.Constants)
 	isWorthwhileMutation := false
 	for i := 0; i < len(valMutationMap.Constants); i++ {
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
 		ac := valMutationMap.Combination[i]
-		ar, _ := valueResolveValueInternalValuesFromPrincipalState(
-			ai, ai, ii, valPrincipalState, valAttackerState, true,
-		)
+		ar, _ := valueResolveValueInternalValuesFromKnowledgeMap(ai, valKnowledgeMap)
 		switch ac.Kind {
 		case typesEnumPrimitive:
-			switch ar.Kind {
+			switch ai.Kind {
 			case typesEnumPrimitive:
 				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output
 				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check

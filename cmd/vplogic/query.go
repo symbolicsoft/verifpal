@@ -38,13 +38,11 @@ func queryConfidentiality(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	resolvedConstant, i := valueResolveConstant(query.Constants[0], valPrincipalState)
-	resolvedValue, err := valueResolveValueInternalValuesFromPrincipalState(
-		resolvedConstant, resolvedConstant, i, valPrincipalState, valAttackerState, false,
-	)
-	if err != nil {
+	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, query.Constants[0])
+	if i < 0 {
 		return result
 	}
+	resolvedValue := valPrincipalState.Assigned[i]
 	ii := valueEquivalentValueInValues(resolvedValue, valAttackerState.Known)
 	if ii < 0 {
 		return result
@@ -186,10 +184,7 @@ func queryFreshness(
 		Options:  []QueryOptionResult{},
 	}
 	indices := []int{}
-	freshnessFound, err := valueContainsFreshValues(&Value{
-		Kind: typesEnumConstant,
-		Data: query.Constants[0],
-	}, query.Constants[0], valPrincipalState, valAttackerState)
+	freshnessFound, err := valueConstantContainsFreshValues(query.Constants[0], valPrincipalState)
 	if err != nil {
 		return result, err
 	}
@@ -273,10 +268,7 @@ func queryUnlinkability(
 	}
 	noFreshness := []*Constant{}
 	for _, c := range query.Constants {
-		freshnessFound, err := valueContainsFreshValues(&Value{
-			Kind: typesEnumConstant,
-			Data: c,
-		}, c, valPrincipalState, valAttackerState)
+		freshnessFound, err := valueConstantContainsFreshValues(c, valPrincipalState)
 		if err != nil {
 			return result, err
 		}
