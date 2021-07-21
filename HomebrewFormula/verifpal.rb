@@ -5,28 +5,28 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.25.0"
+  version "0.26.0"
   bottle :unneeded
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_macos_amd64.zip"
-      sha256 "9b75ba444b9b5ad9304da1a4ad758b44cd46f82829db335e66d32c247074c437"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.26.0/downloads/verifpal_0.26.0_macos_amd64.zip"
+      sha256 "c3ca4c8e6a37d402db0d80b74ddc6f68b858871a1bfd2edfbf009a47d767f35e"
     end
     if Hardware::CPU.arm?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_macos_arm64.zip"
-      sha256 "9f3157ffdcedceed1645f030ea69c22a74ae8e6048321ba15e8e005bb1a4b03e"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.26.0/downloads/verifpal_0.26.0_macos_arm64.zip"
+      sha256 "72562ed305921c4037fdf8ddf4c0564d60162e1ae728bf9f5489424ce2fd0834"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_linux_amd64.zip"
-      sha256 "b79ddd2d3a7d2751b58e389988fc7a3a95b14e2ee00c8a6e4e2a2de3353941ce"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.26.0/downloads/verifpal_0.26.0_linux_amd64.zip"
+      sha256 "009268e7baca810b9d181380ab1104181f349b52ae06585f69e33bf50622cc75"
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.25.0/downloads/verifpal_0.25.0_linux_arm64.zip"
-      sha256 "6ff25c7f47e1ad9148caa9735105566262e30d507b202570aeb7b19cb5ea8c0c"
+      url "https://source.symbolic.software/verifpal/verifpal/-/releases/v0.26.0/downloads/verifpal_0.26.0_linux_arm64.zip"
+      sha256 "c256f132e922c0de8a0e3c69e3bdcb7e582edb8fd9e6d426ad0cc358ce6b288f"
     end
   end
 
