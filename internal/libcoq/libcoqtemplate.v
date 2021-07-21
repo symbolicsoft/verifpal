@@ -494,17 +494,17 @@ Fixpoint absorb_passwords_expression (l: list expression) : list value :=
       end
   end.
 
-Fixpoint absorb_principal (p: principal) : list value :=
+Definition absorb_principal (p: principal) : list value :=
   match p with
   | PRINCIPAL _ pk => merge_lists (absorb_expression pk) (absorb_passwords_expression pk)
 end.
 
-Fixpoint absorb_message (m: message) : value :=
+Definition absorb_message (m: message) : value :=
   match m with
   | MSG _ val => val
 end.
 
-Fixpoint absorb_block (b: block) : list value :=
+Definition absorb_block (b: block) : list value :=
   match b with
     | pblock p => absorb_principal p
     | mblock m => [absorb_message m]
@@ -1653,7 +1653,7 @@ Definition resolve_query (q: query) (l: list value) : bool :=
     | confidentiality v => shallow_search l v
   end.
 
-Fixpoint recompose (l: list value) (v: value) : list value :=
+Definition recompose (l: list value) (v: value) : list value :=
   match ((shallow_search l (prim(SHAMIR_SPLIT1 v)) && shallow_search l (prim(SHAMIR_SPLIT2 v)))
     || (shallow_search l (prim(SHAMIR_SPLIT1 v)) && shallow_search l (prim(SHAMIR_SPLIT3 v)))
     || (shallow_search l (prim(SHAMIR_SPLIT2 v)) && shallow_search l (prim(SHAMIR_SPLIT3 v))) 

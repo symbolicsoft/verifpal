@@ -48,7 +48,7 @@ func coqModel(m Model, valKnowledgeMap *KnowledgeMap) (string, error) {
 		blocksByPhase[block.Phase.Number] = append(blocksByPhase[block.Phase.Number], block)
 	}
 	for i, phase := range blocksByPhase {
-		output = append(output, fmt.Sprintf("Definition phase_%d := [", i))
+		output = append(output, fmt.Sprintf("Definition phase_%d : list block := [", i))
 		output, err = coqBlockByPhase(valKnowledgeMap, phase, output)
 		if err != nil {
 			return "", err
@@ -144,6 +144,7 @@ func coqPrincipal(block Block, valKnowledgeMap *KnowledgeMap) (string, error) {
 			default:
 				for _, c := range expression.Constants {
 					var crc string
+					expressions = append(expressions, fmt.Sprintf("(* knows %s *)", c.Name))
 					crc, err = coqResolveConstant(c, valKnowledgeMap)
 					switch expression.Qualifier {
 					case typesEnumPrivate:
@@ -164,6 +165,7 @@ func coqPrincipal(block Block, valKnowledgeMap *KnowledgeMap) (string, error) {
 		case typesEnumGenerates:
 			for _, c := range expression.Constants {
 				var crv string
+				expressions = append(expressions, fmt.Sprintf("(* generates %s *)", c.Name))
 				crv, err = coqResolveConstant(c, valKnowledgeMap)
 				expressions = append(expressions, fmt.Sprintf(
 					"EXP generation private %s unleaked;", crv,
@@ -172,13 +174,17 @@ func coqPrincipal(block Block, valKnowledgeMap *KnowledgeMap) (string, error) {
 		case typesEnumLeaks:
 			for _, c := range expression.Constants {
 				var crc string
+				expressions = append(expressions, fmt.Sprintf("(* leaks %s *)", c.Name))
 				crc, err = coqResolveConstant(c, valKnowledgeMap)
 				expressions = append(expressions, fmt.Sprintf(
-					"EXP knows public %s leaked;", crc,
+					"EXP knowledge public %s leaked;", crc,
 				))
 			}
 		case typesEnumAssignment:
 			var cae []string
+			for _, c := range expression.Constants {
+				expressions = append(expressions, fmt.Sprintf("(* assigns to %s *)", c.Name))
+			}
 			cae, err = coqAssignmentExpression(expression, valKnowledgeMap)
 			expressions = append(expressions, cae...)
 		}
