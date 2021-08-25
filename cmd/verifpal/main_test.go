@@ -16,7 +16,7 @@ type VerifpalTest struct {
 	ResultsCode string
 }
 
-var verifpalTests = [57]VerifpalTest{
+var verifpalTests = [58]VerifpalTest{
 	{
 		Model:       "challengeresponse.vp",
 		ResultsCode: "a0a1",
@@ -266,6 +266,10 @@ var verifpalTests = [57]VerifpalTest{
 	{
 		Model:       "melanie_bugs.vp",
 		ResultsCode: "c1c1c1c1c1a1",
+	},
+	{
+		Model:       "simple_equiv.vp",
+		ResultsCode: "e0",
 	},
 }
 

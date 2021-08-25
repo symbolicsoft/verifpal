@@ -32,7 +32,7 @@ func mutationMapInit(
 		case typesEnumEquation:
 			continue
 		}
-		a, i := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
+		a, i := valueResolveConstant(v.Data.(*Constant), valPrincipalState, true)
 		if mutationMapSkipValue(v, i, valKnowledgeMap, valPrincipalState, valAttackerState) {
 			continue
 		}
@@ -122,7 +122,7 @@ func mutationMapReplaceConstant(
 			if valueIsGOrNil(v.Data.(*Constant)) {
 				continue
 			}
-			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
+			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState, true)
 			switch c.Kind {
 			case typesEnumConstant:
 				if valueEquivalentValueInValues(c, mutations) < 0 {
@@ -145,7 +145,7 @@ func mutationMapReplacePrimitive(
 			if valueIsGOrNil(v.Data.(*Constant)) {
 				continue
 			}
-			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState)
+			c, _ := valueResolveConstant(v.Data.(*Constant), valPrincipalState, true)
 			switch c.Kind {
 			case typesEnumConstant:
 				if valueEquivalentValueInValues(c, mutations) < 0 {

@@ -153,7 +153,7 @@ func verifyAnalysisEquivalize(a *Value, valPrincipalState *PrincipalState) int {
 	ar := a
 	switch a.Kind {
 	case typesEnumConstant:
-		ar, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState)
+		ar, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState, true)
 	}
 	for i := 0; i < len(valPrincipalState.Assigned); i++ {
 		if valueEquivalentValues(ar, valPrincipalState.Assigned[i], true) {

@@ -104,7 +104,7 @@ func queryAuthenticationGetPassIndices(
 	query Query, valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 ) ([]int, principalEnum, *Constant) {
 	indices := []int{}
-	_, i := valueResolveConstant(query.Message.Constants[0], valPrincipalState)
+	_, i := valueResolveConstant(query.Message.Constants[0], valPrincipalState, true)
 	if i < 0 {
 		return indices, 0, &Constant{}
 	}
@@ -129,7 +129,7 @@ func queryAuthenticationGetPassIndices(
 		if !valueFindConstantInPrimitiveFromKnowledgeMap(c, a, valKnowledgeMap) {
 			continue
 		}
-		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState)
+		_, iiii := valueResolveConstant(valKnowledgeMap.Constants[iii], valPrincipalState, true)
 		if iiii < 0 {
 			return indices, sender, c
 		}
@@ -157,7 +157,7 @@ func queryAuthenticationHandlePass(
 	result VerifyResult, c *Constant, b *Value, mutatedInfo string, sender principalEnum,
 	valPrincipalState *PrincipalState,
 ) VerifyResult {
-	cc, _ := valueResolveConstant(c, valPrincipalState)
+	cc, _ := valueResolveConstant(c, valPrincipalState, true)
 	result.Summary = infoVerifyResultSummary(mutatedInfo, fmt.Sprintf(
 		"%s (%s), sent by %s and not by %s, is successfully used in %s within %s's state.",
 		prettyConstant(c), prettyValue(cc), principalGetNameFromID(sender),
@@ -204,7 +204,7 @@ func queryFreshness(
 		if !valueFindConstantInPrimitiveFromKnowledgeMap(query.Constants[0], a, valKnowledgeMap) {
 			continue
 		}
-		_, ii := valueResolveConstant(valKnowledgeMap.Constants[i], valPrincipalState)
+		_, ii := valueResolveConstant(valKnowledgeMap.Constants[i], valPrincipalState, true)
 		if ii < 0 {
 			return result, nil
 		}
@@ -228,7 +228,7 @@ func queryFreshness(
 	if len(indices) == 0 {
 		return result, nil
 	}
-	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState)
+	resolved, _ := valueResolveConstant(query.Constants[0], valPrincipalState, true)
 	mutatedInfo := infoQueryMutatedValues(
 		valKnowledgeMap, valPrincipalState, valAttackerState, resolved, 0,
 	)
@@ -277,7 +277,7 @@ func queryUnlinkability(
 		}
 	}
 	if len(noFreshness) > 0 {
-		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState)
+		resolved, _ := valueResolveConstant(noFreshness[0], valPrincipalState, true)
 		mutatedInfo := infoQueryMutatedValues(
 			valKnowledgeMap, valPrincipalState, valAttackerState, resolved, 0,
 		)
@@ -298,7 +298,7 @@ func queryUnlinkability(
 	constants := []*Constant{}
 	assigneds := []*Value{}
 	for i := 0; i < len(query.Constants); i++ {
-		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState)
+		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState, true)
 		constants = append(constants, query.Constants[i])
 		assigneds = append(assigneds, a)
 	}
@@ -355,7 +355,7 @@ func queryEquivalence(
 	}
 	values := []*Value{}
 	for i := 0; i < len(query.Constants); i++ {
-		a, _ := valueResolveConstantEqv(query.Constants[i], valPrincipalState)
+		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState, false)
 		values = append(values, a)
 	}
 	brokenEquivalence := false
@@ -406,7 +406,7 @@ func queryPrecondition(
 			Summary:  "",
 		}
 		recipientKnows := false
-		_, i := valueResolveConstant(option.Message.Constants[0], valPrincipalState)
+		_, i := valueResolveConstant(option.Message.Constants[0], valPrincipalState, true)
 		if i < 0 {
 			result.Options = append(result.Options, oResult)
 			continue

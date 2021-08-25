@@ -144,7 +144,7 @@ func verifyActiveMutatePrincipalState(
 	earliestMutation := len(valPrincipalState.Constants)
 	isWorthwhileMutation := false
 	for i := 0; i < len(valMutationMap.Constants); i++ {
-		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState)
+		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState, true)
 		ac := valMutationMap.Combination[i]
 		ar, _ := valueResolveValueInternalValuesFromKnowledgeMap(ai, valKnowledgeMap)
 		switch ac.Kind {

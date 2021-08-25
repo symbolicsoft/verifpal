@@ -291,7 +291,7 @@ func possibleToObtainPasswords(
 	passwords := []*Value{}
 	switch a.Kind {
 	case typesEnumConstant:
-		aa, _ := valueResolveConstant(a.Data.(*Constant), valPrincipalState)
+		aa, _ := valueResolveConstant(a.Data.(*Constant), valPrincipalState, true)
 		switch aa.Kind {
 		case typesEnumConstant:
 			if aa.Data.(*Constant).Qualifier == typesEnumPassword {

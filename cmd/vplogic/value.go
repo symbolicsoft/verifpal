@@ -463,21 +463,13 @@ func valueShouldResolveToBeforeMutate(i int, valPrincipalState *PrincipalState) 
 	return false
 }
 
-func valueResolveConstant(c *Constant, valPrincipalState *PrincipalState) (*Value, int) {
+func valueResolveConstant(c *Constant, valPrincipalState *PrincipalState, allowBeforeMutate bool) (*Value, int) {
 	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
 	if i < 0 {
 		return &Value{Kind: typesEnumConstant, Data: c}, i
 	}
-	if valueShouldResolveToBeforeMutate(i, valPrincipalState) {
+	if allowBeforeMutate && valueShouldResolveToBeforeMutate(i, valPrincipalState) {
 		return valPrincipalState.BeforeMutate[i], i
-	}
-	return valPrincipalState.Assigned[i], i
-}
-
-func valueResolveConstantEqv(c *Constant, valPrincipalState *PrincipalState) (*Value, int) {
-	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
-	if i < 0 {
-		return &Value{Kind: typesEnumConstant, Data: c}, i
 	}
 	return valPrincipalState.Assigned[i], i
 }
@@ -609,7 +601,7 @@ func valueResolveValueInternalValuesFromPrincipalState(
 			if forceBeforeMutate {
 				a = valPrincipalState.BeforeMutate[nextRootIndex]
 			} else {
-				a, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState)
+				a, _ = valueResolveConstant(a.Data.(*Constant), valPrincipalState, true)
 			}
 		default:
 			switch rootValue.Kind {
@@ -698,7 +690,7 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 		switch aa[aai].Kind {
 		case typesEnumConstant:
 			var i int
-			aa[aai], i = valueResolveConstant(aa[aai].Data.(*Constant), valPrincipalState)
+			aa[aai], i = valueResolveConstant(aa[aai].Data.(*Constant), valPrincipalState, true)
 			if forceBeforeMutate {
 				aa[aai] = valPrincipalState.BeforeMutate[i]
 			}
