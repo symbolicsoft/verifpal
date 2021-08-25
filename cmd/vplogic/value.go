@@ -474,6 +474,14 @@ func valueResolveConstant(c *Constant, valPrincipalState *PrincipalState) (*Valu
 	return valPrincipalState.Assigned[i], i
 }
 
+func valueResolveConstantEqv(c *Constant, valPrincipalState *PrincipalState) (*Value, int) {
+	i := valueGetPrincipalStateIndexFromConstant(valPrincipalState, c)
+	if i < 0 {
+		return &Value{Kind: typesEnumConstant, Data: c}, i
+	}
+	return valPrincipalState.Assigned[i], i
+}
+
 func valueResolveValueInternalValuesFromKnowledgeMap(
 	a *Value, valKnowledgeMap *KnowledgeMap,
 ) (*Value, []*Value) {
