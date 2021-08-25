@@ -1,0 +1,14 @@
+attacker[passive]
+
+principal Server[
+	generates x
+	generates y
+	gx = G^x
+	gy = G^y
+	gxy = gx^y
+	gyx = gy^x
+]
+
+queries[
+	equivalence? gxy, gyx
+]
