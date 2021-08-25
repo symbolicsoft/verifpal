@@ -1,1 +1,3 @@
-Verifpal 0.26.0 fixes analysis unreliabilty that could arise when a Verifpal model contains a very large number of different queries.
+Verifpal 0.26.1 fixes analysis unreliabilty that could arise when equivalence queries are used.
+
+Equivalence queries remain unstable, and should be used with caution for the time being.
