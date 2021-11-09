@@ -6,7 +6,6 @@ class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
   version "0.26.1"
-  bottle :unneeded
 
   on_macos do
     if Hardware::CPU.intel?
