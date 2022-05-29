@@ -164,6 +164,7 @@ var cmdAbout = &cobra.Command{
 			"  - \"Mike\" (pseudonym)",
 			"  - Mukesh Tiwari (Dr.)",
 			"  - Oleksandra \"Sasha\" Lapiha",
+			"  - Oskar Goldhahn",
 			"  - Renaud Lifchitz",
 			"  - Sebastian R. Verschoor",
 			"  - Tom Roeder",
