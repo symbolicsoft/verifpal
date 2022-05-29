@@ -316,11 +316,10 @@ type AttackerState struct {
 // - Mutations tracks the possible mutations for this constant in
 //   the PrincipalState.
 // Combination and DepthIndex are internal values to track the
-// combinatorial state of the MutationMAp.
+// combinatorial state of the MutationMap.
 type MutationMap struct {
 	Initialized    bool
 	OutOfMutations bool
-	LastIncrement  int
 	Constants      []*Constant
 	Mutations      [][]*Value
 	Combination    []*Value

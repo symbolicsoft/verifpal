@@ -16,7 +16,6 @@ func mutationMapInit(
 	valMutationMap := MutationMap{
 		Initialized:    true,
 		OutOfMutations: false,
-		LastIncrement:  0,
 		Constants:      []*Constant{},
 		Mutations:      [][]*Value{},
 		Combination:    []*Value{},
@@ -215,7 +214,6 @@ func mutationMapNext(valMutationMap MutationMap) MutationMap {
 			continue
 		}
 		valMutationMap.DepthIndex[i] = valMutationMap.DepthIndex[i] + 1
-		valMutationMap.LastIncrement = i
 		for ii := i; ii >= 0; ii-- {
 			if valMutationMap.DepthIndex[ii] != len(valMutationMap.Mutations[ii]) {
 				continue
@@ -226,7 +224,6 @@ func mutationMapNext(valMutationMap MutationMap) MutationMap {
 			}
 			valMutationMap.DepthIndex[ii] = 0
 			valMutationMap.DepthIndex[ii-1] = valMutationMap.DepthIndex[ii-1] + 1
-			valMutationMap.LastIncrement = ii - 1
 		}
 	}
 	return valMutationMap

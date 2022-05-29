@@ -167,9 +167,7 @@ func verifyActiveMutatePrincipalState(
 		if ii < earliestMutation {
 			earliestMutation = ii
 		}
-		if i >= valMutationMap.LastIncrement {
-			isWorthwhileMutation = true
-		}
+		isWorthwhileMutation = true
 	}
 	if !isWorthwhileMutation {
 		return valPrincipalState, isWorthwhileMutation
