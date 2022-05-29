@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: © 2019-2021 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-FileCopyrightText: © 2019-2022 Nadim Kobeissi <nadim@symbolic.software>
 # SPDX-License-Identifier: GPL-3.0-only
 
 all:
@@ -46,6 +46,9 @@ dep:
 	@/bin/echo -n "."
 	@go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 	@/bin/echo "       OK"
+
+update:
+	@go get -u verifpal.com/cmd/verifpal
 
 lint:
 	@/bin/echo "[Verifpal] Running golangci-lint..."
