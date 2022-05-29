@@ -180,20 +180,23 @@ func infoAnalysis(stage int) {
 	fmt.Fprint(os.Stdout, "\r\r\r\r")
 }
 
-func infoLiteralNumber(n int) string {
-	switch n {
-	case 0:
-		return "first"
-	case 1:
-		return "second"
-	case 2:
-		return "third"
-	case 3:
-		return "fourth"
-	case 4:
-		return "fifth"
-	default:
+func infoLiteralNumber(n int, titleCase bool) string {
+	switch {
+	case n > 9:
 		return fmt.Sprintf("%dth", n)
+	default:
+		switch titleCase {
+		case true:
+			return []string{
+				"First", "Second", "Third", "Fourth", "Fifth",
+				"Sixth", "Seventh", "Eighth", "Ninth", "Tenth",
+			}[n]
+		default:
+			return []string{
+				"first", "second", "third", "fourth", "fifth",
+				"sixth", "seventh", "eighth", "ninth", "tenth",
+			}[n]
+		}
 	}
 }
 
@@ -215,7 +218,7 @@ func infoOutputText(revealed *Value) string {
 			return fmt.Sprintf("Output of %s", outputText)
 		}
 		prefix := fmt.Sprintf("%s output",
-			strings.Title(infoLiteralNumber(revealed.Data.(*Primitive).Output)),
+			infoLiteralNumber(revealed.Data.(*Primitive).Output, true),
 		)
 		return fmt.Sprintf("%s of %s", prefix, outputText)
 	case typesEnumEquation:
