@@ -3,17 +3,17 @@
 
 module verifpal.com
 
-go 1.17
+go 1.19
 
 require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/spf13/cobra v1.4.0
+	github.com/spf13/cobra v1.6.1
 )
 
 require (
 	github.com/akavel/rsrc v0.10.2 // indirect
 	github.com/bketelsen/crypt v0.0.4 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/josephspurrier/goversioninfo v1.3.0 // indirect
 	github.com/mna/pigeon v1.1.0 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
