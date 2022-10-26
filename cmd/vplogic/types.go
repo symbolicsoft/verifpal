@@ -38,7 +38,7 @@ type Model struct {
 	Queries  []Query
 }
 
-//VerifyResult contains the verification results for a particular query.
+// VerifyResult contains the verification results for a particular query.
 type VerifyResult struct {
 	Query    Query
 	Resolved bool
@@ -184,26 +184,26 @@ type KnowledgeMap struct {
 // Creator, Sender, Rewritten, BeforeRewrite, Mutated, MutatableTo, BeforeMutate and Phase
 // operate as related columns, i.e. the n'th slice element in each of them
 // corresponds to the n'th slice element in the other.
-// - Name contains the name of the principal for whom this PrincipalState belongs to.
-// - Constants contains all the constants within the model.
-// - Assigned represents the values to which constants are assigned.
-//   This may be mutated by the active attacker during analysis.
-// - Guard represents whether this value was guarded when this principal received it.
-// - Known represents whether this principal ever gains knowledge of this value.
-// - Wire represents the list of principals who received this constant over the wire (as a message).
-// - KnownBy is a map documenting from whom each principal came to know the constant.
-// - DeclaredAt documents how many messages had passed before the constant was declared.
-// - MaxDeclaredAt documents the maximum possible value for DeclaredAt.
-// - Creator represents the name of the principal who first declared the constant.
-// - Sender represents which principal it was who sent this constant to this principal.
-// - Rewritten tracks whether this value could be rewritten (eg. from `DEC(k,ENC(k,m))` to `m`).
-//   The rewritten value is then stored in Assigned.
-// - BeforeRewrite tracks the value before it was rewritten.
-// - Mutated tracks whether this value could be mutated by the active attacker (eg. from `G^a` to `G^nil`).
-//   The mutated value is then stored in Assigned.
-// - MutatableTo tracks the principal for whom it is possible for this value to ever be mutated.
-// - BeforeMutate tracks the value before it was mutated.
-// - Phase documents at which phase the constant was declared.
+//   - Name contains the name of the principal for whom this PrincipalState belongs to.
+//   - Constants contains all the constants within the model.
+//   - Assigned represents the values to which constants are assigned.
+//     This may be mutated by the active attacker during analysis.
+//   - Guard represents whether this value was guarded when this principal received it.
+//   - Known represents whether this principal ever gains knowledge of this value.
+//   - Wire represents the list of principals who received this constant over the wire (as a message).
+//   - KnownBy is a map documenting from whom each principal came to know the constant.
+//   - DeclaredAt documents how many messages had passed before the constant was declared.
+//   - MaxDeclaredAt documents the maximum possible value for DeclaredAt.
+//   - Creator represents the name of the principal who first declared the constant.
+//   - Sender represents which principal it was who sent this constant to this principal.
+//   - Rewritten tracks whether this value could be rewritten (eg. from `DEC(k,ENC(k,m))` to `m`).
+//     The rewritten value is then stored in Assigned.
+//   - BeforeRewrite tracks the value before it was rewritten.
+//   - Mutated tracks whether this value could be mutated by the active attacker (eg. from `G^a` to `G^nil`).
+//     The mutated value is then stored in Assigned.
+//   - MutatableTo tracks the principal for whom it is possible for this value to ever be mutated.
+//   - BeforeMutate tracks the value before it was mutated.
+//   - Phase documents at which phase the constant was declared.
 type PrincipalState struct {
 	Name          string
 	ID            principalEnum
@@ -291,11 +291,11 @@ type PrimitiveSpec struct {
 // In what follows, Known and PrincipalState operate as related columns,
 // i.e. the n'th slice element in each of them corresponds to the n'th
 // slice element in the other:
-// - Active tracks whether this is an active attacker.
-// - CurrentPhase tracks the phase at which the analysis is currently occurring.
-// - Known tracks the values learned by the attacker.
-// - PrincipalState contains a snapshot of the principal's PrincipalState at the moment
-//   where the corresponding value in Known was learned by the attacker.
+//   - Active tracks whether this is an active attacker.
+//   - CurrentPhase tracks the phase at which the analysis is currently occurring.
+//   - Known tracks the values learned by the attacker.
+//   - PrincipalState contains a snapshot of the principal's PrincipalState at the moment
+//     where the corresponding value in Known was learned by the attacker.
 type AttackerState struct {
 	Active         bool
 	CurrentPhase   int
@@ -309,12 +309,13 @@ type AttackerState struct {
 // In what follows, Constants, Mutations and Combination operate as
 // related columns, i.e. the n'th slice element in each of them
 // corresponds to the n'th slice element in the other:
-// - Initialized tracks whether this MutationMap has been populated.
-// - OutOfMutations tracks whether all of the mutations in this map
-//   have been applied to its corresponding PrincipalState.
-// - Constants tracks the constant which will be mutated.
-// - Mutations tracks the possible mutations for this constant in
-//   the PrincipalState.
+//   - Initialized tracks whether this MutationMap has been populated.
+//   - OutOfMutations tracks whether all of the mutations in this map
+//     have been applied to its corresponding PrincipalState.
+//   - Constants tracks the constant which will be mutated.
+//   - Mutations tracks the possible mutations for this constant in
+//     the PrincipalState.
+//
 // Combination and DepthIndex are internal values to track the
 // combinatorial state of the MutationMap.
 type MutationMap struct {
