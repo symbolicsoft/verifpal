@@ -8,6 +8,8 @@ jobs:
     container:
       image: golang:latest
     steps:
+    - name: Setup Go environment
+      uses: actions/setup-go@v4.1.0
     - name: Checkout code
       uses: actions/checkout@v2
     - name: Install dependencies
