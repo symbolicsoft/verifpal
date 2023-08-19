@@ -4,6 +4,8 @@ on: [push, pull_request]
 
 jobs:
   test:
+    env:
+      GOFLAGS: -buildvcs=fals
     runs-on: ubuntu-latest
     container:
       image: golang:latest
