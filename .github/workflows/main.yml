@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   test:
     env:
-      GOFLAGS: -buildvcs=fals
+      GOFLAGS: -buildvcs=false
     runs-on: ubuntu-latest
     container:
       image: golang:latest
