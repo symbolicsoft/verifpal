@@ -12,12 +12,9 @@ linters:
         - unused
         - gosimple
         - gofmt
-        - structcheck
-        - varcheck
+        - unused
         - ineffassign
-        - deadcode
         - typecheck
-        - depguard
         - dogsled
         - dupl
         - funlen

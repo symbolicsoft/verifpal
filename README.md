@@ -38,20 +38,20 @@ The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essent
 On Windows, the best way to install Verifpal is through the [Scoop](https://scoop.sh) package manager, since you'll also get automatic updates:
 
 ```
-scoop bucket add verifpal https://source.symbolic.software/verifpal/verifpal.git
+scoop bucket add verifpal https://github.com/symbolicsoft/verifpal.git
 scoop install verifpal
 ```
 
 On Linux and macOS, the best way to install Verifpal is through the [Homebrew](https://brew.sh) package manager, since you'll also get automatic updates:
 
 ```
-brew tap verifpal.com/source https://source.symbolic.software/verifpal/verifpal
+brew tap verifpal.com/source https://github.com/symbolicsoft/verifpal
 brew install verifpal
 ```
 
 Otherwise, you can:
 
-- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://source.symbolic.software/verifpal/verifpal/-/releases).
+- *Download and install a release manually*: Releases for Windows, Linux, macOS and FreeBSD are available [here](https://github.com/symbolicsoft/verifpal/releases).
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source
@@ -67,7 +67,7 @@ Verifpal relies on the [Aurora](https://github.com/logrusorgru/aurora) ANSI colo
 Builds will be available under `build/`.
 
 ### Verifpal for Visual Studio Code
-Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code. More information available [here](https://source.symbolic.software/verifpal/verifpal-vscode/-/blob/master/README.md).
+Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code. More information available [here](https://github.com/symbolicsoft/verifpal-vscode).
 
 ## Discussion
 Sign up to the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal) to stay informed on the latest news and announcements regarding Verifpal, and to participate in Verifpal discussions.

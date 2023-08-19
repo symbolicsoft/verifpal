@@ -38,13 +38,13 @@ freebsd:
 
 dep:
 	@/bin/echo -n "[Verifpal] Installing dependencies"
-	@go install github.com/logrusorgru/aurora
+	@go mod download github.com/logrusorgru/aurora
 	@/bin/echo -n "."
-	@go install github.com/mna/pigeon
+	@go mod download github.com/mna/pigeon
 	@/bin/echo -n "."
-	@go install  github.com/spf13/cobra
+	@go mod download  github.com/spf13/cobra
 	@/bin/echo -n "."
-	@go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo
+	@go mod download github.com/josephspurrier/goversioninfo
 	@/bin/echo "       OK"
 
 update:

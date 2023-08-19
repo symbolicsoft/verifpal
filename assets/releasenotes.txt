@@ -1,3 +1,3 @@
-Verifpal 0.27.0 fixes an analysis bug caused by an ill-thought "performance optimization". It also updates a few dependencies.
+Verifpal 0.27.1 introduces nothing new: it's simply an update to move Verifpal's package management URLs to the new GitHub repository.
 
-Thanks to Oskar Goldhahn (NTNU) for detecting the issue.
+That's right: Verifpal is moving to https://github.com/symbolicsoft/verifpal. Please update your links!

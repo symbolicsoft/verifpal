@@ -1,10 +1,5 @@
 project_name: verifpal
 
-gitlab_urls:
-  api: https://source.symbolic.software/api/v4/
-  download: https://source.symbolic.software
-  skip_tls_verify: false
-
 before:
   hooks:
     - go generate ./...
@@ -23,9 +18,7 @@ builds:
       - arm64
 
 archives:
-  - replacements:
-      darwin: macos
-    format: zip
+  - format: zip
     files:
       - LICENSE
       - examples/*
@@ -37,15 +30,14 @@ changelog:
   sort: asc
 
 release:
-  gitlab:
-    owner: verifpal
+  github:
+    owner: symbolicsoft
     name: verifpal
 
 brews:
-  - tap:
-      owner: verifpal
+  - repository:
+      owner: symbolicsoft
       name: verifpal
-    url_template: "https://source.symbolic.software/verifpal/verifpal/-/releases/{{ .Tag }}/downloads/{{ .ArtifactName }}"
     commit_author:
       name: drone
       email: drone@symbolic.software
@@ -53,14 +45,13 @@ brews:
     homepage: "https://verifpal.com"
     description: "Cryptographic protocol analysis for students and engineers."
 
-scoop:
-  bucket:
-    owner: verifpal
-    name: verifpal
-  url_template: "https://source.symbolic.software/verifpal/verifpal/-/releases/{{ .Tag }}/downloads/{{ .ArtifactName }}"
-  commit_author:
-    name: drone
-    email: drone@symbolic.software
-  homepage: "https://verifpal.com"
-  description: "Cryptographic protocol analysis for students and engineers."
-  license: "https://www.gnu.org/licenses/gpl-3.0.en.html"
+scoops:
+  - repository:
+      owner: symbolicsoft
+      name: verifpal
+    commit_author:
+      name: drone
+      email: drone@symbolic.software
+    homepage: "https://verifpal.com"
+    description: "Cryptographic protocol analysis for students and engineers."
+    license: "https://www.gnu.org/licenses/gpl-3.0.en.html"
