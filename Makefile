@@ -40,6 +40,7 @@ dep:
 	@/bin/echo -n "[Verifpal] Installing dependencies"
 	@go mod download github.com/logrusorgru/aurora
 	@/bin/echo -n "."
+	@go get -u github.com/mna/pigeon
 	@go mod download github.com/mna/pigeon
 	@/bin/echo -n "."
 	@go mod download  github.com/spf13/cobra
