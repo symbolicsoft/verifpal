@@ -1,3 +1,1 @@
-Verifpal 0.27.1 introduces nothing new: it's simply an update to move Verifpal's package management URLs to the new GitHub repository.
-
-That's right: Verifpal is moving to https://github.com/symbolicsoft/verifpal. Please update your links!
+Verifpal 0.27.2 fixes build issues with the previous version. There is no need to update from 0.27.0 or 0.27.1 if Verifpal builds correctly for you.
