@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
+[![CI](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml/badge.svg)](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml)
+
 # [Verifpal](https://verifpal.com)
 
 ## What is Verifpal?
