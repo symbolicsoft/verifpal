@@ -147,17 +147,26 @@ func verifyActiveMutatePrincipalState(
 		ai, ii := valueResolveConstant(valMutationMap.Constants[i], valPrincipalState, true)
 		ac := valMutationMap.Combination[i]
 		ar, _ := valueResolveValueInternalValuesFromKnowledgeMap(ai, valKnowledgeMap)
+		switch ar.Kind {
+		case typesEnumPrimitive:
+		        _, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
+		        switch aar[0].Kind {
+		        case typesEnumPrimitive:
+		                ar.Data = aar[0].Data.(*Primitive)
+		        }
+		}
 		switch ac.Kind {
 		case typesEnumPrimitive:
+			_, aac := possibleToRewrite(ac.Data.(*Primitive), valPrincipalState)
+			switch aac[0].Kind {
+			case typesEnumPrimitive:
+				ac.Data = aac[0].Data.(*Primitive)
+			}
 			switch ai.Kind {
 			case typesEnumPrimitive:
 				ac.Data.(*Primitive).Output = ar.Data.(*Primitive).Output
 				ac.Data.(*Primitive).Check = ar.Data.(*Primitive).Check
 			}
-		}
-		switch {
-		case valueEquivalentValues(ac, ar, true):
-			continue
 		}
 		valPrincipalState.Creator[ii] = principalNamesMap["Attacker"]
 		valPrincipalState.Sender[ii] = principalNamesMap["Attacker"]
@@ -166,6 +175,10 @@ func verifyActiveMutatePrincipalState(
 		valPrincipalState.BeforeRewrite[ii] = ac
 		if ii < earliestMutation {
 			earliestMutation = ii
+		}
+		switch {
+		case valueEquivalentValues(ac, ar, true):
+			continue
 		}
 		isWorthwhileMutation = true
 	}
