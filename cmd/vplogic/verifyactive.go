@@ -149,11 +149,11 @@ func verifyActiveMutatePrincipalState(
 		ar, _ := valueResolveValueInternalValuesFromKnowledgeMap(ai, valKnowledgeMap)
 		switch ar.Kind {
 		case typesEnumPrimitive:
-		        _, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
-		        switch aar[0].Kind {
-		        case typesEnumPrimitive:
-		                ar.Data = aar[0].Data.(*Primitive)
-		        }
+			_, aar := possibleToRewrite(ar.Data.(*Primitive), valPrincipalState)
+			switch aar[0].Kind {
+			case typesEnumPrimitive:
+				ar.Data = aar[0].Data.(*Primitive)
+			}
 		}
 		switch ac.Kind {
 		case typesEnumPrimitive:

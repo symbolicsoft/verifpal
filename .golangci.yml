@@ -1,5 +1,5 @@
-run:
-    skip-files:
+issues:
+    exclude-files:
         - main_test.go
         - libpeg.go
         - libcoq.go
@@ -27,7 +27,7 @@ linters:
         - misspell
         - nakedret
         - prealloc
-        - exportloopref
+        - copyloopvar
         - unconvert
         - unparam
         - whitespace
@@ -35,34 +35,9 @@ linters:
 linters-settings:
     gocritic:
         enabled-checks:
-            - appendAssign
-            - caseOrder
-            - dupArg
-            - dupBranchBody
-            - dupCase
-            - dupSubExpr
-            - flagDeref
-            - captLocal
-            - defaultCaseOrder
-            - elseif
-            - ifElseChain
-            - regexpMust
-            - sloppyLen
-            - switchTrue
-            - typeSwitchVar
-            - underef
-            - unlambda
-            - unslice
-            - argOrder
-            - badCall
-            - badCond
             - evalOrder
-            - exitAfterDefer
-            - flagName
-            - mapKey
             - nilValReturn
             - octalLiteral
-            - offBy1
             - regexpPattern
             - sloppyReassign
             - truncateCmp
@@ -72,15 +47,15 @@ linters-settings:
             - dupImport
             - methodExprCall
             - initClause
-            - newDeref
             - nestingReduce
             - stringXbytes
             - unlabelStmt
             - typeUnparen
             - unnecessaryBlock
-            - valSwap
-            - wrapperFunc
             - yodaStyleExpr
+        disabled-checks:
+            - assignOp
+            - singleCaseSwitch
     goconst:
         min-len: 12
     funlen:

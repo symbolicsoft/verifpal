@@ -313,12 +313,12 @@ func constructKnowledgeMapRenderMessage(
 	for _, c := range blck.Message.Constants {
 		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 		if i < 0 {
-			return valKnowledgeMap, fmt.Errorf(fmt.Sprintf(
+			return valKnowledgeMap, fmt.Errorf(
 				"%s sends unknown constant to %s (%s)",
 				principalGetNameFromID(blck.Message.Sender),
 				principalGetNameFromID(blck.Message.Recipient),
 				prettyConstant(c),
-			))
+			)
 		}
 		c = valKnowledgeMap.Constants[i]
 		senderKnows := false
