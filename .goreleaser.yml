@@ -1,4 +1,5 @@
 project_name: verifpal
+version: 2
 
 before:
   hooks:
@@ -26,7 +27,7 @@ archives:
     wrap_in_directory: true
 
 changelog:
-  skip: false
+  disable: false
   sort: asc
 
 release:
@@ -41,7 +42,7 @@ brews:
     commit_author:
       name: drone
       email: drone@symbolic.software
-    folder: HomebrewFormula
+    directory: HomebrewFormula
     homepage: "https://verifpal.com"
     description: "Cryptographic protocol analysis for students and engineers."
 
