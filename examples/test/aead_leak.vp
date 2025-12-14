@@ -1,0 +1,63 @@
+// Proof-of-concept that Verifpal 0.27.4 does not consider that 
+// associated data in AEAD is authenticated but NOT encrypted (hence,
+// the Dolev-Yao attacker should know the associated data):
+// * protocol: simple Diffie-Hellman (DH) with authenticated long-term keys only;
+// * author: Stefano Berlato (sberlato@fbk.eu).
+
+attacker[passive]
+
+
+
+// The protocol assumes that Alice and Bob both have each a pair of long-term 
+// asymmetric keys for DH key establishment. Alice and Bob know each other's 
+// long-term public keys (here modeled as guarded constants).
+
+principal Alice [
+    knows private private_key_alice
+    public_key_alice = G^private_key_alice
+]
+
+principal Bob [
+    knows private private_key_bob
+    public_key_bob = G^private_key_bob
+]
+
+Alice -> Bob : [public_key_alice]
+Bob -> Alice: [public_key_bob]
+
+
+
+// Then, Alice derives a shared secret as public_key_bob^private_key_alice. Alice 
+// uses the shared secret to encrypt a known private message using AEAD, setting as
+// associated data the shared secret itself (just for demonstration purposes).
+
+principal Alice [
+    knows private message
+    shared_secret_alice = public_key_bob^private_key_alice
+    ciphertext_and_tag = AEAD_ENC(shared_secret_alice, message, shared_secret_alice)
+]
+
+Alice -> Bob: ciphertext_and_tag
+
+
+
+// After receiving Alice's message, Bob derives the same shared secret and use it to
+// decrypt the message.
+
+principal Bob [
+    shared_secret_bob = public_key_alice^private_key_bob
+    decrypted_message = AEAD_DEC(shared_secret_bob, ciphertext_and_tag, shared_secret_bob)?
+]
+
+
+
+// According to Verifpal (0.27.4), the query below passes, even though the attacker 
+// can read the associated data - that is, the shared secret - and could use the 
+// shared secret to violated the confidentiality of the message (try replacing
+// "Alice -> Bob: ciphertext_and_tag" 
+// with 
+// "Alice -> Bob: ciphertext_and_tag, shared_secret_alice"
+// to observe the expected attack).
+queries[
+    confidentiality? message
+]

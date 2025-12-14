@@ -4,6 +4,21 @@
 
 package vplogic
 
+func possibleToPassivelyDecomposePrimitive(p *Primitive) []*Value {
+	revealed := []*Value{}
+	if primitiveIsCorePrimitive(p.ID) {
+		return revealed
+	}
+	prim, _ := primitiveGet(p.ID)
+	if !prim.Decompose.HasRule {
+		return revealed
+	}
+	for _, i := range prim.Decompose.PassiveReveal {
+		revealed = append(revealed, p.Arguments[i])
+	}
+	return revealed
+}
+
 func possibleToDecomposePrimitive(
 	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {

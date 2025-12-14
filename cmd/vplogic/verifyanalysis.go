@@ -30,6 +30,10 @@ func verifyAnalysis(
 		if o > 0 {
 			break
 		}
+		o = o + verifyAnalysisPassiveDecompose(valAttackerState.Known[i], valPrincipalState)
+		if o > 0 {
+			break
+		}
 	}
 	for i := 0; i < len(valPrincipalState.Assigned); i++ {
 		o = o + verifyAnalysisReconstruct(valPrincipalState.Assigned[i], valPrincipalState, valAttackerState, 0)
@@ -99,6 +103,26 @@ func verifyAnalysisDecompose(
 			infoOutputText(revealed), prettyValue(a), prettyValues(ar),
 		), "deduction", true)
 		o = o + 1
+	}
+	return o
+}
+
+func verifyAnalysisPassiveDecompose(
+	a *Value, valPrincipalState *PrincipalState,
+) int {
+	o := 0
+	switch a.Kind {
+	case typesEnumPrimitive:
+		passiveRevealed := possibleToPassivelyDecomposePrimitive(a.Data.(*Primitive))
+		for _, revealed := range passiveRevealed {
+			if attackerStatePutWrite(revealed, valPrincipalState) {
+				InfoMessage(fmt.Sprintf(
+					"%s obtained as associated data from %s.",
+					infoOutputText(revealed), prettyValue(a),
+				), "deduction", true)
+				o = o + 1
+			}
+		}
 	}
 	return o
 }

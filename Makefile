@@ -25,7 +25,7 @@ linux:
 macos:
 	@/bin/echo -n "[Verifpal] Building Verifpal for macOS..."
 	@go generate verifpal.com/cmd/verifpal
-	@GOOS="darwin" GOARCH="amd64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
+	@GOOS="darwin" GOARCH="arm64" go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build/macos verifpal.com/cmd/verifpal
 	@$(RM) cmd/verifpal/resource.syso
 	@/bin/echo "   OK"
 

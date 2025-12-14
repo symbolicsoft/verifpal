@@ -227,10 +227,11 @@ type PrincipalState struct {
 
 // DecomposeRule contains a primitive's DecomposeRule.
 type DecomposeRule struct {
-	HasRule bool
-	Given   []int
-	Reveal  int
-	Filter  func(*Primitive, *Value, int) (*Value, bool)
+	HasRule       bool
+	Given         []int
+	Reveal        int
+	Filter        func(*Primitive, *Value, int) (*Value, bool)
+	PassiveReveal []int
 }
 
 // RecomposeRule contains a primitive's RecomposeRule.

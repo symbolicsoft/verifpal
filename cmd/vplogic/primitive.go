@@ -169,6 +169,7 @@ var primitiveSpecs = []PrimitiveSpec{
 			Filter: func(p *Primitive, x *Value, i int) (*Value, bool) {
 				return x, true
 			},
+			PassiveReveal: []int{2},
 		},
 		Recompose: RecomposeRule{
 			HasRule: false,
