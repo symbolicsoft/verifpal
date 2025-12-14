@@ -3,47 +3,51 @@
 
 @echo off
 
-@echo|set /p="[Verifpal] Installing dependencies..."
-@go get -u github.com/mna/pigeon
-@go get -u github.com/logrusorgru/aurora
-@go get -u github.com/josephspurrier/goversioninfo/cmd/goversioninfo
+@echo|set /p="[Verifpal] Installing dependencies"
+@go mod download github.com/logrusorgru/aurora
+@echo|set /p="."
+@go install github.com/mna/pigeon@latest
+@go mod download github.com/mna/pigeon
+@echo|set /p="."
+@go mod download github.com/spf13/cobra
+@echo|set /p="."
 @echo        OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Windows..."
-@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
-@setx GOOS "windows" >nul
-@setx GOARCH "amd64" >nul
+@set GOOS=windows
+@set GOARCH=amd64
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\windows verifpal.com/cmd/verifpal
+@del cmd\verifpal\resource.syso 2>nul
 @echo  OK
 
 @echo|set /p="[Verifpal] Building Verifpal for Linux..."
-@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
-@setx GOOS "linux" >nul
-@setx GOARCH "amd64" >nul
+@set GOOS=linux
+@set GOARCH=amd64
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\linux verifpal.com/cmd/verifpal
+@del cmd\verifpal\resource.syso 2>nul
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for macOS..."
-@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
-@setx GOOS "darwin" >nul
-@setx GOARCH "amd64" >nul
+@set GOOS=darwin
+@set GOARCH=amd64
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\macos verifpal.com/cmd/verifpal
+@del cmd\verifpal\resource.syso 2>nul
 @echo    OK
 
 @echo|set /p="[Verifpal] Building Verifpal for FreeBSD..."
-@setx GOOS "" >nul
 @go generate verifpal.com/cmd/verifpal
-@setx GOOS "freebsd" >nul
-@setx GOARCH "amd64" >nul
+@set GOOS=freebsd
+@set GOARCH=amd64
 @go build -trimpath -gcflags="-e" -ldflags="-s -w" -o build\freebsd verifpal.com/cmd/verifpal
+@del cmd\verifpal\resource.syso 2>nul
 @echo  OK
 
 @echo|set /p="[Verifpal] Cleaning up..."
-@setx GOOS "" >nul
-@del cmd\verifpal\resource.syso
+@set GOOS=
+@set GOARCH=
 @echo                    OK
 
 @exit /b

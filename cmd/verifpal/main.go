@@ -6,7 +6,6 @@
 //go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
 //go:generate gofmt -s -w ../../cmd/vplogic/libcoq.go
 //go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
-//go:generate goversioninfo -64=true -icon=../../assets/icon.ico ../../assets/versioninfo.json
 
 package main
 
