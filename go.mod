@@ -3,9 +3,7 @@
 
 module verifpal.com
 
-go 1.22.0
-
-toolchain go1.23.1
+go 1.25.5
 
 require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
