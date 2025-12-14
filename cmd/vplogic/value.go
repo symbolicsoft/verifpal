@@ -820,6 +820,7 @@ func valueDeepCopy(v *Value) Value {
 			Fresh:       v.Data.(*Constant).Fresh,
 			Leaked:      v.Data.(*Constant).Leaked,
 			Declaration: v.Data.(*Constant).Declaration,
+			Qualifier:   v.Data.(*Constant).Qualifier,
 		}
 	case typesEnumPrimitive:
 		d.Data = &Primitive{

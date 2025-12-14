@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os/exec"
 	"runtime"
-	"sort"
 )
 
 // b2s converts a byte array to a string.
@@ -77,8 +76,13 @@ func minIntInSlice(v []int) (int, error) {
 	if len(v) == 0 {
 		return 0, errors.New("slice has no integers")
 	}
-	sort.Ints(v)
-	return v[0], nil
+	min := v[0]
+	for i := 1; i < len(v); i++ {
+		if v[i] < min {
+			min = v[i]
+		}
+	}
+	return min, nil
 }
 
 // colorOutputSupport tells us whether color output is supported based on the GOOS build target.

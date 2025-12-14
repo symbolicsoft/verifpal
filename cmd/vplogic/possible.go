@@ -143,7 +143,10 @@ func possibleToReconstructPrimitive(
 }
 
 func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) (bool, []*Value) {
-	if len(e.Values) <= 2 {
+	if len(e.Values) < 2 {
+		return false, []*Value{}
+	}
+	if len(e.Values) == 2 {
 		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
 			return true, []*Value{e.Values[1]}
 		}

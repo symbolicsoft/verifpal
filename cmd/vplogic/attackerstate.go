@@ -101,18 +101,16 @@ func attackerStateGetExhausted() bool {
 
 func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool {
 	written := false
+	attackerStateMutex.Lock()
 	if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
-		attackerStateMutex.Lock()
-		if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
-			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
-			attackerStateShared.Known = append(attackerStateShared.Known, known)
-			attackerStateShared.PrincipalState = append(
-				attackerStateShared.PrincipalState, valPrincipalStateClone,
-			)
-			written = true
-		}
-		attackerStateMutex.Unlock()
+		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+		attackerStateShared.Known = append(attackerStateShared.Known, known)
+		attackerStateShared.PrincipalState = append(
+			attackerStateShared.PrincipalState, valPrincipalStateClone,
+		)
+		written = true
 	}
+	attackerStateMutex.Unlock()
 	return written
 }
 
