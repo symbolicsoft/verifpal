@@ -74,13 +74,13 @@ func minIntInSlice(v []int) (int, error) {
 	if len(v) == 0 {
 		return 0, errors.New("slice has no integers")
 	}
-	min := v[0]
+	minVal := v[0]
 	for i := 1; i < len(v); i++ {
-		if v[i] < min {
-			min = v[i]
+		if v[i] < minVal {
+			minVal = v[i]
 		}
 	}
-	return min, nil
+	return minVal, nil
 }
 
 // colorOutputSupport tells us whether color output is supported based on the GOOS build target.

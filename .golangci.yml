@@ -1,71 +1,82 @@
-issues:
-    exclude-files:
-        - main_test.go
-        - libpeg.go
-        - libcoq.go
-
+version: "2"
 linters:
-    enable:
-        - govet
-        - errcheck
-        - staticcheck
-        - unused
-        - gosimple
-        - gofmt
-        - unused
-        - ineffassign
-        - typecheck
-        - dogsled
-        - dupl
-        - funlen
-        - gochecknoinits
-        - godox
-        - gocritic
-        - gocyclo
-        - gosec
-        - lll
-        - misspell
-        - nakedret
-        - prealloc
-        - copyloopvar
-        - unconvert
-        - unparam
-        - whitespace
-
-linters-settings:
-    gocritic:
-        enabled-checks:
-            - evalOrder
-            - nilValReturn
-            - octalLiteral
-            - regexpPattern
-            - sloppyReassign
-            - truncateCmp
-            - weakCond
-            - boolExprSimplify
-            - builtinShadow
-            - dupImport
-            - methodExprCall
-            - initClause
-            - nestingReduce
-            - stringXbytes
-            - unlabelStmt
-            - typeUnparen
-            - unnecessaryBlock
-            - yodaStyleExpr
-        disabled-checks:
-            - assignOp
-            - singleCaseSwitch
-    goconst:
-        min-len: 12
+  enable:
+    - copyloopvar
+    - dogsled
+    - dupl
+    - funlen
+    - gochecknoinits
+    - gocritic
+    - gocyclo
+    - godox
+    - gosec
+    - lll
+    - misspell
+    - nakedret
+    - prealloc
+    - unconvert
+    - unparam
+    - whitespace
+  settings:
     funlen:
-        statements: 64
-        lines: 128
+      lines: 128
+      statements: 64
+    goconst:
+      min-len: 12
+    gocritic:
+      enabled-checks:
+        - evalOrder
+        - nilValReturn
+        - octalLiteral
+        - regexpPattern
+        - sloppyReassign
+        - truncateCmp
+        - weakCond
+        - boolExprSimplify
+        - builtinShadow
+        - dupImport
+        - methodExprCall
+        - initClause
+        - nestingReduce
+        - stringXbytes
+        - unlabelStmt
+        - typeUnparen
+        - unnecessaryBlock
+        - yodaStyleExpr
+      disabled-checks:
+        - assignOp
+        - singleCaseSwitch
     gocyclo:
-        min-complexity: 18
+      min-complexity: 18
     govet:
-        enable-all: true
-        disable:
-            - fieldalignment
+      disable:
+        - fieldalignment
+      enable-all: true
     lll:
-        line-length: 120
+      line-length: 120
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - main_test.go
+      - libpeg.go
+      - libcoq.go
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - main_test.go
+      - libpeg.go
+      - libcoq.go
+      - third_party$
+      - builtin$
+      - examples$

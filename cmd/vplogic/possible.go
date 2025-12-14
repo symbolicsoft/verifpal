@@ -225,15 +225,15 @@ func possibleToRewritePrimitive(
 			if !valid {
 				continue
 			}
-			for i := range ax {
-				switch ax[i].Kind {
+			for i, axElem := range ax {
+				switch axElem.Kind {
 				case typesEnumPrimitive:
-					r, v := possibleToRewrite(ax[i].Data.(*Primitive), valPrincipalState)
+					r, v := possibleToRewrite(axElem.Data.(*Primitive), valPrincipalState)
 					if r {
 						ax[i] = v[0]
 					}
 				case typesEnumEquation:
-					for ii, a := range ax[i].Data.(*Equation).Values {
+					for ii, a := range axElem.Data.(*Equation).Values {
 						switch a.Kind {
 						case typesEnumPrimitive:
 							r, v := possibleToRewrite(a.Data.(*Primitive), valPrincipalState)

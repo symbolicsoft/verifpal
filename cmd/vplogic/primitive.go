@@ -6,6 +6,7 @@ package vplogic
 
 import (
 	"fmt"
+	"sync"
 )
 
 type primitiveEnum uint8
@@ -35,16 +36,21 @@ const (
 	primitiveEnumUNBLIND       primitiveEnum = iota
 )
 
-var primitiveCoreSpecsMap = make(map[primitiveEnum]*PrimitiveCoreSpec)
-var primitiveSpecsMap = make(map[primitiveEnum]*PrimitiveSpec)
+var primitiveCoreSpecsMap map[primitiveEnum]*PrimitiveCoreSpec
+var primitiveSpecsMap map[primitiveEnum]*PrimitiveSpec
+var primitiveSpecsOnce sync.Once
 
-func init() {
-	for i := range primitiveCoreSpecs {
-		primitiveCoreSpecsMap[primitiveCoreSpecs[i].ID] = &primitiveCoreSpecs[i]
-	}
-	for i := range primitiveSpecs {
-		primitiveSpecsMap[primitiveSpecs[i].ID] = &primitiveSpecs[i]
-	}
+func initPrimitiveSpecs() {
+	primitiveSpecsOnce.Do(func() {
+		primitiveCoreSpecsMap = make(map[primitiveEnum]*PrimitiveCoreSpec)
+		primitiveSpecsMap = make(map[primitiveEnum]*PrimitiveSpec)
+		for i := range primitiveCoreSpecs {
+			primitiveCoreSpecsMap[primitiveCoreSpecs[i].ID] = &primitiveCoreSpecs[i]
+		}
+		for i := range primitiveSpecs {
+			primitiveSpecsMap[primitiveSpecs[i].ID] = &primitiveSpecs[i]
+		}
+	})
 }
 
 var primitiveCoreSpecs = []PrimitiveCoreSpec{
@@ -738,6 +744,7 @@ func primitiveIsCorePrimitive(name primitiveEnum) bool {
 }
 
 func primitiveCoreGet(name primitiveEnum) (*PrimitiveCoreSpec, error) {
+	initPrimitiveSpecs()
 	if spec, ok := primitiveCoreSpecsMap[name]; ok {
 		return spec, nil
 	}
@@ -745,6 +752,7 @@ func primitiveCoreGet(name primitiveEnum) (*PrimitiveCoreSpec, error) {
 }
 
 func primitiveGet(name primitiveEnum) (*PrimitiveSpec, error) {
+	initPrimitiveSpecs()
 	if spec, ok := primitiveSpecsMap[name]; ok {
 		return spec, nil
 	}

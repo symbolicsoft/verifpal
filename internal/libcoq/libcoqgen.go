@@ -37,7 +37,7 @@ func main() {
 	s.Split(bufio.ScanLines)
 	for s.Scan() {
 		temp := s.Text()
-		_, err = w.WriteString(fmt.Sprintf("\t%q,\n", temp))
+		_, err = fmt.Fprintf(w, "\t%q,\n", temp)
 		check(err)
 	}
 	r.Close()

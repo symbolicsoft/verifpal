@@ -86,7 +86,17 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 
 func attackerStateGetRead() AttackerState {
 	attackerStateMutex.Lock()
-	valAttackerState := attackerStateShared
+	knownCopy := make([]*Value, len(attackerStateShared.Known))
+	copy(knownCopy, attackerStateShared.Known)
+	principalStateCopy := make([]*PrincipalState, len(attackerStateShared.PrincipalState))
+	copy(principalStateCopy, attackerStateShared.PrincipalState)
+	valAttackerState := AttackerState{
+		Active:         attackerStateShared.Active,
+		CurrentPhase:   attackerStateShared.CurrentPhase,
+		Exhausted:      attackerStateShared.Exhausted,
+		Known:          knownCopy,
+		PrincipalState: principalStateCopy,
+	}
 	attackerStateMutex.Unlock()
 	return valAttackerState
 }

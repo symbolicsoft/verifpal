@@ -159,12 +159,12 @@ func infoAnalysis(stage int) {
 			return
 		}
 	}
-	switch {
-	case stage == 1:
+	switch stage {
+	case 1:
 		s = "1"
-	case stage == 2 || stage == 3:
+	case 2, 3:
 		s = "2-3"
-	case stage == 4 || stage == 5:
+	case 4, 5:
 		s = "4-5"
 	default:
 		s = fmt.Sprintf("%d", stage)
