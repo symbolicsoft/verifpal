@@ -34,7 +34,7 @@ Verifpal now benefits from a higher level of assurance due to the formalization 
 ## Getting Started
 
 ### Verifpal User Manual
-The [Verifpal User Manual](https://verifpal.com/res/pdf/manual.pdf) is an essential guide to getting started with cryptographic protocol analysis using Verifpal. It is strongly recommended that you read the Verifpal User Manual before starting work with Verifpal.
+The [Verifpal User Manual](https://static.verifpal.com/manual.pdf) is an essential guide to getting started with cryptographic protocol analysis using Verifpal. It is strongly recommended that you read the Verifpal User Manual before starting work with Verifpal.
 
 ### Getting a Copy of Verifpal
 On Windows, the best way to install Verifpal is through the [Scoop](https://scoop.sh) package manager, since you'll also get automatic updates:
