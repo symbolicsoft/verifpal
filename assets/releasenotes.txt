@@ -1,4 +1,4 @@
-Verifpal 0.28.0 features an important correctness fix, several bug fixes, and performance improvements.
+Verifpal 0.28.1 features an important correctness fix, several bug fixes, and performance improvements.
 
 Correctness Fix: AEAD Associated Data Modeling
 ----------------------------------------------
@@ -6,6 +6,26 @@ Correctness Fix: AEAD Associated Data Modeling
 Verifpal now correctly models AEAD (Authenticated Encryption with Associated Data) semantics. Previously, in some instances, Verifpal did not reveal the associated data to the Dolev-Yao attacker when observing AEAD ciphertexts. This has been fixed with a new PassiveReveal mechanism that ensures attackers can always observe the associated data portion of AEAD constructions, matching real-world behavior.
 
 Thanks to Stefano Berlato for reporting this issue.
+
+Fix Non-Termination in Active Attacker Verification
+----------------------------------------------
+
+The exhaustion check in verifyActiveStages compared knowledge count using
+a local copy that didn't reflect concurrent modifications from reconstruction.
+This caused models with multi-argument primitives (like HKDF) to run forever
+as reconstruction kept generating derived values even when mutations weren't
+making progress toward resolving queries.
+
+Changes:
+- Add attackerStateGetKnownCount() for thread-safe access to knowledge count
+- Track worthwhile mutations per stage using atomic counter
+- Improve exhaustion condition: exhaust if stage > 5 AND any of:
+  - No worthwhile mutations found in stage
+  - No knowledge growth (using thread-safe count)
+  - Stage exceeds maxStageLimit (64) as fallback for combinatorial explosion
+
+This fixes analysis of models like fakeauth.vp which previously would not
+terminate due to HKDF reconstruction generating endless permutations.
 
 Bug Fixes
 ---------
