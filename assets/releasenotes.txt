@@ -1,1 +1,31 @@
-Verifpal 0.27.4 fixes analysis bugs from previous versions and includes some toolchain updates.
+Verifpal 0.28.0 features an important correctness fix, several bug fixes, and performance improvements.
+
+Correctness Fix: AEAD Associated Data Modeling
+----------------------------------------------
+
+Verifpal now correctly models AEAD (Authenticated Encryption with Associated Data) semantics. Previously, in some instances, Verifpal did not reveal the associated data to the Dolev-Yao attacker when observing AEAD ciphertexts. This has been fixed with a new PassiveReveal mechanism that ensures attackers can always observe the associated data portion of AEAD constructions, matching real-world behavior.
+
+Thanks to Stefano Berlato for reporting this issue.
+
+Bug Fixes
+---------
+
+- Race condition fix: Corrected an unsafe double-checked locking pattern in attacker state management that could cause stale data reads
+- Side effect fix: minIntInSlice no longer modifies its input slice unexpectedly
+- Deep copy fix: Password constants now correctly preserve their qualifier type during value copy operations
+- Nil pointer guard: Added protection against potential panic on malformed equations
+
+Performance Improvements
+------------------------
+
+- O(1) primitive lookups using map-based indexing instead of linear search
+- Efficient string concatenation using strings.Builder
+- Pre-allocated slices to reduce memory allocations
+- Range-based loop conversions throughout the codebase
+- Net reduction of 31 lines while improving performance
+
+Code Quality
+------------
+
+- Updated linter configuration and addressed additional code quality warnings
+
