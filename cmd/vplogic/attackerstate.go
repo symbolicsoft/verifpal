@@ -109,6 +109,13 @@ func attackerStateGetExhausted() bool {
 	return exhausted
 }
 
+func attackerStateGetKnownCount() int {
+	attackerStateMutex.Lock()
+	count := len(attackerStateShared.Known)
+	attackerStateMutex.Unlock()
+	return count
+}
+
 func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool {
 	written := false
 	attackerStateMutex.Lock()

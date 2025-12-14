@@ -7,7 +7,10 @@ package vplogic
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
+
+const maxStageLimit = 64
 
 func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
 	InfoMessage("Attacker is configured as active.", "info", false)
@@ -60,6 +63,7 @@ func verifyActiveStages(
 ) {
 	var principalGroup sync.WaitGroup
 	var err error
+	var worthwhileMutationCount uint32
 	oldKnown := len(valAttackerState.Known)
 	valAttackerState = attackerStateGetRead()
 	principalGroup.Add(len(valPrincipalStates))
@@ -77,7 +81,7 @@ func verifyActiveStages(
 			scanGroup.Add(1)
 			err = verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
-				mutationMapNext(valMutationMap), stage, &scanGroup,
+				mutationMapNext(valMutationMap), stage, &scanGroup, &worthwhileMutationCount,
 			)
 			if err != nil {
 				scanGroup.Done()
@@ -88,7 +92,8 @@ func verifyActiveStages(
 		}(valPrincipalState)
 	}
 	principalGroup.Wait()
-	exhausted := (stage > 5 && (oldKnown == len(valAttackerState.Known)))
+	worthwhile := atomic.LoadUint32(&worthwhileMutationCount)
+	exhausted := stage > 5 && (worthwhile == 0 || oldKnown == attackerStateGetKnownCount() || stage > maxStageLimit)
 	if exhausted {
 		attackerStatePutExhausted()
 	}
@@ -98,7 +103,7 @@ func verifyActiveStages(
 func verifyActiveScan(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
-	stage int, scanGroup *sync.WaitGroup,
+	stage int, scanGroup *sync.WaitGroup, worthwhileMutationCount *uint32,
 ) error {
 	var err error
 	if verifyResultsAllResolved() {
@@ -110,6 +115,7 @@ func verifyActiveScan(
 		valAttackerState, valMutationMap,
 	)
 	if isWorthwhileMutation {
+		atomic.AddUint32(worthwhileMutationCount, 1)
 		scanGroup.Add(1)
 		go func() {
 			err = verifyAnalysis(
@@ -128,7 +134,7 @@ func verifyActiveScan(
 	go func() {
 		err := verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, valAttackerState,
-			mutationMapNext(valMutationMap), stage, scanGroup,
+			mutationMapNext(valMutationMap), stage, scanGroup, worthwhileMutationCount,
 		)
 		if err != nil {
 			scanGroup.Done()
