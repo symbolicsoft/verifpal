@@ -22,48 +22,41 @@ func possibleToPassivelyDecomposePrimitive(p *Primitive) []*Value {
 func possibleToDecomposePrimitive(
 	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
 ) (bool, *Value, []*Value) {
-	has := []*Value{}
 	if primitiveIsCorePrimitive(p.ID) {
-		return false, &Value{}, has
+		return false, &Value{}, nil
 	}
 	prim, _ := primitiveGet(p.ID)
 	if !prim.Decompose.HasRule {
-		return false, &Value{}, has
+		return false, &Value{}, nil
 	}
-	for i := 0; i < len(prim.Decompose.Given); i++ {
-		a := p.Arguments[prim.Decompose.Given[i]]
+	has := make([]*Value, 0, len(prim.Decompose.Given))
+	for i, idx := range prim.Decompose.Given {
+		a := p.Arguments[idx]
 		a, valid := prim.Decompose.Filter(p, a, i)
 		if !valid {
 			continue
 		}
-		ii := valueEquivalentValueInValues(a, valAttackerState.Known)
-		if ii >= 0 {
+		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
 			has = append(has, a)
 			continue
 		}
 		switch a.Kind {
 		case typesEnumPrimitive:
-			r, _ := possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
-			if r {
+			if r, _ := possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState); r {
 				has = append(has, a)
 				continue
 			}
-			r, _, _ = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
-			if r {
+			if r, _, _ := possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState); r {
 				has = append(has, a)
-				continue
 			}
 		case typesEnumEquation:
-			r, _ := possibleToReconstructEquation(a.Data.(*Equation), valAttackerState)
-			if r {
+			if r, _ := possibleToReconstructEquation(a.Data.(*Equation), valAttackerState); r {
 				has = append(has, a)
-				continue
 			}
 		}
 	}
 	if len(has) >= len(prim.Decompose.Given) {
-		revealed := p.Arguments[prim.Decompose.Reveal]
-		return true, revealed, has
+		return true, p.Arguments[prim.Decompose.Reveal], has
 	}
 	return false, &Value{}, has
 }
@@ -306,43 +299,39 @@ func possibleToRebuild(p *Primitive) (bool, *Value) {
 func possibleToObtainPasswords(
 	a *Value, aParent *Value, aIndex int, valPrincipalState *PrincipalState,
 ) []*Value {
-	passwords := []*Value{}
+	var passwords []*Value
 	switch a.Kind {
 	case typesEnumConstant:
 		aa, _ := valueResolveConstant(a.Data.(*Constant), valPrincipalState, true)
-		switch aa.Kind {
-		case typesEnumConstant:
-			if aa.Data.(*Constant).Qualifier == typesEnumPassword {
-				if aIndex >= 0 {
-					switch aParent.Kind {
-					case typesEnumPrimitive:
-						if !primitiveIsCorePrimitive(aParent.Data.(*Primitive).ID) {
-							prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
-							if intInSlice(aIndex, prim.PasswordHashing) {
-								return passwords
-							}
-						}
+		if aa.Kind == typesEnumConstant && aa.Data.(*Constant).Qualifier == typesEnumPassword {
+			if aIndex >= 0 && aParent.Kind == typesEnumPrimitive {
+				if !primitiveIsCorePrimitive(aParent.Data.(*Primitive).ID) {
+					prim, _ := primitiveGet(aParent.Data.(*Primitive).ID)
+					if intInSlice(aIndex, prim.PasswordHashing) {
+						return passwords
 					}
 				}
-				passwords = append(passwords, aa)
 			}
+			passwords = append(passwords, aa)
 		}
 	case typesEnumPrimitive:
-		for i := 0; i < len(a.Data.(*Primitive).Arguments); i++ {
-			if !primitiveIsCorePrimitive(a.Data.(*Primitive).ID) {
-				prim, _ := primitiveGet(a.Data.(*Primitive).ID)
-				if intInSlice(aIndex, prim.PasswordHashing) {
-					aParent = a
-				}
+		p := a.Data.(*Primitive)
+		parent := aParent
+		if !primitiveIsCorePrimitive(p.ID) {
+			prim, _ := primitiveGet(p.ID)
+			if intInSlice(aIndex, prim.PasswordHashing) {
+				parent = a
 			}
+		}
+		for i, arg := range p.Arguments {
 			passwords = append(passwords,
-				possibleToObtainPasswords(a.Data.(*Primitive).Arguments[i], aParent, i, valPrincipalState)...,
+				possibleToObtainPasswords(arg, parent, i, valPrincipalState)...,
 			)
 		}
 	case typesEnumEquation:
-		for i := 0; i < len(a.Data.(*Equation).Values); i++ {
+		for _, v := range a.Data.(*Equation).Values {
 			passwords = append(passwords,
-				possibleToObtainPasswords(a.Data.(*Equation).Values[i], a, -1, valPrincipalState)...,
+				possibleToObtainPasswords(v, a, -1, valPrincipalState)...,
 			)
 		}
 	}

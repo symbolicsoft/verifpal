@@ -47,10 +47,7 @@ func mutationMapInit(
 		valMutationMap.Mutations = append(valMutationMap.Mutations, r)
 	}
 	valMutationMap.Combination = make([]*Value, len(valMutationMap.Constants))
-	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants))
-	for ii := 0; ii < len(valMutationMap.Constants); ii++ {
-		valMutationMap.DepthIndex[ii] = 0
-	}
+	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants)) // Go initializes to zero
 	return valMutationMap, err
 }
 

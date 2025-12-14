@@ -209,21 +209,18 @@ func valueEquivalentEquationsRule(base1 *Value, base2 *Value, exp1 *Value, exp2 
 }
 
 func valueFlattenEquation(e *Equation) *Equation {
-	ef := Equation{
-		Values: []*Value{},
+	ef := &Equation{
+		Values: make([]*Value, 0, len(e.Values)),
 	}
-	for i := 0; i < len(e.Values); i++ {
-		switch e.Values[i].Kind {
-		case typesEnumConstant:
-			ef.Values = append(ef.Values, e.Values[i])
-		case typesEnumPrimitive:
-			ef.Values = append(ef.Values, e.Values[i])
-		case typesEnumEquation:
-			eff := valueFlattenEquation(e.Values[i].Data.(*Equation))
+	for _, v := range e.Values {
+		if v.Kind == typesEnumEquation {
+			eff := valueFlattenEquation(v.Data.(*Equation))
 			ef.Values = append(ef.Values, eff.Values...)
+		} else {
+			ef.Values = append(ef.Values, v)
 		}
 	}
-	return &ef
+	return ef
 }
 
 func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnowledgeMap *KnowledgeMap) bool {
@@ -236,8 +233,8 @@ func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnow
 }
 
 func valueEquivalentValueInValues(v *Value, a []*Value) int {
-	for i := 0; i < len(a); i++ {
-		if valueEquivalentValues(v, a[i], true) {
+	for i, av := range a {
+		if valueEquivalentValues(v, av, true) {
 			return i
 		}
 	}
@@ -245,8 +242,8 @@ func valueEquivalentValueInValues(v *Value, a []*Value) int {
 }
 
 func valueEquivalentConstantInConstants(c *Constant, a []*Constant) int {
-	for i := 0; i < len(a); i++ {
-		if valueEquivalentConstants(c, a[i]) {
+	for i, ac := range a {
+		if valueEquivalentConstants(c, ac) {
 			return i
 		}
 	}
@@ -808,39 +805,42 @@ func valueConstantContainsFreshValues(
 }
 
 func valueDeepCopy(v *Value) Value {
-	d := Value{
-		Kind: v.Kind,
-	}
+	d := Value{Kind: v.Kind}
 	switch v.Kind {
 	case typesEnumConstant:
+		c := v.Data.(*Constant)
 		d.Data = &Constant{
-			Name:        v.Data.(*Constant).Name,
-			ID:          v.Data.(*Constant).ID,
-			Guard:       v.Data.(*Constant).Guard,
-			Fresh:       v.Data.(*Constant).Fresh,
-			Leaked:      v.Data.(*Constant).Leaked,
-			Declaration: v.Data.(*Constant).Declaration,
-			Qualifier:   v.Data.(*Constant).Qualifier,
+			Name:        c.Name,
+			ID:          c.ID,
+			Guard:       c.Guard,
+			Fresh:       c.Fresh,
+			Leaked:      c.Leaked,
+			Declaration: c.Declaration,
+			Qualifier:   c.Qualifier,
 		}
 	case typesEnumPrimitive:
-		d.Data = &Primitive{
-			ID:        v.Data.(*Primitive).ID,
-			Arguments: []*Value{},
-			Output:    v.Data.(*Primitive).Output,
-			Check:     v.Data.(*Primitive).Check,
+		p := v.Data.(*Primitive)
+		newP := &Primitive{
+			ID:        p.ID,
+			Arguments: make([]*Value, len(p.Arguments)),
+			Output:    p.Output,
+			Check:     p.Check,
 		}
-		for i := 0; i < len(v.Data.(*Primitive).Arguments); i++ {
-			arg := valueDeepCopy(v.Data.(*Primitive).Arguments[i])
-			d.Data.(*Primitive).Arguments = append(d.Data.(*Primitive).Arguments, &arg)
+		for i, arg := range p.Arguments {
+			argCopy := valueDeepCopy(arg)
+			newP.Arguments[i] = &argCopy
 		}
+		d.Data = newP
 	case typesEnumEquation:
-		d.Data = &Equation{
-			Values: []*Value{},
+		e := v.Data.(*Equation)
+		newE := &Equation{
+			Values: make([]*Value, len(e.Values)),
 		}
-		for i := 0; i < len(v.Data.(*Equation).Values); i++ {
-			arg := valueDeepCopy(v.Data.(*Equation).Values[i])
-			d.Data.(*Equation).Values = append(d.Data.(*Equation).Values, &arg)
+		for i, val := range e.Values {
+			valCopy := valueDeepCopy(val)
+			newE.Values[i] = &valCopy
 		}
+		d.Data = newE
 	}
 	return d
 }

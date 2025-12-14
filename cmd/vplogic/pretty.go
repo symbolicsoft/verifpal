@@ -35,59 +35,48 @@ func prettyConstant(c *Constant) string {
 }
 
 func prettyConstants(c []*Constant) string {
-	pretty := ""
+	var b strings.Builder
 	for i, v := range c {
-		sep := ""
-		if i != (len(c) - 1) {
-			sep = ", "
+		b.WriteString(prettyConstant(v))
+		if i != len(c)-1 {
+			b.WriteString(", ")
 		}
-		pretty = fmt.Sprintf("%s%s%s",
-			pretty, prettyConstant(v), sep,
-		)
 	}
-	return pretty
+	return b.String()
 }
 
 func prettyPrimitive(p *Primitive) string {
-	pretty := ""
+	var b strings.Builder
 	if primitiveIsCorePrimitive(p.ID) {
 		prim, _ := primitiveCoreGet(p.ID)
-		pretty = fmt.Sprintf("%s(", prim.Name)
+		b.WriteString(prim.Name)
 	} else {
 		prim, _ := primitiveGet(p.ID)
-		pretty = fmt.Sprintf("%s(", prim.Name)
+		b.WriteString(prim.Name)
 	}
-	check := ""
-	if p.Check {
-		check = "?"
-	}
+	b.WriteByte('(')
 	for i, arg := range p.Arguments {
-		sep := ""
-		if i != (len(p.Arguments) - 1) {
-			sep = ", "
+		b.WriteString(prettyValue(arg))
+		if i != len(p.Arguments)-1 {
+			b.WriteString(", ")
 		}
-		pretty = fmt.Sprintf("%s%s%s",
-			pretty, prettyValue(arg), sep,
-		)
 	}
-	return fmt.Sprintf("%s)%s",
-		pretty, check,
-	)
+	b.WriteByte(')')
+	if p.Check {
+		b.WriteByte('?')
+	}
+	return b.String()
 }
 
 func prettyEquation(e *Equation) string {
-	pretty := ""
+	var b strings.Builder
 	for i, c := range e.Values {
-		if i == 0 {
-			pretty = prettyValue(c)
-		} else {
-			pretty = fmt.Sprintf(
-				"%s^%s",
-				pretty, prettyValue(c),
-			)
+		if i > 0 {
+			b.WriteByte('^')
 		}
+		b.WriteString(prettyValue(c))
 	}
-	return pretty
+	return b.String()
 }
 
 func prettyValue(a *Value) string {
@@ -103,18 +92,14 @@ func prettyValue(a *Value) string {
 }
 
 func prettyValues(a []*Value) string {
-	pretty := ""
+	var b strings.Builder
 	for i, v := range a {
-		sep := ", "
-		if i == len(a)-1 {
-			sep = ""
+		b.WriteString(prettyValue(v))
+		if i != len(a)-1 {
+			b.WriteString(", ")
 		}
-		pretty = fmt.Sprintf(
-			"%s%s%s",
-			pretty, prettyValue(v), sep,
-		)
 	}
-	return pretty
+	return b.String()
 }
 
 func prettyQuery(query Query) string {
@@ -319,17 +304,16 @@ func PrettyDiagram(m Model) (string, error) {
 }
 
 func prettyArity(specArity []int) string {
-	arityString := ""
 	if len(specArity) == 1 {
-		arityString = fmt.Sprintf("%d", specArity[0])
-	} else {
-		for i, a := range specArity {
-			if i != len(specArity)-1 {
-				arityString = fmt.Sprintf("%s%d, ", arityString, a)
-			} else {
-				arityString = fmt.Sprintf("%sor %d", arityString, a)
-			}
+		return fmt.Sprintf("%d", specArity[0])
+	}
+	var b strings.Builder
+	for i, a := range specArity {
+		if i != len(specArity)-1 {
+			fmt.Fprintf(&b, "%d, ", a)
+		} else {
+			fmt.Fprintf(&b, "or %d", a)
 		}
 	}
-	return arityString
+	return b.String()
 }

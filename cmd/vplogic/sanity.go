@@ -255,18 +255,17 @@ func sanityQueriesUnlinkability(query Query, valKnowledgeMap *KnowledgeMap) erro
 			prettyQuery(query),
 		)
 	}
-	for i := 0; i < len(query.Constants); i++ {
-		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[i])
-		if ii < 0 {
+	for i, c := range query.Constants {
+		if valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c) < 0 {
 			return fmt.Errorf(
 				"unlinkability query (%s) refers to unknown constant (%s)",
-				prettyQuery(query), prettyConstant(query.Constants[i]),
+				prettyQuery(query), prettyConstant(c),
 			)
 		}
-		if valueEquivalentConstantInConstants(query.Constants[i], query.Constants[:i]) >= 0 {
+		if valueEquivalentConstantInConstants(c, query.Constants[:i]) >= 0 {
 			return fmt.Errorf(
 				"unlinkability query (%s) refers to same constant more than once (%s)",
-				prettyQuery(query), prettyConstant(query.Constants[i]),
+				prettyQuery(query), prettyConstant(c),
 			)
 		}
 	}
@@ -280,18 +279,17 @@ func sanityQueriesEquivalence(query Query, valKnowledgeMap *KnowledgeMap) error 
 			prettyQuery(query),
 		)
 	}
-	for i := 0; i < len(query.Constants); i++ {
-		ii := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, query.Constants[i])
-		if ii < 0 {
+	for i, c := range query.Constants {
+		if valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c) < 0 {
 			return fmt.Errorf(
 				"equivalence query (%s) refers to unknown constant (%s)",
-				prettyQuery(query), prettyConstant(query.Constants[i]),
+				prettyQuery(query), prettyConstant(c),
 			)
 		}
-		if valueEquivalentConstantInConstants(query.Constants[i], query.Constants[:i]) >= 0 {
+		if valueEquivalentConstantInConstants(c, query.Constants[:i]) >= 0 {
 			return fmt.Errorf(
 				"equivalence query (%s) refers to same constant more than once (%s)",
-				prettyQuery(query), prettyConstant(query.Constants[i]),
+				prettyQuery(query), prettyConstant(c),
 			)
 		}
 	}
@@ -432,31 +430,32 @@ func sanityFailOnFailedCheckedPrimitiveRewrite(failedRewrites []*Primitive) erro
 }
 
 func sanityCheckPrimitiveArgumentOutputs(p *Primitive) error {
-	for i := 0; i < len(p.Arguments); i++ {
-		switch p.Arguments[i].Kind {
-		case typesEnumPrimitive:
-			var output []int
-			if primitiveIsCorePrimitive(p.Arguments[i].Data.(*Primitive).ID) {
-				prim, err := primitiveCoreGet(p.Arguments[i].Data.(*Primitive).ID)
-				if err != nil {
-					return err
-				}
-				output = prim.Output
-			} else {
-				prim, err := primitiveGet(p.Arguments[i].Data.(*Primitive).ID)
-				if err != nil {
-					return err
-				}
-				output = prim.Output
+	for _, arg := range p.Arguments {
+		if arg.Kind != typesEnumPrimitive {
+			continue
+		}
+		argPrim := arg.Data.(*Primitive)
+		var output []int
+		if primitiveIsCorePrimitive(argPrim.ID) {
+			prim, err := primitiveCoreGet(argPrim.ID)
+			if err != nil {
+				return err
 			}
-			if !intInSlice(1, output) {
-				return fmt.Errorf(
-					"primitive %s cannot have %s as an argument, since %s necessarily produces more than one output",
-					prettyPrimitive(p),
-					prettyPrimitive(p.Arguments[i].Data.(*Primitive)),
-					prettyPrimitive(p.Arguments[i].Data.(*Primitive)),
-				)
+			output = prim.Output
+		} else {
+			prim, err := primitiveGet(argPrim.ID)
+			if err != nil {
+				return err
 			}
+			output = prim.Output
+		}
+		if !intInSlice(1, output) {
+			return fmt.Errorf(
+				"primitive %s cannot have %s as an argument, since %s necessarily produces more than one output",
+				prettyPrimitive(p),
+				prettyPrimitive(argPrim),
+				prettyPrimitive(argPrim),
+			)
 		}
 	}
 	return nil

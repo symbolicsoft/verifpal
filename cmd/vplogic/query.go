@@ -295,12 +295,11 @@ func queryUnlinkability(
 		}
 		return result, nil
 	}
-	constants := []*Constant{}
-	assigneds := []*Value{}
-	for i := 0; i < len(query.Constants); i++ {
-		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState, true)
-		constants = append(constants, query.Constants[i])
-		assigneds = append(assigneds, a)
+	constants := make([]*Constant, len(query.Constants))
+	assigneds := make([]*Value, len(query.Constants))
+	for i, c := range query.Constants {
+		constants[i] = c
+		assigneds[i], _ = valueResolveConstant(c, valPrincipalState, true)
 	}
 	for i := range assigneds {
 		for ii := range assigneds {
@@ -353,10 +352,9 @@ func queryEquivalence(
 		Summary:  "",
 		Options:  []QueryOptionResult{},
 	}
-	values := []*Value{}
-	for i := 0; i < len(query.Constants); i++ {
-		a, _ := valueResolveConstant(query.Constants[i], valPrincipalState, false)
-		values = append(values, a)
+	values := make([]*Value, len(query.Constants))
+	for i, c := range query.Constants {
+		values[i], _ = valueResolveConstant(c, valPrincipalState, false)
 	}
 	brokenEquivalence := false
 OuterLoop:

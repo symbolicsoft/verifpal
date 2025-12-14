@@ -12,9 +12,7 @@ import (
 
 // b2s converts a byte array to a string.
 func b2s(bs []uint8) string {
-	b := make([]byte, len(bs))
-	copy(b, bs)
-	return string(b)
+	return string(bs)
 }
 
 // strInSlice checks if a string can be found within a slice.
@@ -98,15 +96,13 @@ func colorOutputSupport() bool {
 
 // OpenBrowser opens a URI using the appropriate binding for the host operating system.
 func OpenBrowser(url string) error {
-	var err error
-	err = nil
 	switch runtime.GOOS {
 	case "linux":
-		err = exec.Command("xdg-open", url).Start()
+		return exec.Command("xdg-open", url).Start()
 	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	case "darwin":
-		err = exec.Command("open", url).Start()
+		return exec.Command("open", url).Start()
 	}
-	return err
+	return nil
 }
