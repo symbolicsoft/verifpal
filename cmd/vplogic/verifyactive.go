@@ -10,7 +10,12 @@ import (
 	"sync/atomic"
 )
 
-const maxStageLimit = 64
+const (
+	stageExhaustionThreshold = 5
+	stageRecursiveInjection  = 5
+	stageMutationExpansion   = 3
+	maxStageLimit            = 64
+)
 
 func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
 	InfoMessage("Attacker is configured as active.", "info", false)
@@ -62,7 +67,6 @@ func verifyActiveStages(
 	valAttackerState AttackerState, stageGroup *sync.WaitGroup,
 ) {
 	var principalGroup sync.WaitGroup
-	var err error
 	var worthwhileMutationCount uint32
 	oldKnown := len(valAttackerState.Known)
 	valAttackerState = attackerStateGetRead()
@@ -71,28 +75,24 @@ func verifyActiveStages(
 		func(valPrincipalState *PrincipalState) {
 			defer principalGroup.Done()
 			var scanGroup sync.WaitGroup
-			var valMutationMap MutationMap
-			valMutationMap, err = mutationMapInit(
+			valMutationMap, err := mutationMapInit(
 				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 			)
 			if err != nil {
 				return
 			}
 			scanGroup.Add(1)
-			err = verifyActiveScan(
+			verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
 				mutationMapNext(valMutationMap), stage, &scanGroup, &worthwhileMutationCount,
 			)
-			if err != nil {
-				scanGroup.Done()
-				return
-			}
 			scanGroup.Wait()
 		}(valPrincipalState)
 	}
 	principalGroup.Wait()
 	worthwhile := atomic.LoadUint32(&worthwhileMutationCount)
-	exhausted := stage > 5 && (worthwhile == 0 || oldKnown == attackerStateGetKnownCount() || stage > maxStageLimit)
+	stagnant := worthwhile == 0 || oldKnown == attackerStateGetKnownCount()
+	exhausted := stage > stageExhaustionThreshold && (stagnant || stage > maxStageLimit)
 	if exhausted {
 		attackerStatePutExhausted()
 	}
@@ -103,11 +103,10 @@ func verifyActiveScan(
 	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
 	valAttackerState AttackerState, valMutationMap MutationMap,
 	stage int, scanGroup *sync.WaitGroup, worthwhileMutationCount *uint32,
-) error {
-	var err error
+) {
 	if verifyResultsAllResolved() {
 		scanGroup.Done()
-		return err
+		return
 	}
 	valPrincipalStateMutated, isWorthwhileMutation := verifyActiveMutatePrincipalState(
 		valKnowledgeMap, constructPrincipalStateClone(valPrincipalState, true),
@@ -117,7 +116,7 @@ func verifyActiveScan(
 		atomic.AddUint32(worthwhileMutationCount, 1)
 		scanGroup.Add(1)
 		go func() {
-			err = verifyAnalysis(
+			err := verifyAnalysis(
 				valKnowledgeMap, valPrincipalStateMutated, attackerStateGetRead(), stage, scanGroup,
 			)
 			if err != nil {
@@ -128,18 +127,14 @@ func verifyActiveScan(
 	}
 	if valMutationMap.OutOfMutations {
 		scanGroup.Done()
-		return err
+		return
 	}
 	go func() {
-		err := verifyActiveScan(
+		verifyActiveScan(
 			valKnowledgeMap, valPrincipalState, valAttackerState,
 			mutationMapNext(valMutationMap), stage, scanGroup, worthwhileMutationCount,
 		)
-		if err != nil {
-			scanGroup.Done()
-		}
 	}()
-	return nil
 }
 
 func verifyActiveMutatePrincipalState(

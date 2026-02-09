@@ -213,7 +213,7 @@ func injectPrimitive(
 					uinjectants[arg] = append(uinjectants[arg], k)
 					kinjectants[arg] = append(kinjectants[arg], k)
 				}
-				if stage >= 5 && injectDepth <= stage-5 {
+				if stage >= stageRecursiveInjection && injectDepth <= stage-stageRecursiveInjection {
 					uinjectants, kinjectants = injectPrimitiveRecursively(
 						k, arg, uinjectants, kinjectants,
 						valPrincipalState, valAttackerState, injectDepth, stage,

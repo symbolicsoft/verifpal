@@ -184,6 +184,7 @@ type KnowledgeMap struct {
 	Phase         [][]int
 	MaxPhase      int
 	ConstantIndex map[valueEnum]int
+	UsedBy        map[valueEnum]map[principalEnum]bool
 }
 
 // PrincipalState represents the discrete state of each principal in a model.

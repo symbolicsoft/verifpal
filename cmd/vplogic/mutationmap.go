@@ -109,7 +109,7 @@ func mutationMapReplaceConstant(
 		return mutations
 	}
 	mutations = append(mutations, valueNil)
-	if stage <= 3 {
+	if stage <= stageMutationExpansion {
 		return mutations
 	}
 	for _, v := range valAttackerState.Known {
@@ -183,7 +183,7 @@ func mutationMapReplaceEquation(
 	case 3:
 		mutations = append(mutations, valueGNilNil)
 	}
-	if stage <= 3 {
+	if stage <= stageMutationExpansion {
 		return mutations
 	}
 	for _, v := range valAttackerState.Known {

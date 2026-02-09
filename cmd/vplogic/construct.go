@@ -74,7 +74,38 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 		}
 	}
 	valKnowledgeMap.MaxPhase = currentPhase
+	valKnowledgeMap.UsedBy = constructKnowledgeMapUsedBy(valKnowledgeMap)
 	return valKnowledgeMap, nil
+}
+
+func constructKnowledgeMapUsedBy(valKnowledgeMap *KnowledgeMap) map[valueEnum]map[principalEnum]bool {
+	usedBy := make(map[valueEnum]map[principalEnum]bool)
+	for ii, a := range valKnowledgeMap.Assigned {
+		switch a.Kind {
+		case typesEnumPrimitive, typesEnumEquation:
+			_, v := valueResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
+			creatorID := valKnowledgeMap.Creator[ii]
+			for _, vv := range v {
+				if vv.Kind != typesEnumConstant {
+					continue
+				}
+				cID := vv.Data.(*Constant).ID
+				if usedBy[cID] == nil {
+					usedBy[cID] = make(map[principalEnum]bool)
+				}
+				usedBy[cID][creatorID] = true
+			}
+			assignedVal := valKnowledgeMap.Assigned[ii]
+			if assignedVal.Kind == typesEnumConstant {
+				aID := assignedVal.Data.(*Constant).ID
+				if usedBy[aID] == nil {
+					usedBy[aID] = make(map[principalEnum]bool)
+				}
+				usedBy[aID][creatorID] = true
+			}
+		}
+	}
+	return usedBy
 }
 
 func constructKnowledgeMapRenderPrincipal(

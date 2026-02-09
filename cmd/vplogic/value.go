@@ -104,46 +104,23 @@ func valueGetPrincipalStateIndexFromConstant(valPrincipalState *PrincipalState, 
 }
 
 func valueGetConstantsFromValue(v *Value) []*Constant {
-	c := []*Constant{}
 	switch v.Kind {
 	case typesEnumConstant:
-		c = append(c, v.Data.(*Constant))
+		return []*Constant{v.Data.(*Constant)}
 	case typesEnumPrimitive:
-		c = append(c, valueGetConstantsFromPrimitive(v.Data.(*Primitive))...)
+		c := []*Constant{}
+		for _, a := range v.Data.(*Primitive).Arguments {
+			c = append(c, valueGetConstantsFromValue(a)...)
+		}
+		return c
 	case typesEnumEquation:
-		c = append(c, valueGetConstantsFromEquation(v.Data.(*Equation))...)
-	}
-	return c
-}
-
-func valueGetConstantsFromPrimitive(p *Primitive) []*Constant {
-	c := []*Constant{}
-	for _, a := range p.Arguments {
-		switch a.Kind {
-		case typesEnumConstant:
-			c = append(c, a.Data.(*Constant))
-		case typesEnumPrimitive:
-			c = append(c, valueGetConstantsFromPrimitive(a.Data.(*Primitive))...)
-		case typesEnumEquation:
-			c = append(c, valueGetConstantsFromEquation(a.Data.(*Equation))...)
+		c := []*Constant{}
+		for _, a := range v.Data.(*Equation).Values {
+			c = append(c, valueGetConstantsFromValue(a)...)
 		}
+		return c
 	}
-	return c
-}
-
-func valueGetConstantsFromEquation(e *Equation) []*Constant {
-	c := []*Constant{}
-	for _, a := range e.Values {
-		switch a.Kind {
-		case typesEnumConstant:
-			c = append(c, a.Data.(*Constant))
-		case typesEnumPrimitive:
-			c = append(c, valueGetConstantsFromPrimitive(a.Data.(*Primitive))...)
-		case typesEnumEquation:
-			c = append(c, valueGetConstantsFromEquation(a.Data.(*Equation))...)
-		}
-	}
-	return c
+	return []*Constant{}
 }
 
 func valueEquivalentValues(a1 *Value, a2 *Value, considerOutput bool) bool {
@@ -739,6 +716,21 @@ func valueResolveEquationInternalValuesFromPrincipalState(
 func valueConstantIsUsedByPrincipalInKnowledgeMap(
 	valKnowledgeMap *KnowledgeMap, principalID principalEnum, c *Constant,
 ) bool {
+	if valKnowledgeMap.UsedBy != nil {
+		if principals, ok := valKnowledgeMap.UsedBy[c.ID]; ok {
+			return principals[principalID]
+		}
+		i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
+		if i >= 0 {
+			assignedVal := valKnowledgeMap.Assigned[i]
+			if assignedVal.Kind == typesEnumConstant {
+				if principals, ok := valKnowledgeMap.UsedBy[assignedVal.Data.(*Constant).ID]; ok {
+					return principals[principalID]
+				}
+			}
+		}
+		return false
+	}
 	i := valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap, c)
 	for ii, a := range valKnowledgeMap.Assigned {
 		if valKnowledgeMap.Creator[ii] != principalID {
