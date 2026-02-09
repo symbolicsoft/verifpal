@@ -10,7 +10,7 @@ import (
 
 var verifyResultsShared []VerifyResult
 var verifyResultsFileNameShared string
-var verifyResultsMutex sync.Mutex
+var verifyResultsMutex sync.RWMutex
 
 func verifyResultsInit(m Model) bool {
 	verifyResultsMutex.Lock()
@@ -29,11 +29,11 @@ func verifyResultsInit(m Model) bool {
 }
 
 func verifyResultsGetRead() ([]VerifyResult, string) {
-	verifyResultsMutex.Lock()
+	verifyResultsMutex.RLock()
 	valVerifyResults := make([]VerifyResult, len(verifyResultsShared))
 	copy(valVerifyResults, verifyResultsShared)
 	fileName := verifyResultsFileNameShared
-	verifyResultsMutex.Unlock()
+	verifyResultsMutex.RUnlock()
 	return valVerifyResults, fileName
 }
 
@@ -54,14 +54,14 @@ func verifyResultsPutWrite(result VerifyResult) bool {
 }
 
 func verifyResultsAllResolved() bool {
+	verifyResultsMutex.RLock()
 	allResolved := true
-	verifyResultsMutex.Lock()
 	for _, verifyResult := range verifyResultsShared {
 		if !verifyResult.Resolved {
 			allResolved = false
 			break
 		}
 	}
-	verifyResultsMutex.Unlock()
+	verifyResultsMutex.RUnlock()
 	return allResolved
 }

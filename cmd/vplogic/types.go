@@ -7,23 +7,23 @@ package vplogic
 type typesEnum uint8
 
 const (
-	typesEnumEmpty           typesEnum = iota
-	typesEnumConstant        typesEnum = iota
-	typesEnumPrimitive       typesEnum = iota
-	typesEnumEquation        typesEnum = iota
-	typesEnumPrivate         typesEnum = iota
-	typesEnumPublic          typesEnum = iota
-	typesEnumPassword        typesEnum = iota
-	typesEnumKnows           typesEnum = iota
-	typesEnumGenerates       typesEnum = iota
-	typesEnumAssignment      typesEnum = iota
-	typesEnumLeaks           typesEnum = iota
-	typesEnumConfidentiality typesEnum = iota
-	typesEnumAuthentication  typesEnum = iota
-	typesEnumFreshness       typesEnum = iota
-	typesEnumUnlinkability   typesEnum = iota
-	typesEnumEquivalence     typesEnum = iota
-	typesEnumPrecondition    typesEnum = iota
+	typesEnumEmpty typesEnum = iota
+	typesEnumConstant
+	typesEnumPrimitive
+	typesEnumEquation
+	typesEnumPrivate
+	typesEnumPublic
+	typesEnumPassword
+	typesEnumKnows
+	typesEnumGenerates
+	typesEnumAssignment
+	typesEnumLeaks
+	typesEnumConfidentiality
+	typesEnumAuthentication
+	typesEnumFreshness
+	typesEnumUnlinkability
+	typesEnumEquivalence
+	typesEnumPrecondition
 )
 
 type valueEnum uint16
@@ -106,11 +106,20 @@ type Expression struct {
 	Assigned  *Value
 }
 
+// ValueData is a sealed interface implemented only by Constant, Primitive and Equation.
+type ValueData interface {
+	valueData()
+}
+
 // Value represents either a constant, primitive or equation expression.
 type Value struct {
 	Kind typesEnum
-	Data interface{}
+	Data ValueData
 }
+
+func (*Constant) valueData()  {}
+func (*Primitive) valueData() {}
+func (*Equation) valueData()  {}
 
 // Constant represents a constant expression:
 // - Name indicates the name of the constant.
@@ -174,6 +183,7 @@ type KnowledgeMap struct {
 	MaxDeclaredAt int
 	Phase         [][]int
 	MaxPhase      int
+	ConstantIndex map[valueEnum]int
 }
 
 // PrincipalState represents the discrete state of each principal in a model.
@@ -223,6 +233,7 @@ type PrincipalState struct {
 	MutatableTo   [][]principalEnum
 	BeforeMutate  []*Value
 	Phase         [][]int
+	ConstantIndex map[valueEnum]int
 }
 
 // DecomposeRule contains a primitive's DecomposeRule.

@@ -191,6 +191,9 @@ func injectPrimitive(
 	kinjectants := make([][]*Value, len(p.Arguments))
 	uinjectants := make([][]*Value, len(p.Arguments))
 	for arg := range p.Arguments {
+		if verifyResultsAllResolved() {
+			return []*Value{}
+		}
 		for _, k := range valAttackerState.Known {
 			switch k.Kind {
 			case typesEnumConstant:
@@ -249,144 +252,49 @@ func injectLoopN(p *Primitive, kinjectants [][]*Value) []*Value {
 	if verifyResultsAllResolved() {
 		return []*Value{}
 	}
-	switch len(p.Arguments) {
-	case 1:
-		return injectLoop1(p, kinjectants)
-	case 2:
-		return injectLoop2(p, kinjectants)
-	case 3:
-		return injectLoop3(p, kinjectants)
-	case 4:
-		return injectLoop4(p, kinjectants)
-	case 5:
-		return injectLoop5(p, kinjectants)
-	}
-	return []*Value{}
-}
-
-func injectLoop1(p *Primitive, kinjectants [][]*Value) []*Value {
-	injectants := []*Value{}
-	if verifyResultsAllResolved() {
+	n := len(kinjectants)
+	if n == 0 {
 		return []*Value{}
 	}
-	for i := range kinjectants[0] {
-		aa := &Value{
+	for _, k := range kinjectants {
+		if len(k) == 0 {
+			return []*Value{}
+		}
+	}
+	totalSize := 1
+	for _, k := range kinjectants {
+		totalSize *= len(k)
+	}
+	injectants := make([]*Value, 0, totalSize)
+	indices := make([]int, n)
+	for {
+		if verifyResultsAllResolved() {
+			return injectants
+		}
+		args := make([]*Value, n)
+		for j := 0; j < n; j++ {
+			args[j] = kinjectants[j][indices[j]]
+		}
+		injectants = append(injectants, &Value{
 			Kind: typesEnumPrimitive,
 			Data: &Primitive{
-				ID: p.ID,
-				Arguments: []*Value{
-					kinjectants[0][i],
-				},
-				Output: p.Output,
-				Check:  p.Check,
+				ID:        p.ID,
+				Arguments: args,
+				Output:    p.Output,
+				Check:     p.Check,
 			},
-		}
-		injectants = append(injectants, aa)
-	}
-	return injectants
-}
-
-func injectLoop2(p *Primitive, kinjectants [][]*Value) []*Value {
-	injectants := []*Value{}
-	for i := range kinjectants[0] {
-		for ii := range kinjectants[1] {
-			aa := &Value{
-				Kind: typesEnumPrimitive,
-				Data: &Primitive{
-					ID: p.ID,
-					Arguments: []*Value{
-						kinjectants[0][i],
-						kinjectants[1][ii],
-					},
-					Output: p.Output,
-					Check:  p.Check,
-				},
-			}
-			injectants = append(injectants, aa)
-		}
-	}
-	return injectants
-}
-
-func injectLoop3(p *Primitive, kinjectants [][]*Value) []*Value {
-	injectants := []*Value{}
-	for i := range kinjectants[0] {
-		for ii := range kinjectants[1] {
-			for iii := range kinjectants[2] {
-				aa := &Value{
-					Kind: typesEnumPrimitive,
-					Data: &Primitive{
-						ID: p.ID,
-						Arguments: []*Value{
-							kinjectants[0][i],
-							kinjectants[1][ii],
-							kinjectants[2][iii],
-						},
-						Output: p.Output,
-						Check:  p.Check,
-					},
-				}
-				injectants = append(injectants, aa)
+		})
+		carry := true
+		for j := n - 1; j >= 0 && carry; j-- {
+			indices[j]++
+			if indices[j] < len(kinjectants[j]) {
+				carry = false
+			} else {
+				indices[j] = 0
 			}
 		}
-	}
-	return injectants
-}
-
-func injectLoop4(p *Primitive, kinjectants [][]*Value) []*Value {
-	injectants := []*Value{}
-	for i := range kinjectants[0] {
-		for ii := range kinjectants[1] {
-			for iii := range kinjectants[2] {
-				for iiii := range kinjectants[3] {
-					aa := &Value{
-						Kind: typesEnumPrimitive,
-						Data: &Primitive{
-							ID: p.ID,
-							Arguments: []*Value{
-								kinjectants[0][i],
-								kinjectants[1][ii],
-								kinjectants[2][iii],
-								kinjectants[3][iiii],
-							},
-							Output: p.Output,
-							Check:  p.Check,
-						},
-					}
-					injectants = append(injectants, aa)
-				}
-			}
-		}
-	}
-	return injectants
-}
-
-func injectLoop5(p *Primitive, kinjectants [][]*Value) []*Value {
-	injectants := []*Value{}
-	for i := range kinjectants[0] {
-		for ii := range kinjectants[1] {
-			for iii := range kinjectants[2] {
-				for iiii := range kinjectants[3] {
-					for iiiii := range kinjectants[4] {
-						aa := &Value{
-							Kind: typesEnumPrimitive,
-							Data: &Primitive{
-								ID: p.ID,
-								Arguments: []*Value{
-									kinjectants[0][i],
-									kinjectants[1][ii],
-									kinjectants[2][iii],
-									kinjectants[3][iiii],
-									kinjectants[4][iiiii],
-								},
-								Output: p.Output,
-								Check:  p.Check,
-							},
-						}
-						injectants = append(injectants, aa)
-					}
-				}
-			}
+		if carry {
+			break
 		}
 	}
 	return injectants

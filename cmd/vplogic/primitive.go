@@ -12,28 +12,28 @@ import (
 type primitiveEnum uint8
 
 const (
-	primitiveEnumEmpty         primitiveEnum = iota
-	primitiveEnumASSERT        primitiveEnum = iota
-	primitiveEnumCONCAT        primitiveEnum = iota
-	primitiveEnumSPLIT         primitiveEnum = iota
-	primitiveEnumPWHASH        primitiveEnum = iota
-	primitiveEnumHASH          primitiveEnum = iota
-	primitiveEnumHKDF          primitiveEnum = iota
-	primitiveEnumAEADENC       primitiveEnum = iota
-	primitiveEnumAEADDEC       primitiveEnum = iota
-	primitiveEnumENC           primitiveEnum = iota
-	primitiveEnumDEC           primitiveEnum = iota
-	primitiveEnumMAC           primitiveEnum = iota
-	primitiveEnumSIGN          primitiveEnum = iota
-	primitiveEnumSIGNVERIF     primitiveEnum = iota
-	primitiveEnumPKEENC        primitiveEnum = iota
-	primitiveEnumPKEDEC        primitiveEnum = iota
-	primitiveEnumSHAMIRSPLIT   primitiveEnum = iota
-	primitiveEnumSHAMIRJOIN    primitiveEnum = iota
-	primitiveEnumRINGSIGN      primitiveEnum = iota
-	primitiveEnumRINGSIGNVERIF primitiveEnum = iota
-	primitiveEnumBLIND         primitiveEnum = iota
-	primitiveEnumUNBLIND       primitiveEnum = iota
+	primitiveEnumEmpty primitiveEnum = iota
+	primitiveEnumASSERT
+	primitiveEnumCONCAT
+	primitiveEnumSPLIT
+	primitiveEnumPWHASH
+	primitiveEnumHASH
+	primitiveEnumHKDF
+	primitiveEnumAEADENC
+	primitiveEnumAEADDEC
+	primitiveEnumENC
+	primitiveEnumDEC
+	primitiveEnumMAC
+	primitiveEnumSIGN
+	primitiveEnumSIGNVERIF
+	primitiveEnumPKEENC
+	primitiveEnumPKEDEC
+	primitiveEnumSHAMIRSPLIT
+	primitiveEnumSHAMIRJOIN
+	primitiveEnumRINGSIGN
+	primitiveEnumRINGSIGNVERIF
+	primitiveEnumBLIND
+	primitiveEnumUNBLIND
 )
 
 var primitiveCoreSpecsMap map[primitiveEnum]*PrimitiveCoreSpec

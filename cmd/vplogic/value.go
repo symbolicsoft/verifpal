@@ -74,6 +74,12 @@ func valueIsGOrNil(c *Constant) bool {
 }
 
 func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap *KnowledgeMap, c *Constant) int {
+	if valKnowledgeMap.ConstantIndex != nil {
+		if i, ok := valKnowledgeMap.ConstantIndex[c.ID]; ok {
+			return i
+		}
+		return -1
+	}
 	for i := range valKnowledgeMap.Constants {
 		if valueEquivalentConstants(valKnowledgeMap.Constants[i], c) {
 			return i
@@ -83,6 +89,12 @@ func valueGetKnowledgeMapIndexFromConstant(valKnowledgeMap *KnowledgeMap, c *Con
 }
 
 func valueGetPrincipalStateIndexFromConstant(valPrincipalState *PrincipalState, c *Constant) int {
+	if valPrincipalState.ConstantIndex != nil {
+		if i, ok := valPrincipalState.ConstantIndex[c.ID]; ok && i < len(valPrincipalState.Constants) {
+			return i
+		}
+		return -1
+	}
 	for i := range valPrincipalState.Constants {
 		if valueEquivalentConstants(valPrincipalState.Constants[i], c) {
 			return i

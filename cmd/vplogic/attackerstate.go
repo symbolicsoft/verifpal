@@ -9,7 +9,7 @@ import (
 )
 
 var attackerStateShared AttackerState
-var attackerStateMutex sync.Mutex
+var attackerStateMutex sync.RWMutex
 
 func attackerStateInit(active bool) {
 	attackerStateMutex.Lock()
@@ -85,7 +85,7 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 }
 
 func attackerStateGetRead() AttackerState {
-	attackerStateMutex.Lock()
+	attackerStateMutex.RLock()
 	knownCopy := make([]*Value, len(attackerStateShared.Known))
 	copy(knownCopy, attackerStateShared.Known)
 	principalStateCopy := make([]*PrincipalState, len(attackerStateShared.PrincipalState))
@@ -97,22 +97,21 @@ func attackerStateGetRead() AttackerState {
 		Known:          knownCopy,
 		PrincipalState: principalStateCopy,
 	}
-	attackerStateMutex.Unlock()
+	attackerStateMutex.RUnlock()
 	return valAttackerState
 }
 
 func attackerStateGetExhausted() bool {
-	var exhausted bool
-	attackerStateMutex.Lock()
-	exhausted = attackerStateShared.Exhausted
-	attackerStateMutex.Unlock()
+	attackerStateMutex.RLock()
+	exhausted := attackerStateShared.Exhausted
+	attackerStateMutex.RUnlock()
 	return exhausted
 }
 
 func attackerStateGetKnownCount() int {
-	attackerStateMutex.Lock()
+	attackerStateMutex.RLock()
 	count := len(attackerStateShared.Known)
-	attackerStateMutex.Unlock()
+	attackerStateMutex.RUnlock()
 	return count
 }
 

@@ -69,13 +69,13 @@ func verifyActiveStages(
 	principalGroup.Add(len(valPrincipalStates))
 	for _, valPrincipalState := range valPrincipalStates {
 		func(valPrincipalState *PrincipalState) {
+			defer principalGroup.Done()
 			var scanGroup sync.WaitGroup
 			var valMutationMap MutationMap
 			valMutationMap, err = mutationMapInit(
 				valKnowledgeMap, valPrincipalState, valAttackerState, stage,
 			)
 			if err != nil {
-				scanGroup.Done()
 				return
 			}
 			scanGroup.Add(1)
@@ -88,7 +88,6 @@ func verifyActiveStages(
 				return
 			}
 			scanGroup.Wait()
-			principalGroup.Done()
 		}(valPrincipalState)
 	}
 	principalGroup.Wait()

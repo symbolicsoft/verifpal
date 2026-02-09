@@ -21,10 +21,12 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 		MaxDeclaredAt: 0,
 		Phase:         [][]int{},
 		MaxPhase:      0,
+		ConstantIndex: map[valueEnum]int{},
 	}
 	declaredAt := 0
 	currentPhase := 0
 	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueG.Data.(*Constant))
+	valKnowledgeMap.ConstantIndex[valueG.Data.(*Constant).ID] = len(valKnowledgeMap.Constants) - 1
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueG)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
@@ -37,6 +39,7 @@ func constructKnowledgeMap(m Model, principals []string, principalIDs []principa
 		)
 	}
 	valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, valueNil.Data.(*Constant))
+	valKnowledgeMap.ConstantIndex[valueNil.Data.(*Constant).ID] = len(valKnowledgeMap.Constants) - 1
 	valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, valueNil)
 	valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, principalNamesMap["Attacker"])
 	valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{})
@@ -147,6 +150,7 @@ func constructKnowledgeMapRenderKnows(
 			Qualifier:   expr.Qualifier,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.ConstantIndex[c.ID] = len(valKnowledgeMap.Constants) - 1
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
 			Kind: typesEnumConstant,
 			Data: c,
@@ -192,6 +196,7 @@ func constructKnowledgeMapRenderGenerates(
 			Qualifier:   typesEnumPrivate,
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.ConstantIndex[c.ID] = len(valKnowledgeMap.Constants) - 1
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &Value{
 			Kind: typesEnumConstant,
 			Data: c,
@@ -264,6 +269,7 @@ func constructKnowledgeMapRenderAssignment(
 			a.Data.(*Primitive).Output = i
 		}
 		valKnowledgeMap.Constants = append(valKnowledgeMap.Constants, c)
+		valKnowledgeMap.ConstantIndex[c.ID] = len(valKnowledgeMap.Constants) - 1
 		valKnowledgeMap.Assigned = append(valKnowledgeMap.Assigned, &a)
 		valKnowledgeMap.Creator = append(valKnowledgeMap.Creator, blck.Principal.ID)
 		valKnowledgeMap.KnownBy = append(valKnowledgeMap.KnownBy, []map[principalEnum]principalEnum{{}})
@@ -387,6 +393,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap *KnowledgeMap) []*Princip
 			MutatableTo:   [][]principalEnum{},
 			BeforeMutate:  []*Value{},
 			Phase:         [][]int{},
+			ConstantIndex: make(map[valueEnum]int, len(valKnowledgeMap.Constants)),
 		}
 		for i, c := range valKnowledgeMap.Constants {
 			wire := []principalEnum{}
@@ -412,6 +419,7 @@ func constructPrincipalStates(m Model, valKnowledgeMap *KnowledgeMap) []*Princip
 				)
 			}
 			valPrincipalState.Constants = append(valPrincipalState.Constants, c)
+			valPrincipalState.ConstantIndex[c.ID] = len(valPrincipalState.Constants) - 1
 			valPrincipalState.Assigned = append(valPrincipalState.Assigned, assigned)
 			valPrincipalState.Guard = append(valPrincipalState.Guard, guard)
 			valPrincipalState.Known = append(valPrincipalState.Known, knows)
@@ -479,6 +487,7 @@ func constructPrincipalStateClone(valPrincipalState *PrincipalState, purify bool
 		MutatableTo:   make([][]principalEnum, len(valPrincipalState.MutatableTo)),
 		BeforeMutate:  make([]*Value, len(valPrincipalState.BeforeMutate)),
 		Phase:         make([][]int, len(valPrincipalState.Phase)),
+		ConstantIndex: valPrincipalState.ConstantIndex,
 	}
 	copy(valPrincipalStateClone.Constants, valPrincipalState.Constants)
 	if purify {
