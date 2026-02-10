@@ -1,51 +1,98 @@
-Verifpal 0.28.1 features an important correctness fix, several bug fixes, and performance improvements.
+Verifpal 0.30.0 brings, in addition to performance improvements, a major
+overhaul to how protocol analysis is conducted with some tradeoffs.
 
-Correctness Fix: AEAD Associated Data Modeling
-----------------------------------------------
+Verifpal's active attacker verification could fail to terminate on models
+with multi-argument primitives (HKDF, AEAD, HASH) and many attacker-known
+values. Two sources of combinatorial explosion were responsible:
 
-Verifpal now correctly models AEAD (Authenticated Encryption with Associated Data) semantics. Previously, in some instances, Verifpal did not reveal the associated data to the Dolev-Yao attacker when observing AEAD ciphertexts. This has been fixed with a new PassiveReveal mechanism that ensures attackers can always observe the associated data portion of AEAD constructions, matching real-world behavior.
+1. Mutation map cartesian product explosion (mutationMapNext).
+   The mutation map maps each mutable constant to a list of candidate
+   replacement values. The verifier then enumerates the full cartesian
+   product of all mutation lists simultaneously. For a model where four
+   constants have mutation lists of sizes [2, 7, 7, 527], the full
+   product is 51,646 combinations — each spawning a goroutine for
+   analysis. At higher stages (where injection expands mutation lists
+   further), this product grows into the hundreds of thousands.
 
-Thanks to Stefano Berlato for reporting this issue.
+2. Injection cartesian product explosion (injectLoopN).
+   The injection engine constructs candidate primitive values by
+   combining known values into each argument slot. For a 3-argument
+   primitive like AEAD_ENC where the attacker knows 20 constants,
+   8 equations, and 15 primitives per slot, the cartesian product of
+   injectants can exceed 20^3 = 8,000 values — and this is per
+   primitive, per stage, per principal.
 
-Fix Non-Termination in Active Attacker Verification
-----------------------------------------------
+Together, these two explosions caused the verifier to spawn millions of
+goroutines on models like the Signal protocol variants, leading to memory
+exhaustion, goroutine stack overflow, or effective non-termination.
 
-The exhaustion check in verifyActiveStages compared knowledge count using
-a local copy that didn't reflect concurrent modifications from reconstruction.
-This caused models with multi-argument primitives (like HKDF) to run forever
-as reconstruction kept generating derived values even when mutations weren't
-making progress toward resolving queries.
+Solution
+--------
+The fix has three components that work together:
 
-Changes:
-- Add attackerStateGetKnownCount() for thread-safe access to knowledge count
-- Track worthwhile mutations per stage using atomic counter
-- Improve exhaustion condition: exhaust if stage > 5 AND any of:
-  - No worthwhile mutations found in stage
-  - No knowledge growth (using thread-safe count)
-  - Stage exceeds maxStageLimit (64) as fallback for combinatorial explosion
+### 1. Injection cap (inject.go)
 
-This fixes analysis of models like fakeauth.vp which previously would not
-terminate due to HKDF reconstruction generating endless permutations.
+A hard cap of 500 injected values per primitive (maxInjectionsPerPrimitive).
+The injectLoopN function now:
+- Pre-computes the total product size with overflow-safe arithmetic
+- Caps the pre-allocated slice to the limit
+- Breaks out of the generation loop once the cap is reached
 
-Bug Fixes
----------
+This prevents memory exhaustion from a single inject() call while
+preserving enough injection diversity for attack discovery.
 
-- Race condition fix: Corrected an unsafe double-checked locking pattern in attacker state management that could cause stale data reads
-- Side effect fix: minIntInSlice no longer modifies its input slice unexpectedly
-- Deep copy fix: Password constants now correctly preserve their qualifier type during value copy operations
-- Nil pointer guard: Added protection against potential panic on malformed equations
+### 2. Mutation map subset helpers (mutationmap.go)
 
-Performance Improvements
-------------------------
+Two new functions support the weighted scanning strategy:
 
-- O(1) primitive lookups using map-based indexing instead of linear search
-- Efficient string concatenation using strings.Builder
-- Pre-allocated slices to reduce memory allocations
-- Range-based loop conversions throughout the codebase
-- Net reduction of 31 lines while improving performance
+- mutationMapSubset(fullMap, indices): Creates a MutationMap containing
+  only the constants at the given indices, sharing the underlying
+  mutation slices with the original map.
 
-Code Quality
-------------
+- mutationMapSubsetCapped(fullMap, indices, maxProduct): Creates a subset
+  and, if the product of mutation list sizes exceeds the cap, truncates
+  each dimension to the nth root of the cap. This distributes the budget
+  evenly across dimensions.
 
-- Updated linter configuration and addressed additional code quality warnings
+An intNthRoot helper performs integer nth-root computation via binary
+search for the capping logic.
 
+### 3. Weight-ordered scanning (verifyactive.go)
+
+The core change replaces the previous approach of enumerating the full
+cartesian product of all mutations at once. Instead, verifyActiveScanWeighted
+orchestrates mutation scanning in layers of increasing "weight" — the
+number of simultaneously mutated variables:
+
+  Weight 1: Mutate each variable alone, one at a time.
+            Each variable's mutations are capped to maxWeight1MutationsPerVar
+            (50) to prevent a single high-mutation variable from consuming
+            the entire budget.
+
+  Weight 2: Mutate each pair of variables simultaneously.
+            Pairs whose cartesian product exceeds maxMutationsPerSubset
+            (20,000) are skipped entirely rather than truncated, preserving
+            the combinatorial structure of pairs that do fit.
+
+  Weight 3: Mutate each triple of variables simultaneously.
+            Same skip logic as weight 2.
+
+  Full product: Only attempted if the total product across all variables
+                is within maxFullMutationProduct (50,000).
+
+A per-principal-per-stage scan budget (maxScanBudget = 20,000) tracked via
+atomic counter prevents any single stage from consuming unbounded work.
+The budget is consumed as subsets are scanned, and scanning stops once the
+budget is exhausted.
+
+At most maxSubsetsPerWeight (50) subsets are scanned per weight level,
+preventing C(n, k) combinatorial blowup when the number of mutable
+variables is large.
+
+### Stage limit
+
+The maximum stage limit (maxStageLimit) is reduced from 64 to 8. This
+ensures that the verifier declares exhaustion sooner when exploration at
+higher stages stops discovering new knowledge, which is critical for
+multi-phase models where phase 0 must exhaust before phase 1 analysis
+can begin.
