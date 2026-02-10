@@ -16,10 +16,14 @@ type VerifpalTest struct {
 	ResultsCode string
 }
 
-var verifpalTests = [61]VerifpalTest{
+var verifpalTests = [62]VerifpalTest{
 	{
 		Model:       "challengeresponse.vp",
 		ResultsCode: "a0a1",
+	},
+	{
+		Model:       "checked_aead.vp",
+		ResultsCode: "c0a0a0",
 	},
 	{
 		Model:       "ephemerals_sign.vp",
@@ -91,7 +95,7 @@ var verifpalTests = [61]VerifpalTest{
 	},
 	{
 		Model:       "unchecked_aead.vp",
-		ResultsCode: "c0a0a0",
+		ResultsCode: "c0a1a1",
 	},
 	{
 		Model:       "unguarded_alice.vp",

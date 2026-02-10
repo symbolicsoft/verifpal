@@ -145,6 +145,10 @@ func queryAuthenticationGetPassIndices(
 			indices = append(indices, iiii)
 			continue
 		}
+		if !b.Data.(*Primitive).Check {
+			indices = append(indices, iiii)
+			continue
+		}
 		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState, 0)
 		if pass {
 			indices = append(indices, iiii)
@@ -217,6 +221,10 @@ func queryFreshness(
 			hasRule = prim.Rewrite.HasRule
 		}
 		if !hasRule {
+			indices = append(indices, ii)
+			continue
+		}
+		if !b.Data.(*Primitive).Check {
 			indices = append(indices, ii)
 			continue
 		}

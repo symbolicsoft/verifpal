@@ -47,7 +47,7 @@ principal Bob[
 	bkshared1 = gae2^bs
 	brkab1, bckab1 = HKDF(bkshared1, brkba1, nil)
 	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
-	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
+	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))?
 ]
 
 principal Bob[
@@ -65,7 +65,7 @@ principal Alice[
 	akshared2 = gbe^ae2
 	arkba2, ackba2 = HKDF(akshared2, arkab1, nil)
 	akenc3, akenc4 = HKDF(MAC(ackba2, nil), nil, nil)
-	m2_d = AEAD_DEC(akenc3, e2, HASH(gblongterm, galongterm, gbe))
+	m2_d = AEAD_DEC(akenc3, e2, HASH(gblongterm, galongterm, gbe))?
 ]
 
 principal Alice[
@@ -83,7 +83,7 @@ principal Bob[
 	bkshared3 = gae3^be
 	brkab3, bckab3 = HKDF(bkshared3, brkba2, nil)
 	bkenc5, bkenc6 = HKDF(MAC(bckab3, nil), nil, nil)
-	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))
+	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))?
 ]
 
 phase[1]
