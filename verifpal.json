@@ -1,19 +1,19 @@
 {
-    "version": "0.28.1",
+    "version": "0.30.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v0.28.1/verifpal_0.28.1_windows_amd64.zip",
+            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v0.30.0/verifpal_0.30.0_windows_amd64.zip",
             "bin": [
-                "verifpal_0.28.1_windows_amd64/verifpal.exe"
+                "verifpal_0.30.0_windows_amd64/verifpal.exe"
             ],
-            "hash": "28ce778569bdc01e6f7c9b9634b1cd0ba967e12fe21b9edc3db6d387d8202cb7"
+            "hash": "56b100aa8e10e8fdd06730ca5537a024944c823731a5fdcc4aba5556f3583a5c"
         },
         "arm64": {
-            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v0.28.1/verifpal_0.28.1_windows_arm64.zip",
+            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v0.30.0/verifpal_0.30.0_windows_arm64.zip",
             "bin": [
-                "verifpal_0.28.1_windows_arm64/verifpal.exe"
+                "verifpal_0.30.0_windows_arm64/verifpal.exe"
             ],
-            "hash": "2c825aebc5b5636e02f89b6fa5f515e43271bed7cdb656d3f31b993f64a6af18"
+            "hash": "97008b84d0684e19ed4c69503f9a1b97b51ec1afb6df91bfe1b14086eaab964c"
         }
     },
     "homepage": "https://verifpal.com",
