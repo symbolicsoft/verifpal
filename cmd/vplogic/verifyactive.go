@@ -14,7 +14,13 @@ const (
 	stageExhaustionThreshold = 5
 	stageRecursiveInjection  = 5
 	stageMutationExpansion   = 3
-	maxStageLimit            = 64
+	maxStageLimit            = 8
+	maxSubsetMutationWeight    = 3
+	maxSubsetsPerWeight        = 50
+	maxWeight1MutationsPerVar  = 50
+	maxMutationsPerSubset      = 20000
+	maxFullMutationProduct     = 50000
+	maxScanBudget              = 20000
 )
 
 func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
@@ -81,12 +87,10 @@ func verifyActiveStages(
 			if err != nil {
 				return
 			}
-			scanGroup.Add(1)
-			verifyActiveScan(
+			verifyActiveScanWeighted(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
-				mutationMapNext(valMutationMap), stage, &scanGroup, &worthwhileMutationCount,
+				valMutationMap, stage, &scanGroup, &worthwhileMutationCount,
 			)
-			scanGroup.Wait()
 		}(valPrincipalState)
 	}
 	principalGroup.Wait()
@@ -97,6 +101,139 @@ func verifyActiveStages(
 		attackerStatePutExhausted()
 	}
 	stageGroup.Done()
+}
+
+func verifyActiveScanWeighted(
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
+	valAttackerState AttackerState, valMutationMap MutationMap,
+	stage int, scanGroup *sync.WaitGroup, worthwhileMutationCount *uint32,
+) {
+	n := len(valMutationMap.Constants)
+	if n == 0 {
+		return
+	}
+	var budgetUsed uint32
+	budget := uint32(maxScanBudget)
+	// Scan subsets at increasing weight up to the cap
+	maxWeight := maxSubsetMutationWeight
+	if maxWeight > n {
+		maxWeight = n
+	}
+	for weight := 1; weight <= maxWeight; weight++ {
+		if verifyResultsAllResolved() {
+			return
+		}
+		if atomic.LoadUint32(&budgetUsed) >= budget {
+			break
+		}
+		verifyActiveScanAtWeight(
+			valKnowledgeMap, valPrincipalState, valAttackerState,
+			valMutationMap, stage, scanGroup, worthwhileMutationCount,
+			n, weight, &budgetUsed, budget,
+		)
+	}
+	if verifyResultsAllResolved() {
+		return
+	}
+	if atomic.LoadUint32(&budgetUsed) >= budget {
+		return
+	}
+	// Full product: only scan if total product is small enough
+	totalProduct := 1
+	overflow := false
+	for i := 0; i < n; i++ {
+		m := len(valMutationMap.Mutations[i])
+		if m > 0 && totalProduct > maxFullMutationProduct/m {
+			overflow = true
+			break
+		}
+		totalProduct *= m
+	}
+	if !overflow && totalProduct <= maxFullMutationProduct {
+		scanGroup.Add(1)
+		verifyActiveScan(
+			valKnowledgeMap, valPrincipalState, valAttackerState,
+			mutationMapNext(valMutationMap), stage, scanGroup, worthwhileMutationCount,
+		)
+		scanGroup.Wait()
+	}
+}
+
+func verifyActiveScanAtWeight(
+	valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState,
+	valAttackerState AttackerState, valMutationMap MutationMap,
+	stage int, scanGroup *sync.WaitGroup, worthwhileMutationCount *uint32,
+	n int, weight int, budgetUsed *uint32, budget uint32,
+) {
+	indices := make([]int, weight)
+	for i := range indices {
+		indices[i] = i
+	}
+	scanned := 0
+	for {
+		if verifyResultsAllResolved() {
+			return
+		}
+		if atomic.LoadUint32(budgetUsed) >= budget {
+			return
+		}
+		subIndices := make([]int, weight)
+		copy(subIndices, indices)
+		if weight == 1 {
+			// Weight 1: cap mutations per variable for efficiency
+			subMap := mutationMapSubsetCapped(valMutationMap, subIndices, maxWeight1MutationsPerVar)
+			cost := uint32(len(subMap.Mutations[0]))
+			scanGroup.Add(1)
+			verifyActiveScan(
+				valKnowledgeMap, valPrincipalState, valAttackerState,
+				mutationMapNext(subMap), stage, scanGroup, worthwhileMutationCount,
+			)
+			scanGroup.Wait()
+			atomic.AddUint32(budgetUsed, cost)
+			scanned++
+		} else {
+			// Weight 2+: skip subsets whose full product exceeds the cap
+			product := 1
+			overflow := false
+			for _, idx := range indices {
+				m := len(valMutationMap.Mutations[idx])
+				if m > 0 && product > maxMutationsPerSubset/m {
+					overflow = true
+					break
+				}
+				product *= m
+			}
+			if !overflow && product <= maxMutationsPerSubset {
+				subMap := mutationMapSubset(valMutationMap, subIndices)
+				scanGroup.Add(1)
+				verifyActiveScan(
+					valKnowledgeMap, valPrincipalState, valAttackerState,
+					mutationMapNext(subMap), stage, scanGroup, worthwhileMutationCount,
+				)
+				scanGroup.Wait()
+				atomic.AddUint32(budgetUsed, uint32(product))
+				scanned++
+			}
+		}
+		if scanned >= maxSubsetsPerWeight {
+			return
+		}
+		// Advance to next combination
+		i := weight - 1
+		for i >= 0 {
+			indices[i]++
+			if indices[i] <= n-weight+i {
+				break
+			}
+			i--
+		}
+		if i < 0 {
+			break
+		}
+		for j := i + 1; j < weight; j++ {
+			indices[j] = indices[j-1] + 1
+		}
+	}
 }
 
 func verifyActiveScan(

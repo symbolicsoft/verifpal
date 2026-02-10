@@ -48,6 +48,16 @@ func mutationMapInit(
 	}
 	valMutationMap.Combination = make([]*Value, len(valMutationMap.Constants))
 	valMutationMap.DepthIndex = make([]int, len(valMutationMap.Constants)) // Go initializes to zero
+	if len(valMutationMap.Constants) > 0 {
+		mutSizes := make([]int, len(valMutationMap.Constants))
+		for i := range valMutationMap.Constants {
+			mutSizes[i] = len(valMutationMap.Mutations[i])
+		}
+		InfoMessage(fmt.Sprintf(
+			"Mutation map for %s at stage %d: %d constants, mutations: %v",
+			valPrincipalState.Name, stage, len(valMutationMap.Constants), mutSizes,
+		), "analysis", false)
+	}
 	return valMutationMap, err
 }
 
@@ -198,6 +208,87 @@ func mutationMapReplaceEquation(
 		}
 	}
 	return mutations
+}
+
+func mutationMapSubset(fullMap MutationMap, indices []int) MutationMap {
+	subMap := MutationMap{
+		Initialized:    true,
+		OutOfMutations: false,
+		Constants:      make([]*Constant, len(indices)),
+		Mutations:      make([][]*Value, len(indices)),
+		Combination:    make([]*Value, len(indices)),
+		DepthIndex:     make([]int, len(indices)),
+	}
+	for i, idx := range indices {
+		subMap.Constants[i] = fullMap.Constants[idx]
+		subMap.Mutations[i] = fullMap.Mutations[idx]
+	}
+	return subMap
+}
+
+func mutationMapSubsetCapped(fullMap MutationMap, indices []int, maxProduct int) MutationMap {
+	subMap := mutationMapSubset(fullMap, indices)
+	// Truncate mutation lists so their product stays under maxProduct.
+	// Distribute the budget evenly across dimensions.
+	n := len(indices)
+	if n == 0 {
+		return subMap
+	}
+	product := 1
+	overflow := false
+	for i := 0; i < n; i++ {
+		m := len(subMap.Mutations[i])
+		if m > 0 && product > maxProduct/m {
+			overflow = true
+			break
+		}
+		product *= m
+	}
+	if !overflow && product <= maxProduct {
+		return subMap
+	}
+	// Compute per-dimension cap: nth root of maxProduct
+	perDim := maxProduct
+	for i := 1; i < n; i++ {
+		// Approximate nth root by repeated sqrt-like division
+		perDim = intNthRoot(maxProduct, n)
+	}
+	if perDim < 1 {
+		perDim = 1
+	}
+	for i := 0; i < n; i++ {
+		if len(subMap.Mutations[i]) > perDim {
+			subMap.Mutations[i] = subMap.Mutations[i][:perDim]
+		}
+	}
+	return subMap
+}
+
+func intNthRoot(val int, n int) int {
+	if n <= 1 || val <= 1 {
+		return val
+	}
+	// Binary search for integer nth root
+	lo, hi := 1, val
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		// Check if mid^n > val
+		power := 1
+		overflow := false
+		for i := 0; i < n; i++ {
+			if power > val/mid {
+				overflow = true
+				break
+			}
+			power *= mid
+		}
+		if overflow || power > val {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return lo - 1
 }
 
 func mutationMapNext(valMutationMap MutationMap) MutationMap {

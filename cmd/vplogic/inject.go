@@ -8,6 +8,8 @@ import (
 	"fmt"
 )
 
+const maxInjectionsPerPrimitive = 500
+
 func inject(
 	p *Primitive, injectDepth int,
 	valPrincipalState *PrincipalState, valAttackerState AttackerState, stage int,
@@ -263,7 +265,14 @@ func injectLoopN(p *Primitive, kinjectants [][]*Value) []*Value {
 	}
 	totalSize := 1
 	for _, k := range kinjectants {
+		if totalSize > maxInjectionsPerPrimitive/len(k) {
+			totalSize = maxInjectionsPerPrimitive
+			break
+		}
 		totalSize *= len(k)
+	}
+	if totalSize > maxInjectionsPerPrimitive {
+		totalSize = maxInjectionsPerPrimitive
 	}
 	injectants := make([]*Value, 0, totalSize)
 	indices := make([]int, n)
@@ -284,6 +293,9 @@ func injectLoopN(p *Primitive, kinjectants [][]*Value) []*Value {
 				Check:     p.Check,
 			},
 		})
+		if len(injectants) >= maxInjectionsPerPrimitive {
+			break
+		}
 		carry := true
 		for j := n - 1; j >= 0 && carry; j-- {
 			indices[j]++
