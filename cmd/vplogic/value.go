@@ -249,7 +249,7 @@ func valueHash(v *Value) uint64 {
 }
 
 func valuePrimitiveHash(p *Primitive) uint64 {
-	h := uint64(p.ID)*2654435761 ^ uint64(p.Output)*97
+	h := uint64(p.ID)*2654435761 ^ uint64(p.Output)*97 //nolint:gosec
 	for _, a := range p.Arguments {
 		h = h*31 + valueHash(a)
 	}

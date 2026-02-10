@@ -69,11 +69,12 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 			) {
 				continue
 			}
-			if valueEquivalentValueInValuesMap(valPrincipalState.Assigned[i], attackerStateShared.Known, attackerStateShared.KnownMap) < 0 {
+			assigned := valPrincipalState.Assigned[i]
+			if valueEquivalentValueInValuesMap(assigned, attackerStateShared.Known, attackerStateShared.KnownMap) < 0 {
 				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 				idx := len(attackerStateShared.Known)
-				attackerStateShared.Known = append(attackerStateShared.Known, valPrincipalState.Assigned[i])
-				attackerStateKnownMapAdd(valPrincipalState.Assigned[i], idx)
+				attackerStateShared.Known = append(attackerStateShared.Known, assigned)
+				attackerStateKnownMapAdd(assigned, idx)
 				attackerStateShared.PrincipalState = append(
 					attackerStateShared.PrincipalState, valPrincipalStateClone,
 				)
