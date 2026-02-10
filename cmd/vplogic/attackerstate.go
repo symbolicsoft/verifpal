@@ -6,10 +6,27 @@ package vplogic
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 var attackerStateShared AttackerState
 var attackerStateMutex sync.RWMutex
+var attackerStateSnapshot atomic.Pointer[AttackerState]
+
+func attackerStatePublishSnapshot() {
+	knownCopy := make([]*Value, len(attackerStateShared.Known))
+	copy(knownCopy, attackerStateShared.Known)
+	principalStateCopy := make([]*PrincipalState, len(attackerStateShared.PrincipalState))
+	copy(principalStateCopy, attackerStateShared.PrincipalState)
+	snapshot := &AttackerState{
+		Active:         attackerStateShared.Active,
+		CurrentPhase:   attackerStateShared.CurrentPhase,
+		Exhausted:      attackerStateShared.Exhausted,
+		Known:          knownCopy,
+		PrincipalState: principalStateCopy,
+	}
+	attackerStateSnapshot.Store(snapshot)
+}
 
 func attackerStateInit(active bool) {
 	attackerStateMutex.Lock()
@@ -20,6 +37,7 @@ func attackerStateInit(active bool) {
 		Known:          []*Value{},
 		PrincipalState: []*PrincipalState{},
 	}
+	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
 }
 
@@ -60,6 +78,7 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 		}
 		earliestPhase, err := minIntInSlice(valPrincipalState.Phase[i])
 		if err != nil {
+			attackerStateMutex.Unlock()
 			return err
 		}
 		if earliestPhase > attackerStateShared.CurrentPhase {
@@ -80,11 +99,16 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 			)
 		}
 	}
+	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
 	return nil
 }
 
 func attackerStateGetRead() AttackerState {
+	snapshot := attackerStateSnapshot.Load()
+	if snapshot != nil {
+		return *snapshot
+	}
 	attackerStateMutex.RLock()
 	knownCopy := make([]*Value, len(attackerStateShared.Known))
 	copy(knownCopy, attackerStateShared.Known)
@@ -102,6 +126,10 @@ func attackerStateGetRead() AttackerState {
 }
 
 func attackerStateGetExhausted() bool {
+	snapshot := attackerStateSnapshot.Load()
+	if snapshot != nil {
+		return snapshot.Exhausted
+	}
 	attackerStateMutex.RLock()
 	exhausted := attackerStateShared.Exhausted
 	attackerStateMutex.RUnlock()
@@ -109,6 +137,10 @@ func attackerStateGetExhausted() bool {
 }
 
 func attackerStateGetKnownCount() int {
+	snapshot := attackerStateSnapshot.Load()
+	if snapshot != nil {
+		return len(snapshot.Known)
+	}
 	attackerStateMutex.RLock()
 	count := len(attackerStateShared.Known)
 	attackerStateMutex.RUnlock()
@@ -116,23 +148,31 @@ func attackerStateGetKnownCount() int {
 }
 
 func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool {
-	written := false
-	attackerStateMutex.Lock()
-	if valueEquivalentValueInValues(known, attackerStateShared.Known) < 0 {
-		valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
-		attackerStateShared.Known = append(attackerStateShared.Known, known)
-		attackerStateShared.PrincipalState = append(
-			attackerStateShared.PrincipalState, valPrincipalStateClone,
-		)
-		written = true
+	attackerStateMutex.RLock()
+	found := valueEquivalentValueInValues(known, attackerStateShared.Known) >= 0
+	attackerStateMutex.RUnlock()
+	if found {
+		return false
 	}
+	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+	attackerStateMutex.Lock()
+	if valueEquivalentValueInValues(known, attackerStateShared.Known) >= 0 {
+		attackerStateMutex.Unlock()
+		return false
+	}
+	attackerStateShared.Known = append(attackerStateShared.Known, known)
+	attackerStateShared.PrincipalState = append(
+		attackerStateShared.PrincipalState, valPrincipalStateClone,
+	)
+	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
-	return written
+	return true
 }
 
 func attackerStatePutPhaseUpdate(valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState, phase int) error {
 	attackerStateMutex.Lock()
 	attackerStateShared.CurrentPhase = phase
+	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
 	err := attackerStateAbsorbPhaseValues(valKnowledgeMap, valPrincipalState)
 	return err
@@ -141,6 +181,7 @@ func attackerStatePutPhaseUpdate(valKnowledgeMap *KnowledgeMap, valPrincipalStat
 func attackerStatePutExhausted() bool {
 	attackerStateMutex.Lock()
 	attackerStateShared.Exhausted = true
+	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
 	return true
 }

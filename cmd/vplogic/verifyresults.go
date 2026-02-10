@@ -6,11 +6,13 @@ package vplogic
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 var verifyResultsShared []VerifyResult
 var verifyResultsFileNameShared string
 var verifyResultsMutex sync.RWMutex
+var verifyResultsUnresolved int32
 
 func verifyResultsInit(m Model) bool {
 	verifyResultsMutex.Lock()
@@ -24,6 +26,7 @@ func verifyResultsInit(m Model) bool {
 		}
 	}
 	verifyResultsFileNameShared = m.FileName
+	atomic.StoreInt32(&verifyResultsUnresolved, int32(len(m.Queries))) //nolint:gosec
 	verifyResultsMutex.Unlock()
 	return true
 }
@@ -47,6 +50,9 @@ func verifyResultsPutWrite(result VerifyResult) bool {
 			verifyResultsShared[i].Resolved = result.Resolved
 			verifyResultsShared[i].Summary = result.Summary
 			written = true
+			if result.Resolved {
+				atomic.AddInt32(&verifyResultsUnresolved, -1)
+			}
 		}
 	}
 	verifyResultsMutex.Unlock()
@@ -54,14 +60,5 @@ func verifyResultsPutWrite(result VerifyResult) bool {
 }
 
 func verifyResultsAllResolved() bool {
-	verifyResultsMutex.RLock()
-	allResolved := true
-	for _, verifyResult := range verifyResultsShared {
-		if !verifyResult.Resolved {
-			allResolved = false
-			break
-		}
-	}
-	verifyResultsMutex.RUnlock()
-	return allResolved
+	return atomic.LoadInt32(&verifyResultsUnresolved) <= 0
 }

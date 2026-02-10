@@ -58,10 +58,18 @@ func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*Principal
 		stageGroup.Wait()
 		stage := 6
 		for !verifyResultsAllResolved() && !attackerStateGetExhausted() {
-			stageGroup.Add(1)
-			go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
-			stageGroup.Wait()
-			stage = stage + 1
+			if stage+1 <= maxStageLimit {
+				stageGroup.Add(2)
+				go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+				go verifyActiveStages(stage+1, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+				stageGroup.Wait()
+				stage = stage + 2
+			} else {
+				stageGroup.Add(1)
+				go verifyActiveStages(stage, valKnowledgeMap, valPrincipalStates, attackerStateGetRead(), &stageGroup)
+				stageGroup.Wait()
+				stage = stage + 1
+			}
 		}
 		phase = phase + 1
 	}
@@ -114,14 +122,13 @@ func verifyActiveScanWeighted(
 	}
 	var budgetUsed uint32
 	budget := uint32(maxScanBudget)
-	// Scan subsets at increasing weight up to the cap
 	maxWeight := maxSubsetMutationWeight
 	if maxWeight > n {
 		maxWeight = n
 	}
 	for weight := 1; weight <= maxWeight; weight++ {
 		if verifyResultsAllResolved() {
-			return
+			break
 		}
 		if atomic.LoadUint32(&budgetUsed) >= budget {
 			break
@@ -132,31 +139,26 @@ func verifyActiveScanWeighted(
 			n, weight, &budgetUsed, budget,
 		)
 	}
-	if verifyResultsAllResolved() {
-		return
-	}
-	if atomic.LoadUint32(&budgetUsed) >= budget {
-		return
-	}
-	// Full product: only scan if total product is small enough
-	totalProduct := 1
-	overflow := false
-	for i := 0; i < n; i++ {
-		m := len(valMutationMap.Mutations[i])
-		if m > 0 && totalProduct > maxFullMutationProduct/m {
-			overflow = true
-			break
+	if !verifyResultsAllResolved() && atomic.LoadUint32(&budgetUsed) < budget {
+		totalProduct := 1
+		overflow := false
+		for i := 0; i < n; i++ {
+			m := len(valMutationMap.Mutations[i])
+			if m > 0 && totalProduct > maxFullMutationProduct/m {
+				overflow = true
+				break
+			}
+			totalProduct *= m
 		}
-		totalProduct *= m
+		if !overflow && totalProduct <= maxFullMutationProduct {
+			scanGroup.Add(1)
+			verifyActiveScan(
+				valKnowledgeMap, valPrincipalState, valAttackerState,
+				mutationMapNext(valMutationMap), stage, scanGroup, worthwhileMutationCount,
+			)
+		}
 	}
-	if !overflow && totalProduct <= maxFullMutationProduct {
-		scanGroup.Add(1)
-		verifyActiveScan(
-			valKnowledgeMap, valPrincipalState, valAttackerState,
-			mutationMapNext(valMutationMap), stage, scanGroup, worthwhileMutationCount,
-		)
-		scanGroup.Wait()
-	}
+	scanGroup.Wait()
 }
 
 func verifyActiveScanAtWeight(
@@ -180,19 +182,16 @@ func verifyActiveScanAtWeight(
 		subIndices := make([]int, weight)
 		copy(subIndices, indices)
 		if weight == 1 {
-			// Weight 1: cap mutations per variable for efficiency
 			subMap := mutationMapSubsetCapped(valMutationMap, subIndices, maxWeight1MutationsPerVar)
 			cost := uint32(len(subMap.Mutations[0])) //nolint:gosec
+			atomic.AddUint32(budgetUsed, cost)
 			scanGroup.Add(1)
 			verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
 				mutationMapNext(subMap), stage, scanGroup, worthwhileMutationCount,
 			)
-			scanGroup.Wait()
-			atomic.AddUint32(budgetUsed, cost)
 			scanned++
 		} else {
-			// Weight 2+: skip subsets whose full product exceeds the cap
 			product := 1
 			overflow := false
 			for _, idx := range indices {
@@ -205,20 +204,18 @@ func verifyActiveScanAtWeight(
 			}
 			if !overflow && product <= maxMutationsPerSubset {
 				subMap := mutationMapSubset(valMutationMap, subIndices)
+				atomic.AddUint32(budgetUsed, uint32(product)) //nolint:gosec
 				scanGroup.Add(1)
 				verifyActiveScan(
 					valKnowledgeMap, valPrincipalState, valAttackerState,
 					mutationMapNext(subMap), stage, scanGroup, worthwhileMutationCount,
 				)
-				scanGroup.Wait()
-				atomic.AddUint32(budgetUsed, uint32(product)) //nolint:gosec
 				scanned++
 			}
 		}
 		if scanned >= maxSubsetsPerWeight {
 			return
 		}
-		// Advance to next combination
 		i := weight - 1
 		for i >= 0 {
 			indices[i]++
