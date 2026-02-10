@@ -18,11 +18,16 @@ func attackerStatePublishSnapshot() {
 	copy(knownCopy, attackerStateShared.Known)
 	principalStateCopy := make([]*PrincipalState, len(attackerStateShared.PrincipalState))
 	copy(principalStateCopy, attackerStateShared.PrincipalState)
+	knownMapCopy := make(map[uint64][]int, len(attackerStateShared.KnownMap))
+	for k, v := range attackerStateShared.KnownMap {
+		knownMapCopy[k] = v
+	}
 	snapshot := &AttackerState{
 		Active:         attackerStateShared.Active,
 		CurrentPhase:   attackerStateShared.CurrentPhase,
 		Exhausted:      attackerStateShared.Exhausted,
 		Known:          knownCopy,
+		KnownMap:       knownMapCopy,
 		PrincipalState: principalStateCopy,
 	}
 	attackerStateSnapshot.Store(snapshot)
@@ -35,10 +40,16 @@ func attackerStateInit(active bool) {
 		CurrentPhase:   0,
 		Exhausted:      false,
 		Known:          []*Value{},
+		KnownMap:       make(map[uint64][]int),
 		PrincipalState: []*PrincipalState{},
 	}
 	attackerStatePublishSnapshot()
 	attackerStateMutex.Unlock()
+}
+
+func attackerStateKnownMapAdd(v *Value, idx int) {
+	h := valueHash(v)
+	attackerStateShared.KnownMap[h] = append(attackerStateShared.KnownMap[h], idx)
 }
 
 func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalState *PrincipalState) error {
@@ -58,9 +69,11 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 			) {
 				continue
 			}
-			if valueEquivalentValueInValues(valPrincipalState.Assigned[i], attackerStateShared.Known) < 0 {
+			if valueEquivalentValueInValuesMap(valPrincipalState.Assigned[i], attackerStateShared.Known, attackerStateShared.KnownMap) < 0 {
 				valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+				idx := len(attackerStateShared.Known)
 				attackerStateShared.Known = append(attackerStateShared.Known, valPrincipalState.Assigned[i])
+				attackerStateKnownMapAdd(valPrincipalState.Assigned[i], idx)
 				attackerStateShared.PrincipalState = append(
 					attackerStateShared.PrincipalState, valPrincipalStateClone,
 				)
@@ -84,16 +97,20 @@ func attackerStateAbsorbPhaseValues(valKnowledgeMap *KnowledgeMap, valPrincipalS
 		if earliestPhase > attackerStateShared.CurrentPhase {
 			continue
 		}
-		if valueEquivalentValueInValues(cc, attackerStateShared.Known) < 0 {
+		if valueEquivalentValueInValuesMap(cc, attackerStateShared.Known, attackerStateShared.KnownMap) < 0 {
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+			idx := len(attackerStateShared.Known)
 			attackerStateShared.Known = append(attackerStateShared.Known, cc)
+			attackerStateKnownMapAdd(cc, idx)
 			attackerStateShared.PrincipalState = append(
 				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
 		}
-		if valueEquivalentValueInValues(a, attackerStateShared.Known) < 0 {
+		if valueEquivalentValueInValuesMap(a, attackerStateShared.Known, attackerStateShared.KnownMap) < 0 {
 			valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
+			idx := len(attackerStateShared.Known)
 			attackerStateShared.Known = append(attackerStateShared.Known, a)
+			attackerStateKnownMapAdd(a, idx)
 			attackerStateShared.PrincipalState = append(
 				attackerStateShared.PrincipalState, valPrincipalStateClone,
 			)
@@ -114,11 +131,16 @@ func attackerStateGetRead() AttackerState {
 	copy(knownCopy, attackerStateShared.Known)
 	principalStateCopy := make([]*PrincipalState, len(attackerStateShared.PrincipalState))
 	copy(principalStateCopy, attackerStateShared.PrincipalState)
+	knownMapCopy := make(map[uint64][]int, len(attackerStateShared.KnownMap))
+	for k, v := range attackerStateShared.KnownMap {
+		knownMapCopy[k] = v
+	}
 	valAttackerState := AttackerState{
 		Active:         attackerStateShared.Active,
 		CurrentPhase:   attackerStateShared.CurrentPhase,
 		Exhausted:      attackerStateShared.Exhausted,
 		Known:          knownCopy,
+		KnownMap:       knownMapCopy,
 		PrincipalState: principalStateCopy,
 	}
 	attackerStateMutex.RUnlock()
@@ -149,18 +171,20 @@ func attackerStateGetKnownCount() int {
 
 func attackerStatePutWrite(known *Value, valPrincipalState *PrincipalState) bool {
 	attackerStateMutex.RLock()
-	found := valueEquivalentValueInValues(known, attackerStateShared.Known) >= 0
+	found := valueEquivalentValueInValuesMap(known, attackerStateShared.Known, attackerStateShared.KnownMap) >= 0
 	attackerStateMutex.RUnlock()
 	if found {
 		return false
 	}
 	valPrincipalStateClone := constructPrincipalStateClone(valPrincipalState, false)
 	attackerStateMutex.Lock()
-	if valueEquivalentValueInValues(known, attackerStateShared.Known) >= 0 {
+	if valueEquivalentValueInValuesMap(known, attackerStateShared.Known, attackerStateShared.KnownMap) >= 0 {
 		attackerStateMutex.Unlock()
 		return false
 	}
+	idx := len(attackerStateShared.Known)
 	attackerStateShared.Known = append(attackerStateShared.Known, known)
+	attackerStateKnownMapAdd(known, idx)
 	attackerStateShared.PrincipalState = append(
 		attackerStateShared.PrincipalState, valPrincipalStateClone,
 	)

@@ -314,6 +314,7 @@ type AttackerState struct {
 	CurrentPhase   int
 	Exhausted      bool
 	Known          []*Value
+	KnownMap       map[uint64][]int
 	PrincipalState []*PrincipalState
 }
 

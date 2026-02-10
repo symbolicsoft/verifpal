@@ -243,7 +243,7 @@ func infoQueryMutatedValues(
 		isTargetValue := valueEquivalentValues(
 			targetValue, valPrincipalState.Assigned[i], false,
 		)
-		attackerKnows := valueEquivalentValueInValues(targetValue, valAttackerState.Known) >= 0
+		attackerKnows := valueEquivalentValueInValuesMap(targetValue, valAttackerState.Known, valAttackerState.KnownMap) >= 0
 		if isTargetValue && attackerKnows {
 			if colorOutputSupport() {
 				targetInfo = fmt.Sprintf(
@@ -276,7 +276,7 @@ func infoQueryMutatedValues(
 		return mutatedInfo
 	}
 	for _, m := range mutated {
-		ai := valueEquivalentValueInValues(m, valAttackerState.Known)
+		ai := valueEquivalentValueInValuesMap(m, valAttackerState.Known, valAttackerState.KnownMap)
 		if ai < 0 {
 			continue
 		}

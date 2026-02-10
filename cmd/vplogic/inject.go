@@ -118,12 +118,40 @@ func injectPrimitiveSkeleton(p *Primitive, depth int) (*Primitive, int) {
 	return skeleton, depth + 1
 }
 
+func primitiveSkeletonDepth(p *Primitive, depth int) int {
+	maxChild := depth
+	for _, a := range p.Arguments {
+		if a.Kind == typesEnumPrimitive {
+			cd := primitiveSkeletonDepth(a.Data.(*Primitive), depth+1)
+			if cd > maxChild {
+				maxChild = cd
+			}
+		}
+	}
+	return maxChild + 1
+}
+
+func primitiveSkeletonHash(p *Primitive) uint64 {
+	h := uint64(p.ID) * 2654435761
+	for _, a := range p.Arguments {
+		switch a.Kind {
+		case typesEnumConstant:
+			h = h*31 + 1
+		case typesEnumPrimitive:
+			h = h*31 + primitiveSkeletonHash(a.Data.(*Primitive))
+		case typesEnumEquation:
+			h = h*31 + uint64(len(a.Data.(*Equation).Values))*97
+		}
+	}
+	return h
+}
+
 func injectSkeletonNotDeeper(p *Primitive, reference *Primitive) bool {
 	if p.ID != reference.ID {
 		return false
 	}
-	_, pd := injectPrimitiveSkeleton(p, 0)
-	_, sd := injectPrimitiveSkeleton(reference, 0)
+	pd := primitiveSkeletonDepth(p, 0)
+	sd := primitiveSkeletonDepth(reference, 0)
 	return pd <= sd
 }
 
@@ -131,11 +159,16 @@ func injectSkeletonEquivalent(p *Primitive, reference *Primitive) bool {
 	if p.ID != reference.ID {
 		return false
 	}
-	p1, pd := injectPrimitiveSkeleton(p, 0)
-	p2, sd := injectPrimitiveSkeleton(reference, 0)
+	pd := primitiveSkeletonDepth(p, 0)
+	sd := primitiveSkeletonDepth(reference, 0)
 	if sd > pd {
 		return false
 	}
+	if primitiveSkeletonHash(p) != primitiveSkeletonHash(reference) {
+		return false
+	}
+	p1, _ := injectPrimitiveSkeleton(p, 0)
+	p2, _ := injectPrimitiveSkeleton(reference, 0)
 	e, _, _ := valueEquivalentPrimitives(p1, p2, false)
 	return e
 }

@@ -502,35 +502,29 @@ func constructPrincipalStateClone(valPrincipalState *PrincipalState, purify bool
 	valPrincipalStateClone := PrincipalState{
 		Name:          valPrincipalState.Name,
 		ID:            valPrincipalState.ID,
-		Constants:     make([]*Constant, len(valPrincipalState.Constants)),
+		Constants:     valPrincipalState.Constants,
 		Assigned:      make([]*Value, len(valPrincipalState.Assigned)),
-		Guard:         make([]bool, len(valPrincipalState.Guard)),
-		Known:         make([]bool, len(valPrincipalState.Known)),
-		Wire:          make([][]principalEnum, len(valPrincipalState.Wire)),
-		KnownBy:       make([][]map[principalEnum]principalEnum, len(valPrincipalState.KnownBy)),
-		DeclaredAt:    make([]int, len(valPrincipalState.DeclaredAt)),
+		Guard:         valPrincipalState.Guard,
+		Known:         valPrincipalState.Known,
+		Wire:          valPrincipalState.Wire,
+		KnownBy:       valPrincipalState.KnownBy,
+		DeclaredAt:    valPrincipalState.DeclaredAt,
 		MaxDeclaredAt: valPrincipalState.MaxDeclaredAt,
 		Creator:       make([]principalEnum, len(valPrincipalState.Creator)),
 		Sender:        make([]principalEnum, len(valPrincipalState.Sender)),
 		Rewritten:     make([]bool, len(valPrincipalState.Rewritten)),
 		BeforeRewrite: make([]*Value, len(valPrincipalState.BeforeRewrite)),
 		Mutated:       make([]bool, len(valPrincipalState.Mutated)),
-		MutatableTo:   make([][]principalEnum, len(valPrincipalState.MutatableTo)),
+		MutatableTo:   valPrincipalState.MutatableTo,
 		BeforeMutate:  make([]*Value, len(valPrincipalState.BeforeMutate)),
-		Phase:         make([][]int, len(valPrincipalState.Phase)),
+		Phase:         valPrincipalState.Phase,
 		ConstantIndex: valPrincipalState.ConstantIndex,
 	}
-	copy(valPrincipalStateClone.Constants, valPrincipalState.Constants)
 	if purify {
 		copy(valPrincipalStateClone.Assigned, valPrincipalState.BeforeMutate)
 	} else {
 		copy(valPrincipalStateClone.Assigned, valPrincipalState.Assigned)
 	}
-	copy(valPrincipalStateClone.Guard, valPrincipalState.Guard)
-	copy(valPrincipalStateClone.Known, valPrincipalState.Known)
-	copy(valPrincipalStateClone.Wire, valPrincipalState.Wire)
-	copy(valPrincipalStateClone.KnownBy, valPrincipalState.KnownBy)
-	copy(valPrincipalStateClone.DeclaredAt, valPrincipalState.DeclaredAt)
 	copy(valPrincipalStateClone.Creator, valPrincipalState.Creator)
 	copy(valPrincipalStateClone.Sender, valPrincipalState.Sender)
 	copy(valPrincipalStateClone.Rewritten, valPrincipalState.Rewritten)
@@ -540,8 +534,6 @@ func constructPrincipalStateClone(valPrincipalState *PrincipalState, purify bool
 		copy(valPrincipalStateClone.BeforeRewrite, valPrincipalState.BeforeRewrite)
 	}
 	copy(valPrincipalStateClone.Mutated, valPrincipalState.Mutated)
-	copy(valPrincipalStateClone.MutatableTo, valPrincipalState.MutatableTo)
 	copy(valPrincipalStateClone.BeforeMutate, valPrincipalState.BeforeMutate)
-	copy(valPrincipalStateClone.Phase, valPrincipalState.Phase)
 	return &valPrincipalStateClone
 }

@@ -171,8 +171,14 @@ func valueEquivalentEquations(e1 *Equation, e2 *Equation) bool {
 	if len(e1.Values) == 0 || len(e2.Values) == 0 {
 		return false
 	}
-	e1f := valueFlattenEquation(e1)
-	e2f := valueFlattenEquation(e2)
+	var e1f, e2f *Equation
+	if valueEquationIsFlat(e1) && valueEquationIsFlat(e2) {
+		e1f = e1
+		e2f = e2
+	} else {
+		e1f = valueFlattenEquation(e1)
+		e2f = valueFlattenEquation(e2)
+	}
 	if len(e1f.Values) != len(e2f.Values) {
 		return false
 	}
@@ -197,6 +203,15 @@ func valueEquivalentEquationsRule(base1 *Value, base2 *Value, exp1 *Value, exp2 
 		valueEquivalentValues(exp1, base2, true))
 }
 
+func valueEquationIsFlat(e *Equation) bool {
+	for _, v := range e.Values {
+		if v.Kind == typesEnumEquation {
+			return false
+		}
+	}
+	return true
+}
+
 func valueFlattenEquation(e *Equation) *Equation {
 	ef := &Equation{
 		Values: make([]*Value, 0, len(e.Values)),
@@ -219,6 +234,73 @@ func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnow
 	}
 	_, vv := valueResolveValueInternalValuesFromKnowledgeMap(a, valKnowledgeMap)
 	return valueEquivalentValueInValues(v, vv) >= 0
+}
+
+func valueHash(v *Value) uint64 {
+	switch v.Kind {
+	case typesEnumConstant:
+		return uint64(v.Data.(*Constant).ID)
+	case typesEnumPrimitive:
+		return valuePrimitiveHash(v.Data.(*Primitive))
+	case typesEnumEquation:
+		return valueEquationHash(v.Data.(*Equation))
+	}
+	return 0
+}
+
+func valuePrimitiveHash(p *Primitive) uint64 {
+	h := uint64(p.ID)*2654435761 ^ uint64(p.Output)*97
+	for _, a := range p.Arguments {
+		h = h*31 + valueHash(a)
+	}
+	return h
+}
+
+func valueEquationHash(e *Equation) uint64 {
+	if valueEquationIsFlat(e) {
+		return valueEquationHashInner(e)
+	}
+	ef := valueFlattenEquation(e)
+	return valueEquationHashInner(ef)
+}
+
+func valueEquationHashInner(e *Equation) uint64 {
+	switch len(e.Values) {
+	case 0:
+		return 0
+	case 1:
+		return valueHash(e.Values[0])
+	case 2:
+		return valueHash(e.Values[0])*31 + valueHash(e.Values[1])
+	case 3:
+		h1 := valueHash(e.Values[1])
+		h2 := valueHash(e.Values[2])
+		// Commutative hash for 3-element DH equations
+		if h1 > h2 {
+			h1, h2 = h2, h1
+		}
+		return valueHash(e.Values[0])*31 + h1*17 + h2
+	default:
+		h := uint64(0)
+		for _, v := range e.Values {
+			h = h*31 + valueHash(v)
+		}
+		return h
+	}
+}
+
+func valueEquivalentValueInValuesMap(v *Value, a []*Value, m map[uint64][]int) int {
+	h := valueHash(v)
+	indices, ok := m[h]
+	if !ok {
+		return -1
+	}
+	for _, i := range indices {
+		if valueEquivalentValues(v, a[i], true) {
+			return i
+		}
+	}
+	return -1
 }
 
 func valueEquivalentValueInValues(v *Value, a []*Value) int {

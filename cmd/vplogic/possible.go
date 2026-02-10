@@ -36,7 +36,7 @@ func possibleToDecomposePrimitive(
 		if !valid {
 			continue
 		}
-		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
+		if valueEquivalentValueInValuesMap(a, valAttackerState.Known, valAttackerState.KnownMap) >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -105,7 +105,7 @@ func possibleToReconstructPrimitive(
 		return false, []*Value{}
 	}
 	for _, a := range p.Arguments {
-		if valueEquivalentValueInValues(a, valAttackerState.Known) >= 0 {
+		if valueEquivalentValueInValuesMap(a, valAttackerState.Known, valAttackerState.KnownMap) >= 0 {
 			has = append(has, a)
 			continue
 		}
@@ -140,15 +140,15 @@ func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) 
 		return false, []*Value{}
 	}
 	if len(e.Values) == 2 {
-		if valueEquivalentValueInValues(e.Values[1], valAttackerState.Known) >= 0 {
+		if valueEquivalentValueInValuesMap(e.Values[1], valAttackerState.Known, valAttackerState.KnownMap) >= 0 {
 			return true, []*Value{e.Values[1]}
 		}
 		return false, []*Value{}
 	}
 	s0 := e.Values[1]
 	s1 := e.Values[2]
-	hs0 := valueEquivalentValueInValues(s0, valAttackerState.Known) >= 0
-	hs1 := valueEquivalentValueInValues(s1, valAttackerState.Known) >= 0
+	hs0 := valueEquivalentValueInValuesMap(s0, valAttackerState.Known, valAttackerState.KnownMap) >= 0
+	hs1 := valueEquivalentValueInValuesMap(s1, valAttackerState.Known, valAttackerState.KnownMap) >= 0
 	if hs0 && hs1 {
 		return true, []*Value{s0, s1}
 	}
@@ -164,11 +164,11 @@ func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) 
 			Values: []*Value{e.Values[0], e.Values[2]},
 		},
 	}
-	hp1 := valueEquivalentValueInValues(p1, valAttackerState.Known) >= 0
+	hp1 := valueEquivalentValueInValuesMap(p1, valAttackerState.Known, valAttackerState.KnownMap) >= 0
 	if hs0 && hp1 {
 		return true, []*Value{s0, p1}
 	}
-	hp0 := valueEquivalentValueInValues(p0, valAttackerState.Known) >= 0
+	hp0 := valueEquivalentValueInValuesMap(p0, valAttackerState.Known, valAttackerState.KnownMap) >= 0
 	if hp0 && hs1 {
 		return true, []*Value{p0, s1}
 	}

@@ -43,7 +43,7 @@ func queryConfidentiality(
 		return result
 	}
 	resolvedValue := valPrincipalState.Assigned[i]
-	ii := valueEquivalentValueInValues(resolvedValue, valAttackerState.Known)
+	ii := valueEquivalentValueInValuesMap(resolvedValue, valAttackerState.Known, valAttackerState.KnownMap)
 	if ii < 0 {
 		return result
 	}
