@@ -11,16 +11,16 @@ import (
 )
 
 const (
-	stageExhaustionThreshold = 5
-	stageRecursiveInjection  = 5
-	stageMutationExpansion   = 3
-	maxStageLimit            = 8
-	maxSubsetMutationWeight    = 3
-	maxSubsetsPerWeight        = 50
-	maxWeight1MutationsPerVar  = 50
-	maxMutationsPerSubset      = 20000
-	maxFullMutationProduct     = 50000
-	maxScanBudget              = 20000
+	stageExhaustionThreshold  = 5
+	stageRecursiveInjection   = 5
+	stageMutationExpansion    = 3
+	maxStageLimit             = 8
+	maxSubsetMutationWeight   = 3
+	maxSubsetsPerWeight       = 50
+	maxWeight1MutationsPerVar = 50
+	maxMutationsPerSubset     = 20000
+	maxFullMutationProduct    = 50000
+	maxScanBudget             = 20000
 )
 
 func verifyActive(valKnowledgeMap *KnowledgeMap, valPrincipalStates []*PrincipalState) error {
@@ -182,7 +182,7 @@ func verifyActiveScanAtWeight(
 		if weight == 1 {
 			// Weight 1: cap mutations per variable for efficiency
 			subMap := mutationMapSubsetCapped(valMutationMap, subIndices, maxWeight1MutationsPerVar)
-			cost := uint32(len(subMap.Mutations[0]))
+			cost := uint32(len(subMap.Mutations[0])) //nolint:gosec
 			scanGroup.Add(1)
 			verifyActiveScan(
 				valKnowledgeMap, valPrincipalState, valAttackerState,
@@ -211,7 +211,7 @@ func verifyActiveScanAtWeight(
 					mutationMapNext(subMap), stage, scanGroup, worthwhileMutationCount,
 				)
 				scanGroup.Wait()
-				atomic.AddUint32(budgetUsed, uint32(product))
+				atomic.AddUint32(budgetUsed, uint32(product)) //nolint:gosec
 				scanned++
 			}
 		}
