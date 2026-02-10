@@ -1,4 +1,4 @@
-Verifpal 0.31.1 brings, in addition to performance improvements, a major
+Verifpal 0.31.2 brings, in addition to performance improvements, a major
 overhaul to how protocol analysis is conducted with some tradeoffs.
 
 Verifpal's active attacker verification could fail to terminate on models
