@@ -110,11 +110,12 @@ func possibleToReconstructPrimitive(
 		return false, []*Value{}
 	}
 	has := []*Value{}
-	r, _ := possibleToRewrite(p, valPrincipalState, 0)
+	r, rv := possibleToRewrite(p, valPrincipalState, 0)
 	if !r {
 		return false, []*Value{}
 	}
-	for _, a := range p.Arguments {
+	rp := rv[0].Data.(*Primitive)
+	for _, a := range rp.Arguments {
 		if valueEquivalentValueInValuesMap(a, valAttackerState.Known, valAttackerState.KnownMap) >= 0 {
 			has = append(has, a)
 			continue
@@ -139,7 +140,7 @@ func possibleToReconstructPrimitive(
 			}
 		}
 	}
-	if len(has) < len(p.Arguments) {
+	if len(has) < len(rp.Arguments) {
 		return false, []*Value{}
 	}
 	return true, has
