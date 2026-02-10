@@ -237,6 +237,9 @@ func valueFindConstantInPrimitiveFromKnowledgeMap(c *Constant, a *Value, valKnow
 }
 
 func valueHash(v *Value) uint64 {
+	if v.Data == nil {
+		return 0
+	}
 	switch v.Kind {
 	case typesEnumConstant:
 		return uint64(v.Data.(*Constant).ID)
@@ -343,7 +346,7 @@ func valuePerformPrimitiveRewrite(
 		}
 	}
 	rewrittenRoot, rewrittenValues := possibleToRewrite(
-		rewrite.Data.(*Primitive), valPrincipalState,
+		rewrite.Data.(*Primitive), valPrincipalState, 0,
 	)
 	if !rewrittenRoot {
 		failedRewrites = append(failedRewrites, rewrittenValues[rIndex].Data.(*Primitive))

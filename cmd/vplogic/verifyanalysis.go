@@ -95,7 +95,7 @@ func verifyAnalysisDecompose(
 	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
-		r, revealed, ar = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+		r, revealed, ar = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, 0)
 	}
 	if r && attackerStatePutWrite(revealed, valPrincipalState) {
 		InfoMessage(fmt.Sprintf(
@@ -155,7 +155,7 @@ func verifyAnalysisReconstruct(
 	ar := []*Value{}
 	switch a.Kind {
 	case typesEnumPrimitive:
-		r, ar = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+		r, ar = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, 0)
 		for _, aa := range a.Data.(*Primitive).Arguments {
 			o = o + verifyAnalysisReconstruct(aa, valPrincipalState, valAttackerState, o)
 		}

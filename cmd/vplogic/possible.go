@@ -4,6 +4,8 @@
 
 package vplogic
 
+const maxPossibleDepth = 16
+
 func possibleToPassivelyDecomposePrimitive(p *Primitive) []*Value {
 	revealed := []*Value{}
 	if primitiveIsCorePrimitive(p.ID) {
@@ -21,7 +23,11 @@ func possibleToPassivelyDecomposePrimitive(p *Primitive) []*Value {
 
 func possibleToDecomposePrimitive(
 	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	depth int,
 ) (bool, *Value, []*Value) {
+	if depth > maxPossibleDepth {
+		return false, &Value{}, nil
+	}
 	if primitiveIsCorePrimitive(p.ID) {
 		return false, &Value{}, nil
 	}
@@ -42,11 +48,11 @@ func possibleToDecomposePrimitive(
 		}
 		switch a.Kind {
 		case typesEnumPrimitive:
-			if r, _ := possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState); r {
+			if r, _ := possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, depth+1); r {
 				has = append(has, a)
 				continue
 			}
-			if r, _, _ := possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState); r {
+			if r, _, _ := possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, depth+1); r {
 				has = append(has, a)
 			}
 		case typesEnumEquation:
@@ -98,9 +104,13 @@ func possibleToRecomposePrimitive(
 
 func possibleToReconstructPrimitive(
 	p *Primitive, valPrincipalState *PrincipalState, valAttackerState AttackerState,
+	depth int,
 ) (bool, []*Value) {
+	if depth > maxPossibleDepth {
+		return false, []*Value{}
+	}
 	has := []*Value{}
-	r, _ := possibleToRewrite(p, valPrincipalState)
+	r, _ := possibleToRewrite(p, valPrincipalState, 0)
 	if !r {
 		return false, []*Value{}
 	}
@@ -111,12 +121,12 @@ func possibleToReconstructPrimitive(
 		}
 		switch a.Kind {
 		case typesEnumPrimitive:
-			r, _, _ = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+			r, _, _ = possibleToDecomposePrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, depth+1)
 			if r {
 				has = append(has, a)
 				continue
 			}
-			r, _ = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState)
+			r, _ = possibleToReconstructPrimitive(a.Data.(*Primitive), valPrincipalState, valAttackerState, depth+1)
 			if r {
 				has = append(has, a)
 				continue
@@ -176,34 +186,43 @@ func possibleToReconstructEquation(e *Equation, valAttackerState AttackerState) 
 }
 
 func possibleToRewrite(
-	p *Primitive, valPrincipalState *PrincipalState,
+	p *Primitive, valPrincipalState *PrincipalState, depth int,
 ) (bool, []*Value) {
 	v := []*Value{{Kind: typesEnumPrimitive, Data: p}}
-	for i, a := range p.Arguments {
+	if depth > maxPossibleDepth {
+		return false, v
+	}
+	// Create a shallow copy so we don't mutate the shared original.
+	pc := *p
+	args := make([]*Value, len(pc.Arguments))
+	copy(args, pc.Arguments)
+	pc.Arguments = args
+	for i, a := range pc.Arguments {
 		switch a.Kind {
 		case typesEnumPrimitive:
-			_, pp := possibleToRewrite(a.Data.(*Primitive), valPrincipalState)
-			p.Arguments[i] = pp[0]
+			_, pp := possibleToRewrite(a.Data.(*Primitive), valPrincipalState, depth+1)
+			pc.Arguments[i] = pp[0]
 		}
 	}
-	if primitiveIsCorePrimitive(p.ID) {
-		prim, _ := primitiveCoreGet(p.ID)
+	v = []*Value{{Kind: typesEnumPrimitive, Data: &pc}}
+	if primitiveIsCorePrimitive(pc.ID) {
+		prim, _ := primitiveCoreGet(pc.ID)
 		if prim.HasRule {
-			return prim.CoreRule(p)
+			return prim.CoreRule(&pc)
 		}
 		return !prim.Check, v
 	}
-	prim, _ := primitiveGet(p.ID)
+	prim, _ := primitiveGet(pc.ID)
 	if !prim.Rewrite.HasRule {
 		return true, v
 	}
-	from := p.Arguments[prim.Rewrite.From]
+	from := pc.Arguments[prim.Rewrite.From]
 	switch from.Kind {
 	case typesEnumPrimitive:
 		if from.Data.(*Primitive).ID != prim.Rewrite.ID {
 			return !prim.Check, v
 		}
-		if !possibleToRewritePrimitive(p, valPrincipalState) {
+		if !possibleToRewritePrimitive(&pc, valPrincipalState, depth) {
 			return !prim.Check, v
 		}
 		rewrite := prim.Rewrite.To(from.Data.(*Primitive))
@@ -213,7 +232,7 @@ func possibleToRewrite(
 }
 
 func possibleToRewritePrimitive(
-	p *Primitive, valPrincipalState *PrincipalState,
+	p *Primitive, valPrincipalState *PrincipalState, depth int,
 ) bool {
 	prim, _ := primitiveGet(p.ID)
 	from := p.Arguments[prim.Rewrite.From]
@@ -228,7 +247,7 @@ func possibleToRewritePrimitive(
 			for i, axElem := range ax {
 				switch axElem.Kind {
 				case typesEnumPrimitive:
-					r, v := possibleToRewrite(axElem.Data.(*Primitive), valPrincipalState)
+					r, v := possibleToRewrite(axElem.Data.(*Primitive), valPrincipalState, depth+1)
 					if r {
 						ax[i] = v[0]
 					}
@@ -236,7 +255,7 @@ func possibleToRewritePrimitive(
 					for ii, a := range axElem.Data.(*Equation).Values {
 						switch a.Kind {
 						case typesEnumPrimitive:
-							r, v := possibleToRewrite(a.Data.(*Primitive), valPrincipalState)
+							r, v := possibleToRewrite(a.Data.(*Primitive), valPrincipalState, depth+1)
 							if r {
 								ax[i].Data.(*Equation).Values[ii] = v[0]
 							}

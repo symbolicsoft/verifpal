@@ -145,7 +145,7 @@ func queryAuthenticationGetPassIndices(
 			indices = append(indices, iiii)
 			continue
 		}
-		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState)
+		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState, 0)
 		if pass {
 			indices = append(indices, iiii)
 		}
@@ -220,7 +220,7 @@ func queryFreshness(
 			indices = append(indices, ii)
 			continue
 		}
-		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState)
+		pass, _ := possibleToRewrite(b.Data.(*Primitive), valPrincipalState, 0)
 		if pass {
 			indices = append(indices, ii)
 		}
@@ -312,7 +312,7 @@ func queryUnlinkability(
 			obtainable := false
 			switch assigneds[i].Kind {
 			case typesEnumPrimitive:
-				ok0, _ := possibleToReconstructPrimitive(assigneds[i].Data.(*Primitive), valPrincipalState, valAttackerState)
+				ok0, _ := possibleToReconstructPrimitive(assigneds[i].Data.(*Primitive), valPrincipalState, valAttackerState, 0)
 				ok1, _, _ := possibleToRecomposePrimitive(assigneds[i].Data.(*Primitive), valAttackerState)
 				obtainable = ok0 || ok1
 			}
