@@ -71,7 +71,6 @@ clean:
 	@$(RM) build/macos/verifpal
 	@$(RM) build/freebsd/verifpal
 	@$(RM) cmd/vplogic/libpeg.go
-	@$(RM) cmd/vplogic/libcoq.go
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
 

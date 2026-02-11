@@ -2,9 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 // 8e05848fe7fc3fb8ed3ba50a825c5493
 
-//go:generate go run ../../internal/libcoq/libcoqgen.go
 //go:generate pigeon -o ../../cmd/vplogic/libpeg.go ../../internal/libpeg/libpeg.peg
-//go:generate gofmt -s -w ../../cmd/vplogic/libcoq.go
 //go:generate gofmt -s -w ../../cmd/vplogic/libpeg.go
 
 package main
@@ -47,64 +45,6 @@ var cmdVerify = &cobra.Command{
 		)
 		vplogic.VerifHubScheduledShared, _ = cmd.Flags().GetBool("verifhub")
 		_, _, err := vplogic.Verify(args[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-	},
-}
-
-var cmdTranslate = &cobra.Command{
-	Use:     "translate [coq|pv] [model.vp]",
-	Example: "  verifpal translate coq examples/simple.vp",
-	Short:   "translate Verifpal model into another language",
-	Long: strings.Join([]string{
-		"`translate` allows translating a Verifpal model into either a ProVerif model ",
-		"or a Coq model implementation based on the option given.",
-	}, "\n"),
-	DisableFlagsInUseLine: true,
-	DisableFlagParsing:    true,
-	Args:                  cobra.ExactArgs(1),
-	ValidArgs:             []string{"coq", "pv"},
-	Hidden:                false,
-}
-
-var cmdTranslateCoq = &cobra.Command{
-	Use:     "coq [model.vp]",
-	Example: "  verifpal translate coq examples/simple.vp",
-	Short:   "translate Verifpal model into Coq model",
-	Long: strings.Join([]string{
-		"`translate coq` loads a Verifpal model from the given file path and translates it into a Coq template based",
-		"on the Verifpal Coq library, which can then be used in order to produce a more refined and detailed",
-		"model of your protocol within the Coq verification framework.",
-	}, "\n"),
-	DisableFlagsInUseLine: true,
-	DisableFlagParsing:    true,
-	Args:                  cobra.ExactArgs(1),
-	Hidden:                false,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := vplogic.Coq(args[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-	},
-}
-
-var cmdTranslatePv = &cobra.Command{
-	Use:     "pv [model.vp]",
-	Example: "  verifpal translate pv examples/simple.vp",
-	Short:   "translate Verifpal model into ProVerif model",
-	Long: strings.Join([]string{
-		"`translate pv` loads a Verifpal model from the given file path",
-		"and translates it into a ProVerif model template based on the Verifpal ProVerif library,",
-		"which can then be used in order to produce a more refined and detailed",
-		"model of your protocol within the ProVerif verification framework.",
-	}, "\n"),
-	DisableFlagsInUseLine: true,
-	DisableFlagParsing:    true,
-	Args:                  cobra.ExactArgs(1),
-	Hidden:                false,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := vplogic.Pv(args[0])
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -188,8 +128,7 @@ var cmdJSON = &cobra.Command{
 
 func main() {
 	cmdVerify.Flags().BoolP("verifhub", "", false, "submit to VerifHub upon analysis completion")
-	cmdTranslate.AddCommand(cmdTranslateCoq, cmdTranslatePv)
-	rootCmd.AddCommand(cmdVerify, cmdTranslate, cmdPretty, cmdAbout, cmdJSON)
+	rootCmd.AddCommand(cmdVerify, cmdPretty, cmdAbout, cmdJSON)
 	err := rootCmd.Execute()
 	if err != nil {
 		log.Fatal(err)
