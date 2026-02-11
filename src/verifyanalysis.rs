@@ -293,8 +293,8 @@ fn verify_analysis_equivalize(
         _ => a.clone(),
     };
     for i in 0..val_principal_state.assigned.len() {
-        if value_equivalent_values(&ar, &val_principal_state.assigned[i], true) {
-            if attacker_state_put_write(&val_principal_state.assigned[i], val_principal_state) {
+        if value_equivalent_values(&ar, &val_principal_state.assigned[i], true)
+            && attacker_state_put_write(&val_principal_state.assigned[i], val_principal_state) {
                 info_message(
                     &format!(
                         "{} obtained by equivalizing with the current resolution of {}.",
@@ -306,7 +306,6 @@ fn verify_analysis_equivalize(
                 );
                 o += 1;
             }
-        }
     }
     o
 }

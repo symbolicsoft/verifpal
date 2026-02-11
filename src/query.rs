@@ -53,7 +53,7 @@ fn query_confidentiality(
     result = query_precondition(result, ps);
     let written = verify_results_put_write(&result);
     if written {
-        info_message(&format!("{}{}", pretty_query(&query), result.summary), "result", true);
+        info_message(&format!("{}{}", pretty_query(query), result.summary), "result", true);
     }
     result
 }
@@ -110,9 +110,7 @@ fn query_authentication_get_pass_indices(
         let mut has_rule = false;
         if primitive_is_core(b_prim.id) {
             if let Ok(prim) = primitive_core_get(b_prim.id) { has_rule = prim.has_rule; }
-        } else {
-            if let Ok(prim) = primitive_get(b_prim.id) { has_rule = prim.rewrite.has_rule; }
-        }
+        } else if let Ok(prim) = primitive_get(b_prim.id) { has_rule = prim.rewrite.has_rule; }
         if !has_rule {
             indices.push(iiii_idx);
             continue;
@@ -167,9 +165,7 @@ fn query_freshness(
         let mut has_rule = false;
         if primitive_is_core(b_prim.id) {
             if let Ok(prim) = primitive_core_get(b_prim.id) { has_rule = prim.has_rule; }
-        } else {
-            if let Ok(prim) = primitive_get(b_prim.id) { has_rule = prim.rewrite.has_rule; }
-        }
+        } else if let Ok(prim) = primitive_get(b_prim.id) { has_rule = prim.rewrite.has_rule; }
         if !has_rule { indices.push(ii_idx); continue; }
         let (pass, _) = possible_to_rewrite(b_prim, ps, 0);
         if pass || !b_prim.check { indices.push(ii_idx); }
@@ -186,7 +182,7 @@ fn query_freshness(
     result = query_precondition(result, ps);
     let written = verify_results_put_write(&result);
     if written {
-        info_message(&format!("{}{}", pretty_query(&query), result.summary), "result", true);
+        info_message(&format!("{}{}", pretty_query(query), result.summary), "result", true);
     }
     Ok(result)
 }
@@ -213,7 +209,7 @@ fn query_unlinkability(
         result = query_precondition(result, ps);
         let written = verify_results_put_write(&result);
         if written {
-            info_message(&format!("{}{}", pretty_query(&query), result.summary), "result", true);
+            info_message(&format!("{}{}", pretty_query(query), result.summary), "result", true);
         }
         return Ok(result);
     }
@@ -244,7 +240,7 @@ fn query_unlinkability(
             result = query_precondition(result, ps);
             let written = verify_results_put_write(&result);
             if written {
-                info_message(&format!("{}{}", pretty_query(&query), result.summary), "result", true);
+                info_message(&format!("{}{}", pretty_query(query), result.summary), "result", true);
             }
             return Ok(result);
         }
@@ -281,7 +277,7 @@ fn query_equivalence(
     result = query_precondition(result, ps);
     let written = verify_results_put_write(&result);
     if written {
-        info_message(&format!("{}{}", pretty_query(&query), result.summary), "result", true);
+        info_message(&format!("{}{}", pretty_query(query), result.summary), "result", true);
     }
     result
 }

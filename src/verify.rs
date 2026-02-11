@@ -161,7 +161,7 @@ fn verify_end(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
     let fail_count = results.iter().filter(|r| r.resolved).count();
     let total = results.len();
 
-    print!("\n");
+    println!();
     crate::info::info_separator();
     info_message(
         &format!(
@@ -172,7 +172,7 @@ fn verify_end(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
         "verifpal",
         false,
     );
-    print!("\n");
+    println!();
 
     for r in &results {
         if r.resolved {
@@ -190,7 +190,7 @@ fn verify_end(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
         }
     }
 
-    print!("\n");
+    println!();
     crate::info::info_separator();
 
     if fail_count == 0 {

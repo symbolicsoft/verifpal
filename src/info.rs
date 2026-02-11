@@ -62,13 +62,13 @@ fn info_message_regular(m: &str, t: &str, analysis_count: usize) {
         String::new()
     };
     match t {
-        "verifpal"  => print!(" Verifpal * {}{}\n", m, info_string),
-        "info"      => print!("     Info . {}{}\n", m, info_string),
-        "analysis"  => print!(" Analysis > {}{}\n", m, info_string),
-        "deduction" => print!("Deduction > {}{}\n", m, info_string),
-        "result"    => print!("     FAIL x {}{}\n", m, info_string),
-        "pass"      => print!("     PASS + {}{}\n", m, info_string),
-        "warning"   => print!("  Warning ! {}{}\n", m, info_string),
+        "verifpal"  => println!(" Verifpal * {}{}", m, info_string),
+        "info"      => println!("     Info . {}{}", m, info_string),
+        "analysis"  => println!(" Analysis > {}{}", m, info_string),
+        "deduction" => println!("Deduction > {}{}", m, info_string),
+        "result"    => println!("     FAIL x {}{}", m, info_string),
+        "pass"      => println!("     PASS + {}{}", m, info_string),
+        "warning"   => println!("  Warning ! {}{}", m, info_string),
         _ => {}
     }
 }
@@ -81,43 +81,43 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
     };
     match t {
         "verifpal" => {
-            print!(" {} {} {}{}\n",
+            println!(" {} {} {}{}",
                 "Verifpal".green().bold(),
                 "\u{25c6}".green(),
                 m, info_string);
         }
         "info" => {
-            print!("     {} {} {}{}\n",
+            println!("     {} {} {}{}",
                 "Info".cyan().bold(),
                 "\u{25cf}".cyan(),
                 m, info_string);
         }
         "analysis" => {
-            print!(" {} {} {}{}\n",
+            println!(" {} {} {}{}",
                 "Analysis".blue().bold(),
                 "\u{25b8}".blue(),
                 m.dimmed(), info_string);
         }
         "deduction" => {
-            print!("{} {} {}{}\n",
+            println!("{} {} {}{}",
                 "Deduction".yellow(),
                 "\u{203a}".yellow(),
                 m.dimmed(), info_string);
         }
         "result" => {
-            print!("     {} {} {}{}\n",
+            println!("     {} {} {}{}",
                 "Fail".red().bold(),
                 "\u{2717}".red().bold(),
                 m, info_string);
         }
         "pass" => {
-            print!("     {} {} {}{}\n",
+            println!("     {} {} {}{}",
                 "Pass".green().bold(),
                 "\u{2713}".green().bold(),
                 m, info_string);
         }
         "warning" => {
-            print!("  {} {} {}{}\n",
+            println!("  {} {} {}{}",
                 "Warning".yellow().bold(),
                 "\u{25b2}".yellow().bold(),
                 m, info_string);
@@ -257,11 +257,9 @@ pub fn info_output_text(revealed: &Value) -> String {
                 if let Ok(prim) = primitive_core_get(p.id) {
                     prim.output.len() == 1 && prim.output[0] == 1
                 } else { false }
-            } else {
-                if let Ok(prim) = primitive_get(p.id) {
-                    prim.output.len() == 1 && prim.output[0] == 1
-                } else { false }
-            };
+            } else if let Ok(prim) = primitive_get(p.id) {
+                prim.output.len() == 1 && prim.output[0] == 1
+            } else { false };
             if one_output {
                 format!("Output of {}", output_text)
             } else {
@@ -309,11 +307,10 @@ pub fn info_query_mutated_values(
 
         if is_target && attacker_knows {
             // target obtained
-        } else if val_principal_state.mutated[i] {
-            if value_equivalent_value_in_values(&val_principal_state.assigned[i], &mutated) < 0 {
+        } else if val_principal_state.mutated[i]
+            && value_equivalent_value_in_values(&val_principal_state.assigned[i], &mutated) < 0 {
                 mutated.push(val_principal_state.assigned[i].clone());
             }
-        }
     }
     if !relevant {
         return String::new();

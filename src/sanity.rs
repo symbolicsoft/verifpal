@@ -36,6 +36,7 @@ fn sanity_phases(m: &Model) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::only_used_in_recursion)]
 pub fn sanity_assignment_constants(
     right: &Value, existing: &[Constant], km: &KnowledgeMap,
 ) -> Result<Vec<Constant>, String> {

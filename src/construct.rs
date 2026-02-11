@@ -98,11 +98,11 @@ fn construct_knowledge_map_used_by(km: &KnowledgeMap) -> HashMap<ValueId, HashMa
                 let creator_id = km.creator[ii];
                 for vv in &v {
                     if let Value::Constant(c) = vv {
-                        used_by.entry(c.id).or_insert_with(HashMap::new).insert(creator_id, true);
+                        used_by.entry(c.id).or_default().insert(creator_id, true);
                     }
                 }
                 if let Value::Constant(c) = &km.assigned[ii] {
-                    used_by.entry(c.id).or_insert_with(HashMap::new).insert(creator_id, true);
+                    used_by.entry(c.id).or_default().insert(creator_id, true);
                 }
             }
             _ => {}

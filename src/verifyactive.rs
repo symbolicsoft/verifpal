@@ -88,7 +88,7 @@ pub fn verify_active(
         // Stages 6+ in pairs until resolved or exhausted
         let mut stage = 6;
         while !verify_results_all_resolved() && !attacker_state_get_exhausted() {
-            if stage + 1 <= MAX_STAGE_LIMIT {
+            if stage < MAX_STAGE_LIMIT {
                 let as_snap = attacker_state_get_read();
                 rayon::scope(|s| {
                     s.spawn(|_| {
@@ -223,6 +223,7 @@ fn verify_active_scan_weighted<'s>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_active_scan_at_weight<'s>(
     scope: &rayon::Scope<'s>,
     val_knowledge_map: &'s KnowledgeMap,

@@ -24,7 +24,7 @@ pub fn pretty_constant(c: &Constant) -> String {
 
 pub fn pretty_constants(c: &[Constant]) -> String {
     c.iter()
-        .map(|v| pretty_constant(v))
+        .map(pretty_constant)
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -35,14 +35,14 @@ pub fn pretty_primitive(p: &Primitive) -> String {
     } else {
         primitive_get(p.id).map(|s| s.name.clone()).unwrap_or_default()
     };
-    let args: Vec<String> = p.arguments.iter().map(|a| pretty_value(a)).collect();
+    let args: Vec<String> = p.arguments.iter().map(pretty_value).collect();
     let check_str = if p.check { "?" } else { "" };
     format!("{}({}){}", name, args.join(", "), check_str)
 }
 
 pub fn pretty_equation(e: &Equation) -> String {
     e.values.iter()
-        .map(|v| pretty_value(v))
+        .map(pretty_value)
         .collect::<Vec<_>>()
         .join("^")
 }
@@ -57,7 +57,7 @@ pub fn pretty_value(a: &Value) -> String {
 
 pub fn pretty_values(a: &[Value]) -> String {
     a.iter()
-        .map(|v| pretty_value(v))
+        .map(pretty_value)
         .collect::<Vec<_>>()
         .join(", ")
 }

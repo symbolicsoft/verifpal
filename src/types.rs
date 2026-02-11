@@ -105,7 +105,7 @@ pub struct VerifyResult {
     pub options: Vec<QueryOptionResult>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Block {
     pub kind: String,
     pub principal: Principal,
@@ -113,38 +113,18 @@ pub struct Block {
     pub phase: Phase,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Principal {
     pub name: String,
     pub id: PrincipalId,
     pub expressions: Vec<Expression>,
 }
 
-impl Default for Principal {
-    fn default() -> Self {
-        Principal {
-            name: String::new(),
-            id: 0,
-            expressions: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Message {
     pub sender: PrincipalId,
     pub recipient: PrincipalId,
     pub constants: Vec<Constant>,
-}
-
-impl Default for Message {
-    fn default() -> Self {
-        Message {
-            sender: 0,
-            recipient: 0,
-            constants: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -240,13 +220,3 @@ pub struct MutationMap {
     pub depth_index: Vec<usize>,
 }
 
-impl Default for Block {
-    fn default() -> Self {
-        Block {
-            kind: String::new(),
-            principal: Principal::default(),
-            message: Message::default(),
-            phase: Phase::default(),
-        }
-    }
-}

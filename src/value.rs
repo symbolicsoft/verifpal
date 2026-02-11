@@ -252,9 +252,9 @@ pub fn value_equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
             let mut matched = vec![false; n];
             for i in 1..n {
                 let mut found = false;
-                for j in 1..n {
-                    if !matched[j] && value_equivalent_values(&e1_ref.values[i], &e2_ref.values[j], true) {
-                        matched[j] = true;
+                for (j, m) in matched.iter_mut().enumerate().take(n).skip(1) {
+                    if !*m && value_equivalent_values(&e1_ref.values[i], &e2_ref.values[j], true) {
+                        *m = true;
                         found = true;
                         break;
                     }
@@ -466,8 +466,8 @@ pub fn value_perform_primitive_rewrite(
         }
         return (failed_rewrites, rewritten || rewritten_root, value_nil());
     }
-    if rewritten || rewritten_root {
-        if pi >= 0 {
+    if (rewritten || rewritten_root)
+        && pi >= 0 {
             let idx = pi as usize;
             ps.rewritten[idx] = true;
             ps.assigned[idx] = rewritten_values[r_index].clone();
@@ -475,7 +475,6 @@ pub fn value_perform_primitive_rewrite(
                 ps.before_mutate[idx] = rewritten_values[r_index].clone();
             }
         }
-    }
     (
         failed_rewrites,
         rewritten || rewritten_root,
@@ -970,12 +969,12 @@ fn value_resolve_equation_internal_values_from_principal_state_depth(
     if root_index >= 0 && ps.creator[root_index as usize] == ps.id {
         fbm = false;
     }
-    for aai in 0..aa.len() {
-        if let Value::Constant(c) = &aa[aai].clone() {
+    for item in &mut aa {
+        if let Value::Constant(c) = &item.clone() {
             let (resolved, i) = value_resolve_constant(c, ps, true);
-            aa[aai] = resolved;
+            *item = resolved;
             if fbm && i >= 0 {
-                aa[aai] = ps.before_mutate[i as usize].clone();
+                *item = ps.before_mutate[i as usize].clone();
             }
         }
     }
@@ -1139,10 +1138,10 @@ pub fn value_constant_contains_fresh_values(
         None => return Err("invalid value".to_string()),
     };
     let mut cc = value_get_constants_from_value(&ps.assigned[idx]);
-    for j in 0..cc.len() {
-        if let Some(ii) = value_get_principal_state_index_from_constant(ps, &cc[j]) {
-            cc[j] = ps.constants[ii].clone();
-            if cc[j].fresh {
+    for item in &mut cc {
+        if let Some(ii) = value_get_principal_state_index_from_constant(ps, item) {
+            *item = ps.constants[ii].clone();
+            if item.fresh {
                 return Ok(true);
             }
         }

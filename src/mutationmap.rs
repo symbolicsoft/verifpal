@@ -152,11 +152,10 @@ fn mutation_map_replace_equation(
         if stage <= 3 { return mutations; }
         for v in as_.known.iter() {
             if let Value::Equation(ve) = v {
-                if ve.values.len() == e.values.len() {
-                    if value_equivalent_value_in_values(v, &mutations) < 0 {
+                if ve.values.len() == e.values.len()
+                    && value_equivalent_value_in_values(v, &mutations) < 0 {
                         mutations.push(v.clone());
                     }
-                }
             }
         }
     }

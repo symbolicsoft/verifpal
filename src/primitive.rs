@@ -187,7 +187,7 @@ fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, 
                 }
             }
         }
-        1 | 2 | 3 | 4 => (x.clone(), true),
+        1..=4 => (x.clone(), true),
         _ => (x.clone(), false),
     }
 }

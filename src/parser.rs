@@ -412,10 +412,7 @@ impl<'a> Parser<'a> {
         self.expect("=")?;
         self.skip_whitespace();
         let value = self.parse_value()?;
-        match &value {
-            Value::Constant(_) => return Err("cannot assign value to value".to_string()),
-            _ => {}
-        }
+        if let Value::Constant(_) = &value { return Err("cannot assign value to value".to_string()) }
         Ok(Expression {
             kind: TypesEnum::Assignment,
             qualifier: TypesEnum::Empty,

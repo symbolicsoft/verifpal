@@ -567,17 +567,17 @@ fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize) {
             format!(
                 "{}{}{}{}",
                 " ".repeat(indent),
-                "\u{2500}".repeat(lf).yellow().to_string(),
-                format!(" {} ", label).yellow().bold().to_string(),
-                format!("{}\u{25b6}", "\u{2500}".repeat(rf)).yellow().to_string()
+                "\u{2500}".repeat(lf).yellow(),
+                format!(" {} ", label).yellow().bold(),
+                format!("{}\u{25b6}", "\u{2500}".repeat(rf)).yellow()
             )
         } else {
             format!(
                 "{}{}{}{}",
                 " ".repeat(indent),
-                format!("\u{25c0}{}", "\u{2500}".repeat(lf)).yellow().to_string(),
-                format!(" {} ", label).yellow().bold().to_string(),
-                "\u{2500}".repeat(rf).yellow().to_string()
+                format!("\u{25c0}{}", "\u{2500}".repeat(lf)).yellow(),
+                format!(" {} ", label).yellow().bold(),
+                "\u{2500}".repeat(rf).yellow()
             )
         };
         buf.push_str(&bline(&line, w));
@@ -643,7 +643,7 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize) {
             msg.sender.cyan(),
             "\u{2500}\u{2500}\u{25b6} ".yellow(),
             label.yellow().bold(),
-            format!(" \u{2500}\u{2500}\u{25b6}").yellow(),
+            " \u{2500}\u{2500}\u{25b6}".to_string().yellow(),
             msg.recipient.cyan()
         );
         buf.push_str(&bline(&line, w));

@@ -68,7 +68,7 @@ pub fn attacker_state_put_write(known: &Value, val_principal_state: &PrincipalSt
     let idx = state.known.len();
     Arc::make_mut(&mut state.known).push(known.clone());
     let h = value_hash(known);
-    Arc::make_mut(&mut state.known_map).entry(h).or_insert_with(Vec::new).push(idx);
+    Arc::make_mut(&mut state.known_map).entry(h).or_default().push(idx);
     if let Value::Primitive(p) = known {
         Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
     }
@@ -120,7 +120,7 @@ fn attacker_state_absorb_phase_values(
                 let idx = state.known.len();
                 Arc::make_mut(&mut state.known).push(assigned.clone());
                 let h = value_hash(assigned);
-                Arc::make_mut(&mut state.known_map).entry(h).or_insert_with(Vec::new).push(idx);
+                Arc::make_mut(&mut state.known_map).entry(h).or_default().push(idx);
                 Arc::make_mut(&mut state.principal_state).push(clone);
             }
         }
@@ -145,7 +145,7 @@ fn attacker_state_absorb_phase_values(
             let idx = state.known.len();
             Arc::make_mut(&mut state.known).push(cc.clone());
             let h = value_hash(&cc);
-            Arc::make_mut(&mut state.known_map).entry(h).or_insert_with(Vec::new).push(idx);
+            Arc::make_mut(&mut state.known_map).entry(h).or_default().push(idx);
             Arc::make_mut(&mut state.principal_state).push(clone);
         }
         if value_equivalent_value_in_values_map(a, &state.known, &state.known_map) < 0 {
@@ -153,7 +153,7 @@ fn attacker_state_absorb_phase_values(
             let idx = state.known.len();
             Arc::make_mut(&mut state.known).push(a.clone());
             let h = value_hash(a);
-            Arc::make_mut(&mut state.known_map).entry(h).or_insert_with(Vec::new).push(idx);
+            Arc::make_mut(&mut state.known_map).entry(h).or_default().push(idx);
             Arc::make_mut(&mut state.principal_state).push(clone);
         }
     }

@@ -203,11 +203,11 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
             if !fvalid { continue; }
             ax[0] = filtered;
             // Rewrite primitives in ax
-            for j in 0..2 {
-                match &ax[j].clone() {
+            for item in &mut ax {
+                match &item.clone() {
                     Value::Primitive(inner_p) => {
                         let (r, v) = possible_to_rewrite(inner_p, ps, depth + 1);
-                        if r { ax[j] = v[0].clone(); }
+                        if r { *item = v[0].clone(); }
                     }
                     Value::Equation(inner_e) => {
                         let mut new_eq = Equation { values: inner_e.values.clone() };
@@ -217,7 +217,7 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
                                 if r { new_eq.values[ii] = v[0].clone(); }
                             }
                         }
-                        ax[j] = Value::Equation(Arc::new(new_eq));
+                        *item = Value::Equation(Arc::new(new_eq));
                     }
                     _ => {}
                 }
