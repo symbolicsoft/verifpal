@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Deeply nested primitives: encryption wrapped in encryption wrapped in...
+// Tests the engine's ability to resolve values through many layers of indirection.
+
+attacker[active]
+
+principal Alice[
+	knows private k1, k2, k3, k4, k5
+	generates secret
+	e1 = ENC(k1, secret)
+	e2 = ENC(k2, e1)
+	e3 = ENC(k3, e2)
+	e4 = ENC(k4, e3)
+	e5 = ENC(k5, e4)
+	h = HASH(e5)
+]
+
+Alice -> Bob: e5, h
+
+principal Bob[
+	knows private k1, k2, k3, k4, k5
+	d5 = DEC(k5, e5)
+	d4 = DEC(k4, d5)
+	d3 = DEC(k3, d4)
+	d2 = DEC(k2, d3)
+	d1 = DEC(k1, d2)
+]
+
+queries[
+	confidentiality? secret
+	confidentiality? e1
+	confidentiality? d1
+	equivalence? secret, d1
+	authentication? Alice -> Bob: e5
+]

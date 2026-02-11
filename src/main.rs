@@ -198,4 +198,19 @@ mod tests {
     #[test] fn test_ordering_a() { run_model("ordering_a.vp", "c1a1"); }
     #[test] fn test_ordering_b() { run_model("ordering_b.vp", "c1a1"); }
     #[test] fn test_aead_leak() { run_model("aead_leak.vp", "c1"); }
+    #[test] fn test_deep_nesting() { run_model("deep_nesting.vp", "c0c0c0e1a1"); }
+    #[test] fn test_triple_dh() { run_model("triple_dh.vp", "c0c0a0e1"); }
+    #[test] fn test_key_ratchet() { run_model("key_ratchet.vp", "c0c0c0a1a1a0"); }
+    #[test] fn test_four_party() { run_model("four_party.vp", "c1a0a1a1"); }
+    #[test] fn test_phase_forward_secrecy() { run_model("phase_forward_secrecy.vp", "c0a0e1"); }
+    #[test] fn test_shamir_reconstruction() { run_model("shamir_reconstruction.vp", "c1c1e1"); }
+    #[test] fn test_blind_signature() { run_model("blind_signature.vp", "c0c0a1"); }
+    #[test] fn test_concat_bomb() { run_model("concat_bomb.vp", "c0c0c0c0c0a0"); }
+    #[test] fn test_concat_bomb_leak() { run_model("concat_bomb_leak.vp", "c1c1c1c1c1a1"); }
+    #[test] fn test_concat_bomb_unguarded() { run_model("concat_bomb_unguarded.vp", "c0c0c0c0c0a1"); }
+    #[test] fn test_concat_bomb_equiv() { run_model("concat_bomb_equiv.vp", "e1e1e1e1e1f0"); }
+    #[test] fn test_passive_dh_chain() { run_model("passive_dh_chain.vp", "c0c0c0e0"); }
+    #[test] fn test_double_ratchet() { run_model("double_ratchet.vp", "c0c0a0a0e1e1"); }
+    #[test] fn test_many_principals() { run_model("many_principals.vp", "c1a0a0a0a0a0f0"); }
+    #[test] fn test_psk_with_dh() { run_model("psk_with_dh.vp", "c0c0a1a1"); }
 }

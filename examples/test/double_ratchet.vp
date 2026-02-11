@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Simplified double ratchet: DH ratchet + symmetric ratchet.
+// Each exchange advances the DH ratchet and derives new chain keys.
+// Tests complex key derivation with alternating DH steps.
+
+attacker[active]
+
+principal Alice[
+	knows private a_id
+	ga_id = G^a_id
+	generates a_eph0
+	ga_eph0 = G^a_eph0
+]
+
+principal Bob[
+	knows private b_id
+	gb_id = G^b_id
+	generates b_eph0
+	gb_eph0 = G^b_eph0
+]
+
+Alice -> Bob: [ga_id], [ga_eph0]
+Bob -> Alice: [gb_id], [gb_eph0]
+
+// Round 1: Alice sends
+principal Alice[
+	dh_root = HASH(gb_id^a_id, gb_eph0^a_eph0)
+	rk1, ck_a1 = HKDF(dh_root, nil, nil)
+	mk_a1, _ = HKDF(ck_a1, nil, nil)
+	generates msg1
+	e1 = AEAD_ENC(mk_a1, msg1, ga_eph0)
+]
+
+Alice -> Bob: e1
+
+// Round 1: Bob receives + sends
+principal Bob[
+	dh_root_b = HASH(ga_id^b_id, ga_eph0^b_eph0)
+	rk1_b, ck_b1 = HKDF(dh_root_b, nil, nil)
+	mk_b1, _ = HKDF(ck_b1, nil, nil)
+	msg1_b = AEAD_DEC(mk_b1, e1, ga_eph0)?
+	// DH ratchet step
+	generates b_eph1
+	gb_eph1 = G^b_eph1
+	rk2_b, ck_b2 = HKDF(rk1_b, HASH(ga_eph0^b_eph1), nil)
+	mk_b2, _ = HKDF(ck_b2, nil, nil)
+	generates msg2
+	e2 = AEAD_ENC(mk_b2, msg2, gb_eph1)
+]
+
+Bob -> Alice: [gb_eph1], e2
+
+// Round 2: Alice receives
+principal Alice[
+	rk2, ck_a2 = HKDF(rk1, HASH(gb_eph1^a_eph0), nil)
+	mk_a2, _ = HKDF(ck_a2, nil, nil)
+	msg2_a = AEAD_DEC(mk_a2, e2, gb_eph1)?
+]
+
+queries[
+	confidentiality? msg1
+	confidentiality? msg2
+	authentication? Alice -> Bob: e1
+	authentication? Bob -> Alice: e2
+	equivalence? msg1, msg1_b
+	equivalence? msg2, msg2_a
+]

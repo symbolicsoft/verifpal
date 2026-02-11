@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Triple Diffie-Hellman key agreement (like X3DH without the prekey server).
+// Alice combines 3 DH shared secrets to derive a session key.
+// Tests complex equation resolution and multiple DH operations.
+
+attacker[active]
+
+principal Alice[
+	knows private a_ident
+	ga_ident = G^a_ident
+	generates a_eph
+	ga_eph = G^a_eph
+]
+
+principal Bob[
+	knows private b_ident, b_signed, b_onetime
+	gb_ident = G^b_ident
+	gb_signed = G^b_signed
+	gb_onetime = G^b_onetime
+	sig = SIGN(b_ident, gb_signed)
+]
+
+// Bob publishes his key bundle
+Bob -> Alice: [gb_ident], [gb_signed], [gb_onetime], sig
+
+principal Alice[
+	_ = SIGNVERIF(gb_ident, gb_signed, sig)?
+	dh1 = gb_signed^a_ident
+	dh2 = gb_ident^a_eph
+	dh3 = gb_signed^a_eph
+	master = HASH(dh1, dh2, dh3)
+	rk, ck = HKDF(master, nil, nil)
+	generates msg
+	enc_msg = AEAD_ENC(ck, msg, ga_ident)
+]
+
+Alice -> Bob: [ga_ident], [ga_eph], enc_msg
+
+principal Bob[
+	dh1_b = ga_ident^b_signed
+	dh2_b = ga_eph^b_ident
+	dh3_b = ga_eph^b_signed
+	master_b = HASH(dh1_b, dh2_b, dh3_b)
+	rk_b, ck_b = HKDF(master_b, nil, nil)
+	msg_b = AEAD_DEC(ck_b, enc_msg, ga_ident)?
+]
+
+queries[
+	confidentiality? msg
+	confidentiality? master
+	authentication? Alice -> Bob: enc_msg
+	equivalence? master, master_b
+]
