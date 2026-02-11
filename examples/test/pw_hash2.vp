@@ -1,10 +1,10 @@
-// SPDX-FileCopyrightText: © 2019-2022 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
 attacker[active]
 
 principal Bob[
-	knows private k 
+	knows private k
 ]
 
 principal Alice[

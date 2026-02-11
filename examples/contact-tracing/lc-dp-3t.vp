@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: © 2019-2022 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
 attacker[active]
@@ -7,19 +7,19 @@ attacker[active]
 // A principal block looks like the following
 principal SmartphoneA[
 	// In the line below we state that Alice knows the public BroadcastKey
-	
+
 	knows public BroadcastKey
-	
+
 	// SK is going to be a secret random value
 	// To define it we use the "generates" keyword
 	// We will use the following template for SK variable names
 	// SK[day number][principal initial]
-	
+
 	generates SK0A
-	
+
 	// We will use the following template for EphID variable names
 	// EphID[day number][value number][principal initial]
-	
+
 	EphID00A, EphID01A, EphID02A = HKDF(nil, SK0A, BroadcastKey)
 ]
 
