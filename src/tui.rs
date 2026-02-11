@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::Instant;
 
@@ -27,6 +27,7 @@ const ESC_CLEAR_TO_EOL: &str = "\x1b[K";
 
 static TUI_MODE: AtomicBool = AtomicBool::new(false);
 static TUI_OUT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static LAST_REDRAW_MS: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_tui_mode(enabled: bool) {
     TUI_MODE.store(enabled, Ordering::Relaxed);
@@ -34,6 +35,23 @@ pub fn set_tui_mode(enabled: bool) {
 
 pub fn tui_mode() -> bool {
     TUI_MODE.load(Ordering::Relaxed)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn should_redraw() -> bool {
+    let now = now_ms();
+    let last = LAST_REDRAW_MS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 50 {
+        return false;
+    }
+    LAST_REDRAW_MS.store(now, Ordering::Relaxed);
+    true
 }
 
 // ── TUI data types ─────────────────────────────────────────────────────────
@@ -75,13 +93,24 @@ struct TuiState {
     queries: Vec<TuiQuery>,
     // live
     stage: String,
+    phase: i32,
     analysis_count: usize,
     total_deductions: usize,
     deductions: Vec<String>,
-    attacker_line1: String,
-    attacker_line2: String,
     frame: usize,
     start_time: Option<Instant>,
+    // rich attacker tracking
+    attacker_known_count: usize,
+    scan_principal: String,
+    scan_weight: usize,
+    scan_max_weight: usize,
+    scan_budget_used: u32,
+    scan_budget_total: u32,
+    worthwhile_count: usize,
+    last_mutations: Vec<String>,
+    last_knowledge: Vec<String>,
+    narrative: String,
+    mitm_target: String,
 }
 
 static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
@@ -95,15 +124,73 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
         messages: vec![],
         queries: vec![],
         stage: "0".to_string(),
+        phase: 0,
         analysis_count: 0,
         total_deductions: 0,
         deductions: vec![],
-        attacker_line1: String::new(),
-        attacker_line2: String::new(),
         frame: 0,
         start_time: None,
+        attacker_known_count: 0,
+        scan_principal: String::new(),
+        scan_weight: 0,
+        scan_max_weight: 0,
+        scan_budget_used: 0,
+        scan_budget_total: 80000,
+        worthwhile_count: 0,
+        last_mutations: vec![],
+        last_knowledge: vec![],
+        narrative: String::new(),
+        mitm_target: String::new(),
     })
 });
+
+// ── Attack Narrative Engine ────────────────────────────────────────────────
+
+const NARRATIVES_INIT: &[&str] = &[
+    "Positioning on the network, observing all unencrypted traffic...",
+    "Network reconnaissance initiated. All public values compromised.",
+    "Intercepting all protocol messages between principals...",
+    "Passive observation established. Analyzing traffic patterns...",
+];
+
+const NARRATIVES_MUTATION: &[&str] = &[
+    "Intercepting {P}'s channel, probing constructions for weaknesses...",
+    "Crafting replacement values for {P}'s session...",
+    "Targeting {P}'s encrypted channel with modified payloads...",
+    "Injecting crafted primitives into {P}'s message flow...",
+    "Testing mutation combinations against {P}'s protocol state...",
+    "Replacing {P}'s received values with attacker-controlled data...",
+];
+
+const NARRATIVES_ESCALATION: &[&str] = &[
+    "Escalating attack sophistication \u{2500} expanding search space...",
+    "Deeper analysis initiated \u{2500} probing higher-order mutations...",
+    "Increasing mutation complexity \u{2500} recursive injection active...",
+    "Expanding attacker capabilities \u{2500} new strategies engaged...",
+];
+
+const NARRATIVES_DEDUCTION: &[&str] = &[
+    "New knowledge extracted \u{2500} the attacker's power grows.",
+    "Value obtained through cryptographic analysis.",
+    "Attack surface expanded with newly derived material.",
+    "The attacker leverages structural weakness in the protocol.",
+];
+
+const NARRATIVES_PASSIVE: &[&str] = &[
+    "Passive observation mode \u{2500} no message manipulation permitted.",
+    "Monitoring all wire traffic without active interference.",
+    "Eavesdropping on protocol exchanges between all principals...",
+];
+
+fn pick_narrative(pool: &[&str], seed: u64) -> String {
+    let idx = (seed as usize) % pool.len();
+    pool[idx].to_string()
+}
+
+fn narrative_for_mutation(principal: &str, seed: u64) -> String {
+    let idx = (seed as usize) % NARRATIVES_MUTATION.len();
+    NARRATIVES_MUTATION[idx].replace("{P}", principal)
+}
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -120,6 +207,17 @@ pub fn tui_init(m: &Model) {
     st.start_time = Some(Instant::now());
     st.file_name = m.file_name.clone();
     st.attacker_type = m.attacker.clone();
+    st.phase = 0;
+    st.attacker_known_count = 0;
+    st.scan_principal.clear();
+    st.scan_weight = 0;
+    st.scan_max_weight = 0;
+    st.scan_budget_used = 0;
+    st.scan_budget_total = 80000;
+    st.worthwhile_count = 0;
+    st.last_mutations.clear();
+    st.last_knowledge.clear();
+    st.mitm_target.clear();
 
     for block in &m.blocks {
         if block.kind == "principal" {
@@ -166,8 +264,12 @@ pub fn tui_init(m: &Model) {
         });
     }
 
-    st.attacker_line1 = format!("Initializing {} attacker...", st.attacker_type);
-    st.attacker_line2 = String::new();
+    // Initial narrative
+    if st.attacker_type == "passive" {
+        st.narrative = pick_narrative(NARRATIVES_PASSIVE, 0);
+    } else {
+        st.narrative = pick_narrative(NARRATIVES_INIT, 0);
+    }
 
     // Install panic hook to restore terminal
     let prev = std::panic::take_hook();
@@ -208,32 +310,57 @@ pub fn tui_message(msg: &str, msg_type: &str) {
                 if st.deductions.len() > 5 {
                     st.deductions.remove(0);
                 }
+                // Extract compact knowledge description
+                let compact = compact_knowledge_desc(msg);
+                if !compact.is_empty() {
+                    st.last_knowledge.push(compact);
+                    if st.last_knowledge.len() > 3 {
+                        st.last_knowledge.remove(0);
+                    }
+                }
             }
             "analysis" => {
                 if msg.contains("Mutation map for") {
-                    st.attacker_line1 = trunc(msg, st.width.saturating_sub(16));
+                    // Extract principal name from "Mutation map for Bob at stage..."
+                    if let Some(rest) = msg.strip_prefix("Mutation map for ") {
+                        if let Some(name) = rest.split_whitespace().next() {
+                            st.scan_principal = name.to_string();
+                            st.mitm_target = name.to_string();
+                            let seed = st.frame as u64 ^ (name.len() as u64 * 31);
+                            st.narrative = narrative_for_mutation(name, seed);
+                        }
+                    }
                 } else if msg.contains("Constructed skeleton") {
-                    st.attacker_line2 = trunc(msg, st.width.saturating_sub(16));
+                    // skeleton info — no separate line needed
                 } else if msg.contains("Initializing Stage") {
                     if let Some(rest) = msg.strip_prefix("Initializing Stage ") {
                         if let Some(num) = rest.split_whitespace().next() {
-                            st.stage = num.trim_end_matches(',').to_string();
+                            let stage_str = num.trim_end_matches(',');
+                            st.stage = stage_str.to_string();
+                            let seed = stage_str.parse::<u64>().unwrap_or(0);
+                            st.narrative = pick_narrative(NARRATIVES_ESCALATION, seed);
                         }
                     }
-                    st.attacker_line2 = trunc(msg, st.width.saturating_sub(16));
                 }
             }
             "info" => {
-                if msg.starts_with("Attacker is configured") {
-                    st.attacker_line1 = msg.to_string();
-                } else if msg.starts_with("Running at phase") {
-                    st.attacker_line2 = msg.to_string();
+                if msg.starts_with("Running at phase") {
+                    if let Some(rest) = msg.strip_prefix("Running at phase ") {
+                        if let Some(num) = rest.strip_suffix('.') {
+                            st.phase = num.parse().unwrap_or(0);
+                        }
+                    }
                 }
             }
             _ => {}
         }
     }
-    tui_redraw();
+    // High-priority events always redraw (result = query failure)
+    if msg_type == "result" {
+        force_redraw();
+    } else {
+        tui_redraw();
+    }
 }
 
 /// Handle an info_analysis progress tick in TUI mode.
@@ -249,6 +376,87 @@ pub fn tui_progress(stage_str: &str, count: usize) {
     tui_redraw();
 }
 
+/// Update attacker known value count (called from attacker_state_put_write).
+pub fn tui_attacker_known(count: usize) {
+    {
+        let mut st = TUI.write().expect("TUI state lock");
+        if !st.enabled {
+            return;
+        }
+        st.attacker_known_count = count;
+        if count > 0 {
+            let seed = count as u64;
+            st.narrative = pick_narrative(NARRATIVES_DEDUCTION, seed);
+        }
+    }
+    if should_redraw() {
+        tui_redraw();
+    }
+}
+
+/// Update scan progress (called from verify_active_scan_at_weight).
+pub fn tui_scan_update(
+    principal: &str,
+    weight: usize,
+    max_weight: usize,
+    budget_used: u32,
+    budget_total: u32,
+) {
+    {
+        let mut st = TUI.write().expect("TUI state lock");
+        if !st.enabled {
+            return;
+        }
+        st.scan_principal = principal.to_string();
+        st.scan_weight = weight;
+        st.scan_max_weight = max_weight;
+        st.scan_budget_used = budget_used;
+        st.scan_budget_total = budget_total;
+        st.mitm_target = principal.to_string();
+        if budget_used == 0 {
+            let seed = st.frame as u64 ^ (principal.len() as u64 * 37);
+            st.narrative = narrative_for_mutation(principal, seed);
+        }
+    }
+    if should_redraw() {
+        tui_redraw();
+    }
+}
+
+/// Record a worthwhile mutation description (called on worthwhile mutations).
+pub fn tui_mutation_detail(desc: &str) {
+    {
+        let mut st = TUI.write().expect("TUI state lock");
+        if !st.enabled {
+            return;
+        }
+        st.worthwhile_count += 1;
+        st.last_mutations.push(desc.to_string());
+        if st.last_mutations.len() > 3 {
+            st.last_mutations.remove(0);
+        }
+    }
+    // Worthwhile mutations are rare — always redraw
+    force_redraw();
+}
+
+/// Update stage (called at stage transitions).
+pub fn tui_stage_update(stage: i32) {
+    {
+        let mut st = TUI.write().expect("TUI state lock");
+        if !st.enabled {
+            return;
+        }
+        st.stage = format!("{}", stage);
+        st.worthwhile_count = 0;
+        st.last_mutations.clear();
+        let seed = stage as u64;
+        st.narrative = pick_narrative(NARRATIVES_ESCALATION, seed);
+    }
+    // Stage change is high-priority
+    force_redraw();
+}
+
 /// Leave the TUI and restore the normal terminal.
 pub fn tui_finish() {
     {
@@ -262,10 +470,9 @@ pub fn tui_finish() {
             }
         }
         st.finished = true;
-        st.attacker_line1 = "Analysis complete.".to_string();
-        st.attacker_line2 = String::new();
+        st.narrative = "Analysis complete.".to_string();
     }
-    tui_redraw();
+    force_redraw();
     std::thread::sleep(std::time::Duration::from_millis(800));
 
     let _lock = TUI_OUT.lock().expect("TUI output lock");
@@ -290,6 +497,11 @@ fn tui_redraw() {
     io::stdout().flush().ok();
 }
 
+fn force_redraw() {
+    LAST_REDRAW_MS.store(0, Ordering::Relaxed);
+    tui_redraw();
+}
+
 fn redraw_locked() {
     let mut st = TUI.write().expect("TUI state lock");
     if !st.enabled {
@@ -300,16 +512,16 @@ fn redraw_locked() {
     let frame = st.frame;
     let finished = st.finished;
 
-    let mut buf = String::with_capacity(8192);
+    let mut buf = String::with_capacity(16384);
     buf.push_str(ESC_HOME);
     draw_header(&mut buf, &st, w, frame, finished);
-    draw_protocol(&mut buf, &st, w);
-    draw_attacker(&mut buf, &st, w, finished);
+    draw_protocol(&mut buf, &st, w, frame, finished);
+    draw_attacker(&mut buf, &st, w, frame, finished);
     draw_queries(&mut buf, &st, w, frame);
     draw_deductions(&mut buf, &st, w);
     draw_footer(&mut buf, &st, w, finished);
     // Clear any leftover lines below
-    for _ in 0..3 {
+    for _ in 0..4 {
         buf.push_str(ESC_CLEAR_LINE);
         buf.push('\n');
     }
@@ -452,6 +664,76 @@ fn border_mid(label: &str, w: usize) -> String {
     )
 }
 
+// ── Utility ────────────────────────────────────────────────────────────────
+
+/// Extract a compact knowledge description from a deduction message.
+/// e.g. "Output of AEAD_DEC(...) obtained by decomposing..." -> "AEAD_DEC via decompose"
+fn compact_knowledge_desc(msg: &str) -> String {
+    // Try to extract the method
+    let method = if msg.contains("decomposing") {
+        "decompose"
+    } else if msg.contains("reconstructing") {
+        "reconstruct"
+    } else if msg.contains("recomposing") {
+        "recompose"
+    } else if msg.contains("equivalizing") {
+        "equivalize"
+    } else if msg.contains("password") {
+        "password"
+    } else if msg.contains("concatenated") {
+        "concat"
+    } else if msg.contains("associated data") {
+        "assoc. data"
+    } else {
+        return String::new();
+    };
+    // Try to extract the value name — first word or primitive name
+    let val_name = if let Some(rest) = msg.strip_prefix("Output of ") {
+        rest.split('(').next().unwrap_or("?").to_string()
+    } else {
+        msg.split_whitespace().next().unwrap_or("?").to_string()
+    };
+    let val_short = if val_name.len() > 12 {
+        format!("{}~", &val_name[..11])
+    } else {
+        val_name
+    };
+    format!("{} via {}", val_short, method)
+}
+
+/// Determine deduction color category from a deduction message string.
+fn deduction_color(msg: &str) -> &'static str {
+    if msg.contains("decomposing") {
+        "blue"
+    } else if msg.contains("reconstructing") {
+        "cyan"
+    } else if msg.contains("recomposing") {
+        "magenta"
+    } else if msg.contains("equivalizing") {
+        "yellow"
+    } else if msg.contains("password") {
+        "red"
+    } else if msg.contains("concatenated") {
+        "white"
+    } else if msg.contains("associated data") {
+        "green"
+    } else {
+        "white"
+    }
+}
+
+fn color_str(s: &str, color: &str) -> String {
+    match color {
+        "blue" => s.blue().to_string(),
+        "cyan" => s.cyan().to_string(),
+        "magenta" => s.magenta().to_string(),
+        "yellow" => s.yellow().to_string(),
+        "red" => s.red().to_string(),
+        "green" => s.green().to_string(),
+        _ => s.white().to_string(),
+    }
+}
+
 // ── Section drawers ────────────────────────────────────────────────────────
 
 fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
@@ -472,9 +754,19 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
     let title_line = format!("{}{}{}", left, " ".repeat(gap), right);
     buf.push_str(&bline(&title_line, w));
 
-    // Progress bar
+    // Progress bar with richer info
     let inner = w.saturating_sub(2);
-    let info_str = format!(" Stage {} | #{}", st.stage, st.analysis_count);
+    let elapsed = st.start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+    let timer = format!("{:02}:{:02}:{:02}", elapsed / 3600, (elapsed % 3600) / 60, elapsed % 60);
+    let phase_str = if st.phase > 0 {
+        format!(" Phase {} |", st.phase)
+    } else {
+        String::new()
+    };
+    let info_str = format!(
+        " Stage {} |{} {}",
+        st.stage, phase_str, timer
+    );
     let info_vis = vis_len(&info_str);
     let bar_chars = inner.saturating_sub(2 + info_vis); // 2 for leading "  "
     let scan_pos = if finished {
@@ -488,7 +780,11 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
         if finished {
             bar.push_str(&"\u{2501}".green().to_string());
         } else {
-            let pos = if scan_pos < bar_chars { scan_pos } else { bar_chars * 2 - scan_pos };
+            let pos = if scan_pos < bar_chars {
+                scan_pos
+            } else {
+                bar_chars * 2 - scan_pos
+            };
             let d = (i as isize - pos as isize).unsigned_abs();
             if d == 0 {
                 bar.push_str(&"\u{2588}".cyan().bold().to_string());
@@ -516,19 +812,25 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
     buf.push_str(&border_mid("", w));
 }
 
-fn draw_protocol(buf: &mut String, st: &TuiState, w: usize) {
+fn draw_protocol(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
     buf.push_str(&bline("", w));
 
     if st.principals.len() == 2 {
-        draw_protocol_two(buf, st, w);
+        draw_protocol_two(buf, st, w, frame, finished);
     } else {
-        draw_protocol_list(buf, st, w);
+        draw_protocol_list(buf, st, w, frame, finished);
     }
 
     buf.push_str(&bline("", w));
 }
 
-fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize) {
+fn draw_protocol_two(
+    buf: &mut String,
+    st: &TuiState,
+    w: usize,
+    frame: usize,
+    finished: bool,
+) {
     let p1 = &st.principals[0];
     let p2 = &st.principals[1];
     let n1 = p1.name.to_uppercase();
@@ -538,53 +840,154 @@ fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize) {
     // Principal header
     let sum1 = format!("{}p {}g {}c", p1.n_private, p1.n_generated, p1.n_computed);
     let sum2 = format!("{}p {}g {}c", p2.n_private, p2.n_generated, p2.n_computed);
-    let left_header = format!(
-        "  {} {}",
-        n1.cyan().bold(),
-        sum1.dimmed()
-    );
-    let right_header = format!(
-        "{} {}  ",
-        sum2.dimmed(),
-        n2.cyan().bold()
-    );
+    let left_header = format!("  {} {}", n1.cyan().bold(), sum1.dimmed());
+    let right_header = format!("{} {}  ", sum2.dimmed(), n2.cyan().bold());
     let hgap = inner.saturating_sub(vis_len(&left_header) + vis_len(&right_header));
     let header_line = format!("{}{}{}", left_header, " ".repeat(hgap), right_header);
     buf.push_str(&bline(&header_line, w));
 
-    // Messages as arrows between principals
+    // Messages as arrows between principals — with animated dots and MITM
     let indent = vis_len(&n1) + 4;
     let arrow_space = inner.saturating_sub(indent + vis_len(&n2) + 4);
 
-    for msg in &st.messages {
-        let label = trunc(&msg.constants, arrow_space.saturating_sub(4));
-        let label_vis = vis_len(&label);
-        let fill = arrow_space.saturating_sub(label_vis + 2);
-        let lf = fill / 2;
-        let rf = fill.saturating_sub(lf);
+    for (mi, msg) in st.messages.iter().enumerate() {
+        let is_right = msg.sender == p1.name; // left->right
+        let recipient = if is_right { &msg.recipient } else { &msg.sender };
+        let is_intercepted =
+            !finished && !st.mitm_target.is_empty() && recipient == &st.mitm_target;
 
-        let line = if msg.sender == p1.name {
-            format!(
-                "{}{}{}{}",
-                " ".repeat(indent),
-                "\u{2500}".repeat(lf).yellow(),
-                format!(" {} ", label).yellow().bold(),
-                format!("{}\u{25b6}", "\u{2500}".repeat(rf)).yellow()
-            )
+        let mitm_label = "\u{25c6} MITM";
+        let mitm_vis = 6; // "◆ MITM" = 6 chars
+        let available_for_label = if is_intercepted {
+            arrow_space.saturating_sub(mitm_vis + 3)
         } else {
-            format!(
-                "{}{}{}{}",
-                " ".repeat(indent),
-                format!("\u{25c0}{}", "\u{2500}".repeat(lf)).yellow(),
-                format!(" {} ", label).yellow().bold(),
-                "\u{2500}".repeat(rf).yellow()
-            )
+            arrow_space.saturating_sub(4)
         };
-        buf.push_str(&bline(&line, w));
+        let label = trunc(&msg.constants, available_for_label);
+        let label_vis = vis_len(&label);
+
+        if is_intercepted {
+            // Animated intercepted arrow
+            let arrow_fill = arrow_space.saturating_sub(label_vis + 2 + mitm_vis + 1);
+            let lf = arrow_fill / 2;
+            let rf = arrow_fill.saturating_sub(lf);
+
+            // Pulsing MITM indicator
+            let mitm_colored = if frame % 4 < 2 {
+                mitm_label.red().bold().to_string()
+            } else {
+                mitm_label.red().dimmed().to_string()
+            };
+
+            // Animated dot position
+            let dot_pos = ((frame * 2 + mi * 7) % (lf + rf + 1)) as usize;
+
+            let mut arrow = String::new();
+            arrow.push_str(&" ".repeat(indent));
+
+            if is_right {
+                // left->right intercepted
+                for j in 0..lf {
+                    if j == dot_pos {
+                        arrow.push_str(&"\u{2219}".red().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".red().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&format!(" {} ", label).red().bold().to_string());
+                arrow.push_str(&mitm_colored);
+                arrow.push(' ');
+                for j in 0..rf {
+                    if j + lf == dot_pos {
+                        arrow.push_str(&"\u{2219}".red().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".red().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&"\u{25b6}".red().to_string());
+            } else {
+                // right->left intercepted
+                arrow.push_str(&"\u{25c0}".red().to_string());
+                for j in 0..lf {
+                    if j == dot_pos {
+                        arrow.push_str(&"\u{2219}".red().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".red().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&mitm_colored);
+                arrow.push(' ');
+                arrow.push_str(&format!(" {} ", label).red().bold().to_string());
+                for j in 0..rf {
+                    if j + lf == dot_pos {
+                        arrow.push_str(&"\u{2219}".red().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".red().dimmed().to_string());
+                    }
+                }
+            }
+            buf.push_str(&bline(&arrow, w));
+        } else {
+            // Normal arrow with animated dots
+            let fill = arrow_space.saturating_sub(label_vis + 2);
+            let lf = fill / 2;
+            let rf = fill.saturating_sub(lf);
+            let dot_pos = if finished {
+                usize::MAX
+            } else {
+                ((frame * 2 + mi * 5) % (lf + rf + 1)) as usize
+            };
+
+            let mut arrow = String::new();
+            arrow.push_str(&" ".repeat(indent));
+
+            if is_right {
+                for j in 0..lf {
+                    if j == dot_pos {
+                        arrow.push_str(&"\u{2219}".yellow().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".yellow().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&format!(" {} ", label).yellow().bold().to_string());
+                for j in 0..rf {
+                    if j + lf + 1 == dot_pos {
+                        arrow.push_str(&"\u{2219}".yellow().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".yellow().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&"\u{25b6}".yellow().to_string());
+            } else {
+                arrow.push_str(&"\u{25c0}".yellow().to_string());
+                for j in 0..lf {
+                    if j == dot_pos {
+                        arrow.push_str(&"\u{2219}".yellow().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".yellow().dimmed().to_string());
+                    }
+                }
+                arrow.push_str(&format!(" {} ", label).yellow().bold().to_string());
+                for j in 0..rf {
+                    if j + lf + 1 == dot_pos {
+                        arrow.push_str(&"\u{2219}".yellow().bold().to_string());
+                    } else {
+                        arrow.push_str(&"\u{2500}".yellow().dimmed().to_string());
+                    }
+                }
+            }
+            buf.push_str(&bline(&arrow, w));
+        }
     }
 }
 
-fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize) {
+fn draw_protocol_list(
+    buf: &mut String,
+    st: &TuiState,
+    w: usize,
+    _frame: usize,
+    _finished: bool,
+) {
     let inner = w.saturating_sub(2);
 
     // Build principal entries and wrap across multiple lines if needed
@@ -600,18 +1003,18 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize) {
     // Pack entries into rows that fit within the box
     let sep = " | ";
     let sep_vis = 3;
-    let indent = 2; // leading "  "
+    let indent_size = 2; // leading "  "
     let mut row = String::new();
-    let mut row_vis = indent;
+    let mut row_vis = indent_size;
     row.push_str("  ");
 
     for (i, entry) in entries.iter().enumerate() {
         let entry_vis = vis_len(entry);
         let needed = if i == 0 { entry_vis } else { sep_vis + entry_vis };
-        if row_vis + needed > inner && row_vis > indent {
+        if row_vis + needed > inner && row_vis > indent_size {
             buf.push_str(&bline(&row, w));
             row = format!("  {}", entry);
-            row_vis = indent + entry_vis;
+            row_vis = indent_size + entry_vis;
         } else {
             if i > 0 {
                 row.push_str(&sep.dimmed().to_string());
@@ -621,7 +1024,7 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize) {
             row_vis += entry_vis;
         }
     }
-    if row_vis > indent {
+    if row_vis > indent_size {
         buf.push_str(&bline(&row, w));
     }
     buf.push_str(&bline("", w));
@@ -650,62 +1053,237 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize) {
     }
 }
 
-fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, finished: bool) {
+fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
     buf.push_str(&bline("", w));
 
     // Inner box: 4-space margins on each side within the outer │...│
     let box_inner = w.saturating_sub(12);
 
-    // Attacker box top — all box-drawing chars, no emoji
+    // Attacker box top with pulsing border and knowledge count
+    let known_text = format!(" {} known ", st.attacker_known_count);
     let label_text = format!(" ATTACKER ({}) ", st.attacker_type);
     let label_colored = if finished {
         label_text.green().bold().to_string()
-    } else {
+    } else if frame % 6 < 3 {
         label_text.red().bold().to_string()
+    } else {
+        label_text.red().to_string()
     };
-    let label_vis = vis_len(&label_text); // measure the plain text
+    let label_vis = vis_len(&label_text);
+    let known_vis = vis_len(&known_text);
     let left_dashes = 3;
-    let right_dashes = box_inner.saturating_sub(left_dashes + label_vis);
+    let right_dashes = box_inner.saturating_sub(left_dashes + label_vis + known_vis);
+    let known_colored = known_text.dimmed().to_string();
+    let right_border = format!(
+        "{}{}{}",
+        "\u{2500}".repeat(right_dashes).dimmed(),
+        known_colored,
+        "\u{2510}".dimmed()
+    );
     let top_line = format!(
         "    {}{}{}{}",
         "\u{250c}".dimmed(),
         "\u{2500}".repeat(left_dashes).dimmed(),
         label_colored,
-        format!("{}{}", "\u{2500}".repeat(right_dashes), "\u{2510}").dimmed()
+        right_border
     );
     buf.push_str(&bline(&top_line, w));
 
-    // Activity line 1 — use ▸ (U+25B8, Geometric Shapes, safe 1-wide)
-    let indicator = if finished {
-        "\u{2500}".dimmed().to_string()
-    } else {
-        "\u{25b8}".red().to_string()
-    };
-    let l1 = trunc(&st.attacker_line1, box_inner.saturating_sub(4));
-    let l1_inner = format!(" {} {}", indicator, l1);
-    let l1_pad = box_inner.saturating_sub(vis_len(&l1_inner));
-    let l1_line = format!(
-        "    {}{}{}{}",
-        "\u{2502}".dimmed(),
-        l1_inner,
-        " ".repeat(l1_pad),
-        "\u{2502}".dimmed()
-    );
-    buf.push_str(&bline(&l1_line, w));
-
-    // Activity line 2
-    let l2 = trunc(&st.attacker_line2, box_inner.saturating_sub(4));
-    if !l2.is_empty() {
-        let l2_inner = format!(" {} {}", "\u{2500}".dimmed(), l2.dimmed());
-        let l2_pad = box_inner.saturating_sub(vis_len(&l2_inner));
-        let l2_line = format!(
+    // Narrative line (1-2 lines of contextual prose)
+    let narrative = trunc(&st.narrative, box_inner.saturating_sub(4));
+    if !narrative.is_empty() {
+        let nar_inner = format!(" {}", narrative.italic().dimmed());
+        let nar_pad = box_inner.saturating_sub(vis_len(&nar_inner));
+        let nar_line = format!(
             "    {}{}{}{}",
             "\u{2502}".dimmed(),
-            l2_inner,
-            " ".repeat(l2_pad),
+            nar_inner,
+            " ".repeat(nar_pad),
             "\u{2502}".dimmed()
         );
-        buf.push_str(&bline(&l2_line, w));
+        buf.push_str(&bline(&nar_line, w));
+    }
+
+    // Empty separator line
+    let sep_line = format!(
+        "    {}{}{}",
+        "\u{2502}".dimmed(),
+        " ".repeat(box_inner),
+        "\u{2502}".dimmed()
+    );
+    buf.push_str(&bline(&sep_line, w));
+
+    if st.attacker_type == "active" && !finished {
+        // Search progress bar
+        let pct = if st.scan_budget_total > 0 {
+            ((st.scan_budget_used as f64 / st.scan_budget_total as f64) * 100.0) as usize
+        } else {
+            0
+        };
+        let bar_label = format!(
+            "  SEARCH {}/{}  {}%  wt {}/{}  {} viable",
+            st.scan_budget_used,
+            st.scan_budget_total,
+            pct,
+            st.scan_weight,
+            st.scan_max_weight,
+            st.worthwhile_count
+        );
+        let bar_label_vis = vis_len(&bar_label);
+        let bar_avail = box_inner.saturating_sub(4);
+        if bar_label_vis <= bar_avail {
+            let bar_content = format!(" {}", bar_label.dimmed());
+            let bar_pad = box_inner.saturating_sub(vis_len(&bar_content));
+            let bar_line = format!(
+                "    {}{}{}{}",
+                "\u{2502}".dimmed(),
+                bar_content,
+                " ".repeat(bar_pad),
+                "\u{2502}".dimmed()
+            );
+            buf.push_str(&bline(&bar_line, w));
+        }
+
+        // Visual progress bar
+        let prog_width = box_inner.saturating_sub(4);
+        let filled = (prog_width * pct) / 100;
+        let mut prog = String::new();
+        prog.push_str("  ");
+        for i in 0..prog_width {
+            if i < filled {
+                prog.push_str(&"\u{2593}".cyan().to_string());
+            } else {
+                prog.push_str(&"\u{2591}".dimmed().to_string());
+            }
+        }
+        let prog_inner = format!(" {}", prog);
+        let prog_pad = box_inner.saturating_sub(vis_len(&prog_inner));
+        let prog_line = format!(
+            "    {}{}{}{}",
+            "\u{2502}".dimmed(),
+            prog_inner,
+            " ".repeat(prog_pad),
+            "\u{2502}".dimmed()
+        );
+        buf.push_str(&bline(&prog_line, w));
+
+        // Separator
+        buf.push_str(&bline(&sep_line, w));
+
+        // Dual-column: MUTATIONS (left) | KNOWLEDGE GAINED (right)
+        let half = box_inner.saturating_sub(3) / 2;
+        let left_label = " MUTATIONS";
+        let right_label = "KNOWLEDGE GAINED ";
+        let left_label_pad = half.saturating_sub(vis_len(left_label));
+        let right_label_pad = half.saturating_sub(vis_len(right_label));
+        let col_header_inner = format!(
+            " {}{}{}{}{}{}",
+            left_label.dimmed().bold(),
+            " ".repeat(left_label_pad),
+            " \u{2502} ".dimmed(),
+            right_label.dimmed().bold(),
+            " ".repeat(right_label_pad),
+            ""
+        );
+        let ch_pad = box_inner.saturating_sub(vis_len(&col_header_inner));
+        let col_header_line = format!(
+            "    {}{}{}{}",
+            "\u{2502}".dimmed(),
+            col_header_inner,
+            " ".repeat(ch_pad),
+            "\u{2502}".dimmed()
+        );
+        buf.push_str(&bline(&col_header_line, w));
+
+        // 3 rows of dual-column data
+        for row_idx in 0..3 {
+            let left_content = if row_idx < st.last_mutations.len() {
+                let prefix = if row_idx == st.last_mutations.len() - 1 {
+                    "\u{25b8}".red().to_string()
+                } else {
+                    " ".to_string()
+                };
+                let mt = trunc(&st.last_mutations[row_idx], half.saturating_sub(3));
+                format!(" {} {}", prefix, mt.dimmed())
+            } else {
+                String::new()
+            };
+            let right_content = if row_idx < st.last_knowledge.len() {
+                let kn = trunc(&st.last_knowledge[row_idx], half.saturating_sub(4));
+                let color = if kn.contains("password") {
+                    "red"
+                } else if kn.contains("decompose") {
+                    "blue"
+                } else if kn.contains("reconstruct") {
+                    "cyan"
+                } else if kn.contains("recompose") {
+                    "magenta"
+                } else if kn.contains("equivalize") {
+                    "yellow"
+                } else {
+                    "white"
+                };
+                format!(
+                    " {} {}",
+                    color_str("\u{25cf}", color),
+                    kn.dimmed()
+                )
+            } else {
+                String::new()
+            };
+
+            let lv = vis_len(&left_content);
+            let rv = vis_len(&right_content);
+            let left_pad = half.saturating_sub(lv);
+            let right_pad = half.saturating_sub(rv);
+
+            let row_inner = format!(
+                " {}{}{}{}{}",
+                left_content,
+                " ".repeat(left_pad),
+                " \u{2502} ".dimmed(),
+                right_content,
+                " ".repeat(right_pad),
+            );
+            let row_pad = box_inner.saturating_sub(vis_len(&row_inner));
+            let row_line = format!(
+                "    {}{}{}{}",
+                "\u{2502}".dimmed(),
+                row_inner,
+                " ".repeat(row_pad),
+                "\u{2502}".dimmed()
+            );
+            buf.push_str(&bline(&row_line, w));
+        }
+    } else if finished {
+        // Finished state
+        let done_inner = format!(" {}", "Analysis complete.".green());
+        let done_pad = box_inner.saturating_sub(vis_len(&done_inner));
+        let done_line = format!(
+            "    {}{}{}{}",
+            "\u{2502}".dimmed(),
+            done_inner,
+            " ".repeat(done_pad),
+            "\u{2502}".dimmed()
+        );
+        buf.push_str(&bline(&done_line, w));
+    } else {
+        // Passive attacker — just show knowledge
+        if !st.last_knowledge.is_empty() {
+            for kn in &st.last_knowledge {
+                let kn_trunc = trunc(kn, box_inner.saturating_sub(6));
+                let kn_inner = format!(" \u{25cf} {}", kn_trunc.dimmed());
+                let kn_pad = box_inner.saturating_sub(vis_len(&kn_inner));
+                let kn_line = format!(
+                    "    {}{}{}{}",
+                    "\u{2502}".dimmed(),
+                    kn_inner,
+                    " ".repeat(kn_pad),
+                    "\u{2502}".dimmed()
+                );
+                buf.push_str(&bline(&kn_line, w));
+            }
+        }
     }
 
     // Attacker box bottom
@@ -744,19 +1322,18 @@ fn draw_queries(buf: &mut String, st: &TuiState, w: usize, frame: usize) {
             ),
         };
         let status_vis = vis_len(&status_text);
-        let q_max = inner.saturating_sub(8 + status_vis);
+        let right_pad = 3;
+        let q_max = inner.saturating_sub(4 + status_vis + right_pad);
         let q_text = trunc(&q.text, q_max);
         let q_vis = vis_len(&q_text);
-        // Layout: "  " icon " " q_text gap status_text " "
-        // = 2 + 1 + 1 + q_vis + gap + status_vis + 1 = inner
-        let gap = inner.saturating_sub(5 + q_vis + status_vis);
+        // Layout: "  " icon " " q_text gap status_text right_pad
+        let gap = inner.saturating_sub(4 + q_vis + status_vis + right_pad);
         let line = format!(
-            "  {} {} {}{}{}",
+            "  {} {} {}{}",
             icon,
             q_text,
             " ".repeat(gap),
             status_text,
-            " "
         );
         buf.push_str(&bline(&line, w));
     }
@@ -781,10 +1358,12 @@ fn draw_deductions(buf: &mut String, st: &TuiState, w: usize) {
         for (i, d) in st.deductions.iter().enumerate() {
             let dt = trunc(d, w.saturating_sub(8));
             let opacity = st.deductions.len() - 1 - i;
+            let color = deduction_color(d);
+            let marker = color_str("\u{203a}", color);
             let line = if opacity == 0 {
-                format!("  {} {}", "\u{203a}".yellow().bold(), dt)
+                format!("  {} {}", marker.bold(), dt)
             } else {
-                format!("  {} {}", "\u{203a}".yellow(), dt.dimmed())
+                format!("  {} {}", marker, dt.dimmed())
             };
             buf.push_str(&bline(&line, w));
         }
@@ -800,27 +1379,41 @@ fn draw_deductions(buf: &mut String, st: &TuiState, w: usize) {
 fn draw_footer(buf: &mut String, st: &TuiState, w: usize, finished: bool) {
     buf.push_str(&border_mid("", w));
 
-    let pass_count = st.queries.iter().filter(|q| matches!(q.status, QStatus::Pass)).count();
-    let fail_count = st.queries.iter().filter(|q| matches!(q.status, QStatus::Fail)).count();
+    let pass_count = st
+        .queries
+        .iter()
+        .filter(|q| matches!(q.status, QStatus::Pass))
+        .count();
+    let fail_count = st
+        .queries
+        .iter()
+        .filter(|q| matches!(q.status, QStatus::Fail))
+        .count();
     let total = st.queries.len();
 
     let elapsed = st.start_time.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-    let hours = elapsed / 3600;
-    let minutes = (elapsed % 3600) / 60;
-    let seconds = elapsed % 60;
-    let timer = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+    let timer = format!(
+        "{:02}:{:02}:{:02}",
+        elapsed / 3600,
+        (elapsed % 3600) / 60,
+        elapsed % 60
+    );
 
     let info = if finished {
         let result = if fail_count == 0 {
-            format!("All {} queries pass", total).green().bold().to_string()
+            format!("All {} queries pass", total)
+                .green()
+                .bold()
+                .to_string()
         } else {
-            format!("{} of {} failed", fail_count, total).red().bold().to_string()
+            format!("{} of {} failed", fail_count, total)
+                .red()
+                .bold()
+                .to_string()
         };
         format!(
             "  {} | {} deductions | {}",
-            result,
-            st.total_deductions,
-            timer.dimmed(),
+            result, st.total_deductions, timer.dimmed(),
         )
     } else {
         let status = if fail_count > 0 {
@@ -829,12 +1422,14 @@ fn draw_footer(buf: &mut String, st: &TuiState, w: usize, finished: bool) {
             format!("{}+", pass_count).green().to_string()
         };
         format!(
-            "  {} {} | {} {}/{} queries | {}",
+            "  {} {} | {} {}/{} queries | #{} analyses | {} known | {}",
             st.total_deductions.to_string().bold(),
             "deductions".dimmed(),
             status,
             pass_count + fail_count,
             total,
+            st.analysis_count.to_string().dimmed(),
+            st.attacker_known_count.to_string().bold(),
             timer.dimmed(),
         )
     };

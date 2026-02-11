@@ -10,6 +10,7 @@ use crate::attackerstate::{
 };
 use crate::construct::construct_principal_state_clone;
 use crate::info::info_message;
+use crate::pretty::pretty_value;
 use crate::mutationmap::{
     mutation_map_init, mutation_map_next, mutation_map_subset, mutation_map_subset_capped,
 };
@@ -116,6 +117,9 @@ fn verify_active_stages(
     val_principal_states: &[PrincipalState],
     val_attacker_state: &AttackerState,
 ) {
+    if crate::tui::tui_enabled() {
+        crate::tui::tui_stage_update(stage);
+    }
     let worthwhile_mutation_count = AtomicU32::new(0);
     let old_known = val_attacker_state.known.len();
     let val_attacker_state = attacker_state_get_read();
@@ -173,6 +177,9 @@ fn verify_active_scan_weighted<'s>(
     let mut max_weight = MAX_SUBSET_MUTATION_WEIGHT;
     if max_weight > n {
         max_weight = n;
+    }
+    if crate::tui::tui_enabled() {
+        crate::tui::tui_scan_update(&val_principal_state.name, 0, max_weight, 0, budget);
     }
 
     for weight in 1..=max_weight {
@@ -254,7 +261,10 @@ fn verify_active_scan_at_weight<'s>(
             let sub_map =
                 mutation_map_subset_capped(val_mutation_map, &sub_indices, MAX_WEIGHT1_MUTATIONS_PER_VAR);
             let cost = sub_map.mutations[0].len() as u32;
-            budget_used.fetch_add(cost, Ordering::SeqCst);
+            let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
+            if crate::tui::tui_enabled() && bu % 500 < cost {
+                crate::tui::tui_scan_update(&val_principal_state.name, weight, n.min(MAX_SUBSET_MUTATION_WEIGHT), bu + cost, budget);
+            }
             let next_map = mutation_map_next(sub_map);
             verify_active_scan(
                 scope,
@@ -279,7 +289,10 @@ fn verify_active_scan_at_weight<'s>(
             }
             if !overflow && product <= MAX_MUTATIONS_PER_SUBSET {
                 let sub_map = mutation_map_subset(val_mutation_map, &sub_indices);
-                budget_used.fetch_add(product as u32, Ordering::SeqCst);
+                let bu = budget_used.fetch_add(product as u32, Ordering::SeqCst);
+                if crate::tui::tui_enabled() && bu % 500 < product as u32 {
+                    crate::tui::tui_scan_update(&val_principal_state.name, weight, n.min(MAX_SUBSET_MUTATION_WEIGHT), bu + product as u32, budget);
+                }
                 let next_map = mutation_map_next(sub_map);
                 verify_active_scan(
                     scope,
@@ -353,6 +366,13 @@ fn verify_active_scan<'s>(
             );
             if is_worthwhile {
                 worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
+                if crate::tui::tui_enabled() {
+                    let desc: String = task_map.constants.iter().zip(task_map.combination.iter())
+                        .map(|(c, v)| format!("{} <- {}", c.name, pretty_value(v)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    crate::tui::tui_mutation_detail(&desc);
+                }
                 if !verify_results_all_resolved() {
                     let _ = verify_analysis(
                         val_knowledge_map,

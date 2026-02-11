@@ -73,6 +73,11 @@ pub fn attacker_state_put_write(known: &Value, val_principal_state: &PrincipalSt
         Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
     }
     Arc::make_mut(&mut state.principal_state).push(clone);
+    let count = state.known.len();
+    drop(state);
+    if crate::tui::tui_enabled() {
+        crate::tui::tui_attacker_known(count);
+    }
     true
 }
 
