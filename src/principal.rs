@@ -11,6 +11,9 @@ struct PrincipalNamesState {
 	names: Vec<String>,
 }
 
+/// Global because principal IDs must be unique across the entire process.
+/// Every `PrincipalState` and `SlotMeta` references principals by numeric ID,
+/// so the name-to-ID mapping must be process-wide.
 static PRINCIPAL_STATE: LazyLock<Mutex<PrincipalNamesState>> = LazyLock::new(|| {
 	let mut map = HashMap::new();
 	map.insert("Attacker".to_string(), 0);
@@ -20,8 +23,8 @@ static PRINCIPAL_STATE: LazyLock<Mutex<PrincipalNamesState>> = LazyLock::new(|| 
 	})
 });
 
-pub fn principal_names_map_add(name: &str) -> PrincipalId {
-	let mut state = PRINCIPAL_STATE.lock().expect("principal state lock");
+pub(crate) fn principal_names_map_add(name: &str) -> PrincipalId {
+	let mut state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
 	if let Some(&id) = state.map.get(name) {
 		return id;
 	}
@@ -31,11 +34,11 @@ pub fn principal_names_map_add(name: &str) -> PrincipalId {
 	id
 }
 
-pub fn principal_get_name_from_id(id: PrincipalId) -> String {
-	let state = PRINCIPAL_STATE.lock().expect("principal state lock");
+pub(crate) fn principal_get_name_from_id(id: PrincipalId) -> String {
+	let state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
 	state.names.get(id as usize).cloned().unwrap_or_default()
 }
 
-pub fn principal_get_attacker_id() -> PrincipalId {
+pub(crate) fn principal_get_attacker_id() -> PrincipalId {
 	0
 }

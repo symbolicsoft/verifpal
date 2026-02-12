@@ -5,37 +5,37 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use crate::types::*;
-use crate::value::{value_equivalent_values, value_g, value_nil};
+use crate::value::{value_g, value_nil};
 
 // Primitive ID constants
-pub const PRIM_ASSERT: PrimitiveId = 1;
-pub const PRIM_CONCAT: PrimitiveId = 2;
-pub const PRIM_SPLIT: PrimitiveId = 3;
-pub const PRIM_PWHASH: PrimitiveId = 4;
-pub const PRIM_HASH: PrimitiveId = 5;
-pub const PRIM_HKDF: PrimitiveId = 6;
-pub const PRIM_AEAD_ENC: PrimitiveId = 7;
-pub const PRIM_AEAD_DEC: PrimitiveId = 8;
-pub const PRIM_ENC: PrimitiveId = 9;
-pub const PRIM_DEC: PrimitiveId = 10;
-pub const PRIM_MAC: PrimitiveId = 11;
-pub const PRIM_SIGN: PrimitiveId = 12;
-pub const PRIM_SIGNVERIF: PrimitiveId = 13;
-pub const PRIM_PKE_ENC: PrimitiveId = 14;
-pub const PRIM_PKE_DEC: PrimitiveId = 15;
-pub const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
-pub const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
-pub const PRIM_RINGSIGN: PrimitiveId = 18;
-pub const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
-pub const PRIM_BLIND: PrimitiveId = 20;
-pub const PRIM_UNBLIND: PrimitiveId = 21;
+pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
+pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
+pub(crate) const PRIM_SPLIT: PrimitiveId = 3;
+pub(crate) const PRIM_PWHASH: PrimitiveId = 4;
+pub(crate) const PRIM_HASH: PrimitiveId = 5;
+pub(crate) const PRIM_HKDF: PrimitiveId = 6;
+pub(crate) const PRIM_AEAD_ENC: PrimitiveId = 7;
+pub(crate) const PRIM_AEAD_DEC: PrimitiveId = 8;
+pub(crate) const PRIM_ENC: PrimitiveId = 9;
+pub(crate) const PRIM_DEC: PrimitiveId = 10;
+pub(crate) const PRIM_MAC: PrimitiveId = 11;
+pub(crate) const PRIM_SIGN: PrimitiveId = 12;
+pub(crate) const PRIM_SIGNVERIF: PrimitiveId = 13;
+pub(crate) const PRIM_PKE_ENC: PrimitiveId = 14;
+pub(crate) const PRIM_PKE_DEC: PrimitiveId = 15;
+pub(crate) const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
+pub(crate) const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
+pub(crate) const PRIM_RINGSIGN: PrimitiveId = 18;
+pub(crate) const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
+pub(crate) const PRIM_BLIND: PrimitiveId = 20;
+pub(crate) const PRIM_UNBLIND: PrimitiveId = 21;
 
 type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
 type CoreRuleFn = fn(&Primitive) -> (bool, Vec<Value>);
 type RewriteToFn = fn(&Primitive) -> Value;
 
 #[derive(Clone, Default)]
-pub struct DecomposeRule {
+pub(crate) struct DecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<usize>,
 	pub reveal: usize,
@@ -44,14 +44,14 @@ pub struct DecomposeRule {
 }
 
 #[derive(Clone, Default)]
-pub struct RecomposeRule {
+pub(crate) struct RecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
 #[derive(Clone, Default)]
-pub struct RewriteRule {
+pub(crate) struct RewriteRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub from: usize,
@@ -61,7 +61,7 @@ pub struct RewriteRule {
 }
 
 #[derive(Clone, Default)]
-pub struct RebuildRule {
+pub(crate) struct RebuildRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub given: Vec<Vec<usize>>,
@@ -69,19 +69,19 @@ pub struct RebuildRule {
 }
 
 #[derive(Clone)]
-pub struct PrimitiveCoreSpec {
+pub(crate) struct PrimitiveCoreSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
 	pub output: Vec<i32>,
 	pub has_rule: bool,
 	pub core_rule: Option<CoreRuleFn>,
-	pub check: bool,
+	pub definition_check: bool,
 	pub explosive: bool,
 }
 
 #[derive(Clone, Default)]
-pub struct PrimitiveSpec {
+pub(crate) struct PrimitiveSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
@@ -90,7 +90,7 @@ pub struct PrimitiveSpec {
 	pub recompose: RecomposeRule,
 	pub rewrite: RewriteRule,
 	pub rebuild: RebuildRule,
-	pub check: bool,
+	pub definition_check: bool,
 	pub explosive: bool,
 	pub password_hashing: Vec<usize>,
 }
@@ -108,7 +108,7 @@ fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bo
 				if e.values.len() != 2 {
 					return (x.clone(), false);
 				}
-				if !value_equivalent_values(&e.values[0], &value_g(), true) {
+				if !e.values[0].equivalent(&value_g(), true) {
 					return (x.clone(), false);
 				}
 				(e.values[1].clone(), true)
@@ -172,7 +172,7 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 				id: PRIM_BLIND,
 				arguments: vec![p.arguments[0].clone(), p.arguments[1].clone()],
 				output: 0,
-				check: false,
+				instance_check: false,
 			}));
 			(blind_prim, true)
 		}
@@ -183,7 +183,7 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 // Core rule functions
 fn core_rule_assert(p: &Primitive) -> (bool, Vec<Value>) {
 	let v = vec![Value::Primitive(Arc::new(p.clone()))];
-	if value_equivalent_values(&p.arguments[0], &p.arguments[1], true) {
+	if p.arguments[0].equivalent(&p.arguments[1], true) {
 		(true, v)
 	} else {
 		(false, v)
@@ -229,7 +229,7 @@ fn rewrite_to_unblind(p: &Primitive) -> Value {
 		id: PRIM_SIGN,
 		arguments: vec![p.arguments[0].clone(), inner],
 		output: 0,
-		check: false,
+		instance_check: false,
 	}))
 }
 
@@ -242,7 +242,7 @@ fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			output: vec![1],
 			has_rule: true,
 			core_rule: Some(core_rule_assert),
-			check: true,
+			definition_check: true,
 			explosive: false,
 		},
 		PrimitiveCoreSpec {
@@ -252,7 +252,7 @@ fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			output: vec![1],
 			has_rule: false,
 			core_rule: None,
-			check: false,
+			definition_check: false,
 			explosive: true,
 		},
 		PrimitiveCoreSpec {
@@ -262,7 +262,7 @@ fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			output: vec![1, 2, 3, 4, 5],
 			has_rule: true,
 			core_rule: Some(core_rule_split),
-			check: true,
+			definition_check: true,
 			explosive: false,
 		},
 	]
@@ -334,7 +334,7 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![0]), (2, vec![2])],
 				filter: Some(filter_aead_dec_rewrite),
 			},
-			check: true,
+			definition_check: true,
 			..PrimitiveSpec::default()
 		},
 		// ENC
@@ -408,7 +408,7 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![0]), (1, vec![1])],
 				filter: Some(filter_extract_dh_exponent),
 			},
-			check: true,
+			definition_check: true,
 			..PrimitiveSpec::default()
 		},
 		// PKE_ENC
@@ -512,7 +512,7 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				],
 				filter: Some(filter_ringsignverif_rewrite),
 			},
-			check: true,
+			definition_check: true,
 			..PrimitiveSpec::default()
 		},
 		// BLIND
@@ -560,71 +560,110 @@ static PRIM_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveSpec>> = LazyLock::new
 	specs.into_iter().map(|s| (s.id, s)).collect()
 });
 
-pub fn primitive_is_core(id: PrimitiveId) -> bool {
+pub(crate) trait PrimitiveDefinition {
+	fn name(&self) -> &'static str;
+	fn arity(&self) -> &[i32];
+	fn output(&self) -> &[i32];
+	fn definition_check(&self) -> bool;
+	fn is_explosive(&self) -> bool;
+	fn has_rewrite_rule(&self) -> bool;
+	fn has_single_output(&self) -> bool {
+		self.output().len() == 1 && self.output()[0] == 1
+	}
+}
+
+impl PrimitiveDefinition for PrimitiveCoreSpec {
+	fn name(&self) -> &'static str {
+		self.name
+	}
+	fn arity(&self) -> &[i32] {
+		&self.arity
+	}
+	fn output(&self) -> &[i32] {
+		&self.output
+	}
+	fn definition_check(&self) -> bool {
+		self.definition_check
+	}
+	fn is_explosive(&self) -> bool {
+		self.explosive
+	}
+	fn has_rewrite_rule(&self) -> bool {
+		self.has_rule
+	}
+}
+
+impl PrimitiveDefinition for PrimitiveSpec {
+	fn name(&self) -> &'static str {
+		self.name
+	}
+	fn arity(&self) -> &[i32] {
+		&self.arity
+	}
+	fn output(&self) -> &[i32] {
+		&self.output
+	}
+	fn definition_check(&self) -> bool {
+		self.definition_check
+	}
+	fn is_explosive(&self) -> bool {
+		self.explosive
+	}
+	fn has_rewrite_rule(&self) -> bool {
+		self.rewrite.has_rule
+	}
+}
+
+pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
+	if primitive_is_core(id) {
+		Ok(primitive_core_get(id)? as &dyn PrimitiveDefinition)
+	} else {
+		Ok(primitive_get(id)? as &dyn PrimitiveDefinition)
+	}
+}
+
+pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
 	matches!(id, PRIM_ASSERT | PRIM_CONCAT | PRIM_SPLIT)
 }
 
-pub fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
+pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
 	CORE_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
-pub fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
+pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
 	PRIM_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
-pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
-	if primitive_is_core(id) {
-		primitive_core_get(id).map(|s| s.has_rule).unwrap_or(false)
-	} else {
-		primitive_get(id)
-			.map(|s| s.rewrite.has_rule)
-			.unwrap_or(false)
-	}
+pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
+	primitive_def(id)
+		.map(|d| d.has_rewrite_rule())
+		.unwrap_or(false)
 }
 
-pub fn primitive_name(id: PrimitiveId) -> &'static str {
-	if primitive_is_core(id) {
-		primitive_core_get(id).map(|s| s.name).unwrap_or("")
-	} else {
-		primitive_get(id).map(|s| s.name).unwrap_or("")
-	}
+pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
+	primitive_def(id).map(|d| d.name()).unwrap_or("")
 }
 
-pub fn primitive_is_explosive(id: PrimitiveId) -> bool {
-	if primitive_is_core(id) {
-		primitive_core_get(id).map(|s| s.explosive).unwrap_or(false)
-	} else {
-		primitive_get(id).map(|s| s.explosive).unwrap_or(false)
-	}
+pub(crate) fn primitive_is_explosive(id: PrimitiveId) -> bool {
+	primitive_def(id).map(|d| d.is_explosive()).unwrap_or(false)
 }
 
-pub fn primitive_has_single_output(id: PrimitiveId) -> bool {
-	if primitive_is_core(id) {
-		primitive_core_get(id)
-			.map(|s| s.output.len() == 1 && s.output[0] == 1)
-			.unwrap_or(false)
-	} else {
-		primitive_get(id)
-			.map(|s| s.output.len() == 1 && s.output[0] == 1)
-			.unwrap_or(false)
-	}
+pub(crate) fn primitive_has_single_output(id: PrimitiveId) -> bool {
+	primitive_def(id)
+		.map(|d| d.has_single_output())
+		.unwrap_or(false)
 }
 
-pub fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
-	if primitive_is_core(id) {
-		let s = primitive_core_get(id)?;
-		Ok((&s.output, s.check))
-	} else {
-		let s = primitive_get(id)?;
-		Ok((&s.output, s.check))
-	}
+pub(crate) fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
+	let d = primitive_def(id)?;
+	Ok((d.output(), d.definition_check()))
 }
 
-pub fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
+pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 	CORE_SPECS
 		.values()
 		.find(|s| s.name == name)
@@ -633,10 +672,6 @@ pub fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
-pub fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
-	if primitive_is_core(p.id) {
-		Ok(&primitive_core_get(p.id)?.arity)
-	} else {
-		Ok(&primitive_get(p.id)?.arity)
-	}
+pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
+	Ok(primitive_def(p.id)?.arity())
 }

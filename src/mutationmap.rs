@@ -8,7 +8,13 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-pub fn mutation_map_init(
+/// Stage threshold for mutation expansion.  In stages 1-3 the mutation map
+/// offers only minimal replacements (nil for constants, G^nil for equations)
+/// to keep the search space small while the attacker builds initial knowledge.
+/// From stage 4 onward, all attacker-known values are offered as mutations.
+const STAGE_MUTATION_EXPANSION: i32 = 3;
+
+pub(crate) fn mutation_map_init(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -103,7 +109,7 @@ fn mutation_map_replace_value(
 	as_: &AttackerState,
 ) -> VResult<Vec<Value>> {
 	let a =
-		value_resolve_value_internal_values_from_principal_state(a, a, root_index, ps, as_, false)?;
+		resolve_ps_values(a, a, root_index, ps, as_, false)?;
 	match &a {
 		Value::Constant(_) => Ok(mutation_map_replace_constant(&a, stage, ps, as_)),
 		Value::Primitive(_) => Ok(mutation_map_replace_primitive(ctx, &a, stage, ps, as_)),
@@ -124,9 +130,9 @@ fn mutation_map_replace_constant(
 		}
 	}
 	mutations.push(value_nil());
-	if stage <= 3 {
+	if stage <= STAGE_MUTATION_EXPANSION {
 		return mutations;
-	} // stageMutationExpansion = 3
+	}
 	for v in as_.known.iter() {
 		if let Value::Constant(vc) = v {
 			if vc.is_g_or_nil() {
@@ -189,7 +195,7 @@ fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> 
 			3 => mutations.push(value_g_nil_nil()),
 			_ => {}
 		}
-		if stage <= 3 {
+		if stage <= STAGE_MUTATION_EXPANSION {
 			return mutations;
 		}
 		for v in as_.known.iter() {
@@ -205,7 +211,7 @@ fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> 
 	mutations
 }
 
-pub fn mutation_map_subset(full_map: &MutationMap, indices: &[usize]) -> MutationMap {
+pub(crate) fn mutation_map_subset(full_map: &MutationMap, indices: &[usize]) -> MutationMap {
 	MutationMap {
 		out_of_mutations: false,
 		constants: indices
@@ -222,7 +228,7 @@ pub fn mutation_map_subset(full_map: &MutationMap, indices: &[usize]) -> Mutatio
 }
 
 /// Compute the product of mutation sizes, returning None if it exceeds `cap`.
-pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
+pub(crate) fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
 	let mut product: usize = 1;
 	for m in sizes {
 		if m > 0 && product > cap / m {
@@ -237,7 +243,7 @@ pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Optio
 	}
 }
 
-pub fn mutation_map_subset_capped(
+pub(crate) fn mutation_map_subset_capped(
 	full_map: &MutationMap,
 	indices: &[usize],
 	max_product: usize,
@@ -261,7 +267,7 @@ pub fn mutation_map_subset_capped(
 	sub
 }
 
-pub fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
+pub(crate) fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
 	if mm.combination.is_empty() {
 		mm.out_of_mutations = true;
 		return mm;
@@ -286,7 +292,7 @@ pub fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
 }
 
 impl MutationMap {
-	pub fn new(
+	pub(crate) fn new(
 		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
@@ -295,15 +301,15 @@ impl MutationMap {
 	) -> VResult<MutationMap> {
 		mutation_map_init(ctx, km, ps, as_, stage)
 	}
-	pub fn next(self) -> MutationMap {
+	pub(crate) fn next(self) -> MutationMap {
 		mutation_map_next(self)
 	}
-	pub fn subset(&self, indices: &[usize]) -> MutationMap {
+	pub(crate) fn subset(&self, indices: &[usize]) -> MutationMap {
 		mutation_map_subset(self, indices)
 	}
 }
 
-pub fn inject_skeleton_not_deeper_pub(p: &Primitive, reference: &Primitive) -> bool {
+pub(crate) fn inject_skeleton_not_deeper_pub(p: &Primitive, reference: &Primitive) -> bool {
 	if p.id != reference.id {
 		return false;
 	}

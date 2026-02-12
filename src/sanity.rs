@@ -9,7 +9,7 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-pub fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
+pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
@@ -41,7 +41,7 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 }
 
 #[allow(clippy::only_used_in_recursion)]
-pub fn sanity_assignment_constants(
+pub(crate) fn sanity_assignment_constants(
 	right: &Value,
 	existing: &[Constant],
 	km: &ProtocolTrace,
@@ -83,8 +83,8 @@ pub fn sanity_assignment_constants(
 	Ok(constants)
 }
 
-pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
-	let (output, check) = primitive_output_spec(p.id)?;
+pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
+	let (output, definition_check) = primitive_output_spec(p.id)?;
 	if !output.contains(&(outputs.len() as i32)) {
 		return Err(VerifpalError::Sanity(format!(
 			"primitive has {} outputs, expecting {}",
@@ -92,7 +92,7 @@ pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
 			pretty_arity(output)
 		)));
 	}
-	if p.check && !check {
+	if p.instance_check && !definition_check {
 		return Err(VerifpalError::Sanity("primitive is checked but does not support checking".to_string()));
 	}
 	sanity_check_primitive_argument_outputs(p)
@@ -295,11 +295,11 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 	Ok((declared_names, declared_ids))
 }
 
-pub fn sanity_fail_on_failed_checked_primitive_rewrite(
+pub(crate) fn sanity_fail_on_failed_checked_primitive_rewrite(
 	failures: &[(Primitive, usize)],
 ) -> VResult<()> {
 	for (p, _) in failures {
-		if p.check {
+		if p.instance_check {
 			return Err(VerifpalError::Sanity(format!("checked primitive fails: {}", p)));
 		}
 	}
@@ -319,14 +319,14 @@ fn sanity_check_primitive_argument_outputs(p: &Primitive) -> VResult<()> {
 	Ok(())
 }
 
-pub fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
+pub(crate) fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
 	if e.values.len() > 3 {
 		return Err(VerifpalError::Sanity(format!(
 			"too many layers in equation ({}), maximum is 2",
 			e
 		)));
 	}
-	let g_id = value_g().as_constant().expect("g is Constant").id;
+	let g_id: ValueId = 0; // g is always id 0
 	for (i, c) in e.values.iter().enumerate() {
 		if let Value::Constant(con) = c {
 			if i == 0 && con.id != g_id {
@@ -346,7 +346,7 @@ pub fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
 	Ok(())
 }
 
-pub fn sanity_check_equation_generators(a: &Value) -> VResult<()> {
+pub(crate) fn sanity_check_equation_generators(a: &Value) -> VResult<()> {
 	match a {
 		Value::Primitive(p) => {
 			for va in &p.arguments {

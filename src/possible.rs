@@ -9,7 +9,7 @@ use crate::value::*;
 
 const MAX_POSSIBLE_DEPTH: usize = 16;
 
-pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
+pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
 	}
@@ -27,7 +27,7 @@ pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
 		.collect()
 }
 
-pub fn can_decompose(
+pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
 	as_: &AttackerState,
@@ -93,7 +93,7 @@ pub fn can_decompose(
 	}
 }
 
-pub fn can_recompose(
+pub(crate) fn can_recompose(
 	p: &Primitive,
 	as_: &AttackerState,
 ) -> (bool, Value, Vec<Value>) {
@@ -113,8 +113,8 @@ pub fn can_recompose(
 		for &ii in given_set {
 			for v in as_.known.iter() {
 				if let Value::Primitive(vp) = v {
-					let (equiv, vo, _) = value_equivalent_primitives(vp, p, false);
-					if !equiv || vo != ii {
+					let pm = value_equivalent_primitives(vp, p, false);
+					if !pm.equivalent || pm.output_left != ii {
 						continue;
 					}
 					ar.push(v.clone());
@@ -129,7 +129,7 @@ pub fn can_recompose(
 	(false, empty, vec![])
 }
 
-pub fn can_reconstruct_primitive(
+pub(crate) fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
 	as_: &AttackerState,
@@ -181,7 +181,7 @@ pub fn can_reconstruct_primitive(
 	(true, has)
 }
 
-pub fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec<Value>) {
+pub(crate) fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec<Value>) {
 	if e.values.len() < 2 {
 		return (false, vec![]);
 	}
@@ -215,7 +215,7 @@ pub fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec
 	(false, vec![])
 }
 
-pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
+pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
 	if depth > MAX_POSSIBLE_DEPTH {
 		return (false, vec![Value::Primitive(Arc::new(p.clone()))]);
 	}
@@ -250,7 +250,7 @@ pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, V
 				return rule(pc_ref);
 			}
 		}
-		return (!prim.check, wrap(pc_ref));
+		return (!prim.definition_check, wrap(pc_ref));
 	}
 	let prim = match primitive_get(pc_ref.id) {
 		Ok(s) => s,
@@ -262,17 +262,17 @@ pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, V
 	let from = &pc_ref.arguments[prim.rewrite.from];
 	if let Value::Primitive(from_p) = from {
 		if from_p.id != prim.rewrite.id {
-			return (!prim.check, wrap(pc_ref));
+			return (!prim.definition_check, wrap(pc_ref));
 		}
 		if !can_rewrite_primitive(pc_ref, ps, depth) {
-			return (!prim.check, wrap(pc_ref));
+			return (!prim.definition_check, wrap(pc_ref));
 		}
 		if let Some(to_fn) = prim.rewrite.to {
 			let rewrite = to_fn(from_p);
 			return (true, vec![rewrite]);
 		}
 	}
-	(!prim.check, wrap(pc_ref))
+	(!prim.definition_check, wrap(pc_ref))
 }
 
 fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
@@ -306,11 +306,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
 						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
-						if r {
-							Some(v.into_iter().next().unwrap())
-						} else {
-							None
-						}
+						if r { v.into_iter().next() } else { None }
 					}
 					Value::Equation(inner_e) => {
 						let mut new_values: Option<Vec<Value>> = None;
@@ -344,7 +340,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 	true
 }
 
-pub fn can_rebuild(p: &Primitive) -> (bool, Value) {
+pub(crate) fn can_rebuild(p: &Primitive) -> (bool, Value) {
 	let empty = value_nil();
 	if primitive_is_core(p.id) {
 		return (false, empty);
@@ -374,8 +370,8 @@ pub fn can_rebuild(p: &Primitive) -> (bool, Value) {
 		// Check that all has entries are equivalent but with different outputs
 		let all_ok = has[1..].iter().all(|has_p| {
 			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has_p) {
-				let (equiv, o1, o2) = value_equivalent_primitives(h0, hp, false);
-				equiv && o1 != o2
+				let pm = value_equivalent_primitives(h0, hp, false);
+				pm.equivalent && pm.output_left != pm.output_right
 			} else {
 				false
 			}
@@ -390,7 +386,7 @@ pub fn can_rebuild(p: &Primitive) -> (bool, Value) {
 	(false, empty)
 }
 
-pub fn find_obtainable_passwords(
+pub(crate) fn find_obtainable_passwords(
 	a: &Value,
 	a_parent: &Value,
 	a_index: Option<usize>,

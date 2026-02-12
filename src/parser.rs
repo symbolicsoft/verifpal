@@ -8,6 +8,9 @@ use crate::value::value_names_map_add;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+/// Global counter for generating unique unnamed constant names during parsing.
+/// Must be process-wide so that unnamed constants never collide across models
+/// parsed in the same process (e.g. during parallel test runs).
 static UNNAMED_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 const RESERVED: &[&str] = &[
@@ -188,8 +191,8 @@ impl<'a> Parser<'a> {
 		if self.pos == start {
 			return Err(VerifpalError::Parse(format!("expected identifier at position {}", self.pos)));
 		}
-		let s =
-			std::str::from_utf8(&self.input[start..self.pos]).expect("identifier is valid UTF-8");
+		let s = std::str::from_utf8(&self.input[start..self.pos])
+			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in identifier".to_string()))?;
 		Ok(s.to_lowercase())
 	}
 
@@ -593,7 +596,7 @@ impl<'a> Parser<'a> {
 			id: prim_id,
 			arguments,
 			output: 0,
-			check,
+			instance_check: check,
 		})))
 	}
 
@@ -617,8 +620,8 @@ impl<'a> Parser<'a> {
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
 		}
-		let num_str =
-			std::str::from_utf8(&self.input[start..self.pos]).expect("phase number is valid UTF-8");
+		let num_str = std::str::from_utf8(&self.input[start..self.pos])
+			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in phase number".to_string()))?;
 		let number: i32 = num_str
 			.parse()
 			.map_err(|_| VerifpalError::Parse("invalid phase number".to_string()))?;
@@ -801,7 +804,7 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub fn parse_file(file_path: &str) -> VResult<Model> {
+pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	let path = std::path::Path::new(file_path);
 	let file_name = path
 		.file_name()
@@ -822,7 +825,7 @@ pub fn parse_file(file_path: &str) -> VResult<Model> {
 	parse_string(&file_name, &content)
 }
 
-pub fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
+pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 	let mut parser = Parser::new(input);
 	let mut model = parser.parse_model()?;
 	model.file_name = file_name.to_string();

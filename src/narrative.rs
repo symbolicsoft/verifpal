@@ -10,7 +10,7 @@ use crate::types::*;
 /// 0 = Default, 1 = Jevil, 2 = Spamton
 static CHARACTER: AtomicU8 = AtomicU8::new(0);
 
-pub fn set_character(name: &str) -> VResult<()> {
+pub(crate) fn set_character(name: &str) -> VResult<()> {
 	match name.to_lowercase().as_str() {
 		"jevil" => {
 			CHARACTER.store(1, Ordering::Relaxed);
@@ -33,7 +33,7 @@ fn character() -> u8 {
 
 // ── Narrative pools ──────────────────────────────────────────────────────
 
-pub enum NarrativeContext {
+pub(crate) enum NarrativeContext {
 	Init,
 	Mutation,
 	Escalation,
@@ -303,14 +303,14 @@ fn pool(ctx: &NarrativeContext) -> &'static [&'static str] {
 }
 
 /// Pick a narrative line for the given context, using `seed` to vary selection.
-pub fn pick_narrative(ctx: NarrativeContext, seed: u64) -> String {
+pub(crate) fn pick_narrative(ctx: NarrativeContext, seed: u64) -> String {
 	let p = pool(&ctx);
 	let idx = (seed as usize) % p.len();
 	p[idx].to_string()
 }
 
 /// Pick a mutation narrative with `{P}` replaced by the principal name.
-pub fn narrative_for_mutation(principal: &str, seed: u64) -> String {
+pub(crate) fn narrative_for_mutation(principal: &str, seed: u64) -> String {
 	let p = pool(&NarrativeContext::Mutation);
 	let idx = (seed as usize) % p.len();
 	p[idx].replace("{P}", principal)

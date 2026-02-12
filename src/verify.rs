@@ -10,9 +10,8 @@ use crate::query::query_start;
 use crate::sanity::*;
 use crate::types::*;
 use crate::value::*;
-use crate::verifhub::{verifhub, VERIFHUB_SCHEDULED};
+use crate::verifhub::verifhub;
 use crate::verifyactive::verify_active;
-use std::sync::atomic::Ordering;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -20,16 +19,19 @@ use std::sync::atomic::Ordering;
 
 /// Runs the main verification engine for Verifpal on a model loaded from a file.
 /// Returns a vec of VerifyResult and a "results code" string.
-pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
+///
+/// `verifhub_scheduled` — when `true`, submit the results to VerifHub on completion.
+/// This replaced the old `VERIFHUB_SCHEDULED` global `AtomicBool`.
+pub(crate) fn verify(file_path: &str, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
 	let m = parse_file(file_path)?;
-	verify_model(&m)
+	verify_model(&m, verifhub_scheduled)
 }
 
 // ---------------------------------------------------------------------------
 // Core verification pipeline
 // ---------------------------------------------------------------------------
 
-fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_model(m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
 	let (km, ps) = sanity(m)?;
 	crate::tui::tui_init(m);
 	let ctx = VerifyContext::new(m);
@@ -46,14 +48,14 @@ fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
 		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
 	}
-	verify_end(&ctx, m)
+	verify_end(&ctx, m, verifhub_scheduled)
 }
 
 // ---------------------------------------------------------------------------
 // Resolve unresolved queries against the current principal state
 // ---------------------------------------------------------------------------
 
-pub fn verify_resolve_queries(
+pub(crate) fn verify_resolve_queries(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -71,7 +73,7 @@ pub fn verify_resolve_queries(
 // Standard run: resolve, inject skeletons, rewrite, analyse each principal
 // ---------------------------------------------------------------------------
 
-pub fn verify_standard_run(
+pub(crate) fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -150,7 +152,7 @@ fn verify_get_results_code(results: &[VerifyResult]) -> String {
 // End of verification: print summary, optionally submit to VerifHub
 // ---------------------------------------------------------------------------
 
-fn verify_end(ctx: &VerifyContext, m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_end(ctx: &VerifyContext, m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
 	// Leave the TUI alternate screen before printing final results
 	crate::tui::tui_finish();
 
@@ -201,7 +203,7 @@ fn verify_end(ctx: &VerifyContext, m: &Model) -> VResult<(Vec<VerifyResult>, Str
 
 	let results_code = verify_get_results_code(&results);
 
-	if VERIFHUB_SCHEDULED.load(Ordering::Relaxed) {
+	if verifhub_scheduled {
 		verifhub(m, file_name, &results_code)?;
 	}
 

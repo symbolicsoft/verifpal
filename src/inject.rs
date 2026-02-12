@@ -10,10 +10,49 @@ use crate::primitive::primitive_is_explosive;
 use crate::types::*;
 use crate::value::*;
 
+/// Maximum number of injected value combinations per primitive.  The Cartesian
+/// product of per-argument injectants can grow very fast (e.g. 3 args with
+/// 50 candidates each = 125k).  500 is enough to cover the useful injection
+/// space for real protocols while keeping the inner loop fast.
 const MAX_INJECTIONS_PER_PRIMITIVE: usize = 500;
+
+/// Stage at which recursive injection begins.  In stages 1-4 the search
+/// focuses on direct substitutions (constants, known primitives, simple
+/// skeletons).  Starting at stage 5, the engine recursively injects into
+/// known primitives' arguments, which is more expensive but necessary to
+/// find attacks that require nested constructed values.  The depth of
+/// recursive injection is bounded by `stage - STAGE_RECURSIVE_INJECTION`,
+/// so stage 5 allows depth 0 (one level), stage 6 allows depth 1, etc.
 const STAGE_RECURSIVE_INJECTION: i32 = 5;
 
-pub fn inject(
+/// Generate all attacker-constructible values that could replace a given
+/// primitive in a principal's state.
+///
+/// Rather than enumerating *all* possible combinations of attacker-known
+/// values (which would be astronomically expensive), injection works by
+/// filtering candidates per-argument based on structural compatibility:
+///
+/// - Constants can only replace constant arguments.
+/// - Primitives can only replace primitive arguments with the same
+///   **skeleton** (see below).
+/// - Equations can only replace equations of the same length.
+///
+/// The results are combined via Cartesian product (capped at
+/// `MAX_INJECTIONS_PER_PRIMITIVE`) to produce concrete replacement values.
+///
+/// ## Skeletons
+///
+/// A skeleton is the "shape" of a primitive with all secrets erased:
+/// constants become `nil`, equations become `G` or `G^nil` depending on
+/// length.  Two primitives with the same skeleton have the same structure
+/// and could plausibly be interchanged.  This avoids injecting, say, an
+/// `ENC(k, m)` where an `AEAD_ENC(k, m, ad)` is expected.
+///
+/// Skeleton comparison uses a three-stage filter for speed:
+/// 1. **Depth check** — O(1), no allocation.
+/// 2. **Hash check** — O(n) FNV-style hash, no allocation.
+/// 3. **Full equivalence** — only if depth and hash match.
+pub(crate) fn inject(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	inject_depth: usize,
@@ -39,7 +78,7 @@ fn inject_constant_rules(c: &Constant, arg: usize, p: &Primitive) -> bool {
 	if !matches!(&p.arguments[arg], Value::Constant(_)) {
 		return false;
 	}
-	if c.equivalent(value_g().as_constant().expect("g is Constant")) {
+	if c.id == 0 {
 		return false;
 	}
 	true
@@ -63,6 +102,13 @@ fn inject_equation_rules(e: &Equation, arg: usize, p: &Primitive) -> bool {
 	}
 }
 
+/// Whether a primitive is excluded from injection at the current stage.
+///
+/// - **Stages 0-1**: All primitive injection is blocked.  The search focuses
+///   on simple constant/equation mutations first.
+/// - **Stage 2**: Only "explosive" primitives (HASH, HKDF, CONCAT) are blocked.
+///   These create many candidates and are deferred to reduce early-stage cost.
+/// - **Stage 3+**: All primitives are allowed.
 fn inject_primitive_stage_restricted(p: &Primitive, stage: i32) -> bool {
 	match stage {
 		0 | 1 => true,
@@ -71,12 +117,21 @@ fn inject_primitive_stage_restricted(p: &Primitive, stage: i32) -> bool {
 	}
 }
 
+/// Compute the skeleton of a primitive: a normalized form where all secret
+/// values are replaced by canonical attacker-known surrogates.
+///
+/// - Constants → `nil` (the attacker's canonical known constant).
+/// - Nested primitives → recursively skeletonized.
+/// - Equations with 1 element → `G` (bare generator).
+/// - Equations with 2+ elements → `G^nil` (attacker's canonical DH public key).
+///
+/// Returns the skeleton and the maximum nesting depth encountered.
 fn inject_primitive_skeleton(p: &Primitive, depth: usize) -> (Primitive, usize) {
 	let mut skeleton = Primitive {
 		id: p.id,
 		arguments: Vec::with_capacity(p.arguments.len()),
 		output: p.output,
-		check: false,
+		instance_check: false,
 	};
 	let mut d = depth;
 	for a in &p.arguments {
@@ -99,7 +154,11 @@ fn inject_primitive_skeleton(p: &Primitive, depth: usize) -> (Primitive, usize) 
 	(skeleton, d + 1)
 }
 
-pub fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
+/// Compute the nesting depth of a primitive's skeleton without materializing it.
+/// Used as a cheap pre-filter: a candidate injectant can only replace a
+/// reference primitive if its skeleton depth is ≤ the reference's depth
+/// (injecting a deeper structure would change the protocol's computation shape).
+pub(crate) fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
 	let max_child = p
 		.arguments
 		.iter()
@@ -112,7 +171,11 @@ pub fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
 	max_child + 1
 }
 
-pub fn primitive_skeleton_hash(p: &Primitive) -> u64 {
+/// FNV-style hash of a primitive's structure (primitive IDs, argument types,
+/// equation lengths).  Used as a fast second filter after depth comparison:
+/// if two skeletons have different hashes, they cannot be equivalent, avoiding
+/// the cost of a full recursive comparison.
+pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761);
 	for a in &p.arguments {
 		match a {
@@ -132,11 +195,14 @@ pub fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 
 /// Compute the skeleton hash of a primitive (hash of its skeleton form).
 /// This normalizes equations the same way inject_primitive_skeleton does.
-pub fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
+pub(crate) fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
 	let (skel, _) = inject_primitive_skeleton(p, 0);
 	primitive_skeleton_hash(&skel)
 }
 
+/// Check if candidate primitive `p` has the same skeleton as `reference`.
+/// Uses the three-stage filter (same ID → depth ≤ → hash match → full check)
+/// to avoid expensive recursive comparisons in the common non-matching case.
 fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 	if p.id != reference.id {
 		return false;
@@ -151,11 +217,10 @@ fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 	}
 	let (p1, _) = inject_primitive_skeleton(p, 0);
 	let (p2, _) = inject_primitive_skeleton(reference, 0);
-	let (e, _, _) = value_equivalent_primitives(&p1, &p2, false);
-	e
+	value_equivalent_primitives(&p1, &p2, false).equivalent
 }
 
-pub fn inject_missing_skeletons(
+pub(crate) fn inject_missing_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	record: &MutationRecord,

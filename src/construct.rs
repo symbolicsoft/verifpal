@@ -9,7 +9,7 @@ use crate::value::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn construct_protocol_trace(
+pub(crate) fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
@@ -28,7 +28,10 @@ pub fn construct_protocol_trace(
 
 	// Add builtins (g, nil)
 	for builtin in &[value_g(), value_nil()] {
-		let c = builtin.as_constant().expect("builtin is Constant").clone();
+		let c = match builtin.as_constant() {
+			Some(c) => c.clone(),
+			None => continue,
+		};
 		let known_by: Vec<_> = principal_ids
 			.iter()
 			.map(|&pid| HashMap::from([(pid, pid)]))
@@ -76,7 +79,7 @@ fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<Pr
 	for slot in &trace.slots {
 		match &slot.initial_value {
 			Value::Primitive(_) | Value::Equation(_) => {
-				let (_, v) = value_resolve_value_internal_values_from_protocol_trace(
+				let (_, v) = resolve_trace_values(
 					&slot.initial_value,
 					trace,
 				);
@@ -343,7 +346,7 @@ fn construct_trace_render_message(
 	Ok(())
 }
 
-pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
+pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut states = Vec::new();
 	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
 		let n = trace.slots.len();
@@ -436,7 +439,7 @@ fn construct_principal_states_get_value_mutatability(
 	}
 }
 
-pub fn construct_principal_state_clone(ps: &PrincipalState, purify: bool) -> PrincipalState {
+pub(crate) fn construct_principal_state_clone(ps: &PrincipalState, purify: bool) -> PrincipalState {
 	let values = ps
 		.values
 		.iter()

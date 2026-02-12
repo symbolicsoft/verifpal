@@ -4,11 +4,8 @@
 use crate::info::info_message;
 use crate::pretty::pretty_model;
 use crate::types::*;
-use std::sync::atomic::AtomicBool;
 
-pub static VERIFHUB_SCHEDULED: AtomicBool = AtomicBool::new(false);
-
-pub fn verifhub(m: &Model, file_name: &str, results_code: &str) -> VResult<()> {
+pub(crate) fn verifhub(m: &Model, file_name: &str, results_code: &str) -> VResult<()> {
 	info_message(
 		"Your model will now be submitted to VerifHub.",
 		InfoLevel::Verifpal,

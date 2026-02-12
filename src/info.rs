@@ -11,7 +11,7 @@ use colored::*;
 // Banner and separators
 // ---------------------------------------------------------------------------
 
-pub fn info_banner(version: &str) {
+pub(crate) fn info_banner(version: &str) {
 	if color_output_support() {
 		println!("{}", "\u{2500}".repeat(50).dimmed());
 		println!(
@@ -27,7 +27,7 @@ pub fn info_banner(version: &str) {
 	}
 }
 
-pub fn info_separator() {
+pub(crate) fn info_separator() {
 	if color_output_support() {
 		println!("{}", "\u{2500}".repeat(50).dimmed());
 	} else {
@@ -39,7 +39,7 @@ pub fn info_separator() {
 // Core message output
 // ---------------------------------------------------------------------------
 
-pub fn info_message(m: &str, t: InfoLevel, show_analysis: bool) {
+pub(crate) fn info_message(m: &str, t: InfoLevel, show_analysis: bool) {
 	if crate::tui::tui_enabled() {
 		crate::tui::tui_message(m, t);
 		return;
@@ -153,7 +153,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 // Result summary formatting
 // ---------------------------------------------------------------------------
 
-pub fn info_verify_result_summary(
+pub(crate) fn info_verify_result_summary(
 	mutated_info: &str,
 	summary: &str,
 	o_results: &[QueryOptionResult],
@@ -243,7 +243,7 @@ pub fn info_verify_result_summary(
 // Analysis progress
 // ---------------------------------------------------------------------------
 
-pub fn info_analysis(stage: i32) {
+pub(crate) fn info_analysis(stage: i32) {
 	let analysis_count = crate::context::analysis_count_get();
 	// Throttle updates — only print at intervals proportional to count
 	let interval = match analysis_count {
@@ -290,7 +290,7 @@ pub fn info_analysis(stage: i32) {
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-pub fn info_literal_number(n: usize, title_case: bool) -> String {
+pub(crate) fn info_literal_number(n: usize, title_case: bool) -> String {
 	if n > 9 {
 		return format!("{}th", n);
 	}
@@ -308,7 +308,7 @@ pub fn info_literal_number(n: usize, title_case: bool) -> String {
 	words[n].to_string()
 }
 
-pub fn info_output_text(revealed: &Value) -> String {
+pub(crate) fn info_output_text(revealed: &Value) -> String {
 	match revealed {
 		Value::Constant(_) | Value::Equation(_) => revealed.to_string(),
 		Value::Primitive(p) => {
@@ -326,7 +326,7 @@ pub fn info_output_text(revealed: &Value) -> String {
 // Mutation trace output
 // ---------------------------------------------------------------------------
 
-pub fn info_query_mutated_values(
+pub(crate) fn info_query_mutated_values(
 	trace: &ProtocolTrace,
 	diffs: &[SlotDiff],
 	val_attacker_state: &AttackerState,
@@ -339,13 +339,8 @@ pub fn info_query_mutated_values(
 	let mut relevant = false;
 
 	for diff in diffs {
-		let is_target = value_equivalent_values(target_value, &diff.assigned, false);
-		let attacker_knows = find_equivalent_in_map(
-			target_value,
-			&val_attacker_state.known,
-			&val_attacker_state.known_map,
-		)
-		.is_some();
+		let is_target = target_value.equivalent(&diff.assigned, false);
+		let attacker_knows = val_attacker_state.knows(target_value).is_some();
 
 		let (m_info, m_relevant) = info_query_mutated_value(trace, diff, is_target, attacker_knows);
 		if m_relevant {
@@ -369,11 +364,7 @@ pub fn info_query_mutated_values(
 		return mutated_info;
 	}
 	for m_val in &mutated {
-		let ai = match find_equivalent_in_map(
-			m_val,
-			&val_attacker_state.known,
-			&val_attacker_state.known_map,
-		) {
+		let ai = match val_attacker_state.knows(m_val) {
 			Some(idx) => idx,
 			None => continue,
 		};

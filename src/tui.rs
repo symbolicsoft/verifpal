@@ -30,11 +30,11 @@ static TUI_MODE: AtomicBool = AtomicBool::new(false);
 static TUI_OUT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static LAST_REDRAW_MS: AtomicU64 = AtomicU64::new(0);
 
-pub fn set_tui_mode(enabled: bool) {
+pub(crate) fn set_tui_mode(enabled: bool) {
 	TUI_MODE.store(enabled, Ordering::Relaxed);
 }
 
-pub fn tui_mode() -> bool {
+pub(crate) fn tui_mode() -> bool {
 	TUI_MODE.load(Ordering::Relaxed)
 }
 
@@ -147,7 +147,7 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-pub fn tui_init(m: &Model) {
+pub(crate) fn tui_init(m: &Model) {
 	if !color_output_support() || !tui_mode() {
 		return;
 	}
@@ -189,7 +189,8 @@ pub fn tui_init(m: &Model) {
 						n_generated: 0,
 						n_computed: 0,
 					});
-					st.principals.last_mut().expect("just pushed principal")
+					// SAFETY: just pushed, so last_mut is always Some
+				st.principals.last_mut().unwrap_or_else(|| unreachable!())
 				};
 				for expr in &principal.expressions {
 					match expr.kind {
@@ -238,7 +239,7 @@ pub fn tui_init(m: &Model) {
 		prev(info);
 	}));
 
-	let _lock = TUI_OUT.lock().expect("TUI output lock");
+	let _lock = TUI_OUT.lock().unwrap_or_else(|e| e.into_inner());
 	print!("{}{}", ESC_ALT_SCREEN, ESC_HIDE_CURSOR);
 	drop(st);
 	redraw_locked();
@@ -246,7 +247,7 @@ pub fn tui_init(m: &Model) {
 }
 
 /// Handle an info_message call in TUI mode.
-pub fn tui_message(msg: &str, msg_type: InfoLevel) {
+pub(crate) fn tui_message(msg: &str, msg_type: InfoLevel) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -327,7 +328,7 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 }
 
 /// Handle an info_analysis progress tick in TUI mode.
-pub fn tui_progress(stage_str: &str, count: usize) {
+pub(crate) fn tui_progress(stage_str: &str, count: usize) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -340,7 +341,7 @@ pub fn tui_progress(stage_str: &str, count: usize) {
 }
 
 /// Update attacker known value count (called from attacker_state_put_write).
-pub fn tui_attacker_known(count: usize) {
+pub(crate) fn tui_attacker_known(count: usize) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -358,7 +359,7 @@ pub fn tui_attacker_known(count: usize) {
 }
 
 /// Update scan progress (called from verify_active_scan_at_weight).
-pub fn tui_scan_update(
+pub(crate) fn tui_scan_update(
 	principal: &str,
 	weight: usize,
 	max_weight: usize,
@@ -387,7 +388,7 @@ pub fn tui_scan_update(
 }
 
 /// Record a worthwhile mutation description (called on worthwhile mutations).
-pub fn tui_mutation_detail(desc: &str) {
+pub(crate) fn tui_mutation_detail(desc: &str) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -404,7 +405,7 @@ pub fn tui_mutation_detail(desc: &str) {
 }
 
 /// Update stage (called at stage transitions).
-pub fn tui_stage_update(stage: i32) {
+pub(crate) fn tui_stage_update(stage: i32) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -421,7 +422,7 @@ pub fn tui_stage_update(stage: i32) {
 }
 
 /// Leave the TUI and restore the normal terminal.
-pub fn tui_finish() {
+pub(crate) fn tui_finish() {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -443,14 +444,14 @@ pub fn tui_finish() {
 	force_redraw();
 	std::thread::sleep(std::time::Duration::from_millis(800));
 
-	let _lock = TUI_OUT.lock().expect("TUI output lock");
+	let _lock = TUI_OUT.lock().unwrap_or_else(|e| e.into_inner());
 	print!("{}{}", ESC_SHOW_CURSOR, ESC_NORMAL_SCREEN);
 	io::stdout().flush().ok();
 
 	TUI.write().unwrap_or_else(|e| e.into_inner()).enabled = false;
 }
 
-pub fn tui_enabled() -> bool {
+pub(crate) fn tui_enabled() -> bool {
 	if !tui_mode() {
 		return false;
 	}
@@ -460,7 +461,7 @@ pub fn tui_enabled() -> bool {
 // ── Redraw ─────────────────────────────────────────────────────────────────
 
 fn tui_redraw() {
-	let _lock = TUI_OUT.lock().expect("TUI output lock");
+	let _lock = TUI_OUT.lock().unwrap_or_else(|e| e.into_inner());
 	redraw_locked();
 	io::stdout().flush().ok();
 }

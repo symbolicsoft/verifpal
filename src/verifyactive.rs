@@ -17,8 +17,7 @@ use crate::primitive::*;
 use crate::principal::principal_get_attacker_id;
 use crate::types::*;
 use crate::value::{
-	compute_slot_diffs, value_g_nil,
-	value_resolve_value_internal_values_from_protocol_trace,
+	compute_slot_diffs, resolve_trace_values, value_g_nil,
 };
 use crate::verify::{verify_resolve_queries, verify_standard_run};
 use crate::verifyanalysis::verify_analysis;
@@ -35,22 +34,47 @@ struct FailedGuardInfo {
 }
 
 /// Budget parameters controlling the active attacker's search strategy.
+///
+/// These values are tuned empirically against the Verifpal test suite and
+/// real-world protocol models.  The goal is to explore enough of the mutation
+/// space to find attacks in common protocols (TLS, Signal, Noise, etc.) while
+/// keeping verification of typical models under a few seconds.
 struct StageBudget {
 	/// Stages beyond this threshold are considered for exhaustion detection.
+	/// Set to 6 because stages 1-5 already cover single-variable mutations,
+	/// explosive primitives, recursive injection, and expanded mutation maps.
+	/// If no new knowledge is gained after all of those, further stages are
+	/// unlikely to produce results.
 	exhaustion_threshold: i32,
-	/// Maximum stage number before switching to sequential execution.
+	/// Maximum stage number.  At 10 the search has explored single-variable
+	/// through 3-variable mutations across all principals, with recursive
+	/// injection active from stage 5+.  Real attacks in published protocols
+	/// are consistently found before stage 8.
 	max_stage: i32,
 	/// Maximum subset weight (number of simultaneous variable mutations).
+	/// Weight 1 = single-variable, weight 2 = pairs, weight 3 = triples.
+	/// Beyond triples the combinatorial cost grows faster than the
+	/// likelihood of finding real attacks.
 	max_subset_weight: usize,
-	/// Maximum number of subsets to scan per weight level.
+	/// Maximum number of subsets to scan per weight level.  Limits the
+	/// number of k-subsets of n constants we actually evaluate (since C(n,k)
+	/// can be very large for models with many constants).
 	max_subsets_per_weight: usize,
 	/// Cap on mutations per variable at weight 1 (single-variable scan).
+	/// Single-variable mutations are cheap to evaluate so we allow more of
+	/// them than multi-variable combinations.
 	max_weight1_mutations: usize,
-	/// Maximum mutation product for any subset scan.
+	/// Maximum mutation product for any multi-variable subset scan.
+	/// Prevents combinatorial explosion when two or more variables each
+	/// have many possible mutations (e.g. 200 x 200 = 40k is fine,
+	/// 200 x 200 x 200 = 8M is not).
 	max_mutations_per_subset: usize,
-	/// Maximum total mutation product for full cross-product scan.
+	/// Maximum total mutation product for the full cross-product scan
+	/// that runs after all weighted scans.  Same rationale as above.
 	max_full_product: usize,
 	/// Per-principal scan budget (total mutations across all weights).
+	/// Ensures that a single principal with many mutable constants doesn't
+	/// dominate the search time at the expense of other principals.
 	max_scan_budget: u32,
 }
 
@@ -65,7 +89,7 @@ const BUDGET: StageBudget = StageBudget {
 	max_scan_budget: 80000,
 };
 
-pub fn verify_active(
+pub(crate) fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -210,7 +234,7 @@ fn verify_active_try_equation_bypass_on_state(
 
 	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
 	for &(ref prim, idx) in &failures {
-		if !prim.check || ps.values[idx].creator != ps.id {
+		if !prim.instance_check || ps.values[idx].creator != ps.id {
 			continue;
 		}
 		if let Some(key) = extract_bypass_key(prim) {
@@ -482,14 +506,13 @@ fn verify_active_scan<'s>(
 				combination: task_combo,
 				depth_index: vec![],
 			};
-			let (ps_mutated, is_worthwhile, guard_bypass_info) =
-				verify_active_mutate_principal_state(
+			let result = verify_active_mutate_principal_state(
 					km,
 					construct_principal_state_clone(ps_base, true),
 					as_,
 					&task_map,
 				);
-			if is_worthwhile {
+			if result.is_worthwhile {
 				worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
 				if crate::tui::tui_enabled() {
 					let desc: String = task_map
@@ -503,7 +526,7 @@ fn verify_active_scan<'s>(
 				}
 				if !ctx.all_resolved() {
 					// Pass 1: analyze the (possibly truncated) state.
-					let _ = verify_analysis(ctx, km, &ps_mutated, stage);
+					let _ = verify_analysis(ctx, km, &result.state, stage);
 				}
 				// Pass 2: if truncation occurred and the attacker learned
 				// enough to bypass the guards, inject attacker-controlled
@@ -512,11 +535,11 @@ fn verify_active_scan<'s>(
 				// on the large bypass state to prevent reconstruction
 				// explosion.
 				if !ctx.all_resolved() {
-					if let Some((ref ps_full, ref failed_guards)) = guard_bypass_info {
+					if let Some(ref bypass) = result.guard_bypass {
 						let as_now = ctx.attacker_snapshot();
-						if can_attacker_bypass_any_guard(failed_guards, ps_full, &as_now) {
+						if can_attacker_bypass_any_guard(&bypass.failed_guards, &bypass.full_state, &as_now) {
 							if let Some(ps_injected) =
-								build_bypass_state(ps_full, failed_guards, &as_now)
+								build_bypass_state(&bypass.full_state, &bypass.failed_guards, &as_now)
 							{
 								verify_bypass_decompose(ctx, km, &ps_injected);
 							}
@@ -538,27 +561,37 @@ fn verify_active_scan<'s>(
 fn try_rewrite_primitive(v: &Value, ps: &PrincipalState) -> Option<Value> {
 	let p = v.as_primitive()?;
 	let (_, rv) = can_rewrite(p, ps, 0);
-	if matches!(&rv[0], Value::Primitive(_)) {
-		Some(rv.into_iter().next().unwrap())
-	} else {
-		None
-	}
+	rv.into_iter()
+		.next()
+		.filter(|v| matches!(v, Value::Primitive(_)))
 }
 
-/// Returns (truncated_state, is_worthwhile, Option<(full_state, failed_guards)>).
-/// The third element is Some when truncation occurred and the full pre-truncation
-/// state is saved for a potential second-pass analysis if the attacker can bypass
-/// the guards.
+/// Result of mutating a principal state and checking for worthwhile mutations.
+struct MutationResult {
+	/// The (possibly truncated) principal state after mutation and rewriting.
+	state: PrincipalState,
+	/// Whether any mutation produced a value structurally different from the original.
+	is_worthwhile: bool,
+	/// If truncation occurred due to failed guards, the full pre-truncation state
+	/// and the failed guard info are saved for a potential second-pass analysis
+	/// (where the attacker tries to bypass the guards with known keys).
+	guard_bypass: Option<GuardBypassInfo>,
+}
+
+/// Saved state for attempting guard bypass in a second pass.
+struct GuardBypassInfo {
+	/// Full (non-truncated) pre-resolution principal state.
+	full_state: PrincipalState,
+	/// Guards that failed and may be bypassable.
+	failed_guards: Vec<FailedGuardInfo>,
+}
+
 fn verify_active_mutate_principal_state(
 	km: &ProtocolTrace,
 	mut ps: PrincipalState,
 	as_: &AttackerState,
 	mm: &MutationMap,
-) -> (
-	PrincipalState,
-	bool,
-	Option<(PrincipalState, Vec<FailedGuardInfo>)>,
-) {
+) -> MutationResult {
 	let mut earliest_mutation = ps.meta.len();
 	let mut is_worthwhile_mutation = false;
 	let attacker_id = principal_get_attacker_id();
@@ -570,20 +603,21 @@ fn verify_active_mutate_principal_state(
 			None => continue,
 		};
 		let mut ac = combo.clone();
-		let (ar, _) = value_resolve_value_internal_values_from_protocol_trace(&ai, km);
+		let (ar, _) = resolve_trace_values(&ai, km);
 
 		// If ar is a primitive, try to rewrite it
 		let ar = try_rewrite_primitive(&ar, &ps).unwrap_or(ar);
 
-		// If ac is a primitive, try to rewrite and copy output/check from original
+		// If ac is a primitive, try to rewrite and copy output/instance_check from original
 		if let Value::Primitive(_) = &ac {
 			if let Some(v) = try_rewrite_primitive(&ac, &ps) {
 				ac = v;
 			}
 			if let Value::Primitive(ai_p) = &ai {
-				let ac_p = ac.as_primitive_mut().expect("ac is Primitive");
-				ac_p.output = ai_p.output;
-				ac_p.check = ai_p.check;
+				if let Some(ac_p) = ac.as_primitive_mut() {
+					ac_p.output = ai_p.output;
+					ac_p.instance_check = ai_p.instance_check;
+				}
 			}
 		}
 
@@ -605,7 +639,7 @@ fn verify_active_mutate_principal_state(
 	}
 
 	if !is_worthwhile_mutation {
-		return (ps, is_worthwhile_mutation, None);
+		return MutationResult { state: ps, is_worthwhile: false, guard_bypass: None };
 	}
 
 	let ps_pre = ps.clone();
@@ -618,7 +652,7 @@ fn verify_active_mutate_principal_state(
 	let mut truncation_failed_idx: Option<usize> = None;
 
 	for &(ref prim, idx) in &failures {
-		if !prim.check || ps.values[idx].creator != ps.id {
+		if !prim.instance_check || ps.values[idx].creator != ps.id {
 			continue;
 		}
 		// Extract the bypass key for this failed guard.
@@ -641,23 +675,21 @@ fn verify_active_mutate_principal_state(
 	}
 
 	if let Some(trunc_at) = truncation_index {
-		let failed_idx = truncation_failed_idx.unwrap();
-		// Save the full (non-truncated) state if we have failed guards to
-		// potentially bypass.
-		let full_state_info = if !failed_guards.is_empty() {
-			Some((ps_pre, failed_guards))
+		let failed_idx = truncation_failed_idx.unwrap_or(0);
+		let guard_bypass = if !failed_guards.is_empty() {
+			Some(GuardBypassInfo { full_state: ps_pre, failed_guards })
 		} else {
 			None
 		};
 		ps = verify_active_drop_principal_state_after_index(ps, trunc_at);
-		return (
-			ps,
-			is_worthwhile_mutation && earliest_mutation < failed_idx,
-			full_state_info,
-		);
+		return MutationResult {
+			state: ps,
+			is_worthwhile: is_worthwhile_mutation && earliest_mutation < failed_idx,
+			guard_bypass,
+		};
 	}
 
-	(ps, is_worthwhile_mutation, None)
+	MutationResult { state: ps, is_worthwhile: is_worthwhile_mutation, guard_bypass: None }
 }
 
 /// Extract the key/secret that the attacker would need to know in order to
@@ -753,6 +785,9 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &ProtocolTrace, ps: &Princip
 	let record = compute_slot_diffs(ps, km);
 
 	// Iteratively decompose wire values until no new deductions.
+	// Capped at 8 iterations because each round can only reveal values
+	// hidden behind one layer of encryption; real protocols rarely nest
+	// more than 3-4 layers deep, and 8 provides comfortable headroom.
 	for _ in 0..8 {
 		if ctx.all_resolved() {
 			return;
@@ -821,6 +856,10 @@ fn build_bypass_state(
 	}
 
 	// Iteratively re-resolve, re-rewrite, and inject into new bypassable guards.
+	// Capped at 5 because each iteration can only cascade through one additional
+	// guard dependency (e.g. AEAD_DEC whose key was derived from a previous
+	// bypassed guard).  Protocol models with >5 chained guard dependencies are
+	// extremely rare.
 	let mut needs_final_resolve = false;
 	for _ in 0..5 {
 		let _ = ps.resolve_all_values(as_);
@@ -828,7 +867,7 @@ fn build_bypass_state(
 
 		needs_final_resolve = false;
 		for &(ref prim, idx) in &failures {
-			if !prim.check || ps.values[idx].creator != ps.id {
+			if !prim.instance_check || ps.values[idx].creator != ps.id {
 				continue;
 			}
 			if let Some(key) = extract_bypass_key(prim) {

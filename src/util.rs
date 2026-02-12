@@ -3,7 +3,7 @@
 
 use crate::types::*;
 
-pub fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
+pub(crate) fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
 	if !a.iter().any(|n| n == &x) {
 		a.push(x);
 		true
@@ -12,7 +12,7 @@ pub fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
 	}
 }
 
-pub fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
+pub(crate) fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
 	if !a.contains(&x) {
 		a.push(x);
 		true
@@ -21,7 +21,7 @@ pub fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
 	}
 }
 
-pub fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) -> bool {
+pub(crate) fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) -> bool {
 	if !a.contains(&x) {
 		a.push(x);
 		true
@@ -30,18 +30,18 @@ pub fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) ->
 	}
 }
 
-pub fn min_int_in_slice(v: &[i32]) -> VResult<i32> {
+pub(crate) fn min_int_in_slice(v: &[i32]) -> VResult<i32> {
 	v.iter()
 		.min()
 		.copied()
 		.ok_or_else(|| VerifpalError::Internal("slice has no integers".to_string()))
 }
 
-pub fn color_output_support() -> bool {
+pub(crate) fn color_output_support() -> bool {
 	!cfg!(target_os = "windows")
 }
 
-pub fn int_nth_root(val: i32, n: i32) -> i32 {
+pub(crate) fn int_nth_root(val: i32, n: i32) -> i32 {
 	if n <= 1 || val <= 1 {
 		return val;
 	}

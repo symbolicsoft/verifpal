@@ -9,7 +9,7 @@ use crate::principal::*;
 use crate::types::*;
 use crate::value::*;
 
-pub fn query_start(
+pub(crate) fn query_start(
 	ctx: &VerifyContext,
 	query: &Query,
 	query_index: usize,
@@ -128,7 +128,7 @@ fn query_find_constant_usage_indices(
 		if !matches!(&slot.initial_value, Value::Primitive(_)) {
 			continue;
 		}
-		if !value_find_constant_in_primitive_from_protocol_trace(c, &slot.initial_value, km) {
+		if !find_constant_in_trace_primitive(c, &slot.initial_value, km) {
 			continue;
 		}
 		let (_, ii) = ps.resolve_constant(&slot.constant, true);
@@ -143,7 +143,7 @@ fn query_find_constant_usage_indices(
 			continue;
 		}
 		let (pass, _) = can_rewrite(b_prim, ps, 0);
-		if pass || !b_prim.check {
+		if pass || !b_prim.instance_check {
 			indices.push(ii_idx);
 		}
 	}
