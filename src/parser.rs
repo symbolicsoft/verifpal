@@ -81,7 +81,7 @@ fn starts_with_keyword(s: &str, keyword: &str) -> bool {
 	}
 	s.as_bytes()
 		.get(keyword.len())
-		.map_or(true, |&b| !b.is_ascii_alphanumeric() && b != b'_')
+		.is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'_')
 }
 
 struct Parser<'a> {
