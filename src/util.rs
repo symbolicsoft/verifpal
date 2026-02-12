@@ -3,20 +3,8 @@
 
 use crate::types::PrincipalId;
 
-pub fn str_in_slice(x: &str, a: &[String]) -> bool {
-	a.iter().any(|n| n == x)
-}
-
-pub fn int_in_slice(x: i32, a: &[i32]) -> bool {
-	a.contains(&x)
-}
-
-pub fn principal_enum_in_slice(x: PrincipalId, a: &[PrincipalId]) -> bool {
-	a.contains(&x)
-}
-
 pub fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
-	if !str_in_slice(&x, a) {
+	if !a.iter().any(|n| n == &x) {
 		a.push(x);
 		true
 	} else {
@@ -25,7 +13,7 @@ pub fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
 }
 
 pub fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
-	if !int_in_slice(x, a) {
+	if !a.contains(&x) {
 		a.push(x);
 		true
 	} else {
@@ -34,7 +22,7 @@ pub fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
 }
 
 pub fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) -> bool {
-	if !principal_enum_in_slice(x, a) {
+	if !a.contains(&x) {
 		a.push(x);
 		true
 	} else {
@@ -43,10 +31,10 @@ pub fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) ->
 }
 
 pub fn min_int_in_slice(v: &[i32]) -> Result<i32, String> {
-	if v.is_empty() {
-		return Err("slice has no integers".to_string());
-	}
-	Ok(*v.iter().min().expect("non-empty slice has a minimum"))
+	v.iter()
+		.min()
+		.copied()
+		.ok_or_else(|| "slice has no integers".to_string())
 }
 
 pub fn color_output_support() -> bool {

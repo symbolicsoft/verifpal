@@ -1,9 +1,18 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+/// Acquire a read guard, recovering from poison.
+fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+	lock.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Acquire a write guard, recovering from poison.
+fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+	lock.write().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Global analysis counter for display purposes (TUI/stdout are inherently global).
 static ANALYSIS_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -12,11 +21,10 @@ pub fn analysis_count_get() -> usize {
 	ANALYSIS_COUNT.load(Ordering::SeqCst) as usize
 }
 
-use crate::construct::construct_principal_state_clone;
 use crate::inject::primitive_skeleton_hash_of;
 use crate::types::*;
 use crate::util::*;
-use crate::value::{value_equivalent_value_in_values_map, value_hash};
+use crate::value::{compute_slot_diffs, value_equivalent_value_in_values_map, value_hash};
 
 /// Central verification context. Owns all mutable state for a single
 /// verification run, replacing the old global LazyLock singletons.
@@ -32,11 +40,10 @@ pub struct VerifyContext {
 }
 
 /// Add a value to locked attacker state if not already known.
-fn attacker_state_absorb(state: &mut AttackerState, v: &Value, ps: &PrincipalState) {
-	if value_equivalent_value_in_values_map(v, &state.known, &state.known_map) >= 0 {
+fn attacker_state_absorb(state: &mut AttackerState, v: &Value, record: &MutationRecord) {
+	if value_equivalent_value_in_values_map(v, &state.known, &state.known_map).is_some() {
 		return;
 	}
-	let clone = Arc::new(construct_principal_state_clone(ps, false));
 	let idx = state.known.len();
 	Arc::make_mut(&mut state.known).push(v.clone());
 	let h = value_hash(v);
@@ -44,7 +51,7 @@ fn attacker_state_absorb(state: &mut AttackerState, v: &Value, ps: &PrincipalSta
 		.entry(h)
 		.or_default()
 		.push(idx);
-	Arc::make_mut(&mut state.principal_state).push(clone);
+	Arc::make_mut(&mut state.mutation_records).push(record.clone());
 }
 
 impl VerifyContext {
@@ -54,25 +61,12 @@ impl VerifyContext {
 			.queries
 			.iter()
 			.enumerate()
-			.map(|(i, q)| VerifyResult {
-				query: q.clone(),
-				query_index: i,
-				resolved: false,
-				summary: String::new(),
-				options: vec![],
-			})
+			.map(|(i, q)| VerifyResult::new(q, i))
 			.collect();
 		let unresolved = results.len() as i32;
 		ANALYSIS_COUNT.store(0, Ordering::SeqCst);
 		VerifyContext {
-			attacker: RwLock::new(AttackerState {
-				current_phase: 0,
-				exhausted: false,
-				known: Arc::new(vec![]),
-				known_map: Arc::new(HashMap::new()),
-				skeleton_hashes: Arc::new(HashSet::new()),
-				principal_state: Arc::new(vec![]),
-			}),
+			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			analysis_count: AtomicU32::new(0),
@@ -86,54 +80,36 @@ impl VerifyContext {
 
 	/// Reset attacker state for a new phase.
 	pub fn attacker_init(&self) {
-		let mut state = self.attacker.write().unwrap_or_else(|e| e.into_inner());
-		*state = AttackerState {
-			current_phase: 0,
-			exhausted: false,
-			known: Arc::new(vec![]),
-			known_map: Arc::new(HashMap::new()),
-			skeleton_hashes: Arc::new(HashSet::new()),
-			principal_state: Arc::new(vec![]),
-		};
+		let mut state = write_lock(&self.attacker);
+		*state = AttackerState::new();
 	}
 
 	/// Cheap O(1) snapshot of the attacker state (Arc increments only).
 	pub fn attacker_snapshot(&self) -> AttackerState {
-		self.attacker
-			.read()
-			.unwrap_or_else(|e| e.into_inner())
-			.clone()
+		read_lock(&self.attacker).clone()
 	}
 
 	pub fn attacker_is_exhausted(&self) -> bool {
-		self.attacker
-			.read()
-			.unwrap_or_else(|e| e.into_inner())
-			.exhausted
+		read_lock(&self.attacker).exhausted
 	}
 
 	pub fn attacker_known_count(&self) -> usize {
-		self.attacker
-			.read()
-			.unwrap_or_else(|e| e.into_inner())
-			.known
-			.len()
+		read_lock(&self.attacker).known.len()
 	}
 
 	/// Add a value to attacker knowledge. Returns true if it was new.
-	pub fn attacker_put(&self, known: &Value, ps: &PrincipalState) -> bool {
+	pub fn attacker_put(&self, known: &Value, record: &MutationRecord) -> bool {
 		// Fast check with read lock
 		{
-			let state = self.attacker.read().unwrap_or_else(|e| e.into_inner());
-			if value_equivalent_value_in_values_map(known, &state.known, &state.known_map) >= 0 {
+			let state = read_lock(&self.attacker);
+			if value_equivalent_value_in_values_map(known, &state.known, &state.known_map).is_some()
+			{
 				return false;
 			}
 		}
-		// Prepare clone outside write lock
-		let clone = Arc::new(construct_principal_state_clone(ps, false));
 		// Write lock: double-check and append
-		let mut state = self.attacker.write().unwrap_or_else(|e| e.into_inner());
-		if value_equivalent_value_in_values_map(known, &state.known, &state.known_map) >= 0 {
+		let mut state = write_lock(&self.attacker);
+		if value_equivalent_value_in_values_map(known, &state.known, &state.known_map).is_some() {
 			return false;
 		}
 		let idx = state.known.len();
@@ -146,7 +122,7 @@ impl VerifyContext {
 		if let Value::Primitive(p) = known {
 			Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
 		}
-		Arc::make_mut(&mut state.principal_state).push(clone);
+		Arc::make_mut(&mut state.mutation_records).push(record.clone());
 		let count = state.known.len();
 		drop(state);
 		if crate::tui::tui_enabled() {
@@ -156,65 +132,54 @@ impl VerifyContext {
 	}
 
 	pub fn attacker_set_exhausted(&self) {
-		let mut state = self.attacker.write().unwrap_or_else(|e| e.into_inner());
+		let mut state = write_lock(&self.attacker);
 		state.exhausted = true;
 	}
 
 	/// Initialize attacker knowledge for a new phase.
 	pub fn attacker_phase_update(
 		&self,
-		km: &KnowledgeMap,
+		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		phase: i32,
 	) -> Result<(), String> {
-		{
-			let mut state = self.attacker.write().unwrap_or_else(|e| e.into_inner());
-			state.current_phase = phase;
-		}
-		self.attacker_absorb_phase_values(km, ps)
-	}
-
-	fn attacker_absorb_phase_values(
-		&self,
-		km: &KnowledgeMap,
-		ps: &PrincipalState,
-	) -> Result<(), String> {
-		let mut state = self.attacker.write().unwrap_or_else(|e| e.into_inner());
-		let current_phase = state.current_phase;
+		let mut state = write_lock(&self.attacker);
+		state.current_phase = phase;
+		let record = compute_slot_diffs(ps, km);
 
 		// Public constants
-		for i in 0..ps.constants.len() {
-			if let Value::Constant(c) = &ps.assigned[i] {
+		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
+			if let Value::Constant(c) = &sv.assigned {
 				if c.qualifier != Some(Qualifier::Public) {
 					continue;
 				}
-				if let Ok(earliest) = min_int_in_slice(&ps.phase[i]) {
-					if earliest > current_phase {
+				if let Ok(earliest) = min_int_in_slice(&sm.phase) {
+					if earliest > phase {
 						continue;
 					}
 				}
 				if !crate::value::value_constant_is_used_by_at_least_one_principal(km, c) {
 					continue;
 				}
-				attacker_state_absorb(&mut state, &ps.assigned[i], ps);
+				attacker_state_absorb(&mut state, &sv.assigned, &record);
 			}
 		}
 
 		// Wire/leaked values
-		for (i, c) in ps.constants.iter().enumerate() {
-			if ps.wire[i].is_empty() && !ps.constants[i].leaked {
+		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
+			if sm.wire.is_empty() && !sm.constant.leaked {
 				continue;
 			}
-			if ps.constants[i].qualifier == Some(Qualifier::Public) {
+			if sm.constant.qualifier == Some(Qualifier::Public) {
 				continue;
 			}
-			let earliest = min_int_in_slice(&ps.phase[i])?;
-			if earliest > current_phase {
+			let earliest = min_int_in_slice(&sm.phase)?;
+			if earliest > phase {
 				continue;
 			}
-			let cc = Value::Constant(c.clone());
-			attacker_state_absorb(&mut state, &cc, ps);
-			attacker_state_absorb(&mut state, &ps.assigned[i], ps);
+			let cc = Value::Constant(sm.constant.clone());
+			attacker_state_absorb(&mut state, &cc, &record);
+			attacker_state_absorb(&mut state, &sv.assigned, &record);
 		}
 
 		Ok(())
@@ -225,10 +190,7 @@ impl VerifyContext {
 	// -----------------------------------------------------------------------
 
 	pub fn results_get(&self) -> Vec<VerifyResult> {
-		self.results
-			.read()
-			.unwrap_or_else(|e| e.into_inner())
-			.clone()
+		read_lock(&self.results).clone()
 	}
 
 	pub fn results_file_name(&self) -> &str {
@@ -237,7 +199,7 @@ impl VerifyContext {
 
 	/// Write a resolved result. Returns true if it was newly written.
 	pub fn results_put(&self, result: &VerifyResult) -> bool {
-		let mut state = self.results.write().unwrap_or_else(|e| e.into_inner());
+		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index) {
 			if !vr.resolved {
 				vr.resolved = result.resolved;

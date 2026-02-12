@@ -11,7 +11,7 @@ use crate::possible::{
 use crate::pretty::{pretty_value, pretty_values};
 use crate::primitive::PRIM_CONCAT;
 use crate::types::*;
-use crate::value::{value_equivalent_values, value_nil, value_resolve_constant};
+use crate::value::{compute_slot_diffs, value_equivalent_values, value_resolve_constant};
 use crate::verify::verify_resolve_queries;
 
 // ---------------------------------------------------------------------------
@@ -20,64 +20,56 @@ use crate::verify::verify_resolve_queries;
 
 pub fn verify_analysis(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	stage: i32,
 ) -> Result<(), String> {
 	let mut current_as = ctx.attacker_snapshot();
+	let record = compute_slot_diffs(ps, km);
 	loop {
 		if ctx.all_resolved() {
 			return Ok(());
 		}
 		verify_resolve_queries(ctx, km, ps)?;
 
-		let mut o: usize = 0;
+		let mut progress = false;
 
 		// Phase 1: decompose and passive decompose from attacker known values
-		for i in 0..current_as.known.len() {
-			o += verify_analysis_decompose(ctx, &current_as.known[i], ps, &current_as);
-			if o > 0 {
-				break;
-			}
-			o += verify_analysis_passive_decompose(ctx, &current_as.known[i], ps);
-			if o > 0 {
+		for k in current_as.known.iter() {
+			if verify_analysis_decompose(ctx, k, ps, &current_as, &record) > 0
+				|| verify_analysis_passive_decompose(ctx, k, &record) > 0
+			{
+				progress = true;
 				break;
 			}
 		}
 
 		// Phase 2: reconstruct and recompose from principal assigned values
-		if o == 0 {
-			for i in 0..ps.assigned.len() {
-				o += verify_analysis_reconstruct(ctx, &ps.assigned[i], ps, &current_as, 0);
-				if o > 0 {
-					break;
-				}
-				o += verify_analysis_recompose(ctx, &ps.assigned[i], ps, &current_as);
-				if o > 0 {
+		if !progress {
+			for sv in &ps.values {
+				if verify_analysis_reconstruct(ctx, &sv.assigned, ps, &current_as, 0, &record) > 0
+					|| verify_analysis_recompose(ctx, &sv.assigned, &current_as, &record) > 0
+				{
+					progress = true;
 					break;
 				}
 			}
 		}
 
 		// Phase 3: equivalize, passwords, and concat from attacker known values
-		if o == 0 {
-			for i in 0..current_as.known.len() {
-				o += verify_analysis_equivalize(ctx, &current_as.known[i], ps);
-				if o > 0 {
-					break;
-				}
-				o += verify_analysis_passwords(ctx, &current_as.known[i], ps);
-				if o > 0 {
-					break;
-				}
-				o += verify_analysis_concat(ctx, &current_as.known[i], ps);
-				if o > 0 {
+		if !progress {
+			for k in current_as.known.iter() {
+				if verify_analysis_equivalize(ctx, k, ps, &record) > 0
+					|| verify_analysis_passwords(ctx, k, ps, &record) > 0
+					|| verify_analysis_concat(ctx, k, &record) > 0
+				{
+					progress = true;
 					break;
 				}
 			}
 		}
 
-		if o > 0 {
+		if progress {
 			current_as = ctx.attacker_snapshot();
 			continue;
 		}
@@ -96,18 +88,14 @@ fn verify_analysis_decompose(
 	a: &Value,
 	ps: &PrincipalState,
 	as_: &AttackerState,
+	record: &MutationRecord,
 ) -> usize {
-	let mut o: usize = 0;
-	let mut r = false;
-	let mut revealed = value_nil();
-	let mut ar: Vec<Value> = Vec::new();
-	if let Value::Primitive(p) = a {
-		let result = possible_to_decompose_primitive(p, ps, as_, 0);
-		r = result.0;
-		revealed = result.1;
-		ar = result.2;
-	}
-	if r && ctx.attacker_put(&revealed, ps) {
+	let p = match a {
+		Value::Primitive(p) => p,
+		_ => return 0,
+	};
+	let (r, revealed, ar) = possible_to_decompose_primitive(p, ps, as_, 0);
+	if r && ctx.attacker_put(&revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by decomposing {} with {}.",
@@ -118,32 +106,38 @@ fn verify_analysis_decompose(
 			"deduction",
 			true,
 		);
-		o += 1;
+		1
+	} else {
+		0
 	}
-	o
 }
 
 // ---------------------------------------------------------------------------
 // Passive decompose
 // ---------------------------------------------------------------------------
 
-fn verify_analysis_passive_decompose(ctx: &VerifyContext, a: &Value, ps: &PrincipalState) -> usize {
+fn verify_analysis_passive_decompose(
+	ctx: &VerifyContext,
+	a: &Value,
+	record: &MutationRecord,
+) -> usize {
+	let p = match a {
+		Value::Primitive(p) => p,
+		_ => return 0,
+	};
 	let mut o: usize = 0;
-	if let Value::Primitive(p) = a {
-		let passive_revealed = possible_to_passively_decompose_primitive(p);
-		for revealed in &passive_revealed {
-			if ctx.attacker_put(revealed, ps) {
-				info_message(
-					&format!(
-						"{} obtained as associated data from {}.",
-						info_output_text(revealed),
-						pretty_value(a),
-					),
-					"deduction",
-					true,
-				);
-				o += 1;
-			}
+	for revealed in &possible_to_passively_decompose_primitive(p) {
+		if ctx.attacker_put(revealed, record) {
+			info_message(
+				&format!(
+					"{} obtained as associated data from {}.",
+					info_output_text(revealed),
+					pretty_value(a),
+				),
+				"deduction",
+				true,
+			);
+			o += 1;
 		}
 	}
 	o
@@ -156,20 +150,15 @@ fn verify_analysis_passive_decompose(ctx: &VerifyContext, a: &Value, ps: &Princi
 fn verify_analysis_recompose(
 	ctx: &VerifyContext,
 	a: &Value,
-	ps: &PrincipalState,
 	as_: &AttackerState,
+	record: &MutationRecord,
 ) -> usize {
-	let mut o: usize = 0;
-	let mut r = false;
-	let mut revealed = value_nil();
-	let mut ar: Vec<Value> = Vec::new();
-	if let Value::Primitive(p) = a {
-		let result = possible_to_recompose_primitive(p, as_);
-		r = result.0;
-		revealed = result.1;
-		ar = result.2;
-	}
-	if r && ctx.attacker_put(&revealed, ps) {
+	let p = match a {
+		Value::Primitive(p) => p,
+		_ => return 0,
+	};
+	let (r, revealed, ar) = possible_to_recompose_primitive(p, as_);
+	if r && ctx.attacker_put(&revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by recomposing {} with {}.",
@@ -180,9 +169,10 @@ fn verify_analysis_recompose(
 			"deduction",
 			true,
 		);
-		o += 1;
+		1
+	} else {
+		0
 	}
-	o
 }
 
 // ---------------------------------------------------------------------------
@@ -195,26 +185,20 @@ fn verify_analysis_reconstruct(
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	mut o: usize,
+	record: &MutationRecord,
 ) -> usize {
-	let mut r = false;
-	let mut ar: Vec<Value> = Vec::new();
-	match a {
+	let (r, ar) = match a {
 		Value::Primitive(p) => {
-			let result = possible_to_reconstruct_primitive(p, ps, as_, 0);
-			r = result.0;
-			ar = result.1;
+			let (r, ar) = possible_to_reconstruct_primitive(p, ps, as_, 0);
 			for aa in &p.arguments {
-				o += verify_analysis_reconstruct(ctx, aa, ps, as_, o);
+				o += verify_analysis_reconstruct(ctx, aa, ps, as_, o, record);
 			}
+			(r, ar)
 		}
-		Value::Equation(e) => {
-			let result = possible_to_reconstruct_equation(e, as_);
-			r = result.0;
-			ar = result.1;
-		}
-		_ => {}
-	}
-	if r && ctx.attacker_put(a, ps) {
+		Value::Equation(e) => possible_to_reconstruct_equation(e, as_),
+		_ => return o,
+	};
+	if r && ctx.attacker_put(a, record) {
 		info_message(
 			&format!(
 				"{} obtained by reconstructing with {}.",
@@ -233,23 +217,27 @@ fn verify_analysis_reconstruct(
 // Equivalize
 // ---------------------------------------------------------------------------
 
-fn verify_analysis_equivalize(ctx: &VerifyContext, a: &Value, ps: &PrincipalState) -> usize {
-	let mut o: usize = 0;
-	let ar = match a {
-		Value::Constant(c) => {
-			let (resolved, _) = value_resolve_constant(c, ps, true);
-			resolved
-		}
-		_ => a.clone(),
+fn verify_analysis_equivalize(
+	ctx: &VerifyContext,
+	a: &Value,
+	ps: &PrincipalState,
+	record: &MutationRecord,
+) -> usize {
+	let ar = if let Value::Constant(c) = a {
+		let (resolved, _) = value_resolve_constant(c, ps, true);
+		resolved
+	} else {
+		a.clone()
 	};
-	for i in 0..ps.assigned.len() {
-		if value_equivalent_values(&ar, &ps.assigned[i], true)
-			&& ctx.attacker_put(&ps.assigned[i], ps)
+	let mut o: usize = 0;
+	for sv in &ps.values {
+		if value_equivalent_values(&ar, &sv.assigned, true)
+			&& ctx.attacker_put(&sv.assigned, record)
 		{
 			info_message(
 				&format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
-					info_output_text(&ps.assigned[i]),
+					info_output_text(&sv.assigned),
 					pretty_value(a),
 				),
 				"deduction",
@@ -265,11 +253,17 @@ fn verify_analysis_equivalize(ctx: &VerifyContext, a: &Value, ps: &PrincipalStat
 // Passwords
 // ---------------------------------------------------------------------------
 
-fn verify_analysis_passwords(ctx: &VerifyContext, a: &Value, ps: &PrincipalState) -> usize {
+fn verify_analysis_passwords(
+	ctx: &VerifyContext,
+	a: &Value,
+	ps: &PrincipalState,
+	record: &MutationRecord,
+) -> usize {
 	let mut o: usize = 0;
-	let passwords = possible_to_obtain_passwords(a, a, -1, ps);
+	let mut passwords = Vec::new();
+	possible_to_obtain_passwords(a, a, None, ps, &mut passwords);
 	for password in &passwords {
-		if ctx.attacker_put(password, ps) {
+		if ctx.attacker_put(password, record) {
 			info_message(
 				&format!(
 					"{} obtained as a password unsafely used within {}.",
@@ -289,24 +283,24 @@ fn verify_analysis_passwords(ctx: &VerifyContext, a: &Value, ps: &PrincipalState
 // Concat
 // ---------------------------------------------------------------------------
 
-fn verify_analysis_concat(ctx: &VerifyContext, a: &Value, ps: &PrincipalState) -> usize {
+fn verify_analysis_concat(ctx: &VerifyContext, a: &Value, record: &MutationRecord) -> usize {
+	let p = match a {
+		Value::Primitive(p) if p.id == PRIM_CONCAT => p,
+		_ => return 0,
+	};
 	let mut o: usize = 0;
-	if let Value::Primitive(p) = a {
-		if p.id == PRIM_CONCAT {
-			for arg in &p.arguments {
-				if ctx.attacker_put(arg, ps) {
-					info_message(
-						&format!(
-							"{} obtained as a concatenated fragment of {}.",
-							info_output_text(arg),
-							pretty_value(a),
-						),
-						"deduction",
-						true,
-					);
-					o += 1;
-				}
-			}
+	for arg in &p.arguments {
+		if ctx.attacker_put(arg, record) {
+			info_message(
+				&format!(
+					"{} obtained as a concatenated fragment of {}.",
+					info_output_text(arg),
+					pretty_value(a),
+				),
+				"deduction",
+				true,
+			);
+			o += 1;
 		}
 	}
 	o

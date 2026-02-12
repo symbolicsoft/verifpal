@@ -9,6 +9,7 @@ use crate::context::VerifyContext;
 use crate::info::{info_message, info_output_text};
 use crate::mutationmap::{
 	mutation_map_init, mutation_map_next, mutation_map_subset, mutation_map_subset_capped,
+	mutation_product,
 };
 use crate::possible::{
 	possible_to_decompose_primitive, possible_to_passively_decompose_primitive,
@@ -18,11 +19,10 @@ use crate::pretty::{pretty_value, pretty_values};
 use crate::primitive::*;
 use crate::principal::principal_get_attacker_id;
 use crate::types::*;
-use crate::util::int_in_slice;
 use crate::value::{
-	value_equivalent_value_in_values_map, value_equivalent_values, value_g_nil,
+	compute_slot_diffs, value_equivalent_value_in_values_map, value_equivalent_values, value_g_nil,
 	value_perform_all_rewrites, value_resolve_all_principal_state_values, value_resolve_constant,
-	value_resolve_value_internal_values_from_knowledge_map,
+	value_resolve_value_internal_values_from_protocol_trace,
 };
 use crate::verify::{verify_resolve_queries, verify_standard_run};
 use crate::verifyanalysis::verify_analysis;
@@ -38,23 +38,44 @@ struct FailedGuardInfo {
 	assigned_index: usize,
 }
 
-const STAGE_EXHAUSTION_THRESHOLD: i32 = 6;
-const MAX_STAGE_LIMIT: i32 = 10;
-const MAX_SUBSET_MUTATION_WEIGHT: usize = 3;
-const MAX_SUBSETS_PER_WEIGHT: usize = 150;
-const MAX_WEIGHT1_MUTATIONS_PER_VAR: usize = 150;
-const MAX_MUTATIONS_PER_SUBSET: usize = 50000;
-const MAX_FULL_MUTATION_PRODUCT: usize = 50000;
-const MAX_SCAN_BUDGET: u32 = 80000;
+/// Budget parameters controlling the active attacker's search strategy.
+struct StageBudget {
+	/// Stages beyond this threshold are considered for exhaustion detection.
+	exhaustion_threshold: i32,
+	/// Maximum stage number before switching to sequential execution.
+	max_stage: i32,
+	/// Maximum subset weight (number of simultaneous variable mutations).
+	max_subset_weight: usize,
+	/// Maximum number of subsets to scan per weight level.
+	max_subsets_per_weight: usize,
+	/// Cap on mutations per variable at weight 1 (single-variable scan).
+	max_weight1_mutations: usize,
+	/// Maximum mutation product for any subset scan.
+	max_mutations_per_subset: usize,
+	/// Maximum total mutation product for full cross-product scan.
+	max_full_product: usize,
+	/// Per-principal scan budget (total mutations across all weights).
+	max_scan_budget: u32,
+}
+
+const BUDGET: StageBudget = StageBudget {
+	exhaustion_threshold: 6,
+	max_stage: 10,
+	max_subset_weight: 3,
+	max_subsets_per_weight: 150,
+	max_weight1_mutations: 150,
+	max_mutations_per_subset: 50000,
+	max_full_product: 50000,
+	max_scan_budget: 80000,
+};
 
 pub fn verify_active(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) -> Result<(), String> {
 	info_message("Attacker is configured as active.", "info", false);
-	let mut phase = 0;
-	while phase <= km.max_phase {
+	for phase in 0..=km.max_phase {
 		info_message(&format!("Running at phase {}.", phase), "info", false);
 		ctx.attacker_init();
 		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
@@ -68,40 +89,16 @@ pub fn verify_active(
 			verify_active_equation_bypass(ctx, km, principal_states);
 		}
 
-		// Stage 1
+		// Stage 1 (serial — builds initial attacker knowledge)
 		verify_active_stages(ctx, 1, km, principal_states);
 
-		// Stages 2-3 in parallel
-		rayon::scope(|s| {
-			s.spawn(|_| {
-				verify_active_stages(ctx, 2, km, principal_states);
-			});
-			s.spawn(|_| {
-				verify_active_stages(ctx, 3, km, principal_states);
-			});
-		});
-
-		// Stages 4-5 in parallel
-		rayon::scope(|s| {
-			s.spawn(|_| {
-				verify_active_stages(ctx, 4, km, principal_states);
-			});
-			s.spawn(|_| {
-				verify_active_stages(ctx, 5, km, principal_states);
-			});
-		});
-
-		// Stages 6+ in pairs until resolved or exhausted
-		let mut stage = 6;
+		// Stages 2+ in parallel pairs until resolved or exhausted
+		let mut stage = 2;
 		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() {
-			if stage < MAX_STAGE_LIMIT {
+			if stage < BUDGET.max_stage {
 				rayon::scope(|s| {
-					s.spawn(|_| {
-						verify_active_stages(ctx, stage, km, principal_states);
-					});
-					s.spawn(|_| {
-						verify_active_stages(ctx, stage + 1, km, principal_states);
-					});
+					s.spawn(|_| verify_active_stages(ctx, stage, km, principal_states));
+					s.spawn(|_| verify_active_stages(ctx, stage + 1, km, principal_states));
 				});
 				stage += 2;
 			} else {
@@ -109,9 +106,18 @@ pub fn verify_active(
 				stage += 1;
 			}
 		}
-		phase += 1;
 	}
 	Ok(())
+}
+
+/// Inject an attacker-controlled replacement value into a PrincipalState slot,
+/// marking it as attacker-created and mutated.
+fn inject_attacker_value(sv: &mut SlotValues, attacker_id: PrincipalId, replacement: &Value) {
+	sv.creator = attacker_id;
+	sv.sender = attacker_id;
+	sv.mutated = true;
+	sv.assigned = replacement.clone();
+	sv.before_rewrite = replacement.clone();
 }
 
 /// Targeted MitM public-key replacement attack.  For each principal, try
@@ -128,7 +134,7 @@ pub fn verify_active(
 /// canonical MitM strategy without relying on G^nil being in the mutation map.
 fn verify_active_equation_bypass(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) {
 	let g_nil = value_g_nil();
@@ -147,21 +153,22 @@ fn verify_active_equation_bypass(
 		// read them but cannot tamper with them.
 		// Skip constants not communicated in the current phase — the attacker
 		// can only manipulate values in the phase they were communicated.
-		let mut eq_indices: Vec<usize> = Vec::new();
-		for i in 0..ps_base.constants.len() {
-			if ps_base.creator[i] == ps_base.id {
-				continue;
-			}
-			if ps_base.guard[i] {
-				continue;
-			}
-			if !int_in_slice(as_.current_phase, &ps_base.phase[i]) {
-				continue;
-			}
-			if let Value::Equation(_) = &ps_base.assigned[i] {
-				eq_indices.push(i);
-			}
-		}
+		let eq_indices: Vec<usize> = ps_base
+			.meta
+			.iter()
+			.zip(ps_base.values.iter())
+			.enumerate()
+			.filter_map(|(i, (sm, sv))| {
+				if sv.creator == ps_base.id || sm.guard || !sm.phase.contains(&as_.current_phase) {
+					return None;
+				}
+				if let Value::Equation(_) = &sv.assigned {
+					Some(i)
+				} else {
+					None
+				}
+			})
+			.collect();
 		if eq_indices.is_empty() {
 			continue;
 		}
@@ -172,12 +179,7 @@ fn verify_active_equation_bypass(
 				return;
 			}
 			let mut ps = construct_principal_state_clone(ps_base, true);
-			ps.creator[target_idx] = attacker_id;
-			ps.sender[target_idx] = attacker_id;
-			ps.mutated[target_idx] = true;
-			ps.assigned[target_idx] = g_nil.clone();
-			ps.before_rewrite[target_idx] = g_nil.clone();
-
+			inject_attacker_value(&mut ps.values[target_idx], attacker_id, &g_nil);
 			verify_active_try_equation_bypass_on_state(ctx, km, &mut ps, &as_);
 		}
 
@@ -186,11 +188,7 @@ fn verify_active_equation_bypass(
 		if eq_indices.len() > 1 && !ctx.all_resolved() {
 			let mut ps = construct_principal_state_clone(ps_base, true);
 			for &i in &eq_indices {
-				ps.creator[i] = attacker_id;
-				ps.sender[i] = attacker_id;
-				ps.mutated[i] = true;
-				ps.assigned[i] = g_nil.clone();
-				ps.before_rewrite[i] = g_nil.clone();
+				inject_attacker_value(&mut ps.values[i], attacker_id, &g_nil);
 			}
 			verify_active_try_equation_bypass_on_state(ctx, km, &mut ps, &as_);
 		}
@@ -201,7 +199,7 @@ fn verify_active_equation_bypass(
 /// a mutated principal state.
 fn verify_active_try_equation_bypass_on_state(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	ps: &mut PrincipalState,
 	as_: &AttackerState,
 ) {
@@ -212,20 +210,17 @@ fn verify_active_try_equation_bypass_on_state(
 	let ps_pre = ps.clone();
 
 	let _ = value_resolve_all_principal_state_values(ps, as_);
-	let (failed_rewrites, failed_rewrite_indices) = value_perform_all_rewrites(ps);
+	let failures = value_perform_all_rewrites(ps);
 
 	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
-	for j in 0..failed_rewrites.len() {
-		if !failed_rewrites[j].check {
+	for &(ref prim, idx) in &failures {
+		if !prim.check || ps.values[idx].creator != ps.id {
 			continue;
 		}
-		if ps.creator[failed_rewrite_indices[j]] != ps.id {
-			continue;
-		}
-		if let Some(key) = extract_bypass_key(&failed_rewrites[j]) {
+		if let Some(key) = extract_bypass_key(prim) {
 			failed_guards.push(FailedGuardInfo {
 				bypass_key: key,
-				assigned_index: failed_rewrite_indices[j],
+				assigned_index: idx,
 			});
 		}
 	}
@@ -245,7 +240,7 @@ fn verify_active_try_equation_bypass_on_state(
 fn verify_active_stages(
 	ctx: &VerifyContext,
 	stage: i32,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) {
 	if crate::tui::tui_enabled() {
@@ -280,7 +275,7 @@ fn verify_active_stages(
 
 	let worthwhile = worthwhile_mutation_count.load(Ordering::SeqCst);
 	let stagnant = worthwhile == 0 || old_known == ctx.attacker_known_count();
-	let exhausted = stage > STAGE_EXHAUSTION_THRESHOLD && (stagnant || stage > MAX_STAGE_LIMIT);
+	let exhausted = stage > BUDGET.exhaustion_threshold && (stagnant || stage > BUDGET.max_stage);
 	if exhausted {
 		ctx.attacker_set_exhausted();
 	}
@@ -290,7 +285,7 @@ fn verify_active_stages(
 fn verify_active_scan_weighted<'s>(
 	ctx: &'s VerifyContext,
 	scope: &rayon::Scope<'s>,
-	km: &'s KnowledgeMap,
+	km: &'s ProtocolTrace,
 	ps_base: &'s PrincipalState,
 	as_: &'s AttackerState,
 	mm: MutationMap,
@@ -302,11 +297,8 @@ fn verify_active_scan_weighted<'s>(
 		return;
 	}
 	let budget_used = AtomicU32::new(0);
-	let budget = MAX_SCAN_BUDGET;
-	let mut max_weight = MAX_SUBSET_MUTATION_WEIGHT;
-	if max_weight > n {
-		max_weight = n;
-	}
+	let budget = BUDGET.max_scan_budget;
+	let max_weight = BUDGET.max_subset_weight.min(n);
 	if crate::tui::tui_enabled() {
 		crate::tui::tui_scan_update(&ps_base.name, 0, max_weight, 0, budget);
 	}
@@ -334,30 +326,25 @@ fn verify_active_scan_weighted<'s>(
 		);
 	}
 
-	if !ctx.all_resolved() && budget_used.load(Ordering::SeqCst) < budget {
-		let mut total_product: usize = 1;
-		let mut overflow = false;
-		for i in 0..n {
-			let m = mm.mutations[i].len();
-			if m > 0 && total_product > MAX_FULL_MUTATION_PRODUCT / m {
-				overflow = true;
-				break;
-			}
-			total_product *= m;
-		}
-		if !overflow && total_product <= MAX_FULL_MUTATION_PRODUCT {
-			let next_map = mutation_map_next(mm);
-			verify_active_scan(
-				ctx,
-				scope,
-				km,
-				ps_base,
-				as_,
-				next_map,
-				stage,
-				worthwhile_mutation_count,
-			);
-		}
+	if !ctx.all_resolved()
+		&& budget_used.load(Ordering::SeqCst) < budget
+		&& mutation_product(
+			mm.mutations.iter().map(|m| m.len()),
+			BUDGET.max_full_product,
+		)
+		.is_some()
+	{
+		let next_map = mutation_map_next(mm);
+		verify_active_scan(
+			ctx,
+			scope,
+			km,
+			ps_base,
+			as_,
+			next_map,
+			stage,
+			worthwhile_mutation_count,
+		);
 	}
 }
 
@@ -365,7 +352,7 @@ fn verify_active_scan_weighted<'s>(
 fn verify_active_scan_at_weight<'s>(
 	ctx: &'s VerifyContext,
 	scope: &rayon::Scope<'s>,
-	km: &'s KnowledgeMap,
+	km: &'s ProtocolTrace,
 	ps_base: &'s PrincipalState,
 	as_: &'s AttackerState,
 	mm: &MutationMap,
@@ -391,14 +378,14 @@ fn verify_active_scan_at_weight<'s>(
 
 		if weight == 1 {
 			let sub_map =
-				mutation_map_subset_capped(mm, &sub_indices, MAX_WEIGHT1_MUTATIONS_PER_VAR);
+				mutation_map_subset_capped(mm, &sub_indices, BUDGET.max_weight1_mutations);
 			let cost = sub_map.mutations[0].len() as u32;
 			let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < cost {
 				crate::tui::tui_scan_update(
 					&ps_base.name,
 					weight,
-					n.min(MAX_SUBSET_MUTATION_WEIGHT),
+					n.min(BUDGET.max_subset_weight),
 					bu + cost,
 					budget,
 				);
@@ -415,62 +402,53 @@ fn verify_active_scan_at_weight<'s>(
 				worthwhile_mutation_count,
 			);
 			scanned += 1;
-		} else {
-			let mut product: usize = 1;
-			let mut overflow = false;
-			for &idx in &indices {
-				let m = mm.mutations[idx].len();
-				if m > 0 && product > MAX_MUTATIONS_PER_SUBSET / m {
-					overflow = true;
-					break;
-				}
-				product *= m;
-			}
-			if !overflow && product <= MAX_MUTATIONS_PER_SUBSET {
-				let sub_map = mutation_map_subset(mm, &sub_indices);
-				let bu = budget_used.fetch_add(product as u32, Ordering::SeqCst);
-				if crate::tui::tui_enabled() && bu % 500 < product as u32 {
-					crate::tui::tui_scan_update(
-						&ps_base.name,
-						weight,
-						n.min(MAX_SUBSET_MUTATION_WEIGHT),
-						bu + product as u32,
-						budget,
-					);
-				}
-				let next_map = mutation_map_next(sub_map);
-				verify_active_scan(
-					ctx,
-					scope,
-					km,
-					ps_base,
-					as_,
-					next_map,
-					stage,
-					worthwhile_mutation_count,
+		} else if let Some(product) = mutation_product(
+			indices.iter().map(|&i| mm.mutations[i].len()),
+			BUDGET.max_mutations_per_subset,
+		) {
+			let sub_map = mutation_map_subset(mm, &sub_indices);
+			let bu = budget_used.fetch_add(product as u32, Ordering::SeqCst);
+			if crate::tui::tui_enabled() && bu % 500 < product as u32 {
+				crate::tui::tui_scan_update(
+					&ps_base.name,
+					weight,
+					n.min(BUDGET.max_subset_weight),
+					bu + product as u32,
+					budget,
 				);
-				scanned += 1;
 			}
+			let next_map = mutation_map_next(sub_map);
+			verify_active_scan(
+				ctx,
+				scope,
+				km,
+				ps_base,
+				as_,
+				next_map,
+				stage,
+				worthwhile_mutation_count,
+			);
+			scanned += 1;
 		}
 
-		if scanned >= MAX_SUBSETS_PER_WEIGHT {
+		if scanned >= BUDGET.max_subsets_per_weight {
 			return;
 		}
 
 		// Advance combination indices (lexicographic next subset of size `weight` from `n`)
-		let mut i = weight as i32 - 1;
-		while i >= 0 {
-			indices[i as usize] += 1;
-			if indices[i as usize] <= n - weight + i as usize {
+		let mut advanced = false;
+		for i in (0..weight).rev() {
+			indices[i] += 1;
+			if indices[i] <= n - weight + i {
+				for j in (i + 1)..weight {
+					indices[j] = indices[j - 1] + 1;
+				}
+				advanced = true;
 				break;
 			}
-			i -= 1;
 		}
-		if i < 0 {
+		if !advanced {
 			break;
-		}
-		for j in (i as usize + 1)..weight {
-			indices[j] = indices[j - 1] + 1;
 		}
 	}
 }
@@ -479,7 +457,7 @@ fn verify_active_scan_at_weight<'s>(
 fn verify_active_scan<'s>(
 	ctx: &'s VerifyContext,
 	scope: &rayon::Scope<'s>,
-	km: &'s KnowledgeMap,
+	km: &'s ProtocolTrace,
 	ps_base: &'s PrincipalState,
 	as_: &'s AttackerState,
 	mm: MutationMap,
@@ -559,12 +537,24 @@ fn verify_active_scan<'s>(
 	}
 }
 
+/// Try to rewrite a value if it is a Primitive, returning the rewritten value
+/// only if the result is also a Primitive. Otherwise returns None.
+fn try_rewrite_primitive(v: &Value, ps: &PrincipalState) -> Option<Value> {
+	let p = v.as_primitive()?;
+	let (_, rv) = possible_to_rewrite(p, ps, 0);
+	if matches!(&rv[0], Value::Primitive(_)) {
+		Some(rv.into_iter().next().unwrap())
+	} else {
+		None
+	}
+}
+
 /// Returns (truncated_state, is_worthwhile, Option<(full_state, failed_guards)>).
 /// The third element is Some when truncation occurred and the full pre-truncation
 /// state is saved for a potential second-pass analysis if the attacker can bypass
 /// the guards.
 fn verify_active_mutate_principal_state(
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	mut ps: PrincipalState,
 	as_: &AttackerState,
 	mm: &MutationMap,
@@ -573,37 +563,26 @@ fn verify_active_mutate_principal_state(
 	bool,
 	Option<(PrincipalState, Vec<FailedGuardInfo>)>,
 ) {
-	let mut earliest_mutation = ps.constants.len();
+	let mut earliest_mutation = ps.meta.len();
 	let mut is_worthwhile_mutation = false;
 	let attacker_id = principal_get_attacker_id();
 
-	for i in 0..mm.constants.len() {
-		let (ai, ii) = value_resolve_constant(&mm.constants[i], &ps, true);
-		if ii < 0 {
-			continue;
-		}
-		let ii_usize = ii as usize;
-		let mut ac = mm.combination[i].clone();
-		let (ar, _) = value_resolve_value_internal_values_from_knowledge_map(&ai, km);
+	for (constant, combo) in mm.constants.iter().zip(mm.combination.iter()) {
+		let (ai, ii) = value_resolve_constant(constant, &ps, true);
+		let ii_usize = match ii {
+			Some(i) => i,
+			None => continue,
+		};
+		let mut ac = combo.clone();
+		let (ar, _) = value_resolve_value_internal_values_from_protocol_trace(&ai, km);
 
 		// If ar is a primitive, try to rewrite it
-		let ar = match &ar {
-			Value::Primitive(ar_p) => {
-				let (_, aar) = possible_to_rewrite(ar_p, &ps, 0);
-				match &aar[0] {
-					Value::Primitive(aar_p) => Value::Primitive(aar_p.clone()),
-					_ => ar,
-				}
-			}
-			_ => ar,
-		};
+		let ar = try_rewrite_primitive(&ar, &ps).unwrap_or(ar);
 
 		// If ac is a primitive, try to rewrite and copy output/check from original
 		if let Value::Primitive(_) = &ac {
-			let ac_p = ac.as_primitive().expect("ac is Primitive").clone();
-			let (_, aac) = possible_to_rewrite(&ac_p, &ps, 0);
-			if let Value::Primitive(aac_p) = &aac[0] {
-				ac = Value::Primitive(aac_p.clone());
+			if let Some(v) = try_rewrite_primitive(&ac, &ps) {
+				ac = v;
 			}
 			if let Value::Primitive(ai_p) = &ai {
 				let ac_p = ac.as_primitive_mut().expect("ac is Primitive");
@@ -612,20 +591,21 @@ fn verify_active_mutate_principal_state(
 			}
 		}
 
-		ps.creator[ii_usize] = attacker_id;
-		ps.sender[ii_usize] = attacker_id;
-		ps.mutated[ii_usize] = true;
-		ps.assigned[ii_usize] = ac.clone();
-		ps.before_rewrite[ii_usize] = ac.clone();
+		let worthwhile = !value_equivalent_values(&ac, &ar, true);
+
+		ps.values[ii_usize].creator = attacker_id;
+		ps.values[ii_usize].sender = attacker_id;
+		ps.values[ii_usize].mutated = true;
+		ps.values[ii_usize].before_rewrite = ac.clone();
+		ps.values[ii_usize].assigned = ac;
 
 		if ii_usize < earliest_mutation {
 			earliest_mutation = ii_usize;
 		}
 
-		if value_equivalent_values(&ac, &ar, true) {
-			continue;
+		if worthwhile {
+			is_worthwhile_mutation = true;
 		}
-		is_worthwhile_mutation = true;
 	}
 
 	if !is_worthwhile_mutation {
@@ -633,41 +613,33 @@ fn verify_active_mutate_principal_state(
 	}
 
 	let _ = value_resolve_all_principal_state_values(&mut ps, as_);
-	let (failed_rewrites, failed_rewrite_indices) = value_perform_all_rewrites(&mut ps);
+	let failures = value_perform_all_rewrites(&mut ps);
 
 	// Collect all failed guards and extract the bypass keys before truncating.
 	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
 	let mut truncation_index: Option<usize> = None;
 	let mut truncation_failed_idx: Option<usize> = None;
 
-	for i in 0..failed_rewrites.len() {
-		if !failed_rewrites[i].check {
-			continue;
-		}
-		if ps.creator[failed_rewrite_indices[i]] != ps.id {
+	for &(ref prim, idx) in &failures {
+		if !prim.check || ps.values[idx].creator != ps.id {
 			continue;
 		}
 		// Extract the bypass key for this failed guard.
-		if let Some(key) = extract_bypass_key(&failed_rewrites[i]) {
+		if let Some(key) = extract_bypass_key(prim) {
 			failed_guards.push(FailedGuardInfo {
 				bypass_key: key,
-				assigned_index: failed_rewrite_indices[i],
+				assigned_index: idx,
 			});
 		}
 		// Determine the truncation point (same logic as before).
 		if truncation_index.is_none() {
-			let declared_at = ps.declared_at[failed_rewrite_indices[i]];
+			let declared_at = ps.meta[idx].declared_at;
 			if declared_at == ps.max_declared_at {
-				truncation_index = Some(failed_rewrite_indices[i] + 1);
-			} else {
-				for ii in 0..ps.constants.len() {
-					if ps.declared_at[ii] == declared_at {
-						truncation_index = Some(ii + 1);
-						break;
-					}
-				}
+				truncation_index = Some(idx + 1);
+			} else if let Some(pos) = ps.meta.iter().position(|m| m.declared_at == declared_at) {
+				truncation_index = Some(pos + 1);
 			}
-			truncation_failed_idx = Some(failed_rewrite_indices[i]);
+			truncation_failed_idx = Some(idx);
 		}
 	}
 
@@ -729,18 +701,15 @@ fn can_attacker_bypass_any_guard(
 	ps: &PrincipalState,
 	as_: &AttackerState,
 ) -> bool {
-	for guard in guards {
-		if attacker_can_obtain_value(&guard.bypass_key, ps, as_) {
-			return true;
-		}
-	}
-	false
+	guards
+		.iter()
+		.any(|guard| attacker_can_obtain_value(&guard.bypass_key, ps, as_))
 }
 
 /// Check if the attacker can obtain a value: either it is already in their
 /// known set, or they can reconstruct it from known values.
 fn attacker_can_obtain_value(v: &Value, ps: &PrincipalState, as_: &AttackerState) -> bool {
-	if value_equivalent_value_in_values_map(v, &as_.known, &as_.known_map) >= 0 {
+	if value_equivalent_value_in_values_map(v, &as_.known, &as_.known_map).is_some() {
 		return true;
 	}
 	match v {
@@ -761,21 +730,30 @@ fn attacker_can_obtain_value(v: &Value, ps: &PrincipalState, as_: &AttackerState
 /// decompose them (to extract secrets like encrypted plaintexts), and resolve
 /// queries.  This avoids the full `verify_analysis` loop which causes a
 /// combinatorial explosion of reconstruction attempts on the large bypass state.
-fn verify_bypass_decompose(ctx: &VerifyContext, km: &KnowledgeMap, ps: &PrincipalState) {
+fn verify_bypass_decompose(ctx: &VerifyContext, km: &ProtocolTrace, ps: &PrincipalState) {
 	// Collect wire primitive values from the bypass state for
 	// decomposition.  We intentionally do NOT add all wire values to
 	// attacker knowledge here — adding structurally different but
 	// semantically equivalent values can bloat the injection engine.
 	// Instead we only add values that decomposition actually reveals.
-	let mut wire_prims: Vec<(Value, usize)> = Vec::new();
-	for i in 0..ps.assigned.len() {
-		if ps.wire[i].is_empty() {
-			continue;
-		}
-		if let Value::Primitive(_) = &ps.assigned[i] {
-			wire_prims.push((ps.assigned[i].clone(), i));
-		}
-	}
+	let wire_prims: Vec<(Value, usize)> = ps
+		.meta
+		.iter()
+		.zip(ps.values.iter())
+		.enumerate()
+		.filter_map(|(i, (sm, sv))| {
+			if sm.wire.is_empty() {
+				return None;
+			}
+			if let Value::Primitive(_) = &sv.assigned {
+				Some((sv.assigned.clone(), i))
+			} else {
+				None
+			}
+		})
+		.collect();
+
+	let record = compute_slot_diffs(ps, km);
 
 	// Iteratively decompose wire values until no new deductions.
 	for _ in 0..8 {
@@ -788,7 +766,7 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &KnowledgeMap, ps: &Principa
 			if let Value::Primitive(p) = wv {
 				// Active decompose (e.g. AEAD_ENC: knowing the key reveals plaintext)
 				let (r, revealed, ar) = possible_to_decompose_primitive(p, ps, &as_snap, 0);
-				if r && ctx.attacker_put(&revealed, ps) {
+				if r && ctx.attacker_put(&revealed, &record) {
 					info_message(
 						&format!(
 							"{} obtained by decomposing {} with {}.",
@@ -804,7 +782,7 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &KnowledgeMap, ps: &Principa
 				// Passive decompose (e.g. associated data from AEAD_ENC)
 				let passive = possible_to_passively_decompose_primitive(p);
 				for pv in &passive {
-					if ctx.attacker_put(pv, ps) {
+					if ctx.attacker_put(pv, &record) {
 						found_new = true;
 					}
 				}
@@ -837,10 +815,7 @@ fn build_bypass_state(
 	let mut any_injected = false;
 	for guard in initial_guards {
 		if attacker_can_obtain_value(&guard.bypass_key, &ps, as_) {
-			let idx = guard.assigned_index;
-			ps.assigned[idx] = value_g_nil();
-			ps.before_rewrite[idx] = value_g_nil();
-			ps.before_mutate[idx] = value_g_nil();
+			ps.values[guard.assigned_index].override_all(value_g_nil());
 			any_injected = true;
 		}
 	}
@@ -852,22 +827,16 @@ fn build_bypass_state(
 	let mut needs_final_resolve = false;
 	for _ in 0..5 {
 		let _ = value_resolve_all_principal_state_values(&mut ps, as_);
-		let (failed_rewrites, failed_rewrite_indices) = value_perform_all_rewrites(&mut ps);
+		let failures = value_perform_all_rewrites(&mut ps);
 
 		needs_final_resolve = false;
-		for i in 0..failed_rewrites.len() {
-			if !failed_rewrites[i].check {
+		for &(ref prim, idx) in &failures {
+			if !prim.check || ps.values[idx].creator != ps.id {
 				continue;
 			}
-			if ps.creator[failed_rewrite_indices[i]] != ps.id {
-				continue;
-			}
-			if let Some(key) = extract_bypass_key(&failed_rewrites[i]) {
+			if let Some(key) = extract_bypass_key(prim) {
 				if attacker_can_obtain_value(&key, &ps, as_) {
-					let idx = failed_rewrite_indices[i];
-					ps.assigned[idx] = value_g_nil();
-					ps.before_rewrite[idx] = value_g_nil();
-					ps.before_mutate[idx] = value_g_nil();
+					ps.values[idx].override_all(value_g_nil());
 					needs_final_resolve = true;
 				}
 			}
@@ -890,17 +859,7 @@ fn verify_active_drop_principal_state_after_index(
 	mut ps: PrincipalState,
 	f: usize,
 ) -> PrincipalState {
-	Arc::make_mut(&mut ps.constants).truncate(f);
-	ps.assigned.truncate(f);
-	Arc::make_mut(&mut ps.guard).truncate(f);
-	Arc::make_mut(&mut ps.known).truncate(f);
-	Arc::make_mut(&mut ps.known_by).truncate(f);
-	ps.creator.truncate(f);
-	ps.sender.truncate(f);
-	ps.rewritten.truncate(f);
-	ps.before_rewrite.truncate(f);
-	ps.mutated.truncate(f);
-	ps.before_mutate.truncate(f);
-	Arc::make_mut(&mut ps.phase).truncate(f);
+	Arc::make_mut(&mut ps.meta).truncate(f);
+	ps.values.truncate(f);
 	ps
 }

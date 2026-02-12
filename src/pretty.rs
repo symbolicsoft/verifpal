@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::parser::parse_file;
-use crate::primitive::{primitive_core_get, primitive_get, primitive_is_core};
+use crate::primitive::primitive_name;
 use crate::principal::principal_get_name_from_id;
 use crate::sanity::sanity;
 use crate::types::*;
@@ -27,15 +27,7 @@ pub fn pretty_constants(c: &[Constant]) -> String {
 }
 
 pub fn pretty_primitive(p: &Primitive) -> String {
-	let name = if primitive_is_core(p.id) {
-		primitive_core_get(p.id)
-			.map(|s| s.name.clone())
-			.unwrap_or_default()
-	} else {
-		primitive_get(p.id)
-			.map(|s| s.name.clone())
-			.unwrap_or_default()
-	};
+	let name = primitive_name(p.id);
 	let args: Vec<String> = p.arguments.iter().map(pretty_value).collect();
 	let check_str = if p.check { "?" } else { "" };
 	format!("{}({}){}", name, args.join(", "), check_str)
@@ -63,9 +55,6 @@ pub fn pretty_values(a: &[Value]) -> String {
 
 pub fn pretty_query(query: &Query) -> String {
 	let mut output = match query.kind {
-		QueryKind::Confidentiality => {
-			format!("confidentiality? {}", pretty_constants(&query.constants))
-		}
 		QueryKind::Authentication => {
 			format!(
 				"authentication? {} -> {}: {}",
@@ -74,15 +63,11 @@ pub fn pretty_query(query: &Query) -> String {
 				pretty_constants(&query.message.constants),
 			)
 		}
-		QueryKind::Freshness => {
-			format!("freshness? {}", pretty_constants(&query.constants))
-		}
-		QueryKind::Unlinkability => {
-			format!("unlinkability? {}", pretty_constants(&query.constants))
-		}
-		QueryKind::Equivalence => {
-			format!("equivalence? {}", pretty_constants(&query.constants))
-		}
+		_ => format!(
+			"{}? {}",
+			query.kind.name(),
+			pretty_constants(&query.constants)
+		),
 	};
 	if !query.options.is_empty() {
 		output.push('[');
@@ -189,16 +174,13 @@ pub fn pretty_model(m: &Model) -> Result<String, String> {
 }
 
 pub fn pretty_arity(spec_arity: &[i32]) -> String {
-	if spec_arity.len() == 1 {
-		return format!("{}", spec_arity[0]);
-	}
-	let mut parts = Vec::new();
-	for (i, &a) in spec_arity.iter().enumerate() {
-		if i != spec_arity.len() - 1 {
-			parts.push(format!("{}, ", a));
-		} else {
-			parts.push(format!("or {}", a));
+	match spec_arity.len() {
+		0 => String::new(),
+		1 => spec_arity[0].to_string(),
+		_ => {
+			let (init, last) = spec_arity.split_at(spec_arity.len() - 1);
+			let init_str: Vec<String> = init.iter().map(|a| a.to_string()).collect();
+			format!("{}, or {}", init_str.join(", "), last[0])
 		}
 	}
-	parts.concat()
 }

@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use crate::context::VerifyContext;
 use crate::info::info_message;
+use crate::mutationmap::mutation_product;
 use crate::pretty::*;
-use crate::primitive::*;
+use crate::primitive::primitive_is_explosive;
 use crate::types::*;
 use crate::value::*;
 
@@ -46,17 +47,14 @@ fn inject_constant_rules(c: &Constant, arg: usize, p: &Primitive) -> bool {
 }
 
 fn inject_primitive_rules(k: &Primitive, arg: usize, p: &Primitive, stage: i32) -> bool {
-	if !matches!(&p.arguments[arg], Value::Primitive(_)) {
-		return false;
-	}
+	let ref_p = match &p.arguments[arg] {
+		Value::Primitive(p) => p,
+		_ => return false,
+	};
 	if inject_primitive_stage_restricted(k, stage) {
 		return false;
 	}
-	if let Value::Primitive(ref_p) = &p.arguments[arg] {
-		inject_skeleton_equivalent(k, ref_p)
-	} else {
-		false
-	}
+	inject_skeleton_equivalent(k, ref_p)
 }
 
 fn inject_equation_rules(e: &Equation, arg: usize, p: &Primitive) -> bool {
@@ -69,15 +67,7 @@ fn inject_equation_rules(e: &Equation, arg: usize, p: &Primitive) -> bool {
 fn inject_primitive_stage_restricted(p: &Primitive, stage: i32) -> bool {
 	match stage {
 		0 | 1 => true,
-		2 => {
-			if primitive_is_core(p.id) {
-				primitive_core_get(p.id)
-					.map(|s| s.explosive)
-					.unwrap_or(false)
-			} else {
-				primitive_get(p.id).map(|s| s.explosive).unwrap_or(false)
-			}
-		}
+		2 => primitive_is_explosive(p.id),
 		_ => false,
 	}
 }
@@ -110,16 +100,16 @@ fn inject_primitive_skeleton(p: &Primitive, depth: usize) -> (Primitive, usize) 
 	(skeleton, d + 1)
 }
 
-fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
-	let mut max_child = depth;
-	for a in &p.arguments {
-		if let Value::Primitive(pp) = a {
-			let cd = primitive_skeleton_depth(pp, depth + 1);
-			if cd > max_child {
-				max_child = cd;
-			}
-		}
-	}
+pub fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
+	let max_child = p
+		.arguments
+		.iter()
+		.filter_map(|a| match a {
+			Value::Primitive(pp) => Some(primitive_skeleton_depth(pp, depth + 1)),
+			_ => None,
+		})
+		.max()
+		.unwrap_or(depth);
 	max_child + 1
 }
 
@@ -169,14 +159,14 @@ fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 pub fn inject_missing_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
-	ps: &PrincipalState,
+	record: &MutationRecord,
 	as_: &AttackerState,
 ) {
 	let (skeleton, _) = inject_primitive_skeleton(p, 0);
 	let sh = primitive_skeleton_hash(&skeleton);
 	if !as_.skeleton_hashes.contains(&sh) {
 		let known = Value::Primitive(Arc::new(skeleton.clone()));
-		if ctx.attacker_put(&known, ps) {
+		if ctx.attacker_put(&known, record) {
 			info_message(
 				&format!(
 					"Constructed skeleton {} based on {}.",
@@ -190,7 +180,7 @@ pub fn inject_missing_skeletons(
 	}
 	for a in &p.arguments {
 		if let Value::Primitive(pp) = a {
-			inject_missing_skeletons(ctx, pp, ps, as_);
+			inject_missing_skeletons(ctx, pp, record, as_);
 		}
 	}
 }
@@ -224,22 +214,21 @@ fn inject_primitive(
 			if !inject_value_rules(&resolved, arg, p, stage) {
 				continue;
 			}
-			if value_equivalent_value_in_values(&resolved, &uinjectants[arg]) < 0 {
-				uinjectants[arg].push(resolved.clone());
-				kinjectants[arg].push(resolved.clone());
-			}
+			let is_new = push_unique_value(&mut uinjectants[arg], resolved.clone());
 			if let Value::Primitive(kp) = &resolved {
 				if stage >= STAGE_RECURSIVE_INJECTION
 					&& inject_depth as i32 <= stage - STAGE_RECURSIVE_INJECTION
 				{
 					let kp_inj = inject(ctx, kp, inject_depth + 1, ps, as_, stage);
 					for kkp in kp_inj {
-						if value_equivalent_value_in_values(&kkp, &uinjectants[arg]) < 0 {
-							uinjectants[arg].push(kkp.clone());
+						if push_unique_value(&mut uinjectants[arg], kkp.clone()) {
 							kinjectants[arg].push(kkp);
 						}
 					}
 				}
+			}
+			if is_new {
+				kinjectants[arg].push(resolved);
 			}
 		}
 	}
@@ -259,28 +248,23 @@ fn inject_loop_n(ctx: &VerifyContext, p: &Primitive, kinjectants: &[Vec<Value>])
 			return vec![];
 		}
 	}
-	let mut total_size: usize = 1;
-	for k in kinjectants {
-		if total_size > MAX_INJECTIONS_PER_PRIMITIVE / k.len() {
-			total_size = MAX_INJECTIONS_PER_PRIMITIVE;
-			break;
-		}
-		total_size *= k.len();
-	}
-	total_size = total_size.min(MAX_INJECTIONS_PER_PRIMITIVE);
+	let total_size = mutation_product(
+		kinjectants.iter().map(|k| k.len()),
+		MAX_INJECTIONS_PER_PRIMITIVE,
+	)
+	.unwrap_or(MAX_INJECTIONS_PER_PRIMITIVE);
 	let mut injectants = Vec::with_capacity(total_size);
 	let mut indices = vec![0usize; n];
 	loop {
 		if ctx.all_resolved() {
 			return injectants;
 		}
-		let args: Vec<Value> = (0..n).map(|j| kinjectants[j][indices[j]].clone()).collect();
-		injectants.push(Value::Primitive(Arc::new(Primitive {
-			id: p.id,
-			arguments: args,
-			output: p.output,
-			check: p.check,
-		})));
+		let args: Vec<Value> = indices
+			.iter()
+			.zip(kinjectants.iter())
+			.map(|(&idx, k)| k[idx].clone())
+			.collect();
+		injectants.push(Value::Primitive(Arc::new(p.with_arguments(args))));
 		if injectants.len() >= MAX_INJECTIONS_PER_PRIMITIVE {
 			break;
 		}

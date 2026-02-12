@@ -10,7 +10,7 @@ use crate::value::*;
 
 pub fn mutation_map_init(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	stage: i32,
@@ -36,10 +36,14 @@ pub fn mutation_map_init(
 			_ => continue,
 		};
 		let (a, i) = value_resolve_constant(c, ps, true);
-		if mutation_map_skip_value(v, i, km, ps, as_) {
+		let idx = match i {
+			Some(i) => i,
+			None => continue,
+		};
+		if mutation_map_skip_value(v, idx, km, ps, as_) {
 			continue;
 		}
-		let r = mutation_map_replace_value(ctx, &a, i as usize, stage, ps, as_)?;
+		let r = mutation_map_replace_value(ctx, &a, idx, stage, ps, as_)?;
 		if r.is_empty() {
 			continue;
 		}
@@ -67,27 +71,23 @@ pub fn mutation_map_init(
 
 fn mutation_map_skip_value(
 	v: &Value,
-	i: i32,
-	km: &KnowledgeMap,
+	idx: usize,
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 ) -> bool {
-	if i < 0 {
-		return true;
-	}
-	let idx = i as usize;
-	if ps.guard[idx] {
-		if !principal_enum_in_slice(ps.sender[idx], &ps.mutatable_to[idx]) {
+	if ps.meta[idx].guard {
+		if !ps.meta[idx].mutatable_to.contains(&ps.values[idx].sender) {
 			return true;
 		}
-	} else if ps.creator[idx] == ps.id {
+	} else if ps.values[idx].creator == ps.id {
 		return true;
 	}
-	if !int_in_slice(as_.current_phase, &ps.phase[idx]) {
+	if !ps.meta[idx].phase.contains(&as_.current_phase) {
 		return true;
 	}
 	if let Value::Constant(c) = v {
-		if !value_constant_is_used_by_principal_in_knowledge_map(km, ps.id, c) {
+		if !value_constant_is_used_by_principal_in_protocol_trace(km, ps.id, c) {
 			return true;
 		}
 	}
@@ -102,14 +102,8 @@ fn mutation_map_replace_value(
 	ps: &PrincipalState,
 	as_: &AttackerState,
 ) -> Result<Vec<Value>, String> {
-	let a = value_resolve_value_internal_values_from_principal_state(
-		a,
-		a,
-		root_index as i32,
-		ps,
-		as_,
-		false,
-	)?;
+	let a =
+		value_resolve_value_internal_values_from_principal_state(a, a, root_index, ps, as_, false)?;
 	match &a {
 		Value::Constant(_) => Ok(mutation_map_replace_constant(&a, stage, ps, as_)),
 		Value::Primitive(_) => Ok(mutation_map_replace_primitive(ctx, &a, stage, ps, as_)),
@@ -140,9 +134,7 @@ fn mutation_map_replace_constant(
 			}
 			let (c, _) = value_resolve_constant(vc, ps, true);
 			if let Value::Constant(_) = &c {
-				if value_equivalent_value_in_values(&c, &mutations) < 0 {
-					mutations.push(c);
-				}
+				push_unique_value(&mut mutations, c);
 			}
 		}
 	}
@@ -169,27 +161,21 @@ fn mutation_map_replace_primitive(
 				}
 				let (c, _) = value_resolve_constant(vc, ps, true);
 				if let Value::Constant(_) = &c {
-					if value_equivalent_value_in_values(&c, &mutations) < 0 {
-						mutations.push(c);
-					}
+					push_unique_value(&mut mutations, c);
 				}
 			}
 			Value::Primitive(vp) => {
 				if !inject_skeleton_not_deeper_pub(vp, a_prim) {
 					continue;
 				}
-				if value_equivalent_value_in_values(v, &mutations) < 0 {
-					mutations.push(v.clone());
-				}
+				push_unique_value(&mut mutations, v.clone());
 			}
 			_ => {}
 		}
 	}
 	let injectants = inject(ctx, a_prim, 0, ps, as_, stage);
 	for inj in injectants {
-		if value_equivalent_value_in_values(&inj, &mutations) < 0 {
-			mutations.push(inj);
-		}
+		push_unique_value(&mut mutations, inj);
 	}
 	mutations
 }
@@ -209,7 +195,7 @@ fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> 
 		for v in as_.known.iter() {
 			if let Value::Equation(ve) = v {
 				if ve.values.len() == e.values.len()
-					&& value_equivalent_value_in_values(v, &mutations) < 0
+					&& value_equivalent_value_in_values(v, &mutations).is_none()
 				{
 					mutations.push(v.clone());
 				}
@@ -235,6 +221,22 @@ pub fn mutation_map_subset(full_map: &MutationMap, indices: &[usize]) -> Mutatio
 	}
 }
 
+/// Compute the product of mutation sizes, returning None if it exceeds `cap`.
+pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
+	let mut product: usize = 1;
+	for m in sizes {
+		if m > 0 && product > cap / m {
+			return None;
+		}
+		product *= m;
+	}
+	if product <= cap {
+		Some(product)
+	} else {
+		None
+	}
+}
+
 pub fn mutation_map_subset_capped(
 	full_map: &MutationMap,
 	indices: &[usize],
@@ -245,17 +247,7 @@ pub fn mutation_map_subset_capped(
 	if n == 0 {
 		return sub;
 	}
-	let mut product: usize = 1;
-	let mut overflow = false;
-	for i in 0..n {
-		let m = sub.mutations[i].len();
-		if m > 0 && product > max_product / m {
-			overflow = true;
-			break;
-		}
-		product *= m;
-	}
-	if !overflow && product <= max_product {
+	if mutation_product(sub.mutations.iter().map(|m| m.len()), max_product).is_some() {
 		return sub;
 	}
 	let per_dim = int_nth_root(max_product as i32, n as i32).max(1) as usize;
@@ -275,43 +267,25 @@ pub fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
 	let n = mm.combination.len();
 	for i in 0..n {
 		mm.combination[i] = mm.mutations[i][mm.depth_index[i]].clone();
-		if i != n - 1 {
-			continue;
+	}
+	// Increment last dimension and carry
+	mm.depth_index[n - 1] += 1;
+	let mut j = n - 1;
+	while mm.depth_index[j] == mm.mutations[j].len() {
+		if j == 0 {
+			mm.out_of_mutations = true;
+			break;
 		}
-		mm.depth_index[i] += 1;
-		let mut ii = i as i32;
-		while ii >= 0 {
-			if mm.depth_index[ii as usize] != mm.mutations[ii as usize].len() {
-				break;
-			}
-			if ii <= 0 {
-				mm.out_of_mutations = true;
-				break;
-			}
-			mm.depth_index[ii as usize] = 0;
-			mm.depth_index[(ii - 1) as usize] += 1;
-			ii -= 1;
-		}
+		mm.depth_index[j] = 0;
+		j -= 1;
+		mm.depth_index[j] += 1;
 	}
 	mm
 }
 
-// Public wrapper for inject_skeleton_not_deeper used by mutationmap
 pub fn inject_skeleton_not_deeper_pub(p: &Primitive, reference: &Primitive) -> bool {
 	if p.id != reference.id {
 		return false;
 	}
-	fn skeleton_depth(p: &Primitive, depth: usize) -> usize {
-		let mut max_child = depth;
-		for a in &p.arguments {
-			if let Value::Primitive(pp) = a {
-				let cd = skeleton_depth(pp, depth + 1);
-				if cd > max_child {
-					max_child = cd;
-				}
-			}
-		}
-		max_child + 1
-	}
-	skeleton_depth(p, 0) <= skeleton_depth(reference, 0)
+	primitive_skeleton_depth(p, 0) <= primitive_skeleton_depth(reference, 0)
 }

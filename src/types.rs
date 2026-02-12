@@ -33,6 +33,18 @@ pub enum QueryKind {
 	Equivalence,
 }
 
+impl QueryKind {
+	pub fn name(self) -> &'static str {
+		match self {
+			QueryKind::Confidentiality => "confidentiality",
+			QueryKind::Authentication => "authentication",
+			QueryKind::Freshness => "freshness",
+			QueryKind::Unlinkability => "unlinkability",
+			QueryKind::Equivalence => "equivalence",
+		}
+	}
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum QueryOptionKind {
 	Precondition,
@@ -44,6 +56,21 @@ pub enum BlockKind {
 	Principal,
 	Message,
 	Phase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AttackerKind {
+	Active,
+	Passive,
+}
+
+impl std::fmt::Display for AttackerKind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			AttackerKind::Active => write!(f, "active"),
+			AttackerKind::Passive => write!(f, "passive"),
+		}
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -116,6 +143,18 @@ pub struct Primitive {
 	pub check: bool,
 }
 
+impl Primitive {
+	/// Create a copy with different arguments, preserving id/output/check.
+	pub fn with_arguments(&self, arguments: Vec<Value>) -> Self {
+		Primitive {
+			id: self.id,
+			arguments,
+			output: self.output,
+			check: self.check,
+		}
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Equation {
 	pub values: Vec<Value>,
@@ -124,7 +163,7 @@ pub struct Equation {
 #[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
-	pub attacker: String,
+	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
 	pub queries: Vec<Query>,
 }
@@ -136,6 +175,18 @@ pub struct VerifyResult {
 	pub resolved: bool,
 	pub summary: String,
 	pub options: Vec<QueryOptionResult>,
+}
+
+impl VerifyResult {
+	pub fn new(query: &Query, query_index: usize) -> Self {
+		VerifyResult {
+			query: query.clone(),
+			query_index,
+			resolved: false,
+			summary: String::new(),
+			options: vec![],
+		}
+	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -194,44 +245,124 @@ pub struct Expression {
 }
 
 #[derive(Clone, Debug)]
-pub struct KnowledgeMap {
+pub struct TraceSlot {
+	pub constant: Constant,
+	pub initial_value: Value,
+	pub creator: PrincipalId,
+	pub known_by: Vec<HashMap<PrincipalId, PrincipalId>>,
+	pub declared_at: i32,
+	pub phases: Vec<i32>,
+}
+
+impl TraceSlot {
+	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
+		self.creator == pid || self.known_by.iter().any(|m| m.contains_key(&pid))
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolTrace {
 	pub principals: Vec<String>,
 	pub principal_ids: Vec<PrincipalId>,
-	pub constants: Vec<Constant>,
-	pub assigned: Vec<Value>,
-	pub creator: Vec<PrincipalId>,
-	pub known_by: Vec<Vec<HashMap<PrincipalId, PrincipalId>>>,
-	pub declared_at: Vec<i32>,
+	pub slots: Vec<TraceSlot>,
+	pub index: HashMap<ValueId, usize>,
 	pub max_declared_at: i32,
-	pub phase: Vec<Vec<i32>>,
 	pub max_phase: i32,
-	pub constant_index: HashMap<ValueId, usize>,
 	pub used_by: HashMap<ValueId, HashMap<PrincipalId, bool>>,
+}
+
+/// Immutable per-constant metadata (shared via Arc across clones).
+#[derive(Clone, Debug)]
+pub struct SlotMeta {
+	pub constant: Constant,
+	pub guard: bool,
+	pub known: bool,
+	pub wire: Vec<PrincipalId>,
+	pub known_by: Vec<HashMap<PrincipalId, PrincipalId>>,
+	pub declared_at: i32,
+	pub mutatable_to: Vec<PrincipalId>,
+	pub phase: Vec<i32>,
+}
+
+/// Mutable per-constant values (deep-cloned for each active attacker stage).
+#[derive(Clone, Debug)]
+pub struct SlotValues {
+	pub assigned: Value,
+	pub before_rewrite: Value,
+	pub before_mutate: Value,
+	pub mutated: bool,
+	pub rewritten: bool,
+	pub creator: PrincipalId,
+	pub sender: PrincipalId,
+}
+
+impl SlotValues {
+	/// Set `assigned` and, if the slot has not been mutated, also `before_mutate`.
+	pub fn set_assigned(&mut self, v: Value) {
+		if !self.mutated {
+			self.before_mutate = v.clone();
+		}
+		self.assigned = v;
+	}
+
+	/// Unconditionally override all value fields (assigned, before_rewrite, before_mutate).
+	pub fn override_all(&mut self, v: Value) {
+		self.before_mutate = v.clone();
+		self.before_rewrite = v.clone();
+		self.assigned = v;
+	}
 }
 
 #[derive(Clone, Debug)]
 pub struct PrincipalState {
 	pub name: String,
 	pub id: PrincipalId,
-	// Shared/immutable fields (Arc for cheap cloning, matching Go's shallow copy)
-	pub constants: Arc<Vec<Constant>>,
-	pub guard: Arc<Vec<bool>>,
-	pub known: Arc<Vec<bool>>,
-	pub wire: Arc<Vec<Vec<PrincipalId>>>,
-	pub known_by: Arc<Vec<Vec<HashMap<PrincipalId, PrincipalId>>>>,
-	pub declared_at: Arc<Vec<i32>>,
 	pub max_declared_at: i32,
-	pub mutatable_to: Arc<Vec<Vec<PrincipalId>>>,
-	pub phase: Arc<Vec<Vec<i32>>>,
-	pub constant_index: Arc<HashMap<ValueId, usize>>,
-	// Mutable fields (deep-cloned)
-	pub assigned: Vec<Value>,
-	pub creator: Vec<PrincipalId>,
-	pub sender: Vec<PrincipalId>,
-	pub rewritten: Vec<bool>,
-	pub before_rewrite: Vec<Value>,
-	pub mutated: Vec<bool>,
-	pub before_mutate: Vec<Value>,
+	pub meta: Arc<Vec<SlotMeta>>,
+	pub values: Vec<SlotValues>,
+	pub index: Arc<HashMap<ValueId, usize>>,
+}
+
+impl PrincipalState {
+	/// Whether slot `i` should resolve to `before_mutate` rather than `assigned`.
+	/// Returns true for values that the principal perceives as original:
+	/// - created by this principal itself
+	/// - not known to this principal
+	/// - not received over a wire by this principal
+	/// - not actually mutated by the attacker
+	pub fn should_use_before_mutate(&self, i: usize) -> bool {
+		self.values[i].creator == self.id
+			|| !self.meta[i].known
+			|| !self.meta[i].wire.contains(&self.id)
+			|| !self.values[i].mutated
+	}
+
+	/// The value that this principal perceives for slot `i`.
+	pub fn effective_value(&self, i: usize) -> &Value {
+		if self.should_use_before_mutate(i) {
+			&self.values[i].before_mutate
+		} else {
+			&self.values[i].assigned
+		}
+	}
+}
+
+/// A single slot that differs from the protocol trace initial value.
+/// Captured at the time the attacker learns a value, for forensic tracing.
+#[derive(Clone, Debug)]
+pub struct SlotDiff {
+	pub index: usize,
+	pub constant: Constant,
+	pub assigned: Value,
+	pub mutated: bool,
+}
+
+/// Compact forensic record stored alongside each attacker-known value.
+/// Records only the slots where the PrincipalState differed from the
+/// protocol trace at the time the value was learned by the attacker.
+#[derive(Clone, Debug)]
+pub struct MutationRecord {
+	pub diffs: Vec<SlotDiff>,
 }
 
 #[derive(Clone, Debug)]
@@ -241,7 +372,20 @@ pub struct AttackerState {
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<HashMap<u64, Vec<usize>>>,
 	pub skeleton_hashes: Arc<HashSet<u64>>,
-	pub principal_state: Arc<Vec<Arc<PrincipalState>>>,
+	pub mutation_records: Arc<Vec<MutationRecord>>,
+}
+
+impl AttackerState {
+	pub fn new() -> Self {
+		AttackerState {
+			current_phase: 0,
+			exhausted: false,
+			known: Arc::new(vec![]),
+			known_map: Arc::new(HashMap::new()),
+			skeleton_hashes: Arc::new(HashSet::new()),
+			mutation_records: Arc::new(vec![]),
+		}
+	}
 }
 
 #[derive(Clone, Debug)]

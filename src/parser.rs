@@ -5,9 +5,10 @@ use crate::primitive::primitive_get_enum;
 use crate::principal::principal_names_map_add;
 use crate::types::*;
 use crate::value::value_names_map_add;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-static UNNAMED_COUNTER: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
+static UNNAMED_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 const RESERVED: &[&str] = &[
 	"attacker",
@@ -190,10 +191,12 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		self.expect("[")?;
 		self.skip_whitespace();
-		let attacker_type = self.parse_identifier()?;
-		if attacker_type != "active" && attacker_type != "passive" {
-			return Err(format!("invalid attacker type: {}", attacker_type));
-		}
+		let attacker_str = self.parse_identifier()?;
+		let attacker_type = match attacker_str.as_str() {
+			"active" => AttackerKind::Active,
+			"passive" => AttackerKind::Passive,
+			_ => return Err(format!("invalid attacker type: {}", attacker_str)),
+		};
 		self.skip_whitespace();
 		self.expect("]")?;
 		self.skip_whitespace_and_comments();
@@ -360,14 +363,10 @@ impl<'a> Parser<'a> {
 				self.pos = saved;
 			}
 
-			let c = if self.peek() == Some(b'[') {
+			let constant = if self.peek() == Some(b'[') {
 				self.parse_guarded_constant()?
 			} else {
-				self.parse_constant_value()?
-			};
-			let constant = match c {
-				Value::Constant(c) => c,
-				_ => return Err("expected constant in message".to_string()),
+				self.parse_constant()?
 			};
 			constants.push(constant);
 			self.skip_whitespace();
@@ -381,9 +380,9 @@ impl<'a> Parser<'a> {
 		Ok(constants)
 	}
 
-	fn parse_guarded_constant(&mut self) -> Result<Value, String> {
+	fn parse_guarded_constant(&mut self) -> Result<Constant, String> {
 		self.expect("[")?;
-		let inner = self.parse_constant_value()?;
+		let mut c = self.parse_constant()?;
 		// Consume trailing comma if present inside brackets
 		self.skip_whitespace();
 		self.expect("]")?;
@@ -391,21 +390,9 @@ impl<'a> Parser<'a> {
 		if self.peek() == Some(b',') {
 			self.advance();
 		}
-		match inner {
-			Value::Constant(c) => {
-				check_reserved(&c.name)?;
-				Ok(Value::Constant(Constant {
-					name: c.name,
-					id: c.id,
-					guard: true,
-					fresh: false,
-					leaked: false,
-					declaration: None,
-					qualifier: None,
-				}))
-			}
-			_ => Err("expected constant in guard".to_string()),
-		}
+		check_reserved(&c.name)?;
+		c.guard = true;
+		Ok(c)
 	}
 
 	fn parse_expression(&mut self) -> Result<Expression, String> {
@@ -414,9 +401,9 @@ impl<'a> Parser<'a> {
 		if rem.starts_with("knows") {
 			self.parse_knows()
 		} else if rem.starts_with("generates") {
-			self.parse_generates()
+			self.parse_simple_expression("generates", Declaration::Generates)
 		} else if rem.starts_with("leaks") {
-			self.parse_leaks()
+			self.parse_simple_expression("leaks", Declaration::Leaks)
 		} else {
 			self.parse_assignment()
 		}
@@ -442,24 +429,16 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_generates(&mut self) -> Result<Expression, String> {
-		self.expect("generates")?;
+	fn parse_simple_expression(
+		&mut self,
+		keyword: &str,
+		kind: Declaration,
+	) -> Result<Expression, String> {
+		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
-			kind: Declaration::Generates,
-			qualifier: None,
-			constants,
-			assigned: None,
-		})
-	}
-
-	fn parse_leaks(&mut self) -> Result<Expression, String> {
-		self.expect("leaks")?;
-		self.skip_whitespace();
-		let constants = self.parse_constants()?;
-		Ok(Expression {
-			kind: Declaration::Leaks,
+			kind,
 			qualifier: None,
 			constants,
 			assigned: None,
@@ -519,11 +498,7 @@ impl<'a> Parser<'a> {
 			{
 				break;
 			}
-			let val = self.parse_constant_value()?;
-			match val {
-				Value::Constant(c) => constants.push(c),
-				_ => return Err("expected constant".to_string()),
-			}
+			constants.push(self.parse_constant()?);
 			self.skip_inline_whitespace();
 			if self.peek() == Some(b',') {
 				self.advance();
@@ -535,19 +510,17 @@ impl<'a> Parser<'a> {
 		Ok(constants)
 	}
 
-	fn parse_constant_value(&mut self) -> Result<Value, String> {
+	fn parse_constant(&mut self) -> Result<Constant, String> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name)?;
 		let actual_name: Arc<str> = if name == "_" {
-			let mut counter = UNNAMED_COUNTER.lock().expect("unnamed counter lock");
-			let n = format!("unnamed_{}", *counter);
-			*counter += 1;
-			Arc::from(n)
+			let n = UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed);
+			Arc::from(format!("unnamed_{}", n))
 		} else {
 			Arc::from(name)
 		};
 		let id = value_names_map_add(&actual_name);
-		Ok(Value::Constant(Constant {
+		Ok(Constant {
 			name: actual_name,
 			id,
 			guard: false,
@@ -555,7 +528,11 @@ impl<'a> Parser<'a> {
 			leaked: false,
 			declaration: None,
 			qualifier: None,
-		}))
+		})
+	}
+
+	fn parse_constant_value(&mut self) -> Result<Value, String> {
+		Ok(Value::Constant(self.parse_constant()?))
 	}
 
 	fn parse_value(&mut self) -> Result<Value, String> {
@@ -659,32 +636,32 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace_and_comments();
 		let rem = self.remaining();
 		if rem.starts_with("confidentiality?") {
-			self.parse_query_confidentiality()
+			self.parse_query_single_constant("confidentiality?", QueryKind::Confidentiality)
 		} else if rem.starts_with("authentication?") {
 			self.parse_query_authentication()
 		} else if rem.starts_with("freshness?") {
-			self.parse_query_freshness()
+			self.parse_query_single_constant("freshness?", QueryKind::Freshness)
 		} else if rem.starts_with("unlinkability?") {
-			self.parse_query_unlinkability()
+			self.parse_query_multi_constant("unlinkability?", QueryKind::Unlinkability)
 		} else if rem.starts_with("equivalence?") {
-			self.parse_query_equivalence()
+			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
 			Err(format!("unknown query type at position {}", self.pos))
 		}
 	}
 
-	fn parse_query_confidentiality(&mut self) -> Result<Query, String> {
-		self.expect("confidentiality?")?;
+	fn parse_query_single_constant(
+		&mut self,
+		keyword: &str,
+		kind: QueryKind,
+	) -> Result<Query, String> {
+		self.expect(keyword)?;
 		self.skip_whitespace();
-		let c = self.parse_constant_value()?;
-		let constant = match c {
-			Value::Constant(c) => c,
-			_ => return Err("expected constant".to_string()),
-		};
+		let constant = self.parse_constant()?;
 		self.skip_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
-			kind: QueryKind::Confidentiality,
+			kind,
 			constants: vec![constant],
 			message: Message::default(),
 			options,
@@ -705,11 +682,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		self.expect(":")?;
 		self.skip_whitespace();
-		let c = self.parse_constant_value()?;
-		let constant = match c {
-			Value::Constant(c) => c,
-			_ => return Err("expected constant".to_string()),
-		};
+		let constant = self.parse_constant()?;
 		self.skip_whitespace();
 		let sender_id = principal_names_map_add(&sender_name);
 		let recipient_id = principal_names_map_add(&recipient_name);
@@ -726,46 +699,18 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_query_freshness(&mut self) -> Result<Query, String> {
-		self.expect("freshness?")?;
-		self.skip_whitespace();
-		let c = self.parse_constant_value()?;
-		let constant = match c {
-			Value::Constant(c) => c,
-			_ => return Err("expected constant".to_string()),
-		};
-		self.skip_whitespace();
-		let options = self.try_parse_query_options()?;
-		Ok(Query {
-			kind: QueryKind::Freshness,
-			constants: vec![constant],
-			message: Message::default(),
-			options,
-		})
-	}
-
-	fn parse_query_unlinkability(&mut self) -> Result<Query, String> {
-		self.expect("unlinkability?")?;
+	fn parse_query_multi_constant(
+		&mut self,
+		keyword: &str,
+		kind: QueryKind,
+	) -> Result<Query, String> {
+		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
 		self.skip_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
-			kind: QueryKind::Unlinkability,
-			constants,
-			message: Message::default(),
-			options,
-		})
-	}
-
-	fn parse_query_equivalence(&mut self) -> Result<Query, String> {
-		self.expect("equivalence?")?;
-		self.skip_whitespace();
-		let constants = self.parse_query_constant_list()?;
-		self.skip_whitespace();
-		let options = self.try_parse_query_options()?;
-		Ok(Query {
-			kind: QueryKind::Equivalence,
+			kind,
 			constants,
 			message: Message::default(),
 			options,
@@ -790,11 +735,7 @@ impl<'a> Parser<'a> {
 			{
 				break;
 			}
-			let v = self.parse_constant_value()?;
-			match v {
-				Value::Constant(c) => constants.push(c),
-				_ => break,
-			}
+			constants.push(self.parse_constant()?);
 			self.skip_whitespace();
 			if self.peek() == Some(b',') {
 				self.advance();
@@ -834,11 +775,7 @@ impl<'a> Parser<'a> {
 			self.skip_whitespace();
 			self.expect(":")?;
 			self.skip_whitespace();
-			let c = self.parse_constant_value()?;
-			let constant = match c {
-				Value::Constant(c) => c,
-				_ => return Err("expected constant".to_string()),
-			};
+			let constant = self.parse_constant()?;
 			self.skip_whitespace();
 			self.expect("]")?;
 			self.skip_whitespace_and_comments();
@@ -886,9 +823,7 @@ pub fn parse_file(file_path: &str) -> Result<Model, String> {
 	let content =
 		std::fs::read_to_string(file_path).map_err(|e| format!("failed to read file: {}", e))?;
 
-	let mut model = parse_string(&file_name, &content)?;
-	model.file_name = file_name;
-	Ok(model)
+	parse_string(&file_name, &content)
 }
 
 pub fn parse_string(file_name: &str, input: &str) -> Result<Model, String> {

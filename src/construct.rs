@@ -10,158 +10,131 @@ use crate::value::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn construct_knowledge_map(
+pub fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
-) -> Result<KnowledgeMap, String> {
-	let mut km = KnowledgeMap {
+) -> Result<ProtocolTrace, String> {
+	let mut trace = ProtocolTrace {
 		principals: principals.to_vec(),
 		principal_ids: principal_ids.to_vec(),
-		constants: vec![],
-		assigned: vec![],
-		creator: vec![],
-		known_by: vec![],
-		declared_at: vec![],
+		slots: vec![],
+		index: HashMap::new(),
 		max_declared_at: 0,
-		phase: vec![],
 		max_phase: 0,
-		constant_index: HashMap::new(),
 		used_by: HashMap::new(),
 	};
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
-	// Add g
-	let g = value_g();
-	let g_const = g.as_constant().expect("g is Constant").clone();
-	km.constants.push(g_const.clone());
-	km.constant_index.insert(g_const.id, km.constants.len() - 1);
-	km.assigned.push(g);
-	km.creator.push(principal_get_attacker_id());
-	let mut g_known_by = Vec::new();
-	for &pid in principal_ids {
-		let mut m = HashMap::new();
-		m.insert(pid, pid);
-		g_known_by.push(m);
+	// Add builtins (g, nil)
+	for builtin in &[value_g(), value_nil()] {
+		let c = builtin.as_constant().expect("builtin is Constant").clone();
+		let known_by: Vec<_> = principal_ids
+			.iter()
+			.map(|&pid| HashMap::from([(pid, pid)]))
+			.collect();
+		let cid = c.id;
+		trace.slots.push(TraceSlot {
+			constant: c,
+			initial_value: builtin.clone(),
+			creator: principal_get_attacker_id(),
+			known_by,
+			declared_at,
+			phases: vec![current_phase],
+		});
+		trace.index.insert(cid, trace.slots.len() - 1);
 	}
-	km.known_by.push(g_known_by);
-	km.declared_at.push(declared_at);
-	km.phase.push(vec![current_phase]);
-
-	// Add nil
-	let nil = value_nil();
-	let nil_const = nil.as_constant().expect("nil is Constant").clone();
-	km.constants.push(nil_const.clone());
-	km.constant_index
-		.insert(nil_const.id, km.constants.len() - 1);
-	km.assigned.push(nil);
-	km.creator.push(principal_get_attacker_id());
-	let mut nil_known_by = Vec::new();
-	for &pid in principal_ids {
-		let mut m = HashMap::new();
-		m.insert(pid, pid);
-		nil_known_by.push(m);
-	}
-	km.known_by.push(nil_known_by);
-	km.declared_at.push(declared_at);
-	km.phase.push(vec![current_phase]);
 
 	for blck in &m.blocks {
 		match blck.kind {
 			BlockKind::Principal => {
-				let (new_km, new_da) =
-					construct_knowledge_map_render_principal(km, blck, declared_at, current_phase)?;
-				km = new_km;
+				let new_da =
+					construct_trace_render_principal(&mut trace, blck, declared_at, current_phase)?;
 				declared_at = new_da;
 			}
 			BlockKind::Message => {
 				declared_at += 1;
-				km.max_declared_at = declared_at;
-				km = construct_knowledge_map_render_message(km, blck, current_phase)?;
+				trace.max_declared_at = declared_at;
+				construct_trace_render_message(&mut trace, blck, current_phase)?;
 			}
 			BlockKind::Phase => {
 				current_phase = blck.phase.number;
 			}
 		}
 	}
-	km.max_phase = current_phase;
-	km.used_by = construct_knowledge_map_used_by(&km);
-	Ok(km)
+	trace.max_phase = current_phase;
+	trace.used_by = construct_trace_used_by(&trace);
+	Ok(trace)
 }
 
-fn construct_knowledge_map_used_by(
-	km: &KnowledgeMap,
-) -> HashMap<ValueId, HashMap<PrincipalId, bool>> {
+fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<PrincipalId, bool>> {
 	let mut used_by: HashMap<ValueId, HashMap<PrincipalId, bool>> = HashMap::new();
-	for (ii, a) in km.assigned.iter().enumerate() {
-		match a {
-			Value::Primitive(_) | Value::Equation(_) => {
-				let (_, v) = value_resolve_value_internal_values_from_knowledge_map(a, km);
-				let creator_id = km.creator[ii];
-				for vv in &v {
-					if let Value::Constant(c) = vv {
-						used_by.entry(c.id).or_default().insert(creator_id, true);
-					}
-				}
-				if let Value::Constant(c) = &km.assigned[ii] {
-					used_by.entry(c.id).or_default().insert(creator_id, true);
+	for slot in &trace.slots {
+		if matches!(
+			&slot.initial_value,
+			Value::Primitive(_) | Value::Equation(_)
+		) {
+			let (_, v) =
+				value_resolve_value_internal_values_from_protocol_trace(&slot.initial_value, trace);
+			for vv in &v {
+				if let Value::Constant(c) = vv {
+					used_by.entry(c.id).or_default().insert(slot.creator, true);
 				}
 			}
-			_ => {}
 		}
 	}
 	used_by
 }
 
-fn construct_knowledge_map_render_principal(
-	mut km: KnowledgeMap,
+fn construct_trace_render_principal(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	mut declared_at: i32,
 	current_phase: i32,
-) -> Result<(KnowledgeMap, i32), String> {
+) -> Result<i32, String> {
 	for expr in &blck.principal.expressions {
 		match expr.kind {
 			Declaration::Knows => {
-				km = construct_knowledge_map_render_knows(km, blck, declared_at, expr)?;
+				construct_trace_render_knows(trace, blck, declared_at, expr)?;
 			}
 			Declaration::Generates => {
-				km = construct_knowledge_map_render_generates(km, blck, declared_at, expr)?;
+				construct_trace_render_generates(trace, blck, declared_at, expr)?;
 			}
 			Declaration::Assignment => {
-				km = construct_knowledge_map_render_assignment(km, blck, declared_at, expr)?;
+				construct_trace_render_assignment(trace, blck, declared_at, expr)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
-				km = construct_knowledge_map_render_leaks(km, blck, expr, current_phase)?;
+				construct_trace_render_leaks(trace, blck, expr, current_phase)?;
 			}
 		}
 	}
-	Ok((km, declared_at))
+	Ok(declared_at)
 }
 
-fn construct_knowledge_map_render_knows(
-	mut km: KnowledgeMap,
+fn construct_trace_render_knows(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<KnowledgeMap, String> {
+) -> Result<(), String> {
 	for c in &expr.constants {
-		let i = value_get_knowledge_map_index_from_constant(&km, c);
+		let i = value_get_trace_index_from_constant(trace, c);
 		if let Some(idx) = i {
-			let d1 = km.constants[idx].declaration;
-			let q1 = km.constants[idx].qualifier;
+			let d1 = trace.slots[idx].constant.declaration;
+			let q1 = trace.slots[idx].constant.qualifier;
 			let q2 = expr.qualifier;
-			let fresh = km.constants[idx].fresh;
+			let fresh = trace.slots[idx].constant.fresh;
 			if d1 != Some(Declaration::Knows) || q1 != q2 || fresh {
 				return Err(format!(
 					"constant is known more than once and in different ways ({})",
 					pretty_constant(c)
 				));
 			}
-			let mut m = HashMap::new();
-			m.insert(blck.principal.id, blck.principal.id);
-			km.known_by[idx].push(m);
+			trace.slots[idx]
+				.known_by
+				.push(HashMap::from([(blck.principal.id, blck.principal.id)]));
 			continue;
 		}
 		let new_c = Constant {
@@ -173,36 +146,37 @@ fn construct_knowledge_map_render_knows(
 			declaration: Some(Declaration::Knows),
 			qualifier: expr.qualifier,
 		};
-		km.constants.push(new_c.clone());
-		km.constant_index.insert(new_c.id, km.constants.len() - 1);
-		km.assigned.push(Value::Constant(new_c));
-		km.creator.push(blck.principal.id);
-		km.known_by.push(vec![]);
-		km.declared_at.push(declared_at);
-		km.phase.push(vec![]);
-		let l = km.constants.len() - 1;
+		let cid = new_c.id;
+		trace.slots.push(TraceSlot {
+			constant: new_c.clone(),
+			initial_value: Value::Constant(new_c),
+			creator: blck.principal.id,
+			known_by: vec![],
+			declared_at,
+			phases: vec![],
+		});
+		trace.index.insert(cid, trace.slots.len() - 1);
+		let l = trace.slots.len() - 1;
 		if expr.qualifier != Some(Qualifier::Public) {
 			continue;
 		}
-		for &pid in &km.principal_ids {
+		for &pid in &trace.principal_ids {
 			if pid != blck.principal.id {
-				let mut m = HashMap::new();
-				m.insert(pid, pid);
-				km.known_by[l].push(m);
+				trace.slots[l].known_by.push(HashMap::from([(pid, pid)]));
 			}
 		}
 	}
-	Ok(km)
+	Ok(())
 }
 
-fn construct_knowledge_map_render_generates(
-	mut km: KnowledgeMap,
+fn construct_trace_render_generates(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<KnowledgeMap, String> {
+) -> Result<(), String> {
 	for c in &expr.constants {
-		let i = value_get_knowledge_map_index_from_constant(&km, c);
+		let i = value_get_trace_index_from_constant(trace, c);
 		if i.is_some() {
 			return Err(format!(
 				"generated constant already exists ({})",
@@ -218,40 +192,37 @@ fn construct_knowledge_map_render_generates(
 			declaration: Some(Declaration::Generates),
 			qualifier: Some(Qualifier::Private),
 		};
-		km.constants.push(new_c.clone());
-		km.constant_index.insert(new_c.id, km.constants.len() - 1);
-		km.assigned.push(Value::Constant(new_c));
-		km.creator.push(blck.principal.id);
-		km.known_by.push(vec![HashMap::new()]);
-		km.declared_at.push(declared_at);
-		km.phase.push(vec![]);
+		let cid = new_c.id;
+		trace.slots.push(TraceSlot {
+			constant: new_c.clone(),
+			initial_value: Value::Constant(new_c),
+			creator: blck.principal.id,
+			known_by: vec![HashMap::new()],
+			declared_at,
+			phases: vec![],
+		});
+		trace.index.insert(cid, trace.slots.len() - 1);
 	}
-	Ok(km)
+	Ok(())
 }
 
-fn construct_knowledge_map_render_assignment(
-	mut km: KnowledgeMap,
+fn construct_trace_render_assignment(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<KnowledgeMap, String> {
+) -> Result<(), String> {
 	let assigned = expr.assigned.as_ref().ok_or("missing assignment value")?;
-	let constants = sanity_assignment_constants(assigned, &[], &km)?;
+	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
 	}
 	for c in &constants {
-		let idx = match value_get_knowledge_map_index_from_constant(&km, c) {
+		let idx = match value_get_trace_index_from_constant(trace, c) {
 			Some(idx) => idx,
 			None => return Err(format!("constant does not exist ({})", pretty_constant(c))),
 		};
-		let mut knows = km.creator[idx] == blck.principal.id;
-		for m in &km.known_by[idx] {
-			if m.contains_key(&blck.principal.id) {
-				knows = true;
-				break;
-			}
-		}
+		let knows = trace.slots[idx].known_by_principal(blck.principal.id);
 		if !knows {
 			return Err(format!(
 				"{} is using constant ({}) despite not knowing it",
@@ -261,7 +232,7 @@ fn construct_knowledge_map_render_assignment(
 		}
 	}
 	for (i, c) in expr.constants.iter().enumerate() {
-		let ii = value_get_knowledge_map_index_from_constant(&km, c);
+		let ii = value_get_trace_index_from_constant(trace, c);
 		if ii.is_some() {
 			return Err(format!("constant assigned twice ({})", pretty_constant(c)));
 		}
@@ -278,25 +249,28 @@ fn construct_knowledge_map_render_assignment(
 		if let Value::Primitive(ref mut p) = a {
 			Arc::make_mut(p).output = i;
 		}
-		km.constants.push(new_c.clone());
-		km.constant_index.insert(new_c.id, km.constants.len() - 1);
-		km.assigned.push(a);
-		km.creator.push(blck.principal.id);
-		km.known_by.push(vec![HashMap::new()]);
-		km.declared_at.push(declared_at);
-		km.phase.push(vec![]);
+		let cid = new_c.id;
+		trace.slots.push(TraceSlot {
+			constant: new_c,
+			initial_value: a,
+			creator: blck.principal.id,
+			known_by: vec![HashMap::new()],
+			declared_at,
+			phases: vec![],
+		});
+		trace.index.insert(cid, trace.slots.len() - 1);
 	}
-	Ok(km)
+	Ok(())
 }
 
-fn construct_knowledge_map_render_leaks(
-	mut km: KnowledgeMap,
+fn construct_trace_render_leaks(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	expr: &Expression,
 	current_phase: i32,
-) -> Result<KnowledgeMap, String> {
+) -> Result<(), String> {
 	for c in &expr.constants {
-		let idx = match value_get_knowledge_map_index_from_constant(&km, c) {
+		let idx = match value_get_trace_index_from_constant(trace, c) {
 			Some(idx) => idx,
 			None => {
 				return Err(format!(
@@ -305,13 +279,7 @@ fn construct_knowledge_map_render_leaks(
 				))
 			}
 		};
-		let mut known = km.creator[idx] == blck.principal.id;
-		for m in &km.known_by[idx] {
-			if m.contains_key(&blck.principal.id) {
-				known = true;
-				break;
-			}
-		}
+		let known = trace.slots[idx].known_by_principal(blck.principal.id);
 		if !known {
 			return Err(format!(
 				"{} leaks a constant that they do not know ({})",
@@ -319,19 +287,19 @@ fn construct_knowledge_map_render_leaks(
 				pretty_constant(c)
 			));
 		}
-		km.constants[idx].leaked = true;
-		append_unique_int(&mut km.phase[idx], current_phase);
+		trace.slots[idx].constant.leaked = true;
+		append_unique_int(&mut trace.slots[idx].phases, current_phase);
 	}
-	Ok(km)
+	Ok(())
 }
 
-fn construct_knowledge_map_render_message(
-	mut km: KnowledgeMap,
+fn construct_trace_render_message(
+	trace: &mut ProtocolTrace,
 	blck: &Block,
 	current_phase: i32,
-) -> Result<KnowledgeMap, String> {
+) -> Result<(), String> {
 	for c in &blck.message.constants {
-		let idx = match value_get_knowledge_map_index_from_constant(&km, c) {
+		let idx = match value_get_trace_index_from_constant(trace, c) {
 			Some(idx) => idx,
 			None => {
 				return Err(format!(
@@ -342,16 +310,8 @@ fn construct_knowledge_map_render_message(
 				))
 			}
 		};
-		let mut sender_knows = km.creator[idx] == blck.message.sender;
-		let mut recipient_knows = km.creator[idx] == blck.message.recipient;
-		for m in &km.known_by[idx] {
-			if m.contains_key(&blck.message.sender) {
-				sender_knows = true;
-			}
-			if m.contains_key(&blck.message.recipient) {
-				recipient_knows = true;
-			}
-		}
+		let sender_knows = trace.slots[idx].known_by_principal(blck.message.sender);
+		let recipient_knows = trace.slots[idx].known_by_principal(blck.message.recipient);
 		if !sender_knows {
 			return Err(format!(
 				"{} is sending constant ({}) despite not knowing it",
@@ -366,41 +326,32 @@ fn construct_knowledge_map_render_message(
 				pretty_constant(c)
 			));
 		}
-		let mut m = HashMap::new();
-		m.insert(blck.message.recipient, blck.message.sender);
-		km.known_by[idx].push(m);
-		append_unique_int(&mut km.phase[idx], current_phase);
+		trace.slots[idx].known_by.push(HashMap::from([(
+			blck.message.recipient,
+			blck.message.sender,
+		)]));
+		append_unique_int(&mut trace.slots[idx].phases, current_phase);
 	}
-	Ok(km)
+	Ok(())
 }
 
-pub fn construct_principal_states(m: &Model, km: &KnowledgeMap) -> Vec<PrincipalState> {
+pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut states = Vec::new();
-	for p in 0..km.principals.len() {
-		let n = km.constants.len();
-		let mut constants = Vec::with_capacity(n);
-		let mut assigned = Vec::with_capacity(n);
-		let mut guard_vec = Vec::with_capacity(n);
-		let mut known_vec = Vec::with_capacity(n);
-		let mut wire_vec = Vec::with_capacity(n);
-		let mut known_by_vec = Vec::with_capacity(n);
-		let mut declared_at_vec = Vec::with_capacity(n);
-		let mut creator_vec = Vec::with_capacity(n);
-		let mut sender_vec = Vec::with_capacity(n);
-		let mut before_rewrite = Vec::with_capacity(n);
-		let mut mutatable_to_vec = Vec::with_capacity(n);
-		let mut before_mutate = Vec::with_capacity(n);
-		let mut phase_vec = Vec::with_capacity(n);
-		let mut constant_index = HashMap::with_capacity(n);
+	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
+		let n = trace.slots.len();
+		let mut meta_vec = Vec::with_capacity(n);
+		let mut values_vec = Vec::with_capacity(n);
+		let mut index_map = HashMap::with_capacity(n);
 
-		for (i, c) in km.constants.iter().enumerate() {
+		for slot in &trace.slots {
+			let c = &slot.constant;
 			let mut wire = vec![];
 			let mut guard = false;
 			let mut mutatable_to = vec![];
-			let mut knows = km.creator[i] == km.principal_ids[p];
-			let mut sender = km.creator[i];
-			for m_map in &km.known_by[i] {
-				if let Some(&preceding_sender) = m_map.get(&km.principal_ids[p]) {
+			let mut knows = slot.creator == principal_id;
+			let mut sender = slot.creator;
+			for m_map in &slot.known_by {
+				if let Some(&preceding_sender) = m_map.get(&principal_id) {
 					sender = preceding_sender;
 					knows = true;
 					break;
@@ -408,55 +359,45 @@ pub fn construct_principal_states(m: &Model, km: &KnowledgeMap) -> Vec<Principal
 			}
 			for blck in &m.blocks {
 				if blck.kind == BlockKind::Message {
-					let (w, g, mt) = construct_principal_states_get_value_mutatability(
+					construct_principal_states_get_value_mutatability(
 						c,
 						blck,
-						km.principal_ids[p],
-						km.creator[i],
-						wire,
-						guard,
-						mutatable_to,
+						principal_id,
+						slot.creator,
+						&mut wire,
+						&mut guard,
+						&mut mutatable_to,
 					);
-					wire = w;
-					guard = g;
-					mutatable_to = mt;
 				}
 			}
-			constants.push(c.clone());
-			constant_index.insert(c.id, constants.len() - 1);
-			assigned.push(km.assigned[i].clone());
-			guard_vec.push(guard);
-			known_vec.push(knows);
-			wire_vec.push(wire);
-			known_by_vec.push(km.known_by[i].clone());
-			declared_at_vec.push(km.declared_at[i]);
-			creator_vec.push(km.creator[i]);
-			sender_vec.push(sender);
-			before_rewrite.push(km.assigned[i].clone());
-			mutatable_to_vec.push(mutatable_to);
-			before_mutate.push(km.assigned[i].clone());
-			phase_vec.push(km.phase[i].clone());
+			index_map.insert(c.id, meta_vec.len());
+			meta_vec.push(SlotMeta {
+				constant: c.clone(),
+				guard,
+				known: knows,
+				wire,
+				known_by: slot.known_by.clone(),
+				declared_at: slot.declared_at,
+				mutatable_to,
+				phase: slot.phases.clone(),
+			});
+			values_vec.push(SlotValues {
+				assigned: slot.initial_value.clone(),
+				before_rewrite: slot.initial_value.clone(),
+				before_mutate: slot.initial_value.clone(),
+				mutated: false,
+				rewritten: false,
+				creator: slot.creator,
+				sender,
+			});
 		}
 		states.push(PrincipalState {
-			name: km.principals[p].clone(),
-			id: km.principal_ids[p],
-			constants: Arc::new(constants),
-			guard: Arc::new(guard_vec),
-			known: Arc::new(known_vec),
-			wire: Arc::new(wire_vec),
-			known_by: Arc::new(known_by_vec),
-			declared_at: Arc::new(declared_at_vec),
-			max_declared_at: km.max_declared_at,
-			mutatable_to: Arc::new(mutatable_to_vec),
-			phase: Arc::new(phase_vec),
-			constant_index: Arc::new(constant_index),
-			assigned,
-			creator: creator_vec,
-			sender: sender_vec,
-			rewritten: vec![false; n],
-			before_rewrite,
-			mutated: vec![false; n],
-			before_mutate,
+			name: principal_name.clone(),
+			id: principal_id,
+			max_declared_at: trace.max_declared_at,
+			meta: Arc::new(meta_vec),
+			values: values_vec,
+			index: Arc::new(index_map),
 		});
 	}
 	states
@@ -467,59 +408,53 @@ fn construct_principal_states_get_value_mutatability(
 	blck: &Block,
 	principal_id: PrincipalId,
 	creator: PrincipalId,
-	mut wire: Vec<PrincipalId>,
-	mut guard: bool,
-	mut mutatable_to: Vec<PrincipalId>,
-) -> (Vec<PrincipalId>, bool, Vec<PrincipalId>) {
-	if blck.kind != BlockKind::Message {
-		return (wire, guard, mutatable_to);
-	}
+	wire: &mut Vec<PrincipalId>,
+	guard: &mut bool,
+	mutatable_to: &mut Vec<PrincipalId>,
+) {
 	let ir = blck.message.recipient == principal_id;
 	let ic = creator == principal_id;
 	for cc in &blck.message.constants {
 		if c.id != cc.id {
 			continue;
 		}
-		append_unique_principal_enum(&mut wire, blck.message.recipient);
-		if !guard {
-			guard = cc.guard && (ir || ic);
+		append_unique_principal_enum(wire, blck.message.recipient);
+		if !*guard {
+			*guard = cc.guard && (ir || ic);
 		}
 		if !cc.guard {
-			append_unique_principal_enum(&mut mutatable_to, blck.message.recipient);
+			append_unique_principal_enum(mutatable_to, blck.message.recipient);
 		}
 	}
-	(wire, guard, mutatable_to)
 }
 
 pub fn construct_principal_state_clone(ps: &PrincipalState, purify: bool) -> PrincipalState {
-	let n = ps.assigned.len();
-	let mut clone = PrincipalState {
+	let values = ps
+		.values
+		.iter()
+		.map(|sv| {
+			let (assigned, before_rewrite) = if purify {
+				(&sv.before_mutate, &sv.before_mutate)
+			} else {
+				(&sv.assigned, &sv.before_rewrite)
+			};
+			SlotValues {
+				assigned: assigned.clone(),
+				before_rewrite: before_rewrite.clone(),
+				before_mutate: sv.before_mutate.clone(),
+				mutated: sv.mutated,
+				rewritten: false,
+				creator: sv.creator,
+				sender: sv.sender,
+			}
+		})
+		.collect();
+	PrincipalState {
 		name: ps.name.clone(),
 		id: ps.id,
-		constants: ps.constants.clone(),
-		assigned: Vec::with_capacity(n),
-		guard: ps.guard.clone(),
-		known: ps.known.clone(),
-		wire: ps.wire.clone(),
-		known_by: ps.known_by.clone(),
-		declared_at: ps.declared_at.clone(),
 		max_declared_at: ps.max_declared_at,
-		creator: ps.creator.clone(),
-		sender: ps.sender.clone(),
-		rewritten: vec![false; n],
-		before_rewrite: Vec::with_capacity(n),
-		mutated: ps.mutated.clone(),
-		mutatable_to: ps.mutatable_to.clone(),
-		before_mutate: ps.before_mutate.clone(),
-		phase: ps.phase.clone(),
-		constant_index: ps.constant_index.clone(),
-	};
-	if purify {
-		clone.assigned = ps.before_mutate.clone();
-		clone.before_rewrite = ps.before_mutate.clone();
-	} else {
-		clone.assigned = ps.assigned.clone();
-		clone.before_rewrite = ps.before_rewrite.clone();
+		meta: ps.meta.clone(),
+		values,
+		index: ps.index.clone(),
 	}
-	clone
 }

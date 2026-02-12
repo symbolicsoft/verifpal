@@ -88,7 +88,7 @@ struct TuiState {
 	finished: bool,
 	// model
 	file_name: String,
-	attacker_type: String,
+	attacker_type: AttackerKind,
 	principals: Vec<TuiPrincipal>,
 	messages: Vec<TuiMsg>,
 	queries: Vec<TuiQuery>,
@@ -120,7 +120,7 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
 		width: 80,
 		finished: false,
 		file_name: String::new(),
-		attacker_type: String::new(),
+		attacker_type: AttackerKind::Passive,
 		principals: vec![],
 		messages: vec![],
 		queries: vec![],
@@ -159,7 +159,7 @@ pub fn tui_init(m: &Model) {
 	st.width = w;
 	st.start_time = Some(Instant::now());
 	st.file_name = m.file_name.clone();
-	st.attacker_type = m.attacker.clone();
+	st.attacker_type = m.attacker;
 	st.phase = 0;
 	st.attacker_known_count = 0;
 	st.scan_principal.clear();
@@ -221,7 +221,7 @@ pub fn tui_init(m: &Model) {
 	}
 
 	// Initial narrative
-	if st.attacker_type == "passive" {
+	if st.attacker_type == AttackerKind::Passive {
 		st.narrative = narrative::pick_narrative(NarrativeContext::Passive, 0);
 	} else {
 		st.narrative = narrative::pick_narrative(NarrativeContext::Init, 0);
@@ -406,7 +406,7 @@ pub fn tui_stage_update(stage: i32) {
 		if !st.enabled {
 			return;
 		}
-		st.stage = format!("{}", stage);
+		st.stage = stage.to_string();
 		st.worthwhile_count = 0;
 		st.last_mutations.clear();
 		let seed = stage as u64;
@@ -423,15 +423,12 @@ pub fn tui_finish() {
 		if !st.enabled {
 			return;
 		}
-		let mut any_fail = false;
 		for q in st.queries.iter_mut() {
 			if matches!(q.status, QStatus::Pending) {
 				q.status = QStatus::Pass;
 			}
-			if matches!(q.status, QStatus::Fail) {
-				any_fail = true;
-			}
 		}
+		let any_fail = st.queries.iter().any(|q| matches!(q.status, QStatus::Fail));
 		st.finished = true;
 		st.narrative = if any_fail {
 			narrative::pick_narrative(NarrativeContext::Finished, 0)
@@ -557,30 +554,29 @@ fn trunc(s: &str, max: usize) -> String {
 /// Wrap content in │...│ padded to width w. Truncates if content exceeds inner width.
 fn bline(content: &str, w: usize) -> String {
 	let inner = w.saturating_sub(2);
-	let vl = vis_len(content);
-	if vl > inner {
-		let clipped = trunc(content, inner);
-		let cvl = vis_len(&clipped);
-		let pad = inner.saturating_sub(cvl);
-		format!(
-			"{}{}{}{}{}\n",
-			"\u{2502}".dimmed(),
-			clipped,
-			" ".repeat(pad),
-			"\u{2502}".dimmed(),
-			ESC_CLEAR_TO_EOL
-		)
-	} else {
-		let pad = inner - vl;
-		format!(
-			"{}{}{}{}{}\n",
-			"\u{2502}".dimmed(),
-			content,
-			" ".repeat(pad),
-			"\u{2502}".dimmed(),
-			ESC_CLEAR_TO_EOL
-		)
-	}
+	let clipped = trunc(content, inner);
+	let pad = inner.saturating_sub(vis_len(&clipped));
+	format!(
+		"{}{}{}{}{}\n",
+		"\u{2502}".dimmed(),
+		clipped,
+		" ".repeat(pad),
+		"\u{2502}".dimmed(),
+		ESC_CLEAR_TO_EOL
+	)
+}
+
+/// Format content inside the attacker inner box: "    │<content><padding>│", wrapped by bline.
+fn inbox_line(buf: &mut String, content: &str, box_inner: usize, w: usize) {
+	let pad = box_inner.saturating_sub(vis_len(content));
+	let line = format!(
+		"    {}{}{}{}",
+		"\u{2502}".dimmed(),
+		content,
+		" ".repeat(pad),
+		"\u{2502}".dimmed()
+	);
+	buf.push_str(&bline(&line, w));
 }
 
 fn border_top(w: usize) -> String {
@@ -1011,7 +1007,7 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize, _frame: usize, 
 			msg.sender.cyan(),
 			"\u{2500}\u{2500}\u{25b6} ".yellow(),
 			label.yellow().bold(),
-			" \u{2500}\u{2500}\u{25b6}".to_string().yellow(),
+			" \u{2500}\u{2500}\u{25b6}".yellow(),
 			msg.recipient.cyan()
 		);
 		buf.push_str(&bline(&line, w));
@@ -1057,28 +1053,18 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 	// Narrative line (1-2 lines of contextual prose)
 	let narrative = trunc(&st.narrative, box_inner.saturating_sub(4));
 	if !narrative.is_empty() {
-		let nar_inner = format!(" {}", narrative.italic().dimmed());
-		let nar_pad = box_inner.saturating_sub(vis_len(&nar_inner));
-		let nar_line = format!(
-			"    {}{}{}{}",
-			"\u{2502}".dimmed(),
-			nar_inner,
-			" ".repeat(nar_pad),
-			"\u{2502}".dimmed()
+		inbox_line(
+			buf,
+			&format!(" {}", narrative.italic().dimmed()),
+			box_inner,
+			w,
 		);
-		buf.push_str(&bline(&nar_line, w));
 	}
 
 	// Empty separator line
-	let sep_line = format!(
-		"    {}{}{}",
-		"\u{2502}".dimmed(),
-		" ".repeat(box_inner),
-		"\u{2502}".dimmed()
-	);
-	buf.push_str(&bline(&sep_line, w));
+	inbox_line(buf, "", box_inner, w);
 
-	if st.attacker_type == "active" && !finished {
+	if st.attacker_type == AttackerKind::Active && !finished {
 		// Search progress bar
 		let pct = if st.scan_budget_total > 0 {
 			((st.scan_budget_used as f64 / st.scan_budget_total as f64) * 100.0) as usize
@@ -1097,16 +1083,7 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 		let bar_label_vis = vis_len(&bar_label);
 		let bar_avail = box_inner.saturating_sub(4);
 		if bar_label_vis <= bar_avail {
-			let bar_content = format!(" {}", bar_label.dimmed());
-			let bar_pad = box_inner.saturating_sub(vis_len(&bar_content));
-			let bar_line = format!(
-				"    {}{}{}{}",
-				"\u{2502}".dimmed(),
-				bar_content,
-				" ".repeat(bar_pad),
-				"\u{2502}".dimmed()
-			);
-			buf.push_str(&bline(&bar_line, w));
+			inbox_line(buf, &format!(" {}", bar_label.dimmed()), box_inner, w);
 		}
 
 		// Visual progress bar
@@ -1121,19 +1098,10 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 				prog.push_str(&"\u{2591}".dimmed().to_string());
 			}
 		}
-		let prog_inner = format!(" {}", prog);
-		let prog_pad = box_inner.saturating_sub(vis_len(&prog_inner));
-		let prog_line = format!(
-			"    {}{}{}{}",
-			"\u{2502}".dimmed(),
-			prog_inner,
-			" ".repeat(prog_pad),
-			"\u{2502}".dimmed()
-		);
-		buf.push_str(&bline(&prog_line, w));
+		inbox_line(buf, &format!(" {}", prog), box_inner, w);
 
 		// Separator
-		buf.push_str(&bline(&sep_line, w));
+		inbox_line(buf, "", box_inner, w);
 
 		// Dual-column: MUTATIONS (left) | KNOWLEDGE GAINED (right)
 		let half = box_inner.saturating_sub(3) / 2;
@@ -1150,15 +1118,7 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 			" ".repeat(right_label_pad),
 			""
 		);
-		let ch_pad = box_inner.saturating_sub(vis_len(&col_header_inner));
-		let col_header_line = format!(
-			"    {}{}{}{}",
-			"\u{2502}".dimmed(),
-			col_header_inner,
-			" ".repeat(ch_pad),
-			"\u{2502}".dimmed()
-		);
-		buf.push_str(&bline(&col_header_line, w));
+		inbox_line(buf, &col_header_inner, box_inner, w);
 
 		// 3 rows of dual-column data
 		for row_idx in 0..3 {
@@ -1175,19 +1135,7 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 			};
 			let right_content = if row_idx < st.last_knowledge.len() {
 				let kn = trunc(&st.last_knowledge[row_idx], half.saturating_sub(4));
-				let color = if kn.contains("password") {
-					"red"
-				} else if kn.contains("decompose") {
-					"blue"
-				} else if kn.contains("reconstruct") {
-					"cyan"
-				} else if kn.contains("recompose") {
-					"magenta"
-				} else if kn.contains("equivalize") {
-					"yellow"
-				} else {
-					"white"
-				};
+				let color = deduction_color(&kn);
 				format!(" {} {}", color_str("\u{25cf}", color), kn.dimmed())
 			} else {
 				String::new()
@@ -1206,43 +1154,27 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 				right_content,
 				" ".repeat(right_pad),
 			);
-			let row_pad = box_inner.saturating_sub(vis_len(&row_inner));
-			let row_line = format!(
-				"    {}{}{}{}",
-				"\u{2502}".dimmed(),
-				row_inner,
-				" ".repeat(row_pad),
-				"\u{2502}".dimmed()
-			);
-			buf.push_str(&bline(&row_line, w));
+			inbox_line(buf, &row_inner, box_inner, w);
 		}
 	} else if finished {
 		// Finished state
-		let done_inner = format!(" {}", "Analysis complete.".green());
-		let done_pad = box_inner.saturating_sub(vis_len(&done_inner));
-		let done_line = format!(
-			"    {}{}{}{}",
-			"\u{2502}".dimmed(),
-			done_inner,
-			" ".repeat(done_pad),
-			"\u{2502}".dimmed()
+		inbox_line(
+			buf,
+			&format!(" {}", "Analysis complete.".green()),
+			box_inner,
+			w,
 		);
-		buf.push_str(&bline(&done_line, w));
 	} else {
 		// Passive attacker — just show knowledge
 		if !st.last_knowledge.is_empty() {
 			for kn in &st.last_knowledge {
 				let kn_trunc = trunc(kn, box_inner.saturating_sub(6));
-				let kn_inner = format!(" \u{25cf} {}", kn_trunc.dimmed());
-				let kn_pad = box_inner.saturating_sub(vis_len(&kn_inner));
-				let kn_line = format!(
-					"    {}{}{}{}",
-					"\u{2502}".dimmed(),
-					kn_inner,
-					" ".repeat(kn_pad),
-					"\u{2502}".dimmed()
+				inbox_line(
+					buf,
+					&format!(" \u{25cf} {}", kn_trunc.dimmed()),
+					box_inner,
+					w,
 				);
-				buf.push_str(&bline(&kn_line, w));
 			}
 		}
 	}

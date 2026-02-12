@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::possible::{possible_to_rebuild, possible_to_rewrite};
-use crate::primitive::{primitive_core_get, primitive_get, primitive_is_core};
+use crate::primitive::{primitive_has_rewrite_rule, primitive_is_core};
 use crate::types::*;
-use crate::util::principal_enum_in_slice;
 
 // ---------------------------------------------------------------------------
 // Global name map
@@ -104,61 +103,33 @@ pub fn value_is_g_or_nil(c: &Constant) -> bool {
 // Index lookups
 // ---------------------------------------------------------------------------
 
-pub fn value_get_knowledge_map_index_from_constant(
-	km: &KnowledgeMap,
-	c: &Constant,
-) -> Option<usize> {
-	if !km.constant_index.is_empty() {
-		return km.constant_index.get(&c.id).copied();
-	}
-	for (i, kc) in km.constants.iter().enumerate() {
-		if value_equivalent_constants(kc, c) {
-			return Some(i);
-		}
-	}
-	None
+pub fn value_get_trace_index_from_constant(trace: &ProtocolTrace, c: &Constant) -> Option<usize> {
+	trace.index.get(&c.id).copied()
 }
 
 pub fn value_get_principal_state_index_from_constant(
 	ps: &PrincipalState,
 	c: &Constant,
 ) -> Option<usize> {
-	if !ps.constant_index.is_empty() {
-		if let Some(&i) = ps.constant_index.get(&c.id) {
-			if i < ps.constants.len() {
-				return Some(i);
-			}
-		}
-		return None;
-	}
-	for (i, pc) in ps.constants.iter().enumerate() {
-		if value_equivalent_constants(pc, c) {
-			return Some(i);
-		}
-	}
-	None
+	ps.index.get(&c.id).copied().filter(|&i| i < ps.meta.len())
 }
 
 // ---------------------------------------------------------------------------
 // Extract constants from values
 // ---------------------------------------------------------------------------
 
-pub fn value_get_constants_from_value(v: &Value) -> Vec<Constant> {
+pub fn value_get_constants_from_value(v: &Value, out: &mut Vec<Constant>) {
 	match v {
-		Value::Constant(c) => vec![c.clone()],
+		Value::Constant(c) => out.push(c.clone()),
 		Value::Primitive(p) => {
-			let mut result = Vec::new();
-			for a in &p.arguments {
-				result.extend(value_get_constants_from_value(a));
+			for arg in &p.arguments {
+				value_get_constants_from_value(arg, out);
 			}
-			result
 		}
 		Value::Equation(e) => {
-			let mut result = Vec::new();
-			for a in &e.values {
-				result.extend(value_get_constants_from_value(a));
+			for ev in &e.values {
+				value_get_constants_from_value(ev, out);
 			}
-			result
 		}
 	}
 }
@@ -197,8 +168,8 @@ pub fn value_equivalent_primitives(
 	if p1.arguments.len() != p2.arguments.len() {
 		return (false, 0, 0);
 	}
-	for i in 0..p1.arguments.len() {
-		if !value_equivalent_values(&p1.arguments[i], &p2.arguments[i], true) {
+	for (a1, a2) in p1.arguments.iter().zip(p2.arguments.iter()) {
+		if !value_equivalent_values(a1, a2, true) {
 			return (false, 0, 0);
 		}
 	}
@@ -252,7 +223,7 @@ pub fn value_equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 			let mut matched = vec![false; n];
 			for i in 1..n {
 				let mut found = false;
-				for (j, m) in matched.iter_mut().enumerate().take(n).skip(1) {
+				for (j, m) in matched.iter_mut().enumerate().skip(1) {
 					if !*m && value_equivalent_values(&e1_ref.values[i], &e2_ref.values[j], true) {
 						*m = true;
 						found = true;
@@ -268,7 +239,7 @@ pub fn value_equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	}
 }
 
-pub fn value_equivalent_equations_rule(
+fn value_equivalent_equations_rule(
 	base1: &Value,
 	base2: &Value,
 	exp1: &Value,
@@ -281,16 +252,11 @@ pub fn value_equivalent_equations_rule(
 // Equation flattening
 // ---------------------------------------------------------------------------
 
-pub fn value_equation_is_flat(e: &Equation) -> bool {
-	for v in &e.values {
-		if matches!(v, Value::Equation(_)) {
-			return false;
-		}
-	}
-	true
+fn value_equation_is_flat(e: &Equation) -> bool {
+	e.values.iter().all(|v| !matches!(v, Value::Equation(_)))
 }
 
-pub fn value_flatten_equation(e: &Equation) -> Equation {
+fn value_flatten_equation(e: &Equation) -> Equation {
 	let mut ef = Equation {
 		values: Vec::with_capacity(e.values.len()),
 	};
@@ -306,17 +272,17 @@ pub fn value_flatten_equation(e: &Equation) -> Equation {
 }
 
 // ---------------------------------------------------------------------------
-// Find constant in primitive from knowledge map
+// Find constant in primitive from protocol trace
 // ---------------------------------------------------------------------------
 
-pub fn value_find_constant_in_primitive_from_knowledge_map(
+pub fn value_find_constant_in_primitive_from_protocol_trace(
 	c: &Constant,
 	a: &Value,
-	km: &KnowledgeMap,
+	trace: &ProtocolTrace,
 ) -> bool {
 	let v = Value::Constant(c.clone());
-	let (_, vv) = value_resolve_value_internal_values_from_knowledge_map(a, km);
-	value_equivalent_value_in_values(&v, &vv) >= 0
+	let (_, vv) = value_resolve_value_internal_values_from_protocol_trace(a, trace);
+	value_equivalent_value_in_values(&v, &vv).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +297,7 @@ pub fn value_hash(v: &Value) -> u64 {
 	}
 }
 
-pub fn value_primitive_hash(p: &Primitive) -> u64 {
+fn value_primitive_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761) ^ (p.output as u64).wrapping_mul(97);
 	for a in &p.arguments {
 		h = h.wrapping_mul(31).wrapping_add(value_hash(a));
@@ -339,7 +305,7 @@ pub fn value_primitive_hash(p: &Primitive) -> u64 {
 	h
 }
 
-pub fn value_equation_hash(e: &Equation) -> u64 {
+fn value_equation_hash(e: &Equation) -> u64 {
 	if value_equation_is_flat(e) {
 		return value_equation_hash_inner(e);
 	}
@@ -347,7 +313,7 @@ pub fn value_equation_hash(e: &Equation) -> u64 {
 	value_equation_hash_inner(&ef)
 }
 
-pub fn value_equation_hash_inner(e: &Equation) -> u64 {
+fn value_equation_hash_inner(e: &Equation) -> u64 {
 	match e.values.len() {
 		0 => 0,
 		1 => value_hash(&e.values[0]),
@@ -388,34 +354,34 @@ pub fn value_equivalent_value_in_values_map(
 	v: &Value,
 	a: &[Value],
 	m: &HashMap<u64, Vec<usize>>,
-) -> i32 {
+) -> Option<usize> {
 	let h = value_hash(v);
 	if let Some(indices) = m.get(&h) {
 		for &i in indices {
 			if value_equivalent_values(v, &a[i], true) {
-				return i as i32;
+				return Some(i);
 			}
 		}
 	}
-	-1
+	None
 }
 
-pub fn value_equivalent_value_in_values(v: &Value, a: &[Value]) -> i32 {
-	for (i, av) in a.iter().enumerate() {
-		if value_equivalent_values(v, av, true) {
-			return i as i32;
-		}
-	}
-	-1
+pub fn value_equivalent_value_in_values(v: &Value, a: &[Value]) -> Option<usize> {
+	a.iter().position(|av| value_equivalent_values(v, av, true))
 }
 
-pub fn value_equivalent_constant_in_constants(c: &Constant, a: &[Constant]) -> i32 {
-	for (i, ac) in a.iter().enumerate() {
-		if value_equivalent_constants(c, ac) {
-			return i as i32;
-		}
+/// Push `v` into `a` if no equivalent value already exists. Returns true if pushed.
+pub fn push_unique_value(a: &mut Vec<Value>, v: Value) -> bool {
+	if value_equivalent_value_in_values(&v, a).is_none() {
+		a.push(v);
+		true
+	} else {
+		false
 	}
-	-1
+}
+
+pub fn value_equivalent_constant_in_constants(c: &Constant, a: &[Constant]) -> Option<usize> {
+	a.iter().position(|ac| value_equivalent_constants(c, ac))
 }
 
 // ---------------------------------------------------------------------------
@@ -424,23 +390,18 @@ pub fn value_equivalent_constant_in_constants(c: &Constant, a: &[Constant]) -> i
 
 pub fn value_perform_primitive_rewrite(
 	p: &Primitive,
-	pi: i32,
+	pi: Option<usize>,
 	ps: &mut PrincipalState,
 ) -> (Vec<Primitive>, bool, Value) {
-	let r_index;
 	let (mut rewrite, mut failed_rewrites, rewritten) =
 		value_perform_primitive_arguments_rewrite(p, ps);
 	let (rebuilt, rebuild) =
 		possible_to_rebuild(rewrite.as_primitive().expect("rewrite is Primitive"));
 	if rebuilt {
-		rewrite = rebuild.clone();
-		if pi >= 0 {
-			let idx = pi as usize;
-			ps.assigned[idx] = rebuild.clone();
-			if !ps.mutated[idx] {
-				ps.before_mutate[idx] = rebuild.clone();
-			}
+		if let Some(idx) = pi {
+			ps.values[idx].set_assigned(rebuild.clone());
 		}
+		rewrite = rebuild;
 		match rewrite {
 			Value::Constant(_) | Value::Equation(_) => {
 				return (failed_rewrites, rewritten, rewrite);
@@ -457,29 +418,22 @@ pub fn value_perform_primitive_rewrite(
 				.expect("rewrite result is Primitive")
 				.clone(),
 		);
-		r_index = 0;
-	} else if primitive_is_core(p.id) {
-		r_index = p.output;
-	} else {
-		r_index = 0;
 	}
+	let r_index = if rewritten_root && primitive_is_core(p.id) {
+		p.output
+	} else {
+		0
+	};
 	if r_index >= rewritten_values.len() {
-		if pi >= 0 {
-			let idx = pi as usize;
-			let nil = value_nil();
-			ps.assigned[idx] = nil.clone();
-			if !ps.mutated[idx] {
-				ps.before_mutate[idx] = nil.clone();
-			}
+		if let Some(idx) = pi {
+			ps.values[idx].set_assigned(value_nil());
 		}
 		return (failed_rewrites, rewritten || rewritten_root, value_nil());
 	}
-	if (rewritten || rewritten_root) && pi >= 0 {
-		let idx = pi as usize;
-		ps.rewritten[idx] = true;
-		ps.assigned[idx] = rewritten_values[r_index].clone();
-		if !ps.mutated[idx] {
-			ps.before_mutate[idx] = rewritten_values[r_index].clone();
+	if let Some(idx) = pi {
+		if rewritten || rewritten_root {
+			ps.values[idx].rewritten = true;
+			ps.values[idx].set_assigned(rewritten_values[r_index].clone());
 		}
 	}
 	(
@@ -506,7 +460,7 @@ pub fn value_perform_primitive_arguments_rewrite(
 			Value::Constant(_) => {}
 			Value::Primitive(inner_p) => {
 				let (p_failed, p_rewritten, p_rewrite) =
-					value_perform_primitive_rewrite(inner_p, -1, ps);
+					value_perform_primitive_rewrite(inner_p, None, ps);
 				if p_rewritten {
 					rewritten = true;
 					let args = new_args.get_or_insert_with(|| p.arguments.clone());
@@ -517,7 +471,7 @@ pub fn value_perform_primitive_arguments_rewrite(
 			}
 			Value::Equation(inner_e) => {
 				let (e_failed, e_rewritten, e_rewrite) =
-					value_perform_equation_rewrite(inner_e, -1, ps);
+					value_perform_equation_rewrite(inner_e, None, ps);
 				if e_rewritten {
 					rewritten = true;
 					let args = new_args.get_or_insert_with(|| p.arguments.clone());
@@ -529,12 +483,7 @@ pub fn value_perform_primitive_arguments_rewrite(
 		}
 	}
 	let result = if let Some(args) = new_args {
-		Value::Primitive(Arc::new(Primitive {
-			id: p.id,
-			arguments: args,
-			output: p.output,
-			check: p.check,
-		}))
+		Value::Primitive(Arc::new(p.with_arguments(args)))
 	} else {
 		Value::Primitive(Arc::new(p.clone()))
 	};
@@ -547,7 +496,7 @@ pub fn value_perform_primitive_arguments_rewrite(
 
 pub fn value_perform_equation_rewrite(
 	e: &Equation,
-	pi: i32,
+	pi: Option<usize>,
 	ps: &mut PrincipalState,
 ) -> (Vec<Primitive>, bool, Value) {
 	let mut rewritten = false;
@@ -559,22 +508,11 @@ pub fn value_perform_equation_rewrite(
 				rewrite_eq.values.push(a.clone());
 			}
 			Value::Primitive(inner_p) => {
-				let has_rule = if primitive_is_core(inner_p.id) {
-					if let Ok(prim) = primitive_core_get(inner_p.id) {
-						prim.has_rule
-					} else {
-						false
-					}
-				} else if let Ok(prim) = primitive_get(inner_p.id) {
-					prim.rewrite.has_rule
-				} else {
-					false
-				};
-				if !has_rule {
+				if !primitive_has_rewrite_rule(inner_p.id) {
 					continue;
 				}
 				let (p_failed, p_rewritten, p_rewrite) =
-					value_perform_primitive_rewrite(inner_p, -1, ps);
+					value_perform_primitive_rewrite(inner_p, None, ps);
 				if !p_rewritten {
 					rewrite_eq.values.push(e.values[i].clone());
 					failed_rewrites.extend(p_failed);
@@ -592,7 +530,7 @@ pub fn value_perform_equation_rewrite(
 			}
 			Value::Equation(inner_e) => {
 				let (e_failed, e_rewritten, e_rewrite) =
-					value_perform_equation_rewrite(inner_e, -1, ps);
+					value_perform_equation_rewrite(inner_e, None, ps);
 				if !e_rewritten {
 					rewrite_eq.values.push(e.values[i].clone());
 					failed_rewrites.extend(e_failed);
@@ -604,12 +542,10 @@ pub fn value_perform_equation_rewrite(
 		}
 	}
 	let rewrite = Value::Equation(Arc::new(rewrite_eq));
-	if rewritten && pi >= 0 {
-		let idx = pi as usize;
-		ps.rewritten[idx] = true;
-		ps.assigned[idx] = rewrite.clone();
-		if !ps.mutated[idx] {
-			ps.before_mutate[idx] = rewrite.clone();
+	if let Some(idx) = pi {
+		if rewritten {
+			ps.values[idx].rewritten = true;
+			ps.values[idx].set_assigned(rewrite.clone());
 		}
 	}
 	(failed_rewrites, rewritten, rewrite)
@@ -619,97 +555,69 @@ pub fn value_perform_equation_rewrite(
 // Perform all rewrites
 // ---------------------------------------------------------------------------
 
-pub fn value_perform_all_rewrites(ps: &mut PrincipalState) -> (Vec<Primitive>, Vec<usize>) {
-	let mut failed_rewrites: Vec<Primitive> = Vec::new();
-	let mut failed_rewrite_indices: Vec<usize> = Vec::new();
-	let len = ps.assigned.len();
+pub fn value_perform_all_rewrites(ps: &mut PrincipalState) -> Vec<(Primitive, usize)> {
+	let mut failures: Vec<(Primitive, usize)> = Vec::new();
+	let len = ps.values.len();
 	for i in 0..len {
-		match &ps.assigned[i] {
+		match &ps.values[i].assigned {
 			Value::Primitive(p) => {
 				let p_clone = p.clone();
-				let (failed, _, _) = value_perform_primitive_rewrite(&p_clone, i as i32, ps);
-				if failed.is_empty() {
-					continue;
-				}
-				let count = failed.len();
-				failed_rewrites.extend(failed);
-				for _ in 0..count {
-					failed_rewrite_indices.push(i);
-				}
+				let (failed, _, _) = value_perform_primitive_rewrite(&p_clone, Some(i), ps);
+				failures.extend(failed.into_iter().map(|p| (p, i)));
 			}
 			Value::Equation(e) => {
 				let e_clone = e.clone();
-				let (failed, _, _) = value_perform_equation_rewrite(&e_clone, i as i32, ps);
-				if failed.is_empty() {
-					continue;
-				}
-				let count = failed.len();
-				failed_rewrites.extend(failed);
-				for _ in 0..count {
-					failed_rewrite_indices.push(i);
-				}
+				let (failed, _, _) = value_perform_equation_rewrite(&e_clone, Some(i), ps);
+				failures.extend(failed.into_iter().map(|p| (p, i)));
 			}
 			_ => {}
 		}
 	}
-	(failed_rewrites, failed_rewrite_indices)
+	failures
 }
 
 // ---------------------------------------------------------------------------
 // Resolution helpers
 // ---------------------------------------------------------------------------
 
-pub fn value_should_resolve_to_before_mutate(i: usize, ps: &PrincipalState) -> bool {
-	if ps.creator[i] == ps.id {
-		return true;
-	}
-	if !ps.known[i] {
-		return true;
-	}
-	if !principal_enum_in_slice(ps.id, &ps.wire[i]) {
-		return true;
-	}
-	if !ps.mutated[i] {
-		return true;
-	}
-	false
-}
-
 pub fn value_resolve_constant(
 	c: &Constant,
 	ps: &PrincipalState,
 	allow_before_mutate: bool,
-) -> (Value, i32) {
+) -> (Value, Option<usize>) {
 	let i = value_get_principal_state_index_from_constant(ps, c);
 	match i {
-		None => (Value::Constant(c.clone()), -1),
+		None => (Value::Constant(c.clone()), None),
 		Some(idx) => {
-			if allow_before_mutate && value_should_resolve_to_before_mutate(idx, ps) {
-				(ps.before_mutate[idx].clone(), idx as i32)
+			let value = if allow_before_mutate {
+				ps.effective_value(idx)
 			} else {
-				(ps.assigned[idx].clone(), idx as i32)
-			}
+				&ps.values[idx].assigned
+			};
+			(value.clone(), Some(idx))
 		}
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Resolve internal values from KnowledgeMap
+// Resolve internal values from ProtocolTrace
 // ---------------------------------------------------------------------------
 
-pub fn value_resolve_value_internal_values_from_knowledge_map(
+pub fn value_resolve_value_internal_values_from_protocol_trace(
 	a: &Value,
-	km: &KnowledgeMap,
+	trace: &ProtocolTrace,
 ) -> (Value, Vec<Value>) {
 	let mut v: Vec<Value> = Vec::new();
+	let resolved = resolve_trace_value(a, trace, &mut v);
+	(resolved, v)
+}
+
+fn resolve_trace_value(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
 	let resolved = match a {
 		Value::Constant(c) => {
-			if value_equivalent_value_in_values(a, &v) < 0 {
-				v.push(a.clone());
-			}
-			let i = value_get_knowledge_map_index_from_constant(km, c);
-			match i {
-				Some(idx) => km.assigned[idx].clone(),
+			v.push(a.clone());
+			match value_get_trace_index_from_constant(trace, c) {
+				Some(idx) => trace.slots[idx].initial_value.clone(),
 				None => a.clone(),
 			}
 		}
@@ -717,118 +625,69 @@ pub fn value_resolve_value_internal_values_from_knowledge_map(
 	};
 	match &resolved {
 		Value::Constant(_) => {
-			if value_equivalent_value_in_values(&resolved, &v) < 0 {
-				v.push(resolved.clone());
-			}
-			(resolved, v)
+			push_unique_value(v, resolved.clone());
+			resolved
 		}
-		Value::Primitive(_) => {
-			value_resolve_primitive_internal_values_from_knowledge_map(&resolved, v, km)
-		}
-		Value::Equation(_) => {
-			value_resolve_equation_internal_values_from_knowledge_map(&resolved, v, km)
-		}
+		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, v),
+		Value::Equation(_) => resolve_trace_equation(&resolved, trace, v),
 	}
 }
 
-pub fn value_resolve_primitive_internal_values_from_knowledge_map(
-	a: &Value,
-	mut v: Vec<Value>,
-	km: &KnowledgeMap,
-) -> (Value, Vec<Value>) {
+fn resolve_trace_primitive(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
 	let p = a.as_primitive().expect("value is Primitive");
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, arg) in p.arguments.iter().enumerate() {
-		let (s, vv) = value_resolve_value_internal_values_from_knowledge_map(arg, km);
+		let s = resolve_trace_value(arg, trace, v);
 		if !value_equivalent_values(&s, arg, true) {
 			let args = new_args.get_or_insert_with(|| p.arguments.clone());
 			args[i] = s;
 		}
-		for vvv in vv {
-			if value_equivalent_value_in_values(&vvv, &v) < 0 {
-				v.push(vvv);
-			}
-		}
 	}
 	if let Some(args) = new_args {
-		(
-			Value::Primitive(Arc::new(Primitive {
-				id: p.id,
-				arguments: args,
-				output: p.output,
-				check: p.check,
-			})),
-			v,
-		)
+		Value::Primitive(Arc::new(p.with_arguments(args)))
 	} else {
-		(a.clone(), v)
+		a.clone()
 	}
 }
 
-pub fn value_resolve_equation_internal_values_from_knowledge_map(
-	a: &Value,
-	mut v: Vec<Value>,
-	km: &KnowledgeMap,
-) -> (Value, Vec<Value>) {
+fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
 	let e = a.as_equation().expect("value is Equation");
 	let mut r_eq = Equation { values: Vec::new() };
 	let mut aa: Vec<Value> = Vec::new();
-	for ai in 0..e.values.len() {
-		if let Value::Constant(c) = &e.values[ai] {
-			let i = value_get_knowledge_map_index_from_constant(km, c);
-			if let Some(idx) = i {
-				aa.push(km.assigned[idx].clone());
+	for ev in &e.values {
+		if let Value::Constant(c) = ev {
+			if let Some(idx) = value_get_trace_index_from_constant(trace, c) {
+				aa.push(trace.slots[idx].initial_value.clone());
 			}
-			if value_equivalent_value_in_values(&e.values[ai], &v) < 0 {
-				v.push(e.values[ai].clone());
-			}
+			push_unique_value(v, ev.clone());
 		}
 	}
 	for (aai, item) in aa.iter().enumerate() {
 		match item {
 			Value::Constant(_) => {
 				r_eq.values.push(item.clone());
-				if value_equivalent_value_in_values(item, &v) < 0 {
-					v.push(item.clone());
-				}
+				push_unique_value(v, item.clone());
 			}
 			Value::Primitive(_) => {
-				let (aaa, vv) =
-					value_resolve_primitive_internal_values_from_knowledge_map(item, v.clone(), km);
+				let aaa = resolve_trace_primitive(item, trace, v);
 				r_eq.values.push(aaa);
-				for vvv in vv {
-					if value_equivalent_value_in_values(&vvv, &v) < 0 {
-						v.push(vvv);
-					}
-				}
 			}
 			Value::Equation(_) => {
-				let (aaa, vv) =
-					value_resolve_equation_internal_values_from_knowledge_map(item, v.clone(), km);
-				// Go: r.Values = append(r.Values, aaa)
-				r_eq.values.push(aaa.clone());
+				let aaa = resolve_trace_equation(item, trace, v);
 				let inner = aaa.as_equation().expect("resolved equation is Equation");
 				if aai == 0 {
-					// Go: r.Values = aaa.Data.(*Equation).Values
-					// Completely replaces r.Values (discarding the append above)
 					r_eq.values = inner.values.clone();
 				} else {
-					// Go: r.Values = append(r.Values, aaa.Data.(*Equation).Values[1:]...)
-					// Keeps existing r.Values (including aaa) and appends inner[1:]
+					r_eq.values.push(aaa.clone());
 					if inner.values.len() > 1 {
 						r_eq.values.extend(inner.values[1..].iter().cloned());
-					}
-				}
-				for vvv in vv {
-					if value_equivalent_value_in_values(&vvv, &v) < 0 {
-						v.push(vvv);
 					}
 				}
 			}
 		}
 	}
-	(Value::Equation(Arc::new(r_eq)), v)
+	Value::Equation(Arc::new(r_eq))
 }
 
 // ---------------------------------------------------------------------------
@@ -840,7 +699,7 @@ const MAX_RESOLVE_DEPTH: usize = 64;
 pub fn value_resolve_value_internal_values_from_principal_state(
 	a: &Value,
 	root_value: &Value,
-	root_index: i32,
+	root_index: usize,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	force_before_mutate: bool,
@@ -859,7 +718,7 @@ pub fn value_resolve_value_internal_values_from_principal_state(
 fn value_resolve_value_internal_values_from_principal_state_depth(
 	a: &Value,
 	root_value: &Value,
-	root_index: i32,
+	root_index: usize,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	force_before_mutate: bool,
@@ -875,40 +734,37 @@ fn value_resolve_value_internal_values_from_principal_state_depth(
 	let mut fbm = force_before_mutate;
 
 	if let Value::Constant(c) = &a_resolved {
-		let next_root_index = value_get_principal_state_index_from_constant(ps, c);
-		let nri = match next_root_index {
-			Some(i) => i as i32,
+		let nri = match value_get_principal_state_index_from_constant(ps, c) {
+			Some(i) => i,
 			None => return Err("invalid index".to_string()),
 		};
-		let nri_usize = nri as usize;
 		if nri == root_idx {
 			if !fbm {
-				fbm = value_should_resolve_to_before_mutate(nri_usize, ps);
+				fbm = ps.should_use_before_mutate(nri);
 			}
 			if fbm {
-				a_resolved = ps.before_mutate[nri_usize].clone();
+				a_resolved = ps.values[nri].before_mutate.clone();
 			} else {
 				let (resolved, _) = value_resolve_constant(c, ps, true);
 				a_resolved = resolved;
 			}
 		} else {
 			if let Value::Primitive(_) = &root_val {
-				if root_idx >= 0 && ps.creator[root_idx as usize] != ps.id {
+				if ps.values[root_idx].creator != ps.id {
 					fbm = true;
 				}
 			}
 			if fbm {
-				fbm = !principal_enum_in_slice(
-					ps.creator[root_idx as usize],
-					&ps.mutatable_to[nri_usize],
-				);
+				fbm = !ps.meta[nri]
+					.mutatable_to
+					.contains(&ps.values[root_idx].creator);
 			} else {
-				fbm = value_should_resolve_to_before_mutate(nri_usize, ps);
+				fbm = ps.should_use_before_mutate(nri);
 			}
 			if fbm {
-				a_resolved = ps.before_mutate[nri_usize].clone();
+				a_resolved = ps.values[nri].before_mutate.clone();
 			} else {
-				a_resolved = ps.assigned[nri_usize].clone();
+				a_resolved = ps.values[nri].assigned.clone();
 			}
 			root_idx = nri;
 			root_val = a_resolved.clone();
@@ -941,7 +797,7 @@ fn value_resolve_value_internal_values_from_principal_state_depth(
 fn value_resolve_primitive_internal_values_from_principal_state_depth(
 	a: &Value,
 	root_value: &Value,
-	root_index: i32,
+	root_index: usize,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	force_before_mutate: bool,
@@ -949,7 +805,7 @@ fn value_resolve_primitive_internal_values_from_principal_state_depth(
 ) -> Result<Value, String> {
 	let p = a.as_primitive().expect("value is Primitive");
 	let mut fbm = force_before_mutate;
-	if root_index >= 0 && ps.creator[root_index as usize] == ps.id {
+	if ps.values[root_index].creator == ps.id {
 		fbm = false;
 	}
 	// COW: only allocate a new Primitive if an argument actually changed
@@ -964,12 +820,7 @@ fn value_resolve_primitive_internal_values_from_principal_state_depth(
 		}
 	}
 	if let Some(args) = new_args {
-		Ok(Value::Primitive(Arc::new(Primitive {
-			id: p.id,
-			arguments: args,
-			output: p.output,
-			check: p.check,
-		})))
+		Ok(Value::Primitive(Arc::new(p.with_arguments(args))))
 	} else {
 		Ok(a.clone())
 	}
@@ -978,7 +829,7 @@ fn value_resolve_primitive_internal_values_from_principal_state_depth(
 fn value_resolve_equation_internal_values_from_principal_state_depth(
 	a: &Value,
 	root_value: &Value,
-	root_index: i32,
+	root_index: usize,
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	force_before_mutate: bool,
@@ -988,16 +839,23 @@ fn value_resolve_equation_internal_values_from_principal_state_depth(
 	let mut r_eq = Equation { values: Vec::new() };
 	let mut aa: Vec<Value> = e.values.clone();
 	let mut fbm = force_before_mutate;
-	if root_index >= 0 && ps.creator[root_index as usize] == ps.id {
+	if ps.values[root_index].creator == ps.id {
 		fbm = false;
 	}
 	for item in &mut aa {
-		if let Value::Constant(c) = &item.clone() {
-			let (resolved, i) = value_resolve_constant(c, ps, true);
-			*item = resolved;
-			if fbm && i >= 0 {
-				*item = ps.before_mutate[i as usize].clone();
+		let new_val = match &*item {
+			Value::Constant(c) => {
+				let (resolved, i) = value_resolve_constant(c, ps, true);
+				Some(if fbm {
+					i.map_or(resolved, |idx| ps.values[idx].before_mutate.clone())
+				} else {
+					resolved
+				})
 			}
+			_ => None,
+		};
+		if let Some(v) = new_val {
+			*item = v;
 		}
 	}
 	for (aai, item) in aa.iter().enumerate() {
@@ -1037,21 +895,21 @@ fn value_resolve_equation_internal_values_from_principal_state_depth(
 // Used-by checks
 // ---------------------------------------------------------------------------
 
-pub fn value_constant_is_used_by_principal_in_knowledge_map(
-	km: &KnowledgeMap,
+pub fn value_constant_is_used_by_principal_in_protocol_trace(
+	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
 	c: &Constant,
 ) -> bool {
-	if !km.used_by.is_empty() {
-		if let Some(principals) = km.used_by.get(&c.id) {
+	if !trace.used_by.is_empty() {
+		if let Some(principals) = trace.used_by.get(&c.id) {
 			if let Some(&used) = principals.get(&principal_id) {
 				return used;
 			}
 		}
-		let i = value_get_knowledge_map_index_from_constant(km, c);
+		let i = value_get_trace_index_from_constant(trace, c);
 		if let Some(idx) = i {
-			if let Value::Constant(assigned_c) = &km.assigned[idx] {
-				if let Some(principals) = km.used_by.get(&assigned_c.id) {
+			if let Value::Constant(assigned_c) = &trace.slots[idx].initial_value {
+				if let Some(principals) = trace.used_by.get(&assigned_c.id) {
 					if let Some(&used) = principals.get(&principal_id) {
 						return used;
 					}
@@ -1060,40 +918,43 @@ pub fn value_constant_is_used_by_principal_in_knowledge_map(
 		}
 		return false;
 	}
-	let i = value_get_knowledge_map_index_from_constant(km, c);
-	for (ii, a) in km.assigned.iter().enumerate() {
-		if km.creator[ii] != principal_id {
+	let i = value_get_trace_index_from_constant(trace, c);
+	for slot in &trace.slots {
+		if slot.creator != principal_id {
 			continue;
 		}
-		match a {
-			Value::Primitive(_) | Value::Equation(_) => {
-				let (_, v) = value_resolve_value_internal_values_from_knowledge_map(a, km);
-				if let Some(idx) = i {
-					if value_equivalent_value_in_values(&km.assigned[idx], &v) >= 0 {
-						return true;
-					}
-				}
-				let cv = Value::Constant(c.clone());
-				if value_equivalent_value_in_values(&cv, &v) >= 0 {
-					return true;
-				}
+		if !matches!(
+			&slot.initial_value,
+			Value::Primitive(_) | Value::Equation(_)
+		) {
+			continue;
+		}
+		let (_, v) =
+			value_resolve_value_internal_values_from_protocol_trace(&slot.initial_value, trace);
+		if let Some(idx) = i {
+			if value_equivalent_value_in_values(&trace.slots[idx].initial_value, &v).is_some() {
+				return true;
 			}
-			_ => {}
+		}
+		let cv = Value::Constant(c.clone());
+		if value_equivalent_value_in_values(&cv, &v).is_some() {
+			return true;
 		}
 	}
 	false
 }
 
-pub fn value_constant_is_used_by_at_least_one_principal(km: &KnowledgeMap, c: &Constant) -> bool {
+pub fn value_constant_is_used_by_at_least_one_principal(
+	trace: &ProtocolTrace,
+	c: &Constant,
+) -> bool {
 	if &*c.name == "nil" {
 		return true;
 	}
-	for pid in &km.principal_ids {
-		if value_constant_is_used_by_principal_in_knowledge_map(km, *pid, c) {
-			return true;
-		}
-	}
-	false
+	trace
+		.principal_ids
+		.iter()
+		.any(|&pid| value_constant_is_used_by_principal_in_protocol_trace(trace, pid, c))
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,33 +965,40 @@ pub fn value_resolve_all_principal_state_values(
 	ps: &mut PrincipalState,
 	as_: &AttackerState,
 ) -> Result<(), String> {
-	let n = ps.assigned.len();
+	let n = ps.values.len();
 	let mut new_assigned = Vec::with_capacity(n);
 	let mut new_before_rewrite = Vec::with_capacity(n);
 	// Borrow ps immutably for the resolution loop
 	let ps_ref: &PrincipalState = &*ps;
 	for i in 0..n {
-		let fbm = value_should_resolve_to_before_mutate(i, ps_ref);
+		let fbm = ps_ref.should_use_before_mutate(i);
 		new_assigned.push(value_resolve_value_internal_values_from_principal_state(
-			&ps_ref.assigned[i],
-			&ps_ref.assigned[i],
-			i as i32,
+			&ps_ref.values[i].assigned,
+			&ps_ref.values[i].assigned,
+			i,
 			ps_ref,
 			as_,
 			fbm,
 		)?);
 		new_before_rewrite.push(value_resolve_value_internal_values_from_principal_state(
-			&ps_ref.before_rewrite[i],
-			&ps_ref.before_rewrite[i],
-			i as i32,
+			&ps_ref.values[i].before_rewrite,
+			&ps_ref.values[i].before_rewrite,
+			i,
 			ps_ref,
 			as_,
 			fbm,
 		)?);
 	}
-	ps.assigned = new_assigned;
-	ps.before_rewrite = new_before_rewrite;
-	ps.rewritten.fill(false);
+	for ((sv, assigned), before_rewrite) in ps
+		.values
+		.iter_mut()
+		.zip(new_assigned)
+		.zip(new_before_rewrite)
+	{
+		sv.assigned = assigned;
+		sv.before_rewrite = before_rewrite;
+		sv.rewritten = false;
+	}
 	Ok(())
 }
 
@@ -1147,14 +1015,43 @@ pub fn value_constant_contains_fresh_values(
 		Some(idx) => idx,
 		None => return Err("invalid value".to_string()),
 	};
-	let mut cc = value_get_constants_from_value(&ps.assigned[idx]);
-	for item in &mut cc {
+	let mut cc = Vec::new();
+	value_get_constants_from_value(&ps.values[idx].assigned, &mut cc);
+	for item in &cc {
 		if let Some(ii) = value_get_principal_state_index_from_constant(ps, item) {
-			*item = ps.constants[ii].clone();
-			if item.fresh {
+			if ps.meta[ii].constant.fresh {
 				return Ok(true);
 			}
 		}
 	}
 	Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// Mutation record computation
+// ---------------------------------------------------------------------------
+
+/// Build a compact forensic record of which PrincipalState slots differ
+/// from the protocol trace initial values. Only changed slots are recorded.
+pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> MutationRecord {
+	let diffs = ps
+		.values
+		.iter()
+		.zip(ps.meta.iter())
+		.zip(trace.slots.iter())
+		.enumerate()
+		.filter_map(|(i, ((sv, sm), slot))| {
+			if value_equivalent_values(&sv.before_rewrite, &slot.initial_value, false) {
+				None
+			} else {
+				Some(SlotDiff {
+					index: i,
+					constant: sm.constant.clone(),
+					assigned: sv.assigned.clone(),
+					mutated: sv.mutated,
+				})
+			}
+		})
+		.collect();
+	MutationRecord { diffs }
 }

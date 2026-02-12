@@ -61,7 +61,7 @@ pub fn possible_to_decompose_primitive(
 		if !valid {
 			continue;
 		}
-		if value_equivalent_value_in_values_map(&filtered, &as_.known, &as_.known_map) >= 0 {
+		if value_equivalent_value_in_values_map(&filtered, &as_.known, &as_.known_map).is_some() {
 			has.push(filtered);
 			continue;
 		}
@@ -148,7 +148,7 @@ pub fn possible_to_reconstruct_primitive(
 	};
 	let mut has = Vec::new();
 	for a in &rp.arguments {
-		if value_equivalent_value_in_values_map(a, &as_.known, &as_.known_map) >= 0 {
+		if value_equivalent_value_in_values_map(a, &as_.known, &as_.known_map).is_some() {
 			has.push(a.clone());
 			continue;
 		}
@@ -186,15 +186,16 @@ pub fn possible_to_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (b
 		return (false, vec![]);
 	}
 	if e.values.len() == 2 {
-		if value_equivalent_value_in_values_map(&e.values[1], &as_.known, &as_.known_map) >= 0 {
+		if value_equivalent_value_in_values_map(&e.values[1], &as_.known, &as_.known_map).is_some()
+		{
 			return (true, vec![e.values[1].clone()]);
 		}
 		return (false, vec![]);
 	}
 	let s0 = &e.values[1];
 	let s1 = &e.values[2];
-	let hs0 = value_equivalent_value_in_values_map(s0, &as_.known, &as_.known_map) >= 0;
-	let hs1 = value_equivalent_value_in_values_map(s1, &as_.known, &as_.known_map) >= 0;
+	let hs0 = value_equivalent_value_in_values_map(s0, &as_.known, &as_.known_map).is_some();
+	let hs1 = value_equivalent_value_in_values_map(s1, &as_.known, &as_.known_map).is_some();
 	if hs0 && hs1 {
 		return (true, vec![s0.clone(), s1.clone()]);
 	}
@@ -204,11 +205,11 @@ pub fn possible_to_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (b
 	let p1 = Value::Equation(Arc::new(Equation {
 		values: vec![e.values[0].clone(), e.values[2].clone()],
 	}));
-	let hp1 = value_equivalent_value_in_values_map(&p1, &as_.known, &as_.known_map) >= 0;
+	let hp1 = value_equivalent_value_in_values_map(&p1, &as_.known, &as_.known_map).is_some();
 	if hs0 && hp1 {
 		return (true, vec![s0.clone(), p1]);
 	}
-	let hp0 = value_equivalent_value_in_values_map(&p0, &as_.known, &as_.known_map) >= 0;
+	let hp0 = value_equivalent_value_in_values_map(&p0, &as_.known, &as_.known_map).is_some();
 	if hp0 && hs1 {
 		return (true, vec![p0, s1.clone()]);
 	}
@@ -234,12 +235,7 @@ pub fn possible_to_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> 
 	let pc_owned: Primitive;
 	let pc_ref: &Primitive;
 	if let Some(args) = new_args {
-		pc_owned = Primitive {
-			id: p.id,
-			arguments: args,
-			output: p.output,
-			check: p.check,
-		};
+		pc_owned = p.with_arguments(args);
 		pc_ref = &pc_owned;
 	} else {
 		pc_ref = p;
@@ -308,28 +304,33 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
 			ax[0] = filtered;
 			// Rewrite primitives in ax
 			for item in &mut ax {
-				match &item.clone() {
+				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
 						let (r, v) = possible_to_rewrite(inner_p, ps, depth + 1);
 						if r {
-							*item = v[0].clone();
+							Some(v.into_iter().next().unwrap())
+						} else {
+							None
 						}
 					}
 					Value::Equation(inner_e) => {
-						let mut new_eq = Equation {
-							values: inner_e.values.clone(),
-						};
+						let mut new_values: Option<Vec<Value>> = None;
 						for (ii, ev) in inner_e.values.iter().enumerate() {
 							if let Value::Primitive(ep) = ev {
 								let (r, v) = possible_to_rewrite(ep, ps, depth + 1);
 								if r {
-									new_eq.values[ii] = v[0].clone();
+									let vals =
+										new_values.get_or_insert_with(|| inner_e.values.clone());
+									vals[ii] = v[0].clone();
 								}
 							}
 						}
-						*item = Value::Equation(Arc::new(new_eq));
+						new_values.map(|vals| Value::Equation(Arc::new(Equation { values: vals })))
 					}
-					_ => {}
+					_ => None,
+				};
+				if let Some(new_val) = replacement {
+					*item = new_val;
 				}
 			}
 			valid = value_equivalent_values(&ax[0], &ax[1], true);
@@ -372,19 +373,14 @@ pub fn possible_to_rebuild(p: &Primitive) -> (bool, Value) {
 			continue;
 		}
 		// Check that all has entries are equivalent but with different outputs
-		let mut all_ok = true;
-		for has_p_idx in 1..has.len() {
-			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has[has_p_idx]) {
+		let all_ok = has[1..].iter().all(|has_p| {
+			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has_p) {
 				let (equiv, o1, o2) = value_equivalent_primitives(h0, hp, false);
-				if !equiv || o1 == o2 {
-					all_ok = false;
-					break;
-				}
+				equiv && o1 != o2
 			} else {
-				all_ok = false;
-				break;
+				false
 			}
-		}
+		});
 		if !all_ok {
 			continue;
 		}
@@ -398,50 +394,45 @@ pub fn possible_to_rebuild(p: &Primitive) -> (bool, Value) {
 pub fn possible_to_obtain_passwords(
 	a: &Value,
 	a_parent: &Value,
-	a_index: i32,
+	a_index: Option<usize>,
 	ps: &PrincipalState,
-) -> Vec<Value> {
-	let mut passwords = Vec::new();
+	out: &mut Vec<Value>,
+) {
 	match a {
 		Value::Constant(c) => {
 			let (aa, _) = value_resolve_constant(c, ps, true);
-			if let Value::Constant(ac) = &aa {
-				if ac.qualifier == Some(Qualifier::Password) {
-					if a_index >= 0 {
-						if let Value::Primitive(parent_p) = a_parent {
-							if !primitive_is_core(parent_p.id) {
-								if let Ok(prim) = primitive_get(parent_p.id) {
-									if prim.password_hashing.contains(&(a_index as usize)) {
-										return passwords;
-									}
-								}
-							}
-						}
-					}
-					passwords.push(aa);
+			let is_password =
+				matches!(&aa, Value::Constant(ac) if ac.qualifier == Some(Qualifier::Password));
+			if is_password {
+				let is_hashed = a_index.is_some_and(|idx| {
+					matches!(a_parent, Value::Primitive(pp) if !primitive_is_core(pp.id)
+						&& primitive_get(pp.id).is_ok_and(|prim| prim.password_hashing.contains(&idx)))
+				});
+				if !is_hashed {
+					out.push(aa);
 				}
 			}
 		}
 		Value::Primitive(p) => {
-			let mut parent = a_parent;
+			let is_hashing = !primitive_is_core(p.id)
+				&& a_index.is_some_and(|idx| {
+					primitive_get(p.id).is_ok_and(|prim| prim.password_hashing.contains(&idx))
+				});
 			let parent_owned;
-			if !primitive_is_core(p.id) {
-				if let Ok(prim) = primitive_get(p.id) {
-					if a_index >= 0 && prim.password_hashing.contains(&(a_index as usize)) {
-						parent_owned = a.clone();
-						parent = &parent_owned;
-					}
-				}
-			}
+			let parent = if is_hashing {
+				parent_owned = a.clone();
+				&parent_owned
+			} else {
+				a_parent
+			};
 			for (i, arg) in p.arguments.iter().enumerate() {
-				passwords.extend(possible_to_obtain_passwords(arg, parent, i as i32, ps));
+				possible_to_obtain_passwords(arg, parent, Some(i), ps, out);
 			}
 		}
 		Value::Equation(e) => {
 			for v in &e.values {
-				passwords.extend(possible_to_obtain_passwords(v, a, -1, ps));
+				possible_to_obtain_passwords(v, a, None, ps, out);
 			}
 		}
 	}
-	passwords
 }

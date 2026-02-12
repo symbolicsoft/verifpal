@@ -34,7 +34,7 @@ type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
 type CoreRuleFn = fn(&Primitive) -> (bool, Vec<Value>);
 type RewriteToFn = fn(&Primitive) -> Value;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<usize>,
@@ -43,14 +43,14 @@ pub struct DecomposeRule {
 	pub passive_reveal: Vec<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RewriteRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
@@ -60,7 +60,7 @@ pub struct RewriteRule {
 	pub filter: Option<FilterFn>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RebuildRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
@@ -70,7 +70,7 @@ pub struct RebuildRule {
 
 #[derive(Clone)]
 pub struct PrimitiveCoreSpec {
-	pub name: String,
+	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
 	pub output: Vec<i32>,
@@ -80,9 +80,9 @@ pub struct PrimitiveCoreSpec {
 	pub explosive: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PrimitiveSpec {
-	pub name: String,
+	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
 	pub output: Vec<i32>,
@@ -100,26 +100,7 @@ fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 	(x.clone(), true)
 }
 
-fn filter_signverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
-	match i {
-		0 => match x {
-			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
-			Value::Equation(e) => {
-				if e.values.len() != 2 {
-					return (x.clone(), false);
-				}
-				if !value_equivalent_values(&e.values[0], &value_g(), true) {
-					return (x.clone(), false);
-				}
-				(e.values[1].clone(), true)
-			}
-		},
-		1 => (x.clone(), true),
-		_ => (x.clone(), false),
-	}
-}
-
-fn filter_pke_enc_decompose(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
+fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		0 => match x {
 			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
@@ -209,11 +190,6 @@ fn core_rule_assert(p: &Primitive) -> (bool, Vec<Value>) {
 	}
 }
 
-fn core_rule_concat(p: &Primitive) -> (bool, Vec<Value>) {
-	let v = vec![Value::Primitive(Arc::new(p.clone()))];
-	(false, v)
-}
-
 fn core_rule_split(p: &Primitive) -> (bool, Vec<Value>) {
 	let v = vec![Value::Primitive(Arc::new(p.clone()))];
 	match &p.arguments[0] {
@@ -230,23 +206,16 @@ fn core_rule_split(p: &Primitive) -> (bool, Vec<Value>) {
 }
 
 // Rewrite To functions
-fn rewrite_to_aead_dec(p: &Primitive) -> Value {
+
+/// Rewrite returns the second argument (ciphertext -> plaintext).
+/// Used by AEAD_DEC, DEC, PKE_DEC.
+fn rewrite_to_arg1(p: &Primitive) -> Value {
 	p.arguments[1].clone()
 }
 
-fn rewrite_to_dec(p: &Primitive) -> Value {
-	p.arguments[1].clone()
-}
-
-fn rewrite_to_signverif(_p: &Primitive) -> Value {
-	value_nil()
-}
-
-fn rewrite_to_pke_dec(p: &Primitive) -> Value {
-	p.arguments[1].clone()
-}
-
-fn rewrite_to_ringsignverif(_p: &Primitive) -> Value {
+/// Rewrite returns nil (verification-only primitives).
+/// Used by SIGNVERIF, RINGSIGNVERIF.
+fn rewrite_to_nil(_p: &Primitive) -> Value {
 	value_nil()
 }
 
@@ -268,7 +237,7 @@ fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 	vec![
 		PrimitiveCoreSpec {
 			id: PRIM_ASSERT,
-			name: "ASSERT".to_string(),
+			name: "ASSERT",
 			arity: vec![2],
 			output: vec![1],
 			has_rule: true,
@@ -278,17 +247,17 @@ fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 		},
 		PrimitiveCoreSpec {
 			id: PRIM_CONCAT,
-			name: "CONCAT".to_string(),
+			name: "CONCAT",
 			arity: vec![2, 3, 4, 5],
 			output: vec![1],
 			has_rule: false,
-			core_rule: Some(core_rule_concat),
+			core_rule: None,
 			check: false,
 			explosive: true,
 		},
 		PrimitiveCoreSpec {
 			id: PRIM_SPLIT,
-			name: "SPLIT".to_string(),
+			name: "SPLIT",
 			arity: vec![1],
 			output: vec![1, 2, 3, 4, 5],
 			has_rule: true,
@@ -304,115 +273,34 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		// PW_HASH
 		PrimitiveSpec {
 			id: PRIM_PWHASH,
-			name: "PW_HASH".to_string(),
+			name: "PW_HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![0, 1, 2, 3, 4],
+			..PrimitiveSpec::default()
 		},
 		// HASH
 		PrimitiveSpec {
 			id: PRIM_HASH,
-			name: "HASH".to_string(),
+			name: "HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
 			explosive: true,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// HKDF
 		PrimitiveSpec {
 			id: PRIM_HKDF,
-			name: "HKDF".to_string(),
+			name: "HKDF",
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
 			explosive: true,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// AEAD_ENC
 		PrimitiveSpec {
 			id: PRIM_AEAD_ENC,
-			name: "AEAD_ENC".to_string(),
+			name: "AEAD_ENC",
 			arity: vec![3],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -422,33 +310,13 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_identity),
 				passive_reveal: vec![2],
 			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// AEAD_DEC
 		PrimitiveSpec {
 			id: PRIM_AEAD_DEC,
-			name: "AEAD_DEC".to_string(),
+			name: "AEAD_DEC",
 			arity: vec![3],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -456,35 +324,23 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
+				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_AEAD_ENC,
 				from: 1,
-				to: Some(rewrite_to_aead_dec),
+				to: Some(rewrite_to_arg1),
 				matching: vec![(0, vec![0]), (2, vec![2])],
 				filter: Some(filter_aead_dec_rewrite),
 			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
 			check: true,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// ENC
 		PrimitiveSpec {
 			id: PRIM_ENC,
-			name: "ENC".to_string(),
+			name: "ENC",
 			arity: vec![2],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -492,35 +348,15 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![],
+				..DecomposeRule::default()
 			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// DEC
 		PrimitiveSpec {
 			id: PRIM_DEC,
-			name: "DEC".to_string(),
+			name: "DEC",
 			arity: vec![2],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -528,179 +364,73 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
+				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_ENC,
 				from: 1,
-				to: Some(rewrite_to_dec),
+				to: Some(rewrite_to_arg1),
 				matching: vec![(0, vec![0])],
 				filter: Some(filter_dec_rewrite),
 			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// MAC
 		PrimitiveSpec {
 			id: PRIM_MAC,
-			name: "MAC".to_string(),
+			name: "MAC",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// SIGN
 		PrimitiveSpec {
 			id: PRIM_SIGN,
-			name: "SIGN".to_string(),
+			name: "SIGN",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// SIGNVERIF
 		PrimitiveSpec {
 			id: PRIM_SIGNVERIF,
-			name: "SIGNVERIF".to_string(),
+			name: "SIGNVERIF",
 			arity: vec![3],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_SIGN,
 				from: 2,
-				to: Some(rewrite_to_signverif),
+				to: Some(rewrite_to_nil),
 				matching: vec![(0, vec![0]), (1, vec![1])],
-				filter: Some(filter_signverif_rewrite),
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
+				filter: Some(filter_extract_dh_exponent),
 			},
 			check: true,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// PKE_ENC
 		PrimitiveSpec {
 			id: PRIM_PKE_ENC,
-			name: "PKE_ENC".to_string(),
+			name: "PKE_ENC",
 			arity: vec![2],
 			output: vec![1],
 			decompose: DecomposeRule {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
-				filter: Some(filter_pke_enc_decompose),
-				passive_reveal: vec![],
+				filter: Some(filter_extract_dh_exponent),
+				..DecomposeRule::default()
 			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// PKE_DEC
 		PrimitiveSpec {
 			id: PRIM_PKE_DEC,
-			name: "PKE_DEC".to_string(),
+			name: "PKE_DEC",
 			arity: vec![2],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -708,93 +438,37 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
+				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_PKE_ENC,
 				from: 1,
-				to: Some(rewrite_to_pke_dec),
+				to: Some(rewrite_to_arg1),
 				matching: vec![(0, vec![0])],
 				filter: Some(filter_pke_dec_rewrite),
 			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// SHAMIR_SPLIT
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_SPLIT,
-			name: "SHAMIR_SPLIT".to_string(),
+			name: "SHAMIR_SPLIT",
 			arity: vec![1],
 			output: vec![3],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
 			recompose: RecomposeRule {
 				has_rule: true,
 				given: vec![vec![0, 1], vec![0, 2], vec![1, 2]],
 				reveal: 0,
 			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// SHAMIR_JOIN
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_JOIN,
-			name: "SHAMIR_JOIN".to_string(),
+			name: "SHAMIR_JOIN",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
 			rebuild: RebuildRule {
 				has_rule: true,
 				id: PRIM_SHAMIR_SPLIT,
@@ -808,69 +482,28 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				],
 				reveal: 0,
 			},
-			check: false,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// RINGSIGN
 		PrimitiveSpec {
 			id: PRIM_RINGSIGN,
-			name: "RINGSIGN".to_string(),
+			name: "RINGSIGN",
 			arity: vec![4],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![3],
+			..PrimitiveSpec::default()
 		},
 		// RINGSIGNVERIF
 		PrimitiveSpec {
 			id: PRIM_RINGSIGNVERIF,
-			name: "RINGSIGNVERIF".to_string(),
+			name: "RINGSIGNVERIF",
 			arity: vec![5],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_RINGSIGN,
 				from: 4,
-				to: Some(rewrite_to_ringsignverif),
+				to: Some(rewrite_to_nil),
 				matching: vec![
 					(0, vec![0, 1, 2]),
 					(1, vec![0, 1, 2]),
@@ -879,20 +512,13 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				],
 				filter: Some(filter_ringsignverif_rewrite),
 			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
 			check: true,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 		// BLIND
 		PrimitiveSpec {
 			id: PRIM_BLIND,
-			name: "BLIND".to_string(),
+			name: "BLIND",
 			arity: vec![2],
 			output: vec![1],
 			decompose: DecomposeRule {
@@ -900,49 +526,17 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![],
+				..DecomposeRule::default()
 			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
-			rewrite: RewriteRule {
-				has_rule: false,
-				id: 0,
-				from: 0,
-				to: None,
-				matching: vec![],
-				filter: None,
-			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
 			password_hashing: vec![1],
+			..PrimitiveSpec::default()
 		},
 		// UNBLIND
 		PrimitiveSpec {
 			id: PRIM_UNBLIND,
-			name: "UNBLIND".to_string(),
+			name: "UNBLIND",
 			arity: vec![3],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-				filter: None,
-				passive_reveal: vec![],
-			},
-			recompose: RecomposeRule {
-				has_rule: false,
-				given: vec![],
-				reveal: 0,
-			},
 			rewrite: RewriteRule {
 				has_rule: true,
 				id: PRIM_SIGN,
@@ -951,15 +545,7 @@ fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![1])],
 				filter: Some(filter_unblind_rewrite),
 			},
-			rebuild: RebuildRule {
-				has_rule: false,
-				id: 0,
-				given: vec![],
-				reveal: 0,
-			},
-			check: false,
-			explosive: false,
-			password_hashing: vec![],
+			..PrimitiveSpec::default()
 		},
 	]
 }
@@ -990,26 +576,67 @@ pub fn primitive_get(id: PrimitiveId) -> Result<&'static PrimitiveSpec, String> 
 		.ok_or_else(|| "unknown primitive".to_string())
 }
 
-pub fn primitive_get_enum(name: &str) -> Result<PrimitiveId, String> {
-	for spec in CORE_SPECS.values() {
-		if spec.name == name {
-			return Ok(spec.id);
-		}
+pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
+	if primitive_is_core(id) {
+		primitive_core_get(id).map(|s| s.has_rule).unwrap_or(false)
+	} else {
+		primitive_get(id)
+			.map(|s| s.rewrite.has_rule)
+			.unwrap_or(false)
 	}
-	for spec in PRIM_SPECS.values() {
-		if spec.name == name {
-			return Ok(spec.id);
-		}
-	}
-	Err("unknown primitive".to_string())
 }
 
-pub fn primitive_get_arity(p: &Primitive) -> Result<Vec<i32>, String> {
-	if primitive_is_core(p.id) {
-		let prim = primitive_core_get(p.id)?;
-		Ok(prim.arity.clone())
+pub fn primitive_name(id: PrimitiveId) -> &'static str {
+	if primitive_is_core(id) {
+		primitive_core_get(id).map(|s| s.name).unwrap_or("")
 	} else {
-		let prim = primitive_get(p.id)?;
-		Ok(prim.arity.clone())
+		primitive_get(id).map(|s| s.name).unwrap_or("")
+	}
+}
+
+pub fn primitive_is_explosive(id: PrimitiveId) -> bool {
+	if primitive_is_core(id) {
+		primitive_core_get(id).map(|s| s.explosive).unwrap_or(false)
+	} else {
+		primitive_get(id).map(|s| s.explosive).unwrap_or(false)
+	}
+}
+
+pub fn primitive_has_single_output(id: PrimitiveId) -> bool {
+	if primitive_is_core(id) {
+		primitive_core_get(id)
+			.map(|s| s.output.len() == 1 && s.output[0] == 1)
+			.unwrap_or(false)
+	} else {
+		primitive_get(id)
+			.map(|s| s.output.len() == 1 && s.output[0] == 1)
+			.unwrap_or(false)
+	}
+}
+
+pub fn primitive_output_spec(id: PrimitiveId) -> Result<(&'static [i32], bool), String> {
+	if primitive_is_core(id) {
+		let s = primitive_core_get(id)?;
+		Ok((&s.output, s.check))
+	} else {
+		let s = primitive_get(id)?;
+		Ok((&s.output, s.check))
+	}
+}
+
+pub fn primitive_get_enum(name: &str) -> Result<PrimitiveId, String> {
+	CORE_SPECS
+		.values()
+		.find(|s| s.name == name)
+		.map(|s| s.id)
+		.or_else(|| PRIM_SPECS.values().find(|s| s.name == name).map(|s| s.id))
+		.ok_or_else(|| "unknown primitive".to_string())
+}
+
+pub fn primitive_get_arity(p: &Primitive) -> Result<&'static [i32], String> {
+	if primitive_is_core(p.id) {
+		Ok(&primitive_core_get(p.id)?.arity)
+	} else {
+		Ok(&primitive_get(p.id)?.arity)
 	}
 }

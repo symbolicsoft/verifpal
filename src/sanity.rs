@@ -9,10 +9,10 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-pub fn sanity(m: &Model) -> Result<(KnowledgeMap, Vec<PrincipalState>), String> {
+pub fn sanity(m: &Model) -> Result<(ProtocolTrace, Vec<PrincipalState>), String> {
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
-	let km = construct_knowledge_map(m, &principals, &principal_ids)?;
+	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
 	sanity_queries(m, &km)?;
 	let ps = construct_principal_states(m, &km);
 	Ok((km, ps))
@@ -44,7 +44,7 @@ fn sanity_phases(m: &Model) -> Result<(), String> {
 pub fn sanity_assignment_constants(
 	right: &Value,
 	existing: &[Constant],
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 ) -> Result<Vec<Constant>, String> {
 	let mut constants: Vec<Constant> = existing.to_vec();
 	match right {
@@ -63,7 +63,7 @@ pub fn sanity_assignment_constants(
 				return Err(format!(
 					"primitive has {} inputs, expecting {}",
 					n,
-					pretty_arity(&arity)
+					pretty_arity(arity)
 				));
 			}
 			for a in &p.arguments {
@@ -84,18 +84,12 @@ pub fn sanity_assignment_constants(
 }
 
 pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> Result<(), String> {
-	let (output, check) = if primitive_is_core(p.id) {
-		let prim = primitive_core_get(p.id)?;
-		(prim.output.clone(), prim.check)
-	} else {
-		let prim = primitive_get(p.id)?;
-		(prim.output.clone(), prim.check)
-	};
+	let (output, check) = primitive_output_spec(p.id)?;
 	if !output.contains(&(outputs.len() as i32)) {
 		return Err(format!(
 			"primitive has {} outputs, expecting {}",
 			outputs.len(),
-			pretty_arity(&output)
+			pretty_arity(output)
 		));
 	}
 	if p.check && !check {
@@ -104,25 +98,31 @@ pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> Result<(), Strin
 	sanity_check_primitive_argument_outputs(p)
 }
 
-fn sanity_queries(m: &Model, km: &KnowledgeMap) -> Result<(), String> {
+fn sanity_queries(m: &Model, km: &ProtocolTrace) -> Result<(), String> {
 	for query in &m.queries {
 		match query.kind {
-			QueryKind::Confidentiality => sanity_queries_confidentiality(query, km)?,
 			QueryKind::Authentication => sanity_queries_authentication(query, km)?,
-			QueryKind::Freshness => sanity_queries_freshness(query, km)?,
-			QueryKind::Unlinkability => sanity_queries_unlinkability(query, km)?,
-			QueryKind::Equivalence => sanity_queries_equivalence(query, km)?,
+			QueryKind::Confidentiality | QueryKind::Freshness => {
+				sanity_queries_single_constant(query, km, query.kind.name())?
+			}
+			QueryKind::Unlinkability | QueryKind::Equivalence => {
+				sanity_queries_multi_constant(query, km, query.kind.name())?
+			}
 		}
 		sanity_query_options(query, km)?;
 	}
 	Ok(())
 }
 
-fn sanity_queries_confidentiality(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
-	let i = value_get_knowledge_map_index_from_constant(km, &query.constants[0]);
-	if i.is_none() {
+fn sanity_queries_single_constant(
+	query: &Query,
+	km: &ProtocolTrace,
+	kind: &str,
+) -> Result<(), String> {
+	if value_get_trace_index_from_constant(km, &query.constants[0]).is_none() {
 		return Err(format!(
-			"confidentiality query ({}) refers to unknown constant ({})",
+			"{} query ({}) refers to unknown constant ({})",
+			kind,
 			pretty_query(query),
 			pretty_constant(&query.constants[0])
 		));
@@ -130,8 +130,8 @@ fn sanity_queries_confidentiality(query: &Query, km: &KnowledgeMap) -> Result<()
 	Ok(())
 }
 
-fn sanity_queries_authentication(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
-	let i = value_get_knowledge_map_index_from_constant(km, &query.message.constants[0]);
+fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> Result<(), String> {
+	let i = value_get_trace_index_from_constant(km, &query.message.constants[0]);
 	if i.is_none() {
 		return Err(format!(
 			"authentication query ({}) refers to unknown constant ({})",
@@ -150,62 +150,31 @@ fn sanity_queries_authentication(query: &Query, km: &KnowledgeMap) -> Result<(),
 	sanity_queries_check_known(query, &query.message, c, km)
 }
 
-fn sanity_queries_freshness(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
-	let i = value_get_knowledge_map_index_from_constant(km, &query.constants[0]);
-	if i.is_none() {
-		return Err(format!(
-			"freshness query ({}) refers to unknown constant ({})",
-			pretty_query(query),
-			pretty_constant(&query.constants[0])
-		));
-	}
-	Ok(())
-}
-
-fn sanity_queries_unlinkability(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
+fn sanity_queries_multi_constant(
+	query: &Query,
+	km: &ProtocolTrace,
+	kind: &str,
+) -> Result<(), String> {
 	if query.constants.len() < 2 {
 		return Err(format!(
-			"unlinkability query ({}) must specify at least two constants",
+			"{} query ({}) must specify at least two constants",
+			kind,
 			pretty_query(query)
 		));
 	}
 	for (i, c) in query.constants.iter().enumerate() {
-		if value_get_knowledge_map_index_from_constant(km, c).is_none() {
+		if value_get_trace_index_from_constant(km, c).is_none() {
 			return Err(format!(
-				"unlinkability query ({}) refers to unknown constant ({})",
+				"{} query ({}) refers to unknown constant ({})",
+				kind,
 				pretty_query(query),
 				pretty_constant(c)
 			));
 		}
-		if value_equivalent_constant_in_constants(c, &query.constants[..i]) >= 0 {
+		if value_equivalent_constant_in_constants(c, &query.constants[..i]).is_some() {
 			return Err(format!(
-				"unlinkability query ({}) refers to same constant more than once ({})",
-				pretty_query(query),
-				pretty_constant(c)
-			));
-		}
-	}
-	Ok(())
-}
-
-fn sanity_queries_equivalence(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
-	if query.constants.len() < 2 {
-		return Err(format!(
-			"equivalence query ({}) must specify at least two constants",
-			pretty_query(query)
-		));
-	}
-	for (i, c) in query.constants.iter().enumerate() {
-		if value_get_knowledge_map_index_from_constant(km, c).is_none() {
-			return Err(format!(
-				"equivalence query ({}) refers to unknown constant ({})",
-				pretty_query(query),
-				pretty_constant(c)
-			));
-		}
-		if value_equivalent_constant_in_constants(c, &query.constants[..i]) >= 0 {
-			return Err(format!(
-				"equivalence query ({}) refers to same constant more than once ({})",
+				"{} query ({}) refers to same constant more than once ({})",
+				kind,
 				pretty_query(query),
 				pretty_constant(c)
 			));
@@ -214,7 +183,7 @@ fn sanity_queries_equivalence(query: &Query, km: &KnowledgeMap) -> Result<(), St
 	Ok(())
 }
 
-fn sanity_query_options(query: &Query, km: &KnowledgeMap) -> Result<(), String> {
+fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> Result<(), String> {
 	for option in &query.options {
 		match option.kind {
 			QueryOptionKind::Precondition => {
@@ -249,29 +218,22 @@ fn sanity_queries_check_known(
 	query: &Query,
 	m: &Message,
 	c: &Constant,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 ) -> Result<(), String> {
-	let i = value_get_knowledge_map_index_from_constant(km, &m.constants[0]);
-	if i.is_none() {
-		return Err(format!(
-			"query ({}) refers to unknown constant ({})",
-			pretty_query(query),
-			pretty_constant(&m.constants[0])
-		));
-	}
-	let idx = i.expect("constant exists in knowledge map");
-	let mut sender_knows = km.creator[idx] == m.sender;
-	let mut recipient_knows = km.creator[idx] == m.recipient;
-	for kb in &km.known_by[idx] {
-		if kb.contains_key(&m.sender) {
-			sender_knows = true;
+	let idx = match value_get_trace_index_from_constant(km, &m.constants[0]) {
+		Some(idx) => idx,
+		None => {
+			return Err(format!(
+				"query ({}) refers to unknown constant ({})",
+				pretty_query(query),
+				pretty_constant(&m.constants[0])
+			))
 		}
-		if kb.contains_key(&m.recipient) {
-			recipient_knows = true;
-		}
-	}
+	};
+	let sender_knows = km.slots[idx].known_by_principal(m.sender);
+	let recipient_knows = km.slots[idx].known_by_principal(m.recipient);
 	let used =
-		value_constant_is_used_by_principal_in_knowledge_map(km, m.recipient, &m.constants[0]);
+		value_constant_is_used_by_principal_in_protocol_trace(km, m.recipient, &m.constants[0]);
 	if !sender_knows {
 		return Err(format!(
 			"authentication query ({}) depends on {} sending a constant ({}) that they do not know",
@@ -315,7 +277,7 @@ fn sanity_declared_principals(m: &Model) -> Result<(Vec<String>, Vec<PrincipalId
 		}
 	}
 	for &p in &principals {
-		if !principal_enum_in_slice(p, &declared_ids) {
+		if !declared_ids.contains(&p) {
 			return Err("principal does not exist".to_string());
 		}
 	}
@@ -329,9 +291,9 @@ fn sanity_declared_principals(m: &Model) -> Result<(Vec<String>, Vec<PrincipalId
 }
 
 pub fn sanity_fail_on_failed_checked_primitive_rewrite(
-	failed_rewrites: &[Primitive],
+	failures: &[(Primitive, usize)],
 ) -> Result<(), String> {
-	for p in failed_rewrites {
+	for (p, _) in failures {
 		if p.check {
 			return Err(format!("checked primitive fails: {}", pretty_primitive(p)));
 		}
@@ -342,11 +304,7 @@ pub fn sanity_fail_on_failed_checked_primitive_rewrite(
 fn sanity_check_primitive_argument_outputs(p: &Primitive) -> Result<(), String> {
 	for arg in &p.arguments {
 		if let Value::Primitive(arg_prim) = arg {
-			let output = if primitive_is_core(arg_prim.id) {
-				primitive_core_get(arg_prim.id)?.output.clone()
-			} else {
-				primitive_get(arg_prim.id)?.output.clone()
-			};
+			let (output, _) = primitive_output_spec(arg_prim.id)?;
 			if !output.contains(&1) {
 				return Err(format!("primitive {} cannot have {} as an argument, since {} necessarily produces more than one output",
                     pretty_primitive(p), pretty_primitive(arg_prim), pretty_primitive(arg_prim)));
@@ -363,17 +321,16 @@ pub fn sanity_check_equation_root_generator(e: &Equation) -> Result<(), String> 
 			pretty_equation(e)
 		));
 	}
+	let g_id = value_g().as_constant().expect("g is Constant").id;
 	for (i, c) in e.values.iter().enumerate() {
 		if let Value::Constant(con) = c {
-			if i == 0 && con.id != value_g().as_constant().expect("g is Constant").id {
+			if i == 0 && con.id != g_id {
 				return Err(format!(
 					"equation ({}) does not use 'g' as generator",
 					pretty_equation(e)
 				));
 			}
-			if i > 0
-				&& value_equivalent_constants(con, value_g().as_constant().expect("g is Constant"))
-			{
+			if i > 0 && con.id == g_id {
 				return Err(format!(
 					"equation ({}) uses 'g' not as a generator",
 					pretty_equation(e)

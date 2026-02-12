@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::pretty::*;
-use crate::primitive::*;
+use crate::primitive::primitive_has_single_output;
 use crate::types::*;
 use crate::util::color_output_support;
 use crate::value::*;
@@ -248,38 +248,29 @@ pub fn info_verify_result_summary(
 
 pub fn info_analysis(stage: i32) {
 	let analysis_count = crate::context::analysis_count_get();
-	// Throttle updates
-	match analysis_count {
-		c if c > 100000 => {
-			if c % 10000 != 0 {
-				return;
-			}
-		}
-		c if c > 10000 => {
-			if c % 1000 != 0 {
-				return;
-			}
-		}
-		c if c > 1000 => {
-			if c % 100 != 0 {
-				return;
-			}
-		}
-		c if c > 100 => {
-			if c % 10 != 0 {
-				return;
-			}
-		}
-		_ => {}
+	// Throttle updates — only print at intervals proportional to count
+	let interval = match analysis_count {
+		c if c > 100000 => 10000,
+		c if c > 10000 => 1000,
+		c if c > 1000 => 100,
+		c if c > 100 => 10,
+		_ => 1,
+	};
+	if interval > 1 && !analysis_count.is_multiple_of(interval) {
+		return;
 	}
-	let s = match stage {
-		1 => "1".to_string(),
-		2 | 3 => "2-3".to_string(),
-		4 | 5 => "4-5".to_string(),
-		_ => format!("{}", stage),
+	let owned;
+	let s: &str = match stage {
+		1 => "1",
+		2 | 3 => "2-3",
+		4 | 5 => "4-5",
+		_ => {
+			owned = stage.to_string();
+			&owned
+		}
 	};
 	if crate::tui::tui_enabled() {
-		crate::tui::tui_progress(&s, analysis_count);
+		crate::tui::tui_progress(s, analysis_count);
 		return;
 	}
 	if color_output_support() {
@@ -325,18 +316,7 @@ pub fn info_output_text(revealed: &Value) -> String {
 	match revealed {
 		Value::Constant(_) => output_text,
 		Value::Primitive(p) => {
-			let one_output = if primitive_is_core(p.id) {
-				if let Ok(prim) = primitive_core_get(p.id) {
-					prim.output.len() == 1 && prim.output[0] == 1
-				} else {
-					false
-				}
-			} else if let Ok(prim) = primitive_get(p.id) {
-				prim.output.len() == 1 && prim.output[0] == 1
-			} else {
-				false
-			};
-			if one_output {
+			if primitive_has_single_output(p.id) {
 				format!("Output of {}", output_text)
 			} else {
 				let prefix = format!("{} output", info_literal_number(p.output, true));
@@ -352,55 +332,39 @@ pub fn info_output_text(revealed: &Value) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn info_query_mutated_values(
-	val_knowledge_map: &KnowledgeMap,
-	val_principal_state: &PrincipalState,
+	trace: &ProtocolTrace,
+	diffs: &[SlotDiff],
 	val_attacker_state: &AttackerState,
 	target_value: &Value,
 	info_depth: usize,
 ) -> String {
 	let mut mutated: Vec<Value> = Vec::new();
-	let target_info = "In another session:".to_string();
+	let target_info = "In another session:";
 	let mut mutated_info = String::new();
 	let mut relevant = false;
 
-	let n = val_principal_state
-		.before_rewrite
-		.len()
-		.min(val_knowledge_map.assigned.len());
-	for i in 0..n {
-		if value_equivalent_values(
-			&val_principal_state.before_rewrite[i],
-			&val_knowledge_map.assigned[i],
-			false,
-		) {
-			continue;
-		}
-		let is_target =
-			value_equivalent_values(target_value, &val_principal_state.assigned[i], false);
+	for diff in diffs {
+		let is_target = value_equivalent_values(target_value, &diff.assigned, false);
 		let attacker_knows = value_equivalent_value_in_values_map(
 			target_value,
 			&val_attacker_state.known,
 			&val_attacker_state.known_map,
-		) >= 0;
+		)
+		.is_some();
 
-		let (m_info, m_relevant) = info_query_mutated_value(
-			val_knowledge_map,
-			val_principal_state,
-			i,
-			is_target,
-			attacker_knows,
-		);
+		let (m_info, m_relevant) = info_query_mutated_value(trace, diff, is_target, attacker_knows);
 		if m_relevant {
 			relevant = true;
 		}
-		mutated_info = format!("{}\n            {}", mutated_info, m_info);
+		mutated_info.push_str("\n            ");
+		mutated_info.push_str(&m_info);
 
 		if is_target && attacker_knows {
 			// target obtained
-		} else if val_principal_state.mutated[i]
-			&& value_equivalent_value_in_values(&val_principal_state.assigned[i], &mutated) < 0
+		} else if diff.mutated
+			&& value_equivalent_value_in_values(&diff.assigned, &mutated).is_none()
 		{
-			mutated.push(val_principal_state.assigned[i].clone());
+			mutated.push(diff.assigned.clone());
 		}
 	}
 	if !relevant {
@@ -410,17 +374,17 @@ pub fn info_query_mutated_values(
 		return mutated_info;
 	}
 	for m_val in &mutated {
-		let ai = value_equivalent_value_in_values_map(
+		let ai = match value_equivalent_value_in_values_map(
 			m_val,
 			&val_attacker_state.known,
 			&val_attacker_state.known_map,
-		);
-		if ai < 0 {
-			continue;
-		}
+		) {
+			Some(idx) => idx,
+			None => continue,
+		};
 		let mm_info = info_query_mutated_values(
-			val_knowledge_map,
-			&val_attacker_state.principal_state[ai as usize],
+			trace,
+			&val_attacker_state.mutation_records[ai].diffs,
 			val_attacker_state,
 			m_val,
 			info_depth + 1,
@@ -433,17 +397,16 @@ pub fn info_query_mutated_values(
 }
 
 fn info_query_mutated_value(
-	val_knowledge_map: &KnowledgeMap,
-	val_principal_state: &PrincipalState,
-	index: usize,
+	trace: &ProtocolTrace,
+	diff: &SlotDiff,
 	is_target_value: bool,
 	attacker_knows: bool,
 ) -> (String, bool) {
-	let pc = pretty_constant(&val_principal_state.constants[index]);
-	let pa = pretty_value(&val_principal_state.assigned[index]);
+	let pc = pretty_constant(&diff.constant);
+	let pa = pretty_value(&diff.assigned);
 	let mut relevant = false;
 	let suffix;
-	if is_target_value && attacker_knows && !val_principal_state.mutated[index] {
+	if is_target_value && attacker_knows && !diff.mutated {
 		relevant = true;
 		if color_output_support() {
 			suffix = format!(
@@ -454,7 +417,7 @@ fn info_query_mutated_value(
 		} else {
 			suffix = " <- obtained by Attacker".to_string();
 		}
-	} else if val_principal_state.mutated[index] {
+	} else if diff.mutated {
 		relevant = true;
 		if color_output_support() {
 			suffix = format!(
@@ -463,14 +426,14 @@ fn info_query_mutated_value(
 				"mutated by Attacker".red().bold(),
 				format!(
 					"(was: {})",
-					pretty_value(&val_knowledge_map.assigned[index])
+					pretty_value(&trace.slots[diff.index].initial_value)
 				)
 				.dimmed()
 			);
 		} else {
 			suffix = format!(
 				" <- mutated by Attacker (originally {})",
-				pretty_value(&val_knowledge_map.assigned[index]),
+				pretty_value(&trace.slots[diff.index].initial_value),
 			);
 		}
 	} else {

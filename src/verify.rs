@@ -13,8 +13,6 @@ use crate::types::*;
 use crate::value::*;
 use crate::verifhub::{verifhub, VERIFHUB_SCHEDULED};
 use crate::verifyactive::verify_active;
-use std::sync::Arc;
-
 use std::sync::atomic::Ordering;
 
 // ---------------------------------------------------------------------------
@@ -45,10 +43,9 @@ fn verify_model(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
 		"verifpal",
 		false,
 	);
-	match m.attacker.as_str() {
-		"passive" => verify_passive(&ctx, &km, &ps)?,
-		"active" => verify_active(&ctx, &km, &ps)?,
-		other => return Err(format!("invalid attacker ({})", other)),
+	match m.attacker {
+		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
+		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
 	}
 	verify_end(&ctx, m)
 }
@@ -59,7 +56,7 @@ fn verify_model(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
 
 pub fn verify_resolve_queries(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
 ) -> Result<(), String> {
 	let results = ctx.results_get();
@@ -77,7 +74,7 @@ pub fn verify_resolve_queries(
 
 pub fn verify_standard_run(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 	stage: i32,
 ) -> Result<(), String> {
@@ -86,18 +83,21 @@ pub fn verify_standard_run(
 		let mut ps_resolved = construct_principal_state_clone(ps, false);
 		value_resolve_all_principal_state_values(&mut ps_resolved, &as_)?;
 
+		// Pre-compute mutation record for this principal state
+		let record = compute_slot_diffs(&ps_resolved, km);
+
 		// Inject missing skeletons for all assigned primitives
-		for i in 0..ps_resolved.assigned.len() {
-			if let Value::Primitive(p) = &ps_resolved.assigned[i] {
-				let p = Arc::clone(p);
-				inject_missing_skeletons(ctx, &p, &ps_resolved, &as_);
+		for sv in &ps_resolved.values {
+			if let Value::Primitive(p) = &sv.assigned {
+				inject_missing_skeletons(ctx, p, &record, &as_);
 			}
 		}
 
-		let (failed_rewrites, _) = value_perform_all_rewrites(&mut ps_resolved);
-		sanity_fail_on_failed_checked_primitive_rewrite(&failed_rewrites)?;
+		let failures = value_perform_all_rewrites(&mut ps_resolved);
+		sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 
-		for a in &ps_resolved.assigned {
+		for sv in &ps_resolved.values {
+			let a = &sv.assigned;
 			sanity_check_equation_generators(a)?;
 		}
 
@@ -114,18 +114,16 @@ pub fn verify_standard_run(
 
 fn verify_passive(
 	ctx: &VerifyContext,
-	km: &KnowledgeMap,
+	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) -> Result<(), String> {
 	info_message("Attacker is configured as passive.", "info", false);
-	let mut phase = 0;
-	while phase <= km.max_phase {
+	for phase in 0..=km.max_phase {
 		ctx.attacker_init();
 		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
 		value_resolve_all_principal_state_values(&mut ps_pure_resolved, &ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
-		phase += 1;
 	}
 	Ok(())
 }
@@ -135,18 +133,16 @@ fn verify_passive(
 // ---------------------------------------------------------------------------
 
 fn verify_get_results_code(results: &[VerifyResult]) -> String {
-	let mut code = String::new();
+	let mut code = String::with_capacity(results.len() * 2);
 	for r in results {
-		let q = match r.query.kind {
-			QueryKind::Confidentiality => "c",
-			QueryKind::Authentication => "a",
-			QueryKind::Freshness => "f",
-			QueryKind::Unlinkability => "u",
-			QueryKind::Equivalence => "e",
-		};
-		let v = if r.resolved { "1" } else { "0" };
-		code.push_str(q);
-		code.push_str(v);
+		code.push(match r.query.kind {
+			QueryKind::Confidentiality => 'c',
+			QueryKind::Authentication => 'a',
+			QueryKind::Freshness => 'f',
+			QueryKind::Unlinkability => 'u',
+			QueryKind::Equivalence => 'e',
+		});
+		code.push(if r.resolved { '1' } else { '0' });
 	}
 	code
 }
