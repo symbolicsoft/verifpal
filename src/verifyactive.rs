@@ -94,7 +94,7 @@ pub fn verify_active(
 
 		// Stages 2+ in parallel pairs until resolved or exhausted
 		let mut stage = 2;
-		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() {
+		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() && stage <= BUDGET.max_stage {
 			if stage < BUDGET.max_stage {
 				rayon::scope(|s| {
 					s.spawn(|_| verify_active_stages(ctx, stage, km, principal_states));
@@ -612,6 +612,7 @@ fn verify_active_mutate_principal_state(
 		return (ps, is_worthwhile_mutation, None);
 	}
 
+	let ps_pre = ps.clone();
 	let _ = value_resolve_all_principal_state_values(&mut ps, as_);
 	let failures = value_perform_all_rewrites(&mut ps);
 
@@ -648,7 +649,7 @@ fn verify_active_mutate_principal_state(
 		// Save the full (non-truncated) state if we have failed guards to
 		// potentially bypass.
 		let full_state_info = if !failed_guards.is_empty() {
-			Some((ps.clone(), failed_guards))
+			Some((ps_pre, failed_guards))
 		} else {
 			None
 		};
@@ -680,10 +681,10 @@ fn extract_bypass_key(prim: &Primitive) -> Option<Value> {
 			Some(prim.arguments[0].clone())
 		}
 		PRIM_SIGNVERIF | PRIM_RINGSIGNVERIF => {
-			// Public key is argument 0. For G^sk, the bypass key is sk.
+			// Public key is argument 0. For G^sk or G^a^b, the bypass key is the last exponent.
 			if let Value::Equation(e) = &prim.arguments[0] {
-				if e.values.len() == 2 {
-					return Some(e.values[1].clone());
+				if e.values.len() >= 2 {
+					return Some(e.values[e.values.len() - 1].clone());
 				}
 			}
 			None

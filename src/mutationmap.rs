@@ -250,7 +250,9 @@ pub fn mutation_map_subset_capped(
 	if mutation_product(sub.mutations.iter().map(|m| m.len()), max_product).is_some() {
 		return sub;
 	}
-	let per_dim = int_nth_root(max_product as i32, n as i32).max(1) as usize;
+	let capped_product = max_product.min(i32::MAX as usize) as i32;
+	let capped_n = n.min(i32::MAX as usize) as i32;
+	let per_dim = int_nth_root(capped_product, capped_n).max(1) as usize;
 	for i in 0..n {
 		if sub.mutations[i].len() > per_dim {
 			sub.mutations[i].truncate(per_dim);

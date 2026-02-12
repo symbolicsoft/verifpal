@@ -599,6 +599,8 @@ pub fn value_resolve_constant(
 	}
 }
 
+const MAX_RESOLVE_DEPTH: usize = 64;
+
 // ---------------------------------------------------------------------------
 // Resolve internal values from ProtocolTrace
 // ---------------------------------------------------------------------------
@@ -608,11 +610,14 @@ pub fn value_resolve_value_internal_values_from_protocol_trace(
 	trace: &ProtocolTrace,
 ) -> (Value, Vec<Value>) {
 	let mut v: Vec<Value> = Vec::new();
-	let resolved = resolve_trace_value(a, trace, &mut v);
+	let resolved = resolve_trace_value(a, trace, &mut v, 0);
 	(resolved, v)
 }
 
-fn resolve_trace_value(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
+fn resolve_trace_value(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
+	if depth >= MAX_RESOLVE_DEPTH {
+		return a.clone();
+	}
 	let resolved = match a {
 		Value::Constant(c) => {
 			v.push(a.clone());
@@ -628,17 +633,20 @@ fn resolve_trace_value(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> 
 			push_unique_value(v, resolved.clone());
 			resolved
 		}
-		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, v),
-		Value::Equation(_) => resolve_trace_equation(&resolved, trace, v),
+		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, v, depth + 1),
+		Value::Equation(_) => resolve_trace_equation(&resolved, trace, v, depth + 1),
 	}
 }
 
-fn resolve_trace_primitive(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
+fn resolve_trace_primitive(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
 	let p = a.as_primitive().expect("value is Primitive");
+	if depth >= MAX_RESOLVE_DEPTH {
+		return a.clone();
+	}
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, arg) in p.arguments.iter().enumerate() {
-		let s = resolve_trace_value(arg, trace, v);
+		let s = resolve_trace_value(arg, trace, v, depth);
 		if !value_equivalent_values(&s, arg, true) {
 			let args = new_args.get_or_insert_with(|| p.arguments.clone());
 			args[i] = s;
@@ -651,8 +659,11 @@ fn resolve_trace_primitive(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>)
 	}
 }
 
-fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) -> Value {
+fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
 	let e = a.as_equation().expect("value is Equation");
+	if depth >= MAX_RESOLVE_DEPTH {
+		return a.clone();
+	}
 	let mut r_eq = Equation { values: Vec::new() };
 	let mut aa: Vec<Value> = Vec::new();
 	for ev in &e.values {
@@ -670,11 +681,11 @@ fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) 
 				push_unique_value(v, item.clone());
 			}
 			Value::Primitive(_) => {
-				let aaa = resolve_trace_primitive(item, trace, v);
+				let aaa = resolve_trace_primitive(item, trace, v, depth);
 				r_eq.values.push(aaa);
 			}
 			Value::Equation(_) => {
-				let aaa = resolve_trace_equation(item, trace, v);
+				let aaa = resolve_trace_equation(item, trace, v, depth);
 				let inner = aaa.as_equation().expect("resolved equation is Equation");
 				if aai == 0 {
 					r_eq.values = inner.values.clone();
@@ -693,8 +704,6 @@ fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>) 
 // ---------------------------------------------------------------------------
 // Resolve internal values from PrincipalState
 // ---------------------------------------------------------------------------
-
-const MAX_RESOLVE_DEPTH: usize = 64;
 
 pub fn value_resolve_value_internal_values_from_principal_state(
 	a: &Value,

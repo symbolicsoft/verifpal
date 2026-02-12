@@ -16,9 +16,10 @@ pub fn verifhub(m: &Model, file_name: &str, results_code: &str) -> Result<(), St
 	);
 	let pretty = pretty_model(m)?;
 	let model = urlencoding_encode(&pretty);
+	let encoded_name = urlencoding_encode(file_name);
 	let link = format!(
 		"https://verifhub.verifpal.com/submit?name={}&model={}&results={}",
-		file_name, model, results_code
+		encoded_name, model, results_code
 	);
 	open_browser(&link)
 }

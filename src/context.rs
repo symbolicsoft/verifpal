@@ -51,6 +51,9 @@ fn attacker_state_absorb(state: &mut AttackerState, v: &Value, record: &Mutation
 		.entry(h)
 		.or_default()
 		.push(idx);
+	if let Value::Primitive(p) = v {
+		Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
+	}
 	Arc::make_mut(&mut state.mutation_records).push(record.clone());
 }
 
@@ -143,26 +146,24 @@ impl VerifyContext {
 		ps: &PrincipalState,
 		phase: i32,
 	) -> Result<(), String> {
+		let record = compute_slot_diffs(ps, km);
 		let mut state = write_lock(&self.attacker);
 		state.current_phase = phase;
-		let record = compute_slot_diffs(ps, km);
 
 		// Public constants
 		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
-			if let Value::Constant(c) = &sv.assigned {
-				if c.qualifier != Some(Qualifier::Public) {
-					continue;
-				}
-				if let Ok(earliest) = min_int_in_slice(&sm.phase) {
-					if earliest > phase {
-						continue;
-					}
-				}
-				if !crate::value::value_constant_is_used_by_at_least_one_principal(km, c) {
-					continue;
-				}
-				attacker_state_absorb(&mut state, &sv.assigned, &record);
+			if sm.constant.qualifier != Some(Qualifier::Public) {
+				continue;
 			}
+			if let Ok(earliest) = min_int_in_slice(&sm.phase) {
+				if earliest > phase {
+					continue;
+				}
+			}
+			if !crate::value::value_constant_is_used_by_at_least_one_principal(km, &sm.constant) {
+				continue;
+			}
+			attacker_state_absorb(&mut state, &sv.assigned, &record);
 		}
 
 		// Wire/leaked values

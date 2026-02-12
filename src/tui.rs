@@ -656,8 +656,9 @@ fn compact_knowledge_desc(msg: &str) -> String {
 	} else {
 		msg.split_whitespace().next().unwrap_or("?").to_string()
 	};
-	let val_short = if val_name.len() > 12 {
-		format!("{}~", &val_name[..11])
+	let val_short = if val_name.chars().count() > 12 {
+		let truncated: String = val_name.chars().take(11).collect();
+		format!("{}~", truncated)
 	} else {
 		val_name
 	};
@@ -734,7 +735,7 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
 	let info_str = format!(" Stage {} |{} {}", st.stage, phase_str, timer);
 	let info_vis = vis_len(&info_str);
 	let bar_chars = inner.saturating_sub(2 + info_vis); // 2 for leading "  "
-	let scan_pos = if finished {
+	let scan_pos = if finished || bar_chars == 0 {
 		bar_chars
 	} else {
 		(frame * 3) % (bar_chars * 2) // bounce animation

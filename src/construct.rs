@@ -71,14 +71,20 @@ pub fn construct_protocol_trace(
 fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<PrincipalId, bool>> {
 	let mut used_by: HashMap<ValueId, HashMap<PrincipalId, bool>> = HashMap::new();
 	for slot in &trace.slots {
-		if matches!(
-			&slot.initial_value,
-			Value::Primitive(_) | Value::Equation(_)
-		) {
-			let (_, v) =
-				value_resolve_value_internal_values_from_protocol_trace(&slot.initial_value, trace);
-			for vv in &v {
-				if let Value::Constant(c) = vv {
+		match &slot.initial_value {
+			Value::Primitive(_) | Value::Equation(_) => {
+				let (_, v) = value_resolve_value_internal_values_from_protocol_trace(
+					&slot.initial_value,
+					trace,
+				);
+				for vv in &v {
+					if let Value::Constant(c) = vv {
+						used_by.entry(c.id).or_default().insert(slot.creator, true);
+					}
+				}
+			}
+			Value::Constant(c) => {
+				if c.id != slot.constant.id {
 					used_by.entry(c.id).or_default().insert(slot.creator, true);
 				}
 			}
@@ -442,7 +448,7 @@ pub fn construct_principal_state_clone(ps: &PrincipalState, purify: bool) -> Pri
 				assigned: assigned.clone(),
 				before_rewrite: before_rewrite.clone(),
 				before_mutate: sv.before_mutate.clone(),
-				mutated: sv.mutated,
+				mutated: if purify { false } else { sv.mutated },
 				rewritten: false,
 				creator: sv.creator,
 				sender: sv.sender,

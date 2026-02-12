@@ -51,6 +51,7 @@ const RESERVED: &[&str] = &[
 	"unnamed",
 	"blind",
 	"unblind",
+	"queries",
 ];
 
 fn check_reserved(s: &str) -> Result<(), String> {
@@ -70,6 +71,17 @@ fn title_case(s: &str) -> String {
 		None => String::new(),
 		Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
 	}
+}
+
+/// Check if `s` starts with `keyword` followed by a non-identifier character
+/// (or end of string). This prevents "phaseshift" from matching "phase".
+fn starts_with_keyword(s: &str, keyword: &str) -> bool {
+	if !s.starts_with(keyword) {
+		return false;
+	}
+	s.as_bytes()
+		.get(keyword.len())
+		.map_or(true, |&b| !b.is_ascii_alphanumeric() && b != b'_')
 }
 
 struct Parser<'a> {
@@ -210,7 +222,7 @@ impl<'a> Parser<'a> {
 			}
 
 			// Check for queries block
-			if self.remaining().starts_with("queries") {
+			if starts_with_keyword(self.remaining(), "queries") {
 				break;
 			}
 
@@ -254,13 +266,13 @@ impl<'a> Parser<'a> {
 	fn parse_block(&mut self) -> Result<Block, String> {
 		self.skip_whitespace_and_comments();
 
-		if self.remaining().starts_with("phase") {
+		if starts_with_keyword(self.remaining(), "phase") {
 			return self.parse_phase();
 		}
 
 		// Try to determine if this is a principal or message
 		// A principal starts with "principal", a message has "->" or "→"
-		if self.remaining().starts_with("principal") {
+		if starts_with_keyword(self.remaining(), "principal") {
 			return self.parse_principal();
 		}
 
@@ -336,15 +348,15 @@ impl<'a> Parser<'a> {
 	fn parse_message_constants(&mut self) -> Result<Vec<Constant>, String> {
 		let mut constants = Vec::new();
 		loop {
-			self.skip_whitespace();
+			self.skip_inline_whitespace();
 			if self.at_end() || self.peek() == Some(b'\n') || self.peek() == Some(b'\r') {
 				break;
 			}
 			// Check for end markers
 			let rem = self.remaining();
-			if rem.starts_with("principal")
-				|| rem.starts_with("phase")
-				|| rem.starts_with("queries")
+			if starts_with_keyword(rem, "principal")
+				|| starts_with_keyword(rem, "phase")
+				|| starts_with_keyword(rem, "queries")
 				|| rem.starts_with("//")
 			{
 				break;
@@ -382,7 +394,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_guarded_constant(&mut self) -> Result<Constant, String> {
 		self.expect("[")?;
-		let mut c = self.parse_constant()?;
+		let mut c = self.parse_constant()?; // check_reserved already called inside parse_constant
 		// Consume trailing comma if present inside brackets
 		self.skip_whitespace();
 		self.expect("]")?;
@@ -390,7 +402,6 @@ impl<'a> Parser<'a> {
 		if self.peek() == Some(b',') {
 			self.advance();
 		}
-		check_reserved(&c.name)?;
 		c.guard = true;
 		Ok(c)
 	}
@@ -398,11 +409,11 @@ impl<'a> Parser<'a> {
 	fn parse_expression(&mut self) -> Result<Expression, String> {
 		self.skip_whitespace_and_comments();
 		let rem = self.remaining();
-		if rem.starts_with("knows") {
+		if starts_with_keyword(rem, "knows") {
 			self.parse_knows()
-		} else if rem.starts_with("generates") {
+		} else if starts_with_keyword(rem, "generates") {
 			self.parse_simple_expression("generates", Declaration::Generates)
-		} else if rem.starts_with("leaks") {
+		} else if starts_with_keyword(rem, "leaks") {
 			self.parse_simple_expression("leaks", Declaration::Leaks)
 		} else {
 			self.parse_assignment()
@@ -491,9 +502,9 @@ impl<'a> Parser<'a> {
 			}
 			// Check for keywords that end the constant list
 			let rem = self.remaining();
-			if rem.starts_with("knows")
-				|| rem.starts_with("generates")
-				|| rem.starts_with("leaks")
+			if starts_with_keyword(rem, "knows")
+				|| starts_with_keyword(rem, "generates")
+				|| starts_with_keyword(rem, "leaks")
 				|| rem.starts_with("//")
 			{
 				break;
@@ -726,11 +737,11 @@ impl<'a> Parser<'a> {
 			}
 			// Check for end of query list
 			let rem = self.remaining();
-			if rem.starts_with("confidentiality")
-				|| rem.starts_with("authentication")
-				|| rem.starts_with("freshness")
-				|| rem.starts_with("unlinkability")
-				|| rem.starts_with("equivalence")
+			if starts_with_keyword(rem, "confidentiality")
+				|| starts_with_keyword(rem, "authentication")
+				|| starts_with_keyword(rem, "freshness")
+				|| starts_with_keyword(rem, "unlinkability")
+				|| starts_with_keyword(rem, "equivalence")
 				|| rem.starts_with("//")
 			{
 				break;

@@ -131,6 +131,12 @@ fn sanity_queries_single_constant(
 }
 
 fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> Result<(), String> {
+	if query.message.constants.is_empty() {
+		return Err(format!(
+			"authentication query ({}) has no constants",
+			pretty_query(query)
+		));
+	}
 	let i = value_get_trace_index_from_constant(km, &query.message.constants[0]);
 	if i.is_none() {
 		return Err(format!(
