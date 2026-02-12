@@ -27,6 +27,7 @@ use crate::value::{
     value_perform_all_rewrites, value_resolve_all_principal_state_values, value_resolve_constant,
     value_resolve_value_internal_values_from_knowledge_map,
 };
+use crate::util::int_in_slice;
 use crate::verify::{verify_resolve_queries, verify_standard_run};
 use crate::verifyanalysis::verify_analysis;
 use crate::verifyresults::verify_results_all_resolved;
@@ -157,16 +158,23 @@ fn verify_active_equation_bypass(
             return;
         }
 
+        let as_ = attacker_state_get_read();
+
         // Collect indices of equation-valued constants received from other
         // principals (these are public keys the attacker can intercept).
         // Skip guarded constants (sent in [brackets]) — the attacker can
         // read them but cannot tamper with them.
+        // Skip constants not communicated in the current phase — the attacker
+        // can only manipulate values in the phase they were communicated.
         let mut eq_indices: Vec<usize> = Vec::new();
         for i in 0..val_principal_state.constants.len() {
             if val_principal_state.creator[i] == val_principal_state.id {
                 continue;
             }
             if val_principal_state.guard[i] {
+                continue;
+            }
+            if !int_in_slice(as_.current_phase, &val_principal_state.phase[i]) {
                 continue;
             }
             if let Value::Equation(_) = &val_principal_state.assigned[i] {
@@ -176,8 +184,6 @@ fn verify_active_equation_bypass(
         if eq_indices.is_empty() {
             continue;
         }
-
-        let as_ = attacker_state_get_read();
 
         // Try replacing each equation wire input individually.
         for &target_idx in &eq_indices {
