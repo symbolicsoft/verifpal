@@ -23,7 +23,7 @@ static STATE: LazyLock<RwLock<AttackerState>> = LazyLock::new(|| {
 });
 
 pub fn attacker_state_init() {
-    let mut state = STATE.write().expect("attacker state lock");
+    let mut state = STATE.write().unwrap_or_else(|e| e.into_inner());
     *state = AttackerState {
         current_phase: 0,
         exhausted: false,
@@ -36,15 +36,15 @@ pub fn attacker_state_init() {
 
 /// Returns a cheap snapshot of the attacker state (O(1) — just Arc increments).
 pub fn attacker_state_get_read() -> AttackerState {
-    STATE.read().expect("attacker state lock").clone()
+    STATE.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 pub fn attacker_state_get_exhausted() -> bool {
-    STATE.read().expect("attacker state lock").exhausted
+    STATE.read().unwrap_or_else(|e| e.into_inner()).exhausted
 }
 
 pub fn attacker_state_get_known_count() -> usize {
-    STATE.read().expect("attacker state lock").known.len()
+    STATE.read().unwrap_or_else(|e| e.into_inner()).known.len()
 }
 
 /// Appends a new known value in-place. O(1) amortized — Arc::make_mut only
@@ -53,7 +53,7 @@ pub fn attacker_state_get_known_count() -> usize {
 pub fn attacker_state_put_write(known: &Value, val_principal_state: &PrincipalState) -> bool {
     // Fast check with read lock
     {
-        let state = STATE.read().expect("attacker state lock");
+        let state = STATE.read().unwrap_or_else(|e| e.into_inner());
         if value_equivalent_value_in_values_map(known, &state.known, &state.known_map) >= 0 {
             return false;
         }
@@ -61,7 +61,7 @@ pub fn attacker_state_put_write(known: &Value, val_principal_state: &PrincipalSt
     // Prepare the clone outside the write lock
     let clone = Arc::new(construct_principal_state_clone(val_principal_state, false));
     // Write lock: double-check and append in-place
-    let mut state = STATE.write().expect("attacker state lock");
+    let mut state = STATE.write().unwrap_or_else(|e| e.into_inner());
     if value_equivalent_value_in_values_map(known, &state.known, &state.known_map) >= 0 {
         return false;
     }
@@ -87,14 +87,14 @@ pub fn attacker_state_put_phase_update(
     phase: i32,
 ) -> Result<(), String> {
     {
-        let mut state = STATE.write().expect("attacker state lock");
+        let mut state = STATE.write().unwrap_or_else(|e| e.into_inner());
         state.current_phase = phase;
     }
     attacker_state_absorb_phase_values(val_knowledge_map, val_principal_state)
 }
 
 pub fn attacker_state_put_exhausted() {
-    let mut state = STATE.write().expect("attacker state lock");
+    let mut state = STATE.write().unwrap_or_else(|e| e.into_inner());
     state.exhausted = true;
 }
 
@@ -102,7 +102,7 @@ fn attacker_state_absorb_phase_values(
     val_knowledge_map: &KnowledgeMap,
     val_principal_state: &PrincipalState,
 ) -> Result<(), String> {
-    let mut state = STATE.write().expect("attacker state lock");
+    let mut state = STATE.write().unwrap_or_else(|e| e.into_inner());
     let current_phase = state.current_phase;
 
     // Public constants

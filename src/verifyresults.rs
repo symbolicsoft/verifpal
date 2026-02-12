@@ -20,7 +20,7 @@ static VERIFY_RESULTS: LazyLock<RwLock<VerifyResultsState>> = LazyLock::new(|| {
 static UNRESOLVED: AtomicI32 = AtomicI32::new(0);
 
 pub fn verify_results_init(m: &Model) {
-    let mut state = VERIFY_RESULTS.write().expect("verify results lock");
+    let mut state = VERIFY_RESULTS.write().unwrap_or_else(|e| e.into_inner());
     state.results = m.queries.iter().enumerate().map(|(i, q)| VerifyResult {
         query: q.clone(),
         query_index: i,
@@ -33,12 +33,12 @@ pub fn verify_results_init(m: &Model) {
 }
 
 pub fn verify_results_get_read() -> (Vec<VerifyResult>, String) {
-    let state = VERIFY_RESULTS.read().expect("verify results lock");
+    let state = VERIFY_RESULTS.read().unwrap_or_else(|e| e.into_inner());
     (state.results.clone(), state.file_name.clone())
 }
 
 pub fn verify_results_put_write(result: &VerifyResult) -> bool {
-    let mut state = VERIFY_RESULTS.write().expect("verify results lock");
+    let mut state = VERIFY_RESULTS.write().unwrap_or_else(|e| e.into_inner());
     if let Some(vr) = state.results.get_mut(result.query_index) {
         if !vr.resolved {
             vr.resolved = result.resolved;

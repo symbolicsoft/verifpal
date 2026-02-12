@@ -200,7 +200,7 @@ pub fn tui_init(m: &Model) {
     }
 
     let w = terminal_width().max(60);
-    let mut st = TUI.write().expect("TUI state lock");
+    let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
     st.enabled = true;
     st.finished = false;
     st.width = w;
@@ -288,7 +288,7 @@ pub fn tui_init(m: &Model) {
 /// Handle an info_message call in TUI mode.
 pub fn tui_message(msg: &str, msg_type: &str) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -366,7 +366,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 /// Handle an info_analysis progress tick in TUI mode.
 pub fn tui_progress(stage_str: &str, count: usize) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -379,7 +379,7 @@ pub fn tui_progress(stage_str: &str, count: usize) {
 /// Update attacker known value count (called from attacker_state_put_write).
 pub fn tui_attacker_known(count: usize) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -403,7 +403,7 @@ pub fn tui_scan_update(
     budget_total: u32,
 ) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -426,7 +426,7 @@ pub fn tui_scan_update(
 /// Record a worthwhile mutation description (called on worthwhile mutations).
 pub fn tui_mutation_detail(desc: &str) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -443,7 +443,7 @@ pub fn tui_mutation_detail(desc: &str) {
 /// Update stage (called at stage transitions).
 pub fn tui_stage_update(stage: i32) {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -460,7 +460,7 @@ pub fn tui_stage_update(stage: i32) {
 /// Leave the TUI and restore the normal terminal.
 pub fn tui_finish() {
     {
-        let mut st = TUI.write().expect("TUI state lock");
+        let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
         if !st.enabled {
             return;
         }
@@ -479,7 +479,7 @@ pub fn tui_finish() {
     print!("{}{}", ESC_SHOW_CURSOR, ESC_NORMAL_SCREEN);
     io::stdout().flush().ok();
 
-    TUI.write().expect("TUI state lock").enabled = false;
+    TUI.write().unwrap_or_else(|e| e.into_inner()).enabled = false;
 }
 
 pub fn tui_enabled() -> bool {
@@ -503,7 +503,7 @@ fn force_redraw() {
 }
 
 fn redraw_locked() {
-    let mut st = TUI.write().expect("TUI state lock");
+    let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
     if !st.enabled {
         return;
     }
