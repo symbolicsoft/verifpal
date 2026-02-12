@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::types::PrincipalId;
+use crate::types::*;
 
 pub fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
 	if !a.iter().any(|n| n == &x) {
@@ -30,11 +30,11 @@ pub fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) ->
 	}
 }
 
-pub fn min_int_in_slice(v: &[i32]) -> Result<i32, String> {
+pub fn min_int_in_slice(v: &[i32]) -> VResult<i32> {
 	v.iter()
 		.min()
 		.copied()
-		.ok_or_else(|| "slice has no integers".to_string())
+		.ok_or_else(|| VerifpalError::Internal("slice has no integers".to_string()))
 }
 
 pub fn color_output_support() -> bool {

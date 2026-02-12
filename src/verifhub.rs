@@ -8,10 +8,10 @@ use std::sync::atomic::AtomicBool;
 
 pub static VERIFHUB_SCHEDULED: AtomicBool = AtomicBool::new(false);
 
-pub fn verifhub(m: &Model, file_name: &str, results_code: &str) -> Result<(), String> {
+pub fn verifhub(m: &Model, file_name: &str, results_code: &str) -> VResult<()> {
 	info_message(
 		"Your model will now be submitted to VerifHub.",
-		"verifpal",
+		InfoLevel::Verifpal,
 		false,
 	);
 	let pretty = pretty_model(m)?;
@@ -40,27 +40,27 @@ fn urlencoding_encode(s: &str) -> String {
 	result
 }
 
-fn open_browser(url: &str) -> Result<(), String> {
+fn open_browser(url: &str) -> VResult<()> {
 	#[cfg(target_os = "macos")]
 	{
 		std::process::Command::new("open")
 			.arg(url)
 			.spawn()
-			.map_err(|e| e.to_string())?;
+			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
 	}
 	#[cfg(target_os = "linux")]
 	{
 		std::process::Command::new("xdg-open")
 			.arg(url)
 			.spawn()
-			.map_err(|e| e.to_string())?;
+			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
 	}
 	#[cfg(target_os = "windows")]
 	{
 		std::process::Command::new("rundll32")
 			.args(["url.dll,FileProtocolHandler", url])
 			.spawn()
-			.map_err(|e| e.to_string())?;
+			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
 	}
 	Ok(())
 }

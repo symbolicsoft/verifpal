@@ -3,7 +3,37 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
+
+#[derive(Clone, Debug)]
+pub enum VerifpalError {
+	Parse(String),
+	Sanity(String),
+	Resolution(String),
+	Internal(String),
+}
+
+impl fmt::Display for VerifpalError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			VerifpalError::Parse(s) => write!(f, "parse error: {}", s),
+			VerifpalError::Sanity(s) => write!(f, "sanity error: {}", s),
+			VerifpalError::Resolution(s) => write!(f, "resolution error: {}", s),
+			VerifpalError::Internal(s) => write!(f, "{}", s),
+		}
+	}
+}
+
+impl std::error::Error for VerifpalError {}
+
+impl From<String> for VerifpalError {
+	fn from(s: String) -> Self {
+		VerifpalError::Internal(s)
+	}
+}
+
+pub type VResult<T> = Result<T, VerifpalError>;
 
 pub type PrincipalId = u8;
 pub type ValueId = u32;
@@ -50,12 +80,16 @@ pub enum QueryOptionKind {
 	Precondition,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum BlockKind {
-	#[default]
-	Principal,
-	Message,
-	Phase,
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InfoLevel {
+	Verifpal,
+	Info,
+	Analysis,
+	Deduction,
+	Result,
+	Pass,
+	Warning,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -189,12 +223,11 @@ impl VerifyResult {
 	}
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Block {
-	pub kind: BlockKind,
-	pub principal: Principal,
-	pub message: Message,
-	pub phase: Phase,
+#[derive(Clone, Debug)]
+pub enum Block {
+	Principal(Principal),
+	Message(Message),
+	Phase(Phase),
 }
 
 #[derive(Clone, Debug, Default)]

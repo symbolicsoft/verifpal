@@ -24,7 +24,7 @@ pub fn analysis_count_get() -> usize {
 use crate::inject::primitive_skeleton_hash_of;
 use crate::types::*;
 use crate::util::*;
-use crate::value::{compute_slot_diffs, value_equivalent_value_in_values_map, value_hash};
+use crate::value::compute_slot_diffs;
 
 /// Central verification context. Owns all mutable state for a single
 /// verification run, replacing the old global LazyLock singletons.
@@ -41,12 +41,12 @@ pub struct VerifyContext {
 
 /// Add a value to locked attacker state if not already known.
 fn attacker_state_absorb(state: &mut AttackerState, v: &Value, record: &MutationRecord) {
-	if value_equivalent_value_in_values_map(v, &state.known, &state.known_map).is_some() {
+	if state.knows(v).is_some() {
 		return;
 	}
 	let idx = state.known.len();
 	Arc::make_mut(&mut state.known).push(v.clone());
-	let h = value_hash(v);
+	let h = v.hash_value();
 	Arc::make_mut(&mut state.known_map)
 		.entry(h)
 		.or_default()
@@ -105,19 +105,18 @@ impl VerifyContext {
 		// Fast check with read lock
 		{
 			let state = read_lock(&self.attacker);
-			if value_equivalent_value_in_values_map(known, &state.known, &state.known_map).is_some()
-			{
+			if state.knows(known).is_some() {
 				return false;
 			}
 		}
 		// Write lock: double-check and append
 		let mut state = write_lock(&self.attacker);
-		if value_equivalent_value_in_values_map(known, &state.known, &state.known_map).is_some() {
+		if state.knows(known).is_some() {
 			return false;
 		}
 		let idx = state.known.len();
 		Arc::make_mut(&mut state.known).push(known.clone());
-		let h = value_hash(known);
+		let h = known.hash_value();
 		Arc::make_mut(&mut state.known_map)
 			.entry(h)
 			.or_default()
@@ -145,7 +144,7 @@ impl VerifyContext {
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		phase: i32,
-	) -> Result<(), String> {
+	) -> VResult<()> {
 		let record = compute_slot_diffs(ps, km);
 		let mut state = write_lock(&self.attacker);
 		state.current_phase = phase;
@@ -160,7 +159,7 @@ impl VerifyContext {
 					continue;
 				}
 			}
-			if !crate::value::value_constant_is_used_by_at_least_one_principal(km, &sm.constant) {
+			if !km.constant_used_by_any(&sm.constant) {
 				continue;
 			}
 			attacker_state_absorb(&mut state, &sv.assigned, &record);

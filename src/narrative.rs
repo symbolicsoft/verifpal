@@ -3,12 +3,14 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::types::*;
+
 // ── Character selection ──────────────────────────────────────────────────
 
 /// 0 = Default, 1 = Jevil, 2 = Spamton
 static CHARACTER: AtomicU8 = AtomicU8::new(0);
 
-pub fn set_character(name: &str) -> Result<(), String> {
+pub fn set_character(name: &str) -> VResult<()> {
 	match name.to_lowercase().as_str() {
 		"jevil" => {
 			CHARACTER.store(1, Ordering::Relaxed);
@@ -18,10 +20,10 @@ pub fn set_character(name: &str) -> Result<(), String> {
 			CHARACTER.store(2, Ordering::Relaxed);
 			Ok(())
 		}
-		other => Err(format!(
+		other => Err(VerifpalError::Internal(format!(
 			"Unknown character '{}'. Available: jevil, spamton",
 			other
-		)),
+		))),
 	}
 }
 

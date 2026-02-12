@@ -6,7 +6,6 @@ use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::inject::inject_missing_skeletons;
 use crate::parser::parse_file;
-use crate::pretty::pretty_query;
 use crate::query::query_start;
 use crate::sanity::*;
 use crate::types::*;
@@ -21,7 +20,7 @@ use std::sync::atomic::Ordering;
 
 /// Runs the main verification engine for Verifpal on a model loaded from a file.
 /// Returns a vec of VerifyResult and a "results code" string.
-pub fn verify(file_path: &str) -> Result<(Vec<VerifyResult>, String), String> {
+pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 	let m = parse_file(file_path)?;
 	verify_model(&m)
 }
@@ -30,7 +29,7 @@ pub fn verify(file_path: &str) -> Result<(Vec<VerifyResult>, String), String> {
 // Core verification pipeline
 // ---------------------------------------------------------------------------
 
-fn verify_model(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
+fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 	let (km, ps) = sanity(m)?;
 	crate::tui::tui_init(m);
 	let ctx = VerifyContext::new(m);
@@ -40,7 +39,7 @@ fn verify_model(m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
 			"Verification initiated for '{}' at {}.",
 			m.file_name, initiated,
 		),
-		"verifpal",
+		InfoLevel::Verifpal,
 		false,
 	);
 	match m.attacker {
@@ -58,7 +57,7 @@ pub fn verify_resolve_queries(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-) -> Result<(), String> {
+) -> VResult<()> {
 	let results = ctx.results_get();
 	for result in &results {
 		if !result.resolved {
@@ -77,11 +76,11 @@ pub fn verify_standard_run(
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 	stage: i32,
-) -> Result<(), String> {
+) -> VResult<()> {
 	let as_ = ctx.attacker_snapshot();
 	for ps in principal_states {
 		let mut ps_resolved = construct_principal_state_clone(ps, false);
-		value_resolve_all_principal_state_values(&mut ps_resolved, &as_)?;
+		ps_resolved.resolve_all_values(&as_)?;
 
 		// Pre-compute mutation record for this principal state
 		let record = compute_slot_diffs(&ps_resolved, km);
@@ -93,7 +92,7 @@ pub fn verify_standard_run(
 			}
 		}
 
-		let failures = value_perform_all_rewrites(&mut ps_resolved);
+		let failures = ps_resolved.perform_all_rewrites();
 		sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 
 		for sv in &ps_resolved.values {
@@ -116,12 +115,12 @@ fn verify_passive(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
-) -> Result<(), String> {
-	info_message("Attacker is configured as passive.", "info", false);
+) -> VResult<()> {
+	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
 		ctx.attacker_init();
 		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
-		value_resolve_all_principal_state_values(&mut ps_pure_resolved, &ctx.attacker_snapshot())?;
+		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
 	}
@@ -151,7 +150,7 @@ fn verify_get_results_code(results: &[VerifyResult]) -> String {
 // End of verification: print summary, optionally submit to VerifHub
 // ---------------------------------------------------------------------------
 
-fn verify_end(ctx: &VerifyContext, m: &Model) -> Result<(Vec<VerifyResult>, String), String> {
+fn verify_end(ctx: &VerifyContext, m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 	// Leave the TUI alternate screen before printing final results
 	crate::tui::tui_finish();
 
@@ -168,7 +167,7 @@ fn verify_end(ctx: &VerifyContext, m: &Model) -> Result<(Vec<VerifyResult>, Stri
 			file_name,
 			chrono_time_string(),
 		),
-		"verifpal",
+		InfoLevel::Verifpal,
 		false,
 	);
 	println!();
@@ -176,12 +175,12 @@ fn verify_end(ctx: &VerifyContext, m: &Model) -> Result<(Vec<VerifyResult>, Stri
 	for r in &results {
 		if r.resolved {
 			info_message(
-				&format!("{}{}", pretty_query(&r.query), r.summary),
-				"result",
+				&format!("{}{}", r.query, r.summary),
+				InfoLevel::Result,
 				false,
 			);
 		} else {
-			info_message(&pretty_query(&r.query), "pass", false);
+			info_message(&r.query.to_string(), InfoLevel::Pass, false);
 		}
 	}
 
@@ -189,16 +188,16 @@ fn verify_end(ctx: &VerifyContext, m: &Model) -> Result<(Vec<VerifyResult>, Stri
 	crate::info::info_separator();
 
 	if fail_count == 0 {
-		info_message(&format!("All {} queries pass.", total), "pass", false);
+		info_message(&format!("All {} queries pass.", total), InfoLevel::Pass, false);
 	} else {
 		info_message(
 			&format!("{} of {} queries failed.", fail_count, total),
-			"result",
+			InfoLevel::Result,
 			false,
 		);
 	}
 
-	info_message("Thank you for using Verifpal.", "verifpal", false);
+	info_message("Thank you for using Verifpal.", InfoLevel::Verifpal, false);
 
 	let results_code = verify_get_results_code(&results);
 

@@ -14,7 +14,7 @@ pub fn mutation_map_init(
 	ps: &PrincipalState,
 	as_: &AttackerState,
 	stage: i32,
-) -> Result<MutationMap, String> {
+) -> VResult<MutationMap> {
 	let mut mm = MutationMap {
 		out_of_mutations: false,
 		constants: vec![],
@@ -27,7 +27,7 @@ pub fn mutation_map_init(
 			"Initializing Stage {} mutation map for {}...",
 			stage, ps.name
 		),
-		"analysis",
+		InfoLevel::Analysis,
 		false,
 	);
 	for v in as_.known.iter() {
@@ -35,7 +35,7 @@ pub fn mutation_map_init(
 			Value::Constant(c) => c,
 			_ => continue,
 		};
-		let (a, i) = value_resolve_constant(c, ps, true);
+		let (a, i) = ps.resolve_constant(c, true);
 		let idx = match i {
 			Some(i) => i,
 			None => continue,
@@ -62,7 +62,7 @@ pub fn mutation_map_init(
 				mm.constants.len(),
 				mut_sizes
 			),
-			"analysis",
+			InfoLevel::Analysis,
 			false,
 		);
 	}
@@ -87,7 +87,7 @@ fn mutation_map_skip_value(
 		return true;
 	}
 	if let Value::Constant(c) = v {
-		if !value_constant_is_used_by_principal_in_protocol_trace(km, ps.id, c) {
+		if !km.constant_used_by(ps.id, c) {
 			return true;
 		}
 	}
@@ -101,7 +101,7 @@ fn mutation_map_replace_value(
 	stage: i32,
 	ps: &PrincipalState,
 	as_: &AttackerState,
-) -> Result<Vec<Value>, String> {
+) -> VResult<Vec<Value>> {
 	let a =
 		value_resolve_value_internal_values_from_principal_state(a, a, root_index, ps, as_, false)?;
 	match &a {
@@ -119,7 +119,7 @@ fn mutation_map_replace_constant(
 ) -> Vec<Value> {
 	let mut mutations = vec![];
 	if let Value::Constant(c) = a {
-		if value_is_g_or_nil(c) {
+		if c.is_g_or_nil() {
 			return mutations;
 		}
 	}
@@ -129,10 +129,10 @@ fn mutation_map_replace_constant(
 	} // stageMutationExpansion = 3
 	for v in as_.known.iter() {
 		if let Value::Constant(vc) = v {
-			if value_is_g_or_nil(vc) {
+			if vc.is_g_or_nil() {
 				continue;
 			}
-			let (c, _) = value_resolve_constant(vc, ps, true);
+			let (c, _) = ps.resolve_constant(vc, true);
 			if let Value::Constant(_) = &c {
 				push_unique_value(&mut mutations, c);
 			}
@@ -156,10 +156,10 @@ fn mutation_map_replace_primitive(
 	for v in as_.known.iter() {
 		match v {
 			Value::Constant(vc) => {
-				if value_is_g_or_nil(vc) {
+				if vc.is_g_or_nil() {
 					continue;
 				}
-				let (c, _) = value_resolve_constant(vc, ps, true);
+				let (c, _) = ps.resolve_constant(vc, true);
 				if let Value::Constant(_) = &c {
 					push_unique_value(&mut mutations, c);
 				}
@@ -195,7 +195,7 @@ fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> 
 		for v in as_.known.iter() {
 			if let Value::Equation(ve) = v {
 				if ve.values.len() == e.values.len()
-					&& value_equivalent_value_in_values(v, &mutations).is_none()
+					&& find_equivalent(v, &mutations).is_none()
 				{
 					mutations.push(v.clone());
 				}
@@ -242,7 +242,7 @@ pub fn mutation_map_subset_capped(
 	indices: &[usize],
 	max_product: usize,
 ) -> MutationMap {
-	let mut sub = mutation_map_subset(full_map, indices);
+	let mut sub = full_map.subset(indices);
 	let n = indices.len();
 	if n == 0 {
 		return sub;
@@ -283,6 +283,24 @@ pub fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
 		mm.depth_index[j] += 1;
 	}
 	mm
+}
+
+impl MutationMap {
+	pub fn new(
+		ctx: &VerifyContext,
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
+		as_: &AttackerState,
+		stage: i32,
+	) -> VResult<MutationMap> {
+		mutation_map_init(ctx, km, ps, as_, stage)
+	}
+	pub fn next(self) -> MutationMap {
+		mutation_map_next(self)
+	}
+	pub fn subset(&self, indices: &[usize]) -> MutationMap {
+		mutation_map_subset(self, indices)
+	}
 }
 
 pub fn inject_skeleton_not_deeper_pub(p: &Primitive, reference: &Primitive) -> bool {

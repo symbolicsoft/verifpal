@@ -564,16 +564,16 @@ pub fn primitive_is_core(id: PrimitiveId) -> bool {
 	matches!(id, PRIM_ASSERT | PRIM_CONCAT | PRIM_SPLIT)
 }
 
-pub fn primitive_core_get(id: PrimitiveId) -> Result<&'static PrimitiveCoreSpec, String> {
+pub fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
 	CORE_SPECS
 		.get(&id)
-		.ok_or_else(|| "unknown primitive".to_string())
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
-pub fn primitive_get(id: PrimitiveId) -> Result<&'static PrimitiveSpec, String> {
+pub fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
 	PRIM_SPECS
 		.get(&id)
-		.ok_or_else(|| "unknown primitive".to_string())
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
 pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
@@ -614,7 +614,7 @@ pub fn primitive_has_single_output(id: PrimitiveId) -> bool {
 	}
 }
 
-pub fn primitive_output_spec(id: PrimitiveId) -> Result<(&'static [i32], bool), String> {
+pub fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
 	if primitive_is_core(id) {
 		let s = primitive_core_get(id)?;
 		Ok((&s.output, s.check))
@@ -624,16 +624,16 @@ pub fn primitive_output_spec(id: PrimitiveId) -> Result<(&'static [i32], bool), 
 	}
 }
 
-pub fn primitive_get_enum(name: &str) -> Result<PrimitiveId, String> {
+pub fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 	CORE_SPECS
 		.values()
 		.find(|s| s.name == name)
 		.map(|s| s.id)
 		.or_else(|| PRIM_SPECS.values().find(|s| s.name == name).map(|s| s.id))
-		.ok_or_else(|| "unknown primitive".to_string())
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
 }
 
-pub fn primitive_get_arity(p: &Primitive) -> Result<&'static [i32], String> {
+pub fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
 	if primitive_is_core(p.id) {
 		Ok(&primitive_core_get(p.id)?.arity)
 	} else {

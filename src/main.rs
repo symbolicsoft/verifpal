@@ -24,6 +24,7 @@ mod verifyactive;
 mod verifyanalysis;
 
 use clap::{Parser, Subcommand};
+use types::InfoLevel;
 
 const VERSION: &str = "0.31.2";
 
@@ -79,7 +80,7 @@ fn main() {
 			if !result_code {
 				tui::set_tui_mode(true);
 				info::info_banner(VERSION);
-				info::info_message("Verifpal is Beta software.", "warning", false);
+				info::info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
 			verifhub::VERIFHUB_SCHEDULED.store(hub, std::sync::atomic::Ordering::Relaxed);
 			match verify::verify(&model) {

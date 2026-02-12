@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::pretty::*;
 use crate::primitive::primitive_has_single_output;
 use crate::types::*;
 use crate::util::color_output_support;
@@ -40,7 +39,7 @@ pub fn info_separator() {
 // Core message output
 // ---------------------------------------------------------------------------
 
-pub fn info_message(m: &str, t: &str, show_analysis: bool) {
+pub fn info_message(m: &str, t: InfoLevel, show_analysis: bool) {
 	if crate::tui::tui_enabled() {
 		crate::tui::tui_message(m, t);
 		return;
@@ -57,25 +56,24 @@ pub fn info_message(m: &str, t: &str, show_analysis: bool) {
 	}
 }
 
-fn info_message_regular(m: &str, t: &str, analysis_count: usize) {
+fn info_message_regular(m: &str, t: InfoLevel, analysis_count: usize) {
 	let info_string = if analysis_count > 0 {
 		format!(" (Analysis {})", analysis_count)
 	} else {
 		String::new()
 	};
 	match t {
-		"verifpal" => println!(" Verifpal * {}{}", m, info_string),
-		"info" => println!("     Info . {}{}", m, info_string),
-		"analysis" => println!(" Analysis > {}{}", m, info_string),
-		"deduction" => println!("Deduction > {}{}", m, info_string),
-		"result" => println!("     FAIL x {}{}", m, info_string),
-		"pass" => println!("     PASS + {}{}", m, info_string),
-		"warning" => println!("  Warning ! {}{}", m, info_string),
-		_ => {}
+		InfoLevel::Verifpal => println!(" Verifpal * {}{}", m, info_string),
+		InfoLevel::Info => println!("     Info . {}{}", m, info_string),
+		InfoLevel::Analysis => println!(" Analysis > {}{}", m, info_string),
+		InfoLevel::Deduction => println!("Deduction > {}{}", m, info_string),
+		InfoLevel::Result => println!("     FAIL x {}{}", m, info_string),
+		InfoLevel::Pass => println!("     PASS + {}{}", m, info_string),
+		InfoLevel::Warning => println!("  Warning ! {}{}", m, info_string),
 	}
 }
 
-fn info_message_color(m: &str, t: &str, analysis_count: usize) {
+fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 	let info_string = if analysis_count > 0 {
 		format!(
 			" {}",
@@ -85,7 +83,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 		String::new()
 	};
 	match t {
-		"verifpal" => {
+		InfoLevel::Verifpal => {
 			println!(
 				" {} {} {}{}",
 				"Verifpal".green().bold(),
@@ -94,7 +92,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"info" => {
+		InfoLevel::Info => {
 			println!(
 				"     {} {} {}{}",
 				"Info".cyan().bold(),
@@ -103,7 +101,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"analysis" => {
+		InfoLevel::Analysis => {
 			println!(
 				" {} {} {}{}",
 				"Analysis".blue().bold(),
@@ -112,7 +110,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"deduction" => {
+		InfoLevel::Deduction => {
 			println!(
 				"{} {} {}{}",
 				"Deduction".yellow(),
@@ -121,7 +119,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"result" => {
+		InfoLevel::Result => {
 			println!(
 				"     {} {} {}{}",
 				"Fail".red().bold(),
@@ -130,7 +128,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"pass" => {
+		InfoLevel::Pass => {
 			println!(
 				"     {} {} {}{}",
 				"Pass".green().bold(),
@@ -139,7 +137,7 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		"warning" => {
+		InfoLevel::Warning => {
 			println!(
 				"  {} {} {}{}",
 				"Warning".yellow().bold(),
@@ -148,7 +146,6 @@ fn info_message_color(m: &str, t: &str, analysis_count: usize) {
 				info_string
 			);
 		}
-		_ => {}
 	}
 }
 
@@ -312,18 +309,16 @@ pub fn info_literal_number(n: usize, title_case: bool) -> String {
 }
 
 pub fn info_output_text(revealed: &Value) -> String {
-	let output_text = pretty_value(revealed);
 	match revealed {
-		Value::Constant(_) => output_text,
+		Value::Constant(_) | Value::Equation(_) => revealed.to_string(),
 		Value::Primitive(p) => {
 			if primitive_has_single_output(p.id) {
-				format!("Output of {}", output_text)
+				format!("Output of {}", revealed)
 			} else {
 				let prefix = format!("{} output", info_literal_number(p.output, true));
-				format!("{} of {}", prefix, output_text)
+				format!("{} of {}", prefix, revealed)
 			}
 		}
-		Value::Equation(_) => output_text,
 	}
 }
 
@@ -345,7 +340,7 @@ pub fn info_query_mutated_values(
 
 	for diff in diffs {
 		let is_target = value_equivalent_values(target_value, &diff.assigned, false);
-		let attacker_knows = value_equivalent_value_in_values_map(
+		let attacker_knows = find_equivalent_in_map(
 			target_value,
 			&val_attacker_state.known,
 			&val_attacker_state.known_map,
@@ -362,7 +357,7 @@ pub fn info_query_mutated_values(
 		if is_target && attacker_knows {
 			// target obtained
 		} else if diff.mutated
-			&& value_equivalent_value_in_values(&diff.assigned, &mutated).is_none()
+			&& find_equivalent(&diff.assigned, &mutated).is_none()
 		{
 			mutated.push(diff.assigned.clone());
 		}
@@ -374,7 +369,7 @@ pub fn info_query_mutated_values(
 		return mutated_info;
 	}
 	for m_val in &mutated {
-		let ai = match value_equivalent_value_in_values_map(
+		let ai = match find_equivalent_in_map(
 			m_val,
 			&val_attacker_state.known,
 			&val_attacker_state.known_map,
@@ -402,8 +397,8 @@ fn info_query_mutated_value(
 	is_target_value: bool,
 	attacker_knows: bool,
 ) -> (String, bool) {
-	let pc = pretty_constant(&diff.constant);
-	let pa = pretty_value(&diff.assigned);
+	let pc = diff.constant.to_string();
+	let pa = diff.assigned.to_string();
 	let mut relevant = false;
 	let suffix;
 	if is_target_value && attacker_knows && !diff.mutated {
@@ -424,16 +419,12 @@ fn info_query_mutated_value(
 				" {} {} {}",
 				"\u{2190}".red(),
 				"mutated by Attacker".red().bold(),
-				format!(
-					"(was: {})",
-					pretty_value(&trace.slots[diff.index].initial_value)
-				)
-				.dimmed()
+				format!("(was: {})", trace.slots[diff.index].initial_value).dimmed()
 			);
 		} else {
 			suffix = format!(
 				" <- mutated by Attacker (originally {})",
-				pretty_value(&trace.slots[diff.index].initial_value),
+				trace.slots[diff.index].initial_value,
 			);
 		}
 	} else {

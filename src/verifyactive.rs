@@ -7,21 +7,17 @@ use std::sync::Arc;
 use crate::construct::construct_principal_state_clone;
 use crate::context::VerifyContext;
 use crate::info::{info_message, info_output_text};
-use crate::mutationmap::{
-	mutation_map_init, mutation_map_next, mutation_map_subset, mutation_map_subset_capped,
-	mutation_product,
-};
+use crate::mutationmap::{mutation_map_subset_capped, mutation_product};
 use crate::possible::{
-	possible_to_decompose_primitive, possible_to_passively_decompose_primitive,
-	possible_to_reconstruct_equation, possible_to_reconstruct_primitive, possible_to_rewrite,
+	can_decompose, passively_decompose,
+	can_reconstruct_equation, can_reconstruct_primitive, can_rewrite,
 };
-use crate::pretty::{pretty_value, pretty_values};
+use crate::pretty::pretty_values;
 use crate::primitive::*;
 use crate::principal::principal_get_attacker_id;
 use crate::types::*;
 use crate::value::{
-	compute_slot_diffs, value_equivalent_value_in_values_map, value_equivalent_values, value_g_nil,
-	value_perform_all_rewrites, value_resolve_all_principal_state_values, value_resolve_constant,
+	compute_slot_diffs, value_g_nil,
 	value_resolve_value_internal_values_from_protocol_trace,
 };
 use crate::verify::{verify_resolve_queries, verify_standard_run};
@@ -73,13 +69,13 @@ pub fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
-) -> Result<(), String> {
-	info_message("Attacker is configured as active.", "info", false);
+) -> VResult<()> {
+	info_message("Attacker is configured as active.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
-		info_message(&format!("Running at phase {}.", phase), "info", false);
+		info_message(&format!("Running at phase {}.", phase), InfoLevel::Info, false);
 		ctx.attacker_init();
 		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
-		value_resolve_all_principal_state_values(&mut ps_pure_resolved, &ctx.attacker_snapshot())?;
+		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
 
@@ -209,8 +205,8 @@ fn verify_active_try_equation_bypass_on_state(
 	// and injected values wouldn't propagate to downstream computations.
 	let ps_pre = ps.clone();
 
-	let _ = value_resolve_all_principal_state_values(ps, as_);
-	let failures = value_perform_all_rewrites(ps);
+	let _ = ps.resolve_all_values(as_);
+	let failures = ps.perform_all_rewrites();
 
 	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
 	for &(ref prim, idx) in &failures {
@@ -255,7 +251,7 @@ fn verify_active_stages(
 	rayon::scope(|s| {
 		for ps_base in principal_states {
 			s.spawn(|s_inner| {
-				let mm = match mutation_map_init(ctx, km, ps_base, &as_, stage) {
+				let mm = match MutationMap::new(ctx, km, ps_base, &as_, stage) {
 					Ok(mm) => mm,
 					Err(_) => return,
 				};
@@ -334,7 +330,7 @@ fn verify_active_scan_weighted<'s>(
 		)
 		.is_some()
 	{
-		let next_map = mutation_map_next(mm);
+		let next_map = mm.next();
 		verify_active_scan(
 			ctx,
 			scope,
@@ -390,7 +386,7 @@ fn verify_active_scan_at_weight<'s>(
 					budget,
 				);
 			}
-			let next_map = mutation_map_next(sub_map);
+			let next_map = sub_map.next();
 			verify_active_scan(
 				ctx,
 				scope,
@@ -406,7 +402,7 @@ fn verify_active_scan_at_weight<'s>(
 			indices.iter().map(|&i| mm.mutations[i].len()),
 			BUDGET.max_mutations_per_subset,
 		) {
-			let sub_map = mutation_map_subset(mm, &sub_indices);
+			let sub_map = mm.subset(&sub_indices);
 			let bu = budget_used.fetch_add(product as u32, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < product as u32 {
 				crate::tui::tui_scan_update(
@@ -417,7 +413,7 @@ fn verify_active_scan_at_weight<'s>(
 					budget,
 				);
 			}
-			let next_map = mutation_map_next(sub_map);
+			let next_map = sub_map.next();
 			verify_active_scan(
 				ctx,
 				scope,
@@ -500,7 +496,7 @@ fn verify_active_scan<'s>(
 						.constants
 						.iter()
 						.zip(task_map.combination.iter())
-						.map(|(c, v)| format!("{} <- {}", c.name, pretty_value(v)))
+						.map(|(c, v)| format!("{} <- {}", c.name, v))
 						.collect::<Vec<_>>()
 						.join(", ");
 					crate::tui::tui_mutation_detail(&desc);
@@ -533,7 +529,7 @@ fn verify_active_scan<'s>(
 		if is_last {
 			break;
 		}
-		current_map = mutation_map_next(current_map);
+		current_map = current_map.next();
 	}
 }
 
@@ -541,7 +537,7 @@ fn verify_active_scan<'s>(
 /// only if the result is also a Primitive. Otherwise returns None.
 fn try_rewrite_primitive(v: &Value, ps: &PrincipalState) -> Option<Value> {
 	let p = v.as_primitive()?;
-	let (_, rv) = possible_to_rewrite(p, ps, 0);
+	let (_, rv) = can_rewrite(p, ps, 0);
 	if matches!(&rv[0], Value::Primitive(_)) {
 		Some(rv.into_iter().next().unwrap())
 	} else {
@@ -568,7 +564,7 @@ fn verify_active_mutate_principal_state(
 	let attacker_id = principal_get_attacker_id();
 
 	for (constant, combo) in mm.constants.iter().zip(mm.combination.iter()) {
-		let (ai, ii) = value_resolve_constant(constant, &ps, true);
+		let (ai, ii) = ps.resolve_constant(constant, true);
 		let ii_usize = match ii {
 			Some(i) => i,
 			None => continue,
@@ -591,7 +587,7 @@ fn verify_active_mutate_principal_state(
 			}
 		}
 
-		let worthwhile = !value_equivalent_values(&ac, &ar, true);
+		let worthwhile = !ac.equivalent(&ar, true);
 
 		ps.values[ii_usize].creator = attacker_id;
 		ps.values[ii_usize].sender = attacker_id;
@@ -613,8 +609,8 @@ fn verify_active_mutate_principal_state(
 	}
 
 	let ps_pre = ps.clone();
-	let _ = value_resolve_all_principal_state_values(&mut ps, as_);
-	let failures = value_perform_all_rewrites(&mut ps);
+	let _ = ps.resolve_all_values(as_);
+	let failures = ps.perform_all_rewrites();
 
 	// Collect all failed guards and extract the bypass keys before truncating.
 	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
@@ -710,16 +706,16 @@ fn can_attacker_bypass_any_guard(
 /// Check if the attacker can obtain a value: either it is already in their
 /// known set, or they can reconstruct it from known values.
 fn attacker_can_obtain_value(v: &Value, ps: &PrincipalState, as_: &AttackerState) -> bool {
-	if value_equivalent_value_in_values_map(v, &as_.known, &as_.known_map).is_some() {
+	if as_.knows(v).is_some() {
 		return true;
 	}
 	match v {
 		Value::Primitive(p) => {
-			let (ok, _) = possible_to_reconstruct_primitive(p, ps, as_, 0);
+			let (ok, _) = can_reconstruct_primitive(p, ps, as_, 0);
 			ok
 		}
 		Value::Equation(e) => {
-			let (ok, _) = possible_to_reconstruct_equation(e, as_);
+			let (ok, _) = can_reconstruct_equation(e, as_);
 			ok
 		}
 		_ => false,
@@ -766,22 +762,22 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &ProtocolTrace, ps: &Princip
 		for (wv, _idx) in &wire_prims {
 			if let Value::Primitive(p) = wv {
 				// Active decompose (e.g. AEAD_ENC: knowing the key reveals plaintext)
-				let (r, revealed, ar) = possible_to_decompose_primitive(p, ps, &as_snap, 0);
+				let (r, revealed, ar) = can_decompose(p, ps, &as_snap, 0);
 				if r && ctx.attacker_put(&revealed, &record) {
 					info_message(
 						&format!(
 							"{} obtained by decomposing {} with {}.",
 							info_output_text(&revealed),
-							pretty_value(wv),
+							wv,
 							pretty_values(&ar),
 						),
-						"deduction",
+						InfoLevel::Deduction,
 						true,
 					);
 					found_new = true;
 				}
 				// Passive decompose (e.g. associated data from AEAD_ENC)
-				let passive = possible_to_passively_decompose_primitive(p);
+				let passive = passively_decompose(p);
 				for pv in &passive {
 					if ctx.attacker_put(pv, &record) {
 						found_new = true;
@@ -811,7 +807,7 @@ fn build_bypass_state(
 
 	// Round 1: inject G^nil only into guards whose keys are currently obtainable.
 	// We must inject into assigned, before_rewrite AND before_mutate because
-	// value_resolve_all_principal_state_values uses before_mutate (not assigned)
+	// resolve_all_values uses before_mutate (not assigned)
 	// for values created by the principal itself (which guarded primitives are).
 	let mut any_injected = false;
 	for guard in initial_guards {
@@ -827,8 +823,8 @@ fn build_bypass_state(
 	// Iteratively re-resolve, re-rewrite, and inject into new bypassable guards.
 	let mut needs_final_resolve = false;
 	for _ in 0..5 {
-		let _ = value_resolve_all_principal_state_values(&mut ps, as_);
-		let failures = value_perform_all_rewrites(&mut ps);
+		let _ = ps.resolve_all_values(as_);
+		let failures = ps.perform_all_rewrites();
 
 		needs_final_resolve = false;
 		for &(ref prim, idx) in &failures {
@@ -849,8 +845,8 @@ fn build_bypass_state(
 
 	// If we injected in the last iteration, finalize the state.
 	if needs_final_resolve {
-		let _ = value_resolve_all_principal_state_values(&mut ps, as_);
-		let _ = value_perform_all_rewrites(&mut ps);
+		let _ = ps.resolve_all_values(as_);
+		let _ = ps.perform_all_rewrites();
 	}
 
 	Some(ps)

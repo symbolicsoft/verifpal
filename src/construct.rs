@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::pretty::*;
 use crate::principal::*;
 use crate::sanity::{sanity_assignment_constants, sanity_primitive};
 use crate::types::*;
@@ -14,7 +13,7 @@ pub fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
-) -> Result<ProtocolTrace, String> {
+) -> VResult<ProtocolTrace> {
 	let mut trace = ProtocolTrace {
 		principals: principals.to_vec(),
 		principal_ids: principal_ids.to_vec(),
@@ -47,19 +46,23 @@ pub fn construct_protocol_trace(
 	}
 
 	for blck in &m.blocks {
-		match blck.kind {
-			BlockKind::Principal => {
-				let new_da =
-					construct_trace_render_principal(&mut trace, blck, declared_at, current_phase)?;
+		match blck {
+			Block::Principal(principal) => {
+				let new_da = construct_trace_render_principal(
+					&mut trace,
+					principal,
+					declared_at,
+					current_phase,
+				)?;
 				declared_at = new_da;
 			}
-			BlockKind::Message => {
+			Block::Message(message) => {
 				declared_at += 1;
 				trace.max_declared_at = declared_at;
-				construct_trace_render_message(&mut trace, blck, current_phase)?;
+				construct_trace_render_message(&mut trace, message, current_phase)?;
 			}
-			BlockKind::Phase => {
-				current_phase = blck.phase.number;
+			Block::Phase(phase) => {
+				current_phase = phase.number;
 			}
 		}
 	}
@@ -95,24 +98,24 @@ fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<Pr
 
 fn construct_trace_render_principal(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	principal: &Principal,
 	mut declared_at: i32,
 	current_phase: i32,
-) -> Result<i32, String> {
-	for expr in &blck.principal.expressions {
+) -> VResult<i32> {
+	for expr in &principal.expressions {
 		match expr.kind {
 			Declaration::Knows => {
-				construct_trace_render_knows(trace, blck, declared_at, expr)?;
+				construct_trace_render_knows(trace, principal, declared_at, expr)?;
 			}
 			Declaration::Generates => {
-				construct_trace_render_generates(trace, blck, declared_at, expr)?;
+				construct_trace_render_generates(trace, principal, declared_at, expr)?;
 			}
 			Declaration::Assignment => {
-				construct_trace_render_assignment(trace, blck, declared_at, expr)?;
+				construct_trace_render_assignment(trace, principal, declared_at, expr)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
-				construct_trace_render_leaks(trace, blck, expr, current_phase)?;
+				construct_trace_render_leaks(trace, principal, expr, current_phase)?;
 			}
 		}
 	}
@@ -121,26 +124,26 @@ fn construct_trace_render_principal(
 
 fn construct_trace_render_knows(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	principal: &Principal,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<(), String> {
+) -> VResult<()> {
 	for c in &expr.constants {
-		let i = value_get_trace_index_from_constant(trace, c);
+		let i = trace.index_of(c);
 		if let Some(idx) = i {
 			let d1 = trace.slots[idx].constant.declaration;
 			let q1 = trace.slots[idx].constant.qualifier;
 			let q2 = expr.qualifier;
 			let fresh = trace.slots[idx].constant.fresh;
 			if d1 != Some(Declaration::Knows) || q1 != q2 || fresh {
-				return Err(format!(
+				return Err(VerifpalError::Sanity(format!(
 					"constant is known more than once and in different ways ({})",
-					pretty_constant(c)
-				));
+					c
+				)));
 			}
 			trace.slots[idx]
 				.known_by
-				.push(HashMap::from([(blck.principal.id, blck.principal.id)]));
+				.push(HashMap::from([(principal.id, principal.id)]));
 			continue;
 		}
 		let new_c = Constant {
@@ -156,7 +159,7 @@ fn construct_trace_render_knows(
 		trace.slots.push(TraceSlot {
 			constant: new_c.clone(),
 			initial_value: Value::Constant(new_c),
-			creator: blck.principal.id,
+			creator: principal.id,
 			known_by: vec![],
 			declared_at,
 			phases: vec![],
@@ -167,7 +170,7 @@ fn construct_trace_render_knows(
 			continue;
 		}
 		for &pid in &trace.principal_ids {
-			if pid != blck.principal.id {
+			if pid != principal.id {
 				trace.slots[l].known_by.push(HashMap::from([(pid, pid)]));
 			}
 		}
@@ -177,17 +180,17 @@ fn construct_trace_render_knows(
 
 fn construct_trace_render_generates(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	principal: &Principal,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<(), String> {
+) -> VResult<()> {
 	for c in &expr.constants {
-		let i = value_get_trace_index_from_constant(trace, c);
+		let i = trace.index_of(c);
 		if i.is_some() {
-			return Err(format!(
+			return Err(VerifpalError::Sanity(format!(
 				"generated constant already exists ({})",
-				pretty_constant(c)
-			));
+				c
+			)));
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -202,7 +205,7 @@ fn construct_trace_render_generates(
 		trace.slots.push(TraceSlot {
 			constant: new_c.clone(),
 			initial_value: Value::Constant(new_c),
-			creator: blck.principal.id,
+			creator: principal.id,
 			known_by: vec![HashMap::new()],
 			declared_at,
 			phases: vec![],
@@ -214,33 +217,33 @@ fn construct_trace_render_generates(
 
 fn construct_trace_render_assignment(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	principal: &Principal,
 	declared_at: i32,
 	expr: &Expression,
-) -> Result<(), String> {
-	let assigned = expr.assigned.as_ref().ok_or("missing assignment value")?;
+) -> VResult<()> {
+	let assigned = expr.assigned.as_ref().ok_or_else(|| VerifpalError::Sanity("missing assignment value".to_string()))?;
 	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
 	}
 	for c in &constants {
-		let idx = match value_get_trace_index_from_constant(trace, c) {
+		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
-			None => return Err(format!("constant does not exist ({})", pretty_constant(c))),
+			None => return Err(VerifpalError::Sanity(format!("constant does not exist ({})", c))),
 		};
-		let knows = trace.slots[idx].known_by_principal(blck.principal.id);
+		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
-			return Err(format!(
+			return Err(VerifpalError::Sanity(format!(
 				"{} is using constant ({}) despite not knowing it",
-				blck.principal.name,
-				pretty_constant(c)
-			));
+				principal.name,
+				c
+			)));
 		}
 	}
 	for (i, c) in expr.constants.iter().enumerate() {
-		let ii = value_get_trace_index_from_constant(trace, c);
+		let ii = trace.index_of(c);
 		if ii.is_some() {
-			return Err(format!("constant assigned twice ({})", pretty_constant(c)));
+			return Err(VerifpalError::Sanity(format!("constant assigned twice ({})", c)));
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -259,7 +262,7 @@ fn construct_trace_render_assignment(
 		trace.slots.push(TraceSlot {
 			constant: new_c,
 			initial_value: a,
-			creator: blck.principal.id,
+			creator: principal.id,
 			known_by: vec![HashMap::new()],
 			declared_at,
 			phases: vec![],
@@ -271,27 +274,27 @@ fn construct_trace_render_assignment(
 
 fn construct_trace_render_leaks(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	principal: &Principal,
 	expr: &Expression,
 	current_phase: i32,
-) -> Result<(), String> {
+) -> VResult<()> {
 	for c in &expr.constants {
-		let idx = match value_get_trace_index_from_constant(trace, c) {
+		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(format!(
+				return Err(VerifpalError::Sanity(format!(
 					"leaked constant does not exist ({})",
-					pretty_constant(c)
-				))
+					c
+				)))
 			}
 		};
-		let known = trace.slots[idx].known_by_principal(blck.principal.id);
+		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
-			return Err(format!(
+			return Err(VerifpalError::Sanity(format!(
 				"{} leaks a constant that they do not know ({})",
-				blck.principal.name,
-				pretty_constant(c)
-			));
+				principal.name,
+				c
+			)));
 		}
 		trace.slots[idx].constant.leaked = true;
 		append_unique_int(&mut trace.slots[idx].phases, current_phase);
@@ -301,41 +304,40 @@ fn construct_trace_render_leaks(
 
 fn construct_trace_render_message(
 	trace: &mut ProtocolTrace,
-	blck: &Block,
+	message: &Message,
 	current_phase: i32,
-) -> Result<(), String> {
-	for c in &blck.message.constants {
-		let idx = match value_get_trace_index_from_constant(trace, c) {
+) -> VResult<()> {
+	for c in &message.constants {
+		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(format!(
+				return Err(VerifpalError::Sanity(format!(
 					"{} sends unknown constant to {} ({})",
-					principal_get_name_from_id(blck.message.sender),
-					principal_get_name_from_id(blck.message.recipient),
-					pretty_constant(c)
-				))
+					principal_get_name_from_id(message.sender),
+					principal_get_name_from_id(message.recipient),
+					c
+				)))
 			}
 		};
-		let sender_knows = trace.slots[idx].known_by_principal(blck.message.sender);
-		let recipient_knows = trace.slots[idx].known_by_principal(blck.message.recipient);
+		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
+		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {
-			return Err(format!(
+			return Err(VerifpalError::Sanity(format!(
 				"{} is sending constant ({}) despite not knowing it",
-				principal_get_name_from_id(blck.message.sender),
-				pretty_constant(c)
-			));
+				principal_get_name_from_id(message.sender),
+				c
+			)));
 		}
 		if recipient_knows {
-			return Err(format!(
+			return Err(VerifpalError::Sanity(format!(
 				"{} is receiving constant ({}) despite already knowing it",
-				principal_get_name_from_id(blck.message.recipient),
-				pretty_constant(c)
-			));
+				principal_get_name_from_id(message.recipient),
+				c
+			)));
 		}
-		trace.slots[idx].known_by.push(HashMap::from([(
-			blck.message.recipient,
-			blck.message.sender,
-		)]));
+		trace.slots[idx]
+			.known_by
+			.push(HashMap::from([(message.recipient, message.sender)]));
 		append_unique_int(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
@@ -364,10 +366,10 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 				}
 			}
 			for blck in &m.blocks {
-				if blck.kind == BlockKind::Message {
+				if let Block::Message(message) = blck {
 					construct_principal_states_get_value_mutatability(
 						c,
-						blck,
+						message,
 						principal_id,
 						slot.creator,
 						&mut wire,
@@ -411,25 +413,25 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 
 fn construct_principal_states_get_value_mutatability(
 	c: &Constant,
-	blck: &Block,
+	message: &Message,
 	principal_id: PrincipalId,
 	creator: PrincipalId,
 	wire: &mut Vec<PrincipalId>,
 	guard: &mut bool,
 	mutatable_to: &mut Vec<PrincipalId>,
 ) {
-	let ir = blck.message.recipient == principal_id;
+	let ir = message.recipient == principal_id;
 	let ic = creator == principal_id;
-	for cc in &blck.message.constants {
+	for cc in &message.constants {
 		if c.id != cc.id {
 			continue;
 		}
-		append_unique_principal_enum(wire, blck.message.recipient);
+		append_unique_principal_enum(wire, message.recipient);
 		if !*guard {
 			*guard = cc.guard && (ir || ic);
 		}
 		if !cc.guard {
-			append_unique_principal_enum(mutatable_to, blck.message.recipient);
+			append_unique_principal_enum(mutatable_to, message.recipient);
 		}
 	}
 }

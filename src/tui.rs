@@ -9,7 +9,7 @@ use std::time::Instant;
 use colored::*;
 
 use crate::narrative::{self, NarrativeContext};
-use crate::pretty::*;
+use crate::pretty::pretty_constants;
 use crate::principal::principal_get_name_from_id;
 use crate::types::*;
 use crate::util::color_output_support;
@@ -173,49 +173,53 @@ pub fn tui_init(m: &Model) {
 	st.mitm_target.clear();
 
 	for block in &m.blocks {
-		if block.kind == BlockKind::Principal {
-			// Deduplicate principals by name, summing stats
-			let existing = st
-				.principals
-				.iter_mut()
-				.find(|p| p.name == block.principal.name);
-			let p = if let Some(p) = existing {
-				p
-			} else {
-				st.principals.push(TuiPrincipal {
-					name: block.principal.name.clone(),
-					n_private: 0,
-					n_generated: 0,
-					n_computed: 0,
-				});
-				st.principals.last_mut().expect("just pushed principal")
-			};
-			for expr in &block.principal.expressions {
-				match expr.kind {
-					Declaration::Knows => {
-						p.n_private += expr.constants.len();
+		match block {
+			Block::Principal(principal) => {
+				// Deduplicate principals by name, summing stats
+				let existing = st
+					.principals
+					.iter_mut()
+					.find(|p| p.name == principal.name);
+				let p = if let Some(p) = existing {
+					p
+				} else {
+					st.principals.push(TuiPrincipal {
+						name: principal.name.clone(),
+						n_private: 0,
+						n_generated: 0,
+						n_computed: 0,
+					});
+					st.principals.last_mut().expect("just pushed principal")
+				};
+				for expr in &principal.expressions {
+					match expr.kind {
+						Declaration::Knows => {
+							p.n_private += expr.constants.len();
+						}
+						Declaration::Generates => {
+							p.n_generated += expr.constants.len();
+						}
+						Declaration::Assignment => {
+							p.n_computed += 1;
+						}
+						Declaration::Leaks => {}
 					}
-					Declaration::Generates => {
-						p.n_generated += expr.constants.len();
-					}
-					Declaration::Assignment => {
-						p.n_computed += 1;
-					}
-					Declaration::Leaks => {}
 				}
 			}
-		} else if block.kind == BlockKind::Message {
-			st.messages.push(TuiMsg {
-				sender: principal_get_name_from_id(block.message.sender),
-				recipient: principal_get_name_from_id(block.message.recipient),
-				constants: pretty_constants(&block.message.constants),
-			});
+			Block::Message(message) => {
+				st.messages.push(TuiMsg {
+					sender: principal_get_name_from_id(message.sender),
+					recipient: principal_get_name_from_id(message.recipient),
+					constants: pretty_constants(&message.constants),
+				});
+			}
+			Block::Phase(_) => {}
 		}
 	}
 
 	for query in &m.queries {
 		st.queries.push(TuiQuery {
-			text: pretty_query(query),
+			text: query.to_string(),
 			status: QStatus::Pending,
 		});
 	}
@@ -242,7 +246,7 @@ pub fn tui_init(m: &Model) {
 }
 
 /// Handle an info_message call in TUI mode.
-pub fn tui_message(msg: &str, msg_type: &str) {
+pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -250,7 +254,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 		}
 
 		match msg_type {
-			"result" => {
+			InfoLevel::Result => {
 				for q in st.queries.iter_mut() {
 					if msg.starts_with(&q.text) {
 						q.status = QStatus::Fail;
@@ -260,7 +264,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 					}
 				}
 			}
-			"deduction" => {
+			InfoLevel::Deduction => {
 				st.total_deductions += 1;
 				let max_len = st.width.saturating_sub(10);
 				let display = trunc(msg, max_len);
@@ -277,7 +281,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 					}
 				}
 			}
-			"analysis" => {
+			InfoLevel::Analysis => {
 				if msg.contains("Mutation map for") {
 					// Extract principal name from "Mutation map for Bob at stage..."
 					if let Some(rest) = msg.strip_prefix("Mutation map for ") {
@@ -302,7 +306,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 					}
 				}
 			}
-			"info" => {
+			InfoLevel::Info => {
 				if msg.starts_with("Running at phase") {
 					if let Some(rest) = msg.strip_prefix("Running at phase ") {
 						if let Some(num) = rest.strip_suffix('.') {
@@ -315,7 +319,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
 		}
 	}
 	// High-priority events always redraw (result = query failure)
-	if msg_type == "result" {
+	if msg_type == InfoLevel::Result {
 		force_redraw();
 	} else {
 		tui_redraw();

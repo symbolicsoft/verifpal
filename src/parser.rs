@@ -54,13 +54,13 @@ const RESERVED: &[&str] = &[
 	"queries",
 ];
 
-fn check_reserved(s: &str) -> Result<(), String> {
+fn check_reserved(s: &str) -> VResult<()> {
 	let lower = s.to_lowercase();
 	if RESERVED.contains(&lower.as_str())
 		|| lower.starts_with("attacker")
 		|| lower.starts_with("unnamed")
 	{
-		return Err(format!("cannot use reserved keyword in name: {}", s));
+		return Err(VerifpalError::Parse(format!("cannot use reserved keyword in name: {}", s)));
 	}
 	Ok(())
 }
@@ -151,7 +151,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn expect(&mut self, s: &str) -> Result<(), String> {
+	fn expect(&mut self, s: &str) -> VResult<()> {
 		let bytes = s.as_bytes();
 		if self.pos + bytes.len() <= self.input.len()
 			&& &self.input[self.pos..self.pos + bytes.len()] == bytes
@@ -159,7 +159,7 @@ impl<'a> Parser<'a> {
 			self.pos += bytes.len();
 			Ok(())
 		} else {
-			Err(format!("expected '{}' at position {}", s, self.pos))
+			Err(VerifpalError::Parse(format!("expected '{}' at position {}", s, self.pos)))
 		}
 	}
 
@@ -175,7 +175,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_identifier(&mut self) -> Result<String, String> {
+	fn parse_identifier(&mut self) -> VResult<String> {
 		let start = self.pos;
 		while self.pos < self.input.len() {
 			let c = self.input[self.pos];
@@ -186,19 +186,19 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if self.pos == start {
-			return Err(format!("expected identifier at position {}", self.pos));
+			return Err(VerifpalError::Parse(format!("expected identifier at position {}", self.pos)));
 		}
 		let s =
 			std::str::from_utf8(&self.input[start..self.pos]).expect("identifier is valid UTF-8");
 		Ok(s.to_lowercase())
 	}
 
-	fn parse_model(&mut self) -> Result<Model, String> {
+	fn parse_model(&mut self) -> VResult<Model> {
 		self.skip_whitespace_and_comments();
 
 		// Parse attacker
 		if !self.try_expect("attacker") {
-			return Err("no `attacker` block defined".to_string());
+			return Err(VerifpalError::Parse("no `attacker` block defined".to_string()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -207,7 +207,7 @@ impl<'a> Parser<'a> {
 		let attacker_type = match attacker_str.as_str() {
 			"active" => AttackerKind::Active,
 			"passive" => AttackerKind::Passive,
-			_ => return Err(format!("invalid attacker type: {}", attacker_str)),
+			_ => return Err(VerifpalError::Parse(format!("invalid attacker type: {}", attacker_str))),
 		};
 		self.skip_whitespace();
 		self.expect("]")?;
@@ -232,13 +232,13 @@ impl<'a> Parser<'a> {
 		}
 
 		if blocks.is_empty() {
-			return Err("no principal or message blocks defined".to_string());
+			return Err(VerifpalError::Parse("no principal or message blocks defined".to_string()));
 		}
 
 		// Parse queries
 		self.skip_whitespace_and_comments();
 		if !self.try_expect("queries") {
-			return Err("no `queries` block defined".to_string());
+			return Err(VerifpalError::Parse("no `queries` block defined".to_string()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -263,7 +263,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_block(&mut self) -> Result<Block, String> {
+	fn parse_block(&mut self) -> VResult<Block> {
 		self.skip_whitespace_and_comments();
 
 		if starts_with_keyword(self.remaining(), "phase") {
@@ -280,7 +280,7 @@ impl<'a> Parser<'a> {
 		self.parse_message_block()
 	}
 
-	fn parse_principal(&mut self) -> Result<Block, String> {
+	fn parse_principal(&mut self) -> VResult<Block> {
 		self.expect("principal")?;
 		self.skip_whitespace();
 		let name = self.parse_identifier()?;
@@ -301,19 +301,14 @@ impl<'a> Parser<'a> {
 		self.expect("]")?;
 		self.skip_whitespace_and_comments();
 		let id = principal_names_map_add(&name);
-		Ok(Block {
-			kind: BlockKind::Principal,
-			principal: Principal {
-				name,
-				id,
-				expressions,
-			},
-			message: Message::default(),
-			phase: Phase::default(),
-		})
+		Ok(Block::Principal(Principal {
+			name,
+			id,
+			expressions,
+		}))
 	}
 
-	fn parse_message_block(&mut self) -> Result<Block, String> {
+	fn parse_message_block(&mut self) -> VResult<Block> {
 		let sender_name = self.parse_identifier()?;
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
@@ -321,7 +316,7 @@ impl<'a> Parser<'a> {
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
 			// ok
 		} else {
-			return Err(format!("expected '->' in message at position {}", self.pos));
+			return Err(VerifpalError::Parse(format!("expected '->' in message at position {}", self.pos)));
 		}
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
@@ -333,19 +328,14 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace_and_comments();
 		let sender_id = principal_names_map_add(&sender_name);
 		let recipient_id = principal_names_map_add(&recipient_name);
-		Ok(Block {
-			kind: BlockKind::Message,
-			principal: Principal::default(),
-			message: Message {
-				sender: sender_id,
-				recipient: recipient_id,
-				constants,
-			},
-			phase: Phase::default(),
-		})
+		Ok(Block::Message(Message {
+			sender: sender_id,
+			recipient: recipient_id,
+			constants,
+		}))
 	}
 
-	fn parse_message_constants(&mut self) -> Result<Vec<Constant>, String> {
+	fn parse_message_constants(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
 			self.skip_inline_whitespace();
@@ -387,12 +377,12 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err("message constants are not defined".to_string());
+			return Err(VerifpalError::Parse("message constants are not defined".to_string()));
 		}
 		Ok(constants)
 	}
 
-	fn parse_guarded_constant(&mut self) -> Result<Constant, String> {
+	fn parse_guarded_constant(&mut self) -> VResult<Constant> {
 		self.expect("[")?;
 		let mut c = self.parse_constant()?; // check_reserved already called inside parse_constant
 		// Consume trailing comma if present inside brackets
@@ -406,7 +396,7 @@ impl<'a> Parser<'a> {
 		Ok(c)
 	}
 
-	fn parse_expression(&mut self) -> Result<Expression, String> {
+	fn parse_expression(&mut self) -> VResult<Expression> {
 		self.skip_whitespace_and_comments();
 		let rem = self.remaining();
 		if starts_with_keyword(rem, "knows") {
@@ -420,7 +410,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_knows(&mut self) -> Result<Expression, String> {
+	fn parse_knows(&mut self) -> VResult<Expression> {
 		self.expect("knows")?;
 		self.skip_whitespace();
 		let qualifier_str = self.parse_identifier()?;
@@ -428,7 +418,7 @@ impl<'a> Parser<'a> {
 			"private" => Qualifier::Private,
 			"public" => Qualifier::Public,
 			"password" => Qualifier::Password,
-			_ => return Err(format!("invalid qualifier: {}", qualifier_str)),
+			_ => return Err(VerifpalError::Parse(format!("invalid qualifier: {}", qualifier_str))),
 		};
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
@@ -444,7 +434,7 @@ impl<'a> Parser<'a> {
 		&mut self,
 		keyword: &str,
 		kind: Declaration,
-	) -> Result<Expression, String> {
+	) -> VResult<Expression> {
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
@@ -456,14 +446,14 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_assignment(&mut self) -> Result<Expression, String> {
+	fn parse_assignment(&mut self) -> VResult<Expression> {
 		let constants = self.parse_constants()?;
 		self.skip_whitespace();
 		self.expect("=")?;
 		self.skip_whitespace();
 		let value = self.parse_value()?;
 		if let Value::Constant(_) = &value {
-			return Err("cannot assign value to value".to_string());
+			return Err(VerifpalError::Parse("cannot assign value to value".to_string()));
 		}
 		Ok(Expression {
 			kind: Declaration::Assignment,
@@ -484,7 +474,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_constants(&mut self) -> Result<Vec<Constant>, String> {
+	fn parse_constants(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
 			self.skip_inline_whitespace();
@@ -516,12 +506,12 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err("expected at least one constant".to_string());
+			return Err(VerifpalError::Parse("expected at least one constant".to_string()));
 		}
 		Ok(constants)
 	}
 
-	fn parse_constant(&mut self) -> Result<Constant, String> {
+	fn parse_constant(&mut self) -> VResult<Constant> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name)?;
 		let actual_name: Arc<str> = if name == "_" {
@@ -542,11 +532,11 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_constant_value(&mut self) -> Result<Value, String> {
+	fn parse_constant_value(&mut self) -> VResult<Value> {
 		Ok(Value::Constant(self.parse_constant()?))
 	}
 
-	fn parse_value(&mut self) -> Result<Value, String> {
+	fn parse_value(&mut self) -> VResult<Value> {
 		self.skip_whitespace();
 		// Try primitive first (identifier followed by '(')
 		let saved = self.pos;
@@ -569,10 +559,10 @@ impl<'a> Parser<'a> {
 			return self.parse_constant_value();
 		}
 		self.pos = saved;
-		Err(format!("expected value at position {}", self.pos))
+		Err(VerifpalError::Parse(format!("expected value at position {}", self.pos)))
 	}
 
-	fn parse_primitive(&mut self) -> Result<Value, String> {
+	fn parse_primitive(&mut self) -> VResult<Value> {
 		let name = self.parse_identifier()?;
 		let prim_name = name.to_uppercase();
 		self.skip_whitespace();
@@ -581,7 +571,7 @@ impl<'a> Parser<'a> {
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
-				return Err("unterminated primitive".to_string());
+				return Err(VerifpalError::Parse("unterminated primitive".to_string()));
 			}
 			let arg = self.parse_value()?;
 			arguments.push(arg);
@@ -607,7 +597,7 @@ impl<'a> Parser<'a> {
 		})))
 	}
 
-	fn parse_equation(&mut self) -> Result<Value, String> {
+	fn parse_equation(&mut self) -> VResult<Value> {
 		let first = self.parse_constant_value()?;
 		self.skip_whitespace();
 		self.expect("^")?;
@@ -618,7 +608,7 @@ impl<'a> Parser<'a> {
 		})))
 	}
 
-	fn parse_phase(&mut self) -> Result<Block, String> {
+	fn parse_phase(&mut self) -> VResult<Block> {
 		self.expect("phase")?;
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -631,19 +621,14 @@ impl<'a> Parser<'a> {
 			std::str::from_utf8(&self.input[start..self.pos]).expect("phase number is valid UTF-8");
 		let number: i32 = num_str
 			.parse()
-			.map_err(|_| "invalid phase number".to_string())?;
+			.map_err(|_| VerifpalError::Parse("invalid phase number".to_string()))?;
 		self.skip_whitespace();
 		self.expect("]")?;
 		self.skip_whitespace_and_comments();
-		Ok(Block {
-			kind: BlockKind::Phase,
-			principal: Principal::default(),
-			message: Message::default(),
-			phase: Phase { number },
-		})
+		Ok(Block::Phase(Phase { number }))
 	}
 
-	fn parse_query(&mut self) -> Result<Query, String> {
+	fn parse_query(&mut self) -> VResult<Query> {
 		self.skip_whitespace_and_comments();
 		let rem = self.remaining();
 		if rem.starts_with("confidentiality?") {
@@ -657,7 +642,7 @@ impl<'a> Parser<'a> {
 		} else if rem.starts_with("equivalence?") {
 			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
-			Err(format!("unknown query type at position {}", self.pos))
+			Err(VerifpalError::Parse(format!("unknown query type at position {}", self.pos)))
 		}
 	}
 
@@ -665,7 +650,7 @@ impl<'a> Parser<'a> {
 		&mut self,
 		keyword: &str,
 		kind: QueryKind,
-	) -> Result<Query, String> {
+	) -> VResult<Query> {
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
@@ -679,14 +664,14 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_query_authentication(&mut self) -> Result<Query, String> {
+	fn parse_query_authentication(&mut self) -> VResult<Query> {
 		self.expect("authentication?")?;
 		self.skip_whitespace();
 		// Parse message: Sender -> Recipient: constant
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.skip_whitespace();
 		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-			return Err("expected '->' in authentication query".to_string());
+			return Err(VerifpalError::Parse("expected '->' in authentication query".to_string()));
 		}
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
@@ -714,7 +699,7 @@ impl<'a> Parser<'a> {
 		&mut self,
 		keyword: &str,
 		kind: QueryKind,
-	) -> Result<Query, String> {
+	) -> VResult<Query> {
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
@@ -728,7 +713,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_query_constant_list(&mut self) -> Result<Vec<Constant>, String> {
+	fn parse_query_constant_list(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
 			self.skip_whitespace();
@@ -755,7 +740,7 @@ impl<'a> Parser<'a> {
 		Ok(constants)
 	}
 
-	fn try_parse_query_options(&mut self) -> Result<Vec<QueryOption>, String> {
+	fn try_parse_query_options(&mut self) -> VResult<Vec<QueryOption>> {
 		self.skip_whitespace_and_comments();
 		if self.peek() != Some(b'[') {
 			return Ok(vec![]);
@@ -779,7 +764,7 @@ impl<'a> Parser<'a> {
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
 			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-				return Err("expected '->' in query option".to_string());
+				return Err(VerifpalError::Parse("expected '->' in query option".to_string()));
 			}
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
@@ -794,7 +779,7 @@ impl<'a> Parser<'a> {
 			let option_kind = match option_name.as_str() {
 				"precondition" => QueryOptionKind::Precondition,
 				_ => {
-					return Err(format!("unknown query option: {}", option_name));
+					return Err(VerifpalError::Parse(format!("unknown query option: {}", option_name)));
 				}
 			};
 			let sender_id = principal_names_map_add(&sender_name);
@@ -816,7 +801,7 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub fn parse_file(file_path: &str) -> Result<Model, String> {
+pub fn parse_file(file_path: &str) -> VResult<Model> {
 	let path = std::path::Path::new(file_path);
 	let file_name = path
 		.file_name()
@@ -825,19 +810,19 @@ pub fn parse_file(file_path: &str) -> Result<Model, String> {
 		.to_string();
 
 	if file_name.len() > 64 {
-		return Err("model file name must be 64 characters or less".to_string());
+		return Err(VerifpalError::Parse("model file name must be 64 characters or less".to_string()));
 	}
 	if !file_name.ends_with(".vp") {
-		return Err("model file name must have a '.vp' extension".to_string());
+		return Err(VerifpalError::Parse("model file name must have a '.vp' extension".to_string()));
 	}
 
 	let content =
-		std::fs::read_to_string(file_path).map_err(|e| format!("failed to read file: {}", e))?;
+		std::fs::read_to_string(file_path).map_err(|e| VerifpalError::Parse(format!("failed to read file: {}", e)))?;
 
 	parse_string(&file_name, &content)
 }
 
-pub fn parse_string(file_name: &str, input: &str) -> Result<Model, String> {
+pub fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 	let mut parser = Parser::new(input);
 	let mut model = parser.parse_model()?;
 	model.file_name = file_name.to_string();

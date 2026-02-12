@@ -9,7 +9,7 @@ use crate::value::*;
 
 const MAX_POSSIBLE_DEPTH: usize = 16;
 
-pub fn possible_to_passively_decompose_primitive(p: &Primitive) -> Vec<Value> {
+pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
 	}
@@ -27,7 +27,7 @@ pub fn possible_to_passively_decompose_primitive(p: &Primitive) -> Vec<Value> {
 		.collect()
 }
 
-pub fn possible_to_decompose_primitive(
+pub fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
 	as_: &AttackerState,
@@ -61,24 +61,24 @@ pub fn possible_to_decompose_primitive(
 		if !valid {
 			continue;
 		}
-		if value_equivalent_value_in_values_map(&filtered, &as_.known, &as_.known_map).is_some() {
+		if as_.knows(&filtered).is_some() {
 			has.push(filtered);
 			continue;
 		}
 		match &filtered {
 			Value::Primitive(inner_p) => {
-				let (r, _) = possible_to_reconstruct_primitive(inner_p, ps, as_, depth + 1);
+				let (r, _) = can_reconstruct_primitive(inner_p, ps, as_, depth + 1);
 				if r {
 					has.push(filtered.clone());
 					continue;
 				}
-				let (r2, _, _) = possible_to_decompose_primitive(inner_p, ps, as_, depth + 1);
+				let (r2, _, _) = can_decompose(inner_p, ps, as_, depth + 1);
 				if r2 {
 					has.push(filtered.clone());
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (r, _) = possible_to_reconstruct_equation(inner_e, as_);
+				let (r, _) = can_reconstruct_equation(inner_e, as_);
 				if r {
 					has.push(filtered.clone());
 				}
@@ -93,7 +93,7 @@ pub fn possible_to_decompose_primitive(
 	}
 }
 
-pub fn possible_to_recompose_primitive(
+pub fn can_recompose(
 	p: &Primitive,
 	as_: &AttackerState,
 ) -> (bool, Value, Vec<Value>) {
@@ -129,7 +129,7 @@ pub fn possible_to_recompose_primitive(
 	(false, empty, vec![])
 }
 
-pub fn possible_to_reconstruct_primitive(
+pub fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
 	as_: &AttackerState,
@@ -138,7 +138,7 @@ pub fn possible_to_reconstruct_primitive(
 	if depth > MAX_POSSIBLE_DEPTH {
 		return (false, vec![]);
 	}
-	let (r, rv) = possible_to_rewrite(p, ps, 0);
+	let (r, rv) = can_rewrite(p, ps, 0);
 	if !r {
 		return (false, vec![]);
 	}
@@ -148,25 +148,25 @@ pub fn possible_to_reconstruct_primitive(
 	};
 	let mut has = Vec::new();
 	for a in &rp.arguments {
-		if value_equivalent_value_in_values_map(a, &as_.known, &as_.known_map).is_some() {
+		if as_.knows(a).is_some() {
 			has.push(a.clone());
 			continue;
 		}
 		match a {
 			Value::Primitive(inner_p) => {
-				let (r2, _, _) = possible_to_decompose_primitive(inner_p, ps, as_, depth + 1);
+				let (r2, _, _) = can_decompose(inner_p, ps, as_, depth + 1);
 				if r2 {
 					has.push(a.clone());
 					continue;
 				}
-				let (r3, _) = possible_to_reconstruct_primitive(inner_p, ps, as_, depth + 1);
+				let (r3, _) = can_reconstruct_primitive(inner_p, ps, as_, depth + 1);
 				if r3 {
 					has.push(a.clone());
 					continue;
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (r2, _) = possible_to_reconstruct_equation(inner_e, as_);
+				let (r2, _) = can_reconstruct_equation(inner_e, as_);
 				if r2 {
 					has.push(a.clone());
 					continue;
@@ -181,21 +181,20 @@ pub fn possible_to_reconstruct_primitive(
 	(true, has)
 }
 
-pub fn possible_to_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec<Value>) {
+pub fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec<Value>) {
 	if e.values.len() < 2 {
 		return (false, vec![]);
 	}
 	if e.values.len() == 2 {
-		if value_equivalent_value_in_values_map(&e.values[1], &as_.known, &as_.known_map).is_some()
-		{
+		if as_.knows(&e.values[1]).is_some() {
 			return (true, vec![e.values[1].clone()]);
 		}
 		return (false, vec![]);
 	}
 	let s0 = &e.values[1];
 	let s1 = &e.values[2];
-	let hs0 = value_equivalent_value_in_values_map(s0, &as_.known, &as_.known_map).is_some();
-	let hs1 = value_equivalent_value_in_values_map(s1, &as_.known, &as_.known_map).is_some();
+	let hs0 = as_.knows(s0).is_some();
+	let hs1 = as_.knows(s1).is_some();
 	if hs0 && hs1 {
 		return (true, vec![s0.clone(), s1.clone()]);
 	}
@@ -205,18 +204,18 @@ pub fn possible_to_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (b
 	let p1 = Value::Equation(Arc::new(Equation {
 		values: vec![e.values[0].clone(), e.values[2].clone()],
 	}));
-	let hp1 = value_equivalent_value_in_values_map(&p1, &as_.known, &as_.known_map).is_some();
+	let hp1 = as_.knows(&p1).is_some();
 	if hs0 && hp1 {
 		return (true, vec![s0.clone(), p1]);
 	}
-	let hp0 = value_equivalent_value_in_values_map(&p0, &as_.known, &as_.known_map).is_some();
+	let hp0 = as_.knows(&p0).is_some();
 	if hp0 && hs1 {
 		return (true, vec![p0, s1.clone()]);
 	}
 	(false, vec![])
 }
 
-pub fn possible_to_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
+pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
 	if depth > MAX_POSSIBLE_DEPTH {
 		return (false, vec![Value::Primitive(Arc::new(p.clone()))]);
 	}
@@ -224,8 +223,8 @@ pub fn possible_to_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> 
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, a) in p.arguments.iter().enumerate() {
 		if let Value::Primitive(inner_p) = a {
-			let (_, pp) = possible_to_rewrite(inner_p, ps, depth + 1);
-			if !value_equivalent_values(&pp[0], a, true) {
+			let (_, pp) = can_rewrite(inner_p, ps, depth + 1);
+			if !pp[0].equivalent(a, true) {
 				let args = new_args.get_or_insert_with(|| p.arguments.clone());
 				args[i] = pp[0].clone();
 			}
@@ -265,7 +264,7 @@ pub fn possible_to_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> 
 		if from_p.id != prim.rewrite.id {
 			return (!prim.check, wrap(pc_ref));
 		}
-		if !possible_to_rewrite_primitive(pc_ref, ps, depth) {
+		if !can_rewrite_primitive(pc_ref, ps, depth) {
 			return (!prim.check, wrap(pc_ref));
 		}
 		if let Some(to_fn) = prim.rewrite.to {
@@ -276,7 +275,7 @@ pub fn possible_to_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> 
 	(!prim.check, wrap(pc_ref))
 }
 
-fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
+fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
 	let prim = match primitive_get(p.id) {
 		Ok(s) => s,
 		Err(_) => return false,
@@ -306,7 +305,7 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
 			for item in &mut ax {
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
-						let (r, v) = possible_to_rewrite(inner_p, ps, depth + 1);
+						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
 						if r {
 							Some(v.into_iter().next().unwrap())
 						} else {
@@ -317,7 +316,7 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
 						let mut new_values: Option<Vec<Value>> = None;
 						for (ii, ev) in inner_e.values.iter().enumerate() {
 							if let Value::Primitive(ep) = ev {
-								let (r, v) = possible_to_rewrite(ep, ps, depth + 1);
+								let (r, v) = can_rewrite(ep, ps, depth + 1);
 								if r {
 									let vals =
 										new_values.get_or_insert_with(|| inner_e.values.clone());
@@ -333,7 +332,7 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
 					*item = new_val;
 				}
 			}
-			valid = value_equivalent_values(&ax[0], &ax[1], true);
+			valid = ax[0].equivalent(&ax[1], true);
 			if valid {
 				break;
 			}
@@ -345,7 +344,7 @@ fn possible_to_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usiz
 	true
 }
 
-pub fn possible_to_rebuild(p: &Primitive) -> (bool, Value) {
+pub fn can_rebuild(p: &Primitive) -> (bool, Value) {
 	let empty = value_nil();
 	if primitive_is_core(p.id) {
 		return (false, empty);
@@ -391,7 +390,7 @@ pub fn possible_to_rebuild(p: &Primitive) -> (bool, Value) {
 	(false, empty)
 }
 
-pub fn possible_to_obtain_passwords(
+pub fn find_obtainable_passwords(
 	a: &Value,
 	a_parent: &Value,
 	a_index: Option<usize>,
@@ -400,7 +399,7 @@ pub fn possible_to_obtain_passwords(
 ) {
 	match a {
 		Value::Constant(c) => {
-			let (aa, _) = value_resolve_constant(c, ps, true);
+			let (aa, _) = ps.resolve_constant(c, true);
 			let is_password =
 				matches!(&aa, Value::Constant(ac) if ac.qualifier == Some(Qualifier::Password));
 			if is_password {
@@ -426,12 +425,12 @@ pub fn possible_to_obtain_passwords(
 				a_parent
 			};
 			for (i, arg) in p.arguments.iter().enumerate() {
-				possible_to_obtain_passwords(arg, parent, Some(i), ps, out);
+				find_obtainable_passwords(arg, parent, Some(i), ps, out);
 			}
 		}
 		Value::Equation(e) => {
 			for v in &e.values {
-				possible_to_obtain_passwords(v, a, None, ps, out);
+				find_obtainable_passwords(v, a, None, ps, out);
 			}
 		}
 	}

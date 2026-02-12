@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::mutationmap::mutation_product;
-use crate::pretty::*;
 use crate::primitive::primitive_is_explosive;
 use crate::types::*;
 use crate::value::*;
@@ -40,7 +39,7 @@ fn inject_constant_rules(c: &Constant, arg: usize, p: &Primitive) -> bool {
 	if !matches!(&p.arguments[arg], Value::Constant(_)) {
 		return false;
 	}
-	if value_equivalent_constants(c, value_g().as_constant().expect("g is Constant")) {
+	if c.equivalent(value_g().as_constant().expect("g is Constant")) {
 		return false;
 	}
 	true
@@ -168,12 +167,8 @@ pub fn inject_missing_skeletons(
 		let known = Value::Primitive(Arc::new(skeleton.clone()));
 		if ctx.attacker_put(&known, record) {
 			info_message(
-				&format!(
-					"Constructed skeleton {} based on {}.",
-					pretty_primitive(&skeleton),
-					pretty_primitive(p)
-				),
-				"analysis",
+				&format!("Constructed skeleton {} based on {}.", skeleton, p),
+				InfoLevel::Analysis,
 				true,
 			);
 		}
@@ -206,7 +201,7 @@ fn inject_primitive(
 		for k in as_.known.iter() {
 			let resolved = match k {
 				Value::Constant(c) => {
-					let (v, _) = value_resolve_constant(c, ps, true);
+					let (v, _) = ps.resolve_constant(c, true);
 					v
 				}
 				_ => k.clone(),

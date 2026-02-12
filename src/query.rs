@@ -4,7 +4,6 @@
 use crate::context::VerifyContext;
 use crate::info::*;
 use crate::possible::*;
-use crate::pretty::*;
 use crate::primitive::*;
 use crate::principal::*;
 use crate::types::*;
@@ -16,7 +15,7 @@ pub fn query_start(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-) -> Result<(), String> {
+) -> VResult<()> {
 	let as_ = ctx.attacker_snapshot();
 	match query.kind {
 		QueryKind::Confidentiality => {
@@ -42,8 +41,8 @@ pub fn query_start(
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result) {
 		info_message(
-			&format!("{}{}", pretty_query(&result.query), result.summary),
-			"result",
+			&format!("{}{}", &result.query, result.summary),
+			InfoLevel::Result,
 			true,
 		);
 	}
@@ -58,13 +57,12 @@ fn query_confidentiality(
 	as_: &AttackerState,
 ) -> VerifyResult {
 	let mut result = VerifyResult::new(query, query_index);
-	let i = match value_get_principal_state_index_from_constant(ps, &query.constants[0]) {
+	let i = match ps.index_of(&query.constants[0]) {
 		Some(idx) => idx,
 		None => return result,
 	};
 	let resolved_value = &ps.values[i].assigned;
-	let ii = match value_equivalent_value_in_values_map(resolved_value, &as_.known, &as_.known_map)
-	{
+	let ii = match as_.knows(resolved_value) {
 		Some(idx) => idx,
 		None => return result,
 	};
@@ -75,8 +73,8 @@ fn query_confidentiality(
 		&mutated_info,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
-			pretty_constant(&query.constants[0]),
-			pretty_value(&as_.known[ii]),
+			query.constants[0],
+			as_.known[ii],
 		),
 		&result.options,
 	);
@@ -133,7 +131,7 @@ fn query_find_constant_usage_indices(
 		if !value_find_constant_in_primitive_from_protocol_trace(c, &slot.initial_value, km) {
 			continue;
 		}
-		let (_, ii) = value_resolve_constant(&slot.constant, ps, true);
+		let (_, ii) = ps.resolve_constant(&slot.constant, true);
 		let ii_idx = ii?;
 		let b = &ps.values[ii_idx].before_rewrite;
 		let b_prim = match b {
@@ -144,7 +142,7 @@ fn query_find_constant_usage_indices(
 			indices.push(ii_idx);
 			continue;
 		}
-		let (pass, _) = possible_to_rewrite(b_prim, ps, 0);
+		let (pass, _) = can_rewrite(b_prim, ps, 0);
 		if pass || !b_prim.check {
 			indices.push(ii_idx);
 		}
@@ -158,7 +156,7 @@ fn query_authentication_get_pass_indices(
 	ps: &PrincipalState,
 ) -> (Vec<usize>, PrincipalId, Constant) {
 	let empty_c = Constant::empty();
-	let (_, idx) = value_resolve_constant(&query.message.constants[0], ps, true);
+	let (_, idx) = ps.resolve_constant(&query.message.constants[0], true);
 	let idx = match idx {
 		Some(i) => i,
 		None => return (vec![], 0, empty_c),
@@ -167,7 +165,7 @@ fn query_authentication_get_pass_indices(
 	let sender = ps.values[idx].sender;
 	if sender == principal_get_attacker_id() {
 		let v = &ps.values[idx].before_mutate;
-		if value_equivalent_values(v, &ps.values[idx].assigned, true) {
+		if v.equivalent(&ps.values[idx].assigned, true) {
 			return (vec![], sender, c);
 		}
 	}
@@ -184,16 +182,16 @@ fn query_authentication_handle_pass(
 	sender: PrincipalId,
 	ps: &PrincipalState,
 ) -> VerifyResult {
-	let (cc, _) = value_resolve_constant(c, ps, true);
+	let (cc, _) = ps.resolve_constant(c, true);
 	result.summary = info_verify_result_summary(
 		mutated_info,
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
-			pretty_constant(c),
-			pretty_value(&cc),
+			c,
+			cc,
 			principal_get_name_from_id(sender),
 			principal_get_name_from_id(result.query.message.sender),
-			pretty_value(b),
+			b,
 			principal_get_name_from_id(result.query.message.recipient),
 		),
 		&result.options,
@@ -209,7 +207,7 @@ fn query_freshness(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	as_: &AttackerState,
-) -> Result<VerifyResult, String> {
+) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let freshness_found = value_constant_contains_fresh_values(&query.constants[0], ps)?;
 	if freshness_found {
@@ -222,7 +220,7 @@ fn query_freshness(
 	if indices.is_empty() {
 		return Ok(result);
 	}
-	let (resolved, _) = value_resolve_constant(&query.constants[0], ps, true);
+	let (resolved, _) = ps.resolve_constant(&query.constants[0], true);
 	let diffs = compute_slot_diffs(ps, km);
 	let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &resolved, 0);
 	result.resolved = true;
@@ -230,10 +228,10 @@ fn query_freshness(
 		&mutated_info,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
-			pretty_constant(&query.constants[0]),
-			pretty_value(&resolved),
+			query.constants[0],
+			resolved,
 			ps.name,
-			pretty_value(&ps.values[indices[0]].before_rewrite),
+			ps.values[indices[0]].before_rewrite,
 		),
 		&result.options,
 	);
@@ -249,7 +247,7 @@ fn query_unlinkability(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	as_: &AttackerState,
-) -> Result<VerifyResult, String> {
+) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let mut no_freshness = Vec::new();
 	for c in &query.constants {
@@ -259,13 +257,13 @@ fn query_unlinkability(
 		}
 	}
 	if !no_freshness.is_empty() {
-		let (resolved, _) = value_resolve_constant(&no_freshness[0], ps, true);
+		let (resolved, _) = ps.resolve_constant(&no_freshness[0], true);
 		let diffs = compute_slot_diffs(ps, km);
 		let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &resolved, 0);
 		result.resolved = true;
 		result.summary = info_verify_result_summary(&mutated_info, &format!(
             "{} ({}) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
-            pretty_constant(&no_freshness[0]), pretty_value(&resolved),
+            no_freshness[0], resolved,
         ), &result.options);
 		result = query_precondition(result, ps);
 		emit_query_result(ctx, &result);
@@ -274,20 +272,20 @@ fn query_unlinkability(
 	let assigneds: Vec<Value> = query
 		.constants
 		.iter()
-		.map(|c| value_resolve_constant(c, ps, true).0)
+		.map(|c| ps.resolve_constant(c, true).0)
 		.collect();
 	for (i, ai) in assigneds.iter().enumerate() {
 		for (ii, aii) in assigneds.iter().enumerate() {
 			if i == ii {
 				continue;
 			}
-			if !value_equivalent_values(ai, aii, false) {
+			if !ai.equivalent(aii, false) {
 				continue;
 			}
 			let obtainable = match ai {
 				Value::Primitive(p) => {
-					let (ok0, _) = possible_to_reconstruct_primitive(p, ps, as_, 0);
-					let (ok1, _, _) = possible_to_recompose_primitive(p, as_);
+					let (ok0, _) = can_reconstruct_primitive(p, ps, as_, 0);
+					let (ok1, _, _) = can_recompose(p, as_);
 					ok0 || ok1
 				}
 				_ => false,
@@ -301,8 +299,8 @@ fn query_unlinkability(
 			result.resolved = true;
 			result.summary = info_verify_result_summary(&mutated_info, &format!(
                 "{} and {} are not unlinkable since they are the output of the same primitive ({}), which can be obtained by Attacker",
-                pretty_constant(&query.constants[i]), pretty_constant(&query.constants[ii]),
-                pretty_value(&assigneds[i]),
+                query.constants[i], query.constants[ii],
+                assigneds[i],
             ), &result.options);
 			result = query_precondition(result, ps);
 			emit_query_result(ctx, &result);
@@ -324,11 +322,11 @@ fn query_equivalence(
 	let values: Vec<Value> = query
 		.constants
 		.iter()
-		.map(|c| value_resolve_constant(c, ps, false).0)
+		.map(|c| ps.resolve_constant(c, false).0)
 		.collect();
 	let all_equivalent = values
 		.windows(2)
-		.all(|w| value_equivalent_values(&w[0], &w[1], true));
+		.all(|w| w[0].equivalent(&w[1], true));
 	if all_equivalent {
 		return result;
 	}
@@ -338,7 +336,7 @@ fn query_equivalence(
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
-		&format!("{} are not equivalent.", pretty_values(&values),),
+		&format!("{} are not equivalent.", values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),),
 		&result.options,
 	);
 	result = query_precondition(result, ps);
@@ -355,7 +353,7 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 			resolved: false,
 			summary: String::new(),
 		};
-		let (_, i) = value_resolve_constant(&option.message.constants[0], ps, true);
+		let (_, i) = ps.resolve_constant(&option.message.constants[0], true);
 		let idx = match i {
 			Some(i) => i,
 			None => {
@@ -372,7 +370,7 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 			o_result.summary = format!(
 				"{} sends {} to {} despite the query failing.",
 				principal_get_name_from_id(option.message.sender),
-				pretty_constant(&option.message.constants[0]),
+				option.message.constants[0],
 				principal_get_name_from_id(option.message.recipient),
 			);
 		}

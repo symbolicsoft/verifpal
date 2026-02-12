@@ -4,14 +4,14 @@
 use crate::context::VerifyContext;
 use crate::info::{info_analysis, info_message, info_output_text};
 use crate::possible::{
-	possible_to_decompose_primitive, possible_to_obtain_passwords,
-	possible_to_passively_decompose_primitive, possible_to_recompose_primitive,
-	possible_to_reconstruct_equation, possible_to_reconstruct_primitive,
+	can_decompose, find_obtainable_passwords,
+	passively_decompose, can_recompose,
+	can_reconstruct_equation, can_reconstruct_primitive,
 };
-use crate::pretty::{pretty_value, pretty_values};
+use crate::pretty::pretty_values;
 use crate::primitive::PRIM_CONCAT;
 use crate::types::*;
-use crate::value::{compute_slot_diffs, value_equivalent_values, value_resolve_constant};
+use crate::value::compute_slot_diffs;
 use crate::verify::verify_resolve_queries;
 
 // ---------------------------------------------------------------------------
@@ -23,7 +23,7 @@ pub fn verify_analysis(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	stage: i32,
-) -> Result<(), String> {
+) -> VResult<()> {
 	let mut current_as = ctx.attacker_snapshot();
 	let record = compute_slot_diffs(ps, km);
 	loop {
@@ -94,16 +94,16 @@ fn verify_analysis_decompose(
 		Value::Primitive(p) => p,
 		_ => return 0,
 	};
-	let (r, revealed, ar) = possible_to_decompose_primitive(p, ps, as_, 0);
+	let (r, revealed, ar) = can_decompose(p, ps, as_, 0);
 	if r && ctx.attacker_put(&revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by decomposing {} with {}.",
 				info_output_text(&revealed),
-				pretty_value(a),
+				a,
 				pretty_values(&ar),
 			),
-			"deduction",
+			InfoLevel::Deduction,
 			true,
 		);
 		1
@@ -126,15 +126,15 @@ fn verify_analysis_passive_decompose(
 		_ => return 0,
 	};
 	let mut o: usize = 0;
-	for revealed in &possible_to_passively_decompose_primitive(p) {
+	for revealed in &passively_decompose(p) {
 		if ctx.attacker_put(revealed, record) {
 			info_message(
 				&format!(
 					"{} obtained as associated data from {}.",
 					info_output_text(revealed),
-					pretty_value(a),
+					a,
 				),
-				"deduction",
+				InfoLevel::Deduction,
 				true,
 			);
 			o += 1;
@@ -157,16 +157,16 @@ fn verify_analysis_recompose(
 		Value::Primitive(p) => p,
 		_ => return 0,
 	};
-	let (r, revealed, ar) = possible_to_recompose_primitive(p, as_);
+	let (r, revealed, ar) = can_recompose(p, as_);
 	if r && ctx.attacker_put(&revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by recomposing {} with {}.",
 				info_output_text(&revealed),
-				pretty_value(a),
+				a,
 				pretty_values(&ar),
 			),
-			"deduction",
+			InfoLevel::Deduction,
 			true,
 		);
 		1
@@ -189,13 +189,13 @@ fn verify_analysis_reconstruct(
 ) -> usize {
 	let (r, ar) = match a {
 		Value::Primitive(p) => {
-			let (r, ar) = possible_to_reconstruct_primitive(p, ps, as_, 0);
+			let (r, ar) = can_reconstruct_primitive(p, ps, as_, 0);
 			for aa in &p.arguments {
 				o += verify_analysis_reconstruct(ctx, aa, ps, as_, o, record);
 			}
 			(r, ar)
 		}
-		Value::Equation(e) => possible_to_reconstruct_equation(e, as_),
+		Value::Equation(e) => can_reconstruct_equation(e, as_),
 		_ => return o,
 	};
 	if r && ctx.attacker_put(a, record) {
@@ -205,7 +205,7 @@ fn verify_analysis_reconstruct(
 				info_output_text(a),
 				pretty_values(&ar),
 			),
-			"deduction",
+			InfoLevel::Deduction,
 			true,
 		);
 		o += 1;
@@ -224,23 +224,23 @@ fn verify_analysis_equivalize(
 	record: &MutationRecord,
 ) -> usize {
 	let ar = if let Value::Constant(c) = a {
-		let (resolved, _) = value_resolve_constant(c, ps, true);
+		let (resolved, _) = ps.resolve_constant(c, true);
 		resolved
 	} else {
 		a.clone()
 	};
 	let mut o: usize = 0;
 	for sv in &ps.values {
-		if value_equivalent_values(&ar, &sv.assigned, true)
+		if ar.equivalent(&sv.assigned, true)
 			&& ctx.attacker_put(&sv.assigned, record)
 		{
 			info_message(
 				&format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
 					info_output_text(&sv.assigned),
-					pretty_value(a),
+					a,
 				),
-				"deduction",
+				InfoLevel::Deduction,
 				true,
 			);
 			o += 1;
@@ -261,16 +261,16 @@ fn verify_analysis_passwords(
 ) -> usize {
 	let mut o: usize = 0;
 	let mut passwords = Vec::new();
-	possible_to_obtain_passwords(a, a, None, ps, &mut passwords);
+	find_obtainable_passwords(a, a, None, ps, &mut passwords);
 	for password in &passwords {
 		if ctx.attacker_put(password, record) {
 			info_message(
 				&format!(
 					"{} obtained as a password unsafely used within {}.",
 					info_output_text(password),
-					pretty_value(a),
+					a,
 				),
-				"deduction",
+				InfoLevel::Deduction,
 				true,
 			);
 			o += 1;
@@ -295,9 +295,9 @@ fn verify_analysis_concat(ctx: &VerifyContext, a: &Value, record: &MutationRecor
 				&format!(
 					"{} obtained as a concatenated fragment of {}.",
 					info_output_text(arg),
-					pretty_value(a),
+					a,
 				),
-				"deduction",
+				InfoLevel::Deduction,
 				true,
 			);
 			o += 1;
