@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use colored::*;
 
+use crate::narrative::{self, NarrativeContext};
 use crate::pretty::*;
 use crate::principal::principal_get_name_from_id;
 use crate::types::*;
@@ -144,54 +145,6 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
     })
 });
 
-// ── Attack Narrative Engine ────────────────────────────────────────────────
-
-const NARRATIVES_INIT: &[&str] = &[
-    "Positioning on the network, observing all unencrypted traffic...",
-    "Network reconnaissance initiated. All public values compromised.",
-    "Intercepting all protocol messages between principals...",
-    "Passive observation established. Analyzing traffic patterns...",
-];
-
-const NARRATIVES_MUTATION: &[&str] = &[
-    "Intercepting {P}'s channel, probing constructions for weaknesses...",
-    "Crafting replacement values for {P}'s session...",
-    "Targeting {P}'s encrypted channel with modified payloads...",
-    "Injecting crafted primitives into {P}'s message flow...",
-    "Testing mutation combinations against {P}'s protocol state...",
-    "Replacing {P}'s received values with attacker-controlled data...",
-];
-
-const NARRATIVES_ESCALATION: &[&str] = &[
-    "Escalating attack sophistication \u{2500} expanding search space...",
-    "Deeper analysis initiated \u{2500} probing higher-order mutations...",
-    "Increasing mutation complexity \u{2500} recursive injection active...",
-    "Expanding attacker capabilities \u{2500} new strategies engaged...",
-];
-
-const NARRATIVES_DEDUCTION: &[&str] = &[
-    "New knowledge extracted \u{2500} the attacker's power grows.",
-    "Value obtained through cryptographic analysis.",
-    "Attack surface expanded with newly derived material.",
-    "The attacker leverages structural weakness in the protocol.",
-];
-
-const NARRATIVES_PASSIVE: &[&str] = &[
-    "Passive observation mode \u{2500} no message manipulation permitted.",
-    "Monitoring all wire traffic without active interference.",
-    "Eavesdropping on protocol exchanges between all principals...",
-];
-
-fn pick_narrative(pool: &[&str], seed: u64) -> String {
-    let idx = (seed as usize) % pool.len();
-    pool[idx].to_string()
-}
-
-fn narrative_for_mutation(principal: &str, seed: u64) -> String {
-    let idx = (seed as usize) % NARRATIVES_MUTATION.len();
-    NARRATIVES_MUTATION[idx].replace("{P}", principal)
-}
-
 // ── Public API ─────────────────────────────────────────────────────────────
 
 pub fn tui_init(m: &Model) {
@@ -266,9 +219,9 @@ pub fn tui_init(m: &Model) {
 
     // Initial narrative
     if st.attacker_type == "passive" {
-        st.narrative = pick_narrative(NARRATIVES_PASSIVE, 0);
+        st.narrative = narrative::pick_narrative(NarrativeContext::Passive, 0);
     } else {
-        st.narrative = pick_narrative(NARRATIVES_INIT, 0);
+        st.narrative = narrative::pick_narrative(NarrativeContext::Init, 0);
     }
 
     // Install panic hook to restore terminal
@@ -298,6 +251,8 @@ pub fn tui_message(msg: &str, msg_type: &str) {
                 for q in st.queries.iter_mut() {
                     if msg.starts_with(&q.text) {
                         q.status = QStatus::Fail;
+                        let seed = st.frame as u64 ^ (st.total_deductions as u64);
+                        st.narrative = narrative::pick_narrative(NarrativeContext::QueryFail, seed);
                         break;
                     }
                 }
@@ -327,7 +282,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
                             st.scan_principal = name.to_string();
                             st.mitm_target = name.to_string();
                             let seed = st.frame as u64 ^ (name.len() as u64 * 31);
-                            st.narrative = narrative_for_mutation(name, seed);
+                            st.narrative = narrative::narrative_for_mutation(name, seed);
                         }
                     }
                 } else if msg.contains("Constructed skeleton") {
@@ -338,7 +293,7 @@ pub fn tui_message(msg: &str, msg_type: &str) {
                             let stage_str = num.trim_end_matches(',');
                             st.stage = stage_str.to_string();
                             let seed = stage_str.parse::<u64>().unwrap_or(0);
-                            st.narrative = pick_narrative(NARRATIVES_ESCALATION, seed);
+                            st.narrative = narrative::pick_narrative(NarrativeContext::Escalation, seed);
                         }
                     }
                 }
@@ -386,7 +341,7 @@ pub fn tui_attacker_known(count: usize) {
         st.attacker_known_count = count;
         if count > 0 {
             let seed = count as u64;
-            st.narrative = pick_narrative(NARRATIVES_DEDUCTION, seed);
+            st.narrative = narrative::pick_narrative(NarrativeContext::Deduction, seed);
         }
     }
     if should_redraw() {
@@ -415,7 +370,7 @@ pub fn tui_scan_update(
         st.mitm_target = principal.to_string();
         if budget_used == 0 {
             let seed = st.frame as u64 ^ (principal.len() as u64 * 37);
-            st.narrative = narrative_for_mutation(principal, seed);
+            st.narrative = narrative::narrative_for_mutation(principal, seed);
         }
     }
     if should_redraw() {
@@ -451,7 +406,7 @@ pub fn tui_stage_update(stage: i32) {
         st.worthwhile_count = 0;
         st.last_mutations.clear();
         let seed = stage as u64;
-        st.narrative = pick_narrative(NARRATIVES_ESCALATION, seed);
+        st.narrative = narrative::pick_narrative(NarrativeContext::Escalation, seed);
     }
     // Stage change is high-priority
     force_redraw();
@@ -464,13 +419,21 @@ pub fn tui_finish() {
         if !st.enabled {
             return;
         }
+        let mut any_fail = false;
         for q in st.queries.iter_mut() {
             if matches!(q.status, QStatus::Pending) {
                 q.status = QStatus::Pass;
             }
+            if matches!(q.status, QStatus::Fail) {
+                any_fail = true;
+            }
         }
         st.finished = true;
-        st.narrative = "Analysis complete.".to_string();
+        st.narrative = if any_fail {
+            narrative::pick_narrative(NarrativeContext::Finished, 0)
+        } else {
+            narrative::pick_narrative(NarrativeContext::QueryPass, 0)
+        };
     }
     force_redraw();
     std::thread::sleep(std::time::Duration::from_millis(800));

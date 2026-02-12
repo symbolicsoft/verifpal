@@ -6,6 +6,7 @@ mod construct;
 mod info;
 mod inject;
 mod mutationmap;
+mod narrative;
 mod parser;
 mod possible;
 mod pretty;
@@ -47,6 +48,9 @@ enum Commands {
         /// Output only the result code (for testing)
         #[arg(long, default_value_t = false)]
         result_code: bool,
+        /// Attacker character voice (jevil, spamton)
+        #[arg(long)]
+        character: Option<String>,
     },
     /// Pretty-print a Verifpal model
     #[command(arg_required_else_help = true)]
@@ -61,7 +65,13 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Verify { model, verifhub: hub, result_code } => {
+        Commands::Verify { model, verifhub: hub, result_code, character } => {
+            if let Some(ref ch) = character {
+                if let Err(e) = narrative::set_character(ch) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
             if !result_code {
                 tui::set_tui_mode(true);
                 info::info_banner(VERSION);
