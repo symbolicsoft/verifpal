@@ -39,6 +39,4 @@ pub(crate) fn principal_get_name_from_id(id: PrincipalId) -> String {
 	state.names.get(id as usize).cloned().unwrap_or_default()
 }
 
-pub(crate) fn principal_get_attacker_id() -> PrincipalId {
-	0
-}
+pub(crate) const ATTACKER_ID: PrincipalId = 0;

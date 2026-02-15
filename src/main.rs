@@ -1077,9 +1077,9 @@ mod unit_tests {
 
 	#[test]
 	fn error_display() {
-		let e = VerifpalError::Parse("bad input".to_string());
+		let e = VerifpalError::Parse("bad input".into());
 		assert_eq!(format!("{}", e), "parse error: bad input");
-		let e2 = VerifpalError::Resolution("not found".to_string());
+		let e2 = VerifpalError::Resolution("not found".into());
 		assert_eq!(format!("{}", e2), "resolution error: not found");
 	}
 

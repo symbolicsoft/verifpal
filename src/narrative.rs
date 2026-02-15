@@ -23,7 +23,7 @@ pub(crate) fn set_character(name: &str) -> VResult<()> {
 		other => Err(VerifpalError::Internal(format!(
 			"Unknown character '{}'. Available: jevil, spamton",
 			other
-		))),
+		).into())),
 	}
 }
 
@@ -33,6 +33,7 @@ fn character() -> u8 {
 
 // ── Narrative pools ──────────────────────────────────────────────────────
 
+#[derive(Clone, Copy)]
 pub(crate) enum NarrativeContext {
 	Init,
 	Mutation,
@@ -267,7 +268,7 @@ const SPAMTON_FINISHED: &[&str] = &[
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-fn pool(ctx: &NarrativeContext) -> &'static [&'static str] {
+fn pool(ctx: NarrativeContext) -> &'static [&'static str] {
 	match character() {
 		1 => match ctx {
 			NarrativeContext::Init => JEVIL_INIT,
@@ -304,14 +305,14 @@ fn pool(ctx: &NarrativeContext) -> &'static [&'static str] {
 
 /// Pick a narrative line for the given context, using `seed` to vary selection.
 pub(crate) fn pick_narrative(ctx: NarrativeContext, seed: u64) -> String {
-	let p = pool(&ctx);
+	let p = pool(ctx);
 	let idx = (seed as usize) % p.len();
 	p[idx].to_string()
 }
 
 /// Pick a mutation narrative with `{P}` replaced by the principal name.
 pub(crate) fn narrative_for_mutation(principal: &str, seed: u64) -> String {
-	let p = pool(&NarrativeContext::Mutation);
+	let p = pool(NarrativeContext::Mutation);
 	let idx = (seed as usize) % p.len();
 	p[idx].replace("{P}", principal)
 }

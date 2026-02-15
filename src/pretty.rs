@@ -112,12 +112,7 @@ impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.kind {
 			Declaration::Knows => {
-				let qualifier = match self.qualifier {
-					Some(Qualifier::Private) => "private",
-					Some(Qualifier::Public) => "public",
-					Some(Qualifier::Password) => "password",
-					None => "private",
-				};
+				let qualifier = self.qualifier.unwrap_or(Qualifier::Private);
 				write!(f, "knows {} {}", qualifier, pretty_constants(&self.constants))
 			}
 			Declaration::Generates => {

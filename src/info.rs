@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::borrow::Cow;
+
 use crate::primitive::primitive_has_single_output;
 use crate::types::*;
 use crate::util::color_output_support;
@@ -290,9 +292,9 @@ pub(crate) fn info_analysis(stage: i32) {
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn info_literal_number(n: usize, title_case: bool) -> String {
+pub(crate) fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
 	if n > 9 {
-		return format!("{}th", n);
+		return format!("{}th", n).into();
 	}
 	let words = if title_case {
 		&[
@@ -305,7 +307,7 @@ pub(crate) fn info_literal_number(n: usize, title_case: bool) -> String {
 			"tenth",
 		]
 	};
-	words[n].to_string()
+	Cow::Borrowed(words[n])
 }
 
 pub(crate) fn info_output_text(revealed: &Value) -> String {

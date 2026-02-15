@@ -40,7 +40,7 @@ pub(crate) fn construct_protocol_trace(
 		trace.slots.push(TraceSlot {
 			constant: c,
 			initial_value: builtin.clone(),
-			creator: principal_get_attacker_id(),
+			creator: ATTACKER_ID,
 			known_by,
 			declared_at,
 			phases: vec![current_phase],
@@ -137,7 +137,7 @@ fn construct_trace_render_knows(
 				return Err(VerifpalError::Sanity(format!(
 					"constant is known more than once and in different ways ({})",
 					c
-				)));
+				).into()));
 			}
 			trace.slots[idx]
 				.known_by
@@ -187,7 +187,7 @@ fn construct_trace_render_generates(
 			return Err(VerifpalError::Sanity(format!(
 				"generated constant already exists ({})",
 				c
-			)));
+			).into()));
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -218,7 +218,7 @@ fn construct_trace_render_assignment(
 	declared_at: i32,
 	expr: &Expression,
 ) -> VResult<()> {
-	let assigned = expr.assigned.as_ref().ok_or_else(|| VerifpalError::Sanity("missing assignment value".to_string()))?;
+	let assigned = expr.assigned.as_ref().ok_or_else(|| VerifpalError::Sanity("missing assignment value".into()))?;
 	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
@@ -226,7 +226,7 @@ fn construct_trace_render_assignment(
 	for c in &constants {
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
-			None => return Err(VerifpalError::Sanity(format!("constant does not exist ({})", c))),
+			None => return Err(VerifpalError::Sanity(format!("constant does not exist ({})", c).into())),
 		};
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
@@ -234,12 +234,12 @@ fn construct_trace_render_assignment(
 				"{} is using constant ({}) despite not knowing it",
 				principal.name,
 				c
-			)));
+			).into()));
 		}
 	}
 	for (output_idx, c) in expr.constants.iter().enumerate() {
 		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::Sanity(format!("constant assigned twice ({})", c)));
+			return Err(VerifpalError::Sanity(format!("constant assigned twice ({})", c).into()));
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -281,7 +281,7 @@ fn construct_trace_render_leaks(
 				return Err(VerifpalError::Sanity(format!(
 					"leaked constant does not exist ({})",
 					c
-				)))
+				).into()))
 			}
 		};
 		let known = trace.slots[idx].known_by_principal(principal.id);
@@ -290,10 +290,10 @@ fn construct_trace_render_leaks(
 				"{} leaks a constant that they do not know ({})",
 				principal.name,
 				c
-			)));
+			).into()));
 		}
 		trace.slots[idx].constant.leaked = true;
-		append_unique_int(&mut trace.slots[idx].phases, current_phase);
+		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
 }
@@ -312,7 +312,7 @@ fn construct_trace_render_message(
 					principal_get_name_from_id(message.sender),
 					principal_get_name_from_id(message.recipient),
 					c
-				)))
+				).into()))
 			}
 		};
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
@@ -322,19 +322,19 @@ fn construct_trace_render_message(
 				"{} is sending constant ({}) despite not knowing it",
 				principal_get_name_from_id(message.sender),
 				c
-			)));
+			).into()));
 		}
 		if recipient_knows {
 			return Err(VerifpalError::Sanity(format!(
 				"{} is receiving constant ({}) despite already knowing it",
 				principal_get_name_from_id(message.recipient),
 				c
-			)));
+			).into()));
 		}
 		trace.slots[idx]
 			.known_by
 			.push(HashMap::from([(message.recipient, message.sender)]));
-		append_unique_int(&mut trace.slots[idx].phases, current_phase);
+		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
 }
@@ -422,12 +422,12 @@ fn construct_principal_states_get_value_mutatability(
 		if c.id != msg_const.id {
 			continue;
 		}
-		append_unique_principal_enum(wire, message.recipient);
+		append_unique(wire, message.recipient);
 		if !*guard {
 			*guard = msg_const.guard && (is_recipient || is_creator);
 		}
 		if !msg_const.guard {
-			append_unique_principal_enum(mutatable_to, message.recipient);
+			append_unique(mutatable_to, message.recipient);
 		}
 	}
 }

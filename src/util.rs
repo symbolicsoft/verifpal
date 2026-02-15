@@ -3,25 +3,7 @@
 
 use crate::types::*;
 
-pub(crate) fn append_unique_string(vec: &mut Vec<String>, value: String) -> bool {
-	if !vec.contains(&value) {
-		vec.push(value);
-		true
-	} else {
-		false
-	}
-}
-
-pub(crate) fn append_unique_int(vec: &mut Vec<i32>, value: i32) -> bool {
-	if !vec.contains(&value) {
-		vec.push(value);
-		true
-	} else {
-		false
-	}
-}
-
-pub(crate) fn append_unique_principal_enum(vec: &mut Vec<PrincipalId>, value: PrincipalId) -> bool {
+pub(crate) fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) -> bool {
 	if !vec.contains(&value) {
 		vec.push(value);
 		true
@@ -35,7 +17,7 @@ pub(crate) fn min_int_in_slice(slice: &[i32]) -> VResult<i32> {
 		.iter()
 		.min()
 		.copied()
-		.ok_or_else(|| VerifpalError::Internal("slice has no integers".to_string()))
+		.ok_or_else(|| VerifpalError::Internal("slice has no integers".into()))
 }
 
 pub(crate) fn color_output_support() -> bool {

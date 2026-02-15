@@ -629,13 +629,13 @@ pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
 pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
 	CORE_SPECS
 		.get(&id)
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
 	PRIM_SPECS
 		.get(&id)
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
@@ -669,7 +669,7 @@ pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 		.find(|s| s.name == name)
 		.map(|s| s.id)
 		.or_else(|| PRIM_SPECS.values().find(|s| s.name == name).map(|s| s.id))
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".to_string()))
+		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {

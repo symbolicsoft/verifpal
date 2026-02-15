@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -8,10 +9,10 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) enum VerifpalError {
-	Parse(String),
-	Sanity(String),
-	Resolution(String),
-	Internal(String),
+	Parse(Cow<'static, str>),
+	Sanity(Cow<'static, str>),
+	Resolution(Cow<'static, str>),
+	Internal(Cow<'static, str>),
 }
 
 impl fmt::Display for VerifpalError {
@@ -29,7 +30,13 @@ impl std::error::Error for VerifpalError {}
 
 impl From<String> for VerifpalError {
 	fn from(s: String) -> Self {
-		VerifpalError::Internal(s)
+		VerifpalError::Internal(s.into())
+	}
+}
+
+impl From<&'static str> for VerifpalError {
+	fn from(s: &'static str) -> Self {
+		VerifpalError::Internal(s.into())
 	}
 }
 
@@ -44,6 +51,16 @@ pub(crate) enum Qualifier {
 	Public,
 	Private,
 	Password,
+}
+
+impl fmt::Display for Qualifier {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Qualifier::Public => f.write_str("public"),
+			Qualifier::Private => f.write_str("private"),
+			Qualifier::Password => f.write_str("password"),
+		}
+	}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -150,7 +167,7 @@ impl Value {
 			_ => Err(VerifpalError::Internal(format!(
 				"expected Constant, got {}",
 				self.variant_name()
-			))),
+			).into())),
 		}
 	}
 
@@ -160,7 +177,7 @@ impl Value {
 			_ => Err(VerifpalError::Internal(format!(
 				"expected Primitive, got {}",
 				self.variant_name()
-			))),
+			).into())),
 		}
 	}
 
@@ -170,7 +187,7 @@ impl Value {
 			_ => Err(VerifpalError::Internal(format!(
 				"expected Equation, got {}",
 				self.variant_name()
-			))),
+			).into())),
 		}
 	}
 
@@ -181,7 +198,7 @@ impl Value {
 			_ => Err(VerifpalError::Internal(format!(
 				"expected Primitive, got {}",
 				self.variant_name()
-			))),
+			).into())),
 		}
 	}
 
@@ -464,8 +481,8 @@ pub(crate) struct AttackerState {
 	pub mutation_records: Arc<Vec<MutationRecord>>,
 }
 
-impl AttackerState {
-	pub(crate) fn new() -> Self {
+impl Default for AttackerState {
+	fn default() -> Self {
 		AttackerState {
 			current_phase: 0,
 			exhausted: false,
@@ -474,6 +491,12 @@ impl AttackerState {
 			skeleton_hashes: Arc::new(HashSet::new()),
 			mutation_records: Arc::new(vec![]),
 		}
+	}
+}
+
+impl AttackerState {
+	pub(crate) fn new() -> Self {
+		Self::default()
 	}
 }
 

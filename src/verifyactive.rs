@@ -14,7 +14,7 @@ use crate::possible::{
 };
 use crate::pretty::pretty_values;
 use crate::primitive::*;
-use crate::principal::principal_get_attacker_id;
+use crate::principal::ATTACKER_ID;
 use crate::types::*;
 use crate::value::{
 	compute_slot_diffs, resolve_trace_values, value_g_nil,
@@ -158,7 +158,7 @@ fn verify_active_equation_bypass(
 	principal_states: &[PrincipalState],
 ) {
 	let g_nil = value_g_nil();
-	let attacker_id = principal_get_attacker_id();
+	let attacker_id = ATTACKER_ID;
 
 	for ps_base in principal_states {
 		if ctx.all_resolved() {
@@ -594,7 +594,7 @@ fn verify_active_mutate_principal_state(
 ) -> MutationResult {
 	let mut earliest_mutation = ps.meta.len();
 	let mut is_worthwhile_mutation = false;
-	let attacker_id = principal_get_attacker_id();
+	let attacker_id = ATTACKER_ID;
 
 	for (constant, combo) in mutation_map.constants.iter().zip(mutation_map.combination.iter()) {
 		let (resolved_assigned, slot_idx) = ps.resolve_constant(constant, true);

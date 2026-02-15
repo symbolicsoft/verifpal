@@ -195,7 +195,7 @@ fn resolve_ps_values_depth(
 	if let Value::Constant(c) = &resolved {
 		let slot_idx = match ps.index_of(c) {
 			Some(i) => i,
-			None => return Err(VerifpalError::Resolution("invalid index".to_string())),
+			None => return Err(VerifpalError::Resolution("invalid index".into())),
 		};
 
 		if slot_idx == root_idx {
@@ -418,7 +418,7 @@ pub(crate) fn value_constant_contains_fresh_values(
 ) -> VResult<bool> {
 	let idx = ps
 		.index_of(c)
-		.ok_or_else(|| VerifpalError::Resolution("invalid value".to_string()))?;
+		.ok_or_else(|| VerifpalError::Resolution("invalid value".into()))?;
 	let mut constants = Vec::new();
 	ps.values[idx].assigned.collect_constants(&mut constants);
 	Ok(constants

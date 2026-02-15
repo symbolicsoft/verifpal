@@ -43,21 +43,21 @@ fn open_browser(url: &str) -> VResult<()> {
 		std::process::Command::new("open")
 			.arg(url)
 			.spawn()
-			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
+			.map_err(|e| VerifpalError::Internal(e.to_string().into()))?;
 	}
 	#[cfg(target_os = "linux")]
 	{
 		std::process::Command::new("xdg-open")
 			.arg(url)
 			.spawn()
-			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
+			.map_err(|e| VerifpalError::Internal(e.to_string().into()))?;
 	}
 	#[cfg(target_os = "windows")]
 	{
 		std::process::Command::new("rundll32")
 			.args(["url.dll,FileProtocolHandler", url])
 			.spawn()
-			.map_err(|e| VerifpalError::Internal(e.to_string()))?;
+			.map_err(|e| VerifpalError::Internal(e.to_string().into()))?;
 	}
 	Ok(())
 }

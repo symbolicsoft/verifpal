@@ -163,7 +163,7 @@ fn query_authentication_get_pass_indices(
 	};
 	let c = km.slots[idx].constant.clone();
 	let sender = ps.values[idx].sender;
-	if sender == principal_get_attacker_id() {
+	if sender == ATTACKER_ID {
 		let v = &ps.values[idx].before_mutate;
 		if v.equivalent(&ps.values[idx].assigned, true) {
 			return (vec![], sender, c);

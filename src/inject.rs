@@ -252,7 +252,7 @@ fn inject_primitive(
 	let n = p.arguments.len();
 	let mut kinjectants: Vec<Vec<Value>> = vec![vec![]; n];
 	let mut uinjectants: Vec<Vec<Value>> = vec![vec![]; n];
-	for arg in 0..n {
+	for (arg, (kinj, uinj)) in kinjectants.iter_mut().zip(uinjectants.iter_mut()).enumerate() {
 		if ctx.all_resolved() {
 			return vec![];
 		}
@@ -267,21 +267,21 @@ fn inject_primitive(
 			if !inject_value_rules(&resolved, arg, p, stage) {
 				continue;
 			}
-			let is_new = push_unique_value(&mut uinjectants[arg], resolved.clone());
+			let is_new = push_unique_value(uinj, resolved.clone());
 			if let Value::Primitive(known_prim) = &resolved {
 				if stage >= STAGE_RECURSIVE_INJECTION
 					&& inject_depth as i32 <= stage - STAGE_RECURSIVE_INJECTION
 				{
 					let recursive_injectants = inject(ctx, known_prim, inject_depth + 1, ps, attacker, stage);
 					for injected in recursive_injectants {
-						if push_unique_value(&mut uinjectants[arg], injected.clone()) {
-							kinjectants[arg].push(injected);
+						if push_unique_value(uinj, injected.clone()) {
+							kinj.push(injected);
 						}
 					}
 				}
 			}
 			if is_new {
-				kinjectants[arg].push(resolved);
+				kinj.push(resolved);
 			}
 		}
 	}

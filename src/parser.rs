@@ -63,7 +63,7 @@ fn check_reserved(s: &str) -> VResult<()> {
 		|| lower.starts_with("attacker")
 		|| lower.starts_with("unnamed")
 	{
-		return Err(VerifpalError::Parse(format!("cannot use reserved keyword in name: {}", s)));
+		return Err(VerifpalError::Parse(format!("cannot use reserved keyword in name: {}", s).into()));
 	}
 	Ok(())
 }
@@ -170,7 +170,7 @@ impl<'a> Parser<'a> {
 			self.pos += bytes.len();
 			Ok(())
 		} else {
-			Err(VerifpalError::Parse(format!("expected '{}' at position {}", s, self.pos)))
+			Err(VerifpalError::Parse(format!("expected '{}' at position {}", s, self.pos).into()))
 		}
 	}
 
@@ -197,10 +197,10 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if self.pos == start {
-			return Err(VerifpalError::Parse(format!("expected identifier at position {}", self.pos)));
+			return Err(VerifpalError::Parse(format!("expected identifier at position {}", self.pos).into()));
 		}
 		let s = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in identifier".to_string()))?;
+			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in identifier".into()))?;
 		Ok(s.to_lowercase())
 	}
 
@@ -209,7 +209,7 @@ impl<'a> Parser<'a> {
 
 		// Parse attacker
 		if !self.try_expect("attacker") {
-			return Err(VerifpalError::Parse("no `attacker` block defined".to_string()));
+			return Err(VerifpalError::Parse("no `attacker` block defined".into()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -218,7 +218,7 @@ impl<'a> Parser<'a> {
 		let attacker_type = match attacker_str.as_str() {
 			"active" => AttackerKind::Active,
 			"passive" => AttackerKind::Passive,
-			_ => return Err(VerifpalError::Parse(format!("invalid attacker type: {}", attacker_str))),
+			_ => return Err(VerifpalError::Parse(format!("invalid attacker type: {}", attacker_str).into())),
 		};
 		self.skip_whitespace();
 		self.expect("]")?;
@@ -243,13 +243,13 @@ impl<'a> Parser<'a> {
 		}
 
 		if blocks.is_empty() {
-			return Err(VerifpalError::Parse("no principal or message blocks defined".to_string()));
+			return Err(VerifpalError::Parse("no principal or message blocks defined".into()));
 		}
 
 		// Parse queries
 		self.skip_whitespace_and_comments();
 		if !self.try_expect("queries") {
-			return Err(VerifpalError::Parse("no `queries` block defined".to_string()));
+			return Err(VerifpalError::Parse("no `queries` block defined".into()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -327,7 +327,7 @@ impl<'a> Parser<'a> {
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
 			// ok
 		} else {
-			return Err(VerifpalError::Parse(format!("expected '->' in message at position {}", self.pos)));
+			return Err(VerifpalError::Parse(format!("expected '->' in message at position {}", self.pos).into()));
 		}
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
@@ -388,7 +388,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::Parse("message constants are not defined".to_string()));
+			return Err(VerifpalError::Parse("message constants are not defined".into()));
 		}
 		Ok(constants)
 	}
@@ -429,7 +429,7 @@ impl<'a> Parser<'a> {
 			"private" => Qualifier::Private,
 			"public" => Qualifier::Public,
 			"password" => Qualifier::Password,
-			_ => return Err(VerifpalError::Parse(format!("invalid qualifier: {}", qualifier_str))),
+			_ => return Err(VerifpalError::Parse(format!("invalid qualifier: {}", qualifier_str).into())),
 		};
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
@@ -464,7 +464,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let value = self.parse_value()?;
 		if let Value::Constant(_) = &value {
-			return Err(VerifpalError::Parse("cannot assign value to value".to_string()));
+			return Err(VerifpalError::Parse("cannot assign value to value".into()));
 		}
 		Ok(Expression {
 			kind: Declaration::Assignment,
@@ -517,7 +517,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::Parse("expected at least one constant".to_string()));
+			return Err(VerifpalError::Parse("expected at least one constant".into()));
 		}
 		Ok(constants)
 	}
@@ -570,7 +570,7 @@ impl<'a> Parser<'a> {
 			return self.parse_constant_value();
 		}
 		self.pos = saved;
-		Err(VerifpalError::Parse(format!("expected value at position {}", self.pos)))
+		Err(VerifpalError::Parse(format!("expected value at position {}", self.pos).into()))
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
@@ -582,7 +582,7 @@ impl<'a> Parser<'a> {
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
-				return Err(VerifpalError::Parse("unterminated primitive".to_string()));
+				return Err(VerifpalError::Parse("unterminated primitive".into()));
 			}
 			let arg = self.parse_value()?;
 			arguments.push(arg);
@@ -629,10 +629,10 @@ impl<'a> Parser<'a> {
 			self.pos += 1;
 		}
 		let num_str = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in phase number".to_string()))?;
+			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in phase number".into()))?;
 		let number: i32 = num_str
 			.parse()
-			.map_err(|_| VerifpalError::Parse("invalid phase number".to_string()))?;
+			.map_err(|_| VerifpalError::Parse("invalid phase number".into()))?;
 		self.skip_whitespace();
 		self.expect("]")?;
 		self.skip_whitespace_and_comments();
@@ -653,7 +653,7 @@ impl<'a> Parser<'a> {
 		} else if rem.starts_with("equivalence?") {
 			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
-			Err(VerifpalError::Parse(format!("unknown query type at position {}", self.pos)))
+			Err(VerifpalError::Parse(format!("unknown query type at position {}", self.pos).into()))
 		}
 	}
 
@@ -682,7 +682,7 @@ impl<'a> Parser<'a> {
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.skip_whitespace();
 		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-			return Err(VerifpalError::Parse("expected '->' in authentication query".to_string()));
+			return Err(VerifpalError::Parse("expected '->' in authentication query".into()));
 		}
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
@@ -775,7 +775,7 @@ impl<'a> Parser<'a> {
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
 			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-				return Err(VerifpalError::Parse("expected '->' in query option".to_string()));
+				return Err(VerifpalError::Parse("expected '->' in query option".into()));
 			}
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
@@ -790,7 +790,7 @@ impl<'a> Parser<'a> {
 			let option_kind = match option_name.as_str() {
 				"precondition" => QueryOptionKind::Precondition,
 				_ => {
-					return Err(VerifpalError::Parse(format!("unknown query option: {}", option_name)));
+					return Err(VerifpalError::Parse(format!("unknown query option: {}", option_name).into()));
 				}
 			};
 			let sender_id = principal_names_map_add(&sender_name);
@@ -821,14 +821,14 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 		.to_string();
 
 	if file_name.len() > 64 {
-		return Err(VerifpalError::Parse("model file name must be 64 characters or less".to_string()));
+		return Err(VerifpalError::Parse("model file name must be 64 characters or less".into()));
 	}
 	if !file_name.ends_with(".vp") {
-		return Err(VerifpalError::Parse("model file name must have a '.vp' extension".to_string()));
+		return Err(VerifpalError::Parse("model file name must have a '.vp' extension".into()));
 	}
 
 	let content =
-		std::fs::read_to_string(file_path).map_err(|e| VerifpalError::Parse(format!("failed to read file: {}", e)))?;
+		std::fs::read_to_string(file_path).map_err(|e| VerifpalError::Parse(format!("failed to read file: {}", e).into()))?;
 
 	parse_string(&file_name, &content)
 }
