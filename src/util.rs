@@ -3,35 +3,36 @@
 
 use crate::types::*;
 
-pub(crate) fn append_unique_string(a: &mut Vec<String>, x: String) -> bool {
-	if !a.iter().any(|n| n == &x) {
-		a.push(x);
+pub(crate) fn append_unique_string(vec: &mut Vec<String>, value: String) -> bool {
+	if !vec.contains(&value) {
+		vec.push(value);
 		true
 	} else {
 		false
 	}
 }
 
-pub(crate) fn append_unique_int(a: &mut Vec<i32>, x: i32) -> bool {
-	if !a.contains(&x) {
-		a.push(x);
+pub(crate) fn append_unique_int(vec: &mut Vec<i32>, value: i32) -> bool {
+	if !vec.contains(&value) {
+		vec.push(value);
 		true
 	} else {
 		false
 	}
 }
 
-pub(crate) fn append_unique_principal_enum(a: &mut Vec<PrincipalId>, x: PrincipalId) -> bool {
-	if !a.contains(&x) {
-		a.push(x);
+pub(crate) fn append_unique_principal_enum(vec: &mut Vec<PrincipalId>, value: PrincipalId) -> bool {
+	if !vec.contains(&value) {
+		vec.push(value);
 		true
 	} else {
 		false
 	}
 }
 
-pub(crate) fn min_int_in_slice(v: &[i32]) -> VResult<i32> {
-	v.iter()
+pub(crate) fn min_int_in_slice(slice: &[i32]) -> VResult<i32> {
+	slice
+		.iter()
 		.min()
 		.copied()
 		.ok_or_else(|| VerifpalError::Internal("slice has no integers".to_string()))

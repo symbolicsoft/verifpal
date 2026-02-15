@@ -148,15 +148,17 @@ impl fmt::Display for Expression {
 	}
 }
 
-pub(crate) fn pretty_constants(c: &[Constant]) -> String {
-	c.iter()
+pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
+	constants
+		.iter()
 		.map(|c| c.to_string())
 		.collect::<Vec<_>>()
 		.join(", ")
 }
 
-pub(crate) fn pretty_values(a: &[Value]) -> String {
-	a.iter()
+pub(crate) fn pretty_values(values: &[Value]) -> String {
+	values
+		.iter()
 		.map(|v| v.to_string())
 		.collect::<Vec<_>>()
 		.join(", ")
@@ -211,7 +213,7 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 		1 => spec_arity[0].to_string(),
 		_ => {
 			let (init, last) = spec_arity.split_at(spec_arity.len() - 1);
-			let init_str: Vec<String> = init.iter().map(|a| a.to_string()).collect();
+			let init_str: Vec<String> = init.iter().map(|n| n.to_string()).collect();
 			format!("{}, or {}", init_str.join(", "), last[0])
 		}
 	}

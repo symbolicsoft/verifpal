@@ -22,108 +22,108 @@ const MAX_RESOLVE_DEPTH: usize = 64;
 // ---------------------------------------------------------------------------
 
 pub(crate) fn resolve_trace_values(
-	a: &Value,
+	value: &Value,
 	trace: &ProtocolTrace,
 ) -> (Value, Vec<Value>) {
-	let mut v: Vec<Value> = Vec::new();
-	let resolved = resolve_trace_value(a, trace, &mut v, 0);
-	(resolved, v)
+	let mut visited: Vec<Value> = Vec::new();
+	let resolved = resolve_trace_value(value, trace, &mut visited, 0);
+	(resolved, visited)
 }
 
-fn resolve_trace_value(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
+fn resolve_trace_value(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
 	if depth >= MAX_RESOLVE_DEPTH {
-		return a.clone();
+		return value.clone();
 	}
-	let resolved = match a {
+	let resolved = match value {
 		Value::Constant(c) => {
-			v.push(a.clone());
+			visited.push(value.clone());
 			match trace.index_of(c) {
 				Some(idx) => trace.slots[idx].initial_value.clone(),
-				None => a.clone(),
+				None => value.clone(),
 			}
 		}
-		_ => a.clone(),
+		_ => value.clone(),
 	};
 	match &resolved {
 		Value::Constant(_) => {
-			push_unique_value(v, resolved.clone());
+			push_unique_value(visited, resolved.clone());
 			resolved
 		}
-		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, v, depth + 1),
-		Value::Equation(_) => resolve_trace_equation(&resolved, trace, v, depth + 1),
+		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, visited, depth + 1),
+		Value::Equation(_) => resolve_trace_equation(&resolved, trace, visited, depth + 1),
 	}
 }
 
-fn resolve_trace_primitive(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
-	let p = match a.as_primitive() {
+fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
+	let prim = match value.as_primitive() {
 		Some(p) => p,
-		None => return a.clone(),
+		None => return value.clone(),
 	};
 	if depth >= MAX_RESOLVE_DEPTH {
-		return a.clone();
+		return value.clone();
 	}
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
-	for (i, arg) in p.arguments.iter().enumerate() {
-		let s = resolve_trace_value(arg, trace, v, depth);
-		if !s.equivalent(arg, true) {
-			let args = new_args.get_or_insert_with(|| p.arguments.clone());
-			args[i] = s;
+	for (i, arg) in prim.arguments.iter().enumerate() {
+		let resolved = resolve_trace_value(arg, trace, visited, depth);
+		if !resolved.equivalent(arg, true) {
+			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
+			args[i] = resolved;
 		}
 	}
 	if let Some(args) = new_args {
-		Value::Primitive(Arc::new(p.with_arguments(args)))
+		Value::Primitive(Arc::new(prim.with_arguments(args)))
 	} else {
-		a.clone()
+		value.clone()
 	}
 }
 
-fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, depth: usize) -> Value {
-	let e = match a.as_equation() {
+fn resolve_trace_equation(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
+	let eq = match value.as_equation() {
 		Some(e) => e,
-		None => return a.clone(),
+		None => return value.clone(),
 	};
 	if depth >= MAX_RESOLVE_DEPTH {
-		return a.clone();
+		return value.clone();
 	}
-	let mut r_eq = Equation { values: Vec::new() };
-	let mut aa: Vec<Value> = Vec::new();
-	for ev in &e.values {
-		if let Value::Constant(c) = ev {
+	let mut result_eq = Equation { values: Vec::new() };
+	let mut resolved_elements: Vec<Value> = Vec::new();
+	for elem in &eq.values {
+		if let Value::Constant(c) = elem {
 			if let Some(idx) = trace.index_of(c) {
-				aa.push(trace.slots[idx].initial_value.clone());
+				resolved_elements.push(trace.slots[idx].initial_value.clone());
 			}
-			push_unique_value(v, ev.clone());
+			push_unique_value(visited, elem.clone());
 		}
 	}
-	for (aai, item) in aa.iter().enumerate() {
+	for (i, item) in resolved_elements.iter().enumerate() {
 		match item {
 			Value::Constant(_) => {
-				r_eq.values.push(item.clone());
-				push_unique_value(v, item.clone());
+				result_eq.values.push(item.clone());
+				push_unique_value(visited, item.clone());
 			}
 			Value::Primitive(_) => {
-				let aaa = resolve_trace_primitive(item, trace, v, depth);
-				r_eq.values.push(aaa);
+				let resolved = resolve_trace_primitive(item, trace, visited, depth);
+				result_eq.values.push(resolved);
 			}
 			Value::Equation(_) => {
-				let aaa = resolve_trace_equation(item, trace, v, depth);
-				if let Some(inner) = aaa.as_equation() {
-					if aai == 0 {
-						r_eq.values = inner.values.clone();
+				let resolved = resolve_trace_equation(item, trace, visited, depth);
+				if let Some(inner) = resolved.as_equation() {
+					if i == 0 {
+						result_eq.values = inner.values.clone();
 					} else {
-						r_eq.values.push(aaa.clone());
+						result_eq.values.push(resolved.clone());
 						if inner.values.len() > 1 {
-							r_eq.values.extend(inner.values[1..].iter().cloned());
+							result_eq.values.extend(inner.values[1..].iter().cloned());
 						}
 					}
 				} else {
-					r_eq.values.push(aaa);
+					result_eq.values.push(resolved);
 				}
 			}
 		}
 	}
-	Value::Equation(Arc::new(r_eq))
+	Value::Equation(Arc::new(result_eq))
 }
 
 // ---------------------------------------------------------------------------
@@ -131,19 +131,19 @@ fn resolve_trace_equation(a: &Value, trace: &ProtocolTrace, v: &mut Vec<Value>, 
 // ---------------------------------------------------------------------------
 
 pub(crate) fn resolve_ps_values(
-	a: &Value,
+	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	force_before_mutate: bool,
 ) -> VResult<Value> {
 	resolve_ps_values_depth(
-		a,
+		value,
 		root_value,
 		root_index,
 		ps,
-		as_,
+		attacker,
 		force_before_mutate,
 		0,
 	)
@@ -175,24 +175,24 @@ pub(crate) fn resolve_ps_values(
 ///    `mutatable_to` list includes the root's creator, meaning the attacker
 ///    could have replaced it before the root was computed.
 fn resolve_ps_values_depth(
-	a: &Value,
+	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	force_before_mutate: bool,
 	depth: usize,
 ) -> VResult<Value> {
 	if depth >= MAX_RESOLVE_DEPTH {
-		return Ok(a.clone());
+		return Ok(value.clone());
 	}
 
-	let mut a_resolved = a.clone();
+	let mut resolved = value.clone();
 	let mut root_idx = root_index;
 	let mut root_val = root_value.clone();
 	let mut fbm = force_before_mutate;
 
-	if let Value::Constant(c) = &a_resolved {
+	if let Value::Constant(c) = &resolved {
 		let slot_idx = match ps.index_of(c) {
 			Some(i) => i,
 			None => return Err(VerifpalError::Resolution("invalid index".to_string())),
@@ -204,11 +204,11 @@ fn resolve_ps_values_depth(
 			if !fbm {
 				fbm = ps.should_use_before_mutate(slot_idx);
 			}
-			a_resolved = if fbm {
+			resolved = if fbm {
 				ps.values[slot_idx].before_mutate.clone()
 			} else {
-				let (resolved, _) = ps.resolve_constant(c, true);
-				resolved
+				let (val, _) = ps.resolve_constant(c, true);
+				val
 			};
 		} else {
 			// Case 2: resolving a nested constant (argument of the root).
@@ -231,33 +231,33 @@ fn resolve_ps_values_depth(
 				ps.should_use_before_mutate(slot_idx)
 			};
 
-			a_resolved = if fbm {
+			resolved = if fbm {
 				ps.values[slot_idx].before_mutate.clone()
 			} else {
 				ps.values[slot_idx].assigned.clone()
 			};
 			root_idx = slot_idx;
-			root_val = a_resolved.clone();
+			root_val = resolved.clone();
 		}
 	}
 
-	match &a_resolved {
-		Value::Constant(_) => Ok(a_resolved),
+	match &resolved {
+		Value::Constant(_) => Ok(resolved),
 		Value::Primitive(_) => resolve_ps_primitive_depth(
-			&a_resolved,
+			&resolved,
 			&root_val,
 			root_idx,
 			ps,
-			as_,
+			attacker,
 			fbm,
 			depth + 1,
 		),
 		Value::Equation(_) => resolve_ps_equation_depth(
-			&a_resolved,
+			&resolved,
 			&root_val,
 			root_idx,
 			ps,
-			as_,
+			attacker,
 			fbm,
 			depth + 1,
 		),
@@ -265,99 +265,95 @@ fn resolve_ps_values_depth(
 }
 
 fn resolve_ps_primitive_depth(
-	a: &Value,
+	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	force_before_mutate: bool,
 	depth: usize,
 ) -> VResult<Value> {
-	let p = a.try_as_primitive()?;
-	let mut fbm = force_before_mutate;
-	if ps.values[root_index].creator == ps.id {
-		fbm = false;
-	}
+	let prim = value.try_as_primitive()?;
+	let fbm = if ps.values[root_index].creator == ps.id {
+		false
+	} else {
+		force_before_mutate
+	};
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
-	for (i, arg) in p.arguments.iter().enumerate() {
-		let s = resolve_ps_values_depth(
-			arg, root_value, root_index, ps, as_, fbm, depth,
+	for (i, arg) in prim.arguments.iter().enumerate() {
+		let resolved = resolve_ps_values_depth(
+			arg, root_value, root_index, ps, attacker, fbm, depth,
 		)?;
-		if !s.equivalent(arg, true) {
-			let args = new_args.get_or_insert_with(|| p.arguments.clone());
-			args[i] = s;
+		if !resolved.equivalent(arg, true) {
+			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
+			args[i] = resolved;
 		}
 	}
 	if let Some(args) = new_args {
-		Ok(Value::Primitive(Arc::new(p.with_arguments(args))))
+		Ok(Value::Primitive(Arc::new(prim.with_arguments(args))))
 	} else {
-		Ok(a.clone())
+		Ok(value.clone())
 	}
 }
 
 fn resolve_ps_equation_depth(
-	a: &Value,
+	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	force_before_mutate: bool,
 	depth: usize,
 ) -> VResult<Value> {
-	let e = a.try_as_equation()?;
-	let mut r_eq = Equation { values: Vec::new() };
-	let mut aa: Vec<Value> = e.values.clone();
-	let mut fbm = force_before_mutate;
-	if ps.values[root_index].creator == ps.id {
-		fbm = false;
-	}
-	for item in &mut aa {
-		let new_val = match &*item {
-			Value::Constant(c) => {
-				let (resolved, i) = ps.resolve_constant(c, true);
-				Some(if fbm {
-					i.map_or(resolved, |idx| ps.values[idx].before_mutate.clone())
-				} else {
-					resolved
-				})
-			}
-			_ => None,
-		};
-		if let Some(v) = new_val {
-			*item = v;
+	let eq = value.try_as_equation()?;
+	let mut result_eq = Equation { values: Vec::new() };
+	let mut elements: Vec<Value> = eq.values.clone();
+	let fbm = if ps.values[root_index].creator == ps.id {
+		false
+	} else {
+		force_before_mutate
+	};
+	for item in &mut elements {
+		if let Value::Constant(c) = &*item {
+			let (resolved, slot_idx) = ps.resolve_constant(c, true);
+			*item = if fbm {
+				slot_idx.map_or(resolved, |idx| ps.values[idx].before_mutate.clone())
+			} else {
+				resolved
+			};
 		}
 	}
-	for (aai, item) in aa.iter().enumerate() {
+	for (i, item) in elements.iter().enumerate() {
 		match item {
 			Value::Constant(_) => {
-				r_eq.values.push(item.clone());
+				result_eq.values.push(item.clone());
 			}
 			Value::Primitive(_) => {
-				let aaa = resolve_ps_primitive_depth(
-					item, root_value, root_index, ps, as_, fbm, depth,
+				let resolved = resolve_ps_primitive_depth(
+					item, root_value, root_index, ps, attacker, fbm, depth,
 				)?;
-				r_eq.values.push(aaa);
+				result_eq.values.push(resolved);
 			}
 			Value::Equation(_) => {
-				let aaa = resolve_ps_equation_depth(
-					item, root_value, root_index, ps, as_, fbm, depth,
+				let resolved = resolve_ps_equation_depth(
+					item, root_value, root_index, ps, attacker, fbm, depth,
 				)?;
-				if aai == 0 {
-					r_eq.values = aaa
+				if i == 0 {
+					result_eq.values = resolved
 						.try_as_equation()?
 						.values
 						.clone();
 				} else {
-					let inner = aaa.try_as_equation()?;
+					let inner = resolved.try_as_equation()?;
 					if inner.values.len() > 1 {
-						r_eq.values.extend(inner.values[1..].iter().cloned());
+						result_eq.values.extend(inner.values[1..].iter().cloned());
 					}
 				}
 			}
 		}
 	}
-	Ok(Value::Equation(Arc::new(r_eq)))
+	Ok(Value::Equation(Arc::new(result_eq)))
 }
 
 // ---------------------------------------------------------------------------
@@ -420,19 +416,12 @@ pub(crate) fn value_constant_contains_fresh_values(
 	c: &Constant,
 	ps: &PrincipalState,
 ) -> VResult<bool> {
-	let i = ps.index_of(c);
-	let idx = match i {
-		Some(idx) => idx,
-		None => return Err(VerifpalError::Resolution("invalid value".to_string())),
-	};
-	let mut cc = Vec::new();
-	ps.values[idx].assigned.collect_constants(&mut cc);
-	for item in &cc {
-		if let Some(ii) = ps.index_of(item) {
-			if ps.meta[ii].constant.fresh {
-				return Ok(true);
-			}
-		}
-	}
-	Ok(false)
+	let idx = ps
+		.index_of(c)
+		.ok_or_else(|| VerifpalError::Resolution("invalid value".to_string()))?;
+	let mut constants = Vec::new();
+	ps.values[idx].assigned.collect_constants(&mut constants);
+	Ok(constants
+		.iter()
+		.any(|inner| ps.index_of(inner).is_some_and(|i| ps.meta[i].constant.fresh)))
 }

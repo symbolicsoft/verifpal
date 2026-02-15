@@ -10,7 +10,6 @@ use crate::resolution::constant_used_by_principal;
 use crate::rewrite::{perform_equation_rewrite, perform_primitive_rewrite};
 use crate::types::*;
 
-// Re-exports for backwards compatibility (many modules use `use crate::value::*`)
 pub(crate) use crate::equivalence::find_constant_in_trace_primitive;
 pub(crate) use crate::resolution::{
 	resolve_ps_values, resolve_trace_values, value_constant_contains_fresh_values,
@@ -110,22 +109,22 @@ pub(crate) fn value_names_map_add(name: &str) -> ValueId {
 // Search in value slices
 // ---------------------------------------------------------------------------
 
-pub(crate) fn find_equivalent(v: &Value, a: &[Value]) -> Option<usize> {
-	a.iter().position(|av| v.equivalent(av, true))
+pub(crate) fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
+	values.iter().position(|existing| v.equivalent(existing, true))
 }
 
-/// Push `v` into `a` if no equivalent value already exists. Returns true if pushed.
-pub(crate) fn push_unique_value(a: &mut Vec<Value>, v: Value) -> bool {
-	if find_equivalent(&v, a).is_none() {
-		a.push(v);
+/// Push `v` into `values` if no equivalent value already exists. Returns true if pushed.
+pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
+	if find_equivalent(&v, values).is_none() {
+		values.push(v);
 		true
 	} else {
 		false
 	}
 }
 
-pub(crate) fn find_equivalent_constant(c: &Constant, a: &[Constant]) -> Option<usize> {
-	a.iter().position(|ac| c.equivalent(ac))
+pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<usize> {
+	constants.iter().position(|existing| c.equivalent(existing))
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +254,7 @@ impl PrincipalState {
 		}
 		failures
 	}
-	pub(crate) fn resolve_all_values(&mut self, as_: &AttackerState) -> VResult<()> {
+	pub(crate) fn resolve_all_values(&mut self, attacker: &AttackerState) -> VResult<()> {
 		let n = self.values.len();
 		let mut new_assigned = Vec::with_capacity(n);
 		let mut new_before_rewrite = Vec::with_capacity(n);
@@ -268,7 +267,7 @@ impl PrincipalState {
 				&ps_ref.values[i].assigned,
 				i,
 				ps_ref,
-				as_,
+				attacker,
 				fbm,
 			)?);
 			new_before_rewrite.push(resolve_ps_values(
@@ -276,7 +275,7 @@ impl PrincipalState {
 				&ps_ref.values[i].before_rewrite,
 				i,
 				ps_ref,
-				as_,
+				attacker,
 				fbm,
 			)?);
 		}

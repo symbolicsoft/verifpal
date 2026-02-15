@@ -42,18 +42,18 @@ pub(crate) struct VerifyContext {
 }
 
 /// Add a value to locked attacker state if not already known.
-fn attacker_state_absorb(state: &mut AttackerState, v: &Value, record: &MutationRecord) {
-	if state.knows(v).is_some() {
+fn attacker_state_absorb(state: &mut AttackerState, value: &Value, record: &MutationRecord) {
+	if state.knows(value).is_some() {
 		return;
 	}
 	let idx = state.known.len();
-	Arc::make_mut(&mut state.known).push(v.clone());
-	let h = v.hash_value();
+	Arc::make_mut(&mut state.known).push(value.clone());
+	let h = value.hash_value();
 	Arc::make_mut(&mut state.known_map)
 		.entry(h)
 		.or_default()
 		.push(idx);
-	if let Value::Primitive(p) = v {
+	if let Value::Primitive(p) = value {
 		Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
 	}
 	Arc::make_mut(&mut state.mutation_records).push(record.clone());
@@ -179,8 +179,8 @@ impl VerifyContext {
 			if earliest > phase {
 				continue;
 			}
-			let cc = Value::Constant(sm.constant.clone());
-			attacker_state_absorb(&mut state, &cc, &record);
+			let constant_value = Value::Constant(sm.constant.clone());
+			attacker_state_absorb(&mut state, &constant_value, &record);
 			attacker_state_absorb(&mut state, &sv.assigned, &record);
 		}
 

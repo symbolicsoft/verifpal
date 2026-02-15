@@ -18,7 +18,7 @@ pub(crate) fn mutation_map_init(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	stage: i32,
 ) -> VResult<MutationMap> {
 	let mut mm = MutationMap {
@@ -36,7 +36,7 @@ pub(crate) fn mutation_map_init(
 		InfoLevel::Analysis,
 		false,
 	);
-	for v in as_.known.iter() {
+	for v in attacker.known.iter() {
 		let c = match v {
 			Value::Constant(c) => c,
 			_ => continue,
@@ -46,10 +46,10 @@ pub(crate) fn mutation_map_init(
 			Some(i) => i,
 			None => continue,
 		};
-		if mutation_map_skip_value(v, idx, km, ps, as_) {
+		if mutation_map_skip_value(v, idx, km, ps, attacker) {
 			continue;
 		}
-		let r = mutation_map_replace_value(ctx, &a, idx, stage, ps, as_)?;
+		let r = mutation_map_replace_value(ctx, &a, idx, stage, ps, attacker)?;
 		if r.is_empty() {
 			continue;
 		}
@@ -80,7 +80,7 @@ fn mutation_map_skip_value(
 	idx: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> bool {
 	if ps.meta[idx].guard {
 		if !ps.meta[idx].mutatable_to.contains(&ps.values[idx].sender) {
@@ -89,7 +89,7 @@ fn mutation_map_skip_value(
 	} else if ps.values[idx].creator == ps.id {
 		return true;
 	}
-	if !ps.meta[idx].phase.contains(&as_.current_phase) {
+	if !ps.meta[idx].phase.contains(&attacker.current_phase) {
 		return true;
 	}
 	if let Value::Constant(c) = v {
@@ -106,14 +106,14 @@ fn mutation_map_replace_value(
 	root_index: usize,
 	stage: i32,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VResult<Vec<Value>> {
 	let a =
-		resolve_ps_values(a, a, root_index, ps, as_, false)?;
+		resolve_ps_values(a, a, root_index, ps, attacker, false)?;
 	match &a {
-		Value::Constant(_) => Ok(mutation_map_replace_constant(&a, stage, ps, as_)),
-		Value::Primitive(_) => Ok(mutation_map_replace_primitive(ctx, &a, stage, ps, as_)),
-		Value::Equation(_) => Ok(mutation_map_replace_equation(&a, stage, as_)),
+		Value::Constant(_) => Ok(mutation_map_replace_constant(&a, stage, ps, attacker)),
+		Value::Primitive(_) => Ok(mutation_map_replace_primitive(ctx, &a, stage, ps, attacker)),
+		Value::Equation(_) => Ok(mutation_map_replace_equation(&a, stage, attacker)),
 	}
 }
 
@@ -121,7 +121,7 @@ fn mutation_map_replace_constant(
 	a: &Value,
 	stage: i32,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> Vec<Value> {
 	let mut mutations = vec![];
 	if let Value::Constant(c) = a {
@@ -133,7 +133,7 @@ fn mutation_map_replace_constant(
 	if stage <= STAGE_MUTATION_EXPANSION {
 		return mutations;
 	}
-	for v in as_.known.iter() {
+	for v in attacker.known.iter() {
 		if let Value::Constant(vc) = v {
 			if vc.is_g_or_nil() {
 				continue;
@@ -152,14 +152,14 @@ fn mutation_map_replace_primitive(
 	a: &Value,
 	stage: i32,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> Vec<Value> {
 	let mut mutations = vec![];
 	let a_prim = match a {
 		Value::Primitive(p) => p,
 		_ => return mutations,
 	};
-	for v in as_.known.iter() {
+	for v in attacker.known.iter() {
 		match v {
 			Value::Constant(vc) => {
 				if vc.is_g_or_nil() {
@@ -179,16 +179,16 @@ fn mutation_map_replace_primitive(
 			_ => {}
 		}
 	}
-	let injectants = inject(ctx, a_prim, 0, ps, as_, stage);
+	let injectants = inject(ctx, a_prim, 0, ps, attacker, stage);
 	for inj in injectants {
 		push_unique_value(&mut mutations, inj);
 	}
 	mutations
 }
 
-fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> Vec<Value> {
+fn mutation_map_replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<Value> {
 	let mut mutations = vec![];
-	if let Value::Equation(e) = a {
+	if let Value::Equation(e) = value {
 		match e.values.len() {
 			1 => mutations.push(value_g()),
 			2 => mutations.push(value_g_nil()),
@@ -198,7 +198,7 @@ fn mutation_map_replace_equation(a: &Value, stage: i32, as_: &AttackerState) -> 
 		if stage <= STAGE_MUTATION_EXPANSION {
 			return mutations;
 		}
-		for v in as_.known.iter() {
+		for v in attacker.known.iter() {
 			if let Value::Equation(ve) = v {
 				if ve.values.len() == e.values.len()
 					&& find_equivalent(v, &mutations).is_none()
@@ -296,10 +296,10 @@ impl MutationMap {
 		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
-		as_: &AttackerState,
+		attacker: &AttackerState,
 		stage: i32,
 	) -> VResult<MutationMap> {
-		mutation_map_init(ctx, km, ps, as_, stage)
+		mutation_map_init(ctx, km, ps, attacker, stage)
 	}
 	pub(crate) fn next(self) -> MutationMap {
 		mutation_map_next(self)

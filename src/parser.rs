@@ -69,11 +69,19 @@ fn check_reserved(s: &str) -> VResult<()> {
 }
 
 fn title_case(s: &str) -> String {
+	let mut result = String::with_capacity(s.len());
 	let mut chars = s.chars();
-	match chars.next() {
-		None => String::new(),
-		Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+	if let Some(first) = chars.next() {
+		for c in first.to_uppercase() {
+			result.push(c);
+		}
+		for c in chars {
+			for lc in c.to_lowercase() {
+				result.push(lc);
+			}
+		}
 	}
+	result
 }
 
 /// Check if `s` starts with `keyword` followed by a non-identifier character

@@ -16,22 +16,22 @@ pub(crate) fn query_start(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 ) -> VResult<()> {
-	let as_ = ctx.attacker_snapshot();
+	let attacker = ctx.attacker_snapshot();
 	match query.kind {
 		QueryKind::Confidentiality => {
-			query_confidentiality(ctx, query, query_index, km, ps, &as_);
+			query_confidentiality(ctx, query, query_index, km, ps, &attacker);
 		}
 		QueryKind::Authentication => {
-			query_authentication(ctx, query, query_index, km, ps, &as_);
+			query_authentication(ctx, query, query_index, km, ps, &attacker);
 		}
 		QueryKind::Freshness => {
-			query_freshness(ctx, query, query_index, km, ps, &as_)?;
+			query_freshness(ctx, query, query_index, km, ps, &attacker)?;
 		}
 		QueryKind::Unlinkability => {
-			query_unlinkability(ctx, query, query_index, km, ps, &as_)?;
+			query_unlinkability(ctx, query, query_index, km, ps, &attacker)?;
 		}
 		QueryKind::Equivalence => {
-			query_equivalence(ctx, query, query_index, km, ps, &as_);
+			query_equivalence(ctx, query, query_index, km, ps, &attacker);
 		}
 	}
 	Ok(())
@@ -54,27 +54,27 @@ fn query_confidentiality(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VerifyResult {
 	let mut result = VerifyResult::new(query, query_index);
-	let i = match ps.index_of(&query.constants[0]) {
+	let slot_idx = match ps.index_of(&query.constants[0]) {
 		Some(idx) => idx,
 		None => return result,
 	};
-	let resolved_value = &ps.values[i].assigned;
-	let ii = match as_.knows(resolved_value) {
+	let resolved_value = &ps.values[slot_idx].assigned;
+	let attacker_idx = match attacker.knows(resolved_value) {
 		Some(idx) => idx,
 		None => return result,
 	};
 	let mutated_info =
-		info_query_mutated_values(km, &as_.mutation_records[ii].diffs, as_, resolved_value, 0);
+		info_query_mutated_values(km, &attacker.mutation_records[attacker_idx].diffs, attacker, resolved_value, 0);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
 			query.constants[0],
-			as_.known[ii],
+			attacker.known[attacker_idx],
 		),
 		&result.options,
 	);
@@ -89,7 +89,7 @@ fn query_authentication(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VerifyResult {
 	let mut result = VerifyResult::new(query, query_index);
 	if query.message.recipient != ps.id {
@@ -101,12 +101,12 @@ fn query_authentication(
 			continue;
 		}
 		result.resolved = true;
-		let a = &ps.values[index].assigned;
-		let b = &ps.values[index].before_rewrite;
+		let assigned = &ps.values[index].assigned;
+		let before = &ps.values[index].before_rewrite;
 		let diffs = compute_slot_diffs(ps, km);
-		let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, a, 0);
+		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, assigned, 0);
 		result = query_precondition(result, ps);
-		return query_authentication_handle_pass(ctx, result, &c, b, &mutated_info, sender, ps);
+		return query_authentication_handle_pass(ctx, result, &c, before, &mutated_info, sender, ps);
 	}
 	result
 }
@@ -131,20 +131,20 @@ fn query_find_constant_usage_indices(
 		if !find_constant_in_trace_primitive(c, &slot.initial_value, km) {
 			continue;
 		}
-		let (_, ii) = ps.resolve_constant(&slot.constant, true);
-		let ii_idx = ii?;
-		let b = &ps.values[ii_idx].before_rewrite;
-		let b_prim = match b {
+		let (_, slot_idx) = ps.resolve_constant(&slot.constant, true);
+		let slot_idx = slot_idx?;
+		let before = &ps.values[slot_idx].before_rewrite;
+		let before_prim = match before {
 			Value::Primitive(p) => p,
 			_ => continue,
 		};
-		if !primitive_has_rewrite_rule(b_prim.id) {
-			indices.push(ii_idx);
+		if !primitive_has_rewrite_rule(before_prim.id) {
+			indices.push(slot_idx);
 			continue;
 		}
-		let (pass, _) = can_rewrite(b_prim, ps, 0);
-		if pass || !b_prim.instance_check {
-			indices.push(ii_idx);
+		let (pass, _) = can_rewrite(before_prim, ps, 0);
+		if pass || !before_prim.instance_check {
+			indices.push(slot_idx);
 		}
 	}
 	Some(indices)
@@ -155,7 +155,7 @@ fn query_authentication_get_pass_indices(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 ) -> (Vec<usize>, PrincipalId, Constant) {
-	let empty_c = Constant::empty();
+	let empty_c = Constant::default();
 	let (_, idx) = ps.resolve_constant(&query.message.constants[0], true);
 	let idx = match idx {
 		Some(i) => i,
@@ -182,13 +182,13 @@ fn query_authentication_handle_pass(
 	sender: PrincipalId,
 	ps: &PrincipalState,
 ) -> VerifyResult {
-	let (cc, _) = ps.resolve_constant(c, true);
+	let (resolved, _) = ps.resolve_constant(c, true);
 	result.summary = info_verify_result_summary(
 		mutated_info,
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
-			cc,
+			resolved,
 			principal_get_name_from_id(sender),
 			principal_get_name_from_id(result.query.message.sender),
 			b,
@@ -206,7 +206,7 @@ fn query_freshness(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let freshness_found = value_constant_contains_fresh_values(&query.constants[0], ps)?;
@@ -222,7 +222,7 @@ fn query_freshness(
 	}
 	let (resolved, _) = ps.resolve_constant(&query.constants[0], true);
 	let diffs = compute_slot_diffs(ps, km);
-	let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &resolved, 0);
+	let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &resolved, 0);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
@@ -246,7 +246,7 @@ fn query_unlinkability(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let mut no_freshness = Vec::new();
@@ -259,7 +259,7 @@ fn query_unlinkability(
 	if !no_freshness.is_empty() {
 		let (resolved, _) = ps.resolve_constant(&no_freshness[0], true);
 		let diffs = compute_slot_diffs(ps, km);
-		let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &resolved, 0);
+		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &resolved, 0);
 		result.resolved = true;
 		result.summary = info_verify_result_summary(&mutated_info, &format!(
             "{} ({}) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
@@ -269,23 +269,23 @@ fn query_unlinkability(
 		emit_query_result(ctx, &result);
 		return Ok(result);
 	}
-	let assigneds: Vec<Value> = query
+	let resolved_values: Vec<Value> = query
 		.constants
 		.iter()
 		.map(|c| ps.resolve_constant(c, true).0)
 		.collect();
-	for (i, ai) in assigneds.iter().enumerate() {
-		for (ii, aii) in assigneds.iter().enumerate() {
-			if i == ii {
+	for (i, val_a) in resolved_values.iter().enumerate() {
+		for (j, val_b) in resolved_values.iter().enumerate() {
+			if i == j {
 				continue;
 			}
-			if !ai.equivalent(aii, false) {
+			if !val_a.equivalent(val_b, false) {
 				continue;
 			}
-			let obtainable = match ai {
+			let obtainable = match val_a {
 				Value::Primitive(p) => {
-					let (ok0, _) = can_reconstruct_primitive(p, ps, as_, 0);
-					let (ok1, _, _) = can_recompose(p, as_);
+					let (ok0, _) = can_reconstruct_primitive(p, ps, attacker, 0);
+					let (ok1, _, _) = can_recompose(p, attacker);
 					ok0 || ok1
 				}
 				_ => false,
@@ -293,14 +293,14 @@ fn query_unlinkability(
 			if !obtainable {
 				continue;
 			}
-			let empty = Value::Constant(Constant::empty());
+			let empty = Value::Constant(Constant::default());
 			let diffs = compute_slot_diffs(ps, km);
-			let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &empty, 0);
+			let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &empty, 0);
 			result.resolved = true;
 			result.summary = info_verify_result_summary(&mutated_info, &format!(
                 "{} and {} are not unlinkable since they are the output of the same primitive ({}), which can be obtained by Attacker",
-                query.constants[i], query.constants[ii],
-                assigneds[i],
+                query.constants[i], query.constants[j],
+                resolved_values[i],
             ), &result.options);
 			result = query_precondition(result, ps);
 			emit_query_result(ctx, &result);
@@ -316,7 +316,7 @@ fn query_equivalence(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> VerifyResult {
 	let mut result = VerifyResult::new(query, query_index);
 	let values: Vec<Value> = query
@@ -330,9 +330,9 @@ fn query_equivalence(
 	if all_equivalent {
 		return result;
 	}
-	let empty = Value::Constant(Constant::empty());
+	let empty = Value::Constant(Constant::default());
 	let diffs = compute_slot_diffs(ps, km);
-	let mutated_info = info_query_mutated_values(km, &diffs.diffs, as_, &empty, 0);
+	let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &empty, 0);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
@@ -349,15 +349,15 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 		return result;
 	}
 	for option in &result.query.options {
-		let mut o_result = QueryOptionResult {
+		let mut option_result = QueryOptionResult {
 			resolved: false,
 			summary: String::new(),
 		};
-		let (_, i) = ps.resolve_constant(&option.message.constants[0], true);
-		let idx = match i {
-			Some(i) => i,
+		let (_, slot_idx) = ps.resolve_constant(&option.message.constants[0], true);
+		let idx = match slot_idx {
+			Some(idx) => idx,
 			None => {
-				result.options.push(o_result);
+				result.options.push(option_result);
 				continue;
 			}
 		};
@@ -366,15 +366,15 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 			.iter()
 			.find_map(|m| m.get(&option.message.recipient).copied());
 		if sender == Some(option.message.sender) {
-			o_result.resolved = true;
-			o_result.summary = format!(
+			option_result.resolved = true;
+			option_result.summary = format!(
 				"{} sends {} to {} despite the query failing.",
 				principal_get_name_from_id(option.message.sender),
 				option.message.constants[0],
 				principal_get_name_from_id(option.message.recipient),
 			);
 		}
-		result.options.push(o_result);
+		result.options.push(option_result);
 	}
 	result
 }

@@ -205,19 +205,6 @@ pub(crate) struct Constant {
 	pub qualifier: Option<Qualifier>,
 }
 
-impl Constant {
-	pub(crate) fn empty() -> Self {
-		Constant {
-			name: Arc::from(""),
-			id: 0,
-			guard: false,
-			fresh: false,
-			leaked: false,
-			declaration: None,
-			qualifier: None,
-		}
-	}
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct Primitive {

@@ -20,8 +20,8 @@ pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)>
 
 fn sanity_phases(m: &Model) -> VResult<()> {
 	let mut phase = 0;
-	for blck in &m.blocks {
-		if let Block::Phase(p) = blck {
+	for block in &m.blocks {
+		if let Block::Phase(p) = block {
 			if p.number <= phase {
 				return Err(VerifpalError::Sanity(format!(
 					"phase being declared ({}) must be superior to last declared phase ({})",
@@ -49,31 +49,31 @@ pub(crate) fn sanity_assignment_constants(
 	let mut constants: Vec<Constant> = existing.to_vec();
 	match right {
 		Value::Constant(c) => {
-			if !constants.iter().any(|x| c.equivalent(x)) {
+			if !constants.iter().any(|existing| c.equivalent(existing)) {
 				constants.push(c.clone());
 			}
 		}
 		Value::Primitive(p) => {
 			let arity = primitive_get_arity(p)?;
-			let n = p.arguments.len() as i32;
-			if n == 0 {
+			let arg_count = p.arguments.len() as i32;
+			if arg_count == 0 {
 				return Err(VerifpalError::Sanity("primitive has no inputs".to_string()));
 			}
-			if !arity.contains(&n) {
+			if !arity.contains(&arg_count) {
 				return Err(VerifpalError::Sanity(format!(
 					"primitive has {} inputs, expecting {}",
-					n,
+					arg_count,
 					pretty_arity(arity)
 				)));
 			}
-			for a in &p.arguments {
-				constants = sanity_assignment_constants(a, &constants, km)?;
+			for arg in &p.arguments {
+				constants = sanity_assignment_constants(arg, &constants, km)?;
 			}
 		}
 		Value::Equation(e) => {
-			for v in &e.values {
-				if let Value::Constant(c) = v {
-					if !constants.iter().any(|x| c.equivalent(x)) {
+			for val in &e.values {
+				if let Value::Constant(c) = val {
+					if !constants.iter().any(|existing| c.equivalent(existing)) {
 						constants.push(c.clone());
 					}
 				}
@@ -137,8 +137,7 @@ fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<(
 			query
 		)));
 	}
-	let i = km.index_of(&query.message.constants[0]);
-	if i.is_none() {
+	if km.index_of(&query.message.constants[0]).is_none() {
 		return Err(VerifpalError::Sanity(format!(
 			"authentication query ({}) refers to unknown constant ({})",
 			query,
@@ -346,12 +345,12 @@ pub(crate) fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> 
 	Ok(())
 }
 
-pub(crate) fn sanity_check_equation_generators(a: &Value) -> VResult<()> {
-	match a {
+pub(crate) fn sanity_check_equation_generators(value: &Value) -> VResult<()> {
+	match value {
 		Value::Primitive(p) => {
-			for va in &p.arguments {
-				match va {
-					Value::Primitive(_) => sanity_check_equation_generators(va)?,
+			for arg in &p.arguments {
+				match arg {
+					Value::Primitive(_) => sanity_check_equation_generators(arg)?,
 					Value::Equation(e) => sanity_check_equation_root_generator(e)?,
 					_ => {}
 				}

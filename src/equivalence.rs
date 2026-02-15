@@ -167,10 +167,10 @@ pub(crate) fn flatten_equation(e: &Equation) -> Equation {
 
 pub(crate) fn find_constant_in_trace_primitive(
 	c: &Constant,
-	a: &Value,
+	value: &Value,
 	trace: &ProtocolTrace,
 ) -> bool {
-	let v = Value::Constant(c.clone());
-	let (_, vv) = crate::resolution::resolve_trace_values(a, trace);
-	crate::value::find_equivalent(&v, &vv).is_some()
+	let target = Value::Constant(c.clone());
+	let (_, resolved_values) = crate::resolution::resolve_trace_values(value, trace);
+	crate::value::find_equivalent(&target, &resolved_values).is_some()
 }

@@ -36,7 +36,7 @@ pub(crate) fn construct_protocol_trace(
 			.iter()
 			.map(|&pid| HashMap::from([(pid, pid)]))
 			.collect();
-		let cid = c.id;
+		let const_id = c.id;
 		trace.slots.push(TraceSlot {
 			constant: c,
 			initial_value: builtin.clone(),
@@ -45,19 +45,18 @@ pub(crate) fn construct_protocol_trace(
 			declared_at,
 			phases: vec![current_phase],
 		});
-		trace.index.insert(cid, trace.slots.len() - 1);
+		trace.index.insert(const_id, trace.slots.len() - 1);
 	}
 
-	for blck in &m.blocks {
-		match blck {
+	for block in &m.blocks {
+		match block {
 			Block::Principal(principal) => {
-				let new_da = construct_trace_render_principal(
+				declared_at = construct_trace_render_principal(
 					&mut trace,
 					principal,
 					declared_at,
 					current_phase,
 				)?;
-				declared_at = new_da;
 			}
 			Block::Message(message) => {
 				declared_at += 1;
@@ -79,12 +78,9 @@ fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<Pr
 	for slot in &trace.slots {
 		match &slot.initial_value {
 			Value::Primitive(_) | Value::Equation(_) => {
-				let (_, v) = resolve_trace_values(
-					&slot.initial_value,
-					trace,
-				);
-				for vv in &v {
-					if let Value::Constant(c) = vv {
+				let (_, resolved_values) = resolve_trace_values(&slot.initial_value, trace);
+				for resolved in &resolved_values {
+					if let Value::Constant(c) = resolved {
 						used_by.entry(c.id).or_default().insert(slot.creator, true);
 					}
 				}
@@ -132,13 +128,12 @@ fn construct_trace_render_knows(
 	expr: &Expression,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		let i = trace.index_of(c);
-		if let Some(idx) = i {
-			let d1 = trace.slots[idx].constant.declaration;
-			let q1 = trace.slots[idx].constant.qualifier;
-			let q2 = expr.qualifier;
-			let fresh = trace.slots[idx].constant.fresh;
-			if d1 != Some(Declaration::Knows) || q1 != q2 || fresh {
+		if let Some(idx) = trace.index_of(c) {
+			let existing = &trace.slots[idx].constant;
+			if existing.declaration != Some(Declaration::Knows)
+				|| existing.qualifier != expr.qualifier
+				|| existing.fresh
+			{
 				return Err(VerifpalError::Sanity(format!(
 					"constant is known more than once and in different ways ({})",
 					c
@@ -158,7 +153,7 @@ fn construct_trace_render_knows(
 			declaration: Some(Declaration::Knows),
 			qualifier: expr.qualifier,
 		};
-		let cid = new_c.id;
+		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
 			constant: new_c.clone(),
 			initial_value: Value::Constant(new_c),
@@ -167,14 +162,14 @@ fn construct_trace_render_knows(
 			declared_at,
 			phases: vec![],
 		});
-		trace.index.insert(cid, trace.slots.len() - 1);
-		let l = trace.slots.len() - 1;
+		let slot_idx = trace.slots.len() - 1;
+		trace.index.insert(const_id, slot_idx);
 		if expr.qualifier != Some(Qualifier::Public) {
 			continue;
 		}
 		for &pid in &trace.principal_ids {
 			if pid != principal.id {
-				trace.slots[l].known_by.push(HashMap::from([(pid, pid)]));
+				trace.slots[slot_idx].known_by.push(HashMap::from([(pid, pid)]));
 			}
 		}
 	}
@@ -188,8 +183,7 @@ fn construct_trace_render_generates(
 	expr: &Expression,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		let i = trace.index_of(c);
-		if i.is_some() {
+		if trace.index_of(c).is_some() {
 			return Err(VerifpalError::Sanity(format!(
 				"generated constant already exists ({})",
 				c
@@ -204,7 +198,7 @@ fn construct_trace_render_generates(
 			declaration: Some(Declaration::Generates),
 			qualifier: Some(Qualifier::Private),
 		};
-		let cid = new_c.id;
+		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
 			constant: new_c.clone(),
 			initial_value: Value::Constant(new_c),
@@ -213,7 +207,7 @@ fn construct_trace_render_generates(
 			declared_at,
 			phases: vec![],
 		});
-		trace.index.insert(cid, trace.slots.len() - 1);
+		trace.index.insert(const_id, trace.slots.len() - 1);
 	}
 	Ok(())
 }
@@ -243,9 +237,8 @@ fn construct_trace_render_assignment(
 			)));
 		}
 	}
-	for (i, c) in expr.constants.iter().enumerate() {
-		let ii = trace.index_of(c);
-		if ii.is_some() {
+	for (output_idx, c) in expr.constants.iter().enumerate() {
+		if trace.index_of(c).is_some() {
 			return Err(VerifpalError::Sanity(format!("constant assigned twice ({})", c)));
 		}
 		let new_c = Constant {
@@ -257,20 +250,20 @@ fn construct_trace_render_assignment(
 			declaration: Some(Declaration::Assignment),
 			qualifier: Some(Qualifier::Private),
 		};
-		let mut a = assigned.clone();
-		if let Value::Primitive(ref mut p) = a {
-			Arc::make_mut(p).output = i;
+		let mut initial_value = assigned.clone();
+		if let Value::Primitive(ref mut p) = initial_value {
+			Arc::make_mut(p).output = output_idx;
 		}
-		let cid = new_c.id;
+		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
 			constant: new_c,
-			initial_value: a,
+			initial_value,
 			creator: principal.id,
 			known_by: vec![HashMap::new()],
 			declared_at,
 			phases: vec![],
 		});
-		trace.index.insert(cid, trace.slots.len() - 1);
+		trace.index.insert(const_id, trace.slots.len() - 1);
 	}
 	Ok(())
 }
@@ -423,17 +416,17 @@ fn construct_principal_states_get_value_mutatability(
 	guard: &mut bool,
 	mutatable_to: &mut Vec<PrincipalId>,
 ) {
-	let ir = message.recipient == principal_id;
-	let ic = creator == principal_id;
-	for cc in &message.constants {
-		if c.id != cc.id {
+	let is_recipient = message.recipient == principal_id;
+	let is_creator = creator == principal_id;
+	for msg_const in &message.constants {
+		if c.id != msg_const.id {
 			continue;
 		}
 		append_unique_principal_enum(wire, message.recipient);
 		if !*guard {
-			*guard = cc.guard && (ir || ic);
+			*guard = msg_const.guard && (is_recipient || is_creator);
 		}
-		if !cc.guard {
+		if !msg_const.guard {
 			append_unique_principal_enum(mutatable_to, message.recipient);
 		}
 	}

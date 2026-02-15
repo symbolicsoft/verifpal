@@ -13,9 +13,8 @@ pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
 	}
-	let prim = match primitive_get(p.id) {
-		Ok(s) => s,
-		Err(_) => return vec![],
+	let Ok(prim) = primitive_get(p.id) else {
+		return vec![];
 	};
 	if !prim.decompose.has_rule {
 		return vec![];
@@ -30,26 +29,21 @@ pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	depth: usize,
 ) -> (bool, Value, Vec<Value>) {
 	let empty = value_nil();
-	if depth > MAX_POSSIBLE_DEPTH {
+	if depth > MAX_POSSIBLE_DEPTH || primitive_is_core(p.id) {
 		return (false, empty, vec![]);
 	}
-	if primitive_is_core(p.id) {
+	let Ok(prim) = primitive_get(p.id) else {
 		return (false, empty, vec![]);
-	}
-	let prim = match primitive_get(p.id) {
-		Ok(s) => s,
-		Err(_) => return (false, empty, vec![]),
 	};
 	if !prim.decompose.has_rule {
 		return (false, empty, vec![]);
 	}
-	let filter_fn = match prim.decompose.filter {
-		Some(f) => f,
-		None => return (false, empty, vec![]),
+	let Some(filter_fn) = prim.decompose.filter else {
+		return (false, empty, vec![]);
 	};
 	let mut has = Vec::new();
 	for (filter_i, &idx) in prim.decompose.given.iter().enumerate() {
@@ -61,24 +55,24 @@ pub(crate) fn can_decompose(
 		if !valid {
 			continue;
 		}
-		if as_.knows(&filtered).is_some() {
+		if attacker.knows(&filtered).is_some() {
 			has.push(filtered);
 			continue;
 		}
 		match &filtered {
 			Value::Primitive(inner_p) => {
-				let (r, _) = can_reconstruct_primitive(inner_p, ps, as_, depth + 1);
+				let (r, _) = can_reconstruct_primitive(inner_p, ps, attacker, depth + 1);
 				if r {
 					has.push(filtered.clone());
 					continue;
 				}
-				let (r2, _, _) = can_decompose(inner_p, ps, as_, depth + 1);
+				let (r2, _, _) = can_decompose(inner_p, ps, attacker, depth + 1);
 				if r2 {
 					has.push(filtered.clone());
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (r, _) = can_reconstruct_equation(inner_e, as_);
+				let (r, _) = can_reconstruct_equation(inner_e, attacker);
 				if r {
 					has.push(filtered.clone());
 				}
@@ -95,33 +89,32 @@ pub(crate) fn can_decompose(
 
 pub(crate) fn can_recompose(
 	p: &Primitive,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) -> (bool, Value, Vec<Value>) {
 	let empty = value_nil();
 	if primitive_is_core(p.id) {
 		return (false, empty, vec![]);
 	}
-	let prim = match primitive_get(p.id) {
-		Ok(s) => s,
-		Err(_) => return (false, empty, vec![]),
+	let Ok(prim) = primitive_get(p.id) else {
+		return (false, empty, vec![]);
 	};
 	if !prim.recompose.has_rule {
 		return (false, empty, vec![]);
 	}
 	for given_set in &prim.recompose.given {
-		let mut ar = Vec::new();
-		for &ii in given_set {
-			for v in as_.known.iter() {
-				if let Value::Primitive(vp) = v {
-					let pm = value_equivalent_primitives(vp, p, false);
-					if !pm.equivalent || pm.output_left != ii {
+		let mut candidates = Vec::new();
+		for &output_idx in given_set {
+			for known in attacker.known.iter() {
+				if let Value::Primitive(known_prim) = known {
+					let pm = value_equivalent_primitives(known_prim, p, false);
+					if !pm.equivalent || pm.output_left != output_idx {
 						continue;
 					}
-					ar.push(v.clone());
-					if ar.len() < given_set.len() {
+					candidates.push(known.clone());
+					if candidates.len() < given_set.len() {
 						continue;
 					}
-					return (true, p.arguments[prim.recompose.reveal].clone(), ar);
+					return (true, p.arguments[prim.recompose.reveal].clone(), candidates);
 				}
 			}
 		}
@@ -132,41 +125,40 @@ pub(crate) fn can_recompose(
 pub(crate) fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	depth: usize,
 ) -> (bool, Vec<Value>) {
 	if depth > MAX_POSSIBLE_DEPTH {
 		return (false, vec![]);
 	}
-	let (r, rv) = can_rewrite(p, ps, 0);
-	if !r {
+	let (rewritten, rewrite_values) = can_rewrite(p, ps, 0);
+	if !rewritten {
 		return (false, vec![]);
 	}
-	let rp = match &rv[0] {
-		Value::Primitive(p) => p,
-		_ => return (false, vec![]),
+	let Value::Primitive(rewritten_prim) = &rewrite_values[0] else {
+		return (false, vec![]);
 	};
 	let mut has = Vec::new();
-	for a in &rp.arguments {
-		if as_.knows(a).is_some() {
+	for a in &rewritten_prim.arguments {
+		if attacker.knows(a).is_some() {
 			has.push(a.clone());
 			continue;
 		}
 		match a {
 			Value::Primitive(inner_p) => {
-				let (r2, _, _) = can_decompose(inner_p, ps, as_, depth + 1);
+				let (r2, _, _) = can_decompose(inner_p, ps, attacker, depth + 1);
 				if r2 {
 					has.push(a.clone());
 					continue;
 				}
-				let (r3, _) = can_reconstruct_primitive(inner_p, ps, as_, depth + 1);
+				let (r3, _) = can_reconstruct_primitive(inner_p, ps, attacker, depth + 1);
 				if r3 {
 					has.push(a.clone());
 					continue;
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (r2, _) = can_reconstruct_equation(inner_e, as_);
+				let (r2, _) = can_reconstruct_equation(inner_e, attacker);
 				if r2 {
 					has.push(a.clone());
 					continue;
@@ -175,26 +167,26 @@ pub(crate) fn can_reconstruct_primitive(
 			_ => {}
 		}
 	}
-	if has.len() < rp.arguments.len() {
+	if has.len() < rewritten_prim.arguments.len() {
 		return (false, vec![]);
 	}
 	(true, has)
 }
 
-pub(crate) fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bool, Vec<Value>) {
+pub(crate) fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> (bool, Vec<Value>) {
 	if e.values.len() < 2 {
 		return (false, vec![]);
 	}
 	if e.values.len() == 2 {
-		if as_.knows(&e.values[1]).is_some() {
+		if attacker.knows(&e.values[1]).is_some() {
 			return (true, vec![e.values[1].clone()]);
 		}
 		return (false, vec![]);
 	}
 	let s0 = &e.values[1];
 	let s1 = &e.values[2];
-	let hs0 = as_.knows(s0).is_some();
-	let hs1 = as_.knows(s1).is_some();
+	let hs0 = attacker.knows(s0).is_some();
+	let hs1 = attacker.knows(s1).is_some();
 	if hs0 && hs1 {
 		return (true, vec![s0.clone(), s1.clone()]);
 	}
@@ -204,11 +196,11 @@ pub(crate) fn can_reconstruct_equation(e: &Equation, as_: &AttackerState) -> (bo
 	let p1 = Value::Equation(Arc::new(Equation {
 		values: vec![e.values[0].clone(), e.values[2].clone()],
 	}));
-	let hp1 = as_.knows(&p1).is_some();
+	let hp1 = attacker.knows(&p1).is_some();
 	if hs0 && hp1 {
 		return (true, vec![s0.clone(), p1]);
 	}
-	let hp0 = as_.knows(&p0).is_some();
+	let hp0 = attacker.knows(&p0).is_some();
 	if hp0 && hs1 {
 		return (true, vec![p0, s1.clone()]);
 	}
@@ -276,18 +268,15 @@ pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (
 }
 
 fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
-	let prim = match primitive_get(p.id) {
-		Ok(s) => s,
-		Err(_) => return false,
+	let Ok(prim) = primitive_get(p.id) else {
+		return false;
 	};
 	let from = &p.arguments[prim.rewrite.from];
-	let from_p = match from {
-		Value::Primitive(p) => p,
-		_ => return false,
+	let Value::Primitive(from_p) = from else {
+		return false;
 	};
-	let filter_fn = match prim.rewrite.filter {
-		Some(f) => f,
-		None => return false,
+	let Some(filter_fn) = prim.rewrite.filter else {
+		return false;
 	};
 	for &(a_idx, ref m_vec) in &prim.rewrite.matching {
 		let mut valid = false;
@@ -345,26 +334,25 @@ pub(crate) fn can_rebuild(p: &Primitive) -> (bool, Value) {
 	if primitive_is_core(p.id) {
 		return (false, empty);
 	}
-	let prim = match primitive_get(p.id) {
-		Ok(s) => s,
-		Err(_) => return (false, empty),
+	let Ok(prim) = primitive_get(p.id) else {
+		return (false, empty);
 	};
 	if !prim.rebuild.has_rule {
 		return (false, empty);
 	}
-	for g in &prim.rebuild.given {
+	for given_set in &prim.rebuild.given {
 		let mut has = Vec::new();
-		for &gg in g {
-			if gg >= p.arguments.len() {
+		for &arg_idx in given_set {
+			if arg_idx >= p.arguments.len() {
 				continue;
 			}
-			if let Value::Primitive(arg_p) = &p.arguments[gg] {
+			if let Value::Primitive(arg_p) = &p.arguments[arg_idx] {
 				if arg_p.id == prim.rebuild.id {
-					has.push(&p.arguments[gg]);
+					has.push(&p.arguments[arg_idx]);
 				}
 			}
 		}
-		if has.len() < g.len() {
+		if has.len() < given_set.len() {
 			continue;
 		}
 		// Check that all has entries are equivalent but with different outputs
@@ -395,16 +383,16 @@ pub(crate) fn find_obtainable_passwords(
 ) {
 	match a {
 		Value::Constant(c) => {
-			let (aa, _) = ps.resolve_constant(c, true);
+			let (resolved, _) = ps.resolve_constant(c, true);
 			let is_password =
-				matches!(&aa, Value::Constant(ac) if ac.qualifier == Some(Qualifier::Password));
+				matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password));
 			if is_password {
 				let is_hashed = a_index.is_some_and(|idx| {
 					matches!(a_parent, Value::Primitive(pp) if !primitive_is_core(pp.id)
 						&& primitive_get(pp.id).is_ok_and(|prim| prim.password_hashing.contains(&idx)))
 				});
 				if !is_hashed {
-					out.push(aa);
+					out.push(resolved);
 				}
 			}
 		}

@@ -57,42 +57,35 @@ pub(crate) fn inject(
 	p: &Primitive,
 	inject_depth: usize,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	stage: i32,
 ) -> Vec<Value> {
 	if ctx.all_resolved() {
 		return vec![];
 	}
-	inject_primitive(ctx, p, ps, as_, inject_depth, stage)
+	inject_primitive(ctx, p, ps, attacker, inject_depth, stage)
 }
 
-fn inject_value_rules(k: &Value, arg: usize, p: &Primitive, stage: i32) -> bool {
-	match k {
+fn inject_value_rules(value: &Value, arg: usize, p: &Primitive, stage: i32) -> bool {
+	match value {
 		Value::Constant(c) => inject_constant_rules(c, arg, p),
-		Value::Primitive(kp) => inject_primitive_rules(kp, arg, p, stage),
+		Value::Primitive(prim) => inject_primitive_rules(prim, arg, p, stage),
 		Value::Equation(e) => inject_equation_rules(e, arg, p),
 	}
 }
 
 fn inject_constant_rules(c: &Constant, arg: usize, p: &Primitive) -> bool {
-	if !matches!(&p.arguments[arg], Value::Constant(_)) {
-		return false;
-	}
-	if c.id == 0 {
-		return false;
-	}
-	true
+	matches!(&p.arguments[arg], Value::Constant(_)) && c.id != 0
 }
 
-fn inject_primitive_rules(k: &Primitive, arg: usize, p: &Primitive, stage: i32) -> bool {
-	let ref_p = match &p.arguments[arg] {
-		Value::Primitive(p) => p,
-		_ => return false,
+fn inject_primitive_rules(candidate: &Primitive, arg: usize, p: &Primitive, stage: i32) -> bool {
+	let Value::Primitive(ref_p) = &p.arguments[arg] else {
+		return false;
 	};
-	if inject_primitive_stage_restricted(k, stage) {
+	if inject_primitive_stage_restricted(candidate, stage) {
 		return false;
 	}
-	inject_skeleton_equivalent(k, ref_p)
+	inject_skeleton_equivalent(candidate, ref_p)
 }
 
 fn inject_equation_rules(e: &Equation, arg: usize, p: &Primitive) -> bool {
@@ -224,11 +217,11 @@ pub(crate) fn inject_missing_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	record: &MutationRecord,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 ) {
 	let (skeleton, _) = inject_primitive_skeleton(p, 0);
 	let sh = primitive_skeleton_hash(&skeleton);
-	if !as_.skeleton_hashes.contains(&sh) {
+	if !attacker.skeleton_hashes.contains(&sh) {
 		let known = Value::Primitive(Arc::new(skeleton.clone()));
 		if ctx.attacker_put(&known, record) {
 			info_message(
@@ -240,7 +233,7 @@ pub(crate) fn inject_missing_skeletons(
 	}
 	for a in &p.arguments {
 		if let Value::Primitive(pp) = a {
-			inject_missing_skeletons(ctx, pp, record, as_);
+			inject_missing_skeletons(ctx, pp, record, attacker);
 		}
 	}
 }
@@ -249,7 +242,7 @@ fn inject_primitive(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	ps: &PrincipalState,
-	as_: &AttackerState,
+	attacker: &AttackerState,
 	inject_depth: usize,
 	stage: i32,
 ) -> Vec<Value> {
@@ -263,26 +256,26 @@ fn inject_primitive(
 		if ctx.all_resolved() {
 			return vec![];
 		}
-		for k in as_.known.iter() {
-			let resolved = match k {
+		for known in attacker.known.iter() {
+			let resolved = match known {
 				Value::Constant(c) => {
 					let (v, _) = ps.resolve_constant(c, true);
 					v
 				}
-				_ => k.clone(),
+				_ => known.clone(),
 			};
 			if !inject_value_rules(&resolved, arg, p, stage) {
 				continue;
 			}
 			let is_new = push_unique_value(&mut uinjectants[arg], resolved.clone());
-			if let Value::Primitive(kp) = &resolved {
+			if let Value::Primitive(known_prim) = &resolved {
 				if stage >= STAGE_RECURSIVE_INJECTION
 					&& inject_depth as i32 <= stage - STAGE_RECURSIVE_INJECTION
 				{
-					let kp_inj = inject(ctx, kp, inject_depth + 1, ps, as_, stage);
-					for kkp in kp_inj {
-						if push_unique_value(&mut uinjectants[arg], kkp.clone()) {
-							kinjectants[arg].push(kkp);
+					let recursive_injectants = inject(ctx, known_prim, inject_depth + 1, ps, attacker, stage);
+					for injected in recursive_injectants {
+						if push_unique_value(&mut uinjectants[arg], injected.clone()) {
+							kinjectants[arg].push(injected);
 						}
 					}
 				}
@@ -303,13 +296,13 @@ fn inject_loop_n(ctx: &VerifyContext, p: &Primitive, kinjectants: &[Vec<Value>])
 	if n == 0 {
 		return vec![];
 	}
-	for k in kinjectants {
-		if k.is_empty() {
+	for candidates in kinjectants {
+		if candidates.is_empty() {
 			return vec![];
 		}
 	}
 	let total_size = mutation_product(
-		kinjectants.iter().map(|k| k.len()),
+		kinjectants.iter().map(|candidates| candidates.len()),
 		MAX_INJECTIONS_PER_PRIMITIVE,
 	)
 	.unwrap_or(MAX_INJECTIONS_PER_PRIMITIVE);
@@ -322,7 +315,7 @@ fn inject_loop_n(ctx: &VerifyContext, p: &Primitive, kinjectants: &[Vec<Value>])
 		let args: Vec<Value> = indices
 			.iter()
 			.zip(kinjectants.iter())
-			.map(|(&idx, k)| k[idx].clone())
+			.map(|(&idx, candidates)| candidates[idx].clone())
 			.collect();
 		injectants.push(Value::Primitive(Arc::new(p.with_arguments(args))));
 		if injectants.len() >= MAX_INJECTIONS_PER_PRIMITIVE {

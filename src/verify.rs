@@ -79,10 +79,10 @@ pub(crate) fn verify_standard_run(
 	principal_states: &[PrincipalState],
 	stage: i32,
 ) -> VResult<()> {
-	let as_ = ctx.attacker_snapshot();
+	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
 		let mut ps_resolved = construct_principal_state_clone(ps, false);
-		ps_resolved.resolve_all_values(&as_)?;
+		ps_resolved.resolve_all_values(&attacker)?;
 
 		// Pre-compute mutation record for this principal state
 		let record = compute_slot_diffs(&ps_resolved, km);
@@ -90,7 +90,7 @@ pub(crate) fn verify_standard_run(
 		// Inject missing skeletons for all assigned primitives
 		for sv in &ps_resolved.values {
 			if let Value::Primitive(p) = &sv.assigned {
-				inject_missing_skeletons(ctx, p, &record, &as_);
+				inject_missing_skeletons(ctx, p, &record, &attacker);
 			}
 		}
 

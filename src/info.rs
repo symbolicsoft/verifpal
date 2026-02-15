@@ -39,9 +39,9 @@ pub(crate) fn info_separator() {
 // Core message output
 // ---------------------------------------------------------------------------
 
-pub(crate) fn info_message(m: &str, t: InfoLevel, show_analysis: bool) {
+pub(crate) fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
 	if crate::tui::tui_enabled() {
-		crate::tui::tui_message(m, t);
+		crate::tui::tui_message(msg, level);
 		return;
 	}
 	let analysis_count = if show_analysis {
@@ -50,30 +50,30 @@ pub(crate) fn info_message(m: &str, t: InfoLevel, show_analysis: bool) {
 		0
 	};
 	if color_output_support() {
-		info_message_color(m, t, analysis_count);
+		info_message_color(msg, level, analysis_count);
 	} else {
-		info_message_regular(m, t, analysis_count);
+		info_message_regular(msg, level, analysis_count);
 	}
 }
 
-fn info_message_regular(m: &str, t: InfoLevel, analysis_count: usize) {
+fn info_message_regular(msg: &str, level: InfoLevel, analysis_count: usize) {
 	let info_string = if analysis_count > 0 {
 		format!(" (Analysis {})", analysis_count)
 	} else {
 		String::new()
 	};
-	match t {
-		InfoLevel::Verifpal => println!(" Verifpal * {}{}", m, info_string),
-		InfoLevel::Info => println!("     Info . {}{}", m, info_string),
-		InfoLevel::Analysis => println!(" Analysis > {}{}", m, info_string),
-		InfoLevel::Deduction => println!("Deduction > {}{}", m, info_string),
-		InfoLevel::Result => println!("     FAIL x {}{}", m, info_string),
-		InfoLevel::Pass => println!("     PASS + {}{}", m, info_string),
-		InfoLevel::Warning => println!("  Warning ! {}{}", m, info_string),
+	match level {
+		InfoLevel::Verifpal => println!(" Verifpal * {}{}", msg, info_string),
+		InfoLevel::Info => println!("     Info . {}{}", msg, info_string),
+		InfoLevel::Analysis => println!(" Analysis > {}{}", msg, info_string),
+		InfoLevel::Deduction => println!("Deduction > {}{}", msg, info_string),
+		InfoLevel::Result => println!("     FAIL x {}{}", msg, info_string),
+		InfoLevel::Pass => println!("     PASS + {}{}", msg, info_string),
+		InfoLevel::Warning => println!("  Warning ! {}{}", msg, info_string),
 	}
 }
 
-fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
+fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 	let info_string = if analysis_count > 0 {
 		format!(
 			" {}",
@@ -82,13 +82,13 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 	} else {
 		String::new()
 	};
-	match t {
+	match level {
 		InfoLevel::Verifpal => {
 			println!(
 				" {} {} {}{}",
 				"Verifpal".green().bold(),
 				"\u{25c6}".green(),
-				m,
+				msg,
 				info_string
 			);
 		}
@@ -97,7 +97,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				"     {} {} {}{}",
 				"Info".cyan().bold(),
 				"\u{25cf}".cyan(),
-				m,
+				msg,
 				info_string
 			);
 		}
@@ -106,7 +106,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				" {} {} {}{}",
 				"Analysis".blue().bold(),
 				"\u{25b8}".blue(),
-				m.dimmed(),
+				msg.dimmed(),
 				info_string
 			);
 		}
@@ -115,7 +115,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				"{} {} {}{}",
 				"Deduction".yellow(),
 				"\u{203a}".yellow(),
-				m.dimmed(),
+				msg.dimmed(),
 				info_string
 			);
 		}
@@ -124,7 +124,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				"     {} {} {}{}",
 				"Fail".red().bold(),
 				"\u{2717}".red().bold(),
-				m,
+				msg,
 				info_string
 			);
 		}
@@ -133,7 +133,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				"     {} {} {}{}",
 				"Pass".green().bold(),
 				"\u{2713}".green().bold(),
-				m,
+				msg,
 				info_string
 			);
 		}
@@ -142,7 +142,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 				"  {} {} {}{}",
 				"Warning".yellow().bold(),
 				"\u{25b2}".yellow().bold(),
-				m,
+				msg,
 				info_string
 			);
 		}
@@ -156,7 +156,7 @@ fn info_message_color(m: &str, t: InfoLevel, analysis_count: usize) {
 pub(crate) fn info_verify_result_summary(
 	mutated_info: &str,
 	summary: &str,
-	o_results: &[QueryOptionResult],
+	option_results: &[QueryOptionResult],
 ) -> String {
 	let indent = "            "; // 12 spaces — aligns with message column
 
@@ -198,7 +198,7 @@ pub(crate) fn info_verify_result_summary(
 			output.push_str(&format!("\n{}{}", indent, summary.on_red().white().bold()));
 		}
 
-		for o_result in o_results {
+		for o_result in option_results {
 			if !o_result.resolved {
 				continue;
 			}
@@ -228,7 +228,7 @@ pub(crate) fn info_verify_result_summary(
 			output.push_str(&format!("\n{}{}", indent, summary));
 		}
 
-		for o_result in o_results {
+		for o_result in option_results {
 			if !o_result.resolved {
 				continue;
 			}
@@ -271,7 +271,7 @@ pub(crate) fn info_analysis(stage: i32) {
 		return;
 	}
 	if color_output_support() {
-		let a = format!(
+		let progress = format!(
 			"  {} Stage {}, Analysis {}...",
 			"\u{25b8}".blue(),
 			s,
@@ -279,7 +279,7 @@ pub(crate) fn info_analysis(stage: i32) {
 		)
 		.dimmed()
 		.italic();
-		print!("{}", a);
+		print!("{}", progress);
 	} else {
 		print!("  Stage {}, Analysis {}...", s, analysis_count);
 	}
@@ -342,12 +342,12 @@ pub(crate) fn info_query_mutated_values(
 		let is_target = target_value.equivalent(&diff.assigned, false);
 		let attacker_knows = val_attacker_state.knows(target_value).is_some();
 
-		let (m_info, m_relevant) = info_query_mutated_value(trace, diff, is_target, attacker_knows);
-		if m_relevant {
+		let (diff_info, diff_relevant) = info_query_mutated_value(trace, diff, is_target, attacker_knows);
+		if diff_relevant {
 			relevant = true;
 		}
 		mutated_info.push_str("\n            ");
-		mutated_info.push_str(&m_info);
+		mutated_info.push_str(&diff_info);
 
 		if is_target && attacker_knows {
 			// target obtained
@@ -364,19 +364,19 @@ pub(crate) fn info_query_mutated_values(
 		return mutated_info;
 	}
 	for m_val in &mutated {
-		let ai = match val_attacker_state.knows(m_val) {
+		let attacker_idx = match val_attacker_state.knows(m_val) {
 			Some(idx) => idx,
 			None => continue,
 		};
-		let mm_info = info_query_mutated_values(
+		let nested_info = info_query_mutated_values(
 			trace,
-			&val_attacker_state.mutation_records[ai].diffs,
+			&val_attacker_state.mutation_records[attacker_idx].diffs,
 			val_attacker_state,
 			m_val,
 			info_depth + 1,
 		);
-		if !mm_info.is_empty() {
-			mutated_info = format!("{}\n\n            {}{}", mm_info, target_info, mutated_info);
+		if !nested_info.is_empty() {
+			mutated_info = format!("{}\n\n            {}{}", nested_info, target_info, mutated_info);
 		}
 	}
 	mutated_info
@@ -388,8 +388,8 @@ fn info_query_mutated_value(
 	is_target_value: bool,
 	attacker_knows: bool,
 ) -> (String, bool) {
-	let pc = diff.constant.to_string();
-	let pa = diff.assigned.to_string();
+	let constant_str = diff.constant.to_string();
+	let assigned_str = diff.assigned.to_string();
 	let mut relevant = false;
 	let suffix;
 	if is_target_value && attacker_knows && !diff.mutated {
@@ -423,10 +423,10 @@ fn info_query_mutated_value(
 	}
 	if color_output_support() {
 		(
-			format!("{} {} {}{}", pc, "\u{2192}".dimmed(), pa, suffix),
+			format!("{} {} {}{}", constant_str, "\u{2192}".dimmed(), assigned_str, suffix),
 			relevant,
 		)
 	} else {
-		(format!("{} -> {}{}", pc, pa, suffix), relevant)
+		(format!("{} -> {}{}", constant_str, assigned_str, suffix), relevant)
 	}
 }

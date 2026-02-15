@@ -14,7 +14,7 @@ use crate::value::value_nil;
 
 pub(crate) fn perform_primitive_rewrite(
 	p: &Primitive,
-	pi: Option<usize>,
+	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
 ) -> (Vec<Primitive>, bool, Value) {
 	let (mut rewrite, mut failed_rewrites, rewritten) =
@@ -25,7 +25,7 @@ pub(crate) fn perform_primitive_rewrite(
 	};
 	let (rebuilt, rebuild) = can_rebuild(rewrite_p);
 	if rebuilt {
-		if let Some(idx) = pi {
+		if let Some(idx) = slot_index {
 			ps.values[idx].set_assigned(rebuild.clone());
 		}
 		rewrite = rebuild;
@@ -52,12 +52,12 @@ pub(crate) fn perform_primitive_rewrite(
 		0
 	};
 	if r_index >= rewritten_values.len() {
-		if let Some(idx) = pi {
+		if let Some(idx) = slot_index {
 			ps.values[idx].set_assigned(value_nil());
 		}
 		return (failed_rewrites, rewritten || rewritten_root, value_nil());
 	}
-	if let Some(idx) = pi {
+	if let Some(idx) = slot_index {
 		if rewritten || rewritten_root {
 			ps.values[idx].rewritten = true;
 			ps.values[idx].set_assigned(rewritten_values[r_index].clone());
@@ -123,7 +123,7 @@ fn perform_primitive_arguments_rewrite(
 
 pub(crate) fn perform_equation_rewrite(
 	e: &Equation,
-	pi: Option<usize>,
+	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
 ) -> (Vec<Primitive>, bool, Value) {
 	let mut rewritten = false;
@@ -169,7 +169,7 @@ pub(crate) fn perform_equation_rewrite(
 		}
 	}
 	let rewrite = Value::Equation(Arc::new(rewrite_eq));
-	if let Some(idx) = pi {
+	if let Some(idx) = slot_index {
 		if rewritten {
 			ps.values[idx].rewritten = true;
 			ps.values[idx].set_assigned(rewrite.clone());

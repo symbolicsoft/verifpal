@@ -667,18 +667,18 @@ mod unit_tests {
 		let a = make_constant("ak_a");
 		let b = make_constant("ak_b");
 		let c = make_constant("ak_c");
-		let as_ = make_attacker_state(vec![a.clone(), b.clone()]);
-		assert!(as_.knows(&a).is_some());
-		assert!(as_.knows(&b).is_some());
-		assert!(as_.knows(&c).is_none());
+		let attacker = make_attacker_state(vec![a.clone(), b.clone()]);
+		assert!(attacker.knows(&a).is_some());
+		assert!(attacker.knows(&b).is_some());
+		assert!(attacker.knows(&c).is_none());
 	}
 
 	#[test]
 	fn attacker_knows_equation() {
 		let a = make_constant("ake_a");
 		let eq = make_equation(vec![value_g(), a]);
-		let as_ = make_attacker_state(vec![eq.clone()]);
-		assert!(as_.knows(&eq).is_some());
+		let attacker = make_attacker_state(vec![eq.clone()]);
+		assert!(attacker.knows(&eq).is_some());
 	}
 
 	// -----------------------------------------------------------------------
@@ -690,7 +690,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ps_idx_a"),
 			id: value_names_map_add("ps_idx_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&make_constant("ps_idx_a"), 0)];
@@ -700,7 +700,7 @@ mod unit_tests {
 		let other = Constant {
 			name: Arc::from("ps_idx_b"),
 			id: value_names_map_add("ps_idx_b"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		assert_eq!(ps.index_of(&other), None);
 	}
@@ -710,7 +710,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ps_fbm_a"),
 			id: value_names_map_add("ps_fbm_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)]; // creator == self.id
@@ -723,7 +723,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ps_ev_a"),
 			id: value_names_map_add("ps_ev_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let val = make_constant("ps_ev_a");
 		let meta = vec![make_slot_meta(&c, true)];
@@ -737,7 +737,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ps_evm_a"),
 			id: value_names_map_add("ps_evm_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let original = make_constant("ps_evm_a");
 		let mutated = make_constant("ps_evm_mutated");
@@ -778,7 +778,7 @@ mod unit_tests {
 		let c_dummy = Constant {
 			name: Arc::from("cr_dummy"),
 			id: value_names_map_add("cr_dummy"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
 		let (rewritten, values) = can_rewrite(&split, &ps, 0);
@@ -801,7 +801,7 @@ mod unit_tests {
 		let c_dummy = Constant {
 			name: Arc::from("cra_dummy"),
 			id: value_names_map_add("cra_dummy"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
 		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
@@ -822,7 +822,7 @@ mod unit_tests {
 		let c_dummy = Constant {
 			name: Arc::from("cram_dummy"),
 			id: value_names_map_add("cram_dummy"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
 		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
@@ -839,8 +839,8 @@ mod unit_tests {
 		let eq = Equation {
 			values: vec![value_g(), a.clone()],
 		};
-		let as_ = make_attacker_state(vec![a]);
-		let (can, has) = can_reconstruct_equation(&eq, &as_);
+		let attacker = make_attacker_state(vec![a]);
+		let (can, has) = can_reconstruct_equation(&eq, &attacker);
 		assert!(can);
 		assert_eq!(has.len(), 1);
 	}
@@ -852,8 +852,8 @@ mod unit_tests {
 		let eq = Equation {
 			values: vec![value_g(), a.clone(), b.clone()],
 		};
-		let as_ = make_attacker_state(vec![a, b]);
-		let (can, has) = can_reconstruct_equation(&eq, &as_);
+		let attacker = make_attacker_state(vec![a, b]);
+		let (can, has) = can_reconstruct_equation(&eq, &attacker);
 		assert!(can);
 		assert_eq!(has.len(), 2);
 	}
@@ -865,8 +865,8 @@ mod unit_tests {
 		let eq = Equation {
 			values: vec![value_g(), a.clone(), b],
 		};
-		let as_ = make_attacker_state(vec![a]); // only knows a, not b
-		let (can, _) = can_reconstruct_equation(&eq, &as_);
+		let attacker = make_attacker_state(vec![a]); // only knows a, not b
+		let (can, _) = can_reconstruct_equation(&eq, &attacker);
 		assert!(!can);
 	}
 
@@ -938,11 +938,11 @@ mod unit_tests {
 		let c_dummy = Constant {
 			name: Arc::from("cd_dummy"),
 			id: value_names_map_add("cd_dummy"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
-		let as_ = make_attacker_state(vec![key]);
-		let (can, revealed, _) = can_decompose(&p, &ps, &as_, 0);
+		let attacker = make_attacker_state(vec![key]);
+		let (can, revealed, _) = can_decompose(&p, &ps, &attacker, 0);
 		assert!(can);
 		assert!(revealed.equivalent(&msg, true));
 	}
@@ -960,11 +960,11 @@ mod unit_tests {
 		let c_dummy = Constant {
 			name: Arc::from("cd_nk_dummy"),
 			id: value_names_map_add("cd_nk_dummy"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
-		let as_ = make_attacker_state(vec![]); // doesn't know the key
-		let (can, _, _) = can_decompose(&p, &ps, &as_, 0);
+		let attacker = make_attacker_state(vec![]); // doesn't know the key
+		let (can, _, _) = can_decompose(&p, &ps, &attacker, 0);
 		assert!(!can);
 	}
 
@@ -1125,7 +1125,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("csd_a"),
 			id: value_names_map_add("csd_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let val = make_constant("csd_a");
 		let trace = ProtocolTrace {
@@ -1160,7 +1160,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("csd2_a"),
 			id: value_names_map_add("csd2_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let original = make_constant("csd2_a");
 		let mutated = make_constant("csd2_mutated");
@@ -1228,7 +1228,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ts_a"),
 			id: value_names_map_add("ts_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let slot = TraceSlot {
 			constant: c,
@@ -1247,7 +1247,7 @@ mod unit_tests {
 		let c = Constant {
 			name: Arc::from("ts2_a"),
 			id: value_names_map_add("ts2_a"),
-			..Constant::empty()
+			..Constant::default()
 		};
 		let mut kb = HashMap::new();
 		kb.insert(1u8, 0u8);
