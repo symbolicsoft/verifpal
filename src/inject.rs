@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
+use crate::equivalence::equivalent_primitives;
 use crate::info::info_message;
 use crate::mutationmap::mutation_product;
 use crate::primitive::primitive_is_explosive;
@@ -210,7 +211,7 @@ fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 	}
 	let (p1, _) = inject_primitive_skeleton(p, 0);
 	let (p2, _) = inject_primitive_skeleton(reference, 0);
-	value_equivalent_primitives(&p1, &p2, false).equivalent
+	equivalent_primitives(&p1, &p2, false).equivalent
 }
 
 pub(crate) fn inject_missing_skeletons(
@@ -236,6 +237,15 @@ pub(crate) fn inject_missing_skeletons(
 			inject_missing_skeletons(ctx, pp, record, attacker);
 		}
 	}
+}
+
+/// Returns true if `p` has the same primitive ID as `reference` and its
+/// skeleton depth is no greater than `reference`'s skeleton depth.
+pub(crate) fn skeleton_not_deeper(p: &Primitive, reference: &Primitive) -> bool {
+	if p.id != reference.id {
+		return false;
+	}
+	primitive_skeleton_depth(p, 0) <= primitive_skeleton_depth(reference, 0)
 }
 
 fn inject_primitive(

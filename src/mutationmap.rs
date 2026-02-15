@@ -14,68 +14,150 @@ use crate::value::*;
 /// From stage 4 onward, all attacker-known values are offered as mutations.
 const STAGE_MUTATION_EXPANSION: i32 = 3;
 
-pub(crate) fn mutation_map_init(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	stage: i32,
-) -> VResult<MutationMap> {
-	let mut mm = MutationMap {
-		out_of_mutations: false,
-		constants: vec![],
-		mutations: vec![],
-		combination: vec![],
-		depth_index: vec![],
-	};
-	info_message(
-		&format!(
-			"Initializing Stage {} mutation map for {}...",
-			stage, ps.name
-		),
-		InfoLevel::Analysis,
-		false,
-	);
-	for v in attacker.known.iter() {
-		let c = match v {
-			Value::Constant(c) => c,
-			_ => continue,
-		};
-		let (a, i) = ps.resolve_constant(c, true);
-		let idx = match i {
-			Some(i) => i,
-			None => continue,
-		};
-		if mutation_map_skip_value(v, idx, km, ps, attacker) {
-			continue;
+/// Compute the product of mutation sizes, returning None if it exceeds `cap`.
+pub(crate) fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
+	let mut product: usize = 1;
+	for m in sizes {
+		if m > 0 && product > cap / m {
+			return None;
 		}
-		let r = mutation_map_replace_value(ctx, &a, idx, stage, ps, attacker)?;
-		if r.is_empty() {
-			continue;
-		}
-		mm.constants.push(c.clone());
-		mm.mutations.push(r);
+		product *= m;
 	}
-	mm.combination = vec![value_nil(); mm.constants.len()];
-	mm.depth_index = vec![0; mm.constants.len()];
-	if !mm.constants.is_empty() {
-		let mut_sizes: Vec<usize> = mm.mutations.iter().map(|m| m.len()).collect();
+	if product <= cap {
+		Some(product)
+	} else {
+		None
+	}
+}
+
+impl MutationMap {
+	pub(crate) fn new(
+		ctx: &VerifyContext,
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
+		attacker: &AttackerState,
+		stage: i32,
+	) -> VResult<MutationMap> {
+		let mut mm = MutationMap {
+			out_of_mutations: false,
+			constants: vec![],
+			mutations: vec![],
+			combination: vec![],
+			depth_index: vec![],
+		};
 		info_message(
 			&format!(
-				"Mutation map for {} at stage {}: {} constants, mutations: {:?}",
-				ps.name,
-				stage,
-				mm.constants.len(),
-				mut_sizes
+				"Initializing Stage {} mutation map for {}...",
+				stage, ps.name
 			),
 			InfoLevel::Analysis,
 			false,
 		);
+		for v in attacker.known.iter() {
+			let c = match v {
+				Value::Constant(c) => c,
+				_ => continue,
+			};
+			let (a, i) = ps.resolve_constant(c, true);
+			let idx = match i {
+				Some(i) => i,
+				None => continue,
+			};
+			if skip_value(v, idx, km, ps, attacker) {
+				continue;
+			}
+			let r = replace_value(ctx, &a, idx, stage, ps, attacker)?;
+			if r.is_empty() {
+				continue;
+			}
+			mm.constants.push(c.clone());
+			mm.mutations.push(r);
+		}
+		mm.combination = vec![value_nil(); mm.constants.len()];
+		mm.depth_index = vec![0; mm.constants.len()];
+		if !mm.constants.is_empty() {
+			let mut_sizes: Vec<usize> = mm.mutations.iter().map(|m| m.len()).collect();
+			info_message(
+				&format!(
+					"Mutation map for {} at stage {}: {} constants, mutations: {:?}",
+					ps.name,
+					stage,
+					mm.constants.len(),
+					mut_sizes
+				),
+				InfoLevel::Analysis,
+				false,
+			);
+		}
+		Ok(mm)
 	}
-	Ok(mm)
+
+	pub(crate) fn next(mut self) -> MutationMap {
+		if self.combination.is_empty() {
+			self.out_of_mutations = true;
+			return self;
+		}
+		let n = self.combination.len();
+		for i in 0..n {
+			self.combination[i] = self.mutations[i][self.depth_index[i]].clone();
+		}
+		// Increment last dimension and carry
+		self.depth_index[n - 1] += 1;
+		let mut j = n - 1;
+		while self.depth_index[j] == self.mutations[j].len() {
+			if j == 0 {
+				self.out_of_mutations = true;
+				break;
+			}
+			self.depth_index[j] = 0;
+			j -= 1;
+			self.depth_index[j] += 1;
+		}
+		self
+	}
+
+	pub(crate) fn subset(&self, indices: &[usize]) -> MutationMap {
+		MutationMap {
+			out_of_mutations: false,
+			constants: indices
+				.iter()
+				.map(|&i| self.constants[i].clone())
+				.collect(),
+			mutations: indices
+				.iter()
+				.map(|&i| self.mutations[i].clone())
+				.collect(),
+			combination: vec![value_nil(); indices.len()],
+			depth_index: vec![0; indices.len()],
+		}
+	}
+
+	pub(crate) fn subset_capped(&self, indices: &[usize], max_product: usize) -> MutationMap {
+		let mut sub = self.subset(indices);
+		let n = indices.len();
+		if n == 0 {
+			return sub;
+		}
+		if mutation_product(sub.mutations.iter().map(|m| m.len()), max_product).is_some() {
+			return sub;
+		}
+		let capped_product = max_product.min(i32::MAX as usize) as i32;
+		let capped_n = n.min(i32::MAX as usize) as i32;
+		let per_dim = int_nth_root(capped_product, capped_n).max(1) as usize;
+		for i in 0..n {
+			if sub.mutations[i].len() > per_dim {
+				sub.mutations[i].truncate(per_dim);
+			}
+		}
+		sub
+	}
 }
 
-fn mutation_map_skip_value(
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+fn skip_value(
 	v: &Value,
 	idx: usize,
 	km: &ProtocolTrace,
@@ -100,7 +182,7 @@ fn mutation_map_skip_value(
 	false
 }
 
-fn mutation_map_replace_value(
+fn replace_value(
 	ctx: &VerifyContext,
 	a: &Value,
 	root_index: usize,
@@ -111,13 +193,13 @@ fn mutation_map_replace_value(
 	let a =
 		resolve_ps_values(a, a, root_index, ps, attacker, false)?;
 	match &a {
-		Value::Constant(_) => Ok(mutation_map_replace_constant(&a, stage, ps, attacker)),
-		Value::Primitive(_) => Ok(mutation_map_replace_primitive(ctx, &a, stage, ps, attacker)),
-		Value::Equation(_) => Ok(mutation_map_replace_equation(&a, stage, attacker)),
+		Value::Constant(_) => Ok(replace_constant(&a, stage, ps, attacker)),
+		Value::Primitive(_) => Ok(replace_primitive(ctx, &a, stage, ps, attacker)),
+		Value::Equation(_) => Ok(replace_equation(&a, stage, attacker)),
 	}
 }
 
-fn mutation_map_replace_constant(
+fn replace_constant(
 	a: &Value,
 	stage: i32,
 	ps: &PrincipalState,
@@ -147,7 +229,7 @@ fn mutation_map_replace_constant(
 	mutations
 }
 
-fn mutation_map_replace_primitive(
+fn replace_primitive(
 	ctx: &VerifyContext,
 	a: &Value,
 	stage: i32,
@@ -171,7 +253,7 @@ fn mutation_map_replace_primitive(
 				}
 			}
 			Value::Primitive(vp) => {
-				if !inject_skeleton_not_deeper_pub(vp, a_prim) {
+				if !skeleton_not_deeper(vp, a_prim) {
 					continue;
 				}
 				push_unique_value(&mut mutations, v.clone());
@@ -186,7 +268,7 @@ fn mutation_map_replace_primitive(
 	mutations
 }
 
-fn mutation_map_replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<Value> {
+fn replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<Value> {
 	let mut mutations = vec![];
 	if let Value::Equation(e) = value {
 		match e.values.len() {
@@ -209,109 +291,4 @@ fn mutation_map_replace_equation(value: &Value, stage: i32, attacker: &AttackerS
 		}
 	}
 	mutations
-}
-
-pub(crate) fn mutation_map_subset(full_map: &MutationMap, indices: &[usize]) -> MutationMap {
-	MutationMap {
-		out_of_mutations: false,
-		constants: indices
-			.iter()
-			.map(|&i| full_map.constants[i].clone())
-			.collect(),
-		mutations: indices
-			.iter()
-			.map(|&i| full_map.mutations[i].clone())
-			.collect(),
-		combination: vec![value_nil(); indices.len()],
-		depth_index: vec![0; indices.len()],
-	}
-}
-
-/// Compute the product of mutation sizes, returning None if it exceeds `cap`.
-pub(crate) fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
-	let mut product: usize = 1;
-	for m in sizes {
-		if m > 0 && product > cap / m {
-			return None;
-		}
-		product *= m;
-	}
-	if product <= cap {
-		Some(product)
-	} else {
-		None
-	}
-}
-
-pub(crate) fn mutation_map_subset_capped(
-	full_map: &MutationMap,
-	indices: &[usize],
-	max_product: usize,
-) -> MutationMap {
-	let mut sub = full_map.subset(indices);
-	let n = indices.len();
-	if n == 0 {
-		return sub;
-	}
-	if mutation_product(sub.mutations.iter().map(|m| m.len()), max_product).is_some() {
-		return sub;
-	}
-	let capped_product = max_product.min(i32::MAX as usize) as i32;
-	let capped_n = n.min(i32::MAX as usize) as i32;
-	let per_dim = int_nth_root(capped_product, capped_n).max(1) as usize;
-	for i in 0..n {
-		if sub.mutations[i].len() > per_dim {
-			sub.mutations[i].truncate(per_dim);
-		}
-	}
-	sub
-}
-
-pub(crate) fn mutation_map_next(mut mm: MutationMap) -> MutationMap {
-	if mm.combination.is_empty() {
-		mm.out_of_mutations = true;
-		return mm;
-	}
-	let n = mm.combination.len();
-	for i in 0..n {
-		mm.combination[i] = mm.mutations[i][mm.depth_index[i]].clone();
-	}
-	// Increment last dimension and carry
-	mm.depth_index[n - 1] += 1;
-	let mut j = n - 1;
-	while mm.depth_index[j] == mm.mutations[j].len() {
-		if j == 0 {
-			mm.out_of_mutations = true;
-			break;
-		}
-		mm.depth_index[j] = 0;
-		j -= 1;
-		mm.depth_index[j] += 1;
-	}
-	mm
-}
-
-impl MutationMap {
-	pub(crate) fn new(
-		ctx: &VerifyContext,
-		km: &ProtocolTrace,
-		ps: &PrincipalState,
-		attacker: &AttackerState,
-		stage: i32,
-	) -> VResult<MutationMap> {
-		mutation_map_init(ctx, km, ps, attacker, stage)
-	}
-	pub(crate) fn next(self) -> MutationMap {
-		mutation_map_next(self)
-	}
-	pub(crate) fn subset(&self, indices: &[usize]) -> MutationMap {
-		mutation_map_subset(self, indices)
-	}
-}
-
-pub(crate) fn inject_skeleton_not_deeper_pub(p: &Primitive, reference: &Primitive) -> bool {
-	if p.id != reference.id {
-		return false;
-	}
-	primitive_skeleton_depth(p, 0) <= primitive_skeleton_depth(reference, 0)
 }

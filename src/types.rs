@@ -508,3 +508,28 @@ pub(crate) struct MutationMap {
 	pub combination: Vec<Value>,
 	pub depth_index: Vec<usize>,
 }
+
+/// Result of a successful decomposition: the revealed value and the
+/// attacker-known values that were used to perform the decomposition.
+pub(crate) struct DecomposeResult {
+	pub revealed: Value,
+	pub used: Vec<Value>,
+}
+
+/// Result of a successful recomposition: the revealed value and the
+/// attacker-known values that were used to perform the recomposition.
+pub(crate) struct RecomposeResult {
+	pub revealed: Value,
+	pub used: Vec<Value>,
+}
+
+/// Result of rewriting a primitive or equation value.
+pub(crate) struct RewriteResult {
+	/// Primitives whose rewrite rules failed (checked primitives that
+	/// did not pass their instance check).
+	pub failed_rewrites: Vec<Primitive>,
+	/// Whether any rewriting actually occurred.
+	pub rewritten: bool,
+	/// The (possibly rewritten) value.
+	pub value: Value,
+}

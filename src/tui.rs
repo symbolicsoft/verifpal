@@ -209,8 +209,8 @@ pub(crate) fn tui_init(m: &Model) {
 			}
 			Block::Message(message) => {
 				st.messages.push(TuiMsg {
-					sender: principal_get_name_from_id(message.sender),
-					recipient: principal_get_name_from_id(message.recipient),
+					sender: principal_get_name_from_id(message.sender).to_string(),
+					recipient: principal_get_name_from_id(message.recipient).to_string(),
 					constants: pretty_constants(&message.constants),
 				});
 			}

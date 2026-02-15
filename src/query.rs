@@ -284,9 +284,8 @@ fn query_unlinkability(
 			}
 			let obtainable = match val_a {
 				Value::Primitive(p) => {
-					let (ok0, _) = can_reconstruct_primitive(p, ps, attacker, 0);
-					let (ok1, _, _) = can_recompose(p, attacker);
-					ok0 || ok1
+					can_reconstruct_primitive(p, ps, attacker, 0).is_some()
+						|| can_recompose(p, attacker).is_some()
 				}
 				_ => false,
 			};

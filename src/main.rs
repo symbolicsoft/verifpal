@@ -840,9 +840,9 @@ mod unit_tests {
 			values: vec![value_g(), a.clone()],
 		};
 		let attacker = make_attacker_state(vec![a]);
-		let (can, has) = can_reconstruct_equation(&eq, &attacker);
-		assert!(can);
-		assert_eq!(has.len(), 1);
+		let result = can_reconstruct_equation(&eq, &attacker);
+		assert!(result.is_some());
+		assert_eq!(result.unwrap().len(), 1);
 	}
 
 	#[test]
@@ -853,9 +853,9 @@ mod unit_tests {
 			values: vec![value_g(), a.clone(), b.clone()],
 		};
 		let attacker = make_attacker_state(vec![a, b]);
-		let (can, has) = can_reconstruct_equation(&eq, &attacker);
-		assert!(can);
-		assert_eq!(has.len(), 2);
+		let result = can_reconstruct_equation(&eq, &attacker);
+		assert!(result.is_some());
+		assert_eq!(result.unwrap().len(), 2);
 	}
 
 	#[test]
@@ -866,8 +866,7 @@ mod unit_tests {
 			values: vec![value_g(), a.clone(), b],
 		};
 		let attacker = make_attacker_state(vec![a]); // only knows a, not b
-		let (can, _) = can_reconstruct_equation(&eq, &attacker);
-		assert!(!can);
+		assert!(can_reconstruct_equation(&eq, &attacker).is_none());
 	}
 
 	// -----------------------------------------------------------------------
@@ -942,9 +941,9 @@ mod unit_tests {
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
 		let attacker = make_attacker_state(vec![key]);
-		let (can, revealed, _) = can_decompose(&p, &ps, &attacker, 0);
-		assert!(can);
-		assert!(revealed.equivalent(&msg, true));
+		let result = can_decompose(&p, &ps, &attacker, 0);
+		assert!(result.is_some());
+		assert!(result.unwrap().revealed.equivalent(&msg, true));
 	}
 
 	#[test]
@@ -964,8 +963,7 @@ mod unit_tests {
 		};
 		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
 		let attacker = make_attacker_state(vec![]); // doesn't know the key
-		let (can, _, _) = can_decompose(&p, &ps, &attacker, 0);
-		assert!(!can);
+		assert!(can_decompose(&p, &ps, &attacker, 0).is_none());
 	}
 
 	// -----------------------------------------------------------------------

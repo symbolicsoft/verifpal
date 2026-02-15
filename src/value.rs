@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use crate::equivalence::{equivalent_equations, equivalent_primitives, PrimitiveMatch};
+use crate::equivalence::{equivalent_equations, equivalent_primitives};
 use crate::hashing::{equation_hash, primitive_hash};
 use crate::resolution::constant_used_by_principal;
 use crate::rewrite::{perform_equation_rewrite, perform_primitive_rewrite};
@@ -157,18 +157,6 @@ pub(crate) fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Public re-export of equivalent_primitives for inject.rs and possible.rs
-// ---------------------------------------------------------------------------
-
-pub(crate) fn value_equivalent_primitives(
-	p1: &Primitive,
-	p2: &Primitive,
-	consider_output: bool,
-) -> PrimitiveMatch {
-	equivalent_primitives(p1, p2, consider_output)
-}
-
-// ---------------------------------------------------------------------------
 // Impl methods on core types
 // ---------------------------------------------------------------------------
 
@@ -241,13 +229,13 @@ impl PrincipalState {
 			match &self.values[i].assigned {
 				Value::Primitive(p) => {
 					let p_clone = p.clone();
-					let (failed, _, _) = perform_primitive_rewrite(&p_clone, Some(i), self);
-					failures.extend(failed.into_iter().map(|p| (p, i)));
+					let r = perform_primitive_rewrite(&p_clone, Some(i), self);
+					failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
 				}
 				Value::Equation(e) => {
 					let e_clone = e.clone();
-					let (failed, _, _) = perform_equation_rewrite(&e_clone, Some(i), self);
-					failures.extend(failed.into_iter().map(|p| (p, i)));
+					let r = perform_equation_rewrite(&e_clone, Some(i), self);
+					failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
 				}
 				_ => {}
 			}

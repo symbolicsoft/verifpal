@@ -93,14 +93,16 @@ fn verify_analysis_decompose(
 	let Value::Primitive(prim) = value else {
 		return false;
 	};
-	let (ok, revealed, used) = can_decompose(prim, ps, attacker, 0);
-	if ok && ctx.attacker_put(&revealed, record) {
+	let Some(result) = can_decompose(prim, ps, attacker, 0) else {
+		return false;
+	};
+	if ctx.attacker_put(&result.revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by decomposing {} with {}.",
-				info_output_text(&revealed),
+				info_output_text(&result.revealed),
 				value,
-				pretty_values(&used),
+				pretty_values(&result.used),
 			),
 			InfoLevel::Deduction,
 			true,
@@ -154,14 +156,16 @@ fn verify_analysis_recompose(
 	let Value::Primitive(prim) = value else {
 		return false;
 	};
-	let (ok, revealed, used) = can_recompose(prim, attacker);
-	if ok && ctx.attacker_put(&revealed, record) {
+	let Some(result) = can_recompose(prim, attacker) else {
+		return false;
+	};
+	if ctx.attacker_put(&result.revealed, record) {
 		info_message(
 			&format!(
 				"{} obtained by recomposing {} with {}.",
-				info_output_text(&revealed),
+				info_output_text(&result.revealed),
 				value,
-				pretty_values(&used),
+				pretty_values(&result.used),
 			),
 			InfoLevel::Deduction,
 			true,
@@ -184,28 +188,30 @@ fn verify_analysis_reconstruct(
 	record: &MutationRecord,
 ) -> bool {
 	let mut found = false;
-	let (ok, used) = match value {
+	let result = match value {
 		Value::Primitive(p) => {
-			let (ok, used) = can_reconstruct_primitive(p, ps, attacker, 0);
+			let result = can_reconstruct_primitive(p, ps, attacker, 0);
 			for arg in &p.arguments {
 				found |= verify_analysis_reconstruct(ctx, arg, ps, attacker, record);
 			}
-			(ok, used)
+			result
 		}
 		Value::Equation(e) => can_reconstruct_equation(e, attacker),
 		_ => return found,
 	};
-	if ok && ctx.attacker_put(value, record) {
-		info_message(
-			&format!(
-				"{} obtained by reconstructing with {}.",
-				info_output_text(value),
-				pretty_values(&used),
-			),
-			InfoLevel::Deduction,
-			true,
-		);
-		found = true;
+	if let Some(used) = result {
+		if ctx.attacker_put(value, record) {
+			info_message(
+				&format!(
+					"{} obtained by reconstructing with {}.",
+					info_output_text(value),
+					pretty_values(&used),
+				),
+				InfoLevel::Deduction,
+				true,
+			);
+			found = true;
+		}
 	}
 	found
 }

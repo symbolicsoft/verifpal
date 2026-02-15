@@ -432,33 +432,40 @@ fn construct_principal_states_get_value_mutatability(
 	}
 }
 
-pub(crate) fn construct_principal_state_clone(ps: &PrincipalState, purify: bool) -> PrincipalState {
-	let values = ps
-		.values
-		.iter()
-		.map(|sv| {
-			let (assigned, before_rewrite) = if purify {
-				(&sv.before_mutate, &sv.before_mutate)
-			} else {
-				(&sv.assigned, &sv.before_rewrite)
-			};
-			SlotValues {
-				assigned: assigned.clone(),
-				before_rewrite: before_rewrite.clone(),
-				before_mutate: sv.before_mutate.clone(),
-				mutated: if purify { false } else { sv.mutated },
-				rewritten: false,
-				creator: sv.creator,
-				sender: sv.sender,
-			}
-		})
-		.collect();
-	PrincipalState {
-		name: ps.name.clone(),
-		id: ps.id,
-		max_declared_at: ps.max_declared_at,
-		meta: ps.meta.clone(),
-		values,
-		index: ps.index.clone(),
+impl PrincipalState {
+	/// Deep-clone this principal state for a new verification stage.
+	///
+	/// When `purify` is true, resets all values to their pre-mutation state
+	/// (for a clean new stage).  When false, preserves current mutation state
+	/// (for rewrite analysis within the same stage).
+	pub(crate) fn clone_for_stage(&self, purify: bool) -> PrincipalState {
+		let values = self
+			.values
+			.iter()
+			.map(|sv| {
+				let (assigned, before_rewrite) = if purify {
+					(&sv.before_mutate, &sv.before_mutate)
+				} else {
+					(&sv.assigned, &sv.before_rewrite)
+				};
+				SlotValues {
+					assigned: assigned.clone(),
+					before_rewrite: before_rewrite.clone(),
+					before_mutate: sv.before_mutate.clone(),
+					mutated: if purify { false } else { sv.mutated },
+					rewritten: false,
+					creator: sv.creator,
+					sender: sv.sender,
+				}
+			})
+			.collect();
+		PrincipalState {
+			name: self.name.clone(),
+			id: self.id,
+			max_declared_at: self.max_declared_at,
+			meta: self.meta.clone(),
+			values,
+			index: self.index.clone(),
+		}
 	}
 }

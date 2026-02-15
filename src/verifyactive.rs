@@ -4,10 +4,9 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::construct::construct_principal_state_clone;
 use crate::context::VerifyContext;
 use crate::info::{info_message, info_output_text};
-use crate::mutationmap::{mutation_map_subset_capped, mutation_product};
+use crate::mutationmap::mutation_product;
 use crate::possible::{
 	can_decompose, passively_decompose,
 	can_reconstruct_equation, can_reconstruct_primitive, can_rewrite,
@@ -98,7 +97,7 @@ pub(crate) fn verify_active(
 	for phase in 0..=km.max_phase {
 		info_message(&format!("Running at phase {}.", phase), InfoLevel::Info, false);
 		ctx.attacker_init();
-		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
+		let mut ps_pure_resolved = principal_states[0].clone_for_stage(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
@@ -198,7 +197,7 @@ fn verify_active_equation_bypass(
 			if ctx.all_resolved() {
 				return;
 			}
-			let mut ps = construct_principal_state_clone(ps_base, true);
+			let mut ps = ps_base.clone_for_stage(true);
 			inject_attacker_value(&mut ps.values[target_idx], attacker_id, &g_nil);
 			verify_active_try_equation_bypass_on_state(ctx, km, &mut ps, &attacker);
 		}
@@ -206,7 +205,7 @@ fn verify_active_equation_bypass(
 		// If there are multiple equation wire inputs, also try replacing
 		// all of them simultaneously (full MitM on all public keys).
 		if eq_indices.len() > 1 && !ctx.all_resolved() {
-			let mut ps = construct_principal_state_clone(ps_base, true);
+			let mut ps = ps_base.clone_for_stage(true);
 			for &i in &eq_indices {
 				inject_attacker_value(&mut ps.values[i], attacker_id, &g_nil);
 			}
@@ -398,7 +397,7 @@ fn verify_active_scan_at_weight<'s>(
 
 		if weight == 1 {
 			let sub_map =
-				mutation_map_subset_capped(mm, &sub_indices, BUDGET.max_weight1_mutations);
+				mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
 			let cost = sub_map.mutations[0].len() as u32;
 			let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < cost {
@@ -508,7 +507,7 @@ fn verify_active_scan<'s>(
 			};
 			let result = verify_active_mutate_principal_state(
 					km,
-					construct_principal_state_clone(ps_base, true),
+					ps_base.clone_for_stage(true),
 					attacker,
 					&task_map,
 				);
@@ -742,14 +741,8 @@ fn attacker_can_obtain_value(v: &Value, ps: &PrincipalState, attacker: &Attacker
 		return true;
 	}
 	match v {
-		Value::Primitive(p) => {
-			let (ok, _) = can_reconstruct_primitive(p, ps, attacker, 0);
-			ok
-		}
-		Value::Equation(e) => {
-			let (ok, _) = can_reconstruct_equation(e, attacker);
-			ok
-		}
+		Value::Primitive(p) => can_reconstruct_primitive(p, ps, attacker, 0).is_some(),
+		Value::Equation(e) => can_reconstruct_equation(e, attacker).is_some(),
 		_ => false,
 	}
 }
@@ -797,19 +790,20 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &ProtocolTrace, ps: &Princip
 		for (wv, _idx) in &wire_prims {
 			if let Value::Primitive(p) = wv {
 				// Active decompose (e.g. AEAD_ENC: knowing the key reveals plaintext)
-				let (r, revealed, ar) = can_decompose(p, ps, &attacker_snap, 0);
-				if r && ctx.attacker_put(&revealed, &record) {
-					info_message(
-						&format!(
-							"{} obtained by decomposing {} with {}.",
-							info_output_text(&revealed),
-							wv,
-							pretty_values(&ar),
-						),
-						InfoLevel::Deduction,
-						true,
-					);
-					found_new = true;
+				if let Some(result) = can_decompose(p, ps, &attacker_snap, 0) {
+					if ctx.attacker_put(&result.revealed, &record) {
+						info_message(
+							&format!(
+								"{} obtained by decomposing {} with {}.",
+								info_output_text(&result.revealed),
+								wv,
+								pretty_values(&result.used),
+							),
+							InfoLevel::Deduction,
+							true,
+						);
+						found_new = true;
+					}
 				}
 				// Passive decompose (e.g. associated data from AEAD_ENC)
 				let passive = passively_decompose(p);

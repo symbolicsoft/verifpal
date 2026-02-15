@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::construct::construct_principal_state_clone;
 use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::inject::inject_missing_skeletons;
@@ -81,7 +80,7 @@ pub(crate) fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
-		let mut ps_resolved = construct_principal_state_clone(ps, false);
+		let mut ps_resolved = ps.clone_for_stage(false);
 		ps_resolved.resolve_all_values(&attacker)?;
 
 		// Pre-compute mutation record for this principal state
@@ -121,7 +120,7 @@ fn verify_passive(
 	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
 		ctx.attacker_init();
-		let mut ps_pure_resolved = construct_principal_state_clone(&principal_states[0], true);
+		let mut ps_pure_resolved = principal_states[0].clone_for_stage(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;

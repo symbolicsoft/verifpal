@@ -16,34 +16,30 @@ pub(crate) fn perform_primitive_rewrite(
 	p: &Primitive,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
-) -> (Vec<Primitive>, bool, Value) {
-	let (mut rewrite, mut failed_rewrites, rewritten) =
-		perform_primitive_arguments_rewrite(p, ps);
-	let rewrite_p = match rewrite.as_primitive() {
+) -> RewriteResult {
+	let mut r = perform_primitive_arguments_rewrite(p, ps);
+	let rewrite_p = match r.value.as_primitive() {
 		Some(p) => p,
-		None => return (failed_rewrites, rewritten, rewrite),
+		None => return r,
 	};
-	let (rebuilt, rebuild) = can_rebuild(rewrite_p);
-	if rebuilt {
+	if let Some(rebuild) = can_rebuild(rewrite_p) {
 		if let Some(idx) = slot_index {
 			ps.values[idx].set_assigned(rebuild.clone());
 		}
-		rewrite = rebuild;
-		match rewrite {
-			Value::Constant(_) | Value::Equation(_) => {
-				return (failed_rewrites, rewritten, rewrite);
-			}
+		r.value = rebuild;
+		match r.value {
+			Value::Constant(_) | Value::Equation(_) => return r,
 			_ => {}
 		}
 	}
-	let rewrite_p2 = match rewrite.as_primitive() {
+	let rewrite_p2 = match r.value.as_primitive() {
 		Some(p) => p,
-		None => return (failed_rewrites, rewritten, rewrite),
+		None => return r,
 	};
 	let (rewritten_root, rewritten_values) = can_rewrite(rewrite_p2, ps, 0);
 	if !rewritten_root {
 		if let Some(p) = rewritten_values[0].as_primitive() {
-			failed_rewrites.push(p.clone());
+			r.failed_rewrites.push(p.clone());
 		}
 	}
 	let r_index = if rewritten_root && primitive_is_core(p.id) {
@@ -55,19 +51,19 @@ pub(crate) fn perform_primitive_rewrite(
 		if let Some(idx) = slot_index {
 			ps.values[idx].set_assigned(value_nil());
 		}
-		return (failed_rewrites, rewritten || rewritten_root, value_nil());
+		r.rewritten = r.rewritten || rewritten_root;
+		r.value = value_nil();
+		return r;
 	}
 	if let Some(idx) = slot_index {
-		if rewritten || rewritten_root {
+		if r.rewritten || rewritten_root {
 			ps.values[idx].rewritten = true;
 			ps.values[idx].set_assigned(rewritten_values[r_index].clone());
 		}
 	}
-	(
-		failed_rewrites,
-		rewritten || rewritten_root,
-		rewritten_values[r_index].clone(),
-	)
+	r.rewritten = r.rewritten || rewritten_root;
+	r.value = rewritten_values[r_index].clone();
+	r
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +73,7 @@ pub(crate) fn perform_primitive_rewrite(
 fn perform_primitive_arguments_rewrite(
 	p: &Primitive,
 	ps: &mut PrincipalState,
-) -> (Value, Vec<Primitive>, bool) {
+) -> RewriteResult {
 	let mut failed_rewrites: Vec<Primitive> = Vec::new();
 	let mut rewritten = false;
 	// COW: only allocate new arguments vec if something actually changes
@@ -86,35 +82,33 @@ fn perform_primitive_arguments_rewrite(
 		match a {
 			Value::Constant(_) => {}
 			Value::Primitive(inner_p) => {
-				let (p_failed, p_rewritten, p_rewrite) =
-					perform_primitive_rewrite(inner_p, None, ps);
-				if p_rewritten {
+				let r = perform_primitive_rewrite(inner_p, None, ps);
+				if r.rewritten {
 					rewritten = true;
 					let args = new_args.get_or_insert_with(|| p.arguments.clone());
-					args[i] = p_rewrite;
+					args[i] = r.value;
 				} else {
-					failed_rewrites.extend(p_failed);
+					failed_rewrites.extend(r.failed_rewrites);
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (e_failed, e_rewritten, e_rewrite) =
-					perform_equation_rewrite(inner_e, None, ps);
-				if e_rewritten {
+				let r = perform_equation_rewrite(inner_e, None, ps);
+				if r.rewritten {
 					rewritten = true;
 					let args = new_args.get_or_insert_with(|| p.arguments.clone());
-					args[i] = e_rewrite;
+					args[i] = r.value;
 				} else {
-					failed_rewrites.extend(e_failed);
+					failed_rewrites.extend(r.failed_rewrites);
 				}
 			}
 		}
 	}
-	let result = if let Some(args) = new_args {
+	let value = if let Some(args) = new_args {
 		Value::Primitive(Arc::new(p.with_arguments(args)))
 	} else {
 		Value::Primitive(Arc::new(p.clone()))
 	};
-	(result, failed_rewrites, rewritten)
+	RewriteResult { failed_rewrites, rewritten, value }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +119,7 @@ pub(crate) fn perform_equation_rewrite(
 	e: &Equation,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
-) -> (Vec<Primitive>, bool, Value) {
+) -> RewriteResult {
 	let mut rewritten = false;
 	let mut failed_rewrites: Vec<Primitive> = Vec::new();
 	let mut rewrite_eq = Equation { values: Vec::new() };
@@ -138,17 +132,16 @@ pub(crate) fn perform_equation_rewrite(
 				if !primitive_has_rewrite_rule(inner_p.id) {
 					continue;
 				}
-				let (p_failed, p_rewritten, p_rewrite) =
-					perform_primitive_rewrite(inner_p, None, ps);
-				if !p_rewritten {
+				let r = perform_primitive_rewrite(inner_p, None, ps);
+				if !r.rewritten {
 					rewrite_eq.values.push(e.values[i].clone());
-					failed_rewrites.extend(p_failed);
+					failed_rewrites.extend(r.failed_rewrites);
 					continue;
 				}
 				rewritten = true;
-				match &p_rewrite {
+				match &r.value {
 					Value::Constant(_) | Value::Primitive(_) => {
-						rewrite_eq.values.push(p_rewrite);
+						rewrite_eq.values.push(r.value);
 					}
 					Value::Equation(inner_e) => {
 						rewrite_eq.values.extend(inner_e.values.iter().cloned());
@@ -156,24 +149,23 @@ pub(crate) fn perform_equation_rewrite(
 				}
 			}
 			Value::Equation(inner_e) => {
-				let (e_failed, e_rewritten, e_rewrite) =
-					perform_equation_rewrite(inner_e, None, ps);
-				if !e_rewritten {
+				let r = perform_equation_rewrite(inner_e, None, ps);
+				if !r.rewritten {
 					rewrite_eq.values.push(e.values[i].clone());
-					failed_rewrites.extend(e_failed);
+					failed_rewrites.extend(r.failed_rewrites);
 					continue;
 				}
 				rewritten = true;
-				rewrite_eq.values.push(e_rewrite);
+				rewrite_eq.values.push(r.value);
 			}
 		}
 	}
-	let rewrite = Value::Equation(Arc::new(rewrite_eq));
+	let value = Value::Equation(Arc::new(rewrite_eq));
 	if let Some(idx) = slot_index {
 		if rewritten {
 			ps.values[idx].rewritten = true;
-			ps.values[idx].set_assigned(rewrite.clone());
+			ps.values[idx].set_assigned(value.clone());
 		}
 	}
-	(failed_rewrites, rewritten, rewrite)
+	RewriteResult { failed_rewrites, rewritten, value }
 }
