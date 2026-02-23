@@ -1,1 +1,1 @@
-Verifpal 0.40.0 is an absolutely massive update, rewriting all of Verifpal in Rust and introducing an almost innumerable amount of improvements. For more details, read the announcement on the Symbolic Software blog: https://symbolic.software/blog/2026-02-23-verifpal-rust/
+Verifpal 0.40.1 is an absolutely massive update, rewriting all of Verifpal in Rust and introducing an almost innumerable amount of improvements. For more details, read the announcement on the Symbolic Software blog: https://symbolic.software/blog/2026-02-23-verifpal-rust/
