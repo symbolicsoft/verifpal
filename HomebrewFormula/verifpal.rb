@@ -4,20 +4,20 @@
 class Verifpal < Formula
   desc "Cryptographic protocol analysis for students and engineers."
   homepage "https://verifpal.com"
-  version "0.40.0"
+  version "0.40.1"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.0/verifpal_0.40.0_darwin_amd64.zip"
-      sha256 "4e540819ac9810e25b3ac6321d591b85ebd3d855062d6006c65349d3339517d4"
+      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.1/verifpal_0.40.1_darwin_amd64.zip"
+      sha256 "9e450345eea252c7b2892e68a12be42ddbfd8e4fee884f3063deda3177eebd79"
 
       def install
         bin.install "verifpal"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.0/verifpal_0.40.0_darwin_arm64.zip"
-      sha256 "836792afce4f0787f70a18f7d4e308e34bf7f8e0478311ea50157d3eae570475"
+      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.1/verifpal_0.40.1_darwin_arm64.zip"
+      sha256 "b7cd4f05f0b13adf2ef7cfb93aa9aa1ad8d3d5f51f7bd24cf27db037f564b104"
 
       def install
         bin.install "verifpal"
@@ -27,15 +27,15 @@ class Verifpal < Formula
 
   on_linux do
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.0/verifpal_0.40.0_linux_amd64.zip"
-      sha256 "228d7242386cc337c59cb5d27ba79c1212c07e59fac8f9d5abb7d4debe1b0470"
+      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.1/verifpal_0.40.1_linux_amd64.zip"
+      sha256 "615f57e3b4be8274d158179f7b3e215b81023cd842f709f281a084249dfbb2ef"
       def install
         bin.install "verifpal"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.0/verifpal_0.40.0_linux_arm64.zip"
-      sha256 "46ec48972372fcb76b6bfc52142351637e62caea8ab659c8ba3bd4af4dc71be8"
+      url "https://github.com/symbolicsoft/verifpal/releases/download/v0.40.1/verifpal_0.40.1_linux_arm64.zip"
+      sha256 "a47e85743637d36f36728460e97fa76e35d00ecb3ff7534a48500815879b219b"
       def install
         bin.install "verifpal"
       end
