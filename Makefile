@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 build:
-	@/bin/echo -n "[Verifpal] Building Verifpal for Windows..."
+	@/bin/echo -n "[Verifpal] Building Verifpal..."
 	@cargo build --release 
 	@/bin/echo " OK"
 
