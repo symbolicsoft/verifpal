@@ -97,7 +97,6 @@ pub(crate) enum QueryOptionKind {
 	Precondition,
 }
 
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum InfoLevel {
 	Verifpal,
@@ -164,30 +163,27 @@ impl Value {
 	pub(crate) fn try_as_constant(&self) -> VResult<&Constant> {
 		match self {
 			Value::Constant(c) => Ok(c),
-			_ => Err(VerifpalError::Internal(format!(
-				"expected Constant, got {}",
-				self.variant_name()
-			).into())),
+			_ => Err(VerifpalError::Internal(
+				format!("expected Constant, got {}", self.variant_name()).into(),
+			)),
 		}
 	}
 
 	pub(crate) fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
-			_ => Err(VerifpalError::Internal(format!(
-				"expected Primitive, got {}",
-				self.variant_name()
-			).into())),
+			_ => Err(VerifpalError::Internal(
+				format!("expected Primitive, got {}", self.variant_name()).into(),
+			)),
 		}
 	}
 
 	pub(crate) fn try_as_equation(&self) -> VResult<&Equation> {
 		match self {
 			Value::Equation(e) => Ok(e),
-			_ => Err(VerifpalError::Internal(format!(
-				"expected Equation, got {}",
-				self.variant_name()
-			).into())),
+			_ => Err(VerifpalError::Internal(
+				format!("expected Equation, got {}", self.variant_name()).into(),
+			)),
 		}
 	}
 
@@ -195,10 +191,9 @@ impl Value {
 	pub(crate) fn try_as_primitive_mut(&mut self) -> VResult<&mut Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(Arc::make_mut(p)),
-			_ => Err(VerifpalError::Internal(format!(
-				"expected Primitive, got {}",
-				self.variant_name()
-			).into())),
+			_ => Err(VerifpalError::Internal(
+				format!("expected Primitive, got {}", self.variant_name()).into(),
+			)),
 		}
 	}
 
@@ -221,7 +216,6 @@ pub(crate) struct Constant {
 	pub declaration: Option<Declaration>,
 	pub qualifier: Option<Qualifier>,
 }
-
 
 #[derive(Clone, Debug)]
 pub(crate) struct Primitive {

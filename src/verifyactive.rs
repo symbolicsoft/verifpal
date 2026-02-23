@@ -8,16 +8,14 @@ use crate::context::VerifyContext;
 use crate::info::{info_message, info_output_text};
 use crate::mutationmap::mutation_product;
 use crate::possible::{
-	can_decompose, passively_decompose,
-	can_reconstruct_equation, can_reconstruct_primitive, can_rewrite,
+	can_decompose, can_reconstruct_equation, can_reconstruct_primitive, can_rewrite,
+	passively_decompose,
 };
 use crate::pretty::pretty_values;
 use crate::primitive::*;
 use crate::principal::ATTACKER_ID;
 use crate::types::*;
-use crate::value::{
-	compute_slot_diffs, resolve_trace_values, value_g_nil,
-};
+use crate::value::{compute_slot_diffs, resolve_trace_values, value_g_nil};
 use crate::verify::{verify_resolve_queries, verify_standard_run};
 use crate::verifyanalysis::verify_analysis;
 
@@ -95,7 +93,11 @@ pub(crate) fn verify_active(
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
-		info_message(&format!("Running at phase {}.", phase), InfoLevel::Info, false);
+		info_message(
+			&format!("Running at phase {}.", phase),
+			InfoLevel::Info,
+			false,
+		);
 		ctx.attacker_init();
 		let mut ps_pure_resolved = principal_states[0].clone_for_stage(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
@@ -178,7 +180,9 @@ fn verify_active_equation_bypass(
 			.zip(ps_base.values.iter())
 			.enumerate()
 			.filter_map(|(i, (sm, sv))| {
-				if sv.creator == ps_base.id || sm.guard || !sm.phase.contains(&attacker.current_phase) {
+				if sv.creator == ps_base.id
+					|| sm.guard || !sm.phase.contains(&attacker.current_phase)
+				{
 					return None;
 				}
 				if let Value::Equation(_) = &sv.assigned {
@@ -396,8 +400,7 @@ fn verify_active_scan_at_weight<'s>(
 		let sub_indices = indices.clone();
 
 		if weight == 1 {
-			let sub_map =
-				mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
+			let sub_map = mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
 			let cost = sub_map.mutations[0].len() as u32;
 			let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < cost {
@@ -506,11 +509,11 @@ fn verify_active_scan<'s>(
 				depth_index: vec![],
 			};
 			let result = verify_active_mutate_principal_state(
-					km,
-					ps_base.clone_for_stage(true),
-					attacker,
-					&task_map,
-				);
+				km,
+				ps_base.clone_for_stage(true),
+				attacker,
+				&task_map,
+			);
 			if result.is_worthwhile {
 				worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
 				if crate::tui::tui_enabled() {
@@ -536,10 +539,16 @@ fn verify_active_scan<'s>(
 				if !ctx.all_resolved() {
 					if let Some(ref bypass) = result.guard_bypass {
 						let attacker_now = ctx.attacker_snapshot();
-						if can_attacker_bypass_any_guard(&bypass.failed_guards, &bypass.full_state, &attacker_now) {
-							if let Some(ps_injected) =
-								build_bypass_state(&bypass.full_state, &bypass.failed_guards, &attacker_now)
-							{
+						if can_attacker_bypass_any_guard(
+							&bypass.failed_guards,
+							&bypass.full_state,
+							&attacker_now,
+						) {
+							if let Some(ps_injected) = build_bypass_state(
+								&bypass.full_state,
+								&bypass.failed_guards,
+								&attacker_now,
+							) {
 								verify_bypass_decompose(ctx, km, &ps_injected);
 							}
 						}
@@ -595,7 +604,11 @@ fn verify_active_mutate_principal_state(
 	let mut is_worthwhile_mutation = false;
 	let attacker_id = ATTACKER_ID;
 
-	for (constant, combo) in mutation_map.constants.iter().zip(mutation_map.combination.iter()) {
+	for (constant, combo) in mutation_map
+		.constants
+		.iter()
+		.zip(mutation_map.combination.iter())
+	{
 		let (resolved_assigned, slot_idx) = ps.resolve_constant(constant, true);
 		let slot_idx = match slot_idx {
 			Some(i) => i,
@@ -638,7 +651,11 @@ fn verify_active_mutate_principal_state(
 	}
 
 	if !is_worthwhile_mutation {
-		return MutationResult { state: ps, is_worthwhile: false, guard_bypass: None };
+		return MutationResult {
+			state: ps,
+			is_worthwhile: false,
+			guard_bypass: None,
+		};
 	}
 
 	let ps_pre = ps.clone();
@@ -676,7 +693,10 @@ fn verify_active_mutate_principal_state(
 	if let Some(trunc_at) = truncation_index {
 		let failed_idx = truncation_failed_idx.unwrap_or(0);
 		let guard_bypass = if !failed_guards.is_empty() {
-			Some(GuardBypassInfo { full_state: ps_pre, failed_guards })
+			Some(GuardBypassInfo {
+				full_state: ps_pre,
+				failed_guards,
+			})
 		} else {
 			None
 		};
@@ -688,7 +708,11 @@ fn verify_active_mutate_principal_state(
 		};
 	}
 
-	MutationResult { state: ps, is_worthwhile: is_worthwhile_mutation, guard_bypass: None }
+	MutationResult {
+		state: ps,
+		is_worthwhile: is_worthwhile_mutation,
+		guard_bypass: None,
+	}
 }
 
 /// Extract the key/secret that the attacker would need to know in order to

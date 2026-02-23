@@ -110,7 +110,9 @@ pub(crate) fn value_names_map_add(name: &str) -> ValueId {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
-	values.iter().position(|existing| v.equivalent(existing, true))
+	values
+		.iter()
+		.position(|existing| v.equivalent(existing, true))
 }
 
 /// Push `v` into `values` if no equivalent value already exists. Returns true if pushed.
@@ -206,9 +208,16 @@ impl Constant {
 
 impl PrincipalState {
 	pub(crate) fn index_of(&self, c: &Constant) -> Option<usize> {
-		self.index.get(&c.id).copied().filter(|&i| i < self.meta.len())
+		self.index
+			.get(&c.id)
+			.copied()
+			.filter(|&i| i < self.meta.len())
 	}
-	pub(crate) fn resolve_constant(&self, c: &Constant, allow_before_mutate: bool) -> (Value, Option<usize>) {
+	pub(crate) fn resolve_constant(
+		&self,
+		c: &Constant,
+		allow_before_mutate: bool,
+	) -> (Value, Option<usize>) {
 		let i = self.index_of(c);
 		match i {
 			None => (Value::Constant(c.clone()), None),

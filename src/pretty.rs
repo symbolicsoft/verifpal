@@ -113,7 +113,12 @@ impl fmt::Display for Expression {
 		match self.kind {
 			Declaration::Knows => {
 				let qualifier = self.qualifier.unwrap_or(Qualifier::Private);
-				write!(f, "knows {} {}", qualifier, pretty_constants(&self.constants))
+				write!(
+					f,
+					"knows {} {}",
+					qualifier,
+					pretty_constants(&self.constants)
+				)
 			}
 			Declaration::Generates => {
 				write!(f, "generates {}", pretty_constants(&self.constants))

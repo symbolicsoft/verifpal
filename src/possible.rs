@@ -84,10 +84,7 @@ pub(crate) fn can_decompose(
 	}
 }
 
-pub(crate) fn can_recompose(
-	p: &Primitive,
-	attacker: &AttackerState,
-) -> Option<RecomposeResult> {
+pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
@@ -169,7 +166,10 @@ pub(crate) fn can_reconstruct_primitive(
 	Some(has)
 }
 
-pub(crate) fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> Option<Vec<Value>> {
+pub(crate) fn can_reconstruct_equation(
+	e: &Equation,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
 	if e.values.len() < 2 {
 		return None;
 	}
@@ -291,7 +291,11 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
 						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
-						if r { v.into_iter().next() } else { None }
+						if r {
+							v.into_iter().next()
+						} else {
+							None
+						}
 					}
 					Value::Equation(inner_e) => {
 						let mut new_values: Option<Vec<Value>> = None;
@@ -377,8 +381,7 @@ pub(crate) fn find_obtainable_passwords(
 	match a {
 		Value::Constant(c) => {
 			let (resolved, _) = ps.resolve_constant(c, true);
-			let is_password =
-				matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password));
+			let is_password = matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password));
 			if is_password {
 				let is_hashed = a_index.is_some_and(|idx| {
 					matches!(a_parent, Value::Primitive(pp) if !primitive_is_core(pp.id)

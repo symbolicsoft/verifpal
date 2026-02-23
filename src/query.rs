@@ -66,15 +66,19 @@ fn query_confidentiality(
 		Some(idx) => idx,
 		None => return result,
 	};
-	let mutated_info =
-		info_query_mutated_values(km, &attacker.mutation_records[attacker_idx].diffs, attacker, resolved_value, 0);
+	let mutated_info = info_query_mutated_values(
+		km,
+		&attacker.mutation_records[attacker_idx].diffs,
+		attacker,
+		resolved_value,
+		0,
+	);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
-			query.constants[0],
-			attacker.known[attacker_idx],
+			query.constants[0], attacker.known[attacker_idx],
 		),
 		&result.options,
 	);
@@ -106,7 +110,15 @@ fn query_authentication(
 		let diffs = compute_slot_diffs(ps, km);
 		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, assigned, 0);
 		result = query_precondition(result, ps);
-		return query_authentication_handle_pass(ctx, result, &c, before, &mutated_info, sender, ps);
+		return query_authentication_handle_pass(
+			ctx,
+			result,
+			&c,
+			before,
+			&mutated_info,
+			sender,
+			ps,
+		);
 	}
 	result
 }
@@ -228,10 +240,7 @@ fn query_freshness(
 		&mutated_info,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
-			query.constants[0],
-			resolved,
-			ps.name,
-			ps.values[indices[0]].before_rewrite,
+			query.constants[0], resolved, ps.name, ps.values[indices[0]].before_rewrite,
 		),
 		&result.options,
 	);
@@ -323,9 +332,7 @@ fn query_equivalence(
 		.iter()
 		.map(|c| ps.resolve_constant(c, false).0)
 		.collect();
-	let all_equivalent = values
-		.windows(2)
-		.all(|w| w[0].equivalent(&w[1], true));
+	let all_equivalent = values.windows(2).all(|w| w[0].equivalent(&w[1], true));
 	if all_equivalent {
 		return result;
 	}
@@ -335,7 +342,14 @@ fn query_equivalence(
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info,
-		&format!("{} are not equivalent.", values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),),
+		&format!(
+			"{} are not equivalent.",
+			values
+				.iter()
+				.map(|v| v.to_string())
+				.collect::<Vec<_>>()
+				.join(", "),
+		),
 		&result.options,
 	);
 	result = query_precondition(result, ps);

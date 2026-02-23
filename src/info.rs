@@ -344,7 +344,8 @@ pub(crate) fn info_query_mutated_values(
 		let is_target = target_value.equivalent(&diff.assigned, false);
 		let attacker_knows = val_attacker_state.knows(target_value).is_some();
 
-		let (diff_info, diff_relevant) = info_query_mutated_value(trace, diff, is_target, attacker_knows);
+		let (diff_info, diff_relevant) =
+			info_query_mutated_value(trace, diff, is_target, attacker_knows);
 		if diff_relevant {
 			relevant = true;
 		}
@@ -353,9 +354,7 @@ pub(crate) fn info_query_mutated_values(
 
 		if is_target && attacker_knows {
 			// target obtained
-		} else if diff.mutated
-			&& find_equivalent(&diff.assigned, &mutated).is_none()
-		{
+		} else if diff.mutated && find_equivalent(&diff.assigned, &mutated).is_none() {
 			mutated.push(diff.assigned.clone());
 		}
 	}
@@ -378,7 +377,10 @@ pub(crate) fn info_query_mutated_values(
 			info_depth + 1,
 		);
 		if !nested_info.is_empty() {
-			mutated_info = format!("{}\n\n            {}{}", nested_info, target_info, mutated_info);
+			mutated_info = format!(
+				"{}\n\n            {}{}",
+				nested_info, target_info, mutated_info
+			);
 		}
 	}
 	mutated_info
@@ -425,10 +427,19 @@ fn info_query_mutated_value(
 	}
 	if color_output_support() {
 		(
-			format!("{} {} {}{}", constant_str, "\u{2192}".dimmed(), assigned_str, suffix),
+			format!(
+				"{} {} {}{}",
+				constant_str,
+				"\u{2192}".dimmed(),
+				assigned_str,
+				suffix
+			),
 			relevant,
 		)
 	} else {
-		(format!("{} -> {}{}", constant_str, assigned_str, suffix), relevant)
+		(
+			format!("{} -> {}{}", constant_str, assigned_str, suffix),
+			relevant,
+		)
 	}
 }

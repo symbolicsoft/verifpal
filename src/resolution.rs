@@ -21,16 +21,18 @@ const MAX_RESOLVE_DEPTH: usize = 64;
 // Resolve internal values from ProtocolTrace
 // ---------------------------------------------------------------------------
 
-pub(crate) fn resolve_trace_values(
-	value: &Value,
-	trace: &ProtocolTrace,
-) -> (Value, Vec<Value>) {
+pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
 	let mut visited: Vec<Value> = Vec::new();
 	let resolved = resolve_trace_value(value, trace, &mut visited, 0);
 	(resolved, visited)
 }
 
-fn resolve_trace_value(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
+fn resolve_trace_value(
+	value: &Value,
+	trace: &ProtocolTrace,
+	visited: &mut Vec<Value>,
+	depth: usize,
+) -> Value {
 	if depth >= MAX_RESOLVE_DEPTH {
 		return value.clone();
 	}
@@ -54,7 +56,12 @@ fn resolve_trace_value(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<V
 	}
 }
 
-fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
+fn resolve_trace_primitive(
+	value: &Value,
+	trace: &ProtocolTrace,
+	visited: &mut Vec<Value>,
+	depth: usize,
+) -> Value {
 	let prim = match value.as_primitive() {
 		Some(p) => p,
 		None => return value.clone(),
@@ -78,7 +85,12 @@ fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace, visited: &mut V
 	}
 }
 
-fn resolve_trace_equation(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>, depth: usize) -> Value {
+fn resolve_trace_equation(
+	value: &Value,
+	trace: &ProtocolTrace,
+	visited: &mut Vec<Value>,
+	depth: usize,
+) -> Value {
 	let eq = match value.as_equation() {
 		Some(e) => e,
 		None => return value.clone(),
@@ -214,8 +226,8 @@ fn resolve_ps_values_depth(
 			// Case 2: resolving a nested constant (argument of the root).
 			// If the root is a primitive received from another principal,
 			// force before_mutate so we see the original (untampered) inputs.
-			let root_from_other = matches!(&root_val, Value::Primitive(_))
-				&& ps.values[root_idx].creator != ps.id;
+			let root_from_other =
+				matches!(&root_val, Value::Primitive(_)) && ps.values[root_idx].creator != ps.id;
 			if root_from_other {
 				fbm = true;
 			}
@@ -243,24 +255,12 @@ fn resolve_ps_values_depth(
 
 	match &resolved {
 		Value::Constant(_) => Ok(resolved),
-		Value::Primitive(_) => resolve_ps_primitive_depth(
-			&resolved,
-			&root_val,
-			root_idx,
-			ps,
-			attacker,
-			fbm,
-			depth + 1,
-		),
-		Value::Equation(_) => resolve_ps_equation_depth(
-			&resolved,
-			&root_val,
-			root_idx,
-			ps,
-			attacker,
-			fbm,
-			depth + 1,
-		),
+		Value::Primitive(_) => {
+			resolve_ps_primitive_depth(&resolved, &root_val, root_idx, ps, attacker, fbm, depth + 1)
+		}
+		Value::Equation(_) => {
+			resolve_ps_equation_depth(&resolved, &root_val, root_idx, ps, attacker, fbm, depth + 1)
+		}
 	}
 }
 
@@ -282,9 +282,8 @@ fn resolve_ps_primitive_depth(
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, arg) in prim.arguments.iter().enumerate() {
-		let resolved = resolve_ps_values_depth(
-			arg, root_value, root_index, ps, attacker, fbm, depth,
-		)?;
+		let resolved =
+			resolve_ps_values_depth(arg, root_value, root_index, ps, attacker, fbm, depth)?;
 		if !resolved.equivalent(arg, true) {
 			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
 			args[i] = resolved;
@@ -340,10 +339,7 @@ fn resolve_ps_equation_depth(
 					item, root_value, root_index, ps, attacker, fbm, depth,
 				)?;
 				if i == 0 {
-					result_eq.values = resolved
-						.try_as_equation()?
-						.values
-						.clone();
+					result_eq.values = resolved.try_as_equation()?.values.clone();
 				} else {
 					let inner = resolved.try_as_equation()?;
 					if inner.values.len() > 1 {
@@ -421,7 +417,8 @@ pub(crate) fn value_constant_contains_fresh_values(
 		.ok_or_else(|| VerifpalError::Resolution("invalid value".into()))?;
 	let mut constants = Vec::new();
 	ps.values[idx].assigned.collect_constants(&mut constants);
-	Ok(constants
-		.iter()
-		.any(|inner| ps.index_of(inner).is_some_and(|i| ps.meta[i].constant.fresh)))
+	Ok(constants.iter().any(|inner| {
+		ps.index_of(inner)
+			.is_some_and(|i| ps.meta[i].constant.fresh)
+	}))
 }

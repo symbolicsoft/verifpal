@@ -70,10 +70,7 @@ pub(crate) fn perform_primitive_rewrite(
 // Rewrite: primitive arguments
 // ---------------------------------------------------------------------------
 
-fn perform_primitive_arguments_rewrite(
-	p: &Primitive,
-	ps: &mut PrincipalState,
-) -> RewriteResult {
+fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -> RewriteResult {
 	let mut failed_rewrites: Vec<Primitive> = Vec::new();
 	let mut rewritten = false;
 	// COW: only allocate new arguments vec if something actually changes
@@ -108,7 +105,11 @@ fn perform_primitive_arguments_rewrite(
 	} else {
 		Value::Primitive(Arc::new(p.clone()))
 	};
-	RewriteResult { failed_rewrites, rewritten, value }
+	RewriteResult {
+		failed_rewrites,
+		rewritten,
+		value,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -167,5 +168,9 @@ pub(crate) fn perform_equation_rewrite(
 			ps.values[idx].set_assigned(value.clone());
 		}
 	}
-	RewriteResult { failed_rewrites, rewritten, value }
+	RewriteResult {
+		failed_rewrites,
+		rewritten,
+		value,
+	}
 }

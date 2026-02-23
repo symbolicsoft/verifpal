@@ -176,10 +176,7 @@ pub(crate) fn tui_init(m: &Model) {
 		match block {
 			Block::Principal(principal) => {
 				// Deduplicate principals by name, summing stats
-				let existing = st
-					.principals
-					.iter_mut()
-					.find(|p| p.name == principal.name);
+				let existing = st.principals.iter_mut().find(|p| p.name == principal.name);
 				let p = if let Some(p) = existing {
 					p
 				} else {
@@ -190,7 +187,7 @@ pub(crate) fn tui_init(m: &Model) {
 						n_computed: 0,
 					});
 					// SAFETY: just pushed, so last_mut is always Some
-				st.principals.last_mut().unwrap_or_else(|| unreachable!())
+					st.principals.last_mut().unwrap_or_else(|| unreachable!())
 				};
 				for expr in &principal.expressions {
 					match expr.kind {

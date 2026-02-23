@@ -119,14 +119,8 @@ impl MutationMap {
 	pub(crate) fn subset(&self, indices: &[usize]) -> MutationMap {
 		MutationMap {
 			out_of_mutations: false,
-			constants: indices
-				.iter()
-				.map(|&i| self.constants[i].clone())
-				.collect(),
-			mutations: indices
-				.iter()
-				.map(|&i| self.mutations[i].clone())
-				.collect(),
+			constants: indices.iter().map(|&i| self.constants[i].clone()).collect(),
+			mutations: indices.iter().map(|&i| self.mutations[i].clone()).collect(),
 			combination: vec![value_nil(); indices.len()],
 			depth_index: vec![0; indices.len()],
 		}
@@ -190,8 +184,7 @@ fn replace_value(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> VResult<Vec<Value>> {
-	let a =
-		resolve_ps_values(a, a, root_index, ps, attacker, false)?;
+	let a = resolve_ps_values(a, a, root_index, ps, attacker, false)?;
 	match &a {
 		Value::Constant(_) => Ok(replace_constant(&a, stage, ps, attacker)),
 		Value::Primitive(_) => Ok(replace_primitive(ctx, &a, stage, ps, attacker)),
@@ -282,9 +275,7 @@ fn replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<
 		}
 		for v in attacker.known.iter() {
 			if let Value::Equation(ve) = v {
-				if ve.values.len() == e.values.len()
-					&& find_equivalent(v, &mutations).is_none()
-				{
+				if ve.values.len() == e.values.len() && find_equivalent(v, &mutations).is_none() {
 					mutations.push(v.clone());
 				}
 			}

@@ -780,7 +780,12 @@ mod unit_tests {
 			id: value_names_map_add("cr_dummy"),
 			..Constant::default()
 		};
-		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
 		let (rewritten, values) = can_rewrite(&split, &ps, 0);
 		assert!(rewritten);
 		assert_eq!(values.len(), 2);
@@ -803,7 +808,12 @@ mod unit_tests {
 			id: value_names_map_add("cra_dummy"),
 			..Constant::default()
 		};
-		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
 		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
 		assert!(rewritten);
 	}
@@ -824,7 +834,12 @@ mod unit_tests {
 			id: value_names_map_add("cram_dummy"),
 			..Constant::default()
 		};
-		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
 		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
 		assert!(!rewritten);
 	}
@@ -939,7 +954,12 @@ mod unit_tests {
 			id: value_names_map_add("cd_dummy"),
 			..Constant::default()
 		};
-		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
 		let attacker = make_attacker_state(vec![key]);
 		let result = can_decompose(&p, &ps, &attacker, 0);
 		assert!(result.is_some());
@@ -961,7 +981,12 @@ mod unit_tests {
 			id: value_names_map_add("cd_nk_dummy"),
 			..Constant::default()
 		};
-		let ps = make_principal_state("Test", 0, vec![make_slot_meta(&c_dummy, true)], vec![make_slot_values(&value_nil(), 0)]);
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
 		let attacker = make_attacker_state(vec![]); // doesn't know the key
 		assert!(can_decompose(&p, &ps, &attacker, 0).is_none());
 	}

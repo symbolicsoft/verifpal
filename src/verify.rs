@@ -21,7 +21,10 @@ use crate::verifyactive::verify_active;
 ///
 /// `verifhub_scheduled` — when `true`, submit the results to VerifHub on completion.
 /// This replaced the old `VERIFHUB_SCHEDULED` global `AtomicBool`.
-pub(crate) fn verify(file_path: &str, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
+pub(crate) fn verify(
+	file_path: &str,
+	verifhub_scheduled: bool,
+) -> VResult<(Vec<VerifyResult>, String)> {
 	let m = parse_file(file_path)?;
 	verify_model(&m, verifhub_scheduled)
 }
@@ -151,7 +154,11 @@ fn verify_get_results_code(results: &[VerifyResult]) -> String {
 // End of verification: print summary, optionally submit to VerifHub
 // ---------------------------------------------------------------------------
 
-fn verify_end(ctx: &VerifyContext, m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_end(
+	ctx: &VerifyContext,
+	m: &Model,
+	verifhub_scheduled: bool,
+) -> VResult<(Vec<VerifyResult>, String)> {
 	// Leave the TUI alternate screen before printing final results
 	crate::tui::tui_finish();
 
@@ -189,7 +196,11 @@ fn verify_end(ctx: &VerifyContext, m: &Model, verifhub_scheduled: bool) -> VResu
 	crate::info::info_separator();
 
 	if fail_count == 0 {
-		info_message(&format!("All {} queries pass.", total), InfoLevel::Pass, false);
+		info_message(
+			&format!("All {} queries pass.", total),
+			InfoLevel::Pass,
+			false,
+		);
 	} else {
 		info_message(
 			&format!("{} of {} queries failed.", fail_count, total),

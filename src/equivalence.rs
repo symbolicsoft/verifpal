@@ -18,7 +18,11 @@ pub(crate) struct PrimitiveMatch {
 
 impl PrimitiveMatch {
 	fn no_match() -> Self {
-		PrimitiveMatch { equivalent: false, output_left: 0, output_right: 0 }
+		PrimitiveMatch {
+			equivalent: false,
+			output_left: 0,
+			output_right: 0,
+		}
 	}
 }
 
@@ -41,7 +45,11 @@ pub(crate) fn equivalent_primitives(
 			return PrimitiveMatch::no_match();
 		}
 	}
-	PrimitiveMatch { equivalent: true, output_left: p1.output, output_right: p2.output }
+	PrimitiveMatch {
+		equivalent: true,
+		output_left: p1.output,
+		output_right: p2.output,
+	}
 }
 
 /// Check structural equivalence of two equations (DH exponentiation chains).
@@ -125,12 +133,7 @@ pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 /// pairs match under commutativity.  For `G^a^b == G^c^d`, we need either
 /// `(a==c && b==d)` or `(a==d && b==c)`.  This function checks one ordering;
 /// the caller invokes it twice with swapped arguments to cover both.
-fn equivalent_equations_rule(
-	base1: &Value,
-	base2: &Value,
-	exp1: &Value,
-	exp2: &Value,
-) -> bool {
+fn equivalent_equations_rule(base1: &Value, base2: &Value, exp1: &Value, exp2: &Value) -> bool {
 	base1.equivalent(exp2, true) && exp1.equivalent(base2, true)
 }
 

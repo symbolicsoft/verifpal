@@ -4,9 +4,8 @@
 use crate::context::VerifyContext;
 use crate::info::{info_analysis, info_message, info_output_text};
 use crate::possible::{
-	can_decompose, find_obtainable_passwords,
-	passively_decompose, can_recompose,
-	can_reconstruct_equation, can_reconstruct_primitive,
+	can_decompose, can_recompose, can_reconstruct_equation, can_reconstruct_primitive,
+	find_obtainable_passwords, passively_decompose,
 };
 use crate::pretty::pretty_values;
 use crate::primitive::PRIM_CONCAT;
@@ -234,9 +233,7 @@ fn verify_analysis_equivalize(
 	};
 	let mut found = false;
 	for sv in &ps.values {
-		if resolved.equivalent(&sv.assigned, true)
-			&& ctx.attacker_put(&sv.assigned, record)
-		{
+		if resolved.equivalent(&sv.assigned, true) && ctx.attacker_put(&sv.assigned, record) {
 			info_message(
 				&format!(
 					"{} obtained by equivalizing with the current resolution of {}.",

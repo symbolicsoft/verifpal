@@ -37,7 +37,11 @@ pub(crate) fn principal_names_map_add(name: &str) -> PrincipalId {
 
 pub(crate) fn principal_get_name_from_id(id: PrincipalId) -> Arc<str> {
 	let state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
-	state.names.get(id as usize).cloned().unwrap_or_else(|| Arc::from(""))
+	state
+		.names
+		.get(id as usize)
+		.cloned()
+		.unwrap_or_else(|| Arc::from(""))
 }
 
 pub(crate) const ATTACKER_ID: PrincipalId = 0;

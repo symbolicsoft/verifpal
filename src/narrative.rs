@@ -20,10 +20,9 @@ pub(crate) fn set_character(name: &str) -> VResult<()> {
 			CHARACTER.store(2, Ordering::Relaxed);
 			Ok(())
 		}
-		other => Err(VerifpalError::Internal(format!(
-			"Unknown character '{}'. Available: jevil, spamton",
-			other
-		).into())),
+		other => Err(VerifpalError::Internal(
+			format!("Unknown character '{}'. Available: jevil, spamton", other).into(),
+		)),
 	}
 }
 
