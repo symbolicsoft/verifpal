@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: CC0-1.0
 
 # Verifpal
-cmd/verifpal/resource.syso
 build/windows/verifpal.exe
 build/linux/verifpal
 build/macos/verifpal
@@ -10,27 +9,11 @@ build/macos/verifpal_applesilicon
 build/freebsd/verifpal
 dist
 
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.upx
-*.test
-
 # macOS
 .DS_Store
 
 # Visual Studio Code
 .vscode
-
-# Coq
-*.glob
-*.vo
-*.vok
-*.vos
-*.aux
 
 # Scripts
 scripts

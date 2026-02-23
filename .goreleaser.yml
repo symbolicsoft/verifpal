@@ -1,0 +1,47 @@
+project_name: verifpal
+version: 2
+
+before:
+  hooks:
+    - rustup default stable
+    - cargo install --locked cargo-zigbuild
+
+builds:
+  - builder: rust
+    binary: verifpal
+    targets:
+      - x86_64-pc-windows-gnu
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+      - x86_64-unknown-freebsd
+
+archives:
+  - formats:
+      - zip
+    files:
+      - LICENSE
+      - examples/*
+      - README.md
+    wrap_in_directory: true
+
+changelog:
+  disable: false
+  sort: asc
+
+release:
+  github:
+    owner: symbolicsoft
+    name: verifpal
+
+scoops:
+  - repository:
+      owner: symbolicsoft
+      name: verifpal
+    commit_author:
+      name: drone
+      email: drone@symbolic.software
+    homepage: "https://verifpal.com"
+    description: "Cryptographic protocol analysis for students and engineers."
+    license: "https://www.gnu.org/licenses/gpl-3.0.en.html"
