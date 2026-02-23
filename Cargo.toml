@@ -10,7 +10,7 @@ name = "verifpal"
 path = "src/main.rs"
 
 [dependencies]
-colored = "2"
+colored = "3"
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
 
