@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Symmetric key ratchet: each message uses a key derived from the previous one.
+// Tests HKDF chaining and whether the engine can track key evolution.
+
+attacker[active]
+
+principal Alice[
+	knows private root_key
+	generates m1, m2, m3
+	ck1, mk1 = HKDF(root_key, nil, nil)
+	ck2, mk2 = HKDF(ck1, nil, nil)
+	ck3, mk3 = HKDF(ck2, nil, nil)
+	e1 = AEAD_ENC(mk1, m1, nil)
+	e2 = AEAD_ENC(mk2, m2, nil)
+	e3 = AEAD_ENC(mk3, m3, nil)
+]
+
+Alice -> Bob: e1, e2, e3
+
+principal Bob[
+	knows private root_key
+	ck1_b, mk1_b = HKDF(root_key, nil, nil)
+	ck2_b, mk2_b = HKDF(ck1_b, nil, nil)
+	ck3_b, mk3_b = HKDF(ck2_b, nil, nil)
+	m1_b = AEAD_DEC(mk1_b, e1, nil)?
+	m2_b = AEAD_DEC(mk2_b, e2, nil)?
+	m3_b = AEAD_DEC(mk3_b, e3, nil)?
+]
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? m3
+	authentication? Alice -> Bob: e1
+	authentication? Alice -> Bob: e2
+	authentication? Alice -> Bob: e3
+]

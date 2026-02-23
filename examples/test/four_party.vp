@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Four-party protocol: Alice sends a signed+encrypted message through
+// a relay (Carol) to Bob, who forwards a MAC to Damian for auditing.
+// Tests multi-hop message flow and cross-principal authentication.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = G^a
+]
+
+principal Bob[
+	knows private b
+	gb = G^b
+]
+
+principal Carol[
+	knows private c
+	gc = G^c
+]
+
+principal Damian[
+	knows private d
+	gd = G^d
+]
+
+Alice -> Carol: [ga]
+Alice -> Bob: [ga]
+Bob -> Carol: [gb]
+Carol -> Alice: [gc]
+Carol -> Bob: [gc]
+Damian -> Bob: [gd]
+Bob -> Damian: [gb]
+
+// Alice encrypts a message for Carol, signed, routed through Carol to Bob
+principal Alice[
+	generates msg
+	sig = SIGN(a, msg)
+	shared_ac = gc^a
+	envelope = AEAD_ENC(shared_ac, CONCAT(msg, sig), ga)
+]
+
+Alice -> Carol: envelope
+
+// Carol re-encrypts for Bob
+principal Carol[
+	inner = AEAD_DEC(ga^c, envelope, ga)?
+	msg_c, sig_c = SPLIT(inner)?
+	shared_cb = gb^c
+	re_envelope = AEAD_ENC(shared_cb, CONCAT(msg_c, sig_c), gc)
+]
+
+Carol -> Bob: re_envelope
+
+// Bob decrypts, verifies Alice's signature, and MACs for Damian
+principal Bob[
+	inner_b = AEAD_DEC(gc^b, re_envelope, gc)?
+	msg_b, sig_b = SPLIT(inner_b)?
+	_ = SIGNVERIF(ga, msg_b, sig_b)?
+	audit_mac = MAC(gd^b, msg_b)
+]
+
+Bob -> Damian: [msg_b], audit_mac
+
+principal Damian[
+	_ = ASSERT(MAC(gb^d, msg_b), audit_mac)?
+]
+
+queries[
+	confidentiality? msg
+	authentication? Alice -> Carol: envelope
+	authentication? Carol -> Bob: re_envelope
+	authentication? Bob -> Damian: audit_mac
+]

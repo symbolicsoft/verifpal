@@ -3,23 +3,23 @@ version: 2
 
 before:
   hooks:
-    - go generate ./...
+    - rustup default stable
+    - cargo install --locked cargo-zigbuild
 
 builds:
-  - main: ./cmd/verifpal/main.go
-    gcflags:
-      - -e
-    goos:
-      - windows
-      - linux
-      - darwin
-      - freebsd
-    goarch:
-      - amd64
-      - arm64
+  - builder: rust
+    binary: verifpal
+    targets:
+      - x86_64-pc-windows-gnu
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+      - x86_64-unknown-freebsd
 
 archives:
-  - format: zip
+  - formats:
+      - zip
     files:
       - LICENSE
       - examples/*
@@ -34,17 +34,6 @@ release:
   github:
     owner: symbolicsoft
     name: verifpal
-
-brews:
-  - repository:
-      owner: symbolicsoft
-      name: verifpal
-    commit_author:
-      name: drone
-      email: drone@symbolic.software
-    directory: HomebrewFormula
-    homepage: "https://verifpal.com"
-    description: "Cryptographic protocol analysis for students and engineers."
 
 scoops:
   - repository:

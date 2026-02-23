@@ -1,0 +1,23 @@
+[package]
+name = "verifpal"
+version = "0.31.2"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Verifpal - cryptographic protocol analysis"
+
+[[bin]]
+name = "verifpal"
+path = "src/main.rs"
+
+[dependencies]
+colored = "2"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+

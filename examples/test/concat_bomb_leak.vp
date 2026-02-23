@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// concat_bomb variant: the key leaks, so all confidentiality queries fail.
+// But authentication still holds because of the checked ASSERT.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates a, b, c, d, e
+	bundle = CONCAT(a, b, c, d, e)
+	encrypted = ENC(k, bundle)
+	tag = MAC(k, encrypted)
+	leaks k
+]
+
+Alice -> Bob: encrypted, tag
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, encrypted), tag)?
+	bundle_b = DEC(k, encrypted)
+	a_b, b_b, c_b, d_b, e_b = SPLIT(bundle_b)?
+]
+
+queries[
+	confidentiality? a
+	confidentiality? b
+	confidentiality? c
+	confidentiality? d
+	confidentiality? e
+	authentication? Alice -> Bob: encrypted
+]

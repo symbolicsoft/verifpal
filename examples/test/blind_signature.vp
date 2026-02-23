@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Blind signature protocol: Alice blinds a message, sends it to the Signer,
+// who signs it without seeing it. Tests BLIND/UNBLIND/SIGN primitives and
+// whether the blinding factor protects the message content.
+
+attacker[active]
+
+principal Signer[
+	knows private sk
+	gsk = G^sk
+]
+
+Signer -> Alice: [gsk]
+
+principal Alice[
+	generates msg, blind_factor
+	blinded = BLIND(blind_factor, msg)
+]
+
+Alice -> Signer: blinded
+
+principal Signer[
+	blind_sig = SIGN(sk, blinded)
+]
+
+Signer -> Alice: blind_sig
+
+principal Alice[
+	sig = UNBLIND(blind_factor, blinded, blind_sig)
+]
+
+queries[
+	confidentiality? msg
+	confidentiality? blind_factor
+	authentication? Signer -> Alice: blind_sig
+]

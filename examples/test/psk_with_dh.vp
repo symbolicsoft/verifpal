@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Pre-shared key combined with Diffie-Hellman (like TLS PSK+DHE).
+// The session key mixes both the PSK and a DH shared secret.
+// Even if the PSK leaks later, forward secrecy holds.
+
+attacker[active]
+
+principal Alice[
+	knows private psk
+	knows private a
+	ga = G^a
+]
+
+principal Bob[
+	knows private psk
+	knows private b
+	gb = G^b
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	dh_a = gb^a
+	session_key_a = HKDF(HASH(psk, dh_a), nil, nil)
+	generates m1, m2
+	e1 = AEAD_ENC(session_key_a, m1, nil)
+	e2 = AEAD_ENC(session_key_a, m2, nil)
+]
+
+Alice -> Bob: e1, e2
+
+principal Bob[
+	dh_b = ga^b
+	session_key_b = HKDF(HASH(psk, dh_b), nil, nil)
+	m1_b = AEAD_DEC(session_key_b, e1, nil)?
+	m2_b = AEAD_DEC(session_key_b, e2, nil)?
+]
+
+phase[1]
+
+principal Alice[leaks psk]
+principal Bob[leaks psk]
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	authentication? Alice -> Bob: e1
+	authentication? Alice -> Bob: e2
+]
