@@ -57,16 +57,13 @@ Otherwise, you can:
 - *Compile from source*: Keep reading!
 
 ### Building Verifpal from Source
-You must have [Go](https://golang.org) installed in order to build Verifpal. Please review the [Go Getting Started](https://golang.org/doc/install) instructions in order to understand how to best install Go for your computer and operating system.
-
-#### Installing Dependencies
-Verifpal relies on the [Aurora](https://github.com/logrusorgru/aurora) ANSI color printer, the [Cobra](https://github.com/spf13/cobra) CLI application library and the [Pigeon](https://github.com/mna/pigeon) PEG parser generator. you can easily install them by typing `make dep`. 
+You must have [Rust](https://www.rust-lang.org) installed in order to build Verifpal. Please review the [Rust Getting Started](https://www.rust-lang.org/tools/install) instructions in order to understand how to best install Rust for your computer and operating system.
 
 #### Compiling Verifpal
-- *Windows*: Simply type `Build` to build Verifpal for Windows, Linux, macOS and FreeBSD. This will also install dependencies.
-- *Linux, macOS and FreeBSD*: Simply type `make all` to build Verifpal for Windows, Linux, macOS and FreeBSD.
+Simply type `cargo build --release` to build Verifpal. The binary will be available under `target/release/`.
 
-Builds will be available under `build/`.
+#### Running Tests
+Simply type `cargo test --release` to run the full test suite.
 
 ### Verifpal for Visual Studio Code
 Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it. To install it, simply search for "Verifpal" from inside Visual Studio Code. More information available [here](https://github.com/symbolicsoft/verifpal-vscode).
