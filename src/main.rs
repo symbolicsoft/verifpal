@@ -30,7 +30,7 @@ mod verifyanalysis;
 use clap::{Parser, Subcommand};
 use types::InfoLevel;
 
-const VERSION: &str = "0.31.2";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 #[command(name = "verifpal", version = VERSION, about = format!("Verifpal {} - https://verifpal.com", VERSION))]
