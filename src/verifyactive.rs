@@ -717,31 +717,9 @@ fn verify_active_mutate_principal_state(
 
 /// Extract the key/secret that the attacker would need to know in order to
 /// craft an input that bypasses a failed guarded primitive.
-///
-/// - AEAD_DEC(key, ct, ad): bypass key = key (arg 0)
-/// - DEC(key, ct): bypass key = key (arg 0)
-/// - PKE_DEC(sk, ct): bypass key = sk (arg 0)
-/// - SIGNVERIF(pk, msg, sig): bypass key = private key from pk.
-///   If pk = G^sk, the bypass key is sk.
-/// - ASSERT, SPLIT, SHAMIR_JOIN, RINGSIGNVERIF, UNBLIND:
-///   not handled (returns None).
+/// Delegates to the bypass_key spec defined in PrimitiveSpec.
 fn extract_bypass_key(prim: &Primitive) -> Option<Value> {
-	match prim.id {
-		PRIM_AEAD_DEC | PRIM_DEC | PRIM_PKE_DEC => {
-			// Key is argument 0.
-			Some(prim.arguments[0].clone())
-		}
-		PRIM_SIGNVERIF | PRIM_RINGSIGNVERIF => {
-			// Public key is argument 0. For G^sk or G^a^b, the bypass key is the last exponent.
-			if let Value::Equation(e) = &prim.arguments[0] {
-				if e.values.len() >= 2 {
-					return Some(e.values[e.values.len() - 1].clone());
-				}
-			}
-			None
-		}
-		_ => None,
-	}
+	primitive_extract_bypass_key(prim)
 }
 
 /// Check if the attacker can bypass at least one failed guard.  We only

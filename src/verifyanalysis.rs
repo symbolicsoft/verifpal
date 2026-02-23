@@ -8,7 +8,7 @@ use crate::possible::{
 	find_obtainable_passwords, passively_decompose,
 };
 use crate::pretty::pretty_values;
-use crate::primitive::PRIM_CONCAT;
+use crate::primitive::primitive_core_reveals_args;
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 use crate::verify::verify_resolve_queries;
@@ -287,7 +287,7 @@ fn verify_analysis_concat(ctx: &VerifyContext, value: &Value, record: &MutationR
 	let Value::Primitive(prim) = value else {
 		return false;
 	};
-	if prim.id != PRIM_CONCAT {
+	if !primitive_core_reveals_args(prim.id) {
 		return false;
 	}
 	let mut found = false;
