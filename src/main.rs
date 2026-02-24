@@ -22,9 +22,6 @@ enum Commands {
 	Verify {
 		/// Path to the Verifpal model file
 		model: String,
-		/// Submit to VerifHub upon analysis completion
-		#[arg(long, default_value_t = false)]
-		verifhub: bool,
 		/// Output only the result code (for testing)
 		#[arg(long, default_value_t = false)]
 		result_code: bool,
@@ -47,7 +44,6 @@ fn main() {
 	match cli.command {
 		Commands::Verify {
 			model,
-			verifhub: hub,
 			result_code,
 			character,
 		} => {
@@ -62,7 +58,7 @@ fn main() {
 				info_banner(VERSION);
 				info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
-			match verify(&model, hub) {
+			match verify(&model) {
 				Ok((_, code)) => {
 					if result_code {
 						println!("{}", code);
@@ -1332,7 +1328,7 @@ mod unit_tests {
 mod tests {
 	fn run_model(model: &str, expected: &str) {
 		let file_name = format!("examples/test/{}", model);
-		let (_, results_code) = verifpal::verify::verify(&file_name, false)
+		let (_, results_code) = verifpal::verify::verify(&file_name)
 			.unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
 		assert_eq!(
 			results_code, expected,

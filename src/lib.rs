@@ -22,7 +22,6 @@ pub mod tui;
 pub mod types;
 pub mod util;
 pub mod value;
-pub mod verifhub;
 pub mod verify;
 pub mod verifyactive;
 pub mod verifyanalysis;

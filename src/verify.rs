@@ -9,7 +9,6 @@ use crate::query::query_start;
 use crate::sanity::*;
 use crate::types::*;
 use crate::value::*;
-use crate::verifhub::verifhub;
 use crate::verifyactive::verify_active;
 
 // ---------------------------------------------------------------------------
@@ -18,19 +17,16 @@ use crate::verifyactive::verify_active;
 
 /// Runs the main verification engine for Verifpal on a model loaded from a file.
 /// Returns a vec of VerifyResult and a "results code" string.
-///
-/// `verifhub_scheduled` — when `true`, submit the results to VerifHub on completion.
-/// This replaced the old `VERIFHUB_SCHEDULED` global `AtomicBool`.
-pub fn verify(file_path: &str, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
+pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 	let m = parse_file(file_path)?;
-	verify_model(&m, verifhub_scheduled)
+	verify_model(&m)
 }
 
 // ---------------------------------------------------------------------------
 // Core verification pipeline
 // ---------------------------------------------------------------------------
 
-fn verify_model(m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 	let (km, ps) = sanity(m)?;
 	crate::tui::tui_init(m);
 	let ctx = VerifyContext::new(m);
@@ -47,7 +43,7 @@ fn verify_model(m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResul
 		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
 		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
 	}
-	verify_end(&ctx, m, verifhub_scheduled)
+	verify_end(&ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -148,13 +144,11 @@ fn verify_get_results_code(results: &[VerifyResult]) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// End of verification: print summary, optionally submit to VerifHub
+// End of verification: print summary
 // ---------------------------------------------------------------------------
 
 fn verify_end(
 	ctx: &VerifyContext,
-	m: &Model,
-	verifhub_scheduled: bool,
 ) -> VResult<(Vec<VerifyResult>, String)> {
 	// Leave the TUI alternate screen before printing final results
 	crate::tui::tui_finish();
@@ -209,10 +203,6 @@ fn verify_end(
 	info_message("Thank you for using Verifpal.", InfoLevel::Verifpal, false);
 
 	let results_code = verify_get_results_code(&results);
-
-	if verifhub_scheduled {
-		verifhub(m, file_name, &results_code)?;
-	}
 
 	Ok((results, results_code))
 }

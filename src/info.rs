@@ -6,6 +6,7 @@ use std::sync::{LazyLock, Mutex};
 
 use crate::primitive::primitive_has_single_output;
 use crate::types::*;
+#[cfg(feature = "cli")]
 use crate::util::color_output_support;
 use crate::value::*;
 #[cfg(feature = "cli")]

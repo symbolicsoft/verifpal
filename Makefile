@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 build:
-	@/bin/echo -n "[Verifpal] Building Verifpal..."
+	@/bin/echo "[Verifpal] Building Verifpal..."
 	@cargo build --release 
 	@/bin/echo " OK"
 
@@ -15,7 +15,7 @@ test:
 	@cargo test --release
 
 wasm:
-	@/bin/echo -n "[Verifpal] Building Verifpal WASM..."
+	@/bin/echo "[Verifpal] Building Verifpal WASM..."
 	@wasm-pack build --target web --no-default-features --features wasm
 	@mkdir -p ../verifpal-website/res/wasm
 	@cp pkg/verifpal_bg.wasm ../verifpal-website/res/wasm/
@@ -23,7 +23,7 @@ wasm:
 	@/bin/echo " OK"
 
 clean:
-	@/bin/echo -n "[Verifpal] Cleaning up..."
+	@/bin/echo "[Verifpal] Cleaning up..."
 	@cargo clean
 	@$(RM) -r dist
 	@/bin/echo "                   OK"
