@@ -13,6 +13,10 @@ use std::sync::Arc;
 /// parsed in the same process (e.g. during parallel test runs).
 static UNNAMED_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+pub fn unnamed_counter_reset() {
+	UNNAMED_COUNTER.store(0, Ordering::SeqCst);
+}
+
 const RESERVED: &[&str] = &[
 	"attacker",
 	"passive",
@@ -830,7 +834,7 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
+pub fn parse_file(file_path: &str) -> VResult<Model> {
 	let path = std::path::Path::new(file_path);
 	let file_name = path
 		.file_name()
@@ -855,7 +859,7 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	parse_string(&file_name, &content)
 }
 
-pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
+pub fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 	let mut parser = Parser::new(input);
 	let mut model = parser.parse_model()?;
 	model.file_name = file_name.to_string();

@@ -10,8 +10,8 @@ use crate::resolution::constant_used_by_principal;
 use crate::rewrite::{perform_equation_rewrite, perform_primitive_rewrite};
 use crate::types::*;
 
-pub(crate) use crate::equivalence::find_constant_in_trace_primitive;
-pub(crate) use crate::resolution::{
+pub use crate::equivalence::find_constant_in_trace_primitive;
+pub use crate::resolution::{
 	resolve_ps_values, resolve_trace_values, value_constant_contains_fresh_values,
 };
 
@@ -74,19 +74,19 @@ static STATIC_G_NIL_NIL: LazyLock<Value> = LazyLock::new(|| {
 	}))
 });
 
-pub(crate) fn value_g() -> Value {
+pub fn value_g() -> Value {
 	STATIC_G.clone()
 }
 
-pub(crate) fn value_nil() -> Value {
+pub fn value_nil() -> Value {
 	STATIC_NIL.clone()
 }
 
-pub(crate) fn value_g_nil() -> Value {
+pub fn value_g_nil() -> Value {
 	STATIC_G_NIL.clone()
 }
 
-pub(crate) fn value_g_nil_nil() -> Value {
+pub fn value_g_nil_nil() -> Value {
 	STATIC_G_NIL_NIL.clone()
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn value_g_nil_nil() -> Value {
 // Name map helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn value_names_map_add(name: &str) -> ValueId {
+pub fn value_names_map_add(name: &str) -> ValueId {
 	let mut state = VALUE_NAMES_STATE.lock().unwrap_or_else(|e| e.into_inner());
 	if let Some(&id) = state.map.get(name) {
 		return id;
@@ -105,18 +105,26 @@ pub(crate) fn value_names_map_add(name: &str) -> ValueId {
 	id
 }
 
+pub fn value_names_reset() {
+	let mut state = VALUE_NAMES_STATE.lock().unwrap_or_else(|e| e.into_inner());
+	state.map.clear();
+	state.map.insert(Arc::from("g"), 0);
+	state.map.insert(Arc::from("nil"), 1);
+	state.counter = 2;
+}
+
 // ---------------------------------------------------------------------------
 // Search in value slices
 // ---------------------------------------------------------------------------
 
-pub(crate) fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
+pub fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
 	values
 		.iter()
 		.position(|existing| v.equivalent(existing, true))
 }
 
 /// Push `v` into `values` if no equivalent value already exists. Returns true if pushed.
-pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
+pub fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
 	if find_equivalent(&v, values).is_none() {
 		values.push(v);
 		true
@@ -125,7 +133,7 @@ pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
 	}
 }
 
-pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<usize> {
+pub fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<usize> {
 	constants.iter().position(|existing| c.equivalent(existing))
 }
 
@@ -135,7 +143,7 @@ pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> 
 
 /// Build a compact forensic record of which PrincipalState slots differ
 /// from the protocol trace initial values. Only changed slots are recorded.
-pub(crate) fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> MutationRecord {
+pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> MutationRecord {
 	let diffs = ps
 		.values
 		.iter()
@@ -163,7 +171,7 @@ pub(crate) fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> 
 // ---------------------------------------------------------------------------
 
 impl Value {
-	pub(crate) fn equivalent(&self, other: &Value, consider_output: bool) -> bool {
+	pub fn equivalent(&self, other: &Value, consider_output: bool) -> bool {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
 			(Value::Primitive(p1), Value::Primitive(p2)) => {
@@ -173,14 +181,14 @@ impl Value {
 			_ => false,
 		}
 	}
-	pub(crate) fn hash_value(&self) -> u64 {
+	pub fn hash_value(&self) -> u64 {
 		match self {
 			Value::Constant(c) => c.id as u64,
 			Value::Primitive(p) => primitive_hash(p),
 			Value::Equation(e) => equation_hash(e),
 		}
 	}
-	pub(crate) fn collect_constants(&self, out: &mut Vec<Constant>) {
+	pub fn collect_constants(&self, out: &mut Vec<Constant>) {
 		match self {
 			Value::Constant(c) => out.push(c.clone()),
 			Value::Primitive(p) => {
@@ -198,22 +206,22 @@ impl Value {
 }
 
 impl Constant {
-	pub(crate) fn equivalent(&self, other: &Constant) -> bool {
+	pub fn equivalent(&self, other: &Constant) -> bool {
 		self.id == other.id
 	}
-	pub(crate) fn is_g_or_nil(&self) -> bool {
+	pub fn is_g_or_nil(&self) -> bool {
 		self.id == 0 || self.id == 1
 	}
 }
 
 impl PrincipalState {
-	pub(crate) fn index_of(&self, c: &Constant) -> Option<usize> {
+	pub fn index_of(&self, c: &Constant) -> Option<usize> {
 		self.index
 			.get(&c.id)
 			.copied()
 			.filter(|&i| i < self.meta.len())
 	}
-	pub(crate) fn resolve_constant(
+	pub fn resolve_constant(
 		&self,
 		c: &Constant,
 		allow_before_mutate: bool,
@@ -231,7 +239,7 @@ impl PrincipalState {
 			}
 		}
 	}
-	pub(crate) fn perform_all_rewrites(&mut self) -> Vec<(Primitive, usize)> {
+	pub fn perform_all_rewrites(&mut self) -> Vec<(Primitive, usize)> {
 		let mut failures: Vec<(Primitive, usize)> = Vec::new();
 		let len = self.values.len();
 		for i in 0..len {
@@ -251,7 +259,7 @@ impl PrincipalState {
 		}
 		failures
 	}
-	pub(crate) fn resolve_all_values(&mut self, attacker: &AttackerState) -> VResult<()> {
+	pub fn resolve_all_values(&mut self, attacker: &AttackerState) -> VResult<()> {
 		let n = self.values.len();
 		let mut new_assigned = Vec::with_capacity(n);
 		let mut new_before_rewrite = Vec::with_capacity(n);
@@ -291,13 +299,13 @@ impl PrincipalState {
 }
 
 impl ProtocolTrace {
-	pub(crate) fn index_of(&self, c: &Constant) -> Option<usize> {
+	pub fn index_of(&self, c: &Constant) -> Option<usize> {
 		self.index.get(&c.id).copied()
 	}
-	pub(crate) fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
+	pub fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
 		constant_used_by_principal(self, principal_id, c)
 	}
-	pub(crate) fn constant_used_by_any(&self, c: &Constant) -> bool {
+	pub fn constant_used_by_any(&self, c: &Constant) -> bool {
 		if &*c.name == "nil" {
 			return true;
 		}
@@ -308,7 +316,7 @@ impl ProtocolTrace {
 }
 
 impl AttackerState {
-	pub(crate) fn knows(&self, v: &Value) -> Option<usize> {
+	pub fn knows(&self, v: &Value) -> Option<usize> {
 		let h = v.hash_value();
 		if let Some(indices) = self.known_map.get(&h) {
 			for &i in indices {

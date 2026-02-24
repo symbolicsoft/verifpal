@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub(crate) enum VerifpalError {
+pub enum VerifpalError {
 	Parse(Cow<'static, str>),
 	Sanity(Cow<'static, str>),
 	Resolution(Cow<'static, str>),
@@ -40,14 +40,14 @@ impl From<&'static str> for VerifpalError {
 	}
 }
 
-pub(crate) type VResult<T> = Result<T, VerifpalError>;
+pub type VResult<T> = Result<T, VerifpalError>;
 
-pub(crate) type PrincipalId = u8;
-pub(crate) type ValueId = u32;
-pub(crate) type PrimitiveId = u8;
+pub type PrincipalId = u8;
+pub type ValueId = u32;
+pub type PrimitiveId = u8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Qualifier {
+pub enum Qualifier {
 	Public,
 	Private,
 	Password,
@@ -64,7 +64,7 @@ impl fmt::Display for Qualifier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Declaration {
+pub enum Declaration {
 	Knows,
 	Generates,
 	Assignment,
@@ -72,7 +72,7 @@ pub(crate) enum Declaration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum QueryKind {
+pub enum QueryKind {
 	Confidentiality,
 	Authentication,
 	Freshness,
@@ -81,7 +81,7 @@ pub(crate) enum QueryKind {
 }
 
 impl QueryKind {
-	pub(crate) fn name(self) -> &'static str {
+	pub fn name(self) -> &'static str {
 		match self {
 			QueryKind::Confidentiality => "confidentiality",
 			QueryKind::Authentication => "authentication",
@@ -93,12 +93,12 @@ impl QueryKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum QueryOptionKind {
+pub enum QueryOptionKind {
 	Precondition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum InfoLevel {
+pub enum InfoLevel {
 	Verifpal,
 	Info,
 	Analysis,
@@ -109,7 +109,7 @@ pub(crate) enum InfoLevel {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum AttackerKind {
+pub enum AttackerKind {
 	Active,
 	Passive,
 }
@@ -124,35 +124,35 @@ impl std::fmt::Display for AttackerKind {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Value {
+pub enum Value {
 	Constant(Constant),
 	Primitive(Arc<Primitive>),
 	Equation(Arc<Equation>),
 }
 
 impl Value {
-	pub(crate) fn as_constant(&self) -> Option<&Constant> {
+	pub fn as_constant(&self) -> Option<&Constant> {
 		match self {
 			Value::Constant(c) => Some(c),
 			_ => None,
 		}
 	}
 
-	pub(crate) fn as_primitive(&self) -> Option<&Primitive> {
+	pub fn as_primitive(&self) -> Option<&Primitive> {
 		match self {
 			Value::Primitive(p) => Some(p),
 			_ => None,
 		}
 	}
 
-	pub(crate) fn as_equation(&self) -> Option<&Equation> {
+	pub fn as_equation(&self) -> Option<&Equation> {
 		match self {
 			Value::Equation(e) => Some(e),
 			_ => None,
 		}
 	}
 
-	pub(crate) fn as_primitive_mut(&mut self) -> Option<&mut Primitive> {
+	pub fn as_primitive_mut(&mut self) -> Option<&mut Primitive> {
 		match self {
 			Value::Primitive(p) => Some(Arc::make_mut(p)),
 			_ => None,
@@ -160,7 +160,7 @@ impl Value {
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn try_as_constant(&self) -> VResult<&Constant> {
+	pub fn try_as_constant(&self) -> VResult<&Constant> {
 		match self {
 			Value::Constant(c) => Ok(c),
 			_ => Err(VerifpalError::Internal(
@@ -169,7 +169,7 @@ impl Value {
 		}
 	}
 
-	pub(crate) fn try_as_primitive(&self) -> VResult<&Primitive> {
+	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
 			_ => Err(VerifpalError::Internal(
@@ -178,7 +178,7 @@ impl Value {
 		}
 	}
 
-	pub(crate) fn try_as_equation(&self) -> VResult<&Equation> {
+	pub fn try_as_equation(&self) -> VResult<&Equation> {
 		match self {
 			Value::Equation(e) => Ok(e),
 			_ => Err(VerifpalError::Internal(
@@ -188,7 +188,7 @@ impl Value {
 	}
 
 	#[allow(dead_code)]
-	pub(crate) fn try_as_primitive_mut(&mut self) -> VResult<&mut Primitive> {
+	pub fn try_as_primitive_mut(&mut self) -> VResult<&mut Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(Arc::make_mut(p)),
 			_ => Err(VerifpalError::Internal(
@@ -207,7 +207,7 @@ impl Value {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Constant {
+pub struct Constant {
 	pub name: Arc<str>,
 	pub id: ValueId,
 	pub guard: bool,
@@ -218,7 +218,7 @@ pub(crate) struct Constant {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Primitive {
+pub struct Primitive {
 	pub id: PrimitiveId,
 	pub arguments: Vec<Value>,
 	pub output: usize,
@@ -227,7 +227,7 @@ pub(crate) struct Primitive {
 
 impl Primitive {
 	/// Create a copy with different arguments, preserving id/output/instance_check.
-	pub(crate) fn with_arguments(&self, arguments: Vec<Value>) -> Self {
+	pub fn with_arguments(&self, arguments: Vec<Value>) -> Self {
 		Primitive {
 			id: self.id,
 			arguments,
@@ -238,12 +238,12 @@ impl Primitive {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Equation {
+pub struct Equation {
 	pub values: Vec<Value>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Model {
+pub struct Model {
 	pub file_name: String,
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
@@ -251,7 +251,7 @@ pub(crate) struct Model {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct VerifyResult {
+pub struct VerifyResult {
 	pub query: Query,
 	pub query_index: usize,
 	pub resolved: bool,
@@ -260,7 +260,7 @@ pub(crate) struct VerifyResult {
 }
 
 impl VerifyResult {
-	pub(crate) fn new(query: &Query, query_index: usize) -> Self {
+	pub fn new(query: &Query, query_index: usize) -> Self {
 		VerifyResult {
 			query: query.clone(),
 			query_index,
@@ -272,33 +272,33 @@ impl VerifyResult {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Block {
+pub enum Block {
 	Principal(Principal),
 	Message(Message),
 	Phase(Phase),
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Principal {
+pub struct Principal {
 	pub name: String,
 	pub id: PrincipalId,
 	pub expressions: Vec<Expression>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Message {
+pub struct Message {
 	pub sender: PrincipalId,
 	pub recipient: PrincipalId,
 	pub constants: Vec<Constant>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Phase {
+pub struct Phase {
 	pub number: i32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Query {
+pub struct Query {
 	pub kind: QueryKind,
 	pub constants: Vec<Constant>,
 	pub message: Message,
@@ -306,19 +306,19 @@ pub(crate) struct Query {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct QueryOption {
+pub struct QueryOption {
 	pub kind: QueryOptionKind,
 	pub message: Message,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct QueryOptionResult {
+pub struct QueryOptionResult {
 	pub resolved: bool,
 	pub summary: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Expression {
+pub struct Expression {
 	pub kind: Declaration,
 	pub qualifier: Option<Qualifier>,
 	pub constants: Vec<Constant>,
@@ -326,7 +326,7 @@ pub(crate) struct Expression {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TraceSlot {
+pub struct TraceSlot {
 	pub constant: Constant,
 	pub initial_value: Value,
 	pub creator: PrincipalId,
@@ -336,13 +336,13 @@ pub(crate) struct TraceSlot {
 }
 
 impl TraceSlot {
-	pub(crate) fn known_by_principal(&self, pid: PrincipalId) -> bool {
+	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
 		self.creator == pid || self.known_by.iter().any(|m| m.contains_key(&pid))
 	}
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProtocolTrace {
+pub struct ProtocolTrace {
 	pub principals: Vec<String>,
 	pub principal_ids: Vec<PrincipalId>,
 	pub slots: Vec<TraceSlot>,
@@ -354,7 +354,7 @@ pub(crate) struct ProtocolTrace {
 
 /// Immutable per-constant metadata (shared via Arc across clones).
 #[derive(Clone, Debug)]
-pub(crate) struct SlotMeta {
+pub struct SlotMeta {
 	pub constant: Constant,
 	pub guard: bool,
 	pub known: bool,
@@ -386,7 +386,7 @@ pub(crate) struct SlotMeta {
 /// in their own locally-computed values, causing false positives in
 /// authentication queries.
 #[derive(Clone, Debug)]
-pub(crate) struct SlotValues {
+pub struct SlotValues {
 	pub assigned: Value,
 	pub before_rewrite: Value,
 	pub before_mutate: Value,
@@ -398,7 +398,7 @@ pub(crate) struct SlotValues {
 
 impl SlotValues {
 	/// Set `assigned` and, if the slot has not been mutated, also `before_mutate`.
-	pub(crate) fn set_assigned(&mut self, v: Value) {
+	pub fn set_assigned(&mut self, v: Value) {
 		if !self.mutated {
 			self.before_mutate = v.clone();
 		}
@@ -406,7 +406,7 @@ impl SlotValues {
 	}
 
 	/// Unconditionally override all value fields (assigned, before_rewrite, before_mutate).
-	pub(crate) fn override_all(&mut self, v: Value) {
+	pub fn override_all(&mut self, v: Value) {
 		self.before_mutate = v.clone();
 		self.before_rewrite = v.clone();
 		self.assigned = v;
@@ -414,7 +414,7 @@ impl SlotValues {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PrincipalState {
+pub struct PrincipalState {
 	pub name: String,
 	pub id: PrincipalId,
 	pub max_declared_at: i32,
@@ -430,7 +430,7 @@ impl PrincipalState {
 	/// - not known to this principal
 	/// - not received over a wire by this principal
 	/// - not actually mutated by the attacker
-	pub(crate) fn should_use_before_mutate(&self, i: usize) -> bool {
+	pub fn should_use_before_mutate(&self, i: usize) -> bool {
 		self.values[i].creator == self.id
 			|| !self.meta[i].known
 			|| !self.meta[i].wire.contains(&self.id)
@@ -438,7 +438,7 @@ impl PrincipalState {
 	}
 
 	/// The value that this principal perceives for slot `i`.
-	pub(crate) fn effective_value(&self, i: usize) -> &Value {
+	pub fn effective_value(&self, i: usize) -> &Value {
 		if self.should_use_before_mutate(i) {
 			&self.values[i].before_mutate
 		} else {
@@ -450,7 +450,7 @@ impl PrincipalState {
 /// A single slot that differs from the protocol trace initial value.
 /// Captured at the time the attacker learns a value, for forensic tracing.
 #[derive(Clone, Debug)]
-pub(crate) struct SlotDiff {
+pub struct SlotDiff {
 	pub index: usize,
 	pub constant: Constant,
 	pub assigned: Value,
@@ -461,12 +461,12 @@ pub(crate) struct SlotDiff {
 /// Records only the slots where the PrincipalState differed from the
 /// protocol trace at the time the value was learned by the attacker.
 #[derive(Clone, Debug)]
-pub(crate) struct MutationRecord {
+pub struct MutationRecord {
 	pub diffs: Vec<SlotDiff>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AttackerState {
+pub struct AttackerState {
 	pub current_phase: i32,
 	pub exhausted: bool,
 	pub known: Arc<Vec<Value>>,
@@ -489,13 +489,13 @@ impl Default for AttackerState {
 }
 
 impl AttackerState {
-	pub(crate) fn new() -> Self {
+	pub fn new() -> Self {
 		Self::default()
 	}
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MutationMap {
+pub struct MutationMap {
 	pub out_of_mutations: bool,
 	pub constants: Vec<Constant>,
 	pub mutations: Vec<Vec<Value>>,
@@ -505,20 +505,20 @@ pub(crate) struct MutationMap {
 
 /// Result of a successful decomposition: the revealed value and the
 /// attacker-known values that were used to perform the decomposition.
-pub(crate) struct DecomposeResult {
+pub struct DecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
 }
 
 /// Result of a successful recomposition: the revealed value and the
 /// attacker-known values that were used to perform the recomposition.
-pub(crate) struct RecomposeResult {
+pub struct RecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
 }
 
 /// Result of rewriting a primitive or equation value.
-pub(crate) struct RewriteResult {
+pub struct RewriteResult {
 	/// Primitives whose rewrite rules failed (checked primitives that
 	/// did not pass their instance check).
 	pub failed_rewrites: Vec<Primitive>,

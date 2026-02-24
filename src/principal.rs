@@ -23,7 +23,7 @@ static PRINCIPAL_STATE: LazyLock<Mutex<PrincipalNamesState>> = LazyLock::new(|| 
 	})
 });
 
-pub(crate) fn principal_names_map_add(name: &str) -> PrincipalId {
+pub fn principal_names_map_add(name: &str) -> PrincipalId {
 	let mut state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
 	if let Some(&id) = state.map.get(name) {
 		return id;
@@ -35,7 +35,7 @@ pub(crate) fn principal_names_map_add(name: &str) -> PrincipalId {
 	id
 }
 
-pub(crate) fn principal_get_name_from_id(id: PrincipalId) -> Arc<str> {
+pub fn principal_get_name_from_id(id: PrincipalId) -> Arc<str> {
 	let state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
 	state
 		.names
@@ -44,4 +44,12 @@ pub(crate) fn principal_get_name_from_id(id: PrincipalId) -> Arc<str> {
 		.unwrap_or_else(|| Arc::from(""))
 }
 
-pub(crate) const ATTACKER_ID: PrincipalId = 0;
+pub const ATTACKER_ID: PrincipalId = 0;
+
+pub fn principal_names_reset() {
+	let mut state = PRINCIPAL_STATE.lock().unwrap_or_else(|e| e.into_inner());
+	state.map.clear();
+	state.map.insert(Arc::from("Attacker"), 0);
+	state.names.clear();
+	state.names.push(Arc::from("Attacker"));
+}

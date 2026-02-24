@@ -9,7 +9,7 @@ use crate::principal::*;
 use crate::types::*;
 use crate::value::*;
 
-pub(crate) fn query_start(
+pub fn query_start(
 	ctx: &VerifyContext,
 	query: &Query,
 	query_index: usize,

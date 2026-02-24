@@ -8,7 +8,7 @@ use crate::types::*;
 // ---------------------------------------------------------------------------
 
 /// Result of comparing two primitives for structural equivalence.
-pub(crate) struct PrimitiveMatch {
+pub struct PrimitiveMatch {
 	pub equivalent: bool,
 	/// Output index of the first primitive (meaningful only when `equivalent` is true).
 	pub output_left: usize,
@@ -26,7 +26,7 @@ impl PrimitiveMatch {
 	}
 }
 
-pub(crate) fn equivalent_primitives(
+pub fn equivalent_primitives(
 	p1: &Primitive,
 	p2: &Primitive,
 	consider_output: bool,
@@ -66,7 +66,7 @@ pub(crate) fn equivalent_primitives(
 /// - **Length >3**: the base (index 0) must match exactly; the remaining
 ///   exponents are treated as a commutative multiset (checked via
 ///   permutation matching with a marker array to enforce bijectivity).
-pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
+pub fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	if e1.values.is_empty() || e2.values.is_empty() {
 		return false;
 	}
@@ -145,11 +145,11 @@ fn equivalent_equations_rule(base1: &Value, base2: &Value, exp1: &Value, exp2: &
 /// Flattening normalizes nested DH chains like `(G^a)^b` into `[G, a, b]`
 /// so that equivalence comparison works on a canonical form regardless of
 /// how the expression was originally constructed.
-pub(crate) fn equation_is_flat(e: &Equation) -> bool {
+pub fn equation_is_flat(e: &Equation) -> bool {
 	e.values.iter().all(|v| !matches!(v, Value::Equation(_)))
 }
 
-pub(crate) fn flatten_equation(e: &Equation) -> Equation {
+pub fn flatten_equation(e: &Equation) -> Equation {
 	let mut ef = Equation {
 		values: Vec::with_capacity(e.values.len()),
 	};
@@ -168,7 +168,7 @@ pub(crate) fn flatten_equation(e: &Equation) -> Equation {
 // Find constant in primitive from protocol trace
 // ---------------------------------------------------------------------------
 
-pub(crate) fn find_constant_in_trace_primitive(
+pub fn find_constant_in_trace_primitive(
 	c: &Constant,
 	value: &Value,
 	trace: &ProtocolTrace,

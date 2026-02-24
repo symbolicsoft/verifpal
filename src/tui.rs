@@ -1,43 +1,87 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+#[cfg(feature = "cli")]
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(feature = "cli")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "cli")]
 use std::sync::{LazyLock, Mutex, RwLock};
+#[cfg(feature = "cli")]
 use std::time::Instant;
 
+#[cfg(feature = "cli")]
 use colored::*;
 
+#[cfg(feature = "cli")]
 use crate::narrative::{self, NarrativeContext};
+#[cfg(feature = "cli")]
 use crate::pretty::pretty_constants;
+#[cfg(feature = "cli")]
 use crate::principal::principal_get_name_from_id;
 use crate::types::*;
+#[cfg(feature = "cli")]
 use crate::util::color_output_support;
 
-// ── ANSI escape codes ──────────────────────────────────────────────────────
-
-const ESC_HOME: &str = "\x1b[H";
-const ESC_HIDE_CURSOR: &str = "\x1b[?25l";
-const ESC_SHOW_CURSOR: &str = "\x1b[?25h";
-const ESC_ALT_SCREEN: &str = "\x1b[?1049h";
-const ESC_NORMAL_SCREEN: &str = "\x1b[?1049l";
-const ESC_CLEAR_LINE: &str = "\x1b[2K";
-const ESC_CLEAR_TO_EOL: &str = "\x1b[K";
-
-// ── Global state ───────────────────────────────────────────────────────────
+// ── Global state (always available) ─────────────────────────────────────────
 
 static TUI_MODE: AtomicBool = AtomicBool::new(false);
-static TUI_OUT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-static LAST_REDRAW_MS: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn set_tui_mode(enabled: bool) {
+pub fn set_tui_mode(enabled: bool) {
 	TUI_MODE.store(enabled, Ordering::Relaxed);
 }
 
-pub(crate) fn tui_mode() -> bool {
+pub fn tui_mode() -> bool {
 	TUI_MODE.load(Ordering::Relaxed)
 }
 
+// ── No-op stubs when CLI feature is disabled ────────────────────────────────
+
+#[cfg(not(feature = "cli"))]
+pub fn tui_init(_m: &Model) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_finish() {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_enabled() -> bool {
+	false
+}
+#[cfg(not(feature = "cli"))]
+pub fn tui_message(_msg: &str, _level: InfoLevel) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_progress(_stage_str: &str, _count: usize) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_attacker_known(_count: usize) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_scan_update(_name: &str, _weight: usize, _max_weight: usize, _used: u32, _budget: u32) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_mutation_detail(_desc: &str) {}
+#[cfg(not(feature = "cli"))]
+pub fn tui_stage_update(_stage: i32) {}
+
+// ── Full CLI TUI implementation ─────────────────────────────────────────────
+
+#[cfg(feature = "cli")]
+const ESC_HOME: &str = "\x1b[H";
+#[cfg(feature = "cli")]
+const ESC_HIDE_CURSOR: &str = "\x1b[?25l";
+#[cfg(feature = "cli")]
+const ESC_SHOW_CURSOR: &str = "\x1b[?25h";
+#[cfg(feature = "cli")]
+const ESC_ALT_SCREEN: &str = "\x1b[?1049h";
+#[cfg(feature = "cli")]
+const ESC_NORMAL_SCREEN: &str = "\x1b[?1049l";
+#[cfg(feature = "cli")]
+const ESC_CLEAR_LINE: &str = "\x1b[2K";
+#[cfg(feature = "cli")]
+const ESC_CLEAR_TO_EOL: &str = "\x1b[K";
+
+#[cfg(feature = "cli")]
+static TUI_OUT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+#[cfg(feature = "cli")]
+static LAST_REDRAW_MS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(feature = "cli")]
 fn now_ms() -> u64 {
 	std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
@@ -45,6 +89,7 @@ fn now_ms() -> u64 {
 		.unwrap_or(0)
 }
 
+#[cfg(feature = "cli")]
 fn should_redraw() -> bool {
 	let now = now_ms();
 	let last = LAST_REDRAW_MS.load(Ordering::Relaxed);
@@ -57,6 +102,7 @@ fn should_redraw() -> bool {
 
 // ── TUI data types ─────────────────────────────────────────────────────────
 
+#[cfg(feature = "cli")]
 struct TuiPrincipal {
 	name: String,
 	n_private: usize,
@@ -64,6 +110,7 @@ struct TuiPrincipal {
 	n_computed: usize,
 }
 
+#[cfg(feature = "cli")]
 struct TuiMsg {
 	sender: String,
 	recipient: String,
@@ -71,17 +118,20 @@ struct TuiMsg {
 }
 
 #[derive(Clone)]
+#[cfg(feature = "cli")]
 enum QStatus {
 	Pending,
 	Pass,
 	Fail,
 }
 
+#[cfg(feature = "cli")]
 struct TuiQuery {
 	text: String,
 	status: QStatus,
 }
 
+#[cfg(feature = "cli")]
 struct TuiState {
 	enabled: bool,
 	width: usize,
@@ -114,6 +164,7 @@ struct TuiState {
 	mitm_target: String,
 }
 
+#[cfg(feature = "cli")]
 static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
 	RwLock::new(TuiState {
 		enabled: false,
@@ -147,7 +198,8 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-pub(crate) fn tui_init(m: &Model) {
+#[cfg(feature = "cli")]
+pub fn tui_init(m: &Model) {
 	if !color_output_support() || !tui_mode() {
 		return;
 	}
@@ -244,7 +296,8 @@ pub(crate) fn tui_init(m: &Model) {
 }
 
 /// Handle an info_message call in TUI mode.
-pub(crate) fn tui_message(msg: &str, msg_type: InfoLevel) {
+#[cfg(feature = "cli")]
+pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -325,7 +378,8 @@ pub(crate) fn tui_message(msg: &str, msg_type: InfoLevel) {
 }
 
 /// Handle an info_analysis progress tick in TUI mode.
-pub(crate) fn tui_progress(stage_str: &str, count: usize) {
+#[cfg(feature = "cli")]
+pub fn tui_progress(stage_str: &str, count: usize) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -338,7 +392,8 @@ pub(crate) fn tui_progress(stage_str: &str, count: usize) {
 }
 
 /// Update attacker known value count (called from attacker_state_put_write).
-pub(crate) fn tui_attacker_known(count: usize) {
+#[cfg(feature = "cli")]
+pub fn tui_attacker_known(count: usize) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -356,7 +411,8 @@ pub(crate) fn tui_attacker_known(count: usize) {
 }
 
 /// Update scan progress (called from verify_active_scan_at_weight).
-pub(crate) fn tui_scan_update(
+#[cfg(feature = "cli")]
+pub fn tui_scan_update(
 	principal: &str,
 	weight: usize,
 	max_weight: usize,
@@ -385,7 +441,8 @@ pub(crate) fn tui_scan_update(
 }
 
 /// Record a worthwhile mutation description (called on worthwhile mutations).
-pub(crate) fn tui_mutation_detail(desc: &str) {
+#[cfg(feature = "cli")]
+pub fn tui_mutation_detail(desc: &str) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -402,7 +459,8 @@ pub(crate) fn tui_mutation_detail(desc: &str) {
 }
 
 /// Update stage (called at stage transitions).
-pub(crate) fn tui_stage_update(stage: i32) {
+#[cfg(feature = "cli")]
+pub fn tui_stage_update(stage: i32) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -419,7 +477,8 @@ pub(crate) fn tui_stage_update(stage: i32) {
 }
 
 /// Leave the TUI and restore the normal terminal.
-pub(crate) fn tui_finish() {
+#[cfg(feature = "cli")]
+pub fn tui_finish() {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
@@ -448,7 +507,8 @@ pub(crate) fn tui_finish() {
 	TUI.write().unwrap_or_else(|e| e.into_inner()).enabled = false;
 }
 
-pub(crate) fn tui_enabled() -> bool {
+#[cfg(feature = "cli")]
+pub fn tui_enabled() -> bool {
 	if !tui_mode() {
 		return false;
 	}
@@ -457,17 +517,20 @@ pub(crate) fn tui_enabled() -> bool {
 
 // ── Redraw ─────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "cli")]
 fn tui_redraw() {
 	let _lock = TUI_OUT.lock().unwrap_or_else(|e| e.into_inner());
 	redraw_locked();
 	io::stdout().flush().ok();
 }
 
+#[cfg(feature = "cli")]
 fn force_redraw() {
 	LAST_REDRAW_MS.store(0, Ordering::Relaxed);
 	tui_redraw();
 }
 
+#[cfg(feature = "cli")]
 fn redraw_locked() {
 	let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 	if !st.enabled {
@@ -507,6 +570,7 @@ fn redraw_locked() {
 // NEVER use Miscellaneous Symbols (U+2600+), Dingbats (U+2700+), or
 // emoji in alignment-critical content — their terminal width varies.
 
+#[cfg(feature = "cli")]
 fn vis_len(s: &str) -> usize {
 	let mut n = 0;
 	let mut esc = false;
@@ -524,6 +588,7 @@ fn vis_len(s: &str) -> usize {
 	n
 }
 
+#[cfg(feature = "cli")]
 fn trunc(s: &str, max: usize) -> String {
 	if vis_len(s) <= max {
 		return s.to_string();
@@ -554,6 +619,7 @@ fn trunc(s: &str, max: usize) -> String {
 }
 
 /// Wrap content in │...│ padded to width w. Truncates if content exceeds inner width.
+#[cfg(feature = "cli")]
 fn bline(content: &str, w: usize) -> String {
 	let inner = w.saturating_sub(2);
 	let clipped = trunc(content, inner);
@@ -569,6 +635,7 @@ fn bline(content: &str, w: usize) -> String {
 }
 
 /// Format content inside the attacker inner box: "    │<content><padding>│", wrapped by bline.
+#[cfg(feature = "cli")]
 fn inbox_line(buf: &mut String, content: &str, box_inner: usize, w: usize) {
 	let pad = box_inner.saturating_sub(vis_len(content));
 	let line = format!(
@@ -581,6 +648,7 @@ fn inbox_line(buf: &mut String, content: &str, box_inner: usize, w: usize) {
 	buf.push_str(&bline(&line, w));
 }
 
+#[cfg(feature = "cli")]
 fn border_top(w: usize) -> String {
 	let inner = w.saturating_sub(2);
 	format!(
@@ -592,6 +660,7 @@ fn border_top(w: usize) -> String {
 	)
 }
 
+#[cfg(feature = "cli")]
 fn border_bot(w: usize) -> String {
 	let inner = w.saturating_sub(2);
 	format!(
@@ -603,6 +672,7 @@ fn border_bot(w: usize) -> String {
 	)
 }
 
+#[cfg(feature = "cli")]
 fn border_mid(label: &str, w: usize) -> String {
 	let inner = w.saturating_sub(2);
 	if label.is_empty() {
@@ -633,6 +703,7 @@ fn border_mid(label: &str, w: usize) -> String {
 
 /// Extract a compact knowledge description from a deduction message.
 /// e.g. "Output of AEAD_DEC(...) obtained by decomposing..." -> "AEAD_DEC via decompose"
+#[cfg(feature = "cli")]
 fn compact_knowledge_desc(msg: &str) -> String {
 	// Try to extract the method
 	let method = if msg.contains("decomposing") {
@@ -668,6 +739,7 @@ fn compact_knowledge_desc(msg: &str) -> String {
 }
 
 /// Determine deduction color category from a deduction message string.
+#[cfg(feature = "cli")]
 fn deduction_color(msg: &str) -> &'static str {
 	if msg.contains("decomposing") {
 		"blue"
@@ -688,6 +760,7 @@ fn deduction_color(msg: &str) -> &'static str {
 	}
 }
 
+#[cfg(feature = "cli")]
 fn color_str(s: &str, color: &str) -> String {
 	match color {
 		"blue" => s.blue().to_string(),
@@ -702,6 +775,7 @@ fn color_str(s: &str, color: &str) -> String {
 
 // ── Section drawers ────────────────────────────────────────────────────────
 
+#[cfg(feature = "cli")]
 fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
 	buf.push_str(&border_top(w));
 
@@ -780,6 +854,7 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
 	buf.push_str(&border_mid("", w));
 }
 
+#[cfg(feature = "cli")]
 fn draw_protocol(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
 	buf.push_str(&bline("", w));
 
@@ -792,6 +867,7 @@ fn draw_protocol(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 	buf.push_str(&bline("", w));
 }
 
+#[cfg(feature = "cli")]
 fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
 	let p1 = &st.principals[0];
 	let p2 = &st.principals[1];
@@ -947,6 +1023,7 @@ fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize, frame: usize, fi
 	}
 }
 
+#[cfg(feature = "cli")]
 fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize, _frame: usize, _finished: bool) {
 	let inner = w.saturating_sub(2);
 
@@ -1017,6 +1094,7 @@ fn draw_protocol_list(buf: &mut String, st: &TuiState, w: usize, _frame: usize, 
 	}
 }
 
+#[cfg(feature = "cli")]
 fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished: bool) {
 	buf.push_str(&bline("", w));
 
@@ -1192,6 +1270,7 @@ fn draw_attacker(buf: &mut String, st: &TuiState, w: usize, frame: usize, finish
 	buf.push_str(&bline(&bot_line, w));
 }
 
+#[cfg(feature = "cli")]
 fn draw_queries(buf: &mut String, st: &TuiState, w: usize, frame: usize) {
 	buf.push_str(&border_mid("QUERIES", w));
 
@@ -1230,6 +1309,7 @@ fn draw_queries(buf: &mut String, st: &TuiState, w: usize, frame: usize) {
 	}
 }
 
+#[cfg(feature = "cli")]
 fn draw_deductions(buf: &mut String, st: &TuiState, w: usize) {
 	buf.push_str(&border_mid("DEDUCTIONS", w));
 
@@ -1260,6 +1340,7 @@ fn draw_deductions(buf: &mut String, st: &TuiState, w: usize) {
 	}
 }
 
+#[cfg(feature = "cli")]
 fn draw_footer(buf: &mut String, st: &TuiState, w: usize, finished: bool) {
 	buf.push_str(&border_mid("", w));
 
@@ -1325,6 +1406,7 @@ fn draw_footer(buf: &mut String, st: &TuiState, w: usize, finished: bool) {
 
 // ── Utility ────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "cli")]
 fn terminal_width() -> usize {
 	std::process::Command::new("tput")
 		.arg("cols")

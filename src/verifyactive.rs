@@ -86,7 +86,7 @@ const BUDGET: StageBudget = StageBudget {
 	max_scan_budget: 80000,
 };
 
-pub(crate) fn verify_active(
+pub fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -117,10 +117,16 @@ pub(crate) fn verify_active(
 		let mut stage = 2;
 		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() && stage <= BUDGET.max_stage {
 			if stage < BUDGET.max_stage {
+				#[cfg(feature = "cli")]
 				rayon::scope(|s| {
 					s.spawn(|_| verify_active_stages(ctx, stage, km, principal_states));
 					s.spawn(|_| verify_active_stages(ctx, stage + 1, km, principal_states));
 				});
+				#[cfg(not(feature = "cli"))]
+				{
+					verify_active_stages(ctx, stage, km, principal_states);
+					verify_active_stages(ctx, stage + 1, km, principal_states);
+				}
 				stage += 2;
 			} else {
 				verify_active_stages(ctx, stage, km, principal_states);
@@ -273,8 +279,8 @@ fn verify_active_stages(
 	let old_known = ctx.attacker_known_count();
 	let attacker = ctx.attacker_snapshot();
 
-	// Process all principals in parallel within a single rayon scope.
-	// Each principal is spawned as a task; analyses from all principals/weights overlap.
+	// Process all principals — in parallel with rayon when available, sequentially otherwise.
+	#[cfg(feature = "cli")]
 	rayon::scope(|s| {
 		for ps_base in principal_states {
 			s.spawn(|s_inner| {
@@ -295,6 +301,22 @@ fn verify_active_stages(
 			});
 		}
 	});
+	#[cfg(not(feature = "cli"))]
+	for ps_base in principal_states {
+		let mm = match MutationMap::new(ctx, km, ps_base, &attacker, stage) {
+			Ok(mm) => mm,
+			Err(_) => continue,
+		};
+		verify_active_scan_weighted_seq(
+			ctx,
+			km,
+			ps_base,
+			&attacker,
+			mm,
+			stage,
+			&worthwhile_mutation_count,
+		);
+	}
 
 	let worthwhile = worthwhile_mutation_count.load(Ordering::SeqCst);
 	let stagnant = worthwhile == 0 || old_known == ctx.attacker_known_count();
@@ -304,6 +326,7 @@ fn verify_active_stages(
 	}
 }
 
+#[cfg(feature = "cli")]
 #[allow(clippy::too_many_arguments)]
 fn verify_active_scan_weighted<'s>(
 	ctx: &'s VerifyContext,
@@ -371,6 +394,7 @@ fn verify_active_scan_weighted<'s>(
 	}
 }
 
+#[cfg(feature = "cli")]
 #[allow(clippy::too_many_arguments)]
 fn verify_active_scan_at_weight<'s>(
 	ctx: &'s VerifyContext,
@@ -475,6 +499,7 @@ fn verify_active_scan_at_weight<'s>(
 	}
 }
 
+#[cfg(feature = "cli")]
 #[allow(clippy::too_many_arguments)]
 fn verify_active_scan<'s>(
 	ctx: &'s VerifyContext,
@@ -556,6 +581,204 @@ fn verify_active_scan<'s>(
 				}
 			}
 		});
+
+		if is_last {
+			break;
+		}
+		current_map = current_map.next();
+	}
+}
+
+// ── Sequential (non-rayon) fallback for WASM ────────────────────────────────
+
+#[cfg(not(feature = "cli"))]
+#[allow(clippy::too_many_arguments)]
+fn verify_active_scan_weighted_seq(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps_base: &PrincipalState,
+	attacker: &AttackerState,
+	mm: MutationMap,
+	stage: i32,
+	worthwhile_mutation_count: &AtomicU32,
+) {
+	let n = mm.constants.len();
+	if n == 0 {
+		return;
+	}
+	let budget_used = AtomicU32::new(0);
+	let budget = BUDGET.max_scan_budget;
+	let max_weight = BUDGET.max_subset_weight.min(n);
+
+	for weight in 1..=max_weight {
+		if ctx.all_resolved() || budget_used.load(Ordering::SeqCst) >= budget {
+			break;
+		}
+		verify_active_scan_at_weight_seq(
+			ctx,
+			km,
+			ps_base,
+			attacker,
+			&mm,
+			stage,
+			worthwhile_mutation_count,
+			n,
+			weight,
+			&budget_used,
+			budget,
+		);
+	}
+
+	if !ctx.all_resolved()
+		&& budget_used.load(Ordering::SeqCst) < budget
+		&& mutation_product(
+			mm.mutations.iter().map(|m| m.len()),
+			BUDGET.max_full_product,
+		)
+		.is_some()
+	{
+		verify_active_scan_seq(
+			ctx,
+			km,
+			ps_base,
+			attacker,
+			mm.next(),
+			stage,
+			worthwhile_mutation_count,
+		);
+	}
+}
+
+#[cfg(not(feature = "cli"))]
+#[allow(clippy::too_many_arguments)]
+fn verify_active_scan_at_weight_seq(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps_base: &PrincipalState,
+	attacker: &AttackerState,
+	mm: &MutationMap,
+	stage: i32,
+	worthwhile_mutation_count: &AtomicU32,
+	n: usize,
+	weight: usize,
+	budget_used: &AtomicU32,
+	budget: u32,
+) {
+	let mut indices: Vec<usize> = (0..weight).collect();
+	let mut scanned: usize = 0;
+	loop {
+		if ctx.all_resolved() || budget_used.load(Ordering::SeqCst) >= budget {
+			return;
+		}
+		let sub_indices = indices.clone();
+		if weight == 1 {
+			let sub_map = mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
+			let cost = sub_map.mutations[0].len() as u32;
+			budget_used.fetch_add(cost, Ordering::SeqCst);
+			verify_active_scan_seq(
+				ctx,
+				km,
+				ps_base,
+				attacker,
+				sub_map.next(),
+				stage,
+				worthwhile_mutation_count,
+			);
+			scanned += 1;
+		} else if let Some(product) = mutation_product(
+			indices.iter().map(|&i| mm.mutations[i].len()),
+			BUDGET.max_mutations_per_subset,
+		) {
+			let sub_map = mm.subset(&sub_indices);
+			budget_used.fetch_add(product as u32, Ordering::SeqCst);
+			verify_active_scan_seq(
+				ctx,
+				km,
+				ps_base,
+				attacker,
+				sub_map.next(),
+				stage,
+				worthwhile_mutation_count,
+			);
+			scanned += 1;
+		}
+		if scanned >= BUDGET.max_subsets_per_weight {
+			return;
+		}
+		let mut advanced = false;
+		for i in (0..weight).rev() {
+			indices[i] += 1;
+			if indices[i] <= n - weight + i {
+				for j in (i + 1)..weight {
+					indices[j] = indices[j - 1] + 1;
+				}
+				advanced = true;
+				break;
+			}
+		}
+		if !advanced {
+			break;
+		}
+	}
+}
+
+#[cfg(not(feature = "cli"))]
+#[allow(clippy::too_many_arguments)]
+fn verify_active_scan_seq(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps_base: &PrincipalState,
+	attacker: &AttackerState,
+	mm: MutationMap,
+	stage: i32,
+	worthwhile_mutation_count: &AtomicU32,
+) {
+	let mut current_map = mm;
+	loop {
+		if ctx.all_resolved() {
+			break;
+		}
+		let task_combo = current_map.combination.clone();
+		let task_constants = current_map.constants.clone();
+		let is_last = current_map.out_of_mutations;
+
+		let task_map = MutationMap {
+			out_of_mutations: true,
+			constants: task_constants,
+			mutations: vec![],
+			combination: task_combo,
+			depth_index: vec![],
+		};
+		let result = verify_active_mutate_principal_state(
+			km,
+			ps_base.clone_for_stage(true),
+			attacker,
+			&task_map,
+		);
+		if result.is_worthwhile {
+			worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
+			if !ctx.all_resolved() {
+				let _ = verify_analysis(ctx, km, &result.state, stage);
+			}
+			if !ctx.all_resolved() {
+				if let Some(ref bypass) = result.guard_bypass {
+					let attacker_now = ctx.attacker_snapshot();
+					if can_attacker_bypass_any_guard(
+						&bypass.failed_guards,
+						&bypass.full_state,
+						&attacker_now,
+					) {
+						if let Some(ps_injected) = build_bypass_state(
+							&bypass.full_state,
+							&bypass.failed_guards,
+							&attacker_now,
+						) {
+							verify_bypass_decompose(ctx, km, &ps_injected);
+						}
+					}
+				}
+			}
+		}
 
 		if is_last {
 			break;

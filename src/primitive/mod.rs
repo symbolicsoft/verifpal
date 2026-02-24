@@ -11,22 +11,22 @@ use crate::types::*;
 
 // Re-export everything from spec so callers use `crate::primitive::PRIM_*`.
 #[allow(unused_imports)]
-pub(crate) use self::spec::*;
+pub use self::spec::*;
 
 // ---------------------------------------------------------------------------
 // Function pointer type aliases
 // ---------------------------------------------------------------------------
 
-pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
-pub(crate) type CoreRuleFn = fn(&Primitive) -> (bool, Vec<Value>);
-pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
+pub type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
+pub type CoreRuleFn = fn(&Primitive) -> (bool, Vec<Value>);
+pub type RewriteToFn = fn(&Primitive) -> Value;
 
 // ---------------------------------------------------------------------------
 // Rule structs
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Default)]
-pub(crate) struct DecomposeRule {
+pub struct DecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<usize>,
 	pub reveal: usize,
@@ -35,14 +35,14 @@ pub(crate) struct DecomposeRule {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct RecomposeRule {
+pub struct RecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct RewriteRule {
+pub struct RewriteRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub from: usize,
@@ -52,7 +52,7 @@ pub(crate) struct RewriteRule {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct RebuildRule {
+pub struct RebuildRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub given: Vec<Vec<usize>>,
@@ -64,7 +64,7 @@ pub(crate) struct RebuildRule {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
-pub(crate) struct PrimitiveCoreSpec {
+pub struct PrimitiveCoreSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
@@ -79,7 +79,7 @@ pub(crate) struct PrimitiveCoreSpec {
 
 /// How to extract the bypass key from a guarded primitive's arguments.
 #[derive(Clone, Copy)]
-pub(crate) enum BypassKeyKind {
+pub enum BypassKeyKind {
 	/// Take the argument at this index directly.
 	Direct(usize),
 	/// Extract the last DH exponent from the equation at this index.
@@ -87,7 +87,7 @@ pub(crate) enum BypassKeyKind {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct PrimitiveSpec {
+pub struct PrimitiveSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
@@ -121,7 +121,7 @@ static PRIM_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveSpec>> = LazyLock::new
 // Trait + impls
 // ---------------------------------------------------------------------------
 
-pub(crate) trait PrimitiveDefinition {
+pub trait PrimitiveDefinition {
 	fn name(&self) -> &'static str;
 	fn arity(&self) -> &[i32];
 	fn output(&self) -> &[i32];
@@ -179,7 +179,7 @@ impl PrimitiveDefinition for PrimitiveSpec {
 // Accessor functions
 // ---------------------------------------------------------------------------
 
-pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
+pub fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
 	if primitive_is_core(id) {
 		Ok(primitive_core_get(id)? as &dyn PrimitiveDefinition)
 	} else {
@@ -187,48 +187,48 @@ pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDe
 	}
 }
 
-pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
+pub fn primitive_is_core(id: PrimitiveId) -> bool {
 	CORE_SPECS.contains_key(&id)
 }
 
-pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
+pub fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
 	CORE_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
+pub fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
 	PRIM_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
+pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
 	primitive_def(id)
 		.map(|d| d.has_rewrite_rule())
 		.unwrap_or(false)
 }
 
-pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
+pub fn primitive_name(id: PrimitiveId) -> &'static str {
 	primitive_def(id).map(|d| d.name()).unwrap_or("")
 }
 
-pub(crate) fn primitive_is_explosive(id: PrimitiveId) -> bool {
+pub fn primitive_is_explosive(id: PrimitiveId) -> bool {
 	primitive_def(id).map(|d| d.is_explosive()).unwrap_or(false)
 }
 
-pub(crate) fn primitive_has_single_output(id: PrimitiveId) -> bool {
+pub fn primitive_has_single_output(id: PrimitiveId) -> bool {
 	primitive_def(id)
 		.map(|d| d.has_single_output())
 		.unwrap_or(false)
 }
 
-pub(crate) fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
+pub fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
 	let d = primitive_def(id)?;
 	Ok((d.output(), d.definition_check()))
 }
 
-pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
+pub fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 	CORE_SPECS
 		.values()
 		.find(|s| s.name == name)
@@ -237,15 +237,15 @@ pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
+pub fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
 	Ok(primitive_def(p.id)?.arity())
 }
 
-pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
+pub fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
 	CORE_SPECS.get(&id).is_some_and(|s| s.reveals_args)
 }
 
-pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
+pub fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 	if primitive_is_core(prim.id) {
 		return None;
 	}

@@ -53,7 +53,7 @@ const STAGE_RECURSIVE_INJECTION: i32 = 5;
 /// 1. **Depth check** — O(1), no allocation.
 /// 2. **Hash check** — O(n) FNV-style hash, no allocation.
 /// 3. **Full equivalence** — only if depth and hash match.
-pub(crate) fn inject(
+pub fn inject(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	inject_depth: usize,
@@ -152,7 +152,7 @@ fn inject_primitive_skeleton(p: &Primitive, depth: usize) -> (Primitive, usize) 
 /// Used as a cheap pre-filter: a candidate injectant can only replace a
 /// reference primitive if its skeleton depth is ≤ the reference's depth
 /// (injecting a deeper structure would change the protocol's computation shape).
-pub(crate) fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
+pub fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
 	let max_child = p
 		.arguments
 		.iter()
@@ -169,7 +169,7 @@ pub(crate) fn primitive_skeleton_depth(p: &Primitive, depth: usize) -> usize {
 /// equation lengths).  Used as a fast second filter after depth comparison:
 /// if two skeletons have different hashes, they cannot be equivalent, avoiding
 /// the cost of a full recursive comparison.
-pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {
+pub fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761);
 	for a in &p.arguments {
 		match a {
@@ -189,7 +189,7 @@ pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 
 /// Compute the skeleton hash of a primitive (hash of its skeleton form).
 /// This normalizes equations the same way inject_primitive_skeleton does.
-pub(crate) fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
+pub fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
 	let (skel, _) = inject_primitive_skeleton(p, 0);
 	primitive_skeleton_hash(&skel)
 }
@@ -214,7 +214,7 @@ fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 	equivalent_primitives(&p1, &p2, false).equivalent
 }
 
-pub(crate) fn inject_missing_skeletons(
+pub fn inject_missing_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	record: &MutationRecord,
@@ -241,7 +241,7 @@ pub(crate) fn inject_missing_skeletons(
 
 /// Returns true if `p` has the same primitive ID as `reference` and its
 /// skeleton depth is no greater than `reference`'s skeleton depth.
-pub(crate) fn skeleton_not_deeper(p: &Primitive, reference: &Primitive) -> bool {
+pub fn skeleton_not_deeper(p: &Primitive, reference: &Primitive) -> bool {
 	if p.id != reference.id {
 		return false;
 	}

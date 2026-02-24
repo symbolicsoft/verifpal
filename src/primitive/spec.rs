@@ -20,27 +20,27 @@ use crate::value::{value_g, value_nil};
 // Primitive ID constants
 // ---------------------------------------------------------------------------
 
-pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
-pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
-pub(crate) const PRIM_SPLIT: PrimitiveId = 3;
-pub(crate) const PRIM_PWHASH: PrimitiveId = 4;
-pub(crate) const PRIM_HASH: PrimitiveId = 5;
-pub(crate) const PRIM_HKDF: PrimitiveId = 6;
-pub(crate) const PRIM_AEAD_ENC: PrimitiveId = 7;
-pub(crate) const PRIM_AEAD_DEC: PrimitiveId = 8;
-pub(crate) const PRIM_ENC: PrimitiveId = 9;
-pub(crate) const PRIM_DEC: PrimitiveId = 10;
-pub(crate) const PRIM_MAC: PrimitiveId = 11;
-pub(crate) const PRIM_SIGN: PrimitiveId = 12;
-pub(crate) const PRIM_SIGNVERIF: PrimitiveId = 13;
-pub(crate) const PRIM_PKE_ENC: PrimitiveId = 14;
-pub(crate) const PRIM_PKE_DEC: PrimitiveId = 15;
-pub(crate) const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
-pub(crate) const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
-pub(crate) const PRIM_RINGSIGN: PrimitiveId = 18;
-pub(crate) const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
-pub(crate) const PRIM_BLIND: PrimitiveId = 20;
-pub(crate) const PRIM_UNBLIND: PrimitiveId = 21;
+pub const PRIM_ASSERT: PrimitiveId = 1;
+pub const PRIM_CONCAT: PrimitiveId = 2;
+pub const PRIM_SPLIT: PrimitiveId = 3;
+pub const PRIM_PWHASH: PrimitiveId = 4;
+pub const PRIM_HASH: PrimitiveId = 5;
+pub const PRIM_HKDF: PrimitiveId = 6;
+pub const PRIM_AEAD_ENC: PrimitiveId = 7;
+pub const PRIM_AEAD_DEC: PrimitiveId = 8;
+pub const PRIM_ENC: PrimitiveId = 9;
+pub const PRIM_DEC: PrimitiveId = 10;
+pub const PRIM_MAC: PrimitiveId = 11;
+pub const PRIM_SIGN: PrimitiveId = 12;
+pub const PRIM_SIGNVERIF: PrimitiveId = 13;
+pub const PRIM_PKE_ENC: PrimitiveId = 14;
+pub const PRIM_PKE_DEC: PrimitiveId = 15;
+pub const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
+pub const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
+pub const PRIM_RINGSIGN: PrimitiveId = 18;
+pub const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
+pub const PRIM_BLIND: PrimitiveId = 20;
+pub const PRIM_UNBLIND: PrimitiveId = 21;
 
 // ---------------------------------------------------------------------------
 // Filter functions

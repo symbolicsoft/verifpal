@@ -8,7 +8,7 @@ use crate::types::*;
 // Hashing helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
+pub fn primitive_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761) ^ (p.output as u64).wrapping_mul(97);
 	for a in &p.arguments {
 		h = h.wrapping_mul(31).wrapping_add(a.hash_value());
@@ -16,7 +16,7 @@ pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
 	h
 }
 
-pub(crate) fn equation_hash(e: &Equation) -> u64 {
+pub fn equation_hash(e: &Equation) -> u64 {
 	if equation_is_flat(e) {
 		return equation_hash_inner(e);
 	}

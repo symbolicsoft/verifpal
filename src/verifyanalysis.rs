@@ -17,7 +17,7 @@ use crate::verify::verify_resolve_queries;
 // Main analysis entry point
 // ---------------------------------------------------------------------------
 
-pub(crate) fn verify_analysis(
+pub fn verify_analysis(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,

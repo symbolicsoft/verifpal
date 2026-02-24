@@ -9,7 +9,7 @@ use crate::types::*;
 
 const MAX_POSSIBLE_DEPTH: usize = 16;
 
-pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
+pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
 	}
@@ -26,7 +26,7 @@ pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 		.collect()
 }
 
-pub(crate) fn can_decompose(
+pub fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -84,7 +84,7 @@ pub(crate) fn can_decompose(
 	}
 }
 
-pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
+pub fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
@@ -118,7 +118,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	None
 }
 
-pub(crate) fn can_reconstruct_primitive(
+pub fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -166,10 +166,7 @@ pub(crate) fn can_reconstruct_primitive(
 	Some(has)
 }
 
-pub(crate) fn can_reconstruct_equation(
-	e: &Equation,
-	attacker: &AttackerState,
-) -> Option<Vec<Value>> {
+pub fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> Option<Vec<Value>> {
 	if e.values.len() < 2 {
 		return None;
 	}
@@ -203,7 +200,7 @@ pub(crate) fn can_reconstruct_equation(
 	None
 }
 
-pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
+pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
 	if depth > MAX_POSSIBLE_DEPTH {
 		return (false, vec![Value::Primitive(Arc::new(p.clone()))]);
 	}
@@ -329,7 +326,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 	true
 }
 
-pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
+pub fn can_rebuild(p: &Primitive) -> Option<Value> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
@@ -371,7 +368,7 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	None
 }
 
-pub(crate) fn find_obtainable_passwords(
+pub fn find_obtainable_passwords(
 	a: &Value,
 	a_parent: &Value,
 	a_index: Option<usize>,

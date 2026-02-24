@@ -12,7 +12,7 @@ use crate::value::value_nil;
 // Rewrite: primitives
 // ---------------------------------------------------------------------------
 
-pub(crate) fn perform_primitive_rewrite(
+pub fn perform_primitive_rewrite(
 	p: &Primitive,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
@@ -116,7 +116,7 @@ fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -
 // Rewrite: equations
 // ---------------------------------------------------------------------------
 
-pub(crate) fn perform_equation_rewrite(
+pub fn perform_equation_rewrite(
 	e: &Equation,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,

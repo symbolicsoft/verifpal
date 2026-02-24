@@ -21,7 +21,7 @@ const MAX_RESOLVE_DEPTH: usize = 64;
 // Resolve internal values from ProtocolTrace
 // ---------------------------------------------------------------------------
 
-pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
+pub fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
 	let mut visited: Vec<Value> = Vec::new();
 	let resolved = resolve_trace_value(value, trace, &mut visited, 0);
 	(resolved, visited)
@@ -142,7 +142,7 @@ fn resolve_trace_equation(
 // Resolve internal values from PrincipalState
 // ---------------------------------------------------------------------------
 
-pub(crate) fn resolve_ps_values(
+pub fn resolve_ps_values(
 	value: &Value,
 	root_value: &Value,
 	root_index: usize,
@@ -356,7 +356,7 @@ fn resolve_ps_equation_depth(
 // Used-by checks
 // ---------------------------------------------------------------------------
 
-pub(crate) fn constant_used_by_principal(
+pub fn constant_used_by_principal(
 	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
 	c: &Constant,
@@ -408,10 +408,7 @@ pub(crate) fn constant_used_by_principal(
 // Fresh value check
 // ---------------------------------------------------------------------------
 
-pub(crate) fn value_constant_contains_fresh_values(
-	c: &Constant,
-	ps: &PrincipalState,
-) -> VResult<bool> {
+pub fn value_constant_contains_fresh_values(c: &Constant, ps: &PrincipalState) -> VResult<bool> {
 	let idx = ps
 		.index_of(c)
 		.ok_or_else(|| VerifpalError::Resolution("invalid value".into()))?;

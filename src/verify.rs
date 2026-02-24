@@ -21,10 +21,7 @@ use crate::verifyactive::verify_active;
 ///
 /// `verifhub_scheduled` — when `true`, submit the results to VerifHub on completion.
 /// This replaced the old `VERIFHUB_SCHEDULED` global `AtomicBool`.
-pub(crate) fn verify(
-	file_path: &str,
-	verifhub_scheduled: bool,
-) -> VResult<(Vec<VerifyResult>, String)> {
+pub fn verify(file_path: &str, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResult>, String)> {
 	let m = parse_file(file_path)?;
 	verify_model(&m, verifhub_scheduled)
 }
@@ -57,7 +54,7 @@ fn verify_model(m: &Model, verifhub_scheduled: bool) -> VResult<(Vec<VerifyResul
 // Resolve unresolved queries against the current principal state
 // ---------------------------------------------------------------------------
 
-pub(crate) fn verify_resolve_queries(
+pub fn verify_resolve_queries(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -75,7 +72,7 @@ pub(crate) fn verify_resolve_queries(
 // Standard run: resolve, inject skeletons, rewrite, analyse each principal
 // ---------------------------------------------------------------------------
 
-pub(crate) fn verify_standard_run(
+pub fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],

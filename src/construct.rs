@@ -9,7 +9,7 @@ use crate::value::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) fn construct_protocol_trace(
+pub fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
@@ -364,7 +364,7 @@ fn construct_trace_render_message(
 	Ok(())
 }
 
-pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
+pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut states = Vec::new();
 	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
 		let n = trace.slots.len();
@@ -463,7 +463,7 @@ impl PrincipalState {
 	/// When `purify` is true, resets all values to their pre-mutation state
 	/// (for a clean new stage).  When false, preserves current mutation state
 	/// (for rewrite analysis within the same stage).
-	pub(crate) fn clone_for_stage(&self, purify: bool) -> PrincipalState {
+	pub fn clone_for_stage(&self, purify: bool) -> PrincipalState {
 		let values = self
 			.values
 			.iter()

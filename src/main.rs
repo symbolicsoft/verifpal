@@ -1,34 +1,10 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-mod construct;
-mod context;
-mod equivalence;
-mod hashing;
-mod info;
-mod inject;
-mod mutationmap;
-mod narrative;
-mod parser;
-mod possible;
-mod pretty;
-mod primitive;
-mod principal;
-mod query;
-mod resolution;
-mod rewrite;
-mod sanity;
-mod tui;
-mod types;
-mod util;
-mod value;
-mod verifhub;
-mod verify;
-mod verifyactive;
-mod verifyanalysis;
-
 use clap::{Parser, Subcommand};
-use types::InfoLevel;
+use verifpal::{
+	info_banner, info_message, pretty_print, set_character, set_tui_mode, verify, InfoLevel,
+};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -76,17 +52,17 @@ fn main() {
 			character,
 		} => {
 			if let Some(ref ch) = character {
-				if let Err(e) = narrative::set_character(ch) {
+				if let Err(e) = set_character(ch) {
 					eprintln!("Error: {}", e);
 					std::process::exit(1);
 				}
 			}
 			if !result_code {
-				tui::set_tui_mode(true);
-				info::info_banner(VERSION);
-				info::info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
+				set_tui_mode(true);
+				info_banner(VERSION);
+				info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
-			match verify::verify(&model, hub) {
+			match verify(&model, hub) {
 				Ok((_, code)) => {
 					if result_code {
 						println!("{}", code);
@@ -98,7 +74,7 @@ fn main() {
 				}
 			}
 		}
-		Commands::Pretty { model } => match pretty::pretty_print(&model) {
+		Commands::Pretty { model } => match pretty_print(&model) {
 			Ok(output) => print!("{}", output),
 			Err(e) => {
 				eprintln!("Error: {}", e);
@@ -106,7 +82,7 @@ fn main() {
 			}
 		},
 		Commands::About => {
-			info::info_banner(VERSION);
+			info_banner(VERSION);
 			println!("Verifpal is authored by Nadim Kobeissi.");
 			println!("The following individuals have contributed");
 			println!("meaningful suggestions, bug reports, ideas");
@@ -137,13 +113,13 @@ mod unit_tests {
 	use std::collections::HashMap;
 	use std::sync::Arc;
 
-	use crate::equivalence::*;
-	use crate::hashing::*;
-	use crate::inject::{primitive_skeleton_depth, primitive_skeleton_hash};
-	use crate::possible::*;
-	use crate::primitive::*;
-	use crate::types::*;
-	use crate::value::*;
+	use verifpal::equivalence::*;
+	use verifpal::hashing::*;
+	use verifpal::inject::{primitive_skeleton_depth, primitive_skeleton_hash};
+	use verifpal::possible::*;
+	use verifpal::primitive::*;
+	use verifpal::types::*;
+	use verifpal::value::*;
 
 	// -----------------------------------------------------------------------
 	// Test helpers
@@ -1356,7 +1332,7 @@ mod unit_tests {
 mod tests {
 	fn run_model(model: &str, expected: &str) {
 		let file_name = format!("examples/test/{}", model);
-		let (_, results_code) = crate::verify::verify(&file_name, false)
+		let (_, results_code) = verifpal::verify::verify(&file_name, false)
 			.unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
 		assert_eq!(
 			results_code, expected,

@@ -15,7 +15,7 @@ use crate::value::*;
 const STAGE_MUTATION_EXPANSION: i32 = 3;
 
 /// Compute the product of mutation sizes, returning None if it exceeds `cap`.
-pub(crate) fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
+pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
 	let mut product: usize = 1;
 	for m in sizes {
 		if m > 0 && product > cap / m {
@@ -31,7 +31,7 @@ pub(crate) fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -
 }
 
 impl MutationMap {
-	pub(crate) fn new(
+	pub fn new(
 		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
@@ -92,7 +92,7 @@ impl MutationMap {
 		Ok(mm)
 	}
 
-	pub(crate) fn next(mut self) -> MutationMap {
+	pub fn next(mut self) -> MutationMap {
 		if self.combination.is_empty() {
 			self.out_of_mutations = true;
 			return self;
@@ -116,7 +116,7 @@ impl MutationMap {
 		self
 	}
 
-	pub(crate) fn subset(&self, indices: &[usize]) -> MutationMap {
+	pub fn subset(&self, indices: &[usize]) -> MutationMap {
 		MutationMap {
 			out_of_mutations: false,
 			constants: indices.iter().map(|&i| self.constants[i].clone()).collect(),
@@ -126,7 +126,7 @@ impl MutationMap {
 		}
 	}
 
-	pub(crate) fn subset_capped(&self, indices: &[usize], max_product: usize) -> MutationMap {
+	pub fn subset_capped(&self, indices: &[usize], max_product: usize) -> MutationMap {
 		let mut sub = self.subset(indices);
 		let n = indices.len();
 		if n == 0 {

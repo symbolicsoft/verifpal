@@ -5,14 +5,29 @@ edition = "2021"
 license = "GPL-3.0-only"
 description = "Verifpal - cryptographic protocol analysis"
 
+[lib]
+name = "verifpal"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "verifpal"
 path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["clap", "colored", "rayon"]
+wasm = ["wasm-bindgen"]
 
 [dependencies]
-colored = "3"
-clap = { version = "4", features = ["derive"] }
-rayon = "1"
+clap = { version = "4", features = ["derive"], optional = true }
+colored = { version = "3", optional = true }
+rayon = { version = "1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 
 [profile.release]
 opt-level = 3
@@ -20,4 +35,3 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
-

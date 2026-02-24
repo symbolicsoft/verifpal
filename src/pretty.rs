@@ -9,7 +9,7 @@ use crate::principal::principal_get_name_from_id;
 use crate::sanity::sanity;
 use crate::types::*;
 
-pub(crate) fn pretty_print(model_file: &str) -> VResult<String> {
+pub fn pretty_print(model_file: &str) -> VResult<String> {
 	let m = parse_file(model_file)?;
 	pretty_model(&m)
 }
@@ -148,7 +148,7 @@ impl fmt::Display for Expression {
 	}
 }
 
-pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
+pub fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()
 		.map(|c| c.to_string())
@@ -156,7 +156,7 @@ pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 		.join(", ")
 }
 
-pub(crate) fn pretty_values(values: &[Value]) -> String {
+pub fn pretty_values(values: &[Value]) -> String {
 	values
 		.iter()
 		.map(|v| v.to_string())
@@ -164,7 +164,7 @@ pub(crate) fn pretty_values(values: &[Value]) -> String {
 		.join(", ")
 }
 
-pub(crate) fn pretty_principal(principal: &Principal) -> String {
+pub fn pretty_principal(principal: &Principal) -> String {
 	let mut output = format!("principal {}[\n", principal.name);
 	for expression in &principal.expressions {
 		output.push_str(&format!("\t{}\n", expression));
@@ -173,7 +173,7 @@ pub(crate) fn pretty_principal(principal: &Principal) -> String {
 	output
 }
 
-pub(crate) fn pretty_message(message: &Message) -> String {
+pub fn pretty_message(message: &Message) -> String {
 	format!(
 		"{} -> {}: {}",
 		principal_get_name_from_id(message.sender),
@@ -182,11 +182,11 @@ pub(crate) fn pretty_message(message: &Message) -> String {
 	)
 }
 
-pub(crate) fn pretty_phase(phase: &Phase) -> String {
+pub fn pretty_phase(phase: &Phase) -> String {
 	format!("phase[{}]\n\n", phase.number)
 }
 
-pub(crate) fn pretty_model(m: &Model) -> VResult<String> {
+pub fn pretty_model(m: &Model) -> VResult<String> {
 	sanity(m)?;
 	let mut output = format!("attacker[{}]\n\n", m.attacker);
 	for block in &m.blocks {
@@ -207,7 +207,7 @@ pub(crate) fn pretty_model(m: &Model) -> VResult<String> {
 	Ok(output)
 }
 
-pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
+pub fn pretty_arity(spec_arity: &[i32]) -> String {
 	match spec_arity.len() {
 		0 => String::new(),
 		1 => spec_arity[0].to_string(),

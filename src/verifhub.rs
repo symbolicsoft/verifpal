@@ -5,7 +5,7 @@ use crate::info::info_message;
 use crate::pretty::pretty_model;
 use crate::types::*;
 
-pub(crate) fn verifhub(m: &Model, file_name: &str, results_code: &str) -> VResult<()> {
+pub fn verifhub(m: &Model, file_name: &str, results_code: &str) -> VResult<()> {
 	info_message(
 		"Your model will now be submitted to VerifHub.",
 		InfoLevel::Verifpal,
@@ -38,6 +38,11 @@ fn urlencoding_encode(s: &str) -> String {
 }
 
 fn open_browser(url: &str) -> VResult<()> {
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = url;
+		return Ok(());
+	}
 	#[cfg(target_os = "macos")]
 	{
 		std::process::Command::new("open")

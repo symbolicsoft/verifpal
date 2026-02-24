@@ -19,7 +19,7 @@ fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 /// without threading a reference into the TUI rendering loop.
 static ANALYSIS_COUNT: AtomicU32 = AtomicU32::new(0);
 
-pub(crate) fn analysis_count_get() -> usize {
+pub fn analysis_count_get() -> usize {
 	ANALYSIS_COUNT.load(Ordering::SeqCst) as usize
 }
 
@@ -33,7 +33,7 @@ use crate::value::compute_slot_diffs;
 ///
 /// All mutation is interior (RwLock / Atomic) so the context can be shared
 /// across rayon threads via `&VerifyContext`.
-pub(crate) struct VerifyContext {
+pub struct VerifyContext {
 	attacker: RwLock<AttackerState>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
@@ -61,7 +61,7 @@ fn attacker_state_absorb(state: &mut AttackerState, value: &Value, record: &Muta
 
 impl VerifyContext {
 	/// Create a fresh context for verifying model `m`.
-	pub(crate) fn new(m: &Model) -> Self {
+	pub fn new(m: &Model) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
 			.iter()
@@ -84,26 +84,26 @@ impl VerifyContext {
 	// -----------------------------------------------------------------------
 
 	/// Reset attacker state for a new phase.
-	pub(crate) fn attacker_init(&self) {
+	pub fn attacker_init(&self) {
 		let mut state = write_lock(&self.attacker);
 		*state = AttackerState::new();
 	}
 
 	/// Cheap O(1) snapshot of the attacker state (Arc increments only).
-	pub(crate) fn attacker_snapshot(&self) -> AttackerState {
+	pub fn attacker_snapshot(&self) -> AttackerState {
 		read_lock(&self.attacker).clone()
 	}
 
-	pub(crate) fn attacker_is_exhausted(&self) -> bool {
+	pub fn attacker_is_exhausted(&self) -> bool {
 		read_lock(&self.attacker).exhausted
 	}
 
-	pub(crate) fn attacker_known_count(&self) -> usize {
+	pub fn attacker_known_count(&self) -> usize {
 		read_lock(&self.attacker).known.len()
 	}
 
 	/// Add a value to attacker knowledge. Returns true if it was new.
-	pub(crate) fn attacker_put(&self, known: &Value, record: &MutationRecord) -> bool {
+	pub fn attacker_put(&self, known: &Value, record: &MutationRecord) -> bool {
 		// Fast check with read lock
 		{
 			let state = read_lock(&self.attacker);
@@ -135,13 +135,13 @@ impl VerifyContext {
 		true
 	}
 
-	pub(crate) fn attacker_set_exhausted(&self) {
+	pub fn attacker_set_exhausted(&self) {
 		let mut state = write_lock(&self.attacker);
 		state.exhausted = true;
 	}
 
 	/// Initialize attacker knowledge for a new phase.
-	pub(crate) fn attacker_phase_update(
+	pub fn attacker_phase_update(
 		&self,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
@@ -191,16 +191,16 @@ impl VerifyContext {
 	// Verify results
 	// -----------------------------------------------------------------------
 
-	pub(crate) fn results_get(&self) -> Vec<VerifyResult> {
+	pub fn results_get(&self) -> Vec<VerifyResult> {
 		read_lock(&self.results).clone()
 	}
 
-	pub(crate) fn results_file_name(&self) -> &str {
+	pub fn results_file_name(&self) -> &str {
 		&self.file_name
 	}
 
 	/// Write a resolved result. Returns true if it was newly written.
-	pub(crate) fn results_put(&self, result: &VerifyResult) -> bool {
+	pub fn results_put(&self, result: &VerifyResult) -> bool {
 		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index) {
 			if !vr.resolved {
@@ -216,7 +216,7 @@ impl VerifyContext {
 		false
 	}
 
-	pub(crate) fn all_resolved(&self) -> bool {
+	pub fn all_resolved(&self) -> bool {
 		self.unresolved.load(Ordering::SeqCst) <= 0
 	}
 
@@ -224,7 +224,7 @@ impl VerifyContext {
 	// Analysis counter
 	// -----------------------------------------------------------------------
 
-	pub(crate) fn analysis_count_increment(&self) {
+	pub fn analysis_count_increment(&self) {
 		self.analysis_count.fetch_add(1, Ordering::SeqCst);
 		ANALYSIS_COUNT.fetch_add(1, Ordering::SeqCst);
 	}
