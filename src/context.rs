@@ -164,7 +164,7 @@ impl VerifyContext {
 			if !km.constant_used_by_any(&sm.constant) {
 				continue;
 			}
-			attacker_state_absorb(&mut state, &sv.assigned, &record);
+			attacker_state_absorb(&mut state, &sv.value, &record);
 		}
 
 		// Wire/leaked values
@@ -181,7 +181,7 @@ impl VerifyContext {
 			}
 			let constant_value = Value::Constant(sm.constant.clone());
 			attacker_state_absorb(&mut state, &constant_value, &record);
-			attacker_state_absorb(&mut state, &sv.assigned, &record);
+			attacker_state_absorb(&mut state, &sv.value, &record);
 		}
 
 		Ok(())

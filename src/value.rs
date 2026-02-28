@@ -151,14 +151,14 @@ pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> Mutatio
 		.zip(trace.slots.iter())
 		.enumerate()
 		.filter_map(|(i, ((sv, sm), slot))| {
-			if sv.before_rewrite.equivalent(&slot.initial_value, false) {
+			if sv.pre_rewrite.equivalent(&slot.initial_value, false) {
 				None
 			} else {
 				Some(SlotDiff {
 					index: i,
 					constant: sm.constant.clone(),
-					assigned: sv.assigned.clone(),
-					mutated: sv.mutated,
+					value: sv.value.clone(),
+					tainted: sv.provenance.attacker_tainted,
 				})
 			}
 		})
@@ -224,16 +224,16 @@ impl PrincipalState {
 	pub fn resolve_constant(
 		&self,
 		c: &Constant,
-		allow_before_mutate: bool,
+		allow_original: bool,
 	) -> (Value, Option<usize>) {
 		let i = self.index_of(c);
 		match i {
 			None => (Value::Constant(c.clone()), None),
 			Some(idx) => {
-				let value = if allow_before_mutate {
+				let value = if allow_original {
 					self.effective_value(idx)
 				} else {
-					&self.values[idx].assigned
+					&self.values[idx].value
 				};
 				(value.clone(), Some(idx))
 			}
@@ -243,7 +243,7 @@ impl PrincipalState {
 		let mut failures: Vec<(Primitive, usize)> = Vec::new();
 		let len = self.values.len();
 		for i in 0..len {
-			match &self.values[i].assigned {
+			match &self.values[i].value {
 				Value::Primitive(p) => {
 					let p_clone = p.clone();
 					let r = perform_primitive_rewrite(&p_clone, Some(i), self);
@@ -261,37 +261,37 @@ impl PrincipalState {
 	}
 	pub fn resolve_all_values(&mut self, attacker: &AttackerState) -> VResult<()> {
 		let n = self.values.len();
-		let mut new_assigned = Vec::with_capacity(n);
-		let mut new_before_rewrite = Vec::with_capacity(n);
+		let mut new_value = Vec::with_capacity(n);
+		let mut new_pre_rewrite = Vec::with_capacity(n);
 		// Borrow self immutably for the resolution loop
 		let ps_ref: &PrincipalState = &*self;
 		for i in 0..n {
-			let fbm = ps_ref.should_use_before_mutate(i);
-			new_assigned.push(resolve_ps_values(
-				&ps_ref.values[i].assigned,
-				&ps_ref.values[i].assigned,
+			let use_original = ps_ref.should_use_original(i);
+			new_value.push(resolve_ps_values(
+				&ps_ref.values[i].value,
+				&ps_ref.values[i].value,
 				i,
 				ps_ref,
 				attacker,
-				fbm,
+				use_original,
 			)?);
-			new_before_rewrite.push(resolve_ps_values(
-				&ps_ref.values[i].before_rewrite,
-				&ps_ref.values[i].before_rewrite,
+			new_pre_rewrite.push(resolve_ps_values(
+				&ps_ref.values[i].pre_rewrite,
+				&ps_ref.values[i].pre_rewrite,
 				i,
 				ps_ref,
 				attacker,
-				fbm,
+				use_original,
 			)?);
 		}
-		for ((sv, assigned), before_rewrite) in self
+		for ((sv, value), pre_rewrite) in self
 			.values
 			.iter_mut()
-			.zip(new_assigned)
-			.zip(new_before_rewrite)
+			.zip(new_value)
+			.zip(new_pre_rewrite)
 		{
-			sv.assigned = assigned;
-			sv.before_rewrite = before_rewrite;
+			sv.value = value;
+			sv.pre_rewrite = pre_rewrite;
 			sv.rewritten = false;
 		}
 		Ok(())

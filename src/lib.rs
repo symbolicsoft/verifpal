@@ -19,6 +19,7 @@ pub mod query;
 pub mod resolution;
 pub mod rewrite;
 pub mod sanity;
+pub mod theory;
 pub mod tui;
 pub mod types;
 pub mod util;

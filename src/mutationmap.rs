@@ -8,11 +8,6 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-/// Stage threshold for mutation expansion.  In stages 1-3 the mutation map
-/// offers only minimal replacements (nil for constants, G^nil for equations)
-/// to keep the search space small while the attacker builds initial knowledge.
-/// From stage 4 onward, all attacker-known values are offered as mutations.
-const STAGE_MUTATION_EXPANSION: i32 = 3;
 
 /// Compute the product of mutation sizes, returning None if it exceeds `cap`.
 pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
@@ -36,7 +31,7 @@ impl MutationMap {
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		attacker: &AttackerState,
-		stage: i32,
+		depth: usize,
 	) -> VResult<MutationMap> {
 		let mut mm = MutationMap {
 			out_of_mutations: false,
@@ -47,8 +42,8 @@ impl MutationMap {
 		};
 		info_message(
 			&format!(
-				"Initializing Stage {} mutation map for {}...",
-				stage, ps.name
+				"Initializing depth {} mutation map for {}...",
+				depth, ps.name
 			),
 			InfoLevel::Analysis,
 			false,
@@ -66,7 +61,7 @@ impl MutationMap {
 			if skip_value(v, idx, km, ps, attacker) {
 				continue;
 			}
-			let r = replace_value(ctx, &a, idx, stage, ps, attacker)?;
+			let r = replace_value(ctx, &a, idx, depth, ps, attacker)?;
 			if r.is_empty() {
 				continue;
 			}
@@ -79,9 +74,9 @@ impl MutationMap {
 			let mut_sizes: Vec<usize> = mm.mutations.iter().map(|m| m.len()).collect();
 			info_message(
 				&format!(
-					"Mutation map for {} at stage {}: {} constants, mutations: {:?}",
+					"Mutation map for {} at depth {}: {} constants, mutations: {:?}",
 					ps.name,
-					stage,
+					depth,
 					mm.constants.len(),
 					mut_sizes
 				),
@@ -159,10 +154,10 @@ fn skip_value(
 	attacker: &AttackerState,
 ) -> bool {
 	if ps.meta[idx].guard {
-		if !ps.meta[idx].mutatable_to.contains(&ps.values[idx].sender) {
+		if !ps.meta[idx].mutatable_to.contains(&ps.values[idx].provenance.sender) {
 			return true;
 		}
-	} else if ps.values[idx].creator == ps.id {
+	} else if ps.values[idx].provenance.creator == ps.id {
 		return true;
 	}
 	if !ps.meta[idx].phase.contains(&attacker.current_phase) {
@@ -180,21 +175,21 @@ fn replace_value(
 	ctx: &VerifyContext,
 	a: &Value,
 	root_index: usize,
-	stage: i32,
+	depth: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> VResult<Vec<Value>> {
 	let a = resolve_ps_values(a, a, root_index, ps, attacker, false)?;
 	match &a {
-		Value::Constant(_) => Ok(replace_constant(&a, stage, ps, attacker)),
-		Value::Primitive(_) => Ok(replace_primitive(ctx, &a, stage, ps, attacker)),
-		Value::Equation(_) => Ok(replace_equation(&a, stage, attacker)),
+		Value::Constant(_) => Ok(replace_constant(&a, depth, ps, attacker)),
+		Value::Primitive(_) => Ok(replace_primitive(ctx, &a, depth, ps, attacker)),
+		Value::Equation(_) => Ok(replace_equation(&a, depth, attacker)),
 	}
 }
 
 fn replace_constant(
 	a: &Value,
-	stage: i32,
+	_depth: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Vec<Value> {
@@ -205,9 +200,6 @@ fn replace_constant(
 		}
 	}
 	mutations.push(value_nil());
-	if stage <= STAGE_MUTATION_EXPANSION {
-		return mutations;
-	}
 	for v in attacker.known.iter() {
 		if let Value::Constant(vc) = v {
 			if vc.is_g_or_nil() {
@@ -225,7 +217,7 @@ fn replace_constant(
 fn replace_primitive(
 	ctx: &VerifyContext,
 	a: &Value,
-	stage: i32,
+	depth: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Vec<Value> {
@@ -254,14 +246,14 @@ fn replace_primitive(
 			_ => {}
 		}
 	}
-	let injectants = inject(ctx, a_prim, 0, ps, attacker, stage);
+	let injectants = inject(ctx, a_prim, 0, ps, attacker, depth);
 	for inj in injectants {
 		push_unique_value(&mut mutations, inj);
 	}
 	mutations
 }
 
-fn replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<Value> {
+fn replace_equation(value: &Value, _depth: usize, attacker: &AttackerState) -> Vec<Value> {
 	let mut mutations = vec![];
 	if let Value::Equation(e) = value {
 		match e.values.len() {
@@ -270,7 +262,7 @@ fn replace_equation(value: &Value, stage: i32, attacker: &AttackerState) -> Vec<
 			3 => mutations.push(value_g_nil_nil()),
 			_ => {}
 		}
-		if stage <= STAGE_MUTATION_EXPANSION {
+		if false {
 			return mutations;
 		}
 		for v in attacker.known.iter() {

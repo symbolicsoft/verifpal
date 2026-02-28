@@ -8,44 +8,34 @@
 //!
 //! ## Search Strategy
 //!
-//! The search proceeds through three layers, each running per phase:
+//! The search is parameterized by a single depth parameter `d` (default 3):
 //!
-//! 1. **Baseline analysis** (stage 0): run the protocol as-is with passive
+//! 1. **Baseline analysis** (depth 0): run the protocol as-is with passive
 //!    deduction to build initial attacker knowledge.
 //!
-//! 2. **Equation bypass**: a targeted MitM attack that replaces each received
-//!    DH public key with `G^nil` (the attacker's own key). This covers the
-//!    canonical public-key substitution attack in O(n) time rather than
-//!    requiring the combinatorial search to discover it.
+//! 2. **Bounded-depth search** (depth 1..=d): at each depth level, explore
+//!    mutations of increasing complexity:
+//!    - All k-subsets for k ≤ depth (single-variable at depth 1, pairs at
+//!      depth 2, triples at depth 3).
+//!    - All attacker-known values as potential replacements.
+//!    - Recursive injection nesting ≤ max(0, depth − 1).
 //!
-//! 3. **Staged mutation search** (stages 1–10): explore mutations of
-//!    increasing complexity.
-//!    - **Stages 1–3**: minimal mutations only (nil for constants, G^nil for
-//!      equations). See `STAGE_MUTATION_EXPANSION` in `mutationmap.rs`.
-//!    - **Stage 4+**: all attacker-known values become available as mutations.
-//!    - **Stage 5+**: recursive injection begins — the attacker can inject
-//!      constructed primitives into other primitives' arguments, with
-//!      injection depth bounded by `stage - STAGE_RECURSIVE_INJECTION`
-//!      (see `inject.rs`).
-//!
-//!    Within each stage, mutations are explored via weighted subset scanning:
-//!    weight 1 (single-variable), weight 2 (pairs), weight 3 (triples).
-//!    Each weight level is capped by budget parameters to prevent
-//!    combinatorial explosion.
+//!    DH public-key replacement (the canonical MitM attack) is a natural
+//!    first-order mutation at depth 1 — `G^nil` is always in the attacker's
+//!    knowledge and equation-valued slots accept equation replacements.
 //!
 //! ## Completeness Argument
 //!
 //! The search is **sound** (any reported attack is genuine) but **incomplete**
-//! (some attacks may not be found). The budget parameters are empirically
-//! tuned to find attacks in published protocols (TLS 1.3, Signal, Noise,
-//! Scuttlebutt, DP-3T, etc.) within seconds. The formal bound is:
+//! (some attacks may not be found). The coverage guarantee is:
 //!
-//! > All k-variable mutations for k ≤ `max_subset_weight` (3), with
-//! > injection depth ≤ max(0, stage − `STAGE_RECURSIVE_INJECTION`),
-//! > subject to per-principal budget caps.
+//! > At depth d, Verifpal explores all k-variable mutations for k ≤ d,
+//! > with injection nesting ≤ max(0, d − 1), using all attacker-known
+//! > values as potential replacements, subject to per-principal budget caps.
 //!
-//! If no new knowledge is gained after `exhaustion_threshold` (6) stages,
-//! the search terminates early. The absolute cap is `max_stage` (10).
+//! If no new knowledge is gained at a depth level, the search terminates
+//! early. The default depth of 3 finds all attacks in published protocols
+//! (TLS 1.3, Signal, Noise, Scuttlebutt, DP-3T, etc.) within seconds.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -72,78 +62,40 @@ struct FailedGuardInfo {
 	/// The resolved key/secret argument that the attacker would need to know
 	/// in order to craft an input that bypasses this guard.
 	bypass_key: Value,
-	/// Index into the PrincipalState.assigned array for this guard.
+	/// Index into the PrincipalState.values array for this guard.
 	assigned_index: usize,
 }
 
-/// Budget parameters controlling the active attacker's search strategy.
+/// Configuration for the active attacker's bounded-depth search.
 ///
-/// These values are tuned empirically against the Verifpal test suite and
-/// real-world protocol models.  The goal is to explore enough of the mutation
-/// space to find attacks in common protocols (TLS, Signal, Noise, etc.) while
-/// keeping verification of typical models under a few seconds.
+/// The search explores all attacker strategies involving at most `depth`
+/// simultaneous value substitutions, with injected values of nesting depth
+/// at most `depth`. The coverage guarantee is:
 ///
-/// ## Parameter relationships
+/// > At depth d, Verifpal explores all k-variable mutations for k ≤ d,
+/// > with injection nesting ≤ max(0, d − 1), using all attacker-known
+/// > values as potential replacements.
 ///
-/// - **Termination**: `exhaustion_threshold` and `max_stage` together define
-///   when the search stops. The search runs until all queries are resolved,
-///   the attacker is exhausted (no new knowledge after `exhaustion_threshold`
-///   stages), or `max_stage` is reached.
+/// ## Budget parameters
 ///
-/// - **Combinatorial bounds**: `max_subset_weight` bounds the dimensionality
-///   of the mutation space (how many variables change simultaneously).
-///   `max_mutations_per_subset` and `max_full_product` bound the Cartesian
-///   product size within each subset scan and the final full-product scan,
-///   respectively. `max_weight1_mutations` is intentionally higher because
-///   single-variable scans are cheaper to evaluate.
-///
-/// - **Fairness**: `max_scan_budget` bounds the total mutations per principal
-///   per stage, preventing any single principal from dominating search time.
-///   `max_subsets_per_weight` bounds the number of k-subsets sampled per
-///   weight level.
-struct StageBudget {
-	/// Stages beyond this threshold are considered for exhaustion detection.
-	/// Set to 6 because stages 1-5 already cover single-variable mutations,
-	/// explosive primitives, recursive injection, and expanded mutation maps.
-	/// If no new knowledge is gained after all of those, further stages are
-	/// unlikely to produce results.
-	exhaustion_threshold: i32,
-	/// Maximum stage number.  At 10 the search has explored single-variable
-	/// through 3-variable mutations across all principals, with recursive
-	/// injection active from stage 5+.  Real attacks in published protocols
-	/// are consistently found before stage 8.
-	max_stage: i32,
-	/// Maximum subset weight (number of simultaneous variable mutations).
-	/// Weight 1 = single-variable, weight 2 = pairs, weight 3 = triples.
-	/// Beyond triples the combinatorial cost grows faster than the
-	/// likelihood of finding real attacks.
-	max_subset_weight: usize,
-	/// Maximum number of subsets to scan per weight level.  Limits the
-	/// number of k-subsets of n constants we actually evaluate (since C(n,k)
-	/// can be very large for models with many constants).
+/// - `max_subsets_per_weight`: limits k-subsets sampled per weight level
+/// - `max_weight1_mutations`: cap on mutations at weight 1 (cheap to evaluate)
+/// - `max_mutations_per_subset`: cap on Cartesian product per subset
+/// - `max_full_product`: cap on the full cross-product scan
+/// - `max_scan_budget`: per-principal budget across all weights
+struct SearchConfig {
+	/// Maximum mutation depth. Controls simultaneous substitutions,
+	/// injection nesting, and subset weight. Default: 3.
+	depth: usize,
 	max_subsets_per_weight: usize,
-	/// Cap on mutations per variable at weight 1 (single-variable scan).
-	/// Single-variable mutations are cheap to evaluate so we allow more of
-	/// them than multi-variable combinations.
 	max_weight1_mutations: usize,
-	/// Maximum mutation product for any multi-variable subset scan.
-	/// Prevents combinatorial explosion when two or more variables each
-	/// have many possible mutations (e.g. 200 x 200 = 40k is fine,
-	/// 200 x 200 x 200 = 8M is not).
 	max_mutations_per_subset: usize,
-	/// Maximum total mutation product for the full cross-product scan
-	/// that runs after all weighted scans.  Same rationale as above.
 	max_full_product: usize,
-	/// Per-principal scan budget (total mutations across all weights).
-	/// Ensures that a single principal with many mutable constants doesn't
-	/// dominate the search time at the expense of other principals.
 	max_scan_budget: u32,
 }
 
-const BUDGET: StageBudget = StageBudget {
-	exhaustion_threshold: 6,
-	max_stage: 10,
-	max_subset_weight: 3,
+const CONFIG: SearchConfig = SearchConfig {
+	depth: 3,
 	max_subsets_per_weight: 150,
 	max_weight1_mutations: 150,
 	max_mutations_per_subset: 50000,
@@ -169,47 +121,31 @@ pub fn verify_active(
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
 
-		// Targeted MitM bypass: try replacing equation-valued wire inputs
-		// with G^nil (attacker's own public key).
-		if !ctx.all_resolved() {
-			verify_active_equation_bypass(ctx, km, principal_states);
-		}
+		// Depth 1 (serial — builds initial attacker knowledge)
+		verify_active_at_depth(ctx, 1, km, principal_states);
 
-		// Stage 1 (serial — builds initial attacker knowledge)
-		verify_active_stages(ctx, 1, km, principal_states);
-
-		// Stages 2+ in parallel pairs until resolved or exhausted
-		let mut stage = 2;
-		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() && stage <= BUDGET.max_stage {
-			if stage < BUDGET.max_stage {
+		// Depth 2+ in parallel pairs until resolved or exhausted
+		let mut d = 2usize;
+		while !ctx.all_resolved() && !ctx.attacker_is_exhausted() && d <= CONFIG.depth {
+			if d < CONFIG.depth {
 				#[cfg(feature = "cli")]
 				rayon::scope(|s| {
-					s.spawn(|_| verify_active_stages(ctx, stage, km, principal_states));
-					s.spawn(|_| verify_active_stages(ctx, stage + 1, km, principal_states));
+					s.spawn(|_| verify_active_at_depth(ctx, d, km, principal_states));
+					s.spawn(|_| verify_active_at_depth(ctx, d + 1, km, principal_states));
 				});
 				#[cfg(not(feature = "cli"))]
 				{
-					verify_active_stages(ctx, stage, km, principal_states);
-					verify_active_stages(ctx, stage + 1, km, principal_states);
+					verify_active_at_depth(ctx, d, km, principal_states);
+					verify_active_at_depth(ctx, d + 1, km, principal_states);
 				}
-				stage += 2;
+				d += 2;
 			} else {
-				verify_active_stages(ctx, stage, km, principal_states);
-				stage += 1;
+				verify_active_at_depth(ctx, d, km, principal_states);
+				d += 1;
 			}
 		}
 	}
 	Ok(())
-}
-
-/// Inject an attacker-controlled replacement value into a PrincipalState slot,
-/// marking it as attacker-created and mutated.
-fn inject_attacker_value(sv: &mut SlotValues, attacker_id: PrincipalId, replacement: &Value) {
-	sv.creator = attacker_id;
-	sv.sender = attacker_id;
-	sv.mutated = true;
-	sv.assigned = replacement.clone();
-	sv.before_rewrite = replacement.clone();
 }
 
 /// After a worthwhile mutation has been analyzed, attempt guard bypass if
@@ -260,7 +196,7 @@ fn classify_rewrite_failures(
 	let mut truncation_failed_idx: Option<usize> = None;
 
 	for &(ref prim, idx) in failures {
-		if !prim.instance_check || ps.values[idx].creator != ps.id {
+		if !prim.instance_check || ps.values[idx].provenance.creator != ps.id {
 			continue;
 		}
 		if let Some(key) = extract_bypass_key(prim) {
@@ -283,115 +219,14 @@ fn classify_rewrite_failures(
 	(failed_guards, truncation_index, truncation_failed_idx)
 }
 
-/// Targeted MitM public-key replacement attack.  For each principal, try
-/// replacing each equation-valued wire input (received public key) with G^nil
-/// — the attacker's own public key — one at a time, then check if the
-/// resulting guard failures can be bypassed (because the attacker knows the
-/// private key `nil`).
-///
-/// We also try replacing ALL equation wire inputs simultaneously, because some
-/// protocols derive keys from multiple DH exchanges and the attacker may need
-/// to control all of them.
-///
-/// This is much faster than brute-force mutation because it directly tests the
-/// canonical MitM strategy without relying on G^nil being in the mutation map.
-fn verify_active_equation_bypass(
+fn verify_active_at_depth(
 	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-) {
-	let g_nil = value_g_nil();
-	let attacker_id = ATTACKER_ID;
-
-	for ps_base in principal_states {
-		if ctx.all_resolved() {
-			return;
-		}
-
-		let attacker = ctx.attacker_snapshot();
-
-		// Collect indices of equation-valued constants received from other
-		// principals (these are public keys the attacker can intercept).
-		// Skip guarded constants (sent in [brackets]) — the attacker can
-		// read them but cannot tamper with them.
-		// Skip constants not communicated in the current phase — the attacker
-		// can only manipulate values in the phase they were communicated.
-		let eq_indices: Vec<usize> = ps_base
-			.meta
-			.iter()
-			.zip(ps_base.values.iter())
-			.enumerate()
-			.filter_map(|(i, (sm, sv))| {
-				if sv.creator == ps_base.id
-					|| sm.guard || !sm.phase.contains(&attacker.current_phase)
-				{
-					return None;
-				}
-				if let Value::Equation(_) = &sv.assigned {
-					Some(i)
-				} else {
-					None
-				}
-			})
-			.collect();
-		if eq_indices.is_empty() {
-			continue;
-		}
-
-		// Try replacing each equation wire input individually.
-		for &target_idx in &eq_indices {
-			if ctx.all_resolved() {
-				return;
-			}
-			let mut ps = ps_base.clone_for_stage(true);
-			inject_attacker_value(&mut ps.values[target_idx], attacker_id, &g_nil);
-			verify_active_try_equation_bypass_on_state(ctx, km, &mut ps, &attacker);
-		}
-
-		// If there are multiple equation wire inputs, also try replacing
-		// all of them simultaneously (full MitM on all public keys).
-		if eq_indices.len() > 1 && !ctx.all_resolved() {
-			let mut ps = ps_base.clone_for_stage(true);
-			for &i in &eq_indices {
-				inject_attacker_value(&mut ps.values[i], attacker_id, &g_nil);
-			}
-			verify_active_try_equation_bypass_on_state(ctx, km, &mut ps, &attacker);
-		}
-	}
-}
-
-/// Helper: resolve, rewrite, collect failed guards, and attempt bypass on
-/// a mutated principal state.
-fn verify_active_try_equation_bypass_on_state(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &mut PrincipalState,
-	attacker: &AttackerState,
-) {
-	// Save pre-resolution state: constants still have symbolic references
-	// that will properly propagate injected values during re-resolution
-	// inside build_bypass_state.  After resolution, constants are inlined
-	// and injected values wouldn't propagate to downstream computations.
-	let ps_pre = ps.clone();
-
-	let _ = ps.resolve_all_values(attacker);
-	let failures = ps.perform_all_rewrites();
-	let (failed_guards, _, _) = classify_rewrite_failures(ps, &failures);
-
-	if failed_guards.is_empty() {
-		return;
-	}
-	try_guard_bypass(ctx, km, &ps_pre, &failed_guards);
-}
-
-fn verify_active_stages(
-	ctx: &VerifyContext,
-	stage: i32,
+	depth: usize,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) {
 	if crate::tui::tui_enabled() {
-		crate::tui::tui_stage_update(stage);
+		crate::tui::tui_stage_update(depth as i32);
 	}
 	let worthwhile_mutation_count = AtomicU32::new(0);
 	let old_known = ctx.attacker_known_count();
@@ -402,7 +237,7 @@ fn verify_active_stages(
 	rayon::scope(|s| {
 		for ps_base in principal_states {
 			s.spawn(|s_inner| {
-				let mm = match MutationMap::new(ctx, km, ps_base, &attacker, stage) {
+				let mm = match MutationMap::new(ctx, km, ps_base, &attacker, depth) {
 					Ok(mm) => mm,
 					Err(_) => return,
 				};
@@ -413,7 +248,7 @@ fn verify_active_stages(
 					ps_base,
 					&attacker,
 					mm,
-					stage,
+					depth,
 					&worthwhile_mutation_count,
 				);
 			});
@@ -421,7 +256,7 @@ fn verify_active_stages(
 	});
 	#[cfg(not(feature = "cli"))]
 	for ps_base in principal_states {
-		let mm = match MutationMap::new(ctx, km, ps_base, &attacker, stage) {
+		let mm = match MutationMap::new(ctx, km, ps_base, &attacker, depth) {
 			Ok(mm) => mm,
 			Err(_) => continue,
 		};
@@ -431,15 +266,14 @@ fn verify_active_stages(
 			ps_base,
 			&attacker,
 			mm,
-			stage,
+			depth,
 			&worthwhile_mutation_count,
 		);
 	}
 
 	let worthwhile = worthwhile_mutation_count.load(Ordering::SeqCst);
 	let stagnant = worthwhile == 0 || old_known == ctx.attacker_known_count();
-	let exhausted = stage > BUDGET.exhaustion_threshold && (stagnant || stage > BUDGET.max_stage);
-	if exhausted {
+	if stagnant {
 		ctx.attacker_set_exhausted();
 	}
 }
@@ -453,7 +287,7 @@ fn verify_active_scan_weighted<'s>(
 	ps_base: &'s PrincipalState,
 	attacker: &'s AttackerState,
 	mm: MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &'s AtomicU32,
 ) {
 	let n = mm.constants.len();
@@ -461,8 +295,8 @@ fn verify_active_scan_weighted<'s>(
 		return;
 	}
 	let budget_used = AtomicU32::new(0);
-	let budget = BUDGET.max_scan_budget;
-	let max_weight = BUDGET.max_subset_weight.min(n);
+	let budget = CONFIG.max_scan_budget;
+	let max_weight = depth.min(n);
 	if crate::tui::tui_enabled() {
 		crate::tui::tui_scan_update(&ps_base.name, 0, max_weight, 0, budget);
 	}
@@ -481,7 +315,7 @@ fn verify_active_scan_weighted<'s>(
 			ps_base,
 			attacker,
 			&mm,
-			stage,
+			depth,
 			worthwhile_mutation_count,
 			n,
 			weight,
@@ -494,7 +328,7 @@ fn verify_active_scan_weighted<'s>(
 		&& budget_used.load(Ordering::SeqCst) < budget
 		&& mutation_product(
 			mm.mutations.iter().map(|m| m.len()),
-			BUDGET.max_full_product,
+			CONFIG.max_full_product,
 		)
 		.is_some()
 	{
@@ -506,7 +340,7 @@ fn verify_active_scan_weighted<'s>(
 			ps_base,
 			attacker,
 			next_map,
-			stage,
+			depth,
 			worthwhile_mutation_count,
 		);
 	}
@@ -521,7 +355,7 @@ fn verify_active_scan_at_weight<'s>(
 	ps_base: &'s PrincipalState,
 	attacker: &'s AttackerState,
 	mm: &MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &'s AtomicU32,
 	n: usize,
 	weight: usize,
@@ -542,14 +376,14 @@ fn verify_active_scan_at_weight<'s>(
 		let sub_indices = indices.clone();
 
 		if weight == 1 {
-			let sub_map = mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
+			let sub_map = mm.subset_capped(&sub_indices, CONFIG.max_weight1_mutations);
 			let cost = sub_map.mutations[0].len() as u32;
 			let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < cost {
 				crate::tui::tui_scan_update(
 					&ps_base.name,
 					weight,
-					n.min(BUDGET.max_subset_weight),
+					n.min(depth),
 					bu + cost,
 					budget,
 				);
@@ -562,13 +396,13 @@ fn verify_active_scan_at_weight<'s>(
 				ps_base,
 				attacker,
 				next_map,
-				stage,
+				depth,
 				worthwhile_mutation_count,
 			);
 			scanned += 1;
 		} else if let Some(product) = mutation_product(
 			indices.iter().map(|&i| mm.mutations[i].len()),
-			BUDGET.max_mutations_per_subset,
+			CONFIG.max_mutations_per_subset,
 		) {
 			let sub_map = mm.subset(&sub_indices);
 			let bu = budget_used.fetch_add(product as u32, Ordering::SeqCst);
@@ -576,7 +410,7 @@ fn verify_active_scan_at_weight<'s>(
 				crate::tui::tui_scan_update(
 					&ps_base.name,
 					weight,
-					n.min(BUDGET.max_subset_weight),
+					n.min(depth),
 					bu + product as u32,
 					budget,
 				);
@@ -589,13 +423,13 @@ fn verify_active_scan_at_weight<'s>(
 				ps_base,
 				attacker,
 				next_map,
-				stage,
+				depth,
 				worthwhile_mutation_count,
 			);
 			scanned += 1;
 		}
 
-		if scanned >= BUDGET.max_subsets_per_weight {
+		if scanned >= CONFIG.max_subsets_per_weight {
 			return;
 		}
 
@@ -626,7 +460,7 @@ fn verify_active_scan<'s>(
 	ps_base: &'s PrincipalState,
 	attacker: &'s AttackerState,
 	mm: MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &'s AtomicU32,
 ) {
 	let mut current_map = mm;
@@ -670,11 +504,15 @@ fn verify_active_scan<'s>(
 					crate::tui::tui_mutation_detail(&desc);
 				}
 				if !ctx.all_resolved() {
-					// Pass 1: analyze the (possibly truncated) state.
-					let _ = verify_analysis(ctx, km, &result.state, stage);
+					// Phase 2: Knowledge closure on the (possibly truncated) state.
+					let _ = verify_analysis(ctx, km, &result.state, depth as i32);
 				}
-				// Pass 2: if truncation occurred and the attacker learned
-				// enough to bypass the guards, attempt guard bypass.
+				if !ctx.all_resolved() {
+					// Phase 3: Query evaluation.
+					let _ = verify_resolve_queries(ctx, km, &result.state);
+				}
+				// If truncation occurred and the attacker learned enough
+				// to bypass the guards, attempt guard bypass.
 				process_mutation_bypass(ctx, km, &result);
 			}
 		});
@@ -696,7 +534,7 @@ fn verify_active_scan_weighted_seq(
 	ps_base: &PrincipalState,
 	attacker: &AttackerState,
 	mm: MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &AtomicU32,
 ) {
 	let n = mm.constants.len();
@@ -704,8 +542,8 @@ fn verify_active_scan_weighted_seq(
 		return;
 	}
 	let budget_used = AtomicU32::new(0);
-	let budget = BUDGET.max_scan_budget;
-	let max_weight = BUDGET.max_subset_weight.min(n);
+	let budget = CONFIG.max_scan_budget;
+	let max_weight = depth.min(n);
 
 	for weight in 1..=max_weight {
 		if ctx.all_resolved() || budget_used.load(Ordering::SeqCst) >= budget {
@@ -717,7 +555,7 @@ fn verify_active_scan_weighted_seq(
 			ps_base,
 			attacker,
 			&mm,
-			stage,
+			depth,
 			worthwhile_mutation_count,
 			n,
 			weight,
@@ -730,7 +568,7 @@ fn verify_active_scan_weighted_seq(
 		&& budget_used.load(Ordering::SeqCst) < budget
 		&& mutation_product(
 			mm.mutations.iter().map(|m| m.len()),
-			BUDGET.max_full_product,
+			CONFIG.max_full_product,
 		)
 		.is_some()
 	{
@@ -740,7 +578,7 @@ fn verify_active_scan_weighted_seq(
 			ps_base,
 			attacker,
 			mm.next(),
-			stage,
+			depth,
 			worthwhile_mutation_count,
 		);
 	}
@@ -754,7 +592,7 @@ fn verify_active_scan_at_weight_seq(
 	ps_base: &PrincipalState,
 	attacker: &AttackerState,
 	mm: &MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &AtomicU32,
 	n: usize,
 	weight: usize,
@@ -769,7 +607,7 @@ fn verify_active_scan_at_weight_seq(
 		}
 		let sub_indices = indices.clone();
 		if weight == 1 {
-			let sub_map = mm.subset_capped(&sub_indices, BUDGET.max_weight1_mutations);
+			let sub_map = mm.subset_capped(&sub_indices, CONFIG.max_weight1_mutations);
 			let cost = sub_map.mutations[0].len() as u32;
 			budget_used.fetch_add(cost, Ordering::SeqCst);
 			verify_active_scan_seq(
@@ -778,13 +616,13 @@ fn verify_active_scan_at_weight_seq(
 				ps_base,
 				attacker,
 				sub_map.next(),
-				stage,
+				depth,
 				worthwhile_mutation_count,
 			);
 			scanned += 1;
 		} else if let Some(product) = mutation_product(
 			indices.iter().map(|&i| mm.mutations[i].len()),
-			BUDGET.max_mutations_per_subset,
+			CONFIG.max_mutations_per_subset,
 		) {
 			let sub_map = mm.subset(&sub_indices);
 			budget_used.fetch_add(product as u32, Ordering::SeqCst);
@@ -794,12 +632,12 @@ fn verify_active_scan_at_weight_seq(
 				ps_base,
 				attacker,
 				sub_map.next(),
-				stage,
+				depth,
 				worthwhile_mutation_count,
 			);
 			scanned += 1;
 		}
-		if scanned >= BUDGET.max_subsets_per_weight {
+		if scanned >= CONFIG.max_subsets_per_weight {
 			return;
 		}
 		let mut advanced = false;
@@ -827,7 +665,7 @@ fn verify_active_scan_seq(
 	ps_base: &PrincipalState,
 	attacker: &AttackerState,
 	mm: MutationMap,
-	stage: i32,
+	depth: usize,
 	worthwhile_mutation_count: &AtomicU32,
 ) {
 	let mut current_map = mm;
@@ -855,7 +693,10 @@ fn verify_active_scan_seq(
 		if result.is_worthwhile {
 			worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
 			if !ctx.all_resolved() {
-				let _ = verify_analysis(ctx, km, &result.state, stage);
+				let _ = verify_analysis(ctx, km, &result.state, depth as i32);
+			}
+			if !ctx.all_resolved() {
+				let _ = verify_resolve_queries(ctx, km, &result.state);
 			}
 			process_mutation_bypass(ctx, km, &result);
 		}
@@ -938,11 +779,12 @@ fn verify_active_mutate_principal_state(
 
 		let worthwhile = !combo_value.equivalent(&trace_resolved, true);
 
-		ps.values[slot_idx].creator = attacker_id;
-		ps.values[slot_idx].sender = attacker_id;
-		ps.values[slot_idx].mutated = true;
-		ps.values[slot_idx].before_rewrite = combo_value.clone();
-		ps.values[slot_idx].assigned = combo_value;
+		ps.values[slot_idx].original = ps.values[slot_idx].value.clone();
+		ps.values[slot_idx].provenance.creator = attacker_id;
+		ps.values[slot_idx].provenance.sender = attacker_id;
+		ps.values[slot_idx].provenance.attacker_tainted = true;
+		ps.values[slot_idx].pre_rewrite = combo_value.clone();
+		ps.values[slot_idx].value = combo_value;
 
 		if slot_idx < earliest_mutation {
 			earliest_mutation = slot_idx;
@@ -1046,8 +888,8 @@ fn verify_bypass_decompose(ctx: &VerifyContext, km: &ProtocolTrace, ps: &Princip
 			if sm.wire.is_empty() {
 				return None;
 			}
-			if let Value::Primitive(_) = &sv.assigned {
-				Some((sv.assigned.clone(), i))
+			if let Value::Primitive(_) = &sv.value {
+				Some((sv.value.clone(), i))
 			} else {
 				None
 			}
@@ -1140,7 +982,7 @@ fn build_bypass_state(
 
 		needs_final_resolve = false;
 		for &(ref prim, idx) in &failures {
-			if !prim.instance_check || ps.values[idx].creator != ps.id {
+			if !prim.instance_check || ps.values[idx].provenance.creator != ps.id {
 				continue;
 			}
 			if let Some(key) = extract_bypass_key(prim) {

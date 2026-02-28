@@ -411,13 +411,15 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 				phase: slot.phases.clone(),
 			});
 			values_vec.push(SlotValues {
-				assigned: slot.initial_value.clone(),
-				before_rewrite: slot.initial_value.clone(),
-				before_mutate: slot.initial_value.clone(),
-				mutated: false,
+				value: slot.initial_value.clone(),
+				pre_rewrite: slot.initial_value.clone(),
+				original: slot.initial_value.clone(),
 				rewritten: false,
-				creator: slot.creator,
-				sender,
+				provenance: Provenance {
+					creator: slot.creator,
+					sender,
+					attacker_tainted: false,
+				},
 			});
 		}
 		states.push(PrincipalState {
@@ -468,19 +470,25 @@ impl PrincipalState {
 			.values
 			.iter()
 			.map(|sv| {
-				let (assigned, before_rewrite) = if purify {
-					(&sv.before_mutate, &sv.before_mutate)
+				let (value, pre_rewrite) = if purify {
+					(&sv.original, &sv.original)
 				} else {
-					(&sv.assigned, &sv.before_rewrite)
+					(&sv.value, &sv.pre_rewrite)
 				};
 				SlotValues {
-					assigned: assigned.clone(),
-					before_rewrite: before_rewrite.clone(),
-					before_mutate: sv.before_mutate.clone(),
-					mutated: if purify { false } else { sv.mutated },
+					value: value.clone(),
+					pre_rewrite: pre_rewrite.clone(),
+					original: sv.original.clone(),
 					rewritten: false,
-					creator: sv.creator,
-					sender: sv.sender,
+					provenance: Provenance {
+						creator: sv.provenance.creator,
+						sender: sv.provenance.sender,
+						attacker_tainted: if purify {
+							false
+						} else {
+							sv.provenance.attacker_tainted
+						},
+					},
 				}
 			})
 			.collect();

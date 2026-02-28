@@ -68,15 +68,18 @@ pub fn verify_resolve_queries(
 // Standard verification pipeline
 // ---------------------------------------------------------------------------
 //
-// For each principal, the pipeline executes seven stages in order:
+// For each principal, the pipeline executes three phases:
 //
-//   1. Resolution      – resolve symbolic constant references to concrete values
-//   2. Mutation record  – compute which slots differ from the protocol trace
-//   3. Skeleton inject  – add structural templates to attacker knowledge
-//   4. Rewriting        – apply cryptographic rewrite rules (e.g. DEC(k,ENC(k,m))→m)
-//   5. Sanity checks    – abort if checked primitives failed; validate equation generators
-//   6. Deduction        – run the fixed-point deduction loop (see deduction.rs / verifyanalysis.rs)
-//   7. Query resolution – check whether any pending queries are now resolved
+//   Phase 1 — Trace generation:
+//     Resolve symbolic references, record mutations, inject skeletons,
+//     apply cryptographic rewrites, and run sanity checks.
+//
+//   Phase 2 — Knowledge closure:
+//     Compute the attacker's full knowledge as a monotone fixed-point
+//     (see deduction.rs). No query checks, no early exits.
+//
+//   Phase 3 — Query evaluation:
+//     Check all pending queries against the final attacker knowledge.
 //
 
 pub fn verify_standard_run(
@@ -87,32 +90,49 @@ pub fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
-		// 1. Resolution
-		let mut ps_resolved = ps.clone_for_stage(false);
-		ps_resolved.resolve_all_values(&attacker)?;
+		// Phase 1: Trace generation
+		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
-		// 2. Mutation record
-		let record = compute_slot_diffs(&ps_resolved, km);
-
-		// 3. Skeleton injection
-		inject_skeletons_for_state(ctx, &ps_resolved, &record, &attacker);
-
-		// 4. Rewriting
-		let failures = ps_resolved.perform_all_rewrites();
-
-		// 5. Sanity checks
-		sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
-		for sv in &ps_resolved.values {
-			sanity_check_equation_generators(&sv.assigned)?;
-		}
-
-		// 6. Deduction
+		// Phase 2: Knowledge closure (monotone fixed-point)
 		crate::verifyanalysis::verify_analysis(ctx, km, &ps_resolved, stage)?;
 
-		// 7. Query resolution
+		// Phase 3: Query evaluation
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
 	}
 	Ok(())
+}
+
+/// Phase 1: Generate a protocol trace for a single principal.
+///
+/// Performs resolution, mutation recording, skeleton injection,
+/// cryptographic rewriting, and sanity checks. Returns the fully
+/// resolved principal state ready for knowledge closure.
+pub fn generate_trace(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> VResult<PrincipalState> {
+	// 1. Resolution
+	let mut ps_resolved = ps.clone_for_stage(false);
+	ps_resolved.resolve_all_values(attacker)?;
+
+	// 2. Mutation record
+	let record = compute_slot_diffs(&ps_resolved, km);
+
+	// 3. Skeleton injection
+	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
+
+	// 4. Rewriting
+	let failures = ps_resolved.perform_all_rewrites();
+
+	// 5. Sanity checks
+	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
+	for sv in &ps_resolved.values {
+		sanity_check_equation_generators(&sv.value)?;
+	}
+
+	Ok(ps_resolved)
 }
 
 /// Inject skeleton templates for all assigned primitives into attacker knowledge.
@@ -123,7 +143,7 @@ fn inject_skeletons_for_state(
 	attacker: &AttackerState,
 ) {
 	for sv in &ps.values {
-		if let Value::Primitive(p) = &sv.assigned {
+		if let Value::Primitive(p) = &sv.value {
 			inject_missing_skeletons(ctx, p, record, attacker);
 		}
 	}

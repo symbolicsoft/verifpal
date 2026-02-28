@@ -35,7 +35,6 @@ use crate::pretty::pretty_values;
 use crate::primitive::primitive_core_reveals_args;
 use crate::types::*;
 use crate::value::compute_slot_diffs;
-use crate::verify::verify_resolve_queries;
 
 // ---------------------------------------------------------------------------
 // Rule abstraction
@@ -99,6 +98,13 @@ static DEDUCTION_RULES: &[RuleGroup] = &[
 /// rule can derive new knowledge — i.e., the knowledge set is closed
 /// under all rules.
 ///
+/// This function is a pure fixed-point computation: it does not check
+/// queries or exit early when all queries are resolved. Query evaluation
+/// happens in a separate phase after the closure completes. This makes
+/// the correctness argument trivial by Knaster-Tarski: the iteration
+/// converges to the least fixed point, and every value in the result is
+/// genuinely derivable.
+///
 /// Convergence is guaranteed because:
 /// - The attacker's knowledge set is monotonically increasing
 /// - The set of derivable values is finite (bounded by the protocol model)
@@ -112,11 +118,6 @@ pub fn compute_knowledge_closure(
 	let record = compute_slot_diffs(ps, km);
 
 	loop {
-		if ctx.all_resolved() {
-			return Ok(());
-		}
-		verify_resolve_queries(ctx, km, ps)?;
-
 		let attacker = ctx.attacker_snapshot();
 
 		if !try_deduction_step(ctx, &attacker, ps, &record) {
@@ -151,7 +152,7 @@ fn try_deduction_step(
 			RuleDomain::PrincipalAssigned => {
 				for sv in &ps.values {
 					for rule in group.rules {
-						if rule(ctx, &sv.assigned, ps, attacker, record) {
+						if rule(ctx, &sv.value, ps, attacker, record) {
 							return true;
 						}
 					}
@@ -322,11 +323,11 @@ fn rule_equivalize(
 	};
 	let mut found = false;
 	for sv in &ps.values {
-		if resolved.equivalent(&sv.assigned, true) && ctx.attacker_put(&sv.assigned, record) {
+		if resolved.equivalent(&sv.value, true) && ctx.attacker_put(&sv.value, record) {
 			info_message(
 				&format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
-					info_output_text(&sv.assigned),
+					info_output_text(&sv.value),
 					value,
 				),
 				InfoLevel::Deduction,

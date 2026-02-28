@@ -397,7 +397,7 @@ pub fn info_query_mutated_values(
 	let mut relevant = false;
 
 	for diff in diffs {
-		let is_target = target_value.equivalent(&diff.assigned, false);
+		let is_target = target_value.equivalent(&diff.value, false);
 		let attacker_knows = val_attacker_state.knows(target_value).is_some();
 		let (diff_info, diff_relevant) =
 			info_query_mutated_value(trace, diff, is_target, attacker_knows);
@@ -408,8 +408,8 @@ pub fn info_query_mutated_values(
 		mutated_info.push_str(&diff_info);
 		if is_target && attacker_knows {
 			// target obtained
-		} else if diff.mutated && find_equivalent(&diff.assigned, &mutated).is_none() {
-			mutated.push(diff.assigned.clone());
+		} else if diff.tainted && find_equivalent(&diff.value, &mutated).is_none() {
+			mutated.push(diff.value.clone());
 		}
 	}
 	if !relevant {
@@ -447,10 +447,10 @@ fn info_query_mutated_value(
 	attacker_knows: bool,
 ) -> (String, bool) {
 	let constant_str = diff.constant.to_string();
-	let assigned_str = diff.assigned.to_string();
+	let assigned_str = diff.value.to_string();
 	let mut relevant = false;
 	let suffix;
-	if is_target_value && attacker_knows && !diff.mutated {
+	if is_target_value && attacker_knows && !diff.tainted {
 		relevant = true;
 		#[cfg(feature = "cli")]
 		if color_output_support() {
@@ -466,7 +466,7 @@ fn info_query_mutated_value(
 		{
 			suffix = " <- obtained by Attacker".to_string();
 		}
-	} else if diff.mutated {
+	} else if diff.tainted {
 		relevant = true;
 		#[cfg(feature = "cli")]
 		if color_output_support() {

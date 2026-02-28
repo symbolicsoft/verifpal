@@ -24,7 +24,7 @@ pub fn perform_primitive_rewrite(
 	};
 	if let Some(rebuild) = can_rebuild(rewrite_p) {
 		if let Some(idx) = slot_index {
-			ps.values[idx].set_assigned(rebuild.clone());
+			ps.values[idx].set_value(rebuild.clone());
 		}
 		r.value = rebuild;
 		match r.value {
@@ -49,7 +49,7 @@ pub fn perform_primitive_rewrite(
 	};
 	if r_index >= rewritten_values.len() {
 		if let Some(idx) = slot_index {
-			ps.values[idx].set_assigned(value_nil());
+			ps.values[idx].set_value(value_nil());
 		}
 		r.rewritten = r.rewritten || rewritten_root;
 		r.value = value_nil();
@@ -58,7 +58,7 @@ pub fn perform_primitive_rewrite(
 	if let Some(idx) = slot_index {
 		if r.rewritten || rewritten_root {
 			ps.values[idx].rewritten = true;
-			ps.values[idx].set_assigned(rewritten_values[r_index].clone());
+			ps.values[idx].set_value(rewritten_values[r_index].clone());
 		}
 	}
 	r.rewritten = r.rewritten || rewritten_root;
@@ -165,7 +165,7 @@ pub fn perform_equation_rewrite(
 	if let Some(idx) = slot_index {
 		if rewritten {
 			ps.values[idx].rewritten = true;
-			ps.values[idx].set_assigned(value.clone());
+			ps.values[idx].set_value(value.clone());
 		}
 	}
 	RewriteResult {

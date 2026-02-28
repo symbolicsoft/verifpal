@@ -365,51 +365,63 @@ pub struct SlotMeta {
 	pub phase: Vec<i32>,
 }
 
+/// Tracks who created a value, how it arrived at the current principal,
+/// and whether the attacker may have tampered with it.
+#[derive(Clone, Debug)]
+pub struct Provenance {
+	/// Principal who originally computed/generated this value.
+	pub creator: PrincipalId,
+	/// Principal who sent this value to the current principal.
+	/// Equals creator if the value was never communicated.
+	/// Equals ATTACKER_ID if the attacker injected a replacement.
+	pub sender: PrincipalId,
+	/// Whether this value was replaced by the attacker.
+	pub attacker_tainted: bool,
+}
+
 /// Mutable per-constant values (deep-cloned for each active attacker stage).
 ///
 /// The three value fields track different points in the value's lifecycle:
 ///
-/// - **`before_mutate`**: the value as originally computed by the protocol,
+/// - **`original`**: the value as originally computed by the protocol,
 ///   before the active attacker tampered with it.  This is what the principal
 ///   "thinks" the value is — used during resolution for values the principal
-///   created itself or hasn't received over a wire (see `should_use_before_mutate`).
+///   created itself or hasn't received over a wire.
 ///
-/// - **`before_rewrite`**: the value after attacker mutation but before
+/// - **`pre_rewrite`**: the value after attacker mutation but before
 ///   cryptographic rewriting (e.g. `AEAD_DEC(k, AEAD_ENC(k, m, ad), ad)` is
 ///   not yet rewritten to `m`).  Used for forensic tracing and narrative output.
 ///
-/// - **`assigned`**: the fully resolved current value after mutation and
+/// - **`value`**: the fully resolved current value after mutation and
 ///   rewriting.  This is what the verification engine uses for analysis.
 ///
-/// The distinction between `before_mutate` and `assigned` is critical for
+/// The distinction between `original` and `value` is critical for
 /// correctness: without it, principals would "see" the attacker's mutations
 /// in their own locally-computed values, causing false positives in
 /// authentication queries.
 #[derive(Clone, Debug)]
 pub struct SlotValues {
-	pub assigned: Value,
-	pub before_rewrite: Value,
-	pub before_mutate: Value,
-	pub mutated: bool,
+	pub value: Value,
+	pub pre_rewrite: Value,
+	pub original: Value,
 	pub rewritten: bool,
-	pub creator: PrincipalId,
-	pub sender: PrincipalId,
+	pub provenance: Provenance,
 }
 
 impl SlotValues {
-	/// Set `assigned` and, if the slot has not been mutated, also `before_mutate`.
-	pub fn set_assigned(&mut self, v: Value) {
-		if !self.mutated {
-			self.before_mutate = v.clone();
+	/// Set `value` and, if the slot has not been tainted, also `original`.
+	pub fn set_value(&mut self, v: Value) {
+		if !self.provenance.attacker_tainted {
+			self.original = v.clone();
 		}
-		self.assigned = v;
+		self.value = v;
 	}
 
-	/// Unconditionally override all value fields (assigned, before_rewrite, before_mutate).
+	/// Unconditionally override all value fields (value, pre_rewrite, original).
 	pub fn override_all(&mut self, v: Value) {
-		self.before_mutate = v.clone();
-		self.before_rewrite = v.clone();
-		self.assigned = v;
+		self.original = v.clone();
+		self.pre_rewrite = v.clone();
+		self.value = v;
 	}
 }
 
@@ -424,25 +436,25 @@ pub struct PrincipalState {
 }
 
 impl PrincipalState {
-	/// Whether slot `i` should resolve to `before_mutate` rather than `assigned`.
+	/// Whether slot `i` should resolve to `original` rather than `value`.
 	/// Returns true for values that the principal perceives as original:
-	/// - created by this principal itself
-	/// - not known to this principal
+	/// - not tainted by the attacker, OR
+	/// - created by this principal itself, OR
+	/// - not known to this principal, OR
 	/// - not received over a wire by this principal
-	/// - not actually mutated by the attacker
-	pub fn should_use_before_mutate(&self, i: usize) -> bool {
-		self.values[i].creator == self.id
+	pub fn should_use_original(&self, i: usize) -> bool {
+		!self.values[i].provenance.attacker_tainted
+			|| self.values[i].provenance.creator == self.id
 			|| !self.meta[i].known
 			|| !self.meta[i].wire.contains(&self.id)
-			|| !self.values[i].mutated
 	}
 
 	/// The value that this principal perceives for slot `i`.
 	pub fn effective_value(&self, i: usize) -> &Value {
-		if self.should_use_before_mutate(i) {
-			&self.values[i].before_mutate
+		if self.should_use_original(i) {
+			&self.values[i].original
 		} else {
-			&self.values[i].assigned
+			&self.values[i].value
 		}
 	}
 }
@@ -453,8 +465,8 @@ impl PrincipalState {
 pub struct SlotDiff {
 	pub index: usize,
 	pub constant: Constant,
-	pub assigned: Value,
-	pub mutated: bool,
+	pub value: Value,
+	pub tainted: bool,
 }
 
 /// Compact forensic record stored alongside each attacker-known value.

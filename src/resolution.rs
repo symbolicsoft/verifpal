@@ -182,7 +182,7 @@ pub fn resolve_ps_values(
 /// Two cases:
 ///
 /// 1. **Root constant** (`slot_idx == root_index`): use `before_mutate` if
-///    already forced, or if `should_use_before_mutate()` says so (the
+///    already forced, or if `should_use_original()` says so (the
 ///    principal created it, doesn't know it, didn't receive it on a wire,
 ///    or it wasn't mutated).
 ///
@@ -197,28 +197,28 @@ fn compute_visibility(
 	root_index: usize,
 	root_value: &Value,
 	ps: &PrincipalState,
-	existing_fbm: bool,
+	existing_use_original: bool,
 ) -> bool {
 	if slot_idx == root_index {
 		// Case 1: root constant.
-		if existing_fbm {
+		if existing_use_original {
 			return true;
 		}
-		return ps.should_use_before_mutate(slot_idx);
+		return ps.should_use_original(slot_idx);
 	}
 
 	// Case 2: nested constant.
-	let root_from_other =
-		matches!(root_value, Value::Primitive(_)) && ps.values[root_index].creator != ps.id;
+	let root_from_other = matches!(root_value, Value::Primitive(_))
+		&& ps.values[root_index].provenance.creator != ps.id;
 
-	let forced = existing_fbm || root_from_other;
+	let forced = existing_use_original || root_from_other;
 	if forced {
-		// Force before_mutate UNLESS this constant is mutable by the root's creator.
+		// Force original UNLESS this constant is mutable by the root's creator.
 		!ps.meta[slot_idx]
 			.mutatable_to
-			.contains(&ps.values[root_index].creator)
+			.contains(&ps.values[root_index].provenance.creator)
 	} else {
-		ps.should_use_before_mutate(slot_idx)
+		ps.should_use_original(slot_idx)
 	}
 }
 
@@ -250,16 +250,16 @@ fn resolve_ps_values_depth(
 
 		if slot_idx == root_idx {
 			resolved = if fbm {
-				ps.values[slot_idx].before_mutate.clone()
+				ps.values[slot_idx].original.clone()
 			} else {
 				let (val, _) = ps.resolve_constant(c, true);
 				val
 			};
 		} else {
 			resolved = if fbm {
-				ps.values[slot_idx].before_mutate.clone()
+				ps.values[slot_idx].original.clone()
 			} else {
-				ps.values[slot_idx].assigned.clone()
+				ps.values[slot_idx].value.clone()
 			};
 			root_idx = slot_idx;
 			root_val = resolved.clone();
@@ -287,7 +287,7 @@ fn resolve_ps_primitive_depth(
 	depth: usize,
 ) -> VResult<Value> {
 	let prim = value.try_as_primitive()?;
-	let fbm = if ps.values[root_index].creator == ps.id {
+	let fbm = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
 		force_before_mutate
@@ -321,7 +321,7 @@ fn resolve_ps_equation_depth(
 	let eq = value.try_as_equation()?;
 	let mut result_eq = Equation { values: Vec::new() };
 	let mut elements: Vec<Value> = eq.values.clone();
-	let fbm = if ps.values[root_index].creator == ps.id {
+	let fbm = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
 		force_before_mutate
@@ -330,7 +330,7 @@ fn resolve_ps_equation_depth(
 		if let Value::Constant(c) = &*item {
 			let (resolved, slot_idx) = ps.resolve_constant(c, true);
 			*item = if fbm {
-				slot_idx.map_or(resolved, |idx| ps.values[idx].before_mutate.clone())
+				slot_idx.map_or(resolved, |idx| ps.values[idx].original.clone())
 			} else {
 				resolved
 			};
@@ -426,7 +426,7 @@ pub fn value_constant_contains_fresh_values(c: &Constant, ps: &PrincipalState) -
 		.index_of(c)
 		.ok_or_else(|| VerifpalError::Resolution("invalid value".into()))?;
 	let mut constants = Vec::new();
-	ps.values[idx].assigned.collect_constants(&mut constants);
+	ps.values[idx].value.collect_constants(&mut constants);
 	Ok(constants.iter().any(|inner| {
 		ps.index_of(inner)
 			.is_some_and(|i| ps.meta[i].constant.fresh)

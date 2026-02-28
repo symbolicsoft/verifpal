@@ -61,7 +61,7 @@ fn query_confidentiality(
 		Some(idx) => idx,
 		None => return result,
 	};
-	let resolved_value = &ps.values[slot_idx].assigned;
+	let resolved_value = &ps.values[slot_idx].value;
 	let attacker_idx = match attacker.knows(resolved_value) {
 		Some(idx) => idx,
 		None => return result,
@@ -105,8 +105,8 @@ fn query_authentication(
 			continue;
 		}
 		result.resolved = true;
-		let assigned = &ps.values[index].assigned;
-		let before = &ps.values[index].before_rewrite;
+		let assigned = &ps.values[index].value;
+		let before = &ps.values[index].pre_rewrite;
 		let diffs = compute_slot_diffs(ps, km);
 		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, assigned, 0);
 		result = query_precondition(result, ps);
@@ -145,7 +145,7 @@ fn query_find_constant_usage_indices(
 		}
 		let (_, slot_idx) = ps.resolve_constant(&slot.constant, true);
 		let slot_idx = slot_idx?;
-		let before = &ps.values[slot_idx].before_rewrite;
+		let before = &ps.values[slot_idx].pre_rewrite;
 		let before_prim = match before {
 			Value::Primitive(p) => p,
 			_ => continue,
@@ -174,10 +174,10 @@ fn query_authentication_get_pass_indices(
 		None => return (vec![], 0, empty_c),
 	};
 	let c = km.slots[idx].constant.clone();
-	let sender = ps.values[idx].sender;
+	let sender = ps.values[idx].provenance.sender;
 	if sender == ATTACKER_ID {
-		let v = &ps.values[idx].before_mutate;
-		if v.equivalent(&ps.values[idx].assigned, true) {
+		let v = &ps.values[idx].original;
+		if v.equivalent(&ps.values[idx].value, true) {
 			return (vec![], sender, c);
 		}
 	}
@@ -240,7 +240,7 @@ fn query_freshness(
 		&mutated_info,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
-			query.constants[0], resolved, ps.name, ps.values[indices[0]].before_rewrite,
+			query.constants[0], resolved, ps.name, ps.values[indices[0]].pre_rewrite,
 		),
 		&result.options,
 	);

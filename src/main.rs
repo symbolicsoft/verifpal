@@ -208,13 +208,15 @@ mod unit_tests {
 
 	fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 		SlotValues {
-			assigned: v.clone(),
-			before_rewrite: v.clone(),
-			before_mutate: v.clone(),
-			mutated: false,
+			value: v.clone(),
+			pre_rewrite: v.clone(),
+			original: v.clone(),
 			rewritten: false,
-			creator,
-			sender: creator,
+			provenance: Provenance {
+				creator,
+				sender: creator,
+				attacker_tainted: false,
+			},
 		}
 	}
 
@@ -678,7 +680,7 @@ mod unit_tests {
 	}
 
 	#[test]
-	fn principal_state_should_use_before_mutate_creator() {
+	fn principal_state_should_use_original_creator() {
 		let c = Constant {
 			name: Arc::from("ps_fbm_a"),
 			id: value_names_map_add("ps_fbm_a"),
@@ -687,7 +689,7 @@ mod unit_tests {
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)]; // creator == self.id
 		let ps = make_principal_state("Alice", 0, meta, values);
-		assert!(ps.should_use_before_mutate(0)); // creator == self
+		assert!(ps.should_use_original(0)); // creator == self
 	}
 
 	#[test]
@@ -716,13 +718,13 @@ mod unit_tests {
 		let mut meta = make_slot_meta(&c, false);
 		meta.wire = vec![1]; // received by principal 1
 		let mut sv = make_slot_values(&mutated, 0);
-		sv.before_mutate = original.clone();
-		sv.mutated = true;
-		sv.creator = 0; // different from ps.id=1
+		sv.original = original.clone();
+		sv.provenance.attacker_tainted = true;
+		sv.provenance.creator = 0; // different from ps.id=1
 		let ps = make_principal_state("Bob", 1, vec![meta], vec![sv]);
 		// Bob (id=1) received this on wire, and it was mutated
 		// Since creator(0) != self(1), known=true, wire contains self(1), and mutated=true,
-		// should_use_before_mutate returns false, so effective_value = assigned
+		// should_use_original returns false, so effective_value = value (tainted)
 		assert!(ps.effective_value(0).equivalent(&mutated, true));
 	}
 
@@ -985,62 +987,40 @@ mod unit_tests {
 	}
 
 	// -----------------------------------------------------------------------
-	// 20. SlotValues set_assigned / override_all
+	// 20. SlotValues set_value / override_all
 	// -----------------------------------------------------------------------
 
 	#[test]
-	fn slot_values_set_assigned_not_mutated() {
+	fn slot_values_set_value_not_tainted() {
 		let v1 = make_constant("sv_v1");
 		let v2 = make_constant("sv_v2");
-		let mut sv = SlotValues {
-			assigned: v1.clone(),
-			before_rewrite: v1.clone(),
-			before_mutate: v1,
-			mutated: false,
-			rewritten: false,
-			creator: 0,
-			sender: 0,
-		};
-		sv.set_assigned(v2.clone());
-		assert!(sv.assigned.equivalent(&v2, true));
-		assert!(sv.before_mutate.equivalent(&v2, true)); // also updated when not mutated
+		let mut sv = make_slot_values(&v1, 0);
+		sv.set_value(v2.clone());
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v2, true)); // also updated when not tainted
 	}
 
 	#[test]
-	fn slot_values_set_assigned_mutated() {
+	fn slot_values_set_value_tainted() {
 		let v1 = make_constant("svm_v1");
 		let v2 = make_constant("svm_v2");
-		let mut sv = SlotValues {
-			assigned: v1.clone(),
-			before_rewrite: v1.clone(),
-			before_mutate: v1.clone(),
-			mutated: true,
-			rewritten: false,
-			creator: 0,
-			sender: 0,
-		};
-		sv.set_assigned(v2.clone());
-		assert!(sv.assigned.equivalent(&v2, true));
-		assert!(sv.before_mutate.equivalent(&v1, true)); // NOT updated when mutated
+		let mut sv = make_slot_values(&v1, 0);
+		sv.provenance.attacker_tainted = true;
+		sv.set_value(v2.clone());
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v1, true)); // NOT updated when tainted
 	}
 
 	#[test]
 	fn slot_values_override_all() {
 		let v1 = make_constant("svo_v1");
 		let v2 = make_constant("svo_v2");
-		let mut sv = SlotValues {
-			assigned: v1.clone(),
-			before_rewrite: v1.clone(),
-			before_mutate: v1,
-			mutated: true,
-			rewritten: false,
-			creator: 0,
-			sender: 0,
-		};
+		let mut sv = make_slot_values(&v1, 0);
+		sv.provenance.attacker_tainted = true;
 		sv.override_all(v2.clone());
-		assert!(sv.assigned.equivalent(&v2, true));
-		assert!(sv.before_rewrite.equivalent(&v2, true));
-		assert!(sv.before_mutate.equivalent(&v2, true)); // overridden regardless of mutated
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.pre_rewrite.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v2, true)); // overridden regardless of tainted
 	}
 
 	// -----------------------------------------------------------------------
@@ -1181,12 +1161,12 @@ mod unit_tests {
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
-		sv.mutated = true;
+		sv.provenance.attacker_tainted = true;
 		let ps = make_principal_state("Alice", 0, meta, vec![sv]);
 		let record = compute_slot_diffs(&ps, &trace);
 		assert_eq!(record.diffs.len(), 1);
 		assert_eq!(record.diffs[0].index, 0);
-		assert!(record.diffs[0].mutated);
+		assert!(record.diffs[0].tainted);
 	}
 
 	// -----------------------------------------------------------------------
