@@ -175,17 +175,53 @@ pub fn resolve_ps_values(
 ///   attacker.  Used when the principal received the value from the network
 ///   and the attacker could have replaced it.
 ///
-/// The decision tree for fbm has two cases:
+/// Determine whether a constant should resolve to its `before_mutate` value
+/// (what the principal originally computed) rather than its `assigned` value
+/// (which may have been tampered with by the attacker).
 ///
-/// 1. **Root constant** (same slot as the expression being resolved):
-///    Use `should_use_before_mutate()` — true when the principal created it,
-///    doesn't know it, didn't receive it over a wire, or it wasn't mutated.
+/// Two cases:
 ///
-/// 2. **Nested constant** (referenced inside a primitive/equation argument):
-///    If the enclosing root was created by another principal (received over
-///    the wire), force before_mutate — UNLESS this nested constant's
-///    `mutatable_to` list includes the root's creator, meaning the attacker
-///    could have replaced it before the root was computed.
+/// 1. **Root constant** (`slot_idx == root_index`): use `before_mutate` if
+///    already forced, or if `should_use_before_mutate()` says so (the
+///    principal created it, doesn't know it, didn't receive it on a wire,
+///    or it wasn't mutated).
+///
+/// 2. **Nested constant** (`slot_idx != root_index`): if the root is a
+///    primitive received from another principal, force `before_mutate` so
+///    the principal sees the original (untampered) inputs — UNLESS this
+///    nested constant's `mutatable_to` list includes the root's creator,
+///    meaning the attacker could have replaced it before the root was
+///    computed, in which case the principal sees the tampered value.
+fn compute_visibility(
+	slot_idx: usize,
+	root_index: usize,
+	root_value: &Value,
+	ps: &PrincipalState,
+	existing_fbm: bool,
+) -> bool {
+	if slot_idx == root_index {
+		// Case 1: root constant.
+		if existing_fbm {
+			return true;
+		}
+		return ps.should_use_before_mutate(slot_idx);
+	}
+
+	// Case 2: nested constant.
+	let root_from_other =
+		matches!(root_value, Value::Primitive(_)) && ps.values[root_index].creator != ps.id;
+
+	let forced = existing_fbm || root_from_other;
+	if forced {
+		// Force before_mutate UNLESS this constant is mutable by the root's creator.
+		!ps.meta[slot_idx]
+			.mutatable_to
+			.contains(&ps.values[root_index].creator)
+	} else {
+		ps.should_use_before_mutate(slot_idx)
+	}
+}
+
 fn resolve_ps_values_depth(
 	value: &Value,
 	root_value: &Value,
@@ -210,12 +246,9 @@ fn resolve_ps_values_depth(
 			None => return Err(VerifpalError::Resolution("invalid index".into())),
 		};
 
+		fbm = compute_visibility(slot_idx, root_idx, &root_val, ps, fbm);
+
 		if slot_idx == root_idx {
-			// Case 1: resolving the root constant itself.
-			// Respect any existing fbm override; otherwise ask the principal.
-			if !fbm {
-				fbm = ps.should_use_before_mutate(slot_idx);
-			}
 			resolved = if fbm {
 				ps.values[slot_idx].before_mutate.clone()
 			} else {
@@ -223,26 +256,6 @@ fn resolve_ps_values_depth(
 				val
 			};
 		} else {
-			// Case 2: resolving a nested constant (argument of the root).
-			// If the root is a primitive received from another principal,
-			// force before_mutate so we see the original (untampered) inputs.
-			let root_from_other =
-				matches!(&root_val, Value::Primitive(_)) && ps.values[root_idx].creator != ps.id;
-			if root_from_other {
-				fbm = true;
-			}
-
-			// However, if the nested constant was mutable by the root's
-			// creator, the attacker could have replaced it before the root
-			// was computed — so we should NOT force before_mutate.
-			fbm = if fbm {
-				!ps.meta[slot_idx]
-					.mutatable_to
-					.contains(&ps.values[root_idx].creator)
-			} else {
-				ps.should_use_before_mutate(slot_idx)
-			};
-
 			resolved = if fbm {
 				ps.values[slot_idx].before_mutate.clone()
 			} else {

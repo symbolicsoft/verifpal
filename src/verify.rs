@@ -65,8 +65,19 @@ pub fn verify_resolve_queries(
 }
 
 // ---------------------------------------------------------------------------
-// Standard run: resolve, inject skeletons, rewrite, analyse each principal
+// Standard verification pipeline
 // ---------------------------------------------------------------------------
+//
+// For each principal, the pipeline executes seven stages in order:
+//
+//   1. Resolution      – resolve symbolic constant references to concrete values
+//   2. Mutation record  – compute which slots differ from the protocol trace
+//   3. Skeleton inject  – add structural templates to attacker knowledge
+//   4. Rewriting        – apply cryptographic rewrite rules (e.g. DEC(k,ENC(k,m))→m)
+//   5. Sanity checks    – abort if checked primitives failed; validate equation generators
+//   6. Deduction        – run the fixed-point deduction loop (see deduction.rs / verifyanalysis.rs)
+//   7. Query resolution – check whether any pending queries are now resolved
+//
 
 pub fn verify_standard_run(
 	ctx: &VerifyContext,
@@ -76,32 +87,46 @@ pub fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
+		// 1. Resolution
 		let mut ps_resolved = ps.clone_for_stage(false);
 		ps_resolved.resolve_all_values(&attacker)?;
 
-		// Pre-compute mutation record for this principal state
+		// 2. Mutation record
 		let record = compute_slot_diffs(&ps_resolved, km);
 
-		// Inject missing skeletons for all assigned primitives
-		for sv in &ps_resolved.values {
-			if let Value::Primitive(p) = &sv.assigned {
-				inject_missing_skeletons(ctx, p, &record, &attacker);
-			}
-		}
+		// 3. Skeleton injection
+		inject_skeletons_for_state(ctx, &ps_resolved, &record, &attacker);
 
+		// 4. Rewriting
 		let failures = ps_resolved.perform_all_rewrites();
-		sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 
+		// 5. Sanity checks
+		sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 		for sv in &ps_resolved.values {
-			let a = &sv.assigned;
-			sanity_check_equation_generators(a)?;
+			sanity_check_equation_generators(&sv.assigned)?;
 		}
 
+		// 6. Deduction
 		crate::verifyanalysis::verify_analysis(ctx, km, &ps_resolved, stage)?;
 
+		// 7. Query resolution
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
 	}
 	Ok(())
+}
+
+/// Inject skeleton templates for all assigned primitives into attacker knowledge.
+fn inject_skeletons_for_state(
+	ctx: &VerifyContext,
+	ps: &PrincipalState,
+	record: &MutationRecord,
+	attacker: &AttackerState,
+) {
+	for sv in &ps.values {
+		if let Value::Primitive(p) = &sv.assigned {
+			inject_missing_skeletons(ctx, p, record, attacker);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

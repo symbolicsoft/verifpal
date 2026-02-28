@@ -1,6 +1,52 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+//! # Active Attacker Verification
+//!
+//! Implements Verifpal's active attacker analysis, which explores protocol
+//! executions under an attacker that can modify unguarded values on the wire.
+//!
+//! ## Search Strategy
+//!
+//! The search proceeds through three layers, each running per phase:
+//!
+//! 1. **Baseline analysis** (stage 0): run the protocol as-is with passive
+//!    deduction to build initial attacker knowledge.
+//!
+//! 2. **Equation bypass**: a targeted MitM attack that replaces each received
+//!    DH public key with `G^nil` (the attacker's own key). This covers the
+//!    canonical public-key substitution attack in O(n) time rather than
+//!    requiring the combinatorial search to discover it.
+//!
+//! 3. **Staged mutation search** (stages 1–10): explore mutations of
+//!    increasing complexity.
+//!    - **Stages 1–3**: minimal mutations only (nil for constants, G^nil for
+//!      equations). See `STAGE_MUTATION_EXPANSION` in `mutationmap.rs`.
+//!    - **Stage 4+**: all attacker-known values become available as mutations.
+//!    - **Stage 5+**: recursive injection begins — the attacker can inject
+//!      constructed primitives into other primitives' arguments, with
+//!      injection depth bounded by `stage - STAGE_RECURSIVE_INJECTION`
+//!      (see `inject.rs`).
+//!
+//!    Within each stage, mutations are explored via weighted subset scanning:
+//!    weight 1 (single-variable), weight 2 (pairs), weight 3 (triples).
+//!    Each weight level is capped by budget parameters to prevent
+//!    combinatorial explosion.
+//!
+//! ## Completeness Argument
+//!
+//! The search is **sound** (any reported attack is genuine) but **incomplete**
+//! (some attacks may not be found). The budget parameters are empirically
+//! tuned to find attacks in published protocols (TLS 1.3, Signal, Noise,
+//! Scuttlebutt, DP-3T, etc.) within seconds. The formal bound is:
+//!
+//! > All k-variable mutations for k ≤ `max_subset_weight` (3), with
+//! > injection depth ≤ max(0, stage − `STAGE_RECURSIVE_INJECTION`),
+//! > subject to per-principal budget caps.
+//!
+//! If no new knowledge is gained after `exhaustion_threshold` (6) stages,
+//! the search terminates early. The absolute cap is `max_stage` (10).
+
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -36,6 +82,25 @@ struct FailedGuardInfo {
 /// real-world protocol models.  The goal is to explore enough of the mutation
 /// space to find attacks in common protocols (TLS, Signal, Noise, etc.) while
 /// keeping verification of typical models under a few seconds.
+///
+/// ## Parameter relationships
+///
+/// - **Termination**: `exhaustion_threshold` and `max_stage` together define
+///   when the search stops. The search runs until all queries are resolved,
+///   the attacker is exhausted (no new knowledge after `exhaustion_threshold`
+///   stages), or `max_stage` is reached.
+///
+/// - **Combinatorial bounds**: `max_subset_weight` bounds the dimensionality
+///   of the mutation space (how many variables change simultaneously).
+///   `max_mutations_per_subset` and `max_full_product` bound the Cartesian
+///   product size within each subset scan and the final full-product scan,
+///   respectively. `max_weight1_mutations` is intentionally higher because
+///   single-variable scans are cheaper to evaluate.
+///
+/// - **Fairness**: `max_scan_budget` bounds the total mutations per principal
+///   per stage, preventing any single principal from dominating search time.
+///   `max_subsets_per_weight` bounds the number of k-subsets sampled per
+///   weight level.
 struct StageBudget {
 	/// Stages beyond this threshold are considered for exhaustion detection.
 	/// Set to 6 because stages 1-5 already cover single-variable mutations,
@@ -147,6 +212,77 @@ fn inject_attacker_value(sv: &mut SlotValues, attacker_id: PrincipalId, replacem
 	sv.before_rewrite = replacement.clone();
 }
 
+/// After a worthwhile mutation has been analyzed, attempt guard bypass if
+/// truncation occurred.  Used by both the rayon and sequential scan paths.
+fn process_mutation_bypass(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	result: &MutationResult,
+) {
+	if let Some(ref bypass) = result.guard_bypass {
+		try_guard_bypass(ctx, km, &bypass.full_state, &bypass.failed_guards);
+	}
+}
+
+/// Attempt to bypass failed guards by injecting attacker-controlled values.
+/// Shared by the equation bypass path and both scan paths (rayon + sequential).
+fn try_guard_bypass(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	full_state: &PrincipalState,
+	failed_guards: &[FailedGuardInfo],
+) {
+	if ctx.all_resolved() {
+		return;
+	}
+	let attacker_now = ctx.attacker_snapshot();
+	if !can_attacker_bypass_any_guard(failed_guards, full_state, &attacker_now) {
+		return;
+	}
+	if let Some(ps_injected) = build_bypass_state(full_state, failed_guards, &attacker_now) {
+		verify_bypass_decompose(ctx, km, &ps_injected);
+	}
+}
+
+/// Classify rewrite failures: collect failed guard info and compute truncation point.
+///
+/// Returns `(failed_guards, truncation_index, truncation_failed_idx)`.
+/// `truncation_index` is the point after which the principal state should be
+/// truncated (because a checked primitive failed), and `truncation_failed_idx`
+/// is the slot index of the first failed checked primitive (used to determine
+/// whether mutations before it were worthwhile).
+fn classify_rewrite_failures(
+	ps: &PrincipalState,
+	failures: &[(Primitive, usize)],
+) -> (Vec<FailedGuardInfo>, Option<usize>, Option<usize>) {
+	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
+	let mut truncation_index: Option<usize> = None;
+	let mut truncation_failed_idx: Option<usize> = None;
+
+	for &(ref prim, idx) in failures {
+		if !prim.instance_check || ps.values[idx].creator != ps.id {
+			continue;
+		}
+		if let Some(key) = extract_bypass_key(prim) {
+			failed_guards.push(FailedGuardInfo {
+				bypass_key: key,
+				assigned_index: idx,
+			});
+		}
+		if truncation_index.is_none() {
+			let declared_at = ps.meta[idx].declared_at;
+			if declared_at == ps.max_declared_at {
+				truncation_index = Some(idx + 1);
+			} else if let Some(pos) = ps.meta.iter().position(|m| m.declared_at == declared_at) {
+				truncation_index = Some(pos + 1);
+			}
+			truncation_failed_idx = Some(idx);
+		}
+	}
+
+	(failed_guards, truncation_index, truncation_failed_idx)
+}
+
 /// Targeted MitM public-key replacement attack.  For each principal, try
 /// replacing each equation-valued wire input (received public key) with G^nil
 /// — the attacker's own public key — one at a time, then check if the
@@ -240,30 +376,12 @@ fn verify_active_try_equation_bypass_on_state(
 
 	let _ = ps.resolve_all_values(attacker);
 	let failures = ps.perform_all_rewrites();
-
-	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
-	for &(ref prim, idx) in &failures {
-		if !prim.instance_check || ps.values[idx].creator != ps.id {
-			continue;
-		}
-		if let Some(key) = extract_bypass_key(prim) {
-			failed_guards.push(FailedGuardInfo {
-				bypass_key: key,
-				assigned_index: idx,
-			});
-		}
-	}
+	let (failed_guards, _, _) = classify_rewrite_failures(ps, &failures);
 
 	if failed_guards.is_empty() {
 		return;
 	}
-	if !can_attacker_bypass_any_guard(&failed_guards, ps, attacker) {
-		return;
-	}
-
-	if let Some(ps_injected) = build_bypass_state(&ps_pre, &failed_guards, attacker) {
-		verify_bypass_decompose(ctx, km, &ps_injected);
-	}
+	try_guard_bypass(ctx, km, &ps_pre, &failed_guards);
 }
 
 fn verify_active_stages(
@@ -556,29 +674,8 @@ fn verify_active_scan<'s>(
 					let _ = verify_analysis(ctx, km, &result.state, stage);
 				}
 				// Pass 2: if truncation occurred and the attacker learned
-				// enough to bypass the guards, inject attacker-controlled
-				// values into the full state, decompose wire values, and
-				// resolve queries.  We avoid running full verify_analysis
-				// on the large bypass state to prevent reconstruction
-				// explosion.
-				if !ctx.all_resolved() {
-					if let Some(ref bypass) = result.guard_bypass {
-						let attacker_now = ctx.attacker_snapshot();
-						if can_attacker_bypass_any_guard(
-							&bypass.failed_guards,
-							&bypass.full_state,
-							&attacker_now,
-						) {
-							if let Some(ps_injected) = build_bypass_state(
-								&bypass.full_state,
-								&bypass.failed_guards,
-								&attacker_now,
-							) {
-								verify_bypass_decompose(ctx, km, &ps_injected);
-							}
-						}
-					}
-				}
+				// enough to bypass the guards, attempt guard bypass.
+				process_mutation_bypass(ctx, km, &result);
 			}
 		});
 
@@ -760,24 +857,7 @@ fn verify_active_scan_seq(
 			if !ctx.all_resolved() {
 				let _ = verify_analysis(ctx, km, &result.state, stage);
 			}
-			if !ctx.all_resolved() {
-				if let Some(ref bypass) = result.guard_bypass {
-					let attacker_now = ctx.attacker_snapshot();
-					if can_attacker_bypass_any_guard(
-						&bypass.failed_guards,
-						&bypass.full_state,
-						&attacker_now,
-					) {
-						if let Some(ps_injected) = build_bypass_state(
-							&bypass.full_state,
-							&bypass.failed_guards,
-							&attacker_now,
-						) {
-							verify_bypass_decompose(ctx, km, &ps_injected);
-						}
-					}
-				}
-			}
+			process_mutation_bypass(ctx, km, &result);
 		}
 
 		if is_last {
@@ -884,34 +964,8 @@ fn verify_active_mutate_principal_state(
 	let ps_pre = ps.clone();
 	let _ = ps.resolve_all_values(attacker);
 	let failures = ps.perform_all_rewrites();
-
-	// Collect all failed guards and extract the bypass keys before truncating.
-	let mut failed_guards: Vec<FailedGuardInfo> = Vec::new();
-	let mut truncation_index: Option<usize> = None;
-	let mut truncation_failed_idx: Option<usize> = None;
-
-	for &(ref prim, idx) in &failures {
-		if !prim.instance_check || ps.values[idx].creator != ps.id {
-			continue;
-		}
-		// Extract the bypass key for this failed guard.
-		if let Some(key) = extract_bypass_key(prim) {
-			failed_guards.push(FailedGuardInfo {
-				bypass_key: key,
-				assigned_index: idx,
-			});
-		}
-		// Determine the truncation point (same logic as before).
-		if truncation_index.is_none() {
-			let declared_at = ps.meta[idx].declared_at;
-			if declared_at == ps.max_declared_at {
-				truncation_index = Some(idx + 1);
-			} else if let Some(pos) = ps.meta.iter().position(|m| m.declared_at == declared_at) {
-				truncation_index = Some(pos + 1);
-			}
-			truncation_failed_idx = Some(idx);
-		}
-	}
+	let (failed_guards, truncation_index, truncation_failed_idx) =
+		classify_rewrite_failures(&ps, &failures);
 
 	if let Some(trunc_at) = truncation_index {
 		let failed_idx = truncation_failed_idx.unwrap_or(0);

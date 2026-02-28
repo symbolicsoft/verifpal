@@ -3,6 +3,7 @@
 
 pub mod construct;
 pub mod context;
+pub mod deduction;
 pub mod equivalence;
 pub mod hashing;
 pub mod info;
