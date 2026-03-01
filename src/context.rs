@@ -42,7 +42,11 @@ pub struct VerifyContext {
 }
 
 /// Add a value to locked attacker state if not already known.
-fn attacker_state_absorb(state: &mut AttackerState, value: &Value, record: &MutationRecord) {
+fn attacker_state_absorb(
+	state: &mut AttackerState,
+	value: &Value,
+	record: &Arc<MutationRecord>,
+) {
 	if state.knows(value).is_some() {
 		return;
 	}
@@ -56,7 +60,7 @@ fn attacker_state_absorb(state: &mut AttackerState, value: &Value, record: &Muta
 	if let Value::Primitive(p) = value {
 		Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
 	}
-	Arc::make_mut(&mut state.mutation_records).push(record.clone());
+	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
 }
 
 impl VerifyContext {
@@ -103,7 +107,7 @@ impl VerifyContext {
 	}
 
 	/// Add a value to attacker knowledge. Returns true if it was new.
-	pub fn attacker_put(&self, known: &Value, record: &MutationRecord) -> bool {
+	pub fn attacker_put(&self, known: &Value, record: &Arc<MutationRecord>) -> bool {
 		// Fast check with read lock
 		{
 			let state = read_lock(&self.attacker);
@@ -111,22 +115,12 @@ impl VerifyContext {
 				return false;
 			}
 		}
-		// Write lock: double-check and append
+		// Write lock: double-check and absorb
 		let mut state = write_lock(&self.attacker);
 		if state.knows(known).is_some() {
 			return false;
 		}
-		let idx = state.known.len();
-		Arc::make_mut(&mut state.known).push(known.clone());
-		let h = known.hash_value();
-		Arc::make_mut(&mut state.known_map)
-			.entry(h)
-			.or_default()
-			.push(idx);
-		if let Value::Primitive(p) = known {
-			Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
-		}
-		Arc::make_mut(&mut state.mutation_records).push(record.clone());
+		attacker_state_absorb(&mut state, known, record);
 		let count = state.known.len();
 		drop(state);
 		if crate::tui::tui_enabled() {

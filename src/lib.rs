@@ -26,7 +26,6 @@ pub mod util;
 pub mod value;
 pub mod verify;
 pub mod verifyactive;
-pub mod verifyanalysis;
 
 // ---------------------------------------------------------------------------
 // Public re-exports for the binary crate
@@ -117,7 +116,7 @@ pub fn wasm_verify(input: &str) -> String {
 	let ctx = context::VerifyContext::new(&m);
 
 	let result = match m.attacker {
-		types::AttackerKind::Passive => wasm_verify_passive(&ctx, &km, &ps),
+		types::AttackerKind::Passive => verify::verify_passive(&ctx, &km, &ps),
 		types::AttackerKind::Active => verifyactive::verify_active(&ctx, &km, &ps),
 	};
 
@@ -131,7 +130,7 @@ pub fn wasm_verify(input: &str) -> String {
 	}
 
 	let results = ctx.results_get();
-	let code = wasm_results_code(&results);
+	let code = types::VerifyResult::results_code(&results);
 	let messages = info::wasm_messages_drain();
 
 	let mut rj = String::from("[");
@@ -183,36 +182,4 @@ pub fn wasm_pretty(input: &str) -> String {
 			json_escape(&e.to_string())
 		),
 	}
-}
-
-#[cfg(feature = "wasm")]
-fn wasm_verify_passive(
-	ctx: &context::VerifyContext,
-	km: &types::ProtocolTrace,
-	principal_states: &[types::PrincipalState],
-) -> types::VResult<()> {
-	for phase in 0..=km.max_phase {
-		ctx.attacker_init();
-		let mut ps_pure = principal_states[0].clone_for_depth(true);
-		ps_pure.resolve_all_values(&ctx.attacker_snapshot())?;
-		ctx.attacker_phase_update(km, &ps_pure, phase)?;
-		verify::verify_standard_run(ctx, km, principal_states, 0)?;
-	}
-	Ok(())
-}
-
-#[cfg(feature = "wasm")]
-fn wasm_results_code(results: &[types::VerifyResult]) -> String {
-	let mut code = String::with_capacity(results.len() * 2);
-	for r in results {
-		code.push(match r.query.kind {
-			types::QueryKind::Confidentiality => 'c',
-			types::QueryKind::Authentication => 'a',
-			types::QueryKind::Freshness => 'f',
-			types::QueryKind::Unlinkability => 'u',
-			types::QueryKind::Equivalence => 'e',
-		});
-		code.push(if r.resolved { '1' } else { '0' });
-	}
-	code
 }

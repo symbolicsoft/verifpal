@@ -522,7 +522,7 @@ mod unit_tests {
 	#[test]
 	fn value_try_accessors() {
 		let c = make_constant("try_c");
-		assert!(c.try_as_constant().is_ok());
+		assert!(c.as_constant().is_some());
 		assert!(c.try_as_primitive().is_err());
 		assert!(c.try_as_equation().is_err());
 	}
@@ -1224,13 +1224,11 @@ mod unit_tests {
 			id: value_names_map_add("ts2_a"),
 			..Constant::default()
 		};
-		let mut kb = HashMap::new();
-		kb.insert(1u8, 0u8);
 		let slot = TraceSlot {
 			constant: c,
 			initial_value: value_nil(),
 			creator: 0,
-			known_by: vec![kb],
+			known_by: vec![(1, 0)],
 			declared_at: 0,
 			phases: vec![0],
 		};

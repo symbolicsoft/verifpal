@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::sync::Arc;
+
 use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::inject::inject_missing_skeletons;
@@ -94,7 +96,7 @@ pub fn verify_standard_run(
 		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
 		// Phase 2: Knowledge closure (monotone fixed-point)
-		crate::verifyanalysis::verify_analysis(ctx, km, &ps_resolved, depth)?;
+		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved, depth)?;
 
 		// Phase 3: Query evaluation
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
@@ -139,7 +141,7 @@ pub fn generate_trace(
 fn inject_skeletons_for_state(
 	ctx: &VerifyContext,
 	ps: &PrincipalState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 	attacker: &AttackerState,
 ) {
 	for sv in &ps.values {
@@ -153,7 +155,7 @@ fn inject_skeletons_for_state(
 // Passive attacker verification
 // ---------------------------------------------------------------------------
 
-fn verify_passive(
+pub fn verify_passive(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -169,24 +171,6 @@ fn verify_passive(
 	Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Results code
-// ---------------------------------------------------------------------------
-
-fn verify_get_results_code(results: &[VerifyResult]) -> String {
-	let mut code = String::with_capacity(results.len() * 2);
-	for r in results {
-		code.push(match r.query.kind {
-			QueryKind::Confidentiality => 'c',
-			QueryKind::Authentication => 'a',
-			QueryKind::Freshness => 'f',
-			QueryKind::Unlinkability => 'u',
-			QueryKind::Equivalence => 'e',
-		});
-		code.push(if r.resolved { '1' } else { '0' });
-	}
-	code
-}
 
 // ---------------------------------------------------------------------------
 // End of verification: print summary
@@ -247,7 +231,7 @@ fn verify_end(
 
 	info_message("Thank you for using Verifpal.", InfoLevel::Verifpal, false);
 
-	let results_code = verify_get_results_code(&results);
+	let results_code = VerifyResult::results_code(&results);
 
 	Ok((results, results_code))
 }

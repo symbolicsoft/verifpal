@@ -190,7 +190,7 @@ fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 pub fn inject_missing_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 	attacker: &AttackerState,
 ) {
 	let (skeleton, _) = inject_primitive_skeleton(p, 0);

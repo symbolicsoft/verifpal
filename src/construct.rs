@@ -32,10 +32,7 @@ pub fn construct_protocol_trace(
 			Some(c) => c.clone(),
 			None => continue,
 		};
-		let known_by: Vec<_> = principal_ids
-			.iter()
-			.map(|&pid| HashMap::from([(pid, pid)]))
-			.collect();
+		let known_by: Vec<_> = principal_ids.iter().map(|&pid| (pid, pid)).collect();
 		let const_id = c.id;
 		trace.slots.push(TraceSlot {
 			constant: c,
@@ -144,7 +141,7 @@ fn construct_trace_render_knows(
 			}
 			trace.slots[idx]
 				.known_by
-				.push(HashMap::from([(principal.id, principal.id)]));
+				.push((principal.id, principal.id));
 			continue;
 		}
 		let new_c = Constant {
@@ -158,8 +155,8 @@ fn construct_trace_render_knows(
 		};
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
-			constant: new_c.clone(),
-			initial_value: Value::Constant(new_c),
+			initial_value: Value::Constant(new_c.clone()),
+			constant: new_c,
 			creator: principal.id,
 			known_by: vec![],
 			declared_at,
@@ -174,7 +171,7 @@ fn construct_trace_render_knows(
 			if pid != principal.id {
 				trace.slots[slot_idx]
 					.known_by
-					.push(HashMap::from([(pid, pid)]));
+					.push((pid, pid));
 			}
 		}
 	}
@@ -204,10 +201,10 @@ fn construct_trace_render_generates(
 		};
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
-			constant: new_c.clone(),
-			initial_value: Value::Constant(new_c),
+			initial_value: Value::Constant(new_c.clone()),
+			constant: new_c,
 			creator: principal.id,
-			known_by: vec![HashMap::new()],
+			known_by: vec![],
 			declared_at,
 			phases: vec![],
 		});
@@ -274,7 +271,7 @@ fn construct_trace_render_assignment(
 			constant: new_c,
 			initial_value,
 			creator: principal.id,
-			known_by: vec![HashMap::new()],
+			known_by: vec![],
 			declared_at,
 			phases: vec![],
 		});
@@ -358,7 +355,7 @@ fn construct_trace_render_message(
 		}
 		trace.slots[idx]
 			.known_by
-			.push(HashMap::from([(message.recipient, message.sender)]));
+			.push((message.recipient, message.sender));
 		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
@@ -379,9 +376,9 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 			let mut mutatable_to = vec![];
 			let mut knows = slot.creator == principal_id;
 			let mut sender = slot.creator;
-			for m_map in &slot.known_by {
-				if let Some(&preceding_sender) = m_map.get(&principal_id) {
-					sender = preceding_sender;
+			for &(recipient, from) in &slot.known_by {
+				if recipient == principal_id {
+					sender = from;
 					knows = true;
 					break;
 				}

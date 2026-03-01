@@ -53,7 +53,7 @@ use crate::principal::ATTACKER_ID;
 use crate::types::*;
 use crate::value::{compute_slot_diffs, resolve_trace_values, value_g_nil};
 use crate::verify::{verify_resolve_queries, verify_standard_run};
-use crate::verifyanalysis::verify_analysis;
+use crate::deduction::compute_knowledge_closure;
 
 /// Information about a guarded primitive that failed its rewrite and caused
 /// (or would cause) truncation of the principal state.
@@ -505,7 +505,7 @@ fn verify_active_scan<'s>(
 				}
 				if !ctx.all_resolved() {
 					// Phase 2: Knowledge closure on the (possibly truncated) state.
-					let _ = verify_analysis(ctx, km, &result.state, depth as i32);
+					let _ = compute_knowledge_closure(ctx, km, &result.state, depth as i32);
 				}
 				if !ctx.all_resolved() {
 					// Phase 3: Query evaluation.
@@ -693,7 +693,7 @@ fn verify_active_scan_seq(
 		if result.is_worthwhile {
 			worthwhile_mutation_count.fetch_add(1, Ordering::SeqCst);
 			if !ctx.all_resolved() {
-				let _ = verify_analysis(ctx, km, &result.state, depth as i32);
+				let _ = compute_knowledge_closure(ctx, km, &result.state, depth as i32);
 			}
 			if !ctx.all_resolved() {
 				let _ = verify_resolve_queries(ctx, km, &result.state);
@@ -803,6 +803,9 @@ fn verify_active_mutate_principal_state(
 		};
 	}
 
+	// Clone before resolution: the bypass state needs the pre-resolution
+	// symbolic form. Resolution inlines constants, preventing re-resolution
+	// inside build_bypass_state from propagating injected values.
 	let ps_pre = ps.clone();
 	let _ = ps.resolve_all_values(attacker);
 	let failures = ps.perform_all_rewrites();

@@ -148,7 +148,7 @@ pub fn resolve_ps_values(
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	force_before_mutate: bool,
+	use_original: bool,
 ) -> VResult<Value> {
 	resolve_ps_values_depth(
 		value,
@@ -156,7 +156,7 @@ pub fn resolve_ps_values(
 		root_index,
 		ps,
 		attacker,
-		force_before_mutate,
+		use_original,
 		0,
 	)
 }
@@ -164,30 +164,30 @@ pub fn resolve_ps_values(
 /// Resolve a value within a PrincipalState, following constant chains and
 /// recursing into primitives/equations.
 ///
-/// The `force_before_mutate` (fbm) flag controls which value a constant
+/// The `use_original` flag controls which value a constant
 /// resolves to.  The invariant is:
 ///
-/// - **before_mutate**: the value as originally computed by the protocol,
+/// - **original**: the value as originally computed by the protocol,
 ///   before the attacker tampered with it.  Used when the principal "trusts"
 ///   this value (created it, hasn't received it over a wire, etc.).
 ///
-/// - **assigned**: the current value, which may have been mutated by the
+/// - **value**: the current value, which may have been mutated by the
 ///   attacker.  Used when the principal received the value from the network
 ///   and the attacker could have replaced it.
 ///
-/// Determine whether a constant should resolve to its `before_mutate` value
-/// (what the principal originally computed) rather than its `assigned` value
+/// Determine whether a constant should resolve to its `original` value
+/// (what the principal originally computed) rather than its `value`
 /// (which may have been tampered with by the attacker).
 ///
 /// Two cases:
 ///
-/// 1. **Root constant** (`slot_idx == root_index`): use `before_mutate` if
+/// 1. **Root constant** (`slot_idx == root_index`): use `original` if
 ///    already forced, or if `should_use_original()` says so (the
 ///    principal created it, doesn't know it, didn't receive it on a wire,
-///    or it wasn't mutated).
+///    or the value isn't tainted).
 ///
 /// 2. **Nested constant** (`slot_idx != root_index`): if the root is a
-///    primitive received from another principal, force `before_mutate` so
+///    primitive received from another principal, force `original` so
 ///    the principal sees the original (untampered) inputs — UNLESS this
 ///    nested constant's `mutatable_to` list includes the root's creator,
 ///    meaning the attacker could have replaced it before the root was
@@ -228,7 +228,7 @@ fn resolve_ps_values_depth(
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	force_before_mutate: bool,
+	use_original: bool,
 	depth: usize,
 ) -> VResult<Value> {
 	if depth >= MAX_RESOLVE_DEPTH {
@@ -238,7 +238,7 @@ fn resolve_ps_values_depth(
 	let mut resolved = value.clone();
 	let mut root_idx = root_index;
 	let mut root_val = root_value.clone();
-	let mut fbm = force_before_mutate;
+	let mut use_orig = use_original;
 
 	if let Value::Constant(c) = &resolved {
 		let slot_idx = match ps.index_of(c) {
@@ -246,17 +246,17 @@ fn resolve_ps_values_depth(
 			None => return Err(VerifpalError::Resolution("invalid index".into())),
 		};
 
-		fbm = compute_visibility(slot_idx, root_idx, &root_val, ps, fbm);
+		use_orig = compute_visibility(slot_idx, root_idx, &root_val, ps, use_orig);
 
 		if slot_idx == root_idx {
-			resolved = if fbm {
+			resolved = if use_orig {
 				ps.values[slot_idx].original.clone()
 			} else {
 				let (val, _) = ps.resolve_constant(c, true);
 				val
 			};
 		} else {
-			resolved = if fbm {
+			resolved = if use_orig {
 				ps.values[slot_idx].original.clone()
 			} else {
 				ps.values[slot_idx].value.clone()
@@ -269,10 +269,10 @@ fn resolve_ps_values_depth(
 	match &resolved {
 		Value::Constant(_) => Ok(resolved),
 		Value::Primitive(_) => {
-			resolve_ps_primitive_depth(&resolved, &root_val, root_idx, ps, attacker, fbm, depth + 1)
+			resolve_ps_primitive_depth(&resolved, &root_val, root_idx, ps, attacker, use_orig, depth + 1)
 		}
 		Value::Equation(_) => {
-			resolve_ps_equation_depth(&resolved, &root_val, root_idx, ps, attacker, fbm, depth + 1)
+			resolve_ps_equation_depth(&resolved, &root_val, root_idx, ps, attacker, use_orig, depth + 1)
 		}
 	}
 }
@@ -283,20 +283,20 @@ fn resolve_ps_primitive_depth(
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	force_before_mutate: bool,
+	use_original: bool,
 	depth: usize,
 ) -> VResult<Value> {
 	let prim = value.try_as_primitive()?;
-	let fbm = if ps.values[root_index].provenance.creator == ps.id {
+	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
-		force_before_mutate
+		use_original
 	};
 	// COW: only allocate a new Primitive if an argument actually changed
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, arg) in prim.arguments.iter().enumerate() {
 		let resolved =
-			resolve_ps_values_depth(arg, root_value, root_index, ps, attacker, fbm, depth)?;
+			resolve_ps_values_depth(arg, root_value, root_index, ps, attacker, use_orig, depth)?;
 		if !resolved.equivalent(arg, true) {
 			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
 			args[i] = resolved;
@@ -315,21 +315,21 @@ fn resolve_ps_equation_depth(
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	force_before_mutate: bool,
+	use_original: bool,
 	depth: usize,
 ) -> VResult<Value> {
 	let eq = value.try_as_equation()?;
 	let mut result_eq = Equation { values: Vec::new() };
 	let mut elements: Vec<Value> = eq.values.clone();
-	let fbm = if ps.values[root_index].provenance.creator == ps.id {
+	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
-		force_before_mutate
+		use_original
 	};
 	for item in &mut elements {
 		if let Value::Constant(c) = &*item {
 			let (resolved, slot_idx) = ps.resolve_constant(c, true);
-			*item = if fbm {
+			*item = if use_orig {
 				slot_idx.map_or(resolved, |idx| ps.values[idx].original.clone())
 			} else {
 				resolved
@@ -343,13 +343,13 @@ fn resolve_ps_equation_depth(
 			}
 			Value::Primitive(_) => {
 				let resolved = resolve_ps_primitive_depth(
-					item, root_value, root_index, ps, attacker, fbm, depth,
+					item, root_value, root_index, ps, attacker, use_orig, depth,
 				)?;
 				result_eq.values.push(resolved);
 			}
 			Value::Equation(_) => {
 				let resolved = resolve_ps_equation_depth(
-					item, root_value, root_index, ps, attacker, fbm, depth,
+					item, root_value, root_index, ps, attacker, use_orig, depth,
 				)?;
 				if i == 0 {
 					result_eq.values = resolved.try_as_equation()?.values.clone();

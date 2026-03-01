@@ -143,7 +143,7 @@ pub fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<
 
 /// Build a compact forensic record of which PrincipalState slots differ
 /// from the protocol trace initial values. Only changed slots are recorded.
-pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> MutationRecord {
+pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> Arc<MutationRecord> {
 	let diffs = ps
 		.values
 		.iter()
@@ -163,7 +163,7 @@ pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> Mutatio
 			}
 		})
 		.collect();
-	MutationRecord { diffs }
+	Arc::new(MutationRecord { diffs })
 }
 
 // ---------------------------------------------------------------------------

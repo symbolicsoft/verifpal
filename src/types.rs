@@ -159,16 +159,6 @@ impl Value {
 		}
 	}
 
-	#[allow(dead_code)]
-	pub fn try_as_constant(&self) -> VResult<&Constant> {
-		match self {
-			Value::Constant(c) => Ok(c),
-			_ => Err(VerifpalError::Internal(
-				format!("expected Constant, got {}", self.variant_name()).into(),
-			)),
-		}
-	}
-
 	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
@@ -183,16 +173,6 @@ impl Value {
 			Value::Equation(e) => Ok(e),
 			_ => Err(VerifpalError::Internal(
 				format!("expected Equation, got {}", self.variant_name()).into(),
-			)),
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn try_as_primitive_mut(&mut self) -> VResult<&mut Primitive> {
-		match self {
-			Value::Primitive(p) => Ok(Arc::make_mut(p)),
-			_ => Err(VerifpalError::Internal(
-				format!("expected Primitive, got {}", self.variant_name()).into(),
 			)),
 		}
 	}
@@ -269,6 +249,23 @@ impl VerifyResult {
 			options: vec![],
 		}
 	}
+
+	/// Produce a compact result code string (e.g. `"c1a0f1"`).
+	/// One char per query type + `1` (attack found) or `0` (holds).
+	pub fn results_code(results: &[VerifyResult]) -> String {
+		let mut code = String::with_capacity(results.len() * 2);
+		for r in results {
+			code.push(match r.query.kind {
+				QueryKind::Confidentiality => 'c',
+				QueryKind::Authentication => 'a',
+				QueryKind::Freshness => 'f',
+				QueryKind::Unlinkability => 'u',
+				QueryKind::Equivalence => 'e',
+			});
+			code.push(if r.resolved { '1' } else { '0' });
+		}
+		code
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -330,14 +327,15 @@ pub struct TraceSlot {
 	pub constant: Constant,
 	pub initial_value: Value,
 	pub creator: PrincipalId,
-	pub known_by: Vec<HashMap<PrincipalId, PrincipalId>>,
+	/// Each entry is (recipient, sender): "recipient learned this value from sender."
+	pub known_by: Vec<(PrincipalId, PrincipalId)>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
 }
 
 impl TraceSlot {
 	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
-		self.creator == pid || self.known_by.iter().any(|m| m.contains_key(&pid))
+		self.creator == pid || self.known_by.iter().any(|&(recipient, _)| recipient == pid)
 	}
 }
 
@@ -359,7 +357,8 @@ pub struct SlotMeta {
 	pub guard: bool,
 	pub known: bool,
 	pub wire: Vec<PrincipalId>,
-	pub known_by: Vec<HashMap<PrincipalId, PrincipalId>>,
+	/// Each entry is (recipient, sender): "recipient learned this value from sender."
+	pub known_by: Vec<(PrincipalId, PrincipalId)>,
 	pub declared_at: i32,
 	pub mutatable_to: Vec<PrincipalId>,
 	pub phase: Vec<i32>,
@@ -484,7 +483,7 @@ pub struct AttackerState {
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<HashMap<u64, Vec<usize>>>,
 	pub skeleton_hashes: Arc<HashSet<u64>>,
-	pub mutation_records: Arc<Vec<MutationRecord>>,
+	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 }
 
 impl Default for AttackerState {

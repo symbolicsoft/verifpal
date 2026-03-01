@@ -25,6 +25,8 @@
 //! The ordering reflects priority: cheaper derivations (decomposition) are
 //! tried before more expensive ones (reconstruction, equivalization).
 
+use std::sync::Arc;
+
 use crate::context::VerifyContext;
 use crate::info::{info_analysis, info_message, info_output_text};
 use crate::possible::{
@@ -54,7 +56,8 @@ pub enum RuleDomain {
 /// the current attacker knowledge, and the mutation record. Returns true
 /// if new knowledge was gained (i.e., at least one new value was added
 /// to the attacker's knowledge set).
-type RuleFn = fn(&VerifyContext, &Value, &PrincipalState, &AttackerState, &MutationRecord) -> bool;
+type RuleFn =
+	fn(&VerifyContext, &Value, &PrincipalState, &AttackerState, &Arc<MutationRecord>) -> bool;
 
 /// A group of deduction rules that share an iteration domain.
 ///
@@ -136,7 +139,7 @@ fn try_deduction_step(
 	ctx: &VerifyContext,
 	attacker: &AttackerState,
 	ps: &PrincipalState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	for group in DEDUCTION_RULES {
 		match group.domain {
@@ -179,7 +182,7 @@ fn rule_decompose(
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let Value::Primitive(prim) = value else {
 		return false;
@@ -209,7 +212,7 @@ fn rule_passive_decompose(
 	value: &Value,
 	_ps: &PrincipalState,
 	_attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let Value::Primitive(prim) = value else {
 		return false;
@@ -237,7 +240,7 @@ fn rule_reconstruct(
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	reconstruct_recursive(ctx, value, ps, attacker, record)
 }
@@ -247,7 +250,7 @@ fn reconstruct_recursive(
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let mut found = false;
 	let result = match value {
@@ -283,7 +286,7 @@ fn rule_recompose(
 	value: &Value,
 	_ps: &PrincipalState,
 	attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let Value::Primitive(prim) = value else {
 		return false;
@@ -313,7 +316,7 @@ fn rule_equivalize(
 	value: &Value,
 	ps: &PrincipalState,
 	_attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let resolved = if let Value::Constant(c) = value {
 		let (r, _) = ps.resolve_constant(c, true);
@@ -344,7 +347,7 @@ fn rule_password_extract(
 	value: &Value,
 	ps: &PrincipalState,
 	_attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let mut passwords = Vec::new();
 	find_obtainable_passwords(value, value, None, ps, &mut passwords);
@@ -371,7 +374,7 @@ fn rule_concat_extract(
 	value: &Value,
 	_ps: &PrincipalState,
 	_attacker: &AttackerState,
-	record: &MutationRecord,
+	record: &Arc<MutationRecord>,
 ) -> bool {
 	let Value::Primitive(prim) = value else {
 		return false;
