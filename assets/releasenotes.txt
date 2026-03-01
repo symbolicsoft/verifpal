@@ -1,7 +1,12 @@
-Verifpal 0.40.2 introduces Verifpal Workbench, allowing you to use Verifpal's full functionality in your browser!
+Verifpal 0.50.0 is another major update that takes even fuller advantage of our recent Rust rewrite. Verifpal's analysis engine has been architecturally redesigned for clarity and performance:
 
-Check it out here: https://verifpal.com/workbench
+- The equational theory is now centralized in a single module (theory.rs) covering all 14 rewrite rules across 21 primitives.
+- The analysis pipeline is split into three explicit phases — trace generation, a monotone fixed-point knowledge closure, and query evaluation — replacing the old interleaved loop with a structure that has a direct correctness argument.
+- Value visibility is now governed by explicit provenance tags rather than scattered boolean fields, and the old 10-stage search with 7 empirical constants has been replaced by a bounded-depth search parameterized by a single depth value.
 
-Release announcement here: https://symbolic.software/blog/2026-02-24-verifpal-workbench/
+The result: 3x faster on the full test suite, identical attack-finding coverage across all 147 tests, and a precise coverage guarantee (k ≤ d simultaneous substitutions at nesting depth ≤ d).
 
-Verifpal Workbench supersedes VerifHub, which is now retired.
+In addition, Verifpal for Visual Studio Code has been updated to be fully compatible with the Rust Verifpal rewrite (updating both the extension to version 1.0.10 and Verifpal to 0.50.0 is necessary), and we're also introducing a new Verifpal for Neovim extension!
+
+Read the full release announcement here: https://symbolic.software/blog/2026-03-01-verifpal-engine-redesign/
+
