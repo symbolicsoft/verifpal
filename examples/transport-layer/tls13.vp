@@ -1,0 +1,326 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// =========================================================================
+// TLS 1.3 Full Handshake (RFC 8446)
+// =========================================================================
+//
+// Models the full (EC)DHE handshake with server certificate authentication.
+// No PSK, no 0-RTT, no client certificate authentication.
+//
+// =========================================================================
+// EXPRESSIVENESS LIMITATIONS
+// =========================================================================
+//
+// The following aspects of TLS 1.3 cannot be faithfully modeled in
+// Verifpal's current language. These represent opportunities to expand
+// the tool's capabilities:
+//
+// 1. RECORD-LAYER SEQUENCING
+//    TLS 1.3 encrypts each record with a per-record nonce derived from
+//    a sequence number. The sequence number prevents replay and reordering
+//    of records within a connection. Verifpal has no concept of message
+//    ordering or sequence numbers within a session — messages are either
+//    sent or not, with no ordering guarantees beyond the linear model
+//    syntax. A sequence counter or ordering constraint primitive would
+//    allow modeling replay protection.
+//
+// 2. CIPHER SUITE NEGOTIATION
+//    TLS 1.3's ClientHello proposes multiple cipher suites, key shares,
+//    and protocol versions; the server selects from these. Verifpal
+//    cannot model negotiation or choice — every value is fixed at model
+//    time. This means downgrade attacks (e.g., forcing a weaker cipher
+//    suite) cannot be analyzed. A choice/select primitive or branching
+//    syntax would enable modeling protocol negotiation.
+//
+// 3. CERTIFICATE CHAIN VALIDATION
+//    TLS 1.3 authenticates the server via a certificate chain rooted at
+//    a trusted CA. Verifpal models this as a pre-shared guarded public
+//    key, collapsing the entire PKI trust model into a single assumption.
+//    There is no way to model certificate chains, revocation (CRL/OCSP),
+//    certificate transparency, or name constraints. A TABLE/LOOKUP
+//    primitive for modeling key-value stores (certificate databases)
+//    would partially address this.
+//
+// 4. SESSION RESUMPTION AND 0-RTT
+//    TLS 1.3 supports session resumption via pre-shared keys (PSK) and
+//    0-RTT early data. These require state that persists across protocol
+//    sessions — the server issues a session ticket in one session that
+//    the client uses in the next. Verifpal's phase system models key
+//    compromise over time but not cross-session state. A mechanism for
+//    exporting values from one session and importing them into another
+//    would enable modeling resumption.
+//
+// 5. KEY UPDATE (POST-HANDSHAKE)
+//    TLS 1.3 supports post-handshake key updates where either party can
+//    trigger a ratchet of the application traffic secrets. This requires
+//    modeling an unbounded number of key derivation steps within a single
+//    session. Verifpal's repeat/loop syntax (if added) would help, but
+//    the current language requires manually unrolling each ratchet step.
+//
+// 6. TRANSCRIPT HASH OVER RAW BYTES
+//    TLS 1.3's transcript hash covers the raw byte encoding of each
+//    handshake message, not just the semantic content. Verifpal's HASH
+//    operates on symbolic values, which means two structurally identical
+//    values always hash the same way regardless of encoding. Attacks
+//    that exploit encoding ambiguity (e.g., length extension, parsing
+//    differentials) cannot be modeled.
+//
+// =========================================================================
+// MODEL DESCRIPTION
+// =========================================================================
+//
+// Principals:
+//   Client  — initiates the handshake
+//   Server  — authenticates with a long-term signing key
+//
+// Key schedule (RFC 8446 §7.1):
+//   early_secret       = HKDF-Extract(0, 0)           [no PSK]
+//   derived_ES         = Derive-Secret(early_secret, "derived", "")
+//   handshake_secret   = HKDF-Extract(derived_ES, DHE)
+//   c_hs_traffic       = Derive-Secret(hs_secret, "c hs traffic", CH..SH)
+//   s_hs_traffic       = Derive-Secret(hs_secret, "s hs traffic", CH..SH)
+//   derived_HS         = Derive-Secret(hs_secret, "derived", "")
+//   master_secret      = HKDF-Extract(derived_HS, 0)
+//   c_ap_traffic       = Derive-Secret(master, "c ap traffic", CH..SF)
+//   s_ap_traffic       = Derive-Secret(master, "s ap traffic", CH..SF)
+//
+// Verifpal abstractions:
+//   - HKDF models HKDF-Extract + Derive-Secret (3-arg: IKM, salt, info)
+//   - HASH models transcript hashes
+//   - SIGN/SIGNVERIF models CertificateVerify (Ed25519/ECDSA)
+//   - AEAD_ENC/AEAD_DEC models record-layer encryption (AES-GCM/ChaCha20)
+//   - MAC models the Finished message HMAC
+//   - Phases model forward secrecy: leaking long-term keys after handshake
+//     should not compromise past session traffic
+//
+// Simplifications:
+//   - EncryptedExtensions is modeled as a public constant (no negotiation)
+//   - Certificate message carries the public key directly (no cert chain)
+//   - Session tickets / resumption are not modeled
+//   - Key update (post-handshake) is not modeled
+
+attacker[active]
+
+// =========================================================================
+// 1. Long-term server identity
+// =========================================================================
+
+principal Server[
+	knows private sigKey
+	gSigKey = G^sigKey
+]
+
+// The server's public key is pre-distributed (e.g., via certificate chain).
+// Guarded: the client has pre-authenticated the server's identity.
+Server -> Client: [gSigKey]
+
+// =========================================================================
+// 2. ClientHello
+// =========================================================================
+// Client generates an ephemeral ECDHE key share and sends it in the clear.
+
+principal Client[
+	knows public noExtensions
+	generates ce
+	gce = G^ce
+]
+
+Client -> Server: gce
+
+// =========================================================================
+// 3. ServerHello + Encrypted Server Flight
+// =========================================================================
+// Server generates its own ephemeral ECDHE key share, computes the
+// shared secret, derives the full key schedule, and sends:
+//   - ServerHello (key_share in the clear)
+//   - EncryptedExtensions (encrypted with s_hs_traffic)
+//   - Certificate (encrypted)
+//   - CertificateVerify (encrypted) — signature over transcript
+//   - Finished (encrypted) — MAC over transcript
+
+principal Server[
+	knows public noExtensions
+	generates se
+	gse = G^se
+
+	// --- (EC)DHE shared secret ---
+	dhe = gce^se
+
+	// --- Key schedule (RFC 8446 §7.1) ---
+	// early_secret = HKDF-Extract(0, 0)  [no PSK]
+	earlySecret = HKDF(nil, nil, nil)
+
+	// derived_ES = Derive-Secret(early_secret, "derived", "")
+	derivedES = HKDF(earlySecret, nil, nil)
+
+	// handshake_secret = HKDF-Extract(derived_ES, DHE)
+	handshakeSecret = HKDF(dhe, derivedES, nil)
+
+	// Transcript hash up to ServerHello: covers ClientHello + ServerHello
+	transcriptCH_SH = HASH(gce, gse)
+
+	// s_hs_traffic = Derive-Secret(hs_secret, "s hs traffic", CH..SH)
+	sHsTraffic = HKDF(handshakeSecret, transcriptCH_SH, nil)
+
+	// c_hs_traffic = Derive-Secret(hs_secret, "c hs traffic", CH..SH)
+	cHsTraffic = HKDF(handshakeSecret, nil, transcriptCH_SH)
+
+	// derived_HS = Derive-Secret(hs_secret, "derived", "")
+	derivedHS = HKDF(handshakeSecret, nil, nil)
+
+	// master_secret = HKDF-Extract(derived_HS, 0)
+	masterSecret = HKDF(nil, derivedHS, nil)
+
+	// CertificateVerify: sign the transcript through Certificate
+	// Transcript covers: CH, SH, EncExtensions, Certificate(=gSigKey)
+	transcriptCV = HASH(gce, gse, noExtensions, gSigKey)
+	certVerify = SIGN(sigKey, transcriptCV)
+
+	// Finished: MAC over transcript through CertificateVerify
+	transcriptSF = HASH(gce, gse, noExtensions, gSigKey, certVerify)
+	serverFinished = MAC(sHsTraffic, transcriptSF)
+
+	// Encrypt the server flight with sHsTraffic
+	// AD binds the plaintext ServerHello fields for channel binding
+	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, gSigKey, certVerify, serverFinished), transcriptCH_SH)
+
+	// --- Application traffic secrets ---
+	// Transcript through server Finished
+	transcriptFull = HASH(HASH(gce, gse, noExtensions), gSigKey, certVerify, serverFinished)
+	sApTraffic = HKDF(masterSecret, transcriptFull, nil)
+	cApTraffic = HKDF(masterSecret, nil, transcriptFull)
+]
+
+Server -> Client: gse, serverFlight
+
+// =========================================================================
+// 4. Client processes server flight, sends Finished
+// =========================================================================
+
+principal Client[
+	// --- (EC)DHE shared secret ---
+	dhe_c = gse^ce
+
+	// --- Derive the same key schedule ---
+	earlySecret_c = HKDF(nil, nil, nil)
+	derivedES_c = HKDF(earlySecret_c, nil, nil)
+	handshakeSecret_c = HKDF(dhe_c, derivedES_c, nil)
+	transcriptCH_SH_c = HASH(gce, gse)
+	sHsTraffic_c = HKDF(handshakeSecret_c, transcriptCH_SH_c, nil)
+	cHsTraffic_c = HKDF(handshakeSecret_c, nil, transcriptCH_SH_c)
+	derivedHS_c = HKDF(handshakeSecret_c, nil, nil)
+	masterSecret_c = HKDF(nil, derivedHS_c, nil)
+
+	// --- Decrypt server flight ---
+	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, transcriptCH_SH_c)?
+
+	// --- Extract server flight contents ---
+	_, serverPubKey, certVerify_c, serverFinished_c = SPLIT(serverFlightDec)
+
+	// --- Verify CertificateVerify (server signature over transcript) ---
+	transcriptCV_c = HASH(gce, gse, noExtensions, serverPubKey)
+	sigValid = SIGNVERIF(gSigKey, transcriptCV_c, certVerify_c)?
+
+	// --- Verify server Finished (MAC over transcript) ---
+	transcriptSF_c = HASH(gce, gse, noExtensions, serverPubKey, certVerify_c)
+	expectedFinished = MAC(sHsTraffic_c, transcriptSF_c)
+	finishedValid = ASSERT(serverFinished_c, expectedFinished)?
+
+	// --- Client Finished ---
+	// MAC over full transcript including server Finished
+	transcriptCF = HASH(HASH(gce, gse, noExtensions), serverPubKey, certVerify_c, serverFinished_c)
+	clientFinished = MAC(cHsTraffic_c, transcriptCF)
+
+	// Encrypt client Finished with cHsTraffic
+	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, transcriptCF)
+
+	// --- Application traffic secrets ---
+	transcriptFull_c = HASH(HASH(gce, gse, noExtensions), serverPubKey, certVerify_c, serverFinished_c)
+	sApTraffic_c = HKDF(masterSecret_c, transcriptFull_c, nil)
+	cApTraffic_c = HKDF(masterSecret_c, nil, transcriptFull_c)
+]
+
+Client -> Server: clientFinishedEnc
+
+// =========================================================================
+// 5. Server verifies client Finished
+// =========================================================================
+
+principal Server[
+	// Transcript for client Finished verification
+	transcriptCF_s = HASH(HASH(gce, gse, noExtensions), gSigKey, certVerify, serverFinished)
+
+	// Decrypt and verify client Finished
+	clientFinishedDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, transcriptCF_s)?
+	expectedCF = MAC(cHsTraffic, transcriptCF_s)
+	cfValid = ASSERT(clientFinishedDec, expectedCF)?
+]
+
+// =========================================================================
+// 6. Application data exchange
+// =========================================================================
+// Both sides now have matching application traffic secrets.
+// Messages are encrypted with AEAD using the app traffic keys.
+
+principal Client[
+	generates appMsg1
+	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, nil)
+]
+
+Client -> Server: appData1
+
+principal Server[
+	appMsg1_dec = AEAD_DEC(cApTraffic, appData1, nil)?
+]
+
+principal Server[
+	generates appMsg2
+	appData2 = AEAD_ENC(sApTraffic, appMsg2, nil)
+]
+
+Server -> Client: appData2
+
+principal Client[
+	appMsg2_dec = AEAD_DEC(sApTraffic_c, appData2, nil)?
+]
+
+// =========================================================================
+// 7. Forward secrecy: leak long-term keys after handshake
+// =========================================================================
+// TLS 1.3 provides forward secrecy: compromising the server's long-term
+// signing key after the handshake should not reveal past session traffic.
+
+phase[1]
+
+principal Server[
+	leaks sigKey
+]
+
+// =========================================================================
+// Queries
+// =========================================================================
+
+queries[
+	// Confidentiality of application data
+	confidentiality? appMsg1
+	confidentiality? appMsg2
+
+	// Confidentiality of handshake traffic secrets
+	confidentiality? sHsTraffic
+	confidentiality? cHsTraffic
+
+	// Confidentiality of application traffic secrets
+	confidentiality? sApTraffic
+	confidentiality? cApTraffic
+
+	// Authentication: server's encrypted flight is genuinely from the server
+	authentication? Server -> Client: serverFlight
+
+	// Authentication: client's Finished is genuinely from the client
+	authentication? Client -> Server: clientFinishedEnc
+
+	// Authentication: application data
+	authentication? Client -> Server: appData1
+	authentication? Server -> Client: appData2
+]
