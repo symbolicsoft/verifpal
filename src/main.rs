@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::io::Read;
+
 use clap::{Parser, Subcommand};
 use verifpal::{
 	info_banner, info_message, pretty_print, set_character, set_tui_mode, verify, InfoLevel,
@@ -37,6 +39,34 @@ enum Commands {
 	},
 	/// About information for the Verifpal software
 	About,
+	/// Internal JSON interface for IDE integrations
+	#[command(name = "internal-json", arg_required_else_help = true)]
+	InternalJson {
+		/// Subcommand: knowledgeMap, verify, prettyPrint, prettyDiagram
+		subcommand: String,
+	},
+}
+
+fn read_stdin() -> String {
+	let mut input = String::new();
+	let mut buf = [0u8; 4096];
+	let stdin = std::io::stdin();
+	let mut handle = stdin.lock();
+	loop {
+		match handle.read(&mut buf) {
+			Ok(0) => break,
+			Ok(n) => {
+				for &b in &buf[..n] {
+					if b == 0x04 {
+						return input;
+					}
+					input.push(b as char);
+				}
+			}
+			Err(_) => break,
+		}
+	}
+	input
 }
 
 fn main() {
@@ -77,6 +107,10 @@ fn main() {
 				std::process::exit(1);
 			}
 		},
+		Commands::InternalJson { subcommand } => {
+			let input = read_stdin();
+			verifpal::json::handle_internal_json(&subcommand, &input);
+		}
 		Commands::About => {
 			info_banner(VERSION);
 			println!("Verifpal is authored by Nadim Kobeissi.");

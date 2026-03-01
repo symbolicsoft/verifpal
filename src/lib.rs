@@ -8,6 +8,7 @@ pub mod equivalence;
 pub mod hashing;
 pub mod info;
 pub mod inject;
+pub mod json;
 pub mod mutationmap;
 pub mod narrative;
 pub mod parser;
@@ -39,14 +40,10 @@ pub use types::*;
 pub use verify::verify;
 
 // ---------------------------------------------------------------------------
-// WASM API
+// Global state reset (shared by WASM and internal-json CLI)
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(feature = "wasm")]
-fn wasm_reset_global_state() {
+pub fn reset_global_state() {
 	principal::principal_names_reset();
 	value::value_names_reset();
 	parser::unnamed_counter_reset();
@@ -54,43 +51,21 @@ fn wasm_reset_global_state() {
 	narrative::reset();
 }
 
-#[cfg(feature = "wasm")]
-fn json_escape(s: &str) -> String {
-	let mut out = String::with_capacity(s.len());
-	for c in s.chars() {
-		match c {
-			'"' => out.push_str("\\\""),
-			'\\' => out.push_str("\\\\"),
-			'\n' => out.push_str("\\n"),
-			'\r' => out.push_str("\\r"),
-			'\t' => out.push_str("\\t"),
-			c if c < '\u{20}' => out.push_str(&format!("\\u{:04x}", c as u32)),
-			c => out.push(c),
-		}
-	}
-	out
-}
+// ---------------------------------------------------------------------------
+// WASM API
+// ---------------------------------------------------------------------------
 
 #[cfg(feature = "wasm")]
-fn json_string_array(arr: &[String]) -> String {
-	let mut out = String::from("[");
-	for (i, s) in arr.iter().enumerate() {
-		if i > 0 {
-			out.push(',');
-		}
-		out.push('"');
-		out.push_str(&json_escape(s));
-		out.push('"');
-	}
-	out.push(']');
-	out
-}
+use wasm_bindgen::prelude::*;
+
+#[cfg(feature = "wasm")]
+use json::{json_escape, json_string_array};
 
 /// Verify a Verifpal model from source text. Returns JSON.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_verify(input: &str) -> String {
-	wasm_reset_global_state();
+	reset_global_state();
 	info::wasm_messages_init();
 
 	let m = match parser::parse_string("workbench.vp", input) {
@@ -160,7 +135,7 @@ pub fn wasm_verify(input: &str) -> String {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {
-	wasm_reset_global_state();
+	reset_global_state();
 
 	let m = match parser::parse_string("workbench.vp", input) {
 		Ok(m) => m,
