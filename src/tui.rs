@@ -49,7 +49,7 @@ pub fn tui_enabled() -> bool {
 #[cfg(not(feature = "cli"))]
 pub fn tui_message(_msg: &str, _level: InfoLevel) {}
 #[cfg(not(feature = "cli"))]
-pub fn tui_progress(_stage_str: &str, _count: usize) {}
+pub fn tui_progress(_depth_str: &str, _count: usize) {}
 #[cfg(not(feature = "cli"))]
 pub fn tui_attacker_known(_count: usize) {}
 #[cfg(not(feature = "cli"))]
@@ -57,7 +57,7 @@ pub fn tui_scan_update(_name: &str, _weight: usize, _max_weight: usize, _used: u
 #[cfg(not(feature = "cli"))]
 pub fn tui_mutation_detail(_desc: &str) {}
 #[cfg(not(feature = "cli"))]
-pub fn tui_stage_update(_stage: i32) {}
+pub fn tui_depth_update(_depth: i32) {}
 
 // ── Full CLI TUI implementation ─────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ struct TuiState {
 	messages: Vec<TuiMsg>,
 	queries: Vec<TuiQuery>,
 	// live
-	stage: String,
+	depth: String,
 	phase: i32,
 	analysis_count: usize,
 	total_deductions: usize,
@@ -175,7 +175,7 @@ static TUI: LazyLock<RwLock<TuiState>> = LazyLock::new(|| {
 		principals: vec![],
 		messages: vec![],
 		queries: vec![],
-		stage: "0".to_string(),
+		depth: "0".to_string(),
 		phase: 0,
 		analysis_count: 0,
 		total_deductions: 0,
@@ -334,7 +334,7 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 			}
 			InfoLevel::Analysis => {
 				if msg.contains("Mutation map for") {
-					// Extract principal name from "Mutation map for Bob at stage..."
+					// Extract principal name from "Mutation map for Bob at depth..."
 					if let Some(rest) = msg.strip_prefix("Mutation map for ") {
 						if let Some(name) = rest.split_whitespace().next() {
 							st.scan_principal = name.to_string();
@@ -345,12 +345,12 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 					}
 				} else if msg.contains("Constructed skeleton") {
 					// skeleton info — no separate line needed
-				} else if msg.contains("Initializing Stage") {
-					if let Some(rest) = msg.strip_prefix("Initializing Stage ") {
+				} else if msg.contains("Initializing depth") {
+					if let Some(rest) = msg.strip_prefix("Initializing depth ") {
 						if let Some(num) = rest.split_whitespace().next() {
-							let stage_str = num.trim_end_matches(',');
-							st.stage = stage_str.to_string();
-							let seed = stage_str.parse::<u64>().unwrap_or(0);
+							let depth_str = num.trim_end_matches(',');
+							st.depth = depth_str.to_string();
+							let seed = depth_str.parse::<u64>().unwrap_or(0);
 							st.narrative =
 								narrative::pick_narrative(NarrativeContext::Escalation, seed);
 						}
@@ -379,13 +379,13 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 
 /// Handle an info_analysis progress tick in TUI mode.
 #[cfg(feature = "cli")]
-pub fn tui_progress(stage_str: &str, count: usize) {
+pub fn tui_progress(depth_str: &str, count: usize) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
 			return;
 		}
-		st.stage = stage_str.to_string();
+		st.depth = depth_str.to_string();
 		st.analysis_count = count;
 	}
 	tui_redraw();
@@ -458,21 +458,21 @@ pub fn tui_mutation_detail(desc: &str) {
 	force_redraw();
 }
 
-/// Update stage (called at stage transitions).
+/// Update depth (called at depth transitions).
 #[cfg(feature = "cli")]
-pub fn tui_stage_update(stage: i32) {
+pub fn tui_depth_update(depth: i32) {
 	{
 		let mut st = TUI.write().unwrap_or_else(|e| e.into_inner());
 		if !st.enabled {
 			return;
 		}
-		st.stage = stage.to_string();
+		st.depth = depth.to_string();
 		st.worthwhile_count = 0;
 		st.last_mutations.clear();
-		let seed = stage as u64;
+		let seed = depth as u64;
 		st.narrative = narrative::pick_narrative(NarrativeContext::Escalation, seed);
 	}
-	// Stage change is high-priority
+	// Depth change is high-priority
 	force_redraw();
 }
 
@@ -808,7 +808,7 @@ fn draw_header(buf: &mut String, st: &TuiState, w: usize, frame: usize, finished
 	} else {
 		String::new()
 	};
-	let info_str = format!(" Stage {} |{} {}", st.stage, phase_str, timer);
+	let info_str = format!(" Depth {} |{} {}", st.depth, phase_str, timer);
 	let info_vis = vis_len(&info_str);
 	let bar_chars = inner.saturating_sub(2 + info_vis); // 2 for leading "  "
 	let scan_pos = if finished || bar_chars == 0 {

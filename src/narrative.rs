@@ -224,7 +224,7 @@ const SPAMTON_ESCALATION: &[&str] = &[
 	"THE [[Strings]] ARE PULLING ME HIGHER!! MORE [[Mutations]]!!",
 	"BIGGER!! STRONGER!! MORE [[Aggressive Pricing]]!!",
 	"ENTERING [[Hard Mode]]!! YOUR PROTOCOL WILL [[Beg for Mercy]]!!",
-	"NOW'S MY CHANCE TO BE A [[BIG SHOT]] AT [[Stage {S}]]!!",
+	"NOW'S MY CHANCE TO BE A [[BIG SHOT]] AT [[Depth {S}]]!!",
 ];
 
 const SPAMTON_DEDUCTION: &[&str] = &[

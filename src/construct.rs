@@ -460,12 +460,12 @@ fn construct_principal_states_get_value_mutatability(
 }
 
 impl PrincipalState {
-	/// Deep-clone this principal state for a new verification stage.
+	/// Deep-clone this principal state for a new search depth level.
 	///
 	/// When `purify` is true, resets all values to their pre-mutation state
-	/// (for a clean new stage).  When false, preserves current mutation state
-	/// (for rewrite analysis within the same stage).
-	pub fn clone_for_stage(&self, purify: bool) -> PrincipalState {
+	/// (for a clean new depth level).  When false, preserves current mutation
+	/// state (for rewrite analysis within the same depth level).
+	pub fn clone_for_depth(&self, purify: bool) -> PrincipalState {
 		let values = self
 			.values
 			.iter()

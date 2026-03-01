@@ -375,7 +375,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //
 // `explosive`:         When true, the primitive generates many candidate
 //                      values during attacker injection, so the engine
-//                      defers exploring it until later proof stages.
+//                      defers exploring it to reduce early search cost.
 //                      Set this for hash-like primitives (HASH, HKDF)
 //                      where the attacker could wrap any known value
 //                      in the primitive to produce a candidate.

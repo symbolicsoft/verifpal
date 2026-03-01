@@ -19,7 +19,7 @@ pub fn verify_analysis(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	stage: i32,
+	depth: i32,
 ) -> VResult<()> {
-	compute_knowledge_closure(ctx, km, ps, stage)
+	compute_knowledge_closure(ctx, km, ps, depth)
 }

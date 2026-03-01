@@ -297,7 +297,7 @@ fn info_verify_result_summary_color(
 // Analysis progress
 // ---------------------------------------------------------------------------
 
-pub fn info_analysis(stage: i32) {
+pub fn info_analysis(depth: i32) {
 	if cfg!(target_arch = "wasm32") {
 		return;
 	}
@@ -312,24 +312,15 @@ pub fn info_analysis(stage: i32) {
 	if interval > 1 && !analysis_count.is_multiple_of(interval) {
 		return;
 	}
-	let owned;
-	let s: &str = match stage {
-		1 => "1",
-		2 | 3 => "2-3",
-		4 | 5 => "4-5",
-		_ => {
-			owned = stage.to_string();
-			&owned
-		}
-	};
+	let s = depth.to_string();
 	if crate::tui::tui_enabled() {
-		crate::tui::tui_progress(s, analysis_count);
+		crate::tui::tui_progress(&s, analysis_count);
 		return;
 	}
 	#[cfg(feature = "cli")]
 	if color_output_support() {
 		let progress = format!(
-			"  {} Stage {}, Analysis {}...",
+			"  {} Depth {}, Analysis {}...",
 			"\u{25b8}".blue(),
 			s,
 			analysis_count
@@ -340,7 +331,7 @@ pub fn info_analysis(stage: i32) {
 		print!("\r");
 		return;
 	}
-	print!("  Stage {}, Analysis {}...", s, analysis_count);
+	print!("  Depth {}, Analysis {}...", s, analysis_count);
 	print!("\r");
 }
 

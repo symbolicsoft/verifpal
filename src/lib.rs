@@ -193,7 +193,7 @@ fn wasm_verify_passive(
 ) -> types::VResult<()> {
 	for phase in 0..=km.max_phase {
 		ctx.attacker_init();
-		let mut ps_pure = principal_states[0].clone_for_stage(true);
+		let mut ps_pure = principal_states[0].clone_for_depth(true);
 		ps_pure.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure, phase)?;
 		verify::verify_standard_run(ctx, km, principal_states, 0)?;

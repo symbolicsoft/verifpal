@@ -379,7 +379,7 @@ pub struct Provenance {
 	pub attacker_tainted: bool,
 }
 
-/// Mutable per-constant values (deep-cloned for each active attacker stage).
+/// Mutable per-constant values (deep-cloned for each active attacker depth level).
 ///
 /// The three value fields track different points in the value's lifecycle:
 ///

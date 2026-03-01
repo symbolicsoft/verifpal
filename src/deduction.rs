@@ -113,7 +113,7 @@ pub fn compute_knowledge_closure(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	stage: i32,
+	depth: i32,
 ) -> VResult<()> {
 	let record = compute_slot_diffs(ps, km);
 
@@ -122,7 +122,7 @@ pub fn compute_knowledge_closure(
 
 		if !try_deduction_step(ctx, &attacker, ps, &record) {
 			ctx.analysis_count_increment();
-			info_analysis(stage);
+			info_analysis(depth);
 			return Ok(());
 		}
 	}

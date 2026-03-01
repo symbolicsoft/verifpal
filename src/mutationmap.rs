@@ -262,9 +262,6 @@ fn replace_equation(value: &Value, _depth: usize, attacker: &AttackerState) -> V
 			3 => mutations.push(value_g_nil_nil()),
 			_ => {}
 		}
-		if false {
-			return mutations;
-		}
 		for v in attacker.known.iter() {
 			if let Value::Equation(ve) = v {
 				if ve.values.len() == e.values.len() && find_equivalent(v, &mutations).is_none() {

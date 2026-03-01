@@ -116,7 +116,7 @@ pub fn verify_active(
 			false,
 		);
 		ctx.attacker_init();
-		let mut ps_pure_resolved = principal_states[0].clone_for_stage(true);
+		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;
@@ -226,7 +226,7 @@ fn verify_active_at_depth(
 	principal_states: &[PrincipalState],
 ) {
 	if crate::tui::tui_enabled() {
-		crate::tui::tui_stage_update(depth as i32);
+		crate::tui::tui_depth_update(depth as i32);
 	}
 	let worthwhile_mutation_count = AtomicU32::new(0);
 	let old_known = ctx.attacker_known_count();
@@ -487,7 +487,7 @@ fn verify_active_scan<'s>(
 			};
 			let result = verify_active_mutate_principal_state(
 				km,
-				ps_base.clone_for_stage(true),
+				ps_base.clone_for_depth(true),
 				attacker,
 				&task_map,
 			);
@@ -686,7 +686,7 @@ fn verify_active_scan_seq(
 		};
 		let result = verify_active_mutate_principal_state(
 			km,
-			ps_base.clone_for_stage(true),
+			ps_base.clone_for_depth(true),
 			attacker,
 			&task_map,
 		);

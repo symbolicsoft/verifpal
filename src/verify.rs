@@ -86,7 +86,7 @@ pub fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
-	stage: i32,
+	depth: i32,
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
@@ -94,7 +94,7 @@ pub fn verify_standard_run(
 		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
 		// Phase 2: Knowledge closure (monotone fixed-point)
-		crate::verifyanalysis::verify_analysis(ctx, km, &ps_resolved, stage)?;
+		crate::verifyanalysis::verify_analysis(ctx, km, &ps_resolved, depth)?;
 
 		// Phase 3: Query evaluation
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
@@ -114,7 +114,7 @@ pub fn generate_trace(
 	attacker: &AttackerState,
 ) -> VResult<PrincipalState> {
 	// 1. Resolution
-	let mut ps_resolved = ps.clone_for_stage(false);
+	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values(attacker)?;
 
 	// 2. Mutation record
@@ -161,7 +161,7 @@ fn verify_passive(
 	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
 		ctx.attacker_init();
-		let mut ps_pure_resolved = principal_states[0].clone_for_stage(true);
+		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states, 0)?;

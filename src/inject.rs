@@ -40,7 +40,7 @@ const MAX_INJECTIONS_PER_PRIMITIVE: usize = 500;
 /// and could plausibly be interchanged.  This avoids injecting, say, an
 /// `ENC(k, m)` where an `AEAD_ENC(k, m, ad)` is expected.
 ///
-/// Skeleton comparison uses a three-stage filter for speed:
+/// Skeleton comparison uses a three-step filter for speed:
 /// 1. **Depth check** — O(1), no allocation.
 /// 2. **Hash check** — O(n) FNV-style hash, no allocation.
 /// 3. **Full equivalence** — only if depth and hash match.
@@ -168,7 +168,7 @@ pub fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
 }
 
 /// Check if candidate primitive `p` has the same skeleton as `reference`.
-/// Uses the three-stage filter (same ID → depth ≤ → hash match → full check)
+/// Uses the three-step filter (same ID → depth ≤ → hash match → full check)
 /// to avoid expensive recursive comparisons in the common non-matching case.
 fn inject_skeleton_equivalent(p: &Primitive, reference: &Primitive) -> bool {
 	if p.id != reference.id {
