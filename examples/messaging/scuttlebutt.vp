@@ -21,7 +21,7 @@ principal Bob[
 	ephemeralBPub = G^ephemeralB
 ]
 
-Bob -> Alice: longTermBPub
+Bob -> Alice: [longTermBPub]
 
 // 1. Client Hello
 
