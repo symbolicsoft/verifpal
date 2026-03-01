@@ -4,7 +4,6 @@
 build:
 	@/bin/echo "[Verifpal] Building Verifpal..."
 	@cargo build --release 
-	@/bin/echo " OK"
 
 lint:
 	@/bin/echo "[Verifpal] Running clippy..."
@@ -20,12 +19,10 @@ wasm:
 	@mkdir -p ../verifpal-website/res/wasm
 	@cp pkg/verifpal_bg.wasm ../verifpal-website/res/wasm/
 	@cp pkg/verifpal.js ../verifpal-website/res/wasm/
-	@/bin/echo " OK"
 
 clean:
 	@/bin/echo "[Verifpal] Cleaning up..."
 	@cargo clean
 	@$(RM) -r dist
-	@/bin/echo "                   OK"
 
 .PHONY: all build lint test wasm clean assets examples HomebrewFormula scripts src tools
