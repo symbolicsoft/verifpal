@@ -724,7 +724,7 @@ fn compact_knowledge_desc(msg: &str) -> String {
 		return String::new();
 	};
 	// Try to extract the value name — first word or primitive name
-	let val_name = if let Some(rest) = msg.strip_prefix("Output of ") {
+	let val_name = if let Some(idx) = msg.find(" of ") { let rest = &msg[idx + 4..];
 		rest.split('(').next().unwrap_or("?").to_string()
 	} else {
 		msg.split_whitespace().next().unwrap_or("?").to_string()
