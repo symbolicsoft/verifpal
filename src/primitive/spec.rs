@@ -381,13 +381,14 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                      where the attacker could wrap any known value
 //                      in the primitive to produce a candidate.
 //
-// `password_hashing`:  Argument indices where password values are
-//                      cryptographically protected. The attacker can
-//                      only attempt offline password guessing against
-//                      arguments *not* in this list. For ENC(key, pt),
-//                      `password_hashing: vec![1]` means the plaintext
-//                      (arg 1) is protected; the key (arg 0) is the
-//                      attackable surface.
+// `password_hashing`:  Argument indices with inherent computational
+//                      resistance to offline brute-force, even when
+//                      the attacker knows every other argument. Only
+//                      PW_HASH uses this (it is expensive by design).
+//                      For all other primitives, password protection
+//                      is determined dynamically: a password is safe
+//                      when the attacker lacks at least one sibling
+//                      argument needed to verify a guess.
 //
 // `bypass_key`:        How the active attacker extracts the secret needed
 //                      to forge an input that bypasses a failed guard.
@@ -422,7 +423,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //           filter: Some(filter_identity),
 //           ..DecomposeRule::default()
 //       },
-//       password_hashing: vec![1],   // plaintext is protected
+//       // password_hashing not needed: protection is dynamic
 //       ..PrimitiveSpec::default()
 //   },
 //   PrimitiveSpec {
@@ -492,7 +493,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_identity),
 				..DecomposeRule::default()
 			},
-			password_hashing: vec![1, 2],
 			..PrimitiveSpec::default()
 		},
 		// AEAD_DEC
@@ -533,7 +533,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_identity),
 				..DecomposeRule::default()
 			},
-			password_hashing: vec![1],
 			..PrimitiveSpec::default()
 		},
 		// DEC
@@ -566,7 +565,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "MAC",
 			arity: vec![2],
 			output: vec![1],
-			password_hashing: vec![1],
 			..PrimitiveSpec::default()
 		},
 		// SIGN
@@ -575,7 +573,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SIGN",
 			arity: vec![2],
 			output: vec![1],
-			password_hashing: vec![1],
 			..PrimitiveSpec::default()
 		},
 		// SIGNVERIF
@@ -609,7 +606,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_extract_dh_exponent),
 				..DecomposeRule::default()
 			},
-			password_hashing: vec![1],
 			..PrimitiveSpec::default()
 		},
 		// PKE_DEC
@@ -676,7 +672,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "RINGSIGN",
 			arity: vec![4],
 			output: vec![1],
-			password_hashing: vec![3],
 			..PrimitiveSpec::default()
 		},
 		// RINGSIGNVERIF
@@ -715,7 +710,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_identity),
 				..DecomposeRule::default()
 			},
-			password_hashing: vec![1],
 			..PrimitiveSpec::default()
 		},
 		// UNBLIND

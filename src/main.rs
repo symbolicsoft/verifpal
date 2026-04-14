@@ -1102,14 +1102,15 @@ mod unit_tests {
 		let meta = vec![make_slot_meta(&pw_c, true)];
 		let values = vec![make_slot_values(&pw, 0)];
 		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
 		let mut out = Vec::new();
-		find_obtainable_passwords(&pw, false, &ps, &mut out);
+		find_obtainable_passwords(&pw, false, true, &attacker, &ps, &mut out);
 		assert_eq!(out.len(), 1);
 	}
 
 	#[test]
-	fn find_obtainable_passwords_inside_primitive() {
-		// ENC password_hashing=[1], so password at arg 0 is NOT hashed (obtainable)
+	fn find_obtainable_passwords_known_sibling() {
+		// ENC(pwd, msg): attacker knows msg → can verify pwd guesses → obtainable
 		let pw = make_password("fop2_pw");
 		let msg = make_constant("fop2_msg");
 		let pw_c = pw.as_constant().unwrap().clone();
@@ -1118,10 +1119,27 @@ mod unit_tests {
 		let meta = vec![make_slot_meta(&pw_c, true), make_slot_meta(&msg_c, false)];
 		let values = vec![make_slot_values(&pw, 0), make_slot_values(&msg, 0)];
 		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![msg]);
 		let mut out = Vec::new();
-		find_obtainable_passwords(&enc, false, &ps, &mut out);
-		// Password at arg index 0 is not in ENC's password_hashing=[1], so it's obtainable
+		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
 		assert_eq!(out.len(), 1);
+	}
+
+	#[test]
+	fn find_obtainable_passwords_unknown_sibling() {
+		// ENC(pwd, secret): attacker does NOT know secret → cannot verify → safe
+		let pw = make_password("fop3_pw");
+		let secret = make_constant("fop3_secret");
+		let pw_c = pw.as_constant().unwrap().clone();
+		let secret_c = secret.as_constant().unwrap().clone();
+		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), secret.clone()], 0);
+		let meta = vec![make_slot_meta(&pw_c, true), make_slot_meta(&secret_c, false)];
+		let values = vec![make_slot_values(&pw, 0), make_slot_values(&secret, 0)];
+		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+		let mut out = Vec::new();
+		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
+		assert_eq!(out.len(), 0);
 	}
 
 	// -----------------------------------------------------------------------
@@ -1398,7 +1416,7 @@ mod tests {
 	}
 	#[test]
 	fn test_pw_hash() {
-		run_model("pw_hash.vp", "c1c0c0c0c1c1");
+		run_model("pw_hash.vp", "c0c0c0c0c0c0");
 	}
 	#[test]
 	fn test_pw_hash2() {
@@ -1663,5 +1681,9 @@ mod tests {
 	#[test]
 	fn test_password_aead() {
 		run_model("password_aead.vp", "c0");
+	}
+	#[test]
+	fn test_password_underspec() {
+		run_model("password_underspec.vp", "c0c1c0c0c0c1c0c1c0c0c1c0");
 	}
 }

@@ -475,17 +475,28 @@ pub fn can_rebuild(p: &Primitive) -> Option<Value> {
 // Password extraction
 // ---------------------------------------------------------------------------
 
-/// Find password-qualified values that appear in unprotected positions
-/// within a value tree. These are passwords the attacker can attempt
-/// offline guessing against.
+/// Find password-qualified values that the attacker can recover via
+/// offline brute-force guessing.
 ///
-/// The `password_hashing` field in [`PrimitiveSpec`] lists argument indices
-/// where passwords are cryptographically protected. Protection propagates
-/// to all descendants: if a non-core primitive protects an argument index,
-/// every value nested inside that argument is also considered protected.
+/// A password at position `i` of primitive `P(a0, …, an)` is obtainable
+/// when two conditions hold at every primitive level in the nesting chain:
+///
+/// 1. **No inherent protection.** Position `i` is not in `P.password_hashing`.
+///    This field is reserved for primitives that resist brute-force by
+///    design (e.g. `PW_HASH`).
+///
+/// 2. **Verifiable guess.** The attacker knows every sibling argument
+///    `aj` (j ≠ i). This lets the attacker reconstruct `P(…, guess, …)`
+///    and compare against the known output to confirm the guess.
+///
+/// Both checks are applied at *every* primitive ancestor (core and
+/// non-core alike). If any ancestor has an unknown sibling, the attacker
+/// cannot reconstruct the full value and the password is safe.
 pub fn find_obtainable_passwords(
 	a: &Value,
 	protected: bool,
+	can_verify: bool,
+	attacker: &AttackerState,
 	ps: &PrincipalState,
 	out: &mut Vec<Value>,
 ) {
@@ -493,23 +504,35 @@ pub fn find_obtainable_passwords(
 		Value::Constant(c) => {
 			let (resolved, _) = ps.resolve_constant(c, true);
 			let is_password = matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password));
-			if is_password && !protected {
+			if is_password && !protected && can_verify {
 				out.push(resolved);
 			}
 		}
 		Value::Primitive(p) => {
 			let is_core = primitive_is_core(p.id);
 			for (i, arg) in p.arguments.iter().enumerate() {
-				let arg_protected = protected
-					|| (!is_core
-						&& primitive_get(p.id)
-							.is_ok_and(|prim| prim.password_hashing.contains(&i)));
-				find_obtainable_passwords(arg, arg_protected, ps, out);
+				let inherently_protected = !is_core
+					&& primitive_get(p.id)
+						.is_ok_and(|prim| prim.password_hashing.contains(&i));
+				let siblings_known = p
+					.arguments
+					.iter()
+					.enumerate()
+					.filter(|(j, _)| *j != i)
+					.all(|(_, sibling)| attacker.knows(sibling).is_some());
+				find_obtainable_passwords(
+					arg,
+					protected || inherently_protected,
+					can_verify && siblings_known,
+					attacker,
+					ps,
+					out,
+				);
 			}
 		}
 		Value::Equation(e) => {
 			for v in &e.values {
-				find_obtainable_passwords(v, protected, ps, out);
+				find_obtainable_passwords(v, protected, can_verify, attacker, ps, out);
 			}
 		}
 	}

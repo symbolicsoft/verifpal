@@ -346,11 +346,11 @@ fn rule_password_extract(
 	ctx: &VerifyContext,
 	value: &Value,
 	ps: &PrincipalState,
-	_attacker: &AttackerState,
+	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	let mut passwords = Vec::new();
-	find_obtainable_passwords(value, false, ps, &mut passwords);
+	find_obtainable_passwords(value, false, true, attacker, ps, &mut passwords);
 	let mut found = false;
 	for password in &passwords {
 		if ctx.attacker_put(password, record) {
