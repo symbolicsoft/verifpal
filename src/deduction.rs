@@ -350,7 +350,7 @@ fn rule_password_extract(
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	let mut passwords = Vec::new();
-	find_obtainable_passwords(value, value, None, ps, &mut passwords);
+	find_obtainable_passwords(value, false, ps, &mut passwords);
 	let mut found = false;
 	for password in &passwords {
 		if ctx.attacker_put(password, record) {

@@ -1104,7 +1104,7 @@ mod unit_tests {
 		let values = vec![make_slot_values(&pw, 0)];
 		let ps = make_principal_state("Test", 0, meta, values);
 		let mut out = Vec::new();
-		find_obtainable_passwords(&pw, &value_nil(), None, &ps, &mut out);
+		find_obtainable_passwords(&pw, false, &ps, &mut out);
 		assert_eq!(out.len(), 1);
 	}
 
@@ -1120,7 +1120,7 @@ mod unit_tests {
 		let values = vec![make_slot_values(&pw, 0), make_slot_values(&msg, 0)];
 		let ps = make_principal_state("Test", 0, meta, values);
 		let mut out = Vec::new();
-		find_obtainable_passwords(&enc, &enc, None, &ps, &mut out);
+		find_obtainable_passwords(&enc, false, &ps, &mut out);
 		// Password at arg index 0 is not in ENC's password_hashing=[1], so it's obtainable
 		assert_eq!(out.len(), 1);
 	}
@@ -1656,5 +1656,9 @@ mod tests {
 	#[test]
 	fn test_psk_with_dh() {
 		run_model("psk_with_dh.vp", "c0c0a1a1");
+	}
+	#[test]
+	fn test_concat_password() {
+		run_model("concat_password.vp", "c0c0c0");
 	}
 }
