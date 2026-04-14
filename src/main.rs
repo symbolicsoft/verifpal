@@ -898,7 +898,7 @@ mod unit_tests {
 
 	#[test]
 	fn passive_decompose_aead_enc() {
-		// AEAD_ENC has passive_reveal = [2] (the associated data)
+		// AEAD_ENC has no passive_reveal — the AD is not part of the ciphertext
 		let key = make_constant("pd_key");
 		let msg = make_constant("pd_msg");
 		let ad = make_constant("pd_ad");
@@ -909,8 +909,7 @@ mod unit_tests {
 			instance_check: false,
 		};
 		let revealed = passively_decompose(&p);
-		assert_eq!(revealed.len(), 1);
-		assert!(revealed[0].equivalent(&ad, true));
+		assert_eq!(revealed.len(), 0);
 	}
 
 	#[test]
@@ -1595,7 +1594,7 @@ mod tests {
 	}
 	#[test]
 	fn test_aead_leak() {
-		run_model("aead_leak.vp", "c1");
+		run_model("aead_leak.vp", "c0");
 	}
 	#[test]
 	fn test_deep_nesting() {
@@ -1660,5 +1659,9 @@ mod tests {
 	#[test]
 	fn test_concat_password() {
 		run_model("concat_password.vp", "c0c0c0");
+	}
+	#[test]
+	fn test_password_aead() {
+		run_model("password_aead.vp", "c0");
 	}
 }

@@ -1,6 +1,6 @@
-// Proof-of-concept that Verifpal 0.27.4 does not consider that 
-// associated data in AEAD is authenticated but NOT encrypted (hence,
-// the Dolev-Yao attacker should know the associated data):
+// AEAD associated data is an input to encryption but is NOT part of the
+// ciphertext output. The attacker cannot extract the AD from observing
+// the ciphertext — the protocol must send it separately for it to leak.
 // * protocol: simple Diffie-Hellman (DH) with authenticated long-term keys only;
 // * author: Stefano Berlato (sberlato@fbk.eu).
 
@@ -51,13 +51,10 @@ principal Bob [
 
 
 
-// According to Verifpal (0.27.4), the query below passes, even though the attacker 
-// can read the associated data - that is, the shared secret - and could use the 
-// shared secret to violated the confidentiality of the message (try replacing
-// "Alice -> Bob: ciphertext_and_tag" 
-// with 
-// "Alice -> Bob: ciphertext_and_tag, shared_secret_alice"
-// to observe the expected attack).
+// The query below passes because the AD (shared_secret_alice) is not part of the
+// ciphertext output and is never sent separately. If Alice also sent the AD
+// explicitly (e.g., "Alice -> Bob: ciphertext_and_tag, shared_secret_alice"),
+// the attacker could use it to decrypt the message and the query would fail.
 queries[
     confidentiality? message
 ]

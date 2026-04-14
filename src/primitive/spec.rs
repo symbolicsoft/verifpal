@@ -279,10 +279,11 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                      private exponent.
 // `decompose.passive_reveal`:
 //                      Argument indices leaked even without the key.
-//                      For AEAD_ENC, `passive_reveal: vec![2]` means the
-//                      associated data (argument 2) is always visible to
-//                      the attacker on the wire, even without knowing the
-//                      encryption key.
+//                      Empty for most primitives. Could be used for
+//                      primitives where some arguments are visible to the
+//                      attacker by construction (not the case for AEAD,
+//                      where the AD is an input but not part of the
+//                      ciphertext output).
 //
 // ## Recompose rule
 //
@@ -489,9 +490,9 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				passive_reveal: vec![2],
+				..DecomposeRule::default()
 			},
-			password_hashing: vec![1],
+			password_hashing: vec![1, 2],
 			..PrimitiveSpec::default()
 		},
 		// AEAD_DEC
