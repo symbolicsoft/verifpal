@@ -318,6 +318,23 @@ fn rule_equivalize(
 	_attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
+	// When the principal halted on a failed checked primitive (ASSERT?,
+	// AEAD_DEC?, SIGNVERIF?, …), any `leaks` this same principal declared
+	// after that point never fires.  Using the attacker's token for such
+	// a leaked constant to re-resolve in the current mutated state would
+	// let them harvest values from a branch the principal never reached.
+	if let Value::Constant(c) = value {
+		if let Some(halted_at) = ps.halted_at {
+			let suppressed = ps.leaks.iter().any(|leak| {
+				leak.constant_id == c.id
+					&& leak.principal_id == ps.id
+					&& leak.declared_at > halted_at
+			});
+			if suppressed {
+				return false;
+			}
+		}
+	}
 	let resolved = if let Value::Constant(c) = value {
 		let (r, _) = ps.resolve_constant(c, true);
 		r

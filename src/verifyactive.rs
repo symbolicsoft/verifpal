@@ -41,6 +41,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
+use crate::deduction::compute_knowledge_closure;
 use crate::info::{info_message, info_output_text};
 use crate::mutationmap::mutation_product;
 use crate::possible::{
@@ -53,7 +54,6 @@ use crate::principal::ATTACKER_ID;
 use crate::types::*;
 use crate::value::{compute_slot_diffs, resolve_trace_values, value_g_nil};
 use crate::verify::{verify_resolve_queries, verify_standard_run};
-use crate::deduction::compute_knowledge_closure;
 
 /// Information about a guarded primitive that failed its rewrite and caused
 /// (or would cause) truncation of the principal state.
@@ -150,11 +150,7 @@ pub fn verify_active(
 
 /// After a worthwhile mutation has been analyzed, attempt guard bypass if
 /// truncation occurred.  Used by both the rayon and sequential scan paths.
-fn process_mutation_bypass(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	result: &MutationResult,
-) {
+fn process_mutation_bypass(ctx: &VerifyContext, km: &ProtocolTrace, result: &MutationResult) {
 	if let Some(ref bypass) = result.guard_bypass {
 		try_guard_bypass(ctx, km, &bypass.full_state, &bypass.failed_guards);
 	}
@@ -380,13 +376,7 @@ fn verify_active_scan_at_weight<'s>(
 			let cost = sub_map.mutations[0].len() as u32;
 			let bu = budget_used.fetch_add(cost, Ordering::SeqCst);
 			if crate::tui::tui_enabled() && bu % 500 < cost {
-				crate::tui::tui_scan_update(
-					&ps_base.name,
-					weight,
-					n.min(depth),
-					bu + cost,
-					budget,
-				);
+				crate::tui::tui_scan_update(&ps_base.name, weight, n.min(depth), bu + cost, budget);
 			}
 			let next_map = sub_map.next();
 			verify_active_scan(
@@ -814,6 +804,7 @@ fn verify_active_mutate_principal_state(
 
 	if let Some(trunc_at) = truncation_index {
 		let failed_idx = truncation_failed_idx.unwrap_or(0);
+		let failed_declared_at = ps.meta[failed_idx].declared_at;
 		let guard_bypass = if !failed_guards.is_empty() {
 			Some(GuardBypassInfo {
 				full_state: ps_pre,
@@ -823,6 +814,7 @@ fn verify_active_mutate_principal_state(
 			None
 		};
 		ps = verify_active_drop_principal_state_after_index(ps, trunc_at);
+		ps.halted_at = Some(failed_declared_at);
 		return MutationResult {
 			state: ps,
 			is_worthwhile: is_worthwhile_mutation && earliest_mutation < failed_idx,

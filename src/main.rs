@@ -224,6 +224,8 @@ mod unit_tests {
 			meta: Arc::new(meta),
 			values,
 			index: Arc::new(index),
+			leaks: Arc::new(Vec::new()),
+			halted_at: None,
 		}
 	}
 
@@ -1133,7 +1135,10 @@ mod unit_tests {
 		let pw_c = pw.as_constant().unwrap().clone();
 		let secret_c = secret.as_constant().unwrap().clone();
 		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), secret.clone()], 0);
-		let meta = vec![make_slot_meta(&pw_c, true), make_slot_meta(&secret_c, false)];
+		let meta = vec![
+			make_slot_meta(&pw_c, true),
+			make_slot_meta(&secret_c, false),
+		];
 		let values = vec![make_slot_values(&pw, 0), make_slot_values(&secret, 0)];
 		let ps = make_principal_state("Test", 0, meta, values);
 		let attacker = make_attacker_state(vec![]);
@@ -1173,6 +1178,7 @@ mod unit_tests {
 			max_declared_at: 0,
 			max_phase: 0,
 			used_by: HashMap::new(),
+			leaks: Arc::new(Vec::new()),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -1209,6 +1215,7 @@ mod unit_tests {
 			max_declared_at: 0,
 			max_phase: 0,
 			used_by: HashMap::new(),
+			leaks: Arc::new(Vec::new()),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -1413,6 +1420,10 @@ mod tests {
 	#[test]
 	fn test_pke_unchecked_assert() {
 		run_model("pke_unchecked_assert.vp", "c0a1");
+	}
+	#[test]
+	fn test_assert_junglegym() {
+		run_model("assert_junglegym.vp", "c0");
 	}
 	#[test]
 	fn test_pw_hash() {

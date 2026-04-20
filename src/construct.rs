@@ -22,7 +22,9 @@ pub fn construct_protocol_trace(
 		max_declared_at: 0,
 		max_phase: 0,
 		used_by: HashMap::new(),
+		leaks: Arc::new(Vec::new()),
 	};
+	let mut leaks: Vec<LeakEvent> = Vec::new();
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
@@ -50,6 +52,7 @@ pub fn construct_protocol_trace(
 			Block::Principal(principal) => {
 				declared_at = construct_trace_render_principal(
 					&mut trace,
+					&mut leaks,
 					principal,
 					declared_at,
 					current_phase,
@@ -67,6 +70,7 @@ pub fn construct_protocol_trace(
 	}
 	trace.max_phase = current_phase;
 	trace.used_by = construct_trace_used_by(&trace);
+	trace.leaks = Arc::new(leaks);
 	Ok(trace)
 }
 
@@ -94,6 +98,7 @@ fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<Pr
 
 fn construct_trace_render_principal(
 	trace: &mut ProtocolTrace,
+	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	mut declared_at: i32,
 	current_phase: i32,
@@ -111,7 +116,14 @@ fn construct_trace_render_principal(
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
-				construct_trace_render_leaks(trace, principal, expr, current_phase)?;
+				construct_trace_render_leaks(
+					trace,
+					leaks,
+					principal,
+					expr,
+					current_phase,
+					declared_at,
+				)?;
 			}
 		}
 	}
@@ -282,9 +294,11 @@ fn construct_trace_render_assignment(
 
 fn construct_trace_render_leaks(
 	trace: &mut ProtocolTrace,
+	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	expr: &Expression,
 	current_phase: i32,
+	declared_at: i32,
 ) -> VResult<()> {
 	for c in &expr.constants {
 		let idx = match trace.index_of(c) {
@@ -307,6 +321,12 @@ fn construct_trace_render_leaks(
 		}
 		trace.slots[idx].constant.leaked = true;
 		append_unique(&mut trace.slots[idx].phases, current_phase);
+		leaks.push(LeakEvent {
+			constant_id: c.id,
+			principal_id: principal.id,
+			declared_at,
+			phase: current_phase,
+		});
 	}
 	Ok(())
 }
@@ -426,6 +446,8 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 			meta: Arc::new(meta_vec),
 			values: values_vec,
 			index: Arc::new(index_map),
+			leaks: trace.leaks.clone(),
+			halted_at: None,
 		});
 	}
 	states
@@ -496,6 +518,8 @@ impl PrincipalState {
 			meta: self.meta.clone(),
 			values,
 			index: self.index.clone(),
+			leaks: self.leaks.clone(),
+			halted_at: if purify { None } else { self.halted_at },
 		}
 	}
 }

@@ -348,6 +348,15 @@ pub struct ProtocolTrace {
 	pub max_declared_at: i32,
 	pub max_phase: i32,
 	pub used_by: HashMap<ValueId, HashMap<PrincipalId, bool>>,
+	pub leaks: Arc<Vec<LeakEvent>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LeakEvent {
+	pub constant_id: ValueId,
+	pub principal_id: PrincipalId,
+	pub declared_at: i32,
+	pub phase: i32,
 }
 
 /// Immutable per-constant metadata (shared via Arc across clones).
@@ -432,6 +441,15 @@ pub struct PrincipalState {
 	pub meta: Arc<Vec<SlotMeta>>,
 	pub values: Vec<SlotValues>,
 	pub index: Arc<HashMap<ValueId, usize>>,
+	/// All `leaks` declarations in the protocol, shared read-only across
+	/// principal states.  Used by `rule_equivalize` to suppress leaks that
+	/// follow a halted-at point.
+	pub leaks: Arc<Vec<LeakEvent>>,
+	/// If set, the `declared_at` of the earliest checked-primitive failure
+	/// encountered after attacker mutation.  Any `leaks` with a strictly
+	/// greater `declared_at` by this same principal is treated as never
+	/// having fired.  `None` means the principal executed cleanly.
+	pub halted_at: Option<i32>,
 }
 
 impl PrincipalState {
