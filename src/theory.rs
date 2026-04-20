@@ -122,11 +122,10 @@ pub fn can_decompose(
 					has.push(filtered.clone());
 				}
 			}
-			Value::Equation(inner_e) => {
-				if can_reconstruct_equation(inner_e, attacker).is_some() {
+			Value::Equation(inner_e)
+				if can_reconstruct_equation(inner_e, attacker).is_some() => {
 					has.push(filtered.clone());
 				}
-			}
 			_ => {}
 		}
 	}
@@ -223,12 +222,11 @@ pub fn can_reconstruct_primitive(
 					continue;
 				}
 			}
-			Value::Equation(inner_e) => {
-				if can_reconstruct_equation(inner_e, attacker).is_some() {
+			Value::Equation(inner_e)
+				if can_reconstruct_equation(inner_e, attacker).is_some() => {
 					has.push(a.clone());
 					continue;
 				}
-			}
 			_ => {}
 		}
 	}

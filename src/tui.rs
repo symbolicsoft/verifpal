@@ -357,15 +357,14 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 					}
 				}
 			}
-			InfoLevel::Info => {
-				if msg.starts_with("Running at phase") {
+			InfoLevel::Info
+				if msg.starts_with("Running at phase") => {
 					if let Some(rest) = msg.strip_prefix("Running at phase ") {
 						if let Some(num) = rest.strip_suffix('.') {
 							st.phase = num.parse().unwrap_or(0);
 						}
 					}
 				}
-			}
 			_ => {}
 		}
 	}
@@ -923,7 +922,7 @@ fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize, frame: usize, fi
 			};
 
 			// Animated dot position
-			let dot_pos = ((frame * 2 + mi * 7) % (lf + rf + 1)) as usize;
+			let dot_pos = (frame * 2 + mi * 7) % (lf + rf + 1);
 
 			let mut arrow = String::new();
 			arrow.push_str(&" ".repeat(indent));
@@ -978,7 +977,7 @@ fn draw_protocol_two(buf: &mut String, st: &TuiState, w: usize, frame: usize, fi
 			let dot_pos = if finished {
 				usize::MAX
 			} else {
-				((frame * 2 + mi * 5) % (lf + rf + 1)) as usize
+				(frame * 2 + mi * 5) % (lf + rf + 1)
 			};
 
 			let mut arrow = String::new();
