@@ -1,12 +1,13 @@
-Verifpal 0.50.0 is another major update that takes even fuller advantage of our recent Rust rewrite. Verifpal's analysis engine has been architecturally redesigned for clarity and performance:
+Verifpal 0.51.0 is a correctness-focused release that tightens how the analysis engine reasons about passwords, checked assertions, and AEAD associated data — all on the back of excellent bug reports from the community:
 
-- The equational theory is now centralized in a single module (theory.rs) covering all 14 rewrite rules across 21 primitives.
-- The analysis pipeline is split into three explicit phases — trace generation, a monotone fixed-point knowledge closure, and query evaluation — replacing the old interleaved loop with a structure that has a direct correctness argument.
-- Value visibility is now governed by explicit provenance tags rather than scattered boolean fields, and the old 10-stage search with 7 empirical constants has been replaced by a bounded-depth search parameterized by a single depth value.
+- Password extraction has been rewritten from a static per-primitive "password_hashing" table into a dynamic verifiable-guess check: a password is obtainable only if no ancestor primitive protects its position and the attacker knows every sibling argument needed to verify a guess. This fixes surprising leaks inside CONCAT, and produces accurate results across ENC, MAC, AEAD_ENC, SIGN, BLIND, and SHAMIR_SPLIT.
+- Checked ASSERT(...)? now genuinely halts the principal: every `leaks` declaration is recorded as a LeakEvent with its principal and declared_at, and any leak that sits after a failed check in the same execution branch is suppressed. This eliminates a class of false-positive active attacks.
+- AEAD_ENC no longer passively reveals its associated data on the wire. Associated data is an input to AEAD, not part of the ciphertext, and leaking it by default was blocking legitimate queries (e.g. passwords used as AD).
+- The TUI deduction ticker now correctly labels multi-output primitives (HKDF, SPLIT, SHAMIR_SPLIT) that previously rendered as "First" or "Second".
 
-The result: 3x faster on the full test suite, identical attack-finding coverage across all 147 tests, and a precise coverage guarantee (k ≤ d simultaneous substitutions at nesting depth ≤ d).
+None of the changes affect the Verifpal modeling language — every existing model still parses and runs, producing results that are at worst the same and in several cases strictly more accurate. 152 tests pass (up from 147).
 
-In addition, Verifpal for Visual Studio Code has been updated to be fully compatible with the Rust Verifpal rewrite (updating both the extension to version 1.0.10 and Verifpal to 0.50.0 is necessary), and we're also introducing a new Verifpal for Neovim extension!
+Thanks to Cédric Picard (@cym13) for issues #11, #12, and #13, and to @EFCCWEB3 for issue #10.
 
-Read the full release announcement here: https://symbolic.software/blog/2026-03-01-verifpal-engine-redesign/
+Read the full release announcement here: https://symbolic.software/blog/2026-04-20-verifpal-0-51/
 
