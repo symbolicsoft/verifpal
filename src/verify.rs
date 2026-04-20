@@ -171,14 +171,11 @@ pub fn verify_passive(
 	Ok(())
 }
 
-
 // ---------------------------------------------------------------------------
 // End of verification: print summary
 // ---------------------------------------------------------------------------
 
-fn verify_end(
-	ctx: &VerifyContext,
-) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 	// Leave the TUI alternate screen before printing final results
 	crate::tui::tui_finish();
 

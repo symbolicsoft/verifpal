@@ -150,15 +150,7 @@ pub fn resolve_ps_values(
 	attacker: &AttackerState,
 	use_original: bool,
 ) -> VResult<Value> {
-	resolve_ps_values_depth(
-		value,
-		root_value,
-		root_index,
-		ps,
-		attacker,
-		use_original,
-		0,
-	)
+	resolve_ps_values_depth(value, root_value, root_index, ps, attacker, use_original, 0)
 }
 
 /// Resolve a value within a PrincipalState, following constant chains and
@@ -268,12 +260,24 @@ fn resolve_ps_values_depth(
 
 	match &resolved {
 		Value::Constant(_) => Ok(resolved),
-		Value::Primitive(_) => {
-			resolve_ps_primitive_depth(&resolved, &root_val, root_idx, ps, attacker, use_orig, depth + 1)
-		}
-		Value::Equation(_) => {
-			resolve_ps_equation_depth(&resolved, &root_val, root_idx, ps, attacker, use_orig, depth + 1)
-		}
+		Value::Primitive(_) => resolve_ps_primitive_depth(
+			&resolved,
+			&root_val,
+			root_idx,
+			ps,
+			attacker,
+			use_orig,
+			depth + 1,
+		),
+		Value::Equation(_) => resolve_ps_equation_depth(
+			&resolved,
+			&root_val,
+			root_idx,
+			ps,
+			attacker,
+			use_orig,
+			depth + 1,
+		),
 	}
 }
 

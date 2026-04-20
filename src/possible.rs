@@ -9,6 +9,6 @@
 //! without import changes.
 
 pub use crate::theory::{
-	can_decompose, can_rebuild, can_recompose, can_reconstruct_equation,
-	can_reconstruct_primitive, can_rewrite, find_obtainable_passwords, passively_decompose,
+	can_decompose, can_rebuild, can_recompose, can_reconstruct_equation, can_reconstruct_primitive,
+	can_rewrite, find_obtainable_passwords, passively_decompose,
 };

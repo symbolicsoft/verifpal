@@ -8,7 +8,6 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-
 /// Compute the product of mutation sizes, returning None if it exceeds `cap`.
 pub fn mutation_product(sizes: impl Iterator<Item = usize>, cap: usize) -> Option<usize> {
 	let mut product: usize = 1;
@@ -154,7 +153,10 @@ fn skip_value(
 	attacker: &AttackerState,
 ) -> bool {
 	if ps.meta[idx].guard {
-		if !ps.meta[idx].mutatable_to.contains(&ps.values[idx].provenance.sender) {
+		if !ps.meta[idx]
+			.mutatable_to
+			.contains(&ps.values[idx].provenance.sender)
+		{
 			return true;
 		}
 	} else if ps.values[idx].provenance.creator == ps.id {

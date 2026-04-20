@@ -512,8 +512,7 @@ pub fn find_obtainable_passwords(
 			let is_core = primitive_is_core(p.id);
 			for (i, arg) in p.arguments.iter().enumerate() {
 				let inherently_protected = !is_core
-					&& primitive_get(p.id)
-						.is_ok_and(|prim| prim.password_hashing.contains(&i));
+					&& primitive_get(p.id).is_ok_and(|prim| prim.password_hashing.contains(&i));
 				let siblings_known = p
 					.arguments
 					.iter()

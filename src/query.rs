@@ -374,12 +374,13 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 				continue;
 			}
 		};
-		let sender = ps.meta[idx]
-			.known_by
-			.iter()
-			.find_map(|&(recipient, from)| {
-				if recipient == option.message.recipient { Some(from) } else { None }
-			});
+		let sender = ps.meta[idx].known_by.iter().find_map(|&(recipient, from)| {
+			if recipient == option.message.recipient {
+				Some(from)
+			} else {
+				None
+			}
+		});
 		if sender == Some(option.message.sender) {
 			option_result.resolved = true;
 			option_result.summary = format!(

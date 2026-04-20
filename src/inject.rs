@@ -16,7 +16,6 @@ use crate::value::*;
 /// space for real protocols while keeping the inner loop fast.
 const MAX_INJECTIONS_PER_PRIMITIVE: usize = 500;
 
-
 /// Generate all attacker-constructible values that could replace a given
 /// primitive in a principal's state.
 ///

@@ -42,11 +42,7 @@ pub struct VerifyContext {
 }
 
 /// Add a value to locked attacker state if not already known.
-fn attacker_state_absorb(
-	state: &mut AttackerState,
-	value: &Value,
-	record: &Arc<MutationRecord>,
-) {
+fn attacker_state_absorb(state: &mut AttackerState, value: &Value, record: &Arc<MutationRecord>) {
 	if state.knows(value).is_some() {
 		return;
 	}

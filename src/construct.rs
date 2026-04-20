@@ -151,9 +151,7 @@ fn construct_trace_render_knows(
 					.into(),
 				));
 			}
-			trace.slots[idx]
-				.known_by
-				.push((principal.id, principal.id));
+			trace.slots[idx].known_by.push((principal.id, principal.id));
 			continue;
 		}
 		let new_c = Constant {
@@ -181,9 +179,7 @@ fn construct_trace_render_knows(
 		}
 		for &pid in &trace.principal_ids {
 			if pid != principal.id {
-				trace.slots[slot_idx]
-					.known_by
-					.push((pid, pid));
+				trace.slots[slot_idx].known_by.push((pid, pid));
 			}
 		}
 	}

@@ -221,11 +221,7 @@ impl PrincipalState {
 			.copied()
 			.filter(|&i| i < self.meta.len())
 	}
-	pub fn resolve_constant(
-		&self,
-		c: &Constant,
-		allow_original: bool,
-	) -> (Value, Option<usize>) {
+	pub fn resolve_constant(&self, c: &Constant, allow_original: bool) -> (Value, Option<usize>) {
 		let i = self.index_of(c);
 		match i {
 			None => (Value::Constant(c.clone()), None),
@@ -284,11 +280,7 @@ impl PrincipalState {
 				use_original,
 			)?);
 		}
-		for ((sv, value), pre_rewrite) in self
-			.values
-			.iter_mut()
-			.zip(new_value)
-			.zip(new_pre_rewrite)
+		for ((sv, value), pre_rewrite) in self.values.iter_mut().zip(new_value).zip(new_pre_rewrite)
 		{
 			sv.value = value;
 			sv.pre_rewrite = pre_rewrite;
