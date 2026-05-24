@@ -148,6 +148,61 @@ impl fmt::Display for Expression {
 	}
 }
 
+/// Render a single comment without surrounding context.
+/// For a Line comment: returns "// <text>".
+/// For a single-line Block comment: returns "/* <text> */".
+/// For a multi-line Block comment: returns "/* <text> */" with original
+/// line breaks preserved; continuation lines are re-indented to align
+/// after the opening "/* ".
+fn render_comment(c: &Comment, indent: &str) -> String {
+	match c.style {
+		CommentStyle::Line => format!("//{}", c.text),
+		CommentStyle::Block => {
+			if !c.text.contains('\n') {
+				format!("/*{}*/", c.text)
+			} else {
+				// Re-indent continuation lines.
+				let cont_indent: String = format!("{}   ", indent);
+				let mut out = String::from("/*");
+				for (i, line) in c.text.split('\n').enumerate() {
+					if i == 0 {
+						out.push_str(line);
+					} else {
+						out.push('\n');
+						out.push_str(&cont_indent);
+						out.push_str(line.trim_start());
+					}
+				}
+				out.push_str("*/");
+				out
+			}
+		}
+	}
+}
+
+/// Render a slice of leading comments, each on its own line at the
+/// given indent. Returns "" if the slice is empty.
+fn render_leading(comments: &[Comment], indent: &str) -> String {
+	if comments.is_empty() {
+		return String::new();
+	}
+	let mut s = String::new();
+	for c in comments {
+		s.push_str(indent);
+		s.push_str(&render_comment(c, indent));
+		s.push('\n');
+	}
+	s
+}
+
+/// Render a trailing comment with one leading space. Returns "" if None.
+fn render_trailing(comment: Option<&Comment>) -> String {
+	match comment {
+		Some(c) => format!(" {}", render_comment(c, "")),
+		None => String::new(),
+	}
+}
+
 pub fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()
@@ -165,11 +220,21 @@ pub fn pretty_values(values: &[Value]) -> String {
 }
 
 pub fn pretty_principal(principal: &Principal) -> String {
-	let mut output = format!("principal {}[\n", principal.name);
+	let mut output = format!("principal {}[", principal.name);
+	output.push_str(&render_trailing(principal.header_trailing.as_ref()));
+	output.push('\n');
 	for expression in &principal.expressions {
-		output.push_str(&format!("\t{}\n", expression));
+		output.push_str(&render_leading(&expression.leading_comments, "\t"));
+		output.push_str(&format!(
+			"\t{}{}\n",
+			expression,
+			render_trailing(expression.trailing_comment.as_ref())
+		));
 	}
-	output.push_str("]\n\n");
+	output.push_str(&render_leading(&principal.tail_comments, "\t"));
+	output.push(']');
+	output.push_str(&render_trailing(principal.closing_trailing.as_ref()));
+	output.push_str("\n\n");
 	output
 }
 
@@ -182,28 +247,78 @@ pub fn pretty_message(message: &Message) -> String {
 	)
 }
 
-pub fn pretty_phase(phase: &Phase) -> String {
-	format!("phase[{}]\n\n", phase.number)
-}
-
 pub fn pretty_model(m: &Model) -> VResult<String> {
 	sanity(m)?;
-	let mut output = format!("attacker[{}]\n\n", m.attacker);
+	let mut output = String::new();
+
+	// 1. pre-attacker header comments
+	if !m.pre_attacker_comments.is_empty() {
+		output.push_str(&render_leading(&m.pre_attacker_comments, ""));
+		output.push('\n');
+	}
+
+	// 2-3. attacker line (with optional trailing) + blank line
+	output.push_str(&format!(
+		"attacker[{}]{}\n\n",
+		m.attacker,
+		render_trailing(m.attacker_trailing.as_ref())
+	));
+
+	// 4. each block: leading_comments (no indent) + block + \n\n
 	for block in &m.blocks {
 		match block {
-			Block::Principal(p) => output.push_str(&pretty_principal(p)),
+			Block::Principal(p) => {
+				output.push_str(&render_leading(&p.leading_comments, ""));
+				output.push_str(&pretty_principal(p));
+			}
 			Block::Message(msg) => {
+				output.push_str(&render_leading(&msg.leading_comments, ""));
 				output.push_str(&pretty_message(msg));
+				output.push_str(&render_trailing(msg.trailing_comment.as_ref()));
 				output.push_str("\n\n");
 			}
-			Block::Phase(phase) => output.push_str(&pretty_phase(phase)),
+			Block::Phase(ph) => {
+				output.push_str(&render_leading(&ph.leading_comments, ""));
+				output.push_str(&format!(
+					"phase[{}]{}\n\n",
+					ph.number,
+					render_trailing(ph.trailing_comment.as_ref())
+				));
+			}
 		}
 	}
-	output.push_str("queries[\n");
+
+	// 5-6. queries leading + header line + optional header trailing
+	output.push_str(&render_leading(&m.queries_leading_comments, ""));
+	output.push_str("queries[");
+	output.push_str(&render_trailing(m.queries_header_trailing.as_ref()));
+	output.push('\n');
+
+	// 7. each query: leading + query + optional trailing
 	for query in &m.queries {
-		output.push_str(&format!("\t{}\n", query));
+		output.push_str(&render_leading(&query.leading_comments, "\t"));
+		output.push_str(&format!(
+			"\t{}{}\n",
+			query,
+			render_trailing(query.trailing_comment.as_ref())
+		));
 	}
-	output.push_str("]\n");
+
+	// 8-9. queries tail comments + closing ] + optional closing trailing
+	output.push_str(&render_leading(&m.queries_tail_comments, "\t"));
+	output.push(']');
+	output.push_str(&render_trailing(m.queries_closing_trailing.as_ref()));
+	output.push('\n');
+
+	// 10. EOF tail comments — blank line then one comment per line
+	if !m.tail_comments.is_empty() {
+		output.push('\n');
+		for c in &m.tail_comments {
+			output.push_str(&render_comment(c, ""));
+			output.push('\n');
+		}
+	}
+
 	Ok(output)
 }
 

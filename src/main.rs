@@ -1358,6 +1358,577 @@ mod unit_tests {
 		assert_eq!(QueryKind::Unlinkability.name(), "unlinkability");
 		assert_eq!(QueryKind::Equivalence.name(), "equivalence");
 	}
+
+	// -----------------------------------------------------------------------
+	// 32. Comment preservation: leading comments
+	// -----------------------------------------------------------------------
+
+	use verifpal::parser::parse_string;
+	use verifpal::pretty::pretty_model;
+
+	#[test]
+	fn comment_capture_pre_attacker_line() {
+		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(
+			m.pre_attacker_comments.len(),
+			1,
+			"expected 1 pre-attacker comment"
+		);
+		assert_eq!(m.pre_attacker_comments[0].text, " hello");
+		assert!(matches!(
+			m.pre_attacker_comments[0].style,
+			CommentStyle::Line
+		));
+	}
+
+	#[test]
+	fn comment_capture_leading_on_block() {
+		let src = "attacker[active]\n\n// before alice\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.blocks.len(), 1);
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.leading_comments.len(), 1);
+				assert_eq!(p.leading_comments[0].text, " before alice");
+			}
+			_ => panic!("expected Principal block"),
+		}
+	}
+
+	#[test]
+	fn comment_capture_leading_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\t// long-term key\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.expressions.len(), 1);
+				assert_eq!(p.expressions[0].leading_comments.len(), 1);
+				assert_eq!(p.expressions[0].leading_comments[0].text, " long-term key");
+			}
+			_ => panic!("expected Principal block"),
+		}
+	}
+
+	#[test]
+	fn comment_capture_leading_on_query() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\t// primary goal\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries.len(), 1);
+		assert_eq!(m.queries[0].leading_comments.len(), 1);
+		assert_eq!(m.queries[0].leading_comments[0].text, " primary goal");
+	}
+
+	#[test]
+	fn comment_capture_leading_on_queries_keyword() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\n// verify these\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries_leading_comments.len(), 1);
+		assert_eq!(m.queries_leading_comments[0].text, " verify these");
+	}
+
+	#[test]
+	fn comment_capture_multiple_lines() {
+		let src = "// line 1\n// line 2\n// line 3\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 3);
+		assert_eq!(m.pre_attacker_comments[0].text, " line 1");
+		assert_eq!(m.pre_attacker_comments[1].text, " line 2");
+		assert_eq!(m.pre_attacker_comments[2].text, " line 3");
+	}
+
+	#[test]
+	fn comment_capture_block_pre_attacker() {
+		let src = "/* hello */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 1);
+		assert_eq!(m.pre_attacker_comments[0].text, " hello ");
+		assert!(matches!(
+			m.pre_attacker_comments[0].style,
+			CommentStyle::Block
+		));
+	}
+
+	#[test]
+	fn comment_capture_block_multiline() {
+		let src = "/* line1\n   line2\n   line3 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 1);
+		assert_eq!(
+			m.pre_attacker_comments[0].text,
+			" line1\n   line2\n   line3 "
+		);
+	}
+
+	#[test]
+	fn comment_capture_block_unterminated_errors() {
+		let src = "/* never closed\nattacker[active]\n";
+		assert!(parse_string("t.vp", src).is_err());
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // long-term key\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.expressions[0].trailing_comment.is_some());
+				assert_eq!(
+					p.expressions[0].trailing_comment.as_ref().unwrap().text,
+					" long-term key"
+				);
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_attacker() {
+		let src = "attacker[active] // active model\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.attacker_trailing.is_some());
+		assert_eq!(m.attacker_trailing.as_ref().unwrap().text, " active model");
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_message() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a // initial flight\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let msg = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Message(m) => Some(m),
+				_ => None,
+			})
+			.expect("message");
+		assert!(msg.trailing_comment.is_some());
+		assert_eq!(
+			msg.trailing_comment.as_ref().unwrap().text,
+			" initial flight"
+		);
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_query() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a // primary\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries[0].trailing_comment.is_some());
+		assert_eq!(
+			m.queries[0].trailing_comment.as_ref().unwrap().text,
+			" primary"
+		);
+	}
+
+	#[test]
+	fn comment_capture_block_trailing_inline() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* lt */\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				let t = p.expressions[0]
+					.trailing_comment
+					.as_ref()
+					.expect("trailing");
+				assert_eq!(t.text, " lt ");
+				assert!(matches!(t.style, CommentStyle::Block));
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_block_trailing_multiline_promoted_to_leading() {
+		// Block comment that opens on same line as expression but closes
+		// on a later line — must NOT be a trailing; should attach as
+		// leading on the next node.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* multi\n\tline */\n\tknows private b\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.expressions[0].trailing_comment.is_none());
+				assert_eq!(p.expressions[1].leading_comments.len(), 1);
+				assert_eq!(p.expressions[1].leading_comments[0].text, " multi\n\tline ");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_tail_in_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\t// TODO add more\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.tail_comments.len(), 1);
+				assert_eq!(p.tail_comments[0].text, " TODO add more");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_closing_trailing_on_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n] // end of Alice\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.closing_trailing.is_some());
+				assert_eq!(p.closing_trailing.as_ref().unwrap().text, " end of Alice");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_header_trailing_on_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[ // initiator\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.header_trailing.is_some());
+				assert_eq!(p.header_trailing.as_ref().unwrap().text, " initiator");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_tail_in_queries() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n\t// done\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries_tail_comments.len(), 1);
+		assert_eq!(m.queries_tail_comments[0].text, " done");
+	}
+
+	#[test]
+	fn comment_capture_queries_closing_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n] // end\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries_closing_trailing.is_some());
+		assert_eq!(m.queries_closing_trailing.as_ref().unwrap().text, " end");
+	}
+
+	#[test]
+	fn comment_capture_eof_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n\n// EOF tail\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.tail_comments.len(), 1);
+		assert_eq!(m.tail_comments[0].text, " EOF tail");
+	}
+
+	#[test]
+	fn comment_capture_queries_header_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[ // start\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries_header_trailing.is_some());
+		assert_eq!(m.queries_header_trailing.as_ref().unwrap().text, " start");
+	}
+
+	#[test]
+	fn comment_lookahead_does_not_leak() {
+		// The parse_message_constants lookahead inspects what comes
+		// after a comma. If a comment sits between the message and the
+		// next block, the lookahead must NOT capture it into the
+		// previous message's leading comments after rollback.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a\n// next block\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		// "// next block" must attach to the Bob principal block,
+		// not the previous Alice -> Bob message.
+		let msg = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Message(m) => Some(m),
+				_ => None,
+			})
+			.expect("message");
+		assert!(msg.trailing_comment.is_none());
+		let bob = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Principal(p) if p.name == "Bob" => Some(p),
+				_ => None,
+			})
+			.expect("bob");
+		assert_eq!(bob.leading_comments.len(), 1);
+		assert_eq!(bob.leading_comments[0].text, " next block");
+	}
+
+	#[test]
+	fn comment_dropped_in_primitive_args() {
+		// Comment between primitive arguments is silently dropped.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tx = ENC(/* secret */ a, a)\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		// No AST field contains "secret".
+		let serialized = format!("{:?}", m);
+		assert!(
+			!serialized.contains("secret"),
+			"dropped comment must not appear in AST"
+		);
+	}
+
+	#[test]
+	fn comment_dropped_in_equation() {
+		// Use a comment string that does not appear in any AST field name.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tg = G ^ /* xzqrhs */ a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let serialized = format!("{:?}", m);
+		assert!(
+			!serialized.contains("xzqrhs"),
+			"dropped comment must not appear in AST"
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// 33. Comment preservation: emission tests
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn pretty_emits_pre_attacker_comments() {
+		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(
+			out.starts_with("// hello\n\nattacker[active]"),
+			"got: {}",
+			out
+		);
+	}
+
+	#[test]
+	fn pretty_emits_leading_on_block() {
+		let src = "attacker[active]\n\n// before alice\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(
+			out.contains("// before alice\nprincipal Alice["),
+			"got: {}",
+			out
+		);
+	}
+
+	#[test]
+	fn pretty_emits_trailing_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // lt\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("knows private a // lt"), "got: {}", out);
+	}
+
+	#[test]
+	fn pretty_emits_block_comment_inline() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* lt */\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("knows private a /* lt */"), "got: {}", out);
+	}
+
+	#[test]
+	fn pretty_emits_block_comment_multiline() {
+		let src = "/* line1\n   line2 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("/* line1"), "missing /* line1 in:\n{}", out);
+		assert!(out.contains("line2 */"), "missing 'line2 */':\n{}", out);
+	}
+
+	// -----------------------------------------------------------------------
+	// 34. Comment preservation: idempotence round-trip tests
+	// -----------------------------------------------------------------------
+
+	/// Parse `src`, pretty-print, parse the result, pretty-print again,
+	/// and assert the two outputs are byte-equal. This is the canonical
+	/// "preserves comments" check.
+	fn assert_round_trip_idempotent(src: &str) {
+		let m1 = parse_string("rt.vp", src).expect("parse 1");
+		let s1 = pretty_model(&m1).expect("pretty 1");
+		let m2 = parse_string("rt.vp", &s1).expect("parse 2");
+		let s2 = pretty_model(&m2).expect("pretty 2");
+		assert_eq!(
+			s1, s2,
+			"not idempotent\n--- s1 ---\n{}\n--- s2 ---\n{}",
+			s1, s2
+		);
+	}
+
+	#[test]
+	fn round_trip_simple() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_pre_attacker_comment() {
+		let src = "// SPDX header\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_leading_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\t// long-term\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_trailing_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // long-term\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_leading_block() {
+		let src = "attacker[active]\n\n// initiator\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_principal_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\t// TODO\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_block_comment_pre_attacker() {
+		let src = "/* SPDX header */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_block_comment_multiline() {
+		let src = "/* multi\n   line\n   header */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn block_comment_unterminated_errors_with_position() {
+		let src = "/* never closed\nattacker[active]\n";
+		let err = parse_string("t.vp", src).unwrap_err();
+		let msg = err.to_string();
+		assert!(msg.contains("unterminated block comment"), "got: {}", msg);
+	}
+
+	#[test]
+	fn block_comment_nested_first_close_wins() {
+		// /* /* */ */
+		// Outer /* opens. First */ closes. The trailing */ becomes
+		// stray tokens after the comment which produce a parse error
+		// (because they're not valid syntax at the model start).
+		let src = "/* /* */ */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let result = parse_string("t.vp", src);
+		assert!(result.is_err(), "expected parse error from stray */");
+	}
+
+	#[test]
+	fn block_comment_multiline_in_leading_position_renders() {
+		let src = "attacker[active]\n\n/* multi\n   line\n   header */\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		// Expect the block comment intact in the output.
+		assert!(out.contains("/* multi"), "missing /* multi in:\n{}", out);
+		assert!(out.contains("line"), "missing 'line':\n{}", out);
+		assert!(out.contains("header */"), "missing 'header */':\n{}", out);
+		// Re-parse to verify the comment survived
+		let m2 = parse_string("t.vp", &out).expect("re-parse");
+		match &m2.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.leading_comments.len(), 1);
+				assert!(matches!(p.leading_comments[0].style, CommentStyle::Block));
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn round_trip_message_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a // flight 1\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_query_trailing_and_leading() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\t// primary goal\n\tconfidentiality? a // payload only\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_phase_with_leading_and_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\n// handshake done\nphase[1] // post-handshake\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_principal_closing_and_header_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[ // header\n\tknows private a\n] // closing\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_queries_header_and_closing_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[ // start\n\tconfidentiality? a\n] // end\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_eof_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n\n// EOF\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	// -----------------------------------------------------------------------
+	// 33. Golden-file tests: assert byte-equality with stored pretty output
+	// -----------------------------------------------------------------------
+
+	fn assert_golden(input: &str, golden: &str) {
+		let m = parse_string("g.vp", input).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert_eq!(
+			out, golden,
+			"golden mismatch\n--- expected ---\n{}\n--- got ---\n{}",
+			golden, out
+		);
+	}
+
+	#[test]
+	fn golden_aead_leak() {
+		assert_golden(
+			include_str!("../examples/test/aead_leak.vp"),
+			include_str!("../examples/test/golden_pretty/aead_leak.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_assert_junglegym() {
+		assert_golden(
+			include_str!("../examples/test/assert_junglegym.vp"),
+			include_str!("../examples/test/golden_pretty/assert_junglegym.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_auth_with_signing() {
+		assert_golden(
+			include_str!("../examples/test/auth_with_signing.vp"),
+			include_str!("../examples/test/golden_pretty/auth_with_signing.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_concat_bomb() {
+		assert_golden(
+			include_str!("../examples/test/concat_bomb.vp"),
+			include_str!("../examples/test/golden_pretty/concat_bomb.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_simple() {
+		assert_golden(
+			include_str!("../examples/simple.vp"),
+			include_str!("../examples/test/golden_pretty/simple.vp"),
+		);
+	}
 }
 
 #[cfg(test)]

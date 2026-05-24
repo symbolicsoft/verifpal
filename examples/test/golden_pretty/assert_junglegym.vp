@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Regression test for https://github.com/symbolic-software/verifpal/issues/13
+//
+// A checked `ASSERT(...)?` must genuinely guard the principal: if the
+// attacker mutates one of the ciphertexts so that the equality cannot
+// hold symbolically, the principal must halt and never reach the
+// subsequent `leaks` statement. Previously the engine reported a
+// false attack on `confidentiality? Kab` because it explored a state
+// where `tag_` and `HASH(Kab_, Kab_bob_)` were not equivalent yet
+// the `leaks Kab_bob_` fired anyway.
+
+attacker[active]
+
+principal Alice[
+	knows private ka
+]
+
+principal Bob[
+	knows private ka
+	knows private kb
+	generates kab
+	kab_bob = ENC(kb, kab)
+	tag = HASH(kab, kab_bob)
+	enctag = ENC(ka, tag)
+	kab_alice = ENC(ka, kab)
+	kab_bob_alice = ENC(ka, kab_bob)
+]
+
+Bob -> Alice: enctag, kab_alice, kab_bob_alice
+
+principal Alice[
+	tag_ = DEC(ka, enctag)
+	kab_ = DEC(ka, kab_alice)
+	kab_bob_ = DEC(ka, kab_bob_alice)
+	_ = ASSERT(tag_, HASH(kab_, kab_bob_))?
+	leaks kab_bob_
+]
+
+queries[
+	confidentiality? kab
+]

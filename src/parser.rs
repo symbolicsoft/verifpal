@@ -104,6 +104,8 @@ fn starts_with_keyword(s: &str, keyword: &str) -> bool {
 struct Parser<'a> {
 	input: &'a [u8],
 	pos: usize,
+	pending_leading: Vec<Comment>,
+	unterminated_block_at: Option<usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -111,6 +113,8 @@ impl<'a> Parser<'a> {
 		Parser {
 			input: input.as_bytes(),
 			pos: 0,
+			pending_leading: Vec::new(),
+			unterminated_block_at: None,
 		}
 	}
 
@@ -151,20 +155,165 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn skip_whitespace_and_comments(&mut self) {
+	/// Consume whitespace and comments. Captures comments into
+	/// `pending_leading` so they can be attached to the next AST node
+	/// via `take_leading`.
+	fn consume_trivia(&mut self) {
+		self.consume_trivia_inner(true);
+	}
+
+	/// Same as `consume_trivia`, but discards any comments encountered
+	/// rather than buffering them. Used in disallowed-comment positions
+	/// (inside primitive args, equation halves, attacker[]/phase[]
+	/// brackets, inner query option brackets).
+	fn consume_trivia_nocapture(&mut self) {
+		self.consume_trivia_inner(false);
+	}
+
+	/// Internal trivia consumer. When `capture` is false, comments are
+	/// recognized and skipped but not stored — used for positions where
+	/// comments are disallowed (inside primitive args, etc.).
+	fn consume_trivia_inner(&mut self, capture: bool) {
 		loop {
 			self.skip_whitespace();
-			if self.pos + 1 < self.input.len()
-				&& self.input[self.pos] == b'/'
-				&& self.input[self.pos + 1] == b'/'
-			{
-				// Skip to end of line
+			let two = if self.pos + 1 < self.input.len() {
+				(self.input[self.pos], self.input[self.pos + 1])
+			} else {
+				(0, 0)
+			};
+			if two == (b'/', b'/') {
+				let start = self.pos + 2;
 				while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
+					self.pos += 1;
+				}
+				if capture {
+					let text = std::str::from_utf8(&self.input[start..self.pos])
+						.unwrap_or("")
+						.to_string();
+					self.pending_leading.push(Comment {
+						text,
+						style: CommentStyle::Line,
+					});
+				}
+			} else if two == (b'/', b'*') {
+				let open = self.pos;
+				self.pos += 2;
+				let start = self.pos;
+				loop {
+					if self.pos + 1 >= self.input.len() {
+						// Unterminated block comment.
+						self.pos = self.input.len();
+						self.unterminated_block_at = Some(open);
+						return;
+					}
+					if self.input[self.pos] == b'*' && self.input[self.pos + 1] == b'/' {
+						let end = self.pos;
+						self.pos += 2;
+						if capture {
+							let text = std::str::from_utf8(&self.input[start..end])
+								.unwrap_or("")
+								.to_string();
+							self.pending_leading.push(Comment {
+								text,
+								style: CommentStyle::Block,
+							});
+						}
+						break;
+					}
 					self.pos += 1;
 				}
 			} else {
 				break;
 			}
+		}
+	}
+
+	/// Drain and return any pending leading comments. Called at the
+	/// start of building each AST node.
+	fn take_leading(&mut self) -> Vec<Comment> {
+		std::mem::take(&mut self.pending_leading)
+	}
+
+	/// Snapshot the parser state for a potentially-aborted lookahead.
+	fn snapshot(&self) -> (usize, usize) {
+		(self.pos, self.pending_leading.len())
+	}
+
+	/// Restore parser state from a snapshot, discarding any comments
+	/// captured during the rolled-back lookahead.
+	fn restore(&mut self, (pos, leading_len): (usize, usize)) {
+		self.pos = pos;
+		self.pending_leading.truncate(leading_len);
+	}
+
+	fn check_unterminated_block(&self) -> VResult<()> {
+		if let Some(pos) = self.unterminated_block_at {
+			return Err(VerifpalError::Parse(
+				format!("unterminated block comment starting at byte {}", pos).into(),
+			));
+		}
+		Ok(())
+	}
+
+	/// Try to capture a same-line trailing comment after the node's
+	/// last token. Skips inline whitespace (spaces/tabs only) and
+	/// returns a Comment if one opens and (for block style) closes
+	/// before the next newline. Leaves `self.pos` past the comment
+	/// if captured, or unchanged if not.
+	fn try_take_trailing(&mut self) -> Option<Comment> {
+		let saved = self.snapshot();
+		self.skip_inline_whitespace();
+		if self.pos + 1 >= self.input.len() {
+			self.restore(saved);
+			return None;
+		}
+		let two = (self.input[self.pos], self.input[self.pos + 1]);
+		if two == (b'/', b'/') {
+			let start = self.pos + 2;
+			self.pos += 2;
+			while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
+				self.pos += 1;
+			}
+			let text = std::str::from_utf8(&self.input[start..self.pos])
+				.unwrap_or("")
+				.to_string();
+			Some(Comment {
+				text,
+				style: CommentStyle::Line,
+			})
+		} else if two == (b'/', b'*') {
+			// Scan for `*/` BEFORE the next newline. If we hit a newline
+			// first, this is NOT a trailing comment — restore pos and
+			// return None so the next consume_trivia picks it up as a
+			// leading comment of the next node.
+			let probe_start = self.pos + 2;
+			let mut probe = probe_start;
+			loop {
+				if probe + 1 >= self.input.len() {
+					// Unterminated — leave for consume_trivia to flag.
+					self.restore(saved);
+					return None;
+				}
+				let c = self.input[probe];
+				if c == b'\n' {
+					self.restore(saved);
+					return None;
+				}
+				if c == b'*' && self.input[probe + 1] == b'/' {
+					let text = std::str::from_utf8(&self.input[probe_start..probe])
+						.unwrap_or("")
+						.to_string();
+					self.pos = probe + 2;
+					return Some(Comment {
+						text,
+						style: CommentStyle::Block,
+					});
+				}
+				probe += 1;
+			}
+		} else {
+			self.restore(saved);
+			None
 		}
 	}
 
@@ -215,15 +364,17 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_model(&mut self) -> VResult<Model> {
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
+		self.check_unterminated_block()?;
+		let pre_attacker_comments = self.take_leading();
 
 		// Parse attacker
 		if !self.try_expect("attacker") {
 			return Err(VerifpalError::Parse("no `attacker` block defined".into()));
 		}
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		self.expect("[")?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		let attacker_str = self.parse_identifier()?;
 		let attacker_type = match attacker_str.as_str() {
 			"active" => AttackerKind::Active,
@@ -234,14 +385,15 @@ impl<'a> Parser<'a> {
 				))
 			}
 		};
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		self.expect("]")?;
-		self.skip_whitespace_and_comments();
+		let attacker_trailing = self.try_take_trailing();
+		self.consume_trivia();
 
 		// Parse blocks
 		let mut blocks = Vec::new();
 		while !self.at_end() {
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 			if self.at_end() {
 				break;
 			}
@@ -253,7 +405,7 @@ impl<'a> Parser<'a> {
 
 			let block = self.parse_block()?;
 			blocks.push(block);
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 		}
 
 		if blocks.is_empty() {
@@ -263,48 +415,73 @@ impl<'a> Parser<'a> {
 		}
 
 		// Parse queries
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
+		let queries_leading_comments = self.take_leading();
 		if !self.try_expect("queries") {
 			return Err(VerifpalError::Parse("no `queries` block defined".into()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
-		self.skip_whitespace_and_comments();
+		let queries_header_trailing = self.try_take_trailing();
+		self.consume_trivia();
 		let mut queries = Vec::new();
-		while !self.at_end() {
-			self.skip_whitespace_and_comments();
+		loop {
+			self.consume_trivia();
 			if self.peek() == Some(b']') {
-				self.advance();
 				break;
 			}
-			let query = self.parse_query()?;
+			if self.at_end() {
+				break;
+			}
+			let leading = self.take_leading();
+			let mut query = self.parse_query()?;
+			query.leading_comments = leading;
+			query.trailing_comment = self.try_take_trailing();
 			queries.push(query);
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 		}
-
+		let queries_tail_comments = self.take_leading();
+		let queries_closing_trailing = if self.peek() == Some(b']') {
+			self.advance();
+			self.try_take_trailing()
+		} else {
+			None
+		};
+		self.consume_trivia();
+		let tail_comments = self.take_leading();
+		self.check_unterminated_block()?;
 		Ok(Model {
 			file_name: String::new(),
 			attacker: attacker_type,
 			blocks,
 			queries,
+			pre_attacker_comments,
+			attacker_trailing,
+			queries_leading_comments,
+			queries_header_trailing,
+			queries_tail_comments,
+			queries_closing_trailing,
+			tail_comments,
 		})
 	}
 
 	fn parse_block(&mut self) -> VResult<Block> {
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
+		let leading = self.take_leading();
 
-		if starts_with_keyword(self.remaining(), "phase") {
-			return self.parse_phase();
+		let mut block = if starts_with_keyword(self.remaining(), "phase") {
+			self.parse_phase()?
+		} else if starts_with_keyword(self.remaining(), "principal") {
+			self.parse_principal()?
+		} else {
+			self.parse_message_block()?
+		};
+		match &mut block {
+			Block::Principal(p) => p.leading_comments = leading,
+			Block::Message(m) => m.leading_comments = leading,
+			Block::Phase(p) => p.leading_comments = leading,
 		}
-
-		// Try to determine if this is a principal or message
-		// A principal starts with "principal", a message has "->" or "→"
-		if starts_with_keyword(self.remaining(), "principal") {
-			return self.parse_principal();
-		}
-
-		// Must be a message: Sender -> Recipient: constants
-		self.parse_message_block()
+		Ok(block)
 	}
 
 	fn parse_principal(&mut self) -> VResult<Block> {
@@ -314,24 +491,34 @@ impl<'a> Parser<'a> {
 		let name = title_case(&name);
 		self.skip_whitespace();
 		self.expect("[")?;
-		self.skip_whitespace_and_comments();
+		let header_trailing = self.try_take_trailing();
+		self.consume_trivia();
 		let mut expressions = Vec::new();
 		while self.peek() != Some(b']') {
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				break;
 			}
-			let expr = self.parse_expression()?;
+			let leading = self.take_leading();
+			let mut expr = self.parse_expression()?;
+			expr.leading_comments = leading;
+			expr.trailing_comment = self.try_take_trailing();
 			expressions.push(expr);
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 		}
+		let tail_comments = self.take_leading();
 		self.expect("]")?;
-		self.skip_whitespace_and_comments();
+		let closing_trailing = self.try_take_trailing();
+		self.consume_trivia();
 		let id = principal_names_map_add(&name);
 		Ok(Block::Principal(Principal {
 			name,
 			id,
 			expressions,
+			leading_comments: Vec::new(),
+			header_trailing,
+			tail_comments,
+			closing_trailing,
 		}))
 	}
 
@@ -354,13 +541,16 @@ impl<'a> Parser<'a> {
 		self.expect(":")?;
 		self.skip_whitespace();
 		let constants = self.parse_message_constants()?;
-		self.skip_whitespace_and_comments();
+		let trailing = self.try_take_trailing();
+		self.consume_trivia();
 		let sender_id = principal_names_map_add(&sender_name);
 		let recipient_id = principal_names_map_add(&recipient_name);
 		Ok(Block::Message(Message {
 			sender: sender_id,
 			recipient: recipient_id,
 			constants,
+			leading_comments: Vec::new(),
+			trailing_comment: trailing,
 		}))
 	}
 
@@ -377,21 +567,22 @@ impl<'a> Parser<'a> {
 				|| starts_with_keyword(rem, "phase")
 				|| starts_with_keyword(rem, "queries")
 				|| rem.starts_with("//")
+				|| rem.starts_with("/*")
 			{
 				break;
 			}
 			// Check for next message or block
 			// Heuristic: if we see an identifier followed by ->, this is a new message
-			let saved = self.pos;
+			let saved = self.snapshot();
 			if let Ok(_id) = self.parse_identifier() {
 				self.skip_whitespace();
 				if self.remaining().starts_with("->") || self.remaining().starts_with("\u{2192}") {
-					self.pos = saved;
+					self.restore(saved);
 					break;
 				}
-				self.pos = saved;
+				self.restore(saved);
 			} else {
-				self.pos = saved;
+				self.restore(saved);
 			}
 
 			let constant = if self.peek() == Some(b'[') {
@@ -400,7 +591,7 @@ impl<'a> Parser<'a> {
 				self.parse_constant()?
 			};
 			constants.push(constant);
-			self.skip_whitespace();
+			self.skip_inline_whitespace();
 			if self.peek() == Some(b',') {
 				self.advance();
 			}
@@ -416,10 +607,9 @@ impl<'a> Parser<'a> {
 	fn parse_guarded_constant(&mut self) -> VResult<Constant> {
 		self.expect("[")?;
 		let mut c = self.parse_constant()?; // check_reserved already called inside parse_constant
-									  // Consume trailing comma if present inside brackets
 		self.skip_whitespace();
 		self.expect("]")?;
-		self.skip_whitespace();
+		self.skip_inline_whitespace();
 		if self.peek() == Some(b',') {
 			self.advance();
 		}
@@ -428,7 +618,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_expression(&mut self) -> VResult<Expression> {
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
 		let rem = self.remaining();
 		if starts_with_keyword(rem, "knows") {
 			self.parse_knows()
@@ -462,6 +652,8 @@ impl<'a> Parser<'a> {
 			qualifier: Some(qualifier),
 			constants,
 			assigned: None,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -474,6 +666,8 @@ impl<'a> Parser<'a> {
 			qualifier: None,
 			constants,
 			assigned: None,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -491,6 +685,8 @@ impl<'a> Parser<'a> {
 			qualifier: None,
 			constants,
 			assigned: Some(value),
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -527,6 +723,7 @@ impl<'a> Parser<'a> {
 				|| starts_with_keyword(rem, "generates")
 				|| starts_with_keyword(rem, "leaks")
 				|| rem.starts_with("//")
+				|| rem.starts_with("/*")
 			{
 				break;
 			}
@@ -572,26 +769,26 @@ impl<'a> Parser<'a> {
 	fn parse_value(&mut self) -> VResult<Value> {
 		self.skip_whitespace();
 		// Try primitive first (identifier followed by '(')
-		let saved = self.pos;
+		let saved = self.snapshot();
 		if let Ok(_name) = self.parse_identifier() {
 			self.skip_whitespace();
 			if self.peek() == Some(b'(') {
 				// It's a primitive
-				self.pos = saved;
+				self.restore(saved);
 				return self.parse_primitive();
 			}
 			// Check for equation (constant ^ constant)
 			self.skip_whitespace();
 			if self.peek() == Some(b'^') {
 				// It's an equation
-				self.pos = saved;
+				self.restore(saved);
 				return self.parse_equation();
 			}
 			// It's a constant
-			self.pos = saved;
+			self.restore(saved);
 			return self.parse_constant_value();
 		}
-		self.pos = saved;
+		self.restore(saved);
 		Err(VerifpalError::Parse(
 			format!("expected value at position {}", self.pos).into(),
 		))
@@ -602,7 +799,7 @@ impl<'a> Parser<'a> {
 		let prim_name = name.to_uppercase();
 		self.skip_whitespace();
 		self.expect("(")?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
@@ -610,15 +807,15 @@ impl<'a> Parser<'a> {
 			}
 			let arg = self.parse_value()?;
 			arguments.push(arg);
-			self.skip_whitespace();
+			self.consume_trivia_nocapture();
 			if self.peek() == Some(b',') {
 				self.advance();
-				self.skip_whitespace();
+				self.consume_trivia_nocapture();
 			}
 		}
 		self.expect(")")?;
 		let check = self.try_expect("?");
-		// Consume optional comma
+		// Consume optional comma — outside the args list.
 		self.skip_whitespace();
 		if self.peek() == Some(b',') {
 			self.advance();
@@ -634,9 +831,9 @@ impl<'a> Parser<'a> {
 
 	fn parse_equation(&mut self) -> VResult<Value> {
 		let first = self.parse_constant_value()?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		self.expect("^")?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		let second = self.parse_constant_value()?;
 		Ok(Value::Equation(Arc::new(Equation {
 			values: vec![first, second],
@@ -645,9 +842,9 @@ impl<'a> Parser<'a> {
 
 	fn parse_phase(&mut self) -> VResult<Block> {
 		self.expect("phase")?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		self.expect("[")?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		let start = self.pos;
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
@@ -657,14 +854,19 @@ impl<'a> Parser<'a> {
 		let number: i32 = num_str
 			.parse()
 			.map_err(|_| VerifpalError::Parse("invalid phase number".into()))?;
-		self.skip_whitespace();
+		self.consume_trivia_nocapture();
 		self.expect("]")?;
-		self.skip_whitespace_and_comments();
-		Ok(Block::Phase(Phase { number }))
+		let trailing = self.try_take_trailing();
+		self.consume_trivia();
+		Ok(Block::Phase(Phase {
+			number,
+			leading_comments: Vec::new(),
+			trailing_comment: trailing,
+		}))
 	}
 
 	fn parse_query(&mut self) -> VResult<Query> {
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
 		let rem = self.remaining();
 		if rem.starts_with("confidentiality?") {
 			self.parse_query_single_constant("confidentiality?", QueryKind::Confidentiality)
@@ -687,13 +889,15 @@ impl<'a> Parser<'a> {
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
-		self.skip_whitespace();
+		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
 			kind,
 			constants: vec![constant],
 			message: Message::default(),
 			options,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -714,7 +918,7 @@ impl<'a> Parser<'a> {
 		self.expect(":")?;
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
-		self.skip_whitespace();
+		self.skip_inline_whitespace();
 		let sender_id = principal_names_map_add(&sender_name);
 		let recipient_id = principal_names_map_add(&recipient_name);
 		let options = self.try_parse_query_options()?;
@@ -725,8 +929,12 @@ impl<'a> Parser<'a> {
 				sender: sender_id,
 				recipient: recipient_id,
 				constants: vec![constant],
+				leading_comments: Vec::new(),
+				trailing_comment: None,
 			},
 			options,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -734,13 +942,15 @@ impl<'a> Parser<'a> {
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
-		self.skip_whitespace();
+		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
 			kind,
 			constants,
 			message: Message::default(),
 			options,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -772,26 +982,26 @@ impl<'a> Parser<'a> {
 	}
 
 	fn try_parse_query_options(&mut self) -> VResult<Vec<QueryOption>> {
-		self.skip_whitespace_and_comments();
+		self.skip_inline_whitespace();
 		if self.peek() != Some(b'[') {
 			return Ok(vec![]);
 		}
 		self.advance(); // [
-		self.skip_whitespace_and_comments();
+		self.consume_trivia();
 		let mut options = Vec::new();
 		while self.peek() != Some(b']') {
 			if self.at_end() {
 				break;
 			}
-			self.skip_whitespace_and_comments();
+			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				break;
 			}
+			let leading = self.take_leading();
 			let option_name = self.parse_identifier()?;
 			self.skip_whitespace();
 			self.expect("[")?;
 			self.skip_whitespace();
-			// Parse inner message
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
 			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
@@ -805,7 +1015,8 @@ impl<'a> Parser<'a> {
 			let constant = self.parse_constant()?;
 			self.skip_whitespace();
 			self.expect("]")?;
-			self.skip_whitespace_and_comments();
+			let trailing = self.try_take_trailing();
+			self.consume_trivia();
 
 			let option_kind = match option_name.as_str() {
 				"precondition" => QueryOptionKind::Precondition,
@@ -823,7 +1034,11 @@ impl<'a> Parser<'a> {
 					sender: sender_id,
 					recipient: recipient_id,
 					constants: vec![constant],
+					leading_comments: Vec::new(),
+					trailing_comment: None,
 				},
+				leading_comments: leading,
+				trailing_comment: trailing,
 			});
 		}
 		if self.peek() == Some(b']') {

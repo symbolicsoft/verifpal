@@ -64,6 +64,18 @@ impl fmt::Display for Qualifier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CommentStyle {
+	Line,
+	Block,
+}
+
+#[derive(Clone, Debug)]
+pub struct Comment {
+	pub text: String,
+	pub style: CommentStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Declaration {
 	Knows,
 	Generates,
@@ -228,6 +240,13 @@ pub struct Model {
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
 	pub queries: Vec<Query>,
+	pub pre_attacker_comments: Vec<Comment>,
+	pub attacker_trailing: Option<Comment>,
+	pub queries_leading_comments: Vec<Comment>,
+	pub queries_header_trailing: Option<Comment>,
+	pub queries_tail_comments: Vec<Comment>,
+	pub queries_closing_trailing: Option<Comment>,
+	pub tail_comments: Vec<Comment>,
 }
 
 #[derive(Clone, Debug)]
@@ -280,6 +299,10 @@ pub struct Principal {
 	pub name: String,
 	pub id: PrincipalId,
 	pub expressions: Vec<Expression>,
+	pub leading_comments: Vec<Comment>,
+	pub header_trailing: Option<Comment>,
+	pub tail_comments: Vec<Comment>,
+	pub closing_trailing: Option<Comment>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -287,11 +310,15 @@ pub struct Message {
 	pub sender: PrincipalId,
 	pub recipient: PrincipalId,
 	pub constants: Vec<Constant>,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Phase {
 	pub number: i32,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
 }
 
 #[derive(Clone, Debug)]
@@ -300,12 +327,16 @@ pub struct Query {
 	pub constants: Vec<Constant>,
 	pub message: Message,
 	pub options: Vec<QueryOption>,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
 }
 
 #[derive(Clone, Debug)]
 pub struct QueryOption {
 	pub kind: QueryOptionKind,
 	pub message: Message,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
 }
 
 #[derive(Clone, Debug)]
@@ -320,6 +351,8 @@ pub struct Expression {
 	pub qualifier: Option<Qualifier>,
 	pub constants: Vec<Constant>,
 	pub assigned: Option<Value>,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
 }
 
 #[derive(Clone, Debug)]

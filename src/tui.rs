@@ -357,14 +357,13 @@ pub fn tui_message(msg: &str, msg_type: InfoLevel) {
 					}
 				}
 			}
-			InfoLevel::Info
-				if msg.starts_with("Running at phase") => {
-					if let Some(rest) = msg.strip_prefix("Running at phase ") {
-						if let Some(num) = rest.strip_suffix('.') {
-							st.phase = num.parse().unwrap_or(0);
-						}
+			InfoLevel::Info if msg.starts_with("Running at phase") => {
+				if let Some(rest) = msg.strip_prefix("Running at phase ") {
+					if let Some(num) = rest.strip_suffix('.') {
+						st.phase = num.parse().unwrap_or(0);
 					}
 				}
+			}
 			_ => {}
 		}
 	}
