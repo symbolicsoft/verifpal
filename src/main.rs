@@ -348,6 +348,41 @@ mod unit_tests {
 	}
 
 	// -----------------------------------------------------------------------
+	// 3b. Parser: content after the queries block is a hard error
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn parse_rejects_content_after_queries() {
+		// A phase declared after the queries block would silently disable
+		// forward secrecy analysis. The parser now refuses to run when it
+		// finds any content after the `queries` block.
+		let model = concat!(
+			"attacker[active]\n",
+			"principal Alice[ knows private x ]\n",
+			"Alice -> Bob: x\n",
+			"principal Bob[]\n",
+			"queries[ confidentiality? x ]\n",
+			"phase[1]\n",
+			"principal Alice[ leaks x ]\n",
+		);
+		assert!(verifpal::parser::parse_string("after_queries.vp", model).is_err());
+	}
+
+	#[test]
+	fn parse_accepts_phase_before_queries() {
+		let model = concat!(
+			"attacker[active]\n",
+			"principal Alice[ knows private x ]\n",
+			"Alice -> Bob: x\n",
+			"principal Bob[]\n",
+			"phase[1]\n",
+			"principal Alice[ leaks x ]\n",
+			"queries[ confidentiality? x ]\n",
+		);
+		assert!(verifpal::parser::parse_string("before_queries.vp", model).is_ok());
+	}
+
+	// -----------------------------------------------------------------------
 	// 4. Primitive equivalence
 	// -----------------------------------------------------------------------
 

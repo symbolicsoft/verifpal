@@ -450,6 +450,12 @@ impl<'a> Parser<'a> {
 		self.consume_trivia();
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
+		if !self.at_end() {
+			return Err(VerifpalError::Parse(
+				"the `queries` block must be at the end of the model; found content after `queries`"
+					.into(),
+			));
+		}
 		Ok(Model {
 			file_name: String::new(),
 			attacker: attacker_type,
