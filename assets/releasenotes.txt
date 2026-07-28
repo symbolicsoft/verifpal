@@ -1,1 +1,9 @@
-Verifpal 0.52.0 improves the pretty-printer such that it no longer removes comments written in the models being pretty-printed.
+Since the 0.52.0 release, Verifpal has received two meaningful improvements to the trustworthiness of its analysis, plus some housekeeping.
+
+First, the analysis engine had a subtle bug in how it handled `SPLIT` and `CONCAT`: when a value like `CONCAT(n1, n2)` was split back into its parts, some parts of the engine would always grab the *first* piece instead of the piece actually being referred to, so `n2` could quietly become `n1` inside the engine's reasoning. This caused Verifpal to report an "attack" on a perfectly sound protocol (issue #18). The supposed attacker was just replaying the honest message, but the engine, having garbled its own copy of that message, no longer recognized it as identical.
+
+The fix restructures the rewriting machinery so that every part of the engine now receives exactly the piece it asked for: making this whole class of mistake impossible rather than patching one instance of it, and the engine also learned to recognize that a message which *reduces to* the honest value is still just a replay, not an attack.
+
+Second, thanks to a contribution from Hardik Ghoshal, the parser now refuses to analyze a model that has content after the `queries` block: such content used to be silently ignored, which could hide important model text (like a key leak in a later phase) and make a broken protocol appear safe.
+
+Finally, the codebase was migrated to the Rust 2024 edition and the release packaging (Homebrew, Scoop) was refreshed.
