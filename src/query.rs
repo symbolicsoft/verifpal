@@ -41,7 +41,7 @@ pub fn query_start(
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result) {
 		info_message(
-			&format!("{}{}", &result.query, result.summary),
+			&format!("{}{}", result.query, result.summary),
 			InfoLevel::Result,
 			true,
 		);
