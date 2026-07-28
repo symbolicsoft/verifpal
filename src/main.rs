@@ -805,21 +805,11 @@ mod unit_tests {
 
 	#[test]
 	fn can_rewrite_split_concat() {
-		// SPLIT(CONCAT(a, b)) should rewrite to [a, b]
+		// SPLIT(CONCAT(a, b)) reduces to the projection selected by the
+		// instance's output index; out-of-bounds projections reduce to nil.
 		let a = make_constant("cr_a");
 		let b = make_constant("cr_b");
-		let concat = Primitive {
-			id: PRIM_CONCAT,
-			arguments: vec![a.clone(), b.clone()],
-			output: 0,
-			instance_check: false,
-		};
-		let split = Primitive {
-			id: PRIM_SPLIT,
-			arguments: vec![Value::Primitive(Arc::new(concat))],
-			output: 0,
-			instance_check: false,
-		};
+		let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
 		let c_dummy = Constant {
 			name: Arc::from("cr_dummy"),
 			id: value_names_map_add("cr_dummy"),
@@ -831,11 +821,81 @@ mod unit_tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, values) = can_rewrite(&split, &ps, 0);
+		for (output, expected) in [(0, a), (1, b), (2, value_nil())] {
+			let split = Primitive {
+				id: PRIM_SPLIT,
+				arguments: vec![concat.clone()],
+				output,
+				instance_check: false,
+			};
+			let (rewritten, value) = can_rewrite(&split, &ps, 0);
+			assert!(rewritten);
+			assert!(value.equivalent(&expected, true));
+		}
+	}
+
+	#[test]
+	fn can_rewrite_pke_dec_with_projected_key() {
+		// PKE_DEC(sk2, PKE_ENC(G^SPLIT(CONCAT(sk1, sk2))[1], m)) should
+		// rewrite to m: the projection in the public key resolves to sk2,
+		// the matching secret key.
+		let sk1 = make_constant("crpk_sk1");
+		let sk2 = make_constant("crpk_sk2");
+		let m = make_constant("crpk_m");
+		let pair = make_primitive(PRIM_CONCAT, vec![sk1, sk2.clone()], 0);
+		let proj = make_primitive(PRIM_SPLIT, vec![pair], 1);
+		let pk = make_equation(vec![value_g(), proj]);
+		let enc = make_primitive(PRIM_PKE_ENC, vec![pk, m.clone()], 0);
+		let dec = Primitive {
+			id: PRIM_PKE_DEC,
+			arguments: vec![sk2, enc],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("crpk_dummy"),
+			id: value_names_map_add("crpk_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, value) = can_rewrite(&dec, &ps, 0);
 		assert!(rewritten);
-		assert_eq!(values.len(), 2);
-		assert!(values[0].equivalent(&a, true));
-		assert!(values[1].equivalent(&b, true));
+		assert!(value.equivalent(&m, true));
+	}
+
+	#[test]
+	fn can_reconstruct_primitive_projection() {
+		// SPLIT(CONCAT(HASH(a), HASH(b)))[1] reduces to HASH(b); an attacker
+		// who knows b (but not a) can reconstruct it.
+		let a = make_constant("crproj_a");
+		let b = make_constant("crproj_b");
+		let hash_a = make_primitive(PRIM_HASH, vec![a], 0);
+		let hash_b = make_primitive(PRIM_HASH, vec![b.clone()], 0);
+		let pair = make_primitive(PRIM_CONCAT, vec![hash_a, hash_b], 0);
+		let proj = Primitive {
+			id: PRIM_SPLIT,
+			arguments: vec![pair],
+			output: 1,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("crproj_dummy"),
+			id: value_names_map_add("crproj_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![b]);
+		assert!(can_reconstruct_primitive(&proj, &ps, &attacker, 0).is_some());
 	}
 
 	#[test]
@@ -2006,6 +2066,14 @@ mod tests {
 	#[test]
 	fn test_hmac_unguarded_bob() {
 		run_model("hmac_unguarded_bob.vp", "c1a0");
+	}
+	#[test]
+	fn test_concat_split_replay() {
+		run_model("concat_split_replay.vp", "a0");
+	}
+	#[test]
+	fn test_wire_projection_replay() {
+		run_model("wire_projection_replay.vp", "a0");
 	}
 	#[test]
 	fn test_ok() {

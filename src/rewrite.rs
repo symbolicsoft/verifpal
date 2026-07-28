@@ -4,9 +4,8 @@
 use std::sync::Arc;
 
 use crate::possible::{can_rebuild, can_rewrite};
-use crate::primitive::{primitive_has_rewrite_rule, primitive_is_core};
+use crate::primitive::primitive_has_rewrite_rule;
 use crate::types::*;
-use crate::value::value_nil;
 
 // ---------------------------------------------------------------------------
 // Rewrite: primitives
@@ -36,31 +35,18 @@ pub fn perform_primitive_rewrite(
 		Some(p) => p,
 		None => return r,
 	};
-	let (rewritten_root, rewritten_values) = can_rewrite(rewrite_p2, ps, 0);
-	if !rewritten_root && let Some(p) = rewritten_values[0].as_primitive() {
+	let (rewritten_root, rewritten_value) = can_rewrite(rewrite_p2, ps, 0);
+	if !rewritten_root && let Some(p) = rewritten_value.as_primitive() {
 		r.failed_rewrites.push(p.clone());
-	}
-	let r_index = if rewritten_root && primitive_is_core(p.id) {
-		p.output
-	} else {
-		0
-	};
-	if r_index >= rewritten_values.len() {
-		if let Some(idx) = slot_index {
-			ps.values[idx].set_value(value_nil());
-		}
-		r.rewritten = r.rewritten || rewritten_root;
-		r.value = value_nil();
-		return r;
 	}
 	if let Some(idx) = slot_index
 		&& (r.rewritten || rewritten_root)
 	{
 		ps.values[idx].rewritten = true;
-		ps.values[idx].set_value(rewritten_values[r_index].clone());
+		ps.values[idx].set_value(rewritten_value.clone());
 	}
 	r.rewritten = r.rewritten || rewritten_root;
-	r.value = rewritten_values[r_index].clone();
+	r.value = rewritten_value;
 	r
 }
 

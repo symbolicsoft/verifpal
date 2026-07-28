@@ -134,8 +134,8 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 // Core rule functions
 // ---------------------------------------------------------------------------
 
-fn core_rule_assert(p: &Primitive) -> (bool, Vec<Value>) {
-	let v = vec![Value::Primitive(Arc::new(p.clone()))];
+fn core_rule_assert(p: &Primitive) -> (bool, Value) {
+	let v = Value::Primitive(Arc::new(p.clone()));
 	if p.arguments[0].equivalent(&p.arguments[1], true) {
 		(true, v)
 	} else {
@@ -143,18 +143,18 @@ fn core_rule_assert(p: &Primitive) -> (bool, Vec<Value>) {
 	}
 }
 
-fn core_rule_split(p: &Primitive) -> (bool, Vec<Value>) {
-	let v = vec![Value::Primitive(Arc::new(p.clone()))];
+fn core_rule_split(p: &Primitive) -> (bool, Value) {
 	match &p.arguments[0] {
-		Value::Constant(_) => (false, v),
-		Value::Primitive(pp) => {
-			if pp.id == PRIM_CONCAT {
-				(true, pp.arguments.clone())
-			} else {
-				(false, v)
-			}
-		}
-		Value::Equation(_) => (false, v),
+		Value::Primitive(pp) if pp.id == PRIM_CONCAT => (
+			true,
+			// Project this instance's output; a SPLIT into more parts than
+			// the CONCAT provides yields nil for the excess outputs.
+			pp.arguments
+				.get(p.output)
+				.cloned()
+				.unwrap_or_else(value_nil),
+		),
+		_ => (false, Value::Primitive(Arc::new(p.clone()))),
 	}
 }
 

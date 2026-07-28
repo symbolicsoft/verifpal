@@ -197,11 +197,11 @@ pub fn can_reconstruct_primitive(
 	if depth > MAX_DEPTH {
 		return None;
 	}
-	let (rewritten, rewrite_values) = can_rewrite(p, ps, 0);
+	let (rewritten, rewrite_value) = can_rewrite(p, ps, 0);
 	if !rewritten {
 		return None;
 	}
-	let Value::Primitive(rewritten_prim) = &rewrite_values[0] else {
+	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
 	let mut has = Vec::new();
@@ -285,20 +285,22 @@ pub fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> Optio
 /// Symbolically rewrite a primitive by checking if its arguments match the
 /// rewrite rule's pattern. Recursively rewrites child primitives first.
 ///
-/// Returns `(success, result_values)` where `success` is false if a checked
-/// primitive's rewrite rule failed (indicating a protocol error).
-pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Vec<Value>) {
+/// Returns `(success, result)` where `result` is the reduced value of this
+/// primitive *instance* (multi-output primitives project via `p.output`
+/// inside their core rule), and `success` is false if a checked primitive's
+/// rewrite rule failed (indicating a protocol error).
+pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
 	if depth > MAX_DEPTH {
-		return (false, vec![Value::Primitive(Arc::new(p.clone()))]);
+		return (false, Value::Primitive(Arc::new(p.clone())));
 	}
 	// COW: only clone arguments if a child rewrite actually changed something
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, a) in p.arguments.iter().enumerate() {
 		if let Value::Primitive(inner_p) = a {
-			let (_, pp) = can_rewrite(inner_p, ps, depth + 1);
-			if !pp[0].equivalent(a, true) {
+			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
+			if !replacement.equivalent(a, true) {
 				let args = new_args.get_or_insert_with(|| p.arguments.clone());
-				args[i] = pp[0].clone();
+				args[i] = replacement;
 			}
 		}
 	}
@@ -311,7 +313,7 @@ pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, V
 	} else {
 		pc_ref = p;
 	}
-	let wrap = |pr: &Primitive| vec![Value::Primitive(Arc::new(pr.clone()))];
+	let wrap = |pr: &Primitive| Value::Primitive(Arc::new(pr.clone()));
 	if primitive_is_core(pc_ref.id) {
 		let prim = match primitive_core_get(pc_ref.id) {
 			Ok(s) => s,
@@ -341,7 +343,7 @@ pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, V
 		}
 		if let Some(to_fn) = prim.rewrite.to {
 			let rewrite = to_fn(from_p);
-			return (true, vec![rewrite]);
+			return (true, rewrite);
 		}
 	}
 	(!prim.definition_check, wrap(pc_ref))
@@ -378,7 +380,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
 						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
-						if r { v.into_iter().next() } else { None }
+						if r { Some(v) } else { None }
 					}
 					Value::Equation(inner_e) => {
 						let mut new_values: Option<Vec<Value>> = None;
@@ -388,7 +390,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 								if r {
 									let vals =
 										new_values.get_or_insert_with(|| inner_e.values.clone());
-									vals[ii] = v[0].clone();
+									vals[ii] = v;
 								}
 							}
 						}

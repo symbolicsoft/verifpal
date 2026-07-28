@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Regression model for GitHub issue #18: Bob signs a CONCAT built from
+// SPLIT projections of a guarded message. The attacker can only replay
+// Bob's exact ciphertext, so the authentication query must pass, exactly
+// as it does when Alice sends the nonces as separate guarded messages.
+
+attacker[active]
+
+principal Alice[
+	knows private sk_a
+	pk_a = G^sk_a
+]
+
+Alice -> Bob: [pk_a]
+
+principal Bob[
+	knows private sk_b
+	pk_b = G^sk_b
+]
+
+Bob -> Alice: [pk_b]
+
+principal Alice[
+	generates n1, n2
+	data_alice = CONCAT(n1, n2)
+]
+
+Alice -> Bob: [data_alice]
+
+principal Bob[
+	n1_b, n2_b = SPLIT(data_alice)
+	generates n3
+	data_bob = CONCAT(n1_b, n2_b, n3)
+	data_bob_sign = SIGN(sk_b, data_bob)
+	data_bob_sign_enc = PKE_ENC(pk_a, CONCAT(data_bob, data_bob_sign))
+]
+
+Bob -> Alice: data_bob_sign_enc
+
+principal Alice[
+	data_bob_sign_dec = PKE_DEC(sk_a, data_bob_sign_enc)
+	data_bob_dec, data_bob_sign_dec_ = SPLIT(data_bob_sign_dec)
+	_ = SIGNVERIF(pk_b, data_bob_dec, data_bob_sign_dec_)?
+	n1_a, n2_a, _ = SPLIT(data_bob_dec)
+	_ = ASSERT(n1, n1_a)?
+	_ = ASSERT(n2, n2_a)?
+]
+
+queries[
+	authentication? Bob -> Alice: data_bob_sign_enc
+]

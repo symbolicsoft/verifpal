@@ -18,7 +18,10 @@ pub use self::spec::*;
 // ---------------------------------------------------------------------------
 
 pub type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
-pub type CoreRuleFn = fn(&Primitive) -> (bool, Vec<Value>);
+/// A core rewrite rule reduces a primitive *instance* to a single value:
+/// multi-output primitives project via `p.output` inside the rule, so
+/// callers never select among outputs.
+pub type CoreRuleFn = fn(&Primitive) -> (bool, Value);
 pub type RewriteToFn = fn(&Primitive) -> Value;
 
 // ---------------------------------------------------------------------------

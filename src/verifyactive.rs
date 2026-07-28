@@ -698,14 +698,16 @@ fn verify_active_scan_seq(
 	}
 }
 
-/// Try to rewrite a value if it is a Primitive, returning the rewritten value
-/// only if the result is also a Primitive. Otherwise returns None.
+/// Try to rewrite a value if it is a Primitive, returning the rewritten
+/// value if it differs from the input. Otherwise returns None.
 fn try_rewrite_primitive(v: &Value, ps: &PrincipalState) -> Option<Value> {
 	let p = v.as_primitive()?;
 	let (_, rv) = can_rewrite(p, ps, 0);
-	rv.into_iter()
-		.next()
-		.filter(|v| matches!(v, Value::Primitive(_)))
+	if rv.equivalent(v, true) {
+		None
+	} else {
+		Some(rv)
+	}
 }
 
 /// Result of mutating a principal state and checking for worthwhile mutations.
@@ -754,9 +756,13 @@ fn verify_active_mutate_principal_state(
 		// If trace_resolved is a primitive, try to rewrite it
 		let trace_resolved = try_rewrite_primitive(&trace_resolved, &ps).unwrap_or(trace_resolved);
 
-		// If combo_value is a primitive, try to rewrite and copy output/instance_check from original
+		// If combo_value is a primitive, try to rewrite and copy output/instance_check from original.
+		// Mutations that rewrite to a non-primitive are kept in primitive form
+		// so their skeleton shape survives as a distinct mutation.
 		if let Value::Primitive(_) = &combo_value {
-			if let Some(v) = try_rewrite_primitive(&combo_value, &ps) {
+			if let Some(v) = try_rewrite_primitive(&combo_value, &ps)
+				.filter(|v| matches!(v, Value::Primitive(_)))
+			{
 				combo_value = v;
 			}
 			if let Value::Primitive(orig_p) = &resolved_assigned
@@ -767,7 +773,12 @@ fn verify_active_mutate_principal_state(
 			}
 		}
 
-		let worthwhile = !combo_value.equivalent(&trace_resolved, true);
+		// Compare reducts: a mutation whose term merely reduces to the honest
+		// value (e.g. an injected SPLIT(CONCAT(...)) projection) is a replay,
+		// indistinguishable to the recipient from the value itself.
+		let combo_reduct =
+			try_rewrite_primitive(&combo_value, &ps).unwrap_or_else(|| combo_value.clone());
+		let worthwhile = !combo_reduct.equivalent(&trace_resolved, true);
 
 		ps.values[slot_idx].original = ps.values[slot_idx].value.clone();
 		ps.values[slot_idx].provenance.creator = attacker_id;
