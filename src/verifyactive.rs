@@ -981,12 +981,11 @@ fn build_bypass_state(
 	// guard dependency (e.g. AEAD_DEC whose key was derived from a previous
 	// bypassed guard).  Protocol models with >5 chained guard dependencies are
 	// extremely rare.
-	let mut needs_final_resolve = false;
 	for _ in 0..5 {
 		let _ = ps.resolve_all_values(attacker);
 		let failures = ps.perform_all_rewrites();
 
-		needs_final_resolve = false;
+		let mut injected_this_round = false;
 		for &(ref prim, idx) in &failures {
 			if !prim.instance_check || ps.values[idx].provenance.creator != ps.id {
 				continue;
@@ -995,18 +994,24 @@ fn build_bypass_state(
 				&& attacker_can_obtain_value(&key, &ps, attacker)
 			{
 				ps.values[idx].override_all(value_g_nil());
-				needs_final_resolve = true;
+				injected_this_round = true;
 			}
 		}
-		if !needs_final_resolve {
+		if !injected_this_round {
 			break;
 		}
 	}
 
-	// If we injected in the last iteration, finalize the state.
-	if needs_final_resolve {
-		let _ = ps.resolve_all_values(attacker);
-		let _ = ps.perform_all_rewrites();
+	// Finalize the state and re-check for checked primitives that still fail.
+	// A bypass state is only sound up to the first remaining failure: the
+	// principal would have halted there and never produced any later values,
+	// so truncate the state at that point instead of exposing them to the
+	// attacker (e.g. wire ciphertexts fed to decomposition).
+	let _ = ps.resolve_all_values(attacker);
+	let failures = ps.perform_all_rewrites();
+	let (_, truncation_index, _) = classify_rewrite_failures(&ps, &failures);
+	if let Some(trunc_at) = truncation_index {
+		ps = verify_active_drop_principal_state_after_index(ps, trunc_at);
 	}
 
 	Some(ps)
