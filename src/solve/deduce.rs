@@ -762,6 +762,41 @@ impl<'a> Deducer<'a> {
 			return dedupe(out);
 		}
 
+		// `SPLIT(x)?` succeeds exactly when `x` is a CONCAT, and being a core
+		// primitive it has no rewrite rule for the branch below to read — so
+		// without this the check contributes no constraint at all and the
+		// solver never learns that the plaintext it is forging has to be a
+		// concatenation.  That is enough to hide a complete forgery: with a
+		// leaked key the attacker can build `ENC(k, ...)`, but offering
+		// `ENC(k, nil)` halts the principal at the split, and `ENC(k, CONCAT(…))`
+		// is never proposed.
+		//
+		// The argument is inverted rather than matched because it is normally
+		// reached through a decryption: the question is not "is this a CONCAT"
+		// but "what must the attacker send so that it becomes one".
+		if p.id == PRIM_SPLIT
+			&& let Some(inner) = p.arguments.first()
+			&& let Ok(concat_spec) = primitive_def(PRIM_CONCAT)
+		{
+			let mut out = Vec::new();
+			for arity in concat_spec.arity().iter().map(|a| *a as usize) {
+				if p.output >= arity {
+					continue;
+				}
+				let arguments: Vec<Value> = (0..arity).map(|_| self.fresh_var()).collect();
+				let candidate = Value::Primitive(Arc::new(Primitive {
+					id: PRIM_CONCAT,
+					arguments,
+					output: 0,
+					instance_check: false,
+				}));
+				for bound in self.invert(inner, &candidate, base) {
+					out.extend(self.require_constructible(&bound, base, false));
+				}
+			}
+			return dedupe(out);
+		}
+
 		// Rewrite-rule checks (`AEAD_DEC?`, `SIGNVERIF?`, …): the consumed
 		// argument must have the shape the rule demands.
 		let Ok(spec) = primitive_get(p.id) else {

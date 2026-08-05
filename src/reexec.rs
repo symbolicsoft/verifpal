@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use crate::primitive::primitive_extract_bypass_key;
 use crate::principal::ATTACKER_ID;
-use crate::theory::{can_reconstruct_equation, can_reconstruct_primitive};
+use crate::theory::{can_reconstruct_equation, can_reconstruct_primitive, can_rewrite};
 use crate::types::*;
-use crate::value::value_g_nil;
+use crate::value::{resolve_trace_values, value_g_nil};
 
 /// What the principal actually computes under `installs`, with guard bypass
 /// and halt truncation already applied.
@@ -28,11 +28,23 @@ pub(crate) fn reexecute(
 	ps_base: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
 	attacker: &AttackerState,
+	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
-	for (slot, ground) in installs {
+	// Authorship is judged against the *pristine* state, before any install has
+	// perturbed it, so that one slot's substitution cannot change the verdict on
+	// another's.  Deciding it here rather than at the call sites is what keeps
+	// the solver and the minimizer in the exact agreement this module exists to
+	// guarantee.
+	let authored: Vec<bool> = installs
+		.iter()
+		.map(|(slot, ground)| {
+			slot.get() < ps.values.len() && attacker_authored(ground, slot.get(), km, &ps)
+		})
+		.collect();
+	for ((slot, ground), authored) in installs.iter().zip(authored) {
 		if slot.get() < ps.values.len() {
-			install(&mut ps, slot.get(), ground.clone());
+			install(&mut ps, slot.get(), ground.clone(), authored);
 		}
 	}
 
@@ -143,19 +155,71 @@ fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool 
 	}
 }
 
+/// Whether putting `ground` in `slot` is something the *attacker* did, as
+/// opposed to the honest message arriving unchanged.
+///
+/// A term that merely reduces back to the honest value — an injected
+/// `SPLIT(CONCAT(...))` projection, say — is a replay: the recipient cannot
+/// tell it apart from the real message, so the attacker has authored nothing.
+/// This is the check that fixed issue #18.
+///
+/// It governs *authorship*, not installation.  A proposal routinely binds one
+/// slot it is really attacking alongside several it merely forwards, and the
+/// forwarded ones still have to be installed or the principal would compute
+/// from a state no run ever produced.  What must not travel with them is the
+/// claim that the attacker sent them: stamping a relayed value as
+/// attacker-sent is exactly what manufactures a false authentication attack,
+/// because the query then sees a foreign sender on a value the recipient
+/// received untouched.
+pub(crate) fn attacker_authored(
+	ground: &Value,
+	slot: usize,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+) -> bool {
+	let honest = &ps.values[slot].value;
+	let (trace_resolved, _) = resolve_trace_values(honest, km);
+	let trace_reduct = reduce(&trace_resolved, ps).unwrap_or(trace_resolved);
+	let ground_reduct = reduce(ground, ps).unwrap_or_else(|| ground.clone());
+	!ground_reduct.equivalent(&trace_reduct, true)
+}
+
+/// Rewrite a primitive if doing so changes it.
+fn reduce(v: &Value, ps: &PrincipalState) -> Option<Value> {
+	let p = v.as_primitive()?;
+	let (_, rewritten) = can_rewrite(p, ps, 0);
+	if rewritten.equivalent(v, true) {
+		None
+	} else {
+		Some(rewritten)
+	}
+}
+
 /// Install an attacker-chosen value in a slot, with the provenance the rest of
 /// the engine expects.
 ///
 /// `original` keeps the value the principal believes it received.  Losing that
 /// distinction is what causes false authentication attacks, because principals
 /// would then "see" the attacker's tampering inside their own computations.
-pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value) {
+///
+/// `authored` is [`attacker_authored`]: when false the value is installed but
+/// the provenance is left alone, because the attacker forwarded the honest
+/// message rather than replacing it.
+pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value, authored: bool) {
 	let previous = ps.values[slot].value.clone();
 	let sv = &mut ps.values[slot];
 	sv.original = previous;
 	sv.provenance.creator = ATTACKER_ID;
-	sv.provenance.sender = ATTACKER_ID;
 	sv.provenance.attacker_tainted = true;
+	// Taint and authorship are separate, for the same reason `attacker_tainted`
+	// and `bypass_injected` are: taint says the value passed through the
+	// attacker's hands and governs what the principal perceives and what the
+	// closure may derive from it, which is true of a relayed value too.
+	// `sender` is the narrower claim that the attacker *produced* it, and that
+	// is the only thing an authentication query reads.
+	if authored {
+		sv.provenance.sender = ATTACKER_ID;
+	}
 	sv.pre_rewrite = ground.clone();
 	sv.value = ground;
 }
@@ -206,7 +270,8 @@ mod tests {
 		let ps = make_principal_state("Alice", 0, meta, values);
 		let attacker = make_attacker_state(vec![]);
 
-		let out = reexecute(&ps, &[(SlotIdx(1), a.clone())], &attacker).expect("reexecute");
+		let km = make_trace();
+		let out = reexecute(&ps, &[(SlotIdx(1), a.clone())], &attacker, &km).expect("reexecute");
 
 		// The installed slot carries the attacker's value and provenance.
 		assert!(out.values[1].value.equivalent(&a, true));
@@ -219,5 +284,38 @@ mod tests {
 		assert!(out.values[1].original.equivalent(&b, true));
 		// Untouched slots are unaffected.
 		assert!(!out.values[0].provenance.attacker_tainted);
+	}
+
+	/// Forwarding the honest value is a relay, not an attack: the value is
+	/// installed but the attacker gets no authorship for it.  Stamping it would
+	/// make every unrelated slot of a multi-slot proposal look attacker-sent,
+	/// which is what manufactured the false `signal.vp` authentication attack.
+	#[test]
+	fn reexecute_does_not_attribute_a_relayed_value_to_the_attacker() {
+		use crate::reexec::reexecute;
+		let a = make_constant("relay_a");
+		let b = make_constant("relay_b");
+		let ca = a.as_constant().expect("constant").clone();
+		let cb = b.as_constant().expect("constant").clone();
+		let meta = vec![make_slot_meta(&ca, true), make_slot_meta(&cb, false)];
+		let values = vec![make_slot_values(&a, 0), make_slot_values(&b, 1)];
+		let ps = make_principal_state("Alice", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+		let km = make_trace();
+
+		// Slot 1 already holds `b`; installing `b` there changes nothing.
+		let out = reexecute(&ps, &[(SlotIdx(1), b.clone())], &attacker, &km).expect("reexecute");
+
+		assert!(out.values[1].value.equivalent(&b, true));
+		// Taint still applies: the value did pass through the attacker's hands,
+		// and the closure's view of it must not change.
+		assert!(out.values[1].provenance.attacker_tainted);
+		// Authorship does not: the attacker forwarded this, it did not produce
+		// it, so an authentication query must still see the honest sender.
+		assert_ne!(
+			out.values[1].provenance.sender,
+			crate::principal::ATTACKER_ID,
+			"a forwarded value must not be attributed to the attacker"
+		);
 	}
 }

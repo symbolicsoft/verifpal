@@ -86,10 +86,10 @@ principal Bob[
 	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))?
 ]
 
-// phase[1]
+phase[1]
 
-// principal Alice[leaks alongterm]
-// principal Bob[leaks blongterm]
+principal Alice[leaks alongterm]
+principal Bob[leaks blongterm]
 
 queries[
 	confidentiality? m1

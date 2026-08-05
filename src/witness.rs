@@ -262,7 +262,7 @@ fn probe(
 	pure.resolve_all_values(&scratch.attacker_snapshot()).ok()?;
 	scratch.attacker_phase_update(km, &pure, phase).ok()?;
 
-	let ps = reexecute(base, installs, &scratch.attacker_snapshot()).ok()?;
+	let ps = reexecute(base, installs, &scratch.attacker_snapshot(), km).ok()?;
 	// As in `solve/validate.rs`: a hypothetical state that cannot be analysed
 	// answers nothing, which is a "no" and not a run-level error.
 	let _ = compute_knowledge_closure(&scratch, km, &ps);

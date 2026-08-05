@@ -22,9 +22,8 @@
 
 use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
-use crate::theory::can_rewrite;
+use crate::reexec::attacker_authored;
 use crate::types::*;
-use crate::value::resolve_trace_values;
 use crate::verify::verify_resolve_queries;
 
 use super::symbolic::SymbolicState;
@@ -67,7 +66,7 @@ pub(crate) fn validate(
 		if slot >= ps.values.len() {
 			continue;
 		}
-		if is_worthwhile(&ground, slot, km, &ps) {
+		if attacker_authored(&ground, slot, km, &ps) {
 			worthwhile = true;
 		}
 		installs.push((SlotIdx(slot), ground));
@@ -77,7 +76,7 @@ pub(crate) fn validate(
 		return Ok(false);
 	}
 
-	let ps = crate::reexec::reexecute(&ps, &installs, attacker)?;
+	let ps = crate::reexec::reexecute(&ps, &installs, attacker, km)?;
 
 	// Errors from analysing a *hypothetical* state are not errors in the run.
 	//
@@ -91,31 +90,4 @@ pub(crate) fn validate(
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)
-}
-
-/// Whether replacing slot `slot` with `ground` is distinguishable from the
-/// honest message.
-///
-/// A term that merely reduces back to the honest value — an injected
-/// `SPLIT(CONCAT(...))` projection, say — is a replay, not an attack.  The
-/// recipient cannot tell it apart from the real message, so attributing it to
-/// the attacker would manufacture a false authentication result.  This is the
-/// check that fixed issue #18 and it is reproduced here deliberately.
-fn is_worthwhile(ground: &Value, slot: usize, km: &ProtocolTrace, ps: &PrincipalState) -> bool {
-	let honest = &ps.values[slot].value;
-	let (trace_resolved, _) = resolve_trace_values(honest, km);
-	let trace_reduct = reduce(&trace_resolved, ps).unwrap_or(trace_resolved);
-	let ground_reduct = reduce(ground, ps).unwrap_or_else(|| ground.clone());
-	!ground_reduct.equivalent(&trace_reduct, true)
-}
-
-/// Rewrite a primitive if doing so changes it.
-fn reduce(v: &Value, ps: &PrincipalState) -> Option<Value> {
-	let p = v.as_primitive()?;
-	let (_, rewritten) = can_rewrite(p, ps, 0);
-	if rewritten.equivalent(v, true) {
-		None
-	} else {
-		Some(rewritten)
-	}
 }

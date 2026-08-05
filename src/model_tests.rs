@@ -292,11 +292,11 @@ fn test_triple_dh() {
 }
 #[test]
 fn test_key_ratchet() {
-	run_model("key_ratchet.vp", "c0c0c0a1a1a0");
+	run_model("key_ratchet.vp", "c0c0c0a0a0a0");
 }
 #[test]
 fn test_four_party() {
-	run_model("four_party.vp", "c1a0a1a1");
+	run_model("four_party.vp", "c1a0a0a1");
 }
 #[test]
 fn test_phase_forward_secrecy() {
@@ -309,6 +309,12 @@ fn test_shamir_reconstruction() {
 #[test]
 fn test_blind_signature() {
 	run_model("blind_signature.vp", "c0c0a1");
+}
+/// A relayed message must not be credited to the attacker just because some
+/// other slot of the same proposal was genuinely substituted.
+#[test]
+fn test_relay_not_forgery() {
+	run_model("relay_not_forgery.vp", "a0");
 }
 #[test]
 fn test_concat_bomb() {

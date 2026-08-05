@@ -89,7 +89,24 @@ pub(crate) fn is_mutable_slot(
 		{
 			return false;
 		}
-	} else if ps.values[idx].provenance.creator == ps.id {
+	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
+		// Creating the value is not the only way to hold it off the network:
+		// `knows private k` declared by two principals is one trace slot with one
+		// creator, so the *other* principal's copy has a foreign creator while
+		// still never having been transmitted.  The attacker cannot reach what
+		// never crossed a wire, so the test is whether the value travelled at
+		// all, not who made it.
+		//
+		// It is deliberately not "did *this* principal receive it": a value can
+		// be substituted on a wire it travels earlier and still reach a later
+		// principal that never received it directly, which is exactly the
+		// oracle in `exa.vp`.
+		//
+		// Getting this wrong hides real attacks as well as inventing ones. A
+		// recipient's own key admitted as controllable enters the symbolic term
+		// as `$k`, so the shape its rewrite rule demands becomes `ENC($k, ...)`
+		// instead of `ENC(k, ...)`, and the forgery that key would unlock is
+		// never proposed.
 		return false;
 	}
 	if !meta.phase.contains(&attacker.current_phase) {
