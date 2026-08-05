@@ -147,9 +147,9 @@ pub(crate) fn ground_free_as(v: &Value, filler: &Value) -> Value {
 				.collect();
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
-		Value::Equation(e) => Value::Equation(Arc::new(Equation {
-			values: e.values.iter().map(|a| ground_free_as(a, filler)).collect(),
-		})),
+		Value::Equation(e) => Value::Equation(Arc::new(splice_equation(
+			e.values.iter().map(|a| ground_free_as(a, filler)),
+		))),
 	}
 }
 
@@ -254,6 +254,27 @@ mod tests {
 			.get(&crate::solve::vars::attacker_var_id(0))
 			.expect("variable bound");
 		assert!(bound.equivalent(&x, true));
+	}
+
+	#[test]
+	fn solver_grounding_free_positions_splices_equations() {
+		let term = dh(
+			crate::value::value_g(),
+			vec![crate::solve::vars::free_var(0)],
+		);
+		let grounded = crate::solve::vars::ground_free_as(&term, &crate::value::value_g_nil());
+		assert!(grounded.equivalent(&crate::value::value_g_nil(), true));
+	}
+
+	#[test]
+	fn solver_unify_requires_matching_equation_base() {
+		let x = solver_constant("solver_base_x");
+		let y = solver_constant("solver_base_y");
+		let var = crate::solve::vars::attacker_var(0, "solver_base_var");
+		let pattern = dh(crate::value::value_g(), vec![var, y.clone()]);
+		let target = dh(crate::value::value_nil(), vec![y, x]);
+		let s = crate::solve::vars::Substitution::new();
+		assert!(crate::solve::matching::unify(&pattern, &target, &s).is_none());
 	}
 
 	#[test]

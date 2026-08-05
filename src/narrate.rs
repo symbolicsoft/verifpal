@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::primitive::primitive_name;
 use crate::principal::ATTACKER_ID;
+use crate::theory::can_rewrite;
 use crate::types::*;
 use crate::witness::Witness;
 
@@ -161,6 +162,9 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 			continue;
 		}
 		if !p.arguments.iter().any(|a| value_is_tainted(a, ps)) {
+			continue;
+		}
+		if !can_rewrite(p, ps, 0).0 {
 			continue;
 		}
 		let own = [&*ps.meta[i].constant.name];
@@ -522,6 +526,46 @@ mod tests {
 			}
 			other => panic!("expected Mutations, got {:?}", other),
 		}
+	}
+
+	fn gate_state(second: &str) -> PrincipalState {
+		let a = make_constant("gs_a");
+		let b = make_constant(second);
+		let chk = make_constant("gs_chk");
+		let assert_prim = Primitive {
+			id: PRIM_ASSERT,
+			arguments: vec![a.clone(), b.clone()],
+			output: 0,
+			instance_check: true,
+		};
+		let meta = vec![
+			make_slot_meta(a.as_constant().expect("c"), true),
+			make_slot_meta(b.as_constant().expect("c"), true),
+			make_slot_meta(chk.as_constant().expect("c"), true),
+		];
+		let mut tainted = make_slot_values(&a, 0);
+		tainted.provenance.attacker_tainted = true;
+		let values = vec![
+			tainted,
+			make_slot_values(&b, 0),
+			make_slot_values(&Value::Primitive(Arc::new(assert_prim)), 0),
+		];
+		make_principal_state("Alice", 0, meta, values)
+	}
+
+	#[test]
+	fn gate_steps_only_report_checks_that_pass() {
+		use crate::narrate::{NameTable, gate_steps};
+		let failing = gate_state("gs_b");
+		let table = NameTable::from_state(&failing);
+		assert!(
+			gate_steps(&failing, &table).is_empty(),
+			"a check that does not pass must not be narrated as passing"
+		);
+
+		let passing = gate_state("gs_a");
+		let table = NameTable::from_state(&passing);
+		assert_eq!(gate_steps(&passing, &table).len(), 1);
 	}
 
 	#[test]

@@ -575,13 +575,14 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		slots_only: bool,
 	) -> Vec<Substitution> {
-		let obligations: Vec<Value> = s
+		let mut pending: Vec<(&ValueId, &Value)> = s
 			.iter()
 			.filter(|(id, _)| {
 				!base.contains_key(*id) && !(slots_only && super::vars::is_free_var_id(**id))
 			})
-			.map(|(_, v)| v.clone())
 			.collect();
+		pending.sort_by_key(|(id, _)| **id);
+		let obligations: Vec<Value> = pending.into_iter().map(|(_, v)| v.clone()).collect();
 
 		let mut frontier = vec![s.clone()];
 		for obligation in obligations {

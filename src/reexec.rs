@@ -173,15 +173,7 @@ fn truncation_point(ps: &PrincipalState, failures: &[(Primitive, usize)]) -> Opt
 			continue;
 		}
 		let declared_at = ps.meta[*idx].declared_at;
-		let truncate_at = if declared_at == ps.max_declared_at {
-			idx + 1
-		} else {
-			match ps.meta.iter().position(|m| m.declared_at == declared_at) {
-				Some(pos) => pos + 1,
-				None => idx + 1,
-			}
-		};
-		return Some((truncate_at, declared_at));
+		return Some((idx + 1, declared_at));
 	}
 	None
 }

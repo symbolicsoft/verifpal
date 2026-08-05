@@ -80,13 +80,17 @@ fn resolve_trace_equation(
 	if depth >= MAX_RESOLVE_DEPTH {
 		return value.clone();
 	}
-	let mut elements: Vec<Value> = Vec::new();
+	let mut elements: Vec<Value> = Vec::with_capacity(eq.values.len());
 	for elem in &eq.values {
-		if let Value::Constant(c) = elem {
-			if let Some(idx) = trace.index_of(c) {
-				elements.push(trace.slots[idx].initial_value.clone());
+		match elem {
+			Value::Constant(c) => {
+				push_unique_value(visited, elem.clone());
+				match trace.index_of(c) {
+					Some(idx) => elements.push(trace.slots[idx].initial_value.clone()),
+					None => elements.push(elem.clone()),
+				}
 			}
-			push_unique_value(visited, elem.clone());
+			_ => elements.push(elem.clone()),
 		}
 	}
 	Value::Equation(Arc::new(splice_equation(elements.iter().map(
@@ -332,4 +336,57 @@ pub(crate) fn value_constant_contains_fresh_values(
 		ps.index_of(inner)
 			.is_some_and(|i| ps.meta[i].constant.fresh)
 	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+	use crate::value::value_g;
+	use std::collections::HashMap;
+
+	fn slot_of(v: &Value) -> TraceSlot {
+		TraceSlot {
+			constant: v.as_constant().expect("constant").clone(),
+			initial_value: v.clone(),
+			creator: 1,
+			known_by: vec![],
+			declared_at: 0,
+			phases: vec![0],
+		}
+	}
+
+	fn trace_with(slots: Vec<TraceSlot>) -> ProtocolTrace {
+		let mut index = HashMap::new();
+		for (i, slot) in slots.iter().enumerate() {
+			index.insert(slot.constant.id, i);
+		}
+		ProtocolTrace {
+			principals: vec!["Alice".to_string()],
+			principal_ids: vec![1],
+			slots,
+			index,
+			max_declared_at: 0,
+			max_phase: 0,
+			used_by: HashMap::new(),
+			leaks: Arc::new(Vec::new()),
+		}
+	}
+
+	#[test]
+	fn resolving_an_equation_keeps_elements_it_cannot_resolve() {
+		let a = make_constant("rte_a");
+		let absent = make_constant("rte_absent");
+		let trace = trace_with(vec![slot_of(&value_g()), slot_of(&a)]);
+		let eq = make_equation(vec![value_g(), a, absent.clone()]);
+		let (resolved, _) = resolve_trace_values(&eq, &trace);
+		let e = resolved.as_equation().expect("still an equation");
+		assert_eq!(
+			e.values.len(),
+			3,
+			"an exponent the trace cannot resolve must survive, got {}",
+			resolved
+		);
+		assert!(e.values[2].equivalent(&absent, true));
+	}
 }

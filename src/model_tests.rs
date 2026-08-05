@@ -53,6 +53,10 @@ fn test_aead_replay_not_forgery() {
 	run_model("aead_replay_not_forgery.vp", "a0c0");
 }
 #[test]
+fn test_dh_exponent_not_dropped() {
+	run_model("dh_exponent_not_dropped.vp", "c0c0");
+}
+#[test]
 fn test_ok() {
 	run_model("ok.vp", "c0a0a0");
 }

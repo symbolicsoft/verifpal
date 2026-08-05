@@ -56,7 +56,9 @@ pub(crate) fn validate(
 	}
 
 	let governing = crate::reexec::governing_attacker(ctx, &installs, &ps, attacker);
-	let ps = crate::reexec::reexecute(&ps, &installs, &governing, km)?;
+	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, &governing, km) else {
+		return Ok(false);
+	};
 
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);

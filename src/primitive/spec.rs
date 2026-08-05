@@ -225,7 +225,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			..PrimitiveSpec::default()
 		},
@@ -239,7 +238,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
@@ -263,7 +261,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			..PrimitiveSpec::default()
 		},
@@ -277,7 +274,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
@@ -331,7 +327,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_extract_dh_exponent),
-				..DecomposeRule::default()
 			},
 			..PrimitiveSpec::default()
 		},
@@ -345,7 +340,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			rewrite: RewriteRule {
 				has_rule: true,
@@ -429,7 +423,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				given: vec![0],
 				reveal: 1,
 				filter: Some(filter_identity),
-				..DecomposeRule::default()
 			},
 			..PrimitiveSpec::default()
 		},

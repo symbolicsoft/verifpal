@@ -9,7 +9,7 @@ use crate::pretty::pretty_values;
 use crate::primitive::primitive_core_reveals_args;
 use crate::theory::{
 	can_decompose, can_recompose, can_reconstruct_equation, can_reconstruct_primitive,
-	find_obtainable_passwords, passively_decompose,
+	find_obtainable_passwords,
 };
 use crate::types::*;
 use crate::value::compute_slot_diffs;
@@ -30,7 +30,7 @@ pub(crate) struct RuleGroup {
 static DEDUCTION_RULES: &[RuleGroup] = &[
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
-		rules: &[rule_decompose, rule_passive_decompose],
+		rules: &[rule_decompose],
 	},
 	RuleGroup {
 		domain: RuleDomain::PrincipalAssigned,
@@ -136,38 +136,6 @@ fn rule_decompose(
 			)
 		},
 	)
-}
-
-fn rule_passive_decompose(
-	ctx: &VerifyContext,
-	value: &Value,
-	_ps: &PrincipalState,
-	_attacker: &AttackerState,
-	record: &Arc<MutationRecord>,
-) -> bool {
-	let Value::Primitive(prim) = value else {
-		return false;
-	};
-	let mut found = false;
-	for revealed in &passively_decompose(prim) {
-		found |= learn(
-			ctx,
-			revealed,
-			record,
-			DerivationRecord::Decomposed {
-				of: value.clone(),
-				using: vec![],
-			},
-			|| {
-				format!(
-					"{} obtained as associated data from {}.",
-					info_output_text(revealed),
-					value,
-				)
-			},
-		);
-	}
-	found
 }
 
 fn rule_reconstruct(

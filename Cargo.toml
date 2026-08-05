@@ -2,7 +2,7 @@
 name = "verifpal"
 version = "0.60.2"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.96"
 license = "GPL-3.0-only"
 description = "Verifpal - cryptographic protocol analysis"
 

@@ -9,23 +9,6 @@ use crate::types::*;
 
 const MAX_DEPTH: usize = 16;
 
-pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
-	if primitive_is_core(p.id) {
-		return vec![];
-	}
-	let Ok(prim) = primitive_get(p.id) else {
-		return vec![];
-	};
-	if !prim.decompose.has_rule {
-		return vec![];
-	}
-	prim.decompose
-		.passive_reveal
-		.iter()
-		.filter_map(|&i| p.arguments.get(i).cloned())
-		.collect()
-}
-
 pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
@@ -552,48 +535,6 @@ mod tests {
 		};
 		let attacker = make_attacker_state(vec![a]);
 		assert!(can_reconstruct_equation(&eq, &attacker).is_none());
-	}
-
-	#[test]
-	fn passive_decompose_aead_enc() {
-		let key = make_constant("pd_key");
-		let msg = make_constant("pd_msg");
-		let ad = make_constant("pd_ad");
-		let p = Primitive {
-			id: PRIM_AEAD_ENC,
-			arguments: vec![key, msg, ad.clone()],
-			output: 0,
-			instance_check: false,
-		};
-		let revealed = passively_decompose(&p);
-		assert_eq!(revealed.len(), 0);
-	}
-
-	#[test]
-	fn passive_decompose_hash_no_rule() {
-		let a = make_constant("pd_hash_a");
-		let p = Primitive {
-			id: PRIM_HASH,
-			arguments: vec![a],
-			output: 0,
-			instance_check: false,
-		};
-		let revealed = passively_decompose(&p);
-		assert!(revealed.is_empty());
-	}
-
-	#[test]
-	fn passive_decompose_core_primitive() {
-		let a = make_constant("pd_core_a");
-		let b = make_constant("pd_core_b");
-		let p = Primitive {
-			id: PRIM_CONCAT,
-			arguments: vec![a, b],
-			output: 0,
-			instance_check: false,
-		};
-		let revealed = passively_decompose(&p);
-		assert!(revealed.is_empty());
 	}
 
 	#[test]

@@ -102,6 +102,7 @@ pub(crate) fn perform_equation_rewrite(
 			}
 			Value::Primitive(inner_p) => {
 				if !primitive_has_rewrite_rule(inner_p.id) {
+					rewrite_eq.values.push(a.clone());
 					continue;
 				}
 				let r = perform_primitive_rewrite(inner_p, None, ps);

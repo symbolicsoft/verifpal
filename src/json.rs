@@ -114,6 +114,11 @@ pub(crate) fn json_verify_results(results: &[VerifyResult]) -> String {
 }
 
 pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
+	let anchor = m.blocks.iter().find_map(|block| match block {
+		Block::Principal(p) => Some(p.name.clone()),
+		Block::Message(msg) => Some(msg.sender_name.to_string()),
+		Block::Phase(_) => None,
+	});
 	let mut output = String::new();
 	for block in &m.blocks {
 		match block {
@@ -131,7 +136,12 @@ pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 				));
 			}
 			Block::Phase(phase) => {
-				output.push_str(&format!("Note right of : phase[{}]\n", phase.number));
+				if let Some(anchor) = &anchor {
+					output.push_str(&format!(
+						"Note right of {}: phase[{}]\n",
+						anchor, phase.number
+					));
+				}
 			}
 		}
 	}
@@ -183,4 +193,28 @@ fn handle_pretty_print(input: &str) -> VResult<String> {
 fn handle_pretty_diagram(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
 	located(&m, pretty_diagram(&m))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn phase_notes_name_a_participant() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private pd_x\n\
+			]\n\
+			phase[1]\n\
+			principal Alice[\n\
+			leaks pd_x\n\
+			]\n\
+			queries[\n\
+			confidentiality? pd_x\n\
+			]\n";
+		let m = parse_string("pd.vp", src).expect("parse");
+		let out = pretty_diagram(&m).expect("diagram");
+		assert!(out.contains("Note right of Alice: phase[1]"), "{out}");
+		assert!(!out.contains("of :"), "{out}");
+	}
 }

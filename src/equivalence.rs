@@ -70,17 +70,18 @@ pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 				&& e1_ref.values[1].equivalent(&e2_ref.values[1], true)
 		}
 		3 => {
-			equivalent_equations_rule(
-				&e1_ref.values[1],
-				&e2_ref.values[1],
-				&e1_ref.values[2],
-				&e2_ref.values[2],
-			) || equivalent_equations_rule(
-				&e1_ref.values[1],
-				&e2_ref.values[2],
-				&e1_ref.values[2],
-				&e2_ref.values[1],
-			)
+			e1_ref.values[0].equivalent(&e2_ref.values[0], true)
+				&& (equivalent_equations_rule(
+					&e1_ref.values[1],
+					&e2_ref.values[1],
+					&e1_ref.values[2],
+					&e2_ref.values[2],
+				) || equivalent_equations_rule(
+					&e1_ref.values[1],
+					&e2_ref.values[2],
+					&e1_ref.values[2],
+					&e2_ref.values[1],
+				))
 		}
 		_ => {
 			if !e1_ref.values[0].equivalent(&e2_ref.values[0], true) {
@@ -197,6 +198,16 @@ mod tests {
 		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
 		let e2 = make_equation(vec![value_g(), b, a]);
 		assert!(e1.equivalent(&e2, true));
+	}
+
+	#[test]
+	fn equation_equivalence_3_element_requires_same_base() {
+		let a = make_constant("dh_base_a");
+		let b = make_constant("dh_base_b");
+		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
+		let e2 = make_equation(vec![value_nil(), a, b]);
+		assert!(!e1.equivalent(&e2, true));
+		assert_ne!(e1.hash_value(), e2.hash_value());
 	}
 
 	#[test]

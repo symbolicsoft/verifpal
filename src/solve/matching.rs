@@ -72,6 +72,9 @@ fn unify_into(a: &Value, b: &Value, s: &mut Substitution) -> bool {
 				return false;
 			}
 			if e1.values.len() == 3 {
+				if !unify_into(&e1.values[0], &e2.values[0], s) {
+					return false;
+				}
 				let checkpoint = s.clone();
 				if unify_into(&e1.values[1], &e2.values[1], s)
 					&& unify_into(&e1.values[2], &e2.values[2], s)
