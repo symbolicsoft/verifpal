@@ -32,7 +32,7 @@ use super::vars::{Substitution, as_var, bind, contains_var};
 /// two checks against one forged message produces exactly this — one solution
 /// constraining the message's first field, another its second — and unifying
 /// them yields the message satisfying both.
-pub fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
+pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
 	let mut out = s.clone();
 	if unify_into(a, b, &mut out) {
 		Some(out)
@@ -42,7 +42,7 @@ pub fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
 }
 
 /// Merge two substitutions, unifying rather than rejecting where they disagree.
-pub fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
+pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
 	let mut out = a.clone();
 	for (id, value) in b {
 		match out.get(id).cloned() {
@@ -141,10 +141,13 @@ fn unify_bind(id: ValueId, v: &Value, s: &mut Substitution) -> bool {
 	}
 }
 
-/// Match `pattern` (which may mention attacker variables) against the ground
-/// term `target`, extending `s`.  Returns the extended substitution, or `None`
-/// if no consistent extension exists.
-pub fn match_value(pattern: &Value, target: &Value, s: &Substitution) -> Option<Substitution> {
+/// Fit `pattern`, which may mention attacker variables, to the ground term
+/// `target`, extending `s`.
+pub(crate) fn match_value(
+	pattern: &Value,
+	target: &Value,
+	s: &Substitution,
+) -> Option<Substitution> {
 	let mut out = s.clone();
 	if match_into(pattern, target, &mut out) {
 		Some(out)

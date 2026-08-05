@@ -9,27 +9,18 @@ mod spec;
 use self::spec::{build_core_specs, build_primitive_specs};
 use crate::types::*;
 
-// Re-export everything from spec so callers use `crate::primitive::PRIM_*`.
 #[allow(unused_imports)]
-pub use self::spec::*;
+pub(crate) use self::spec::*;
 
-// ---------------------------------------------------------------------------
-// Function pointer type aliases
-// ---------------------------------------------------------------------------
-
-pub type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
+pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
 /// A core rewrite rule reduces a primitive *instance* to a single value:
 /// multi-output primitives project via `p.output` inside the rule, so
 /// callers never select among outputs.
-pub type CoreRuleFn = fn(&Primitive) -> (bool, Value);
-pub type RewriteToFn = fn(&Primitive) -> Value;
-
-// ---------------------------------------------------------------------------
-// Rule structs
-// ---------------------------------------------------------------------------
+pub(crate) type CoreRuleFn = fn(&Primitive) -> (bool, Value);
+pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
 
 #[derive(Clone, Default)]
-pub struct DecomposeRule {
+pub(crate) struct DecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<usize>,
 	pub reveal: usize,
@@ -38,14 +29,14 @@ pub struct DecomposeRule {
 }
 
 #[derive(Clone, Default)]
-pub struct RecomposeRule {
+pub(crate) struct RecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
 #[derive(Clone, Default)]
-pub struct RewriteRule {
+pub(crate) struct RewriteRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub from: usize,
@@ -55,19 +46,15 @@ pub struct RewriteRule {
 }
 
 #[derive(Clone, Default)]
-pub struct RebuildRule {
+pub(crate) struct RebuildRule {
 	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
-// ---------------------------------------------------------------------------
-// Spec structs
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
-pub struct PrimitiveCoreSpec {
+pub(crate) struct PrimitiveCoreSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
@@ -81,7 +68,7 @@ pub struct PrimitiveCoreSpec {
 
 /// How to extract the bypass key from a guarded primitive's arguments.
 #[derive(Clone, Copy)]
-pub enum BypassKeyKind {
+pub(crate) enum BypassKeyKind {
 	/// Take the argument at this index directly.
 	Direct(usize),
 	/// Extract the last DH exponent from the equation at this index.
@@ -89,7 +76,7 @@ pub enum BypassKeyKind {
 }
 
 #[derive(Clone, Default)]
-pub struct PrimitiveSpec {
+pub(crate) struct PrimitiveSpec {
 	pub name: &'static str,
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
@@ -100,13 +87,8 @@ pub struct PrimitiveSpec {
 	pub rebuild: RebuildRule,
 	pub definition_check: bool,
 	pub password_hashing: Vec<usize>,
-	/// How to extract the bypass key for active attacker guard bypass.
 	pub bypass_key: Option<BypassKeyKind>,
 }
-
-// ---------------------------------------------------------------------------
-// Registries
-// ---------------------------------------------------------------------------
 
 static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {
 	let specs = build_core_specs();
@@ -118,11 +100,7 @@ static PRIM_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveSpec>> = LazyLock::new
 	specs.into_iter().map(|s| (s.id, s)).collect()
 });
 
-// ---------------------------------------------------------------------------
-// Trait + impls
-// ---------------------------------------------------------------------------
-
-pub trait PrimitiveDefinition {
+pub(crate) trait PrimitiveDefinition {
 	fn name(&self) -> &'static str;
 	fn arity(&self) -> &[i32];
 	fn output(&self) -> &[i32];
@@ -169,11 +147,7 @@ impl PrimitiveDefinition for PrimitiveSpec {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Accessor functions
-// ---------------------------------------------------------------------------
-
-pub fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
+pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
 	if primitive_is_core(id) {
 		Ok(primitive_core_get(id)? as &dyn PrimitiveDefinition)
 	} else {
@@ -181,61 +155,61 @@ pub fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinitio
 	}
 }
 
-pub fn primitive_is_core(id: PrimitiveId) -> bool {
+pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
 	CORE_SPECS.contains_key(&id)
 }
 
-pub fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
+pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
 	CORE_SPECS
 		.get(&id)
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
+		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
+pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
 	PRIM_SPECS
 		.get(&id)
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
+		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
+pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
 	primitive_def(id)
 		.map(|d| d.has_rewrite_rule())
 		.unwrap_or(false)
 }
 
-pub fn primitive_name(id: PrimitiveId) -> &'static str {
+pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
 	primitive_def(id).map(|d| d.name()).unwrap_or("")
 }
 
-pub fn primitive_has_single_output(id: PrimitiveId) -> bool {
+pub(crate) fn primitive_has_single_output(id: PrimitiveId) -> bool {
 	primitive_def(id)
 		.map(|d| d.has_single_output())
 		.unwrap_or(false)
 }
 
-pub fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
+pub(crate) fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
 	let d = primitive_def(id)?;
 	Ok((d.output(), d.definition_check()))
 }
 
-pub fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
+pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 	CORE_SPECS
 		.values()
 		.find(|s| s.name == name)
 		.map(|s| s.id)
 		.or_else(|| PRIM_SPECS.values().find(|s| s.name == name).map(|s| s.id))
-		.ok_or_else(|| VerifpalError::Internal("unknown primitive".into()))
+		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
+pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
 	Ok(primitive_def(p.id)?.arity())
 }
 
-pub fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
+pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
 	CORE_SPECS.get(&id).is_some_and(|s| s.reveals_args)
 }
 
-pub fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
+pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 	if primitive_is_core(prim.id) {
 		return None;
 	}
@@ -251,5 +225,81 @@ pub fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 			None
 		}
 		None => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn primitive_def_core() {
+		let def = primitive_def(PRIM_ASSERT).unwrap();
+		assert_eq!(def.name(), "ASSERT");
+		assert!(def.definition_check());
+		assert!(def.has_rewrite_rule());
+	}
+
+	#[test]
+	fn primitive_def_non_core() {
+		let def = primitive_def(PRIM_AEAD_ENC).unwrap();
+		assert_eq!(def.name(), "AEAD_ENC");
+		assert!(!def.definition_check());
+		assert!(!def.has_rewrite_rule());
+	}
+
+	#[test]
+	fn primitive_def_check_property() {
+		let dec = primitive_def(PRIM_AEAD_DEC).unwrap();
+		assert!(dec.definition_check());
+		let enc = primitive_def(PRIM_ENC).unwrap();
+		assert!(!enc.definition_check());
+	}
+
+	#[test]
+	fn primitive_is_core_check() {
+		assert!(primitive_is_core(PRIM_ASSERT));
+		assert!(primitive_is_core(PRIM_CONCAT));
+		assert!(primitive_is_core(PRIM_SPLIT));
+		assert!(!primitive_is_core(PRIM_HASH));
+		assert!(!primitive_is_core(PRIM_AEAD_ENC));
+	}
+
+	#[test]
+	fn primitive_name_lookup() {
+		assert_eq!(primitive_name(PRIM_HASH), "HASH");
+		assert_eq!(primitive_name(PRIM_SIGN), "SIGN");
+		assert_eq!(primitive_name(PRIM_CONCAT), "CONCAT");
+	}
+
+	#[test]
+	fn primitive_get_enum_roundtrip() {
+		let id = primitive_get_enum("AEAD_ENC").unwrap();
+		assert_eq!(id, PRIM_AEAD_ENC);
+		let id2 = primitive_get_enum("SPLIT").unwrap();
+		assert_eq!(id2, PRIM_SPLIT);
+		assert!(primitive_get_enum("NONEXISTENT").is_err());
+	}
+
+	#[test]
+	fn primitive_single_output() {
+		assert!(primitive_has_single_output(PRIM_HASH));
+		assert!(primitive_has_single_output(PRIM_ENC));
+		assert!(!primitive_has_single_output(PRIM_SPLIT)); // output: [1,2,3,4,5]
+		assert!(!primitive_has_single_output(PRIM_HKDF)); // output: [1,2,3,4,5]
+	}
+
+	#[test]
+	fn primitive_has_rewrite_rule_checks() {
+		assert!(primitive_has_rewrite_rule(PRIM_AEAD_DEC));
+		assert!(primitive_has_rewrite_rule(PRIM_DEC));
+		assert!(primitive_has_rewrite_rule(PRIM_SIGNVERIF));
+		assert!(primitive_has_rewrite_rule(PRIM_PKE_DEC));
+		assert!(primitive_has_rewrite_rule(PRIM_ASSERT));
+		assert!(primitive_has_rewrite_rule(PRIM_SPLIT));
+		assert!(!primitive_has_rewrite_rule(PRIM_HASH));
+		assert!(!primitive_has_rewrite_rule(PRIM_ENC));
+		assert!(!primitive_has_rewrite_rule(PRIM_SIGN));
+		assert!(!primitive_has_rewrite_rule(PRIM_MAC));
 	}
 }

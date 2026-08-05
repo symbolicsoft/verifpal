@@ -4,14 +4,19 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        components: clippy
+        components: clippy, rustfmt
     - name: Cache cargo registry and build
       uses: actions/cache@v4
       with:
@@ -22,7 +27,37 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
+    - name: Check formatting
+      run: cargo fmt --check
+    # --all-targets, because plain clippy does not compile #[cfg(test)] code
+    # and so never lints the tests.
     - name: Run clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --all-targets -- -D warnings
     - name: Run tests
-      run: cargo test
+      run: cargo test --release
+
+  wasm:
+    name: wasm build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+        components: clippy
+    - name: Cache cargo registry and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-wasm-
+    # The wasm feature set is never compiled by the default build, so a
+    # CLI-only CI misses breakage in it entirely.
+    - name: Clippy the wasm library
+      run: cargo clippy --lib --no-default-features --features wasm --target wasm32-unknown-unknown -- -D warnings

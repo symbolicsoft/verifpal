@@ -21,17 +21,16 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 
 ```sh
 cargo build --release                  # build (also: make build)
-cargo clippy -- -D warnings            # exactly what CI runs (also: make lint)
-cargo clippy --all-targets -- -D warnings   # also lints the test modules, which CI does NOT
-cargo test --release                   # 228 tests (144 unit + 84 model), ~0.2s once built (also: make test)
+cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
+cargo test --release                   # 237 tests (153 unit + 84 model), ~0.2s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
-cargo test --release unit_tests::      # only the unit tests
+cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
 cargo check --lib --no-default-features --features wasm   # fast check that the wasm build isn't broken
 make wasm                              # wasm-pack build + copy into ../verifpal-website/res/wasm/
 ```
 
-CI (`.github/workflows/main.yml`) runs exactly `cargo clippy -- -D warnings` and `cargo test` on Ubuntu. A single warning fails the build. Note that plain `cargo clippy` does not compile `#[cfg(test)]` code, so lint errors you introduce in the test modules will not show up until you pass `--all-targets`.
+CI (`.github/workflows/main.yml`) runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test --release` on Ubuntu, macOS and Windows, plus a separate job that clippies the wasm library for `wasm32-unknown-unknown`. A single warning fails the build. `make lint` runs the same three checks locally.
 
 Running the tool:
 
@@ -44,11 +43,15 @@ VERIFPAL_SOLVE_DEBUG=1 cargo run --release -- verify m.vp    # log every solver 
 
 `--result-code` only suppresses the banner and the beta-software warning; the whole analysis still prints and the code is the **last** line (`… | tail -1`). Other subcommands: `about`; `internal-json <knowledgeMap|verify|prettyPrint|prettyDiagram>` reads a model from stdin (to EOF or `0x04`) and emits JSON — this is the VS Code extension interface.
 
+Errors carry a `Span` into the model source and print as `file:line:col: kind: message` with the offending line and a caret. Parser errors get the position the parser stopped at automatically; `sanity.rs`/`construct.rs` attach the span of the query or declaration at fault via `VerifpalError::or_span`, which keeps whichever span is narrower. Call `.located(file_name, &model.source)` at an entry point so plain `Display` shows the position — `Model` carries its own source for exactly this.
+
 `VERIFPAL_SOLVE_DEBUG` is the first thing to reach for when an active-attacker result is wrong: it prints each proposal as `[solve] <Principal> ran=<bool> [slot=value …]`, including the ones `validate` rejected as indistinguishable replays, which is otherwise very tedious to reconstruct.
 
 ## Crate layout and features
 
-- One crate: lib `verifpal` (`src/lib.rs`, `crate-type = ["cdylib", "rlib"]`) + bin (`src/main.rs`, requires the default `cli` feature). **All tests live in `src/main.rs`** — there is no `tests/` directory. The tests reach the engine through the public lib API (`use verifpal::…`), so anything a test touches has to stay `pub`.
+- One crate: lib `verifpal` (`src/lib.rs`, `crate-type = ["cdylib", "rlib"]`) + bin (`src/main.rs`, requires the default `cli` feature). `src/main.rs` is the CLI only and holds no tests.
+- **Every engine module is `pub(crate)`**; the public API is what `lib.rs` re-exports — `verify`, `pretty_print`, `handle_internal_json`, `info_banner`/`info_message`, the `types` module, and the wasm entry points. `#![warn(unreachable_pub)]` is on, so a stray `pub` on an internal item fails CI; write `pub(crate)`.
+- There is no `tests/` directory: an integration-test target collides with this crate's `cdylib` output on one artifact name, and wasm-pack needs the `cdylib`. End-to-end model tests live in `src/model_tests.rs` instead.
 - Features: `cli` (default: clap, colored) and `wasm` (wasm-bindgen; entry points `wasm_verify`/`wasm_pretty` in `lib.rs`, which return JSON strings and buffer all output through `info::wasm_messages_*`).
 - The engine is single-threaded; rayon was dropped with the mutation search that used it. If you add a parallel code path it must be `cli`-only, with a sequential `#[cfg(not(feature = "cli"))]` twin for WASM — **when you change one, change the other**, and run the wasm feature check above. `VerifyContext` is already interior-mutable, so it is safe to share.
 - Release profile: `opt-level = 3`, fat LTO, 1 codegen unit, `panic = "abort"`, `strip = "symbols"`. Use `--release` for anything that actually runs analysis; the engine is compute-heavy and the debug build is about 11× slower (`tls13.vp`: 1.4s release, 15s debug).
@@ -117,7 +120,7 @@ parse_file (parser.rs)              hand-written recursive-descent, comment-pres
   → verify_end                      prints results, returns the results code
 ```
 
-`verify::verify(path)` is the file entry point; `json.rs` and the wasm entry points reassemble the same steps around `parse_string`. Throughout the code, `km` is the `ProtocolTrace` (historical name "knowledge map") and `ps` a `PrincipalState`.
+`verify::analyze(&Model)` is the **one** place that sequence exists: it runs sanity, builds the context, dispatches on the attacker kind and returns the `VerifyContext` holding the results. `verify::verify(path)` is the CLI entry point (parse, `analyze`, `verify_end`); `json.rs` and the wasm entry points differ only in how they render what `analyze` returns. Throughout the code, `km` is the `ProtocolTrace` (historical name "knowledge map") and `ps` a `PrincipalState`.
 
 ### Core data model (types.rs)
 
@@ -235,17 +238,17 @@ A query result carries a narrated trace, produced in two steps after the query r
 
 `parser.rs` — byte-level recursive descent; comments are captured into AST nodes so `pretty` round-trips them (round-trip idempotence is unit-tested). `pretty.rs` — canonical formatter, golden-tested; it also owns the `Display` impls for `Value`/`Constant`/`Primitive`/`Equation`/`Query`/`Expression`, so *every* engine message and attack trace is rendered by this file. `resolution.rs` — inlining and `compute_visibility` (`MAX_RESOLVE_DEPTH = 64`). `rewrite.rs` — applies the rewrite rules over a whole state and reports failures as `(Primitive, slot)`. `equivalence.rs`/`hashing.rs` — the equivalence/hash invariant above, plus `splice_equation` (the one place that knows how a nested equation folds into its parent) and `collect_subterm_hashes`. `construct.rs` — builds the trace and principal states under `sanity.rs`, and owns `clone_for_depth(purify)`. `info.rs` — all user-facing output, buffered into JSON messages under wasm; also `InfoQuiet`, the thread-local guard that silences hypothetical re-runs. `json.rs` — the `internal-json` IDE interface and the sequence-diagram renderer. `util.rs` — three small helpers.
 
-`context.rs`/`value.rs`/`principal.rs`/`parser.rs` own process-wide registries (value ids, principal ids with `ATTACKER_ID = 0`, the unnamed-constant counter, the analysis counter); `reset_global_state()` in `lib.rs` resets the first three between runs for wasm/embedded use, and `json.rs`/the wasm entry points call it.
+There is no process-global mutable state. `ValueNames` (`value.rs`) and `PrincipalNames` (`principal.rs`) are interners **owned by the `Parser`**, so ids are per-model and two analyses in one process cannot interfere; the unnamed-constant counter is a parser field, and the analysis counter is thread-local. `PrincipalNames::intern` errors past `PrincipalId::MAX` rather than truncating a 256th principal onto `ATTACKER_ID = 0`, and `ValueNames::intern` refuses to reach the id range `solve::vars` reserves. Principal *names* travel on `Message`/`Principal` and via `ProtocolTrace::principal_name`, because `Display for Query` cannot take a lookup table.
 
 All output is plain text: there is no alternate-screen progress UI and no attacker-voice easter egg, so don't go looking for `tui.rs`, `narrative.rs`, or a `--character` flag that older docs may still mention. Likewise `inject.rs`, `mutationmap.rs` and `verifyactive.rs` were the forward mutation search and are gone.
 
 ## Testing conventions
 
-- `src/main.rs` has two `#[cfg(test)]` modules: `unit_tests` (144 tests — equivalence/hashing/theory/parser comment capture/round-trips/golden pretty/solver-variable mechanics/context isolation/witness/narration) and `tests` (84 end-to-end: `run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code).
+- Unit tests live in a `#[cfg(test)] mod tests` at the foot of the module they exercise, so they can reach private items directly. `src/testutil.rs` holds the shared value/state builders. `src/model_tests.rs` holds the 84 end-to-end tests (`run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code).
 - **Result code format**: one letter+digit per query, in model order — `c`/`a`/`f`/`u`/`e` for the query kind, `0` = holds, `1` = attack found. So `"c1a0"` means the confidentiality query failed and the authentication query passed.
 - Adding an engine regression test: write a model in `examples/test/`, get the code via `cargo run --release -- verify examples/test/foo.vp --result-code | tail -1`, **verify by reading the attack trace that each 0/1 is actually correct** (the tool's own output is only ground truth for regressions, not correctness), then add a `run_model` test. Explaining *why* the expected code is right in a comment at the top of the model is the house style — see `aead_replay_not_forgery.vp`.
 - Golden pretty-printer files live in `examples/test/golden_pretty/` (5 of them) and are compared byte-for-byte via `include_str!`. Update them deliberately when changing the formatter.
-- Tests run in parallel threads within one process, and the value-name map is process-global: **unit tests must use unique constant names** (existing tests prefix names per-test, e.g. `cre3_a`, `hash_dh_b`, `mw_m`).
+- The engine interns names per model, but the test builders share one table (`testutil::test_value_id`), so **unit tests must still use unique constant names** (existing tests prefix names per-test, e.g. `cre3_a`, `hash_dh_b`, `mw_m`). A test that both parses a model *and* builds a value by hand must take the constant from the parsed trace via `testutil::trace_constant` — ids from the shared test table will not match the model's own.
 - A handful of models in `examples/test/` are not wired to any test (`minimal_witness.vp`, the `signal_small_leaks*`/`signal_small_unguarded_{alice,bob}` variants). They run fine; they are just scratch comparisons.
 
 ### Performance expectations

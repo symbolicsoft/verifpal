@@ -12,13 +12,8 @@
 use std::sync::Arc;
 
 use crate::primitive::primitive_name;
-use crate::principal::principal_get_name_from_id;
 use crate::types::*;
 use crate::witness::Witness;
-
-// ---------------------------------------------------------------------------
-// Term compression by slot name
-// ---------------------------------------------------------------------------
 
 /// Maps values to the names of the slots holding them.
 ///
@@ -26,17 +21,17 @@ use crate::witness::Witness;
 /// either in the model or earlier in the same trace.  It is what lets the
 /// narration print full structure — nothing is ever elided by depth — while
 /// staying readable.
-pub struct NameTable {
+pub(crate) struct NameTable {
 	entries: Vec<(Value, Arc<str>)>,
 }
 
 impl NameTable {
 	/// A table that names nothing, for callers with no witness to draw on.
-	pub fn empty() -> NameTable {
+	pub(crate) fn empty() -> NameTable {
 		NameTable { entries: vec![] }
 	}
 
-	pub fn from_state(ps: &PrincipalState) -> NameTable {
+	pub(crate) fn from_state(ps: &PrincipalState) -> NameTable {
 		let mut entries: Vec<(Value, Arc<str>)> = Vec::new();
 		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
 			// Naming a constant after itself says nothing.
@@ -54,7 +49,7 @@ impl NameTable {
 	}
 
 	/// Render `v`, replacing every maximal subterm that names a slot.
-	pub fn compress(&self, v: &Value) -> String {
+	pub(crate) fn compress(&self, v: &Value) -> String {
 		self.compress_excluding(v, &[])
 	}
 
@@ -67,7 +62,7 @@ impl NameTable {
 	/// same problem across slots — the second `G^nil` would print as the name
 	/// of the first slot that got one — so callers exclude every slot the step
 	/// touches, not only the one being described.
-	pub fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
+	pub(crate) fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
 		let named = self
 			.entries
 			.iter()
@@ -103,13 +98,9 @@ impl NameTable {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Trace steps
-// ---------------------------------------------------------------------------
-
 /// One attacker substitution.
 #[derive(Clone, Debug)]
-pub struct MutationItem {
+pub(crate) struct MutationItem {
 	pub name: Arc<str>,
 	pub new_value: String,
 	pub old_value: String,
@@ -118,16 +109,16 @@ pub struct MutationItem {
 
 /// One narrated step of an attack.
 #[derive(Clone, Debug)]
-pub enum Step {
+pub(crate) enum Step {
 	/// Substitutions the attacker made in a single wire message.
 	Mutations {
-		sender: PrincipalId,
-		recipient: PrincipalId,
+		sender: Arc<str>,
+		recipient: Arc<str>,
 		items: Vec<MutationItem>,
 	},
 	/// A checked primitive that passed despite attacker-controlled inputs.
 	Gate {
-		principal: PrincipalId,
+		principal: Arc<str>,
 		primitive: String,
 	},
 	/// One derivation the attacker performed.
@@ -139,7 +130,11 @@ pub enum Step {
 /// Grouping is by `(sender, recipient, declared_at)`: values that travelled
 /// together are one action by the attacker, and reading them as one line is
 /// how a protocol designer thinks about them.
-pub fn mutation_steps(km: &ProtocolTrace, ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
+pub(crate) fn mutation_steps(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	table: &NameTable,
+) -> Vec<Step> {
 	let mutated: Vec<&str> = ps
 		.values
 		.iter()
@@ -182,8 +177,8 @@ pub fn mutation_steps(km: &ProtocolTrace, ps: &PrincipalState, table: &NameTable
 	groups
 		.into_iter()
 		.map(|(sender, recipient, _, items)| Step::Mutations {
-			sender,
-			recipient,
+			sender: Arc::from(km.principal_name(sender)),
+			recipient: Arc::from(km.principal_name(recipient)),
 			items,
 		})
 		.collect()
@@ -194,7 +189,7 @@ pub fn mutation_steps(km: &ProtocolTrace, ps: &PrincipalState, table: &NameTable
 ///
 /// These are the steps a reader is most likely to disbelieve — "surely the
 /// signature check catches that" — so they are called out explicitly.
-pub fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
+pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 	let mut steps = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		let Value::Primitive(p) = &sv.pre_rewrite else {
@@ -211,7 +206,7 @@ pub fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		let own = [&*ps.meta[i].constant.name];
 		let own = own.as_slice();
 		steps.push(Step::Gate {
-			principal: ps.id,
+			principal: Arc::from(ps.name.as_str()),
 			primitive: table.compress_excluding(&sv.pre_rewrite, own),
 		});
 	}
@@ -234,10 +229,6 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Derivation DAG walk
-// ---------------------------------------------------------------------------
-
 /// How the attacker built `target`, as ordered steps: ingredients first, the
 /// target last.
 ///
@@ -251,24 +242,27 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 /// obtained something in a session where it could not have.  Attribution is
 /// per line rather than a mode switch: a marker that changed the meaning of
 /// every step after it would mislabel the ones that belong to `home`.
-pub fn derivation_steps(
+pub(crate) fn derivation_steps(
+	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	target: &Value,
 	table: &NameTable,
 	home: PrincipalId,
 ) -> Vec<Step> {
-	let mut seen: Vec<usize> = Vec::new();
+	let mut seen: Vec<KnownIdx> = Vec::new();
 	let mut steps: Vec<Step> = Vec::new();
-	walk(attacker, target, table, home, &mut seen, &mut steps);
+	walk(km, attacker, target, table, home, &mut seen, &mut steps);
 	steps
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk(
+	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	value: &Value,
 	table: &NameTable,
 	home: PrincipalId,
-	seen: &mut Vec<usize>,
+	seen: &mut Vec<KnownIdx>,
 	steps: &mut Vec<Step>,
 ) {
 	let Some(idx) = attacker.knows(value) else {
@@ -290,18 +284,17 @@ fn walk(
 		.cloned()
 		.collect::<Vec<_>>()
 	{
-		walk(attacker, &ingredient, table, home, seen, steps);
+		walk(km, attacker, &ingredient, table, home, seen, steps);
 	}
 
 	if let Some(text) = describe(derivation, value, table) {
 		let session = attacker
-			.mutation_records
-			.get(idx)
+			.record(idx)
 			.filter(|r| r.principal_id != home)
 			.map(|r| {
 				format!(
 					"In an earlier session with {} (phase {}), ",
-					crate::principal::principal_get_name_from_id(r.principal_id),
+					km.principal_name(r.principal_id),
 					r.phase,
 				)
 			});
@@ -380,23 +373,19 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 		.join(", ")
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
 /// A narrated attack, and the vocabulary it was written in.
 ///
 /// The goal line quotes the same terms the steps do, so it is written with the
 /// same table: a summary that spells out in full what step 13 called `akenc1`
 /// makes the reader match two pages of nested HKDF by eye.
-pub struct Narration {
+pub(crate) struct Narration {
 	pub trace: String,
 	table: NameTable,
 }
 
 impl Narration {
 	/// No trace and no vocabulary, for a probe that will not be read.
-	pub fn none() -> Narration {
+	pub(crate) fn none() -> Narration {
 		Narration {
 			trace: String::new(),
 			table: NameTable::empty(),
@@ -404,7 +393,7 @@ impl Narration {
 	}
 
 	/// Render `v` in the vocabulary of this trace.
-	pub fn term(&self, v: &Value) -> String {
+	pub(crate) fn term(&self, v: &Value) -> String {
 		self.table.compress(v)
 	}
 }
@@ -413,11 +402,12 @@ impl Narration {
 ///
 /// The trace is empty when there is nothing to narrate — a query that fails
 /// without the attacker doing anything is fully explained by its goal line.
-pub fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
+pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
 	let mut steps = mutation_steps(km, &witness.ps, &table);
 	steps.extend(gate_steps(&witness.ps, &table));
 	steps.extend(derivation_steps(
+		km,
 		&witness.attacker,
 		target,
 		&table,
@@ -437,14 +427,13 @@ fn render(steps: &[Step]) -> String {
 				sender,
 				recipient,
 				items,
-			} => render_mutations(*sender, *recipient, items),
+			} => render_mutations(sender, recipient, items),
 			Step::Gate {
 				principal,
 				primitive,
 			} => format!(
 				"{}'s {} passes — its inputs are attacker-controlled.",
-				principal_get_name_from_id(*principal),
-				primitive,
+				principal, primitive,
 			),
 			Step::Derive { text } => text.clone(),
 		};
@@ -453,7 +442,7 @@ fn render(steps: &[Step]) -> String {
 	out
 }
 
-fn render_mutations(sender: PrincipalId, recipient: PrincipalId, items: &[MutationItem]) -> String {
+fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> String {
 	// A substitution whose term is indistinguishable from the honest one is
 	// not a replacement — it is the attacker sending the message itself.  For
 	// authentication that *is* the attack, and "replaces e1 with e1" would
@@ -468,8 +457,8 @@ fn render_mutations(sender: PrincipalId, recipient: PrincipalId, items: &[Mutati
 		let mut text = format!(
 			"Attacker replaces {} (sent by {} to {}) with {}.",
 			names.join(", "),
-			principal_get_name_from_id(sender),
-			principal_get_name_from_id(recipient),
+			sender,
+			recipient,
 			values.join(", "),
 		);
 		let originals: Vec<String> = replaced
@@ -486,13 +475,205 @@ fn render_mutations(sender: PrincipalId, recipient: PrincipalId, items: &[Mutati
 		let names: Vec<String> = impersonated.iter().map(|i| i.name.to_string()).collect();
 		parts.push(format!(
 			"Attacker, not {}, is what sends {} to {}.",
-			principal_get_name_from_id(sender),
+			sender,
 			names.join(", "),
-			principal_get_name_from_id(recipient),
+			recipient,
 		));
 	}
 	if items.iter().any(|i| i.guarded) {
 		parts.push("The guard is bypassed: Attacker holds its key.".to_string());
 	}
 	parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::parser::parse_string;
+	use crate::primitive::*;
+	use crate::testutil::*;
+
+	fn name_table_state() -> PrincipalState {
+		// nt_k = HASH(nt_a); nt_e = HASH(nt_k, nt_b)
+		let a = make_constant("nt_a");
+		let b = make_constant("nt_b");
+		let k = make_constant("nt_k");
+		let e = make_constant("nt_e");
+		let hash_a = make_primitive(PRIM_HASH, vec![a.clone()], 0);
+		let hash_kb = make_primitive(PRIM_HASH, vec![hash_a.clone(), b.clone()], 0);
+		let meta = vec![
+			make_slot_meta(a.as_constant().expect("c"), true),
+			make_slot_meta(b.as_constant().expect("c"), true),
+			make_slot_meta(k.as_constant().expect("c"), true),
+			make_slot_meta(e.as_constant().expect("c"), true),
+		];
+		let values = vec![
+			make_slot_values(&a, 0),
+			make_slot_values(&b, 0),
+			make_slot_values(&hash_a, 0),
+			make_slot_values(&hash_kb, 0),
+		];
+		make_principal_state("Alice", 0, meta, values)
+	}
+
+	#[test]
+	fn name_table_compresses_whole_term_to_slot_name() {
+		use crate::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		assert_eq!(table.compress(&hash_a), "nt_k");
+	}
+
+	#[test]
+	fn name_table_compresses_subterms_only() {
+		use crate::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		// A term that is not itself a named slot keeps its shape, but its
+		// named subterm collapses.
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		let outer = make_primitive(PRIM_HASH, vec![hash_a, make_constant("nt_x")], 0);
+		assert_eq!(table.compress(&outer), "HASH(nt_k, nt_x)");
+	}
+
+	#[test]
+	fn name_table_respects_output_index() {
+		use crate::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		// Same shape, different output index: not the same value, not the name.
+		let other_output = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 1);
+		assert_eq!(table.compress(&other_output), "HASH(nt_a)");
+	}
+
+	#[test]
+	fn name_table_never_names_a_term_after_itself() {
+		use crate::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		// Describing what slot nt_k now holds must not answer "nt_k".
+		assert_eq!(table.compress_excluding(&hash_a, &["nt_k"]), "HASH(nt_a)");
+		// Excluding an unrelated name changes nothing.
+		assert_eq!(table.compress_excluding(&hash_a, &["nt_e"]), "nt_k");
+	}
+
+	#[test]
+	fn mutation_steps_group_by_message_and_report_old_value() {
+		use crate::narrate::{NameTable, Step, mutation_steps};
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private ms_a\n\
+			ms_ga = G^ms_a\n\
+			]\n\
+			Alice -> Bob: ms_ga\n\
+			principal Bob[\n\
+			knows private ms_b\n\
+			ms_s = ms_ga^ms_b\n\
+			]\n\
+			queries[\n\
+			confidentiality? ms_s\n\
+			]\n";
+		let m = parse_string("ms.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		// Bob's state, with the wire value replaced by the attacker.
+		let bob = states
+			.iter()
+			.find(|p| p.name == "Bob")
+			.expect("Bob")
+			.clone();
+		let slot = bob
+			.index_of(
+				&km.slots
+					.iter()
+					.find(|s| &*s.constant.name == "ms_ga")
+					.expect("slot")
+					.constant,
+			)
+			.expect("index");
+		let mut mutated = bob.clone();
+		crate::reexec::install(&mut mutated, slot, crate::value::value_g_nil());
+
+		let table = NameTable::from_state(&mutated);
+		let steps = mutation_steps(&km, &mutated, &table);
+		assert_eq!(steps.len(), 1, "one message mutated, one step");
+		match &steps[0] {
+			Step::Mutations { items, .. } => {
+				assert_eq!(items.len(), 1);
+				assert_eq!(&*items[0].name, "ms_ga");
+				assert_eq!(items[0].new_value, "G^nil");
+				assert_eq!(items[0].old_value, "G^ms_a");
+			}
+			other => panic!("expected Mutations, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn derivation_steps_walk_ancestors_before_target() {
+		use crate::context::VerifyContext;
+		use crate::narrate::{NameTable, Step, derivation_steps};
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private dw_m\n\
+			knows private dw_k\n\
+			dw_e = ENC(dw_k, dw_m)\n\
+			leaks dw_k\n\
+			]\n\
+			principal Bob[\n\
+			knows private dw_b\n\
+			]\n\
+			Alice -> Bob: dw_e\n\
+			queries[\n\
+			confidentiality? dw_m\n\
+			]\n";
+		let m = parse_string("dw.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+		crate::verify::verify_standard_run(&ctx, &km, &states).expect("run");
+
+		let attacker = ctx.attacker_snapshot();
+		let target = trace_constant(&km, "dw_m");
+		let table = NameTable::from_state(&pure);
+		let steps = derivation_steps(&km, &attacker, &target, &table, pure.id);
+
+		assert!(!steps.is_empty(), "the attacker learned dw_m somehow");
+		let text: Vec<String> = steps
+			.iter()
+			.map(|s| match s {
+				Step::Derive { text } => text.clone(),
+				other => panic!("expected Derive, got {:?}", other),
+			})
+			.collect();
+		assert!(
+			text.iter().any(|t| t.contains("dw_m")),
+			"a step must reach the target: {:?}",
+			text
+		);
+		// The key was leaked, and that must be narrated before the step that
+		// uses it to open the ciphertext.
+		let leaked = text.iter().position(|t| t.contains("leaks declaration"));
+		let opened = text.iter().position(|t| t.contains("dw_m"));
+		assert!(
+			leaked.is_some() && opened.is_some() && leaked < opened,
+			"ingredients must precede the step that consumes them: {:?}",
+			text
+		);
+	}
+
+	#[test]
+	fn derivation_steps_stay_silent_on_unknown_values() {
+		use crate::narrate::{NameTable, derivation_steps};
+		// A value the attacker never learned has no derivation to narrate.
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let attacker = make_attacker_state(vec![]);
+		let unknown = make_constant("dw_absent");
+		let trace = make_trace();
+		assert!(derivation_steps(&trace, &attacker, &unknown, &table, 0).is_empty());
+	}
 }

@@ -3,12 +3,8 @@
 
 use crate::types::*;
 
-// ---------------------------------------------------------------------------
-// Equivalence helpers
-// ---------------------------------------------------------------------------
-
 /// Result of comparing two primitives for structural equivalence.
-pub struct PrimitiveMatch {
+pub(crate) struct PrimitiveMatch {
 	pub equivalent: bool,
 	/// Output index of the first primitive (meaningful only when `equivalent` is true).
 	pub output_left: usize,
@@ -26,7 +22,7 @@ impl PrimitiveMatch {
 	}
 }
 
-pub fn equivalent_primitives(
+pub(crate) fn equivalent_primitives(
 	p1: &Primitive,
 	p2: &Primitive,
 	consider_output: bool,
@@ -52,21 +48,14 @@ pub fn equivalent_primitives(
 	}
 }
 
-/// Check structural equivalence of two equations (DH exponentiation chains).
+/// Structural equivalence of two DH chains, where `G^a^b^c` is `[G, a, b, c]`.
 ///
-/// Equations model repeated Diffie-Hellman exponentiation: `G^a^b^c` is
-/// represented as `[G, a, b, c]`.  The equivalence rules reflect the
-/// algebraic properties of DH groups:
-///
-/// - **Length 1-2**: exact element-wise match (no commutativity for the base).
-/// - **Length 3** (`G^a^b`): exponents are commutative due to the DH property
-///   `G^a^b = G^b^a`.  We check both orderings: `(a==c && b==d)` or
-///   `(a==d && b==c)`.  The base `G` is NOT checked because in a 3-element
-///   equation it is always the generator.
-/// - **Length >3**: the base (index 0) must match exactly; the remaining
-///   exponents are treated as a commutative multiset (checked via
-///   permutation matching with a marker array to enforce bijectivity).
-pub fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
+/// - Length 1-2: element-wise, no commutativity.
+/// - Length 3: exponents commute (`G^a^b = G^b^a`), so both orderings are
+///   tried. The base is not compared — in a 3-element equation it is always
+///   the generator.
+/// - Length >3: base must match; the exponents are a commutative multiset.
+pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	if e1.values.is_empty() || e2.values.is_empty() {
 		return false;
 	}
@@ -104,11 +93,9 @@ pub fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 			)
 		}
 		_ => {
-			// >3 elements: base must match, exponents are commutative
 			if !e1_ref.values[0].equivalent(&e2_ref.values[0], true) {
 				return false;
 			}
-			// Check that exponents [1..] are a permutation of each other
 			let n = e1_ref.values.len();
 			let mut matched = vec![false; n];
 			for i in 1..n {
@@ -129,23 +116,15 @@ pub fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	}
 }
 
-/// Cross-match rule for 3-element DH equations: checks if two (exponent, exponent)
-/// pairs match under commutativity.  For `G^a^b == G^c^d`, we need either
-/// `(a==c && b==d)` or `(a==d && b==c)`.  This function checks one ordering;
-/// the caller invokes it twice with swapped arguments to cover both.
-fn equivalent_equations_rule(base1: &Value, base2: &Value, exp1: &Value, exp2: &Value) -> bool {
-	base1.equivalent(exp2, true) && exp1.equivalent(base2, true)
+/// One of the two admissible alignments of a 3-element equation's exponents;
+/// the caller tries both to cover DH commutativity.
+fn equivalent_equations_rule(a1: &Value, b1: &Value, a2: &Value, b2: &Value) -> bool {
+	a1.equivalent(b2, true) && a2.equivalent(b1, true)
 }
 
-// ---------------------------------------------------------------------------
-// Equation flattening
-// ---------------------------------------------------------------------------
-
-/// An equation is "flat" if none of its elements are themselves equations.
-/// Flattening normalizes nested DH chains like `(G^a)^b` into `[G, a, b]`
-/// so that equivalence comparison works on a canonical form regardless of
-/// how the expression was originally constructed.
-pub fn equation_is_flat(e: &Equation) -> bool {
+/// Flat means no element is itself an equation. Flattening `(G^a)^b` to
+/// `[G, a, b]` gives comparison a canonical form to work on.
+pub(crate) fn equation_is_flat(e: &Equation) -> bool {
 	e.values.iter().all(|v| !matches!(v, Value::Equation(_)))
 }
 
@@ -156,7 +135,7 @@ pub fn equation_is_flat(e: &Equation) -> bool {
 /// substitution both produce nested equations this way — `gab = ga^b` where `ga`
 /// resolves to `G^a` — and every resolver has to re-flatten them identically, so
 /// the rule lives here once rather than in each of them.
-pub fn splice_equation(elements: impl IntoIterator<Item = Value>) -> Equation {
+pub(crate) fn splice_equation(elements: impl IntoIterator<Item = Value>) -> Equation {
 	let elements = elements.into_iter();
 	let mut values: Vec<Value> = Vec::with_capacity(elements.size_hint().0);
 	for (i, resolved) in elements.enumerate() {
@@ -174,7 +153,7 @@ pub fn splice_equation(elements: impl IntoIterator<Item = Value>) -> Equation {
 	Equation { values }
 }
 
-pub fn flatten_equation(e: &Equation) -> Equation {
+pub(crate) fn flatten_equation(e: &Equation) -> Equation {
 	let mut ef = Equation {
 		values: Vec::with_capacity(e.values.len()),
 	};
@@ -189,11 +168,7 @@ pub fn flatten_equation(e: &Equation) -> Equation {
 	ef
 }
 
-// ---------------------------------------------------------------------------
-// Find constant in primitive from protocol trace
-// ---------------------------------------------------------------------------
-
-pub fn find_constant_in_trace_primitive(
+pub(crate) fn find_constant_in_trace_primitive(
 	c: &Constant,
 	value: &Value,
 	trace: &ProtocolTrace,
@@ -201,4 +176,166 @@ pub fn find_constant_in_trace_primitive(
 	let target = Value::Constant(c.clone());
 	let (_, resolved_values) = crate::resolution::resolve_trace_values(value, trace);
 	crate::value::find_equivalent(&target, &resolved_values).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::*;
+	use crate::testutil::*;
+	use crate::value::*;
+	use std::sync::Arc;
+
+	#[test]
+	fn constant_equivalence_same_id() {
+		let a = make_constant("test_const_a");
+		let b = make_constant("test_const_a"); // same name → same id
+		assert!(a.equivalent(&b, true));
+	}
+
+	#[test]
+	fn constant_equivalence_different_id() {
+		let a = make_constant("eq_const_x");
+		let b = make_constant("eq_const_y");
+		assert!(!a.equivalent(&b, true));
+	}
+
+	#[test]
+	fn equation_equivalence_2_element() {
+		let a = make_constant("eq2_a");
+		let b = make_constant("eq2_b");
+		let e1 = make_equation(vec![value_g(), a.clone()]);
+		let e2 = make_equation(vec![value_g(), a.clone()]);
+		assert!(e1.equivalent(&e2, true));
+		let e3 = make_equation(vec![value_g(), b]);
+		assert!(!e1.equivalent(&e3, true));
+	}
+
+	#[test]
+	fn equation_equivalence_3_element_commutative() {
+		// G^a^b == G^b^a (Diffie-Hellman commutativity)
+		let a = make_constant("dh_a");
+		let b = make_constant("dh_b");
+		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
+		let e2 = make_equation(vec![value_g(), b, a]);
+		assert!(e1.equivalent(&e2, true));
+	}
+
+	#[test]
+	fn equation_equivalence_3_element_not_equal() {
+		let a = make_constant("dh_ne_a");
+		let b = make_constant("dh_ne_b");
+		let c = make_constant("dh_ne_c");
+		let e1 = make_equation(vec![value_g(), a.clone(), b]);
+		let e2 = make_equation(vec![value_g(), a, c]);
+		assert!(!e1.equivalent(&e2, true));
+	}
+
+	#[test]
+	fn equation_equivalence_empty() {
+		let e1 = make_equation(vec![]);
+		let e2 = make_equation(vec![]);
+		assert!(!e1.equivalent(&e2, true));
+	}
+
+	#[test]
+	fn equation_flatten_nested() {
+		let a = make_constant("flat_a");
+		let b = make_constant("flat_b");
+		let inner = Equation {
+			values: vec![value_g(), a.clone()],
+		};
+		let outer = Equation {
+			values: vec![Value::Equation(Arc::new(inner)), b.clone()],
+		};
+		assert!(!equation_is_flat(&outer));
+		let flat = flatten_equation(&outer);
+		assert!(equation_is_flat(&flat));
+		assert_eq!(flat.values.len(), 3); // g, a, b
+	}
+
+	#[test]
+	fn equation_already_flat() {
+		let a = make_constant("aflat_a");
+		let eq = Equation {
+			values: vec![value_g(), a],
+		};
+		assert!(equation_is_flat(&eq));
+	}
+
+	#[test]
+	fn primitive_equivalence_same() {
+		let a = make_constant("peq_a");
+		let b = make_constant("peq_b");
+		let p1 = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![a.clone(), b.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let p2 = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![a, b],
+			output: 0,
+			instance_check: false,
+		};
+		assert!(equivalent_primitives(&p1, &p2, true).equivalent);
+	}
+
+	#[test]
+	fn primitive_equivalence_different_id() {
+		let a = make_constant("pdiff_a");
+		let b = make_constant("pdiff_b");
+		let p1 = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![a.clone(), b.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let p2 = Primitive {
+			id: PRIM_DEC,
+			arguments: vec![a, b],
+			output: 0,
+			instance_check: false,
+		};
+		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
+	}
+
+	#[test]
+	fn primitive_equivalence_different_output() {
+		let a = make_constant("pout_a");
+		let p1 = Primitive {
+			id: PRIM_HKDF,
+			arguments: vec![a.clone(), a.clone(), a.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let p2 = Primitive {
+			id: PRIM_HKDF,
+			arguments: vec![a.clone(), a.clone(), a],
+			output: 1,
+			instance_check: false,
+		};
+		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
+		let pm = equivalent_primitives(&p1, &p2, false);
+		assert!(pm.equivalent); // ignoring output they're equivalent
+		assert_eq!(pm.output_left, 0);
+		assert_eq!(pm.output_right, 1);
+	}
+
+	#[test]
+	fn canonical_g_nil_equivalence() {
+		let g = value_g();
+		let nil = value_nil();
+		assert!(g.equivalent(&value_g(), true));
+		assert!(nil.equivalent(&value_nil(), true));
+		assert!(!g.equivalent(&nil, true));
+	}
+
+	#[test]
+	fn canonical_g_nil_equation() {
+		let gn = value_g_nil();
+		let expected = make_equation(vec![value_g(), value_nil()]);
+		assert!(gn.equivalent(&expected, true));
+	}
 }

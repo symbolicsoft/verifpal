@@ -9,7 +9,7 @@ use crate::value::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn construct_protocol_trace(
+pub(crate) fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
@@ -28,7 +28,6 @@ pub fn construct_protocol_trace(
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
-	// Add builtins (g, nil)
 	for builtin in &[value_g(), value_nil()] {
 		let c = match builtin.as_constant() {
 			Some(c) => c.clone(),
@@ -61,7 +60,8 @@ pub fn construct_protocol_trace(
 			Block::Message(message) => {
 				declared_at += 1;
 				trace.max_declared_at = declared_at;
-				construct_trace_render_message(&mut trace, message, current_phase)?;
+				construct_trace_render_message(&mut trace, message, current_phase)
+					.map_err(|e| e.or_span(message.span))?;
 			}
 			Block::Phase(phase) => {
 				current_phase = phase.number;
@@ -104,15 +104,19 @@ fn construct_trace_render_principal(
 	current_phase: i32,
 ) -> VResult<i32> {
 	for expr in &principal.expressions {
+		let located = |e: VerifpalError| e.or_span(expr.span);
 		match expr.kind {
 			Declaration::Knows => {
-				construct_trace_render_knows(trace, principal, declared_at, expr)?;
+				construct_trace_render_knows(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Generates => {
-				construct_trace_render_generates(trace, principal, declared_at, expr)?;
+				construct_trace_render_generates(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Assignment => {
-				construct_trace_render_assignment(trace, principal, declared_at, expr)?;
+				construct_trace_render_assignment(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
@@ -123,7 +127,8 @@ fn construct_trace_render_principal(
 					expr,
 					current_phase,
 					declared_at,
-				)?;
+				)
+				.map_err(located)?;
 			}
 		}
 	}
@@ -143,7 +148,7 @@ fn construct_trace_render_knows(
 				|| existing.qualifier != expr.qualifier
 				|| existing.fresh
 			{
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"constant is known more than once and in different ways ({})",
 						c
@@ -194,7 +199,7 @@ fn construct_trace_render_generates(
 ) -> VResult<()> {
 	for c in &expr.constants {
 		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!("generated constant already exists ({})", c).into(),
 			));
 		}
@@ -230,7 +235,7 @@ fn construct_trace_render_assignment(
 	let assigned = expr
 		.assigned
 		.as_ref()
-		.ok_or_else(|| VerifpalError::Sanity("missing assignment value".into()))?;
+		.ok_or_else(|| VerifpalError::sanity("missing assignment value".into()))?;
 	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
@@ -239,14 +244,14 @@ fn construct_trace_render_assignment(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("constant does not exist ({})", c).into(),
 				));
 			}
 		};
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is using constant ({}) despite not knowing it",
 					principal.name, c
@@ -257,7 +262,7 @@ fn construct_trace_render_assignment(
 	}
 	for (output_idx, c) in expr.constants.iter().enumerate() {
 		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!("constant assigned twice ({})", c).into(),
 			));
 		}
@@ -300,14 +305,14 @@ fn construct_trace_render_leaks(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("leaked constant does not exist ({})", c).into(),
 				));
 			}
 		};
 		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} leaks a constant that they do not know ({})",
 					principal.name, c
@@ -336,12 +341,10 @@ fn construct_trace_render_message(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"{} sends unknown constant to {} ({})",
-						principal_get_name_from_id(message.sender),
-						principal_get_name_from_id(message.recipient),
-						c
+						message.sender_name, message.recipient_name, c
 					)
 					.into(),
 				));
@@ -350,21 +353,19 @@ fn construct_trace_render_message(
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is sending constant ({}) despite not knowing it",
-					principal_get_name_from_id(message.sender),
-					c
+					message.sender_name, c
 				)
 				.into(),
 			));
 		}
 		if recipient_knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is receiving constant ({}) despite already knowing it",
-					principal_get_name_from_id(message.recipient),
-					c
+					message.recipient_name, c
 				)
 				.into(),
 			));
@@ -377,7 +378,7 @@ fn construct_trace_render_message(
 	Ok(())
 }
 
-pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
+pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut states = Vec::new();
 	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
 		let n = trace.slots.len();
@@ -480,11 +481,8 @@ fn construct_wire_index(
 }
 
 impl PrincipalState {
-	/// Deep-clone this principal state for a new search depth level.
-	///
-	/// When `purify` is true, resets all values to their pre-mutation state
-	/// (for a clean new depth level).  When false, preserves current mutation
-	/// state (for rewrite analysis within the same depth level).
+	/// Deep-clone this state; `purify` resets every value to its pre-mutation
+	/// form, discarding attacker taint and any halt.
 	pub fn clone_for_depth(&self, purify: bool) -> PrincipalState {
 		let values = self
 			.values

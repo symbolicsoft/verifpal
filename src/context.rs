@@ -1,25 +1,32 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// Acquire a read guard, recovering from poison.
 fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
 	lock.read().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Acquire a write guard, recovering from poison.
 fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 	lock.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Global because the analysis count labels output from wherever it is
-/// emitted, without a `VerifyContext` in hand.
-static ANALYSIS_COUNT: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+	/// Labels output lines, which are emitted from places that have no
+	/// `VerifyContext` in hand. Per thread rather than per process so that
+	/// concurrent analyses — the test suite, or an embedder — do not renumber
+	/// each other's output.
+	static ANALYSIS_COUNT: Cell<u32> = const { Cell::new(0) };
+}
 
-pub fn analysis_count_get() -> usize {
-	ANALYSIS_COUNT.load(Ordering::SeqCst) as usize
+pub(crate) fn analysis_count_get() -> usize {
+	ANALYSIS_COUNT.with(|c| c.get()) as usize
+}
+
+fn analysis_count_reset() {
+	ANALYSIS_COUNT.with(|c| c.set(0));
 }
 
 use crate::skeleton::primitive_skeleton_hash_of;
@@ -27,13 +34,12 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
 
-/// Central verification context. Owns all mutable state for a single
-/// verification run, replacing the old global LazyLock singletons.
+/// All mutable state for a single verification run.
 ///
-/// All mutation is interior (RwLock / Atomic), so the context is shared by
+/// Mutation is interior (RwLock / Atomic), so the context is shared by
 /// `&VerifyContext` rather than threaded through as `&mut`, and stays safe to
-/// share across threads should any stage of the pipeline become parallel.
-pub struct VerifyContext {
+/// share should any stage of the pipeline become parallel.
+pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
@@ -100,7 +106,7 @@ fn derivation_provenance(
 		let Some(idx) = state.knows(ingredient) else {
 			continue;
 		};
-		let Some(inherited) = state.mutation_records.get(idx) else {
+		let Some(inherited) = state.record(idx) else {
 			continue;
 		};
 		if !adopted && !inherited.diffs.is_empty() {
@@ -124,7 +130,6 @@ fn derivation_provenance(
 	})
 }
 
-/// Add a value to locked attacker state if not already known.
 fn attacker_state_absorb(
 	state: &mut AttackerState,
 	value: &Value,
@@ -141,13 +146,10 @@ fn attacker_state_absorb(
 		// it.  Knowledge is unchanged either way; only the explanation is.
 		let candidate = derivation_provenance(state, record, &derivation);
 		let explains = |r: &MutationRecord| r.diffs.iter().any(|d| d.tainted);
-		let stale = state
-			.mutation_records
-			.get(existing)
-			.is_some_and(|r| !explains(r));
+		let stale = state.record(existing).is_some_and(|r| !explains(r));
 		if stale && explains(&candidate) {
-			Arc::make_mut(&mut state.mutation_records)[existing] = candidate;
-			Arc::make_mut(&mut state.derivations)[existing] = derivation;
+			Arc::make_mut(&mut state.mutation_records)[existing.get()] = candidate;
+			Arc::make_mut(&mut state.derivations)[existing.get()] = derivation;
 		}
 		return;
 	}
@@ -167,8 +169,7 @@ fn attacker_state_absorb(
 }
 
 impl VerifyContext {
-	/// Create a fresh context for verifying model `m`.
-	pub fn new(m: &Model, states: &[PrincipalState]) -> Self {
+	pub(crate) fn new(m: &Model, states: &[PrincipalState]) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
 			.iter()
@@ -176,7 +177,7 @@ impl VerifyContext {
 			.map(|(i, q)| VerifyResult::new(q, i))
 			.collect();
 		let unresolved = results.len() as i32;
-		ANALYSIS_COUNT.store(0, Ordering::SeqCst);
+		analysis_count_reset();
 		VerifyContext {
 			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
@@ -187,51 +188,37 @@ impl VerifyContext {
 		}
 	}
 
-	/// Every principal's starting state, for replaying a candidate attack in
-	/// the session it belongs to.
-	pub fn principal_states(&self) -> &[PrincipalState] {
+	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
 		&self.states
 	}
 
-	// -----------------------------------------------------------------------
-	// Attacker state
-	// -----------------------------------------------------------------------
-
-	/// Reset attacker state for a new phase.
-	pub fn attacker_init(&self) {
+	pub(crate) fn attacker_init(&self) {
 		let mut state = write_lock(&self.attacker);
 		*state = AttackerState::new();
 	}
 
-	/// Cheap O(1) snapshot of the attacker state (Arc increments only).
-	pub fn attacker_snapshot(&self) -> AttackerState {
+	/// O(1): Arc increments only.
+	pub(crate) fn attacker_snapshot(&self) -> AttackerState {
 		read_lock(&self.attacker).clone()
 	}
 
-	pub fn attacker_known_count(&self) -> usize {
+	pub(crate) fn attacker_known_count(&self) -> usize {
 		read_lock(&self.attacker).known.len()
 	}
 
-	/// Add a value to attacker knowledge. Returns true if it was new.
-	pub fn attacker_put(&self, known: &Value, record: &Arc<MutationRecord>) -> bool {
-		self.attacker_put_with(known, record, DerivationRecord::Initial)
-	}
-
-	/// As [`Self::attacker_put`], recording how the value was derived.
-	pub fn attacker_put_with(
+	/// Returns true if the value was new.
+	pub(crate) fn attacker_put_with(
 		&self,
 		known: &Value,
 		record: &Arc<MutationRecord>,
 		derivation: DerivationRecord,
 	) -> bool {
-		// Fast check with read lock
 		{
 			let state = read_lock(&self.attacker);
 			if state.knows(known).is_some() {
 				return false;
 			}
 		}
-		// Write lock: double-check and absorb
 		let mut state = write_lock(&self.attacker);
 		if state.knows(known).is_some() {
 			return false;
@@ -240,8 +227,7 @@ impl VerifyContext {
 		true
 	}
 
-	/// Initialize attacker knowledge for a new phase.
-	pub fn attacker_phase_update(
+	pub(crate) fn attacker_phase_update(
 		&self,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
@@ -251,7 +237,6 @@ impl VerifyContext {
 		let mut state = write_lock(&self.attacker);
 		state.current_phase = phase;
 
-		// Public constants
 		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
 			if sm.constant.qualifier != Some(Qualifier::Public) {
 				continue;
@@ -267,7 +252,6 @@ impl VerifyContext {
 			attacker_state_absorb(&mut state, &sv.value, &record, DerivationRecord::Initial);
 		}
 
-		// Wire/leaked values
 		for (slot, (sm, sv)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
 			if sm.wire.is_empty() && !sm.constant.leaked {
 				continue;
@@ -280,9 +264,13 @@ impl VerifyContext {
 				continue;
 			}
 			let derivation = if sm.constant.leaked {
-				DerivationRecord::Leaked { slot }
+				DerivationRecord::Leaked {
+					slot: SlotIdx(slot),
+				}
 			} else {
-				DerivationRecord::Obtained { slot }
+				DerivationRecord::Obtained {
+					slot: SlotIdx(slot),
+				}
 			};
 			let constant_value = Value::Constant(sm.constant.clone());
 			attacker_state_absorb(&mut state, &constant_value, &record, derivation.clone());
@@ -292,20 +280,16 @@ impl VerifyContext {
 		Ok(())
 	}
 
-	// -----------------------------------------------------------------------
-	// Verify results
-	// -----------------------------------------------------------------------
-
-	pub fn results_get(&self) -> Vec<VerifyResult> {
+	pub(crate) fn results_get(&self) -> Vec<VerifyResult> {
 		read_lock(&self.results).clone()
 	}
 
-	pub fn results_file_name(&self) -> &str {
+	pub(crate) fn results_file_name(&self) -> &str {
 		&self.file_name
 	}
 
-	/// Write a resolved result. Returns true if it was newly written.
-	pub fn results_put(&self, result: &VerifyResult) -> bool {
+	/// Returns true if the result was newly written.
+	pub(crate) fn results_put(&self, result: &VerifyResult) -> bool {
 		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index)
 			&& !vr.resolved
@@ -321,11 +305,11 @@ impl VerifyContext {
 		false
 	}
 
-	pub fn all_resolved(&self) -> bool {
+	pub(crate) fn all_resolved(&self) -> bool {
 		self.unresolved.load(Ordering::SeqCst) <= 0
 	}
 
-	pub fn query_is_resolved(&self, query_index: usize) -> bool {
+	pub(crate) fn query_is_resolved(&self, query_index: usize) -> bool {
 		read_lock(&self.results)
 			.get(query_index)
 			.is_some_and(|r| r.resolved)
@@ -340,9 +324,8 @@ impl VerifyContext {
 	/// circuit the moment the target answers.
 	///
 	/// Constructed field-by-field rather than through `new`, because `new`
-	/// resets the process-global `ANALYSIS_COUNT` that real output labels
-	/// itself with.
-	pub fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
+	/// resets the `ANALYSIS_COUNT` that real output labels itself with.
+	pub(crate) fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
 		let mut results = self.results_get();
 		for (i, r) in results.iter_mut().enumerate() {
 			if i == query_index {
@@ -364,14 +347,97 @@ impl VerifyContext {
 		}
 	}
 
-	// -----------------------------------------------------------------------
-	// Analysis counter
-	// -----------------------------------------------------------------------
-
-	pub fn analysis_count_increment(&self) {
+	pub(crate) fn analysis_count_increment(&self) {
 		self.analysis_count.fetch_add(1, Ordering::SeqCst);
 		if !crate::info::info_is_quiet() {
-			ANALYSIS_COUNT.fetch_add(1, Ordering::SeqCst);
+			ANALYSIS_COUNT.with(|c| c.set(c.get() + 1));
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::parser::parse_string;
+	use crate::testutil::*;
+	use std::sync::Arc;
+
+	#[test]
+	fn scratch_context_isolates_single_query() {
+		use crate::context::VerifyContext;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private scr_m\n\
+			knows private scr_k\n\
+			scr_e = ENC(scr_k, scr_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? scr_m\n\
+			confidentiality? scr_k\n\
+			]\n";
+		let m = parse_string("scratch.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[]);
+		let scratch = ctx.scratch_for_query(1);
+
+		// Only the target query is open in the scratch.
+		assert!(!scratch.query_is_resolved(1));
+		assert!(scratch.query_is_resolved(0));
+		assert!(!scratch.all_resolved());
+
+		// Resolving the target in the scratch closes it there...
+		let mut r = VerifyResult::new(&m.queries[1], 1);
+		r.resolved = true;
+		r.summary = " probe".to_string();
+		assert!(scratch.results_put(&r));
+		assert!(scratch.query_is_resolved(1));
+		assert!(scratch.all_resolved());
+
+		// ...and leaves the real context untouched.
+		assert!(!ctx.query_is_resolved(1));
+		assert!(!ctx.all_resolved());
+		assert_eq!(ctx.results_get()[1].summary, "");
+	}
+
+	#[test]
+	fn attacker_put_with_records_derivation() {
+		use crate::context::VerifyContext;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private drv_m\n\
+			knows private drv_k\n\
+			drv_e = ENC(drv_k, drv_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? drv_m\n\
+			]\n";
+		let m = parse_string("drv.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[]);
+		let record = Arc::new(MutationRecord {
+			diffs: vec![],
+			principal_id: 0,
+			phase: 0,
+		});
+		let learned = make_constant("drv_learned");
+		let source = make_constant("drv_source");
+
+		assert!(ctx.attacker_put_with(
+			&learned,
+			&record,
+			DerivationRecord::Decomposed {
+				of: source.clone(),
+				using: vec![learned.clone()],
+			},
+		));
+
+		let attacker = ctx.attacker_snapshot();
+		let idx = attacker.knows(&learned).expect("value was absorbed");
+		match attacker.derivation(idx) {
+			Some(DerivationRecord::Decomposed { of, using }) => {
+				assert!(of.equivalent(&source, true));
+				assert_eq!(using.len(), 1);
+			}
+			other => panic!("expected Decomposed, got {:?}", other),
+		}
+		assert_eq!(attacker.known.len(), attacker.derivations.len());
 	}
 }

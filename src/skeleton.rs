@@ -26,13 +26,6 @@ use crate::info::info_message;
 use crate::types::*;
 use crate::value::{value_g, value_g_nil, value_nil};
 
-/// Compute the skeleton of a primitive: a normalized form where all secret
-/// values are replaced by canonical attacker-known surrogates.
-///
-/// - Constants → `nil` (the attacker's canonical known constant).
-/// - Nested primitives → recursively skeletonized.
-/// - Equations with 1 element → `G` (bare generator).
-/// - Equations with 2+ elements → `G^nil` (attacker's canonical DH public key).
 fn primitive_skeleton(p: &Primitive) -> Primitive {
 	let arguments = p
 		.arguments
@@ -55,7 +48,7 @@ fn primitive_skeleton(p: &Primitive) -> Primitive {
 /// FNV-style hash of a primitive's structure (primitive IDs, argument types,
 /// equation lengths).  Two primitives with different hashes cannot share a
 /// skeleton, so this rules out a match without a recursive comparison.
-pub fn primitive_skeleton_hash(p: &Primitive) -> u64 {
+pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761);
 	for a in &p.arguments {
 		match a {
@@ -73,15 +66,14 @@ pub fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 	h
 }
 
-/// Compute the skeleton hash of a primitive (hash of its skeleton form).
-/// This normalizes equations the same way [`primitive_skeleton`] does.
-pub fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
+/// The hash of a primitive's skeleton, rather than of the primitive itself.
+pub(crate) fn primitive_skeleton_hash_of(p: &Primitive) -> u64 {
 	primitive_skeleton_hash(&primitive_skeleton(p))
 }
 
 /// Give the attacker the skeleton of `p`, and of every primitive nested inside
 /// it, unless it already holds something of that shape.
-pub fn attacker_learn_skeletons(
+pub(crate) fn attacker_learn_skeletons(
 	ctx: &VerifyContext,
 	p: &Primitive,
 	record: &Arc<MutationRecord>,
@@ -103,5 +95,32 @@ pub fn attacker_learn_skeletons(
 		if let Value::Primitive(pp) = a {
 			attacker_learn_skeletons(ctx, pp, record, attacker);
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::*;
+	use crate::testutil::*;
+
+	#[test]
+	fn skeleton_hash_same_structure() {
+		let a = make_constant("sh_a");
+		let b = make_constant("sh_b");
+		let p1 = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![a.clone(), b.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let p2 = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![b, a],
+			output: 0,
+			instance_check: false,
+		};
+		// Same structure (constants are normalized to nil in skeleton)
+		assert_eq!(primitive_skeleton_hash(&p1), primitive_skeleton_hash(&p2));
 	}
 }

@@ -26,6 +26,11 @@
 //! rules that could invent unboundedly many new terms are restricted to a
 //! finite basis drawn from the protocol.
 //!
+//! This is a claim about *this* module. The forward theory it calls into still
+//! has recursion limits of its own — `theory.rs::MAX_DEPTH` and
+//! `resolution.rs::MAX_RESOLVE_DEPTH` — so a derivation nested deeper than
+//! those is still missed. Removing the search budget did not remove them.
+//!
 //! ## Shape of a run
 //!
 //! ```text
@@ -52,12 +57,12 @@
 //! through the ordinary pipeline, and re-checks the query against real attacker
 //! knowledge.  A bug in the solver costs a missed attack, never a false one.
 
-pub mod deduce;
-pub mod diverge;
-pub mod matching;
-pub mod symbolic;
-pub mod validate;
-pub mod vars;
+pub(crate) mod deduce;
+pub(crate) mod diverge;
+pub(crate) mod matching;
+pub(crate) mod symbolic;
+pub(crate) mod validate;
+pub(crate) mod vars;
 
 use std::collections::HashSet;
 
@@ -72,8 +77,7 @@ use deduce::Deducer;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
-/// Run the active attacker against every phase of the model.
-pub fn verify_active(
+pub(crate) fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -94,7 +98,6 @@ pub fn verify_active(
 		// Passive baseline: everything derivable without touching the wire.
 		verify_standard_run(ctx, km, principal_states)?;
 
-		// Goal-directed rounds, to a knowledge fixed point.
 		loop {
 			if ctx.all_resolved() {
 				break;
@@ -142,7 +145,6 @@ enum Pass {
 	Constructed,
 }
 
-/// Propose and validate substitutions against one principal.
 fn solve_principal(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,

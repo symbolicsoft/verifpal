@@ -23,7 +23,7 @@ fn attack_trace(
 	ps: &PrincipalState,
 	query_index: usize,
 	target: &Value,
-	seed: &[(usize, Value)],
+	seed: &[(SlotIdx, Value)],
 ) -> Narration {
 	if in_minimization() {
 		return Narration::none();
@@ -37,10 +37,10 @@ fn attack_trace(
 /// Provenance travels along derivation edges (see
 /// `context.rs::derivation_provenance`), so a value's own record already names
 /// the run that earned it, however many runs later the query was re-answered.
-fn recorded_mutations(attacker: &AttackerState, attacker_idx: usize) -> Vec<(usize, Value)> {
+fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(SlotIdx, Value)> {
 	attacker
 		.mutation_records
-		.get(attacker_idx)
+		.get(attacker_idx.get())
 		.map(|record| {
 			record
 				.diffs
@@ -52,7 +52,7 @@ fn recorded_mutations(attacker: &AttackerState, attacker_idx: usize) -> Vec<(usi
 		.unwrap_or_default()
 }
 
-pub fn query_start(
+pub(crate) fn query_start(
 	ctx: &VerifyContext,
 	query: &Query,
 	query_index: usize,
@@ -62,10 +62,10 @@ pub fn query_start(
 	let attacker = ctx.attacker_snapshot();
 	match query.kind {
 		QueryKind::Confidentiality => {
-			query_confidentiality(ctx, query, query_index, km, ps, &attacker);
+			query_confidentiality(ctx, query, query_index, km, ps, &attacker)?;
 		}
 		QueryKind::Authentication => {
-			query_authentication(ctx, query, query_index, km, ps, &attacker);
+			query_authentication(ctx, query, query_index, km, ps, &attacker)?;
 		}
 		QueryKind::Freshness => {
 			query_freshness(ctx, query, query_index, km, ps, &attacker)?;
@@ -74,13 +74,12 @@ pub fn query_start(
 			query_unlinkability(ctx, query, query_index, km, ps, &attacker)?;
 		}
 		QueryKind::Equivalence => {
-			query_equivalence(ctx, query, query_index, km, ps, &attacker);
+			query_equivalence(ctx, query, query_index, km, ps, &attacker)?;
 		}
 	}
 	Ok(())
 }
 
-/// Write a resolved query result and log it. Returns true if newly written.
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result) {
 		info_message(
@@ -98,16 +97,17 @@ fn query_confidentiality(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-) -> VerifyResult {
+) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
-	let slot_idx = match ps.index_of(&query.constants[0]) {
+	let subject = query.subject()?;
+	let slot_idx = match ps.index_of(subject) {
 		Some(idx) => idx,
-		None => return result,
+		None => return Ok(result),
 	};
 	let resolved_value = &ps.values[slot_idx].value;
 	let attacker_idx = match attacker.knows(resolved_value) {
 		Some(idx) => idx,
-		None => return result,
+		None => return Ok(result),
 	};
 	let seed = recorded_mutations(attacker, attacker_idx);
 	let mutated_info = attack_trace(ctx, km, ps, query_index, resolved_value, &seed);
@@ -116,14 +116,14 @@ fn query_confidentiality(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
-			query.constants[0],
-			mutated_info.term(&attacker.known[attacker_idx]),
+			subject,
+			mutated_info.term(&attacker.known[attacker_idx.get()]),
 		),
 		&result.options,
 	);
 	result = query_precondition(result, ps);
 	emit_query_result(ctx, &result);
-	result
+	Ok(result)
 }
 
 fn query_authentication(
@@ -133,12 +133,12 @@ fn query_authentication(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-) -> VerifyResult {
+) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	if query.message.recipient != ps.id {
-		return result;
+		return Ok(result);
 	}
-	let (indices, sender, c) = query_authentication_get_pass_indices(query, km, ps);
+	let (indices, sender, c) = query_authentication_get_pass_indices(query, km, ps)?;
 	for &index in &indices {
 		if query.message.sender == sender {
 			continue;
@@ -152,23 +152,21 @@ fn query_authentication(
 			.unwrap_or_default();
 		let mutated_info = attack_trace(ctx, km, ps, query_index, assigned, &seed);
 		result = query_precondition(result, ps);
-		return query_authentication_handle_pass(
+		return Ok(query_authentication_handle_pass(
 			ctx,
 			result,
 			&c,
 			before,
 			&mutated_info,
-			sender,
+			km.principal_name(sender),
 			ps,
-		);
+		));
 	}
-	result
+	Ok(result)
 }
 
-/// Find indices of PrincipalState slots where constant `c` is used inside a
-/// primitive by this principal, and the primitive either has no rewrite rule,
-/// or its rewrite succeeds, or it's unchecked. Returns `None` if a constant
-/// resolution fails (caller should bail).
+/// Slots where this principal uses `c` inside a primitive that does not halt
+/// it — one with no rewrite rule, or whose rewrite passes, or unchecked.
 fn query_find_constant_usage_indices(
 	c: &Constant,
 	km: &ProtocolTrace,
@@ -208,23 +206,23 @@ fn query_authentication_get_pass_indices(
 	query: &Query,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-) -> (Vec<usize>, PrincipalId, Constant) {
+) -> VResult<(Vec<usize>, PrincipalId, Constant)> {
 	let empty_c = Constant::default();
-	let (_, idx) = ps.resolve_constant(&query.message.constants[0], true);
+	let (_, idx) = ps.resolve_constant(query.message.constant()?, true);
 	let idx = match idx {
 		Some(i) => i,
-		None => return (vec![], 0, empty_c),
+		None => return Ok((vec![], 0, empty_c)),
 	};
 	let c = km.slots[idx].constant.clone();
 	let sender = ps.values[idx].provenance.sender;
 	if sender == ATTACKER_ID {
 		let v = &ps.values[idx].original;
 		if v.equivalent(&ps.values[idx].value, true) {
-			return (vec![], sender, c);
+			return Ok((vec![], sender, c));
 		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
-	(indices, sender, c)
+	Ok((indices, sender, c))
 }
 
 fn query_authentication_handle_pass(
@@ -233,7 +231,7 @@ fn query_authentication_handle_pass(
 	c: &Constant,
 	b: &Value,
 	mutated_info: &Narration,
-	sender: PrincipalId,
+	sender_name: &str,
 	ps: &PrincipalState,
 ) -> VerifyResult {
 	let (resolved, _) = ps.resolve_constant(c, true);
@@ -243,10 +241,10 @@ fn query_authentication_handle_pass(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
 			mutated_info.term(&resolved),
-			principal_get_name_from_id(sender),
-			principal_get_name_from_id(result.query.message.sender),
+			sender_name,
+			result.query.message.sender_name,
 			mutated_info.term(b),
-			principal_get_name_from_id(result.query.message.recipient),
+			result.query.message.recipient_name,
 		),
 		&result.options,
 	);
@@ -263,25 +261,26 @@ fn query_freshness(
 	_attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
-	let freshness_found = value_constant_contains_fresh_values(&query.constants[0], ps)?;
+	let subject = query.subject()?;
+	let freshness_found = value_constant_contains_fresh_values(subject, ps)?;
 	if freshness_found {
 		return Ok(result);
 	}
-	let indices = match query_find_constant_usage_indices(&query.constants[0], km, ps) {
+	let indices = match query_find_constant_usage_indices(subject, km, ps) {
 		Some(v) => v,
 		None => return Ok(result),
 	};
 	if indices.is_empty() {
 		return Ok(result);
 	}
-	let (resolved, _) = ps.resolve_constant(&query.constants[0], true);
+	let (resolved, _) = ps.resolve_constant(subject, true);
 	let mutated_info = attack_trace(ctx, km, ps, query_index, &resolved, &[]);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
-			query.constants[0],
+			subject,
 			mutated_info.term(&resolved),
 			ps.name,
 			mutated_info.term(&ps.values[indices[0]].pre_rewrite),
@@ -377,7 +376,7 @@ fn query_equivalence(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	_attacker: &AttackerState,
-) -> VerifyResult {
+) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let values: Vec<Value> = query
 		.constants
@@ -386,7 +385,7 @@ fn query_equivalence(
 		.collect();
 	let all_equivalent = values.windows(2).all(|w| w[0].equivalent(&w[1], true));
 	if all_equivalent {
-		return result;
+		return Ok(result);
 	}
 	let empty = Value::Constant(Constant::default());
 	let mutated_info = attack_trace(ctx, km, ps, query_index, &empty, &[]);
@@ -405,7 +404,7 @@ fn query_equivalence(
 	);
 	result = query_precondition(result, ps);
 	emit_query_result(ctx, &result);
-	result
+	Ok(result)
 }
 
 fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyResult {
@@ -417,7 +416,11 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 			resolved: false,
 			summary: String::new(),
 		};
-		let (_, slot_idx) = ps.resolve_constant(&option.message.constants[0], true);
+		let Ok(option_constant) = option.message.constant() else {
+			result.options.push(option_result);
+			continue;
+		};
+		let (_, slot_idx) = ps.resolve_constant(option_constant, true);
 		let idx = match slot_idx {
 			Some(idx) => idx,
 			None => {
@@ -436,9 +439,7 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 			option_result.resolved = true;
 			option_result.summary = format!(
 				"{} sends {} to {} despite the query failing.",
-				principal_get_name_from_id(option.message.sender),
-				option.message.constants[0],
-				principal_get_name_from_id(option.message.recipient),
+				option.message.sender_name, option_constant, option.message.recipient_name,
 			);
 		}
 		result.options.push(option_result);

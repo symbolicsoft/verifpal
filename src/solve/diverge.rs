@@ -3,33 +3,16 @@
 
 //! # Divergence goals
 //!
-//! Equivalence queries are the one kind that is not a deducibility question.
-//! They fail when the queried constants, resolved within a single principal's
-//! state, are not all pairwise equivalent, and they never consult the attacker
-//! at all (`query.rs`).  So the goal form is not "make this derivable" but
-//! "make these two terms differ".
+//! Equivalence queries are the one kind that is not a deducibility question:
+//! they fail when the queried constants do not all resolve alike, and never
+//! consult the attacker at all.  So the goal is "make these two terms differ",
+//! and candidates come from the *asymmetry* in which attacker variables reach
+//! which side.
 //!
-//! ## Method
-//!
-//! Two terms diverge under a substitution when they depend on the attacker's
-//! choices differently.  If `a` mentions `$gbe` and `b` does not, then binding
-//! `$gbe` to anything other than the honest value makes the position where it
-//! occurs differ.  So the candidate substitutions are generated from the
-//! *asymmetry* in variable occurrence between the two terms, and each is bound
-//! to `nil` — inside the `G^X` shape, the attacker's own key.
-//!
-//! ## Why this may propose too much, and why that is fine
-//!
-//! Divergence at an inner position does not always survive to the top.  It
-//! propagates through constructor contexts such as `HASH` and `CONCAT`, but an
-//! enclosing destructor with a rewrite rule can discard or collapse the
-//! differing argument.  Modelling that faithfully would mean reimplementing the
-//! rewrite theory in reverse.
-//!
-//! Instead this module treats propagation as a proposal heuristic and lets
-//! `validate.rs` decide, exactly as it decides for every other goal kind.  A
-//! proposal whose difference gets collapsed costs one wasted validation and
-//! reports nothing.  The asymmetry is deliberate: over-proposing is cheap,
+//! Divergence at an inner position does not always survive to the top — an
+//! enclosing destructor can collapse the differing argument, and modelling that
+//! would mean running the rewrite theory in reverse.  So this proposes and lets
+//! `validate.rs` decide.  Over-proposing costs one wasted validation;
 //! over-claiming would be a false attack.
 
 use crate::types::*;
@@ -38,10 +21,7 @@ use super::vars::{Substitution, collect_vars, dedupe};
 use crate::value::value_nil;
 
 /// Substitutions that plausibly make `a` and `b` differ.
-///
-/// The returned substitutions are proposals only; whether the two terms really
-/// end up inequivalent is settled by concrete re-execution.
-pub fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Substitution> {
+pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Substitution> {
 	let mut a_vars = Vec::new();
 	let mut b_vars = Vec::new();
 	collect_vars(a, &mut a_vars);

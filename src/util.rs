@@ -3,7 +3,7 @@
 
 use crate::types::*;
 
-pub fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) -> bool {
+pub(crate) fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) -> bool {
 	if !vec.contains(&value) {
 		vec.push(value);
 		true
@@ -12,15 +12,16 @@ pub fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) -> bool {
 	}
 }
 
-pub fn min_int_in_slice(slice: &[i32]) -> VResult<i32> {
+pub(crate) fn min_int_in_slice(slice: &[i32]) -> VResult<i32> {
 	slice
 		.iter()
 		.min()
 		.copied()
-		.ok_or_else(|| VerifpalError::Internal("slice has no integers".into()))
+		.ok_or_else(|| VerifpalError::internal("slice has no integers".into()))
 }
 
-pub fn color_output_support() -> bool {
+#[cfg(feature = "cli")]
+pub(crate) fn color_output_support() -> bool {
 	if cfg!(target_arch = "wasm32") {
 		return false;
 	}

@@ -12,7 +12,7 @@
 //! ## Why this does not reuse `resolve_all_values`
 //!
 //! [`crate::resolution`] errors out on any constant missing from the principal's
-//! index (`VerifpalError::Resolution("invalid index")`), so attacker variables
+//! index (`VerifpalError::resolution("invalid index")`), so attacker variables
 //! cannot simply be dropped into slots and resolved.  Rather than bend the
 //! state representation to accommodate them, the inlining is mirrored here over
 //! the same slot data.
@@ -49,7 +49,7 @@ use crate::value::value_g;
 use super::vars::attacker_var;
 
 /// A principal's computation expressed over attacker variables.
-pub struct SymbolicState {
+pub(crate) struct SymbolicState {
 	/// Symbolic term per slot, parallel to `ps.values`.
 	pub terms: Vec<Value>,
 	/// Slots the attacker controls in the current phase.
@@ -59,7 +59,7 @@ pub struct SymbolicState {
 }
 
 impl SymbolicState {
-	pub fn is_var_slot(&self, slot: usize) -> bool {
+	pub(crate) fn is_var_slot(&self, slot: usize) -> bool {
 		self.var_terms.get(slot).is_some_and(|t| t.is_some())
 	}
 }
@@ -69,7 +69,7 @@ impl SymbolicState {
 /// The phase clause is what preserves phase semantics: a slot carrying a
 /// message from an earlier phase is not controllable now, so the attacker
 /// cannot retroactively tamper with it.
-pub fn is_mutable_slot(
+pub(crate) fn is_mutable_slot(
 	idx: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -101,8 +101,6 @@ pub fn is_mutable_slot(
 	true
 }
 
-/// Choose the variable term for a controlled slot, based on the shape of the
-/// value the principal honestly expects there.
 fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
 	match honest {
 		Value::Equation(_) => Value::Equation(Arc::new(Equation {
@@ -112,8 +110,11 @@ fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
 	}
 }
 
-/// Build the symbolic view of `ps`.
-pub fn build(km: &ProtocolTrace, ps: &PrincipalState, attacker: &AttackerState) -> SymbolicState {
+pub(crate) fn build(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> SymbolicState {
 	let n = ps.values.len();
 	let mut var_terms: Vec<Option<Value>> = vec![None; n];
 	let mut var_slots = Vec::new();

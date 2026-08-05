@@ -46,7 +46,7 @@ thread_local! {
 /// A probe re-checks the query, which runs the ordinary query evaluation,
 /// which would otherwise minimize again — forever.  Callers of
 /// [`minimize_witness`] use this to take the plain path instead.
-pub fn in_minimization() -> bool {
+pub(crate) fn in_minimization() -> bool {
 	MINIMIZING.with(|f| f.get())
 }
 
@@ -67,11 +67,9 @@ impl Drop for MinimizingGuard {
 
 /// A re-verified attack: the state to narrate and the attacker knowledge it
 /// produced, including the derivation records that explain it.
-pub struct Witness {
+pub(crate) struct Witness {
 	pub ps: PrincipalState,
 	pub attacker: AttackerState,
-	/// False when minimization bailed out and `ps` is the unreduced state.
-	pub minimized: bool,
 }
 
 /// Reduce the attack to the mutations query `query_index` actually needs.
@@ -84,42 +82,41 @@ pub struct Witness {
 /// report an attack with no attacker actions in it.  Slot indices are shared
 /// across principal states (every state is built from the same trace slots in
 /// the same order), so a recorded diff installs at the same index here.
-pub fn minimize_witness(
+pub(crate) fn minimize_witness(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	query_index: usize,
-	seed: &[(usize, Value)],
+	seed: &[(SlotIdx, Value)],
 ) -> Witness {
 	// The attack as the real run already knows it.  Passing `false` means no
 	// substitutions are claimed — used when no candidate replayed from here,
 	// because showing the recorded ones anyway would be worse than showing none:
 	// they can name a slot the attack never turned on, and a reader has no way
 	// to tell.
-	let unminimized = |minimized: bool| Witness {
+	let unminimized = || Witness {
 		ps: ps.clone(),
 		attacker: ctx.attacker_snapshot(),
-		minimized,
 	};
 
 	// A probe's own query evaluation must not recurse back into here.
 	if in_minimization() {
-		return unminimized(false);
+		return unminimized();
 	}
 
 	// `seed` is the value's own provenance: the substitutions that earned it.
 	// `ps` is whatever run happened to re-answer the query afterwards, which is
 	// usually a different attack, so the two are never merged.
-	let mut mutations: Vec<(usize, Value)> = if seed.is_empty() {
+	let mut mutations: Vec<(SlotIdx, Value)> = if seed.is_empty() {
 		ps.values
 			.iter()
 			.enumerate()
 			.filter(|(_, sv)| sv.provenance.attacker_tainted)
-			.map(|(i, sv)| (i, sv.pre_rewrite.clone()))
+			.map(|(i, sv)| (SlotIdx(i), sv.pre_rewrite.clone()))
 			.collect()
 	} else {
 		seed.iter()
-			.filter(|(slot, _)| *slot < ps.values.len())
+			.filter(|(slot, _)| slot.get() < ps.values.len())
 			.cloned()
 			.collect()
 	};
@@ -128,7 +125,7 @@ pub fn minimize_witness(
 	// A passive result, or one the attacker reached without touching the
 	// wire, is already as small as it gets.
 	if mutations.is_empty() {
-		return unminimized(true);
+		return unminimized();
 	}
 
 	let _guard = MinimizingGuard::new();
@@ -172,7 +169,7 @@ pub fn minimize_witness(
 		sessions.push(base.clone());
 	}
 
-	let mitm_for = |session: &PrincipalState| -> Vec<(usize, Value)> {
+	let mitm_for = |session: &PrincipalState| -> Vec<(SlotIdx, Value)> {
 		session
 			.meta
 			.iter()
@@ -183,14 +180,14 @@ pub fn minimize_witness(
 						slot.creator != session.id && slot.initial_value.as_equation().is_some()
 					})
 			})
-			.map(|(i, _)| (i, value_g_nil()))
+			.map(|(i, _)| (SlotIdx(i), value_g_nil()))
 			.collect()
 	};
 
 	// Candidates in order of how well they explain, not how they were found.
 	// Every one is re-executed before it is believed, so the worst a bad guess
 	// costs is a probe.
-	let recorded_as_gnil: Vec<(usize, Value)> = mutations
+	let recorded_as_gnil: Vec<(SlotIdx, Value)> = mutations
 		.iter()
 		.map(|(slot, value)| {
 			let replacement = match value {
@@ -201,7 +198,7 @@ pub fn minimize_witness(
 		})
 		.collect();
 
-	let mut chosen: Option<(PrincipalState, Vec<(usize, Value)>)> = None;
+	let mut chosen: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
 	'search: for session in &sessions {
 		for candidate in [
 			mitm_for(session),
@@ -220,12 +217,13 @@ pub fn minimize_witness(
 	let Some((base, mutations)) = chosen else {
 		// Nothing replayed in any session.  Report the derivation without
 		// claiming attacker actions we could not verify.
-		return unminimized(false);
+		return unminimized();
 	};
 
-	let mut keep: Vec<(usize, Value)> = mutations.clone();
+	let mut keep: Vec<(SlotIdx, Value)> = mutations.clone();
 	for (slot, _) in &mutations {
-		let trial: Vec<(usize, Value)> = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
+		let trial: Vec<(SlotIdx, Value)> =
+			keep.iter().filter(|(s, _)| s != slot).cloned().collect();
 		if trial.len() == keep.len() {
 			continue;
 		}
@@ -237,7 +235,7 @@ pub fn minimize_witness(
 	// `keep` was accepted by the probe that shrank to it, so this reproduces.
 	match probe(ctx, km, &base, &keep, query_index, phase) {
 		Some(witness) => witness,
-		None => unminimized(false),
+		None => unminimized(),
 	}
 }
 
@@ -254,7 +252,7 @@ fn probe(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	base: &PrincipalState,
-	installs: &[(usize, Value)],
+	installs: &[(SlotIdx, Value)],
 	query_index: usize,
 	phase: i32,
 ) -> Option<Witness> {
@@ -275,6 +273,44 @@ fn probe(
 	Some(Witness {
 		ps,
 		attacker: scratch.attacker_snapshot(),
-		minimized: true,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::parser::parse_string;
+
+	#[test]
+	fn minimize_witness_is_identity_without_mutations() {
+		use crate::context::VerifyContext;
+		use crate::witness::minimize_witness;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private mw_m\n\
+			leaks mw_m\n\
+			]\n\
+			queries[\n\
+			confidentiality? mw_m\n\
+			]\n";
+		let m = parse_string("mw.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+
+		// No slot is attacker-tainted in a passive run, so there is nothing to
+		// drop and the witness is the state it was given.
+		let w = minimize_witness(&ctx, &km, &pure, 0, &[]);
+		assert_eq!(w.ps.values.len(), pure.values.len());
+	}
+
+	#[test]
+	fn minimize_witness_is_not_reentrant() {
+		use crate::witness::in_minimization;
+		// Outside minimization the flag is clear; the guard is what stops a
+		// probe's own query evaluation from minimizing again forever.
+		assert!(!in_minimization());
+	}
 }

@@ -12,10 +12,6 @@ use crate::util::color_output_support;
 #[cfg(feature = "cli")]
 use colored::*;
 
-// ---------------------------------------------------------------------------
-// Quiet-output guard
-// ---------------------------------------------------------------------------
-
 thread_local! {
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
@@ -28,15 +24,14 @@ thread_local! {
 /// part of the reported attack, so printing them would be actively
 /// misleading as well as voluminous.  Recording into the scratch context is
 /// unaffected — only printing and the analysis counter are gated.
-pub fn info_is_quiet() -> bool {
+pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
 }
 
-/// RAII guard suppressing output on the current thread until dropped.
-pub struct InfoQuiet;
+pub(crate) struct InfoQuiet;
 
 impl InfoQuiet {
-	pub fn new() -> InfoQuiet {
+	pub(crate) fn new() -> InfoQuiet {
 		QUIET_DEPTH.with(|d| d.set(d.get() + 1));
 		InfoQuiet
 	}
@@ -54,20 +49,18 @@ impl Drop for InfoQuiet {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// WASM message buffer
-// ---------------------------------------------------------------------------
-
 static WASM_MSG_BUF: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-pub fn wasm_messages_init() {
+#[cfg(feature = "wasm")]
+pub(crate) fn wasm_messages_init() {
 	WASM_MSG_BUF
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
 		.clear();
 }
 
-pub fn wasm_messages_drain() -> Vec<String> {
+#[cfg(feature = "wasm")]
+pub(crate) fn wasm_messages_drain() -> Vec<String> {
 	WASM_MSG_BUF
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -81,10 +74,6 @@ fn wasm_push(msg: String) {
 		.unwrap_or_else(|e| e.into_inner())
 		.push(msg);
 }
-
-// ---------------------------------------------------------------------------
-// Banner and separators
-// ---------------------------------------------------------------------------
 
 pub fn info_banner(version: &str) {
 	if cfg!(target_arch = "wasm32") {
@@ -107,7 +96,7 @@ pub fn info_banner(version: &str) {
 	println!("Verifpal {} - https://verifpal.com", version);
 }
 
-pub fn info_separator() {
+pub(crate) fn info_separator() {
 	if cfg!(target_arch = "wasm32") {
 		return;
 	}
@@ -118,10 +107,6 @@ pub fn info_separator() {
 	}
 	println!("{}", "-".repeat(50));
 }
-
-// ---------------------------------------------------------------------------
-// Core message output
-// ---------------------------------------------------------------------------
 
 /// The left column for a level: `(indent, plain label, plain symbol, coloured
 /// label, coloured symbol)`.
@@ -219,11 +204,7 @@ fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 	);
 }
 
-// ---------------------------------------------------------------------------
-// Result summary formatting
-// ---------------------------------------------------------------------------
-
-pub fn info_verify_result_summary(
+pub(crate) fn info_verify_result_summary(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
@@ -320,17 +301,18 @@ fn info_verify_result_summary_color(
 	output
 }
 
-// ---------------------------------------------------------------------------
-// Analysis progress
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Utility helpers
-// ---------------------------------------------------------------------------
-
-pub fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
+/// `n` is a zero-based index, so `n == 0` is "first".
+pub(crate) fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
 	if n > 9 {
-		return format!("{}th", n).into();
+		let ordinal = n + 1;
+		let suffix = match (ordinal % 10, ordinal % 100) {
+			(_, 11..=13) => "th",
+			(1, _) => "st",
+			(2, _) => "nd",
+			(3, _) => "rd",
+			_ => "th",
+		};
+		return format!("{}{}", ordinal, suffix).into();
 	}
 	let words = if title_case {
 		&[
@@ -346,7 +328,7 @@ pub fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
 	Cow::Borrowed(words[n])
 }
 
-pub fn info_output_text(revealed: &Value) -> String {
+pub(crate) fn info_output_text(revealed: &Value) -> String {
 	match revealed {
 		Value::Constant(_) | Value::Equation(_) => revealed.to_string(),
 		Value::Primitive(p) => {
@@ -357,5 +339,25 @@ pub fn info_output_text(revealed: &Value) -> String {
 				format!("{} of {}", prefix, revealed)
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+
+	#[test]
+	fn info_quiet_guard_nests_and_restores() {
+		use crate::info::{InfoQuiet, info_is_quiet};
+		assert!(!info_is_quiet());
+		{
+			let _outer = InfoQuiet::new();
+			assert!(info_is_quiet());
+			{
+				let _inner = InfoQuiet::new();
+				assert!(info_is_quiet());
+			}
+			assert!(info_is_quiet(), "inner guard must not un-quiet the outer");
+		}
+		assert!(!info_is_quiet());
 	}
 }

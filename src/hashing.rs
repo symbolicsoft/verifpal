@@ -6,11 +6,7 @@ use std::collections::HashSet;
 use crate::equivalence::{equation_is_flat, flatten_equation};
 use crate::types::*;
 
-// ---------------------------------------------------------------------------
-// Hashing helpers
-// ---------------------------------------------------------------------------
-
-pub fn primitive_hash(p: &Primitive) -> u64 {
+pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
 	let mut h = (p.id as u64).wrapping_mul(2654435761) ^ (p.output as u64).wrapping_mul(97);
 	for a in &p.arguments {
 		h = h.wrapping_mul(31).wrapping_add(a.hash_value());
@@ -18,7 +14,7 @@ pub fn primitive_hash(p: &Primitive) -> u64 {
 	h
 }
 
-pub fn equation_hash(e: &Equation) -> u64 {
+pub(crate) fn equation_hash(e: &Equation) -> u64 {
 	if equation_is_flat(e) {
 		return equation_hash_inner(e);
 	}
@@ -60,7 +56,7 @@ fn equation_hash_inner(e: &Equation) -> u64 {
 }
 
 /// Record the hash of `v` and of every term inside it.
-pub fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
+pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
 	out.insert(v.hash_value());
 	match v {
 		Value::Primitive(p) => {
@@ -74,5 +70,64 @@ pub fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
 			}
 		}
 		Value::Constant(_) => {}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::*;
+	use crate::testutil::*;
+	use crate::value::*;
+	use std::sync::Arc;
+
+	#[test]
+	fn hash_equal_constants() {
+		let a = make_constant("hash_eq_a");
+		let b = make_constant("hash_eq_a"); // same name → same id
+		assert_eq!(a.hash_value(), b.hash_value());
+	}
+
+	#[test]
+	fn hash_commutative_dh() {
+		// Commutative DH equations must hash the same
+		let a = make_constant("hash_dh_a");
+		let b = make_constant("hash_dh_b");
+		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
+		let e2 = make_equation(vec![value_g(), b, a]);
+		assert_eq!(e1.hash_value(), e2.hash_value());
+	}
+
+	#[test]
+	fn hash_different_values() {
+		let a = make_constant("hash_d_a");
+		let b = make_constant("hash_d_b");
+		// Very likely different hashes (not guaranteed but extremely probable)
+		assert_ne!(a.hash_value(), b.hash_value());
+	}
+
+	#[test]
+	fn hash_primitive_includes_output() {
+		let a = make_constant("hash_po_a");
+		let p1 = make_primitive(PRIM_HKDF, vec![a.clone(), a.clone(), a.clone()], 0);
+		let p2 = make_primitive(PRIM_HKDF, vec![a.clone(), a.clone(), a], 1);
+		assert_ne!(p1.hash_value(), p2.hash_value());
+	}
+
+	#[test]
+	fn equation_hash_flat_vs_nested() {
+		let a = make_constant("ehf_a");
+		let b = make_constant("ehf_b");
+		let flat = Equation {
+			values: vec![value_g(), a.clone(), b.clone()],
+		};
+		// Nested: (G^a)^b  (same thing when flattened)
+		let inner = Equation {
+			values: vec![value_g(), a],
+		};
+		let nested = Equation {
+			values: vec![Value::Equation(Arc::new(inner)), b],
+		};
+		assert_eq!(equation_hash(&flat), equation_hash(&nested));
 	}
 }

@@ -7,21 +7,163 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
+/// A half-open byte range in the model source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Span {
+	pub start: usize,
+	pub end: usize,
+}
+
+impl Span {
+	pub fn new(start: usize, end: usize) -> Self {
+		Span { start, end }
+	}
+
+	pub fn at(pos: usize) -> Self {
+		Span {
+			start: pos,
+			end: pos,
+		}
+	}
+
+	/// One-based line and column of `start` within `source`. The column counts
+	/// characters, not bytes, so it matches what an editor shows.
+	pub fn line_col(&self, source: &str) -> (usize, usize) {
+		let (line, start, _) = self.line_bounds(source);
+		let col = source[start..self.start.min(source.len())].chars().count() + 1;
+		(line, col)
+	}
+
+	/// `(one-based line, byte offset of its start, byte offset of its end)`.
+	fn line_bounds(&self, source: &str) -> (usize, usize, usize) {
+		let at = self.start.min(source.len());
+		let upto = &source.as_bytes()[..at];
+		let line = upto.iter().filter(|&&b| b == b'\n').count() + 1;
+		let start = upto
+			.iter()
+			.rposition(|&b| b == b'\n')
+			.map(|i| i + 1)
+			.unwrap_or(0);
+		let end = source[at..]
+			.find('\n')
+			.map(|i| at + i)
+			.unwrap_or(source.len());
+		(line, start, end)
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+	Parse,
+	Sanity,
+	Resolution,
+	Internal,
+}
+
+impl ErrorKind {
+	pub fn label(self) -> &'static str {
+		match self {
+			ErrorKind::Parse => "parse error",
+			ErrorKind::Sanity => "sanity error",
+			ErrorKind::Resolution => "resolution error",
+			ErrorKind::Internal => "internal error",
+		}
+	}
+}
+
 #[derive(Clone, Debug)]
-pub enum VerifpalError {
-	Parse(Cow<'static, str>),
-	Sanity(Cow<'static, str>),
-	Resolution(Cow<'static, str>),
-	Internal(Cow<'static, str>),
+pub struct VerifpalError {
+	pub kind: ErrorKind,
+	pub message: Cow<'static, str>,
+	pub span: Option<Span>,
+	/// Set once the source is in hand, so `Display` can show file, line and
+	/// column to callers that only ever print the error.
+	rendered: Option<String>,
+}
+
+impl VerifpalError {
+	pub fn parse(message: Cow<'static, str>) -> Self {
+		Self::of(ErrorKind::Parse, message)
+	}
+
+	pub fn sanity(message: Cow<'static, str>) -> Self {
+		Self::of(ErrorKind::Sanity, message)
+	}
+
+	pub fn resolution(message: Cow<'static, str>) -> Self {
+		Self::of(ErrorKind::Resolution, message)
+	}
+
+	pub fn internal(message: Cow<'static, str>) -> Self {
+		Self::of(ErrorKind::Internal, message)
+	}
+
+	fn of(kind: ErrorKind, message: Cow<'static, str>) -> Self {
+		VerifpalError {
+			kind,
+			message,
+			span: None,
+			rendered: None,
+		}
+	}
+
+	pub fn at(mut self, span: Span) -> Self {
+		self.span = Some(span);
+		self
+	}
+
+	/// Attach `span` only if the error does not already carry a narrower one,
+	/// so an inner error keeps its own position as the stack unwinds.
+	pub fn or_span(mut self, span: Span) -> Self {
+		self.span.get_or_insert(span);
+		self
+	}
+
+	/// Fold the source location into the message, so plain `Display` shows it.
+	pub fn located(mut self, file_name: &str, source: &str) -> Self {
+		self.rendered = Some(self.render(file_name, source));
+		self
+	}
+
+	/// `file:line:col: kind: message`, with the offending line and a caret.
+	pub fn render(&self, file_name: &str, source: &str) -> String {
+		let Some(span) = self.span else {
+			return format!("{}: {}: {}", file_name, self.kind.label(), self.message);
+		};
+		let (line, col) = span.line_col(source);
+		let mut out = format!(
+			"{}:{}:{}: {}: {}",
+			file_name,
+			line,
+			col,
+			self.kind.label(),
+			self.message
+		);
+		// Tabs are shown as one space and the caret padding counts characters,
+		// so the caret lands under the span even on a tab-indented line.
+		let (_, line_start, line_end) = span.line_bounds(source);
+		let text = &source[line_start..line_end];
+		let at = span.start.min(source.len());
+		let lead = source[line_start..at].chars().count();
+		let width = source[at..span.end.min(line_end)].chars().count().max(1);
+		out.push_str(&format!(
+			"\n  {}\n  {}{}",
+			text.replace('\t', " "),
+			" ".repeat(lead),
+			"^".repeat(width)
+		));
+		out
+	}
 }
 
 impl fmt::Display for VerifpalError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			VerifpalError::Parse(s) => write!(f, "parse error: {}", s),
-			VerifpalError::Sanity(s) => write!(f, "sanity error: {}", s),
-			VerifpalError::Resolution(s) => write!(f, "resolution error: {}", s),
-			VerifpalError::Internal(s) => write!(f, "{}", s),
+		if let Some(rendered) = &self.rendered {
+			return write!(f, "{}", rendered);
+		}
+		match self.kind {
+			ErrorKind::Internal => write!(f, "{}", self.message),
+			kind => write!(f, "{}: {}", kind.label(), self.message),
 		}
 	}
 }
@@ -30,17 +172,48 @@ impl std::error::Error for VerifpalError {}
 
 impl From<String> for VerifpalError {
 	fn from(s: String) -> Self {
-		VerifpalError::Internal(s.into())
+		VerifpalError::internal(s.into())
 	}
 }
 
 impl From<&'static str> for VerifpalError {
 	fn from(s: &'static str) -> Self {
-		VerifpalError::Internal(s.into())
+		VerifpalError::internal(s.into())
 	}
 }
 
 pub type VResult<T> = Result<T, VerifpalError>;
+
+/// An index into a principal's slots — equivalently, into `ProtocolTrace::slots`,
+/// which every `PrincipalState` is built parallel to.
+///
+/// Distinct from [`KnownIdx`] so the two index spaces cannot be swapped: a
+/// mutation record stores slot indices but is *found* by a knowledge index, and
+/// both used to be a bare `usize`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SlotIdx(pub usize);
+
+impl SlotIdx {
+	pub fn get(self) -> usize {
+		self.0
+	}
+}
+
+impl fmt::Display for SlotIdx {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+/// An index into `AttackerState::known` and the arrays parallel to it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KnownIdx(pub usize);
+
+impl KnownIdx {
+	pub fn get(self) -> usize {
+		self.0
+	}
+}
 
 pub type PrincipalId = u8;
 pub type ValueId = u32;
@@ -167,7 +340,7 @@ impl Value {
 	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
-			_ => Err(VerifpalError::Internal(
+			_ => Err(VerifpalError::internal(
 				format!("expected Primitive, got {}", self.variant_name()).into(),
 			)),
 		}
@@ -176,7 +349,7 @@ impl Value {
 	pub fn try_as_equation(&self) -> VResult<&Equation> {
 		match self {
 			Value::Equation(e) => Ok(e),
-			_ => Err(VerifpalError::Internal(
+			_ => Err(VerifpalError::internal(
 				format!("expected Equation, got {}", self.variant_name()).into(),
 			)),
 		}
@@ -211,7 +384,6 @@ pub struct Primitive {
 }
 
 impl Primitive {
-	/// Create a copy with different arguments, preserving id/output/instance_check.
 	pub fn with_arguments(&self, arguments: Vec<Value>) -> Self {
 		Primitive {
 			id: self.id,
@@ -221,16 +393,12 @@ impl Primitive {
 		}
 	}
 
-	/// Rebuild with `f` applied to each argument, returning `None` when `f`
-	/// reported every argument unchanged.
+	/// Rebuild with `f` applied to each argument, returning `None` when every
+	/// argument was unchanged.
 	///
-	/// `f` returns `Some` only for an argument that actually changed, so a
-	/// caller that cares about a subset of arguments — rewriting only touches
-	/// nested primitives — pays nothing for the rest. Rebuilding a primitive
-	/// whose arguments are all unchanged allocates a fresh `Arc` and a fresh
-	/// argument vector for nothing, and resolution and rewriting walk every
-	/// term in the model, so the copy-on-write is worth keeping — just not
-	/// worth hand-writing at each site that needs it.
+	/// `f` returns `Some` only for an argument it actually changed, so a caller
+	/// that cares about a subset — rewriting only touches nested primitives —
+	/// pays nothing for the rest.
 	pub fn map_arguments(&self, mut f: impl FnMut(&Value) -> Option<Value>) -> Option<Primitive> {
 		let mut changed: Option<Vec<Value>> = None;
 		for (i, a) in self.arguments.iter().enumerate() {
@@ -261,9 +429,35 @@ pub struct Equation {
 	pub values: Vec<Value>,
 }
 
+/// Model source text. Debug-prints as a size so that dumping a `Model` does
+/// not dump the whole file.
+#[derive(Clone, Default)]
+pub struct Source(pub Arc<str>);
+
+impl fmt::Debug for Source {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "<{} bytes>", self.0.len())
+	}
+}
+
+impl std::ops::Deref for Source {
+	type Target = str;
+	fn deref(&self) -> &str {
+		&self.0
+	}
+}
+
+impl From<&str> for Source {
+	fn from(s: &str) -> Self {
+		Source(Arc::from(s))
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
+	/// The text this model was parsed from, so an error can quote its own line.
+	pub source: Source,
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
 	pub queries: Vec<Query>,
@@ -325,6 +519,7 @@ pub enum Block {
 pub struct Principal {
 	pub name: String,
 	pub id: PrincipalId,
+	pub span: Span,
 	pub expressions: Vec<Expression>,
 	pub leading_comments: Vec<Comment>,
 	pub header_trailing: Option<Comment>,
@@ -332,13 +527,33 @@ pub struct Principal {
 	pub closing_trailing: Option<Comment>,
 }
 
-#[derive(Clone, Debug, Default)]
+/// Names ride alongside the ids so rendering never needs a process-wide
+/// id-to-name table; `Display for Query` in particular cannot take one.
+#[derive(Clone, Debug)]
 pub struct Message {
+	pub span: Span,
 	pub sender: PrincipalId,
+	pub sender_name: Arc<str>,
 	pub recipient: PrincipalId,
+	pub recipient_name: Arc<str>,
 	pub constants: Vec<Constant>,
 	pub leading_comments: Vec<Comment>,
 	pub trailing_comment: Option<Comment>,
+}
+
+impl Default for Message {
+	fn default() -> Self {
+		Message {
+			span: Span::default(),
+			sender: 0,
+			sender_name: Arc::from(""),
+			recipient: 0,
+			recipient_name: Arc::from(""),
+			constants: Vec::new(),
+			leading_comments: Vec::new(),
+			trailing_comment: None,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -350,12 +565,33 @@ pub struct Phase {
 
 #[derive(Clone, Debug)]
 pub struct Query {
+	pub span: Span,
 	pub kind: QueryKind,
 	pub constants: Vec<Constant>,
 	pub message: Message,
 	pub options: Vec<QueryOption>,
 	pub leading_comments: Vec<Comment>,
 	pub trailing_comment: Option<Comment>,
+}
+
+impl Query {
+	/// Errors rather than indexing: a violated invariant must not become a
+	/// query that silently reports as holding.
+	pub fn subject(&self) -> VResult<&Constant> {
+		self.constants.first().ok_or_else(|| {
+			VerifpalError::internal(
+				format!("{} query carries no constant", self.kind.name()).into(),
+			)
+		})
+	}
+}
+
+impl Message {
+	pub fn constant(&self) -> VResult<&Constant> {
+		self.constants
+			.first()
+			.ok_or_else(|| VerifpalError::internal("query message carries no constant".into()))
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -374,6 +610,7 @@ pub struct QueryOptionResult {
 
 #[derive(Clone, Debug)]
 pub struct Expression {
+	pub span: Span,
 	pub kind: Declaration,
 	pub qualifier: Option<Qualifier>,
 	pub constants: Vec<Constant>,
@@ -399,7 +636,7 @@ impl TraceSlot {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ProtocolTrace {
 	pub principals: Vec<String>,
 	pub principal_ids: Vec<PrincipalId>,
@@ -433,8 +670,6 @@ pub struct SlotMeta {
 	pub phase: Vec<i32>,
 }
 
-/// Tracks who created a value, how it arrived at the current principal,
-/// and whether the attacker may have tampered with it.
 #[derive(Clone, Debug)]
 pub struct Provenance {
 	/// Principal who originally computed/generated this value.
@@ -443,7 +678,6 @@ pub struct Provenance {
 	/// Equals creator if the value was never communicated.
 	/// Equals ATTACKER_ID if the attacker injected a replacement.
 	pub sender: PrincipalId,
-	/// Whether this value was replaced by the attacker.
 	pub attacker_tainted: bool,
 	/// Whether the attacker put its own key here to defeat a guard it could
 	/// bypass — the man-in-the-middle on a signed or guarded public key.
@@ -457,26 +691,18 @@ pub struct Provenance {
 	pub bypass_injected: bool,
 }
 
-/// Mutable per-constant values (deep-cloned for each active attacker depth level).
+/// The three points in a slot's lifecycle that the engine has to tell apart:
 ///
-/// The three value fields track different points in the value's lifecycle:
+/// - `original`: what the protocol honestly computed, before the attacker
+///   tampered with it — what the principal believes the value is.
+/// - `pre_rewrite`: after mutation, before cryptographic rewriting, so
+///   `AEAD_DEC(k, AEAD_ENC(k, m, ad), ad)` still reads as itself. Narration
+///   quotes this.
+/// - `value`: after mutation and rewriting. Analysis uses this.
 ///
-/// - **`original`**: the value as originally computed by the protocol,
-///   before the active attacker tampered with it.  This is what the principal
-///   "thinks" the value is — used during resolution for values the principal
-///   created itself or hasn't received over a wire.
-///
-/// - **`pre_rewrite`**: the value after attacker mutation but before
-///   cryptographic rewriting (e.g. `AEAD_DEC(k, AEAD_ENC(k, m, ad), ad)` is
-///   not yet rewritten to `m`).  Used for forensic tracing and narrative output.
-///
-/// - **`value`**: the fully resolved current value after mutation and
-///   rewriting.  This is what the verification engine uses for analysis.
-///
-/// The distinction between `original` and `value` is critical for
-/// correctness: without it, principals would "see" the attacker's mutations
-/// in their own locally-computed values, causing false positives in
-/// authentication queries.
+/// Conflating `original` and `value` is what causes false authentication
+/// attacks: principals would "see" the attacker's tampering inside their own
+/// locally-computed values.
 #[derive(Clone, Debug)]
 pub struct SlotValues {
 	pub value: Value,
@@ -495,7 +721,6 @@ impl SlotValues {
 		self.value = v;
 	}
 
-	/// Unconditionally override all value fields (value, pre_rewrite, original).
 	pub fn override_all(&mut self, v: Value) {
 		self.original = v.clone();
 		self.pre_rewrite = v.clone();
@@ -532,11 +757,6 @@ pub struct PrincipalState {
 
 impl PrincipalState {
 	/// Whether slot `i` should resolve to `original` rather than `value`.
-	/// Returns true for values that the principal perceives as original:
-	/// - not tainted by the attacker, OR
-	/// - created by this principal itself, OR
-	/// - not known to this principal, OR
-	/// - not received over a wire by this principal
 	pub fn should_use_original(&self, i: usize) -> bool {
 		!self.values[i].provenance.attacker_tainted
 			|| self.values[i].provenance.creator == self.id
@@ -554,21 +774,18 @@ impl PrincipalState {
 	}
 }
 
-/// A single slot that differs from the protocol trace initial value.
-/// Captured at the time the attacker learns a value, for forensic tracing.
+/// A single slot that differs from the protocol trace's initial value.
 #[derive(Clone, Debug)]
 pub struct SlotDiff {
-	pub index: usize,
+	pub index: SlotIdx,
 	pub constant: Constant,
 	pub value: Value,
 	pub tainted: bool,
 }
 
-/// Compact forensic record stored alongside each attacker-known value.
-/// Records only the slots where the PrincipalState differed from the
-/// protocol trace at the time the value was learned by the attacker,
-/// plus which principal's session that was and at which phase — narration
-/// needs both to attribute a set of mutations to a session.
+/// The slots that had to differ for the attacker to hold a value, and whose
+/// session they differed in — narration needs both to attribute a set of
+/// mutations to a run.
 #[derive(Clone, Debug)]
 pub struct MutationRecord {
 	pub diffs: Vec<SlotDiff>,
@@ -587,9 +804,9 @@ pub enum DerivationRecord {
 	/// Public, declared, or otherwise held from the start of the phase.
 	Initial,
 	/// Handed over by a `leaks` declaration.
-	Leaked { slot: usize },
+	Leaked { slot: SlotIdx },
 	/// Read off the wire, or equivalized against a slot's resolution.
-	Obtained { slot: usize },
+	Obtained { slot: SlotIdx },
 	/// Recovered from inside `of` using the values in `using`.
 	Decomposed { of: Value, using: Vec<Value> },
 	/// Rebuilt from `from`, all of which the attacker already held.
@@ -695,4 +912,255 @@ pub struct RewriteResult {
 	pub rewritten: bool,
 	/// The (possibly rewritten) value.
 	pub value: Value,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::*;
+	use crate::testutil::*;
+	use crate::value::*;
+	use std::sync::Arc;
+
+	#[test]
+	fn value_accessors() {
+		let c = make_constant("acc_c");
+		let p = make_primitive(PRIM_HASH, vec![c.clone()], 0);
+		let e = make_equation(vec![value_g(), c.clone()]);
+
+		assert!(c.as_constant().is_some());
+		assert!(c.as_primitive().is_none());
+		assert!(c.as_equation().is_none());
+
+		assert!(p.as_primitive().is_some());
+		assert!(p.as_constant().is_none());
+
+		assert!(e.as_equation().is_some());
+		assert!(e.as_constant().is_none());
+	}
+
+	#[test]
+	fn value_try_accessors() {
+		let c = make_constant("try_c");
+		assert!(c.as_constant().is_some());
+		assert!(c.try_as_primitive().is_err());
+		assert!(c.try_as_equation().is_err());
+	}
+
+	#[test]
+	fn principal_state_should_use_original_creator() {
+		let c = Constant {
+			name: Arc::from("ps_fbm_a"),
+			id: test_value_id("ps_fbm_a"),
+			..Constant::default()
+		};
+		let meta = vec![make_slot_meta(&c, true)];
+		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)]; // creator == self.id
+		let ps = make_principal_state("Alice", 0, meta, values);
+		assert!(ps.should_use_original(0)); // creator == self
+	}
+
+	#[test]
+	fn principal_state_effective_value_not_mutated() {
+		let c = Constant {
+			name: Arc::from("ps_ev_a"),
+			id: test_value_id("ps_ev_a"),
+			..Constant::default()
+		};
+		let val = make_constant("ps_ev_a");
+		let meta = vec![make_slot_meta(&c, true)];
+		let values = vec![make_slot_values(&val, 0)];
+		let ps = make_principal_state("Alice", 0, meta, values);
+		assert!(ps.effective_value(0).equivalent(&val, true));
+	}
+
+	#[test]
+	fn principal_state_effective_value_mutated() {
+		let c = Constant {
+			name: Arc::from("ps_evm_a"),
+			id: test_value_id("ps_evm_a"),
+			..Constant::default()
+		};
+		let original = make_constant("ps_evm_a");
+		let mutated = make_constant("ps_evm_mutated");
+		let mut meta = make_slot_meta(&c, false);
+		meta.wire = vec![1]; // received by principal 1
+		let mut sv = make_slot_values(&mutated, 0);
+		sv.original = original.clone();
+		sv.provenance.attacker_tainted = true;
+		sv.provenance.creator = 0; // different from ps.id=1
+		let ps = make_principal_state("Bob", 1, vec![meta], vec![sv]);
+		// Bob (id=1) received this on wire, and it was mutated
+		// Since creator(0) != self(1), known=true, wire contains self(1), and mutated=true,
+		// should_use_original returns false, so effective_value = value (tainted)
+		assert!(ps.effective_value(0).equivalent(&mutated, true));
+	}
+
+	#[test]
+	fn primitive_with_arguments() {
+		let a = make_constant("pwa_a");
+		let b = make_constant("pwa_b");
+		let p = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![a],
+			output: 0,
+			instance_check: true,
+		};
+		let p2 = p.with_arguments(vec![b.clone()]);
+		assert_eq!(p2.id, PRIM_ENC);
+		assert_eq!(p2.output, 0);
+		assert!(p2.instance_check);
+		assert!(p2.arguments[0].equivalent(&b, true));
+	}
+
+	#[test]
+	fn slot_values_set_value_not_tainted() {
+		let v1 = make_constant("sv_v1");
+		let v2 = make_constant("sv_v2");
+		let mut sv = make_slot_values(&v1, 0);
+		sv.set_value(v2.clone());
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v2, true)); // also updated when not tainted
+	}
+
+	#[test]
+	fn slot_values_set_value_tainted() {
+		let v1 = make_constant("svm_v1");
+		let v2 = make_constant("svm_v2");
+		let mut sv = make_slot_values(&v1, 0);
+		sv.provenance.attacker_tainted = true;
+		sv.set_value(v2.clone());
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v1, true)); // NOT updated when tainted
+	}
+
+	#[test]
+	fn slot_values_override_all() {
+		let v1 = make_constant("svo_v1");
+		let v2 = make_constant("svo_v2");
+		let mut sv = make_slot_values(&v1, 0);
+		sv.provenance.attacker_tainted = true;
+		sv.override_all(v2.clone());
+		assert!(sv.value.equivalent(&v2, true));
+		assert!(sv.pre_rewrite.equivalent(&v2, true));
+		assert!(sv.original.equivalent(&v2, true)); // overridden regardless of tainted
+	}
+
+	#[test]
+	fn error_display() {
+		let e = VerifpalError::parse("bad input".into());
+		assert_eq!(format!("{}", e), "parse error: bad input");
+		let e2 = VerifpalError::resolution("not found".into());
+		assert_eq!(format!("{}", e2), "resolution error: not found");
+	}
+
+	#[test]
+	fn trace_slot_known_by_creator() {
+		let c = Constant {
+			name: Arc::from("ts_a"),
+			id: test_value_id("ts_a"),
+			..Constant::default()
+		};
+		let slot = TraceSlot {
+			constant: c,
+			initial_value: value_nil(),
+			creator: 0,
+			known_by: vec![],
+			declared_at: 0,
+			phases: vec![0],
+		};
+		assert!(slot.known_by_principal(0)); // creator
+		assert!(!slot.known_by_principal(1)); // not creator, not in known_by
+	}
+
+	#[test]
+	fn trace_slot_known_by_receiver() {
+		let c = Constant {
+			name: Arc::from("ts2_a"),
+			id: test_value_id("ts2_a"),
+			..Constant::default()
+		};
+		let slot = TraceSlot {
+			constant: c,
+			initial_value: value_nil(),
+			creator: 0,
+			known_by: vec![(1, 0)],
+			declared_at: 0,
+			phases: vec![0],
+		};
+		assert!(slot.known_by_principal(1)); // in known_by
+	}
+
+	#[test]
+	fn mutation_record_empty() {
+		let record = MutationRecord {
+			diffs: vec![],
+			principal_id: 0,
+			phase: 0,
+		};
+		assert!(record.diffs.is_empty());
+	}
+
+	#[test]
+	fn query_kind_names() {
+		assert_eq!(QueryKind::Confidentiality.name(), "confidentiality");
+		assert_eq!(QueryKind::Authentication.name(), "authentication");
+		assert_eq!(QueryKind::Freshness.name(), "freshness");
+		assert_eq!(QueryKind::Unlinkability.name(), "unlinkability");
+		assert_eq!(QueryKind::Equivalence.name(), "equivalence");
+	}
+}
+
+#[cfg(test)]
+mod span_tests {
+	use super::*;
+
+	const SRC: &str = "attacker[active]\n\nprincipal Alice[\n\tknows private m\n]\n";
+
+	#[test]
+	fn line_col_is_one_based_and_counts_characters() {
+		assert_eq!(Span::at(0).line_col(SRC), (1, 1));
+		assert_eq!(Span::at(17).line_col(SRC), (2, 1));
+		// Byte 18 is the start of line 3.
+		assert_eq!(Span::at(18).line_col(SRC), (3, 1));
+		let unicode = "principal Amélié[\n\tknows private m\n]\n";
+		// The column counts characters, so the accented name does not shift it.
+		let after_name = unicode.find('[').expect("bracket");
+		assert_eq!(Span::at(after_name).line_col(unicode).1, 17);
+	}
+
+	#[test]
+	fn render_points_a_caret_at_the_span() {
+		let at_knows = SRC.find("knows").expect("knows");
+		let e = VerifpalError::sanity("bad".into()).at(Span::new(at_knows, at_knows + 5));
+		let rendered = e.render("m.vp", SRC);
+		assert!(
+			rendered.starts_with("m.vp:4:2: sanity error: bad"),
+			"{rendered}"
+		);
+		let caret_line = rendered.lines().last().expect("caret line");
+		// Two spaces of gutter, one for the tab, then the caret under `knows`.
+		assert_eq!(caret_line, "   ^^^^^");
+	}
+
+	#[test]
+	fn an_error_without_a_span_still_renders() {
+		let e = VerifpalError::sanity("bad".into());
+		assert_eq!(e.render("m.vp", SRC), "m.vp: sanity error: bad");
+	}
+
+	#[test]
+	fn or_span_keeps_the_narrower_inner_location() {
+		let inner = VerifpalError::parse("inner".into()).at(Span::at(5));
+		let outer = inner.or_span(Span::at(99));
+		assert_eq!(outer.span, Some(Span::at(5)));
+	}
+
+	#[test]
+	fn located_errors_display_with_their_position() {
+		let e = VerifpalError::sanity("bad".into())
+			.at(Span::at(0))
+			.located("m.vp", SRC);
+		assert!(e.to_string().starts_with("m.vp:1:1: sanity error: bad"));
+	}
 }

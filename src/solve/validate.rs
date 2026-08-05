@@ -37,7 +37,7 @@ use super::vars::{Substitution, apply};
 /// `false` means every binding reduced to the honest value, so the "mutation"
 /// was a replay indistinguishable from the real message — see
 /// [`is_worthwhile`].
-pub fn validate(
+pub(crate) fn validate(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps_base: &PrincipalState,
@@ -46,7 +46,7 @@ pub fn validate(
 	subst: &Substitution,
 ) -> VResult<bool> {
 	let ps = ps_base.clone_for_depth(true);
-	let mut installs: Vec<(usize, Value)> = Vec::new();
+	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
 	let mut worthwhile = false;
 
 	for &slot in &sym.var_slots {
@@ -70,7 +70,7 @@ pub fn validate(
 		if is_worthwhile(&ground, slot, km, &ps) {
 			worthwhile = true;
 		}
-		installs.push((slot, ground));
+		installs.push((SlotIdx(slot), ground));
 	}
 
 	if !worthwhile {

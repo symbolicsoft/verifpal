@@ -4,12 +4,11 @@
 use crate::construct::*;
 use crate::pretty::{pretty_arity, pretty_constants};
 use crate::primitive::*;
-use crate::principal::*;
 use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 
-pub fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
+pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
@@ -23,7 +22,7 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 	for block in &m.blocks {
 		if let Block::Phase(p) = block {
 			if p.number <= phase {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"phase being declared ({}) must be superior to last declared phase ({})",
 						p.number, phase
@@ -32,7 +31,7 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 				));
 			}
 			if p.number != phase + 1 {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"phase being declared ({}) skips phases since last declared phase ({})",
 						p.number, phase
@@ -47,7 +46,7 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 }
 
 #[allow(clippy::only_used_in_recursion)]
-pub fn sanity_assignment_constants(
+pub(crate) fn sanity_assignment_constants(
 	right: &Value,
 	existing: &[Constant],
 	km: &ProtocolTrace,
@@ -63,10 +62,10 @@ pub fn sanity_assignment_constants(
 			let arity = primitive_get_arity(p)?;
 			let arg_count = p.arguments.len() as i32;
 			if arg_count == 0 {
-				return Err(VerifpalError::Sanity("primitive has no inputs".into()));
+				return Err(VerifpalError::sanity("primitive has no inputs".into()));
 			}
 			if !arity.contains(&arg_count) {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"primitive has {} inputs, expecting {}",
 						arg_count,
@@ -92,10 +91,10 @@ pub fn sanity_assignment_constants(
 	Ok(constants)
 }
 
-pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
+pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
 	let (output, definition_check) = primitive_output_spec(p.id)?;
 	if !output.contains(&(outputs.len() as i32)) {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"primitive has {} outputs, expecting {}",
 				outputs.len(),
@@ -105,7 +104,7 @@ pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
 		));
 	}
 	if p.instance_check && !definition_check {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			"primitive is checked but does not support checking".into(),
 		));
 	}
@@ -114,26 +113,30 @@ pub fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
 
 fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	for query in &m.queries {
+		let located = |e: VerifpalError| e.or_span(query.span);
 		match query.kind {
-			QueryKind::Authentication => sanity_queries_authentication(query, km)?,
+			QueryKind::Authentication => {
+				sanity_queries_authentication(query, km).map_err(located)?
+			}
 			QueryKind::Confidentiality | QueryKind::Freshness => {
-				sanity_queries_single_constant(query, km, query.kind.name())?
+				sanity_queries_single_constant(query, km, query.kind.name()).map_err(located)?
 			}
 			QueryKind::Unlinkability | QueryKind::Equivalence => {
-				sanity_queries_multi_constant(query, km, query.kind.name())?
+				sanity_queries_multi_constant(query, km, query.kind.name()).map_err(located)?
 			}
 		}
-		sanity_query_options(query, km)?;
+		sanity_query_options(query, km).map_err(located)?;
 	}
 	Ok(())
 }
 
 fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
-	if km.index_of(&query.constants[0]).is_none() {
-		return Err(VerifpalError::Sanity(
+	let subject = query.subject()?;
+	if km.index_of(subject).is_none() {
+		return Err(VerifpalError::sanity(
 			format!(
 				"{} query ({}) refers to unknown constant ({})",
-				kind, query, query.constants[0]
+				kind, query, subject
 			)
 			.into(),
 		));
@@ -143,21 +146,22 @@ fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace, kind: &str)
 
 fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 	if query.message.constants.is_empty() {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!("authentication query ({}) has no constants", query).into(),
 		));
 	}
-	if km.index_of(&query.message.constants[0]).is_none() {
-		return Err(VerifpalError::Sanity(
+	let c = query.message.constant()?;
+	if km.index_of(c).is_none() {
+		return Err(VerifpalError::sanity(
 			format!(
 				"authentication query ({}) refers to unknown constant ({})",
-				query, query.message.constants[0]
+				query, c
 			)
 			.into(),
 		));
 	}
 	if query.message.constants.len() != 1 {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"authentication query ({}) has more than one constant",
 				query
@@ -165,14 +169,13 @@ fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<(
 			.into(),
 		));
 	}
-	let c = &query.message.constants[0];
 	sanity_queries_check_message_principals(&query.message)?;
 	sanity_queries_check_known(query, &query.message, c, km)
 }
 
 fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
 	if query.constants.len() < 2 {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"{} query ({}) must specify at least two constants",
 				kind, query
@@ -182,7 +185,7 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 	}
 	for (i, c) in query.constants.iter().enumerate() {
 		if km.index_of(c).is_none() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} query ({}) refers to unknown constant ({})",
 					kind, query, c
@@ -191,7 +194,7 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 			));
 		}
 		if find_equivalent_constant(c, &query.constants[..i]).is_some() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} query ({}) refers to same constant more than once ({})",
 					kind, query, c
@@ -208,7 +211,7 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 		match option.kind {
 			QueryOptionKind::Precondition => {
 				if option.message.constants.len() != 1 {
-					return Err(VerifpalError::Sanity(
+					return Err(VerifpalError::sanity(
 						format!(
 							"precondition option message ({}) has more than one constant",
 							query
@@ -216,7 +219,7 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 						.into(),
 					));
 				}
-				let c = &option.message.constants[0];
+				let c = option.message.constant()?;
 				sanity_queries_check_message_principals(&option.message)?;
 				sanity_queries_check_known(query, &option.message, c, km)?;
 			}
@@ -227,11 +230,11 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 
 fn sanity_queries_check_message_principals(message: &Message) -> VResult<()> {
 	if message.sender == message.recipient {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"query with message ({} -> {}: {}) has identical sender and recipient",
-				principal_get_name_from_id(message.sender),
-				principal_get_name_from_id(message.recipient),
+				message.sender_name,
+				message.recipient_name,
 				pretty_constants(&message.constants)
 			)
 			.into(),
@@ -246,46 +249,38 @@ fn sanity_queries_check_known(
 	c: &Constant,
 	km: &ProtocolTrace,
 ) -> VResult<()> {
-	let idx = match km.index_of(&m.constants[0]) {
+	let idx = match km.index_of(c) {
 		Some(idx) => idx,
 		None => {
-			return Err(VerifpalError::Sanity(
-				format!(
-					"query ({}) refers to unknown constant ({})",
-					query, m.constants[0]
-				)
-				.into(),
+			return Err(VerifpalError::sanity(
+				format!("query ({}) refers to unknown constant ({})", query, c).into(),
 			));
 		}
 	};
 	let sender_knows = km.slots[idx].known_by_principal(m.sender);
 	let recipient_knows = km.slots[idx].known_by_principal(m.recipient);
-	let used = km.constant_used_by(m.recipient, &m.constants[0]);
+	let used = km.constant_used_by(m.recipient, c);
 	if !sender_knows {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"authentication query ({}) depends on {} sending a constant ({}) that they do not know",
-				query,
-				principal_get_name_from_id(m.sender),
-				c
+				query, m.sender_name, c
 			)
 			.into(),
 		));
 	}
 	if !recipient_knows {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"authentication query ({}) depends on {} receiving a constant ({}) that they never receive",
-				query,
-				principal_get_name_from_id(m.recipient),
-				c
+				query, m.recipient_name, c
 			)
 			.into(),
 		));
 	}
 	if !used {
-		return Err(VerifpalError::Sanity(format!("authentication query ({}) depends on {} using a constant ({}) in a primitive, but this never happens",
-            query, principal_get_name_from_id(m.recipient), c).into()));
+		return Err(VerifpalError::sanity(format!("authentication query ({}) depends on {} using a constant ({}) in a primitive, but this never happens",
+            query, m.recipient_name, c).into()));
 	}
 	Ok(())
 }
@@ -315,11 +310,11 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 	}
 	for &p in &principals {
 		if !declared_ids.contains(&p) {
-			return Err(VerifpalError::Sanity("principal does not exist".into()));
+			return Err(VerifpalError::sanity("principal does not exist".into()));
 		}
 	}
 	if declared_names.len() > 64 {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!(
 				"more than 64 principals ({}) declared",
 				declared_names.len()
@@ -330,12 +325,12 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 	Ok((declared_names, declared_ids))
 }
 
-pub fn sanity_fail_on_failed_checked_primitive_rewrite(
+pub(crate) fn sanity_fail_on_failed_checked_primitive_rewrite(
 	failures: &[(Primitive, usize)],
 ) -> VResult<()> {
 	for (p, _) in failures {
 		if p.instance_check {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!("checked primitive fails: {}", p).into(),
 			));
 		}
@@ -348,7 +343,7 @@ fn sanity_check_primitive_argument_outputs(p: &Primitive) -> VResult<()> {
 		if let Value::Primitive(arg_prim) = arg {
 			let (output, _) = primitive_output_spec(arg_prim.id)?;
 			if !output.contains(&1) {
-				return Err(VerifpalError::Sanity(format!("primitive {} cannot have {} as an argument, since {} necessarily produces more than one output",
+				return Err(VerifpalError::sanity(format!("primitive {} cannot have {} as an argument, since {} necessarily produces more than one output",
                     p, arg_prim, arg_prim).into()));
 			}
 		}
@@ -356,9 +351,9 @@ fn sanity_check_primitive_argument_outputs(p: &Primitive) -> VResult<()> {
 	Ok(())
 }
 
-pub fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
+pub(crate) fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
 	if e.values.len() > 3 {
-		return Err(VerifpalError::Sanity(
+		return Err(VerifpalError::sanity(
 			format!("too many layers in equation ({}), maximum is 2", e).into(),
 		));
 	}
@@ -366,12 +361,12 @@ pub fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
 	for (i, c) in e.values.iter().enumerate() {
 		if let Value::Constant(con) = c {
 			if i == 0 && con.id != g_id {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("equation ({}) does not use 'g' as generator", e).into(),
 				));
 			}
 			if i > 0 && con.id == g_id {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("equation ({}) uses 'g' not as a generator", e).into(),
 				));
 			}
@@ -380,7 +375,7 @@ pub fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
 	Ok(())
 }
 
-pub fn sanity_check_equation_generators(value: &Value) -> VResult<()> {
+pub(crate) fn sanity_check_equation_generators(value: &Value) -> VResult<()> {
 	match value {
 		Value::Primitive(p) => {
 			for arg in &p.arguments {

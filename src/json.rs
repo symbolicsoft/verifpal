@@ -1,20 +1,13 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::context::VerifyContext;
 use crate::parser::parse_string;
 use crate::pretty::{pretty_constants, pretty_model};
-use crate::principal::principal_get_name_from_id;
 use crate::sanity::sanity;
-use crate::solve::verify_active;
 use crate::types::*;
-use crate::verify::verify_passive;
+use crate::verify::analyze;
 
-// ---------------------------------------------------------------------------
-// JSON utilities
-// ---------------------------------------------------------------------------
-
-pub fn json_escape(s: &str) -> String {
+pub(crate) fn json_escape(s: &str) -> String {
 	let mut out = String::with_capacity(s.len());
 	for c in s.chars() {
 		match c {
@@ -30,8 +23,7 @@ pub fn json_escape(s: &str) -> String {
 	out
 }
 
-/// Render `items` as a JSON array, formatting each element with `f`.
-pub fn json_array<T>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> String) -> String {
+pub(crate) fn json_array<T>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> String) -> String {
 	let mut out = String::from("[");
 	for (i, item) in items.into_iter().enumerate() {
 		if i > 0 {
@@ -43,23 +35,16 @@ pub fn json_array<T>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> String
 	out
 }
 
-pub fn json_string_array(arr: &[String]) -> String {
+pub(crate) fn json_string_array(arr: &[String]) -> String {
 	json_array(arr, |s| format!(r#""{}""#, json_escape(s)))
 }
 
-// ---------------------------------------------------------------------------
-// Knowledge map serialization
-// ---------------------------------------------------------------------------
-
-pub fn json_knowledge_map(trace: &ProtocolTrace) -> String {
+pub(crate) fn json_knowledge_map(trace: &ProtocolTrace) -> String {
 	let constants = json_array(trace.slots.iter(), |slot| {
 		format!(r#"{{"Name":"{}"}}"#, json_escape(&slot.constant.name))
 	});
 	let creators = json_array(trace.slots.iter(), |slot| {
-		format!(
-			r#""{}""#,
-			json_escape(&principal_get_name_from_id(slot.creator))
-		)
+		format!(r#""{}""#, json_escape(trace.principal_name(slot.creator)))
 	});
 	let assigned = json_array(trace.slots.iter(), |slot| {
 		format!(r#""{}""#, json_escape(&slot.initial_value.to_string()))
@@ -69,8 +54,8 @@ pub fn json_knowledge_map(trace: &ProtocolTrace) -> String {
 		json_array(slot.known_by.iter(), |&(recipient, sender)| {
 			format!(
 				r#"{{"{}":"{}"}}"#,
-				json_escape(&principal_get_name_from_id(recipient)),
-				json_escape(&principal_get_name_from_id(sender)),
+				json_escape(trace.principal_name(recipient)),
+				json_escape(trace.principal_name(sender)),
 			)
 		})
 	});
@@ -85,16 +70,12 @@ pub fn json_knowledge_map(trace: &ProtocolTrace) -> String {
 	)
 }
 
-// ---------------------------------------------------------------------------
-// Verify results serialization
-// ---------------------------------------------------------------------------
-
 fn json_query_display(q: &Query) -> String {
 	match q.kind {
 		QueryKind::Authentication => format!(
 			"authentication? {} -> {}: {}",
-			principal_get_name_from_id(q.message.sender),
-			principal_get_name_from_id(q.message.recipient),
+			q.message.sender_name,
+			q.message.recipient_name,
 			pretty_constants(&q.message.constants),
 		),
 		_ => format!("{}? {}", q.kind.name(), pretty_constants(&q.constants)),
@@ -113,7 +94,7 @@ fn json_query_constants(q: &Query) -> Vec<String> {
 	}
 }
 
-pub fn json_verify_results(results: &[VerifyResult]) -> String {
+pub(crate) fn json_verify_results(results: &[VerifyResult]) -> String {
 	let mut out = String::from("[");
 	for (i, r) in results.iter().enumerate() {
 		if i > 0 {
@@ -133,11 +114,7 @@ pub fn json_verify_results(results: &[VerifyResult]) -> String {
 	out
 }
 
-// ---------------------------------------------------------------------------
-// Sequence diagram generation
-// ---------------------------------------------------------------------------
-
-pub fn pretty_diagram(m: &Model) -> VResult<String> {
+pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 	let mut output = String::new();
 	for block in &m.blocks {
 		match block {
@@ -147,12 +124,10 @@ pub fn pretty_diagram(m: &Model) -> VResult<String> {
 				}
 			}
 			Block::Message(msg) => {
-				let sender = principal_get_name_from_id(msg.sender);
-				let recipient = principal_get_name_from_id(msg.recipient);
 				output.push_str(&format!(
 					"{}->{}:{}\n",
-					sender,
-					recipient,
+					msg.sender_name,
+					msg.recipient_name,
 					pretty_constants(&msg.constants),
 				));
 			}
@@ -164,12 +139,7 @@ pub fn pretty_diagram(m: &Model) -> VResult<String> {
 	Ok(output)
 }
 
-// ---------------------------------------------------------------------------
-// Internal-JSON command handlers
-// ---------------------------------------------------------------------------
-
 pub fn handle_internal_json(subcommand: &str, input: &str) {
-	crate::reset_global_state();
 	let result = match subcommand {
 		"knowledgeMap" => handle_knowledge_map(input),
 		"verify" => handle_verify(input),
@@ -189,30 +159,31 @@ pub fn handle_internal_json(subcommand: &str, input: &str) {
 	}
 }
 
+/// Errors are located against the model's own source so the editor gets a
+/// line and column rather than a bare message.
+fn located<T>(m: &Model, r: VResult<T>) -> VResult<T> {
+	r.map_err(|e| e.located(&m.file_name, &m.source))
+}
+
 fn handle_knowledge_map(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
-	let (trace, _) = sanity(&m)?;
+	let (trace, _) = located(&m, sanity(&m))?;
 	Ok(json_knowledge_map(&trace))
 }
 
 fn handle_verify(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
-	let (km, ps) = sanity(&m)?;
-	let ctx = VerifyContext::new(&m, &ps);
-	match m.attacker {
-		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
-		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
-	}
-	let results = ctx.results_get();
-	Ok(json_verify_results(&results))
+	Ok(json_verify_results(
+		&located(&m, analyze(&m))?.results_get(),
+	))
 }
 
 fn handle_pretty_print(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
-	pretty_model(&m)
+	located(&m, pretty_model(&m))
 }
 
 fn handle_pretty_diagram(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
-	pretty_diagram(&m)
+	located(&m, pretty_diagram(&m))
 }

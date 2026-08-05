@@ -5,13 +5,12 @@ use std::fmt;
 
 use crate::parser::parse_file;
 use crate::primitive::primitive_name;
-use crate::principal::principal_get_name_from_id;
 use crate::sanity::sanity;
 use crate::types::*;
 
 pub fn pretty_print(model_file: &str) -> VResult<String> {
 	let m = parse_file(model_file)?;
-	pretty_model(&m)
+	pretty_model(&m).map_err(|e| e.located(&m.file_name, &m.source))
 }
 
 impl fmt::Display for Constant {
@@ -73,8 +72,8 @@ impl fmt::Display for Query {
 				write!(
 					f,
 					"authentication? {} -> {}: {}",
-					principal_get_name_from_id(self.message.sender),
-					principal_get_name_from_id(self.message.recipient),
+					self.message.sender_name,
+					self.message.recipient_name,
 					pretty_constants(&self.message.constants),
 				)?;
 			}
@@ -95,8 +94,8 @@ impl fmt::Display for Query {
 						write!(
 							f,
 							"\n\t\tprecondition[{} -> {}: {}]",
-							principal_get_name_from_id(option.message.sender),
-							principal_get_name_from_id(option.message.recipient),
+							option.message.sender_name,
+							option.message.recipient_name,
 							pretty_constants(&option.message.constants),
 						)?;
 					}
@@ -148,12 +147,8 @@ impl fmt::Display for Expression {
 	}
 }
 
-/// Render a single comment without surrounding context.
-/// For a Line comment: returns "// <text>".
-/// For a single-line Block comment: returns "/* <text> */".
-/// For a multi-line Block comment: returns "/* <text> */" with original
-/// line breaks preserved; continuation lines are re-indented to align
-/// after the opening "/* ".
+/// A multi-line block comment keeps its original line breaks; continuation
+/// lines are re-indented to align after the opening `/* `.
 fn render_comment(c: &Comment, indent: &str) -> String {
 	match c.style {
 		CommentStyle::Line => format!("//{}", c.text),
@@ -161,7 +156,6 @@ fn render_comment(c: &Comment, indent: &str) -> String {
 			if !c.text.contains('\n') {
 				format!("/*{}*/", c.text)
 			} else {
-				// Re-indent continuation lines.
 				let cont_indent: String = format!("{}   ", indent);
 				let mut out = String::from("/*");
 				for (i, line) in c.text.split('\n').enumerate() {
@@ -180,8 +174,6 @@ fn render_comment(c: &Comment, indent: &str) -> String {
 	}
 }
 
-/// Render a slice of leading comments, each on its own line at the
-/// given indent. Returns "" if the slice is empty.
 fn render_leading(comments: &[Comment], indent: &str) -> String {
 	if comments.is_empty() {
 		return String::new();
@@ -195,7 +187,6 @@ fn render_leading(comments: &[Comment], indent: &str) -> String {
 	s
 }
 
-/// Render a trailing comment with one leading space. Returns "" if None.
 fn render_trailing(comment: Option<&Comment>) -> String {
 	match comment {
 		Some(c) => format!(" {}", render_comment(c, "")),
@@ -203,7 +194,7 @@ fn render_trailing(comment: Option<&Comment>) -> String {
 	}
 }
 
-pub fn pretty_constants(constants: &[Constant]) -> String {
+pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()
 		.map(|c| c.to_string())
@@ -211,7 +202,7 @@ pub fn pretty_constants(constants: &[Constant]) -> String {
 		.join(", ")
 }
 
-pub fn pretty_values(values: &[Value]) -> String {
+pub(crate) fn pretty_values(values: &[Value]) -> String {
 	values
 		.iter()
 		.map(|v| v.to_string())
@@ -219,7 +210,7 @@ pub fn pretty_values(values: &[Value]) -> String {
 		.join(", ")
 }
 
-pub fn pretty_principal(principal: &Principal) -> String {
+pub(crate) fn pretty_principal(principal: &Principal) -> String {
 	let mut output = format!("principal {}[", principal.name);
 	output.push_str(&render_trailing(principal.header_trailing.as_ref()));
 	output.push('\n');
@@ -238,33 +229,30 @@ pub fn pretty_principal(principal: &Principal) -> String {
 	output
 }
 
-pub fn pretty_message(message: &Message) -> String {
+pub(crate) fn pretty_message(message: &Message) -> String {
 	format!(
 		"{} -> {}: {}",
-		principal_get_name_from_id(message.sender),
-		principal_get_name_from_id(message.recipient),
+		message.sender_name,
+		message.recipient_name,
 		pretty_constants(&message.constants),
 	)
 }
 
-pub fn pretty_model(m: &Model) -> VResult<String> {
+pub(crate) fn pretty_model(m: &Model) -> VResult<String> {
 	sanity(m)?;
 	let mut output = String::new();
 
-	// 1. pre-attacker header comments
 	if !m.pre_attacker_comments.is_empty() {
 		output.push_str(&render_leading(&m.pre_attacker_comments, ""));
 		output.push('\n');
 	}
 
-	// 2-3. attacker line (with optional trailing) + blank line
 	output.push_str(&format!(
 		"attacker[{}]{}\n\n",
 		m.attacker,
 		render_trailing(m.attacker_trailing.as_ref())
 	));
 
-	// 4. each block: leading_comments (no indent) + block + \n\n
 	for block in &m.blocks {
 		match block {
 			Block::Principal(p) => {
@@ -288,13 +276,11 @@ pub fn pretty_model(m: &Model) -> VResult<String> {
 		}
 	}
 
-	// 5-6. queries leading + header line + optional header trailing
 	output.push_str(&render_leading(&m.queries_leading_comments, ""));
 	output.push_str("queries[");
 	output.push_str(&render_trailing(m.queries_header_trailing.as_ref()));
 	output.push('\n');
 
-	// 7. each query: leading + query + optional trailing
 	for query in &m.queries {
 		output.push_str(&render_leading(&query.leading_comments, "\t"));
 		output.push_str(&format!(
@@ -304,13 +290,11 @@ pub fn pretty_model(m: &Model) -> VResult<String> {
 		));
 	}
 
-	// 8-9. queries tail comments + closing ] + optional closing trailing
 	output.push_str(&render_leading(&m.queries_tail_comments, "\t"));
 	output.push(']');
 	output.push_str(&render_trailing(m.queries_closing_trailing.as_ref()));
 	output.push('\n');
 
-	// 10. EOF tail comments — blank line then one comment per line
 	if !m.tail_comments.is_empty() {
 		output.push('\n');
 		for c in &m.tail_comments {
@@ -322,7 +306,7 @@ pub fn pretty_model(m: &Model) -> VResult<String> {
 	Ok(output)
 }
 
-pub fn pretty_arity(spec_arity: &[i32]) -> String {
+pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 	match spec_arity.len() {
 		0 => String::new(),
 		1 => spec_arity[0].to_string(),
@@ -331,5 +315,245 @@ pub fn pretty_arity(spec_arity: &[i32]) -> String {
 			let init_str: Vec<String> = init.iter().map(|n| n.to_string()).collect();
 			format!("{}, or {}", init_str.join(", "), last[0])
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::parser::parse_string;
+
+	#[test]
+	fn pretty_emits_pre_attacker_comments() {
+		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(
+			out.starts_with("// hello\n\nattacker[active]"),
+			"got: {}",
+			out
+		);
+	}
+
+	#[test]
+	fn pretty_emits_leading_on_block() {
+		let src = "attacker[active]\n\n// before alice\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(
+			out.contains("// before alice\nprincipal Alice["),
+			"got: {}",
+			out
+		);
+	}
+
+	#[test]
+	fn pretty_emits_trailing_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // lt\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("knows private a // lt"), "got: {}", out);
+	}
+
+	#[test]
+	fn pretty_emits_block_comment_inline() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* lt */\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("knows private a /* lt */"), "got: {}", out);
+	}
+
+	#[test]
+	fn pretty_emits_block_comment_multiline() {
+		let src = "/* line1\n   line2 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert!(out.contains("/* line1"), "missing /* line1 in:\n{}", out);
+		assert!(out.contains("line2 */"), "missing 'line2 */':\n{}", out);
+	}
+
+	fn assert_round_trip_idempotent(src: &str) {
+		let m1 = parse_string("rt.vp", src).expect("parse 1");
+		let s1 = pretty_model(&m1).expect("pretty 1");
+		let m2 = parse_string("rt.vp", &s1).expect("parse 2");
+		let s2 = pretty_model(&m2).expect("pretty 2");
+		assert_eq!(
+			s1, s2,
+			"not idempotent\n--- s1 ---\n{}\n--- s2 ---\n{}",
+			s1, s2
+		);
+	}
+
+	#[test]
+	fn round_trip_simple() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_pre_attacker_comment() {
+		let src = "// SPDX header\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_leading_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\t// long-term\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_trailing_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // long-term\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_leading_block() {
+		let src = "attacker[active]\n\n// initiator\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_principal_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\t// TODO\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_block_comment_pre_attacker() {
+		let src = "/* SPDX header */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_block_comment_multiline() {
+		let src = "/* multi\n   line\n   header */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn block_comment_unterminated_errors_with_position() {
+		let src = "/* never closed\nattacker[active]\n";
+		let err = parse_string("t.vp", src).unwrap_err();
+		let msg = err.to_string();
+		assert!(msg.contains("unterminated block comment"), "got: {}", msg);
+	}
+
+	#[test]
+	fn block_comment_nested_first_close_wins() {
+		// /* /* */ */
+		// Outer /* opens. First */ closes. The trailing */ becomes
+		// stray tokens after the comment which produce a parse error
+		// (because they're not valid syntax at the model start).
+		let src = "/* /* */ */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let result = parse_string("t.vp", src);
+		assert!(result.is_err(), "expected parse error from stray */");
+	}
+
+	#[test]
+	fn block_comment_multiline_in_leading_position_renders() {
+		let src = "attacker[active]\n\n/* multi\n   line\n   header */\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		// Expect the block comment intact in the output.
+		assert!(out.contains("/* multi"), "missing /* multi in:\n{}", out);
+		assert!(out.contains("line"), "missing 'line':\n{}", out);
+		assert!(out.contains("header */"), "missing 'header */':\n{}", out);
+		// Re-parse to verify the comment survived
+		let m2 = parse_string("t.vp", &out).expect("re-parse");
+		match &m2.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.leading_comments.len(), 1);
+				assert!(matches!(p.leading_comments[0].style, CommentStyle::Block));
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn round_trip_message_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a // flight 1\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_query_trailing_and_leading() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\t// primary goal\n\tconfidentiality? a // payload only\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_phase_with_leading_and_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\n// handshake done\nphase[1] // post-handshake\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_principal_closing_and_header_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[ // header\n\tknows private a\n] // closing\n\nqueries[\n\tconfidentiality? a\n]\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_queries_header_and_closing_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[ // start\n\tconfidentiality? a\n] // end\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	#[test]
+	fn round_trip_eof_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n\n// EOF\n";
+		assert_round_trip_idempotent(src);
+	}
+
+	fn assert_golden(input: &str, golden: &str) {
+		let m = parse_string("g.vp", input).expect("parse");
+		let out = pretty_model(&m).expect("pretty");
+		assert_eq!(
+			out, golden,
+			"golden mismatch\n--- expected ---\n{}\n--- got ---\n{}",
+			golden, out
+		);
+	}
+
+	#[test]
+	fn golden_aead_leak() {
+		assert_golden(
+			include_str!("../examples/test/aead_leak.vp"),
+			include_str!("../examples/test/golden_pretty/aead_leak.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_assert_junglegym() {
+		assert_golden(
+			include_str!("../examples/test/assert_junglegym.vp"),
+			include_str!("../examples/test/golden_pretty/assert_junglegym.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_auth_with_signing() {
+		assert_golden(
+			include_str!("../examples/test/auth_with_signing.vp"),
+			include_str!("../examples/test/golden_pretty/auth_with_signing.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_concat_bomb() {
+		assert_golden(
+			include_str!("../examples/test/concat_bomb.vp"),
+			include_str!("../examples/test/golden_pretty/concat_bomb.vp"),
+		);
+	}
+
+	#[test]
+	fn golden_simple() {
+		assert_golden(
+			include_str!("../examples/simple.vp"),
+			include_str!("../examples/test/golden_pretty/simple.vp"),
+		);
 	}
 }

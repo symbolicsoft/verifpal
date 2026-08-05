@@ -22,20 +22,17 @@ use crate::theory::{can_reconstruct_equation, can_reconstruct_primitive};
 use crate::types::*;
 use crate::value::value_g_nil;
 
-/// Install `installs` into a copy of `ps_base` and run it forward through the
-/// ordinary pipeline.
-///
-/// The returned state is what the principal actually computes under those
-/// substitutions, with guard bypass and halt truncation already applied.
-pub fn reexecute(
+/// What the principal actually computes under `installs`, with guard bypass
+/// and halt truncation already applied.
+pub(crate) fn reexecute(
 	ps_base: &PrincipalState,
-	installs: &[(usize, Value)],
+	installs: &[(SlotIdx, Value)],
 	attacker: &AttackerState,
 ) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
 	for (slot, ground) in installs {
-		if *slot < ps.values.len() {
-			install(&mut ps, *slot, ground.clone());
+		if slot.get() < ps.values.len() {
+			install(&mut ps, slot.get(), ground.clone());
 		}
 	}
 
@@ -135,7 +132,6 @@ fn try_guard_bypass(
 	Ok(Some(ps))
 }
 
-/// Whether the attacker holds `v` outright or can rebuild it from what it holds.
 fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool {
 	if attacker.knows(v).is_some() {
 		return true;
@@ -153,7 +149,7 @@ fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool 
 /// `original` keeps the value the principal believes it received.  Losing that
 /// distinction is what causes false authentication attacks, because principals
 /// would then "see" the attacker's tampering inside their own computations.
-pub fn install(ps: &mut PrincipalState, slot: usize, ground: Value) {
+pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value) {
 	let previous = ps.values[slot].value.clone();
 	let sv = &mut ps.values[slot];
 	sv.original = previous;
@@ -191,4 +187,37 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 	Arc::make_mut(&mut ps.meta).truncate(at);
 	ps.values.truncate(at);
 	ps
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::testutil::*;
+	use crate::types::SlotIdx;
+
+	#[test]
+	fn reexecute_installs_with_attacker_provenance() {
+		use crate::reexec::reexecute;
+		let a = make_constant("rex_a");
+		let b = make_constant("rex_b");
+		let ca = a.as_constant().expect("constant").clone();
+		let cb = b.as_constant().expect("constant").clone();
+		let meta = vec![make_slot_meta(&ca, true), make_slot_meta(&cb, false)];
+		let values = vec![make_slot_values(&a, 0), make_slot_values(&b, 1)];
+		let ps = make_principal_state("Alice", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+
+		let out = reexecute(&ps, &[(SlotIdx(1), a.clone())], &attacker).expect("reexecute");
+
+		// The installed slot carries the attacker's value and provenance.
+		assert!(out.values[1].value.equivalent(&a, true));
+		assert!(out.values[1].provenance.attacker_tainted);
+		assert_eq!(
+			out.values[1].provenance.sender,
+			crate::principal::ATTACKER_ID
+		);
+		// `original` keeps what the principal believed it received.
+		assert!(out.values[1].original.equivalent(&b, true));
+		// Untouched slots are unaffected.
+		assert!(!out.values[0].provenance.attacker_tainted);
+	}
 }

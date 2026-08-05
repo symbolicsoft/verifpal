@@ -13,45 +13,39 @@ use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
 
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
-
-/// Runs the main verification engine for Verifpal on a model loaded from a file.
-/// Returns a vec of VerifyResult and a "results code" string.
-pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
-	let m = parse_file(file_path)?;
-	verify_model(&m)
+/// Validate a model, build its context, and run the attacker it asks for.
+///
+/// The single place this sequence exists; the CLI, the IDE JSON interface and
+/// the wasm entry points differ only in how they render the results it holds.
+pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
+	let (trace, states) = sanity(m)?;
+	let ctx = VerifyContext::new(m, &states);
+	match m.attacker {
+		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
+		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
+	}
+	Ok(ctx)
 }
 
-// ---------------------------------------------------------------------------
-// Core verification pipeline
-// ---------------------------------------------------------------------------
+pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
+	let m = parse_file(file_path)?;
+	verify_model(&m).map_err(|e| e.located(&m.file_name, &m.source))
+}
 
 fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
-	let (km, ps) = sanity(m)?;
-	let ctx = VerifyContext::new(m, &ps);
-	let initiated = chrono_time_string();
 	info_message(
 		&format!(
 			"Verification initiated for '{}' at {}.",
-			m.file_name, initiated,
+			m.file_name,
+			chrono_time_string(),
 		),
 		InfoLevel::Verifpal,
 		false,
 	);
-	match m.attacker {
-		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
-		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
-	}
-	verify_end(&ctx)
+	verify_end(&analyze(m)?)
 }
 
-// ---------------------------------------------------------------------------
-// Resolve unresolved queries against the current principal state
-// ---------------------------------------------------------------------------
-
-pub fn verify_resolve_queries(
+pub(crate) fn verify_resolve_queries(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -65,68 +59,39 @@ pub fn verify_resolve_queries(
 	Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Standard verification pipeline
-// ---------------------------------------------------------------------------
-//
-// For each principal, the pipeline executes three phases:
-//
-//   Phase 1 — Trace generation:
-//     Resolve symbolic references, record mutations, inject skeletons,
-//     apply cryptographic rewrites, and run sanity checks.
-//
-//   Phase 2 — Knowledge closure:
-//     Compute the attacker's full knowledge as a monotone fixed-point
-//     (see deduction.rs). No query checks, no early exits.
-//
-//   Phase 3 — Query evaluation:
-//     Check all pending queries against the final attacker knowledge.
-//
-
-pub fn verify_standard_run(
+pub(crate) fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
-		// Phase 1: Trace generation
 		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
-		// Phase 2: Knowledge closure (monotone fixed-point)
 		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved)?;
 
-		// Phase 3: Query evaluation
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
 	}
 	Ok(())
 }
 
-/// Phase 1: Generate a protocol trace for a single principal.
-///
-/// Performs resolution, mutation recording, skeleton injection,
-/// cryptographic rewriting, and sanity checks. Returns the fully
-/// resolved principal state ready for knowledge closure.
-pub fn generate_trace(
+/// Resolve, record mutations, inject skeletons, rewrite, and sanity-check one
+/// principal, yielding the state that knowledge closure then runs over.
+pub(crate) fn generate_trace(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> VResult<PrincipalState> {
-	// 1. Resolution
 	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values(attacker)?;
 
-	// 2. Mutation record
 	let record = compute_slot_diffs(&ps_resolved, km, attacker.current_phase);
 
-	// 3. Skeleton injection
 	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
 
-	// 4. Rewriting
 	let failures = ps_resolved.perform_all_rewrites();
 
-	// 5. Sanity checks
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 	for sv in &ps_resolved.values {
 		sanity_check_equation_generators(&sv.value)?;
@@ -135,7 +100,6 @@ pub fn generate_trace(
 	Ok(ps_resolved)
 }
 
-/// Inject skeleton templates for all assigned primitives into attacker knowledge.
 fn inject_skeletons_for_state(
 	ctx: &VerifyContext,
 	ps: &PrincipalState,
@@ -149,11 +113,7 @@ fn inject_skeletons_for_state(
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Passive attacker verification
-// ---------------------------------------------------------------------------
-
-pub fn verify_passive(
+pub(crate) fn verify_passive(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
@@ -168,10 +128,6 @@ pub fn verify_passive(
 	}
 	Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// End of verification: print summary
-// ---------------------------------------------------------------------------
 
 fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 	let results = ctx.results_get();
@@ -228,19 +184,13 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 	Ok((results, results_code))
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Produce a human-readable time string in HH:MM:SS AM/PM format.
-/// Uses only the standard library to avoid extra dependencies.
+/// UTC, formatted by hand to avoid pulling in a date-time dependency.
 fn chrono_time_string() -> String {
 	use std::time::SystemTime;
 	let now = SystemTime::now()
 		.duration_since(SystemTime::UNIX_EPOCH)
 		.unwrap_or_default()
 		.as_secs();
-	// Simple UTC-based HH:MM:SS formatting
 	let secs_of_day = (now % 86400) as u32;
 	let hours = secs_of_day / 3600;
 	let minutes = (secs_of_day % 3600) / 60;
@@ -255,4 +205,59 @@ fn chrono_time_string() -> String {
 		(hours - 12, "PM")
 	};
 	format!("{:02}:{:02}:{:02} {}", h12, minutes, seconds, ampm)
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::parser::parse_string;
+
+	fn model(constant: &str) -> String {
+		format!(
+			"attacker[passive]\n\
+			principal Alice[\n\
+			knows private {c}\n\
+			knows private {c}_k\n\
+			{c}_e = ENC({c}_k, {c})\n\
+			]\n\
+			principal Bob[\n\
+			knows private {c}_b\n\
+			]\n\
+			Alice -> Bob: {c}_e\n\
+			queries[\n\
+			confidentiality? {c}\n\
+			]\n",
+			c = constant
+		)
+	}
+
+	#[test]
+	fn analyses_in_one_process_do_not_share_identifier_state() {
+		// Names are interned per model, so two models analysed back to back
+		// assign the same ids to their own first constants and neither can
+		// exhaust an id space on the other's behalf.
+		let first = parse_string("first.vp", &model("aaa")).expect("parse");
+		let second = parse_string("second.vp", &model("bbb")).expect("parse");
+
+		let ids = |m: &crate::types::Model| {
+			let (km, _) = crate::sanity::sanity(m).expect("sanity");
+			let mut v: Vec<_> = km.slots.iter().map(|s| s.constant.id).collect();
+			v.sort_unstable();
+			v
+		};
+		assert_eq!(ids(&first), ids(&second));
+	}
+
+	#[test]
+	fn repeated_analysis_of_the_same_model_is_stable() {
+		let m = parse_string("repeat.vp", &model("ccc")).expect("parse");
+		let code = |m: &crate::types::Model| {
+			crate::types::VerifyResult::results_code(
+				&super::analyze(m).expect("analyze").results_get(),
+			)
+		};
+		let first = code(&m);
+		let second = code(&m);
+		assert_eq!(first, second);
+		assert_eq!(first, "c0");
+	}
 }

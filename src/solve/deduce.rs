@@ -54,9 +54,6 @@
 //! bindings a goal additionally requires, so a goal reached by several routes
 //! is computed a single time.
 //!
-//! Note the difference in kind from a budget: every one of these is a statement
-//! about the term algebra that can be checked by reading it, not a number whose
-//! interaction with a model's shape decides what gets found.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -90,11 +87,11 @@ fn goal_key(v: &Value) -> u64 {
 	v.hash_value().wrapping_mul(31).wrapping_add(tag)
 }
 
-pub struct Deducer<'a> {
+pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	/// Symbolic terms carried on the wire, available for decomposition.
 	wire_terms: Vec<Value>,
-	/// Results already computed, keyed by goal-plus-choices.
+	/// The additional bindings each solved goal requires, keyed by goal.
 	memo: RefCell<HashMap<u64, Vec<Substitution>>>,
 	/// Goals currently being solved, innermost last.  A goal that reappears
 	/// while it is still being solved is a cycle, and the branch that reached it
@@ -111,7 +108,11 @@ pub struct Deducer<'a> {
 }
 
 impl<'a> Deducer<'a> {
-	pub fn new(ps: &PrincipalState, attacker: &'a AttackerState, sym: &'a SymbolicState) -> Self {
+	pub(crate) fn new(
+		ps: &PrincipalState,
+		attacker: &'a AttackerState,
+		sym: &'a SymbolicState,
+	) -> Self {
 		let mut wire_terms = Vec::new();
 		for (idx, meta) in ps.meta.iter().enumerate() {
 			if meta.wire.is_empty() && !meta.constant.leaked {
@@ -155,21 +156,13 @@ impl<'a> Deducer<'a> {
 	/// An empty result means "not derivable by any choice this solver can see".
 	/// A result containing the input substitution unchanged means "already
 	/// derivable, no choice needed".
-	pub fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
+	pub(crate) fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
 		let mut out = Vec::new();
 		self.solve_into(goal, s, &mut out);
 		dedupe(out)
 	}
 
 	/// Solve `goal`, memoising the result and cutting cycles.
-	///
-	/// Termination does not rest on a depth counter.  The goal space is the
-	/// principal's own subterms plus the DH partials and rewrite shapes built
-	/// from them, which is finite, and a goal that reappears inside its own
-	/// solution contributes nothing and is cut.  That is the whole argument —
-	/// deliberately so, because a depth cap would silently drop attacks in
-	/// exactly the way the budgeted engine does, which is the defect this
-	/// design exists to remove.
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		let g = apply(goal, s);
 
@@ -227,17 +220,14 @@ impl<'a> Deducer<'a> {
 		super::vars::free_var(n)
 	}
 
-	/// The inner term a rewrite rule demands, with open positions left free.
 	fn rewrite_shape(&self, outer: &Primitive, spec: &PrimitiveSpec) -> Option<Value> {
 		self.rewrite_shapes(outer, spec).into_iter().next()
 	}
 
-	/// Every inner term the rule would accept, with open positions left free.
 	fn rewrite_shapes(&self, outer: &Primitive, spec: &PrimitiveSpec) -> Vec<Value> {
 		build_rewrite_shapes_with(outer, spec, || self.fresh_var())
 	}
 
-	/// The inner term a rewrite rule demands, with open positions set to `fill`.
 	fn rewrite_shape_yielding(
 		&self,
 		outer: &Primitive,
@@ -250,7 +240,6 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_rules(&self, g: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
-		// Already in hand.
 		if !contains_var(g) && self.attacker.knows(g).is_some() {
 			out.push(s.clone());
 			return;
@@ -609,7 +598,7 @@ impl<'a> Deducer<'a> {
 	///
 	/// Used for authentication goals, where forging means producing a value the
 	/// recipient's primitive will accept.
-	pub fn solve_forgeable(&self, term: &Value, s: &Substitution) -> Vec<Substitution> {
+	pub(crate) fn solve_forgeable(&self, term: &Value, s: &Substitution) -> Vec<Substitution> {
 		self.solve(term, s)
 	}
 
@@ -618,7 +607,7 @@ impl<'a> Deducer<'a> {
 	/// Open positions become *fresh variables*, not `nil`: a later constraint may
 	/// require a particular value there, and a position already committed to
 	/// `nil` could not then be reconciled with it.
-	pub fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
+	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
 		let mut out = Vec::new();
 		for term in &sym.terms {
 			self.collect_forgeable(term, var_id, &mut out);
@@ -666,7 +655,11 @@ impl<'a> Deducer<'a> {
 	/// about.  Solving the check as a constraint handles both at once, and does
 	/// so for every checked primitive in the model rather than only the one a
 	/// particular query names.
-	pub fn constraint_goals(&self, sym: &SymbolicState, base: &Substitution) -> Vec<Substitution> {
+	pub(crate) fn constraint_goals(
+		&self,
+		sym: &SymbolicState,
+		base: &Substitution,
+	) -> Vec<Substitution> {
 		let mut checked = Vec::new();
 		for term in &sym.terms {
 			collect_checked(term, &mut checked);
@@ -962,7 +955,7 @@ fn partial(base: &Value, exponent: &Value) -> Value {
 ///
 /// Used when one query needs several independent goals discharged in the *same*
 /// session — the bindings must not contradict each other.
-pub fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Substitution> {
+pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Substitution> {
 	let mut out = Vec::new();
 	for a in left {
 		for b in right {

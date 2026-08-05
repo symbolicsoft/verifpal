@@ -1,54 +1,49 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-pub mod construct;
-pub mod context;
-pub mod deduction;
-pub mod equivalence;
-pub mod hashing;
-pub mod info;
-pub mod json;
-pub mod narrate;
-pub mod parser;
-pub mod pretty;
-pub mod primitive;
-pub mod principal;
-pub mod query;
-pub mod reexec;
-pub mod resolution;
-pub mod rewrite;
-pub mod sanity;
-pub mod skeleton;
-pub mod solve;
-pub mod theory;
-pub mod types;
-pub mod util;
-pub mod value;
-pub mod verify;
-pub mod witness;
+#![warn(unreachable_pub)]
 
-// ---------------------------------------------------------------------------
-// Public re-exports for the binary crate
-// ---------------------------------------------------------------------------
+//! Verifpal: symbolic formal verification of cryptographic protocols.
+//!
+//! The engine modules are internal. The supported surface is what this file
+//! re-exports: parse and analyse a model, pretty-print one, and the JSON
+//! interface the editor extensions drive.
+
+pub(crate) mod construct;
+pub(crate) mod context;
+pub(crate) mod deduction;
+pub(crate) mod equivalence;
+pub(crate) mod hashing;
+pub(crate) mod info;
+pub(crate) mod json;
+#[cfg(test)]
+mod model_tests;
+pub(crate) mod narrate;
+pub(crate) mod parser;
+pub(crate) mod pretty;
+pub(crate) mod primitive;
+pub(crate) mod principal;
+pub(crate) mod query;
+pub(crate) mod reexec;
+pub(crate) mod resolution;
+pub(crate) mod rewrite;
+pub(crate) mod sanity;
+pub(crate) mod skeleton;
+pub(crate) mod solve;
+#[cfg(test)]
+mod testutil;
+pub(crate) mod theory;
+pub mod types;
+pub(crate) mod util;
+pub(crate) mod value;
+pub(crate) mod verify;
+pub(crate) mod witness;
 
 pub use info::{info_banner, info_message};
+pub use json::handle_internal_json;
 pub use pretty::pretty_print;
 pub use types::*;
 pub use verify::verify;
-
-// ---------------------------------------------------------------------------
-// Global state reset (shared by WASM and internal-json CLI)
-// ---------------------------------------------------------------------------
-
-pub fn reset_global_state() {
-	principal::principal_names_reset();
-	value::value_names_reset();
-	parser::unnamed_counter_reset();
-}
-
-// ---------------------------------------------------------------------------
-// WASM API
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
@@ -56,100 +51,64 @@ use wasm_bindgen::prelude::*;
 #[cfg(feature = "wasm")]
 use json::{json_escape, json_string_array};
 
-/// Verify a Verifpal model from source text. Returns JSON.
 #[cfg(feature = "wasm")]
-#[wasm_bindgen]
-pub fn wasm_verify(input: &str) -> String {
-	reset_global_state();
-	info::wasm_messages_init();
+fn wasm_verify_error(e: &VerifpalError, messages: &[String]) -> String {
+	format!(
+		r#"{{"ok":false,"error":"{}","results":[],"code":"","messages":{}}}"#,
+		json_escape(&e.to_string()),
+		json_string_array(messages),
+	)
+}
 
-	let m = match parser::parse_string("workbench.vp", input) {
-		Ok(m) => m,
-		Err(e) => {
-			return format!(
-				r#"{{"ok":false,"error":"{}","results":[],"code":"","messages":[]}}"#,
-				json_escape(&e.to_string())
-			);
-		}
-	};
+#[cfg(feature = "wasm")]
+fn wasm_pretty_error(e: &VerifpalError) -> String {
+	format!(
+		r#"{{"ok":false,"error":"{}","output":""}}"#,
+		json_escape(&e.to_string())
+	)
+}
 
-	let (km, ps) = match sanity::sanity(&m) {
-		Ok(v) => v,
-		Err(e) => {
-			return format!(
-				r#"{{"ok":false,"error":"{}","results":[],"code":"","messages":[]}}"#,
-				json_escape(&e.to_string())
-			);
-		}
-	};
-
-	let ctx = context::VerifyContext::new(&m, &ps);
-
-	let result = match m.attacker {
-		types::AttackerKind::Passive => verify::verify_passive(&ctx, &km, &ps),
-		types::AttackerKind::Active => solve::verify_active(&ctx, &km, &ps),
-	};
-
-	if let Err(e) = result {
-		let messages = info::wasm_messages_drain();
-		return format!(
-			r#"{{"ok":false,"error":"{}","results":[],"code":"","messages":{}}}"#,
-			json_escape(&e.to_string()),
-			json_string_array(&messages),
-		);
-	}
-
+#[cfg(feature = "wasm")]
+fn wasm_verify_inner(input: &str) -> VResult<String> {
+	let m = parser::parse_string("workbench.vp", input)?;
+	let ctx = verify::analyze(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
 	let results = ctx.results_get();
-	let code = types::VerifyResult::results_code(&results);
-	let messages = info::wasm_messages_drain();
-
-	let mut rj = String::from("[");
-	for (i, r) in results.iter().enumerate() {
-		if i > 0 {
-			rj.push(',');
-		}
-		rj.push_str(&format!(
+	let results_json = json::json_array(results.iter(), |r| {
+		format!(
 			r#"{{"query":"{}","resolved":{},"kind":"{}","summary":"{}"}}"#,
 			json_escape(&r.query.to_string()),
 			r.resolved,
 			r.query.kind.name(),
 			json_escape(&r.summary),
-		));
-	}
-	rj.push(']');
-
-	format!(
+		)
+	});
+	Ok(format!(
 		r#"{{"ok":true,"results":{},"code":"{}","messages":{}}}"#,
-		rj,
-		json_escape(&code),
-		json_string_array(&messages),
-	)
+		results_json,
+		json_escape(&types::VerifyResult::results_code(&results)),
+		json_string_array(&info::wasm_messages_drain()),
+	))
+}
+
+/// Verify a Verifpal model from source text. Returns JSON.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn wasm_verify(input: &str) -> String {
+	info::wasm_messages_init();
+	wasm_verify_inner(input).unwrap_or_else(|e| wasm_verify_error(&e, &info::wasm_messages_drain()))
 }
 
 /// Pretty-print a Verifpal model from source text. Returns JSON.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {
-	reset_global_state();
-
-	let m = match parser::parse_string("workbench.vp", input) {
-		Ok(m) => m,
-		Err(e) => {
-			return format!(
-				r#"{{"ok":false,"error":"{}","output":""}}"#,
-				json_escape(&e.to_string())
-			);
-		}
-	};
-
-	match pretty::pretty_model(&m) {
+	let rendered =
+		parser::parse_string("workbench.vp", input).and_then(|m| pretty::pretty_model(&m));
+	match rendered {
 		Ok(output) => format!(
 			r#"{{"ok":true,"error":"","output":"{}"}}"#,
 			json_escape(&output)
 		),
-		Err(e) => format!(
-			r#"{{"ok":false,"error":"{}","output":""}}"#,
-			json_escape(&e.to_string())
-		),
+		Err(e) => wasm_pretty_error(&e),
 	}
 }

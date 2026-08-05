@@ -7,7 +7,9 @@ build:
 
 lint:
 	@/bin/echo "[Verifpal] Running clippy..."
-	@cargo clippy -- -D warnings
+	@cargo fmt --check
+	@cargo clippy --all-targets -- -D warnings
+	@cargo clippy --lib --no-default-features --features wasm -- -D warnings
 
 test:
 	@/bin/echo "[Verifpal] Running test battery..."

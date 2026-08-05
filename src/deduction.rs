@@ -1,29 +1,17 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Deduction Rule Engine
+//! # Deduction rule engine
 //!
-//! Implements the attacker's knowledge expansion as a monotone fixed-point
-//! computation over a finite set of deduction rules.
+//! The attacker's knowledge expansion, as a monotone fixed point over a finite
+//! set of rules: knowledge only grows, the derivable set is bounded by the
+//! model, so iterating to closure terminates at the least fixed point of
+//! F(K) = K ∪ { v : v derivable from K under some rule }.
 //!
-//! ## Fixed-point property
-//!
-//! The attacker's knowledge set K is monotonically increasing: each rule
-//! application either adds a new value to K or leaves it unchanged. Since
-//! the set of derivable values is finite (bounded by the protocol model),
-//! the iteration terminates when K is closed under all rules — i.e., when
-//! no rule can derive a value not already in K. This is the least fixed
-//! point of F(K) = K ∪ { v : v derivable from K under some rule }.
-//!
-//! ## Rule groups and priority
-//!
-//! Rules are organized into groups, each iterating over a specific domain
-//! (attacker-known values or principal-assigned values). Within each group,
-//! rules are tried in order with short-circuit on first success. On any
-//! success, the outer loop restarts from the first group.
-//!
-//! The ordering reflects priority: cheaper derivations (decomposition) are
-//! tried before more expensive ones (reconstruction, equivalization).
+//! Rules are grouped by the domain they iterate over. Within a group they are
+//! tried in order and short-circuit on first success; any success restarts the
+//! outer loop from the first group. Cheap derivations come before expensive
+//! ones.
 
 use std::sync::Arc;
 
@@ -38,42 +26,20 @@ use crate::theory::{
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 
-// ---------------------------------------------------------------------------
-// Rule abstraction
-// ---------------------------------------------------------------------------
-
-/// The domain a rule group iterates over.
-pub enum RuleDomain {
-	/// Iterate over values in the attacker's current knowledge set.
+pub(crate) enum RuleDomain {
 	AttackerKnown,
-	/// Iterate over assigned values in the principal's state.
 	PrincipalAssigned,
 }
 
-/// A deduction rule function.
-///
-/// Takes a source value (from the rule's domain), the principal state,
-/// the current attacker knowledge, and the mutation record. Returns true
-/// if new knowledge was gained (i.e., at least one new value was added
-/// to the attacker's knowledge set).
+/// Returns true if the rule gained the attacker new knowledge.
 type RuleFn =
 	fn(&VerifyContext, &Value, &PrincipalState, &AttackerState, &Arc<MutationRecord>) -> bool;
 
-/// A group of deduction rules that share an iteration domain.
-///
-/// Within a group, for each source value, rules are tried in order.
-/// On first success (any rule returns true), iteration stops and the
-/// outer fixed-point loop restarts from the first group.
-pub struct RuleGroup {
+pub(crate) struct RuleGroup {
 	pub domain: RuleDomain,
 	pub rules: &'static [RuleFn],
 }
 
-/// The complete set of deduction rules, organized into priority groups.
-///
-/// - Group 1 (AttackerKnown): decompose, passive_decompose
-/// - Group 2 (PrincipalAssigned): reconstruct, recompose
-/// - Group 3 (AttackerKnown): equivalize, password_extract, concat_extract
 static DEDUCTION_RULES: &[RuleGroup] = &[
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
@@ -89,30 +55,12 @@ static DEDUCTION_RULES: &[RuleGroup] = &[
 	},
 ];
 
-// ---------------------------------------------------------------------------
-// Fixed-point computation
-// ---------------------------------------------------------------------------
-
-/// Compute the least fixed point of the attacker's knowledge under the
-/// deduction rules.
+/// Grow attacker knowledge to its least fixed point.
 ///
-/// Each iteration applies all rule groups in priority order, breaking on
-/// first progress (new knowledge gained). The loop terminates when no
-/// rule can derive new knowledge — i.e., the knowledge set is closed
-/// under all rules.
-///
-/// This function is a pure fixed-point computation: it does not check
-/// queries or exit early when all queries are resolved. Query evaluation
-/// happens in a separate phase after the closure completes. This makes
-/// the correctness argument trivial by Knaster-Tarski: the iteration
-/// converges to the least fixed point, and every value in the result is
-/// genuinely derivable.
-///
-/// Convergence is guaranteed because:
-/// - The attacker's knowledge set is monotonically increasing
-/// - The set of derivable values is finite (bounded by the protocol model)
-/// - Each iteration either adds a new value or terminates
-pub fn compute_knowledge_closure(
+/// Deliberately checks no queries and takes no early exit when they are all
+/// resolved: keeping evaluation in a separate phase is what makes the
+/// Knaster-Tarski argument trivial.
+pub(crate) fn compute_knowledge_closure(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -129,10 +77,7 @@ pub fn compute_knowledge_closure(
 	}
 }
 
-/// Apply all deduction rule groups in priority order.
-///
-/// Returns true if any rule derived new knowledge (triggering a restart
-/// of the outer fixed-point loop).
+/// Returns true if any rule derived new knowledge, restarting the outer loop.
 fn try_deduction_step(
 	ctx: &VerifyContext,
 	attacker: &AttackerState,
@@ -163,17 +108,6 @@ fn try_deduction_step(
 	}
 	false
 }
-
-// ---------------------------------------------------------------------------
-// Rule implementations
-// ---------------------------------------------------------------------------
-//
-// Each rule function follows the same pattern:
-//   1. Check if the source value is the right type
-//   2. Try the deduction operation
-//   3. If successful, add the result to attacker knowledge
-//   4. Log what was derived
-//   5. Return whether progress was made
 
 /// Record a value the attacker derived, and say how — unless output is quiet.
 ///
@@ -378,7 +312,9 @@ fn rule_equivalize(
 			ctx,
 			&sv.value,
 			record,
-			DerivationRecord::Obtained { slot },
+			DerivationRecord::Obtained {
+				slot: SlotIdx(slot),
+			},
 			|| {
 				format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
@@ -451,4 +387,59 @@ fn rule_concat_extract(
 		);
 	}
 	found
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::parser::parse_string;
+
+	#[test]
+	fn deduction_records_real_derivations() {
+		use crate::context::VerifyContext;
+		// Alice leaks the key, so the attacker decomposes the ciphertext.
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private ddr_m\n\
+			knows private ddr_k\n\
+			ddr_e = ENC(ddr_k, ddr_m)\n\
+			leaks ddr_k\n\
+			]\n\
+			principal Bob[\n\
+			knows private ddr_b\n\
+			]\n\
+			Alice -> Bob: ddr_e\n\
+			queries[\n\
+			confidentiality? ddr_m\n\
+			]\n";
+		let m = parse_string("ddr.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+		crate::verify::verify_standard_run(&ctx, &km, &states).expect("run");
+
+		let attacker = ctx.attacker_snapshot();
+		assert_eq!(attacker.known.len(), attacker.derivations.len());
+		// Something must have been decomposed: that is how ddr_m is learned.
+		assert!(
+			attacker
+				.derivations
+				.iter()
+				.any(|d| matches!(d, DerivationRecord::Decomposed { .. })),
+			"expected at least one Decomposed derivation, got {:?}",
+			attacker.derivations
+		);
+		// The leaked key must be recorded as leaked, not as generic knowledge.
+		assert!(
+			attacker
+				.derivations
+				.iter()
+				.any(|d| matches!(d, DerivationRecord::Leaked { .. })),
+			"expected the leaks declaration to be recorded, got {:?}",
+			attacker.derivations
+		);
+	}
 }
