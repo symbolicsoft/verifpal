@@ -108,24 +108,8 @@ pub fn can_decompose(
 		if !valid {
 			continue;
 		}
-		if attacker.knows(&filtered).is_some() {
+		if obtainable(&filtered, ps, attacker, depth) {
 			has.push(filtered);
-			continue;
-		}
-		match &filtered {
-			Value::Primitive(inner_p) => {
-				if can_reconstruct_primitive(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(filtered.clone());
-					continue;
-				}
-				if can_decompose(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(filtered.clone());
-				}
-			}
-			Value::Equation(inner_e) if can_reconstruct_equation(inner_e, attacker).is_some() => {
-				has.push(filtered.clone());
-			}
-			_ => {}
 		}
 	}
 	if has.len() >= prim.decompose.given.len() {
@@ -135,6 +119,25 @@ pub fn can_decompose(
 		})
 	} else {
 		None
+	}
+}
+
+/// Whether the attacker can get hold of `v` at all: it already holds it, or it
+/// can open or rebuild it from what it holds.
+///
+/// Decomposition and reconstruction both ask exactly this of every argument
+/// they need, so the cascade lives here rather than being spelled out twice.
+fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: usize) -> bool {
+	if attacker.knows(v).is_some() {
+		return true;
+	}
+	match v {
+		Value::Primitive(p) => {
+			can_decompose(p, ps, attacker, depth + 1).is_some()
+				|| can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
+		}
+		Value::Equation(e) => can_reconstruct_equation(e, attacker).is_some(),
+		Value::Constant(_) => false,
 	}
 }
 
@@ -206,26 +209,8 @@ pub fn can_reconstruct_primitive(
 	};
 	let mut has = Vec::new();
 	for a in &rewritten_prim.arguments {
-		if attacker.knows(a).is_some() {
+		if obtainable(a, ps, attacker, depth) {
 			has.push(a.clone());
-			continue;
-		}
-		match a {
-			Value::Primitive(inner_p) => {
-				if can_decompose(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(a.clone());
-					continue;
-				}
-				if can_reconstruct_primitive(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(a.clone());
-					continue;
-				}
-			}
-			Value::Equation(inner_e) if can_reconstruct_equation(inner_e, attacker).is_some() => {
-				has.push(a.clone());
-				continue;
-			}
-			_ => {}
 		}
 	}
 	if has.len() < rewritten_prim.arguments.len() {
@@ -293,26 +278,15 @@ pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, V
 	if depth > MAX_DEPTH {
 		return (false, Value::Primitive(Arc::new(p.clone())));
 	}
-	// COW: only clone arguments if a child rewrite actually changed something
-	let mut new_args: Option<Vec<Value>> = None;
-	for (i, a) in p.arguments.iter().enumerate() {
-		if let Value::Primitive(inner_p) = a {
+	// Reduce child primitives first; `pc_ref` is the original unless one changed.
+	let reduced = p.map_arguments(|a| match a {
+		Value::Primitive(inner_p) => {
 			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
-			if !replacement.equivalent(a, true) {
-				let args = new_args.get_or_insert_with(|| p.arguments.clone());
-				args[i] = replacement;
-			}
+			(!replacement.equivalent(a, true)).then_some(replacement)
 		}
-	}
-	// pc_ref points to either the original or the modified primitive
-	let pc_owned: Primitive;
-	let pc_ref: &Primitive;
-	if let Some(args) = new_args {
-		pc_owned = p.with_arguments(args);
-		pc_ref = &pc_owned;
-	} else {
-		pc_ref = p;
-	}
+		_ => None,
+	});
+	let pc_ref: &Primitive = reduced.as_ref().unwrap_or(p);
 	let wrap = |pr: &Primitive| Value::Primitive(Arc::new(pr.clone()));
 	if primitive_is_core(pc_ref.id) {
 		let prim = match primitive_core_get(pc_ref.id) {

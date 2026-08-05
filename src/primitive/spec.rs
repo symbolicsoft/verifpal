@@ -201,7 +201,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: true,
 			core_rule: Some(core_rule_assert),
 			definition_check: true,
-			explosive: false,
 			reveals_args: false,
 		},
 		PrimitiveCoreSpec {
@@ -212,7 +211,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: false,
 			core_rule: None,
 			definition_check: false,
-			explosive: true,
 			reveals_args: true,
 		},
 		PrimitiveCoreSpec {
@@ -223,7 +221,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: true,
 			core_rule: Some(core_rule_split),
 			definition_check: true,
-			explosive: false,
 			reveals_args: false,
 		},
 	]
@@ -374,13 +371,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                      (the default), the primitive can appear without
 //                      its rewrite succeeding.
 //
-// `explosive`:         When true, the primitive generates many candidate
-//                      values during attacker injection, so the engine
-//                      defers exploring it to reduce early search cost.
-//                      Set this for hash-like primitives (HASH, HKDF)
-//                      where the attacker could wrap any known value
-//                      in the primitive to produce a candidate.
-//
 // `password_hashing`:  Argument indices with inherent computational
 //                      resistance to offline brute-force, even when
 //                      the attacker knows every other argument. Only
@@ -468,7 +458,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
-			explosive: true,
 			..PrimitiveSpec::default()
 		},
 		// HKDF
@@ -477,7 +466,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HKDF",
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
-			explosive: true,
 			..PrimitiveSpec::default()
 		},
 		// AEAD_ENC

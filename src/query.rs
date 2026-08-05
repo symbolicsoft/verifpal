@@ -3,11 +3,54 @@
 
 use crate::context::VerifyContext;
 use crate::info::*;
-use crate::possible::*;
+use crate::narrate::{Narration, narrate_attack};
 use crate::primitive::*;
 use crate::principal::*;
+use crate::theory::*;
 use crate::types::*;
 use crate::value::*;
+use crate::witness::{in_minimization, minimize_witness};
+
+/// Minimize the state that resolved this query, then narrate it.
+///
+/// During a minimization probe this returns the empty string: the probe only
+/// reads whether the query resolved, so building a narration for it would be
+/// pure waste — and the state it would describe is a hypothesis under test,
+/// not a reported attack.
+fn attack_trace(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	query_index: usize,
+	target: &Value,
+	seed: &[(usize, Value)],
+) -> Narration {
+	if in_minimization() {
+		return Narration::none();
+	}
+	let witness = minimize_witness(ctx, km, ps, query_index, seed);
+	narrate_attack(km, &witness, target)
+}
+
+/// The substitutions the attacker needed in order to hold this value.
+///
+/// Provenance travels along derivation edges (see
+/// `context.rs::derivation_provenance`), so a value's own record already names
+/// the run that earned it, however many runs later the query was re-answered.
+fn recorded_mutations(attacker: &AttackerState, attacker_idx: usize) -> Vec<(usize, Value)> {
+	attacker
+		.mutation_records
+		.get(attacker_idx)
+		.map(|record| {
+			record
+				.diffs
+				.iter()
+				.filter(|d| d.tainted)
+				.map(|d| (d.index, d.value.clone()))
+				.collect()
+		})
+		.unwrap_or_default()
+}
 
 pub fn query_start(
 	ctx: &VerifyContext,
@@ -66,19 +109,15 @@ fn query_confidentiality(
 		Some(idx) => idx,
 		None => return result,
 	};
-	let mutated_info = info_query_mutated_values(
-		km,
-		&attacker.mutation_records[attacker_idx].diffs,
-		attacker,
-		resolved_value,
-		0,
-	);
+	let seed = recorded_mutations(attacker, attacker_idx);
+	let mutated_info = attack_trace(ctx, km, ps, query_index, resolved_value, &seed);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
-		&mutated_info,
+		&mutated_info.trace,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
-			query.constants[0], attacker.known[attacker_idx],
+			query.constants[0],
+			mutated_info.term(&attacker.known[attacker_idx]),
 		),
 		&result.options,
 	);
@@ -107,8 +146,11 @@ fn query_authentication(
 		result.resolved = true;
 		let assigned = &ps.values[index].value;
 		let before = &ps.values[index].pre_rewrite;
-		let diffs = compute_slot_diffs(ps, km);
-		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, assigned, 0);
+		let seed = attacker
+			.knows(assigned)
+			.map(|i| recorded_mutations(attacker, i))
+			.unwrap_or_default();
+		let mutated_info = attack_trace(ctx, km, ps, query_index, assigned, &seed);
 		result = query_precondition(result, ps);
 		return query_authentication_handle_pass(
 			ctx,
@@ -190,20 +232,20 @@ fn query_authentication_handle_pass(
 	mut result: VerifyResult,
 	c: &Constant,
 	b: &Value,
-	mutated_info: &str,
+	mutated_info: &Narration,
 	sender: PrincipalId,
 	ps: &PrincipalState,
 ) -> VerifyResult {
 	let (resolved, _) = ps.resolve_constant(c, true);
 	result.summary = info_verify_result_summary(
-		mutated_info,
+		&mutated_info.trace,
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
-			resolved,
+			mutated_info.term(&resolved),
 			principal_get_name_from_id(sender),
 			principal_get_name_from_id(result.query.message.sender),
-			b,
+			mutated_info.term(b),
 			principal_get_name_from_id(result.query.message.recipient),
 		),
 		&result.options,
@@ -218,7 +260,7 @@ fn query_freshness(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	attacker: &AttackerState,
+	_attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let freshness_found = value_constant_contains_fresh_values(&query.constants[0], ps)?;
@@ -233,14 +275,16 @@ fn query_freshness(
 		return Ok(result);
 	}
 	let (resolved, _) = ps.resolve_constant(&query.constants[0], true);
-	let diffs = compute_slot_diffs(ps, km);
-	let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &resolved, 0);
+	let mutated_info = attack_trace(ctx, km, ps, query_index, &resolved, &[]);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
-		&mutated_info,
+		&mutated_info.trace,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
-			query.constants[0], resolved, ps.name, ps.values[indices[0]].pre_rewrite,
+			query.constants[0],
+			mutated_info.term(&resolved),
+			ps.name,
+			mutated_info.term(&ps.values[indices[0]].pre_rewrite),
 		),
 		&result.options,
 	);
@@ -267,14 +311,14 @@ fn query_unlinkability(
 	}
 	if !no_freshness.is_empty() {
 		let (resolved, _) = ps.resolve_constant(&no_freshness[0], true);
-		let diffs = compute_slot_diffs(ps, km);
-		let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &resolved, 0);
+		let mutated_info = attack_trace(ctx, km, ps, query_index, &resolved, &[]);
 		result.resolved = true;
 		result.summary = info_verify_result_summary(
-			&mutated_info,
+			&mutated_info.trace,
 			&format!(
 				"{} ({}) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
-				no_freshness[0], resolved,
+				no_freshness[0],
+				mutated_info.term(&resolved),
 			),
 			&result.options,
 		);
@@ -306,14 +350,15 @@ fn query_unlinkability(
 				continue;
 			}
 			let empty = Value::Constant(Constant::default());
-			let diffs = compute_slot_diffs(ps, km);
-			let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &empty, 0);
+			let mutated_info = attack_trace(ctx, km, ps, query_index, &empty, &[]);
 			result.resolved = true;
 			result.summary = info_verify_result_summary(
-				&mutated_info,
+				&mutated_info.trace,
 				&format!(
 					"{} and {} are not unlinkable since they are the output of the same primitive ({}), which can be obtained by Attacker",
-					query.constants[i], query.constants[j], resolved_values[i],
+					query.constants[i],
+					query.constants[j],
+					mutated_info.term(&resolved_values[i]),
 				),
 				&result.options,
 			);
@@ -331,7 +376,7 @@ fn query_equivalence(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	attacker: &AttackerState,
+	_attacker: &AttackerState,
 ) -> VerifyResult {
 	let mut result = VerifyResult::new(query, query_index);
 	let values: Vec<Value> = query
@@ -344,16 +389,15 @@ fn query_equivalence(
 		return result;
 	}
 	let empty = Value::Constant(Constant::default());
-	let diffs = compute_slot_diffs(ps, km);
-	let mutated_info = info_query_mutated_values(km, &diffs.diffs, attacker, &empty, 0);
+	let mutated_info = attack_trace(ctx, km, ps, query_index, &empty, &[]);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
-		&mutated_info,
+		&mutated_info.trace,
 		&format!(
 			"{} are not equivalent.",
 			values
 				.iter()
-				.map(|v| v.to_string())
+				.map(|v| mutated_info.term(v))
 				.collect::<Vec<_>>()
 				.join(", "),
 		),

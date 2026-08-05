@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::collections::HashSet;
+
 use crate::equivalence::{equation_is_flat, flatten_equation};
 use crate::types::*;
 
@@ -35,7 +37,6 @@ fn equation_hash_inner(e: &Equation) -> u64 {
 		3 => {
 			let mut h1 = e.values[1].hash_value();
 			let mut h2 = e.values[2].hash_value();
-			// Commutative hash for 3-element DH equations
 			if h1 > h2 {
 				std::mem::swap(&mut h1, &mut h2);
 			}
@@ -46,7 +47,6 @@ fn equation_hash_inner(e: &Equation) -> u64 {
 				.wrapping_add(h2)
 		}
 		_ => {
-			// >3 elements: commutative hash for exponents (same as DH equivalence)
 			let base_h = e.values[0].hash_value();
 			let mut exp_hashes: Vec<u64> = e.values[1..].iter().map(|v| v.hash_value()).collect();
 			exp_hashes.sort_unstable();
@@ -56,5 +56,23 @@ fn equation_hash_inner(e: &Equation) -> u64 {
 			}
 			h
 		}
+	}
+}
+
+/// Record the hash of `v` and of every term inside it.
+pub fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
+	out.insert(v.hash_value());
+	match v {
+		Value::Primitive(p) => {
+			for a in &p.arguments {
+				collect_subterm_hashes(a, out);
+			}
+		}
+		Value::Equation(e) => {
+			for a in &e.values {
+				collect_subterm_hashes(a, out);
+			}
+		}
+		Value::Constant(_) => {}
 	}
 }

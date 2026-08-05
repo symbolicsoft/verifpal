@@ -4,9 +4,7 @@
 use std::io::Read;
 
 use clap::{Parser, Subcommand};
-use verifpal::{
-	InfoLevel, info_banner, info_message, pretty_print, set_character, set_tui_mode, verify,
-};
+use verifpal::{InfoLevel, info_banner, info_message, pretty_print, verify};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -27,9 +25,6 @@ enum Commands {
 		/// Output only the result code (for testing)
 		#[arg(long, default_value_t = false)]
 		result_code: bool,
-		/// Attacker character voice (jevil, spamton)
-		#[arg(long)]
-		character: Option<String>,
 	},
 	/// Pretty-print a Verifpal model
 	#[command(arg_required_else_help = true)]
@@ -48,7 +43,7 @@ enum Commands {
 }
 
 fn read_stdin() -> String {
-	let mut input = String::new();
+	let mut input: Vec<u8> = Vec::new();
 	let mut buf = [0u8; 4096];
 	let stdin = std::io::stdin();
 	let mut handle = stdin.lock();
@@ -56,35 +51,26 @@ fn read_stdin() -> String {
 		match handle.read(&mut buf) {
 			Ok(0) => break,
 			Ok(n) => {
-				for &b in &buf[..n] {
-					if b == 0x04 {
-						return input;
-					}
-					input.push(b as char);
+				// The editor sends EOT rather than closing the pipe.
+				if let Some(eot) = buf[..n].iter().position(|&b| b == 0x04) {
+					input.extend_from_slice(&buf[..eot]);
+					break;
 				}
+				input.extend_from_slice(&buf[..n]);
 			}
 			Err(_) => break,
 		}
 	}
-	input
+	// Decode once, at the end: pushing `b as char` per byte would turn every
+	// multi-byte UTF-8 sequence in a comment into mojibake.
+	String::from_utf8_lossy(&input).into_owned()
 }
 
 fn main() {
 	let cli = Cli::parse();
 	match cli.command {
-		Commands::Verify {
-			model,
-			result_code,
-			character,
-		} => {
-			if let Some(ref ch) = character
-				&& let Err(e) = set_character(ch)
-			{
-				eprintln!("Error: {}", e);
-				std::process::exit(1);
-			}
+		Commands::Verify { model, result_code } => {
 			if !result_code {
-				set_tui_mode(true);
 				info_banner(VERSION);
 				info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
@@ -145,9 +131,9 @@ mod unit_tests {
 
 	use verifpal::equivalence::*;
 	use verifpal::hashing::*;
-	use verifpal::inject::{primitive_skeleton_depth, primitive_skeleton_hash};
-	use verifpal::possible::*;
 	use verifpal::primitive::*;
+	use verifpal::skeleton::primitive_skeleton_hash;
+	use verifpal::theory::*;
 	use verifpal::types::*;
 	use verifpal::value::*;
 
@@ -199,11 +185,11 @@ mod unit_tests {
 		}
 		AttackerState {
 			current_phase: 0,
-			exhausted: false,
 			known: Arc::new(known),
 			known_map: Arc::new(known_map),
 			skeleton_hashes: Arc::new(std::collections::HashSet::new()),
 			mutation_records: Arc::new(vec![]),
+			derivations: Arc::new(vec![]),
 		}
 	}
 
@@ -252,6 +238,7 @@ mod unit_tests {
 				creator,
 				sender: creator,
 				attacker_tainted: false,
+				bypass_injected: false,
 			},
 		}
 	}
@@ -504,13 +491,6 @@ mod unit_tests {
 		assert!(gn.equivalent(&expected, true));
 	}
 
-	#[test]
-	fn canonical_g_nil_nil_equation() {
-		let gnn = value_g_nil_nil();
-		let expected = make_equation(vec![value_g(), value_nil(), value_nil()]);
-		assert!(gnn.equivalent(&expected, true));
-	}
-
 	// -----------------------------------------------------------------------
 	// 7. Value name map
 	// -----------------------------------------------------------------------
@@ -608,7 +588,6 @@ mod unit_tests {
 		assert_eq!(def.name(), "ASSERT");
 		assert!(def.definition_check());
 		assert!(def.has_rewrite_rule());
-		assert!(!def.is_explosive());
 	}
 
 	#[test]
@@ -657,31 +636,6 @@ mod unit_tests {
 	// -----------------------------------------------------------------------
 	// 12. Skeleton depth and hash
 	// -----------------------------------------------------------------------
-
-	#[test]
-	fn skeleton_depth_flat() {
-		let p = Primitive {
-			id: PRIM_ENC,
-			arguments: vec![make_constant("sd_a"), make_constant("sd_b")],
-			output: 0,
-			instance_check: false,
-		};
-		let d = primitive_skeleton_depth(&p, 0);
-		assert_eq!(d, 1);
-	}
-
-	#[test]
-	fn skeleton_depth_nested() {
-		let inner = make_primitive(PRIM_HASH, vec![make_constant("sd_n_a")], 0);
-		let p = Primitive {
-			id: PRIM_ENC,
-			arguments: vec![make_constant("sd_n_k"), inner],
-			output: 0,
-			instance_check: false,
-		};
-		let d = primitive_skeleton_depth(&p, 0);
-		assert_eq!(d, 3); // outer=1+max(inner=1+1, leaf)=3
-	}
 
 	#[test]
 	fn skeleton_hash_same_structure() {
@@ -1278,7 +1232,7 @@ mod unit_tests {
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
 		let ps = make_principal_state("Alice", 0, meta, values);
-		let record = compute_slot_diffs(&ps, &trace);
+		let record = compute_slot_diffs(&ps, &trace, 0);
 		assert!(record.diffs.is_empty());
 	}
 
@@ -1316,7 +1270,7 @@ mod unit_tests {
 		let mut sv = make_slot_values(&mutated, 0);
 		sv.provenance.attacker_tainted = true;
 		let ps = make_principal_state("Alice", 0, meta, vec![sv]);
-		let record = compute_slot_diffs(&ps, &trace);
+		let record = compute_slot_diffs(&ps, &trace, 0);
 		assert_eq!(record.diffs.len(), 1);
 		assert_eq!(record.diffs[0].index, 0);
 		assert!(record.diffs[0].tainted);
@@ -1325,15 +1279,6 @@ mod unit_tests {
 	// -----------------------------------------------------------------------
 	// 25. Explosive primitives
 	// -----------------------------------------------------------------------
-
-	#[test]
-	fn explosive_primitives() {
-		assert!(primitive_is_explosive(PRIM_CONCAT));
-		assert!(primitive_is_explosive(PRIM_HASH));
-		assert!(primitive_is_explosive(PRIM_HKDF));
-		assert!(!primitive_is_explosive(PRIM_ENC));
-		assert!(!primitive_is_explosive(PRIM_SIGN));
-	}
 
 	// -----------------------------------------------------------------------
 	// 26. Single output check
@@ -1394,7 +1339,11 @@ mod unit_tests {
 
 	#[test]
 	fn mutation_record_empty() {
-		let record = MutationRecord { diffs: vec![] };
+		let record = MutationRecord {
+			diffs: vec![],
+			principal_id: 0,
+			phase: 0,
+		};
 		assert!(record.diffs.is_empty());
 	}
 
@@ -1972,6 +1921,128 @@ mod unit_tests {
 	}
 
 	// -----------------------------------------------------------------------
+	// 35. Goal-directed solver: variables, substitution, unification
+	// -----------------------------------------------------------------------
+
+	fn solver_constant(name: &str) -> Value {
+		Value::Constant(Constant {
+			name: std::sync::Arc::from(name),
+			id: verifpal::value::value_names_map_add(name),
+			..Default::default()
+		})
+	}
+
+	fn dh(base: Value, exponents: Vec<Value>) -> Value {
+		let mut values = vec![base];
+		values.extend(exponents);
+		Value::Equation(std::sync::Arc::new(Equation { values }))
+	}
+
+	#[test]
+	fn solver_var_ids_are_disjoint_from_interned_names() {
+		// A model would need billions of constants to reach the reserved range,
+		// so a variable can never collide with a name from the model.
+		let interned = verifpal::value::value_names_map_add("solver_disjoint_a");
+		assert!(interned < verifpal::solve::vars::ATTACKER_VAR_BASE);
+		assert!(verifpal::solve::vars::is_attacker_var_id(
+			verifpal::solve::vars::attacker_var_id(0)
+		));
+		assert!(!verifpal::solve::vars::is_attacker_var_id(interned));
+	}
+
+	#[test]
+	fn solver_apply_resolves_chained_bindings() {
+		// Matching can bind one variable in terms of another, so substitution
+		// has to be transitive rather than stopping at the first lookup.
+		let outer = verifpal::solve::vars::attacker_var(0, "solver_chain_outer");
+		let inner = verifpal::solve::vars::attacker_var(1, "solver_chain_inner");
+		let mut s = verifpal::solve::vars::Substitution::new();
+		s.insert(verifpal::solve::vars::attacker_var_id(0), inner.clone());
+		s.insert(
+			verifpal::solve::vars::attacker_var_id(1),
+			verifpal::value::value_nil(),
+		);
+		let resolved = verifpal::solve::vars::apply(&outer, &s);
+		assert!(resolved.equivalent(&verifpal::value::value_nil(), true));
+	}
+
+	#[test]
+	fn solver_apply_splices_equations() {
+		// Binding an equation into an exponent position must splice, matching
+		// what resolution does, or a nested equation escapes into the engine.
+		let var = verifpal::solve::vars::attacker_var(0, "solver_splice");
+		let exponent = solver_constant("solver_splice_e");
+		let term = dh(verifpal::value::value_g(), vec![var, exponent.clone()]);
+		let mut s = verifpal::solve::vars::Substitution::new();
+		s.insert(
+			verifpal::solve::vars::attacker_var_id(0),
+			verifpal::value::value_nil(),
+		);
+		let resolved = verifpal::solve::vars::apply(&term, &s);
+		let expected = dh(
+			verifpal::value::value_g(),
+			vec![verifpal::value::value_nil(), exponent],
+		);
+		assert!(resolved.equivalent(&expected, true));
+	}
+
+	#[test]
+	fn solver_unify_respects_dh_commutativity() {
+		// `G^x^y == G^y^x`, so unification must try both alignments before
+		// giving up.
+		let x = solver_constant("solver_dh_x");
+		let y = solver_constant("solver_dh_y");
+		let var = verifpal::solve::vars::attacker_var(0, "solver_dh_var");
+		let pattern = dh(verifpal::value::value_g(), vec![var, y.clone()]);
+		let target = dh(verifpal::value::value_g(), vec![y, x.clone()]);
+		let s = verifpal::solve::vars::Substitution::new();
+		let solved = verifpal::solve::matching::unify(&pattern, &target, &s)
+			.expect("commuted exponents should unify");
+		let bound = solved
+			.get(&verifpal::solve::vars::attacker_var_id(0))
+			.expect("variable bound");
+		assert!(bound.equivalent(&x, true));
+	}
+
+	#[test]
+	fn solver_merge_unifies_partial_solutions() {
+		// Two checks on one forged message each constrain a different field.
+		// Merging must combine them rather than call them contradictory.
+		let a = solver_constant("solver_merge_a");
+		let b = solver_constant("solver_merge_b");
+		let slot = verifpal::solve::vars::attacker_var_id(0);
+		let concat = |x: Value, y: Value| {
+			Value::Primitive(std::sync::Arc::new(Primitive {
+				id: 2, // CONCAT
+				arguments: vec![x, y],
+				output: 0,
+				instance_check: false,
+			}))
+		};
+
+		let mut left = verifpal::solve::vars::Substitution::new();
+		left.insert(slot, concat(a.clone(), verifpal::solve::vars::free_var(0)));
+		let mut right = verifpal::solve::vars::Substitution::new();
+		right.insert(slot, concat(verifpal::solve::vars::free_var(1), b.clone()));
+
+		let merged = verifpal::solve::matching::merge(&left, &right).expect("should unify");
+		let value = merged.get(&slot).expect("slot bound");
+		assert!(value.equivalent(&concat(a, b), true));
+	}
+
+	#[test]
+	fn solver_free_positions_become_nil() {
+		// Whatever no rule constrained is the attacker's choice at the moment a
+		// proposal is executed.
+		let free = verifpal::solve::vars::free_var(7);
+		assert!(verifpal::solve::vars::is_free_var_id(
+			verifpal::solve::vars::as_var(&free).expect("is a variable")
+		));
+		let grounded = verifpal::solve::vars::ground_free(&free);
+		assert!(grounded.equivalent(&verifpal::value::value_nil(), true));
+	}
+
+	// -----------------------------------------------------------------------
 	// 33. Golden-file tests: assert byte-equality with stored pretty output
 	// -----------------------------------------------------------------------
 
@@ -2024,6 +2095,468 @@ mod unit_tests {
 			include_str!("../examples/test/golden_pretty/simple.vp"),
 		);
 	}
+
+	// -----------------------------------------------------------------------
+	// 34. Quiet-output guard
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn info_quiet_guard_nests_and_restores() {
+		use verifpal::info::{InfoQuiet, info_is_quiet};
+		assert!(!info_is_quiet());
+		{
+			let _outer = InfoQuiet::new();
+			assert!(info_is_quiet());
+			{
+				let _inner = InfoQuiet::new();
+				assert!(info_is_quiet());
+			}
+			assert!(info_is_quiet(), "inner guard must not un-quiet the outer");
+		}
+		assert!(!info_is_quiet());
+	}
+
+	// -----------------------------------------------------------------------
+	// 35. Scratch verification context
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn scratch_context_isolates_single_query() {
+		use verifpal::context::VerifyContext;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private scr_m\n\
+			knows private scr_k\n\
+			scr_e = ENC(scr_k, scr_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? scr_m\n\
+			confidentiality? scr_k\n\
+			]\n";
+		let m = parse_string("scratch.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[]);
+		let scratch = ctx.scratch_for_query(1);
+
+		// Only the target query is open in the scratch.
+		assert!(!scratch.query_is_resolved(1));
+		assert!(scratch.query_is_resolved(0));
+		assert!(!scratch.all_resolved());
+
+		// Resolving the target in the scratch closes it there...
+		let mut r = VerifyResult::new(&m.queries[1], 1);
+		r.resolved = true;
+		r.summary = " probe".to_string();
+		assert!(scratch.results_put(&r));
+		assert!(scratch.query_is_resolved(1));
+		assert!(scratch.all_resolved());
+
+		// ...and leaves the real context untouched.
+		assert!(!ctx.query_is_resolved(1));
+		assert!(!ctx.all_resolved());
+		assert_eq!(ctx.results_get()[1].summary, "");
+	}
+
+	// -----------------------------------------------------------------------
+	// 36. Shared re-execution
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn reexecute_installs_with_attacker_provenance() {
+		use verifpal::reexec::reexecute;
+		let a = make_constant("rex_a");
+		let b = make_constant("rex_b");
+		let ca = a.as_constant().expect("constant").clone();
+		let cb = b.as_constant().expect("constant").clone();
+		let meta = vec![make_slot_meta(&ca, true), make_slot_meta(&cb, false)];
+		let values = vec![make_slot_values(&a, 0), make_slot_values(&b, 1)];
+		let ps = make_principal_state("Alice", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+
+		let out = reexecute(&ps, &[(1, a.clone())], &attacker).expect("reexecute");
+
+		// The installed slot carries the attacker's value and provenance.
+		assert!(out.values[1].value.equivalent(&a, true));
+		assert!(out.values[1].provenance.attacker_tainted);
+		assert_eq!(
+			out.values[1].provenance.sender,
+			verifpal::principal::ATTACKER_ID
+		);
+		// `original` keeps what the principal believed it received.
+		assert!(out.values[1].original.equivalent(&b, true));
+		// Untouched slots are unaffected.
+		assert!(!out.values[0].provenance.attacker_tainted);
+	}
+
+	// -----------------------------------------------------------------------
+	// 37. Mutation records carry principal and phase
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn slot_diffs_record_principal_and_phase() {
+		let c = Constant {
+			name: Arc::from("mrp_a"),
+			id: value_names_map_add("mrp_a"),
+			..Constant::default()
+		};
+		let val = make_constant("mrp_a");
+		let trace = ProtocolTrace {
+			principals: vec!["Bob".to_string()],
+			principal_ids: vec![3],
+			slots: vec![TraceSlot {
+				constant: c.clone(),
+				initial_value: val.clone(),
+				creator: 3,
+				known_by: vec![],
+				declared_at: 0,
+				phases: vec![0],
+			}],
+			index: {
+				let mut m = HashMap::new();
+				m.insert(c.id, 0);
+				m
+			},
+			max_declared_at: 0,
+			max_phase: 0,
+			used_by: HashMap::new(),
+			leaks: Arc::new(Vec::new()),
+		};
+		let meta = vec![make_slot_meta(&c, true)];
+		let values = vec![make_slot_values(&val, 3)];
+		let ps = make_principal_state("Bob", 3, meta, values);
+		let record = compute_slot_diffs(&ps, &trace, 2);
+		assert_eq!(record.principal_id, 3);
+		assert_eq!(record.phase, 2);
+	}
+
+	// -----------------------------------------------------------------------
+	// 38. Derivation records
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn attacker_put_with_records_derivation() {
+		use verifpal::context::VerifyContext;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private drv_m\n\
+			knows private drv_k\n\
+			drv_e = ENC(drv_k, drv_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? drv_m\n\
+			]\n";
+		let m = parse_string("drv.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[]);
+		let record = Arc::new(MutationRecord {
+			diffs: vec![],
+			principal_id: 0,
+			phase: 0,
+		});
+		let learned = make_constant("drv_learned");
+		let source = make_constant("drv_source");
+
+		assert!(ctx.attacker_put_with(
+			&learned,
+			&record,
+			DerivationRecord::Decomposed {
+				of: source.clone(),
+				using: vec![learned.clone()],
+			},
+		));
+
+		let attacker = ctx.attacker_snapshot();
+		let idx = attacker.knows(&learned).expect("value was absorbed");
+		match attacker.derivation(idx) {
+			Some(DerivationRecord::Decomposed { of, using }) => {
+				assert!(of.equivalent(&source, true));
+				assert_eq!(using.len(), 1);
+			}
+			other => panic!("expected Decomposed, got {:?}", other),
+		}
+		assert_eq!(attacker.known.len(), attacker.derivations.len());
+	}
+
+	#[test]
+	fn deduction_records_real_derivations() {
+		use verifpal::context::VerifyContext;
+		// Alice leaks the key, so the attacker decomposes the ciphertext.
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private ddr_m\n\
+			knows private ddr_k\n\
+			ddr_e = ENC(ddr_k, ddr_m)\n\
+			leaks ddr_k\n\
+			]\n\
+			principal Bob[\n\
+			knows private ddr_b\n\
+			]\n\
+			Alice -> Bob: ddr_e\n\
+			queries[\n\
+			confidentiality? ddr_m\n\
+			]\n";
+		let m = parse_string("ddr.vp", src).expect("parse");
+		let (km, states) = verifpal::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+		verifpal::verify::verify_standard_run(&ctx, &km, &states).expect("run");
+
+		let attacker = ctx.attacker_snapshot();
+		assert_eq!(attacker.known.len(), attacker.derivations.len());
+		// Something must have been decomposed: that is how ddr_m is learned.
+		assert!(
+			attacker
+				.derivations
+				.iter()
+				.any(|d| matches!(d, DerivationRecord::Decomposed { .. })),
+			"expected at least one Decomposed derivation, got {:?}",
+			attacker.derivations
+		);
+		// The leaked key must be recorded as leaked, not as generic knowledge.
+		assert!(
+			attacker
+				.derivations
+				.iter()
+				.any(|d| matches!(d, DerivationRecord::Leaked { .. })),
+			"expected the leaks declaration to be recorded, got {:?}",
+			attacker.derivations
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// 39. Witness minimization
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn minimize_witness_is_identity_without_mutations() {
+		use verifpal::context::VerifyContext;
+		use verifpal::witness::minimize_witness;
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private mw_m\n\
+			leaks mw_m\n\
+			]\n\
+			queries[\n\
+			confidentiality? mw_m\n\
+			]\n";
+		let m = parse_string("mw.vp", src).expect("parse");
+		let (km, states) = verifpal::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+
+		// No slot is attacker-tainted in a passive run, so there is nothing to
+		// drop and the witness is the state it was given.
+		let w = minimize_witness(&ctx, &km, &pure, 0, &[]);
+		assert!(w.minimized);
+		assert_eq!(w.ps.values.len(), pure.values.len());
+	}
+
+	#[test]
+	fn minimize_witness_is_not_reentrant() {
+		use verifpal::witness::in_minimization;
+		// Outside minimization the flag is clear; the guard is what stops a
+		// probe's own query evaluation from minimizing again forever.
+		assert!(!in_minimization());
+	}
+
+	// -----------------------------------------------------------------------
+	// 40. Term compression by slot name
+	// -----------------------------------------------------------------------
+
+	fn name_table_state() -> PrincipalState {
+		// nt_k = HASH(nt_a); nt_e = HASH(nt_k, nt_b)
+		let a = make_constant("nt_a");
+		let b = make_constant("nt_b");
+		let k = make_constant("nt_k");
+		let e = make_constant("nt_e");
+		let hash_a = make_primitive(PRIM_HASH, vec![a.clone()], 0);
+		let hash_kb = make_primitive(PRIM_HASH, vec![hash_a.clone(), b.clone()], 0);
+		let meta = vec![
+			make_slot_meta(a.as_constant().expect("c"), true),
+			make_slot_meta(b.as_constant().expect("c"), true),
+			make_slot_meta(k.as_constant().expect("c"), true),
+			make_slot_meta(e.as_constant().expect("c"), true),
+		];
+		let values = vec![
+			make_slot_values(&a, 0),
+			make_slot_values(&b, 0),
+			make_slot_values(&hash_a, 0),
+			make_slot_values(&hash_kb, 0),
+		];
+		make_principal_state("Alice", 0, meta, values)
+	}
+
+	#[test]
+	fn name_table_compresses_whole_term_to_slot_name() {
+		use verifpal::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		assert_eq!(table.compress(&hash_a), "nt_k");
+	}
+
+	#[test]
+	fn name_table_compresses_subterms_only() {
+		use verifpal::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		// A term that is not itself a named slot keeps its shape, but its
+		// named subterm collapses.
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		let outer = make_primitive(PRIM_HASH, vec![hash_a, make_constant("nt_x")], 0);
+		assert_eq!(table.compress(&outer), "HASH(nt_k, nt_x)");
+	}
+
+	#[test]
+	fn name_table_respects_output_index() {
+		use verifpal::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		// Same shape, different output index: not the same value, not the name.
+		let other_output = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 1);
+		assert_eq!(table.compress(&other_output), "HASH(nt_a)");
+	}
+
+	#[test]
+	fn name_table_never_names_a_term_after_itself() {
+		use verifpal::narrate::NameTable;
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
+		// Describing what slot nt_k now holds must not answer "nt_k".
+		assert_eq!(table.compress_excluding(&hash_a, &["nt_k"]), "HASH(nt_a)");
+		// Excluding an unrelated name changes nothing.
+		assert_eq!(table.compress_excluding(&hash_a, &["nt_e"]), "nt_k");
+	}
+
+	// -----------------------------------------------------------------------
+	// 41. Mutation and gate steps
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn mutation_steps_group_by_message_and_report_old_value() {
+		use verifpal::narrate::{NameTable, Step, mutation_steps};
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private ms_a\n\
+			ms_ga = G^ms_a\n\
+			]\n\
+			Alice -> Bob: ms_ga\n\
+			principal Bob[\n\
+			knows private ms_b\n\
+			ms_s = ms_ga^ms_b\n\
+			]\n\
+			queries[\n\
+			confidentiality? ms_s\n\
+			]\n";
+		let m = parse_string("ms.vp", src).expect("parse");
+		let (km, states) = verifpal::sanity::sanity(&m).expect("sanity");
+		// Bob's state, with the wire value replaced by the attacker.
+		let bob = states
+			.iter()
+			.find(|p| p.name == "Bob")
+			.expect("Bob")
+			.clone();
+		let slot = bob
+			.index_of(
+				&km.slots
+					.iter()
+					.find(|s| &*s.constant.name == "ms_ga")
+					.expect("slot")
+					.constant,
+			)
+			.expect("index");
+		let mut mutated = bob.clone();
+		verifpal::reexec::install(&mut mutated, slot, verifpal::value::value_g_nil());
+
+		let table = NameTable::from_state(&mutated);
+		let steps = mutation_steps(&km, &mutated, &table);
+		assert_eq!(steps.len(), 1, "one message mutated, one step");
+		match &steps[0] {
+			Step::Mutations { items, .. } => {
+				assert_eq!(items.len(), 1);
+				assert_eq!(&*items[0].name, "ms_ga");
+				assert_eq!(items[0].new_value, "G^nil");
+				assert_eq!(items[0].old_value, "G^ms_a");
+			}
+			other => panic!("expected Mutations, got {:?}", other),
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// 42. Derivation DAG walk
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn derivation_steps_walk_ancestors_before_target() {
+		use verifpal::context::VerifyContext;
+		use verifpal::narrate::{NameTable, Step, derivation_steps};
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private dw_m\n\
+			knows private dw_k\n\
+			dw_e = ENC(dw_k, dw_m)\n\
+			leaks dw_k\n\
+			]\n\
+			principal Bob[\n\
+			knows private dw_b\n\
+			]\n\
+			Alice -> Bob: dw_e\n\
+			queries[\n\
+			confidentiality? dw_m\n\
+			]\n";
+		let m = parse_string("dw.vp", src).expect("parse");
+		let (km, states) = verifpal::sanity::sanity(&m).expect("sanity");
+		let ctx = VerifyContext::new(&m, &states);
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values(&ctx.attacker_snapshot())
+			.expect("resolve");
+		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
+		verifpal::verify::verify_standard_run(&ctx, &km, &states).expect("run");
+
+		let attacker = ctx.attacker_snapshot();
+		let target = make_constant("dw_m");
+		let table = NameTable::from_state(&pure);
+		let steps = derivation_steps(&attacker, &target, &table, pure.id);
+
+		assert!(!steps.is_empty(), "the attacker learned dw_m somehow");
+		let text: Vec<String> = steps
+			.iter()
+			.map(|s| match s {
+				Step::Derive { text } => text.clone(),
+				other => panic!("expected Derive, got {:?}", other),
+			})
+			.collect();
+		assert!(
+			text.iter().any(|t| t.contains("dw_m")),
+			"a step must reach the target: {:?}",
+			text
+		);
+		// The key was leaked, and that must be narrated before the step that
+		// uses it to open the ciphertext.
+		let leaked = text.iter().position(|t| t.contains("leaks declaration"));
+		let opened = text.iter().position(|t| t.contains("dw_m"));
+		assert!(
+			leaked.is_some() && opened.is_some() && leaked < opened,
+			"ingredients must precede the step that consumes them: {:?}",
+			text
+		);
+	}
+
+	#[test]
+	fn derivation_steps_stay_silent_on_unknown_values() {
+		use verifpal::narrate::{NameTable, derivation_steps};
+		// A value the attacker never learned has no derivation to narrate.
+		let ps = name_table_state();
+		let table = NameTable::from_state(&ps);
+		let attacker = make_attacker_state(vec![]);
+		let unknown = make_constant("dw_absent");
+		assert!(derivation_steps(&attacker, &unknown, &table, 0).is_empty());
+	}
 }
 
 #[cfg(test)]
@@ -2074,6 +2607,10 @@ mod tests {
 	#[test]
 	fn test_wire_projection_replay() {
 		run_model("wire_projection_replay.vp", "a0");
+	}
+	#[test]
+	fn test_aead_replay_not_forgery() {
+		run_model("aead_replay_not_forgery.vp", "a0c0");
 	}
 	#[test]
 	fn test_ok() {

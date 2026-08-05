@@ -75,7 +75,6 @@ pub struct PrimitiveCoreSpec {
 	pub has_rule: bool,
 	pub core_rule: Option<CoreRuleFn>,
 	pub definition_check: bool,
-	pub explosive: bool,
 	/// When true, attacker knowledge of this primitive's output reveals all arguments.
 	pub reveals_args: bool,
 }
@@ -100,7 +99,6 @@ pub struct PrimitiveSpec {
 	pub rewrite: RewriteRule,
 	pub rebuild: RebuildRule,
 	pub definition_check: bool,
-	pub explosive: bool,
 	pub password_hashing: Vec<usize>,
 	/// How to extract the bypass key for active attacker guard bypass.
 	pub bypass_key: Option<BypassKeyKind>,
@@ -129,7 +127,6 @@ pub trait PrimitiveDefinition {
 	fn arity(&self) -> &[i32];
 	fn output(&self) -> &[i32];
 	fn definition_check(&self) -> bool;
-	fn is_explosive(&self) -> bool;
 	fn has_rewrite_rule(&self) -> bool;
 	fn has_single_output(&self) -> bool {
 		self.output().len() == 1 && self.output()[0] == 1
@@ -149,9 +146,6 @@ impl PrimitiveDefinition for PrimitiveCoreSpec {
 	fn definition_check(&self) -> bool {
 		self.definition_check
 	}
-	fn is_explosive(&self) -> bool {
-		self.explosive
-	}
 	fn has_rewrite_rule(&self) -> bool {
 		self.has_rule
 	}
@@ -169,9 +163,6 @@ impl PrimitiveDefinition for PrimitiveSpec {
 	}
 	fn definition_check(&self) -> bool {
 		self.definition_check
-	}
-	fn is_explosive(&self) -> bool {
-		self.explosive
 	}
 	fn has_rewrite_rule(&self) -> bool {
 		self.rewrite.has_rule
@@ -214,10 +205,6 @@ pub fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
 
 pub fn primitive_name(id: PrimitiveId) -> &'static str {
 	primitive_def(id).map(|d| d.name()).unwrap_or("")
-}
-
-pub fn primitive_is_explosive(id: PrimitiveId) -> bool {
-	primitive_def(id).map(|d| d.is_explosive()).unwrap_or(false)
 }
 
 pub fn primitive_has_single_output(id: PrimitiveId) -> bool {

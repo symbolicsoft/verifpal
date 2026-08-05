@@ -68,12 +68,6 @@ static STATIC_G_NIL: LazyLock<Value> = LazyLock::new(|| {
 	}))
 });
 
-static STATIC_G_NIL_NIL: LazyLock<Value> = LazyLock::new(|| {
-	Value::Equation(Arc::new(Equation {
-		values: vec![value_g(), value_nil(), value_nil()],
-	}))
-});
-
 pub fn value_g() -> Value {
 	STATIC_G.clone()
 }
@@ -84,10 +78,6 @@ pub fn value_nil() -> Value {
 
 pub fn value_g_nil() -> Value {
 	STATIC_G_NIL.clone()
-}
-
-pub fn value_g_nil_nil() -> Value {
-	STATIC_G_NIL_NIL.clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +133,11 @@ pub fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<
 
 /// Build a compact forensic record of which PrincipalState slots differ
 /// from the protocol trace initial values. Only changed slots are recorded.
-pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> Arc<MutationRecord> {
+pub fn compute_slot_diffs(
+	ps: &PrincipalState,
+	trace: &ProtocolTrace,
+	phase: i32,
+) -> Arc<MutationRecord> {
 	let diffs = ps
 		.values
 		.iter()
@@ -158,12 +152,16 @@ pub fn compute_slot_diffs(ps: &PrincipalState, trace: &ProtocolTrace) -> Arc<Mut
 					index: i,
 					constant: sm.constant.clone(),
 					value: sv.value.clone(),
-					tainted: sv.provenance.attacker_tainted,
+					tainted: sv.provenance.attacker_tainted || sv.provenance.bypass_injected,
 				})
 			}
 		})
 		.collect();
-	Arc::new(MutationRecord { diffs })
+	Arc::new(MutationRecord {
+		diffs,
+		principal_id: ps.id,
+		phase,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +306,9 @@ impl ProtocolTrace {
 }
 
 impl AttackerState {
+	pub fn derivation(&self, idx: usize) -> Option<&DerivationRecord> {
+		self.derivations.get(idx)
+	}
 	pub fn knows(&self, v: &Value) -> Option<usize> {
 		let h = v.hash_value();
 		if let Some(indices) = self.known_map.get(&h) {

@@ -6,9 +6,9 @@ use crate::parser::parse_string;
 use crate::pretty::{pretty_constants, pretty_model};
 use crate::principal::principal_get_name_from_id;
 use crate::sanity::sanity;
+use crate::solve::verify_active;
 use crate::types::*;
 use crate::verify::verify_passive;
-use crate::verifyactive::verify_active;
 
 // ---------------------------------------------------------------------------
 // JSON utilities
@@ -30,18 +30,21 @@ pub fn json_escape(s: &str) -> String {
 	out
 }
 
-pub fn json_string_array(arr: &[String]) -> String {
+/// Render `items` as a JSON array, formatting each element with `f`.
+pub fn json_array<T>(items: impl IntoIterator<Item = T>, f: impl Fn(T) -> String) -> String {
 	let mut out = String::from("[");
-	for (i, s) in arr.iter().enumerate() {
+	for (i, item) in items.into_iter().enumerate() {
 		if i > 0 {
 			out.push(',');
 		}
-		out.push('"');
-		out.push_str(&json_escape(s));
-		out.push('"');
+		out.push_str(&f(item));
 	}
 	out.push(']');
 	out
+}
+
+pub fn json_string_array(arr: &[String]) -> String {
+	json_array(arr, |s| format!(r#""{}""#, json_escape(s)))
 }
 
 // ---------------------------------------------------------------------------
@@ -49,81 +52,36 @@ pub fn json_string_array(arr: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn json_knowledge_map(trace: &ProtocolTrace) -> String {
-	// Constants: [{Name: "x"}, ...]
-	let mut constants = String::from("[");
-	for (i, slot) in trace.slots.iter().enumerate() {
-		if i > 0 {
-			constants.push(',');
-		}
-		constants.push_str(&format!(
-			r#"{{"Name":"{}"}}"#,
-			json_escape(&slot.constant.name)
-		));
-	}
-	constants.push(']');
-
-	// Creator: ["Alice", ...]
-	let creators: Vec<String> = trace
-		.slots
-		.iter()
-		.map(|slot| principal_get_name_from_id(slot.creator).to_string())
-		.collect();
-	let creators_json = json_string_array(&creators);
-
-	// Assigned: ["x", "G^a", "ENC(k, m)"] (pre-formatted display strings)
-	let assigned: Vec<String> = trace
-		.slots
-		.iter()
-		.map(|slot| slot.initial_value.to_string())
-		.collect();
-	let assigned_json = json_string_array(&assigned);
-
+	let constants = json_array(trace.slots.iter(), |slot| {
+		format!(r#"{{"Name":"{}"}}"#, json_escape(&slot.constant.name))
+	});
+	let creators = json_array(trace.slots.iter(), |slot| {
+		format!(
+			r#""{}""#,
+			json_escape(&principal_get_name_from_id(slot.creator))
+		)
+	});
+	let assigned = json_array(trace.slots.iter(), |slot| {
+		format!(r#""{}""#, json_escape(&slot.initial_value.to_string()))
+	});
 	// KnownBy: [[{"Bob": "Alice"}], ...]
-	let mut known_by = String::from("[");
-	for (i, slot) in trace.slots.iter().enumerate() {
-		if i > 0 {
-			known_by.push(',');
-		}
-		known_by.push('[');
-		for (j, &(recipient, sender)) in slot.known_by.iter().enumerate() {
-			if j > 0 {
-				known_by.push(',');
-			}
-			let r_name = principal_get_name_from_id(recipient);
-			let s_name = principal_get_name_from_id(sender);
-			known_by.push_str(&format!(
+	let known_by = json_array(trace.slots.iter(), |slot| {
+		json_array(slot.known_by.iter(), |&(recipient, sender)| {
+			format!(
 				r#"{{"{}":"{}"}}"#,
-				json_escape(&r_name),
-				json_escape(&s_name),
-			));
-		}
-		known_by.push(']');
-	}
-	known_by.push(']');
-
-	// Principals
-	let principals_json = json_string_array(&trace.principals);
-
-	// Phase: [[], [0], ...]
-	let mut phases = String::from("[");
-	for (i, slot) in trace.slots.iter().enumerate() {
-		if i > 0 {
-			phases.push(',');
-		}
-		phases.push('[');
-		for (j, &ph) in slot.phases.iter().enumerate() {
-			if j > 0 {
-				phases.push(',');
-			}
-			phases.push_str(&ph.to_string());
-		}
-		phases.push(']');
-	}
-	phases.push(']');
+				json_escape(&principal_get_name_from_id(recipient)),
+				json_escape(&principal_get_name_from_id(sender)),
+			)
+		})
+	});
+	let principals = json_string_array(&trace.principals);
+	let phases = json_array(trace.slots.iter(), |slot| {
+		json_array(slot.phases.iter(), |ph| ph.to_string())
+	});
 
 	format!(
 		r#"{{"Constants":{},"Creator":{},"Assigned":{},"KnownBy":{},"Principals":{},"Phase":{},"MaxPhase":{}}}"#,
-		constants, creators_json, assigned_json, known_by, principals_json, phases, trace.max_phase,
+		constants, creators, assigned, known_by, principals, phases, trace.max_phase,
 	)
 }
 
@@ -240,16 +198,13 @@ fn handle_knowledge_map(input: &str) -> VResult<String> {
 fn handle_verify(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
 	let (km, ps) = sanity(&m)?;
-	let ctx = VerifyContext::new(&m);
+	let ctx = VerifyContext::new(&m, &ps);
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &km, &ps)?,
 		AttackerKind::Active => verify_active(&ctx, &km, &ps)?,
 	}
 	let results = ctx.results_get();
-	// Leading newline ensures JSON starts on a fresh line, since
-	// info_analysis progress messages use \r without \n and would
-	// otherwise leave the cursor mid-line in piped output.
-	Ok(format!("\n{}", json_verify_results(&results)))
+	Ok(json_verify_results(&results))
 }
 
 fn handle_pretty_print(input: &str) -> VResult<String> {

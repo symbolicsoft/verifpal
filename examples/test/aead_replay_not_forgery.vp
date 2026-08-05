@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// The attacker holds Alice's ciphertext in full — it travels unencrypted on
+// the wire — and can hand it to Bob himself. Bob's checked decryption then
+// succeeds, because it is the genuine message. That is a replay, not a
+// forgery: Bob cannot tell it from the real delivery, and nothing the attacker
+// did changed what he computed, so the authentication query must pass.
+//
+// Forging is out of reach in the other direction too. Producing any other
+// AEAD_ENC under k requires k, which is shared privately and never travels;
+// k is also the bypass key for the AEAD_DEC check, so a failed check genuinely
+// halts Bob rather than being bypassed. There is exactly one value Bob will
+// accept here and Alice is the only one who can produce it.
+//
+// This is the shape of scuttlebutt.vp's `authentication? Bob -> Alice:
+// secretBox1Bob`, where a fully attacker-known ciphertext passes through a
+// checked decryption whose key the attacker cannot reach. Verifpal 0.53
+// reported an attack on that query on the strength of the value being
+// "obtained by Attacker", with an attack trace containing no mutations at all.
+// Being known is not the same as being forgeable, and this model pins the
+// difference in isolation.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	generates n
+	c = AEAD_ENC(k, m, n)
+]
+
+Alice -> Bob: c, n
+
+principal Bob[
+	knows private k
+	m_b = AEAD_DEC(k, c, n)?
+]
+
+queries[
+	authentication? Alice -> Bob: c
+	confidentiality? m
+]

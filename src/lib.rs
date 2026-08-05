@@ -7,35 +7,32 @@ pub mod deduction;
 pub mod equivalence;
 pub mod hashing;
 pub mod info;
-pub mod inject;
 pub mod json;
-pub mod mutationmap;
-pub mod narrative;
+pub mod narrate;
 pub mod parser;
-pub mod possible;
 pub mod pretty;
 pub mod primitive;
 pub mod principal;
 pub mod query;
+pub mod reexec;
 pub mod resolution;
 pub mod rewrite;
 pub mod sanity;
+pub mod skeleton;
+pub mod solve;
 pub mod theory;
-pub mod tui;
 pub mod types;
 pub mod util;
 pub mod value;
 pub mod verify;
-pub mod verifyactive;
+pub mod witness;
 
 // ---------------------------------------------------------------------------
 // Public re-exports for the binary crate
 // ---------------------------------------------------------------------------
 
 pub use info::{info_banner, info_message};
-pub use narrative::set_character;
 pub use pretty::pretty_print;
-pub use tui::set_tui_mode;
 pub use types::*;
 pub use verify::verify;
 
@@ -47,8 +44,6 @@ pub fn reset_global_state() {
 	principal::principal_names_reset();
 	value::value_names_reset();
 	parser::unnamed_counter_reset();
-	tui::set_tui_mode(false);
-	narrative::reset();
 }
 
 // ---------------------------------------------------------------------------
@@ -88,11 +83,11 @@ pub fn wasm_verify(input: &str) -> String {
 		}
 	};
 
-	let ctx = context::VerifyContext::new(&m);
+	let ctx = context::VerifyContext::new(&m, &ps);
 
 	let result = match m.attacker {
 		types::AttackerKind::Passive => verify::verify_passive(&ctx, &km, &ps),
-		types::AttackerKind::Active => verifyactive::verify_active(&ctx, &km, &ps),
+		types::AttackerKind::Active => solve::verify_active(&ctx, &km, &ps),
 	};
 
 	if let Err(e) = result {

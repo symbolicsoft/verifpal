@@ -149,6 +149,31 @@ pub fn equation_is_flat(e: &Equation) -> bool {
 	e.values.iter().all(|v| !matches!(v, Value::Equation(_)))
 }
 
+/// Assemble an equation from already-resolved elements, splicing nested ones.
+///
+/// An equation landing in base position *replaces* the accumulator; one landing
+/// in an exponent position contributes only its own exponents. Inlining and
+/// substitution both produce nested equations this way — `gab = ga^b` where `ga`
+/// resolves to `G^a` — and every resolver has to re-flatten them identically, so
+/// the rule lives here once rather than in each of them.
+pub fn splice_equation(elements: impl IntoIterator<Item = Value>) -> Equation {
+	let elements = elements.into_iter();
+	let mut values: Vec<Value> = Vec::with_capacity(elements.size_hint().0);
+	for (i, resolved) in elements.enumerate() {
+		match &resolved {
+			Value::Equation(inner) => {
+				if i == 0 {
+					values = inner.values.clone();
+				} else if inner.values.len() > 1 {
+					values.extend(inner.values[1..].iter().cloned());
+				}
+			}
+			_ => values.push(resolved),
+		}
+	}
+	Equation { values }
+}
+
 pub fn flatten_equation(e: &Equation) -> Equation {
 	let mut ef = Equation {
 		values: Vec::with_capacity(e.values.len()),

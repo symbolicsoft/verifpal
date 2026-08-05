@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use crate::context::VerifyContext;
 use crate::info::info_message;
-use crate::inject::inject_missing_skeletons;
 use crate::parser::parse_file;
 use crate::query::query_start;
 use crate::sanity::*;
+use crate::skeleton::attacker_learn_skeletons;
+use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
-use crate::verifyactive::verify_active;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -30,8 +30,7 @@ pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 
 fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 	let (km, ps) = sanity(m)?;
-	crate::tui::tui_init(m);
-	let ctx = VerifyContext::new(m);
+	let ctx = VerifyContext::new(m, &ps);
 	let initiated = chrono_time_string();
 	info_message(
 		&format!(
@@ -88,7 +87,6 @@ pub fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
-	depth: i32,
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
@@ -96,7 +94,7 @@ pub fn verify_standard_run(
 		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
 		// Phase 2: Knowledge closure (monotone fixed-point)
-		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved, depth)?;
+		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved)?;
 
 		// Phase 3: Query evaluation
 		verify_resolve_queries(ctx, km, &ps_resolved)?;
@@ -120,7 +118,7 @@ pub fn generate_trace(
 	ps_resolved.resolve_all_values(attacker)?;
 
 	// 2. Mutation record
-	let record = compute_slot_diffs(&ps_resolved, km);
+	let record = compute_slot_diffs(&ps_resolved, km, attacker.current_phase);
 
 	// 3. Skeleton injection
 	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
@@ -146,7 +144,7 @@ fn inject_skeletons_for_state(
 ) {
 	for sv in &ps.values {
 		if let Value::Primitive(p) = &sv.value {
-			inject_missing_skeletons(ctx, p, record, attacker);
+			attacker_learn_skeletons(ctx, p, record, attacker);
 		}
 	}
 }
@@ -166,7 +164,7 @@ pub fn verify_passive(
 		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
-		verify_standard_run(ctx, km, principal_states, 0)?;
+		verify_standard_run(ctx, km, principal_states)?;
 	}
 	Ok(())
 }
@@ -176,9 +174,6 @@ pub fn verify_passive(
 // ---------------------------------------------------------------------------
 
 fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
-	// Leave the TUI alternate screen before printing final results
-	crate::tui::tui_finish();
-
 	let results = ctx.results_get();
 	let file_name = ctx.results_file_name();
 	let fail_count = results.iter().filter(|r| r.resolved).count();

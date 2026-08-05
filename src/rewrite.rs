@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use crate::possible::{can_rebuild, can_rewrite};
 use crate::primitive::primitive_has_rewrite_rule;
+use crate::theory::{can_rebuild, can_rewrite};
 use crate::types::*;
 
 // ---------------------------------------------------------------------------

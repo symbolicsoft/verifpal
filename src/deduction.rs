@@ -28,13 +28,13 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::info::{info_analysis, info_message, info_output_text};
-use crate::possible::{
+use crate::info::{info_is_quiet, info_message, info_output_text};
+use crate::pretty::pretty_values;
+use crate::primitive::primitive_core_reveals_args;
+use crate::theory::{
 	can_decompose, can_recompose, can_reconstruct_equation, can_reconstruct_primitive,
 	find_obtainable_passwords, passively_decompose,
 };
-use crate::pretty::pretty_values;
-use crate::primitive::primitive_core_reveals_args;
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 
@@ -116,16 +116,14 @@ pub fn compute_knowledge_closure(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	depth: i32,
 ) -> VResult<()> {
-	let record = compute_slot_diffs(ps, km);
+	let record = compute_slot_diffs(ps, km, ctx.attacker_snapshot().current_phase);
 
 	loop {
 		let attacker = ctx.attacker_snapshot();
 
 		if !try_deduction_step(ctx, &attacker, ps, &record) {
 			ctx.analysis_count_increment();
-			info_analysis(depth);
 			return Ok(());
 		}
 	}
@@ -177,6 +175,29 @@ fn try_deduction_step(
 //   4. Log what was derived
 //   5. Return whether progress was made
 
+/// Record a value the attacker derived, and say how — unless output is quiet.
+///
+/// Every rule ends this way.  Routing them all through one function is what
+/// keeps "knowledge and the derivation that explains it are recorded together"
+/// true by construction.  The message is a closure because minimization re-runs
+/// this whole closure many times with output suppressed, and every `format!`
+/// built for a suppressed line is thrown away.
+fn learn(
+	ctx: &VerifyContext,
+	value: &Value,
+	record: &Arc<MutationRecord>,
+	derivation: DerivationRecord,
+	message: impl FnOnce() -> String,
+) -> bool {
+	if !ctx.attacker_put_with(value, record, derivation) {
+		return false;
+	}
+	if !info_is_quiet() {
+		info_message(&message(), InfoLevel::Deduction, true);
+	}
+	true
+}
+
 fn rule_decompose(
 	ctx: &VerifyContext,
 	value: &Value,
@@ -190,21 +211,23 @@ fn rule_decompose(
 	let Some(result) = can_decompose(prim, ps, attacker, 0) else {
 		return false;
 	};
-	if ctx.attacker_put(&result.revealed, record) {
-		info_message(
-			&format!(
+	learn(
+		ctx,
+		&result.revealed,
+		record,
+		DerivationRecord::Decomposed {
+			of: value.clone(),
+			using: result.used.clone(),
+		},
+		|| {
+			format!(
 				"{} obtained by decomposing {} with {}.",
 				info_output_text(&result.revealed),
 				value,
 				pretty_values(&result.used),
-			),
-			InfoLevel::Deduction,
-			true,
-		);
-		true
-	} else {
-		false
-	}
+			)
+		},
+	)
 }
 
 fn rule_passive_decompose(
@@ -219,18 +242,22 @@ fn rule_passive_decompose(
 	};
 	let mut found = false;
 	for revealed in &passively_decompose(prim) {
-		if ctx.attacker_put(revealed, record) {
-			info_message(
-				&format!(
+		found |= learn(
+			ctx,
+			revealed,
+			record,
+			DerivationRecord::Decomposed {
+				of: value.clone(),
+				using: vec![],
+			},
+			|| {
+				format!(
 					"{} obtained as associated data from {}.",
 					info_output_text(revealed),
 					value,
-				),
-				InfoLevel::Deduction,
-				true,
-			);
-			found = true;
-		}
+				)
+			},
+		);
 	}
 	found
 }
@@ -264,19 +291,20 @@ fn reconstruct_recursive(
 		Value::Equation(e) => can_reconstruct_equation(e, attacker),
 		_ => return found,
 	};
-	if let Some(used) = result
-		&& ctx.attacker_put(value, record)
-	{
-		info_message(
-			&format!(
-				"{} obtained by reconstructing with {}.",
-				info_output_text(value),
-				pretty_values(&used),
-			),
-			InfoLevel::Deduction,
-			true,
+	if let Some(used) = result {
+		found |= learn(
+			ctx,
+			value,
+			record,
+			DerivationRecord::Reconstructed { from: used.clone() },
+			|| {
+				format!(
+					"{} obtained by reconstructing with {}.",
+					info_output_text(value),
+					pretty_values(&used),
+				)
+			},
 		);
-		found = true;
 	}
 	found
 }
@@ -294,21 +322,23 @@ fn rule_recompose(
 	let Some(result) = can_recompose(prim, attacker) else {
 		return false;
 	};
-	if ctx.attacker_put(&result.revealed, record) {
-		info_message(
-			&format!(
+	learn(
+		ctx,
+		&result.revealed,
+		record,
+		DerivationRecord::Recomposed {
+			of: value.clone(),
+			using: result.used.clone(),
+		},
+		|| {
+			format!(
 				"{} obtained by recomposing {} with {}.",
 				info_output_text(&result.revealed),
 				value,
 				pretty_values(&result.used),
-			),
-			InfoLevel::Deduction,
-			true,
-		);
-		true
-	} else {
-		false
-	}
+			)
+		},
+	)
 }
 
 fn rule_equivalize(
@@ -340,19 +370,23 @@ fn rule_equivalize(
 		value.clone()
 	};
 	let mut found = false;
-	for sv in &ps.values {
-		if resolved.equivalent(&sv.value, true) && ctx.attacker_put(&sv.value, record) {
-			info_message(
-				&format!(
+	for (slot, sv) in ps.values.iter().enumerate() {
+		if !resolved.equivalent(&sv.value, true) {
+			continue;
+		}
+		found |= learn(
+			ctx,
+			&sv.value,
+			record,
+			DerivationRecord::Obtained { slot },
+			|| {
+				format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
 					info_output_text(&sv.value),
 					value,
-				),
-				InfoLevel::Deduction,
-				true,
-			);
-			found = true;
-		}
+				)
+			},
+		);
 	}
 	found
 }
@@ -368,18 +402,21 @@ fn rule_password_extract(
 	find_obtainable_passwords(value, false, true, attacker, ps, &mut passwords);
 	let mut found = false;
 	for password in &passwords {
-		if ctx.attacker_put(password, record) {
-			info_message(
-				&format!(
+		found |= learn(
+			ctx,
+			password,
+			record,
+			DerivationRecord::PasswordExtracted {
+				from: value.clone(),
+			},
+			|| {
+				format!(
 					"{} obtained as a password unsafely used within {}.",
 					info_output_text(password),
 					value,
-				),
-				InfoLevel::Deduction,
-				true,
-			);
-			found = true;
-		}
+				)
+			},
+		);
 	}
 	found
 }
@@ -399,18 +436,19 @@ fn rule_concat_extract(
 	}
 	let mut found = false;
 	for arg in &prim.arguments {
-		if ctx.attacker_put(arg, record) {
-			info_message(
-				&format!(
+		found |= learn(
+			ctx,
+			arg,
+			record,
+			DerivationRecord::ConcatFragment { of: value.clone() },
+			|| {
+				format!(
 					"{} obtained as a concatenated fragment of {}.",
 					info_output_text(arg),
 					value,
-				),
-				InfoLevel::Deduction,
-				true,
-			);
-			found = true;
-		}
+				)
+			},
+		);
 	}
 	found
 }

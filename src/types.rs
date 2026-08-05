@@ -164,13 +164,6 @@ impl Value {
 		}
 	}
 
-	pub fn as_primitive_mut(&mut self) -> Option<&mut Primitive> {
-		match self {
-			Value::Primitive(p) => Some(Arc::make_mut(p)),
-			_ => None,
-		}
-	}
-
 	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
@@ -226,6 +219,40 @@ impl Primitive {
 			output: self.output,
 			instance_check: self.instance_check,
 		}
+	}
+
+	/// Rebuild with `f` applied to each argument, returning `None` when `f`
+	/// reported every argument unchanged.
+	///
+	/// `f` returns `Some` only for an argument that actually changed, so a
+	/// caller that cares about a subset of arguments — rewriting only touches
+	/// nested primitives — pays nothing for the rest. Rebuilding a primitive
+	/// whose arguments are all unchanged allocates a fresh `Arc` and a fresh
+	/// argument vector for nothing, and resolution and rewriting walk every
+	/// term in the model, so the copy-on-write is worth keeping — just not
+	/// worth hand-writing at each site that needs it.
+	pub fn map_arguments(&self, mut f: impl FnMut(&Value) -> Option<Value>) -> Option<Primitive> {
+		let mut changed: Option<Vec<Value>> = None;
+		for (i, a) in self.arguments.iter().enumerate() {
+			if let Some(mapped) = f(a) {
+				changed.get_or_insert_with(|| self.arguments.clone())[i] = mapped;
+			}
+		}
+		changed.map(|arguments| self.with_arguments(arguments))
+	}
+
+	/// As [`Self::map_arguments`], for a mapping that can fail.
+	pub fn try_map_arguments(
+		&self,
+		mut f: impl FnMut(&Value) -> VResult<Option<Value>>,
+	) -> VResult<Option<Primitive>> {
+		let mut changed: Option<Vec<Value>> = None;
+		for (i, a) in self.arguments.iter().enumerate() {
+			if let Some(mapped) = f(a)? {
+				changed.get_or_insert_with(|| self.arguments.clone())[i] = mapped;
+			}
+		}
+		Ok(changed.map(|arguments| self.with_arguments(arguments)))
 	}
 }
 
@@ -418,6 +445,16 @@ pub struct Provenance {
 	pub sender: PrincipalId,
 	/// Whether this value was replaced by the attacker.
 	pub attacker_tainted: bool,
+	/// Whether the attacker put its own key here to defeat a guard it could
+	/// bypass — the man-in-the-middle on a signed or guarded public key.
+	///
+	/// Kept apart from `attacker_tainted` deliberately.  Taint decides which
+	/// value a principal perceives (`should_use_original`), and a guard bypass
+	/// must not change that: the principal genuinely computed with what it was
+	/// handed.  This flag exists so the substitution is still *reportable* —
+	/// without it the single most important step of a MITM trace, the attacker
+	/// swapping in its own long-term key, is invisible to the narrator.
+	pub bypass_injected: bool,
 }
 
 /// Mutable per-constant values (deep-cloned for each active attacker depth level).
@@ -463,6 +500,14 @@ impl SlotValues {
 		self.original = v.clone();
 		self.pre_rewrite = v.clone();
 		self.value = v;
+	}
+
+	/// As [`Self::override_all`], marking the slot as a guard the attacker
+	/// bypassed by supplying its own key.  Reporting only — see
+	/// [`Provenance::bypass_injected`].
+	pub fn override_all_bypassed(&mut self, v: Value) {
+		self.override_all(v);
+		self.provenance.bypass_injected = true;
 	}
 }
 
@@ -521,31 +566,102 @@ pub struct SlotDiff {
 
 /// Compact forensic record stored alongside each attacker-known value.
 /// Records only the slots where the PrincipalState differed from the
-/// protocol trace at the time the value was learned by the attacker.
+/// protocol trace at the time the value was learned by the attacker,
+/// plus which principal's session that was and at which phase — narration
+/// needs both to attribute a set of mutations to a session.
 #[derive(Clone, Debug)]
 pub struct MutationRecord {
 	pub diffs: Vec<SlotDiff>,
+	pub principal_id: PrincipalId,
+	pub phase: i32,
+}
+
+/// How the attacker came to hold a value.
+///
+/// Each deduction rule already renders exactly this into its `Deduction ›`
+/// line; recording it lets the narrator walk the real derivation instead of
+/// reconstructing a plausible one.  Slot indices refer to the
+/// `PrincipalState` the value was learned from.
+#[derive(Clone, Debug)]
+pub enum DerivationRecord {
+	/// Public, declared, or otherwise held from the start of the phase.
+	Initial,
+	/// Handed over by a `leaks` declaration.
+	Leaked { slot: usize },
+	/// Read off the wire, or equivalized against a slot's resolution.
+	Obtained { slot: usize },
+	/// Recovered from inside `of` using the values in `using`.
+	Decomposed { of: Value, using: Vec<Value> },
+	/// Rebuilt from `from`, all of which the attacker already held.
+	Reconstructed { from: Vec<Value> },
+	/// Recovered by combining enough shares of `of`.
+	Recomposed { of: Value, using: Vec<Value> },
+	/// A password used without a password hash inside `from`.
+	PasswordExtracted { from: Value },
+	/// A fragment of a concatenation, which reveals its arguments.
+	ConcatFragment { of: Value },
+	/// A skeleton template injected so the attacker can shape a forgery.
+	Injected,
+}
+
+impl DerivationRecord {
+	/// The attacker-held values this derivation consumed.
+	pub fn ingredients(&self) -> Vec<&Value> {
+		match self {
+			DerivationRecord::Decomposed { of, using }
+			| DerivationRecord::Recomposed { of, using } => {
+				let mut v = vec![of];
+				v.extend(using.iter());
+				v
+			}
+			DerivationRecord::Reconstructed { from } => from.iter().collect(),
+			DerivationRecord::PasswordExtracted { from } => vec![from],
+			DerivationRecord::ConcatFragment { of } => vec![of],
+			DerivationRecord::Initial
+			| DerivationRecord::Leaked { .. }
+			| DerivationRecord::Obtained { .. }
+			| DerivationRecord::Injected => vec![],
+		}
+	}
+
+	/// Whether the state the attacker was looking at is part of why this value
+	/// became derivable.
+	///
+	/// Reading a value out of a principal's state — off the wire, from a leak,
+	/// or by rebuilding a term whose *shape* that state defines — depends on
+	/// the substitutions in force there.  Combining values the attacker already
+	/// holds does not: a decryption needs the ciphertext and the key, and the
+	/// substitutions that earned those are recorded against them.
+	pub fn reads_from_state(&self) -> bool {
+		matches!(
+			self,
+			DerivationRecord::Leaked { .. }
+				| DerivationRecord::Obtained { .. }
+				| DerivationRecord::Reconstructed { .. }
+		)
+	}
 }
 
 #[derive(Clone, Debug)]
 pub struct AttackerState {
 	pub current_phase: i32,
-	pub exhausted: bool,
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<HashMap<u64, Vec<usize>>>,
 	pub skeleton_hashes: Arc<HashSet<u64>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
+	/// Parallel to `known`: how each value was derived.
+	pub derivations: Arc<Vec<DerivationRecord>>,
 }
 
 impl Default for AttackerState {
 	fn default() -> Self {
 		AttackerState {
 			current_phase: 0,
-			exhausted: false,
 			known: Arc::new(vec![]),
 			known_map: Arc::new(HashMap::new()),
 			skeleton_hashes: Arc::new(HashSet::new()),
 			mutation_records: Arc::new(vec![]),
+			derivations: Arc::new(vec![]),
 		}
 	}
 }
@@ -554,15 +670,6 @@ impl AttackerState {
 	pub fn new() -> Self {
 		Self::default()
 	}
-}
-
-#[derive(Clone, Debug)]
-pub struct MutationMap {
-	pub out_of_mutations: bool,
-	pub constants: Vec<Constant>,
-	pub mutations: Vec<Vec<Value>>,
-	pub combination: Vec<Value>,
-	pub depth_index: Vec<usize>,
 }
 
 /// Result of a successful decomposition: the revealed value and the

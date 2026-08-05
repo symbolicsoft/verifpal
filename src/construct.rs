@@ -385,11 +385,10 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 		let mut values_vec = Vec::with_capacity(n);
 		let mut index_map = HashMap::with_capacity(n);
 
+		let wire_index = construct_wire_index(m, trace, principal_id);
+
 		for slot in &trace.slots {
 			let c = &slot.constant;
-			let mut wire = vec![];
-			let mut guard = false;
-			let mut mutatable_to = vec![];
 			let mut knows = slot.creator == principal_id;
 			let mut sender = slot.creator;
 			for &(recipient, from) in &slot.known_by {
@@ -399,28 +398,16 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 					break;
 				}
 			}
-			for blck in &m.blocks {
-				if let Block::Message(message) = blck {
-					construct_principal_states_get_value_mutatability(
-						c,
-						message,
-						principal_id,
-						slot.creator,
-						&mut wire,
-						&mut guard,
-						&mut mutatable_to,
-					);
-				}
-			}
+			let travel = wire_index.get(&c.id);
 			index_map.insert(c.id, meta_vec.len());
 			meta_vec.push(SlotMeta {
 				constant: c.clone(),
-				guard,
+				guard: travel.is_some_and(|t| t.guard),
 				known: knows,
-				wire,
+				wire: travel.map(|t| t.wire.clone()).unwrap_or_default(),
 				known_by: slot.known_by.clone(),
 				declared_at: slot.declared_at,
-				mutatable_to,
+				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),
 				phase: slot.phases.clone(),
 			});
 			values_vec.push(SlotValues {
@@ -432,6 +419,7 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 					creator: slot.creator,
 					sender,
 					attacker_tainted: false,
+					bypass_injected: false,
 				},
 			});
 		}
@@ -449,29 +437,46 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 	states
 }
 
-fn construct_principal_states_get_value_mutatability(
-	c: &Constant,
-	message: &Message,
+/// How a value travelled on the wire, from one principal's point of view.
+#[derive(Default)]
+struct WireTravel {
+	wire: Vec<PrincipalId>,
+	guard: bool,
+	mutatable_to: Vec<PrincipalId>,
+}
+
+/// Index every message once per principal.
+///
+/// The alternative is rescanning the whole model for each slot, which makes
+/// state construction grow with principals × slots × messages rather than with
+/// the size of the model.
+fn construct_wire_index(
+	m: &Model,
+	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
-	creator: PrincipalId,
-	wire: &mut Vec<PrincipalId>,
-	guard: &mut bool,
-	mutatable_to: &mut Vec<PrincipalId>,
-) {
-	let is_recipient = message.recipient == principal_id;
-	let is_creator = creator == principal_id;
-	for msg_const in &message.constants {
-		if c.id != msg_const.id {
+) -> HashMap<ValueId, WireTravel> {
+	let mut index: HashMap<ValueId, WireTravel> = HashMap::new();
+	for block in &m.blocks {
+		let Block::Message(message) = block else {
 			continue;
-		}
-		append_unique(wire, message.recipient);
-		if !*guard {
-			*guard = msg_const.guard && (is_recipient || is_creator);
-		}
-		if !msg_const.guard {
-			append_unique(mutatable_to, message.recipient);
+		};
+		for msg_const in &message.constants {
+			let Some(slot_idx) = trace.index_of(msg_const) else {
+				continue;
+			};
+			let is_recipient = message.recipient == principal_id;
+			let is_creator = trace.slots[slot_idx].creator == principal_id;
+			let travel = index.entry(msg_const.id).or_default();
+			append_unique(&mut travel.wire, message.recipient);
+			if !travel.guard {
+				travel.guard = msg_const.guard && (is_recipient || is_creator);
+			}
+			if !msg_const.guard {
+				append_unique(&mut travel.mutatable_to, message.recipient);
+			}
 		}
 	}
+	index
 }
 
 impl PrincipalState {
@@ -502,6 +507,11 @@ impl PrincipalState {
 							false
 						} else {
 							sv.provenance.attacker_tainted
+						},
+						bypass_injected: if purify {
+							false
+						} else {
+							sv.provenance.bypass_injected
 						},
 					},
 				}
