@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Pre-shared key combined with Diffie-Hellman (like TLS PSK+DHE).
-// The session key mixes both the PSK and a DH shared secret.
-// Even if the PSK leaks later, forward secrecy holds.
-
 attacker[active]
 
 principal Alice[

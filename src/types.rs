@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
-/// A half-open byte range in the model source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
 	pub start: usize,
@@ -26,15 +25,12 @@ impl Span {
 		}
 	}
 
-	/// One-based line and column of `start` within `source`. The column counts
-	/// characters, not bytes, so it matches what an editor shows.
 	pub fn line_col(&self, source: &str) -> (usize, usize) {
 		let (line, start, _) = self.line_bounds(source);
 		let col = source[start..self.start.min(source.len())].chars().count() + 1;
 		(line, col)
 	}
 
-	/// `(one-based line, byte offset of its start, byte offset of its end)`.
 	fn line_bounds(&self, source: &str) -> (usize, usize, usize) {
 		let at = self.start.min(source.len());
 		let upto = &source.as_bytes()[..at];
@@ -76,8 +72,6 @@ pub struct VerifpalError {
 	pub kind: ErrorKind,
 	pub message: Cow<'static, str>,
 	pub span: Option<Span>,
-	/// Set once the source is in hand, so `Display` can show file, line and
-	/// column to callers that only ever print the error.
 	rendered: Option<String>,
 }
 
@@ -112,20 +106,16 @@ impl VerifpalError {
 		self
 	}
 
-	/// Attach `span` only if the error does not already carry a narrower one,
-	/// so an inner error keeps its own position as the stack unwinds.
 	pub fn or_span(mut self, span: Span) -> Self {
 		self.span.get_or_insert(span);
 		self
 	}
 
-	/// Fold the source location into the message, so plain `Display` shows it.
 	pub fn located(mut self, file_name: &str, source: &str) -> Self {
 		self.rendered = Some(self.render(file_name, source));
 		self
 	}
 
-	/// `file:line:col: kind: message`, with the offending line and a caret.
 	pub fn render(&self, file_name: &str, source: &str) -> String {
 		let Some(span) = self.span else {
 			return format!("{}: {}: {}", file_name, self.kind.label(), self.message);
@@ -139,8 +129,6 @@ impl VerifpalError {
 			self.kind.label(),
 			self.message
 		);
-		// Tabs are shown as one space and the caret padding counts characters,
-		// so the caret lands under the span even on a tab-indented line.
 		let (_, line_start, line_end) = span.line_bounds(source);
 		let text = &source[line_start..line_end];
 		let at = span.start.min(source.len());
@@ -184,12 +172,6 @@ impl From<&'static str> for VerifpalError {
 
 pub type VResult<T> = Result<T, VerifpalError>;
 
-/// An index into a principal's slots — equivalently, into `ProtocolTrace::slots`,
-/// which every `PrincipalState` is built parallel to.
-///
-/// Distinct from [`KnownIdx`] so the two index spaces cannot be swapped: a
-/// mutation record stores slot indices but is *found* by a knowledge index, and
-/// both used to be a bare `usize`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SlotIdx(pub usize);
 
@@ -205,7 +187,6 @@ impl fmt::Display for SlotIdx {
 	}
 }
 
-/// An index into `AttackerState::known` and the arrays parallel to it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KnownIdx(pub usize);
 
@@ -393,12 +374,6 @@ impl Primitive {
 		}
 	}
 
-	/// Rebuild with `f` applied to each argument, returning `None` when every
-	/// argument was unchanged.
-	///
-	/// `f` returns `Some` only for an argument it actually changed, so a caller
-	/// that cares about a subset — rewriting only touches nested primitives —
-	/// pays nothing for the rest.
 	pub fn map_arguments(&self, mut f: impl FnMut(&Value) -> Option<Value>) -> Option<Primitive> {
 		let mut changed: Option<Vec<Value>> = None;
 		for (i, a) in self.arguments.iter().enumerate() {
@@ -409,7 +384,6 @@ impl Primitive {
 		changed.map(|arguments| self.with_arguments(arguments))
 	}
 
-	/// As [`Self::map_arguments`], for a mapping that can fail.
 	pub fn try_map_arguments(
 		&self,
 		mut f: impl FnMut(&Value) -> VResult<Option<Value>>,
@@ -429,8 +403,6 @@ pub struct Equation {
 	pub values: Vec<Value>,
 }
 
-/// Model source text. Debug-prints as a size so that dumping a `Model` does
-/// not dump the whole file.
 #[derive(Clone, Default)]
 pub struct Source(pub Arc<str>);
 
@@ -456,7 +428,6 @@ impl From<&str> for Source {
 #[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
-	/// The text this model was parsed from, so an error can quote its own line.
 	pub source: Source,
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
@@ -490,8 +461,6 @@ impl VerifyResult {
 		}
 	}
 
-	/// Produce a compact result code string (e.g. `"c1a0f1"`).
-	/// One char per query type + `1` (attack found) or `0` (holds).
 	pub fn results_code(results: &[VerifyResult]) -> String {
 		let mut code = String::with_capacity(results.len() * 2);
 		for r in results {
@@ -527,8 +496,6 @@ pub struct Principal {
 	pub closing_trailing: Option<Comment>,
 }
 
-/// Names ride alongside the ids so rendering never needs a process-wide
-/// id-to-name table; `Display for Query` in particular cannot take one.
 #[derive(Clone, Debug)]
 pub struct Message {
 	pub span: Span,
@@ -575,8 +542,6 @@ pub struct Query {
 }
 
 impl Query {
-	/// Errors rather than indexing: a violated invariant must not become a
-	/// query that silently reports as holding.
 	pub fn subject(&self) -> VResult<&Constant> {
 		self.constants.first().ok_or_else(|| {
 			VerifpalError::internal(
@@ -624,7 +589,6 @@ pub struct TraceSlot {
 	pub constant: Constant,
 	pub initial_value: Value,
 	pub creator: PrincipalId,
-	/// Each entry is (recipient, sender): "recipient learned this value from sender."
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
@@ -656,14 +620,12 @@ pub struct LeakEvent {
 	pub phase: i32,
 }
 
-/// Immutable per-constant metadata (shared via Arc across clones).
 #[derive(Clone, Debug)]
 pub struct SlotMeta {
 	pub constant: Constant,
 	pub guard: bool,
 	pub known: bool,
 	pub wire: Vec<PrincipalId>,
-	/// Each entry is (recipient, sender): "recipient learned this value from sender."
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
 	pub declared_at: i32,
 	pub mutatable_to: Vec<PrincipalId>,
@@ -672,37 +634,12 @@ pub struct SlotMeta {
 
 #[derive(Clone, Debug)]
 pub struct Provenance {
-	/// Principal who originally computed/generated this value.
 	pub creator: PrincipalId,
-	/// Principal who sent this value to the current principal.
-	/// Equals creator if the value was never communicated.
-	/// Equals ATTACKER_ID if the attacker injected a replacement.
 	pub sender: PrincipalId,
 	pub attacker_tainted: bool,
-	/// Whether the attacker put its own key here to defeat a guard it could
-	/// bypass — the man-in-the-middle on a signed or guarded public key.
-	///
-	/// Kept apart from `attacker_tainted` deliberately.  Taint decides which
-	/// value a principal perceives (`should_use_original`), and a guard bypass
-	/// must not change that: the principal genuinely computed with what it was
-	/// handed.  This flag exists so the substitution is still *reportable* —
-	/// without it the single most important step of a MITM trace, the attacker
-	/// swapping in its own long-term key, is invisible to the narrator.
 	pub bypass_injected: bool,
 }
 
-/// The three points in a slot's lifecycle that the engine has to tell apart:
-///
-/// - `original`: what the protocol honestly computed, before the attacker
-///   tampered with it — what the principal believes the value is.
-/// - `pre_rewrite`: after mutation, before cryptographic rewriting, so
-///   `AEAD_DEC(k, AEAD_ENC(k, m, ad), ad)` still reads as itself. Narration
-///   quotes this.
-/// - `value`: after mutation and rewriting. Analysis uses this.
-///
-/// Conflating `original` and `value` is what causes false authentication
-/// attacks: principals would "see" the attacker's tampering inside their own
-/// locally-computed values.
 #[derive(Clone, Debug)]
 pub struct SlotValues {
 	pub value: Value,
@@ -713,7 +650,6 @@ pub struct SlotValues {
 }
 
 impl SlotValues {
-	/// Set `value` and, if the slot has not been tainted, also `original`.
 	pub fn set_value(&mut self, v: Value) {
 		if !self.provenance.attacker_tainted {
 			self.original = v.clone();
@@ -727,9 +663,6 @@ impl SlotValues {
 		self.value = v;
 	}
 
-	/// As [`Self::override_all`], marking the slot as a guard the attacker
-	/// bypassed by supplying its own key.  Reporting only — see
-	/// [`Provenance::bypass_injected`].
 	pub fn override_all_bypassed(&mut self, v: Value) {
 		self.override_all(v);
 		self.provenance.bypass_injected = true;
@@ -744,19 +677,11 @@ pub struct PrincipalState {
 	pub meta: Arc<Vec<SlotMeta>>,
 	pub values: Vec<SlotValues>,
 	pub index: Arc<HashMap<ValueId, usize>>,
-	/// All `leaks` declarations in the protocol, shared read-only across
-	/// principal states.  Used by `rule_equivalize` to suppress leaks that
-	/// follow a halted-at point.
 	pub leaks: Arc<Vec<LeakEvent>>,
-	/// If set, the `declared_at` of the earliest checked-primitive failure
-	/// encountered after attacker mutation.  Any `leaks` with a strictly
-	/// greater `declared_at` by this same principal is treated as never
-	/// having fired.  `None` means the principal executed cleanly.
 	pub halted_at: Option<i32>,
 }
 
 impl PrincipalState {
-	/// Whether slot `i` should resolve to `original` rather than `value`.
 	pub fn should_use_original(&self, i: usize) -> bool {
 		!self.values[i].provenance.attacker_tainted
 			|| self.values[i].provenance.creator == self.id
@@ -764,7 +689,6 @@ impl PrincipalState {
 			|| !self.meta[i].wire.contains(&self.id)
 	}
 
-	/// The value that this principal perceives for slot `i`.
 	pub fn effective_value(&self, i: usize) -> &Value {
 		if self.should_use_original(i) {
 			&self.values[i].original
@@ -774,7 +698,6 @@ impl PrincipalState {
 	}
 }
 
-/// A single slot that differs from the protocol trace's initial value.
 #[derive(Clone, Debug)]
 pub struct SlotDiff {
 	pub index: SlotIdx,
@@ -783,9 +706,6 @@ pub struct SlotDiff {
 	pub tainted: bool,
 }
 
-/// The slots that had to differ for the attacker to hold a value, and whose
-/// session they differed in — narration needs both to attribute a set of
-/// mutations to a run.
 #[derive(Clone, Debug)]
 pub struct MutationRecord {
 	pub diffs: Vec<SlotDiff>,
@@ -793,36 +713,20 @@ pub struct MutationRecord {
 	pub phase: i32,
 }
 
-/// How the attacker came to hold a value.
-///
-/// Each deduction rule already renders exactly this into its `Deduction ›`
-/// line; recording it lets the narrator walk the real derivation instead of
-/// reconstructing a plausible one.  Slot indices refer to the
-/// `PrincipalState` the value was learned from.
 #[derive(Clone, Debug)]
 pub enum DerivationRecord {
-	/// Public, declared, or otherwise held from the start of the phase.
 	Initial,
-	/// Handed over by a `leaks` declaration.
 	Leaked { slot: SlotIdx },
-	/// Read off the wire, or equivalized against a slot's resolution.
 	Obtained { slot: SlotIdx },
-	/// Recovered from inside `of` using the values in `using`.
 	Decomposed { of: Value, using: Vec<Value> },
-	/// Rebuilt from `from`, all of which the attacker already held.
 	Reconstructed { from: Vec<Value> },
-	/// Recovered by combining enough shares of `of`.
 	Recomposed { of: Value, using: Vec<Value> },
-	/// A password used without a password hash inside `from`.
 	PasswordExtracted { from: Value },
-	/// A fragment of a concatenation, which reveals its arguments.
 	ConcatFragment { of: Value },
-	/// A skeleton template injected so the attacker can shape a forgery.
 	Injected,
 }
 
 impl DerivationRecord {
-	/// The attacker-held values this derivation consumed.
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using }
@@ -841,14 +745,6 @@ impl DerivationRecord {
 		}
 	}
 
-	/// Whether the state the attacker was looking at is part of why this value
-	/// became derivable.
-	///
-	/// Reading a value out of a principal's state — off the wire, from a leak,
-	/// or by rebuilding a term whose *shape* that state defines — depends on
-	/// the substitutions in force there.  Combining values the attacker already
-	/// holds does not: a decryption needs the ciphertext and the key, and the
-	/// substitutions that earned those are recorded against them.
 	pub fn reads_from_state(&self) -> bool {
 		matches!(
 			self,
@@ -866,7 +762,6 @@ pub struct AttackerState {
 	pub known_map: Arc<HashMap<u64, Vec<usize>>>,
 	pub skeleton_hashes: Arc<HashSet<u64>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
-	/// Parallel to `known`: how each value was derived.
 	pub derivations: Arc<Vec<DerivationRecord>>,
 }
 
@@ -889,28 +784,19 @@ impl AttackerState {
 	}
 }
 
-/// Result of a successful decomposition: the revealed value and the
-/// attacker-known values that were used to perform the decomposition.
 pub struct DecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
 }
 
-/// Result of a successful recomposition: the revealed value and the
-/// attacker-known values that were used to perform the recomposition.
 pub struct RecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
 }
 
-/// Result of rewriting a primitive or equation value.
 pub struct RewriteResult {
-	/// Primitives whose rewrite rules failed (checked primitives that
-	/// did not pass their instance check).
 	pub failed_rewrites: Vec<Primitive>,
-	/// Whether any rewriting actually occurred.
 	pub rewritten: bool,
-	/// The (possibly rewritten) value.
 	pub value: Value,
 }
 
@@ -955,9 +841,9 @@ mod tests {
 			..Constant::default()
 		};
 		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)]; // creator == self.id
+		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)];
 		let ps = make_principal_state("Alice", 0, meta, values);
-		assert!(ps.should_use_original(0)); // creator == self
+		assert!(ps.should_use_original(0));
 	}
 
 	#[test]
@@ -984,15 +870,12 @@ mod tests {
 		let original = make_constant("ps_evm_a");
 		let mutated = make_constant("ps_evm_mutated");
 		let mut meta = make_slot_meta(&c, false);
-		meta.wire = vec![1]; // received by principal 1
+		meta.wire = vec![1];
 		let mut sv = make_slot_values(&mutated, 0);
 		sv.original = original.clone();
 		sv.provenance.attacker_tainted = true;
-		sv.provenance.creator = 0; // different from ps.id=1
+		sv.provenance.creator = 0;
 		let ps = make_principal_state("Bob", 1, vec![meta], vec![sv]);
-		// Bob (id=1) received this on wire, and it was mutated
-		// Since creator(0) != self(1), known=true, wire contains self(1), and mutated=true,
-		// should_use_original returns false, so effective_value = value (tainted)
 		assert!(ps.effective_value(0).equivalent(&mutated, true));
 	}
 
@@ -1020,7 +903,7 @@ mod tests {
 		let mut sv = make_slot_values(&v1, 0);
 		sv.set_value(v2.clone());
 		assert!(sv.value.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v2, true)); // also updated when not tainted
+		assert!(sv.original.equivalent(&v2, true));
 	}
 
 	#[test]
@@ -1031,7 +914,7 @@ mod tests {
 		sv.provenance.attacker_tainted = true;
 		sv.set_value(v2.clone());
 		assert!(sv.value.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v1, true)); // NOT updated when tainted
+		assert!(sv.original.equivalent(&v1, true));
 	}
 
 	#[test]
@@ -1043,7 +926,7 @@ mod tests {
 		sv.override_all(v2.clone());
 		assert!(sv.value.equivalent(&v2, true));
 		assert!(sv.pre_rewrite.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v2, true)); // overridden regardless of tainted
+		assert!(sv.original.equivalent(&v2, true));
 	}
 
 	#[test]
@@ -1069,8 +952,8 @@ mod tests {
 			declared_at: 0,
 			phases: vec![0],
 		};
-		assert!(slot.known_by_principal(0)); // creator
-		assert!(!slot.known_by_principal(1)); // not creator, not in known_by
+		assert!(slot.known_by_principal(0));
+		assert!(!slot.known_by_principal(1));
 	}
 
 	#[test]
@@ -1088,7 +971,7 @@ mod tests {
 			declared_at: 0,
 			phases: vec![0],
 		};
-		assert!(slot.known_by_principal(1)); // in known_by
+		assert!(slot.known_by_principal(1));
 	}
 
 	#[test]
@@ -1121,10 +1004,8 @@ mod span_tests {
 	fn line_col_is_one_based_and_counts_characters() {
 		assert_eq!(Span::at(0).line_col(SRC), (1, 1));
 		assert_eq!(Span::at(17).line_col(SRC), (2, 1));
-		// Byte 18 is the start of line 3.
 		assert_eq!(Span::at(18).line_col(SRC), (3, 1));
 		let unicode = "principal Amélié[\n\tknows private m\n]\n";
-		// The column counts characters, so the accented name does not shift it.
 		let after_name = unicode.find('[').expect("bracket");
 		assert_eq!(Span::at(after_name).line_col(unicode).1, 17);
 	}
@@ -1139,7 +1020,6 @@ mod span_tests {
 			"{rendered}"
 		);
 		let caret_line = rendered.lines().last().expect("caret line");
-		// Two spaces of gutter, one for the tab, then the caret under `knows`.
 		assert_eq!(caret_line, "   ^^^^^");
 	}
 

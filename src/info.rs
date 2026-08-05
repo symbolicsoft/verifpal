@@ -16,14 +16,6 @@ thread_local! {
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
-/// Whether output on this thread is currently suppressed.
-///
-/// Witness minimization re-runs the whole deduction closure many times per
-/// failed query.  Those runs are hypothetical: their `Deduction ›` lines
-/// describe states that are being tested for necessity, not states that are
-/// part of the reported attack, so printing them would be actively
-/// misleading as well as voluminous.  Recording into the scratch context is
-/// unaffected — only printing and the analysis counter are gated.
 pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
 }
@@ -108,11 +100,6 @@ pub(crate) fn info_separator() {
 	println!("{}", "-".repeat(50));
 }
 
-/// The left column for a level: `(indent, plain label, plain symbol, coloured
-/// label, coloured symbol)`.
-///
-/// Both renderers read this, so the plain and coloured forms cannot drift apart
-/// in spacing or wording — they differ only where this table says they do.
 fn level_columns(
 	level: InfoLevel,
 ) -> (
@@ -133,7 +120,6 @@ fn level_columns(
 	}
 }
 
-/// How a level is painted: `(colour, bold label, bold symbol, dim message)`.
 #[cfg(feature = "cli")]
 fn level_styling(level: InfoLevel) -> (Color, bool, bool, bool) {
 	match level {
@@ -301,7 +287,6 @@ fn info_verify_result_summary_color(
 	output
 }
 
-/// `n` is a zero-based index, so `n == 0` is "first".
 pub(crate) fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
 	if n > 9 {
 		let ordinal = n + 1;

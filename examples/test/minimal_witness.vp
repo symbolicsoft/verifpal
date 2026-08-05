@@ -1,6 +1,3 @@
-// The attack needs exactly one substitution: mw_gb, which gives the attacker
-// the shared secret. mw_decoy is mutable and irrelevant — a correct minimal
-// witness must not mention it.
 
 attacker[active]
 

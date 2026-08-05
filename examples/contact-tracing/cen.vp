@@ -3,21 +3,14 @@
 
 attacker[active]
 
-// Day 0, setup
 principal Server[
-	// constants that represent day numbers
 	knows public i0, i1, i2
 ]
 principal Alice[
 	knows public i0, i1, i2
-	// report authorization key
 	generates rakA
-	// report verification key
 	rvkA = G^rakA
-	// report verification key
-	// initial contact event key
 	cek_0A = HASH(rakA)
-	// contact event number
 	cen_0A = HASH(i0, cek_0A)
 ]
 principal Bob[
@@ -35,9 +28,7 @@ principal Charlie[
 	cen_0C = HASH(i0, cek_0C)
 ]
 
-// Day 1, Alice meets Bob, Bob meets Charlie
 principal Alice[
-	// contact event key
 	cek_1A = HASH(CONCAT(rvkA, cek_0A))
 	cen_1A = HASH(CONCAT(i1, cek_1A))
 ]
@@ -58,7 +49,6 @@ Charlie -> Bob: cen_1C
 
 phase[1]
 
-// Day 2, Alice is diagnosed
 principal Alice [
 	knows private memo_type
 	knows private memo_len

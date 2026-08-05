@@ -3,7 +3,6 @@
 
 attacker[active]
 
-// initialisation
 principal Alice[
 	knows public hmac_key
 ]

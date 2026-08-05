@@ -3,12 +3,9 @@
 
 use crate::types::*;
 
-/// Result of comparing two primitives for structural equivalence.
 pub(crate) struct PrimitiveMatch {
 	pub equivalent: bool,
-	/// Output index of the first primitive (meaningful only when `equivalent` is true).
 	pub output_left: usize,
-	/// Output index of the second primitive (meaningful only when `equivalent` is true).
 	pub output_right: usize,
 }
 
@@ -48,13 +45,6 @@ pub(crate) fn equivalent_primitives(
 	}
 }
 
-/// Structural equivalence of two DH chains, where `G^a^b^c` is `[G, a, b, c]`.
-///
-/// - Length 1-2: element-wise, no commutativity.
-/// - Length 3: exponents commute (`G^a^b = G^b^a`), so both orderings are
-///   tried. The base is not compared — in a 3-element equation it is always
-///   the generator.
-/// - Length >3: base must match; the exponents are a commutative multiset.
 pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	if e1.values.is_empty() || e2.values.is_empty() {
 		return false;
@@ -116,25 +106,14 @@ pub(crate) fn equivalent_equations(e1: &Equation, e2: &Equation) -> bool {
 	}
 }
 
-/// One of the two admissible alignments of a 3-element equation's exponents;
-/// the caller tries both to cover DH commutativity.
 fn equivalent_equations_rule(a1: &Value, b1: &Value, a2: &Value, b2: &Value) -> bool {
 	a1.equivalent(b2, true) && a2.equivalent(b1, true)
 }
 
-/// Flat means no element is itself an equation. Flattening `(G^a)^b` to
-/// `[G, a, b]` gives comparison a canonical form to work on.
 pub(crate) fn equation_is_flat(e: &Equation) -> bool {
 	e.values.iter().all(|v| !matches!(v, Value::Equation(_)))
 }
 
-/// Assemble an equation from already-resolved elements, splicing nested ones.
-///
-/// An equation landing in base position *replaces* the accumulator; one landing
-/// in an exponent position contributes only its own exponents. Inlining and
-/// substitution both produce nested equations this way — `gab = ga^b` where `ga`
-/// resolves to `G^a` — and every resolver has to re-flatten them identically, so
-/// the rule lives here once rather than in each of them.
 pub(crate) fn splice_equation(elements: impl IntoIterator<Item = Value>) -> Equation {
 	let elements = elements.into_iter();
 	let mut values: Vec<Value> = Vec::with_capacity(elements.size_hint().0);
@@ -189,7 +168,7 @@ mod tests {
 	#[test]
 	fn constant_equivalence_same_id() {
 		let a = make_constant("test_const_a");
-		let b = make_constant("test_const_a"); // same name → same id
+		let b = make_constant("test_const_a");
 		assert!(a.equivalent(&b, true));
 	}
 
@@ -213,7 +192,6 @@ mod tests {
 
 	#[test]
 	fn equation_equivalence_3_element_commutative() {
-		// G^a^b == G^b^a (Diffie-Hellman commutativity)
 		let a = make_constant("dh_a");
 		let b = make_constant("dh_b");
 		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
@@ -251,7 +229,7 @@ mod tests {
 		assert!(!equation_is_flat(&outer));
 		let flat = flatten_equation(&outer);
 		assert!(equation_is_flat(&flat));
-		assert_eq!(flat.values.len(), 3); // g, a, b
+		assert_eq!(flat.values.len(), 3);
 	}
 
 	#[test]
@@ -318,7 +296,7 @@ mod tests {
 		};
 		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
 		let pm = equivalent_primitives(&p1, &p2, false);
-		assert!(pm.equivalent); // ignoring output they're equivalent
+		assert!(pm.equivalent);
 		assert_eq!(pm.output_left, 0);
 		assert_eq!(pm.output_right, 1);
 	}

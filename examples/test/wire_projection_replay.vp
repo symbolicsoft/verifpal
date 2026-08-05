@@ -1,11 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Companion to concat_split_replay.vp: here the SPLIT projection itself
-// travels on the wire, so the honest value of n2_b resolves to a top-level
-// SPLIT(CONCAT(n1, n2)) projection. The attacker can only replay n2, which
-// Alice's checked ASSERT binds to her own nonce, so the query must pass.
-
 attacker[active]
 
 principal Alice[

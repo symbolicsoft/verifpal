@@ -1,62 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Goal-directed active attacker search
-//!
-//! Verifpal's active attacker.  The question it answers is "what would the
-//! attacker need in order to learn this, and can it arrange that" — solved
-//! backwards from each query, rather than forwards by trying substitutions and
-//! seeing what falls out.
-//!
-//! The distinction decides what is findable.  Enumerating forwards means
-//! enumerating combinations of wire substitutions, and the number of those
-//! grows so fast that a search has to be bounded by depth and per-principal
-//! budgets.  Those bounds then decide, unpredictably, which attacks the tool
-//! can reach: Signal's X3DH man-in-the-middle needs three public keys replaced
-//! at once, and no affordable budget reliably reaches it.
-//!
-//! Solving backwards has no such cliff.  An attack requiring four simultaneous
-//! wire substitutions is not found by considering four-element subsets; it is
-//! the union of four bindings, each forced independently by a deducibility
-//! requirement.  Nothing enumerates, so nothing needs a budget, and there is no
-//! depth at which the engine stops looking.
-//!
-//! Termination comes from the search space instead of from a cap on it:
-//! goals are memoised, a goal that reaches itself is cut as a cycle, and the
-//! rules that could invent unboundedly many new terms are restricted to a
-//! finite basis drawn from the protocol.
-//!
-//! This is a claim about *this* module. The forward theory it calls into still
-//! has recursion limits of its own — `theory.rs::MAX_DEPTH` and
-//! `resolution.rs::MAX_RESOLVE_DEPTH` — so a derivation nested deeper than
-//! those is still missed. Removing the search budget did not remove them.
-//!
-//! ## Shape of a run
-//!
-//! ```text
-//! for each phase
-//!   seed attacker knowledge, run the passive baseline
-//!   repeat until knowledge stops growing
-//!     for each principal
-//!       build the symbolic view          symbolic.rs
-//!       for each unresolved query
-//!         turn it into a goal            this module, `goals_for_query`
-//!         solve the goal                 deduce.rs / diverge.rs
-//!       validate every proposal          validate.rs
-//! ```
-//!
-//! The outer repeat exists because validation grows attacker knowledge, which
-//! can unlock goals that were previously unreachable.  It terminates on a
-//! knowledge fixed point, the same monotone argument
-//! [`crate::deduction::compute_knowledge_closure`] relies on.
-//!
-//! ## Soundness
-//!
-//! No module in this directory can record a query result.  Every proposal goes
-//! through `validate.rs`, which materialises it, re-executes the principal
-//! through the ordinary pipeline, and re-checks the query against real attacker
-//! knowledge.  A bug in the solver costs a missed attack, never a false one.
-
 pub(crate) mod deduce;
 pub(crate) mod diverge;
 pub(crate) mod matching;
@@ -95,7 +39,6 @@ pub(crate) fn verify_active(
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 
-		// Passive baseline: everything derivable without touching the wire.
 		verify_standard_run(ctx, km, principal_states)?;
 
 		loop {
@@ -104,12 +47,6 @@ pub(crate) fn verify_active(
 			}
 			let before = ctx.attacker_known_count();
 
-			// Targeted proposals for every principal come first.  An attack is
-			// often explained by one principal's computation while another
-			// principal happens to offer a large pile of constructible values;
-			// interleaving the two per-principal would let that pile delay, or
-			// in a big model effectively prevent, ever looking at the principal
-			// that matters.
 			for ps in principal_states {
 				solve_principal(ctx, km, ps, Pass::Targeted)?;
 				if ctx.all_resolved() {
@@ -129,19 +66,15 @@ pub(crate) fn verify_active(
 				break;
 			}
 		}
+
+		ctx.attacker_phase_archive(phase);
 	}
 	Ok(())
 }
 
-/// Which family of proposals to try.
-///
-/// Splitting the two is about ordering across principals, not about limiting
-/// what gets tried: both passes run before the engine gives up.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Pass {
-	/// Derived from a query goal or a checked primitive — few and precise.
 	Targeted,
-	/// Assembled or replayed values for a controlled slot — broad and costly.
 	Constructed,
 }
 
@@ -175,34 +108,14 @@ fn solve_principal(
 		));
 	}
 
-	// Satisfying the model's checked primitives is worth proposing regardless of
-	// what any query asks.  A check the attacker can satisfy is a check that
-	// does not halt the principal, which is what keeps the rest of the
-	// computation — and therefore the rest of the attack — reachable.
 	if pass == Pass::Targeted {
 		proposals.extend(deducer.constraint_goals(&sym, &empty));
 	}
 
-	// The canonical man-in-the-middle: every wire value the attacker controls
-	// becomes its own.  This is not a search — it is a single substitution, so
-	// it costs exactly one validation — but it is the shape most protocol
-	// attacks take, and offering it unconditionally means the engine never
-	// depends on the goal analysis being complete to find it.  It restores by
-	// construction what the deleted `verify_active_equation_bypass` pass did by
-	// hand.
 	let blanket = blanket_substitution(&sym);
 	if pass == Pass::Targeted && !blanket.is_empty() {
 		proposals.push(blanket.clone());
 
-		// Tampering with exactly one message, leaving the rest of the run
-		// untouched.  The blanket changes everything at once, which is the wrong
-		// move whenever some *other* message is covered by a check the attacker
-		// cannot satisfy: replacing it too halts the principal before it reaches
-		// the message that mattered.  A recipient that consumes a value without
-		// checking it — decrypting without a `?` — accepts anything, and then
-		// the minimal action is the whole attack.
-		//
-		// One proposal per controlled slot, so this is linear in the model.
 		for &slot in &sym.var_slots {
 			if let Some(term) = &sym.var_terms[slot] {
 				let mut single = Substitution::new();
@@ -214,26 +127,6 @@ fn solve_principal(
 		}
 	}
 
-	// Some slots are broken not by a derived value but by a *built* one: the
-	// attacker assembles a primitive of the right shape out of what it holds, or
-	// replays one it already has, and posts it.  Goal analysis says which slots
-	// matter and why; for what to put in one, reuse the existing injection
-	// engine.
-	//
-	// These come last, and deliberately so.  They are the broadest and the most
-	// expensive proposals, while the goal-derived ones above are few and
-	// precise.  Ordering them behind the targeted proposals means a model whose
-	// attack the goal analysis can explain never pays for them, because the loop
-	// stops as soon as every query is resolved.
-	//
-	// The set stays linear in slots.  A combinatorial blow-up would come from
-	// taking products *across* slots; here each slot is offered its candidates
-	// independently, paired only with the single blanket substitution.
-	// Every controlled slot bound to the value it actually carried.  Forwarding
-	// a message unchanged is still the attacker forwarding it, and a recipient
-	// cannot tell the difference — so when one message in a run is genuinely
-	// tampered with, the others in that run are attacker-relayed too, and the
-	// recipient accepting them is an authentication failure for them as well.
 	let relayed = relay_substitution(km, ps, &sym);
 
 	let protocol = if pass == Pass::Constructed {
@@ -261,8 +154,6 @@ fn solve_principal(
 				combined.insert(var_id, candidate.clone());
 				proposals.push(combined);
 			}
-			// The same choice, but with the rest of the run relayed rather than
-			// left untouched.
 			let mut with_relay = relayed.clone();
 			with_relay.insert(var_id, candidate);
 			proposals.push(with_relay);
@@ -273,25 +164,12 @@ fn solve_principal(
 		if ctx.all_resolved() {
 			break;
 		}
-		// Variables the solver never bound are deliberately left free: the
-		// attacker has no reason to touch that wire value, so it forwards the
-		// honest message.  `validate` skips unbound slots for exactly this
-		// reason.  Grounding them here instead would be actively harmful — in a
-		// model where a signature is checked, replacing an untargeted signature
-		// with `nil` fails the check and halts the principal before it ever
-		// computes the value the attack was aiming at.
 		let ran = validate::validate(ctx, km, ps, &sym, &attacker, &proposal)?;
 		trace_proposal(ps, &sym, &proposal, ran);
 	}
 	Ok(())
 }
 
-/// Turn a query into the goal(s) whose solutions would break it.
-///
-/// The mapping follows what each query actually tests (`query.rs`):
-/// confidentiality is already a pure knowledge lookup, authentication is a
-/// forgery the recipient accepts, equivalence is a divergence, and freshness is
-/// a static property of the model that no attacker choice affects.
 fn goals_for_query(
 	query: &Query,
 	km: &ProtocolTrace,
@@ -307,8 +185,6 @@ fn goals_for_query(
 		},
 		QueryKind::Authentication => authentication_goals(query, km, ps, sym, deducer, base),
 		QueryKind::Unlinkability => {
-			// Only the "same primitive, and the attacker can obtain it" half is
-			// attacker-dependent; the freshness half is static.
 			let mut out = Vec::new();
 			for c in &query.constants {
 				if let Some(term) = slot_term(Some(c), ps, sym) {
@@ -329,22 +205,10 @@ fn goals_for_query(
 			}
 			out
 		}
-		// Freshness never consults the attacker: it asks whether a value
-		// transitively contains a `fresh` constant, which no substitution
-		// changes.  The passive baseline already settles it.
 		QueryKind::Freshness => Vec::new(),
 	}
 }
 
-/// Authentication fails when the recipient successfully uses a value the
-/// attacker sent.  So the goal is a forgery: some term the attacker can build
-/// that lands in the queried wire slot.
-///
-/// Two candidates are offered.  Reconstructing the honest value is the strong
-/// case — if the attacker can build what the sender would have sent, the
-/// recipient cannot tell the difference and every downstream check passes.  The
-/// blanket proposal in `solve_principal` covers the weak case where merely
-/// substituting the attacker's own key is enough.
 fn authentication_goals(
 	query: &Query,
 	km: &ProtocolTrace,
@@ -370,10 +234,6 @@ fn authentication_goals(
 	};
 	let mut out = Vec::new();
 
-	// Forgery: build something the recipient's rewrite rule accepts but the
-	// sender never sent.  This is the case that actually breaks authentication,
-	// because a replay of the honest value is indistinguishable to the
-	// recipient and `validate` rightly refuses to call it an attack.
 	for shape in deducer.forgeable_shapes(sym, vars::attacker_var_id(slot)) {
 		for candidate in deducer.solve(&shape, base) {
 			let forged = vars::apply(&shape, &candidate);
@@ -386,13 +246,8 @@ fn authentication_goals(
 		}
 	}
 
-	// Reconstruction: if the attacker can rebuild what the sender would have
-	// sent, it can inject it on its own authority.  Kept as a fallback for
-	// values consumed by primitives with no rewrite rule to invert.
 	let (honest, _) = resolve_trace_values(&Value::Constant(c.clone()), km);
 	for candidate in deducer.solve_forgeable(&honest, base) {
-		// `match_value` rather than a raw insert, so a shaped variable (`G^$x`)
-		// binds its exponent instead of being overwritten wholesale.
 		if let Some(bound) = matching::match_value(var_term, &honest, &candidate) {
 			out.push(bound);
 		}
@@ -400,7 +255,6 @@ fn authentication_goals(
 	out
 }
 
-/// Every attacker-controlled wire value replaced by one of the attacker's own.
 fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	let mut out = Substitution::new();
 	for &slot in &sym.var_slots {
@@ -411,16 +265,8 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	out
 }
 
-/// Report a proposal and whether it was executed.
-///
-/// Enabled by setting `VERIFPAL_SOLVE_DEBUG`; silent otherwise.  Attacks are
-/// diagnosed by asking which substitutions were tried and which were rejected
-/// as indistinguishable replays, and that is tedious to reconstruct after the
-/// fact.
 fn trace_proposal(ps: &PrincipalState, sym: &SymbolicState, proposal: &Substitution, ran: bool) {
 	let debug = std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some();
-	// A proposal that did not run changed nothing, so it is worth the cost of
-	// rendering only when someone asked to see the rejected ones too.
 	if !debug && !ran {
 		return;
 	}
@@ -430,7 +276,6 @@ fn trace_proposal(ps: &PrincipalState, sym: &SymbolicState, proposal: &Substitut
 	}
 }
 
-/// Each bound slot rendered as `name=value`, for display only.
 fn binding_summary(
 	ps: &PrincipalState,
 	sym: &SymbolicState,
@@ -450,12 +295,6 @@ fn binding_summary(
 		.collect()
 }
 
-/// Every controlled slot bound to the value the honest run put on the wire.
-///
-/// On its own this changes nothing and `validate` will reject it as not
-/// worthwhile.  Its purpose is to be combined with a binding that *does* change
-/// something: the resulting run has one forged message and the rest relayed,
-/// which is what a real interception looks like.
 fn relay_substitution(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -472,13 +311,6 @@ fn relay_substitution(
 	out
 }
 
-/// Hashes of every ground term the protocol itself puts on the wire, and every
-/// subterm of those.
-///
-/// This is the set candidate selection draws from, and the reason it can do so
-/// without any cap. Attacker knowledge grows with every derivation, so
-/// selecting from it needs pruning and any pruning is a limit; the terms the
-/// *model* mentions are fixed by the model, so selecting from them needs none.
 fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> HashSet<u64> {
 	let mut out = HashSet::new();
 	for meta in ps.meta.iter() {
@@ -488,25 +320,6 @@ fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> HashSet<u64> {
 	out
 }
 
-/// Values the attacker could put in `slot`, derived rather than catalogued.
-///
-/// Two sources, both finite by construction and neither capped, size-ordered or
-/// depth-filtered.
-///
-/// **Terms of the protocol that the attacker holds.** A substitution attack
-/// replaces one message with another, and the messages are a fixed set given by
-/// the model. A ciphertext from one slot can be admissible in another whenever
-/// the two share a key, which no goal analysis would ever derive, so this
-/// source cannot be dispensed with — but restricting it to protocol terms is
-/// what keeps it bounded by the model's size rather than by how long the search
-/// has run.
-///
-/// **Shapes the recipient's own rules demand.** Where a slot feeds a primitive
-/// with a rewrite rule, that rule dictates what would be accepted there, and
-/// inverting it yields the shape directly. Each is then required to be
-/// *constructible*: offering one unchecked would let the engine send a
-/// ciphertext under a key derived from a secret it never had, and report the
-/// recipient accepting it as an attack.
 fn slot_candidates(
 	attacker: &AttackerState,
 	sym: &SymbolicState,
@@ -522,9 +335,6 @@ fn slot_candidates(
 		if !protocol.contains(&candidate.hash_value()) || candidate.equivalent(honest, true) {
 			continue;
 		}
-		// A sort condition, not a size one: a term of the wrong shape fails
-		// every rewrite the recipient performs, and that outcome is already
-		// covered by the canonical `nil` substitution.
 		let compatible = match (honest, candidate) {
 			(Value::Primitive(h), Value::Primitive(k)) => k.id == h.id,
 			(Value::Equation(h), Value::Equation(k)) => h.values.len() == k.values.len(),
@@ -536,12 +346,6 @@ fn slot_candidates(
 		}
 	}
 
-	// Solved under the blanket as well as on its own.  A shape's key is often
-	// only computable once some *other* slot has been taken over — the forged
-	// ciphertext for one message is encrypted under a key that exists only
-	// because the attacker replaced a public value in another.  Solving in
-	// isolation would judge such a shape unbuildable and discard it, when it is
-	// buildable in exactly the run it would be used in.
 	let mut contexts = vec![Substitution::new()];
 	if !blanket.is_empty() {
 		contexts.push(blanket.clone());
@@ -562,7 +366,6 @@ fn slot_candidates(
 	out
 }
 
-/// The symbolic term a queried constant denotes in this principal.
 fn slot_term(c: Option<&Constant>, ps: &PrincipalState, sym: &SymbolicState) -> Option<Value> {
 	let c = c?;
 	let slot = ps.index_of(c)?;

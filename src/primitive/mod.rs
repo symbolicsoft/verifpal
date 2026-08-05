@@ -13,9 +13,6 @@ use crate::types::*;
 pub(crate) use self::spec::*;
 
 pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
-/// A core rewrite rule reduces a primitive *instance* to a single value:
-/// multi-output primitives project via `p.output` inside the rule, so
-/// callers never select among outputs.
 pub(crate) type CoreRuleFn = fn(&Primitive) -> (bool, Value);
 pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
 
@@ -62,16 +59,12 @@ pub(crate) struct PrimitiveCoreSpec {
 	pub has_rule: bool,
 	pub core_rule: Option<CoreRuleFn>,
 	pub definition_check: bool,
-	/// When true, attacker knowledge of this primitive's output reveals all arguments.
 	pub reveals_args: bool,
 }
 
-/// How to extract the bypass key from a guarded primitive's arguments.
 #[derive(Clone, Copy)]
 pub(crate) enum BypassKeyKind {
-	/// Take the argument at this index directly.
 	Direct(usize),
-	/// Extract the last DH exponent from the equation at this index.
 	DhExponent(usize),
 }
 
@@ -285,8 +278,8 @@ mod tests {
 	fn primitive_single_output() {
 		assert!(primitive_has_single_output(PRIM_HASH));
 		assert!(primitive_has_single_output(PRIM_ENC));
-		assert!(!primitive_has_single_output(PRIM_SPLIT)); // output: [1,2,3,4,5]
-		assert!(!primitive_has_single_output(PRIM_HKDF)); // output: [1,2,3,4,5]
+		assert!(!primitive_has_single_output(PRIM_SPLIT));
+		assert!(!primitive_has_single_output(PRIM_HKDF));
 	}
 
 	#[test]

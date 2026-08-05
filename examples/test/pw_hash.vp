@@ -28,8 +28,6 @@ principal Bob[]
 
 Alice -> Bob: e1, e2, e3, e4, e5, e6
 
-// Attacker will find out m1, m5 and m6 only.
-
 queries[
 	confidentiality? m1
 	confidentiality? m2

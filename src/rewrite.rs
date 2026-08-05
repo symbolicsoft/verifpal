@@ -49,7 +49,6 @@ pub(crate) fn perform_primitive_rewrite(
 fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -> RewriteResult {
 	let mut failed_rewrites: Vec<Primitive> = Vec::new();
 	let mut rewritten = false;
-	// COW: only allocate new arguments vec if something actually changes
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, a) in p.arguments.iter().enumerate() {
 		match a {

@@ -147,8 +147,6 @@ impl fmt::Display for Expression {
 	}
 }
 
-/// A multi-line block comment keeps its original line breaks; continuation
-/// lines are re-indented to align after the opening `/* `.
 fn render_comment(c: &Comment, indent: &str) -> String {
 	match c.style {
 		CommentStyle::Line => format!("//{}", c.text),
@@ -442,10 +440,6 @@ mod tests {
 
 	#[test]
 	fn block_comment_nested_first_close_wins() {
-		// /* /* */ */
-		// Outer /* opens. First */ closes. The trailing */ becomes
-		// stray tokens after the comment which produce a parse error
-		// (because they're not valid syntax at the model start).
 		let src = "/* /* */ */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let result = parse_string("t.vp", src);
 		assert!(result.is_err(), "expected parse error from stray */");
@@ -456,11 +450,9 @@ mod tests {
 		let src = "attacker[active]\n\n/* multi\n   line\n   header */\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		let out = pretty_model(&m).expect("pretty");
-		// Expect the block comment intact in the output.
 		assert!(out.contains("/* multi"), "missing /* multi in:\n{}", out);
 		assert!(out.contains("line"), "missing 'line':\n{}", out);
 		assert!(out.contains("header */"), "missing 'header */':\n{}", out);
-		// Re-parse to verify the comment survived
 		let m2 = parse_string("t.vp", &out).expect("re-parse");
 		match &m2.blocks[0] {
 			Block::Principal(p) => {

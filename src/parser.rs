@@ -80,8 +80,6 @@ fn title_case(s: &str) -> String {
 	result
 }
 
-/// Check if `s` starts with `keyword` followed by a non-identifier character
-/// (or end of string). This prevents "phaseshift" from matching "phase".
 fn starts_with_keyword(s: &str, keyword: &str) -> bool {
 	if !s.starts_with(keyword) {
 		return false;
@@ -156,14 +154,10 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Buffers comments into `pending_leading` for the next AST node.
 	fn consume_trivia(&mut self) {
 		self.consume_trivia_inner(true);
 	}
 
-	/// As `consume_trivia`, but for the positions where comments are
-	/// disallowed and therefore dropped: inside primitive args, equation
-	/// halves, `attacker[]`/`phase[]` brackets, and query option brackets.
 	fn consume_trivia_nocapture(&mut self) {
 		self.consume_trivia_inner(false);
 	}
@@ -196,7 +190,6 @@ impl<'a> Parser<'a> {
 				let start = self.pos;
 				loop {
 					if self.pos + 1 >= self.input.len() {
-						// Unterminated block comment.
 						self.pos = self.input.len();
 						self.unterminated_block_at = Some(open);
 						return;
@@ -227,13 +220,10 @@ impl<'a> Parser<'a> {
 		std::mem::take(&mut self.pending_leading)
 	}
 
-	/// Snapshot the parser state for a potentially-aborted lookahead.
 	fn snapshot(&self) -> (usize, usize) {
 		(self.pos, self.pending_leading.len())
 	}
 
-	/// Restore parser state from a snapshot, discarding any comments
-	/// captured during the rolled-back lookahead.
 	fn restore(&mut self, (pos, leading_len): (usize, usize)) {
 		self.pos = pos;
 		self.pending_leading.truncate(leading_len);
@@ -246,8 +236,6 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
-	/// A comment on the same line as the node's last token. A block comment
-	/// only counts if it also closes before the newline.
 	fn try_take_trailing(&mut self) -> Option<Comment> {
 		let saved = self.snapshot();
 		self.skip_inline_whitespace();
@@ -270,15 +258,10 @@ impl<'a> Parser<'a> {
 				style: CommentStyle::Line,
 			})
 		} else if two == (b'/', b'*') {
-			// Scan for `*/` BEFORE the next newline. If we hit a newline
-			// first, this is NOT a trailing comment — restore pos and
-			// return None so the next consume_trivia picks it up as a
-			// leading comment of the next node.
 			let probe_start = self.pos + 2;
 			let mut probe = probe_start;
 			loop {
 				if probe + 1 >= self.input.len() {
-					// Unterminated — leave for consume_trivia to flag.
 					self.restore(saved);
 					return None;
 				}
@@ -352,7 +335,6 @@ impl<'a> Parser<'a> {
 		self.check_unterminated_block()?;
 		let pre_attacker_comments = self.take_leading();
 
-		// Parse attacker
 		if !self.try_expect("attacker") {
 			return Err(VerifpalError::parse("no `attacker` block defined".into()));
 		}
@@ -374,7 +356,6 @@ impl<'a> Parser<'a> {
 		let attacker_trailing = self.try_take_trailing();
 		self.consume_trivia();
 
-		// Parse blocks
 		let mut blocks = Vec::new();
 		while !self.at_end() {
 			self.consume_trivia();
@@ -382,7 +363,6 @@ impl<'a> Parser<'a> {
 				break;
 			}
 
-			// Check for queries block
 			if starts_with_keyword(self.remaining(), "queries") {
 				break;
 			}
@@ -398,7 +378,6 @@ impl<'a> Parser<'a> {
 			));
 		}
 
-		// Parse queries
 		self.consume_trivia();
 		let queries_leading_comments = self.take_leading();
 		if !self.try_expect("queries") {
@@ -520,9 +499,7 @@ impl<'a> Parser<'a> {
 		let sender_name = self.parse_identifier()?;
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
-		// Accept -> or →
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
-			// ok
 		} else {
 			return Err(
 				VerifpalError::parse("expected '->' in message".into()).at(Span::at(self.pos))
@@ -558,7 +535,6 @@ impl<'a> Parser<'a> {
 			if self.at_end() || self.peek() == Some(b'\n') || self.peek() == Some(b'\r') {
 				break;
 			}
-			// Check for end markers
 			let rem = self.remaining();
 			if starts_with_keyword(rem, "principal")
 				|| starts_with_keyword(rem, "phase")
@@ -568,8 +544,6 @@ impl<'a> Parser<'a> {
 			{
 				break;
 			}
-			// Check for next message or block
-			// Heuristic: if we see an identifier followed by ->, this is a new message
 			let saved = self.snapshot();
 			if let Ok(_id) = self.parse_identifier() {
 				self.skip_whitespace();
@@ -603,7 +577,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_guarded_constant(&mut self) -> VResult<Constant> {
 		self.expect("[")?;
-		let mut c = self.parse_constant()?; // check_reserved already called inside parse_constant
+		let mut c = self.parse_constant()?;
 		self.skip_whitespace();
 		self.expect("]")?;
 		self.skip_inline_whitespace();
@@ -720,7 +694,6 @@ impl<'a> Parser<'a> {
 			{
 				break;
 			}
-			// Check for keywords that end the constant list
 			let rem = self.remaining();
 			if starts_with_keyword(rem, "knows")
 				|| starts_with_keyword(rem, "generates")
@@ -772,23 +745,18 @@ impl<'a> Parser<'a> {
 
 	fn parse_value(&mut self) -> VResult<Value> {
 		self.skip_whitespace();
-		// Try primitive first (identifier followed by '(')
 		let saved = self.snapshot();
 		if let Ok(_name) = self.parse_identifier() {
 			self.skip_whitespace();
 			if self.peek() == Some(b'(') {
-				// It's a primitive
 				self.restore(saved);
 				return self.parse_primitive();
 			}
-			// Check for equation (constant ^ constant)
 			self.skip_whitespace();
 			if self.peek() == Some(b'^') {
-				// It's an equation
 				self.restore(saved);
 				return self.parse_equation();
 			}
-			// It's a constant
 			self.restore(saved);
 			return self.parse_constant_value();
 		}
@@ -817,7 +785,6 @@ impl<'a> Parser<'a> {
 		}
 		self.expect(")")?;
 		let check = self.try_expect("?");
-		// Consume optional comma — outside the args list.
 		self.skip_whitespace();
 		if self.peek() == Some(b',') {
 			self.advance();
@@ -907,7 +874,6 @@ impl<'a> Parser<'a> {
 		let start = self.pos;
 		self.expect("authentication?")?;
 		self.skip_whitespace();
-		// Parse message: Sender -> Recipient: constant
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.skip_whitespace();
 		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
@@ -970,7 +936,6 @@ impl<'a> Parser<'a> {
 			if self.at_end() || self.peek() == Some(b']') || self.peek() == Some(b'[') {
 				break;
 			}
-			// Check for end of query list
 			let rem = self.remaining();
 			if starts_with_keyword(rem, "confidentiality")
 				|| starts_with_keyword(rem, "authentication")
@@ -995,7 +960,7 @@ impl<'a> Parser<'a> {
 		if self.peek() != Some(b'[') {
 			return Ok(vec![]);
 		}
-		self.advance(); // [
+		self.advance();
 		self.consume_trivia();
 		let mut options = Vec::new();
 		while self.peek() != Some(b']') {
@@ -1089,8 +1054,6 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 
 pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 	let mut parser = Parser::new(input);
-	// Any parse error that did not set a narrower span gets the position the
-	// parser stopped at, so no parse error is ever reported without a location.
 	let mut model = parser
 		.parse_model()
 		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input))?;
@@ -1105,9 +1068,6 @@ mod tests {
 
 	#[test]
 	fn parse_rejects_content_after_queries() {
-		// A phase declared after the queries block would silently disable
-		// forward secrecy analysis. The parser now refuses to run when it
-		// finds any content after the `queries` block.
 		let model = concat!(
 			"attacker[active]\n",
 			"principal Alice[ knows private x ]\n",
@@ -1307,9 +1267,6 @@ mod tests {
 
 	#[test]
 	fn comment_capture_block_trailing_multiline_promoted_to_leading() {
-		// Block comment that opens on same line as expression but closes
-		// on a later line — must NOT be a trailing; should attach as
-		// leading on the next node.
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* multi\n\tline */\n\tknows private b\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
@@ -1395,14 +1352,8 @@ mod tests {
 
 	#[test]
 	fn comment_lookahead_does_not_leak() {
-		// The parse_message_constants lookahead inspects what comes
-		// after a comma. If a comment sits between the message and the
-		// next block, the lookahead must NOT capture it into the
-		// previous message's leading comments after rollback.
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a\n// next block\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		// "// next block" must attach to the Bob principal block,
-		// not the previous Alice -> Bob message.
 		let msg = m
 			.blocks
 			.iter()
@@ -1426,10 +1377,8 @@ mod tests {
 
 	#[test]
 	fn comment_dropped_in_primitive_args() {
-		// Comment between primitive arguments is silently dropped.
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tx = ENC(/* secret */ a, a)\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		// No AST field contains "secret".
 		let serialized = format!("{:?}", m);
 		assert!(
 			!serialized.contains("secret"),
@@ -1439,7 +1388,6 @@ mod tests {
 
 	#[test]
 	fn comment_dropped_in_equation() {
-		// Use a comment string that does not appear in any AST field name.
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tg = G ^ /* xzqrhs */ a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		let serialized = format!("{:?}", m);

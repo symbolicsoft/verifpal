@@ -438,7 +438,6 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 	states
 }
 
-/// How a value travelled on the wire, from one principal's point of view.
 #[derive(Default)]
 struct WireTravel {
 	wire: Vec<PrincipalId>,
@@ -446,11 +445,6 @@ struct WireTravel {
 	mutatable_to: Vec<PrincipalId>,
 }
 
-/// Index every message once per principal.
-///
-/// The alternative is rescanning the whole model for each slot, which makes
-/// state construction grow with principals × slots × messages rather than with
-/// the size of the model.
 fn construct_wire_index(
 	m: &Model,
 	trace: &ProtocolTrace,
@@ -481,8 +475,6 @@ fn construct_wire_index(
 }
 
 impl PrincipalState {
-	/// Deep-clone this state; `purify` resets every value to its pre-mutation
-	/// form, discarding attacker taint and any halt.
 	pub fn clone_for_depth(&self, purify: bool) -> PrincipalState {
 		let values = self
 			.values

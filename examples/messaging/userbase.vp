@@ -9,7 +9,6 @@ principal UserA_OtherDevice[]
 principal UserB[]
 principal UserB_OtherDevice[]
 
-// _generatePasswordToken
 principal UserA[
 	knows password passA
 	generates seedA
@@ -23,7 +22,6 @@ principal UserA[
 	passwordEncryptedSeedA = AEAD_ENC(passwordBasedEncryptionKeyA, seedA, nil)
 ]
 
-// _generateKeysAndSignUp
 principal UserA[
 	masterKeyA = HKDF(seedA, nil, nil)
 	generates encryptionKeySaltA
@@ -37,7 +35,6 @@ principal UserA[
 
 UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, passwordEncryptedSeedA
 
-// _generatePasswordToken
 principal UserB[
 	knows password passB
 	generates seedB
@@ -51,7 +48,6 @@ principal UserB[
 	passwordEncryptedSeedB = AEAD_ENC(passwordBasedEncryptionKeyB, seedB, nil)
 ]
 
-// _generateKeysAndSignUp
 principal UserB[
 	masterKeyB = HKDF(seedB, nil, nil)
 	generates encryptionKeySaltB

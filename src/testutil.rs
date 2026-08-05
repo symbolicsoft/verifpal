@@ -1,17 +1,12 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! Value and state builders shared by the unit tests.
-
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::types::*;
 use crate::value::*;
 
-/// Test-only interner. The engine interns per model inside the parser; tests
-/// build values by hand and still need the same name to mean the same id
-/// across a test, so they share one table.
 static TEST_NAMES: LazyLock<Mutex<ValueNames>> = LazyLock::new(|| Mutex::new(ValueNames::new()));
 
 pub(crate) fn test_value_id(name: &str) -> ValueId {
@@ -26,10 +21,6 @@ pub(crate) fn make_trace() -> ProtocolTrace {
 	ProtocolTrace::default()
 }
 
-/// The constant a *parsed* model bound to `name`.
-///
-/// Ids are interned per model, so a test that parses a model cannot build a
-/// matching constant with [`make_constant`] — it has to take the model's own.
 pub(crate) fn trace_constant(km: &ProtocolTrace, name: &str) -> Value {
 	km.slots
 		.iter()

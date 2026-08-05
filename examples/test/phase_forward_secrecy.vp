@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Forward secrecy test with phases: long-term keys leak AFTER the session.
-// Ephemeral DH provides forward secrecy so messages stay confidential
-// even after long-term key compromise.
-
 attacker[active]
 
 principal Alice[
@@ -20,7 +16,6 @@ principal Bob[
 Alice -> Bob: [ga]
 Bob -> Alice: [gb]
 
-// Ephemeral DH exchange
 principal Alice[
 	generates ea
 	gea = G^ea
@@ -34,7 +29,6 @@ principal Bob[
 Alice -> Bob: [gea]
 Bob -> Alice: [geb]
 
-// Alice derives session key from ephemeral DH only
 principal Alice[
 	eph_shared_a = geb^ea
 	session_key_a = HASH(eph_shared_a)
@@ -50,7 +44,6 @@ principal Bob[
 	decrypted = AEAD_DEC(session_key_b, encrypted, nil)?
 ]
 
-// Phase 1: long-term keys leak (but ephemeral keys don't)
 phase[1]
 
 principal Alice[leaks a]

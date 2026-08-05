@@ -3,8 +3,6 @@
 
 attacker[active]
 
-// Setup
-
 principal Alice[
 	knows public n
 	knows private longTermA
@@ -23,15 +21,11 @@ principal Bob[
 
 Bob -> Alice: [longTermBPub]
 
-// 1. Client Hello
-
 principal Alice[
 	nMacAlice = MAC(n, ephemeralAPub)
 ]
 
 Alice -> Bob: ephemeralAPub, nMacAlice
-
-// 2. Server Hello
 
 principal Bob[
 	nMacAliceValid = ASSERT(MAC(n, ephemeralAPub), nMacAlice)?
@@ -39,8 +33,6 @@ principal Bob[
 ]
 
 Bob -> Alice: ephemeralBPub, nMacBob
-
-// 3. Client Authenticate
 
 principal Alice[
 	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)?
@@ -54,7 +46,6 @@ principal Alice[
 	masterSecret2Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice, longEphemeralSecretAlice)
 ]
 
-// TODO: Concatentation
 Alice -> Bob: secretBox1Alice, secretBox2Alice
 
 principal Bob[
@@ -67,8 +58,6 @@ principal Bob[
 	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
 ]
 
-// 4. Server Accept
-
 principal Bob[
 	sig2Bob = SIGN(longTermB, HASH(n, sig1Bob, longTermAPub_Bob, ephemeralSecretBob))
 	masterSecret2Bob = HASH(n, ephemeralSecretBob, longTermSecretBob, longEphemeralSecretBob)
@@ -76,8 +65,6 @@ principal Bob[
 ]
 
 Bob -> Alice: secretBox1Bob
-
-// 5. Send a message
 
 principal Alice[
 	knows private m1

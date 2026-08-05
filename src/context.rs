@@ -14,10 +14,6 @@ fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 }
 
 thread_local! {
-	/// Labels output lines, which are emitted from places that have no
-	/// `VerifyContext` in hand. Per thread rather than per process so that
-	/// concurrent analyses — the test suite, or an embedder — do not renumber
-	/// each other's output.
 	static ANALYSIS_COUNT: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -34,41 +30,16 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
 
-/// All mutable state for a single verification run.
-///
-/// Mutation is interior (RwLock / Atomic), so the context is shared by
-/// `&VerifyContext` rather than threaded through as `&mut`, and stays safe to
-/// share should any stage of the pipeline become parallel.
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
 	analysis_count: AtomicU32,
 	file_name: String,
-	/// Every principal's starting state.
-	///
-	/// Held so trace narration can replay a candidate attack in the session it
-	/// belongs to.  A query resolves against whichever principal reaches it
-	/// first, which is often not the one whose session the attack happened in —
-	/// Alice's message is compromised in Alice's run, but the query is answered
-	/// while walking Bob's.
 	states: Vec<PrincipalState>,
+	phase_knowledge: RwLock<Vec<AttackerState>>,
 }
 
-/// The substitutions that had to be in force for the attacker to hold this
-/// value — not the ones that happened to be in force when it absorbed it.
-///
-/// These are different things, and conflating them is what made attack traces
-/// describe one attack's actions beside another attack's consequences.  The
-/// attacker learns a ciphertext in the run where it substituted a public key,
-/// then decrypts it in some later run whose own substitutions are about
-/// something else entirely.  Snapshotting the ambient state at absorption time
-/// records the later run and loses the one that mattered.
-///
-/// So provenance travels along the derivation edge: a value combined out of
-/// values the attacker already held inherits their provenance, and only a
-/// value genuinely read out of a principal's state picks up that state's
-/// substitutions.
 fn derivation_provenance(
 	state: &AttackerState,
 	ambient: &Arc<MutationRecord>,
@@ -76,7 +47,6 @@ fn derivation_provenance(
 ) -> Arc<MutationRecord> {
 	let ingredients = derivation.ingredients();
 	if ingredients.is_empty() && !derivation.reads_from_state() {
-		// Public knowledge and injected skeletons cost the attacker nothing.
 		return Arc::new(MutationRecord {
 			diffs: vec![],
 			principal_id: ambient.principal_id,
@@ -89,11 +59,6 @@ fn derivation_provenance(
 	let mut phase = ambient.phase;
 	let mut adopted = false;
 
-	// An ingredient the attacker has not absorbed yet is one a rule rebuilt
-	// on the spot out of the state in front of it — `can_decompose` will hand
-	// back a key it reconstructed rather than one it held.  There is no record
-	// to inherit for such a value, and the state that supplied it is exactly
-	// the provenance, so the ambient diffs stand in.
 	let rebuilt_in_place = ingredients
 		.iter()
 		.any(|ingredient| state.knows(ingredient).is_none());
@@ -110,8 +75,6 @@ fn derivation_provenance(
 			continue;
 		};
 		if !adopted && !inherited.diffs.is_empty() {
-			// Attribute the session to whoever's run actually produced the
-			// leverage, so the narration names the right principal.
 			principal_id = inherited.principal_id;
 			phase = inherited.phase;
 			adopted = true;
@@ -137,13 +100,6 @@ fn attacker_state_absorb(
 	derivation: DerivationRecord,
 ) {
 	if let Some(existing) = state.knows(value) {
-		// The value is already known, but the run offering it again may explain
-		// it better.  The search reaches the same term by several routes, and
-		// the first to arrive is often one that carries no attacker actions at
-		// all — the substitution that produced the term having been made in a
-		// state the arriving path had already purified.  Keeping that first
-		// record is how a trace ends up describing an attack with nothing in
-		// it.  Knowledge is unchanged either way; only the explanation is.
 		let candidate = derivation_provenance(state, record, &derivation);
 		let explains = |r: &MutationRecord| r.diffs.iter().any(|d| d.tainted);
 		let stale = state.record(existing).is_some_and(|r| !explains(r));
@@ -185,6 +141,7 @@ impl VerifyContext {
 			analysis_count: AtomicU32::new(0),
 			file_name: m.file_name.clone(),
 			states: states.to_vec(),
+			phase_knowledge: RwLock::new(vec![]),
 		}
 	}
 
@@ -192,12 +149,27 @@ impl VerifyContext {
 		&self.states
 	}
 
+	pub(crate) fn attacker_phase_archive(&self, phase: i32) {
+		let snapshot = self.attacker_snapshot();
+		let idx = phase.max(0) as usize;
+		let mut archive = write_lock(&self.phase_knowledge);
+		if archive.len() <= idx {
+			archive.resize_with(idx + 1, AttackerState::new);
+		}
+		archive[idx] = snapshot;
+	}
+
+	pub(crate) fn attacker_knowledge_at(&self, phase: i32) -> Option<AttackerState> {
+		read_lock(&self.phase_knowledge)
+			.get(phase.max(0) as usize)
+			.cloned()
+	}
+
 	pub(crate) fn attacker_init(&self) {
 		let mut state = write_lock(&self.attacker);
 		*state = AttackerState::new();
 	}
 
-	/// O(1): Arc increments only.
 	pub(crate) fn attacker_snapshot(&self) -> AttackerState {
 		read_lock(&self.attacker).clone()
 	}
@@ -206,7 +178,6 @@ impl VerifyContext {
 		read_lock(&self.attacker).known.len()
 	}
 
-	/// Returns true if the value was new.
 	pub(crate) fn attacker_put_with(
 		&self,
 		known: &Value,
@@ -288,7 +259,6 @@ impl VerifyContext {
 		&self.file_name
 	}
 
-	/// Returns true if the result was newly written.
 	pub(crate) fn results_put(&self, result: &VerifyResult) -> bool {
 		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index)
@@ -315,16 +285,6 @@ impl VerifyContext {
 			.is_some_and(|r| r.resolved)
 	}
 
-	/// A disposable context for re-checking exactly one query.
-	///
-	/// Attacker knowledge is snapshotted, so probes start from everything the
-	/// real run has learned but cannot write back into it.  Every query other
-	/// than `query_index` is pre-marked resolved, which makes
-	/// `verify_resolve_queries` skip them and lets `all_resolved()` short
-	/// circuit the moment the target answers.
-	///
-	/// Constructed field-by-field rather than through `new`, because `new`
-	/// resets the `ANALYSIS_COUNT` that real output labels itself with.
 	pub(crate) fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
 		let mut results = self.results_get();
 		for (i, r) in results.iter_mut().enumerate() {
@@ -344,6 +304,7 @@ impl VerifyContext {
 			analysis_count: AtomicU32::new(0),
 			file_name: self.file_name.clone(),
 			states: self.states.clone(),
+			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 		}
 	}
 
@@ -379,12 +340,10 @@ mod tests {
 		let ctx = VerifyContext::new(&m, &[]);
 		let scratch = ctx.scratch_for_query(1);
 
-		// Only the target query is open in the scratch.
 		assert!(!scratch.query_is_resolved(1));
 		assert!(scratch.query_is_resolved(0));
 		assert!(!scratch.all_resolved());
 
-		// Resolving the target in the scratch closes it there...
 		let mut r = VerifyResult::new(&m.queries[1], 1);
 		r.resolved = true;
 		r.summary = " probe".to_string();
@@ -392,7 +351,6 @@ mod tests {
 		assert!(scratch.query_is_resolved(1));
 		assert!(scratch.all_resolved());
 
-		// ...and leaves the real context untouched.
 		assert!(!ctx.query_is_resolved(1));
 		assert!(!ctx.all_resolved());
 		assert_eq!(ctx.results_get()[1].summary, "");

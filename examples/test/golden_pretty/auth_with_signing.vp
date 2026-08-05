@@ -3,7 +3,6 @@
 
 attacker[active]
 
-// initialisation
 principal Alice[
 	knows private a
 	a_public = G^a
@@ -16,7 +15,6 @@ principal Bob[
 
 Alice -> Bob: a
 
-// Key exchange
 principal Alice[
 	generates plaintext
 	signature = SIGN(a, plaintext)

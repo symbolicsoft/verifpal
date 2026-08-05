@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// concat_bomb variant: the key leaks, so all confidentiality queries fail.
-// But authentication still holds because of the checked ASSERT.
-
 attacker[active]
 
 principal Alice[

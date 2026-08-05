@@ -15,11 +15,6 @@ pub(crate) use crate::resolution::{
 	resolve_ps_values, resolve_trace_values, value_constant_contains_fresh_values,
 };
 
-/// Per-model constant name to [`ValueId`] table, owned by the parser.
-///
-/// Ids only ever need to be unique *within* one model, since every comparison
-/// happens between values of the same run. Interning per model also keeps the
-/// ids small and makes analyses independent of each other.
 pub(crate) struct ValueNames {
 	map: HashMap<Arc<str>, ValueId>,
 	counter: ValueId,
@@ -39,7 +34,6 @@ impl ValueNames {
 		ValueNames { map, counter: 2 }
 	}
 
-	/// Ids must stay below the ranges `solve::vars` reserves for its variables.
 	pub(crate) fn intern(&mut self, name: &str) -> VResult<ValueId> {
 		if let Some(&id) = self.map.get(name) {
 			return Ok(id);
@@ -117,7 +111,6 @@ pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> 
 	constants.iter().position(|existing| c.equivalent(existing))
 }
 
-/// The slots that differ from the protocol trace, for the forensic record.
 pub(crate) fn compute_slot_diffs(
 	ps: &PrincipalState,
 	trace: &ProtocolTrace,
@@ -344,7 +337,7 @@ mod tests {
 	fn find_equivalent_in_slice() {
 		let a = make_constant("find_a");
 		let b = make_constant("find_b");
-		let c = make_constant("find_a"); // same as a
+		let c = make_constant("find_a");
 		let slice = vec![a.clone(), b.clone()];
 		assert_eq!(find_equivalent(&c, &slice), Some(0));
 		let d = make_constant("find_d");
@@ -358,7 +351,7 @@ mod tests {
 		let mut v = vec![];
 		assert!(push_unique_value(&mut v, a.clone()));
 		assert!(push_unique_value(&mut v, b));
-		assert!(!push_unique_value(&mut v, a)); // duplicate
+		assert!(!push_unique_value(&mut v, a));
 		assert_eq!(v.len(), 2);
 	}
 
@@ -427,7 +420,7 @@ mod tests {
 		let eq = make_equation(vec![value_g(), a]);
 		let mut out = Vec::new();
 		eq.collect_constants(&mut out);
-		assert_eq!(out.len(), 2); // g and a
+		assert_eq!(out.len(), 2);
 	}
 
 	#[test]

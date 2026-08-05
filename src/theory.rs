@@ -1,32 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Equational theory
-//!
-//! Every rule governing what the attacker can derive and how symbolic values
-//! reduce, driven by the declarative [`PrimitiveSpec`] system in
-//! `primitive/spec.rs`.
-//!
-//! ```text
-//! DEC(k, ENC(k, m)) → m                                    [given: k]
-//! AEAD_DEC(k, AEAD_ENC(k, m, ad), ad) → m                  [given: k, ad]
-//! AEAD_ENC(k, m, ad) → ad                                   [passive]
-//! ENC(k, m) → m                                             [given: k]
-//! BLIND(factor, m) → m                                      [given: factor]
-//! PKE_DEC(sk, PKE_ENC(G^sk, m)) → m                         [given: sk]
-//! PKE_ENC(G^sk, m) → m                                      [given: sk (via G^sk)]
-//! SIGNVERIF(G^sk, msg, SIGN(sk, msg)) → nil                 [rewrite: def check]
-//! RINGSIGNVERIF(G^sk, ..., RINGSIGN(sk, ...)) → nil         [rewrite: def check]
-//! UNBLIND(factor, SIGN(sk, BLIND(factor, m)), m) → SIGN(sk, m) [rewrite]
-//! SHAMIR_SPLIT(s)[i] + SHAMIR_SPLIT(s)[j] → s               [recompose: 2-of-3]
-//! SHAMIR_JOIN(SHAMIR_SPLIT(s)[i], SHAMIR_SPLIT(s)[j]) → s   [rebuild]
-//! CONCAT(a, b, ...) → a, b, ...                             [passive: reveals args]
-//! G^a^b = G^b^a                                              [DH commutativity]
-//! ```
-//!
-//! To extend the theory, add a [`PrimitiveSpec`] entry in `primitive/spec.rs`;
-//! the rule engine picks it up automatically.
-
 use std::sync::Arc;
 
 use crate::equivalence::equivalent_primitives;
@@ -35,8 +9,6 @@ use crate::types::*;
 
 const MAX_DEPTH: usize = 16;
 
-/// Passively decompose a primitive: extract arguments that are always visible
-/// to the attacker without any key knowledge (e.g., associated data in AEAD_ENC).
 pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
@@ -54,9 +26,6 @@ pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 		.collect()
 }
 
-/// Knowing the spec's `given` arguments (the encryption key) reveals its
-/// `reveal` argument (the plaintext). A given argument counts as held if the
-/// attacker can obtain it at all, not only if it holds it outright.
 pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
@@ -97,11 +66,6 @@ pub(crate) fn can_decompose(
 	}
 }
 
-/// Whether the attacker can get hold of `v` at all: it already holds it, or it
-/// can open or rebuild it from what it holds.
-///
-/// Decomposition and reconstruction both ask exactly this of every argument
-/// they need, so the cascade lives here rather than being spelled out twice.
 fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: usize) -> bool {
 	if attacker.knows(v).is_some() {
 		return true;
@@ -116,8 +80,6 @@ fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: u
 	}
 }
 
-/// Enough shares of a multi-output primitive recover its input — each inner
-/// vec of `recompose.given` is one sufficient set of output indices.
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
 	if primitive_is_core(p.id) {
 		return None;
@@ -152,8 +114,6 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	None
 }
 
-/// Buildable when every argument of the symbolically rewritten form is
-/// obtainable.
 pub(crate) fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
@@ -182,9 +142,6 @@ pub(crate) fn can_reconstruct_primitive(
 	Some(has)
 }
 
-/// `G^a` needs `a`. `G^a^b` needs both exponents, or one exponent plus the
-/// other side's public value — by commutativity, `a` and `G^b` build `G^a^b`
-/// just as well as `a` and `b` do.
 pub(crate) fn can_reconstruct_equation(
 	e: &Equation,
 	attacker: &AttackerState,
@@ -222,18 +179,10 @@ pub(crate) fn can_reconstruct_equation(
 	None
 }
 
-/// Reduce a primitive if its arguments match its rewrite rule's pattern,
-/// children first.
-///
-/// Returns `(success, result)` where `result` is the reduced value of this
-/// primitive *instance* (multi-output primitives project via `p.output`
-/// inside their core rule), and `success` is false if a checked primitive's
-/// rewrite rule failed (indicating a protocol error).
 pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
 	if depth > MAX_DEPTH {
 		return (false, Value::Primitive(Arc::new(p.clone())));
 	}
-	// Reduce child primitives first; `pc_ref` is the original unless one changed.
 	let reduced = p.map_arguments(|a| match a {
 		Value::Primitive(inner_p) => {
 			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
@@ -278,9 +227,6 @@ pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (
 	(!prim.definition_check, wrap(pc_ref))
 }
 
-/// Internal: check if a primitive's rewrite rule's matching constraints are
-/// satisfied. Each constraint requires that an argument of the outer primitive
-/// matches (after filtering) an argument of the inner primitive.
 fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
 	let Ok(prim) = primitive_get(p.id) else {
 		return false;
@@ -304,7 +250,6 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 				continue;
 			}
 			ax[0] = filtered;
-			// Rewrite primitives in ax
 			for item in &mut ax {
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
@@ -343,11 +288,6 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 	true
 }
 
-/// Check if a primitive can be eagerly rebuilt from matching sub-values.
-///
-/// Used during symbolic rewriting (not attacker deduction): when two arguments
-/// of a join primitive (e.g., SHAMIR_JOIN) are shares from the same split
-/// (e.g., SHAMIR_SPLIT), the join is immediately resolved.
 pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	if primitive_is_core(p.id) {
 		return None;
@@ -371,7 +311,6 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 		if has.len() < given_set.len() {
 			continue;
 		}
-		// Check that all has entries are equivalent but with different outputs
 		let all_ok = has[1..].iter().all(|has_p| {
 			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has_p) {
 				let pm = equivalent_primitives(h0, hp, false);
@@ -390,23 +329,6 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	None
 }
 
-/// Find password-qualified values that the attacker can recover via
-/// offline brute-force guessing.
-///
-/// A password at position `i` of primitive `P(a0, …, an)` is obtainable
-/// when two conditions hold at every primitive level in the nesting chain:
-///
-/// 1. **No inherent protection.** Position `i` is not in `P.password_hashing`.
-///    This field is reserved for primitives that resist brute-force by
-///    design (e.g. `PW_HASH`).
-///
-/// 2. **Verifiable guess.** The attacker knows every sibling argument
-///    `aj` (j ≠ i). This lets the attacker reconstruct `P(…, guess, …)`
-///    and compare against the known output to confirm the guess.
-///
-/// Both checks are applied at *every* primitive ancestor (core and
-/// non-core alike). If any ancestor has an unknown sibling, the attacker
-/// cannot reconstruct the full value and the password is safe.
 pub(crate) fn find_obtainable_passwords(
 	a: &Value,
 	protected: bool,
@@ -461,8 +383,6 @@ mod tests {
 
 	#[test]
 	fn can_rewrite_split_concat() {
-		// SPLIT(CONCAT(a, b)) reduces to the projection selected by the
-		// instance's output index; out-of-bounds projections reduce to nil.
 		let a = make_constant("cr_a");
 		let b = make_constant("cr_b");
 		let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
@@ -492,9 +412,6 @@ mod tests {
 
 	#[test]
 	fn can_rewrite_pke_dec_with_projected_key() {
-		// PKE_DEC(sk2, PKE_ENC(G^SPLIT(CONCAT(sk1, sk2))[1], m)) should
-		// rewrite to m: the projection in the public key resolves to sk2,
-		// the matching secret key.
 		let sk1 = make_constant("crpk_sk1");
 		let sk2 = make_constant("crpk_sk2");
 		let m = make_constant("crpk_m");
@@ -526,8 +443,6 @@ mod tests {
 
 	#[test]
 	fn can_reconstruct_primitive_projection() {
-		// SPLIT(CONCAT(HASH(a), HASH(b)))[1] reduces to HASH(b); an attacker
-		// who knows b (but not a) can reconstruct it.
 		let a = make_constant("crproj_a");
 		let b = make_constant("crproj_b");
 		let hash_a = make_primitive(PRIM_HASH, vec![a], 0);
@@ -635,13 +550,12 @@ mod tests {
 		let eq = Equation {
 			values: vec![value_g(), a.clone(), b],
 		};
-		let attacker = make_attacker_state(vec![a]); // only knows a, not b
+		let attacker = make_attacker_state(vec![a]);
 		assert!(can_reconstruct_equation(&eq, &attacker).is_none());
 	}
 
 	#[test]
 	fn passive_decompose_aead_enc() {
-		// AEAD_ENC has no passive_reveal — the AD is not part of the ciphertext
 		let key = make_constant("pd_key");
 		let msg = make_constant("pd_msg");
 		let ad = make_constant("pd_ad");
@@ -730,7 +644,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let attacker = make_attacker_state(vec![]); // doesn't know the key
+		let attacker = make_attacker_state(vec![]);
 		assert!(can_decompose(&p, &ps, &attacker, 0).is_none());
 	}
 
@@ -749,7 +663,6 @@ mod tests {
 
 	#[test]
 	fn find_obtainable_passwords_known_sibling() {
-		// ENC(pwd, msg): attacker knows msg → can verify pwd guesses → obtainable
 		let pw = make_password("fop2_pw");
 		let msg = make_constant("fop2_msg");
 		let pw_c = pw.as_constant().unwrap().clone();
@@ -766,7 +679,6 @@ mod tests {
 
 	#[test]
 	fn find_obtainable_passwords_unknown_sibling() {
-		// ENC(pwd, secret): attacker does NOT know secret → cannot verify → safe
 		let pw = make_password("fop3_pw");
 		let secret = make_constant("fop3_secret");
 		let pw_c = pw.as_constant().unwrap().clone();

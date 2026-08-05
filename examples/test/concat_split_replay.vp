@@ -1,11 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Regression model for GitHub issue #18: Bob signs a CONCAT built from
-// SPLIT projections of a guarded message. The attacker can only replay
-// Bob's exact ciphertext, so the authentication query must pass, exactly
-// as it does when Alice sends the nonces as separate guarded messages.
-
 attacker[active]
 
 principal Alice[

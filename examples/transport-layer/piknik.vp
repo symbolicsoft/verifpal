@@ -1,10 +1,5 @@
 // SPDX-FileCopyrightText: © 2021 Daan Sprenkels <daan@dsprenkels.com>
 // SPDX-License-Identifier: GPL-3.0-only OR CC0-1.0
-//
-// This verifpal example models the security of Frank Denis' 'piknik'
-// copy-paste protocol (<https://github.com/jedisct1/piknik>).
-// It is based on version 00ee34c of the piknik source. Due to
-// limitations in verifpal, only the Copy operation is implemented.
 
 attacker[active]
 
@@ -20,8 +15,8 @@ principal Client1[
     knows private ekid
     signpubkey = G^signprivkey
 
-    leaks skk // Leaking API key simulates a non-honest server.
-    leaks ekid // ekid is an ID, not a key; so it is considered public.
+    leaks skk
+    leaks ekid
 ]
 
 principal Client2[
@@ -30,8 +25,6 @@ principal Client2[
     knows private keygen
 ]
 
-// We assume the signing public key is provisioned out-of-band on all the
-// clients.
 Client1 -> Client2: [signpubkey]
 
 principal Client1[
@@ -55,7 +48,6 @@ principal Client1[
     generates ts
     generates n
     generates m
-    // leaks m
 
     _ = ASSERT(h1, HASH(skk, 1, rprime, h0))?
 
@@ -70,7 +62,7 @@ Client1 -> Client2: h2, ts, signature, ekid, n, ct
 principal Client2[
     _ = ASSERT(h2, HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid)))?
     _ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
-    
+
     gkeygen_ = G^keygen
     nm_ = DEC(gkeygen_^ekid, ct)
     n_, m_ = SPLIT(nm_)
@@ -83,4 +75,3 @@ queries[
     authentication? Client1 -> Client2: ct
     freshness? m
 ]
-

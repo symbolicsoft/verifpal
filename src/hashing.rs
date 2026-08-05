@@ -55,7 +55,6 @@ fn equation_hash_inner(e: &Equation) -> u64 {
 	}
 }
 
-/// Record the hash of `v` and of every term inside it.
 pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
 	out.insert(v.hash_value());
 	match v {
@@ -84,13 +83,12 @@ mod tests {
 	#[test]
 	fn hash_equal_constants() {
 		let a = make_constant("hash_eq_a");
-		let b = make_constant("hash_eq_a"); // same name → same id
+		let b = make_constant("hash_eq_a");
 		assert_eq!(a.hash_value(), b.hash_value());
 	}
 
 	#[test]
 	fn hash_commutative_dh() {
-		// Commutative DH equations must hash the same
 		let a = make_constant("hash_dh_a");
 		let b = make_constant("hash_dh_b");
 		let e1 = make_equation(vec![value_g(), a.clone(), b.clone()]);
@@ -102,7 +100,6 @@ mod tests {
 	fn hash_different_values() {
 		let a = make_constant("hash_d_a");
 		let b = make_constant("hash_d_b");
-		// Very likely different hashes (not guaranteed but extremely probable)
 		assert_ne!(a.hash_value(), b.hash_value());
 	}
 
@@ -121,7 +118,6 @@ mod tests {
 		let flat = Equation {
 			values: vec![value_g(), a.clone(), b.clone()],
 		};
-		// Nested: (G^a)^b  (same thing when flattened)
 		let inner = Equation {
 			values: vec![value_g(), a],
 		};

@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Simplified double ratchet: DH ratchet + symmetric ratchet.
-// Each exchange advances the DH ratchet and derives new chain keys.
-// Tests complex key derivation with alternating DH steps.
-
 attacker[active]
 
 principal Alice[
@@ -24,7 +20,6 @@ principal Bob[
 Alice -> Bob: [ga_id], [ga_eph0]
 Bob -> Alice: [gb_id], [gb_eph0]
 
-// Round 1: Alice sends
 principal Alice[
 	dh_root = HASH(gb_id^a_id, gb_eph0^a_eph0)
 	rk1, ck_a1 = HKDF(dh_root, nil, nil)
@@ -35,13 +30,11 @@ principal Alice[
 
 Alice -> Bob: e1
 
-// Round 1: Bob receives + sends
 principal Bob[
 	dh_root_b = HASH(ga_id^b_id, ga_eph0^b_eph0)
 	rk1_b, ck_b1 = HKDF(dh_root_b, nil, nil)
 	mk_b1, _ = HKDF(ck_b1, nil, nil)
 	msg1_b = AEAD_DEC(mk_b1, e1, ga_eph0)?
-	// DH ratchet step
 	generates b_eph1
 	gb_eph1 = G^b_eph1
 	rk2_b, ck_b2 = HKDF(rk1_b, HASH(ga_eph0^b_eph1), nil)
@@ -52,7 +45,6 @@ principal Bob[
 
 Bob -> Alice: [gb_eph1], e2
 
-// Round 2: Alice receives
 principal Alice[
 	rk2, ck_a2 = HKDF(rk1, HASH(gb_eph1^a_eph0), nil)
 	mk_a2, _ = HKDF(ck_a2, nil, nil)

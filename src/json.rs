@@ -49,7 +49,6 @@ pub(crate) fn json_knowledge_map(trace: &ProtocolTrace) -> String {
 	let assigned = json_array(trace.slots.iter(), |slot| {
 		format!(r#""{}""#, json_escape(&slot.initial_value.to_string()))
 	});
-	// KnownBy: [[{"Bob": "Alice"}], ...]
 	let known_by = json_array(trace.slots.iter(), |slot| {
 		json_array(slot.known_by.iter(), |&(recipient, sender)| {
 			format!(
@@ -159,8 +158,6 @@ pub fn handle_internal_json(subcommand: &str, input: &str) {
 	}
 }
 
-/// Errors are located against the model's own source so the editor gets a
-/// line and column rather than a bare message.
 fn located<T>(m: &Model, r: VResult<T>) -> VResult<T> {
 	r.map_err(|e| e.located(&m.file_name, &m.source))
 }

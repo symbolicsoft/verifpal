@@ -17,27 +17,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-	/// Analyze a Verifpal model
 	#[command(arg_required_else_help = true)]
 	Verify {
-		/// Path to the Verifpal model file
 		model: String,
-		/// Output only the result code (for testing)
 		#[arg(long, default_value_t = false)]
 		result_code: bool,
 	},
-	/// Pretty-print a Verifpal model
 	#[command(arg_required_else_help = true)]
 	Pretty {
-		/// Path to the Verifpal model file
 		model: String,
 	},
-	/// About information for the Verifpal software
 	About,
-	/// Internal JSON interface for IDE integrations
 	#[command(name = "internal-json", arg_required_else_help = true)]
 	InternalJson {
-		/// Subcommand: knowledgeMap, verify, prettyPrint, prettyDiagram
 		subcommand: String,
 	},
 }
@@ -51,7 +43,6 @@ fn read_stdin() -> String {
 		match handle.read(&mut buf) {
 			Ok(0) => break,
 			Ok(n) => {
-				// The editor sends EOT rather than closing the pipe.
 				if let Some(eot) = buf[..n].iter().position(|&b| b == 0x04) {
 					input.extend_from_slice(&buf[..eot]);
 					break;
@@ -61,8 +52,6 @@ fn read_stdin() -> String {
 			Err(_) => break,
 		}
 	}
-	// Decode once, at the end: pushing `b as char` per byte would turn every
-	// multi-byte UTF-8 sequence in a comment into mojibake.
 	String::from_utf8_lossy(&input).into_owned()
 }
 

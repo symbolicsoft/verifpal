@@ -1,12 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! End-to-end model tests: each asserts a model's compact result code.
-//!
-//! These live in the library rather than `tests/` because an integration-test
-//! target plus this crate's `cdylib` output collide on one artifact name, and
-//! the `cdylib` is what wasm-pack needs.
-
 fn run_model(model: &str, expected: &str) {
 	let file_name = format!("examples/test/{}", model);
 	let (_, results_code) =
@@ -302,6 +296,41 @@ fn test_four_party() {
 fn test_phase_forward_secrecy() {
 	run_model("phase_forward_secrecy.vp", "c0a0e1");
 }
+
+#[test]
+fn test_phase_tamper_then_compromise() {
+	run_model("phase_tamper_then_compromise.vp", "c1c1c1c1");
+}
+
+#[test]
+fn test_phase_tamper_without_compromise() {
+	run_model("phase_tamper_without_compromise.vp", "c0c0");
+}
+
+#[test]
+fn test_phase_tamper_compromise_three_phases() {
+	run_model("phase_tamper_compromise_three_phases.vp", "c1");
+}
+
+#[test]
+fn test_phase_retroactive_forgery() {
+	run_model("phase_retroactive_forgery.vp", "c0a0");
+}
+
+#[test]
+fn test_phase_retroactive_aead_bypass() {
+	run_model("phase_retroactive_aead_bypass.vp", "c1a0");
+}
+
+#[test]
+fn test_phase_signed_prekey() {
+	run_model("phase_signed_prekey.vp", "c0");
+}
+
+#[test]
+fn test_phase_unsigned_prekey() {
+	run_model("phase_unsigned_prekey.vp", "c1");
+}
 #[test]
 fn test_shamir_reconstruction() {
 	run_model("shamir_reconstruction.vp", "c1c1e1");
@@ -310,8 +339,6 @@ fn test_shamir_reconstruction() {
 fn test_blind_signature() {
 	run_model("blind_signature.vp", "c0c0a1");
 }
-/// A relayed message must not be credited to the attacker just because some
-/// other slot of the same proposal was genuinely substituted.
 #[test]
 fn test_relay_not_forgery() {
 	run_model("relay_not_forgery.vp", "a0");

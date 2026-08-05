@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal Alice[
+	knows private ia
+	gia = G^ia
+]
+
+principal Bob[
+	knows private ib, sb
+	gib = G^ib
+	gsb = G^sb
+	sbsig = SIGN(ib, gsb)
+]
+
+Bob -> Alice: [gib], gsb, sbsig
+
+principal Alice[
+	generates ea, m
+	gea = G^ea
+	_ = SIGNVERIF(gib, gsb, sbsig)?
+	master = HASH(gsb^ia, gib^ea, gsb^ea)
+	k = HKDF(master, nil, nil)
+	c = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: [gia], gea, c
+
+phase[1]
+
+principal Alice[leaks ia]
+principal Bob[leaks ib]
+
+queries[
+	confidentiality? m
+]

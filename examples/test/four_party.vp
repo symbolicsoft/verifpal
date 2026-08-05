@@ -1,28 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Four-party protocol: Alice sends a signed+encrypted message through
-// a relay (Carol) to Bob, who forwards a MAC to Damian for auditing.
-// Tests multi-hop message flow and cross-principal authentication.
-//
-// Expected: c1a0a0a0.  `msg` is not confidential because Bob puts it on the
-// wire himself in `Bob -> Damian: [msg_b], audit_mac`: a guard stops the
-// attacker replacing a value, not seeing it.
-//
-// All three authentication queries hold for one reason — every DH public is
-// guarded, so the attacker never obtains a pairwise secret and can only forward
-// the real message.  `re_envelope` would need AEAD_ENC(G^c^b, ...), `audit_mac`
-// MAC(G^b^d, ...).
-//
-// Two of them used to report a1, by two different false shapes:
-//
-//   - `re_envelope`: a relay credited to the attacker because another slot of
-//     the same proposal carried a genuine substitution.
-//   - `audit_mac`: sending Carol `nil` leaves Bob's AEAD_DEC(gc^b, ...)? stuck,
-//     so `msg_b` never reduces.  Damian's state cannot see that Bob halted, so
-//     handing that same stuck term back made his ASSERT compare two identical
-//     dead computations and pass.
-
 attacker[active]
 
 principal Alice[
@@ -53,7 +31,6 @@ Carol -> Bob: [gc]
 Damian -> Bob: [gd]
 Bob -> Damian: [gb]
 
-// Alice encrypts a message for Carol, signed, routed through Carol to Bob
 principal Alice[
 	generates msg
 	sig = SIGN(a, msg)
@@ -63,7 +40,6 @@ principal Alice[
 
 Alice -> Carol: envelope
 
-// Carol re-encrypts for Bob
 principal Carol[
 	inner = AEAD_DEC(ga^c, envelope, ga)?
 	msg_c, sig_c = SPLIT(inner)?
@@ -73,7 +49,6 @@ principal Carol[
 
 Carol -> Bob: re_envelope
 
-// Bob decrypts, verifies Alice's signature, and MACs for Damian
 principal Bob[
 	inner_b = AEAD_DEC(gc^b, re_envelope, gc)?
 	msg_b, sig_b = SPLIT(inner_b)?

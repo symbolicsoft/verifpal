@@ -13,10 +13,6 @@ use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
 
-/// Validate a model, build its context, and run the attacker it asks for.
-///
-/// The single place this sequence exists; the CLI, the IDE JSON interface and
-/// the wasm entry points differ only in how they render the results it holds.
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	let (trace, states) = sanity(m)?;
 	let ctx = VerifyContext::new(m, &states);
@@ -75,8 +71,6 @@ pub(crate) fn verify_standard_run(
 	Ok(())
 }
 
-/// Resolve, record mutations, inject skeletons, rewrite, and sanity-check one
-/// principal, yielding the state that knowledge closure then runs over.
 pub(crate) fn generate_trace(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -184,7 +178,6 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 	Ok((results, results_code))
 }
 
-/// UTC, formatted by hand to avoid pulling in a date-time dependency.
 fn chrono_time_string() -> String {
 	use std::time::SystemTime;
 	let now = SystemTime::now()
@@ -232,9 +225,6 @@ mod tests {
 
 	#[test]
 	fn analyses_in_one_process_do_not_share_identifier_state() {
-		// Names are interned per model, so two models analysed back to back
-		// assign the same ids to their own first constants and neither can
-		// exhaust an id space on the other's behalf.
 		let first = parse_string("first.vp", &model("aaa")).expect("parse");
 		let second = parse_string("second.vp", &model("bbb")).expect("parse");
 

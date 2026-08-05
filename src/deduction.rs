@@ -1,18 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Deduction rule engine
-//!
-//! The attacker's knowledge expansion, as a monotone fixed point over a finite
-//! set of rules: knowledge only grows, the derivable set is bounded by the
-//! model, so iterating to closure terminates at the least fixed point of
-//! F(K) = K ∪ { v : v derivable from K under some rule }.
-//!
-//! Rules are grouped by the domain they iterate over. Within a group they are
-//! tried in order and short-circuit on first success; any success restarts the
-//! outer loop from the first group. Cheap derivations come before expensive
-//! ones.
-
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
@@ -31,7 +19,6 @@ pub(crate) enum RuleDomain {
 	PrincipalAssigned,
 }
 
-/// Returns true if the rule gained the attacker new knowledge.
 type RuleFn =
 	fn(&VerifyContext, &Value, &PrincipalState, &AttackerState, &Arc<MutationRecord>) -> bool;
 
@@ -55,11 +42,6 @@ static DEDUCTION_RULES: &[RuleGroup] = &[
 	},
 ];
 
-/// Grow attacker knowledge to its least fixed point.
-///
-/// Deliberately checks no queries and takes no early exit when they are all
-/// resolved: keeping evaluation in a separate phase is what makes the
-/// Knaster-Tarski argument trivial.
 pub(crate) fn compute_knowledge_closure(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -77,7 +59,6 @@ pub(crate) fn compute_knowledge_closure(
 	}
 }
 
-/// Returns true if any rule derived new knowledge, restarting the outer loop.
 fn try_deduction_step(
 	ctx: &VerifyContext,
 	attacker: &AttackerState,
@@ -109,13 +90,6 @@ fn try_deduction_step(
 	false
 }
 
-/// Record a value the attacker derived, and say how — unless output is quiet.
-///
-/// Every rule ends this way.  Routing them all through one function is what
-/// keeps "knowledge and the derivation that explains it are recorded together"
-/// true by construction.  The message is a closure because minimization re-runs
-/// this whole closure many times with output suppressed, and every `format!`
-/// built for a suppressed line is thrown away.
 fn learn(
 	ctx: &VerifyContext,
 	value: &Value,
@@ -282,11 +256,6 @@ fn rule_equivalize(
 	_attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
-	// When the principal halted on a failed checked primitive (ASSERT?,
-	// AEAD_DEC?, SIGNVERIF?, …), any `leaks` this same principal declared
-	// after that point never fires.  Using the attacker's token for such
-	// a leaked constant to re-resolve in the current mutated state would
-	// let them harvest values from a branch the principal never reached.
 	if let Value::Constant(c) = value
 		&& let Some(halted_at) = ps.halted_at
 	{
@@ -397,7 +366,6 @@ mod tests {
 	#[test]
 	fn deduction_records_real_derivations() {
 		use crate::context::VerifyContext;
-		// Alice leaks the key, so the attacker decomposes the ciphertext.
 		let src = "attacker[passive]\n\
 			principal Alice[\n\
 			knows private ddr_m\n\
@@ -423,7 +391,6 @@ mod tests {
 
 		let attacker = ctx.attacker_snapshot();
 		assert_eq!(attacker.known.len(), attacker.derivations.len());
-		// Something must have been decomposed: that is how ddr_m is learned.
 		assert!(
 			attacker
 				.derivations
@@ -432,7 +399,6 @@ mod tests {
 			"expected at least one Decomposed derivation, got {:?}",
 			attacker.derivations
 		);
-		// The leaked key must be recorded as leaked, not as generic knowledge.
 		assert!(
 			attacker
 				.derivations

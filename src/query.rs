@@ -11,12 +11,6 @@ use crate::types::*;
 use crate::value::*;
 use crate::witness::{in_minimization, minimize_witness};
 
-/// Minimize the state that resolved this query, then narrate it.
-///
-/// During a minimization probe this returns the empty string: the probe only
-/// reads whether the query resolved, so building a narration for it would be
-/// pure waste — and the state it would describe is a hypothesis under test,
-/// not a reported attack.
 fn attack_trace(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -32,11 +26,6 @@ fn attack_trace(
 	narrate_attack(km, &witness, target)
 }
 
-/// The substitutions the attacker needed in order to hold this value.
-///
-/// Provenance travels along derivation edges (see
-/// `context.rs::derivation_provenance`), so a value's own record already names
-/// the run that earned it, however many runs later the query was re-answered.
 fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(SlotIdx, Value)> {
 	attacker
 		.mutation_records
@@ -165,8 +154,6 @@ fn query_authentication(
 	Ok(result)
 }
 
-/// Slots where this principal uses `c` inside a primitive that does not halt
-/// it — one with no rewrite rule, or whose rewrite passes, or unchecked.
 fn query_find_constant_usage_indices(
 	c: &Constant,
 	km: &ProtocolTrace,

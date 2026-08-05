@@ -3,8 +3,6 @@
 
 attacker[active]
 
-// Setup
-
 principal Alice[
 	knows private longTermA
 	generates ephemeralA
@@ -21,15 +19,9 @@ principal Bob[
 
 Bob -> Alice: longTermBPub
 
-// 1. Client Hello
-
 Alice -> Bob: ephemeralAPub
 
-// 2. Server Hello
-
 Bob -> Alice: ephemeralBPub
-
-// 3. Client Authenticate
 
 principal Alice[
 	ephemeralSecretAlice = ephemeralBPub^ephemeralA
@@ -42,7 +34,6 @@ principal Alice[
 	masterSecret2Alice = HASH(ephemeralSecretAlice, longTermSecretAlice, longEphemeralSecretAlice)
 ]
 
-// TODO: Concatentation
 Alice -> Bob: secretBox1Alice, secretBox2Alice
 
 principal Bob[
@@ -55,8 +46,6 @@ principal Bob[
 	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
 ]
 
-// 4. Server Accept
-
 principal Bob[
 	sig2Bob = SIGN(longTermB, HASH(sig1Bob, longTermAPub_Bob, ephemeralSecretBob))
 	masterSecret2Bob = HASH(ephemeralSecretBob, longTermSecretBob, longEphemeralSecretBob)
@@ -64,8 +53,6 @@ principal Bob[
 ]
 
 Bob -> Alice: secretBox1Bob
-
-// 5. Send a message
 
 principal Alice[
 	knows private m1

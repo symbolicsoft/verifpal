@@ -7,8 +7,6 @@ use crate::equivalence::splice_equation;
 use crate::types::*;
 use crate::value::{find_equivalent, push_unique_value};
 
-/// Far beyond what any real model needs (typical depth is < 10); it exists to
-/// stop a malformed or circular model looping forever.
 const MAX_RESOLVE_DEPTH: usize = 64;
 
 pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
@@ -91,7 +89,6 @@ fn resolve_trace_equation(
 			push_unique_value(visited, elem.clone());
 		}
 	}
-	// Consumed lazily by `splice_equation`, so no intermediate vector is built.
 	Value::Equation(Arc::new(splice_equation(elements.iter().map(
 		|item| match item {
 			Value::Constant(_) => {
@@ -115,22 +112,6 @@ pub(crate) fn resolve_ps_values(
 	resolve_ps_values_depth(value, root_value, root_index, ps, attacker, use_original, 0)
 }
 
-/// Whether a constant should resolve to its `original` (what the principal
-/// computed) rather than its `value` (which the attacker may have replaced).
-///
-/// Two cases:
-///
-/// 1. **Root constant** (`slot_idx == root_index`): use `original` if
-///    already forced, or if `should_use_original()` says so (the
-///    principal created it, doesn't know it, didn't receive it on a wire,
-///    or the value isn't tainted).
-///
-/// 2. **Nested constant** (`slot_idx != root_index`): if the root is a
-///    primitive received from another principal, force `original` so
-///    the principal sees the original (untampered) inputs — UNLESS this
-///    nested constant's `mutatable_to` list includes the root's creator,
-///    meaning the attacker could have replaced it before the root was
-///    computed, in which case the principal sees the tampered value.
 fn compute_visibility(
 	slot_idx: usize,
 	root_index: usize,
@@ -139,20 +120,17 @@ fn compute_visibility(
 	existing_use_original: bool,
 ) -> bool {
 	if slot_idx == root_index {
-		// Case 1: root constant.
 		if existing_use_original {
 			return true;
 		}
 		return ps.should_use_original(slot_idx);
 	}
 
-	// Case 2: nested constant.
 	let root_from_other = matches!(root_value, Value::Primitive(_))
 		&& ps.values[root_index].provenance.creator != ps.id;
 
 	let forced = existing_use_original || root_from_other;
 	if forced {
-		// Force original UNLESS this constant is mutable by the root's creator.
 		!ps.meta[slot_idx]
 			.mutatable_to
 			.contains(&ps.values[root_index].provenance.creator)
@@ -271,7 +249,6 @@ fn resolve_ps_equation_depth(
 	};
 	let mut resolved: Vec<Value> = Vec::with_capacity(eq.values.len());
 	for element in &eq.values {
-		// A constant element stands for whatever its slot currently holds.
 		let item = match element {
 			Value::Constant(c) => {
 				let (value, slot_idx) = ps.resolve_constant(c, true);

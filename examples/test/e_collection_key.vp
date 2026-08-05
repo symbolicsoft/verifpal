@@ -15,7 +15,6 @@ principal Alice[
 Alice -> Bob: collection_uid
 
 principal Bob[
-	// Keypair
 	generates b
 	gb = G^b
 ]

@@ -27,8 +27,6 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
-    # --all-targets, because plain clippy does not compile #[cfg(test)] code
-    # and so never lints the tests.
     - name: Run clippy
       run: cargo clippy --all-targets -- -D warnings
     - name: Run tests
@@ -55,7 +53,5 @@ jobs:
         key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-wasm-
-    # The wasm feature set is never compiled by the default build, so a
-    # CLI-only CI misses breakage in it entirely.
     - name: Clippy the wasm library
       run: cargo clippy --lib --no-default-features --features wasm --target wasm32-unknown-unknown -- -D warnings

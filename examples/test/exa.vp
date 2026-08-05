@@ -8,7 +8,6 @@ principal P1[
    knows private M
    knows public c
    key = AEAD_ENC(k1, c, c)
-   // AEAD_ENC(AEAD_ENC(k1, c, c), m, c)
    msg1 = AEAD_ENC(key, M, c)
    msg3 = AEAD_ENC(AEAD_ENC(k1,msg1,c),c,c)
 ]

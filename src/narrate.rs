@@ -1,14 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Narrating an attack
-//!
-//! Renders a minimized witness as numbered causal steps: what the attacker
-//! substituted, which checks that got past, and how the goal was then
-//! derived.  The derivation is read from the [`DerivationRecord`]s the
-//! engine recorded while learning each value, so the narration describes the
-//! run that happened rather than a plausible reconstruction of it.
-
 use std::sync::Arc;
 
 use crate::primitive::primitive_name;
@@ -16,18 +8,11 @@ use crate::principal::ATTACKER_ID;
 use crate::types::*;
 use crate::witness::Witness;
 
-/// Maps values to the names of the slots holding them.
-///
-/// Substituting a slot's name for its value is lossless: the definition is
-/// either in the model or earlier in the same trace.  It is what lets the
-/// narration print full structure — nothing is ever elided by depth — while
-/// staying readable.
 pub(crate) struct NameTable {
 	entries: Vec<(Value, Arc<str>)>,
 }
 
 impl NameTable {
-	/// A table that names nothing, for callers with no witness to draw on.
 	pub(crate) fn empty() -> NameTable {
 		NameTable { entries: vec![] }
 	}
@@ -35,12 +20,9 @@ impl NameTable {
 	pub(crate) fn from_state(ps: &PrincipalState) -> NameTable {
 		let mut entries: Vec<(Value, Arc<str>)> = Vec::new();
 		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
-			// Naming a constant after itself says nothing.
 			if matches!(&sv.value, Value::Constant(_)) {
 				continue;
 			}
-			// First declaration of a value wins: it is the one the reader
-			// meets first.
 			if entries.iter().any(|(v, _)| v.equivalent(&sv.value, true)) {
 				continue;
 			}
@@ -49,20 +31,10 @@ impl NameTable {
 		NameTable { entries }
 	}
 
-	/// Render `v`, replacing every maximal subterm that names a slot.
 	pub(crate) fn compress(&self, v: &Value) -> String {
 		self.compress_excluding(v, &[])
 	}
 
-	/// As [`Self::compress`], but never collapsing to any name in `exclude`.
-	///
-	/// Rendering what a slot *now holds* must not answer with that slot's own
-	/// name: after a mutation the table maps the slot's new value to the slot,
-	/// so "Attacker replaces ms_ga with ms_ga" is what an unguarded compress
-	/// produces.  A step that mutates several slots to the same term has the
-	/// same problem across slots — the second `G^nil` would print as the name
-	/// of the first slot that got one — so callers exclude every slot the step
-	/// touches, not only the one being described.
 	pub(crate) fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
 		let named = self
 			.entries
@@ -99,7 +71,6 @@ impl NameTable {
 	}
 }
 
-/// One attacker substitution.
 #[derive(Clone, Debug)]
 pub(crate) struct MutationItem {
 	pub name: Arc<str>,
@@ -108,39 +79,26 @@ pub(crate) struct MutationItem {
 	pub guarded: bool,
 }
 
-/// One narrated step of an attack.
 #[derive(Clone, Debug)]
 pub(crate) enum Step {
-	/// Substitutions the attacker made in a single wire message.
 	Mutations {
 		sender: Arc<str>,
 		recipient: Arc<str>,
 		items: Vec<MutationItem>,
 	},
-	/// A checked primitive that passed despite attacker-controlled inputs.
 	Gate {
 		principal: Arc<str>,
 		primitive: String,
 	},
-	/// One derivation the attacker performed.
-	Derive { text: String },
+	Derive {
+		text: String,
+	},
 }
 
-/// Whether a slot is the attacker's doing and so belongs in the trace.
-///
-/// Taint is too broad: a relayed value is tainted but was forwarded unchanged,
-/// so reporting it claims an action never taken.  A guard bypass is the
-/// converse — it leaves taint alone yet is the step a MITM trace least affords
-/// to lose — which is what `bypass_injected` is for.
 fn reportable(sv: &SlotValues) -> bool {
 	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected
 }
 
-/// Substitutions in `ps`, grouped into the wire messages they belong to.
-///
-/// Grouping is by `(sender, recipient, declared_at)`: values that travelled
-/// together are one action by the attacker, and reading them as one line is
-/// how a protocol designer thinks about them.
 pub(crate) fn mutation_steps(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -164,8 +122,6 @@ pub(crate) fn mutation_steps(
 			.get(i)
 			.map(|slot| slot.creator)
 			.unwrap_or(sv.provenance.creator);
-		// Excluding every mutated slot's name is what stops the line reading
-		// "Attacker replaces ms_ga with ms_ga".
 		let own = mutated.as_slice();
 		let item = MutationItem {
 			name: Arc::clone(&sm.constant.name),
@@ -195,11 +151,6 @@ pub(crate) fn mutation_steps(
 		.collect()
 }
 
-/// Checked primitives this principal computed that passed even though the
-/// attacker controlled their inputs.
-///
-/// These are the steps a reader is most likely to disbelieve — "surely the
-/// signature check catches that" — so they are called out explicitly.
 pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 	let mut steps = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
@@ -212,8 +163,6 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		if !p.arguments.iter().any(|a| value_is_tainted(a, ps)) {
 			continue;
 		}
-		// Same reason as in `mutation_steps`: naming the check after the slot
-		// that holds it would print "m1_d passes" instead of the AEAD_DEC.
 		let own = [&*ps.meta[i].constant.name];
 		let own = own.as_slice();
 		steps.push(Step::Gate {
@@ -224,7 +173,6 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 	steps
 }
 
-/// Whether `v` contains any value the attacker substituted in `ps`.
 fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	if ps
 		.values
@@ -240,19 +188,6 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
-/// How the attacker built `target`, as ordered steps: ingredients first, the
-/// target last.
-///
-/// Chains that bottom out in values the attacker simply had — public
-/// constants, `nil`, skeletons it can shape freely — end silently.  Narrating
-/// "the attacker knows nil" would bury the steps that matter.
-///
-/// `home` is the principal whose session is being narrated.  A value the
-/// attacker learned while running a *different* principal gets its line
-/// prefixed with that session, so a reader is never told the attacker
-/// obtained something in a session where it could not have.  Attribution is
-/// per line rather than a mode switch: a marker that changed the meaning of
-/// every step after it would mislabel the ones that belong to `home`.
 pub(crate) fn derivation_steps(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
@@ -287,8 +222,6 @@ fn walk(
 		return;
 	};
 
-	// Ingredients first, so a step never mentions a value the reader has not
-	// been told how the attacker got.
 	for ingredient in derivation
 		.ingredients()
 		.into_iter()
@@ -310,7 +243,6 @@ fn walk(
 				)
 			});
 		let text = match session {
-			// Lower-case the sentence that now follows a prefix.
 			Some(prefix) => format!("{}{}{}", prefix, lowercase_first(&text), ""),
 			None => text,
 		};
@@ -326,15 +258,9 @@ fn lowercase_first(s: &str) -> String {
 	}
 }
 
-/// One line of prose for a derivation, or `None` when it is not worth a step.
-///
-/// A record with no template of its own still renders — in the raw form the
-/// `Deduction ›` line uses — because a step the reader cannot see is worse
-/// than a step that reads mechanically.
 fn describe(derivation: &DerivationRecord, value: &Value, table: &NameTable) -> Option<String> {
 	let v = table.compress(value);
 	Some(match derivation {
-		// Values the attacker simply had are not events.
 		DerivationRecord::Initial | DerivationRecord::Injected => return None,
 		DerivationRecord::Leaked { .. } => {
 			format!("Attacker is handed {} by a leaks declaration.", v)
@@ -384,18 +310,12 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 		.join(", ")
 }
 
-/// A narrated attack, and the vocabulary it was written in.
-///
-/// The goal line quotes the same terms the steps do, so it is written with the
-/// same table: a summary that spells out in full what step 13 called `akenc1`
-/// makes the reader match two pages of nested HKDF by eye.
 pub(crate) struct Narration {
 	pub trace: String,
 	table: NameTable,
 }
 
 impl Narration {
-	/// No trace and no vocabulary, for a probe that will not be read.
 	pub(crate) fn none() -> Narration {
 		Narration {
 			trace: String::new(),
@@ -403,16 +323,11 @@ impl Narration {
 		}
 	}
 
-	/// Render `v` in the vocabulary of this trace.
 	pub(crate) fn term(&self, v: &Value) -> String {
 		self.table.compress(v)
 	}
 }
 
-/// Render a minimized witness as numbered attack steps.
-///
-/// The trace is empty when there is nothing to narrate — a query that fails
-/// without the attacker doing anything is fully explained by its goal line.
 pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
 	let mut steps = mutation_steps(km, &witness.ps, &table);
@@ -454,9 +369,6 @@ fn render(steps: &[Step]) -> String {
 }
 
 fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> String {
-	// `reportable` has already dropped relays, so an item that still renders
-	// identically to the honest value was authored by the attacker and is
-	// described as impersonation rather than as a no-op replacement.
 	let (replaced, impersonated): (Vec<&MutationItem>, Vec<&MutationItem>) =
 		items.iter().partition(|i| i.new_value != i.old_value);
 
@@ -504,7 +416,6 @@ mod tests {
 	use crate::testutil::*;
 
 	fn name_table_state() -> PrincipalState {
-		// nt_k = HASH(nt_a); nt_e = HASH(nt_k, nt_b)
 		let a = make_constant("nt_a");
 		let b = make_constant("nt_b");
 		let k = make_constant("nt_k");
@@ -540,8 +451,6 @@ mod tests {
 		use crate::narrate::NameTable;
 		let ps = name_table_state();
 		let table = NameTable::from_state(&ps);
-		// A term that is not itself a named slot keeps its shape, but its
-		// named subterm collapses.
 		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
 		let outer = make_primitive(PRIM_HASH, vec![hash_a, make_constant("nt_x")], 0);
 		assert_eq!(table.compress(&outer), "HASH(nt_k, nt_x)");
@@ -552,7 +461,6 @@ mod tests {
 		use crate::narrate::NameTable;
 		let ps = name_table_state();
 		let table = NameTable::from_state(&ps);
-		// Same shape, different output index: not the same value, not the name.
 		let other_output = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 1);
 		assert_eq!(table.compress(&other_output), "HASH(nt_a)");
 	}
@@ -563,9 +471,7 @@ mod tests {
 		let ps = name_table_state();
 		let table = NameTable::from_state(&ps);
 		let hash_a = make_primitive(PRIM_HASH, vec![make_constant("nt_a")], 0);
-		// Describing what slot nt_k now holds must not answer "nt_k".
 		assert_eq!(table.compress_excluding(&hash_a, &["nt_k"]), "HASH(nt_a)");
-		// Excluding an unrelated name changes nothing.
 		assert_eq!(table.compress_excluding(&hash_a, &["nt_e"]), "nt_k");
 	}
 
@@ -587,7 +493,6 @@ mod tests {
 			]\n";
 		let m = parse_string("ms.vp", src).expect("parse");
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
-		// Bob's state, with the wire value replaced by the attacker.
 		let bob = states
 			.iter()
 			.find(|p| p.name == "Bob")
@@ -664,8 +569,6 @@ mod tests {
 			"a step must reach the target: {:?}",
 			text
 		);
-		// The key was leaked, and that must be narrated before the step that
-		// uses it to open the ciphertext.
 		let leaked = text.iter().position(|t| t.contains("leaks declaration"));
 		let opened = text.iter().position(|t| t.contains("dw_m"));
 		assert!(
@@ -678,7 +581,6 @@ mod tests {
 	#[test]
 	fn derivation_steps_stay_silent_on_unknown_values() {
 		use crate::narrate::{NameTable, derivation_steps};
-		// A value the attacker never learned has no derivation to narrate.
 		let ps = name_table_state();
 		let table = NameTable::from_state(&ps);
 		let attacker = make_attacker_state(vec![]);

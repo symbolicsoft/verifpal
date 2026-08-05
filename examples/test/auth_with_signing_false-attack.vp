@@ -3,7 +3,6 @@
 
 attacker[active]
 
-// initialisation
 principal Alice[
 	knows private a
 	a_public = G^a
@@ -17,7 +16,6 @@ principal Bob[
 Alice -> Bob   : [a_public]
 Bob -> Alice : [b_public]
 
-// Key exchange
 principal Alice[
 	generates plaintext
 	key = b_public^a

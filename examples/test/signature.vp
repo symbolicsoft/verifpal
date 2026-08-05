@@ -3,7 +3,6 @@
 
 attacker[active]
 
-// initialisation
 principal Alice[
 	knows public hmac_key
 	knows private key
@@ -16,7 +15,6 @@ principal Bob[
 ]
 
 Alice -> Bob : [pk]
-//
 principal Alice[
 	generates plaintext
 	ciphertext = ENC(key, plaintext)

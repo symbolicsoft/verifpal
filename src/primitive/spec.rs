@@ -1,15 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! Primitive specifications.
-//!
-//! To add a new primitive to Verifpal, this is the only file you need to edit:
-//!   1. Add a new `PRIM_*` constant.
-//!   2. If it is a core primitive, add a `PrimitiveCoreSpec` to `build_core_specs()`.
-//!      Otherwise add a `PrimitiveSpec` to `build_primitive_specs()`.
-//!   3. If the primitive needs custom filter, core-rule, or rewrite-to logic,
-//!      define the function in this file and reference it from the spec.
-
 use std::sync::Arc;
 
 use super::*;
@@ -135,8 +126,6 @@ fn core_rule_split(p: &Primitive) -> (bool, Value) {
 	match &p.arguments[0] {
 		Value::Primitive(pp) if pp.id == PRIM_CONCAT => (
 			true,
-			// Project this instance's output; a SPLIT into more parts than
-			// the CONCAT provides yields nil for the excess outputs.
 			pp.arguments
 				.get(p.output)
 				.cloned()
@@ -146,14 +135,10 @@ fn core_rule_split(p: &Primitive) -> (bool, Value) {
 	}
 }
 
-/// Rewrite returns the second argument (ciphertext -> plaintext).
-/// Used by AEAD_DEC, DEC, PKE_DEC.
 fn rewrite_to_arg1(p: &Primitive) -> Value {
 	p.arguments[1].clone()
 }
 
-/// Rewrite returns nil (verification-only primitives).
-/// Used by SIGNVERIF, RINGSIGNVERIF.
 fn rewrite_to_nil(_p: &Primitive) -> Value {
 	value_nil()
 }
@@ -205,212 +190,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 		},
 	]
 }
-
-//
-// # How to add a new primitive
-//
-// 1. Define a `PRIM_*` constant with a unique ID (above).
-// 2. Add a `PrimitiveSpec { .. }` entry to the vec returned below.
-// 3. If your primitive needs custom filter, core-rule, or rewrite-to
-//    behavior, write the function in this file and reference it.
-//
-// That's it. The rest of the engine picks up the spec automatically.
-//
-//
-// # PrimitiveSpec field reference
-//
-// ## Identity
-//
-// `id`:    Unique numeric ID (the `PRIM_*` constant).
-// `name`:  Name as it appears in Verifpal models (e.g. "AEAD_ENC").
-//
-// ## Shape
-//
-// `arity`:  Allowed argument counts. `vec![3]` means exactly 3 arguments;
-//           `vec![1,2,3,4,5]` means 1 through 5 are all valid arities.
-// `output`: Allowed output counts. `vec![1]` means one output value;
-//           `vec![3]` (SHAMIR_SPLIT) means it always produces 3 shares;
-//           `vec![1,2,3,4,5]` (HKDF) means the caller picks how many
-//           outputs to bind, and any count from 1 to 5 is valid.
-//
-// ## Decompose rule
-//
-// Models active decryption: "if the attacker knows the key, they can
-// open the ciphertext." Set `decompose.has_rule = true` to enable.
-//
-// `decompose.given`:   Argument indices the attacker must already know.
-//                      For ENC(key, pt), `given: vec![0]` means the
-//                      attacker needs the key (argument 0).
-// `decompose.reveal`:  Argument index revealed on success.
-//                      For ENC(key, pt), `reveal: 1` gives the plaintext.
-// `decompose.filter`:  Optional per-argument transform applied during
-//                      active decomposition.  `filter_identity` passes
-//                      arguments through unchanged.
-//                      `filter_extract_dh_exponent` extracts `sk` from
-//                      a public key of the form `G^sk`, which is needed
-//                      for PKE_ENC where the "key" the attacker must
-//                      possess is not the public key itself but the
-//                      private exponent.
-// `decompose.passive_reveal`:
-//                      Argument indices leaked even without the key.
-//                      Empty for most primitives.
-//
-// ## Recompose rule
-//
-// Models threshold reconstruction: "if the attacker has enough shares,
-// they can recover the secret." Only relevant for primitives with
-// multiple outputs (e.g. SHAMIR_SPLIT). Set `recompose.has_rule = true`.
-//
-// `recompose.given`:   Each inner vec is an alternative sufficient set
-//                      of output indices. For SHAMIR_SPLIT:
-//                      `given: vec![vec![0,1], vec![0,2], vec![1,2]]`
-//                      means any 2-of-3 shares suffice.
-// `recompose.reveal`:  Index of the original input to recover.
-//                      `reveal: 0` means the secret (argument 0 of the
-//                      SHAMIR_SPLIT that produced the shares).
-//
-// ## Rewrite rule
-//
-// Models inverse operations: "DEC undoes ENC when the keys match."
-// This is the core mechanism for symbolic reduction of paired
-// primitives (encrypt/decrypt, sign/verify). Set `rewrite.has_rule`.
-//
-// `rewrite.id`:        The primitive this one inverts.
-//                      For DEC, `id: PRIM_ENC` — DEC undoes ENC.
-//                      For SIGNVERIF, `id: PRIM_SIGN`.
-// `rewrite.from`:      Which argument of *this* primitive is expected to
-//                      contain the inverse primitive. For DEC(key, ct),
-//                      `from: 1` means argument 1 (the ciphertext) should
-//                      be an ENC(...) for the rewrite to fire.
-// `rewrite.to`:        Function producing the rewritten output value.
-//                      `rewrite_to_arg1` returns the plaintext (argument 1
-//                      of the inner ENC). `rewrite_to_nil` returns nil
-//                      (for verification-only primitives like SIGNVERIF,
-//                      whose output is just "verified" with no data).
-// `rewrite.matching`:  Constraints that must hold between *this* primitive's
-//                      arguments and the inner primitive's arguments.
-//                      Each entry `(my_arg, inner_args)` means: argument
-//                      `my_arg` of *this* primitive must be equivalent to
-//                      at least one of the `inner_args` of the inner
-//                      primitive.
-//                      Example — DEC(key, ENC(k2, pt)):
-//                        `matching: vec![(0, vec![0])]`
-//                        means DEC.arg[0] (key) must equal ENC.arg[0] (k2).
-//                      Example — RINGSIGNVERIF(pk1, pk2, pk3, msg, sig):
-//                        `matching: vec![(0,vec![0,1,2]), (1,vec![0,1,2]),
-//                                        (2,vec![0,1,2]), (3,vec![3])]`
-//                        means each of the three public keys can match any
-//                        of the three RINGSIGN key slots, but the message
-//                        (arg 3) must match exactly.
-// `rewrite.filter`:    Optional per-argument transform applied during
-//                      rewrite matching. Similar to decompose.filter but
-//                      used during the rewrite-specific matching pass.
-//                      For AEAD_DEC, `filter_aead_dec_rewrite` allows
-//                      matching on arguments 0 and 2 (key and AD).
-//                      For SIGNVERIF, `filter_extract_dh_exponent`
-//                      extracts the private key from a DH public key.
-//
-// ## Rebuild rule
-//
-// Models join operations that eagerly reconstruct a split value during
-// symbolic rewriting (rather than during attacker analysis). This is
-// used for SHAMIR_JOIN, where the engine can simplify the protocol
-// state by recognizing that two shares from the same SHAMIR_SPLIT
-// recover the original secret. Set `rebuild.has_rule = true`.
-//
-// `rebuild.id`:        The split primitive being reconstructed.
-//                      For SHAMIR_JOIN, `id: PRIM_SHAMIR_SPLIT`.
-// `rebuild.given`:     Each inner vec lists argument indices of *this*
-//                      primitive that must all contain inner primitives
-//                      matching `rebuild.id`, with the same inputs but
-//                      different outputs.
-//                      For SHAMIR_JOIN(a, b):
-//                        `vec![vec![0,1], vec![1,0]]`
-//                        means arguments 0 and 1 must both be shares
-//                        from the same SHAMIR_SPLIT.
-// `rebuild.reveal`:    Index of the original input (of the inner split
-//                      primitive) to recover. `reveal: 0` recovers
-//                      the secret that was passed to SHAMIR_SPLIT.
-//
-// ## Behavioral flags
-//
-// `definition_check`:  When true, this is a *checked* primitive: in a
-//                      well-formed protocol, its rewrite rule must
-//                      succeed. AEAD_DEC must actually decrypt; SIGNVERIF
-//                      must actually verify. If the rule fails, the
-//                      engine treats it as a protocol error. When false
-//                      (the default), the primitive can appear without
-//                      its rewrite succeeding.
-//
-// `password_hashing`:  Argument indices with inherent computational
-//                      resistance to offline brute-force, even when
-//                      the attacker knows every other argument. Only
-//                      PW_HASH uses this (it is expensive by design).
-//                      For all other primitives, password protection
-//                      is determined dynamically: a password is safe
-//                      when the attacker lacks at least one sibling
-//                      argument needed to verify a guess.
-//
-// `bypass_key`:        How the active attacker extracts the secret needed
-//                      to forge an input that bypasses a failed guard.
-//                      `None` means no bypass is possible.
-//                      `Some(BypassKeyKind::Direct(i))` takes argument i
-//                      directly (e.g. the decryption key in DEC).
-//                      `Some(BypassKeyKind::DhExponent(i))` extracts the
-//                      last DH exponent from an equation at argument i
-//                      (e.g. the signing key `sk` from a public key
-//                      `G^sk` in SIGNVERIF).
-//
-//
-// # Example: a simple encryption primitive
-//
-// Suppose you wanted to add a primitive called STREAM_ENC(key, plaintext)
-// with a corresponding STREAM_DEC(key, ciphertext). You would:
-//
-//   const PRIM_STREAM_ENC: PrimitiveId = 22;
-//   const PRIM_STREAM_DEC: PrimitiveId = 23;
-//
-// Then add two PrimitiveSpec entries:
-//
-//   PrimitiveSpec {
-//       id: PRIM_STREAM_ENC,
-//       name: "STREAM_ENC",
-//       arity: vec![2],              // takes key + plaintext
-//       output: vec![1],             // produces one ciphertext
-//       decompose: DecomposeRule {
-//           has_rule: true,
-//           given: vec![0],          // attacker needs the key
-//           reveal: 1,               // to learn the plaintext
-//           filter: Some(filter_identity),
-//           ..DecomposeRule::default()
-//       },
-//       // password_hashing not needed: protection is dynamic
-//       ..PrimitiveSpec::default()
-//   },
-//   PrimitiveSpec {
-//       id: PRIM_STREAM_DEC,
-//       name: "STREAM_DEC",
-//       arity: vec![2],              // takes key + ciphertext
-//       output: vec![1],             // produces one plaintext
-//       decompose: DecomposeRule {
-//           has_rule: true,
-//           given: vec![0],
-//           reveal: 1,
-//           filter: Some(filter_identity),
-//           ..DecomposeRule::default()
-//       },
-//       rewrite: RewriteRule {
-//           has_rule: true,
-//           id: PRIM_STREAM_ENC,     // STREAM_DEC undoes STREAM_ENC
-//           from: 1,                 // arg 1 should be a STREAM_ENC(...)
-//           to: Some(rewrite_to_arg1), // result = inner plaintext
-//           matching: vec![(0, vec![0])], // keys must match
-//           filter: Some(filter_dec_rewrite),
-//       },
-//       definition_check: true,      // decryption must succeed
-//       bypass_key: Some(BypassKeyKind::Direct(0)), // key is arg 0
-//       ..PrimitiveSpec::default()
-//   },
 
 pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 	vec![

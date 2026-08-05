@@ -9,12 +9,6 @@ use crate::types::{PrincipalId, VResult, VerifpalError};
 pub(crate) const ATTACKER_ID: PrincipalId = 0;
 pub(crate) const ATTACKER_NAME: &str = "Attacker";
 
-/// Per-model principal name to id table.
-///
-/// Owned by the parser rather than the process. A global table would keep
-/// allocating ids across every model analysed in one process, and since
-/// `PrincipalId` is a `u8` the 256th distinct name would wrap onto
-/// `ATTACKER_ID` — aliasing a principal with the attacker rather than failing.
 pub(crate) struct PrincipalNames {
 	map: HashMap<Arc<str>, PrincipalId>,
 	names: Vec<Arc<str>>,
@@ -83,9 +77,6 @@ mod tests {
 
 	#[test]
 	fn exhausting_the_id_space_errors_instead_of_wrapping_onto_the_attacker() {
-		// A `PrincipalId` is a `u8`. Allocating past it used to truncate, and
-		// the first name to wrap landed on `ATTACKER_ID` — aliasing a principal
-		// with the attacker rather than failing.
 		let mut names = PrincipalNames::new();
 		for i in 0..PrincipalId::MAX {
 			let id = names

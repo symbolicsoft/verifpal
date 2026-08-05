@@ -357,7 +357,7 @@ pub(crate) fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> 
 			format!("too many layers in equation ({}), maximum is 2", e).into(),
 		));
 	}
-	let g_id: ValueId = 0; // g is always id 0
+	let g_id: ValueId = 0;
 	for (i, c) in e.values.iter().enumerate() {
 		if let Value::Constant(con) = c {
 			if i == 0 && con.id != g_id {

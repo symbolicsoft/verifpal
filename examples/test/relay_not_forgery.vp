@@ -1,21 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Expected: a0.
-//
-// `k` is a shared private that never leaks, so the attacker can build no
-// ciphertext `AEAD_DEC(kk_b, e, nil)?` accepts.  The only `e` it can send is
-// Alice's own, and forwarding a message unchanged is a relay, not a forgery.
-//
-// `ga` is the trap: unguarded, used by Bob, and replaceable with another
-// protocol term the attacker holds (`gb`), so substituting it is a genuine
-// attack on something.  That proposal also relays every other controlled slot,
-// `e` among them.  Decide authorship per proposal rather than per slot and the
-// relayed `e` is stamped attacker-sent, reporting a false attack.
-//
-// This is the shape that made `signal.vp` report a false attack on its first
-// message: the real substitution was on the *third* message's ephemeral key.
-
 attacker[active]
 
 principal Alice[

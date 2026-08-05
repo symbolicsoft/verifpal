@@ -3,12 +3,6 @@
 
 #![warn(unreachable_pub)]
 
-//! Verifpal: symbolic formal verification of cryptographic protocols.
-//!
-//! The engine modules are internal. The supported surface is what this file
-//! re-exports: parse and analyse a model, pretty-print one, and the JSON
-//! interface the editor extensions drive.
-
 pub(crate) mod construct;
 pub(crate) mod context;
 pub(crate) mod deduction;
@@ -90,7 +84,6 @@ fn wasm_verify_inner(input: &str) -> VResult<String> {
 	))
 }
 
-/// Verify a Verifpal model from source text. Returns JSON.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_verify(input: &str) -> String {
@@ -98,7 +91,6 @@ pub fn wasm_verify(input: &str) -> String {
 	wasm_verify_inner(input).unwrap_or_else(|e| wasm_verify_error(&e, &info::wasm_messages_drain()))
 }
 
-/// Pretty-print a Verifpal model from source text. Returns JSON.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {

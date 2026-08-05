@@ -1,17 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-// Symmetric key ratchet: each message uses a key derived from the previous one.
-// Tests HKDF chaining and whether the engine can track key evolution.
-//
-// Expected: c0c0c0a0a0a0.  `root_key` is a shared private that never leaks, so
-// the attacker derives none of mk1/mk2/mk3 — which is what the three passing
-// confidentiality queries say — and with no message key it can forge nothing.
-//
-// The old a1a1a0 was incoherent: e1, e2 and e3 are structurally identical, so
-// nothing forges the first two but not the third.  Both were relays credited to
-// the attacker because another slot of the same proposal was substituted.
-
 attacker[active]
 
 principal Alice[
