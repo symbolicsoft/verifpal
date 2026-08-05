@@ -1,14 +1,11 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! # Unified Equational Theory
+//! # Equational theory
 //!
-//! This module centralizes Verifpal's equational theory — the complete set of
-//! rules governing what the attacker can derive and how symbolic values reduce.
-//! All derivation, reduction, and reconstruction operations are defined here,
-//! driven by the declarative [`PrimitiveSpec`] system in `primitive/spec.rs`.
-//!
-//! ## Complete rule set
+//! Every rule governing what the attacker can derive and how symbolic values
+//! reduce, driven by the declarative [`PrimitiveSpec`] system in
+//! `primitive/spec.rs`.
 //!
 //! ```text
 //! DEC(k, ENC(k, m)) → m                                    [given: k]
@@ -27,22 +24,8 @@
 //! G^a^b = G^b^a                                              [DH commutativity]
 //! ```
 //!
-//! ## Derivation kinds
-//!
-//! The attacker can derive new values through six operations:
-//!
-//! - **Decompose** — open a primitive given knowledge of its key arguments
-//! - **Passive reveal** — extract always-visible arguments (e.g., AEAD associated data)
-//! - **Recompose** — combine threshold shares to recover a secret
-//! - **Reconstruct** — build a value from individually known components
-//! - **Symbolic rewrite** — reduce paired primitives (encrypt/decrypt)
-//! - **Rebuild** — eagerly join matching sub-values
-//!
-//! ## Adding a new primitive
-//!
-//! To extend the equational theory, add a [`PrimitiveSpec`] entry in
-//! `primitive/spec.rs`. The rule engine picks it up automatically — no other
-//! files need changes.
+//! To extend the theory, add a [`PrimitiveSpec`] entry in `primitive/spec.rs`;
+//! the rule engine picks it up automatically.
 
 use std::sync::Arc;
 
@@ -50,16 +33,11 @@ use crate::equivalence::equivalent_primitives;
 use crate::primitive::*;
 use crate::types::*;
 
-/// Maximum recursion depth for derivation operations.
 const MAX_DEPTH: usize = 16;
-
-// ---------------------------------------------------------------------------
-// Decomposition: "attacker knows the key → learns the plaintext"
-// ---------------------------------------------------------------------------
 
 /// Passively decompose a primitive: extract arguments that are always visible
 /// to the attacker without any key knowledge (e.g., associated data in AEAD_ENC).
-pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
+pub(crate) fn passively_decompose(p: &Primitive) -> Vec<Value> {
 	if primitive_is_core(p.id) {
 		return vec![];
 	}
@@ -76,13 +54,10 @@ pub fn passively_decompose(p: &Primitive) -> Vec<Value> {
 		.collect()
 }
 
-/// Actively decompose a primitive: if the attacker knows the required "given"
-/// arguments (e.g., the encryption key), reveal the hidden argument (e.g., the
-/// plaintext).
-///
-/// The attacker may obtain the given arguments directly (already in their
-/// knowledge set) or indirectly (by reconstructing or decomposing nested values).
-pub fn can_decompose(
+/// Knowing the spec's `given` arguments (the encryption key) reveals its
+/// `reveal` argument (the plaintext). A given argument counts as held if the
+/// attacker can obtain it at all, not only if it holds it outright.
+pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -108,24 +83,8 @@ pub fn can_decompose(
 		if !valid {
 			continue;
 		}
-		if attacker.knows(&filtered).is_some() {
+		if obtainable(&filtered, ps, attacker, depth) {
 			has.push(filtered);
-			continue;
-		}
-		match &filtered {
-			Value::Primitive(inner_p) => {
-				if can_reconstruct_primitive(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(filtered.clone());
-					continue;
-				}
-				if can_decompose(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(filtered.clone());
-				}
-			}
-			Value::Equation(inner_e) if can_reconstruct_equation(inner_e, attacker).is_some() => {
-				has.push(filtered.clone());
-			}
-			_ => {}
 		}
 	}
 	if has.len() >= prim.decompose.given.len() {
@@ -138,16 +97,28 @@ pub fn can_decompose(
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Recomposition: "attacker has enough threshold shares → recovers secret"
-// ---------------------------------------------------------------------------
-
-/// Check if the attacker can recompose a secret from threshold shares.
+/// Whether the attacker can get hold of `v` at all: it already holds it, or it
+/// can open or rebuild it from what it holds.
 ///
-/// For primitives like SHAMIR_SPLIT that produce multiple outputs, the attacker
-/// can recover the original input if they possess enough shares (as specified
-/// by the recompose rule's `given` sets).
-pub fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
+/// Decomposition and reconstruction both ask exactly this of every argument
+/// they need, so the cascade lives here rather than being spelled out twice.
+fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: usize) -> bool {
+	if attacker.knows(v).is_some() {
+		return true;
+	}
+	match v {
+		Value::Primitive(p) => {
+			can_decompose(p, ps, attacker, depth + 1).is_some()
+				|| can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
+		}
+		Value::Equation(e) => can_reconstruct_equation(e, attacker).is_some(),
+		Value::Constant(_) => false,
+	}
+}
+
+/// Enough shares of a multi-output primitive recover its input — each inner
+/// vec of `recompose.given` is one sufficient set of output indices.
+pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
@@ -181,14 +152,9 @@ pub fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<Recompos
 	None
 }
 
-// ---------------------------------------------------------------------------
-// Reconstruction: "attacker knows all components → can build the value"
-// ---------------------------------------------------------------------------
-
-/// Check if the attacker can reconstruct a primitive from individually known
-/// components. First rewrites the primitive symbolically, then checks if every
-/// argument of the rewritten form is attacker-obtainable.
-pub fn can_reconstruct_primitive(
+/// Buildable when every argument of the symbolically rewritten form is
+/// obtainable.
+pub(crate) fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -206,26 +172,8 @@ pub fn can_reconstruct_primitive(
 	};
 	let mut has = Vec::new();
 	for a in &rewritten_prim.arguments {
-		if attacker.knows(a).is_some() {
+		if obtainable(a, ps, attacker, depth) {
 			has.push(a.clone());
-			continue;
-		}
-		match a {
-			Value::Primitive(inner_p) => {
-				if can_decompose(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(a.clone());
-					continue;
-				}
-				if can_reconstruct_primitive(inner_p, ps, attacker, depth + 1).is_some() {
-					has.push(a.clone());
-					continue;
-				}
-			}
-			Value::Equation(inner_e) if can_reconstruct_equation(inner_e, attacker).is_some() => {
-				has.push(a.clone());
-				continue;
-			}
-			_ => {}
 		}
 	}
 	if has.len() < rewritten_prim.arguments.len() {
@@ -234,17 +182,13 @@ pub fn can_reconstruct_primitive(
 	Some(has)
 }
 
-/// Check if the attacker can reconstruct a DH equation from known components.
-///
-/// Equations model Diffie-Hellman exponentiation chains: `G^a^b` is `[G, a, b]`.
-/// The DH commutativity rule `G^a^b = G^b^a` means that knowing `a` and `G^b`
-/// (or `b` and `G^a`) suffices to construct `G^a^b`.
-///
-/// For a 2-element equation `G^a`, the attacker needs to know `a`.
-/// For a 3-element equation `G^a^b`, the attacker needs either:
-///   - Both exponents `a` and `b`, or
-///   - One exponent and the partial equation (e.g., `a` and `G^b`)
-pub fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> Option<Vec<Value>> {
+/// `G^a` needs `a`. `G^a^b` needs both exponents, or one exponent plus the
+/// other side's public value — by commutativity, `a` and `G^b` build `G^a^b`
+/// just as well as `a` and `b` do.
+pub(crate) fn can_reconstruct_equation(
+	e: &Equation,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
 	if e.values.len() < 2 {
 		return None;
 	}
@@ -278,41 +222,26 @@ pub fn can_reconstruct_equation(e: &Equation, attacker: &AttackerState) -> Optio
 	None
 }
 
-// ---------------------------------------------------------------------------
-// Symbolic rewrite: "DEC(k, ENC(k, m)) → m"
-// ---------------------------------------------------------------------------
-
-/// Symbolically rewrite a primitive by checking if its arguments match the
-/// rewrite rule's pattern. Recursively rewrites child primitives first.
+/// Reduce a primitive if its arguments match its rewrite rule's pattern,
+/// children first.
 ///
 /// Returns `(success, result)` where `result` is the reduced value of this
 /// primitive *instance* (multi-output primitives project via `p.output`
 /// inside their core rule), and `success` is false if a checked primitive's
 /// rewrite rule failed (indicating a protocol error).
-pub fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
+pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
 	if depth > MAX_DEPTH {
 		return (false, Value::Primitive(Arc::new(p.clone())));
 	}
-	// COW: only clone arguments if a child rewrite actually changed something
-	let mut new_args: Option<Vec<Value>> = None;
-	for (i, a) in p.arguments.iter().enumerate() {
-		if let Value::Primitive(inner_p) = a {
+	// Reduce child primitives first; `pc_ref` is the original unless one changed.
+	let reduced = p.map_arguments(|a| match a {
+		Value::Primitive(inner_p) => {
 			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
-			if !replacement.equivalent(a, true) {
-				let args = new_args.get_or_insert_with(|| p.arguments.clone());
-				args[i] = replacement;
-			}
+			(!replacement.equivalent(a, true)).then_some(replacement)
 		}
-	}
-	// pc_ref points to either the original or the modified primitive
-	let pc_owned: Primitive;
-	let pc_ref: &Primitive;
-	if let Some(args) = new_args {
-		pc_owned = p.with_arguments(args);
-		pc_ref = &pc_owned;
-	} else {
-		pc_ref = p;
-	}
+		_ => None,
+	});
+	let pc_ref: &Primitive = reduced.as_ref().unwrap_or(p);
 	let wrap = |pr: &Primitive| Value::Primitive(Arc::new(pr.clone()));
 	if primitive_is_core(pc_ref.id) {
 		let prim = match primitive_core_get(pc_ref.id) {
@@ -414,16 +343,12 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 	true
 }
 
-// ---------------------------------------------------------------------------
-// Rebuild: "SHAMIR_JOIN(split[0], split[1]) → secret"
-// ---------------------------------------------------------------------------
-
 /// Check if a primitive can be eagerly rebuilt from matching sub-values.
 ///
 /// Used during symbolic rewriting (not attacker deduction): when two arguments
 /// of a join primitive (e.g., SHAMIR_JOIN) are shares from the same split
 /// (e.g., SHAMIR_SPLIT), the join is immediately resolved.
-pub fn can_rebuild(p: &Primitive) -> Option<Value> {
+pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
@@ -465,10 +390,6 @@ pub fn can_rebuild(p: &Primitive) -> Option<Value> {
 	None
 }
 
-// ---------------------------------------------------------------------------
-// Password extraction
-// ---------------------------------------------------------------------------
-
 /// Find password-qualified values that the attacker can recover via
 /// offline brute-force guessing.
 ///
@@ -486,7 +407,7 @@ pub fn can_rebuild(p: &Primitive) -> Option<Value> {
 /// Both checks are applied at *every* primitive ancestor (core and
 /// non-core alike). If any ancestor has an unknown sibling, the attacker
 /// cannot reconstruct the full value and the password is safe.
-pub fn find_obtainable_passwords(
+pub(crate) fn find_obtainable_passwords(
 	a: &Value,
 	protected: bool,
 	can_verify: bool,
@@ -528,5 +449,338 @@ pub fn find_obtainable_passwords(
 				find_obtainable_passwords(v, protected, can_verify, attacker, ps, out);
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+	use crate::value::*;
+	use std::sync::Arc;
+
+	#[test]
+	fn can_rewrite_split_concat() {
+		// SPLIT(CONCAT(a, b)) reduces to the projection selected by the
+		// instance's output index; out-of-bounds projections reduce to nil.
+		let a = make_constant("cr_a");
+		let b = make_constant("cr_b");
+		let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
+		let c_dummy = Constant {
+			name: Arc::from("cr_dummy"),
+			id: test_value_id("cr_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		for (output, expected) in [(0, a), (1, b), (2, value_nil())] {
+			let split = Primitive {
+				id: PRIM_SPLIT,
+				arguments: vec![concat.clone()],
+				output,
+				instance_check: false,
+			};
+			let (rewritten, value) = can_rewrite(&split, &ps, 0);
+			assert!(rewritten);
+			assert!(value.equivalent(&expected, true));
+		}
+	}
+
+	#[test]
+	fn can_rewrite_pke_dec_with_projected_key() {
+		// PKE_DEC(sk2, PKE_ENC(G^SPLIT(CONCAT(sk1, sk2))[1], m)) should
+		// rewrite to m: the projection in the public key resolves to sk2,
+		// the matching secret key.
+		let sk1 = make_constant("crpk_sk1");
+		let sk2 = make_constant("crpk_sk2");
+		let m = make_constant("crpk_m");
+		let pair = make_primitive(PRIM_CONCAT, vec![sk1, sk2.clone()], 0);
+		let proj = make_primitive(PRIM_SPLIT, vec![pair], 1);
+		let pk = make_equation(vec![value_g(), proj]);
+		let enc = make_primitive(PRIM_PKE_ENC, vec![pk, m.clone()], 0);
+		let dec = Primitive {
+			id: PRIM_PKE_DEC,
+			arguments: vec![sk2, enc],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("crpk_dummy"),
+			id: test_value_id("crpk_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, value) = can_rewrite(&dec, &ps, 0);
+		assert!(rewritten);
+		assert!(value.equivalent(&m, true));
+	}
+
+	#[test]
+	fn can_reconstruct_primitive_projection() {
+		// SPLIT(CONCAT(HASH(a), HASH(b)))[1] reduces to HASH(b); an attacker
+		// who knows b (but not a) can reconstruct it.
+		let a = make_constant("crproj_a");
+		let b = make_constant("crproj_b");
+		let hash_a = make_primitive(PRIM_HASH, vec![a], 0);
+		let hash_b = make_primitive(PRIM_HASH, vec![b.clone()], 0);
+		let pair = make_primitive(PRIM_CONCAT, vec![hash_a, hash_b], 0);
+		let proj = Primitive {
+			id: PRIM_SPLIT,
+			arguments: vec![pair],
+			output: 1,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("crproj_dummy"),
+			id: test_value_id("crproj_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![b]);
+		assert!(can_reconstruct_primitive(&proj, &ps, &attacker, 0).is_some());
+	}
+
+	#[test]
+	fn can_rewrite_assert_matching() {
+		let a = make_constant("cra_a");
+		let assert_prim = Primitive {
+			id: PRIM_ASSERT,
+			arguments: vec![a.clone(), a.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("cra_dummy"),
+			id: test_value_id("cra_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
+		assert!(rewritten);
+	}
+
+	#[test]
+	fn can_rewrite_assert_mismatch() {
+		let a = make_constant("cram_a");
+		let b = make_constant("cram_b");
+		let assert_prim = Primitive {
+			id: PRIM_ASSERT,
+			arguments: vec![a, b],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("cram_dummy"),
+			id: test_value_id("cram_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
+		assert!(!rewritten);
+	}
+
+	#[test]
+	fn can_reconstruct_equation_2_element() {
+		let a = make_constant("cre_a");
+		let eq = Equation {
+			values: vec![value_g(), a.clone()],
+		};
+		let attacker = make_attacker_state(vec![a]);
+		let result = can_reconstruct_equation(&eq, &attacker);
+		assert!(result.is_some());
+		assert_eq!(result.unwrap().len(), 1);
+	}
+
+	#[test]
+	fn can_reconstruct_equation_3_element_both_exponents() {
+		let a = make_constant("cre3_a");
+		let b = make_constant("cre3_b");
+		let eq = Equation {
+			values: vec![value_g(), a.clone(), b.clone()],
+		};
+		let attacker = make_attacker_state(vec![a, b]);
+		let result = can_reconstruct_equation(&eq, &attacker);
+		assert!(result.is_some());
+		assert_eq!(result.unwrap().len(), 2);
+	}
+
+	#[test]
+	fn can_reconstruct_equation_missing_exponent() {
+		let a = make_constant("crem_a");
+		let b = make_constant("crem_b");
+		let eq = Equation {
+			values: vec![value_g(), a.clone(), b],
+		};
+		let attacker = make_attacker_state(vec![a]); // only knows a, not b
+		assert!(can_reconstruct_equation(&eq, &attacker).is_none());
+	}
+
+	#[test]
+	fn passive_decompose_aead_enc() {
+		// AEAD_ENC has no passive_reveal — the AD is not part of the ciphertext
+		let key = make_constant("pd_key");
+		let msg = make_constant("pd_msg");
+		let ad = make_constant("pd_ad");
+		let p = Primitive {
+			id: PRIM_AEAD_ENC,
+			arguments: vec![key, msg, ad.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let revealed = passively_decompose(&p);
+		assert_eq!(revealed.len(), 0);
+	}
+
+	#[test]
+	fn passive_decompose_hash_no_rule() {
+		let a = make_constant("pd_hash_a");
+		let p = Primitive {
+			id: PRIM_HASH,
+			arguments: vec![a],
+			output: 0,
+			instance_check: false,
+		};
+		let revealed = passively_decompose(&p);
+		assert!(revealed.is_empty());
+	}
+
+	#[test]
+	fn passive_decompose_core_primitive() {
+		let a = make_constant("pd_core_a");
+		let b = make_constant("pd_core_b");
+		let p = Primitive {
+			id: PRIM_CONCAT,
+			arguments: vec![a, b],
+			output: 0,
+			instance_check: false,
+		};
+		let revealed = passively_decompose(&p);
+		assert!(revealed.is_empty());
+	}
+
+	#[test]
+	fn can_decompose_enc_with_key() {
+		let key = make_constant("cd_key");
+		let msg = make_constant("cd_msg");
+		let p = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![key.clone(), msg.clone()],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("cd_dummy"),
+			id: test_value_id("cd_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![key]);
+		let result = can_decompose(&p, &ps, &attacker, 0);
+		assert!(result.is_some());
+		assert!(result.unwrap().revealed.equivalent(&msg, true));
+	}
+
+	#[test]
+	fn can_decompose_enc_without_key() {
+		let key = make_constant("cd_nk_key");
+		let msg = make_constant("cd_nk_msg");
+		let p = Primitive {
+			id: PRIM_ENC,
+			arguments: vec![key, msg],
+			output: 0,
+			instance_check: false,
+		};
+		let c_dummy = Constant {
+			name: Arc::from("cd_nk_dummy"),
+			id: test_value_id("cd_nk_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![]); // doesn't know the key
+		assert!(can_decompose(&p, &ps, &attacker, 0).is_none());
+	}
+
+	#[test]
+	fn find_obtainable_passwords_direct() {
+		let pw = make_password("fop_pw");
+		let pw_c = pw.as_constant().unwrap().clone();
+		let meta = vec![make_slot_meta(&pw_c, true)];
+		let values = vec![make_slot_values(&pw, 0)];
+		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+		let mut out = Vec::new();
+		find_obtainable_passwords(&pw, false, true, &attacker, &ps, &mut out);
+		assert_eq!(out.len(), 1);
+	}
+
+	#[test]
+	fn find_obtainable_passwords_known_sibling() {
+		// ENC(pwd, msg): attacker knows msg → can verify pwd guesses → obtainable
+		let pw = make_password("fop2_pw");
+		let msg = make_constant("fop2_msg");
+		let pw_c = pw.as_constant().unwrap().clone();
+		let msg_c = msg.as_constant().unwrap().clone();
+		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), msg.clone()], 0);
+		let meta = vec![make_slot_meta(&pw_c, true), make_slot_meta(&msg_c, false)];
+		let values = vec![make_slot_values(&pw, 0), make_slot_values(&msg, 0)];
+		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![msg]);
+		let mut out = Vec::new();
+		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
+		assert_eq!(out.len(), 1);
+	}
+
+	#[test]
+	fn find_obtainable_passwords_unknown_sibling() {
+		// ENC(pwd, secret): attacker does NOT know secret → cannot verify → safe
+		let pw = make_password("fop3_pw");
+		let secret = make_constant("fop3_secret");
+		let pw_c = pw.as_constant().unwrap().clone();
+		let secret_c = secret.as_constant().unwrap().clone();
+		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), secret.clone()], 0);
+		let meta = vec![
+			make_slot_meta(&pw_c, true),
+			make_slot_meta(&secret_c, false),
+		];
+		let values = vec![make_slot_values(&pw, 0), make_slot_values(&secret, 0)];
+		let ps = make_principal_state("Test", 0, meta, values);
+		let attacker = make_attacker_state(vec![]);
+		let mut out = Vec::new();
+		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
+		assert_eq!(out.len(), 0);
 	}
 }

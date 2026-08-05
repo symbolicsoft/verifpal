@@ -3,25 +3,15 @@
 
 use std::sync::Arc;
 
+use crate::equivalence::splice_equation;
 use crate::types::*;
 use crate::value::{find_equivalent, push_unique_value};
 
-// ---------------------------------------------------------------------------
-// Resolution helpers
-// ---------------------------------------------------------------------------
-
-/// Maximum recursion depth for value resolution.  Resolution follows constant
-/// chains (a = b, b = c, ...) and recurses into primitive arguments and
-/// equation elements.  64 is far beyond what any real protocol model requires
-/// (typical depth is < 10) but guards against infinite loops from malformed
-/// or circular models without imposing a practical limit.
+/// Far beyond what any real model needs (typical depth is < 10); it exists to
+/// stop a malformed or circular model looping forever.
 const MAX_RESOLVE_DEPTH: usize = 64;
 
-// ---------------------------------------------------------------------------
-// Resolve internal values from ProtocolTrace
-// ---------------------------------------------------------------------------
-
-pub fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
+pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
 	let mut visited: Vec<Value> = Vec::new();
 	let resolved = resolve_trace_value(value, trace, &mut visited, 0);
 	(resolved, visited)
@@ -69,19 +59,13 @@ fn resolve_trace_primitive(
 	if depth >= MAX_RESOLVE_DEPTH {
 		return value.clone();
 	}
-	// COW: only allocate a new Primitive if an argument actually changed
-	let mut new_args: Option<Vec<Value>> = None;
-	for (i, arg) in prim.arguments.iter().enumerate() {
+	let mapped = prim.map_arguments(|arg| {
 		let resolved = resolve_trace_value(arg, trace, visited, depth);
-		if !resolved.equivalent(arg, true) {
-			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
-			args[i] = resolved;
-		}
-	}
-	if let Some(args) = new_args {
-		Value::Primitive(Arc::new(prim.with_arguments(args)))
-	} else {
-		value.clone()
+		(!resolved.equivalent(arg, true)).then_some(resolved)
+	});
+	match mapped {
+		Some(mapped) => Value::Primitive(Arc::new(mapped)),
+		None => value.clone(),
 	}
 }
 
@@ -98,51 +82,29 @@ fn resolve_trace_equation(
 	if depth >= MAX_RESOLVE_DEPTH {
 		return value.clone();
 	}
-	let mut result_eq = Equation { values: Vec::new() };
-	let mut resolved_elements: Vec<Value> = Vec::new();
+	let mut elements: Vec<Value> = Vec::new();
 	for elem in &eq.values {
 		if let Value::Constant(c) = elem {
 			if let Some(idx) = trace.index_of(c) {
-				resolved_elements.push(trace.slots[idx].initial_value.clone());
+				elements.push(trace.slots[idx].initial_value.clone());
 			}
 			push_unique_value(visited, elem.clone());
 		}
 	}
-	for (i, item) in resolved_elements.iter().enumerate() {
-		match item {
+	// Consumed lazily by `splice_equation`, so no intermediate vector is built.
+	Value::Equation(Arc::new(splice_equation(elements.iter().map(
+		|item| match item {
 			Value::Constant(_) => {
-				result_eq.values.push(item.clone());
 				push_unique_value(visited, item.clone());
+				item.clone()
 			}
-			Value::Primitive(_) => {
-				let resolved = resolve_trace_primitive(item, trace, visited, depth);
-				result_eq.values.push(resolved);
-			}
-			Value::Equation(_) => {
-				let resolved = resolve_trace_equation(item, trace, visited, depth);
-				if let Some(inner) = resolved.as_equation() {
-					if i == 0 {
-						result_eq.values = inner.values.clone();
-					} else {
-						result_eq.values.push(resolved.clone());
-						if inner.values.len() > 1 {
-							result_eq.values.extend(inner.values[1..].iter().cloned());
-						}
-					}
-				} else {
-					result_eq.values.push(resolved);
-				}
-			}
-		}
-	}
-	Value::Equation(Arc::new(result_eq))
+			Value::Primitive(_) => resolve_trace_primitive(item, trace, visited, depth),
+			Value::Equation(_) => resolve_trace_equation(item, trace, visited, depth),
+		},
+	))))
 }
 
-// ---------------------------------------------------------------------------
-// Resolve internal values from PrincipalState
-// ---------------------------------------------------------------------------
-
-pub fn resolve_ps_values(
+pub(crate) fn resolve_ps_values(
 	value: &Value,
 	root_value: &Value,
 	root_index: usize,
@@ -153,23 +115,8 @@ pub fn resolve_ps_values(
 	resolve_ps_values_depth(value, root_value, root_index, ps, attacker, use_original, 0)
 }
 
-/// Resolve a value within a PrincipalState, following constant chains and
-/// recursing into primitives/equations.
-///
-/// The `use_original` flag controls which value a constant
-/// resolves to.  The invariant is:
-///
-/// - **original**: the value as originally computed by the protocol,
-///   before the attacker tampered with it.  Used when the principal "trusts"
-///   this value (created it, hasn't received it over a wire, etc.).
-///
-/// - **value**: the current value, which may have been mutated by the
-///   attacker.  Used when the principal received the value from the network
-///   and the attacker could have replaced it.
-///
-/// Determine whether a constant should resolve to its `original` value
-/// (what the principal originally computed) rather than its `value`
-/// (which may have been tampered with by the attacker).
+/// Whether a constant should resolve to its `original` (what the principal
+/// computed) rather than its `value` (which the attacker may have replaced).
 ///
 /// Two cases:
 ///
@@ -235,7 +182,7 @@ fn resolve_ps_values_depth(
 	if let Value::Constant(c) = &resolved {
 		let slot_idx = match ps.index_of(c) {
 			Some(i) => i,
-			None => return Err(VerifpalError::Resolution("invalid index".into())),
+			None => return Err(VerifpalError::resolution("invalid index".into())),
 		};
 
 		use_orig = compute_visibility(slot_idx, root_idx, &root_val, ps, use_orig);
@@ -296,21 +243,15 @@ fn resolve_ps_primitive_depth(
 	} else {
 		use_original
 	};
-	// COW: only allocate a new Primitive if an argument actually changed
-	let mut new_args: Option<Vec<Value>> = None;
-	for (i, arg) in prim.arguments.iter().enumerate() {
+	let mapped = prim.try_map_arguments(|arg| {
 		let resolved =
 			resolve_ps_values_depth(arg, root_value, root_index, ps, attacker, use_orig, depth)?;
-		if !resolved.equivalent(arg, true) {
-			let args = new_args.get_or_insert_with(|| prim.arguments.clone());
-			args[i] = resolved;
-		}
-	}
-	if let Some(args) = new_args {
-		Ok(Value::Primitive(Arc::new(prim.with_arguments(args))))
-	} else {
-		Ok(value.clone())
-	}
+		Ok((!resolved.equivalent(arg, true)).then_some(resolved))
+	})?;
+	Ok(match mapped {
+		Some(mapped) => Value::Primitive(Arc::new(mapped)),
+		None => value.clone(),
+	})
 }
 
 fn resolve_ps_equation_depth(
@@ -323,57 +264,39 @@ fn resolve_ps_equation_depth(
 	depth: usize,
 ) -> VResult<Value> {
 	let eq = value.try_as_equation()?;
-	let mut result_eq = Equation { values: Vec::new() };
-	let mut elements: Vec<Value> = eq.values.clone();
 	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
 		use_original
 	};
-	for item in &mut elements {
-		if let Value::Constant(c) = &*item {
-			let (resolved, slot_idx) = ps.resolve_constant(c, true);
-			*item = if use_orig {
-				slot_idx.map_or(resolved, |idx| ps.values[idx].original.clone())
-			} else {
-				resolved
-			};
-		}
-	}
-	for (i, item) in elements.iter().enumerate() {
-		match item {
-			Value::Constant(_) => {
-				result_eq.values.push(item.clone());
-			}
-			Value::Primitive(_) => {
-				let resolved = resolve_ps_primitive_depth(
-					item, root_value, root_index, ps, attacker, use_orig, depth,
-				)?;
-				result_eq.values.push(resolved);
-			}
-			Value::Equation(_) => {
-				let resolved = resolve_ps_equation_depth(
-					item, root_value, root_index, ps, attacker, use_orig, depth,
-				)?;
-				if i == 0 {
-					result_eq.values = resolved.try_as_equation()?.values.clone();
+	let mut resolved: Vec<Value> = Vec::with_capacity(eq.values.len());
+	for element in &eq.values {
+		// A constant element stands for whatever its slot currently holds.
+		let item = match element {
+			Value::Constant(c) => {
+				let (value, slot_idx) = ps.resolve_constant(c, true);
+				if use_orig {
+					slot_idx.map_or(value, |idx| ps.values[idx].original.clone())
 				} else {
-					let inner = resolved.try_as_equation()?;
-					if inner.values.len() > 1 {
-						result_eq.values.extend(inner.values[1..].iter().cloned());
-					}
+					value
 				}
 			}
-		}
+			_ => element.clone(),
+		};
+		resolved.push(match &item {
+			Value::Constant(_) => item,
+			Value::Primitive(_) => resolve_ps_primitive_depth(
+				&item, root_value, root_index, ps, attacker, use_orig, depth,
+			)?,
+			Value::Equation(_) => resolve_ps_equation_depth(
+				&item, root_value, root_index, ps, attacker, use_orig, depth,
+			)?,
+		});
 	}
-	Ok(Value::Equation(Arc::new(result_eq)))
+	Ok(Value::Equation(Arc::new(splice_equation(resolved))))
 }
 
-// ---------------------------------------------------------------------------
-// Used-by checks
-// ---------------------------------------------------------------------------
-
-pub fn constant_used_by_principal(
+pub(crate) fn constant_used_by_principal(
 	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
 	c: &Constant,
@@ -419,14 +342,13 @@ pub fn constant_used_by_principal(
 	false
 }
 
-// ---------------------------------------------------------------------------
-// Fresh value check
-// ---------------------------------------------------------------------------
-
-pub fn value_constant_contains_fresh_values(c: &Constant, ps: &PrincipalState) -> VResult<bool> {
+pub(crate) fn value_constant_contains_fresh_values(
+	c: &Constant,
+	ps: &PrincipalState,
+) -> VResult<bool> {
 	let idx = ps
 		.index_of(c)
-		.ok_or_else(|| VerifpalError::Resolution("invalid value".into()))?;
+		.ok_or_else(|| VerifpalError::resolution("invalid value".into()))?;
 	let mut constants = Vec::new();
 	ps.values[idx].value.collect_constants(&mut constants);
 	Ok(constants.iter().any(|inner| {

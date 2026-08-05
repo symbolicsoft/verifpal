@@ -9,7 +9,7 @@ use crate::value::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub fn construct_protocol_trace(
+pub(crate) fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
 	principal_ids: &[PrincipalId],
@@ -28,7 +28,6 @@ pub fn construct_protocol_trace(
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
-	// Add builtins (g, nil)
 	for builtin in &[value_g(), value_nil()] {
 		let c = match builtin.as_constant() {
 			Some(c) => c.clone(),
@@ -61,7 +60,8 @@ pub fn construct_protocol_trace(
 			Block::Message(message) => {
 				declared_at += 1;
 				trace.max_declared_at = declared_at;
-				construct_trace_render_message(&mut trace, message, current_phase)?;
+				construct_trace_render_message(&mut trace, message, current_phase)
+					.map_err(|e| e.or_span(message.span))?;
 			}
 			Block::Phase(phase) => {
 				current_phase = phase.number;
@@ -104,15 +104,19 @@ fn construct_trace_render_principal(
 	current_phase: i32,
 ) -> VResult<i32> {
 	for expr in &principal.expressions {
+		let located = |e: VerifpalError| e.or_span(expr.span);
 		match expr.kind {
 			Declaration::Knows => {
-				construct_trace_render_knows(trace, principal, declared_at, expr)?;
+				construct_trace_render_knows(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Generates => {
-				construct_trace_render_generates(trace, principal, declared_at, expr)?;
+				construct_trace_render_generates(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Assignment => {
-				construct_trace_render_assignment(trace, principal, declared_at, expr)?;
+				construct_trace_render_assignment(trace, principal, declared_at, expr)
+					.map_err(located)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
@@ -123,7 +127,8 @@ fn construct_trace_render_principal(
 					expr,
 					current_phase,
 					declared_at,
-				)?;
+				)
+				.map_err(located)?;
 			}
 		}
 	}
@@ -143,7 +148,7 @@ fn construct_trace_render_knows(
 				|| existing.qualifier != expr.qualifier
 				|| existing.fresh
 			{
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"constant is known more than once and in different ways ({})",
 						c
@@ -194,7 +199,7 @@ fn construct_trace_render_generates(
 ) -> VResult<()> {
 	for c in &expr.constants {
 		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!("generated constant already exists ({})", c).into(),
 			));
 		}
@@ -230,7 +235,7 @@ fn construct_trace_render_assignment(
 	let assigned = expr
 		.assigned
 		.as_ref()
-		.ok_or_else(|| VerifpalError::Sanity("missing assignment value".into()))?;
+		.ok_or_else(|| VerifpalError::sanity("missing assignment value".into()))?;
 	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
@@ -239,14 +244,14 @@ fn construct_trace_render_assignment(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("constant does not exist ({})", c).into(),
 				));
 			}
 		};
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is using constant ({}) despite not knowing it",
 					principal.name, c
@@ -257,7 +262,7 @@ fn construct_trace_render_assignment(
 	}
 	for (output_idx, c) in expr.constants.iter().enumerate() {
 		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!("constant assigned twice ({})", c).into(),
 			));
 		}
@@ -300,14 +305,14 @@ fn construct_trace_render_leaks(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!("leaked constant does not exist ({})", c).into(),
 				));
 			}
 		};
 		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} leaks a constant that they do not know ({})",
 					principal.name, c
@@ -336,12 +341,10 @@ fn construct_trace_render_message(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::Sanity(
+				return Err(VerifpalError::sanity(
 					format!(
 						"{} sends unknown constant to {} ({})",
-						principal_get_name_from_id(message.sender),
-						principal_get_name_from_id(message.recipient),
-						c
+						message.sender_name, message.recipient_name, c
 					)
 					.into(),
 				));
@@ -350,21 +353,19 @@ fn construct_trace_render_message(
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is sending constant ({}) despite not knowing it",
-					principal_get_name_from_id(message.sender),
-					c
+					message.sender_name, c
 				)
 				.into(),
 			));
 		}
 		if recipient_knows {
-			return Err(VerifpalError::Sanity(
+			return Err(VerifpalError::sanity(
 				format!(
 					"{} is receiving constant ({}) despite already knowing it",
-					principal_get_name_from_id(message.recipient),
-					c
+					message.recipient_name, c
 				)
 				.into(),
 			));
@@ -377,7 +378,7 @@ fn construct_trace_render_message(
 	Ok(())
 }
 
-pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
+pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut states = Vec::new();
 	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
 		let n = trace.slots.len();
@@ -385,11 +386,10 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 		let mut values_vec = Vec::with_capacity(n);
 		let mut index_map = HashMap::with_capacity(n);
 
+		let wire_index = construct_wire_index(m, trace, principal_id);
+
 		for slot in &trace.slots {
 			let c = &slot.constant;
-			let mut wire = vec![];
-			let mut guard = false;
-			let mut mutatable_to = vec![];
 			let mut knows = slot.creator == principal_id;
 			let mut sender = slot.creator;
 			for &(recipient, from) in &slot.known_by {
@@ -399,28 +399,16 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 					break;
 				}
 			}
-			for blck in &m.blocks {
-				if let Block::Message(message) = blck {
-					construct_principal_states_get_value_mutatability(
-						c,
-						message,
-						principal_id,
-						slot.creator,
-						&mut wire,
-						&mut guard,
-						&mut mutatable_to,
-					);
-				}
-			}
+			let travel = wire_index.get(&c.id);
 			index_map.insert(c.id, meta_vec.len());
 			meta_vec.push(SlotMeta {
 				constant: c.clone(),
-				guard,
+				guard: travel.is_some_and(|t| t.guard),
 				known: knows,
-				wire,
+				wire: travel.map(|t| t.wire.clone()).unwrap_or_default(),
 				known_by: slot.known_by.clone(),
 				declared_at: slot.declared_at,
-				mutatable_to,
+				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),
 				phase: slot.phases.clone(),
 			});
 			values_vec.push(SlotValues {
@@ -432,6 +420,7 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 					creator: slot.creator,
 					sender,
 					attacker_tainted: false,
+					bypass_injected: false,
 				},
 			});
 		}
@@ -449,37 +438,51 @@ pub fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<Princ
 	states
 }
 
-fn construct_principal_states_get_value_mutatability(
-	c: &Constant,
-	message: &Message,
+/// How a value travelled on the wire, from one principal's point of view.
+#[derive(Default)]
+struct WireTravel {
+	wire: Vec<PrincipalId>,
+	guard: bool,
+	mutatable_to: Vec<PrincipalId>,
+}
+
+/// Index every message once per principal.
+///
+/// The alternative is rescanning the whole model for each slot, which makes
+/// state construction grow with principals × slots × messages rather than with
+/// the size of the model.
+fn construct_wire_index(
+	m: &Model,
+	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
-	creator: PrincipalId,
-	wire: &mut Vec<PrincipalId>,
-	guard: &mut bool,
-	mutatable_to: &mut Vec<PrincipalId>,
-) {
-	let is_recipient = message.recipient == principal_id;
-	let is_creator = creator == principal_id;
-	for msg_const in &message.constants {
-		if c.id != msg_const.id {
+) -> HashMap<ValueId, WireTravel> {
+	let mut index: HashMap<ValueId, WireTravel> = HashMap::new();
+	for block in &m.blocks {
+		let Block::Message(message) = block else {
 			continue;
-		}
-		append_unique(wire, message.recipient);
-		if !*guard {
-			*guard = msg_const.guard && (is_recipient || is_creator);
-		}
-		if !msg_const.guard {
-			append_unique(mutatable_to, message.recipient);
+		};
+		for msg_const in &message.constants {
+			let Some(slot_idx) = trace.index_of(msg_const) else {
+				continue;
+			};
+			let is_recipient = message.recipient == principal_id;
+			let is_creator = trace.slots[slot_idx].creator == principal_id;
+			let travel = index.entry(msg_const.id).or_default();
+			append_unique(&mut travel.wire, message.recipient);
+			if !travel.guard {
+				travel.guard = msg_const.guard && (is_recipient || is_creator);
+			}
+			if !msg_const.guard {
+				append_unique(&mut travel.mutatable_to, message.recipient);
+			}
 		}
 	}
+	index
 }
 
 impl PrincipalState {
-	/// Deep-clone this principal state for a new search depth level.
-	///
-	/// When `purify` is true, resets all values to their pre-mutation state
-	/// (for a clean new depth level).  When false, preserves current mutation
-	/// state (for rewrite analysis within the same depth level).
+	/// Deep-clone this state; `purify` resets every value to its pre-mutation
+	/// form, discarding attacker taint and any halt.
 	pub fn clone_for_depth(&self, purify: bool) -> PrincipalState {
 		let values = self
 			.values
@@ -502,6 +505,11 @@ impl PrincipalState {
 							false
 						} else {
 							sv.provenance.attacker_tainted
+						},
+						bypass_injected: if purify {
+							false
+						} else {
+							sv.provenance.bypass_injected
 						},
 					},
 				}

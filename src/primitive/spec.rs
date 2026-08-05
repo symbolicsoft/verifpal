@@ -16,35 +16,27 @@ use super::*;
 use crate::types::*;
 use crate::value::{value_g, value_nil};
 
-// ---------------------------------------------------------------------------
-// Primitive ID constants
-// ---------------------------------------------------------------------------
-
-pub const PRIM_ASSERT: PrimitiveId = 1;
-pub const PRIM_CONCAT: PrimitiveId = 2;
-pub const PRIM_SPLIT: PrimitiveId = 3;
-pub const PRIM_PWHASH: PrimitiveId = 4;
-pub const PRIM_HASH: PrimitiveId = 5;
-pub const PRIM_HKDF: PrimitiveId = 6;
-pub const PRIM_AEAD_ENC: PrimitiveId = 7;
-pub const PRIM_AEAD_DEC: PrimitiveId = 8;
-pub const PRIM_ENC: PrimitiveId = 9;
-pub const PRIM_DEC: PrimitiveId = 10;
-pub const PRIM_MAC: PrimitiveId = 11;
-pub const PRIM_SIGN: PrimitiveId = 12;
-pub const PRIM_SIGNVERIF: PrimitiveId = 13;
-pub const PRIM_PKE_ENC: PrimitiveId = 14;
-pub const PRIM_PKE_DEC: PrimitiveId = 15;
-pub const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
-pub const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
-pub const PRIM_RINGSIGN: PrimitiveId = 18;
-pub const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
-pub const PRIM_BLIND: PrimitiveId = 20;
-pub const PRIM_UNBLIND: PrimitiveId = 21;
-
-// ---------------------------------------------------------------------------
-// Filter functions
-// ---------------------------------------------------------------------------
+pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
+pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
+pub(crate) const PRIM_SPLIT: PrimitiveId = 3;
+pub(crate) const PRIM_PWHASH: PrimitiveId = 4;
+pub(crate) const PRIM_HASH: PrimitiveId = 5;
+pub(crate) const PRIM_HKDF: PrimitiveId = 6;
+pub(crate) const PRIM_AEAD_ENC: PrimitiveId = 7;
+pub(crate) const PRIM_AEAD_DEC: PrimitiveId = 8;
+pub(crate) const PRIM_ENC: PrimitiveId = 9;
+pub(crate) const PRIM_DEC: PrimitiveId = 10;
+pub(crate) const PRIM_MAC: PrimitiveId = 11;
+pub(crate) const PRIM_SIGN: PrimitiveId = 12;
+pub(crate) const PRIM_SIGNVERIF: PrimitiveId = 13;
+pub(crate) const PRIM_PKE_ENC: PrimitiveId = 14;
+pub(crate) const PRIM_PKE_DEC: PrimitiveId = 15;
+pub(crate) const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
+pub(crate) const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
+pub(crate) const PRIM_RINGSIGN: PrimitiveId = 18;
+pub(crate) const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
+pub(crate) const PRIM_BLIND: PrimitiveId = 20;
+pub(crate) const PRIM_UNBLIND: PrimitiveId = 21;
 
 fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 	(x.clone(), true)
@@ -130,10 +122,6 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Core rule functions
-// ---------------------------------------------------------------------------
-
 fn core_rule_assert(p: &Primitive) -> (bool, Value) {
 	let v = Value::Primitive(Arc::new(p.clone()));
 	if p.arguments[0].equivalent(&p.arguments[1], true) {
@@ -157,10 +145,6 @@ fn core_rule_split(p: &Primitive) -> (bool, Value) {
 		_ => (false, Value::Primitive(Arc::new(p.clone()))),
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Rewrite-to functions
-// ---------------------------------------------------------------------------
 
 /// Rewrite returns the second argument (ciphertext -> plaintext).
 /// Used by AEAD_DEC, DEC, PKE_DEC.
@@ -187,10 +171,6 @@ fn rewrite_to_unblind(p: &Primitive) -> Value {
 	}))
 }
 
-// ---------------------------------------------------------------------------
-// Core primitive specifications
-// ---------------------------------------------------------------------------
-
 pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 	vec![
 		PrimitiveCoreSpec {
@@ -201,7 +181,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: true,
 			core_rule: Some(core_rule_assert),
 			definition_check: true,
-			explosive: false,
 			reveals_args: false,
 		},
 		PrimitiveCoreSpec {
@@ -212,7 +191,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: false,
 			core_rule: None,
 			definition_check: false,
-			explosive: true,
 			reveals_args: true,
 		},
 		PrimitiveCoreSpec {
@@ -223,15 +201,11 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			has_rule: true,
 			core_rule: Some(core_rule_split),
 			definition_check: true,
-			explosive: false,
 			reveals_args: false,
 		},
 	]
 }
 
-// ---------------------------------------------------------------------------
-// Primitive specifications
-// ---------------------------------------------------------------------------
 //
 // # How to add a new primitive
 //
@@ -279,11 +253,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                      private exponent.
 // `decompose.passive_reveal`:
 //                      Argument indices leaked even without the key.
-//                      Empty for most primitives. Could be used for
-//                      primitives where some arguments are visible to the
-//                      attacker by construction (not the case for AEAD,
-//                      where the AD is an input but not part of the
-//                      ciphertext output).
+//                      Empty for most primitives.
 //
 // ## Recompose rule
 //
@@ -358,8 +328,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                        `vec![vec![0,1], vec![1,0]]`
 //                        means arguments 0 and 1 must both be shares
 //                        from the same SHAMIR_SPLIT.
-//                      (Entries referencing out-of-bounds indices are
-//                      harmlessly skipped.)
 // `rebuild.reveal`:    Index of the original input (of the inner split
 //                      primitive) to recover. `reveal: 0` recovers
 //                      the secret that was passed to SHAMIR_SPLIT.
@@ -373,13 +341,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 //                      engine treats it as a protocol error. When false
 //                      (the default), the primitive can appear without
 //                      its rewrite succeeding.
-//
-// `explosive`:         When true, the primitive generates many candidate
-//                      values during attacker injection, so the engine
-//                      defers exploring it to reduce early search cost.
-//                      Set this for hash-like primitives (HASH, HKDF)
-//                      where the attacker could wrap any known value
-//                      in the primitive to produce a candidate.
 //
 // `password_hashing`:  Argument indices with inherent computational
 //                      resistance to offline brute-force, even when
@@ -453,7 +414,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 
 pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 	vec![
-		// PW_HASH
 		PrimitiveSpec {
 			id: PRIM_PWHASH,
 			name: "PW_HASH",
@@ -462,25 +422,20 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			password_hashing: vec![0, 1, 2, 3, 4],
 			..PrimitiveSpec::default()
 		},
-		// HASH
 		PrimitiveSpec {
 			id: PRIM_HASH,
 			name: "HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
-			explosive: true,
 			..PrimitiveSpec::default()
 		},
-		// HKDF
 		PrimitiveSpec {
 			id: PRIM_HKDF,
 			name: "HKDF",
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
-			explosive: true,
 			..PrimitiveSpec::default()
 		},
-		// AEAD_ENC
 		PrimitiveSpec {
 			id: PRIM_AEAD_ENC,
 			name: "AEAD_ENC",
@@ -495,7 +450,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// AEAD_DEC
 		PrimitiveSpec {
 			id: PRIM_AEAD_DEC,
 			name: "AEAD_DEC",
@@ -520,7 +474,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
-		// ENC
 		PrimitiveSpec {
 			id: PRIM_ENC,
 			name: "ENC",
@@ -535,7 +488,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// DEC
 		PrimitiveSpec {
 			id: PRIM_DEC,
 			name: "DEC",
@@ -559,7 +511,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
-		// MAC
 		PrimitiveSpec {
 			id: PRIM_MAC,
 			name: "MAC",
@@ -567,7 +518,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			..PrimitiveSpec::default()
 		},
-		// SIGN
 		PrimitiveSpec {
 			id: PRIM_SIGN,
 			name: "SIGN",
@@ -575,7 +525,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			..PrimitiveSpec::default()
 		},
-		// SIGNVERIF
 		PrimitiveSpec {
 			id: PRIM_SIGNVERIF,
 			name: "SIGNVERIF",
@@ -593,7 +542,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			bypass_key: Some(BypassKeyKind::DhExponent(0)),
 			..PrimitiveSpec::default()
 		},
-		// PKE_ENC
 		PrimitiveSpec {
 			id: PRIM_PKE_ENC,
 			name: "PKE_ENC",
@@ -608,7 +556,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// PKE_DEC
 		PrimitiveSpec {
 			id: PRIM_PKE_DEC,
 			name: "PKE_DEC",
@@ -632,7 +579,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
-		// SHAMIR_SPLIT
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_SPLIT,
 			name: "SHAMIR_SPLIT",
@@ -645,7 +591,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// SHAMIR_JOIN
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_JOIN,
 			name: "SHAMIR_JOIN",
@@ -666,7 +611,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// RINGSIGN
 		PrimitiveSpec {
 			id: PRIM_RINGSIGN,
 			name: "RINGSIGN",
@@ -674,7 +618,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			..PrimitiveSpec::default()
 		},
-		// RINGSIGNVERIF
 		PrimitiveSpec {
 			id: PRIM_RINGSIGNVERIF,
 			name: "RINGSIGNVERIF",
@@ -697,7 +640,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			bypass_key: Some(BypassKeyKind::DhExponent(0)),
 			..PrimitiveSpec::default()
 		},
-		// BLIND
 		PrimitiveSpec {
 			id: PRIM_BLIND,
 			name: "BLIND",
@@ -712,7 +654,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			..PrimitiveSpec::default()
 		},
-		// UNBLIND
 		PrimitiveSpec {
 			id: PRIM_UNBLIND,
 			name: "UNBLIND",

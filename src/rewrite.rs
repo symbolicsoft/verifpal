@@ -3,15 +3,11 @@
 
 use std::sync::Arc;
 
-use crate::possible::{can_rebuild, can_rewrite};
 use crate::primitive::primitive_has_rewrite_rule;
+use crate::theory::{can_rebuild, can_rewrite};
 use crate::types::*;
 
-// ---------------------------------------------------------------------------
-// Rewrite: primitives
-// ---------------------------------------------------------------------------
-
-pub fn perform_primitive_rewrite(
+pub(crate) fn perform_primitive_rewrite(
 	p: &Primitive,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
@@ -49,10 +45,6 @@ pub fn perform_primitive_rewrite(
 	r.value = rewritten_value;
 	r
 }
-
-// ---------------------------------------------------------------------------
-// Rewrite: primitive arguments
-// ---------------------------------------------------------------------------
 
 fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -> RewriteResult {
 	let mut failed_rewrites: Vec<Primitive> = Vec::new();
@@ -96,11 +88,7 @@ fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Rewrite: equations
-// ---------------------------------------------------------------------------
-
-pub fn perform_equation_rewrite(
+pub(crate) fn perform_equation_rewrite(
 	e: &Equation,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,

@@ -2,20 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::primitive::primitive_get_enum;
-use crate::principal::principal_names_map_add;
+use crate::principal::PrincipalNames;
 use crate::types::*;
-use crate::value::value_names_map_add;
+use crate::value::ValueNames;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// Global counter for generating unique unnamed constant names during parsing.
-/// Must be process-wide so that unnamed constants never collide across models
-/// parsed in the same process (e.g. during parallel test runs).
-static UNNAMED_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-pub fn unnamed_counter_reset() {
-	UNNAMED_COUNTER.store(0, Ordering::SeqCst);
-}
 
 const RESERVED: &[&str] = &[
 	"attacker",
@@ -67,7 +57,7 @@ fn check_reserved(s: &str) -> VResult<()> {
 		|| lower.starts_with("attacker")
 		|| lower.starts_with("unnamed")
 	{
-		return Err(VerifpalError::Parse(
+		return Err(VerifpalError::parse(
 			format!("cannot use reserved keyword in name: {}", s).into(),
 		));
 	}
@@ -106,6 +96,9 @@ struct Parser<'a> {
 	pos: usize,
 	pending_leading: Vec<Comment>,
 	unterminated_block_at: Option<usize>,
+	values: ValueNames,
+	principals: PrincipalNames,
+	unnamed_counter: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -115,7 +108,15 @@ impl<'a> Parser<'a> {
 			pos: 0,
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
+			values: ValueNames::new(),
+			principals: PrincipalNames::new(),
+			unnamed_counter: 0,
 		}
+	}
+
+	fn principal_id(&mut self, name: &str) -> VResult<(PrincipalId, Arc<str>)> {
+		let id = self.principals.intern(name)?;
+		Ok((id, self.principals.name_of(id)))
 	}
 
 	fn remaining(&self) -> &str {
@@ -155,24 +156,18 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Consume whitespace and comments. Captures comments into
-	/// `pending_leading` so they can be attached to the next AST node
-	/// via `take_leading`.
+	/// Buffers comments into `pending_leading` for the next AST node.
 	fn consume_trivia(&mut self) {
 		self.consume_trivia_inner(true);
 	}
 
-	/// Same as `consume_trivia`, but discards any comments encountered
-	/// rather than buffering them. Used in disallowed-comment positions
-	/// (inside primitive args, equation halves, attacker[]/phase[]
-	/// brackets, inner query option brackets).
+	/// As `consume_trivia`, but for the positions where comments are
+	/// disallowed and therefore dropped: inside primitive args, equation
+	/// halves, `attacker[]`/`phase[]` brackets, and query option brackets.
 	fn consume_trivia_nocapture(&mut self) {
 		self.consume_trivia_inner(false);
 	}
 
-	/// Internal trivia consumer. When `capture` is false, comments are
-	/// recognized and skipped but not stored — used for positions where
-	/// comments are disallowed (inside primitive args, etc.).
 	fn consume_trivia_inner(&mut self, capture: bool) {
 		loop {
 			self.skip_whitespace();
@@ -228,8 +223,6 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Drain and return any pending leading comments. Called at the
-	/// start of building each AST node.
 	fn take_leading(&mut self) -> Vec<Comment> {
 		std::mem::take(&mut self.pending_leading)
 	}
@@ -248,18 +241,13 @@ impl<'a> Parser<'a> {
 
 	fn check_unterminated_block(&self) -> VResult<()> {
 		if let Some(pos) = self.unterminated_block_at {
-			return Err(VerifpalError::Parse(
-				format!("unterminated block comment starting at byte {}", pos).into(),
-			));
+			return Err(VerifpalError::parse("unterminated block comment".into()).at(Span::at(pos)));
 		}
 		Ok(())
 	}
 
-	/// Try to capture a same-line trailing comment after the node's
-	/// last token. Skips inline whitespace (spaces/tabs only) and
-	/// returns a Comment if one opens and (for block style) closes
-	/// before the next newline. Leaves `self.pos` past the comment
-	/// if captured, or unchanged if not.
+	/// A comment on the same line as the node's last token. A block comment
+	/// only counts if it also closes before the newline.
 	fn try_take_trailing(&mut self) -> Option<Comment> {
 		let saved = self.snapshot();
 		self.skip_inline_whitespace();
@@ -325,9 +313,7 @@ impl<'a> Parser<'a> {
 			self.pos += bytes.len();
 			Ok(())
 		} else {
-			Err(VerifpalError::Parse(
-				format!("expected '{}' at position {}", s, self.pos).into(),
-			))
+			Err(VerifpalError::parse(format!("expected '{}'", s).into()).at(Span::at(self.pos)))
 		}
 	}
 
@@ -354,12 +340,10 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if self.pos == start {
-			return Err(VerifpalError::Parse(
-				format!("expected identifier at position {}", self.pos).into(),
-			));
+			return Err(VerifpalError::parse("expected identifier".into()).at(Span::at(self.pos)));
 		}
 		let s = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in identifier".into()))?;
+			.map_err(|_| VerifpalError::parse("invalid UTF-8 in identifier".into()))?;
 		Ok(s.to_lowercase())
 	}
 
@@ -370,7 +354,7 @@ impl<'a> Parser<'a> {
 
 		// Parse attacker
 		if !self.try_expect("attacker") {
-			return Err(VerifpalError::Parse("no `attacker` block defined".into()));
+			return Err(VerifpalError::parse("no `attacker` block defined".into()));
 		}
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
@@ -380,7 +364,7 @@ impl<'a> Parser<'a> {
 			"active" => AttackerKind::Active,
 			"passive" => AttackerKind::Passive,
 			_ => {
-				return Err(VerifpalError::Parse(
+				return Err(VerifpalError::parse(
 					format!("invalid attacker type: {}", attacker_str).into(),
 				));
 			}
@@ -409,7 +393,7 @@ impl<'a> Parser<'a> {
 		}
 
 		if blocks.is_empty() {
-			return Err(VerifpalError::Parse(
+			return Err(VerifpalError::parse(
 				"no principal or message blocks defined".into(),
 			));
 		}
@@ -418,7 +402,7 @@ impl<'a> Parser<'a> {
 		self.consume_trivia();
 		let queries_leading_comments = self.take_leading();
 		if !self.try_expect("queries") {
-			return Err(VerifpalError::Parse("no `queries` block defined".into()));
+			return Err(VerifpalError::parse("no `queries` block defined".into()));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -451,13 +435,14 @@ impl<'a> Parser<'a> {
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
 		if !self.at_end() {
-			return Err(VerifpalError::Parse(
+			return Err(VerifpalError::parse(
 				"the `queries` block must be at the end of the model; found content after `queries`"
 					.into(),
 			));
 		}
 		Ok(Model {
 			file_name: String::new(),
+			source: Source::default(),
 			attacker: attacker_type,
 			blocks,
 			queries,
@@ -491,6 +476,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_principal(&mut self) -> VResult<Block> {
+		let start = self.pos;
 		self.expect("principal")?;
 		self.skip_whitespace();
 		let name = self.parse_identifier()?;
@@ -516,10 +502,11 @@ impl<'a> Parser<'a> {
 		self.expect("]")?;
 		let closing_trailing = self.try_take_trailing();
 		self.consume_trivia();
-		let id = principal_names_map_add(&name);
+		let id = self.principals.intern(&name)?;
 		Ok(Block::Principal(Principal {
 			name,
 			id,
+			span: Span::new(start, self.pos),
 			expressions,
 			leading_comments: Vec::new(),
 			header_trailing,
@@ -529,6 +516,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_message_block(&mut self) -> VResult<Block> {
+		let start = self.pos;
 		let sender_name = self.parse_identifier()?;
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
@@ -536,9 +524,9 @@ impl<'a> Parser<'a> {
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
 			// ok
 		} else {
-			return Err(VerifpalError::Parse(
-				format!("expected '->' in message at position {}", self.pos).into(),
-			));
+			return Err(
+				VerifpalError::parse("expected '->' in message".into()).at(Span::at(self.pos))
+			);
 		}
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
@@ -549,11 +537,14 @@ impl<'a> Parser<'a> {
 		let constants = self.parse_message_constants()?;
 		let trailing = self.try_take_trailing();
 		self.consume_trivia();
-		let sender_id = principal_names_map_add(&sender_name);
-		let recipient_id = principal_names_map_add(&recipient_name);
+		let (sender, sender_name) = self.principal_id(&sender_name)?;
+		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
 		Ok(Block::Message(Message {
-			sender: sender_id,
-			recipient: recipient_id,
+			span: Span::new(start, self.pos),
+			sender,
+			sender_name,
+			recipient,
+			recipient_name,
 			constants,
 			leading_comments: Vec::new(),
 			trailing_comment: trailing,
@@ -603,7 +594,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::Parse(
+			return Err(VerifpalError::parse(
 				"message constants are not defined".into(),
 			));
 		}
@@ -638,6 +629,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_knows(&mut self) -> VResult<Expression> {
+		let start = self.pos;
 		self.expect("knows")?;
 		self.skip_whitespace();
 		let qualifier_str = self.parse_identifier()?;
@@ -646,7 +638,7 @@ impl<'a> Parser<'a> {
 			"public" => Qualifier::Public,
 			"password" => Qualifier::Password,
 			_ => {
-				return Err(VerifpalError::Parse(
+				return Err(VerifpalError::parse(
 					format!("invalid qualifier: {}", qualifier_str).into(),
 				));
 			}
@@ -654,6 +646,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
+			span: Span::new(start, self.pos),
 			kind: Declaration::Knows,
 			qualifier: Some(qualifier),
 			constants,
@@ -664,10 +657,12 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_simple_expression(&mut self, keyword: &str, kind: Declaration) -> VResult<Expression> {
+		let start = self.pos;
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
+			span: Span::new(start, self.pos),
 			kind,
 			qualifier: None,
 			constants,
@@ -678,15 +673,17 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_assignment(&mut self) -> VResult<Expression> {
+		let start = self.pos;
 		let constants = self.parse_constants()?;
 		self.skip_whitespace();
 		self.expect("=")?;
 		self.skip_whitespace();
 		let value = self.parse_value()?;
 		if let Value::Constant(_) = &value {
-			return Err(VerifpalError::Parse("cannot assign value to value".into()));
+			return Err(VerifpalError::parse("cannot assign value to value".into()));
 		}
 		Ok(Expression {
+			span: Span::new(start, self.pos),
 			kind: Declaration::Assignment,
 			qualifier: None,
 			constants,
@@ -740,7 +737,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::Parse(
+			return Err(VerifpalError::parse(
 				"expected at least one constant".into(),
 			));
 		}
@@ -751,12 +748,13 @@ impl<'a> Parser<'a> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name)?;
 		let actual_name: Arc<str> = if name == "_" {
-			let n = UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed);
+			let n = self.unnamed_counter;
+			self.unnamed_counter += 1;
 			Arc::from(format!("unnamed_{}", n))
 		} else {
 			Arc::from(name)
 		};
-		let id = value_names_map_add(&actual_name);
+		let id = self.values.intern(&actual_name)?;
 		Ok(Constant {
 			name: actual_name,
 			id,
@@ -795,9 +793,7 @@ impl<'a> Parser<'a> {
 			return self.parse_constant_value();
 		}
 		self.restore(saved);
-		Err(VerifpalError::Parse(
-			format!("expected value at position {}", self.pos).into(),
-		))
+		Err(VerifpalError::parse("expected value".into()).at(Span::at(self.pos)))
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
@@ -809,7 +805,7 @@ impl<'a> Parser<'a> {
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
-				return Err(VerifpalError::Parse("unterminated primitive".into()));
+				return Err(VerifpalError::parse("unterminated primitive".into()));
 			}
 			let arg = self.parse_value()?;
 			arguments.push(arg);
@@ -856,10 +852,10 @@ impl<'a> Parser<'a> {
 			self.pos += 1;
 		}
 		let num_str = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::Parse("invalid UTF-8 in phase number".into()))?;
+			.map_err(|_| VerifpalError::parse("invalid UTF-8 in phase number".into()))?;
 		let number: i32 = num_str
 			.parse()
-			.map_err(|_| VerifpalError::Parse("invalid phase number".into()))?;
+			.map_err(|_| VerifpalError::parse("invalid phase number".into()))?;
 		self.consume_trivia_nocapture();
 		self.expect("]")?;
 		let trailing = self.try_take_trailing();
@@ -885,19 +881,19 @@ impl<'a> Parser<'a> {
 		} else if rem.starts_with("equivalence?") {
 			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
-			Err(VerifpalError::Parse(
-				format!("unknown query type at position {}", self.pos).into(),
-			))
+			Err(VerifpalError::parse("unknown query type".into()).at(Span::at(self.pos)))
 		}
 	}
 
 	fn parse_query_single_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
+		let start = self.pos;
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
 		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
+			span: Span::new(start, self.pos),
 			kind,
 			constants: vec![constant],
 			message: Message::default(),
@@ -908,13 +904,14 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_query_authentication(&mut self) -> VResult<Query> {
+		let start = self.pos;
 		self.expect("authentication?")?;
 		self.skip_whitespace();
 		// Parse message: Sender -> Recipient: constant
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.skip_whitespace();
 		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-			return Err(VerifpalError::Parse(
+			return Err(VerifpalError::parse(
 				"expected '->' in authentication query".into(),
 			));
 		}
@@ -925,15 +922,19 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
 		self.skip_inline_whitespace();
-		let sender_id = principal_names_map_add(&sender_name);
-		let recipient_id = principal_names_map_add(&recipient_name);
+		let (sender, sender_name) = self.principal_id(&sender_name)?;
+		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
+			span: Span::new(start, self.pos),
 			kind: QueryKind::Authentication,
 			constants: vec![],
 			message: Message {
-				sender: sender_id,
-				recipient: recipient_id,
+				span: Span::new(start, self.pos),
+				sender,
+				sender_name,
+				recipient,
+				recipient_name,
 				constants: vec![constant],
 				leading_comments: Vec::new(),
 				trailing_comment: None,
@@ -945,12 +946,14 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_query_multi_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
+		let start = self.pos;
 		self.expect(keyword)?;
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
 		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
+			span: Span::new(start, self.pos),
 			kind,
 			constants,
 			message: Message::default(),
@@ -1003,6 +1006,7 @@ impl<'a> Parser<'a> {
 			if self.peek() == Some(b']') {
 				break;
 			}
+			let option_start = self.pos;
 			let leading = self.take_leading();
 			let option_name = self.parse_identifier()?;
 			self.skip_whitespace();
@@ -1011,7 +1015,7 @@ impl<'a> Parser<'a> {
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
 			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-				return Err(VerifpalError::Parse("expected '->' in query option".into()));
+				return Err(VerifpalError::parse("expected '->' in query option".into()));
 			}
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
@@ -1027,18 +1031,21 @@ impl<'a> Parser<'a> {
 			let option_kind = match option_name.as_str() {
 				"precondition" => QueryOptionKind::Precondition,
 				_ => {
-					return Err(VerifpalError::Parse(
+					return Err(VerifpalError::parse(
 						format!("unknown query option: {}", option_name).into(),
 					));
 				}
 			};
-			let sender_id = principal_names_map_add(&sender_name);
-			let recipient_id = principal_names_map_add(&recipient_name);
+			let (sender, sender_name) = self.principal_id(&sender_name)?;
+			let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
 			options.push(QueryOption {
 				kind: option_kind,
 				message: Message {
-					sender: sender_id,
-					recipient: recipient_id,
+					span: Span::new(option_start, self.pos),
+					sender,
+					sender_name,
+					recipient,
+					recipient_name,
 					constants: vec![constant],
 					leading_comments: Vec::new(),
 					trailing_comment: None,
@@ -1055,7 +1062,7 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub fn parse_file(file_path: &str) -> VResult<Model> {
+pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	let path = std::path::Path::new(file_path);
 	let file_name = path
 		.file_name()
@@ -1064,25 +1071,381 @@ pub fn parse_file(file_path: &str) -> VResult<Model> {
 		.to_string();
 
 	if file_name.len() > 64 {
-		return Err(VerifpalError::Parse(
+		return Err(VerifpalError::parse(
 			"model file name must be 64 characters or less".into(),
 		));
 	}
 	if !file_name.ends_with(".vp") {
-		return Err(VerifpalError::Parse(
+		return Err(VerifpalError::parse(
 			"model file name must have a '.vp' extension".into(),
 		));
 	}
 
 	let content = std::fs::read_to_string(file_path)
-		.map_err(|e| VerifpalError::Parse(format!("failed to read file: {}", e).into()))?;
+		.map_err(|e| VerifpalError::parse(format!("failed to read file: {}", e).into()))?;
 
 	parse_string(&file_name, &content)
 }
 
-pub fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
+pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 	let mut parser = Parser::new(input);
-	let mut model = parser.parse_model()?;
+	// Any parse error that did not set a narrower span gets the position the
+	// parser stopped at, so no parse error is ever reported without a location.
+	let mut model = parser
+		.parse_model()
+		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input))?;
 	model.file_name = file_name.to_string();
+	model.source = Source::from(input);
 	Ok(model)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn parse_rejects_content_after_queries() {
+		// A phase declared after the queries block would silently disable
+		// forward secrecy analysis. The parser now refuses to run when it
+		// finds any content after the `queries` block.
+		let model = concat!(
+			"attacker[active]\n",
+			"principal Alice[ knows private x ]\n",
+			"Alice -> Bob: x\n",
+			"principal Bob[]\n",
+			"queries[ confidentiality? x ]\n",
+			"phase[1]\n",
+			"principal Alice[ leaks x ]\n",
+		);
+		assert!(crate::parser::parse_string("after_queries.vp", model).is_err());
+	}
+
+	#[test]
+	fn parse_accepts_phase_before_queries() {
+		let model = concat!(
+			"attacker[active]\n",
+			"principal Alice[ knows private x ]\n",
+			"Alice -> Bob: x\n",
+			"principal Bob[]\n",
+			"phase[1]\n",
+			"principal Alice[ leaks x ]\n",
+			"queries[ confidentiality? x ]\n",
+		);
+		assert!(crate::parser::parse_string("before_queries.vp", model).is_ok());
+	}
+
+	#[test]
+	fn comment_capture_pre_attacker_line() {
+		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(
+			m.pre_attacker_comments.len(),
+			1,
+			"expected 1 pre-attacker comment"
+		);
+		assert_eq!(m.pre_attacker_comments[0].text, " hello");
+		assert!(matches!(
+			m.pre_attacker_comments[0].style,
+			CommentStyle::Line
+		));
+	}
+
+	#[test]
+	fn comment_capture_leading_on_block() {
+		let src = "attacker[active]\n\n// before alice\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.blocks.len(), 1);
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.leading_comments.len(), 1);
+				assert_eq!(p.leading_comments[0].text, " before alice");
+			}
+			_ => panic!("expected Principal block"),
+		}
+	}
+
+	#[test]
+	fn comment_capture_leading_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\t// long-term key\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.expressions.len(), 1);
+				assert_eq!(p.expressions[0].leading_comments.len(), 1);
+				assert_eq!(p.expressions[0].leading_comments[0].text, " long-term key");
+			}
+			_ => panic!("expected Principal block"),
+		}
+	}
+
+	#[test]
+	fn comment_capture_leading_on_query() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\t// primary goal\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries.len(), 1);
+		assert_eq!(m.queries[0].leading_comments.len(), 1);
+		assert_eq!(m.queries[0].leading_comments[0].text, " primary goal");
+	}
+
+	#[test]
+	fn comment_capture_leading_on_queries_keyword() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\n// verify these\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries_leading_comments.len(), 1);
+		assert_eq!(m.queries_leading_comments[0].text, " verify these");
+	}
+
+	#[test]
+	fn comment_capture_multiple_lines() {
+		let src = "// line 1\n// line 2\n// line 3\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 3);
+		assert_eq!(m.pre_attacker_comments[0].text, " line 1");
+		assert_eq!(m.pre_attacker_comments[1].text, " line 2");
+		assert_eq!(m.pre_attacker_comments[2].text, " line 3");
+	}
+
+	#[test]
+	fn comment_capture_block_pre_attacker() {
+		let src = "/* hello */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 1);
+		assert_eq!(m.pre_attacker_comments[0].text, " hello ");
+		assert!(matches!(
+			m.pre_attacker_comments[0].style,
+			CommentStyle::Block
+		));
+	}
+
+	#[test]
+	fn comment_capture_block_multiline() {
+		let src = "/* line1\n   line2\n   line3 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.pre_attacker_comments.len(), 1);
+		assert_eq!(
+			m.pre_attacker_comments[0].text,
+			" line1\n   line2\n   line3 "
+		);
+	}
+
+	#[test]
+	fn comment_capture_block_unterminated_errors() {
+		let src = "/* never closed\nattacker[active]\n";
+		assert!(parse_string("t.vp", src).is_err());
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_expression() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // long-term key\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.expressions[0].trailing_comment.is_some());
+				assert_eq!(
+					p.expressions[0].trailing_comment.as_ref().unwrap().text,
+					" long-term key"
+				);
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_attacker() {
+		let src = "attacker[active] // active model\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.attacker_trailing.is_some());
+		assert_eq!(m.attacker_trailing.as_ref().unwrap().text, " active model");
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_message() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a // initial flight\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let msg = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Message(m) => Some(m),
+				_ => None,
+			})
+			.expect("message");
+		assert!(msg.trailing_comment.is_some());
+		assert_eq!(
+			msg.trailing_comment.as_ref().unwrap().text,
+			" initial flight"
+		);
+	}
+
+	#[test]
+	fn comment_capture_trailing_on_query() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a // primary\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries[0].trailing_comment.is_some());
+		assert_eq!(
+			m.queries[0].trailing_comment.as_ref().unwrap().text,
+			" primary"
+		);
+	}
+
+	#[test]
+	fn comment_capture_block_trailing_inline() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* lt */\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				let t = p.expressions[0]
+					.trailing_comment
+					.as_ref()
+					.expect("trailing");
+				assert_eq!(t.text, " lt ");
+				assert!(matches!(t.style, CommentStyle::Block));
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_block_trailing_multiline_promoted_to_leading() {
+		// Block comment that opens on same line as expression but closes
+		// on a later line — must NOT be a trailing; should attach as
+		// leading on the next node.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* multi\n\tline */\n\tknows private b\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.expressions[0].trailing_comment.is_none());
+				assert_eq!(p.expressions[1].leading_comments.len(), 1);
+				assert_eq!(p.expressions[1].leading_comments[0].text, " multi\n\tline ");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_tail_in_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\t// TODO add more\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert_eq!(p.tail_comments.len(), 1);
+				assert_eq!(p.tail_comments[0].text, " TODO add more");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_closing_trailing_on_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n] // end of Alice\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.closing_trailing.is_some());
+				assert_eq!(p.closing_trailing.as_ref().unwrap().text, " end of Alice");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_header_trailing_on_principal() {
+		let src = "attacker[active]\n\nprincipal Alice[ // initiator\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		match &m.blocks[0] {
+			Block::Principal(p) => {
+				assert!(p.header_trailing.is_some());
+				assert_eq!(p.header_trailing.as_ref().unwrap().text, " initiator");
+			}
+			_ => panic!(),
+		}
+	}
+
+	#[test]
+	fn comment_capture_tail_in_queries() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n\t// done\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.queries_tail_comments.len(), 1);
+		assert_eq!(m.queries_tail_comments[0].text, " done");
+	}
+
+	#[test]
+	fn comment_capture_queries_closing_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n] // end\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries_closing_trailing.is_some());
+		assert_eq!(m.queries_closing_trailing.as_ref().unwrap().text, " end");
+	}
+
+	#[test]
+	fn comment_capture_eof_tail() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n\n// EOF tail\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert_eq!(m.tail_comments.len(), 1);
+		assert_eq!(m.tail_comments[0].text, " EOF tail");
+	}
+
+	#[test]
+	fn comment_capture_queries_header_trailing() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[ // start\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		assert!(m.queries_header_trailing.is_some());
+		assert_eq!(m.queries_header_trailing.as_ref().unwrap().text, " start");
+	}
+
+	#[test]
+	fn comment_lookahead_does_not_leak() {
+		// The parse_message_constants lookahead inspects what comes
+		// after a comma. If a comment sits between the message and the
+		// next block, the lookahead must NOT capture it into the
+		// previous message's leading comments after rollback.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nAlice -> Bob: a\n// next block\n\nprincipal Bob[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		// "// next block" must attach to the Bob principal block,
+		// not the previous Alice -> Bob message.
+		let msg = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Message(m) => Some(m),
+				_ => None,
+			})
+			.expect("message");
+		assert!(msg.trailing_comment.is_none());
+		let bob = m
+			.blocks
+			.iter()
+			.find_map(|b| match b {
+				Block::Principal(p) if p.name == "Bob" => Some(p),
+				_ => None,
+			})
+			.expect("bob");
+		assert_eq!(bob.leading_comments.len(), 1);
+		assert_eq!(bob.leading_comments[0].text, " next block");
+	}
+
+	#[test]
+	fn comment_dropped_in_primitive_args() {
+		// Comment between primitive arguments is silently dropped.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tx = ENC(/* secret */ a, a)\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		// No AST field contains "secret".
+		let serialized = format!("{:?}", m);
+		assert!(
+			!serialized.contains("secret"),
+			"dropped comment must not appear in AST"
+		);
+	}
+
+	#[test]
+	fn comment_dropped_in_equation() {
+		// Use a comment string that does not appear in any AST field name.
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tg = G ^ /* xzqrhs */ a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let serialized = format!("{:?}", m);
+		assert!(
+			!serialized.contains("xzqrhs"),
+			"dropped comment must not appear in AST"
+		);
+	}
 }
