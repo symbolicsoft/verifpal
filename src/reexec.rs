@@ -31,11 +31,9 @@ pub(crate) fn reexecute(
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
-	// Authorship is judged against the *pristine* state, before any install has
-	// perturbed it, so that one slot's substitution cannot change the verdict on
-	// another's.  Deciding it here rather than at the call sites is what keeps
-	// the solver and the minimizer in the exact agreement this module exists to
-	// guarantee.
+	// Judged against the pristine state so one slot's substitution cannot change
+	// the verdict on another's, and decided here so the solver and the minimizer
+	// cannot drift apart.
 	let authored: Vec<bool> = installs
 		.iter()
 		.map(|(slot, ground)| {
@@ -158,19 +156,14 @@ fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool 
 /// Whether putting `ground` in `slot` is something the *attacker* did, as
 /// opposed to the honest message arriving unchanged.
 ///
-/// A term that merely reduces back to the honest value — an injected
-/// `SPLIT(CONCAT(...))` projection, say — is a replay: the recipient cannot
-/// tell it apart from the real message, so the attacker has authored nothing.
-/// This is the check that fixed issue #18.
+/// A term that reduces back to the honest value is a replay: the recipient
+/// cannot tell it apart from the real message (issue #18).
 ///
-/// It governs *authorship*, not installation.  A proposal routinely binds one
-/// slot it is really attacking alongside several it merely forwards, and the
-/// forwarded ones still have to be installed or the principal would compute
-/// from a state no run ever produced.  What must not travel with them is the
-/// claim that the attacker sent them: stamping a relayed value as
-/// attacker-sent is exactly what manufactures a false authentication attack,
-/// because the query then sees a foreign sender on a value the recipient
-/// received untouched.
+/// This governs authorship, not installation.  A proposal binds the slot it is
+/// attacking alongside several it merely forwards, and those still have to be
+/// installed or the principal computes from a state no run produced — but
+/// stamping them attacker-sent is what manufactures a false authentication
+/// attack.
 pub(crate) fn attacker_authored(
 	ground: &Value,
 	slot: usize,
@@ -211,12 +204,10 @@ pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value, autho
 	sv.original = previous;
 	sv.provenance.creator = ATTACKER_ID;
 	sv.provenance.attacker_tainted = true;
-	// Taint and authorship are separate, for the same reason `attacker_tainted`
-	// and `bypass_injected` are: taint says the value passed through the
-	// attacker's hands and governs what the principal perceives and what the
-	// closure may derive from it, which is true of a relayed value too.
-	// `sender` is the narrower claim that the attacker *produced* it, and that
-	// is the only thing an authentication query reads.
+	// Taint says the value passed through the attacker's hands, which is true of
+	// a relay too, and governs what the principal perceives.  `sender` is the
+	// narrower claim that the attacker produced it — the only thing an
+	// authentication query reads.
 	if authored {
 		sv.provenance.sender = ATTACKER_ID;
 	}
@@ -286,10 +277,9 @@ mod tests {
 		assert!(!out.values[0].provenance.attacker_tainted);
 	}
 
-	/// Forwarding the honest value is a relay, not an attack: the value is
-	/// installed but the attacker gets no authorship for it.  Stamping it would
-	/// make every unrelated slot of a multi-slot proposal look attacker-sent,
-	/// which is what manufactured the false `signal.vp` authentication attack.
+	/// Forwarding the honest value is a relay: installed, but not the attacker's
+	/// to claim.  Stamping it made every unrelated slot of a multi-slot proposal
+	/// look attacker-sent — the false `signal.vp` authentication attack.
 	#[test]
 	fn reexecute_does_not_attribute_a_relayed_value_to_the_attacker() {
 		use crate::reexec::reexecute;
@@ -307,11 +297,8 @@ mod tests {
 		let out = reexecute(&ps, &[(SlotIdx(1), b.clone())], &attacker, &km).expect("reexecute");
 
 		assert!(out.values[1].value.equivalent(&b, true));
-		// Taint still applies: the value did pass through the attacker's hands,
-		// and the closure's view of it must not change.
+		// Taint still applies; authorship does not.
 		assert!(out.values[1].provenance.attacker_tainted);
-		// Authorship does not: the attacker forwarded this, it did not produce
-		// it, so an authentication query must still see the honest sender.
 		assert_ne!(
 			out.values[1].provenance.sender,
 			crate::principal::ATTACKER_ID,

@@ -5,14 +5,23 @@
 // a relay (Carol) to Bob, who forwards a MAC to Damian for auditing.
 // Tests multi-hop message flow and cross-principal authentication.
 //
-// Expected: c1a0a0a1.  `msg` is not confidential because Bob puts it on the
-// wire himself in `Bob -> Damian: [msg_b], audit_mac` — a guard stops the
+// Expected: c1a0a0a0.  `msg` is not confidential because Bob puts it on the
+// wire himself in `Bob -> Damian: [msg_b], audit_mac`: a guard stops the
 // attacker replacing a value, not seeing it.
 //
-// `re_envelope` is authentic: forging it needs AEAD_ENC(G^c^b, ...), and with
-// every DH public guarded the attacker never obtains G^c^b, so the most it can
-// do is forward Carol's own ciphertext.  It previously expected a1, which was a
-// relay miscredited to the attacker.
+// All three authentication queries hold for one reason — every DH public is
+// guarded, so the attacker never obtains a pairwise secret and can only forward
+// the real message.  `re_envelope` would need AEAD_ENC(G^c^b, ...), `audit_mac`
+// MAC(G^b^d, ...).
+//
+// Two of them used to report a1, by two different false shapes:
+//
+//   - `re_envelope`: a relay credited to the attacker because another slot of
+//     the same proposal carried a genuine substitution.
+//   - `audit_mac`: sending Carol `nil` leaves Bob's AEAD_DEC(gc^b, ...)? stuck,
+//     so `msg_b` never reduces.  Damian's state cannot see that Bob halted, so
+//     handing that same stuck term back made his ASSERT compare two identical
+//     dead computations and pass.
 
 attacker[active]
 

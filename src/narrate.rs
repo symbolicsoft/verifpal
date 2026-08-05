@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use crate::primitive::primitive_name;
+use crate::principal::ATTACKER_ID;
 use crate::types::*;
 use crate::witness::Witness;
 
@@ -125,6 +126,16 @@ pub(crate) enum Step {
 	Derive { text: String },
 }
 
+/// Whether a slot is the attacker's doing and so belongs in the trace.
+///
+/// Taint is too broad: a relayed value is tainted but was forwarded unchanged,
+/// so reporting it claims an action never taken.  A guard bypass is the
+/// converse — it leaves taint alone yet is the step a MITM trace least affords
+/// to lose — which is what `bypass_injected` is for.
+fn reportable(sv: &SlotValues) -> bool {
+	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected
+}
+
 /// Substitutions in `ps`, grouped into the wire messages they belong to.
 ///
 /// Grouping is by `(sender, recipient, declared_at)`: values that travelled
@@ -139,12 +150,12 @@ pub(crate) fn mutation_steps(
 		.values
 		.iter()
 		.enumerate()
-		.filter(|(_, sv)| sv.provenance.attacker_tainted)
+		.filter(|(_, sv)| reportable(sv))
 		.map(|(i, _)| &*ps.meta[i].constant.name)
 		.collect();
 	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
-		if !sv.provenance.attacker_tainted {
+		if !reportable(sv) {
 			continue;
 		}
 		let sm = &ps.meta[i];
@@ -443,10 +454,9 @@ fn render(steps: &[Step]) -> String {
 }
 
 fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> String {
-	// A substitution whose term is indistinguishable from the honest one is
-	// not a replacement — it is the attacker sending the message itself.  For
-	// authentication that *is* the attack, and "replaces e1 with e1" would
-	// describe it as a no-op.
+	// `reportable` has already dropped relays, so an item that still renders
+	// identically to the honest value was authored by the attacker and is
+	// described as impersonation rather than as a no-op replacement.
 	let (replaced, impersonated): (Vec<&MutationItem>, Vec<&MutationItem>) =
 		items.iter().partition(|i| i.new_value != i.old_value);
 

@@ -296,7 +296,7 @@ fn test_key_ratchet() {
 }
 #[test]
 fn test_four_party() {
-	run_model("four_party.vp", "c1a0a0a1");
+	run_model("four_party.vp", "c1a0a0a0");
 }
 #[test]
 fn test_phase_forward_secrecy() {

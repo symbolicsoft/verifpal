@@ -3,23 +3,18 @@
 
 // Expected: a0.
 //
-// `k` is a shared private that never leaks, so the attacker cannot build any
-// ciphertext `AEAD_DEC(kk_b, e, nil)?` will accept.  The only `e` it can put on
-// the wire is Alice's own, and forwarding a message unchanged is a relay, not a
-// forgery: Bob receives exactly what Alice sent.  So the query holds.
+// `k` is a shared private that never leaks, so the attacker can build no
+// ciphertext `AEAD_DEC(kk_b, e, nil)?` accepts.  The only `e` it can send is
+// Alice's own, and forwarding a message unchanged is a relay, not a forgery.
 //
-// `ga` is the trap.  It is unguarded, Bob uses it, and the attacker holds other
-// protocol terms of the same shape (`gb`) to put there — so a proposal that
-// substitutes `ga` is a genuine attack on something.  That proposal carries a
-// relay of every other controlled slot, `e` among them, because the honest
-// ciphertext has to be on the wire for Bob to reach the substituted value at
-// all.  If attacker authorship is decided per proposal rather than per slot,
-// the relayed `e` is stamped attacker-sent and this query reports a false
-// attack.
+// `ga` is the trap: unguarded, used by Bob, and replaceable with another
+// protocol term the attacker holds (`gb`), so substituting it is a genuine
+// attack on something.  That proposal also relays every other controlled slot,
+// `e` among them.  Decide authorship per proposal rather than per slot and the
+// relayed `e` is stamped attacker-sent, reporting a false attack.
 //
-// This is the shape that made `examples/messaging/signal.vp` report a false
-// attack on the first message: the distinguishing substitution was on the
-// *third* message's ephemeral key, and `e1` merely rode along.
+// This is the shape that made `signal.vp` report a false attack on its first
+// message: the real substitution was on the *third* message's ephemeral key.
 
 attacker[active]
 

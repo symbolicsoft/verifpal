@@ -762,18 +762,15 @@ impl<'a> Deducer<'a> {
 			return dedupe(out);
 		}
 
-		// `SPLIT(x)?` succeeds exactly when `x` is a CONCAT, and being a core
-		// primitive it has no rewrite rule for the branch below to read — so
-		// without this the check contributes no constraint at all and the
-		// solver never learns that the plaintext it is forging has to be a
-		// concatenation.  That is enough to hide a complete forgery: with a
-		// leaked key the attacker can build `ENC(k, ...)`, but offering
-		// `ENC(k, nil)` halts the principal at the split, and `ENC(k, CONCAT(…))`
-		// is never proposed.
+		// `SPLIT(x)?` succeeds exactly when `x` is a CONCAT, but being core it
+		// has no rewrite rule for the branch below to read, so without this the
+		// check constrains nothing and the solver never learns its forged
+		// plaintext must be a concatenation.  That hides whole forgeries: with a
+		// leaked key `ENC(k, nil)` halts the principal at the split and
+		// `ENC(k, CONCAT(…))` is never offered.
 		//
-		// The argument is inverted rather than matched because it is normally
-		// reached through a decryption: the question is not "is this a CONCAT"
-		// but "what must the attacker send so that it becomes one".
+		// Inverted rather than matched because the argument is normally reached
+		// through a decryption: the question is what to send so it becomes one.
 		if p.id == PRIM_SPLIT
 			&& let Some(inner) = p.arguments.first()
 			&& let Ok(concat_spec) = primitive_def(PRIM_CONCAT)

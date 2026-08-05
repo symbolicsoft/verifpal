@@ -4,17 +4,13 @@
 // Symmetric key ratchet: each message uses a key derived from the previous one.
 // Tests HKDF chaining and whether the engine can track key evolution.
 //
-// Expected: c0c0c0a0a0a0.  `root_key` is a shared private that is never leaked,
-// so the attacker derives none of mk1/mk2/mk3 — which is exactly what the three
-// passing confidentiality queries say.  Having no message key, it can forge no
-// ciphertext, so all three authentication queries hold too.
+// Expected: c0c0c0a0a0a0.  `root_key` is a shared private that never leaks, so
+// the attacker derives none of mk1/mk2/mk3 — which is what the three passing
+// confidentiality queries say — and with no message key it can forge nothing.
 //
-// This model previously expected a1a1a0, which is incoherent on its face: e1,
-// e2 and e3 are structurally identical, differing only in which link of the
-// same chain keys them, so nothing can forge the first two but not the third.
-// Those two attacks were relays — the attacker forwarding Alice's own
-// ciphertext — being credited to the attacker because a substitution elsewhere
-// in the same proposal made the whole proposal count as an attack.
+// The old a1a1a0 was incoherent: e1, e2 and e3 are structurally identical, so
+// nothing forges the first two but not the third.  Both were relays credited to
+// the attacker because another slot of the same proposal was substituted.
 
 attacker[active]
 

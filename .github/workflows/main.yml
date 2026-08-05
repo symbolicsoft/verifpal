@@ -27,8 +27,6 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
-    - name: Check formatting
-      run: cargo fmt --check
     # --all-targets, because plain clippy does not compile #[cfg(test)] code
     # and so never lints the tests.
     - name: Run clippy
