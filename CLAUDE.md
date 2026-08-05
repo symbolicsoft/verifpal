@@ -30,7 +30,7 @@ cargo check --lib --no-default-features --features wasm   # fast check that the 
 make wasm                              # wasm-pack build + copy into ../verifpal-website/res/wasm/
 ```
 
-CI (`.github/workflows/main.yml`) runs `cargo clippy --all-targets -- -D warnings` and `cargo test --release` on Ubuntu, macOS and Windows, plus a separate job that clippies the wasm library for `wasm32-unknown-unknown`. A single warning fails the build. Formatting is **not** gated in CI; `make lint` still runs `cargo fmt --check` locally, so keep the tree formatted.
+CI (`.github/workflows/main.yml`) runs `cargo clippy --all-targets -- -D warnings` and `cargo test --release` on Ubuntu and macOS, plus a separate job that clippies the wasm library for `wasm32-unknown-unknown`. A single warning fails the build. Formatting is **not** gated in CI; `make lint` still runs `cargo fmt --check` locally, so keep the tree formatted.
 
 Running the tool:
 
