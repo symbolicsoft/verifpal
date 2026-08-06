@@ -23,7 +23,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 356 tests (unit + model), ~0.5s once built (also: make test)
+cargo test --release                   # 361 tests (unit + model), ~1.6s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -266,7 +266,7 @@ All output is plain text: there is no alternate-screen progress UI and no attack
 
 ### Performance expectations
 
-Every model in `examples/test/` runs in milliseconds. Of the shipped real-world models, `examples/transport-layer/tls13.vp` is the slowest that completes (~1.4s); `signal.vp`, `scuttlebutt.vp`, `firefox-sync.vp`, `piknik.vp`, `cen.vp`, `lc-dp-3t.vp`, `protonmail.vp` and `userbase.vp` are all well under a second. **`examples/transport-layer/needham-schroeder.vp` does not complete** — it runs for many minutes and was verified to behave the same way under the released 0.53.0 binary, so a hang there is a pre-existing property of that model, not something you just broke.
+Every model in `examples/test/` runs in milliseconds, with one exception: the five `junglegym_*.vp` stress models are deliberately convoluted, and `junglegym_deep_ratchet.vp` takes roughly 1.5s on its own — it is most of the test suite's wall clock. They exist to lean on `MAX_RESOLVE_DEPTH`, the theory recursion cap, `normalise_arguments`, guard bypass and the unlinkability witness search all at once; each carries its expected result code and the reasoning for it in a header comment. Of the shipped real-world models, `examples/transport-layer/tls13.vp` is the slowest that completes (~1.4s); `signal.vp`, `scuttlebutt.vp`, `firefox-sync.vp`, `piknik.vp`, `cen.vp`, `lc-dp-3t.vp`, `protonmail.vp` and `userbase.vp` are all well under a second. **`examples/transport-layer/needham-schroeder.vp` does not complete** — it runs for many minutes and was verified to behave the same way under the released 0.53.0 binary, so a hang there is a pre-existing property of that model, not something you just broke.
 
 ## Style and licensing
 

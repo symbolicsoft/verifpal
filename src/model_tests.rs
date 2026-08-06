@@ -103,6 +103,33 @@ fn test_cap_noop_annotated() {
 }
 
 #[test]
+fn test_junglegym_hybrid_pq() {
+	run_model("junglegym_hybrid_pq.vp", "c1c1c0a0a1f0f1e1e1");
+}
+#[test]
+fn test_junglegym_threshold_ring() {
+	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a0a0u0u0u1f0f1e1e1");
+}
+#[test]
+fn test_junglegym_password_maze() {
+	run_model("junglegym_password_maze.vp", "c0c1c0c0c1a0a0a0f0f1e1e1u0");
+}
+#[test]
+fn test_junglegym_phase_cascade() {
+	run_model(
+		"junglegym_phase_cascade.vp",
+		"c1c1c0c1a0a0a0a0a1a1a0f0f1e0e0u1",
+	);
+}
+#[test]
+fn test_junglegym_deep_ratchet() {
+	run_model(
+		"junglegym_deep_ratchet.vp",
+		"c0c0c0c0c0a0a0a0a0f0f1e1e1e1u0u0",
+	);
+}
+
+#[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }
