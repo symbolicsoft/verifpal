@@ -197,20 +197,30 @@ fn reconstruct_recursive(
 		}
 		_ => return found,
 	};
-	if let Some(used) = result {
-		found |= learn(
-			ctx,
-			value,
-			record,
-			DerivationRecord::Reconstructed { from: used.clone() },
-			|| {
-				format!(
-					"{} obtained by reconstructing with {}.",
-					info_output_text(value),
-					pretty_values(&used),
-				)
+	if let Some(reconstructed) = result {
+		let used = reconstructed.from;
+		let derivation = match reconstructed.forged {
+			Some(capability) => DerivationRecord::Broken {
+				of: value.clone(),
+				capability,
+				using: used.clone(),
 			},
-		);
+			None => DerivationRecord::Reconstructed { from: used.clone() },
+		};
+		let forged = reconstructed.forged;
+		found |= learn(ctx, value, record, derivation, || match forged {
+			Some(capability) => format!(
+				"{} forged from {} under the declared `{}` assumption.",
+				info_output_text(value),
+				pretty_values(&used),
+				capability.name(),
+			),
+			None => format!(
+				"{} obtained by reconstructing with {}.",
+				info_output_text(value),
+				pretty_values(&used),
+			),
+		});
 	}
 	found
 }

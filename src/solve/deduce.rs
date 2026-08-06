@@ -25,6 +25,7 @@ fn goal_key(v: &Value) -> u64 {
 
 pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
+	capabilities: Arc<CapabilityIndex>,
 	wire_terms: Vec<Value>,
 	memo: RefCell<HashMap<u64, Vec<Substitution>>>,
 	active: RefCell<Vec<u64>>,
@@ -61,6 +62,7 @@ impl<'a> Deducer<'a> {
 
 		Deducer {
 			attacker,
+			capabilities: ps.capabilities.clone(),
 			wire_terms,
 			basis,
 			memo: RefCell::new(HashMap::new()),
@@ -311,8 +313,12 @@ impl<'a> Deducer<'a> {
 		s: &Substitution,
 		out: &mut Vec<Substitution>,
 	) {
+		let forgeable_secret = self.forgeable_secret(p);
 		let mut frontier = vec![s.clone()];
-		for arg in &p.arguments {
+		for (i, arg) in p.arguments.iter().enumerate() {
+			if Some(i) == forgeable_secret {
+				continue;
+			}
 			let mut next = Vec::new();
 			for candidate in &frontier {
 				self.solve_into(arg, candidate, &mut next);
@@ -323,6 +329,33 @@ impl<'a> Deducer<'a> {
 			frontier = dedupe(next);
 		}
 		out.extend(frontier);
+	}
+
+	fn forgeable_secret(&self, p: &Primitive) -> Option<usize> {
+		if !self.capability_in_force(p, Capability::Forgeable) {
+			return None;
+		}
+		primitive_get(p.id).ok()?.forgeable_secret
+	}
+
+	fn capability_in_force(&self, p: &Primitive, cap: Capability) -> bool {
+		if self.capabilities.is_empty() {
+			return false;
+		}
+		let phase = self.attacker.current_phase;
+		if self.capabilities.in_force(p, cap, phase) {
+			return true;
+		}
+		if !contains_var(&Value::Primitive(Arc::new(p.clone()))) {
+			return false;
+		}
+		let pattern = Value::Primitive(Arc::new(p.clone()));
+		let empty = Substitution::new();
+		self.capabilities.annotated_terms().any(|(term, caps)| {
+			caps.in_force(cap, phase)
+				&& matches!(term, Value::Primitive(q) if q.id == p.id)
+				&& match_value(&pattern, term, &empty).is_some()
+		})
 	}
 
 	fn solve_by_decomposition(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {

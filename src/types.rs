@@ -832,6 +832,11 @@ pub struct DecomposeResult {
 	pub used: Vec<Value>,
 }
 
+pub struct ReconstructResult {
+	pub from: Vec<Value>,
+	pub forged: Option<Capability>,
+}
+
 pub struct RecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,

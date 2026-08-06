@@ -77,6 +77,15 @@ fn test_cap_weak_phase_delayed() {
 }
 
 #[test]
+fn test_cap_forgeable_sign() {
+	run_model("cap_forgeable_sign.vp", "a1");
+}
+#[test]
+fn test_cap_forgeable_aead() {
+	run_model("cap_forgeable_aead.vp", "c0a1");
+}
+
+#[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }

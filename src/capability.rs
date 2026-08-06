@@ -200,6 +200,12 @@ impl CapabilityIndex {
 		self.lookup(p).in_force(cap, phase)
 	}
 
+	pub fn annotated_terms(&self) -> impl Iterator<Item = (&Value, &Capabilities)> {
+		self.buckets
+			.values()
+			.flat_map(|b| b.iter().map(|(v, caps)| (v, caps)))
+	}
+
 	pub fn assumptions(&self) -> Vec<(Value, Capability, i32)> {
 		let mut out = Vec::new();
 		for bucket in self.buckets.values() {

@@ -228,6 +228,7 @@ fn collect_leaves(
 		return held;
 	};
 	let used = can_reconstruct_primitive(p, ps, attacker, 0)
+		.map(|r| r.from)
 		.or_else(|| can_recompose(p, attacker).map(|r| r.used));
 	let Some(used) = used else {
 		return held;

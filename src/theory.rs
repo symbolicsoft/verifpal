@@ -351,7 +351,7 @@ pub(crate) fn can_reconstruct_primitive(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	depth: usize,
-) -> Option<Vec<Value>> {
+) -> Option<ReconstructResult> {
 	can_reconstruct_primitive_directly(p, ps, attacker, depth).or_else(|| {
 		let swapped = commutativity_swap(p)?;
 		can_reconstruct_primitive_directly(&swapped, ps, attacker, depth)
@@ -363,7 +363,7 @@ fn can_reconstruct_primitive_directly(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	depth: usize,
-) -> Option<Vec<Value>> {
+) -> Option<ReconstructResult> {
 	if depth > MAX_DEPTH {
 		return None;
 	}
@@ -374,16 +374,33 @@ fn can_reconstruct_primitive_directly(
 	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
+	let forgeable_secret = ps
+		.capabilities
+		.in_force(
+			rewritten_prim,
+			Capability::Forgeable,
+			attacker.current_phase,
+		)
+		.then(|| primitive_get(rewritten_prim.id).ok()?.forgeable_secret)
+		.flatten();
 	let mut has = Vec::new();
-	for a in &rewritten_prim.arguments {
+	let mut skipped = 0usize;
+	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
+		if Some(i) == forgeable_secret {
+			skipped += 1;
+			continue;
+		}
 		if obtainable(a, ps, attacker, depth) {
 			has.push(a.clone());
 		}
 	}
-	if has.len() < rewritten_prim.arguments.len() {
+	if has.len() + skipped < rewritten_prim.arguments.len() {
 		return None;
 	}
-	Some(has)
+	Some(ReconstructResult {
+		from: has,
+		forged: (skipped > 0).then_some(Capability::Forgeable),
+	})
 }
 
 pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
