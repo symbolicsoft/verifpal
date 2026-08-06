@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: `malleable` parses and is part of the vocabulary, but no
+// primitive declares it yet, so the engine rejects it rather than accepting an
+// assumption it would silently ignore. An annotation that does nothing reads
+// as a check that was performed when it was not.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public m
+	c = ENC[malleable](k, m)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	d = DEC(k, c)
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+]

@@ -141,6 +141,9 @@ pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 			 did you mean `{}[forgeable]`?",
 			name
 		),
+		Capability::Malleable => "`malleable` is not yet supported by the engine; \
+			 it is rejected rather than silently ignored"
+			.to_string(),
 		_ => format!("{} does not support the `{}` parameter", name, cap.name()),
 	}
 }

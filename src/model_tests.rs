@@ -86,6 +86,14 @@ fn test_cap_forgeable_aead() {
 }
 
 #[test]
+fn test_cap_err_malleable_unsupported() {
+	run_model_err(
+		"cap_err_malleable_unsupported.vp",
+		"`malleable` is not yet supported",
+	);
+}
+
+#[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }
