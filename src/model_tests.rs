@@ -107,6 +107,11 @@ fn test_cap_noop_annotated() {
 }
 
 #[test]
+fn test_pqxdh_weak() {
+	run_model_at("examples/messaging/pqxdh-weak.vp", "pqxdh-weak.vp", "c0a0");
+}
+
+#[test]
 fn test_junglegym_hybrid_pq() {
 	run_model("junglegym_hybrid_pq.vp", "c1c1c0a0a1f0f1e1e1");
 }
