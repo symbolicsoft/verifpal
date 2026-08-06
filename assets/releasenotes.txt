@@ -1,4 +1,67 @@
-Verifpal 0.71.0 replaces how unlinkability queries are decided.
+Verifpal 0.71.0 adds parametrized primitives, which let a model say that a
+particular piece of cryptography is broken, and replaces how unlinkability
+queries are decided.
+
+PARAMETRIZED PRIMITIVES
+
+Until now, every primitive in a Verifpal model was perfectly secure. A hash was
+never invertible, a signature was never forgeable, and the only way to model a
+break was to hand the attacker the underlying secrets with `leaks`. That works,
+but it states the wrong thing: a leaks list enumerates values, and it is silently
+wrong the moment you forget one.
+
+A primitive call site may now carry a bracketed list of declared weakening
+assumptions between the name and the arguments:
+
+    ga = PUBKEY[weak](a)
+    s  = SIGN[forgeable](sk, m)
+    e  = AEAD_ENC[weak, forgeable from phase 2](k, m, ad)
+
+`weak` means confidentiality is lost, so holding the term yields what it
+protects: a preimage for `HASH` and `PW_HASH`, the plaintext for `AEAD_ENC`,
+`ENC` and `PKE_ENC`, the shared secret for `KEM_ENCAP`, and the private key for
+`PUBKEY`. `PUBKEY[weak]` is discrete logarithm, and Diffie-Hellman collapses out
+of it without any Diffie-Hellman-specific rule: if the attacker can recover a
+private key it can recompute every shared secret that key was used in.
+
+`forgeable` means authenticity is lost, so the term is constructible without its
+secret. It is declared by `SIGN`, `MAC`, `RINGSIGN` and `AEAD_ENC`. Keeping this
+separate from `weak` is what makes `AEAD_ENC[forgeable]` expressible: a
+ciphertext an attacker can produce but still cannot read.
+
+`from phase N` means "from phase N onward", and binds to the capability it
+follows. Without it, the assumption is in force from the start. This is what
+makes harvest-now-decrypt-later models say what they mean. The new
+`examples/messaging/pqxdh-weak.vp` is Signal's PQXDH with every Diffie-Hellman
+public key annotated `PUBKEY[weak from phase 1]` and nothing leaked at all: the
+KEM encapsulation key is deliberately left unannotated, which is the entire
+hybrid argument, and the model still holds.
+
+Three things are worth knowing before you use this. An assumption a primitive
+does not declare is a hard error naming the alternative that would have worked,
+rather than an annotation that silently does nothing — an assumption that reads
+as a check but performs none is worse than no assumption at all. The same applies
+to `from phase N` naming a phase the model never reaches. And `malleable` is in
+the vocabulary and parses, but no primitive declares it, so any use is rejected:
+the attack it enables needs two coordinated wire substitutions that the current
+solver cannot form, and shipping it as a silent no-op was not an option.
+
+An unannotated model is unaffected, bit for bit. Capabilities are deliberately
+invisible to term hashing and equivalence, because an annotated term and its
+unannotated twin are the same cryptographic object; the engine reads assumptions
+from a model-level index instead.
+
+`weak`, `forgeable`, `malleable` and `from` are contextual keywords recognised
+only inside the parameter brackets, so models already using `weak` or `from` as
+constant names keep working.
+
+Finally, a verification performed under declared assumptions now says so. The
+results block is preceded by a warning listing every annotated term, and
+`internal-json` carries the same information on each result, so a passing result
+copied out of Verifpal cannot lose the caveat that makes it meaningful. The
+result code format is unchanged.
+
+UNLINKABILITY
 
 Previously, an unlinkability query failed if a queried value contained no fresh
 constant, or if two queried values were outputs of the same primitive application
@@ -20,4 +83,9 @@ or observe cannot be linked. And seed-compromise linkability, where one leaked
 secret lets the attacker recompute many derived identifiers, is now detected
 where it previously was not.
 
-The unlinkability test corpus grows from one model to thirty.
+TESTS
+
+The unlinkability test corpus grows from one model to thirty, fifteen models
+cover the capability parameters, and five deliberately convoluted "jungle gym"
+models exercise the resolution depth limits, the theory recursion cap, guard
+bypass and the unlinkability witness search all at once.

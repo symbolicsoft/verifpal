@@ -78,10 +78,20 @@ fn wasm_verify_inner(input: &str) -> VResult<String> {
 			json_escape(&r.summary),
 		)
 	});
+	let assumptions = ctx.capability_assumptions();
+	let assumptions_json = json::json_array(assumptions.iter(), |(term, capability, onset)| {
+		format!(
+			r#"{{"term":"{}","capability":"{}","fromPhase":{}}}"#,
+			json_escape(&term.to_string()),
+			capability.name(),
+			onset,
+		)
+	});
 	Ok(format!(
-		r#"{{"ok":true,"results":{},"code":"{}","messages":{}}}"#,
+		r#"{{"ok":true,"results":{},"code":"{}","assumptions":{},"messages":{}}}"#,
 		results_json,
 		json_escape(&types::VerifyResult::results_code(&results)),
+		assumptions_json,
 		json_string_array(&info::wasm_messages_drain()),
 	))
 }
