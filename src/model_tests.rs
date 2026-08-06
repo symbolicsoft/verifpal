@@ -252,6 +252,26 @@ fn test_unlink_no_shared_ancestor() {
 	run_model("unlink_no_shared_ancestor.vp", "u0");
 }
 #[test]
+fn test_unlink_never_sent() {
+	run_model("unlink_never_sent.vp", "u0");
+}
+#[test]
+fn test_unlink_sealed() {
+	run_model("unlink_sealed.vp", "u0");
+}
+#[test]
+fn test_unlink_sealed_opened() {
+	run_model("unlink_sealed_opened.vp", "u1");
+}
+#[test]
+fn test_unlink_nonfresh_public() {
+	run_model("unlink_nonfresh_public.vp", "u0");
+}
+#[test]
+fn test_unlink_nonfresh_secret() {
+	run_model("unlink_nonfresh_secret.vp", "u0");
+}
+#[test]
 fn test_needham_schroeder_pk() {
 	run_model("needham-schroeder-pk.vp", "a1a1c1c1");
 }

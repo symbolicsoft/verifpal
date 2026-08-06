@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+attacker[passive]
+
+principal Alice[
+	knows public c1, c2
+	generates seed
+	generates filler
+	tok1 = HASH(seed, c1)
+	tok2 = HASH(seed, c2)
+	leaks seed
+]
+
+Alice -> Bob: filler
+
+principal Bob[
+	_ = HASH(filler)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

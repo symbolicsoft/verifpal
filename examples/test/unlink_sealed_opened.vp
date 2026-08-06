@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+attacker[passive]
+
+principal Alice[
+	knows private s
+	knows public c1, c2
+	generates ke
+	leaks ke
+	tok1 = HASH(s, c1)
+	tok2 = HASH(s, c2)
+	e = ENC(ke, s)
+]
+
+Alice -> Bob: tok1, tok2, e
+
+principal Bob[
+	knows public c1, c2
+	_ = HASH(tok1)
+	_ = HASH(tok2)
+	_ = HASH(e)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]
