@@ -209,7 +209,11 @@ fn test_freshness() {
 }
 #[test]
 fn test_unlinkability() {
-	run_model("unlinkability.vp", "u1u1u0");
+	run_model("unlinkability.vp", "u0u0u0");
+}
+#[test]
+fn test_unlink_seed_leaked() {
+	run_model("unlink_seed_leaked.vp", "u1");
 }
 #[test]
 fn test_needham_schroeder_pk() {

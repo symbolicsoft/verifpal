@@ -19,6 +19,37 @@ pub(crate) struct LinkWitness {
 	pub value: Value,
 }
 
+pub(crate) fn find_link_witness(
+	a: &Constant,
+	b: &Constant,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<LinkWitness> {
+	if !is_observable(a, ps) || !is_observable(b, ps) {
+		return None;
+	}
+	let (av, _) = ps.resolve_constant(a, true);
+	let (bv, _) = ps.resolve_constant(b, true);
+	witness_observed_equality(&av, &bv, ps, attacker)
+		.or_else(|| witness_identifying_check(&av, &bv, ps, attacker))
+		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
+}
+
+impl LinkWitness {
+	pub(crate) fn describe(&self, term: &str) -> String {
+		match self.kind {
+			LinkWitnessKind::SharedSecret => format!("via {term}"),
+			LinkWitnessKind::IdentifyingCheck(id) => format!(
+				"because {} succeeds for both under {term}",
+				crate::primitive::primitive_name(id)
+			),
+			LinkWitnessKind::ObservedEquality => {
+				format!("because both are the same value ({term})")
+			}
+		}
+	}
+}
+
 fn witness_identifying_check(
 	av: &Value,
 	bv: &Value,
