@@ -377,6 +377,8 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 	let mut capability_index = CapabilityIndex::default();
 	for slot in &trace.slots {
 		capability_index.insert(&slot.initial_value);
+		let (resolved, _) = crate::resolution::resolve_trace_values(&slot.initial_value, trace);
+		capability_index.insert(&resolved);
 	}
 	let capabilities = Arc::new(capability_index);
 	let mut states = Vec::new();

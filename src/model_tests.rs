@@ -72,6 +72,10 @@ fn test_cap_weak_pubkey_dh() {
 	run_model("cap_weak_pubkey_dh.vp", "c1");
 }
 #[test]
+fn test_cap_weak_kem_resolved() {
+	run_model("cap_weak_kem_resolved.vp", "c1c1");
+}
+#[test]
 fn test_cap_weak_phase_delayed() {
 	run_model("cap_weak_phase_delayed.vp", "c0c1");
 }
