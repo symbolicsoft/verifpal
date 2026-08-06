@@ -209,7 +209,135 @@ fn test_freshness() {
 }
 #[test]
 fn test_unlinkability() {
-	run_model("unlinkability.vp", "u1u1u0");
+	run_model("unlinkability.vp", "u0u1u1");
+}
+#[test]
+fn test_unlink_seed_leaked() {
+	run_model("unlink_seed_leaked.vp", "u1");
+}
+#[test]
+fn test_unlink_active_links() {
+	run_model("unlink_active_links.vp", "u1");
+}
+#[test]
+fn test_unlink_passive_holds() {
+	run_model("unlink_passive_holds.vp", "u0");
+}
+#[test]
+fn test_unlink_identical_values() {
+	run_model("unlink_identical_values.vp", "u1");
+}
+#[test]
+fn test_unlink_independent_origins() {
+	run_model("unlink_independent_origins.vp", "u0");
+}
+#[test]
+fn test_unlink_both_values_known() {
+	run_model("unlink_both_values_known.vp", "u0");
+}
+#[test]
+fn test_unlink_seed_secret() {
+	run_model("unlink_seed_secret.vp", "u0");
+}
+#[test]
+fn test_unlink_chain_forward() {
+	run_model("unlink_chain_forward.vp", "u0");
+}
+#[test]
+fn test_unlink_chain_root() {
+	run_model("unlink_chain_root.vp", "u1");
+}
+#[test]
+fn test_unlink_no_shared_ancestor() {
+	run_model("unlink_no_shared_ancestor.vp", "u0");
+}
+#[test]
+fn test_unlink_never_sent() {
+	run_model("unlink_never_sent.vp", "u0");
+}
+#[test]
+fn test_unlink_sealed() {
+	run_model("unlink_sealed.vp", "u0");
+}
+#[test]
+fn test_unlink_sealed_opened() {
+	run_model("unlink_sealed_opened.vp", "u1");
+}
+#[test]
+fn test_unlink_nonfresh_public() {
+	run_model("unlink_nonfresh_public.vp", "u0");
+}
+#[test]
+fn test_unlink_nonfresh_secret() {
+	run_model("unlink_nonfresh_secret.vp", "u0");
+}
+#[test]
+fn test_unlink_signature_links() {
+	run_model("unlink_signature_links.vp", "u1");
+}
+#[test]
+fn test_unlink_ringsign() {
+	run_model("unlink_ringsign.vp", "u0");
+}
+#[test]
+fn test_unlink_aead_probe() {
+	run_model("unlink_aead_probe.vp", "u1");
+}
+#[test]
+fn test_unlink_blind_signature() {
+	run_model("unlink_blind_signature.vp", "u0");
+}
+#[test]
+fn test_unlink_pubkey_pseudonym() {
+	run_model("unlink_pubkey_pseudonym.vp", "u1");
+}
+#[test]
+fn test_unlink_split_concat() {
+	run_model("unlink_split_concat.vp", "u1");
+}
+#[test]
+fn test_unlink_dh_mitm() {
+	run_model("unlink_dh_mitm.vp", "u1");
+}
+#[test]
+fn test_unlink_kem_leak() {
+	run_model("unlink_kem_leak.vp", "u1");
+}
+#[test]
+fn test_unlink_phase_compromise() {
+	run_model("unlink_phase_compromise.vp", "u1");
+}
+#[test]
+fn test_unlink_phase_holds() {
+	run_model("unlink_phase_holds.vp", "u0");
+}
+#[test]
+fn test_unlink_nary_one_pair() {
+	run_model("unlink_nary_one_pair.vp", "u1");
+}
+#[test]
+fn test_unlink_kdf_outputs() {
+	run_model("unlink_kdf_outputs.vp", "u0");
+}
+#[test]
+fn test_unlink_kdf_outputs_leaked() {
+	run_model("unlink_kdf_outputs_leaked.vp", "u1");
+}
+#[test]
+fn test_unlink_injected_equality() {
+	run_model("unlink_injected_equality.vp", "u0");
+}
+#[test]
+fn test_dp3t_root_leaked() {
+	run_model("dp3t_root_leaked.vp", "c1a1u1");
+}
+#[test]
+fn test_lc_dp_3t() {
+	run_model_at(
+		"examples/contact-tracing/lc-dp-3t.vp",
+		"lc-dp-3t.vp",
+		"c0a1u0",
+	);
 }
 #[test]
 fn test_needham_schroeder_pk() {

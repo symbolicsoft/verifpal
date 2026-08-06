@@ -288,64 +288,17 @@ fn query_unlinkability(
 	attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
-	let mut no_freshness = Vec::new();
-	for c in &query.constants {
-		let found = value_constant_contains_fresh_values(c, ps)?;
-		if !found {
-			no_freshness.push(c.clone());
-		}
-	}
-	if !no_freshness.is_empty() {
-		let (resolved, _) = ps.resolve_constant(&no_freshness[0], true);
-		let mutated_info = attack_trace(ctx, km, ps, query_index, &resolved, &[]);
-		result.resolved = true;
-		result.summary = info_verify_result_summary(
-			&mutated_info.trace,
-			&format!(
-				"{} ({}) cannot be a suitable unlinkability candidate since it does not satisfy freshness.",
-				no_freshness[0],
-				mutated_info.term(&resolved),
-			),
-			&result.options,
-		);
-		result = query_precondition(result, ps);
-		emit_query_result(ctx, &result);
-		return Ok(result);
-	}
-	let resolved_values: Vec<Value> = query
-		.constants
-		.iter()
-		.map(|c| ps.resolve_constant(c, true).0)
-		.collect();
-	for (i, val_a) in resolved_values.iter().enumerate() {
-		for (j, val_b) in resolved_values.iter().enumerate() {
-			if i == j {
+	for (i, a) in query.constants.iter().enumerate() {
+		for b in query.constants.iter().skip(i + 1) {
+			let Some(witness) = crate::unlink::find_link_witness(a, b, ps, attacker) else {
 				continue;
-			}
-			if !val_a.equivalent(val_b, false) {
-				continue;
-			}
-			let obtainable = match val_a {
-				Value::Primitive(p) => {
-					can_reconstruct_primitive(p, ps, attacker, 0).is_some()
-						|| can_recompose(p, attacker).is_some()
-				}
-				_ => false,
 			};
-			if !obtainable {
-				continue;
-			}
-			let empty = Value::Constant(Constant::default());
-			let mutated_info = attack_trace(ctx, km, ps, query_index, &empty, &[]);
+			let mutated_info = attack_trace(ctx, km, ps, query_index, &witness.value, &[]);
+			let clause = witness.describe(&mutated_info.term(&witness.value));
 			result.resolved = true;
 			result.summary = info_verify_result_summary(
 				&mutated_info.trace,
-				&format!(
-					"{} and {} are not unlinkable since they are the output of the same primitive ({}), which can be obtained by Attacker",
-					query.constants[i],
-					query.constants[j],
-					mutated_info.term(&resolved_values[i]),
-				),
+				&format!("Attacker links {a} and {b} {clause}."),
 				&result.options,
 			);
 			result = query_precondition(result, ps);

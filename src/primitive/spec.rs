@@ -260,6 +260,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Direct(0)),
+			identifying_positions: vec![0],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -356,6 +357,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				arg: 0,
 				constructor: PRIM_PUBKEY,
 			}),
+			identifying_positions: vec![0],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -457,6 +459,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				arg: 0,
 				constructor: PRIM_PUBKEY,
 			}),
+			identifying_positions: vec![],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -522,6 +525,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			argument_restrictions: vec![(0, vec![PRIM_PUBKEY, PRIM_DH_KEX])],
+			identifying_positions: vec![0],
 			..PrimitiveSpec::default()
 		},
 	]

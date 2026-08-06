@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[passive]
+
+principal Alice[
+	knows public m1, m2
+	generates ska
+	ga = PUBKEY(ska)
+]
+
+principal Bob[
+	generates skb
+	gb = PUBKEY(skb)
+]
+
+principal Charlie[
+	generates skc
+	gc = PUBKEY(skc)
+]
+
+Bob -> Alice: gb
+Charlie -> Alice: gc
+
+principal Alice[
+	r1 = RINGSIGN(ska, gb, gc, m1)
+	r2 = RINGSIGN(ska, gb, gc, m2)
+]
+
+Alice -> Bob: ga, gc, r1, r2
+
+principal Bob[
+	knows public m1, m2
+	_ = RINGSIGNVERIF(ga, gb, gc, m1, r1)?
+	_ = RINGSIGNVERIF(ga, gb, gc, m2, r2)?
+]
+
+queries[
+	unlinkability? r1, r2
+]

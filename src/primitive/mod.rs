@@ -94,6 +94,7 @@ pub(crate) struct PrimitiveSpec {
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
 	pub key_derivation: bool,
+	pub identifying_positions: Vec<usize>,
 }
 
 static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {
@@ -175,6 +176,13 @@ pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> 
 	PRIM_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+}
+
+pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
+	PRIM_SPECS
+		.values()
+		.filter(|s| s.definition_check && s.rewrite.has_rule && s.rewrite.id == id)
+		.min_by_key(|s| s.id)
 }
 
 pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
@@ -346,6 +354,28 @@ mod tests {
 	fn pubkey_and_dh_kex_resolve_by_name() {
 		assert!(primitive_get_enum("PUBKEY").is_ok());
 		assert!(primitive_get_enum("DH_KEX").is_ok());
+	}
+
+	#[test]
+	fn identifying_positions_table() {
+		assert_eq!(
+			primitive_get(PRIM_SIGNVERIF).unwrap().identifying_positions,
+			vec![0]
+		);
+		assert_eq!(
+			primitive_get(PRIM_AEAD_DEC).unwrap().identifying_positions,
+			vec![0]
+		);
+		assert_eq!(
+			primitive_get(PRIM_KEM_DECAP).unwrap().identifying_positions,
+			vec![0]
+		);
+		assert!(
+			primitive_get(PRIM_RINGSIGNVERIF)
+				.unwrap()
+				.identifying_positions
+				.is_empty()
+		);
 	}
 
 	#[test]

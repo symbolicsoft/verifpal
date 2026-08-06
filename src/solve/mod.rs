@@ -187,8 +187,17 @@ fn goals_for_query(
 		QueryKind::Unlinkability => {
 			let mut out = Vec::new();
 			for c in &query.constants {
-				if let Some(term) = slot_term(Some(c), ps, sym) {
-					out.extend(deducer.solve(&term, base));
+				let Some(term) = slot_term(Some(c), ps, sym) else {
+					continue;
+				};
+				let Value::Primitive(p) = &term else {
+					continue;
+				};
+				for arg in &p.arguments {
+					if !crate::unlink::depends_on_secret(arg, ps) {
+						continue;
+					}
+					out.extend(deducer.solve(arg, base));
 				}
 			}
 			out

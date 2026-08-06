@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[passive]
+
+principal Alice[
+	knows public c1, c2
+	generates s
+	t1, t2 = SPLIT(CONCAT(HASH(s, c1), HASH(s, c2)))
+	leaks s
+]
+
+Alice -> Bob: t1, t2
+
+principal Bob[
+	knows public c1, c2
+	_ = HASH(t1)
+	_ = HASH(t2)
+]
+
+queries[
+	unlinkability? t1, t2
+]

@@ -1,6 +1,23 @@
-Verifpal 0.70.0 makes a major change to the language, removing equations completely, and also introduces support for modeling Key Encapsulation Mechanisms (KEMs).
+Verifpal 0.71.0 replaces how unlinkability queries are decided.
 
-For more information, check out the blog post announcement:
+Previously, an unlinkability query failed if a queried value contained no fresh
+constant, or if two queried values were outputs of the same primitive application
+and the attacker could rebuild it. Neither test consulted what the attacker had
+actually observed. The first reported a property of the model as though it were
+an attack, and disagreed with Verifpal's own freshness query. The second could
+only ever compare values produced by a single primitive application, so
+linkability across sessions or epochs could not be detected at all.
 
-https://symbolic.software/blog/2026-08-05-verifpal-0-70/
+Verifpal now decides unlinkability the way the User Manual has always defined it,
+by searching for a concrete link witness: a value the attacker holds that ties
+both queried values to one participant. It reports that witness as the
+explanation, so a failing query now reads, for example, "Attacker links EphID00A
+and EphID10A via SK0A."
 
+Two consequences worth checking against your own models. Models that used to fail
+on the freshness clause will now pass, because a value the attacker cannot reach
+or observe cannot be linked. And seed-compromise linkability, where one leaked
+secret lets the attacker recompute many derived identifiers, is now detected
+where it previously was not.
+
+The unlinkability test corpus grows from one model to thirty.
