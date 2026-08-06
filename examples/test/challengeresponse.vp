@@ -5,12 +5,12 @@ attacker[active]
 
 principal Server [
 	knows private s
-	gs = G^s
+	gs = PUBKEY(s)
 ]
 
 principal Client[
 	knows private c
-	gc = G^c
+	gc = PUBKEY(c)
 	generates nonce
 ]
 

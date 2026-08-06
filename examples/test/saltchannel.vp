@@ -5,22 +5,22 @@ attacker[active]
 
 principal Server [
 	knows private s
-	gs = G^s
+	gs = PUBKEY(s)
 ]
 
 principal Client [
 	knows private c
-	gc = G^c
+	gc = PUBKEY(c)
 	generates ec
-	m1 = G^ec
+	m1 = PUBKEY(ec)
 ]
 
 Client -> Server: m1
 
 principal Server [
 	generates es
-	m2 = G^es
-	shared_s = m1^es
+	m2 = PUBKEY(es)
+	shared_s = DH_KEX(m1, es)
 	m3a = AEAD_ENC(shared_s, gs, nil)
 	m3b = AEAD_ENC(shared_s, SIGN(s, HASH(m1, m2)), nil)
 ]
@@ -28,7 +28,7 @@ principal Server [
 Server -> Client: m2, m3a, m3b
 
 principal Client [
-	shared_c = m2^ec
+	shared_c = DH_KEX(m2, ec)
 	gs_dec = AEAD_DEC(shared_c, m3a, nil)
 	m3b_dec = AEAD_DEC(shared_c, m3b, nil)
 	valid_c = SIGNVERIF(gs_dec, HASH(m1, m2), m3b_dec)?

@@ -15,7 +15,7 @@ principal Alice[
 	knows private m4
 	knows private m5
 	knows private m6
-	ga = G^pass5
+	ga = PUBKEY(pass5)
 	e1 = ENC(pass1, m1)
 	e2 = ENC(PW_HASH(pass2), m2)
 	e3 = ENC(PW_HASH(HASH(pass3)), m3)

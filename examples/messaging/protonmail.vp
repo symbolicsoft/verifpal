@@ -12,7 +12,7 @@ principal Alice[
 	knows private psk
 	generates a
 	generates m1
-	ga = G^a
+	ga = PUBKEY(a)
 	em1 = AEAD_ENC(psk, m1, nil)
 ]
 
@@ -26,8 +26,8 @@ principal Bob[
 	knows private psk
 	generates m2
 	generates b
-	gb = G^b
-	gab = ga^b
+	gb = PUBKEY(b)
+	gab = DH_KEX(ga, b)
 	m1b = AEAD_DEC(psk, em1, nil)?
 	em2 = AEAD_ENC(gab, m2, nil)
 ]
@@ -36,7 +36,7 @@ Bob -> Protonmail: em2, gb
 Protonmail -> Alice: em2, gb
 
 principal Alice[
-	gba = gb^a
+	gba = DH_KEX(gb, a)
 	m2a = AEAD_DEC(gba, em2, nil)?
 ]
 

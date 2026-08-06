@@ -15,7 +15,7 @@ principal Alice[
 	knows private k
 	generates s
 	m_a = AEAD_DEC(k, c, nil)?
-	gs = G^s
+	gs = PUBKEY(s)
 	tag = MAC(m_a, gs)
 ]
 

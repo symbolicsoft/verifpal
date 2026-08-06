@@ -6,14 +6,14 @@ attacker[active]
 principal Alice[
 	knows private k
 	generates m, a
-	ga = G^a
+	ga = PUBKEY(a)
 	kk = HASH(k)
 	e = AEAD_ENC(kk, m, nil)
 ]
 
 principal Bob[
 	knows private k, b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Bob -> Alice: gb
@@ -23,7 +23,7 @@ Alice -> Bob: ga, e
 principal Bob[
 	kk_b = HASH(k)
 	m_b = AEAD_DEC(kk_b, e, nil)?
-	shared = ga^b
+	shared = DH_KEX(ga, b)
 	tag = MAC(shared, m_b)
 ]
 

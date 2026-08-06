@@ -5,25 +5,25 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 	h = HASH(a)
 	leaks a
 ]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Alice -> Bob: ga
 Bob -> Alice: gb
 
 principal Alice[
-	gba = gb^a
+	gba = DH_KEX(gb, a)
 ]
 
 principal Bob[
-	gab = ga^b
+	gab = DH_KEX(ga, b)
 ]
 
 queries[

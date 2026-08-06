@@ -5,7 +5,7 @@ attacker[active]
 
 principal Server[
 	knows private sk
-	gsk = G^sk
+	gsk = PUBKEY(sk)
 	generates payload, nonce
 	sig = SIGN(sk, HASH(payload, nonce))
 ]

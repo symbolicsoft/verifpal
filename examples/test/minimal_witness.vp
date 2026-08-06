@@ -3,21 +3,21 @@ attacker[active]
 
 principal Alice[
 	knows private mw_a
-	mw_ga = G^mw_a
+	mw_ga = PUBKEY(mw_a)
 	generates mw_m
 	generates mw_decoy
 ]
 
 principal Bob[
 	knows private mw_b
-	mw_gb = G^mw_b
+	mw_gb = PUBKEY(mw_b)
 ]
 
 Alice -> Bob: mw_ga, mw_decoy
 Bob -> Alice: mw_gb
 
 principal Alice[
-	mw_ka = mw_gb^mw_a
+	mw_ka = DH_KEX(mw_gb, mw_a)
 	mw_e = ENC(mw_ka, mw_m)
 ]
 

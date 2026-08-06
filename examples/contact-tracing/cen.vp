@@ -9,21 +9,21 @@ principal Server[
 principal Alice[
 	knows public i0, i1, i2
 	generates rakA
-	rvkA = G^rakA
+	rvkA = PUBKEY(rakA)
 	cek_0A = HASH(rakA)
 	cen_0A = HASH(i0, cek_0A)
 ]
 principal Bob[
 	knows public i0, i1, i2
 	generates rakB
-	rvkB = G^rakB
+	rvkB = PUBKEY(rakB)
 	cek_0B = HASH(rakB)
 	cen_0B = HASH(i0, cek_0B)
 ]
 principal Charlie[
 	knows public i0, i1, i2
 	generates rakC
-	rvkC = G^rakC
+	rvkC = PUBKEY(rakC)
 	cek_0C = HASH(rakC)
 	cen_0C = HASH(i0, cek_0C)
 ]

@@ -5,11 +5,11 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	a_public = G^a
+	a_public = PUBKEY(a)
 ]
 principal Bob[
 	knows private b
-	b_public = G^b
+	b_public = PUBKEY(b)
 ]
 Alice -> Bob   : a
 
@@ -22,7 +22,7 @@ Alice -> Bob : signature, ciphertext
 
 principal Bob[
 	plaintext_ = DEC(a, ciphertext)
-	vrf = SIGNVERIF(G^a, plaintext_, signature)?
+	vrf = SIGNVERIF(PUBKEY(a), plaintext_, signature)?
 ]
 
 queries[

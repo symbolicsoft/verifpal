@@ -5,7 +5,7 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
@@ -16,22 +16,22 @@ Alice -> Bob: ga
 
 principal Bob[
 	generates be
-	gbe = G^be
+	gbe = PUBKEY(be)
 ]
 
 Bob -> Alice: gbe
 
 principal Alice[
 	generates ae
-	gae = G^ae
-	as = gbe^ae
+	gae = PUBKEY(ae)
+	as = DH_KEX(gbe, ae)
 	proof = SIGN(a, as)
 ]
 
 Alice -> Bob: gae, proof
 
 principal Bob[
-	bs = gae^be
+	bs = DH_KEX(gae, be)
 	_ = SIGNVERIF(ga, bs, proof)?
 	ciphertext = AEAD_ENC(bs, message, nil)
 ]

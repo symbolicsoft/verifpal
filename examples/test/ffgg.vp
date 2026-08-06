@@ -5,7 +5,7 @@ attacker[active]
 
 principal Bob[
 	knows private skb
-	pkb = G^skb
+	pkb = PUBKEY(skb)
 ]
 
 principal Alice[

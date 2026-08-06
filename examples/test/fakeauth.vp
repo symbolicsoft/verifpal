@@ -10,7 +10,7 @@ principal Alice[
     alice_master_decryption, alice_master_auth = HKDF(alice_username, PW_HASH(alice_password), const_e)
     knows private alice_private_key
     e_alice_private_key = AEAD_ENC(alice_master_decryption, alice_private_key, alice_username)
-    alice_public_key = G^alice_private_key
+    alice_public_key = PUBKEY(alice_private_key)
 ]
 
 Alice -> Server: [e_alice_private_key], [alice_master_auth], [alice_public_key]

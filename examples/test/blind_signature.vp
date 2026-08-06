@@ -5,7 +5,7 @@ attacker[active]
 
 principal Signer[
 	knows private sk
-	gsk = G^sk
+	gsk = PUBKEY(sk)
 ]
 
 Signer -> Alice: [gsk]

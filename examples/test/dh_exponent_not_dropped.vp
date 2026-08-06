@@ -8,9 +8,9 @@ principal Alice[
 	knows public c
 	e = ENC(c, c)
 	a1 = DEC(c, e)
-	ga1 = G^a1
+	ga1 = PUBKEY(a1)
 	b1 = HASH(x)
-	s = ga1^b1
+	s = DH_KEX(ga1, b1)
 ]
 
 queries[

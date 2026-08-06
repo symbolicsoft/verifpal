@@ -7,7 +7,7 @@ principal Alice[
 	knows public hmac_key
 	knows private key
 	knows private sk
-	pk = G^sk
+	pk = PUBKEY(sk)
 ]
 
 principal Bob[

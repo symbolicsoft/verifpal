@@ -30,7 +30,7 @@ principal UserA[
 	encryptionKeyA = HKDF(masterKeyA, encryptionKeySaltA, nil)
 	dhPrivateKeyA = HKDF(masterKeyA, dhKeySaltA, nil)
 	hmacKeyA = HKDF(masterKeyA, hmacKeySaltA, nil)
-	publicKeyA = G^dhPrivateKeyA
+	publicKeyA = PUBKEY(dhPrivateKeyA)
 ]
 
 UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, passwordEncryptedSeedA
@@ -56,7 +56,7 @@ principal UserB[
 	encryptionKeyB = HKDF(masterKeyB, encryptionKeySaltB, nil)
 	dhPrivateKeyB = HKDF(masterKeyB, dhKeySaltB, nil)
 	hmacKeyB = HKDF(masterKeyB, hmacKeySaltB, nil)
-	publicKeyB = G^dhPrivateKeyB
+	publicKeyB = PUBKEY(dhPrivateKeyB)
 ]
 
 UserB -> Server: passwordTokenB, publicKeyB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, dhKeySaltB, hmacKeySaltB, passwordBasedEncryptionKeySaltB, passwordEncryptedSeedB

@@ -7,16 +7,16 @@ principal Alice[
 	knows public n
 	knows private longTermA
 	generates ephemeralA
-	longTermAPub = G^longTermA
-	ephemeralAPub = G^ephemeralA
+	longTermAPub = PUBKEY(longTermA)
+	ephemeralAPub = PUBKEY(ephemeralA)
 ]
 
 principal Bob[
 	knows public n
 	knows private longTermB
 	generates ephemeralB
-	longTermBPub = G^longTermB
-	ephemeralBPub = G^ephemeralB
+	longTermBPub = PUBKEY(longTermB)
+	ephemeralBPub = PUBKEY(ephemeralB)
 ]
 
 Bob -> Alice: [longTermBPub]
@@ -36,26 +36,26 @@ Bob -> Alice: ephemeralBPub, nMacBob
 
 principal Alice[
 	nMacBobValid = ASSERT(MAC(n, ephemeralBPub), nMacBob)?
-	ephemeralSecretAlice = ephemeralBPub^ephemeralA
-	longTermSecretAlice = longTermBPub^ephemeralA
+	ephemeralSecretAlice = DH_KEX(ephemeralBPub, ephemeralA)
+	longTermSecretAlice = DH_KEX(longTermBPub, ephemeralA)
 	masterSecret1Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice)
 	sig1Alice = SIGN(longTermA, HASH(n, longTermBPub, ephemeralSecretAlice))
 	secretBox1Alice = AEAD_ENC(masterSecret1Alice, sig1Alice, nil)
 	secretBox2Alice = AEAD_ENC(masterSecret1Alice, longTermAPub, nil)
-	longEphemeralSecretAlice = ephemeralBPub^longTermA
+	longEphemeralSecretAlice = DH_KEX(ephemeralBPub, longTermA)
 	masterSecret2Alice = HASH(n, ephemeralSecretAlice, longTermSecretAlice, longEphemeralSecretAlice)
 ]
 
 Alice -> Bob: secretBox1Alice, secretBox2Alice
 
 principal Bob[
-	ephemeralSecretBob = ephemeralAPub^ephemeralB
-	longTermSecretBob = ephemeralAPub^longTermB
+	ephemeralSecretBob = DH_KEX(ephemeralAPub, ephemeralB)
+	longTermSecretBob = DH_KEX(ephemeralAPub, longTermB)
 	masterSecret1Bob = HASH(n, ephemeralSecretBob, longTermSecretBob)
 	sig1Bob = AEAD_DEC(masterSecret1Bob, secretBox1Alice, nil)?
 	longTermAPub_Bob = AEAD_DEC(masterSecret1Bob, secretBox2Alice, nil)?
 	sig1Valid = SIGNVERIF(longTermAPub_bob, HASH(n, longTermBPub, ephemeralSecretBob), sig1Bob)?
-	longEphemeralSecretBob = longTermAPub_Bob^ephemeralB
+	longEphemeralSecretBob = DH_KEX(longTermAPub_Bob, ephemeralB)
 ]
 
 principal Bob[

@@ -5,12 +5,12 @@ attacker[passive]
 
 principal Alice[
 	knows private ska, sec
-	pka = G^ska
+	pka = PUBKEY(ska)
 ]
 
 principal Bob[
 	knows private skb, sec
-	pkb = G^skb
+	pkb = PUBKEY(skb)
 ]
 
 Alice -> Bob: pka

@@ -5,13 +5,13 @@ attacker[active]
 
 principal Alice[
 	knows private ia
-	gia = G^ia
+	gia = PUBKEY(ia)
 ]
 
 principal Bob[
 	knows private ib, sb
-	gib = G^ib
-	gsb = G^sb
+	gib = PUBKEY(ib)
+	gsb = PUBKEY(sb)
 	sbsig = SIGN(ib, gsb)
 ]
 
@@ -19,9 +19,9 @@ Bob -> Alice: [gib], gsb, sbsig
 
 principal Alice[
 	generates ea, m
-	gea = G^ea
+	gea = PUBKEY(ea)
 	_ = SIGNVERIF(gib, gsb, sbsig)
-	master = HASH(gsb^ia, gib^ea, gsb^ea)
+	master = HASH(DH_KEX(gsb, ia), DH_KEX(gib, ea), DH_KEX(gsb, ea))
 	k = HKDF(master, nil, nil)
 	c = AEAD_ENC(k, m, nil)
 ]

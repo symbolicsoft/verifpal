@@ -5,7 +5,7 @@ attacker[active]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Bob -> Alice: gb
@@ -13,31 +13,31 @@ Bob -> Alice: gb
 principal Alice[
 	knows private a
 	knows private aa
-	ga = G^a
-	gaa = G^aa
-	egaa = AEAD_ENC(gb^a, gaa, nil)
+	ga = PUBKEY(a)
+	gaa = PUBKEY(aa)
+	egaa = AEAD_ENC(DH_KEX(gb, a), gaa, nil)
 ]
 
 Alice -> Bob: ga, egaa
 
 principal Bob[
-	b_gaa = AEAD_DEC(ga^b, egaa, nil)?
+	b_gaa = AEAD_DEC(DH_KEX(ga, b), egaa, nil)?
 	knows private m
-	em = AEAD_ENC(b_gaa^b, m, nil)
+	em = AEAD_ENC(DH_KEX(b_gaa, b), m, nil)
 ]
 
 Bob -> Alice: em
 
 principal Alice[
-	x = AEAD_DEC(gb^aa, em, nil)?
+	x = AEAD_DEC(DH_KEX(gb, aa), em, nil)?
 	knows private m2
-	em2 = AEAD_ENC(gb^aa, m2, nil)
+	em2 = AEAD_ENC(DH_KEX(gb, aa), m2, nil)
 ]
 
 Alice -> Bob: em2
 
 principal Bob[
-	_ = AEAD_DEC(b_gaa^b, em2, nil)?
+	_ = AEAD_DEC(DH_KEX(b_gaa, b), em2, nil)?
 ]
 
 queries[

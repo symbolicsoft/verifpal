@@ -5,12 +5,12 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Alice -> Bob: [ga]
@@ -18,19 +18,19 @@ Bob -> Alice: [gb]
 
 principal Alice[
 	generates ea
-	gea = G^ea
+	gea = PUBKEY(ea)
 ]
 
 principal Bob[
 	generates eb
-	geb = G^eb
+	geb = PUBKEY(eb)
 ]
 
 Alice -> Bob: [gea]
 Bob -> Alice: [geb]
 
 principal Alice[
-	eph_shared_a = geb^ea
+	eph_shared_a = DH_KEX(geb, ea)
 	session_key_a = HASH(eph_shared_a)
 	generates secret_msg
 	encrypted = AEAD_ENC(session_key_a, secret_msg, nil)
@@ -39,7 +39,7 @@ principal Alice[
 Alice -> Bob: encrypted
 
 principal Bob[
-	eph_shared_b = gea^eb
+	eph_shared_b = DH_KEX(gea, eb)
 	session_key_b = HASH(eph_shared_b)
 	decrypted = AEAD_DEC(session_key_b, encrypted, nil)?
 ]

@@ -5,22 +5,22 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 principal Carol[
 	knows private c
-	gc = G^c
+	gc = PUBKEY(c)
 ]
 
 principal Damian[
 	knows private d
-	gd = G^d
+	gd = PUBKEY(d)
 ]
 
 Alice -> Carol: [ga]
@@ -34,32 +34,32 @@ Bob -> Damian: [gb]
 principal Alice[
 	generates msg
 	sig = SIGN(a, msg)
-	shared_ac = gc^a
+	shared_ac = DH_KEX(gc, a)
 	envelope = AEAD_ENC(shared_ac, CONCAT(msg, sig), ga)
 ]
 
 Alice -> Carol: envelope
 
 principal Carol[
-	inner = AEAD_DEC(ga^c, envelope, ga)?
+	inner = AEAD_DEC(DH_KEX(ga, c), envelope, ga)?
 	msg_c, sig_c = SPLIT(inner)?
-	shared_cb = gb^c
+	shared_cb = DH_KEX(gb, c)
 	re_envelope = AEAD_ENC(shared_cb, CONCAT(msg_c, sig_c), gc)
 ]
 
 Carol -> Bob: re_envelope
 
 principal Bob[
-	inner_b = AEAD_DEC(gc^b, re_envelope, gc)?
+	inner_b = AEAD_DEC(DH_KEX(gc, b), re_envelope, gc)?
 	msg_b, sig_b = SPLIT(inner_b)?
 	_ = SIGNVERIF(ga, msg_b, sig_b)?
-	audit_mac = MAC(gd^b, msg_b)
+	audit_mac = MAC(DH_KEX(gd, b), msg_b)
 ]
 
 Bob -> Damian: [msg_b], audit_mac
 
 principal Damian[
-	_ = ASSERT(MAC(gb^d, msg_b), audit_mac)?
+	_ = ASSERT(MAC(DH_KEX(gb, d), msg_b), audit_mac)?
 ]
 
 queries[

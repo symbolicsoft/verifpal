@@ -5,17 +5,17 @@ attacker[active]
 
 principal Bob[
 	knows private b, s
-	gb = G^b
-	gs = G^s
+	gb = PUBKEY(b)
+	gs = PUBKEY(s)
 ]
 
 Bob -> Alice: [gb], gs
 
 principal Alice[
 	generates e, m
-	ge = G^e
-	d1 = gs^e
-	d2 = gb^e
+	ge = PUBKEY(e)
+	d1 = DH_KEX(gs, e)
+	d2 = DH_KEX(gb, e)
 	k = HASH(d1, d2)
 	c = AEAD_ENC(k, m, nil)
 ]

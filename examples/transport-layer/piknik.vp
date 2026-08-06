@@ -13,7 +13,7 @@ principal Client1[
     knows private signprivkey
     knows private keygen
     knows private ekid
-    signpubkey = G^signprivkey
+    signpubkey = PUBKEY(signprivkey)
 
     leaks skk
     leaks ekid
@@ -51,8 +51,8 @@ principal Client1[
 
     _ = ASSERT(h1, HASH(skk, 1, rprime, h0))?
 
-    gkeygen = G^keygen
-    ct = ENC(gkeygen^ekid, CONCAT(n, m))
+    gkeygen = PUBKEY(keygen)
+    ct = ENC(DH_KEX(gkeygen, ekid), CONCAT(n, m))
     signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
     h2 = HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid))
 ]
@@ -63,8 +63,8 @@ principal Client2[
     _ = ASSERT(h2, HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid)))?
     _ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
 
-    gkeygen_ = G^keygen
-    nm_ = DEC(gkeygen_^ekid, ct)
+    gkeygen_ = PUBKEY(keygen)
+    nm_ = DEC(DH_KEX(gkeygen_, ekid), ct)
     n_, m_ = SPLIT(nm_)
 ]
 

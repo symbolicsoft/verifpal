@@ -5,22 +5,22 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 principal Carol[
 	knows private c
-	gc = G^c
+	gc = PUBKEY(c)
 ]
 
 principal Damian[
 	knows private d
-	gd = G^d
+	gd = PUBKEY(d)
 ]
 
 Alice -> Bob: [ga]

@@ -6,13 +6,13 @@ attacker[active]
 principal Alice[
 	knows private a
 	generates na
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
 	knows private b
 	generates nb
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Alice -> Bob: [ga]

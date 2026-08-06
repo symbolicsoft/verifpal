@@ -5,7 +5,7 @@ attacker[active]
 
 principal Server[
 	knows private sigKey
-	gSigKey = G^sigKey
+	gSigKey = PUBKEY(sigKey)
 ]
 
 Server -> Client: [gSigKey]
@@ -13,7 +13,7 @@ Server -> Client: [gSigKey]
 principal Client[
 	knows public noExtensions
 	generates ce
-	gce = G^ce
+	gce = PUBKEY(ce)
 ]
 
 Client -> Server: gce
@@ -21,9 +21,9 @@ Client -> Server: gce
 principal Server[
 	knows public noExtensions
 	generates se
-	gse = G^se
+	gse = PUBKEY(se)
 
-	dhe = gce^se
+	dhe = DH_KEX(gce, se)
 
 	earlySecret = HKDF(nil, nil, nil)
 
@@ -57,7 +57,7 @@ principal Server[
 Server -> Client: gse, serverFlight
 
 principal Client[
-	dhe_c = gse^ce
+	dhe_c = DH_KEX(gse, ce)
 
 	earlySecret_c = HKDF(nil, nil, nil)
 	derivedES_c = HKDF(earlySecret_c, nil, nil)

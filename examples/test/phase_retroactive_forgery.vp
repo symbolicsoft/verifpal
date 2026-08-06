@@ -5,14 +5,14 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 principal Bob[
 	knows private b
-	gb = G^b
+	gb = PUBKEY(b)
 	generates s
-	gs = G^s
+	gs = PUBKEY(s)
 	sig = SIGN(b, gs)
 ]
 
@@ -21,7 +21,7 @@ Bob -> Alice: [gb], gs, sig
 principal Alice[
 	generates m
 	_ = SIGNVERIF(gb, gs, sig)?
-	k = gs^a
+	k = DH_KEX(gs, a)
 	c = AEAD_ENC(k, m, nil)
 ]
 

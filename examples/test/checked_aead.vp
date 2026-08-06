@@ -5,11 +5,11 @@ attacker[active]
 
 principal Alice[
 	knows private a
-	a_public = G^a
+	a_public = PUBKEY(a)
 ]
 principal Bob[
 	knows private b
-	b_public = G^b
+	b_public = PUBKEY(b)
 ]
 Alice -> Bob   : [a_public]
 Bob   -> Alice : [b_public]
@@ -17,7 +17,7 @@ Bob   -> Alice : [b_public]
 principal Alice[
 	generates plaintext
 	generates ad
-	ss         = b_public^a
+	ss         = DH_KEX(b_public, a)
 	key        = HASH(ss)
 	ciphertext = AEAD_ENC(key, plaintext, ad)
 ]
@@ -25,7 +25,7 @@ principal Alice[
 Alice -> Bob : ad, ciphertext
 
 principal Bob[
-	ss_        = a_public^b
+	ss_        = DH_KEX(a_public, b)
 	key_       = HASH(ss_)
 	plaintext_ = AEAD_DEC(key_, ciphertext, ad)?
 ]

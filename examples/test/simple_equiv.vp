@@ -6,10 +6,10 @@ attacker[passive]
 principal Server[
     generates x
     generates y
-    gx = G^x
-    gy = G^y
-    gxy = gx^y
-    gyx = gy^x
+    gx = PUBKEY(x)
+    gy = PUBKEY(y)
+    gxy = DH_KEX(gx, y)
+    gyx = DH_KEX(gy, x)
 ]
 
 queries [

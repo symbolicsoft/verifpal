@@ -7,7 +7,7 @@ principal Alice[
 	knows password a_pass
 	derived = PW_HASH(a_pass)
 	generates a
-	ga = G^a
+	ga = PUBKEY(a)
 	generates collection_uid
 	collection_key = HKDF(collection_uid, derived, nil)
 ]
@@ -16,7 +16,7 @@ Alice -> Bob: collection_uid
 
 principal Bob[
 	generates b
-	gb = G^b
+	gb = PUBKEY(b)
 ]
 
 Bob -> Alice: [gb]

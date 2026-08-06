@@ -5,14 +5,14 @@ attacker[active]
 
 principal Alice[
 	knows private sk_a
-	pk_a = G^sk_a
+	pk_a = PUBKEY(sk_a)
 ]
 
 Alice -> Bob: [pk_a]
 
 principal Bob[
 	knows private sk_b
-	pk_b = G^sk_b
+	pk_b = PUBKEY(sk_b)
 ]
 
 Bob -> Alice: [pk_b]

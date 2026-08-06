@@ -5,23 +5,23 @@ attacker[active]
 
 principal Alice[
 	knows private a_id
-	ga_id = G^a_id
+	ga_id = PUBKEY(a_id)
 	generates a_eph0
-	ga_eph0 = G^a_eph0
+	ga_eph0 = PUBKEY(a_eph0)
 ]
 
 principal Bob[
 	knows private b_id
-	gb_id = G^b_id
+	gb_id = PUBKEY(b_id)
 	generates b_eph0
-	gb_eph0 = G^b_eph0
+	gb_eph0 = PUBKEY(b_eph0)
 ]
 
 Alice -> Bob: [ga_id], [ga_eph0]
 Bob -> Alice: [gb_id], [gb_eph0]
 
 principal Alice[
-	dh_root = HASH(gb_id^a_id, gb_eph0^a_eph0)
+	dh_root = HASH(DH_KEX(gb_id, a_id), DH_KEX(gb_eph0, a_eph0))
 	rk1, ck_a1 = HKDF(dh_root, nil, nil)
 	mk_a1, _ = HKDF(ck_a1, nil, nil)
 	generates msg1
@@ -31,13 +31,13 @@ principal Alice[
 Alice -> Bob: e1
 
 principal Bob[
-	dh_root_b = HASH(ga_id^b_id, ga_eph0^b_eph0)
+	dh_root_b = HASH(DH_KEX(ga_id, b_id), DH_KEX(ga_eph0, b_eph0))
 	rk1_b, ck_b1 = HKDF(dh_root_b, nil, nil)
 	mk_b1, _ = HKDF(ck_b1, nil, nil)
 	msg1_b = AEAD_DEC(mk_b1, e1, ga_eph0)?
 	generates b_eph1
-	gb_eph1 = G^b_eph1
-	rk2_b, ck_b2 = HKDF(rk1_b, HASH(ga_eph0^b_eph1), nil)
+	gb_eph1 = PUBKEY(b_eph1)
+	rk2_b, ck_b2 = HKDF(rk1_b, HASH(DH_KEX(ga_eph0, b_eph1)), nil)
 	mk_b2, _ = HKDF(ck_b2, nil, nil)
 	generates msg2
 	e2 = AEAD_ENC(mk_b2, msg2, gb_eph1)
@@ -46,7 +46,7 @@ principal Bob[
 Bob -> Alice: [gb_eph1], e2
 
 principal Alice[
-	rk2, ck_a2 = HKDF(rk1, HASH(gb_eph1^a_eph0), nil)
+	rk2, ck_a2 = HKDF(rk1, HASH(DH_KEX(gb_eph1, a_eph0)), nil)
 	mk_a2, _ = HKDF(ck_a2, nil, nil)
 	msg2_a = AEAD_DEC(mk_a2, e2, gb_eph1)?
 ]

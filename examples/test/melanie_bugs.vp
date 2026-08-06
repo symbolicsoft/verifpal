@@ -5,29 +5,29 @@ attacker[active]
 
 principal Alice[
 	generates a
-	ga = G^a
+	ga = PUBKEY(a)
 ]
 
 Alice -> Bob: [ga]
 
 principal Bob[
 	generates b
-	gb = G^b
-	gab = ga^b
+	gb = PUBKEY(b)
+	gab = DH_KEX(ga, b)
 	generates eb
-	geb = G^eb
+	geb = PUBKEY(eb)
 	e1 = AEAD_ENC(gab, geb, gb)
 ]
 
 Bob -> Alice: [gb], e1
 
 principal Alice[
-	gba = gb^a
+	gba = DH_KEX(gb, a)
 	geb_a = AEAD_DEC(gba, e1, gb)?
 	generates ea
-	gea = G^ea
+	gea = PUBKEY(ea)
 	e2 = AEAD_ENC(gba, gea, ga)
-	shared_secret_a = geb_a^ea
+	shared_secret_a = DH_KEX(geb_a, ea)
 	generates m1
 	e3 = AEAD_ENC(shared_secret_a, m1, ga)
 ]
@@ -36,7 +36,7 @@ Alice -> Bob: e2, e3
 
 principal Bob[
 	gea_b = AEAD_DEC(gab, e2, ga)?
-	shared_secret_b = gea_b^eb
+	shared_secret_b = DH_KEX(gea_b, eb)
 	m1_b = AEAD_DEC(shared_secret_b, e3, ga)
 ]
 
