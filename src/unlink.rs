@@ -7,6 +7,38 @@ use std::sync::Arc;
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 
+pub(crate) enum LinkWitnessKind {
+	SharedSecret,
+	IdentifyingCheck(PrimitiveId),
+	ObservedEquality,
+}
+
+pub(crate) struct LinkWitness {
+	pub kind: LinkWitnessKind,
+	pub value: Value,
+}
+
+fn witness_observed_equality(
+	av: &Value,
+	bv: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<LinkWitness> {
+	if !av.equivalent(bv, true) {
+		return None;
+	}
+	if attacker.knows(av).is_none() || attacker.knows(bv).is_none() {
+		return None;
+	}
+	if !depends_on_secret(av, ps) {
+		return None;
+	}
+	Some(LinkWitness {
+		kind: LinkWitnessKind::ObservedEquality,
+		value: av.clone(),
+	})
+}
+
 pub(crate) fn depends_on_secret(v: &Value, ps: &PrincipalState) -> bool {
 	let mut constants = Vec::new();
 	v.collect_constants(&mut constants);
@@ -102,7 +134,7 @@ fn push_leaf(out: &mut Vec<Value>, v: &Value) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::primitive::PRIM_HASH;
+	use crate::primitive::{PRIM_HASH, PRIM_MAC};
 	use crate::testutil::*;
 
 	fn state_from(values: &[Value]) -> PrincipalState {
@@ -146,6 +178,22 @@ mod tests {
 
 		let attacker = make_attacker_state(vec![tok.clone()]);
 		assert!(origin_leaves(&tok, &ps, &attacker).is_none());
+	}
+
+	#[test]
+	fn observed_equality_needs_a_secret() {
+		let k = make_password("w3_k");
+		let n = make_constant("w3_n");
+		let tok = make_primitive(PRIM_MAC, vec![k.clone(), n.clone()], 0);
+		let ps = state_from(&[k, n]);
+		let attacker = make_attacker_state(vec![tok.clone()]);
+		assert!(witness_observed_equality(&tok, &tok, &ps, &attacker).is_some());
+
+		let pub_c = make_constant("w3_pub");
+		let pub_tok = make_primitive(PRIM_MAC, vec![pub_c.clone(), pub_c.clone()], 0);
+		let ps = state_from(std::slice::from_ref(&pub_c));
+		let attacker = make_attacker_state(vec![pub_tok.clone()]);
+		assert!(witness_observed_equality(&pub_tok, &pub_tok, &ps, &attacker).is_none());
 	}
 
 	#[test]
