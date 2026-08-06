@@ -23,7 +23,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 361 tests (unit + model), ~1.6s once built (also: make test)
+cargo test --release                   # 363 tests (unit + model), ~1.6s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
