@@ -216,6 +216,14 @@ fn test_unlink_seed_leaked() {
 	run_model("unlink_seed_leaked.vp", "u1");
 }
 #[test]
+fn test_unlink_active_links() {
+	run_model("unlink_active_links.vp", "u1");
+}
+#[test]
+fn test_unlink_passive_holds() {
+	run_model("unlink_passive_holds.vp", "u0");
+}
+#[test]
 fn test_needham_schroeder_pk() {
 	run_model("needham-schroeder-pk.vp", "a1a1c1c1");
 }
