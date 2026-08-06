@@ -144,6 +144,23 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 	);
 	println!();
 
+	let assumptions = ctx.capability_assumption_terms();
+	if !assumptions.is_empty() {
+		info_message(
+			&format!(
+				"Analysis performed under {} declared weakening assumption{}:",
+				assumptions.len(),
+				if assumptions.len() == 1 { "" } else { "s" },
+			),
+			InfoLevel::Warning,
+			false,
+		);
+		for term in &assumptions {
+			info_message(&format!("{}", term), InfoLevel::Warning, false);
+		}
+		println!();
+	}
+
 	for r in &results {
 		if r.resolved {
 			info_message(

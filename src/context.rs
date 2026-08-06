@@ -149,6 +149,20 @@ impl VerifyContext {
 		&self.states
 	}
 
+	pub(crate) fn capability_assumptions(&self) -> Vec<(Value, Capability, i32)> {
+		self.states
+			.first()
+			.map(|ps| ps.capabilities.assumptions())
+			.unwrap_or_default()
+	}
+
+	pub(crate) fn capability_assumption_terms(&self) -> Vec<Value> {
+		self.states
+			.first()
+			.map(|ps| ps.capabilities.assumption_terms())
+			.unwrap_or_default()
+	}
+
 	pub(crate) fn attacker_phase_archive(&self, phase: i32) {
 		let snapshot = self.attacker_snapshot();
 		let idx = phase.max(0) as usize;

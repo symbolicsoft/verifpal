@@ -209,6 +209,17 @@ impl CapabilityIndex {
 			.flat_map(|b| b.iter().map(|(v, caps)| (v, caps)))
 	}
 
+	pub fn assumption_terms(&self) -> Vec<Value> {
+		let mut out: Vec<Value> = self
+			.buckets
+			.values()
+			.flatten()
+			.map(|(v, _)| v.clone())
+			.collect();
+		out.sort_by_key(|v| v.hash_value());
+		out
+	}
+
 	pub fn assumptions(&self) -> Vec<(Value, Capability, i32)> {
 		let mut out = Vec::new();
 		for bucket in self.buckets.values() {
