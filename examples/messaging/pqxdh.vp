@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Signal PQXDH: X3DH plus a signed KEM prekey, with the KEM shared secret
+// mixed into the master secret. Phase 1 leaks every Diffie-Hellman private
+// value, which is the harvest-now-decrypt-later adversary: the message must
+// survive it, carried by the KEM leg alone.
+//
+// The two prekey signatures are domain-separated with the public tags c2 and
+// c3. Without that separation an attacker swaps the KEM prekey for the DH
+// prekey, carrying Bob's genuine signature with it, and the KEM leg quietly
+// becomes a second classical leg.
+
+attacker[active]
+
+principal Alice[
+	knows public c1, c2, c3
+	knows private alongterm
+	galongterm = PUBKEY(alongterm)
+]
+
+principal Bob[
+	knows public c1, c2, c3
+	knows private blongterm, bs
+	generates bo, dkb
+	gblongterm = PUBKEY(blongterm)
+	gbs = PUBKEY(bs)
+	gbo = PUBKEY(bo)
+	ekb = PUBKEY(dkb)
+	gbssig = SIGN(blongterm, HASH(c2, gbs))
+	ekbsig = SIGN(blongterm, HASH(c3, ekb))
+]
+
+Bob -> Alice: [gblongterm], gbs, gbssig, gbo, ekb, ekbsig
+
+principal Alice[
+	generates m1, ae1, r
+	gae1 = PUBKEY(ae1)
+	valid = SIGNVERIF(gblongterm, HASH(c2, gbs), gbssig)?
+	kvalid = SIGNVERIF(gblongterm, HASH(c3, ekb), ekbsig)?
+	ss, ct = KEM_ENCAP(ekb, r)
+	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss)
+	akenc = HKDF(amaster, c1, nil)
+	e1 = AEAD_ENC(akenc, m1, HASH(galongterm, gblongterm, gae1))
+]
+
+Alice -> Bob: [galongterm], gae1, ct, e1
+
+principal Bob[
+	bss = KEM_DECAP(dkb, ct)
+	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss)
+	bkenc = HKDF(bmaster, c1, nil)
+	m1_d = AEAD_DEC(bkenc, e1, HASH(galongterm, gblongterm, gae1))?
+]
+
+phase[1]
+
+principal Alice[leaks alongterm, ae1]
+principal Bob[leaks blongterm, bs, bo]
+
+queries[
+	confidentiality? m1
+	authentication? Alice -> Bob: e1
+]

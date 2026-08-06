@@ -95,6 +95,10 @@ pub(crate) struct PrimitiveSpec {
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
 	pub key_derivation: bool,
 	pub identifying_positions: Vec<usize>,
+	pub weak_reveals: Vec<usize>,
+	pub weak_reveals_output: Option<usize>,
+	pub forgeable_secret: Option<usize>,
+	pub malleable_vary: Vec<usize>,
 }
 
 static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {

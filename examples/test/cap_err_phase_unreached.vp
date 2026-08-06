@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: phase 5 is never reached, so this assumption has no effect. A
+// weakening that silently does nothing reads as a check that was performed.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public ad
+	e = AEAD_ENC[weak from phase 5](k, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, e, ad)
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+]

@@ -15,6 +15,54 @@ fn run_model_at(path: &str, model: &str, expected: &str) {
 	);
 }
 
+fn run_model_err(model: &str, expected_substring: &str) {
+	let path = format!("examples/test/{}", model);
+	match crate::verify::verify(&path) {
+		Ok((_, code)) => panic!(
+			"FAIL • {} (expected an error containing {:?}, got result code {})",
+			model, expected_substring, code
+		),
+		Err(e) => {
+			let text = format!("{}", e);
+			assert!(
+				text.contains(expected_substring),
+				"FAIL • {} (expected an error containing {:?}, got: {})",
+				model,
+				expected_substring,
+				text
+			);
+		}
+	}
+}
+
+#[test]
+fn test_cap_err_sign_weak() {
+	run_model_err("cap_err_sign_weak.vp", "did you mean `SIGN[forgeable]`");
+}
+#[test]
+fn test_cap_err_dh_kex_weak() {
+	run_model_err("cap_err_dh_kex_weak.vp", "did you mean `PUBKEY[weak]`");
+}
+#[test]
+fn test_cap_err_hash_forgeable() {
+	run_model_err("cap_err_hash_forgeable.vp", "has no secret argument");
+}
+#[test]
+fn test_cap_err_aead_malleable() {
+	run_model_err(
+		"cap_err_aead_malleable.vp",
+		"did you mean `AEAD_ENC[forgeable]`",
+	);
+}
+#[test]
+fn test_cap_err_core_primitive() {
+	run_model_err("cap_err_core_primitive.vp", "no cryptographic guarantee");
+}
+#[test]
+fn test_cap_err_phase_unreached() {
+	run_model_err("cap_err_phase_unreached.vp", "is never reached");
+}
+
 #[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");

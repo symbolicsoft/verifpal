@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: core primitives carry no cryptographic guarantee to weaken.
+attacker[active]
+
+principal Alice[
+	knows private m
+	knows private n
+	c = CONCAT[weak](m, n)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	_ = HASH(c)
+]
+
+queries[
+	confidentiality? m
+]

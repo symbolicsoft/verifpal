@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: HASH has no secret argument, so there is nothing to forge
+// without.
+attacker[active]
+
+principal Alice[
+	knows private m
+	h = HASH[forgeable](m)
+]
+
+Alice -> Bob: h
+
+principal Bob[
+	_ = HASH(h)
+]
+
+queries[
+	confidentiality? m
+]

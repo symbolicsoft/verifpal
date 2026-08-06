@@ -210,6 +210,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
 			password_hashing: vec![0, 1, 2, 3, 4],
+			weak_reveals: vec![0, 1, 2, 3, 4],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -217,6 +218,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
+			weak_reveals: vec![0, 1, 2, 3, 4],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -238,6 +240,8 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveal_output: None,
 				filter: Some(filter_identity),
 			},
+			weak_reveals: vec![1],
+			forgeable_secret: Some(0),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -277,6 +281,8 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveal_output: None,
 				filter: Some(filter_identity),
 			},
+			weak_reveals: vec![1],
+			malleable_vary: vec![1],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -307,6 +313,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "MAC",
 			arity: vec![2],
 			output: vec![1],
+			forgeable_secret: Some(0),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -316,6 +323,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			key_derivation: true,
 			argument_restrictions: vec![(0, vec![PRIM_PUBKEY, PRIM_DH_KEX])],
+			weak_reveals: vec![0],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -339,6 +347,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SIGN",
 			arity: vec![2],
 			output: vec![1],
+			forgeable_secret: Some(0),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -374,6 +383,8 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveal_output: None,
 				filter: Some(filter_extract_dh_exponent),
 			},
+			weak_reveals: vec![1],
+			malleable_vary: vec![1],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -436,6 +447,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "RINGSIGN",
 			arity: vec![4],
 			output: vec![1],
+			forgeable_secret: Some(0),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -509,6 +521,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				(0, vec![PRIM_DH_KEX, PRIM_KEM_ENCAP, PRIM_KEM_DECAP]),
 				(1, vec![PRIM_PUBKEY, PRIM_DH_KEX]),
 			],
+			weak_reveals_output: Some(0),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {

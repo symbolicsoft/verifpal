@@ -324,7 +324,7 @@ mod tests {
 
 	#[test]
 	fn pretty_round_trips_primitive_capabilities() {
-		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private prc_k\n\tknows private prc_m\n\tknows private prc_ad\n\tprc_e = AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)\n]\n\nqueries[\n\tconfidentiality? prc_m\n]\n";
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private prc_k\n\tknows private prc_m\n\tknows private prc_ad\n\tprc_e = AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)\n]\n\nphase[1]\n\nphase[2]\n\nqueries[\n\tconfidentiality? prc_m\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		let once = pretty_model(&m).expect("pretty");
 		let m2 = parse_string("t.vp", &once).expect("reparse");

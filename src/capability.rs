@@ -1,6 +1,9 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
+use crate::types::PrimitiveId;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Capability {
 	Weak,
@@ -91,6 +94,51 @@ impl Capabilities {
 				_ => self.set(cap, onset),
 			}
 		}
+	}
+}
+
+pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
+	if primitive_is_core(id) {
+		return false;
+	}
+	let Ok(spec) = primitive_get(id) else {
+		return false;
+	};
+	match cap {
+		Capability::Weak => !spec.weak_reveals.is_empty() || spec.weak_reveals_output.is_some(),
+		Capability::Forgeable => spec.forgeable_secret.is_some(),
+		Capability::Malleable => !spec.malleable_vary.is_empty(),
+	}
+}
+
+pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
+	let name = primitive_name(id);
+	if primitive_is_core(id) {
+		return format!(
+			"{} is a core primitive and carries no cryptographic guarantee to weaken",
+			name
+		);
+	}
+	match cap {
+		Capability::Weak if supports(id, Capability::Forgeable) => format!(
+			"{} provides authenticity, not confidentiality; did you mean `{}[forgeable]`?",
+			name, name
+		),
+		Capability::Weak if name == "DH_KEX" => {
+			"discrete log is a property of the key, not the exchange; \
+			 did you mean `PUBKEY[weak]`?"
+				.to_string()
+		}
+		Capability::Forgeable => format!(
+			"{} has no secret argument; anyone who knows its inputs can compute it",
+			name
+		),
+		Capability::Malleable if supports(id, Capability::Forgeable) => format!(
+			"malleability of an authenticated primitive is an authenticity break; \
+			 did you mean `{}[forgeable]`?",
+			name
+		),
+		_ => format!("{} does not support the `{}` parameter", name, cap.name()),
 	}
 }
 
