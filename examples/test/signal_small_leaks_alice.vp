@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// Expected: c0a1. Only alongterm leaks in phase 0; blongterm leaks in phase 1, too
+// late to matter for m1. With Bob's identity key still secret the prekey signature
+// cannot be forged, so gbs/gbo stay authentic and Alice's ephemeral ae1 keeps
+// amaster out of reach: compromising Alice's identity key alone does not break X3DH
+// secrecy (c0). e1 still travels unguarded, so Bob accepts an attacker-authored
+// ciphertext (a1).
 attacker[active]
 
 principal Alice[

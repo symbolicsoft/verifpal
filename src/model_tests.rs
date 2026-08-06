@@ -132,6 +132,26 @@ fn test_signal_small_unguarded() {
 	run_model("signal_small_unguarded.vp", "c1a1");
 }
 #[test]
+fn test_signal_small_unguarded_alice() {
+	run_model("signal_small_unguarded_alice.vp", "c0a1");
+}
+#[test]
+fn test_signal_small_unguarded_bob() {
+	run_model("signal_small_unguarded_bob.vp", "c1a1");
+}
+#[test]
+fn test_signal_small_leaks() {
+	run_model("signal_small_leaks.vp", "c1a1");
+}
+#[test]
+fn test_signal_small_leaks_alice() {
+	run_model("signal_small_leaks_alice.vp", "c0a1");
+}
+#[test]
+fn test_signal_small_leaks_bob() {
+	run_model("signal_small_leaks_bob.vp", "c1a1");
+}
+#[test]
 fn test_auth_with_signing() {
 	run_model("auth_with_signing.vp", "c1a1a1");
 }
@@ -461,4 +481,8 @@ fn test_kem_checked_decap() {
 #[test]
 fn test_kem_freshness() {
 	run_model("kem_freshness.vp", "f0f1");
+}
+#[test]
+fn test_minimal_witness() {
+	run_model("minimal_witness.vp", "c1");
 }

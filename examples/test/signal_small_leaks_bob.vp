@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// Expected: c1a1. The counterpart to signal_small_leaks_alice: only blongterm leaks
+// in phase 0. Because blongterm signs the prekey bundle, leaking it is enough to
+// sign PUBKEY(nil) prekeys past Alice's SIGNVERIF and run a full man-in-the-middle,
+// so m1 falls (c1) — Bob's identity key is the asymmetric one here. e1 is unguarded,
+// hence a1 as well.
 attacker[active]
 
 principal Alice[

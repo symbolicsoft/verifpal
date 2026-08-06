@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// Expected: c1a1. The mirror of signal_small_unguarded_alice: only galongterm is
+// guarded, so the attacker replaces gblongterm/gbs/gbo with PUBKEY(nil), whose
+// private key it knows, and the guard bypass carries Alice's SIGNVERIF check. It
+// then rebuilds amaster and opens e1 (c1). e1 is unguarded as well, so Bob also
+// accepts a ciphertext Alice never sent (a1).
 attacker[active]
 
 principal Alice[

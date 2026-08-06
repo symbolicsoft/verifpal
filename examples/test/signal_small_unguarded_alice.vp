@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// Expected: c0a1. Bob's identity key reaches Alice guarded, so gbssig cannot be
+// forged and gbs/gbo stay authenticated: Alice's X3DH secret survives (c0). Alice's
+// message to Bob is entirely unguarded, so the attacker hands Bob its own gae1/gae2
+// and a ciphertext of its choosing, which Bob's unchecked AEAD_DEC accepts (a1).
 attacker[active]
 
 principal Alice[

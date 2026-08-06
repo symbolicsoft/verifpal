@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
+// Expected: c1a1. Both identity keys travel guarded, but both long-term secrets
+// leak during phase 0, while the session is still live: blongterm lets the attacker
+// sign PUBKEY(nil) prekeys past Alice's SIGNVERIF, and alongterm supplies the
+// remaining DH share, so amaster is reconstructible and m1 falls (c1). A key
+// compromised in the same phase buys no forward secrecy. e1 is unguarded, so Bob
+// accepts an attacker-authored ciphertext too (a1).
 attacker[active]
 
 principal Alice[

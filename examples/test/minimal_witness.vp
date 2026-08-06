@@ -1,4 +1,11 @@
 
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Expected: c1. mw_gb travels unguarded, so the attacker substitutes PUBKEY(nil),
+// computes mw_ka = DH_KEX(mw_ga, nil) and opens mw_e. mw_decoy exists only to give
+// the witness minimizer a mutation it must drop: the reported trace should name the
+// mw_gb substitution and nothing else.
 attacker[active]
 
 principal Alice[

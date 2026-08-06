@@ -23,7 +23,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 278 tests (unit + model), ~0.4s once built (also: make test)
+cargo test --release                   # 284 tests (unit + model), ~0.4s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -252,7 +252,7 @@ All output is plain text: there is no alternate-screen progress UI and no attack
 - Adding an engine regression test: write a model in `examples/test/`, get the code via `cargo run --release -- verify examples/test/foo.vp --result-code | tail -1`, **verify by reading the attack trace that each 0/1 is actually correct** (the tool's own output is only ground truth for regressions, not correctness), then add a `run_model` test. Explaining *why* the expected code is right in a comment at the top of the model is the house style — see `aead_replay_not_forgery.vp`.
 - Golden pretty-printer files live in `examples/test/golden_pretty/` (5 of them) and are compared byte-for-byte via `include_str!`. Update them deliberately when changing the formatter.
 - The engine interns names per model, but the test builders share one table (`testutil::test_value_id`), so **unit tests must still use unique constant names** (existing tests prefix names per-test, e.g. `cre3_a`, `hash_dh_b`, `mw_m`). A test that both parses a model *and* builds a value by hand must take the constant from the parsed trace via `testutil::trace_constant` — ids from the shared test table will not match the model's own.
-- A handful of models in `examples/test/` are not wired to any test (`minimal_witness.vp`, the `signal_small_leaks*`/`signal_small_unguarded_{alice,bob}` variants). They run fine; they are just scratch comparisons.
+- Every model in `examples/test/` is wired to a `run_model` test; keep it that way when you add one.
 
 ### Performance expectations
 
