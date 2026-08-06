@@ -287,6 +287,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 				arguments: p.arguments.clone(),
 				output: output_idx,
 				instance_check: p.instance_check,
+				capabilities: p.capabilities,
 				hash: HashCell::default(),
 			};
 			let hash = crate::hashing::primitive_hash(&probe);
@@ -571,6 +572,7 @@ mod tests {
 				arguments: vec![concat.clone()],
 				output,
 				instance_check: false,
+				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			};
 			let (rewritten, value) = can_rewrite(&split, &ps, 0);
@@ -593,6 +595,7 @@ mod tests {
 			arguments: vec![sk2, enc],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -623,6 +626,7 @@ mod tests {
 			arguments: vec![pair],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -648,6 +652,7 @@ mod tests {
 			arguments: vec![a.clone(), a.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -674,6 +679,7 @@ mod tests {
 			arguments: vec![a, b],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -700,6 +706,7 @@ mod tests {
 			arguments: vec![key.clone(), msg.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -729,6 +736,7 @@ mod tests {
 			arguments: vec![ek.clone(), r.clone()],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -764,6 +772,7 @@ mod tests {
 			arguments: vec![ek.clone(), r],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -792,6 +801,7 @@ mod tests {
 			arguments: vec![dk, ct],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -823,6 +833,7 @@ mod tests {
 			arguments: vec![other, ct],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -849,6 +860,7 @@ mod tests {
 			arguments: vec![key, msg],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {

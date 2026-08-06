@@ -265,6 +265,7 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 		arguments: vec![bare],
 		output: 0,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	}));
 	arguments[rule.bare] = inner;
@@ -273,6 +274,7 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 		arguments,
 		output: p.output,
 		instance_check: p.instance_check,
+		capabilities: p.capabilities,
 		hash: HashCell::default(),
 	})
 }
@@ -287,6 +289,7 @@ pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
 		arguments: vec![inner],
 		output: 0,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	})))
 }

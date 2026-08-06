@@ -7,6 +7,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
+pub use crate::capability::{Capabilities, Capability};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
 	pub start: usize,
@@ -370,6 +372,7 @@ pub struct Primitive {
 	pub arguments: Vec<Value>,
 	pub output: usize,
 	pub instance_check: bool,
+	pub capabilities: Capabilities,
 	pub hash: HashCell,
 }
 
@@ -380,6 +383,7 @@ impl Primitive {
 			arguments,
 			output: self.output,
 			instance_check: self.instance_check,
+			capabilities: self.capabilities,
 			hash: HashCell::default(),
 		}
 	}
@@ -390,6 +394,7 @@ impl Primitive {
 			arguments: self.arguments.clone(),
 			output,
 			instance_check: self.instance_check,
+			capabilities: self.capabilities,
 			hash: HashCell::default(),
 		}
 	}
@@ -897,6 +902,7 @@ mod tests {
 			arguments: vec![a],
 			output: 0,
 			instance_check: true,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = p.with_arguments(vec![b.clone()]);

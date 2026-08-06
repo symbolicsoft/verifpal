@@ -470,6 +470,7 @@ impl<'a> Deducer<'a> {
 					arguments,
 					output: 0,
 					instance_check: false,
+					capabilities: Capabilities::default(),
 					hash: HashCell::default(),
 				}));
 				out.extend(self.invert(inner, &candidate, s));
@@ -505,6 +506,7 @@ impl<'a> Deducer<'a> {
 					arguments,
 					output: 0,
 					instance_check: false,
+					capabilities: Capabilities::default(),
 					hash: HashCell::default(),
 				}));
 				for bound in self.invert(inner, &candidate, base) {
@@ -646,6 +648,7 @@ fn build_rewrite_shapes_with(
 				arguments,
 				output: 0,
 				instance_check: false,
+				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			}))
 		})

@@ -59,6 +59,7 @@ pub(crate) fn make_primitive(id: PrimitiveId, args: Vec<Value>, output: usize) -
 		arguments: args,
 		output,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	}))
 }

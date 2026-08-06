@@ -751,9 +751,11 @@ impl<'a> Parser<'a> {
 	fn parse_value(&mut self) -> VResult<Value> {
 		self.skip_whitespace();
 		let saved = self.snapshot();
-		if let Ok(_name) = self.parse_identifier() {
+		if let Ok(name) = self.parse_identifier() {
 			self.skip_whitespace();
-			if self.peek() == Some(b'(') {
+			if self.peek() == Some(b'(')
+				|| (self.peek() == Some(b'[') && primitive_get_enum(&name.to_uppercase()).is_ok())
+			{
 				self.restore(saved);
 				return self.parse_primitive();
 			}
@@ -764,9 +766,85 @@ impl<'a> Parser<'a> {
 		Err(VerifpalError::parse("expected value".into()).at(Span::at(self.pos)))
 	}
 
+	fn parse_capability_onset(&mut self) -> VResult<i32> {
+		let saved = self.snapshot();
+		let Ok(word) = self.parse_identifier() else {
+			self.restore(saved);
+			return Ok(0);
+		};
+		if !word.eq_ignore_ascii_case("from") {
+			self.restore(saved);
+			return Ok(0);
+		}
+		self.consume_trivia_nocapture();
+		let kw = self.parse_identifier()?;
+		if !kw.eq_ignore_ascii_case("phase") {
+			return Err(VerifpalError::parse(
+				"expected `phase` after `from` in primitive parameter".into(),
+			)
+			.at(Span::at(self.pos)));
+		}
+		self.consume_trivia_nocapture();
+		let start = self.pos;
+		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
+			self.pos += 1;
+		}
+		if start == self.pos {
+			return Err(VerifpalError::parse(
+				"expected a phase number in primitive parameter".into(),
+			)
+			.at(Span::at(self.pos)));
+		}
+		std::str::from_utf8(&self.input[start..self.pos])
+			.ok()
+			.and_then(|s| s.parse::<i32>().ok())
+			.ok_or_else(|| {
+				VerifpalError::parse("invalid phase number in primitive parameter".into())
+					.at(Span::at(start))
+			})
+	}
+
+	fn parse_capabilities(&mut self) -> VResult<Capabilities> {
+		let start = self.pos;
+		self.expect("[")?;
+		let mut caps = Capabilities::default();
+		loop {
+			self.consume_trivia_nocapture();
+			let word = self.parse_identifier()?;
+			let cap = Capability::from_name(&word).ok_or_else(|| {
+				VerifpalError::parse(format!("unknown primitive parameter `{}`", word).into())
+					.at(Span::at(start))
+			})?;
+			if caps.has(cap) {
+				return Err(VerifpalError::parse(
+					format!("duplicate primitive parameter `{}`", cap.name()).into(),
+				)
+				.at(Span::at(start)));
+			}
+			self.consume_trivia_nocapture();
+			let onset = self.parse_capability_onset()?;
+			caps.set(cap, onset);
+			self.consume_trivia_nocapture();
+			if self.peek() == Some(b',') {
+				self.advance();
+				continue;
+			}
+			break;
+		}
+		self.consume_trivia_nocapture();
+		self.expect("]")?;
+		Ok(caps)
+	}
+
 	fn parse_primitive(&mut self) -> VResult<Value> {
 		let name = self.parse_identifier()?;
 		let prim_name = name.to_uppercase();
+		self.skip_whitespace();
+		let capabilities = if self.peek() == Some(b'[') {
+			self.parse_capabilities()?
+		} else {
+			Capabilities::default()
+		};
 		self.skip_whitespace();
 		self.expect("(")?;
 		self.consume_trivia_nocapture();
@@ -795,6 +873,7 @@ impl<'a> Parser<'a> {
 			arguments,
 			output: 0,
 			instance_check: check,
+			capabilities,
 			hash: HashCell::default(),
 		})))
 	}
@@ -1067,6 +1146,59 @@ mod tests {
 				.find_map(|e| e.assigned.as_ref())
 				.expect("an assignment")
 		)
+	}
+
+	fn first_primitive(m: &Model) -> Option<Primitive> {
+		let Block::Principal(p) = &m.blocks[0] else {
+			return None;
+		};
+		p.expressions
+			.iter()
+			.find_map(|e| match e.assigned.as_ref() {
+				Some(Value::Primitive(p)) => Some((**p).clone()),
+				_ => None,
+			})
+	}
+
+	#[test]
+	fn parses_primitive_capabilities() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap1_sk\n\tknows private cap1_m\n\tcap1_s = SIGN[forgeable](cap1_sk, cap1_m)\n]\nqueries[\n\tconfidentiality? cap1_m\n]\n";
+		let m = parse_string("cap1.vp", src).expect("parses");
+		let p = first_primitive(&m).expect("a primitive");
+		assert!(p.capabilities.has(Capability::Forgeable));
+		assert_eq!(p.capabilities.onset(Capability::Forgeable), Some(0));
+		assert!(!p.capabilities.has(Capability::Weak));
+	}
+
+	#[test]
+	fn parses_capability_with_phase_onset() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap2_k\n\tknows private cap2_m\n\tknows private cap2_ad\n\tcap2_e = AEAD_ENC[forgeable, weak from phase 2](cap2_k, cap2_m, cap2_ad)\n]\nqueries[\n\tconfidentiality? cap2_m\n]\n";
+		let m = parse_string("cap2.vp", src).expect("parses");
+		let p = first_primitive(&m).expect("a primitive");
+		assert_eq!(p.capabilities.onset(Capability::Forgeable), Some(0));
+		assert_eq!(p.capabilities.onset(Capability::Weak), Some(2));
+	}
+
+	#[test]
+	fn rejects_unknown_capability() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap3_m\n\tcap3_h = HASH[bogus](cap3_m)\n]\nqueries[\n\tconfidentiality? cap3_m\n]\n";
+		let err = parse_string("cap3.vp", src).expect_err("should reject");
+		assert!(
+			format!("{}", err).contains("unknown primitive parameter"),
+			"got: {}",
+			err
+		);
+	}
+
+	#[test]
+	fn rejects_duplicate_capability() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap4_m\n\tcap4_h = HASH[weak, weak](cap4_m)\n]\nqueries[\n\tconfidentiality? cap4_m\n]\n";
+		let err = parse_string("cap4.vp", src).expect_err("should reject");
+		assert!(
+			format!("{}", err).contains("duplicate primitive parameter"),
+			"got: {}",
+			err
+		);
 	}
 
 	#[test]

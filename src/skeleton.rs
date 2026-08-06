@@ -25,6 +25,7 @@ fn primitive_skeleton(p: &Primitive) -> Primitive {
 		arguments,
 		output: p.output,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	}
 }
@@ -86,6 +87,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -93,6 +95,7 @@ mod tests {
 			arguments: vec![b, a],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		assert_eq!(primitive_skeleton_hash(&p1), primitive_skeleton_hash(&p2));

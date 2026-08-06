@@ -28,7 +28,21 @@ impl fmt::Display for Constant {
 impl fmt::Display for Primitive {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let name = primitive_name(self.id);
-		write!(f, "{}(", name)?;
+		write!(f, "{}", name)?;
+		if !self.capabilities.is_empty() {
+			write!(f, "[")?;
+			for (i, (cap, onset)) in self.capabilities.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				write!(f, "{}", cap.name())?;
+				if onset > 0 {
+					write!(f, " from phase {}", onset)?;
+				}
+			}
+			write!(f, "]")?;
+		}
+		write!(f, "(")?;
 		for (i, arg) in self.arguments.iter().enumerate() {
 			if i > 0 {
 				write!(f, ", ")?;
@@ -307,6 +321,21 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+
+	#[test]
+	fn pretty_round_trips_primitive_capabilities() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private prc_k\n\tknows private prc_m\n\tknows private prc_ad\n\tprc_e = AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)\n]\n\nqueries[\n\tconfidentiality? prc_m\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let once = pretty_model(&m).expect("pretty");
+		let m2 = parse_string("t.vp", &once).expect("reparse");
+		let twice = pretty_model(&m2).expect("pretty again");
+		assert_eq!(once, twice);
+		assert!(
+			once.contains("AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)"),
+			"got: {}",
+			once
+		);
+	}
 
 	#[test]
 	fn pretty_round_trips_dh_to_new_syntax() {

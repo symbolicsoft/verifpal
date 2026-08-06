@@ -109,6 +109,7 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 				arguments: vec![p.arguments[0].clone(), p.arguments[1].clone()],
 				output: 0,
 				instance_check: false,
+				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			}));
 			(blind_prim, true)
@@ -161,6 +162,7 @@ fn rewrite_to_unblind(p: &Primitive) -> Value {
 		arguments: vec![p.arguments[0].clone(), inner],
 		output: 0,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	}))
 }
@@ -544,6 +546,7 @@ mod tests {
 			arguments: vec![k.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let (_, ok) = filter_extract_dh_exponent(&p, &k, 0);
@@ -559,6 +562,7 @@ mod tests {
 			arguments: vec![hashed.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let (_, ok) = filter_extract_dh_exponent(&p, &hashed, 0);

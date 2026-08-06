@@ -141,6 +141,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -148,6 +149,7 @@ mod tests {
 			arguments: vec![a, b],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		assert!(equivalent_primitives(&p1, &p2, true).equivalent);
@@ -162,6 +164,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -169,6 +172,7 @@ mod tests {
 			arguments: vec![a, b],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
@@ -182,6 +186,7 @@ mod tests {
 			arguments: vec![a.clone(), a.clone(), a.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -189,6 +194,7 @@ mod tests {
 			arguments: vec![a.clone(), a.clone(), a],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);

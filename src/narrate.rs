@@ -531,6 +531,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: true,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let meta = vec![

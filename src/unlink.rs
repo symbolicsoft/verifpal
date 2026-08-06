@@ -85,6 +85,7 @@ fn witness_identifying_check(
 			arguments: vec![ap.arguments[key_arg].clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		})),
 		_ => ap.arguments[key_arg].clone(),
