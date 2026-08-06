@@ -1,4 +1,4 @@
-Verifpal 0.71.0 adds parametrized primitives, which let a model say that a
+Verifpal 0.80.0 adds parametrized primitives, which let a model say that a
 particular piece of cryptography is broken, and replaces how unlinkability
 queries are decided.
 
@@ -82,10 +82,3 @@ on the freshness clause will now pass, because a value the attacker cannot reach
 or observe cannot be linked. And seed-compromise linkability, where one leaked
 secret lets the attacker recompute many derived identifiers, is now detected
 where it previously was not.
-
-TESTS
-
-The unlinkability test corpus grows from one model to thirty, fifteen models
-cover the capability parameters, and five deliberately convoluted "jungle gym"
-models exercise the resolution depth limits, the theory recursion cap, guard
-bypass and the unlinkability witness search all at once.
