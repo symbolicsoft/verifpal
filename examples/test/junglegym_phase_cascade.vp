@@ -1,0 +1,123 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c0c1a0a0a0a0a1a1a0f0f1e0e0u1
+//
+// Four phases and two weakening assumptions that come into force at different
+// times. Everything is guarded, so phase 0 is airtight and each later failure
+// has exactly one cause. Each capability was checked by stripping it: `weak`
+// alone controls the two confidentiality failures and the unlinkability one,
+// `forgeable` alone controls the two late-exchange authentication failures,
+// and with neither the model reports the all-holds baseline.
+//
+//   phase 2  PUBKEY[weak] falls. The attacker recomputes the phase-0 session
+//            key and opens a recording it made back then -- harvest now,
+//            decrypt later.
+//   phase 3  MAC[forgeable] falls. The late exchange happens AFTER that, so
+//            the attacker can rewrite it in flight. claim_tag, sent in phase
+//            0, stays authentic: a capability arriving later than the message
+//            it would forge is no capability at all.
+//
+// Two modelling constraints shape this. The late authenticator is a MAC and
+// not a signature, because a signature needs a verification key on the wire
+// and try_guard_bypass defeats the guard on it. And both MACs are domain
+// separated by CONCAT'ing epoch or label, because without that the attacker
+// does not need to forge anything -- it simply REPLAYS the phase-0 pair
+// (claim, claim_tag) into the phase-3 slot, which the engine finds and which
+// makes the forgery capability inert.
+
+attacker[active]
+
+
+principal Archive[
+	knows private archive_ltk
+	knows private shared_mk
+	knows public epoch, label
+	archive_ltpk = PUBKEY(archive_ltk)
+	generates archive_eph
+	archive_ephpk = PUBKEY[weak from phase 2](archive_eph)
+	generates ledger_entry
+]
+
+principal Auditor[
+	knows private shared_mk
+	knows public epoch, label
+	knows private auditor_ltk
+	auditor_ltpk = PUBKEY(auditor_ltk)
+	generates auditor_eph
+	auditor_ephpk = PUBKEY(auditor_eph)
+]
+
+Archive -> Auditor: [archive_ltpk], [archive_ephpk]
+Auditor -> Archive: [auditor_ltpk], [auditor_ephpk]
+
+principal Archive[
+	agreed = DH_KEX(auditor_ephpk, archive_eph)
+	sealing, signing, binding = HKDF(agreed, CONCAT(archive_ephpk, auditor_ephpk), epoch)
+	sealed_now = AEAD_ENC(sealing, ledger_entry, label)
+	generates claim
+	claim_tag = MAC[forgeable from phase 3](shared_mk, CONCAT(claim, epoch))
+	binding_tag = MAC(binding, CONCAT(sealed_now, claim))
+]
+
+Archive -> Auditor: sealed_now, claim, claim_tag, binding_tag
+
+principal Auditor[
+	agreed_a = DH_KEX(archive_ephpk, auditor_eph)
+	sealing_a, signing_a, binding_a = HKDF(agreed_a, CONCAT(archive_ephpk, auditor_ephpk), epoch)
+	_ = ASSERT(binding_tag, MAC(binding_a, CONCAT(sealed_now, claim)))?
+	_ = ASSERT(claim_tag, MAC(shared_mk, CONCAT(claim, epoch)))?
+	entry_a = AEAD_DEC(sealing_a, sealed_now, label)?
+	countersig = SIGN(auditor_ltk, HASH(entry_a, claim, epoch))
+]
+
+Auditor -> Archive: countersig
+
+principal Archive[
+	_ = SIGNVERIF(auditor_ltpk, HASH(ledger_entry, claim, epoch), countersig)?
+]
+
+phase[1]
+
+phase[2]
+
+phase[3]
+
+principal Archive[
+	// Sent AFTER the forgery capability comes into force, so unlike claim_tag
+	// this one the attacker can actually rewrite in flight.
+	generates late_claim
+	late_tag = MAC[forgeable from phase 3](shared_mk, CONCAT(late_claim, label))
+]
+
+Archive -> Auditor: late_claim, late_tag
+
+principal Auditor[
+	_ = ASSERT(late_tag, MAC(shared_mk, CONCAT(late_claim, label)))?
+]
+
+phase[4]
+
+principal Archive[
+	leaks archive_ltk
+]
+
+queries[
+	confidentiality? ledger_entry
+	confidentiality? sealing
+	confidentiality? shared_mk
+	confidentiality? claim
+	authentication? Archive -> Auditor: sealed_now[
+		precondition[Auditor -> Archive: countersig]
+	]
+	authentication? Archive -> Auditor: claim
+	authentication? Archive -> Auditor: binding_tag
+	authentication? Auditor -> Archive: countersig
+	authentication? Archive -> Auditor: late_claim
+	authentication? Archive -> Auditor: late_tag
+	authentication? Archive -> Auditor: claim_tag
+	freshness? ledger_entry
+	freshness? epoch
+	equivalence? sealing, sealing_a
+	equivalence? binding, binding_a
+	unlinkability? sealed_now, binding_tag
+]

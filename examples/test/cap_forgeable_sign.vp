@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — the attacker replaces m with its own value and forges a
+// matching signature without sk, so Bob's SIGNVERIF passes on a message Alice
+// never sent. The check passing is the point: a forgery that halted Bob would
+// never reach the authentication query.
+//
+// Note m must travel on the wire. Forging a signature over a value the
+// attacker cannot change reproduces the honest term exactly, which is a replay
+// rather than an attack.
+attacker[active]
+
+principal Alice[
+	generates sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN[forgeable](sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

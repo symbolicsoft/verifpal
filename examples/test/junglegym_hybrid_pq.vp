@@ -1,0 +1,106 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c0a0a1f0f1e1e1
+//
+// A hybrid classical+post-quantum handshake: X25519-shaped DH_KEX alongside a
+// KEM, both folded into one HKDF, then a signed transcript, a MAC key
+// confirmation, an AEAD payload and a MAC receipt, over three phases.
+//
+// The ephemeral public keys travel UNGUARDED, so an active attacker MitMs the
+// handshake in phase 0 and most secrecy queries fall to that alone. What still
+// holds is the part that matters: bob_sig stays authentic because Bob's
+// long-term key is guarded and never leaks, and kem_seed stays secret because
+// it never leaves Bob. PUBKEY[weak from phase 3] additionally hands the
+// attacker Alice's ephemeral private key once phase 3 arrives.
+//
+// Note the KEM output order: `ss, ct = KEM_ENCAP(pk, r)` -- shared secret
+// first. Getting it backwards makes KEM_DECAP reduce to the wrong output and
+// produces a checked-primitive failure whose two sides PRINT IDENTICALLY,
+// because Display does not show the output index.
+
+attacker[active]
+
+principal Alice[
+	knows private alice_ltk
+	knows public ctx
+	alice_ltpk = PUBKEY(alice_ltk)
+	generates alice_eph
+	alice_ephpk = PUBKEY[weak from phase 3](alice_eph)
+]
+
+principal Bob[
+	knows private bob_ltk
+	knows public ctx
+	bob_ltpk = PUBKEY(bob_ltk)
+	generates bob_eph
+	bob_ephpk = PUBKEY(bob_eph)
+	generates kem_seed
+]
+
+Alice -> Bob: [alice_ltpk], alice_ephpk
+Bob   -> Alice: [bob_ltpk], bob_ephpk
+
+principal Bob[
+	kem_ss, kem_ct = KEM_ENCAP(alice_ephpk, kem_seed)
+	dh_ss = DH_KEX(alice_ephpk, bob_eph)
+	transcript = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root, chain, auth_key = HKDF(CONCAT(dh_ss, kem_ss), transcript, ctx)
+	bob_sig = SIGN(bob_ltk, HASH(transcript, root))
+	confirm = MAC(auth_key, transcript)
+]
+
+Bob -> Alice: kem_ct, bob_sig, confirm
+
+principal Alice[
+	kem_ss_a = KEM_DECAP(alice_eph, kem_ct)?
+	dh_ss_a = DH_KEX(bob_ephpk, alice_eph)
+	transcript_a = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root_a, chain_a, auth_key_a = HKDF(CONCAT(dh_ss_a, kem_ss_a), transcript_a, ctx)
+	_ = SIGNVERIF(bob_ltpk, HASH(transcript_a, root_a), bob_sig)?
+	_ = ASSERT(confirm, MAC(auth_key_a, transcript_a))?
+	generates payload
+	sealed = AEAD_ENC(root_a, payload, transcript_a)
+	receipt = MAC(chain_a, sealed)
+]
+
+Alice -> Bob: sealed, receipt
+
+principal Bob[
+	_ = ASSERT(receipt, MAC(chain, sealed))?
+	payload_b = AEAD_DEC(root, sealed, transcript)?
+	ack = HASH(payload_b, chain)
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	_ = ASSERT(ack, HASH(payload, chain_a))?
+]
+
+phase[1]
+
+principal Bob[
+	leaks bob_eph
+]
+
+phase[2]
+
+principal Alice[
+	leaks alice_ltk
+]
+
+phase[3]
+
+queries[
+	confidentiality? payload
+	confidentiality? root
+	confidentiality? kem_seed
+	authentication? Bob -> Alice: bob_sig
+	authentication? Alice -> Bob: sealed[
+		precondition[Bob -> Alice: ack]
+	]
+	freshness? payload
+	freshness? ctx
+	equivalence? root, root_a
+	equivalence? auth_key, auth_key_a
+]

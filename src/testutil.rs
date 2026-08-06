@@ -59,6 +59,7 @@ pub(crate) fn make_primitive(id: PrimitiveId, args: Vec<Value>, output: usize) -
 		arguments: args,
 		output,
 		instance_check: false,
+		capabilities: Capabilities::default(),
 		hash: HashCell::default(),
 	}))
 }
@@ -97,6 +98,7 @@ pub(crate) fn make_principal_state(
 		index: Arc::new(index),
 		leaks: Arc::new(Vec::new()),
 		halted_at: None,
+		capabilities: Arc::new(CapabilityIndex::default()),
 	}
 }
 

@@ -222,6 +222,7 @@ mod tests {
 				arguments: vec![x, y],
 				output: 0,
 				instance_check: false,
+				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			}))
 		};

@@ -241,6 +241,36 @@ pub(crate) fn can_decompose(
 	}
 }
 
+pub(crate) fn can_break_weak(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	if primitive_is_core(p.id) {
+		return None;
+	}
+	if !ps
+		.capabilities
+		.in_force(p, Capability::Weak, attacker.current_phase)
+	{
+		return None;
+	}
+	let spec = primitive_get(p.id).ok()?;
+	let mut revealed = Vec::new();
+	for &idx in &spec.weak_reveals {
+		if let Some(a) = p.arguments.get(idx) {
+			revealed.push(a.clone());
+		}
+	}
+	if let Some(output) = spec.weak_reveals_output {
+		revealed.push(Value::Primitive(Arc::new(p.with_output(output))));
+	}
+	if revealed.is_empty() {
+		return None;
+	}
+	Some(revealed)
+}
+
 pub(crate) fn obtainable(
 	v: &Value,
 	ps: &PrincipalState,
@@ -287,6 +317,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 				arguments: p.arguments.clone(),
 				output: output_idx,
 				instance_check: p.instance_check,
+				capabilities: p.capabilities,
 				hash: HashCell::default(),
 			};
 			let hash = crate::hashing::primitive_hash(&probe);
@@ -320,7 +351,7 @@ pub(crate) fn can_reconstruct_primitive(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	depth: usize,
-) -> Option<Vec<Value>> {
+) -> Option<ReconstructResult> {
 	can_reconstruct_primitive_directly(p, ps, attacker, depth).or_else(|| {
 		let swapped = commutativity_swap(p)?;
 		can_reconstruct_primitive_directly(&swapped, ps, attacker, depth)
@@ -332,7 +363,7 @@ fn can_reconstruct_primitive_directly(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	depth: usize,
-) -> Option<Vec<Value>> {
+) -> Option<ReconstructResult> {
 	if depth > MAX_DEPTH {
 		return None;
 	}
@@ -343,16 +374,33 @@ fn can_reconstruct_primitive_directly(
 	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
+	let forgeable_secret = ps
+		.capabilities
+		.in_force(
+			rewritten_prim,
+			Capability::Forgeable,
+			attacker.current_phase,
+		)
+		.then(|| primitive_get(rewritten_prim.id).ok()?.forgeable_secret)
+		.flatten();
 	let mut has = Vec::new();
-	for a in &rewritten_prim.arguments {
+	let mut skipped = 0usize;
+	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
+		if Some(i) == forgeable_secret {
+			skipped += 1;
+			continue;
+		}
 		if obtainable(a, ps, attacker, depth) {
 			has.push(a.clone());
 		}
 	}
-	if has.len() < rewritten_prim.arguments.len() {
+	if has.len() + skipped < rewritten_prim.arguments.len() {
 		return None;
 	}
-	Some(has)
+	Some(ReconstructResult {
+		from: has,
+		forged: (skipped > 0).then_some(Capability::Forgeable),
+	})
 }
 
 pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
@@ -549,6 +597,68 @@ mod tests {
 	use crate::value::*;
 	use std::sync::Arc;
 
+	fn weak_index(v: &Value, onset: i32) -> Arc<CapabilityIndex> {
+		let Value::Primitive(p) = v else {
+			panic!("expected a primitive");
+		};
+		let mut annotated = (**p).clone();
+		annotated.capabilities.set(Capability::Weak, onset);
+		let mut index = CapabilityIndex::default();
+		index.insert(&Value::Primitive(Arc::new(annotated)));
+		Arc::new(index)
+	}
+
+	#[test]
+	fn can_break_weak_reveals_every_in_range_argument() {
+		let m = make_constant("cbw_m");
+		let n = make_constant("cbw_n");
+		let h = make_primitive(PRIM_HASH, vec![m.clone(), n.clone()], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
+		ps.capabilities = weak_index(&h, 0);
+		let attacker = make_attacker_state(vec![h.clone()]);
+
+		let revealed = can_break_weak(hp, &ps, &attacker).expect("weak is in force");
+		assert_eq!(revealed.len(), 2);
+		assert!(revealed.iter().any(|v| v.equivalent(&m, true)));
+		assert!(revealed.iter().any(|v| v.equivalent(&n, true)));
+	}
+
+	#[test]
+	fn can_break_weak_is_none_before_its_onset_phase() {
+		let m = make_constant("cbwp_m");
+		let h = make_primitive(PRIM_HASH, vec![m], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
+		ps.capabilities = weak_index(&h, 2);
+		let mut attacker = make_attacker_state(vec![h.clone()]);
+
+		attacker.current_phase = 0;
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		attacker.current_phase = 1;
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		attacker.current_phase = 2;
+		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+		attacker.current_phase = 3;
+		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+	}
+
+	#[test]
+	fn can_break_weak_is_none_without_an_annotation() {
+		let m = make_constant("cbwn_m");
+		let h = make_primitive(PRIM_HASH, vec![m], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let attacker = make_attacker_state(vec![h.clone()]);
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+	}
+
 	#[test]
 	fn can_rewrite_split_concat() {
 		let a = make_constant("cr_a");
@@ -571,6 +681,7 @@ mod tests {
 				arguments: vec![concat.clone()],
 				output,
 				instance_check: false,
+				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			};
 			let (rewritten, value) = can_rewrite(&split, &ps, 0);
@@ -593,6 +704,7 @@ mod tests {
 			arguments: vec![sk2, enc],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -623,6 +735,7 @@ mod tests {
 			arguments: vec![pair],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -648,6 +761,7 @@ mod tests {
 			arguments: vec![a.clone(), a.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -674,6 +788,7 @@ mod tests {
 			arguments: vec![a, b],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -700,6 +815,7 @@ mod tests {
 			arguments: vec![key.clone(), msg.clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -729,6 +845,7 @@ mod tests {
 			arguments: vec![ek.clone(), r.clone()],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -764,6 +881,7 @@ mod tests {
 			arguments: vec![ek.clone(), r],
 			output: 1,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -792,6 +910,7 @@ mod tests {
 			arguments: vec![dk, ct],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -823,6 +942,7 @@ mod tests {
 			arguments: vec![other, ct],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -849,6 +969,7 @@ mod tests {
 			arguments: vec![key, msg],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {

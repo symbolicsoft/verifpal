@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — exercises every surface form of the parameter list in one
+// model: a bare capability, two capabilities in one list, and a phase-delayed
+// onset. This model is also the golden pretty-printer source for the syntax.
+//
+// a falls out of PUBKEY[weak] (discrete log) and m out of AEAD_ENC[weak].
+
+attacker[passive]
+
+principal Alice[
+	generates a
+	ga = PUBKEY[weak](a)
+	knows private k
+	knows private m
+	e = AEAD_ENC[weak, forgeable from phase 2](k, m, nil)
+]
+
+Alice -> Bob: ga, e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, e, nil)
+	_ = HASH(d, ga)
+]
+
+phase[1]
+
+phase[2]
+
+queries[
+	confidentiality? a
+	confidentiality? m
+]

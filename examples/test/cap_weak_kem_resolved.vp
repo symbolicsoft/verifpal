@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1
+//
+// Two things at once, both of which were broken before this model existed.
+//
+// First, KEM_ENCAP is the only primitive whose `weak` reveal is an OUTPUT
+// rather than an argument (weak_reveals_output), so it is the only one that
+// exercises that branch of can_break_weak: breaking the encapsulation hands
+// over the shared secret, and the AEAD keyed on it opens.
+//
+// Second, and more subtly, the annotated primitive's first argument is `ek`,
+// an assigned constant that resolves to PUBKEY(dk). The capability index is
+// built from each slot's term, and the attacker holds the RESOLVED form, so
+// an index built only from unresolved terms never matches and the annotation
+// silently does nothing. Every other capability model annotates a primitive
+// whose arguments are atomic, which is why none of them caught this.
+attacker[passive]
+
+principal Bob[
+	knows private dk
+	ek = PUBKEY(dk)
+]
+
+Bob -> Alice: ek
+
+principal Alice[
+	knows private m
+	generates r
+	ss, ct = KEM_ENCAP[weak](ek, r)
+	e = AEAD_ENC(ss, m, nil)
+]
+
+Alice -> Bob: ct, e
+
+principal Bob[
+	ssb = KEM_DECAP(dk, ct)
+	d = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	confidentiality? ss
+]

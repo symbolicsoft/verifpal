@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0 — identical to hmac_ok.vp.
+//
+// This model pins the central claim of the capability feature: an annotation
+// the engine never puts in force changes nothing. The MAC is declared
+// forgeable from phase 1, and phase 1 exists but carries no traffic, so every
+// query resolves exactly as it does in hmac_ok.vp. If this code ever diverges
+// from that model's, capabilities have leaked into term identity, hashing, or
+// equivalence.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	a_public = PUBKEY(a)
+]
+principal Bob[
+	knows private b
+	b_public = PUBKEY(b)
+]
+
+Alice -> Bob   : [a_public]
+Bob   -> Alice : [b_public]
+
+principal Alice[
+	generates plaintext
+	ss         = DH_KEX(b_public, a)
+	key        = HASH(ss)
+	ciphertext = ENC(key, plaintext)
+	tag        = MAC[forgeable from phase 1](key, ciphertext)
+]
+
+Alice -> Bob : ciphertext, tag
+
+principal Bob[
+	ss_        = DH_KEX(a_public, b)
+	key_       = HASH(ss_)
+	_          = ASSERT(tag, MAC(key_, ciphertext))?
+	plaintext_ = DEC(key_, ciphertext)
+]
+
+phase[1]
+
+queries[
+	confidentiality? plaintext
+	authentication? Alice -> Bob : ciphertext
+]

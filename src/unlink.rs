@@ -85,6 +85,7 @@ fn witness_identifying_check(
 			arguments: vec![ap.arguments[key_arg].clone()],
 			output: 0,
 			instance_check: false,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		})),
 		_ => ap.arguments[key_arg].clone(),
@@ -227,6 +228,7 @@ fn collect_leaves(
 		return held;
 	};
 	let used = can_reconstruct_primitive(p, ps, attacker, 0)
+		.map(|r| r.from)
 		.or_else(|| can_recompose(p, attacker).map(|r| r.used));
 	let Some(used) = used else {
 		return held;

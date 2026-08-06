@@ -93,7 +93,11 @@ fn json_query_constants(q: &Query) -> Vec<String> {
 	}
 }
 
-pub(crate) fn json_verify_results(results: &[VerifyResult]) -> String {
+pub(crate) fn json_verify_results(
+	results: &[VerifyResult],
+	assumptions: &[(Value, Capability, i32)],
+) -> String {
+	let rendered = json_assumptions(assumptions);
 	let mut out = String::from("[");
 	for (i, r) in results.iter().enumerate() {
 		if i > 0 {
@@ -102,11 +106,29 @@ pub(crate) fn json_verify_results(results: &[VerifyResult]) -> String {
 		let query_str = json_query_display(&r.query);
 		let constants = json_query_constants(&r.query);
 		out.push_str(&format!(
-			r#"{{"Query":"{}","Resolved":{},"Summary":"{}","Constants":{}}}"#,
+			r#"{{"Query":"{}","Resolved":{},"Summary":"{}","Constants":{},"Assumptions":{}}}"#,
 			json_escape(&query_str),
 			r.resolved,
 			json_escape(&r.summary),
 			json_string_array(&constants),
+			rendered,
+		));
+	}
+	out.push(']');
+	out
+}
+
+fn json_assumptions(assumptions: &[(Value, Capability, i32)]) -> String {
+	let mut out = String::from("[");
+	for (i, (term, cap, onset)) in assumptions.iter().enumerate() {
+		if i > 0 {
+			out.push(',');
+		}
+		out.push_str(&format!(
+			r#"{{"Term":"{}","Capability":"{}","FromPhase":{}}}"#,
+			json_escape(&term.to_string()),
+			cap.name(),
+			onset,
 		));
 	}
 	out.push(']');
@@ -180,8 +202,10 @@ fn handle_knowledge_map(input: &str) -> VResult<String> {
 
 fn handle_verify(input: &str) -> VResult<String> {
 	let m = parse_string("editor.vp", input)?;
+	let ctx = located(&m, analyze(&m))?;
 	Ok(json_verify_results(
-		&located(&m, analyze(&m))?.results_get(),
+		&ctx.results_get(),
+		&ctx.capability_assumptions(),
 	))
 }
 
@@ -198,6 +222,47 @@ fn handle_pretty_diagram(input: &str) -> VResult<String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn internal_json_reports_declared_assumptions() {
+		let out = handle_verify(
+			"attacker[passive]\n\
+			principal Alice[\n\
+			knows private jcap_m\n\
+			jcap_h = HASH[weak](jcap_m)\n\
+			]\n\
+			Alice -> Bob: jcap_h\n\
+			principal Bob[\n\
+			_ = HASH(jcap_h)\n\
+			]\n\
+			queries[\n\
+			confidentiality? jcap_m\n\
+			]\n",
+		)
+		.expect("verifies");
+		assert!(out.contains("\"Assumptions\""), "{out}");
+		assert!(out.contains("weak"), "{out}");
+	}
+
+	#[test]
+	fn internal_json_omits_assumptions_when_none_declared() {
+		let out = handle_verify(
+			"attacker[passive]\n\
+			principal Alice[\n\
+			knows private jnoc_m\n\
+			jnoc_h = HASH(jnoc_m)\n\
+			]\n\
+			Alice -> Bob: jnoc_h\n\
+			principal Bob[\n\
+			_ = HASH(jnoc_h)\n\
+			]\n\
+			queries[\n\
+			confidentiality? jnoc_m\n\
+			]\n",
+		)
+		.expect("verifies");
+		assert!(out.contains("\"Assumptions\":[]"), "{out}");
+	}
 
 	#[test]
 	fn phase_notes_name_a_participant() {

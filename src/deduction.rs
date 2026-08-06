@@ -29,7 +29,7 @@ pub(crate) struct RuleGroup {
 static DEDUCTION_RULES: &[RuleGroup] = &[
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
-		rules: &[rule_decompose],
+		rules: &[rule_decompose, rule_break_weak],
 	},
 	RuleGroup {
 		domain: RuleDomain::PrincipalAssigned,
@@ -133,6 +133,42 @@ fn rule_decompose(
 	)
 }
 
+fn rule_break_weak(
+	ctx: &VerifyContext,
+	value: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	record: &Arc<MutationRecord>,
+) -> bool {
+	let Value::Primitive(p) = value else {
+		return false;
+	};
+	let Some(revealed) = crate::theory::can_break_weak(p, ps, attacker) else {
+		return false;
+	};
+	let mut progress = false;
+	for r in revealed {
+		progress |= learn(
+			ctx,
+			&r,
+			record,
+			DerivationRecord::Broken {
+				of: value.clone(),
+				capability: Capability::Weak,
+				using: vec![],
+			},
+			|| {
+				format!(
+					"{} recovered from {} under the declared `weak` assumption.",
+					info_output_text(&r),
+					value,
+				)
+			},
+		);
+	}
+	progress
+}
+
 fn rule_reconstruct(
 	ctx: &VerifyContext,
 	value: &Value,
@@ -161,20 +197,30 @@ fn reconstruct_recursive(
 		}
 		_ => return found,
 	};
-	if let Some(used) = result {
-		found |= learn(
-			ctx,
-			value,
-			record,
-			DerivationRecord::Reconstructed { from: used.clone() },
-			|| {
-				format!(
-					"{} obtained by reconstructing with {}.",
-					info_output_text(value),
-					pretty_values(&used),
-				)
+	if let Some(reconstructed) = result {
+		let used = reconstructed.from;
+		let derivation = match reconstructed.forged {
+			Some(capability) => DerivationRecord::Broken {
+				of: value.clone(),
+				capability,
+				using: used.clone(),
 			},
-		);
+			None => DerivationRecord::Reconstructed { from: used.clone() },
+		};
+		let forged = reconstructed.forged;
+		found |= learn(ctx, value, record, derivation, || match forged {
+			Some(capability) => format!(
+				"{} forged from {} under the declared `{}` assumption.",
+				info_output_text(value),
+				pretty_values(&used),
+				capability.name(),
+			),
+			None => format!(
+				"{} obtained by reconstructing with {}.",
+				info_output_text(value),
+				pretty_values(&used),
+			),
+		});
 	}
 	found
 }

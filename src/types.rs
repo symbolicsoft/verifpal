@@ -7,6 +7,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
+pub use crate::capability::{Capabilities, Capability, CapabilityIndex};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
 	pub start: usize,
@@ -370,6 +372,7 @@ pub struct Primitive {
 	pub arguments: Vec<Value>,
 	pub output: usize,
 	pub instance_check: bool,
+	pub capabilities: Capabilities,
 	pub hash: HashCell,
 }
 
@@ -380,6 +383,7 @@ impl Primitive {
 			arguments,
 			output: self.output,
 			instance_check: self.instance_check,
+			capabilities: self.capabilities,
 			hash: HashCell::default(),
 		}
 	}
@@ -390,6 +394,7 @@ impl Primitive {
 			arguments: self.arguments.clone(),
 			output,
 			instance_check: self.instance_check,
+			capabilities: self.capabilities,
 			hash: HashCell::default(),
 		}
 	}
@@ -694,6 +699,7 @@ pub struct PrincipalState {
 	pub index: Arc<HashMap<ValueId, usize>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
+	pub capabilities: Arc<CapabilityIndex>,
 }
 
 impl PrincipalState {
@@ -731,13 +737,34 @@ pub struct MutationRecord {
 #[derive(Clone, Debug)]
 pub enum DerivationRecord {
 	Initial,
-	Leaked { slot: SlotIdx },
-	Obtained { slot: SlotIdx },
-	Decomposed { of: Value, using: Vec<Value> },
-	Reconstructed { from: Vec<Value> },
-	Recomposed { of: Value, using: Vec<Value> },
-	PasswordExtracted { from: Value },
-	ConcatFragment { of: Value },
+	Leaked {
+		slot: SlotIdx,
+	},
+	Obtained {
+		slot: SlotIdx,
+	},
+	Decomposed {
+		of: Value,
+		using: Vec<Value>,
+	},
+	Reconstructed {
+		from: Vec<Value>,
+	},
+	Recomposed {
+		of: Value,
+		using: Vec<Value>,
+	},
+	PasswordExtracted {
+		from: Value,
+	},
+	ConcatFragment {
+		of: Value,
+	},
+	Broken {
+		of: Value,
+		capability: Capability,
+		using: Vec<Value>,
+	},
 	Injected,
 }
 
@@ -745,7 +772,8 @@ impl DerivationRecord {
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using }
-			| DerivationRecord::Recomposed { of, using } => {
+			| DerivationRecord::Recomposed { of, using }
+			| DerivationRecord::Broken { of, using, .. } => {
 				let mut v = vec![of];
 				v.extend(using.iter());
 				v
@@ -802,6 +830,11 @@ impl AttackerState {
 pub struct DecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
+}
+
+pub struct ReconstructResult {
+	pub from: Vec<Value>,
+	pub forged: Option<Capability>,
 }
 
 pub struct RecomposeResult {
@@ -897,6 +930,7 @@ mod tests {
 			arguments: vec![a],
 			output: 0,
 			instance_check: true,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let p2 = p.with_arguments(vec![b.clone()]);

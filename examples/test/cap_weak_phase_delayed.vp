@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — harvest now, decrypt later. m_now stays confidential;
+// m_later is recorded in phase 0 and opened in phase 2. No amount of `leaks`
+// can express "the attacker gains the ability to invert this".
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private m_now
+	knows private m_later
+	e_now = AEAD_ENC(k, m_now, nil)
+	e_later = AEAD_ENC[weak from phase 2](k, m_later, nil)
+]
+
+Alice -> Bob: e_now, e_later
+
+principal Bob[
+	knows private k
+	d_now = AEAD_DEC(k, e_now, nil)
+	d_later = AEAD_DEC(k, e_later, nil)
+]
+
+phase[1]
+
+phase[2]
+
+queries[
+	confidentiality? m_now
+	confidentiality? m_later
+]

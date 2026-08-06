@@ -15,6 +15,124 @@ fn run_model_at(path: &str, model: &str, expected: &str) {
 	);
 }
 
+fn run_model_err(model: &str, expected_substring: &str) {
+	let path = format!("examples/test/{}", model);
+	match crate::verify::verify(&path) {
+		Ok((_, code)) => panic!(
+			"FAIL • {} (expected an error containing {:?}, got result code {})",
+			model, expected_substring, code
+		),
+		Err(e) => {
+			let text = format!("{}", e);
+			assert!(
+				text.contains(expected_substring),
+				"FAIL • {} (expected an error containing {:?}, got: {})",
+				model,
+				expected_substring,
+				text
+			);
+		}
+	}
+}
+
+#[test]
+fn test_cap_err_sign_weak() {
+	run_model_err("cap_err_sign_weak.vp", "did you mean `SIGN[forgeable]`");
+}
+#[test]
+fn test_cap_err_dh_kex_weak() {
+	run_model_err("cap_err_dh_kex_weak.vp", "did you mean `PUBKEY[weak]`");
+}
+#[test]
+fn test_cap_err_hash_forgeable() {
+	run_model_err("cap_err_hash_forgeable.vp", "has no secret argument");
+}
+#[test]
+fn test_cap_err_aead_malleable() {
+	run_model_err(
+		"cap_err_aead_malleable.vp",
+		"did you mean `AEAD_ENC[forgeable]`",
+	);
+}
+#[test]
+fn test_cap_err_core_primitive() {
+	run_model_err("cap_err_core_primitive.vp", "no cryptographic guarantee");
+}
+#[test]
+fn test_cap_err_phase_unreached() {
+	run_model_err("cap_err_phase_unreached.vp", "is never reached");
+}
+
+#[test]
+fn test_cap_weak_hash() {
+	run_model("cap_weak_hash.vp", "c1c1");
+}
+#[test]
+fn test_cap_weak_pubkey_dh() {
+	run_model("cap_weak_pubkey_dh.vp", "c1");
+}
+#[test]
+fn test_cap_weak_kem_resolved() {
+	run_model("cap_weak_kem_resolved.vp", "c1c1");
+}
+#[test]
+fn test_cap_weak_phase_delayed() {
+	run_model("cap_weak_phase_delayed.vp", "c0c1");
+}
+
+#[test]
+fn test_cap_forgeable_sign() {
+	run_model("cap_forgeable_sign.vp", "a1");
+}
+#[test]
+fn test_cap_forgeable_aead() {
+	run_model("cap_forgeable_aead.vp", "c0a1");
+}
+
+#[test]
+fn test_cap_err_malleable_unsupported() {
+	run_model_err(
+		"cap_err_malleable_unsupported.vp",
+		"`malleable` is not yet supported",
+	);
+}
+
+#[test]
+fn test_cap_multi_annotation() {
+	run_model("cap_multi_annotation.vp", "c1c1");
+}
+#[test]
+fn test_cap_noop_annotated() {
+	run_model("cap_noop_annotated.vp", "c0a0");
+}
+
+#[test]
+fn test_junglegym_hybrid_pq() {
+	run_model("junglegym_hybrid_pq.vp", "c1c1c0a0a1f0f1e1e1");
+}
+#[test]
+fn test_junglegym_threshold_ring() {
+	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a0a0u0u0u1f0f1e1e1");
+}
+#[test]
+fn test_junglegym_password_maze() {
+	run_model("junglegym_password_maze.vp", "c0c1c0c0c1a0a0a0f0f1e1e1u0");
+}
+#[test]
+fn test_junglegym_phase_cascade() {
+	run_model(
+		"junglegym_phase_cascade.vp",
+		"c1c1c0c1a0a0a0a0a1a1a0f0f1e0e0u1",
+	);
+}
+#[test]
+fn test_junglegym_deep_ratchet() {
+	run_model(
+		"junglegym_deep_ratchet.vp",
+		"c0c0c0c0c0a0a0a0a0f0f1e1e1e1u0u0",
+	);
+}
+
 #[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");

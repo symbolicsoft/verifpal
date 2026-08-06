@@ -296,6 +296,27 @@ fn describe(derivation: &DerivationRecord, value: &Value, table: &NameTable) -> 
 		DerivationRecord::ConcatFragment { of } => {
 			format!("Attacker splits {} and takes {}.", table.compress(of), v)
 		}
+		DerivationRecord::Broken {
+			of,
+			capability,
+			using,
+		} if using.is_empty() => format!(
+			"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
+			table.compress(of),
+			capability.name(),
+			v,
+		),
+		DerivationRecord::Broken {
+			of,
+			capability,
+			using,
+		} => format!(
+			"Attacker breaks {} under the declared `{}` assumption using {}, obtaining {}.",
+			table.compress(of),
+			capability.name(),
+			join_terms(using, table),
+			v,
+		),
 	})
 }
 
@@ -531,6 +552,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: true,
+			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
 		let meta = vec![

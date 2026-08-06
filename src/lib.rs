@@ -3,6 +3,7 @@
 
 #![warn(unreachable_pub)]
 
+pub(crate) mod capability;
 pub(crate) mod construct;
 pub(crate) mod context;
 pub(crate) mod deduction;

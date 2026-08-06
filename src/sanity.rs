@@ -12,9 +12,53 @@ pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)>
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
+	sanity_capabilities(m, &km)?;
 	sanity_queries(m, &km)?;
 	let ps = construct_principal_states(m, &km);
 	Ok((km, ps))
+}
+
+fn sanity_capabilities(m: &Model, km: &ProtocolTrace) -> VResult<()> {
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expression in &p.expressions {
+			let Some(value) = &expression.assigned else {
+				continue;
+			};
+			sanity_capabilities_value(value, km).map_err(|e| e.or_span(expression.span))?;
+		}
+	}
+	Ok(())
+}
+
+fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
+	let Value::Primitive(p) = v else {
+		return Ok(());
+	};
+	for (cap, onset) in p.capabilities.iter() {
+		if !crate::capability::supports(p.id, cap) {
+			return Err(VerifpalError::sanity(
+				crate::capability::unsupported_message(p.id, cap).into(),
+			));
+		}
+		if onset > km.max_phase {
+			return Err(VerifpalError::sanity(
+				format!(
+					"`{}` on {} comes into force at phase {}, which is never reached",
+					cap.name(),
+					crate::primitive::primitive_name(p.id),
+					onset
+				)
+				.into(),
+			));
+		}
+	}
+	for arg in &p.arguments {
+		sanity_capabilities_value(arg, km)?;
+	}
+	Ok(())
 }
 
 fn sanity_phases(m: &Model) -> VResult<()> {

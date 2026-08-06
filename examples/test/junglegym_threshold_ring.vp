@@ -1,0 +1,125 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0c0a1a0a0u0u0u1f0f1e1e1
+//
+// Five-principal escrow: a Shamir-split key, ring signatures that must stay
+// anonymous, and blind signatures that must stay unlinkable.
+//
+// The three unlinkability queries are the point. Two RINGSIGNs under the same
+// key over different tags stay UNLINKABLE — that is the emptiness of
+// identifying_positions for RINGSIGNVERIF doing its job, and it is the one
+// primitive whose whole purpose would be defeated by a false attack here. Two
+// blind signatures likewise stay unlinkable. Two Shamir shares of one secret
+// are correctly LINKED, by common secret origin through escrow.
+//
+// UNBLIND's second argument is the original message, not the blinded value:
+// the rewrite filter reconstructs BLIND(arg0, arg1). examples/test/
+// blind_signature.vp never exercises this because it has no checked verify.
+
+attacker[active]
+
+principal Anchor[
+	knows private anchor_sk
+	knows public tag1, tag2
+	anchor_pk = PUBKEY(anchor_sk)
+	generates escrow
+	share_a, share_b, share_c = SHAMIR_SPLIT(escrow)
+	generates ring_a
+	ring_ga = PUBKEY(ring_a)
+]
+
+principal Beacon[
+	knows public tag1, tag2
+	generates ring_b
+	ring_gb = PUBKEY(ring_b)
+	generates beacon_sk
+	beacon_pk = PUBKEY(beacon_sk)
+]
+
+principal Cipher[
+	knows public tag1, tag2
+	generates ring_c
+	ring_gc = PUBKEY(ring_c)
+]
+
+Anchor → Beacon: [anchor_pk], ring_ga, share_a
+Beacon → Anchor: [beacon_pk], ring_gb
+Cipher → Anchor: ring_gc
+Cipher → Beacon: ring_gc
+Beacon → Cipher: ring_gb
+Anchor → Cipher: [anchor_pk], share_b, share_c, ring_ga
+
+principal Anchor[
+	// Two ring signatures under the SAME key over two different tags. A ring
+	// names a set and never a member, so these must stay unlinkable.
+	ring_sig1 = RINGSIGN(ring_a, ring_gb, ring_gc, tag1)
+	ring_sig2 = RINGSIGN(ring_a, ring_gb, ring_gc, tag2)
+	// Escrow travels to Beacon under Beacon's public key.
+	escrow_sealed = PKE_ENC(beacon_pk, escrow)
+]
+
+Anchor → Beacon: ring_sig1, ring_sig2, escrow_sealed
+Anchor → Cipher: ring_sig2
+
+principal Beacon[
+	_ = RINGSIGNVERIF(ring_ga, ring_gb, ring_gc, tag1, ring_sig1)?
+	_ = RINGSIGNVERIF(ring_ga, ring_gb, ring_gc, tag2, ring_sig2)?
+	escrow_b = PKE_DEC(beacon_sk, escrow_sealed)
+	generates blind_k1, blind_k2
+	knows public doc1, doc2
+	blinded1 = BLIND(blind_k1, doc1)
+	blinded2 = BLIND(blind_k2, doc2)
+]
+
+Beacon → Anchor: blinded1, blinded2
+
+principal Anchor[
+	blind_sig1 = SIGN(anchor_sk, blinded1)
+	blind_sig2 = SIGN(anchor_sk, blinded2)
+]
+
+Anchor → Beacon: blind_sig1, blind_sig2
+
+principal Beacon[
+	sig1 = UNBLIND(blind_k1, doc1, blind_sig1)
+	sig2 = UNBLIND(blind_k2, doc2, blind_sig2)
+	_ = SIGNVERIF(anchor_pk, doc1, sig1)?
+	_ = SIGNVERIF(anchor_pk, doc2, sig2)?
+	vault = AEAD_ENC(escrow_b, CONCAT(sig1, sig2), tag1)
+]
+
+Beacon → Cipher: vault
+
+principal Cipher[
+	// Cipher holds two of three shares and can rebuild the escrow key.
+	_ = RINGSIGNVERIF(ring_ga, ring_gb, ring_gc, tag2, ring_sig2)?
+	escrow_c = SHAMIR_JOIN(share_b, share_c)
+	opened = AEAD_DEC(escrow_c, vault, tag1)?
+	got1, got2 = SPLIT(opened)
+	_ = SIGNVERIF(anchor_pk, doc1, got1)?
+	receipt = MAC(escrow_c, opened)
+]
+
+Cipher → Beacon: receipt
+
+principal Beacon[
+	_ = ASSERT(receipt, MAC(escrow_b, CONCAT(sig1, sig2)))?
+]
+
+queries[
+	confidentiality? escrow
+	confidentiality? ring_a
+	confidentiality? blind_k1
+	authentication? Anchor → Beacon: escrow_sealed
+	authentication? Beacon → Cipher: vault[
+		precondition[Cipher → Beacon: receipt]
+	]
+	authentication? Cipher → Beacon: receipt
+	unlinkability? ring_sig1, ring_sig2
+	unlinkability? sig1, sig2
+	unlinkability? share_a, share_b
+	freshness? escrow
+	freshness? tag1
+	equivalence? escrow, escrow_b
+	equivalence? escrow_b, escrow_c
+]
