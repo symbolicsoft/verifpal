@@ -337,8 +337,7 @@ fn slot_candidates(
 		}
 		let compatible = match (honest, candidate) {
 			(Value::Primitive(h), Value::Primitive(k)) => k.id == h.id,
-			(Value::Equation(h), Value::Equation(k)) => h.values.len() == k.values.len(),
-			(Value::Constant(_), Value::Constant(k)) => !k.is_g_or_nil(),
+			(Value::Constant(_), Value::Constant(k)) => !k.is_nil(),
 			_ => false,
 		};
 		if compatible {
@@ -354,7 +353,9 @@ fn slot_candidates(
 		for context in &contexts {
 			for solution in deducer.solve(&shape, context) {
 				let applied = vars::apply(&shape, &solution);
-				for filler in [crate::value::value_nil(), crate::value::value_g_nil()] {
+				let attacker_key =
+					crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil);
+				for filler in [crate::value::value_nil(), attacker_key] {
 					let built = vars::ground_free_as(&applied, &filler);
 					if !vars::contains_var(&built) {
 						push_unique_value(&mut out, built);

@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use crate::equivalence::splice_equation;
 use crate::types::*;
 use crate::value::{find_equivalent, push_unique_value};
 
@@ -40,7 +39,6 @@ fn resolve_trace_value(
 			resolved
 		}
 		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, visited, depth + 1),
-		Value::Equation(_) => resolve_trace_equation(&resolved, trace, visited, depth + 1),
 	}
 }
 
@@ -65,44 +63,6 @@ fn resolve_trace_primitive(
 		Some(mapped) => Value::Primitive(Arc::new(mapped)),
 		None => value.clone(),
 	}
-}
-
-fn resolve_trace_equation(
-	value: &Value,
-	trace: &ProtocolTrace,
-	visited: &mut Vec<Value>,
-	depth: usize,
-) -> Value {
-	let eq = match value.as_equation() {
-		Some(e) => e,
-		None => return value.clone(),
-	};
-	if depth >= MAX_RESOLVE_DEPTH {
-		return value.clone();
-	}
-	let mut elements: Vec<Value> = Vec::with_capacity(eq.values.len());
-	for elem in &eq.values {
-		match elem {
-			Value::Constant(c) => {
-				push_unique_value(visited, elem.clone());
-				match trace.index_of(c) {
-					Some(idx) => elements.push(trace.slots[idx].initial_value.clone()),
-					None => elements.push(elem.clone()),
-				}
-			}
-			_ => elements.push(elem.clone()),
-		}
-	}
-	Value::Equation(Arc::new(splice_equation(elements.iter().map(
-		|item| match item {
-			Value::Constant(_) => {
-				push_unique_value(visited, item.clone());
-				item.clone()
-			}
-			Value::Primitive(_) => resolve_trace_primitive(item, trace, visited, depth),
-			Value::Equation(_) => resolve_trace_equation(item, trace, visited, depth),
-		},
-	))))
 }
 
 pub(crate) fn resolve_ps_values(
@@ -198,15 +158,6 @@ fn resolve_ps_values_depth(
 			use_orig,
 			depth + 1,
 		),
-		Value::Equation(_) => resolve_ps_equation_depth(
-			&resolved,
-			&root_val,
-			root_idx,
-			ps,
-			attacker,
-			use_orig,
-			depth + 1,
-		),
 	}
 }
 
@@ -235,48 +186,6 @@ fn resolve_ps_primitive_depth(
 		None => value.clone(),
 	})
 }
-
-fn resolve_ps_equation_depth(
-	value: &Value,
-	root_value: &Value,
-	root_index: usize,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	use_original: bool,
-	depth: usize,
-) -> VResult<Value> {
-	let eq = value.try_as_equation()?;
-	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
-		false
-	} else {
-		use_original
-	};
-	let mut resolved: Vec<Value> = Vec::with_capacity(eq.values.len());
-	for element in &eq.values {
-		let item = match element {
-			Value::Constant(c) => {
-				let (value, slot_idx) = ps.resolve_constant(c, true);
-				if use_orig {
-					slot_idx.map_or(value, |idx| ps.values[idx].original.clone())
-				} else {
-					value
-				}
-			}
-			_ => element.clone(),
-		};
-		resolved.push(match &item {
-			Value::Constant(_) => item,
-			Value::Primitive(_) => resolve_ps_primitive_depth(
-				&item, root_value, root_index, ps, attacker, use_orig, depth,
-			)?,
-			Value::Equation(_) => resolve_ps_equation_depth(
-				&item, root_value, root_index, ps, attacker, use_orig, depth,
-			)?,
-		});
-	}
-	Ok(Value::Equation(Arc::new(splice_equation(resolved))))
-}
-
 pub(crate) fn constant_used_by_principal(
 	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
@@ -303,10 +212,7 @@ pub(crate) fn constant_used_by_principal(
 		if slot.creator != principal_id {
 			continue;
 		}
-		if !matches!(
-			&slot.initial_value,
-			Value::Primitive(_) | Value::Equation(_)
-		) {
+		if !matches!(&slot.initial_value, Value::Primitive(_)) {
 			continue;
 		}
 		let (_, v) = resolve_trace_values(&slot.initial_value, trace);
@@ -336,57 +242,4 @@ pub(crate) fn value_constant_contains_fresh_values(
 		ps.index_of(inner)
 			.is_some_and(|i| ps.meta[i].constant.fresh)
 	}))
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::testutil::*;
-	use crate::value::value_g;
-	use std::collections::HashMap;
-
-	fn slot_of(v: &Value) -> TraceSlot {
-		TraceSlot {
-			constant: v.as_constant().expect("constant").clone(),
-			initial_value: v.clone(),
-			creator: 1,
-			known_by: vec![],
-			declared_at: 0,
-			phases: vec![0],
-		}
-	}
-
-	fn trace_with(slots: Vec<TraceSlot>) -> ProtocolTrace {
-		let mut index = HashMap::new();
-		for (i, slot) in slots.iter().enumerate() {
-			index.insert(slot.constant.id, i);
-		}
-		ProtocolTrace {
-			principals: vec!["Alice".to_string()],
-			principal_ids: vec![1],
-			slots,
-			index,
-			max_declared_at: 0,
-			max_phase: 0,
-			used_by: HashMap::new(),
-			leaks: Arc::new(Vec::new()),
-		}
-	}
-
-	#[test]
-	fn resolving_an_equation_keeps_elements_it_cannot_resolve() {
-		let a = make_constant("rte_a");
-		let absent = make_constant("rte_absent");
-		let trace = trace_with(vec![slot_of(&value_g()), slot_of(&a)]);
-		let eq = make_equation(vec![value_g(), a, absent.clone()]);
-		let (resolved, _) = resolve_trace_values(&eq, &trace);
-		let e = resolved.as_equation().expect("still an equation");
-		assert_eq!(
-			e.values.len(),
-			3,
-			"an exponent the trace cannot resolve must survive, got {}",
-			resolved
-		);
-		assert!(e.values[2].equivalent(&absent, true));
-	}
 }

@@ -43,24 +43,11 @@ impl fmt::Display for Primitive {
 	}
 }
 
-impl fmt::Display for Equation {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for (i, v) in self.values.iter().enumerate() {
-			if i > 0 {
-				write!(f, "^")?;
-			}
-			write!(f, "{}", v)?;
-		}
-		Ok(())
-	}
-}
-
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Value::Constant(c) => write!(f, "{}", c),
 			Value::Primitive(p) => write!(f, "{}", p),
-			Value::Equation(e) => write!(f, "{}", e),
 		}
 	}
 }
@@ -320,6 +307,23 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+
+	#[test]
+	fn pretty_round_trips_dh_to_new_syntax() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private dsz_a\n\tknows private dsz_b\n\tdsz_ga = PUBKEY(dsz_a)\n\tdsz_k = DH_KEX(dsz_ga, dsz_b)\n]\n\nqueries[\n\tconfidentiality? dsz_k\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let once = pretty_model(&m).expect("pretty");
+		let m2 = parse_string("t.vp", &once).expect("reparse");
+		let twice = pretty_model(&m2).expect("pretty again");
+		assert_eq!(once, twice);
+		assert!(once.contains("dsz_ga = PUBKEY(dsz_a)"), "got: {}", once);
+		assert!(
+			once.contains("dsz_k = DH_KEX(dsz_ga, dsz_b)"),
+			"got: {}",
+			once
+		);
+		assert!(!once.contains('^'), "got: {}", once);
+	}
 
 	#[test]
 	fn pretty_emits_pre_attacker_comments() {

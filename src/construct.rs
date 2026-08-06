@@ -28,7 +28,7 @@ pub(crate) fn construct_protocol_trace(
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
-	for builtin in &[value_g(), value_nil()] {
+	for builtin in &[value_nil()] {
 		let c = match builtin.as_constant() {
 			Some(c) => c.clone(),
 			None => continue,
@@ -78,19 +78,12 @@ fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<Pr
 	let mut used_by: HashMap<ValueId, HashMap<PrincipalId, bool>> = HashMap::new();
 	for slot in &trace.slots {
 		match &slot.initial_value {
-			Value::Primitive(_) | Value::Equation(_) => {
-				let (_, resolved_values) = resolve_trace_values(&slot.initial_value, trace);
-				for resolved in &resolved_values {
-					if let Value::Constant(c) = resolved {
-						used_by.entry(c.id).or_default().insert(slot.creator, true);
-					}
-				}
-			}
 			Value::Constant(c) => {
 				if c.id != slot.constant.id {
 					used_by.entry(c.id).or_default().insert(slot.creator, true);
 				}
 			}
+			Value::Primitive(_) => {}
 		}
 	}
 	used_by
@@ -277,7 +270,9 @@ fn construct_trace_render_assignment(
 		};
 		let mut initial_value = assigned.clone();
 		if let Value::Primitive(ref mut p) = initial_value {
-			Arc::make_mut(p).output = output_idx;
+			let mutable = Arc::make_mut(p);
+			mutable.output = output_idx;
+			mutable.hash.clear();
 		}
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {

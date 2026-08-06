@@ -92,9 +92,8 @@ fn available_at(v: &Value, snapshot: &AttackerState) -> bool {
 		return true;
 	}
 	match v {
-		Value::Constant(c) => c.is_g_or_nil(),
+		Value::Constant(c) => c.is_nil(),
 		Value::Primitive(p) => p.arguments.iter().all(|a| available_at(a, snapshot)),
-		Value::Equation(e) => e.values.iter().all(|a| available_at(a, snapshot)),
 	}
 }
 
@@ -109,7 +108,6 @@ fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {
 			}
 			p.arguments.iter().any(|a| contains_failed_check(a, ps))
 		}
-		Value::Equation(e) => e.values.iter().any(|a| contains_failed_check(a, ps)),
 		Value::Constant(_) => false,
 	}
 }

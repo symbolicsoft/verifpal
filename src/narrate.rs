@@ -62,12 +62,6 @@ impl NameTable {
 					if p.instance_check { "?" } else { "" }
 				)
 			}
-			Value::Equation(e) => e
-				.values
-				.iter()
-				.map(|ev| self.compress_excluding(ev, exclude))
-				.collect::<Vec<_>>()
-				.join("^"),
 		}
 	}
 }
@@ -187,7 +181,6 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 	match v {
 		Value::Primitive(p) => p.arguments.iter().any(|a| value_is_tainted(a, ps)),
-		Value::Equation(e) => e.values.iter().any(|ev| value_is_tainted(ev, ps)),
 		Value::Constant(_) => false,
 	}
 }
@@ -485,12 +478,12 @@ mod tests {
 		let src = "attacker[active]\n\
 			principal Alice[\n\
 			knows private ms_a\n\
-			ms_ga = G^ms_a\n\
+			ms_ga = PUBKEY(ms_a)\n\
 			]\n\
 			Alice -> Bob: ms_ga\n\
 			principal Bob[\n\
 			knows private ms_b\n\
-			ms_s = ms_ga^ms_b\n\
+			ms_s = DH_KEX(ms_ga, ms_b)\n\
 			]\n\
 			queries[\n\
 			confidentiality? ms_s\n\
@@ -512,7 +505,8 @@ mod tests {
 			)
 			.expect("index");
 		let mut mutated = bob.clone();
-		crate::reexec::install(&mut mutated, slot, crate::value::value_g_nil(), true);
+		let attacker_key = crate::primitive::nil_key_derivation().expect("key derivation exists");
+		crate::reexec::install(&mut mutated, slot, attacker_key, true);
 
 		let table = NameTable::from_state(&mutated);
 		let steps = mutation_steps(&km, &mutated, &table);
@@ -521,8 +515,8 @@ mod tests {
 			Step::Mutations { items, .. } => {
 				assert_eq!(items.len(), 1);
 				assert_eq!(&*items[0].name, "ms_ga");
-				assert_eq!(items[0].new_value, "G^nil");
-				assert_eq!(items[0].old_value, "G^ms_a");
+				assert_eq!(items[0].new_value, "PUBKEY(nil)");
+				assert_eq!(items[0].old_value, "PUBKEY(ms_a)");
 			}
 			other => panic!("expected Mutations, got {:?}", other),
 		}
@@ -537,6 +531,7 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: true,
+			hash: HashCell::default(),
 		};
 		let meta = vec![
 			make_slot_meta(a.as_constant().expect("c"), true),

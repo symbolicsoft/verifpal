@@ -12,12 +12,52 @@ use crate::util::color_output_support;
 #[cfg(feature = "cli")]
 use colored::*;
 
+const DEDUCTION_MESSAGE_LIMIT: usize = 1000;
+
 thread_local! {
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
+	static DEDUCTIONS_SHOWN: Cell<usize> = const { Cell::new(0) };
+	static DEDUCTIONS_SUPPRESSED: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
+}
+
+pub(crate) fn info_reset_deductions() {
+	DEDUCTIONS_SHOWN.with(|c| c.set(0));
+	DEDUCTIONS_SUPPRESSED.with(|c| c.set(0));
+}
+
+pub(crate) fn info_deductions_suppressed() -> usize {
+	DEDUCTIONS_SUPPRESSED.with(|c| c.get())
+}
+
+pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
+	if info_is_quiet() {
+		return;
+	}
+	let shown = DEDUCTIONS_SHOWN.with(|c| c.get());
+	if shown >= DEDUCTION_MESSAGE_LIMIT {
+		let suppressed = DEDUCTIONS_SUPPRESSED.with(|c| {
+			let next = c.get() + 1;
+			c.set(next);
+			next
+		});
+		if suppressed == 1 {
+			info_message(
+				&format!(
+					"Further deductions are being suppressed after {} messages; the analysis continues in full.",
+					DEDUCTION_MESSAGE_LIMIT
+				),
+				InfoLevel::Info,
+				false,
+			);
+		}
+		return;
+	}
+	DEDUCTIONS_SHOWN.with(|c| c.set(shown + 1));
+	info_message(&message(), InfoLevel::Deduction, true);
 }
 
 pub(crate) struct InfoQuiet;
@@ -315,7 +355,7 @@ pub(crate) fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, st
 
 pub(crate) fn info_output_text(revealed: &Value) -> String {
 	match revealed {
-		Value::Constant(_) | Value::Equation(_) => revealed.to_string(),
+		Value::Constant(_) => revealed.to_string(),
 		Value::Primitive(p) => {
 			if primitive_has_single_output(p.id) {
 				format!("Output of {}", revealed)

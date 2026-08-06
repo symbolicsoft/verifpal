@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::types::*;
-use crate::value::{value_g, value_g_nil, value_nil};
+use crate::value::value_nil;
 
 fn primitive_skeleton(p: &Primitive) -> Primitive {
 	let arguments = p
@@ -14,9 +14,10 @@ fn primitive_skeleton(p: &Primitive) -> Primitive {
 		.iter()
 		.map(|a| match a {
 			Value::Constant(_) => value_nil(),
+			Value::Primitive(pp) if crate::primitive::primitive_is_key_derivation(pp.id) => {
+				crate::primitive::nil_key_derivation().unwrap_or_else(value_nil)
+			}
 			Value::Primitive(pp) => Value::Primitive(Arc::new(primitive_skeleton(pp))),
-			Value::Equation(e) if e.values.len() <= 1 => value_g(),
-			Value::Equation(_) => value_g_nil(),
 		})
 		.collect();
 	Primitive {
@@ -24,6 +25,7 @@ fn primitive_skeleton(p: &Primitive) -> Primitive {
 		arguments,
 		output: p.output,
 		instance_check: false,
+		hash: HashCell::default(),
 	}
 }
 
@@ -34,11 +36,6 @@ pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {
 			Value::Constant(_) => h = h.wrapping_mul(31).wrapping_add(1),
 			Value::Primitive(pp) => {
 				h = h.wrapping_mul(31).wrapping_add(primitive_skeleton_hash(pp))
-			}
-			Value::Equation(e) => {
-				h = h
-					.wrapping_mul(31)
-					.wrapping_add((e.values.len() as u64).wrapping_mul(97))
 			}
 		}
 	}
@@ -89,12 +86,14 @@ mod tests {
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
 			id: PRIM_ENC,
 			arguments: vec![b, a],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		assert_eq!(primitive_skeleton_hash(&p1), primitive_skeleton_hash(&p2));
 	}

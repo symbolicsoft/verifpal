@@ -8,8 +8,11 @@ use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
 use crate::reexec::{governing_attacker, reexecute};
 use crate::types::*;
-use crate::value::value_g_nil;
 use crate::verify::verify_resolve_queries;
+
+fn attacker_public_key() -> Option<Value> {
+	crate::primitive::nil_key_derivation()
+}
 
 thread_local! {
 	static MINIMIZING: Cell<bool> = const { Cell::new(false) };
@@ -100,10 +103,11 @@ pub(crate) fn minimize_witness(
 			.filter(|(i, sm)| {
 				sm.wire.contains(&session.id)
 					&& km.slots.get(*i).is_some_and(|slot| {
-						slot.creator != session.id && slot.initial_value.as_equation().is_some()
+						slot.creator != session.id
+							&& crate::primitive::value_is_key_derivation(&slot.initial_value)
 					})
 			})
-			.map(|(i, _)| (SlotIdx(i), value_g_nil()))
+			.filter_map(|(i, _)| attacker_public_key().map(|v| (SlotIdx(i), v)))
 			.collect()
 	};
 
@@ -111,7 +115,9 @@ pub(crate) fn minimize_witness(
 		.iter()
 		.map(|(slot, value)| {
 			let replacement = match value {
-				Value::Equation(_) => value_g_nil(),
+				Value::Primitive(p) if crate::primitive::primitive_is_key_derivation(p.id) => {
+					attacker_public_key().unwrap_or_else(|| value.clone())
+				}
 				other => other.clone(),
 			};
 			(*slot, replacement)

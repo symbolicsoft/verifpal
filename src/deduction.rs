@@ -4,12 +4,11 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::info::{info_is_quiet, info_message, info_output_text};
+use crate::info::{info_deduction, info_output_text};
 use crate::pretty::pretty_values;
 use crate::primitive::primitive_core_reveals_args;
 use crate::theory::{
-	can_decompose, can_recompose, can_reconstruct_equation, can_reconstruct_primitive,
-	find_obtainable_passwords,
+	can_decompose, can_recompose, can_reconstruct_primitive, find_obtainable_passwords,
 };
 use crate::types::*;
 use crate::value::compute_slot_diffs;
@@ -65,29 +64,27 @@ fn try_deduction_step(
 	ps: &PrincipalState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
+	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker);
+	let mut progress = false;
 	for group in DEDUCTION_RULES {
 		match group.domain {
 			RuleDomain::AttackerKnown => {
 				for known in attacker.known.iter() {
 					for rule in group.rules {
-						if rule(ctx, known, ps, attacker, record) {
-							return true;
-						}
+						progress |= rule(ctx, known, ps, attacker, record);
 					}
 				}
 			}
 			RuleDomain::PrincipalAssigned => {
 				for sv in &ps.values {
 					for rule in group.rules {
-						if rule(ctx, &sv.value, ps, attacker, record) {
-							return true;
-						}
+						progress |= rule(ctx, &sv.value, ps, attacker, record);
 					}
 				}
 			}
 		}
 	}
-	false
+	progress
 }
 
 fn learn(
@@ -100,9 +97,7 @@ fn learn(
 	if !ctx.attacker_put_with(value, record, derivation) {
 		return false;
 	}
-	if !info_is_quiet() {
-		info_message(&message(), InfoLevel::Deduction, true);
-	}
+	info_deduction(message);
 	true
 }
 
@@ -164,7 +159,6 @@ fn reconstruct_recursive(
 			}
 			result
 		}
-		Value::Equation(e) => can_reconstruct_equation(e, attacker),
 		_ => return found,
 	};
 	if let Some(used) = result {
@@ -241,10 +235,8 @@ fn rule_equivalize(
 		value.clone()
 	};
 	let mut found = false;
-	for (slot, sv) in ps.values.iter().enumerate() {
-		if !resolved.equivalent(&sv.value, true) {
-			continue;
-		}
+	for slot in crate::theory::slots_equivalent_to(ps, &resolved) {
+		let sv = &ps.values[slot];
 		found |= learn(
 			ctx,
 			&sv.value,
@@ -271,6 +263,9 @@ fn rule_password_extract(
 	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
+	if !crate::theory::state_declares_passwords(ps) {
+		return false;
+	}
 	let mut passwords = Vec::new();
 	find_obtainable_passwords(value, false, true, attacker, ps, &mut passwords);
 	let mut found = false;

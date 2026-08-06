@@ -64,7 +64,17 @@ pub(crate) struct PrimitiveCoreSpec {
 #[derive(Clone, Copy)]
 pub(crate) enum BypassKeyKind {
 	Direct(usize),
-	DhExponent(usize),
+	Derived {
+		arg: usize,
+		constructor: PrimitiveId,
+	},
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CommutativityRule {
+	pub wrapped: usize,
+	pub constructor: PrimitiveId,
+	pub bare: usize,
 }
 
 #[derive(Clone, Default)]
@@ -80,6 +90,9 @@ pub(crate) struct PrimitiveSpec {
 	pub definition_check: bool,
 	pub password_hashing: Vec<usize>,
 	pub bypass_key: Option<BypassKeyKind>,
+	pub commutativity: Option<CommutativityRule>,
+	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
+	pub key_derivation: bool,
 }
 
 static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {
@@ -197,6 +210,112 @@ pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
 	Ok(primitive_def(p.id)?.arity())
 }
 
+static COMMUTATIVITY_TABLE: LazyLock<[Option<CommutativityRule>; 256]> = LazyLock::new(|| {
+	let mut table = [None; 256];
+	for spec in PRIM_SPECS.values() {
+		table[spec.id as usize] = spec.commutativity;
+	}
+	table
+});
+
+static KEY_DERIVATION_TABLE: LazyLock<[bool; 256]> = LazyLock::new(|| {
+	let mut table = [false; 256];
+	for spec in PRIM_SPECS.values() {
+		table[spec.id as usize] = spec.key_derivation;
+	}
+	table
+});
+
+pub(crate) fn commutativity_rule(id: PrimitiveId) -> Option<&'static CommutativityRule> {
+	COMMUTATIVITY_TABLE[id as usize].as_ref()
+}
+
+pub(crate) fn commutativity_parts_ref(p: &Primitive) -> Option<(&Value, &Value)> {
+	let rule = commutativity_rule(p.id)?;
+	let wrapped = p.arguments.get(rule.wrapped)?;
+	let bare = p.arguments.get(rule.bare)?;
+	let Value::Primitive(w) = wrapped else {
+		return None;
+	};
+	if w.id != rule.constructor || w.arguments.len() != 1 {
+		return None;
+	}
+	Some((&w.arguments[0], bare))
+}
+
+pub(crate) fn commutativity_parts(p: &Primitive) -> Option<(Value, Value)> {
+	commutativity_parts_ref(p).map(|(inner, bare)| (inner.clone(), bare.clone()))
+}
+
+pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
+	let rule = commutativity_rule(p.id)?;
+	let (inner, bare) = commutativity_parts(p)?;
+	let mut arguments = p.arguments.clone();
+	arguments[rule.wrapped] = Value::Primitive(std::sync::Arc::new(Primitive {
+		id: rule.constructor,
+		arguments: vec![bare],
+		output: 0,
+		instance_check: false,
+		hash: HashCell::default(),
+	}));
+	arguments[rule.bare] = inner;
+	Some(Primitive {
+		id: p.id,
+		arguments,
+		output: p.output,
+		instance_check: p.instance_check,
+		hash: HashCell::default(),
+	})
+}
+
+pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
+	let id = PRIM_SPECS
+		.values()
+		.find(|s| s.key_derivation)
+		.map(|s| s.id)?;
+	Some(Value::Primitive(std::sync::Arc::new(Primitive {
+		id,
+		arguments: vec![inner],
+		output: 0,
+		instance_check: false,
+		hash: HashCell::default(),
+	})))
+}
+
+pub(crate) fn nil_key_derivation() -> Option<Value> {
+	key_derivation_of(crate::value::value_nil())
+}
+
+pub(crate) fn value_is_key_derivation(v: &Value) -> bool {
+	matches!(v, Value::Primitive(p) if primitive_is_key_derivation(p.id))
+}
+
+pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) -> Vec<Value> {
+	for (position, banned) in argument_restrictions(id) {
+		while let Some(Value::Primitive(inner)) = arguments.get(*position) {
+			if !banned.contains(&inner.id)
+				|| !primitive_is_key_derivation(inner.id)
+				|| inner.arguments.len() != 1
+			{
+				break;
+			}
+			let unwrapped = inner.arguments[0].clone();
+			arguments[*position] = unwrapped;
+		}
+	}
+	arguments
+}
+
+pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [(usize, Vec<PrimitiveId>)] {
+	primitive_get(id)
+		.map(|s| s.argument_restrictions.as_slice())
+		.unwrap_or(&[])
+}
+
+pub(crate) fn primitive_is_key_derivation(id: PrimitiveId) -> bool {
+	KEY_DERIVATION_TABLE[id as usize]
+}
+
 pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
 	CORE_SPECS.get(&id).is_some_and(|s| s.reveals_args)
 }
@@ -208,14 +327,12 @@ pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 	let spec = primitive_get(prim.id).ok()?;
 	match spec.bypass_key {
 		Some(BypassKeyKind::Direct(i)) => Some(prim.arguments[i].clone()),
-		Some(BypassKeyKind::DhExponent(i)) => {
-			if let Value::Equation(e) = &prim.arguments[i]
-				&& e.values.len() >= 2
-			{
-				return Some(e.values[e.values.len() - 1].clone());
+		Some(BypassKeyKind::Derived { arg, constructor }) => match &prim.arguments[arg] {
+			Value::Primitive(p) if p.id == constructor && p.arguments.len() == 1 => {
+				Some(p.arguments[0].clone())
 			}
-			None
-		}
+			_ => None,
+		},
 		None => None,
 	}
 }
@@ -223,6 +340,39 @@ pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn pubkey_and_dh_kex_resolve_by_name() {
+		assert!(primitive_get_enum("PUBKEY").is_ok());
+		assert!(primitive_get_enum("DH_KEX").is_ok());
+	}
+
+	#[test]
+	fn pubkey_is_the_key_derivation_constructor() {
+		assert!(primitive_is_key_derivation(
+			primitive_get_enum("PUBKEY").unwrap()
+		));
+		assert!(!primitive_is_key_derivation(
+			primitive_get_enum("DH_KEX").unwrap()
+		));
+		assert!(!primitive_is_key_derivation(PRIM_HASH));
+	}
+
+	#[test]
+	fn neither_new_primitive_may_be_checked() {
+		for name in ["PUBKEY", "DH_KEX"] {
+			let id = primitive_get_enum(name).unwrap();
+			assert!(!primitive_def(id).unwrap().definition_check());
+		}
+	}
+
+	#[test]
+	fn new_primitive_arities_come_from_the_spec() {
+		let pk = primitive_def(primitive_get_enum("PUBKEY").unwrap()).unwrap();
+		assert_eq!(pk.arity(), &[1]);
+		let dh = primitive_def(primitive_get_enum("DH_KEX").unwrap()).unwrap();
+		assert_eq!(dh.arity(), &[2]);
+	}
 
 	#[test]
 	fn primitive_def_core() {

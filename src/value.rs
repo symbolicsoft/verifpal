@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use crate::equivalence::{equivalent_equations, equivalent_primitives};
-use crate::hashing::{equation_hash, primitive_hash};
+use crate::equivalence::equivalent_primitives;
+use crate::hashing::primitive_hash;
 use crate::resolution::constant_used_by_principal;
-use crate::rewrite::{perform_equation_rewrite, perform_primitive_rewrite};
+use crate::rewrite::perform_primitive_rewrite;
 use crate::types::*;
 
 pub(crate) use crate::equivalence::find_constant_in_trace_primitive;
@@ -29,7 +29,6 @@ impl Default for ValueNames {
 impl ValueNames {
 	pub(crate) fn new() -> Self {
 		let mut map = HashMap::new();
-		map.insert(Arc::from("g"), 0);
 		map.insert(Arc::from("nil"), 1);
 		ValueNames { map, counter: 2 }
 	}
@@ -50,18 +49,6 @@ impl ValueNames {
 	}
 }
 
-static STATIC_G: LazyLock<Value> = LazyLock::new(|| {
-	Value::Constant(Constant {
-		name: Arc::from("g"),
-		id: 0,
-		guard: false,
-		fresh: false,
-		leaked: false,
-		declaration: Some(Declaration::Knows),
-		qualifier: Some(Qualifier::Public),
-	})
-});
-
 static STATIC_NIL: LazyLock<Value> = LazyLock::new(|| {
 	Value::Constant(Constant {
 		name: Arc::from("nil"),
@@ -74,22 +61,8 @@ static STATIC_NIL: LazyLock<Value> = LazyLock::new(|| {
 	})
 });
 
-static STATIC_G_NIL: LazyLock<Value> = LazyLock::new(|| {
-	Value::Equation(Arc::new(Equation {
-		values: vec![value_g(), value_nil()],
-	}))
-});
-
-pub(crate) fn value_g() -> Value {
-	STATIC_G.clone()
-}
-
 pub(crate) fn value_nil() -> Value {
 	STATIC_NIL.clone()
-}
-
-pub(crate) fn value_g_nil() -> Value {
-	STATIC_G_NIL.clone()
 }
 
 pub(crate) fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
@@ -147,9 +120,14 @@ impl Value {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
 			(Value::Primitive(p1), Value::Primitive(p2)) => {
+				if Arc::ptr_eq(p1, p2) {
+					return true;
+				}
+				if consider_output && primitive_hash(p1) != primitive_hash(p2) {
+					return false;
+				}
 				equivalent_primitives(p1, p2, consider_output).equivalent
 			}
-			(Value::Equation(e1), Value::Equation(e2)) => equivalent_equations(e1, e2),
 			_ => false,
 		}
 	}
@@ -157,7 +135,6 @@ impl Value {
 		match self {
 			Value::Constant(c) => c.id as u64,
 			Value::Primitive(p) => primitive_hash(p),
-			Value::Equation(e) => equation_hash(e),
 		}
 	}
 	pub fn collect_constants(&self, out: &mut Vec<Constant>) {
@@ -168,11 +145,6 @@ impl Value {
 					arg.collect_constants(out);
 				}
 			}
-			Value::Equation(e) => {
-				for ev in &e.values {
-					ev.collect_constants(out);
-				}
-			}
 		}
 	}
 }
@@ -181,8 +153,8 @@ impl Constant {
 	pub fn equivalent(&self, other: &Constant) -> bool {
 		self.id == other.id
 	}
-	pub fn is_g_or_nil(&self) -> bool {
-		self.id == 0 || self.id == 1
+	pub fn is_nil(&self) -> bool {
+		self.id == 1
 	}
 }
 
@@ -211,18 +183,10 @@ impl PrincipalState {
 		let mut failures: Vec<(Primitive, usize)> = Vec::new();
 		let len = self.values.len();
 		for i in 0..len {
-			match &self.values[i].value {
-				Value::Primitive(p) => {
-					let p_clone = p.clone();
-					let r = perform_primitive_rewrite(&p_clone, Some(i), self);
-					failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
-				}
-				Value::Equation(e) => {
-					let e_clone = e.clone();
-					let r = perform_equation_rewrite(&e_clone, Some(i), self);
-					failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
-				}
-				_ => {}
+			if let Value::Primitive(p) = &self.values[i].value {
+				let p_clone = p.clone();
+				let r = perform_primitive_rewrite(&p_clone, Some(i), self);
+				failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
 			}
 		}
 		failures
@@ -300,7 +264,10 @@ impl AttackerState {
 		self.known.get(idx.get())
 	}
 	pub fn knows(&self, v: &Value) -> Option<KnownIdx> {
-		let h = v.hash_value();
+		self.knows_hashed(v, v.hash_value())
+	}
+
+	pub fn knows_hashed(&self, v: &Value, h: u64) -> Option<KnownIdx> {
 		if let Some(indices) = self.known_map.get(&h) {
 			for &i in indices {
 				if v.equivalent(&self.known[i], true) {
@@ -356,13 +323,11 @@ mod tests {
 	}
 
 	#[test]
-	fn constant_is_g_or_nil() {
-		let g = value_g();
+	fn constant_is_nil() {
 		let nil = value_nil();
-		let other = make_constant("not_g_or_nil");
-		assert!(g.as_constant().unwrap().is_g_or_nil());
-		assert!(nil.as_constant().unwrap().is_g_or_nil());
-		assert!(!other.as_constant().unwrap().is_g_or_nil());
+		let other = make_constant("not_nil");
+		assert!(nil.as_constant().unwrap().is_nil());
+		assert!(!other.as_constant().unwrap().is_nil());
 	}
 
 	#[test]
@@ -374,14 +339,6 @@ mod tests {
 		assert!(attacker.knows(&a).is_some());
 		assert!(attacker.knows(&b).is_some());
 		assert!(attacker.knows(&c).is_none());
-	}
-
-	#[test]
-	fn attacker_knows_equation() {
-		let a = make_constant("ake_a");
-		let eq = make_equation(vec![value_g(), a]);
-		let attacker = make_attacker_state(vec![eq.clone()]);
-		assert!(attacker.knows(&eq).is_some());
 	}
 
 	#[test]
@@ -411,15 +368,6 @@ mod tests {
 		let p = make_primitive(PRIM_ENC, vec![a, b], 0);
 		let mut out = Vec::new();
 		p.collect_constants(&mut out);
-		assert_eq!(out.len(), 2);
-	}
-
-	#[test]
-	fn collect_constants_from_equation() {
-		let a = make_constant("cce_a");
-		let eq = make_equation(vec![value_g(), a]);
-		let mut out = Vec::new();
-		eq.collect_constants(&mut out);
 		assert_eq!(out.len(), 2);
 	}
 

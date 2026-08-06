@@ -9,7 +9,7 @@ use crate::equivalence::equivalent_primitives;
 use crate::hashing::collect_subterm_hashes;
 use crate::primitive::*;
 use crate::types::*;
-use crate::value::{value_g, value_nil};
+use crate::value::value_nil;
 
 use super::matching::match_value;
 use super::symbolic::SymbolicState;
@@ -19,7 +19,6 @@ fn goal_key(v: &Value) -> u64 {
 	let tag: u64 = match v {
 		Value::Constant(_) => 0x0000_0000_0000_0001,
 		Value::Primitive(_) => 0x9E37_79B9_7F4A_7C15,
-		Value::Equation(_) => 0xBF58_476D_1CE4_E5B9,
 	};
 	v.hash_value().wrapping_mul(31).wrapping_add(tag)
 }
@@ -180,7 +179,6 @@ impl<'a> Deducer<'a> {
 		self.solve_by_wire(g, s, out);
 
 		match g {
-			Value::Equation(e) => self.solve_equation(e, s, out),
 			Value::Primitive(p) => self.solve_primitive(p, s, out),
 			Value::Constant(_) => {}
 		}
@@ -300,39 +298,19 @@ impl<'a> Deducer<'a> {
 		}
 	}
 
-	fn solve_equation(&self, e: &Equation, s: &Substitution, out: &mut Vec<Substitution>) {
-		match e.values.len() {
-			2 => self.solve_into(&e.values[1], s, out),
-			3 => {
-				let a = &e.values[1];
-				let b = &e.values[2];
-				let base = &e.values[0];
-				let pub_a = partial(base, a);
-				let pub_b = partial(base, b);
-
-				self.solve_pair(a, b, s, out);
-				self.solve_pair(a, &pub_b, s, out);
-				self.solve_pair(&pub_a, b, s, out);
-			}
-			_ => {}
+	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
+		self.solve_primitive_arguments(p, s, out);
+		if let Some(swapped) = commutativity_swap(p) {
+			self.solve_primitive_arguments(&swapped, s, out);
 		}
 	}
 
-	fn solve_pair(
+	fn solve_primitive_arguments(
 		&self,
-		first: &Value,
-		second: &Value,
+		p: &Primitive,
 		s: &Substitution,
 		out: &mut Vec<Substitution>,
 	) {
-		let mut firsts = Vec::new();
-		self.solve_into(first, s, &mut firsts);
-		for s1 in firsts {
-			self.solve_into(second, &s1, out);
-		}
-	}
-
-	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
 		let mut frontier = vec![s.clone()];
 		for arg in &p.arguments {
 			let mut next = Vec::new();
@@ -432,11 +410,6 @@ impl<'a> Deducer<'a> {
 					self.collect_forgeable(a, var_id, out);
 				}
 			}
-			Value::Equation(e) => {
-				for a in &e.values {
-					self.collect_forgeable(a, var_id, out);
-				}
-			}
 			Value::Constant(_) => {}
 		}
 	}
@@ -497,6 +470,7 @@ impl<'a> Deducer<'a> {
 					arguments,
 					output: 0,
 					instance_check: false,
+					hash: HashCell::default(),
 				}));
 				out.extend(self.invert(inner, &candidate, s));
 			}
@@ -531,6 +505,7 @@ impl<'a> Deducer<'a> {
 					arguments,
 					output: 0,
 					instance_check: false,
+					hash: HashCell::default(),
 				}));
 				for bound in self.invert(inner, &candidate, base) {
 					out.extend(self.require_constructible(&bound, base, false));
@@ -613,11 +588,6 @@ fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
 				collect_checked(a, out);
 			}
 		}
-		Value::Equation(e) => {
-			for a in &e.values {
-				collect_checked(a, out);
-			}
-		}
 		Value::Constant(_) => {}
 	}
 }
@@ -676,22 +646,10 @@ fn build_rewrite_shapes_with(
 				arguments,
 				output: 0,
 				instance_check: false,
+				hash: HashCell::default(),
 			}))
 		})
 		.collect()
-}
-
-fn partial(base: &Value, exponent: &Value) -> Value {
-	Value::Equation(Arc::new(Equation {
-		values: vec![
-			if matches!(base, Value::Constant(_)) {
-				base.clone()
-			} else {
-				value_g()
-			},
-			exponent.clone(),
-		],
-	}))
 }
 
 pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Substitution> {

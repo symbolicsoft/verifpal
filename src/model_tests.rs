@@ -2,9 +2,12 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 fn run_model(model: &str, expected: &str) {
-	let file_name = format!("examples/test/{}", model);
+	run_model_at(&format!("examples/test/{}", model), model, expected);
+}
+
+fn run_model_at(path: &str, model: &str, expected: &str) {
 	let (_, results_code) =
-		crate::verify::verify(&file_name).unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
+		crate::verify::verify(path).unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
 	assert_eq!(
 		results_code, expected,
 		"FAIL • {} (expected {}, got {})",
@@ -390,4 +393,20 @@ fn test_password_aead() {
 #[test]
 fn test_password_underspec() {
 	run_model("password_underspec.vp", "c0c1c0c0c0c1c0c1c0c0c1c0");
+}
+#[test]
+fn test_password_dh_unknown_base() {
+	run_model("password_dh_unknown_base.vp", "c0");
+}
+#[test]
+fn test_password_dh_known_base() {
+	run_model("password_dh_known_base.vp", "c1");
+}
+#[test]
+fn test_piknik_signature_not_forgeable() {
+	run_model_at(
+		"examples/transport-layer/piknik.vp",
+		"piknik.vp",
+		"c0a0a0a0f0",
+	);
 }

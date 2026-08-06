@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::equivalence::splice_equation;
 use crate::types::*;
 use crate::value::value_nil;
 
@@ -53,7 +52,6 @@ pub(crate) fn contains_var(v: &Value) -> bool {
 	match v {
 		Value::Constant(c) => is_attacker_var_id(c.id),
 		Value::Primitive(p) => p.arguments.iter().any(contains_var),
-		Value::Equation(e) => e.values.iter().any(contains_var),
 	}
 }
 
@@ -66,11 +64,6 @@ pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
 		}
 		Value::Primitive(p) => {
 			for a in &p.arguments {
-				collect_vars(a, out);
-			}
-		}
-		Value::Equation(e) => {
-			for a in &e.values {
 				collect_vars(a, out);
 			}
 		}
@@ -98,11 +91,9 @@ fn apply_depth(v: &Value, s: &Substitution, depth: usize) -> Value {
 				.iter()
 				.map(|a| apply_depth(a, s, depth + 1))
 				.collect();
+			let args = crate::primitive::normalise_arguments(p.id, args);
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
-		Value::Equation(e) => Value::Equation(Arc::new(splice_equation(
-			e.values.iter().map(|item| apply_depth(item, s, depth + 1)),
-		))),
 	}
 }
 
@@ -145,11 +136,9 @@ pub(crate) fn ground_free_as(v: &Value, filler: &Value) -> Value {
 				.iter()
 				.map(|a| ground_free_as(a, filler))
 				.collect();
+			let args = crate::primitive::normalise_arguments(p.id, args);
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
-		Value::Equation(e) => Value::Equation(Arc::new(splice_equation(
-			e.values.iter().map(|a| ground_free_as(a, filler)),
-		))),
 	}
 }
 
@@ -169,12 +158,32 @@ pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 		})
 }
 
+fn substitution_hash(s: &Substitution) -> u64 {
+	let mut acc: u64 = s.len() as u64;
+	for (id, v) in s {
+		acc ^= (*id as u64)
+			.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+			.rotate_left(17)
+			^ v.hash_value().wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+	}
+	acc
+}
+
 pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 	let mut out: Vec<Substitution> = Vec::with_capacity(candidates.len());
+	let mut seen: HashMap<u64, Vec<usize>> = HashMap::new();
 	for candidate in candidates {
-		if !out.iter().any(|kept| same_substitution(kept, &candidate)) {
-			out.push(candidate);
+		let hash = substitution_hash(&candidate);
+		let duplicate = seen.get(&hash).is_some_and(|bucket| {
+			bucket
+				.iter()
+				.any(|&i| same_substitution(&out[i], &candidate))
+		});
+		if duplicate {
+			continue;
 		}
+		seen.entry(hash).or_default().push(out.len());
+		out.push(candidate);
 	}
 	out
 }
@@ -192,12 +201,6 @@ mod tests {
 		})
 	}
 
-	fn dh(base: Value, exponents: Vec<Value>) -> Value {
-		let mut values = vec![base];
-		values.extend(exponents);
-		Value::Equation(std::sync::Arc::new(Equation { values }))
-	}
-
 	#[test]
 	fn solver_var_ids_are_disjoint_from_interned_names() {
 		let interned = test_value_id("solver_disjoint_a");
@@ -206,75 +209,6 @@ mod tests {
 			crate::solve::vars::attacker_var_id(0)
 		));
 		assert!(!crate::solve::vars::is_attacker_var_id(interned));
-	}
-
-	#[test]
-	fn solver_apply_resolves_chained_bindings() {
-		let outer = crate::solve::vars::attacker_var(0, "solver_chain_outer");
-		let inner = crate::solve::vars::attacker_var(1, "solver_chain_inner");
-		let mut s = crate::solve::vars::Substitution::new();
-		s.insert(crate::solve::vars::attacker_var_id(0), inner.clone());
-		s.insert(
-			crate::solve::vars::attacker_var_id(1),
-			crate::value::value_nil(),
-		);
-		let resolved = crate::solve::vars::apply(&outer, &s);
-		assert!(resolved.equivalent(&crate::value::value_nil(), true));
-	}
-
-	#[test]
-	fn solver_apply_splices_equations() {
-		let var = crate::solve::vars::attacker_var(0, "solver_splice");
-		let exponent = solver_constant("solver_splice_e");
-		let term = dh(crate::value::value_g(), vec![var, exponent.clone()]);
-		let mut s = crate::solve::vars::Substitution::new();
-		s.insert(
-			crate::solve::vars::attacker_var_id(0),
-			crate::value::value_nil(),
-		);
-		let resolved = crate::solve::vars::apply(&term, &s);
-		let expected = dh(
-			crate::value::value_g(),
-			vec![crate::value::value_nil(), exponent],
-		);
-		assert!(resolved.equivalent(&expected, true));
-	}
-
-	#[test]
-	fn solver_unify_respects_dh_commutativity() {
-		let x = solver_constant("solver_dh_x");
-		let y = solver_constant("solver_dh_y");
-		let var = crate::solve::vars::attacker_var(0, "solver_dh_var");
-		let pattern = dh(crate::value::value_g(), vec![var, y.clone()]);
-		let target = dh(crate::value::value_g(), vec![y, x.clone()]);
-		let s = crate::solve::vars::Substitution::new();
-		let solved = crate::solve::matching::unify(&pattern, &target, &s)
-			.expect("commuted exponents should unify");
-		let bound = solved
-			.get(&crate::solve::vars::attacker_var_id(0))
-			.expect("variable bound");
-		assert!(bound.equivalent(&x, true));
-	}
-
-	#[test]
-	fn solver_grounding_free_positions_splices_equations() {
-		let term = dh(
-			crate::value::value_g(),
-			vec![crate::solve::vars::free_var(0)],
-		);
-		let grounded = crate::solve::vars::ground_free_as(&term, &crate::value::value_g_nil());
-		assert!(grounded.equivalent(&crate::value::value_g_nil(), true));
-	}
-
-	#[test]
-	fn solver_unify_requires_matching_equation_base() {
-		let x = solver_constant("solver_base_x");
-		let y = solver_constant("solver_base_y");
-		let var = crate::solve::vars::attacker_var(0, "solver_base_var");
-		let pattern = dh(crate::value::value_g(), vec![var, y.clone()]);
-		let target = dh(crate::value::value_nil(), vec![y, x]);
-		let s = crate::solve::vars::Substitution::new();
-		assert!(crate::solve::matching::unify(&pattern, &target, &s).is_none());
 	}
 
 	#[test]
@@ -288,6 +222,7 @@ mod tests {
 				arguments: vec![x, y],
 				output: 0,
 				instance_check: false,
+				hash: HashCell::default(),
 			}))
 		};
 

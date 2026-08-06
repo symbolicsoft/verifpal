@@ -6,10 +6,14 @@ use std::sync::Arc;
 use crate::context::VerifyContext;
 use crate::primitive::primitive_extract_bypass_key;
 use crate::principal::ATTACKER_ID;
-use crate::theory::{can_reconstruct_equation, can_reconstruct_primitive, can_rewrite};
+use crate::theory::{can_reconstruct_primitive, can_rewrite};
 use crate::types::*;
 use crate::util::min_int_in_slice;
-use crate::value::{resolve_trace_values, value_g_nil};
+use crate::value::resolve_trace_values;
+
+fn attacker_public_key() -> Value {
+	crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil)
+}
 
 pub(crate) fn governing_attacker(
 	ctx: &VerifyContext,
@@ -88,7 +92,7 @@ fn try_guard_bypass(
 	let mut ps = ps_pre.clone();
 	for idx in bypassable {
 		if idx < ps.values.len() {
-			ps.values[idx].override_all_bypassed(value_g_nil());
+			ps.values[idx].override_all_bypassed(attacker_public_key());
 		}
 	}
 
@@ -102,7 +106,7 @@ fn try_guard_bypass(
 			}
 			if primitive_extract_bypass_key(prim).is_some_and(|key| can_obtain(&key, &ps, attacker))
 			{
-				ps.values[*idx].override_all_bypassed(value_g_nil());
+				ps.values[*idx].override_all_bypassed(attacker_public_key());
 				injected = true;
 			}
 		}
@@ -126,7 +130,6 @@ fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool 
 	}
 	match v {
 		Value::Primitive(p) => can_reconstruct_primitive(p, ps, attacker, 0).is_some(),
-		Value::Equation(e) => can_reconstruct_equation(e, attacker).is_some(),
 		_ => false,
 	}
 }

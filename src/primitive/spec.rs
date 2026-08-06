@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::types::*;
-use crate::value::{value_g, value_nil};
+use crate::value::value_nil;
 
 pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
 pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
@@ -28,6 +28,8 @@ pub(crate) const PRIM_RINGSIGN: PrimitiveId = 18;
 pub(crate) const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
 pub(crate) const PRIM_BLIND: PrimitiveId = 20;
 pub(crate) const PRIM_UNBLIND: PrimitiveId = 21;
+pub(crate) const PRIM_PUBKEY: PrimitiveId = 22;
+pub(crate) const PRIM_DH_KEX: PrimitiveId = 23;
 
 fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 	(x.clone(), true)
@@ -36,16 +38,12 @@ fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		0 => match x {
-			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
-			Value::Equation(e) => {
-				if e.values.len() != 2 {
-					return (x.clone(), false);
-				}
-				if !e.values[0].equivalent(&value_g(), true) {
-					return (x.clone(), false);
-				}
-				(e.values[1].clone(), true)
+			Value::Primitive(p)
+				if super::primitive_is_key_derivation(p.id) && p.arguments.len() == 1 =>
+			{
+				(p.arguments[0].clone(), true)
 			}
+			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
 		},
 		1 => (x.clone(), true),
 		_ => (x.clone(), false),
@@ -54,14 +52,9 @@ fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bo
 
 fn filter_pke_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
-		0 => match x {
-			Value::Constant(_) | Value::Primitive(_) => {
-				let eq = Value::Equation(Arc::new(Equation {
-					values: vec![value_g(), x.clone()],
-				}));
-				(eq, true)
-			}
-			Value::Equation(_) => (x.clone(), false),
+		0 => match super::key_derivation_of(x.clone()) {
+			Some(k) => (k, true),
+			None => (x.clone(), false),
 		},
 		_ => (x.clone(), false),
 	}
@@ -84,14 +77,12 @@ fn filter_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		0 => match x {
-			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
-			Value::Equation(e) => {
-				if e.values.len() == 2 {
-					(e.values[1].clone(), true)
-				} else {
-					(x.clone(), false)
-				}
+			Value::Primitive(p)
+				if super::primitive_is_key_derivation(p.id) && p.arguments.len() == 1 =>
+			{
+				(p.arguments[0].clone(), true)
 			}
+			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
 		},
 		1..=4 => (x.clone(), true),
 		_ => (x.clone(), false),
@@ -106,6 +97,7 @@ fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 				arguments: vec![p.arguments[0].clone(), p.arguments[1].clone()],
 				output: 0,
 				instance_check: false,
+				hash: HashCell::default(),
 			}));
 			(blind_prim, true)
 		}
@@ -153,6 +145,7 @@ fn rewrite_to_unblind(p: &Primitive) -> Value {
 		arguments: vec![p.arguments[0].clone(), inner],
 		output: 0,
 		instance_check: false,
+		hash: HashCell::default(),
 	}))
 }
 
@@ -294,6 +287,31 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
+			id: PRIM_PUBKEY,
+			name: "PUBKEY",
+			arity: vec![1],
+			output: vec![1],
+			key_derivation: true,
+			argument_restrictions: vec![(0, vec![PRIM_PUBKEY, PRIM_DH_KEX])],
+			..PrimitiveSpec::default()
+		},
+		PrimitiveSpec {
+			id: PRIM_DH_KEX,
+			name: "DH_KEX",
+			arity: vec![2],
+			output: vec![1],
+			commutativity: Some(CommutativityRule {
+				wrapped: 0,
+				constructor: PRIM_PUBKEY,
+				bare: 1,
+			}),
+			argument_restrictions: vec![
+				(0, vec![PRIM_DH_KEX]),
+				(1, vec![PRIM_PUBKEY, PRIM_DH_KEX]),
+			],
+			..PrimitiveSpec::default()
+		},
+		PrimitiveSpec {
 			id: PRIM_SIGN,
 			name: "SIGN",
 			arity: vec![2],
@@ -314,7 +332,10 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_extract_dh_exponent),
 			},
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::DhExponent(0)),
+			bypass_key: Some(BypassKeyKind::Derived {
+				arg: 0,
+				constructor: PRIM_PUBKEY,
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -410,7 +431,10 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_ringsignverif_rewrite),
 			},
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::DhExponent(0)),
+			bypass_key: Some(BypassKeyKind::Derived {
+				arg: 0,
+				constructor: PRIM_PUBKEY,
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -442,4 +466,39 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			..PrimitiveSpec::default()
 		},
 	]
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+
+	#[test]
+	fn extract_exponent_rejects_a_bare_constant() {
+		let k = make_constant("fey_k");
+		let p = Primitive {
+			id: PRIM_SIGNVERIF,
+			arguments: vec![k.clone()],
+			output: 0,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let (_, ok) = filter_extract_dh_exponent(&p, &k, 0);
+		assert!(!ok, "a bare constant is not a public key");
+	}
+
+	#[test]
+	fn extract_exponent_rejects_a_non_key_primitive() {
+		let k = make_constant("fez_k");
+		let hashed = make_primitive(PRIM_HASH, vec![k], 0);
+		let p = Primitive {
+			id: PRIM_SIGNVERIF,
+			arguments: vec![hashed.clone()],
+			output: 0,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let (_, ok) = filter_extract_dh_exponent(&p, &hashed, 0);
+		assert!(!ok, "only the key-derivation constructor may be peeled");
+	}
 }

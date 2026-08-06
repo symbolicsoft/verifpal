@@ -53,16 +53,13 @@ pub(crate) fn make_password(name: &str) -> Value {
 	})
 }
 
-pub(crate) fn make_equation(values: Vec<Value>) -> Value {
-	Value::Equation(Arc::new(Equation { values }))
-}
-
 pub(crate) fn make_primitive(id: PrimitiveId, args: Vec<Value>, output: usize) -> Value {
 	Value::Primitive(Arc::new(Primitive {
 		id,
 		arguments: args,
 		output,
 		instance_check: false,
+		hash: HashCell::default(),
 	}))
 }
 

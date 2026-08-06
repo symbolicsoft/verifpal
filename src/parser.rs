@@ -48,6 +48,9 @@ const RESERVED: &[&str] = &[
 	"unnamed",
 	"blind",
 	"unblind",
+	"pubkey",
+	"dh_kex",
+	"g",
 	"queries",
 ];
 
@@ -752,11 +755,6 @@ impl<'a> Parser<'a> {
 				self.restore(saved);
 				return self.parse_primitive();
 			}
-			self.skip_whitespace();
-			if self.peek() == Some(b'^') {
-				self.restore(saved);
-				return self.parse_equation();
-			}
 			self.restore(saved);
 			return self.parse_constant_value();
 		}
@@ -795,17 +793,7 @@ impl<'a> Parser<'a> {
 			arguments,
 			output: 0,
 			instance_check: check,
-		})))
-	}
-
-	fn parse_equation(&mut self) -> VResult<Value> {
-		let first = self.parse_constant_value()?;
-		self.consume_trivia_nocapture();
-		self.expect("^")?;
-		self.consume_trivia_nocapture();
-		let second = self.parse_constant_value()?;
-		Ok(Value::Equation(Arc::new(Equation {
-			values: vec![first, second],
+			hash: HashCell::default(),
 		})))
 	}
 
@@ -1065,6 +1053,75 @@ pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	fn first_assigned(m: &Model) -> String {
+		let Block::Principal(p) = &m.blocks[0] else {
+			panic!("expected a principal block");
+		};
+		format!(
+			"{:?}",
+			p.expressions
+				.iter()
+				.find_map(|e| e.assigned.as_ref())
+				.expect("an assignment")
+		)
+	}
+
+	#[test]
+	fn pubkey_parses_to_a_primitive() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private brg_a\n\tbrg_ga = PUBKEY(brg_a)\n]\n\nqueries[\n\tconfidentiality? brg_a\n]\n";
+		let m = parse_string("new.vp", src).expect("parses");
+		assert!(first_assigned(&m).starts_with("Primitive"));
+	}
+
+	#[test]
+	fn nested_dh_kex_parses_as_a_nested_primitive() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private brn_a\n\tknows private brn_b\n\tbrn_k = DH_KEX(PUBKEY(brn_a), brn_b)\n]\n\nqueries[\n\tconfidentiality? brn_k\n]\n";
+		let m = parse_string("new.vp", src).expect("new parses");
+		let Block::Principal(p) = &m.blocks[0] else {
+			panic!("expected a principal block");
+		};
+		let assigned = p
+			.expressions
+			.iter()
+			.find_map(|e| e.assigned.as_ref())
+			.expect("an assignment");
+		let Value::Primitive(outer) = assigned else {
+			panic!("expected a primitive, got {:?}", assigned);
+		};
+		assert_eq!(outer.id, primitive_get_enum("DH_KEX").unwrap());
+		assert_eq!(outer.arguments.len(), 2);
+		let Value::Primitive(inner) = &outer.arguments[0] else {
+			panic!("expected PUBKEY in argument 0");
+		};
+		assert_eq!(inner.id, primitive_get_enum("PUBKEY").unwrap());
+	}
+
+	fn sanity_error_for(assignment: &str) -> String {
+		let src = format!(
+			"attacker[active]\n\nprincipal Alice[\n\tknows private brc_a\n\t{}\n]\n\nqueries[\n\tconfidentiality? brc_a\n]\n",
+			assignment
+		);
+		let m = parse_string("bad.vp", &src).expect("parses");
+		crate::sanity::sanity(&m)
+			.err()
+			.map(|e| e.to_string())
+			.unwrap_or_default()
+	}
+
+	#[test]
+	fn bridged_primitives_reject_checking_like_any_other() {
+		let baseline = sanity_error_for("brc_x = HASH(brc_a)?");
+		assert!(!baseline.is_empty());
+		assert_eq!(sanity_error_for("brc_x = PUBKEY(brc_a)?"), baseline);
+		assert_eq!(sanity_error_for("brc_x = DH_KEX(brc_a, brc_a)?"), baseline);
+	}
+
+	#[test]
+	fn bridged_primitives_reject_bad_arity_from_the_spec() {
+		assert!(sanity_error_for("brc_x = PUBKEY(brc_a, brc_a)").contains("expecting 1"));
+		assert!(sanity_error_for("brc_x = DH_KEX(brc_a)").contains("expecting 2"));
+	}
 
 	#[test]
 	fn parse_rejects_content_after_queries() {
@@ -1387,13 +1444,14 @@ mod tests {
 	}
 
 	#[test]
-	fn comment_dropped_in_equation() {
-		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tg = G ^ /* xzqrhs */ a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
-		let m = parse_string("t.vp", src).expect("parse");
-		let serialized = format!("{:?}", m);
-		assert!(
-			!serialized.contains("xzqrhs"),
-			"dropped comment must not appear in AST"
-		);
+	fn caret_is_rejected() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private crj_a\n\tcrj_ga = G^crj_a\n]\n\nqueries[\n\tconfidentiality? crj_a\n]\n";
+		assert!(parse_string("old.vp", src).is_err());
+	}
+
+	#[test]
+	fn bare_generator_is_rejected() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private crk_a\n\tcrk_x = HASH(G)\n]\n\nqueries[\n\tconfidentiality? crk_a\n]\n";
+		assert!(parse_string("old.vp", src).is_err());
 	}
 }

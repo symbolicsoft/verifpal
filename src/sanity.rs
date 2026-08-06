@@ -78,15 +78,6 @@ pub(crate) fn sanity_assignment_constants(
 				constants = sanity_assignment_constants(arg, &constants, km)?;
 			}
 		}
-		Value::Equation(e) => {
-			for val in &e.values {
-				if let Value::Constant(c) = val
-					&& !constants.iter().any(|existing| c.equivalent(existing))
-				{
-					constants.push(c.clone());
-				}
-			}
-		}
 	}
 	Ok(constants)
 }
@@ -351,45 +342,89 @@ fn sanity_check_primitive_argument_outputs(p: &Primitive) -> VResult<()> {
 	Ok(())
 }
 
-pub(crate) fn sanity_check_equation_root_generator(e: &Equation) -> VResult<()> {
-	if e.values.len() > 3 {
-		return Err(VerifpalError::sanity(
-			format!("too many layers in equation ({}), maximum is 2", e).into(),
-		));
-	}
-	let g_id: ValueId = 0;
-	for (i, c) in e.values.iter().enumerate() {
-		if let Value::Constant(con) = c {
-			if i == 0 && con.id != g_id {
-				return Err(VerifpalError::sanity(
-					format!("equation ({}) does not use 'g' as generator", e).into(),
-				));
-			}
-			if i > 0 && con.id == g_id {
-				return Err(VerifpalError::sanity(
-					format!("equation ({}) uses 'g' not as a generator", e).into(),
-				));
-			}
+pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
+	let Value::Primitive(p) = value else {
+		return Ok(());
+	};
+	for (position, banned) in argument_restrictions(p.id) {
+		if let Some(Value::Primitive(inner)) = p.arguments.get(*position)
+			&& banned.contains(&inner.id)
+		{
+			return Err(VerifpalError::sanity(
+				format!(
+					"{} cannot take {} as argument {}",
+					primitive_name(p.id),
+					primitive_name(inner.id),
+					position + 1
+				)
+				.into(),
+			));
 		}
+	}
+	for arg in &p.arguments {
+		sanity_check_argument_restrictions(arg)?;
 	}
 	Ok(())
 }
 
-pub(crate) fn sanity_check_equation_generators(value: &Value) -> VResult<()> {
-	match value {
-		Value::Primitive(p) => {
-			for arg in &p.arguments {
-				match arg {
-					Value::Primitive(_) => sanity_check_equation_generators(arg)?,
-					Value::Equation(e) => sanity_check_equation_root_generator(e)?,
-					_ => {}
-				}
-			}
-		}
-		Value::Equation(e) => {
-			sanity_check_equation_root_generator(e)?;
-		}
-		_ => {}
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+
+	fn pubkey(inner: Value) -> Value {
+		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
 	}
-	Ok(())
+
+	fn dh_kex(a: Value, b: Value) -> Value {
+		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![a, b], 0)
+	}
+
+	#[test]
+	fn dh_kex_rejects_public_key_in_secret_position() {
+		let x = make_constant("arj_x");
+		let y = make_constant("arj_y");
+		let bad = dh_kex(pubkey(x), pubkey(y));
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn dh_kex_rejects_nested_key_exchange() {
+		let x = make_constant("arn_x");
+		let y = make_constant("arn_y");
+		let z = make_constant("arn_z");
+		let inner = dh_kex(pubkey(x), y);
+		let bad = dh_kex(inner, z);
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn pubkey_rejects_a_public_key_argument() {
+		let x = make_constant("arp_x");
+		let bad = pubkey(pubkey(x));
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn dh_kex_accepts_a_bare_secret() {
+		let x = make_constant("ark_x");
+		let y = make_constant("ark_y");
+		let good = dh_kex(pubkey(x), y);
+		assert!(sanity_check_argument_restrictions(&good).is_ok());
+	}
+
+	#[test]
+	fn restrictions_reach_nested_arguments() {
+		let x = make_constant("arq_x");
+		let y = make_constant("arq_y");
+		let bad = make_primitive(PRIM_HASH, vec![dh_kex(pubkey(x), pubkey(y))], 0);
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn unrelated_primitives_are_unrestricted() {
+		let x = make_constant("aru_x");
+		let ok = make_primitive(PRIM_HASH, vec![make_primitive(PRIM_HASH, vec![x], 0)], 0);
+		assert!(sanity_check_argument_restrictions(&ok).is_ok());
+	}
 }

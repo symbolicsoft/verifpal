@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::equivalence::equivalent_primitives;
@@ -8,6 +10,192 @@ use crate::primitive::*;
 use crate::types::*;
 
 const MAX_DEPTH: usize = 16;
+
+type RewriteCache = HashMap<(u64, usize), Vec<(Primitive, (bool, Value))>>;
+
+struct ObtainableMemo {
+	owner: (*const PrincipalState, *const AttackerState),
+	entries: HashMap<(u64, usize), Vec<(Value, bool)>>,
+	has_passwords: bool,
+	slots_by_hash: HashMap<u64, Vec<usize>>,
+}
+
+pub(crate) fn slots_equivalent_to(ps: &PrincipalState, value: &Value) -> Vec<usize> {
+	let hash = value.hash_value();
+	let indexed: Option<Vec<usize>> = MEMO.with(|m| {
+		let borrowed = m.borrow();
+		let memo = borrowed.as_ref()?;
+		if !std::ptr::eq(memo.owner.0, ps) {
+			return None;
+		}
+		Some(memo.slots_by_hash.get(&hash).cloned().unwrap_or_default())
+	});
+	match indexed {
+		Some(candidates) => candidates
+			.into_iter()
+			.filter(|&i| value.equivalent(&ps.values[i].value, true))
+			.collect(),
+		None => ps
+			.values
+			.iter()
+			.enumerate()
+			.filter(|(_, sv)| value.equivalent(&sv.value, true))
+			.map(|(i, _)| i)
+			.collect(),
+	}
+}
+
+fn index_slots_by_hash(ps: &PrincipalState) -> HashMap<u64, Vec<usize>> {
+	let mut index: HashMap<u64, Vec<usize>> = HashMap::new();
+	for (i, sv) in ps.values.iter().enumerate() {
+		index.entry(sv.value.hash_value()).or_default().push(i);
+	}
+	index
+}
+
+pub(crate) fn state_declares_passwords(ps: &PrincipalState) -> bool {
+	MEMO.with(|m| {
+		if let Some(memo) = m.borrow().as_ref()
+			&& std::ptr::eq(memo.owner.0, ps)
+		{
+			return Some(memo.has_passwords);
+		}
+		None
+	})
+	.unwrap_or_else(|| scan_for_passwords(ps))
+}
+
+fn scan_for_passwords(ps: &PrincipalState) -> bool {
+	ps.meta
+		.iter()
+		.any(|m| m.constant.qualifier == Some(Qualifier::Password))
+		|| ps.values.iter().any(
+			|sv| matches!(&sv.value, Value::Constant(c) if c.qualifier == Some(Qualifier::Password)),
+		)
+}
+
+fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
+	x.id == y.id
+		&& x.output == y.output
+		&& x.instance_check == y.instance_check
+		&& x.arguments.len() == y.arguments.len()
+		&& x.arguments
+			.iter()
+			.zip(y.arguments.iter())
+			.all(|(p, q)| structurally_identical(p, q))
+}
+
+fn structurally_identical(a: &Value, b: &Value) -> bool {
+	match (a, b) {
+		(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
+		(Value::Primitive(x), Value::Primitive(y)) => {
+			Arc::ptr_eq(x, y) || structurally_identical_primitive(x, y)
+		}
+		_ => false,
+	}
+}
+
+thread_local! {
+	static MEMO: RefCell<Option<ObtainableMemo>> = const { RefCell::new(None) };
+	static REWRITE_CACHE: RefCell<RewriteCache> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn rewrite_cache_reset() {
+	REWRITE_CACHE.with(|c| c.borrow_mut().clear());
+}
+
+fn rewrite_cache_get(key: (u64, usize), p: &Primitive) -> Option<(bool, Value)> {
+	REWRITE_CACHE.with(|c| {
+		c.borrow()
+			.get(&key)?
+			.iter()
+			.find(|(candidate, _)| structurally_identical_primitive(candidate, p))
+			.map(|(_, hit)| hit.clone())
+	})
+}
+
+fn rewrite_cache_put(key: (u64, usize), p: &Primitive, result: &(bool, Value)) {
+	REWRITE_CACHE.with(|c| {
+		c.borrow_mut()
+			.entry(key)
+			.or_default()
+			.push((p.clone(), result.clone()));
+	});
+}
+
+pub(crate) struct DeductionMemo {
+	previous: Option<Option<ObtainableMemo>>,
+}
+
+impl DeductionMemo {
+	pub(crate) fn scoped(ps: &PrincipalState, attacker: &AttackerState) -> Self {
+		let installed = ObtainableMemo {
+			owner: (ps as *const _, attacker as *const _),
+			entries: HashMap::new(),
+			has_passwords: scan_for_passwords(ps),
+			slots_by_hash: index_slots_by_hash(ps),
+		};
+		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
+		DeductionMemo {
+			previous: Some(previous),
+		}
+	}
+}
+
+impl Drop for DeductionMemo {
+	fn drop(&mut self) {
+		if let Some(previous) = self.previous.take() {
+			MEMO.with(|m| *m.borrow_mut() = previous);
+		}
+	}
+}
+
+fn memo_owner_matches(
+	memo: &ObtainableMemo,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	memo.owner == (ps as *const _, attacker as *const _)
+}
+
+fn memo_obtainable_get(
+	key: (u64, usize),
+	v: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<bool> {
+	MEMO.with(|m| {
+		let borrowed = m.borrow();
+		let memo = borrowed.as_ref()?;
+		if !memo_owner_matches(memo, ps, attacker) {
+			return None;
+		}
+		memo.entries
+			.get(&key)?
+			.iter()
+			.find(|(candidate, _)| structurally_identical(candidate, v))
+			.map(|(_, hit)| *hit)
+	})
+}
+
+fn memo_obtainable_put(
+	key: (u64, usize),
+	v: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	result: bool,
+) {
+	MEMO.with(|m| {
+		if let Some(memo) = m.borrow_mut().as_mut()
+			&& memo_owner_matches(memo, ps, attacker)
+		{
+			memo.entries
+				.entry(key)
+				.or_default()
+				.push((v.clone(), result));
+		}
+	});
+}
 
 pub(crate) fn can_decompose(
 	p: &Primitive,
@@ -50,17 +238,26 @@ pub(crate) fn can_decompose(
 }
 
 fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: usize) -> bool {
-	if attacker.knows(v).is_some() {
+	let hash = v.hash_value();
+	if attacker.knows_hashed(v, hash).is_some() {
 		return true;
 	}
-	match v {
+	if matches!(v, Value::Constant(_)) {
+		return false;
+	}
+	let key = (hash, depth);
+	if let Some(hit) = memo_obtainable_get(key, v, ps, attacker) {
+		return hit;
+	}
+	let result = match v {
 		Value::Primitive(p) => {
 			can_decompose(p, ps, attacker, depth + 1).is_some()
 				|| can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
 		}
-		Value::Equation(e) => can_reconstruct_equation(e, attacker).is_some(),
 		Value::Constant(_) => false,
-	}
+	};
+	memo_obtainable_put(key, v, ps, attacker, result);
+	result
 }
 
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
@@ -76,21 +273,33 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	for given_set in &prim.recompose.given {
 		let mut candidates = Vec::new();
 		for &output_idx in given_set {
-			for known in attacker.known.iter() {
-				if let Value::Primitive(known_prim) = known {
-					let pm = equivalent_primitives(known_prim, p, false);
-					if !pm.equivalent || pm.output_left != output_idx {
-						continue;
-					}
-					candidates.push(known.clone());
-					if candidates.len() < given_set.len() {
-						continue;
-					}
-					return Some(RecomposeResult {
-						revealed: p.arguments[prim.recompose.reveal].clone(),
-						used: candidates,
-					});
+			let probe = Primitive {
+				id: p.id,
+				arguments: p.arguments.clone(),
+				output: output_idx,
+				instance_check: p.instance_check,
+				hash: HashCell::default(),
+			};
+			let hash = crate::hashing::primitive_hash(&probe);
+			let Some(indices) = attacker.known_map.get(&hash) else {
+				continue;
+			};
+			for &i in indices {
+				let Some(known @ Value::Primitive(known_prim)) = attacker.known.get(i) else {
+					continue;
+				};
+				let pm = equivalent_primitives(known_prim, p, false);
+				if !pm.equivalent || pm.output_left != output_idx {
+					continue;
 				}
+				candidates.push(known.clone());
+				if candidates.len() < given_set.len() {
+					continue;
+				}
+				return Some(RecomposeResult {
+					revealed: p.arguments[prim.recompose.reveal].clone(),
+					used: candidates,
+				});
 			}
 		}
 	}
@@ -98,6 +307,18 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 }
 
 pub(crate) fn can_reconstruct_primitive(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	depth: usize,
+) -> Option<Vec<Value>> {
+	can_reconstruct_primitive_directly(p, ps, attacker, depth).or_else(|| {
+		let swapped = commutativity_swap(p)?;
+		can_reconstruct_primitive_directly(&swapped, ps, attacker, depth)
+	})
+}
+
+fn can_reconstruct_primitive_directly(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -125,47 +346,20 @@ pub(crate) fn can_reconstruct_primitive(
 	Some(has)
 }
 
-pub(crate) fn can_reconstruct_equation(
-	e: &Equation,
-	attacker: &AttackerState,
-) -> Option<Vec<Value>> {
-	if e.values.len() < 2 {
-		return None;
-	}
-	if e.values.len() == 2 {
-		if attacker.knows(&e.values[1]).is_some() {
-			return Some(vec![e.values[1].clone()]);
-		}
-		return None;
-	}
-	let s0 = &e.values[1];
-	let s1 = &e.values[2];
-	let hs0 = attacker.knows(s0).is_some();
-	let hs1 = attacker.knows(s1).is_some();
-	if hs0 && hs1 {
-		return Some(vec![s0.clone(), s1.clone()]);
-	}
-	let p0 = Value::Equation(Arc::new(Equation {
-		values: vec![e.values[0].clone(), e.values[1].clone()],
-	}));
-	let p1 = Value::Equation(Arc::new(Equation {
-		values: vec![e.values[0].clone(), e.values[2].clone()],
-	}));
-	let hp1 = attacker.knows(&p1).is_some();
-	if hs0 && hp1 {
-		return Some(vec![s0.clone(), p1]);
-	}
-	let hp0 = attacker.knows(&p0).is_some();
-	if hp0 && hs1 {
-		return Some(vec![p0, s1.clone()]);
-	}
-	None
-}
-
 pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
 	if depth > MAX_DEPTH {
 		return (false, Value::Primitive(Arc::new(p.clone())));
 	}
+	let key = (crate::hashing::primitive_hash(p), depth);
+	if let Some(hit) = rewrite_cache_get(key, p) {
+		return hit;
+	}
+	let result = can_rewrite_uncached(p, ps, depth);
+	rewrite_cache_put(key, p, &result);
+	result
+}
+
+fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
 	let reduced = p.map_arguments(|a| match a {
 		Value::Primitive(inner_p) => {
 			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
@@ -238,20 +432,6 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 					Value::Primitive(inner_p) => {
 						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
 						if r { Some(v) } else { None }
-					}
-					Value::Equation(inner_e) => {
-						let mut new_values: Option<Vec<Value>> = None;
-						for (ii, ev) in inner_e.values.iter().enumerate() {
-							if let Value::Primitive(ep) = ev {
-								let (r, v) = can_rewrite(ep, ps, depth + 1);
-								if r {
-									let vals =
-										new_values.get_or_insert_with(|| inner_e.values.clone());
-									vals[ii] = v;
-								}
-							}
-						}
-						new_values.map(|vals| Value::Equation(Arc::new(Equation { values: vals })))
 					}
 					_ => None,
 				};
@@ -330,15 +510,16 @@ pub(crate) fn find_obtainable_passwords(
 		}
 		Value::Primitive(p) => {
 			let is_core = primitive_is_core(p.id);
+			let known: Vec<bool> = p
+				.arguments
+				.iter()
+				.map(|arg| attacker.knows(arg).is_some())
+				.collect();
+			let known_count = known.iter().filter(|k| **k).count();
 			for (i, arg) in p.arguments.iter().enumerate() {
 				let inherently_protected = !is_core
 					&& primitive_get(p.id).is_ok_and(|prim| prim.password_hashing.contains(&i));
-				let siblings_known = p
-					.arguments
-					.iter()
-					.enumerate()
-					.filter(|(j, _)| *j != i)
-					.all(|(_, sibling)| attacker.knows(sibling).is_some());
+				let siblings_known = known_count == known.len() - usize::from(!known[i]);
 				find_obtainable_passwords(
 					arg,
 					protected || inherently_protected,
@@ -347,11 +528,6 @@ pub(crate) fn find_obtainable_passwords(
 					ps,
 					out,
 				);
-			}
-		}
-		Value::Equation(e) => {
-			for v in &e.values {
-				find_obtainable_passwords(v, protected, can_verify, attacker, ps, out);
 			}
 		}
 	}
@@ -386,6 +562,7 @@ mod tests {
 				arguments: vec![concat.clone()],
 				output,
 				instance_check: false,
+				hash: HashCell::default(),
 			};
 			let (rewritten, value) = can_rewrite(&split, &ps, 0);
 			assert!(rewritten);
@@ -400,13 +577,14 @@ mod tests {
 		let m = make_constant("crpk_m");
 		let pair = make_primitive(PRIM_CONCAT, vec![sk1, sk2.clone()], 0);
 		let proj = make_primitive(PRIM_SPLIT, vec![pair], 1);
-		let pk = make_equation(vec![value_g(), proj]);
+		let pk = make_primitive(PRIM_PUBKEY, vec![proj], 0);
 		let enc = make_primitive(PRIM_PKE_ENC, vec![pk, m.clone()], 0);
 		let dec = Primitive {
 			id: PRIM_PKE_DEC,
 			arguments: vec![sk2, enc],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("crpk_dummy"),
@@ -436,6 +614,7 @@ mod tests {
 			arguments: vec![pair],
 			output: 1,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("crproj_dummy"),
@@ -460,6 +639,7 @@ mod tests {
 			arguments: vec![a.clone(), a.clone()],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("cra_dummy"),
@@ -485,6 +665,7 @@ mod tests {
 			arguments: vec![a, b],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("cram_dummy"),
@@ -502,42 +683,6 @@ mod tests {
 	}
 
 	#[test]
-	fn can_reconstruct_equation_2_element() {
-		let a = make_constant("cre_a");
-		let eq = Equation {
-			values: vec![value_g(), a.clone()],
-		};
-		let attacker = make_attacker_state(vec![a]);
-		let result = can_reconstruct_equation(&eq, &attacker);
-		assert!(result.is_some());
-		assert_eq!(result.unwrap().len(), 1);
-	}
-
-	#[test]
-	fn can_reconstruct_equation_3_element_both_exponents() {
-		let a = make_constant("cre3_a");
-		let b = make_constant("cre3_b");
-		let eq = Equation {
-			values: vec![value_g(), a.clone(), b.clone()],
-		};
-		let attacker = make_attacker_state(vec![a, b]);
-		let result = can_reconstruct_equation(&eq, &attacker);
-		assert!(result.is_some());
-		assert_eq!(result.unwrap().len(), 2);
-	}
-
-	#[test]
-	fn can_reconstruct_equation_missing_exponent() {
-		let a = make_constant("crem_a");
-		let b = make_constant("crem_b");
-		let eq = Equation {
-			values: vec![value_g(), a.clone(), b],
-		};
-		let attacker = make_attacker_state(vec![a]);
-		assert!(can_reconstruct_equation(&eq, &attacker).is_none());
-	}
-
-	#[test]
 	fn can_decompose_enc_with_key() {
 		let key = make_constant("cd_key");
 		let msg = make_constant("cd_msg");
@@ -546,6 +691,7 @@ mod tests {
 			arguments: vec![key.clone(), msg.clone()],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("cd_dummy"),
@@ -573,6 +719,7 @@ mod tests {
 			arguments: vec![key, msg],
 			output: 0,
 			instance_check: false,
+			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
 			name: Arc::from("cd_nk_dummy"),

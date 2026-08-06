@@ -3,10 +3,8 @@
 
 use std::sync::Arc;
 
-use crate::equivalence::splice_equation;
 use crate::theory::can_rewrite;
 use crate::types::*;
-use crate::value::value_g;
 
 use super::vars::attacker_var;
 
@@ -29,7 +27,7 @@ pub(crate) fn is_mutable_slot(
 	attacker: &AttackerState,
 ) -> bool {
 	let meta = &ps.meta[idx];
-	if meta.constant.is_g_or_nil() {
+	if meta.constant.is_nil() {
 		return false;
 	}
 	if meta.guard {
@@ -52,11 +50,12 @@ pub(crate) fn is_mutable_slot(
 }
 
 fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
+	let var = attacker_var(slot, name);
 	match honest {
-		Value::Equation(_) => Value::Equation(Arc::new(Equation {
-			values: vec![value_g(), attacker_var(slot, name)],
-		})),
-		_ => attacker_var(slot, name),
+		Value::Primitive(_) if crate::primitive::value_is_key_derivation(honest) => {
+			crate::primitive::key_derivation_of(var.clone()).unwrap_or(var)
+		}
+		_ => var,
 	}
 }
 
@@ -168,10 +167,5 @@ fn inline(
 				.collect();
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
-		Value::Equation(e) => Value::Equation(Arc::new(splice_equation(
-			e.values
-				.iter()
-				.map(|item| inline(item, ps, var_terms, owner, memo, building)),
-		))),
 	}
 }

@@ -14,15 +14,16 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 | `concat_split_replay.vp` | `a0` | a `SPLIT(CONCAT(…))` that reduces to the honest value is a replay |
 | `wire_projection_replay.vp` | `a0` | projecting a wire value back onto itself is a replay |
 | `aead_replay_not_forgery.vp` | `a0c0` | a fully attacker-known ciphertext under an unreachable key is not forgeable |
+| `examples/transport-layer/piknik.vp` | `c0a0a0a0f0` | a substitution the attacker cannot build is not an attack: every value under Client1's signature stays authenticated, because forging it would need `signprivkey` (never leaked) and the confidential plaintext `m` |
 
-"Known to the attacker" is not "forgeable by the attacker" — that distinction is what the last model exists to hold down.
+"Known to the attacker" is not "forgeable by the attacker" — that distinction is what the last two models exist to hold down. `piknik.vp` is reached through `run_model_at`, which takes a full path; `run_model` still prefixes `examples/test/`.
 
 ## Commands
 
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 246 tests (154 unit + 92 model), ~0.2s once built (also: make test)
+cargo test --release                   # 256 tests (unit + model), ~0.1s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -64,7 +65,8 @@ attacker[active]                    // or passive
 principal Alice[
     knows public c0                 // also: private, password
     generates a                     // fresh value
-    ga = G^a                        // DH equation (max two exponents: G^a^b)
+    ga = PUBKEY(a)                  // public key from a private value
+    k  = DH_KEX(gb, a)              // DH shared secret; DH_KEX(PUBKEY(b), a) == DH_KEX(PUBKEY(a), b)
     e = AEAD_ENC(k, m, ad)
     x, y = SPLIT(CONCAT(m, n))      // multi-output primitives bind several constants
     _ = HASH(m)                     // `_` is an anonymous constant (becomes unnamed_N)
@@ -95,7 +97,7 @@ Constraints enforced by the parser and `sanity.rs`:
 
 - Nothing may follow the `queries` block (hard error — it used to be silently ignored and could hide leaks). The `queries` block itself must exist and come last.
 - ≤64 principals. Principal names are title-cased (`alice` → `Alice`); every other identifier is lower-cased, so the language is case-insensitive throughout.
-- Equations must use `G` as the generator and only in base position; at most two exponents (`G^a^b`).
+- `PUBKEY`/`DH_KEX` argument restrictions are declared in `spec.rs` and enforced by `sanity.rs`: `DH_KEX`'s second argument may not be a public key (this is what makes CDH structural), `DH_KEX` may not nest inside `DH_KEX`, and `PUBKEY` may not take a public key.
 - Primitive names are resolved case-insensitively against the spec registry. Arity, output count, and "may this be checked" all come from the spec.
 - A model file's *name* must end in `.vp` and be ≤64 characters (`parser.rs::parse_file`).
 - Constants cannot shadow reserved words: everything in `parser.rs::RESERVED`, plus any name starting with `attacker` or `unnamed`. **Adding a primitive means adding its lowercase name to `RESERVED` too.**
@@ -104,7 +106,7 @@ Constraints enforced by the parser and `sanity.rs`:
 
 Primitives (arity → outputs): ASSERT(2), CONCAT(2–5), SPLIT(1→1–5), HASH(1–5), PW_HASH(1–5), HKDF(3→1–5), AEAD_ENC/AEAD_DEC(3), ENC/DEC(2), MAC(2), SIGN(2), SIGNVERIF(3), PKE_ENC/PKE_DEC(2), SHAMIR_SPLIT(1→3), SHAMIR_JOIN(2), RINGSIGN(4), RINGSIGNVERIF(5), BLIND(2), UNBLIND(3). Only primitives with `definition_check` — ASSERT, SPLIT, AEAD_DEC, SIGNVERIF, RINGSIGNVERIF — may take the `?` suffix. ASSERT, CONCAT and SPLIT are *core* primitives: they live in a separate registry (`CORE_SPECS`) whose reduction is a hand-written Rust function rather than a declarative rewrite rule, and several theory functions bail out on them explicitly (`primitive_is_core`). Everything else is data.
 
-Comments (`//` and `/* */`) are captured into AST nodes so `pretty` round-trips them, **except** in positions where they are deliberately dropped: inside primitive argument lists, inside equations, inside the `attacker[…]`/`phase[…]` brackets, and inside a query option's inner brackets.
+Comments (`//` and `/* */`) are captured into AST nodes so `pretty` round-trips them, **except** in positions where they are deliberately dropped: inside primitive argument lists, inside the `attacker[…]`/`phase[…]` brackets, and inside a query option's inner brackets.
 
 ## Architecture
 
@@ -124,7 +126,8 @@ parse_file (parser.rs)              hand-written recursive-descent, comment-pres
 
 ### Core data model (types.rs)
 
-- `Value` = `Constant` | `Primitive(Arc)` | `Equation(Arc)`. Constants are interned process-wide: name → `ValueId` (`value.rs`; `g` is id 0, `nil` id 1); equivalence compares ids. Equations model DH chains (`G^a^b` = `[G, a, b]`) with commutativity `G^a^b = G^b^a` (`equivalence.rs`), and nested equations are flattened to a canonical form before comparison.
+- `Value` = `Constant` | `Primitive(Arc)`. Constants are interned per model: name → `ValueId` (`value.rs`; `nil` is id 1); equivalence compares ids. Diffie-Hellman is expressed with the ordinary primitives `PUBKEY(sk)` and `DH_KEX(pk, sk)`; their commutativity (`DH_KEX(PUBKEY(a), b) == DH_KEX(PUBKEY(b), a)`) is declared by the `commutativity` field on `PrimitiveSpec` and consumed generically by `equivalence.rs`, `hashing.rs` and `solve/matching.rs`.
+- `Primitive` carries a `HashCell`: a term's hash is computed once and cached, which makes `hash_value` O(1) and lets `Value::equivalent` reject non-equal terms on hash inequality before any deep comparison. Terms are immutable once built; the single in-place mutation (`construct.rs`, setting a multi-output `output` index) clears the cell.
 - **Invariant: `a.equivalent(b)` ⟹ `a.hash_value() == b.hash_value()`** (`hashing.rs` uses a commutative hash for DH exponents). `AttackerState::knows()` looks up by hash bucket first, so breaking this silently breaks attacker knowledge. Unit tests pin it.
 - `SlotValues` holds **three values per slot** — the single most important invariant in the engine:
   - `original`: what the protocol honestly computed (what the principal *believes*),
@@ -167,7 +170,7 @@ Closure never checks queries — that separation is what makes the fixed-point a
 
 A monotone fixed point over three rule groups, restarting from the first group on any progress:
 
-1. over attacker-known values: `decompose`, `passive_decompose`
+1. over attacker-known values: `decompose`
 2. over principal-assigned values: `reconstruct`, `recompose`
 3. over attacker-known values: `equivalize`, `password_extract`, `concat_extract`
 
@@ -190,7 +193,7 @@ When a query resolves, `attack_trace` minimizes the state that resolved it (`wit
 
 ### Equational theory (theory.rs + primitive/spec.rs)
 
-All cryptographic behavior is **declarative data**: `PrimitiveSpec` entries define decompose ("knows key → learns plaintext"), recompose (threshold shares), rewrite ("DEC undoes ENC", with matching constraints and filters), rebuild (SHAMIR_JOIN), password protection, and guard-bypass key extraction. `theory.rs` interprets the specs (`can_decompose`, `can_reconstruct_primitive`/`can_reconstruct_equation`, `can_rewrite`, `can_rebuild`, `find_obtainable_passwords`, `passively_decompose`) with `MAX_DEPTH = 16` on recursion. `obtainable` is the shared "can the attacker get this argument at all" cascade that decomposition and reconstruction both run over each of their arguments.
+All cryptographic behavior is **declarative data**: `PrimitiveSpec` entries define decompose ("knows key → learns plaintext"), recompose (threshold shares), rewrite ("DEC undoes ENC", with matching constraints and filters), rebuild (SHAMIR_JOIN), password protection, and guard-bypass key extraction. `theory.rs` interprets the specs (`can_decompose`, `can_reconstruct_primitive`, `can_rewrite`, `can_rebuild`, `find_obtainable_passwords`) with `MAX_DEPTH = 16` on recursion. `obtainable` is the shared "can the attacker get this argument at all" cascade that decomposition and reconstruction both run over each of their arguments.
 
 Password extraction is worth knowing: a `password` constant is recoverable when, at *every* primitive level enclosing it, the position is not in `password_hashing` (only `PW_HASH` sets that) **and** the attacker knows every sibling argument — i.e. it can verify a guess offline.
 
@@ -202,10 +205,10 @@ Goal-directed. The engine asks "what would the attacker need in order to learn t
 
 Per phase: passive baseline, then rounds to a knowledge fixed point (validation grows attacker knowledge, which can unlock goals). Each round runs `Pass::Targeted` for every principal, then `Pass::Constructed` for every principal — never interleaved per principal, because one principal offering a large pile of constructible values would otherwise delay ever looking at the principal that matters.
 
-- `symbolic.rs` — the principal's computation with every attacker-controllable wire slot replaced by a variable, then reduced the way `perform_all_rewrites` would reduce it. `is_mutable_slot` decides controllability (guarded-unless-`mutatable_to`, self-created, wrong-phase, unused-by-this-principal, and `g`/`nil` are all excluded). A DH public key becomes `G^$x`, not a bare `$x`, so the MitM shape falls out of the representation. Terms are memoised per slot; without that, nested ciphertexts expand exponentially. `reaches` mirrors `compute_visibility`, so a choice that can only be made *after* a principal acted does not appear inside what that principal computed.
+- `symbolic.rs` — the principal's computation with every attacker-controllable wire slot replaced by a variable, then reduced the way `perform_all_rewrites` would reduce it. `is_mutable_slot` decides controllability (guarded-unless-`mutatable_to`, self-created, wrong-phase, unused-by-this-principal, and `nil` is excluded). A DH public key becomes `PUBKEY($x)`, not a bare `$x`, so the MitM shape falls out of the representation. Terms are memoised per slot; without that, nested ciphertexts expand exponentially. `reaches` mirrors `compute_visibility`, so a choice that can only be made *after* a principal acted does not appear inside what that principal computed.
 - `vars.rs` — attacker variables are interned `Constant`s in reserved id ranges (`ATTACKER_VAR_BASE = 0x8000_0000` for slots, `FREE_VAR_BASE = 0xC000_0000` for free choices), so there is no fourth `Value` variant and nothing else in the engine needs to know they exist. Free positions stay variables until materialisation — committing them to `nil` early makes two partial solutions for the same forged message unmergeable.
 - `matching.rs` — one-sided `match_value`, two-sided `unify`, and `merge` (which unifies rather than rejecting conflicting bindings), all modulo DH commutativity (a closed two-case analysis, not AC unification).
-- `deduce.rs` — the solver proper. Goals are discharged by: already-known, bare-variable (`nil`), **replay** (a held value that is an instance of the pattern), wire unification, oracle (restricted to the finite basis), rewrite-match, equation inversion, primitive-by-arguments, decomposition, `invert` (backwards through rewrite rules and `SPLIT`/`CONCAT`), and `satisfy_check` for checked primitives. Bindings produced by unification are then put under obligation by `require_constructible`, which is what forces the DH substitution in a real MitM. Goals are memoised by `goal_key`, which **must** include a kind tag — `G^x` and `x` share a hash otherwise, and the collision is silent. Results computed while a cycle was cut are not cached.
+- `deduce.rs` — the solver proper. Goals are discharged by: already-known, bare-variable (`nil`), **replay** (a held value that is an instance of the pattern), wire unification, oracle (restricted to the finite basis), rewrite-match, primitive-by-arguments, decomposition, `invert` (backwards through rewrite rules and `SPLIT`/`CONCAT`), and `satisfy_check` for checked primitives. Bindings produced by unification are then put under obligation by `require_constructible`, which is what forces the DH substitution in a real MitM. Goals are memoised by `goal_key`, which **must** include a kind tag, or a primitive and a constant sharing a hash collide silently. Results computed while a cycle was cut are not cached.
 - `diverge.rs` — equivalence queries, solved by grounding the variables that reach only one side.
 - `validate.rs` — **propose and dispose**. Nothing in `solve/` can record a query result; every proposal is materialised into a concrete `PrincipalState`, re-executed via `reexec.rs`, and re-checked against real attacker knowledge. It owns `is_worthwhile` — a term that reduces back to the honest value is a replay, not an attack (false-attack issue #18), and dropping this check is how you manufacture false authentication results. Errors from analysing a hypothetical state are swallowed: a speculative branch that cannot be analysed answers nothing, and must not abort the whole run.
 
@@ -213,13 +216,13 @@ Proposal families, in the order they are offered: goals derived from each unreso
 
 Variables the solver never bound are deliberately left free, and `validate` skips those slots: the attacker has no reason to touch that wire value, and grounding it would fail an unrelated check and halt the principal before the attack could land.
 
-**Skeletons** (`skeleton.rs`) are no longer part of the search: they are a primitive's shape with secrets erased (constants→`nil`, equations→`G`/`G^nil`), added to attacker knowledge during trace generation. Since `nil` and `G^nil` are values the attacker already holds, a skeleton is by construction something it can build, so this asserts nothing new.
+**Skeletons** (`skeleton.rs`) are no longer part of the search: they are a primitive's shape with secrets erased (constants→`nil`, public keys→`PUBKEY(nil)`), added to attacker knowledge during trace generation. Since `nil` and `PUBKEY(nil)` are values the attacker already holds, a skeleton is by construction something it can build, so this asserts nothing new.
 
 ### Re-execution (reexec.rs)
 
 `reexecute` installs attacker-chosen values into a principal and runs it forward: install → resolve → rewrite → then either bypass guards the attacker can defeat (`try_guard_bypass`, `MAX_BYPASS_ROUNDS = 5`, keyed on the spec's `bypass_key`) or truncate at the checked primitive that halts the principal and set `halted_at`. Guard bypass has to work from the *pre-resolution* state, because injecting into an already-inlined state does not propagate to the slots that referenced the guard's output.
 
-The bypass exists because substituting `G^nil` for an identity key fails a signature check — but the attacker knows the private key for `G^nil`, so treating that as a halt would discard the whole man-in-the-middle.
+The bypass exists because substituting `PUBKEY(nil)` for an identity key fails a signature check — but the attacker knows the private key for `PUBKEY(nil)`, so treating that as a halt would discard the whole man-in-the-middle.
 
 This lives in one place because **two callers must agree exactly**: `solve/validate.rs` validating a proposal, and `witness.rs` deciding whether a mutation is load-bearing. A minimizer that re-executed even slightly differently could drop a mutation the engine actually needs and report a trace that does not reproduce.
 
@@ -227,7 +230,7 @@ This lives in one place because **two callers must agree exactly**: `solve/valid
 
 A query result carries a narrated trace, produced in two steps after the query resolves:
 
-- `witness.rs::minimize_witness` — the solver installs the union of the bindings for *every* goal it was pursuing, so a raw witness routinely contains substitutions only some other query needed. The minimizer first picks a **candidate**: for each principal's pristine session (the query's own principal first), it tries the canonical MitM (attacker's key wherever a DH public value arrived over the wire), then the recorded mutations, then those with equations replaced by `G^nil` — taking the first that still resolves the query. It then drops mutations one at a time for as long as the query keeps resolving. If nothing replays anywhere, it falls back to `derivation_only`: report the derivation and claim no attacker actions, rather than name substitutions that may not be the ones that mattered.
+- `witness.rs::minimize_witness` — the solver installs the union of the bindings for *every* goal it was pursuing, so a raw witness routinely contains substitutions only some other query needed. The minimizer first picks a **candidate**: for each principal's pristine session (the query's own principal first), it tries the canonical MitM (attacker's key wherever a DH public value arrived over the wire), then the recorded mutations, then those with public keys replaced by `PUBKEY(nil)` — taking the first that still resolves the query. It then drops mutations one at a time for as long as the query keeps resolving. If nothing replays anywhere, it falls back to `derivation_only`: report the derivation and claim no attacker actions, rather than name substitutions that may not be the ones that mattered.
   - Probes run against a **scratch `VerifyContext`** whose results are discarded, so this too cannot record a result — a bug here yields a larger witness, never an attack that does not exist.
   - Each probe re-seeds from the **passive baseline**, not end-of-search knowledge. Attacker knowledge is monotone, so probing against the snapshot would answer every confidentiality query "yes" immediately and make every mutation look droppable.
   - Sessions come from `ctx.principal_states()`, never from the state in hand: a guard bypass writes its injected key into `original`, which is the field purification restores from, so a bypassed state cannot be cleaned by purifying it.
@@ -236,7 +239,7 @@ A query result carries a narrated trace, produced in two steps after the query r
 
 ### Supporting modules
 
-`parser.rs` — byte-level recursive descent; comments are captured into AST nodes so `pretty` round-trips them (round-trip idempotence is unit-tested). `pretty.rs` — canonical formatter, golden-tested; it also owns the `Display` impls for `Value`/`Constant`/`Primitive`/`Equation`/`Query`/`Expression`, so *every* engine message and attack trace is rendered by this file. `resolution.rs` — inlining and `compute_visibility` (`MAX_RESOLVE_DEPTH = 64`). `rewrite.rs` — applies the rewrite rules over a whole state and reports failures as `(Primitive, slot)`. `equivalence.rs`/`hashing.rs` — the equivalence/hash invariant above, plus `splice_equation` (the one place that knows how a nested equation folds into its parent) and `collect_subterm_hashes`. `construct.rs` — builds the trace and principal states under `sanity.rs`, and owns `clone_for_depth(purify)`. `info.rs` — all user-facing output, buffered into JSON messages under wasm; also `InfoQuiet`, the thread-local guard that silences hypothetical re-runs. `json.rs` — the `internal-json` IDE interface and the sequence-diagram renderer. `util.rs` — three small helpers.
+`parser.rs` — byte-level recursive descent; comments are captured into AST nodes so `pretty` round-trips them (round-trip idempotence is unit-tested). `pretty.rs` — canonical formatter, golden-tested; it also owns the `Display` impls for `Value`/`Constant`/`Primitive`/`Query`/`Expression`, so *every* engine message and attack trace is rendered by this file. `resolution.rs` — inlining and `compute_visibility` (`MAX_RESOLVE_DEPTH = 64`). `rewrite.rs` — applies the rewrite rules over a whole state and reports failures as `(Primitive, slot)`. `equivalence.rs`/`hashing.rs` — the equivalence/hash invariant above and `collect_subterm_hashes`. `primitive::normalise_arguments` is the one place that keeps the term space finite: where `argument_restrictions` forbids a key-derivation application in a position, it unwraps it, so the solver cannot build `PUBKEY(PUBKEY(x))` and recurse forever. Removing it makes attacker knowledge fail to saturate on models with an unguarded public key. `construct.rs` — builds the trace and principal states under `sanity.rs`, and owns `clone_for_depth(purify)`. `info.rs` — all user-facing output, buffered into JSON messages under wasm; also `InfoQuiet`, the thread-local guard that silences hypothetical re-runs. `json.rs` — the `internal-json` IDE interface and the sequence-diagram renderer. `util.rs` — three small helpers.
 
 There is no process-global mutable state. `ValueNames` (`value.rs`) and `PrincipalNames` (`principal.rs`) are interners **owned by the `Parser`**, so ids are per-model and two analyses in one process cannot interfere; the unnamed-constant counter is a parser field, and the analysis counter is thread-local. `PrincipalNames::intern` errors past `PrincipalId::MAX` rather than truncating a 256th principal onto `ATTACKER_ID = 0`, and `ValueNames::intern` refuses to reach the id range `solve::vars` reserves. Principal *names* travel on `Message`/`Principal` and via `ProtocolTrace::principal_name`, because `Display for Query` cannot take a lookup table.
 
@@ -244,7 +247,7 @@ All output is plain text: there is no alternate-screen progress UI and no attack
 
 ## Testing conventions
 
-- Unit tests live in a `#[cfg(test)] mod tests` at the foot of the module they exercise, so they can reach private items directly. `src/testutil.rs` holds the shared value/state builders. `src/model_tests.rs` holds the 84 end-to-end tests (`run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code).
+- Unit tests live in a `#[cfg(test)] mod tests` at the foot of the module they exercise, so they can reach private items directly. `src/testutil.rs` holds the shared value/state builders. `src/model_tests.rs` holds the end-to-end model tests (`run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code).
 - **Result code format**: one letter+digit per query, in model order — `c`/`a`/`f`/`u`/`e` for the query kind, `0` = holds, `1` = attack found. So `"c1a0"` means the confidentiality query failed and the authentication query passed.
 - Adding an engine regression test: write a model in `examples/test/`, get the code via `cargo run --release -- verify examples/test/foo.vp --result-code | tail -1`, **verify by reading the attack trace that each 0/1 is actually correct** (the tool's own output is only ground truth for regressions, not correctness), then add a `run_model` test. Explaining *why* the expected code is right in a comment at the top of the model is the house style — see `aead_replay_not_forgery.vp`.
 - Golden pretty-printer files live in `examples/test/golden_pretty/` (5 of them) and are compared byte-for-byte via `include_str!`. Update them deliberately when changing the formatter.
@@ -265,6 +268,6 @@ Every model in `examples/test/` runs in milliseconds. Of the shipped real-world 
 ## Packaging (usually not your concern, but don't break it)
 
 - Releases are cut with goreleaser (`.goreleaser.yml`, cargo-zigbuild, 6 targets). The repo doubles as its own Homebrew tap (`HomebrewFormula/verifpal.rb`) and Scoop bucket (`verifpal.json`) — release automation rewrites these; don't hand-edit them with code changes.
-- `pkg/` is committed wasm-pack output (the npm package); regenerate via `make wasm`, which also copies artifacts into the sibling checkout `../verifpal-website`. `../verifpal-manual` holds the manual source.
+- `pkg/` is wasm-pack output (the npm package) and is untracked — wasm-pack writes a `.gitignore` with `*` into it; regenerate via `make wasm`, which also copies artifacts into the sibling checkout `../verifpal-website`. `../verifpal-manual` holds the manual source.
 - `assets/releasenotes.txt` is the human-written release-notes text; `assets/email.txt` is the announcement template (`0VERSION0` is substituted at release time) and `assets/pgp.txt` the project signing key.
 - `default.nix` exists for Nix users; `scripts` is a symlink to a private directory outside the repo (gitignored) — it may be broken on other machines, and nothing in the build depends on it.

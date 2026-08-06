@@ -62,36 +62,34 @@ fn unify_into(a: &Value, b: &Value, s: &mut Substitution) -> bool {
 			{
 				return false;
 			}
-			p1.arguments
+			if crate::primitive::commutativity_rule(p1.id).is_none() {
+				return p1
+					.arguments
+					.iter()
+					.zip(p2.arguments.iter())
+					.all(|(x, y)| unify_into(x, y, s));
+			}
+			let checkpoint = s.clone();
+			if p1
+				.arguments
 				.iter()
 				.zip(p2.arguments.iter())
 				.all(|(x, y)| unify_into(x, y, s))
-		}
-		(Value::Equation(e1), Value::Equation(e2)) => {
-			if e1.values.len() != e2.values.len() {
-				return false;
+			{
+				return true;
 			}
-			if e1.values.len() == 3 {
-				if !unify_into(&e1.values[0], &e2.values[0], s) {
-					return false;
-				}
-				let checkpoint = s.clone();
-				if unify_into(&e1.values[1], &e2.values[1], s)
-					&& unify_into(&e1.values[2], &e2.values[2], s)
-				{
-					return true;
-				}
-				*s = checkpoint;
-				return unify_into(&e1.values[1], &e2.values[2], s)
-					&& unify_into(&e1.values[2], &e2.values[1], s);
-			}
-			e1.values
-				.iter()
-				.zip(e2.values.iter())
-				.all(|(x, y)| unify_into(x, y, s))
+			*s = checkpoint;
+			commutative_swap(p1, p2)
+				.is_some_and(|(u1, v1, u2, v2)| unify_into(&u1, &v2, s) && unify_into(&v1, &u2, s))
 		}
 		_ => false,
 	}
+}
+
+fn commutative_swap(p1: &Primitive, p2: &Primitive) -> Option<(Value, Value, Value, Value)> {
+	let (u1, v1) = crate::primitive::commutativity_parts(p1)?;
+	let (u2, v2) = crate::primitive::commutativity_parts(p2)?;
+	Some((u1, v1, u2, v2))
 }
 
 fn unify_bind(id: ValueId, v: &Value, s: &mut Substitution) -> bool {
@@ -149,50 +147,74 @@ fn match_structural(pattern: &Value, target: &Value, s: &mut Substitution) -> bo
 			{
 				return false;
 			}
-			for (a, b) in p1.arguments.iter().zip(p2.arguments.iter()) {
-				if !match_into(a, b, s) {
-					return false;
-				}
-			}
-			true
-		}
-		(Value::Equation(e1), Value::Equation(e2)) => match_equations(e1, e2, s),
-		_ => false,
-	}
-}
-
-fn match_equations(e1: &Equation, e2: &Equation, s: &mut Substitution) -> bool {
-	if e1.values.len() != e2.values.len() {
-		return false;
-	}
-	match e1.values.len() {
-		0 => true,
-		1 => match_into(&e1.values[0], &e2.values[0], s),
-		2 => {
-			match_into(&e1.values[0], &e2.values[0], s)
-				&& match_into(&e1.values[1], &e2.values[1], s)
-		}
-		3 => {
-			if !match_into(&e1.values[0], &e2.values[0], s) {
-				return false;
+			if crate::primitive::commutativity_rule(p1.id).is_none() {
+				return p1
+					.arguments
+					.iter()
+					.zip(p2.arguments.iter())
+					.all(|(a, b)| match_into(a, b, s));
 			}
 			let checkpoint = s.clone();
-			if match_into(&e1.values[1], &e2.values[1], s)
-				&& match_into(&e1.values[2], &e2.values[2], s)
+			if p1
+				.arguments
+				.iter()
+				.zip(p2.arguments.iter())
+				.all(|(a, b)| match_into(a, b, s))
 			{
 				return true;
 			}
 			*s = checkpoint;
-			match_into(&e1.values[1], &e2.values[2], s)
-				&& match_into(&e1.values[2], &e2.values[1], s)
+			commutative_swap(p1, p2)
+				.is_some_and(|(u1, v1, u2, v2)| match_into(&u1, &v2, s) && match_into(&v1, &u2, s))
 		}
-		_ => {
-			for (a, b) in e1.values.iter().zip(e2.values.iter()) {
-				if !match_into(a, b, s) {
-					return false;
-				}
-			}
-			true
-		}
+		_ => false,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::primitive_get_enum;
+	use crate::testutil::*;
+
+	fn pubkey(inner: Value) -> Value {
+		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
+	}
+
+	fn dh_kex(a: Value, b: Value) -> Value {
+		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![a, b], 0)
+	}
+
+	#[test]
+	fn dh_kex_matches_modulo_commutativity() {
+		let x = make_constant("mtc_x");
+		let y = make_constant("mtc_y");
+		let var = crate::solve::vars::attacker_var(0, "mtc_slot");
+		let pattern = dh_kex(pubkey(var.clone()), y.clone());
+		let target = dh_kex(pubkey(y), x.clone());
+		let s = match_value(&pattern, &target, &Substitution::new())
+			.expect("matches modulo commutativity");
+		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
+	}
+
+	#[test]
+	fn dh_kex_unifies_modulo_commutativity() {
+		let x = make_constant("unc_x");
+		let y = make_constant("unc_y");
+		let var = crate::solve::vars::attacker_var(1, "unc_slot");
+		let a = dh_kex(pubkey(var.clone()), y.clone());
+		let b = dh_kex(pubkey(y), x.clone());
+		let s = unify(&a, &b, &Substitution::new()).expect("unifies modulo commutativity");
+		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
+	}
+
+	#[test]
+	fn dh_kex_does_not_match_unrelated_pairs() {
+		let x = make_constant("dnm_x");
+		let y = make_constant("dnm_y");
+		let z = make_constant("dnm_z");
+		let pattern = dh_kex(pubkey(x.clone()), y);
+		let target = dh_kex(pubkey(x), z);
+		assert!(match_value(&pattern, &target, &Substitution::new()).is_none());
 	}
 }

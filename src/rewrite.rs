@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use crate::primitive::primitive_has_rewrite_rule;
 use crate::theory::{can_rebuild, can_rewrite};
 use crate::types::*;
 
@@ -22,10 +21,6 @@ pub(crate) fn perform_primitive_rewrite(
 			ps.values[idx].set_value(rebuild.clone());
 		}
 		r.value = rebuild;
-		match r.value {
-			Value::Constant(_) | Value::Equation(_) => return r,
-			_ => {}
-		}
 	}
 	let rewrite_p2 = match r.value.as_primitive() {
 		Some(p) => p,
@@ -63,16 +58,6 @@ fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -
 					failed_rewrites.extend(r.failed_rewrites);
 				}
 			}
-			Value::Equation(inner_e) => {
-				let r = perform_equation_rewrite(inner_e, None, ps);
-				if r.rewritten {
-					rewritten = true;
-					let args = new_args.get_or_insert_with(|| p.arguments.clone());
-					args[i] = r.value;
-				} else {
-					failed_rewrites.extend(r.failed_rewrites);
-				}
-			}
 		}
 	}
 	let value = if let Some(args) = new_args {
@@ -80,66 +65,6 @@ fn perform_primitive_arguments_rewrite(p: &Primitive, ps: &mut PrincipalState) -
 	} else {
 		Value::Primitive(Arc::new(p.clone()))
 	};
-	RewriteResult {
-		failed_rewrites,
-		rewritten,
-		value,
-	}
-}
-
-pub(crate) fn perform_equation_rewrite(
-	e: &Equation,
-	slot_index: Option<usize>,
-	ps: &mut PrincipalState,
-) -> RewriteResult {
-	let mut rewritten = false;
-	let mut failed_rewrites: Vec<Primitive> = Vec::new();
-	let mut rewrite_eq = Equation { values: Vec::new() };
-	for (i, a) in e.values.iter().enumerate() {
-		match a {
-			Value::Constant(_) => {
-				rewrite_eq.values.push(a.clone());
-			}
-			Value::Primitive(inner_p) => {
-				if !primitive_has_rewrite_rule(inner_p.id) {
-					rewrite_eq.values.push(a.clone());
-					continue;
-				}
-				let r = perform_primitive_rewrite(inner_p, None, ps);
-				if !r.rewritten {
-					rewrite_eq.values.push(e.values[i].clone());
-					failed_rewrites.extend(r.failed_rewrites);
-					continue;
-				}
-				rewritten = true;
-				match &r.value {
-					Value::Constant(_) | Value::Primitive(_) => {
-						rewrite_eq.values.push(r.value);
-					}
-					Value::Equation(inner_e) => {
-						rewrite_eq.values.extend(inner_e.values.iter().cloned());
-					}
-				}
-			}
-			Value::Equation(inner_e) => {
-				let r = perform_equation_rewrite(inner_e, None, ps);
-				if !r.rewritten {
-					rewrite_eq.values.push(e.values[i].clone());
-					failed_rewrites.extend(r.failed_rewrites);
-					continue;
-				}
-				rewritten = true;
-				rewrite_eq.values.push(r.value);
-			}
-		}
-	}
-	let value = Value::Equation(Arc::new(rewrite_eq));
-	if let Some(idx) = slot_index
-		&& rewritten
-	{
-		ps.values[idx].rewritten = true;
-		ps.values[idx].set_value(value.clone());
-	}
 	RewriteResult {
 		failed_rewrites,
 		rewritten,

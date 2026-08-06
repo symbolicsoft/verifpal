@@ -14,6 +14,8 @@ use crate::types::*;
 use crate::value::*;
 
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
+	crate::theory::rewrite_cache_reset();
+	crate::info::info_reset_deductions();
 	let (trace, states) = sanity(m)?;
 	let ctx = VerifyContext::new(m, &states);
 	match m.attacker {
@@ -88,7 +90,7 @@ pub(crate) fn generate_trace(
 
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 	for sv in &ps_resolved.values {
-		sanity_check_equation_generators(&sv.value)?;
+		sanity_check_argument_restrictions(&sv.value)?;
 	}
 
 	Ok(ps_resolved)
@@ -156,6 +158,15 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 
 	println!();
 	crate::info::info_separator();
+
+	let suppressed = crate::info::info_deductions_suppressed();
+	if suppressed > 0 {
+		info_message(
+			&format!("{} further deductions were not shown.", suppressed),
+			InfoLevel::Info,
+			false,
+		);
+	}
 
 	if fail_count == 0 {
 		info_message(

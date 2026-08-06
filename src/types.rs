@@ -293,7 +293,6 @@ impl std::fmt::Display for AttackerKind {
 pub enum Value {
 	Constant(Constant),
 	Primitive(Arc<Primitive>),
-	Equation(Arc<Equation>),
 }
 
 impl Value {
@@ -311,13 +310,6 @@ impl Value {
 		}
 	}
 
-	pub fn as_equation(&self) -> Option<&Equation> {
-		match self {
-			Value::Equation(e) => Some(e),
-			_ => None,
-		}
-	}
-
 	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
 		match self {
 			Value::Primitive(p) => Ok(p),
@@ -327,20 +319,10 @@ impl Value {
 		}
 	}
 
-	pub fn try_as_equation(&self) -> VResult<&Equation> {
-		match self {
-			Value::Equation(e) => Ok(e),
-			_ => Err(VerifpalError::internal(
-				format!("expected Equation, got {}", self.variant_name()).into(),
-			)),
-		}
-	}
-
 	fn variant_name(&self) -> &'static str {
 		match self {
 			Value::Constant(_) => "Constant",
 			Value::Primitive(_) => "Primitive",
-			Value::Equation(_) => "Equation",
 		}
 	}
 }
@@ -356,12 +338,39 @@ pub struct Constant {
 	pub qualifier: Option<Qualifier>,
 }
 
+#[derive(Debug, Default)]
+pub struct HashCell(std::sync::atomic::AtomicU64);
+
+impl Clone for HashCell {
+	fn clone(&self) -> Self {
+		HashCell(std::sync::atomic::AtomicU64::new(
+			self.0.load(std::sync::atomic::Ordering::Relaxed),
+		))
+	}
+}
+
+impl HashCell {
+	pub fn get(&self) -> Option<u64> {
+		match self.0.load(std::sync::atomic::Ordering::Relaxed) {
+			0 => None,
+			cached => Some(cached),
+		}
+	}
+	pub fn set(&self, hash: u64) {
+		self.0.store(hash, std::sync::atomic::Ordering::Relaxed);
+	}
+	pub fn clear(&self) {
+		self.0.store(0, std::sync::atomic::Ordering::Relaxed);
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Primitive {
 	pub id: PrimitiveId,
 	pub arguments: Vec<Value>,
 	pub output: usize,
 	pub instance_check: bool,
+	pub hash: HashCell,
 }
 
 impl Primitive {
@@ -371,6 +380,7 @@ impl Primitive {
 			arguments,
 			output: self.output,
 			instance_check: self.instance_check,
+			hash: HashCell::default(),
 		}
 	}
 
@@ -396,11 +406,6 @@ impl Primitive {
 		}
 		Ok(changed.map(|arguments| self.with_arguments(arguments)))
 	}
-}
-
-#[derive(Clone, Debug)]
-pub struct Equation {
-	pub values: Vec<Value>,
 }
 
 #[derive(Clone, Default)]
@@ -812,17 +817,12 @@ mod tests {
 	fn value_accessors() {
 		let c = make_constant("acc_c");
 		let p = make_primitive(PRIM_HASH, vec![c.clone()], 0);
-		let e = make_equation(vec![value_g(), c.clone()]);
 
 		assert!(c.as_constant().is_some());
 		assert!(c.as_primitive().is_none());
-		assert!(c.as_equation().is_none());
 
 		assert!(p.as_primitive().is_some());
 		assert!(p.as_constant().is_none());
-
-		assert!(e.as_equation().is_some());
-		assert!(e.as_constant().is_none());
 	}
 
 	#[test]
@@ -830,7 +830,6 @@ mod tests {
 		let c = make_constant("try_c");
 		assert!(c.as_constant().is_some());
 		assert!(c.try_as_primitive().is_err());
-		assert!(c.try_as_equation().is_err());
 	}
 
 	#[test]
@@ -888,6 +887,7 @@ mod tests {
 			arguments: vec![a],
 			output: 0,
 			instance_check: true,
+			hash: HashCell::default(),
 		};
 		let p2 = p.with_arguments(vec![b.clone()]);
 		assert_eq!(p2.id, PRIM_ENC);
