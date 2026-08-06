@@ -224,6 +224,34 @@ fn test_unlink_passive_holds() {
 	run_model("unlink_passive_holds.vp", "u0");
 }
 #[test]
+fn test_unlink_identical_values() {
+	run_model("unlink_identical_values.vp", "u1");
+}
+#[test]
+fn test_unlink_independent_origins() {
+	run_model("unlink_independent_origins.vp", "u0");
+}
+#[test]
+fn test_unlink_both_values_known() {
+	run_model("unlink_both_values_known.vp", "u0");
+}
+#[test]
+fn test_unlink_seed_secret() {
+	run_model("unlink_seed_secret.vp", "u0");
+}
+#[test]
+fn test_unlink_chain_forward() {
+	run_model("unlink_chain_forward.vp", "u0");
+}
+#[test]
+fn test_unlink_chain_root() {
+	run_model("unlink_chain_root.vp", "u1");
+}
+#[test]
+fn test_unlink_no_shared_ancestor() {
+	run_model("unlink_no_shared_ancestor.vp", "u0");
+}
+#[test]
 fn test_needham_schroeder_pk() {
 	run_model("needham-schroeder-pk.vp", "a1a1c1c1");
 }
