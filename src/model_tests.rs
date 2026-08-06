@@ -64,6 +64,19 @@ fn test_cap_err_phase_unreached() {
 }
 
 #[test]
+fn test_cap_weak_hash() {
+	run_model("cap_weak_hash.vp", "c1c1");
+}
+#[test]
+fn test_cap_weak_pubkey_dh() {
+	run_model("cap_weak_pubkey_dh.vp", "c1");
+}
+#[test]
+fn test_cap_weak_phase_delayed() {
+	run_model("cap_weak_phase_delayed.vp", "c0c1");
+}
+
+#[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }

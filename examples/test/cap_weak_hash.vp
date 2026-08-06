@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — a preimage of HASH(m, n) recovers BOTH arguments, which is
+// why `weak` cannot reuse the single-valued DecomposeRule::reveal.
+attacker[passive]
+
+principal Alice[
+	knows private m
+	knows private n
+	h = HASH[weak](m, n)
+]
+
+Alice -> Bob: h
+
+principal Bob[
+	_ = HASH(h)
+]
+
+queries[
+	confidentiality? m
+	confidentiality? n
+]

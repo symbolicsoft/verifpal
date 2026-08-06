@@ -241,6 +241,36 @@ pub(crate) fn can_decompose(
 	}
 }
 
+pub(crate) fn can_break_weak(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	if primitive_is_core(p.id) {
+		return None;
+	}
+	if !ps
+		.capabilities
+		.in_force(p, Capability::Weak, attacker.current_phase)
+	{
+		return None;
+	}
+	let spec = primitive_get(p.id).ok()?;
+	let mut revealed = Vec::new();
+	for &idx in &spec.weak_reveals {
+		if let Some(a) = p.arguments.get(idx) {
+			revealed.push(a.clone());
+		}
+	}
+	if let Some(output) = spec.weak_reveals_output {
+		revealed.push(Value::Primitive(Arc::new(p.with_output(output))));
+	}
+	if revealed.is_empty() {
+		return None;
+	}
+	Some(revealed)
+}
+
 pub(crate) fn obtainable(
 	v: &Value,
 	ps: &PrincipalState,
@@ -549,6 +579,68 @@ mod tests {
 	use crate::testutil::*;
 	use crate::value::*;
 	use std::sync::Arc;
+
+	fn weak_index(v: &Value, onset: i32) -> Arc<CapabilityIndex> {
+		let Value::Primitive(p) = v else {
+			panic!("expected a primitive");
+		};
+		let mut annotated = (**p).clone();
+		annotated.capabilities.set(Capability::Weak, onset);
+		let mut index = CapabilityIndex::default();
+		index.insert(&Value::Primitive(Arc::new(annotated)));
+		Arc::new(index)
+	}
+
+	#[test]
+	fn can_break_weak_reveals_every_in_range_argument() {
+		let m = make_constant("cbw_m");
+		let n = make_constant("cbw_n");
+		let h = make_primitive(PRIM_HASH, vec![m.clone(), n.clone()], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
+		ps.capabilities = weak_index(&h, 0);
+		let attacker = make_attacker_state(vec![h.clone()]);
+
+		let revealed = can_break_weak(hp, &ps, &attacker).expect("weak is in force");
+		assert_eq!(revealed.len(), 2);
+		assert!(revealed.iter().any(|v| v.equivalent(&m, true)));
+		assert!(revealed.iter().any(|v| v.equivalent(&n, true)));
+	}
+
+	#[test]
+	fn can_break_weak_is_none_before_its_onset_phase() {
+		let m = make_constant("cbwp_m");
+		let h = make_primitive(PRIM_HASH, vec![m], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
+		ps.capabilities = weak_index(&h, 2);
+		let mut attacker = make_attacker_state(vec![h.clone()]);
+
+		attacker.current_phase = 0;
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		attacker.current_phase = 1;
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		attacker.current_phase = 2;
+		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+		attacker.current_phase = 3;
+		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+	}
+
+	#[test]
+	fn can_break_weak_is_none_without_an_annotation() {
+		let m = make_constant("cbwn_m");
+		let h = make_primitive(PRIM_HASH, vec![m], 0);
+		let Value::Primitive(hp) = &h else {
+			panic!("expected a primitive");
+		};
+		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let attacker = make_attacker_state(vec![h.clone()]);
+		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+	}
 
 	#[test]
 	fn can_rewrite_split_concat() {

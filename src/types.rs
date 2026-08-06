@@ -737,13 +737,34 @@ pub struct MutationRecord {
 #[derive(Clone, Debug)]
 pub enum DerivationRecord {
 	Initial,
-	Leaked { slot: SlotIdx },
-	Obtained { slot: SlotIdx },
-	Decomposed { of: Value, using: Vec<Value> },
-	Reconstructed { from: Vec<Value> },
-	Recomposed { of: Value, using: Vec<Value> },
-	PasswordExtracted { from: Value },
-	ConcatFragment { of: Value },
+	Leaked {
+		slot: SlotIdx,
+	},
+	Obtained {
+		slot: SlotIdx,
+	},
+	Decomposed {
+		of: Value,
+		using: Vec<Value>,
+	},
+	Reconstructed {
+		from: Vec<Value>,
+	},
+	Recomposed {
+		of: Value,
+		using: Vec<Value>,
+	},
+	PasswordExtracted {
+		from: Value,
+	},
+	ConcatFragment {
+		of: Value,
+	},
+	Broken {
+		of: Value,
+		capability: Capability,
+		using: Vec<Value>,
+	},
 	Injected,
 }
 
@@ -751,7 +772,8 @@ impl DerivationRecord {
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using }
-			| DerivationRecord::Recomposed { of, using } => {
+			| DerivationRecord::Recomposed { of, using }
+			| DerivationRecord::Broken { of, using, .. } => {
 				let mut v = vec![of];
 				v.extend(using.iter());
 				v
