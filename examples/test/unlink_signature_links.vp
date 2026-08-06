@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+attacker[passive]
+
+principal Alice[
+	knows public m1, m2
+	generates sk
+	ga = PUBKEY(sk)
+	s1 = SIGN(sk, m1)
+	s2 = SIGN(sk, m2)
+]
+
+Alice -> Bob: ga, s1, s2
+
+principal Bob[
+	knows public m1, m2
+	_ = SIGNVERIF(ga, m1, s1)?
+	_ = SIGNVERIF(ga, m2, s2)?
+]
+
+queries[
+	unlinkability? s1, s2
+]

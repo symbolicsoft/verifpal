@@ -272,6 +272,30 @@ fn test_unlink_nonfresh_secret() {
 	run_model("unlink_nonfresh_secret.vp", "u0");
 }
 #[test]
+fn test_unlink_signature_links() {
+	run_model("unlink_signature_links.vp", "u1");
+}
+#[test]
+fn test_unlink_ringsign() {
+	run_model("unlink_ringsign.vp", "u0");
+}
+#[test]
+fn test_unlink_aead_probe() {
+	run_model("unlink_aead_probe.vp", "u1");
+}
+#[test]
+fn test_unlink_blind_signature() {
+	run_model("unlink_blind_signature.vp", "u0");
+}
+#[test]
+fn test_unlink_pubkey_pseudonym() {
+	run_model("unlink_pubkey_pseudonym.vp", "u1");
+}
+#[test]
+fn test_unlink_split_concat() {
+	run_model("unlink_split_concat.vp", "u1");
+}
+#[test]
 fn test_needham_schroeder_pk() {
 	run_model("needham-schroeder-pk.vp", "a1a1c1c1");
 }
