@@ -94,7 +94,6 @@ pub(crate) struct PrimitiveSpec {
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
 	pub key_derivation: bool,
-	#[allow(dead_code)]
 	pub identifying_positions: Vec<usize>,
 }
 
@@ -177,6 +176,13 @@ pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> 
 	PRIM_SPECS
 		.get(&id)
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+}
+
+pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
+	PRIM_SPECS
+		.values()
+		.filter(|s| s.definition_check && s.rewrite.has_rule && s.rewrite.id == id)
+		.min_by_key(|s| s.id)
 }
 
 pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {

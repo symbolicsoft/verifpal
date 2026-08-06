@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::primitive::{BypassKeyKind, primitive_check_undoing};
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 
@@ -16,6 +17,51 @@ pub(crate) enum LinkWitnessKind {
 pub(crate) struct LinkWitness {
 	pub kind: LinkWitnessKind,
 	pub value: Value,
+}
+
+fn witness_identifying_check(
+	av: &Value,
+	bv: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<LinkWitness> {
+	let (Value::Primitive(ap), Value::Primitive(bp)) = (av, bv) else {
+		return None;
+	};
+	if ap.id != bp.id {
+		return None;
+	}
+	let check = primitive_check_undoing(ap.id)?;
+	let identifying = *check.identifying_positions.first()?;
+	let (_, targets) = check
+		.rewrite
+		.matching
+		.iter()
+		.find(|(position, _)| *position == identifying)?;
+	let key_arg = *targets.first()?;
+	if key_arg >= ap.arguments.len() || key_arg >= bp.arguments.len() {
+		return None;
+	}
+	if !ap.arguments[key_arg].equivalent(&bp.arguments[key_arg], true) {
+		return None;
+	}
+	let identifier = match check.bypass_key {
+		Some(BypassKeyKind::Derived { constructor, .. }) => Value::Primitive(Arc::new(Primitive {
+			id: constructor,
+			arguments: vec![ap.arguments[key_arg].clone()],
+			output: 0,
+			instance_check: false,
+			hash: HashCell::default(),
+		})),
+		_ => ap.arguments[key_arg].clone(),
+	};
+	if !crate::theory::obtainable(&identifier, ps, attacker, 0) {
+		return None;
+	}
+	Some(LinkWitness {
+		kind: LinkWitnessKind::IdentifyingCheck(check.id),
+		value: identifier,
+	})
 }
 
 fn witness_shared_secret(
@@ -159,7 +205,9 @@ fn push_leaf(out: &mut Vec<Value>, v: &Value) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::primitive::{PRIM_HASH, PRIM_MAC};
+	use crate::primitive::{
+		PRIM_HASH, PRIM_MAC, PRIM_PUBKEY, PRIM_RINGSIGN, PRIM_RINGSIGNVERIF, PRIM_SIGN,
+	};
 	use crate::testutil::*;
 
 	fn state_from(values: &[Value]) -> PrincipalState {
@@ -203,6 +251,41 @@ mod tests {
 
 		let attacker = make_attacker_state(vec![tok.clone()]);
 		assert!(origin_leaves(&tok, &ps, &attacker).is_none());
+	}
+
+	#[test]
+	fn signatures_link_but_ring_signatures_do_not() {
+		let sk = make_password("w2_sk");
+		let gb = make_constant("w2_gb");
+		let gc = make_constant("w2_gc");
+		let m1 = make_constant("w2_m1");
+		let m2 = make_constant("w2_m2");
+		let ga = make_primitive(PRIM_PUBKEY, vec![sk.clone()], 0);
+		let s1 = make_primitive(PRIM_SIGN, vec![sk.clone(), m1.clone()], 0);
+		let s2 = make_primitive(PRIM_SIGN, vec![sk.clone(), m2.clone()], 0);
+		let ps = state_from(&[gb.clone(), gc.clone(), m1.clone(), m2.clone()]);
+		let attacker = make_attacker_state(vec![
+			ga.clone(),
+			m1.clone(),
+			m2.clone(),
+			s1.clone(),
+			s2.clone(),
+		]);
+		let w = witness_identifying_check(&s1, &s2, &ps, &attacker).expect("signatures link");
+		assert!(w.value.equivalent(&ga, true));
+
+		let r1 = make_primitive(
+			PRIM_RINGSIGN,
+			vec![sk.clone(), gb.clone(), gc.clone(), m1],
+			0,
+		);
+		let r2 = make_primitive(PRIM_RINGSIGN, vec![sk, gb, gc, m2], 0);
+		let attacker = make_attacker_state(vec![r1.clone(), r2.clone(), ga]);
+		let undoing =
+			primitive_check_undoing(PRIM_RINGSIGN).expect("RINGSIGNVERIF undoes RINGSIGN");
+		assert_eq!(undoing.id, PRIM_RINGSIGNVERIF);
+		assert!(undoing.identifying_positions.is_empty());
+		assert!(witness_identifying_check(&r1, &r2, &ps, &attacker).is_none());
 	}
 
 	#[test]
