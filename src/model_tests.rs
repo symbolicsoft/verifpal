@@ -209,7 +209,7 @@ fn test_freshness() {
 }
 #[test]
 fn test_unlinkability() {
-	run_model("unlinkability.vp", "u0u0u0");
+	run_model("unlinkability.vp", "u0u1u1");
 }
 #[test]
 fn test_unlink_seed_leaked() {
@@ -322,6 +322,22 @@ fn test_unlink_kdf_outputs() {
 #[test]
 fn test_unlink_kdf_outputs_leaked() {
 	run_model("unlink_kdf_outputs_leaked.vp", "u1");
+}
+#[test]
+fn test_unlink_injected_equality() {
+	run_model("unlink_injected_equality.vp", "u0");
+}
+#[test]
+fn test_dp3t_root_leaked() {
+	run_model("dp3t_root_leaked.vp", "c1a1u1");
+}
+#[test]
+fn test_lc_dp_3t() {
+	run_model_at(
+		"examples/contact-tracing/lc-dp-3t.vp",
+		"lc-dp-3t.vp",
+		"c0a1u0",
+	);
 }
 #[test]
 fn test_needham_schroeder_pk() {

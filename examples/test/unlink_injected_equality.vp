@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-attacker[passive]
+attacker[active]
 
 principal Alice[
 	generates b
@@ -19,9 +19,8 @@ Bob -> Alice: h1, h2, h3
 principal Alice[
 	_ = HASH(h1)
 	_ = HASH(h2)
-	_ = HASH(h3)
 ]
 
 queries[
-	unlinkability? h1, h2, h3
+	unlinkability? h1, h2
 ]

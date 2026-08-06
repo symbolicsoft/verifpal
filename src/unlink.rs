@@ -28,6 +28,9 @@ pub(crate) fn find_link_witness(
 	if !is_observable(a, ps) || !is_observable(b, ps) {
 		return None;
 	}
+	if attacker_authored_slot(a, ps) || attacker_authored_slot(b, ps) {
+		return None;
+	}
 	let (av, _) = ps.resolve_constant(a, true);
 	let (bv, _) = ps.resolve_constant(b, true);
 	witness_observed_equality(&av, &bv, ps, attacker)
@@ -145,6 +148,13 @@ pub(crate) fn depends_on_secret(v: &Value, ps: &PrincipalState) -> bool {
 	let mut constants = Vec::new();
 	v.collect_constants(&mut constants);
 	constants.iter().any(|c| constant_is_secret(c, ps))
+}
+
+fn attacker_authored_slot(c: &Constant, ps: &PrincipalState) -> bool {
+	ps.index_of(c).is_some_and(|i| {
+		let p = &ps.values[i].provenance;
+		p.attacker_tainted || p.creator == crate::principal::ATTACKER_ID
+	})
 }
 
 pub(crate) fn is_observable(c: &Constant, ps: &PrincipalState) -> bool {

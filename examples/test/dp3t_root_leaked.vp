@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+attacker[active]
+
+principal SmartphoneA[
+
+	knows public BroadcastKey
+
+	generates SK0A
+	leaks SK0A
+
+	EphID00A, EphID01A, EphID02A = HKDF(nil, SK0A, BroadcastKey)
+]
+
+principal SmartphoneB[
+	knows public BroadcastKey
+	generates SK0B
+	EphID00B, EphID01B, EphID02B = HKDF(nil, SK0B, BroadcastKey)
+]
+
+principal SmartphoneC[
+	knows public BroadcastKey
+	generates SK0C
+	EphID00C, EphID01C, EphID02C = HKDF(nil, SK0C, BroadcastKey)
+]
+
+SmartphoneA -> SmartphoneB: EphID00A
+SmartphoneB -> SmartphoneA: EphID00B
+
+SmartphoneC -> SmartphoneB: EphID01C
+SmartphoneB -> SmartphoneC: EphID01B
+
+principal BackendServer[
+	knows private infectedPatients0
+]
+
+BackendServer -> SmartphoneA: infectedPatients0
+BackendServer -> SmartphoneB: infectedPatients0
+BackendServer -> SmartphoneC: infectedPatients0
+
+principal SmartphoneA[
+	SK1A = HASH(SK0A)
+	EphID10A, EphID11A, EphID12A = HKDF(nil, SK1A, BroadcastKey)
+]
+
+SmartphoneA -> SmartphoneB: EphID10A
+
+principal SmartphoneB[
+	SK1B = HASH(SK0B)
+	EphID10B, EphID11B, EphID12B = HKDF(nil, SK1B, BroadcastKey)
+]
+
+principal SmartphoneC[
+	SK1C = HASH(SK0C)
+	EphID10C, EphID11C, EphID12C = HKDF(nil, SK1C, BroadcastKey)
+]
+
+principal SmartphoneA[
+	SK2A = HASH(SK1A)
+	EphID20A, EphID21A, EphID22A = HKDF(nil, SK2A, BroadcastKey)
+]
+
+principal HealthCareAuthority[
+	generates triggerToken
+	knows private ephemeral_sk
+	m1 = ENC(ephemeral_sk, triggerToken)
+]
+
+HealthCareAuthority -> BackendServer : [m1]
+HealthCareAuthority -> SmartphoneA : m1
+
+principal SmartphoneA[
+	knows private ephemeral_sk
+	m1_dec = DEC(ephemeral_sk, m1)
+	m2 = ENC(ephemeral_sk, SK1A)
+]
+
+SmartphoneA -> BackendServer: m2
+
+principal BackendServer [
+	knows private ephemeral_sk
+	m2_dec = DEC(ephemeral_sk, m2)
+	infectedPatients1 = CONCAT(infectedPatients0, m2_dec)
+]
+
+BackendServer -> SmartphoneA: infectedPatients1
+BackendServer -> SmartphoneB: infectedPatients1
+BackendServer -> SmartphoneC: infectedPatients1
+
+queries[
+	confidentiality? EphID02A
+	authentication? SmartphoneA -> BackendServer: m2
+	unlinkability? EphID00A, EphID10A
+]

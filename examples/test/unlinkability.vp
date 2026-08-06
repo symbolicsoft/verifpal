@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 
-attacker [active]
+attacker[active]
 
 principal Alice[
 	generates b
@@ -16,11 +16,20 @@ principal Bob[
 	leaks c
 	h1, h2, h3 = HKDF(a, b, nil)
 	h4, h5, h6 = HKDF(c, c, nil)
-	h7, h8, h9 = HKDF(a, c, d)
+	p1 = PUBKEY(d)
+	p2 = PUBKEY(d)
+]
+
+Bob -> Alice: h1, h2, h3, h4, h5, h6, p1, p2
+
+principal Alice[
+	_ = HASH(h1)
+	_ = HASH(h4)
+	_ = HASH(p1)
 ]
 
 queries[
 	unlinkability? h1, h2, h3
 	unlinkability? h4, h5, h6
-	unlinkability? h7, h8, h9
+	unlinkability? p1, p2
 ]
