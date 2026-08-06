@@ -94,15 +94,6 @@ pub(crate) struct PrimitiveSpec {
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
 	pub key_derivation: bool,
-	/// Argument positions that name a participant. A successful check with the
-	/// same value in an identifying position ties its payloads to one
-	/// participant, which is what makes those payloads linkable.
-	///
-	/// Empty means the primitive reveals no identity. `RINGSIGNVERIF` is empty
-	/// deliberately: hiding which ring member signed is the entire point of a
-	/// ring signature, and leaving this empty is what stops `unlinkability?`
-	/// from reporting a false attack on it.
-	// Read by `unlink::witness_identifying_check`; the allow goes away with it.
 	#[allow(dead_code)]
 	pub identifying_positions: Vec<usize>,
 }
@@ -373,7 +364,6 @@ mod tests {
 			primitive_get(PRIM_KEM_DECAP).unwrap().identifying_positions,
 			vec![0]
 		);
-		// A ring names a set, never a member. Empty on purpose.
 		assert!(
 			primitive_get(PRIM_RINGSIGNVERIF)
 				.unwrap()

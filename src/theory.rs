@@ -241,7 +241,12 @@ pub(crate) fn can_decompose(
 	}
 }
 
-fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState, depth: usize) -> bool {
+pub(crate) fn obtainable(
+	v: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	depth: usize,
+) -> bool {
 	let hash = v.hash_value();
 	if attacker.knows_hashed(v, hash).is_some() {
 		return true;

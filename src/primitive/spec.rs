@@ -459,9 +459,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				arg: 0,
 				constructor: PRIM_PUBKEY,
 			}),
-			// A ring signature names a ring, never a signer. Deliberately empty:
-			// this is what keeps `unlinkability?` from reporting a false attack
-			// on the one primitive whose entire purpose is unlinkability.
 			identifying_positions: vec![],
 			..PrimitiveSpec::default()
 		},

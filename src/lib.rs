@@ -28,6 +28,8 @@ pub(crate) mod solve;
 mod testutil;
 pub(crate) mod theory;
 pub mod types;
+#[allow(dead_code)]
+pub(crate) mod unlink;
 pub(crate) mod util;
 pub(crate) mod value;
 pub(crate) mod verify;
