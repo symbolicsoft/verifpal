@@ -98,6 +98,7 @@ pub(crate) fn make_principal_state(
 		index: Arc::new(index),
 		leaks: Arc::new(Vec::new()),
 		halted_at: None,
+		capabilities: Arc::new(CapabilityIndex::default()),
 	}
 }
 

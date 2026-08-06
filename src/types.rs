@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
-pub use crate::capability::{Capabilities, Capability};
+pub use crate::capability::{Capabilities, Capability, CapabilityIndex};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
@@ -699,6 +699,7 @@ pub struct PrincipalState {
 	pub index: Arc<HashMap<ValueId, usize>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
+	pub capabilities: Arc<CapabilityIndex>,
 }
 
 impl PrincipalState {

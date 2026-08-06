@@ -1,8 +1,11 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
-use crate::types::PrimitiveId;
+use crate::types::{Primitive, PrimitiveId, Value};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Capability {
@@ -142,6 +145,75 @@ pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 	}
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct CapabilityIndex {
+	buckets: HashMap<u64, Vec<(Value, Capabilities)>>,
+}
+
+impl CapabilityIndex {
+	pub fn is_empty(&self) -> bool {
+		self.buckets.is_empty()
+	}
+
+	pub fn insert(&mut self, v: &Value) {
+		let Value::Primitive(p) = v else {
+			return;
+		};
+		for arg in &p.arguments {
+			self.insert(arg);
+		}
+		if p.capabilities.is_empty() {
+			return;
+		}
+		let hash = v.hash_value();
+		let bucket = self.buckets.entry(hash).or_default();
+		for (existing, caps) in bucket.iter_mut() {
+			if existing.equivalent(v, true) {
+				caps.merge(&p.capabilities);
+				return;
+			}
+		}
+		bucket.push((v.clone(), p.capabilities));
+	}
+
+	pub fn lookup(&self, p: &Primitive) -> Capabilities {
+		if self.buckets.is_empty() {
+			return Capabilities::default();
+		}
+		let probe = Value::Primitive(Arc::new(p.clone()));
+		let hash = probe.hash_value();
+		let Some(bucket) = self.buckets.get(&hash) else {
+			return Capabilities::default();
+		};
+		for (existing, caps) in bucket {
+			if existing.equivalent(&probe, true) {
+				return *caps;
+			}
+		}
+		Capabilities::default()
+	}
+
+	pub fn in_force(&self, p: &Primitive, cap: Capability, phase: i32) -> bool {
+		if self.buckets.is_empty() {
+			return false;
+		}
+		self.lookup(p).in_force(cap, phase)
+	}
+
+	pub fn assumptions(&self) -> Vec<(Value, Capability, i32)> {
+		let mut out = Vec::new();
+		for bucket in self.buckets.values() {
+			for (v, caps) in bucket {
+				for (cap, onset) in caps.iter() {
+					out.push((v.clone(), cap, onset));
+				}
+			}
+		}
+		out.sort_by_key(|(v, cap, onset)| (v.hash_value(), cap.index(), *onset));
+		out
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -196,6 +268,75 @@ mod tests {
 		c.set(Capability::Weak, 0);
 		let got: Vec<_> = c.iter().collect();
 		assert_eq!(got, vec![(Capability::Weak, 0), (Capability::Malleable, 3)]);
+	}
+
+	fn annotated(v: Value, cap: Capability, onset: i32) -> Value {
+		let Value::Primitive(p) = v else {
+			panic!("expected a primitive");
+		};
+		let mut p = (*p).clone();
+		p.capabilities.set(cap, onset);
+		Value::Primitive(Arc::new(p))
+	}
+
+	#[test]
+	fn index_answers_for_an_equivalent_but_unannotated_term() {
+		use crate::primitive::*;
+		use crate::testutil::*;
+		let k = make_constant("cidx_k");
+		let m = make_constant("cidx_m");
+		let ad = make_constant("cidx_ad");
+		let plain = make_primitive(PRIM_AEAD_ENC, vec![k, m, ad], 0);
+
+		let mut index = CapabilityIndex::default();
+		index.insert(&annotated(plain.clone(), Capability::Weak, 0));
+
+		let Value::Primitive(plain_p) = &plain else {
+			panic!("expected a primitive");
+		};
+		assert!(
+			index.in_force(plain_p, Capability::Weak, 0),
+			"equivalent terms must share the annotation"
+		);
+	}
+
+	#[test]
+	fn index_records_nested_annotations() {
+		use crate::primitive::*;
+		use crate::testutil::*;
+		let a = make_constant("cnest_a");
+		let b = make_constant("cnest_b");
+		let inner = make_primitive(PRIM_PUBKEY, vec![a], 0);
+		let outer = make_primitive(
+			PRIM_DH_KEX,
+			vec![annotated(inner.clone(), Capability::Weak, 3), b],
+			0,
+		);
+
+		let mut index = CapabilityIndex::default();
+		index.insert(&outer);
+
+		let Value::Primitive(inner_p) = &inner else {
+			panic!("expected a primitive");
+		};
+		assert!(!index.in_force(inner_p, Capability::Weak, 2));
+		assert!(index.in_force(inner_p, Capability::Weak, 3));
+	}
+
+	#[test]
+	fn empty_index_grants_nothing() {
+		use crate::primitive::*;
+		use crate::testutil::*;
+		let a = make_constant("cempty_a");
+		let h = make_primitive(PRIM_HASH, vec![a], 0);
+		let Value::Primitive(p) = &h else {
+			panic!("expected a primitive");
+		};
+		let index = CapabilityIndex::default();
+		assert!(index.is_empty());
+		for cap in Capability::ALL {
+			assert!(!index.in_force(p, cap, 0));
+		}
 	}
 
 	#[test]

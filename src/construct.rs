@@ -374,6 +374,11 @@ fn construct_trace_render_message(
 }
 
 pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
+	let mut capability_index = CapabilityIndex::default();
+	for slot in &trace.slots {
+		capability_index.insert(&slot.initial_value);
+	}
+	let capabilities = Arc::new(capability_index);
 	let mut states = Vec::new();
 	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
 		let n = trace.slots.len();
@@ -428,6 +433,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 			index: Arc::new(index_map),
 			leaks: trace.leaks.clone(),
 			halted_at: None,
+			capabilities: capabilities.clone(),
 		});
 	}
 	states
@@ -511,6 +517,7 @@ impl PrincipalState {
 			index: self.index.clone(),
 			leaks: self.leaks.clone(),
 			halted_at: if purify { None } else { self.halted_at },
+			capabilities: self.capabilities.clone(),
 		}
 	}
 }
