@@ -18,6 +18,31 @@ pub(crate) struct LinkWitness {
 	pub value: Value,
 }
 
+fn witness_shared_secret(
+	av: &Value,
+	bv: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<LinkWitness> {
+	let a_leaves = origin_leaves(av, ps, attacker)?;
+	let b_leaves = origin_leaves(bv, ps, attacker)?;
+	for w in &a_leaves {
+		if !depends_on_secret(w, ps) {
+			continue;
+		}
+		if w.equivalent(av, true) || w.equivalent(bv, true) {
+			continue;
+		}
+		if b_leaves.iter().any(|x| x.equivalent(w, true)) {
+			return Some(LinkWitness {
+				kind: LinkWitnessKind::SharedSecret,
+				value: w.clone(),
+			});
+		}
+	}
+	None
+}
+
 fn witness_observed_equality(
 	av: &Value,
 	bv: &Value,
@@ -178,6 +203,29 @@ mod tests {
 
 		let attacker = make_attacker_state(vec![tok.clone()]);
 		assert!(origin_leaves(&tok, &ps, &attacker).is_none());
+	}
+
+	#[test]
+	fn shared_secret_links_across_different_applications() {
+		let seed = make_password("w1_seed");
+		let c1 = make_constant("w1_c1");
+		let c2 = make_constant("w1_c2");
+		let tok1 = make_primitive(PRIM_HASH, vec![seed.clone(), c1.clone()], 0);
+		let tok2 = make_primitive(PRIM_HASH, vec![seed.clone(), c2.clone()], 0);
+		let ps = state_from(&[seed.clone(), c1.clone(), c2.clone()]);
+
+		let attacker = make_attacker_state(vec![
+			tok1.clone(),
+			tok2.clone(),
+			seed.clone(),
+			c1.clone(),
+			c2.clone(),
+		]);
+		let w = witness_shared_secret(&tok1, &tok2, &ps, &attacker).expect("linked");
+		assert!(w.value.equivalent(&seed, true));
+
+		let attacker = make_attacker_state(vec![tok1.clone(), tok2.clone(), c1, c2]);
+		assert!(witness_shared_secret(&tok1, &tok2, &ps, &attacker).is_none());
 	}
 
 	#[test]
