@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+attacker[active]
+
+principal Alice[
+	knows public c1, c2
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: gb
+
+principal Alice[
+	k = DH_KEX(gb, a)
+	tok1 = HASH(k, c1)
+	tok2 = HASH(k, c2)
+]
+
+Alice -> Bob: ga, tok1, tok2
+
+principal Bob[
+	knows public c1, c2
+	_ = HASH(tok1)
+	_ = HASH(tok2)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+attacker[passive]
+
+principal Bob[
+	generates dk
+	ek = PUBKEY(dk)
+	leaks dk
+]
+
+Bob -> Alice: ek
+
+principal Alice[
+	knows public c1, c2
+	generates r
+	ss, ct = KEM_ENCAP(ek, r)
+	tok1 = HASH(ss, c1)
+	tok2 = HASH(ss, c2)
+]
+
+Alice -> Bob: ct, tok1, tok2
+
+principal Bob[
+	knows public c1, c2
+	ss2 = KEM_DECAP(dk, ct)?
+	_ = HASH(tok1)
+	_ = HASH(tok2)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]
