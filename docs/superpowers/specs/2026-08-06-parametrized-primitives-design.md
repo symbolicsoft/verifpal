@@ -5,6 +5,18 @@
 
 # Parametrized primitives
 
+> **Implementation outcome (2026-08-06).** `weak` and `forgeable` shipped as
+> specified. `malleable` did **not**: it parses and stays in the vocabulary, but
+> no primitive declares it and any use is a hard error. The attack it enables
+> needs two coordinated wire substitutions, which the solver only forms through
+> its goal-directed path, and that path cannot derive the required ciphertext
+> goal — it would have to invert a nested *unchecked* rewrite, and the natural
+> check to hang it on is `ASSERT`, a core primitive the theory functions bail
+> out of. Deducing retargeted ciphertexts forward instead works, but feeds them
+> back as retarget targets and inflates the term space without bound, which is
+> the finiteness property `normalise_arguments` exists to protect. Two further
+> corrections to this document appear inline below, marked the same way.
+
 ## Summary
 
 Verifpal models today assert that every primitive is perfectly secure. There is no way
@@ -217,6 +229,13 @@ for free: `deduction.rs`'s closure, `solve/deduce.rs`, `unlink.rs`, and — impo
 `solve/deduce.rs::satisfy_check`, which is what makes a forged signature actually pass
 `SIGNVERIF` rather than halting the principal before the attack can land.
 
+> **Correction.** This last claim is wrong. `solve/deduce.rs::require_constructible`
+> routes through the solver's *own* rule set, not `theory::can_reconstruct_primitive`,
+> so `forgeable` needed a second branch in `solve_primitive_arguments`. And because
+> solver goals are patterns containing free variables, the capability lookup there
+> unifies against the index's annotated terms rather than comparing for equivalence —
+> `AEAD_ENC(k, $free, ad)` is not equivalent to the annotated `AEAD_ENC(k, m, ad)`.
+
 `solve/validate.rs::is_worthwhile` needs no change: a `malleable` substitution that
 reproduces the honest plaintext reduces back to the honest value and is already
 correctly rejected as a replay.
@@ -249,6 +268,12 @@ will be pasted without the caveat that makes them meaningful.
   weakening assumptions", so a clean result is not mistaken for an unconditional one.
 - `internal-json` carries them, so the VS Code extension can surface them. Note that
   `../verifpal-vscode` must be updated by hand; nothing checks it.
+
+> **Correction.** The `internal-json` verify payload is a top-level *array*, not an
+> object, so there is nowhere to hang a sibling `assumptions` key without changing its
+> shape — which would break the extension for the same reason the result code format is
+> frozen. Assumptions ship as an `"Assumptions"` key on each result object instead,
+> which consumers that ignore unknown keys tolerate.
 - **The result code format does not change.** It is per-query letter-plus-digit and
   every existing test, plus the extension, depends on it.
 
