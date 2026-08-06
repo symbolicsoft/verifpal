@@ -94,6 +94,15 @@ fn test_cap_err_malleable_unsupported() {
 }
 
 #[test]
+fn test_cap_multi_annotation() {
+	run_model("cap_multi_annotation.vp", "c1c1");
+}
+#[test]
+fn test_cap_noop_annotated() {
+	run_model("cap_noop_annotated.vp", "c0a0");
+}
+
+#[test]
 fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }

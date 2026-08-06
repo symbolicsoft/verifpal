@@ -543,6 +543,14 @@ mod tests {
 	}
 
 	#[test]
+	fn golden_cap_multi_annotation() {
+		assert_golden(
+			include_str!("../examples/test/cap_multi_annotation.vp"),
+			include_str!("../examples/test/golden_pretty/cap_multi_annotation.vp"),
+		);
+	}
+
+	#[test]
 	fn golden_aead_leak() {
 		assert_golden(
 			include_str!("../examples/test/aead_leak.vp"),
