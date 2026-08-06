@@ -23,7 +23,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 256 tests (unit + model), ~0.1s once built (also: make test)
+cargo test --release                   # 278 tests (unit + model), ~0.4s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -104,7 +104,7 @@ Constraints enforced by the parser and `sanity.rs`:
 - A constant cannot be assigned twice, generated twice, `knows`n two different ways, sent by someone who does not know it, or received by someone who already knows it. `leaks` requires the leaker to know the value.
 - Authentication and `precondition` queries are validated at load time: the sender must know the constant, the recipient must receive it, and the recipient must actually *use* it inside a primitive — otherwise the query is a sanity error, not a failing query.
 
-Primitives (arity → outputs): ASSERT(2), CONCAT(2–5), SPLIT(1→1–5), HASH(1–5), PW_HASH(1–5), HKDF(3→1–5), AEAD_ENC/AEAD_DEC(3), ENC/DEC(2), MAC(2), SIGN(2), SIGNVERIF(3), PKE_ENC/PKE_DEC(2), SHAMIR_SPLIT(1→3), SHAMIR_JOIN(2), RINGSIGN(4), RINGSIGNVERIF(5), BLIND(2), UNBLIND(3). Only primitives with `definition_check` — ASSERT, SPLIT, AEAD_DEC, SIGNVERIF, RINGSIGNVERIF — may take the `?` suffix. ASSERT, CONCAT and SPLIT are *core* primitives: they live in a separate registry (`CORE_SPECS`) whose reduction is a hand-written Rust function rather than a declarative rewrite rule, and several theory functions bail out on them explicitly (`primitive_is_core`). Everything else is data.
+Primitives (arity → outputs): ASSERT(2), CONCAT(2–5), SPLIT(1→1–5), HASH(1–5), PW_HASH(1–5), HKDF(3→1–5), AEAD_ENC/AEAD_DEC(3), ENC/DEC(2), MAC(2), SIGN(2), SIGNVERIF(3), PKE_ENC/PKE_DEC(2), SHAMIR_SPLIT(1→3), SHAMIR_JOIN(2), RINGSIGN(4), RINGSIGNVERIF(5), BLIND(2), UNBLIND(3), KEM_ENCAP(2→2), KEM_DECAP(2). Only primitives with `definition_check` — ASSERT, SPLIT, AEAD_DEC, SIGNVERIF, RINGSIGNVERIF, KEM_DECAP — may take the `?` suffix. ASSERT, CONCAT and SPLIT are *core* primitives: they live in a separate registry (`CORE_SPECS`) whose reduction is a hand-written Rust function rather than a declarative rewrite rule, and several theory functions bail out on them explicitly (`primitive_is_core`). Everything else is data.
 
 Comments (`//` and `/* */`) are captured into AST nodes so `pretty` round-trips them, **except** in positions where they are deliberately dropped: inside primitive argument lists, inside the `attacker[…]`/`phase[…]` brackets, and inside a query option's inner brackets.
 
@@ -193,7 +193,7 @@ When a query resolves, `attack_trace` minimizes the state that resolved it (`wit
 
 ### Equational theory (theory.rs + primitive/spec.rs)
 
-All cryptographic behavior is **declarative data**: `PrimitiveSpec` entries define decompose ("knows key → learns plaintext"), recompose (threshold shares), rewrite ("DEC undoes ENC", with matching constraints and filters), rebuild (SHAMIR_JOIN), password protection, and guard-bypass key extraction. `theory.rs` interprets the specs (`can_decompose`, `can_reconstruct_primitive`, `can_rewrite`, `can_rebuild`, `find_obtainable_passwords`) with `MAX_DEPTH = 16` on recursion. `obtainable` is the shared "can the attacker get this argument at all" cascade that decomposition and reconstruction both run over each of their arguments.
+All cryptographic behavior is **declarative data**: `PrimitiveSpec` entries define decompose ("knows key → learns plaintext"; `reveal_output` makes the rule yield one of the primitive's *outputs* instead of an argument, which is how an attacker holding a decapsulation key opens a `KEM_ENCAP` ciphertext no principal ever decapsulated), recompose (threshold shares), rewrite ("DEC undoes ENC", with matching constraints and filters), rebuild (SHAMIR_JOIN), password protection, and guard-bypass key extraction. `theory.rs` interprets the specs (`can_decompose`, `can_reconstruct_primitive`, `can_rewrite`, `can_rebuild`, `find_obtainable_passwords`) with `MAX_DEPTH = 16` on recursion. `obtainable` is the shared "can the attacker get this argument at all" cascade that decomposition and reconstruction both run over each of their arguments.
 
 Password extraction is worth knowing: a `password` constant is recoverable when, at *every* primitive level enclosing it, the position is not in `password_hashing` (only `PW_HASH` sets that) **and** the attacker knows every sibling argument — i.e. it can verify a guess offline.
 

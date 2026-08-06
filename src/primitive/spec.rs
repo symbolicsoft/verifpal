@@ -30,6 +30,8 @@ pub(crate) const PRIM_BLIND: PrimitiveId = 20;
 pub(crate) const PRIM_UNBLIND: PrimitiveId = 21;
 pub(crate) const PRIM_PUBKEY: PrimitiveId = 22;
 pub(crate) const PRIM_DH_KEX: PrimitiveId = 23;
+pub(crate) const PRIM_KEM_ENCAP: PrimitiveId = 24;
+pub(crate) const PRIM_KEM_DECAP: PrimitiveId = 25;
 
 fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 	(x.clone(), true)
@@ -46,6 +48,16 @@ fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bo
 			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
 		},
 		1 => (x.clone(), true),
+		_ => (x.clone(), false),
+	}
+}
+
+fn filter_kem_decap_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
+	match i {
+		0 => match super::key_derivation_of(x.clone()) {
+			Some(k) => (k, true),
+			None => (x.clone(), false),
+		},
 		_ => (x.clone(), false),
 	}
 }
@@ -129,6 +141,10 @@ fn core_rule_split(p: &Primitive) -> (bool, Value) {
 
 fn rewrite_to_arg1(p: &Primitive) -> Value {
 	p.arguments[1].clone()
+}
+
+fn rewrite_to_kem_secret(p: &Primitive) -> Value {
+	Value::Primitive(Arc::new(p.with_output(0)))
 }
 
 fn rewrite_to_nil(_p: &Primitive) -> Value {
@@ -217,6 +233,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			..PrimitiveSpec::default()
@@ -230,6 +247,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			rewrite: RewriteRule {
@@ -253,6 +271,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			..PrimitiveSpec::default()
@@ -266,6 +285,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			rewrite: RewriteRule {
@@ -347,6 +367,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_extract_dh_exponent),
 			},
 			..PrimitiveSpec::default()
@@ -360,6 +381,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			rewrite: RewriteRule {
@@ -446,6 +468,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				has_rule: true,
 				given: vec![0],
 				reveal: 1,
+				reveal_output: None,
 				filter: Some(filter_identity),
 			},
 			..PrimitiveSpec::default()
@@ -463,6 +486,42 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![1])],
 				filter: Some(filter_unblind_rewrite),
 			},
+			..PrimitiveSpec::default()
+		},
+		PrimitiveSpec {
+			id: PRIM_KEM_ENCAP,
+			name: "KEM_ENCAP",
+			arity: vec![2],
+			output: vec![2],
+			decompose: DecomposeRule {
+				has_rule: true,
+				given: vec![0],
+				reveal: 0,
+				reveal_output: Some(0),
+				filter: Some(filter_extract_dh_exponent),
+			},
+			argument_restrictions: vec![
+				(0, vec![PRIM_DH_KEX, PRIM_KEM_ENCAP, PRIM_KEM_DECAP]),
+				(1, vec![PRIM_PUBKEY, PRIM_DH_KEX]),
+			],
+			..PrimitiveSpec::default()
+		},
+		PrimitiveSpec {
+			id: PRIM_KEM_DECAP,
+			name: "KEM_DECAP",
+			arity: vec![2],
+			output: vec![1],
+			rewrite: RewriteRule {
+				has_rule: true,
+				id: PRIM_KEM_ENCAP,
+				from: 1,
+				to: Some(rewrite_to_kem_secret),
+				matching: vec![(0, vec![0])],
+				filter: Some(filter_kem_decap_rewrite),
+			},
+			definition_check: true,
+			bypass_key: Some(BypassKeyKind::Direct(0)),
+			argument_restrictions: vec![(0, vec![PRIM_PUBKEY, PRIM_DH_KEX])],
 			..PrimitiveSpec::default()
 		},
 	]

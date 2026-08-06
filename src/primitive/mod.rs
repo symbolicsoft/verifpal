@@ -21,6 +21,7 @@ pub(crate) struct DecomposeRule {
 	pub has_rule: bool,
 	pub given: Vec<usize>,
 	pub reveal: usize,
+	pub reveal_output: Option<usize>,
 	pub filter: Option<FilterFn>,
 }
 

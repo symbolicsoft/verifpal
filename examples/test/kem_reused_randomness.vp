@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Encapsulation is a function of its arguments, so reusing the randomness
+// reproduces the shared secret exactly. The first equivalence query therefore
+// holds and the second is contradicted, which is what makes the hazard visible.
+
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+]
+
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows private m
+	generates r, r2
+	ss1, ct1 = KEM_ENCAP(ekb, r)
+	ss2, ct2 = KEM_ENCAP(ekb, r)
+	ss3, ct3 = KEM_ENCAP(ekb, r2)
+	e = AEAD_ENC(ss1, m, nil)
+]
+
+Alice -> Bob: ct1, e
+
+principal Bob[
+	ssb = KEM_DECAP(dkb, ct1)
+	d = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	equivalence? ss1, ss2
+	equivalence? ss1, ss3
+]

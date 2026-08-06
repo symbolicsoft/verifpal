@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Signing the encapsulation restores what the KEM cannot give on its own.
+// With Alice's signing key pre-authenticated and the verification checked,
+// the attacker can no longer pass off its own encapsulation as hers.
+
+attacker[active]
+
+principal Alice[
+	knows private siga
+	ga = PUBKEY(siga)
+]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows private m
+	generates r
+	ss, ct = KEM_ENCAP(ekb, r)
+	e = AEAD_ENC(ss, m, nil)
+	sig = SIGN(siga, ct)
+]
+
+Alice -> Bob: ct, e, sig
+
+principal Bob[
+	_ = SIGNVERIF(ga, ct, sig)?
+	ssb = KEM_DECAP(dkb, ct)
+	d = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: ct
+]

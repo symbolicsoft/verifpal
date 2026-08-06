@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// The KEM analogue of the Diffie-Hellman mayor-in-the-middle. With Bob's
+// encapsulation key unguarded, the attacker substitutes its own, Alice
+// encapsulates to it, and the attacker decapsulates with the matching private key.
+
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+]
+
+Bob -> Alice: ekb
+
+principal Alice[
+	knows private m
+	generates r
+	ss, ct = KEM_ENCAP(ekb, r)
+	e = AEAD_ENC(ss, m, nil)
+]
+
+Alice -> Bob: ct, e
+
+principal Bob[
+	ssb = KEM_DECAP(dkb, ct)
+	d = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

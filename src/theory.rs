@@ -228,8 +228,12 @@ pub(crate) fn can_decompose(
 		}
 	}
 	if has.len() >= prim.decompose.given.len() {
+		let revealed = match prim.decompose.reveal_output {
+			Some(output) => Value::Primitive(Arc::new(p.with_output(output))),
+			None => p.arguments[prim.decompose.reveal].clone(),
+		};
 		Some(DecomposeResult {
-			revealed: p.arguments[prim.decompose.reveal].clone(),
+			revealed,
 			used: has,
 		})
 	} else {
@@ -708,6 +712,127 @@ mod tests {
 		let result = can_decompose(&p, &ps, &attacker, 0);
 		assert!(result.is_some());
 		assert!(result.unwrap().revealed.equivalent(&msg, true));
+	}
+
+	#[test]
+	fn can_decompose_kem_with_private_key_reveals_shared_secret() {
+		let dk = make_constant("kd_dk");
+		let r = make_constant("kd_r");
+		let ek = make_primitive(PRIM_PUBKEY, vec![dk.clone()], 0);
+		let ct = Primitive {
+			id: PRIM_KEM_ENCAP,
+			arguments: vec![ek.clone(), r.clone()],
+			output: 1,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let c_dummy = Constant {
+			name: Arc::from("kd_dummy"),
+			id: test_value_id("kd_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![dk]);
+		let revealed = can_decompose(&ct, &ps, &attacker, 0)
+			.expect("holder of the private key can decapsulate")
+			.revealed;
+		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
+		assert!(revealed.equivalent(&expected, true));
+		assert_ne!(
+			revealed.hash_value(),
+			Value::Primitive(Arc::new(ct)).hash_value()
+		);
+	}
+
+	#[test]
+	fn can_decompose_kem_without_private_key() {
+		let dk = make_constant("kn_dk");
+		let r = make_constant("kn_r");
+		let ek = make_primitive(PRIM_PUBKEY, vec![dk], 0);
+		let ct = Primitive {
+			id: PRIM_KEM_ENCAP,
+			arguments: vec![ek.clone(), r],
+			output: 1,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let c_dummy = Constant {
+			name: Arc::from("kn_dummy"),
+			id: test_value_id("kn_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let attacker = make_attacker_state(vec![ek]);
+		assert!(can_decompose(&ct, &ps, &attacker, 0).is_none());
+	}
+
+	#[test]
+	fn kem_decap_rewrites_to_the_shared_secret() {
+		let dk = make_constant("kr_dk");
+		let r = make_constant("kr_r");
+		let ek = make_primitive(PRIM_PUBKEY, vec![dk.clone()], 0);
+		let ct = make_primitive(PRIM_KEM_ENCAP, vec![ek.clone(), r.clone()], 1);
+		let decap = Primitive {
+			id: PRIM_KEM_DECAP,
+			arguments: vec![dk, ct],
+			output: 0,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let c_dummy = Constant {
+			name: Arc::from("kr_dummy"),
+			id: test_value_id("kr_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, value) = can_rewrite(&decap, &ps, 0);
+		assert!(rewritten);
+		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
+		assert!(value.equivalent(&expected, true));
+	}
+
+	#[test]
+	fn kem_decap_does_not_rewrite_under_the_wrong_key() {
+		let dk = make_constant("kw_dk");
+		let other = make_constant("kw_other");
+		let r = make_constant("kw_r");
+		let ek = make_primitive(PRIM_PUBKEY, vec![dk], 0);
+		let ct = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 1);
+		let decap = Primitive {
+			id: PRIM_KEM_DECAP,
+			arguments: vec![other, ct],
+			output: 0,
+			instance_check: false,
+			hash: HashCell::default(),
+		};
+		let c_dummy = Constant {
+			name: Arc::from("kw_dummy"),
+			id: test_value_id("kw_dummy"),
+			..Constant::default()
+		};
+		let ps = make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&c_dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		);
+		let (rewritten, _) = can_rewrite(&decap, &ps, 0);
+		assert!(!rewritten);
 	}
 
 	#[test]

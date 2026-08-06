@@ -50,6 +50,8 @@ const RESERVED: &[&str] = &[
 	"unblind",
 	"pubkey",
 	"dh_kex",
+	"kem_encap",
+	"kem_decap",
 	"g",
 	"queries",
 ];
@@ -1447,6 +1449,17 @@ mod tests {
 	fn caret_is_rejected() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private crj_a\n\tcrj_ga = G^crj_a\n]\n\nqueries[\n\tconfidentiality? crj_a\n]\n";
 		assert!(parse_string("old.vp", src).is_err());
+	}
+
+	#[test]
+	fn kem_primitive_names_are_reserved() {
+		for name in ["kem_encap", "kem_decap"] {
+			let src = format!(
+				"attacker[active]\n\nprincipal Alice[\n\tknows private {}\n]\n\nqueries[\n\tconfidentiality? {}\n]\n",
+				name, name
+			);
+			assert!(parse_string("reserved.vp", &src).is_err());
+		}
 	}
 
 	#[test]

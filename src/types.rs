@@ -384,6 +384,16 @@ impl Primitive {
 		}
 	}
 
+	pub fn with_output(&self, output: usize) -> Self {
+		Primitive {
+			id: self.id,
+			arguments: self.arguments.clone(),
+			output,
+			instance_check: self.instance_check,
+			hash: HashCell::default(),
+		}
+	}
+
 	pub fn map_arguments(&self, mut f: impl FnMut(&Value) -> Option<Value>) -> Option<Primitive> {
 		let mut changed: Option<Vec<Value>> = None;
 		for (i, a) in self.arguments.iter().enumerate() {

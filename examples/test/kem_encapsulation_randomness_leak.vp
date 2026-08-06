@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// The encapsulation randomness is as sensitive as the decapsulation key:
+// anyone holding it can recompute the shared secret from the public
+// encapsulation key alone, without ever decapsulating.
+
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+]
+
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows private m
+	generates r
+	ss, ct = KEM_ENCAP(ekb, r)
+	e = AEAD_ENC(ss, m, nil)
+	leaks r
+]
+
+Alice -> Bob: ct, e
+
+principal Bob[
+	ssb = KEM_DECAP(dkb, ct)
+	d = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	confidentiality? ss
+]

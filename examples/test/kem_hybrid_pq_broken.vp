@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Hybrid key exchange: an X25519 shared secret and a KEM shared secret are
+// both fed into HKDF, so the session key is only as weak as both together.
+// Leaking the decapsulation key models a broken KEM. The Diffie-Hellman half
+// still protects the message, which is the whole point of hybridising.
+
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	generates b
+	ekb = PUBKEY(dkb)
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [ekb], [gb]
+
+principal Alice[
+	knows private m
+	generates a, r
+	ga = PUBKEY(a)
+	ss, ct = KEM_ENCAP(ekb, r)
+	dh = DH_KEX(gb, a)
+	k = HKDF(dh, ss, nil)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: [ga], ct, e
+
+principal Bob[
+	ssb = KEM_DECAP(dkb, ct)
+	dhb = DH_KEX(ga, b)
+	kb = HKDF(dhb, ssb, nil)
+	d = AEAD_DEC(kb, e, nil)?
+]
+
+phase[1]
+
+principal Bob[leaks dkb]
+
+queries[
+	confidentiality? m
+]

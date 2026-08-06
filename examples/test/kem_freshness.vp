@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// A shared secret is only as fresh as its encapsulation randomness. The first
+// secret derives from a generated value and is fresh; the second is built from
+// a static one and is not, so it cannot distinguish one session from another.
+
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+]
+
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows private rstatic
+	generates rfresh
+	ssfresh, ctfresh = KEM_ENCAP(ekb, rfresh)
+	ssstatic, ctstatic = KEM_ENCAP(ekb, rstatic)
+	efresh = AEAD_ENC(ssfresh, nil, nil)
+	estatic = AEAD_ENC(ssstatic, nil, nil)
+]
+
+Alice -> Bob: [ctfresh], [efresh], [ctstatic], [estatic]
+
+principal Bob[
+	b1 = KEM_DECAP(dkb, ctfresh)
+	b2 = KEM_DECAP(dkb, ctstatic)
+	_ = AEAD_DEC(b1, efresh, nil)?
+	_ = AEAD_DEC(b2, estatic, nil)?
+]
+
+queries[
+	freshness? ssfresh
+	freshness? ssstatic
+]

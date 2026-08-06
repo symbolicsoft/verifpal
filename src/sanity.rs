@@ -388,6 +388,45 @@ mod tests {
 		assert!(sanity_check_argument_restrictions(&bad).is_err());
 	}
 
+	fn kem_encap(ek: Value, r: Value, output: usize) -> Value {
+		make_primitive(
+			primitive_get_enum("KEM_ENCAP").unwrap(),
+			vec![ek, r],
+			output,
+		)
+	}
+
+	fn kem_decap(dk: Value, ct: Value) -> Value {
+		make_primitive(primitive_get_enum("KEM_DECAP").unwrap(), vec![dk, ct], 0)
+	}
+
+	#[test]
+	fn kem_decap_rejects_public_key_in_secret_position() {
+		let x = make_constant("krp_x");
+		let y = make_constant("krp_y");
+		let r = make_constant("krp_r");
+		let ct = kem_encap(pubkey(y), r, 1);
+		let bad = kem_decap(pubkey(x), ct);
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn kem_encap_rejects_key_exchange_as_encapsulation_key() {
+		let x = make_constant("kre_x");
+		let y = make_constant("kre_y");
+		let r = make_constant("kre_r");
+		let bad = kem_encap(dh_kex(pubkey(x), y), r, 0);
+		assert!(sanity_check_argument_restrictions(&bad).is_err());
+	}
+
+	#[test]
+	fn kem_encap_accepts_a_public_key() {
+		let x = make_constant("kra_x");
+		let r = make_constant("kra_r");
+		let good = kem_encap(pubkey(x), r, 0);
+		assert!(sanity_check_argument_restrictions(&good).is_ok());
+	}
+
 	#[test]
 	fn dh_kex_rejects_nested_key_exchange() {
 		let x = make_constant("arn_x");

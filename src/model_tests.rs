@@ -410,3 +410,55 @@ fn test_piknik_signature_not_forgeable() {
 		"c0a0a0a0f0",
 	);
 }
+#[test]
+fn test_kem_roundtrip() {
+	run_model("kem_roundtrip.vp", "c0a1");
+}
+#[test]
+fn test_kem_signed_ct() {
+	run_model("kem_signed_ct.vp", "c0a0");
+}
+#[test]
+fn test_kem_unguarded_ek() {
+	run_model("kem_unguarded_ek.vp", "c1a1");
+}
+#[test]
+fn test_kem_static_key_no_forward_secrecy() {
+	run_model("kem_static_key_no_forward_secrecy.vp", "c1c1");
+}
+#[test]
+fn test_kem_ephemeral_forward_secrecy() {
+	run_model("kem_ephemeral_forward_secrecy.vp", "c0");
+}
+#[test]
+fn test_kem_encapsulation_randomness_leak() {
+	run_model("kem_encapsulation_randomness_leak.vp", "c1c1");
+}
+#[test]
+fn test_kem_hybrid_classical_broken() {
+	run_model("kem_hybrid_classical_broken.vp", "c0");
+}
+#[test]
+fn test_kem_hybrid_pq_broken() {
+	run_model("kem_hybrid_pq_broken.vp", "c0");
+}
+#[test]
+fn test_kem_hybrid_both_broken() {
+	run_model("kem_hybrid_both_broken.vp", "c1");
+}
+#[test]
+fn test_kem_reused_randomness() {
+	run_model("kem_reused_randomness.vp", "e0e1");
+}
+#[test]
+fn test_kem_secret_not_forgeable() {
+	run_model("kem_secret_not_forgeable.vp", "c0c0");
+}
+#[test]
+fn test_kem_checked_decap() {
+	run_model("kem_checked_decap.vp", "c0a0");
+}
+#[test]
+fn test_kem_freshness() {
+	run_model("kem_freshness.vp", "f0f1");
+}
