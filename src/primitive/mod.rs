@@ -94,6 +94,17 @@ pub(crate) struct PrimitiveSpec {
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
 	pub key_derivation: bool,
+	/// Argument positions that name a participant. A successful check with the
+	/// same value in an identifying position ties its payloads to one
+	/// participant, which is what makes those payloads linkable.
+	///
+	/// Empty means the primitive reveals no identity. `RINGSIGNVERIF` is empty
+	/// deliberately: hiding which ring member signed is the entire point of a
+	/// ring signature, and leaving this empty is what stops `unlinkability?`
+	/// from reporting a false attack on it.
+	// Read by `unlink::witness_identifying_check`; the allow goes away with it.
+	#[allow(dead_code)]
+	pub identifying_positions: Vec<usize>,
 }
 
 static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {
@@ -346,6 +357,29 @@ mod tests {
 	fn pubkey_and_dh_kex_resolve_by_name() {
 		assert!(primitive_get_enum("PUBKEY").is_ok());
 		assert!(primitive_get_enum("DH_KEX").is_ok());
+	}
+
+	#[test]
+	fn identifying_positions_table() {
+		assert_eq!(
+			primitive_get(PRIM_SIGNVERIF).unwrap().identifying_positions,
+			vec![0]
+		);
+		assert_eq!(
+			primitive_get(PRIM_AEAD_DEC).unwrap().identifying_positions,
+			vec![0]
+		);
+		assert_eq!(
+			primitive_get(PRIM_KEM_DECAP).unwrap().identifying_positions,
+			vec![0]
+		);
+		// A ring names a set, never a member. Empty on purpose.
+		assert!(
+			primitive_get(PRIM_RINGSIGNVERIF)
+				.unwrap()
+				.identifying_positions
+				.is_empty()
+		);
 	}
 
 	#[test]
