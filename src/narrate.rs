@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::primitive::primitive_name;
@@ -94,18 +95,47 @@ fn reportable(sv: &SlotValues) -> bool {
 	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected
 }
 
+/// Does `v` mention any constant in `ids`?
+fn mentions(v: &Value, ids: &HashSet<u32>) -> bool {
+	match v {
+		Value::Constant(c) => ids.contains(&c.id),
+		Value::Primitive(p) => p.arguments.iter().any(|a| mentions(a, ids)),
+	}
+}
+
+fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
+	let mut ids: HashSet<u32> = ps
+		.values
+		.iter()
+		.enumerate()
+		.filter(|(_, sv)| reportable(sv))
+		.map(|(i, _)| ps.meta[i].constant.id)
+		.collect();
+	loop {
+		let before = ids.len();
+		for slot in km.slots.iter() {
+			if !ids.contains(&slot.constant.id) && mentions(&slot.initial_value, &ids) {
+				ids.insert(slot.constant.id);
+			}
+		}
+		if ids.len() == before {
+			break;
+		}
+	}
+	ps.meta
+		.iter()
+		.filter(|sm| ids.contains(&sm.constant.id))
+		.map(|sm| Arc::clone(&sm.constant.name))
+		.collect()
+}
+
 pub(crate) fn mutation_steps(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	table: &NameTable,
 ) -> Vec<Step> {
-	let mutated: Vec<&str> = ps
-		.values
-		.iter()
-		.enumerate()
-		.filter(|(_, sv)| reportable(sv))
-		.map(|(i, _)| &*ps.meta[i].constant.name)
-		.collect();
+	let shadowed = shadowed_names(km, ps);
+	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		if !reportable(sv) {
@@ -163,9 +193,16 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		}
 		let own = [&*ps.meta[i].constant.name];
 		let own = own.as_slice();
+		let primitive = table.compress_excluding(&sv.pre_rewrite, own);
+		if steps
+			.iter()
+			.any(|s| matches!(s, Step::Gate { primitive: p, .. } if *p == primitive))
+		{
+			continue;
+		}
 		steps.push(Step::Gate {
 			principal: Arc::from(ps.name.as_str()),
-			primitive: table.compress_excluding(&sv.pre_rewrite, own),
+			primitive,
 		});
 	}
 	steps
