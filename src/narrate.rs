@@ -37,6 +37,22 @@ impl NameTable {
 		self.compress_excluding(v, &[])
 	}
 
+	/// A copy of this table with `names` removed, for rendering steps in which
+	/// those names would be misleading. Used for the derivations that explain
+	/// how the attacker obtained what it injects: those run *before* the
+	/// substitution, so a name whose value the substitution caused cannot be
+	/// used to describe them.
+	pub(crate) fn without(&self, names: &[&str]) -> NameTable {
+		NameTable {
+			entries: self
+				.entries
+				.iter()
+				.filter(|(_, n)| !names.contains(&&**n))
+				.cloned()
+				.collect(),
+		}
+	}
+
 	pub(crate) fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
 		let named = self
 			.entries
@@ -222,16 +238,21 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
+/// The derivations explaining how the attacker came to hold `target`.
+///
+/// `seen` is threaded by the caller so that several walks over one narration
+/// (the injected values, then the query's target) do not each re-explain a
+/// derivation the reader has already been shown.
 pub(crate) fn derivation_steps(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	target: &Value,
 	table: &NameTable,
 	home: PrincipalId,
+	seen: &mut Vec<KnownIdx>,
 ) -> Vec<Step> {
-	let mut seen: Vec<KnownIdx> = Vec::new();
 	let mut steps: Vec<Step> = Vec::new();
-	walk(km, attacker, target, table, home, &mut seen, &mut steps);
+	walk(km, attacker, target, table, home, seen, &mut steps);
 	steps
 }
 
@@ -385,15 +406,34 @@ impl Narration {
 
 pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
-	let mut steps = mutation_steps(km, &witness.ps, &table);
+	let mut seen: Vec<KnownIdx> = Vec::new();
+	let shadowed = shadowed_names(km, &witness.ps);
+	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
+	let pre_table = table.without(&shadowed_refs);
+	let mut steps: Vec<Step> = Vec::new();
+	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
+		steps.extend(derivation_steps(
+			km,
+			&witness.attacker,
+			&sv.pre_rewrite,
+			&pre_table,
+			witness.ps.id,
+			&mut seen,
+		));
+	}
+
+	steps.extend(mutation_steps(km, &witness.ps, &table));
 	steps.extend(gate_steps(&witness.ps, &table));
+
 	steps.extend(derivation_steps(
 		km,
 		&witness.attacker,
 		target,
 		&table,
 		witness.ps.id,
+		&mut seen,
 	));
+
 	Narration {
 		trace: render(&steps),
 		table,
@@ -652,7 +692,7 @@ mod tests {
 		let attacker = ctx.attacker_snapshot();
 		let target = trace_constant(&km, "dw_m");
 		let table = NameTable::from_state(&pure);
-		let steps = derivation_steps(&km, &attacker, &target, &table, pure.id);
+		let steps = derivation_steps(&km, &attacker, &target, &table, pure.id, &mut Vec::new());
 
 		assert!(!steps.is_empty(), "the attacker learned dw_m somehow");
 		let text: Vec<String> = steps
@@ -684,6 +724,6 @@ mod tests {
 		let attacker = make_attacker_state(vec![]);
 		let unknown = make_constant("dw_absent");
 		let trace = make_trace();
-		assert!(derivation_steps(&trace, &attacker, &unknown, &table, 0).is_empty());
+		assert!(derivation_steps(&trace, &attacker, &unknown, &table, 0, &mut Vec::new()).is_empty());
 	}
 }
