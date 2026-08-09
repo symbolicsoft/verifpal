@@ -40,6 +40,7 @@ pub(crate) fn construct_protocol_trace(
 			initial_value: builtin.clone(),
 			creator: ATTACKER_ID,
 			known_by,
+			sent_by: vec![],
 			declared_at,
 			phases: vec![current_phase],
 		});
@@ -60,7 +61,7 @@ pub(crate) fn construct_protocol_trace(
 			Block::Message(message) => {
 				declared_at += 1;
 				trace.max_declared_at = declared_at;
-				construct_trace_render_message(&mut trace, message, current_phase)
+				construct_trace_render_message(&mut trace, message, current_phase, declared_at)
 					.map_err(|e| e.or_span(message.span))?;
 			}
 			Block::Phase(phase) => {
@@ -167,6 +168,7 @@ fn construct_trace_render_knows(
 			constant: new_c,
 			creator: principal.id,
 			known_by: vec![],
+			sent_by: vec![],
 			declared_at,
 			phases: vec![],
 		});
@@ -211,6 +213,7 @@ fn construct_trace_render_generates(
 			constant: new_c,
 			creator: principal.id,
 			known_by: vec![],
+			sent_by: vec![],
 			declared_at,
 			phases: vec![],
 		});
@@ -280,6 +283,7 @@ fn construct_trace_render_assignment(
 			initial_value,
 			creator: principal.id,
 			known_by: vec![],
+			sent_by: vec![],
 			declared_at,
 			phases: vec![],
 		});
@@ -331,6 +335,7 @@ fn construct_trace_render_message(
 	trace: &mut ProtocolTrace,
 	message: &Message,
 	current_phase: i32,
+	declared_at: i32,
 ) -> VResult<()> {
 	for c in &message.constants {
 		let idx = match trace.index_of(c) {
@@ -368,6 +373,7 @@ fn construct_trace_render_message(
 		trace.slots[idx]
 			.known_by
 			.push((message.recipient, message.sender));
+		trace.slots[idx].sent_by.push((message.sender, declared_at));
 		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
@@ -409,6 +415,12 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				known: knows,
 				wire: travel.map(|t| t.wire.clone()).unwrap_or_default(),
 				known_by: slot.known_by.clone(),
+				sent_at: slot
+					.sent_by
+					.iter()
+					.filter(|&&(sender, _)| sender == principal_id)
+					.map(|&(_, at)| at)
+					.min(),
 				declared_at: slot.declared_at,
 				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),
 				phase: slot.phases.clone(),

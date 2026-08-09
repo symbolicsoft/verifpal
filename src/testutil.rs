@@ -109,6 +109,7 @@ pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 		known: true,
 		wire: if creator_is_self { vec![] } else { vec![0] },
 		known_by: vec![],
+		sent_at: None,
 		declared_at: 0,
 		mutatable_to: vec![],
 		phase: vec![0],

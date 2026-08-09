@@ -283,6 +283,10 @@ fn test_auth_with_signing_false_attack() {
 	run_model("auth_with_signing_false-attack.vp", "c0a1a0");
 }
 #[test]
+fn test_halted_principal_false_attack() {
+	run_model("halted_principal_false-attack.vp", "c0");
+}
+#[test]
 fn test_hmac_verif() {
 	run_model("hmac_verif.vp", "a1a1");
 }

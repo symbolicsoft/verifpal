@@ -610,6 +610,7 @@ pub struct TraceSlot {
 	pub initial_value: Value,
 	pub creator: PrincipalId,
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
+	pub sent_by: Vec<(PrincipalId, i32)>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
 }
@@ -647,6 +648,7 @@ pub struct SlotMeta {
 	pub known: bool,
 	pub wire: Vec<PrincipalId>,
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
+	pub sent_at: Option<i32>,
 	pub declared_at: i32,
 	pub mutatable_to: Vec<PrincipalId>,
 	pub phase: Vec<i32>,
@@ -993,6 +995,7 @@ mod tests {
 			initial_value: value_nil(),
 			creator: 0,
 			known_by: vec![],
+			sent_by: vec![],
 			declared_at: 0,
 			phases: vec![0],
 		};
@@ -1012,6 +1015,7 @@ mod tests {
 			initial_value: value_nil(),
 			creator: 0,
 			known_by: vec![(1, 0)],
+			sent_by: vec![(0, 1)],
 			declared_at: 0,
 			phases: vec![0],
 		};

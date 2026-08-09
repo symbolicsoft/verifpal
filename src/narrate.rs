@@ -724,6 +724,8 @@ mod tests {
 		let attacker = make_attacker_state(vec![]);
 		let unknown = make_constant("dw_absent");
 		let trace = make_trace();
-		assert!(derivation_steps(&trace, &attacker, &unknown, &table, 0, &mut Vec::new()).is_empty());
+		assert!(
+			derivation_steps(&trace, &attacker, &unknown, &table, 0, &mut Vec::new()).is_empty()
+		);
 	}
 }
