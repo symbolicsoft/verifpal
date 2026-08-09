@@ -66,8 +66,6 @@ pub(crate) fn reexecute(
 	Ok(ps)
 }
 
-const MAX_BYPASS_ROUNDS: usize = 5;
-
 fn try_guard_bypass(
 	ps_pre: &PrincipalState,
 	ps_resolved: &PrincipalState,
@@ -96,12 +94,15 @@ fn try_guard_bypass(
 		}
 	}
 
-	for _ in 0..MAX_BYPASS_ROUNDS {
+	loop {
 		ps.resolve_all_values(attacker)?;
 		let round = ps.perform_all_rewrites();
 		let mut injected = false;
 		for (prim, idx) in &round {
-			if !prim.instance_check || ps.values[*idx].provenance.creator != ps.id {
+			if !prim.instance_check
+				|| ps.values[*idx].provenance.creator != ps.id
+				|| ps.values[*idx].provenance.bypass_injected
+			{
 				continue;
 			}
 			if primitive_extract_bypass_key(prim).is_some_and(|key| can_obtain(&key, &ps, attacker))

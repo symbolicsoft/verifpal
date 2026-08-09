@@ -230,7 +230,7 @@ Variables the solver never bound are deliberately left free, and `validate` skip
 
 ### Re-execution (reexec.rs)
 
-`reexecute` installs attacker-chosen values into a principal and runs it forward: install → resolve → rewrite → then either bypass guards the attacker can defeat (`try_guard_bypass`, `MAX_BYPASS_ROUNDS = 5`, keyed on the spec's `bypass_key`) or truncate at the checked primitive that halts the principal and set `halted_at`. Guard bypass has to work from the *pre-resolution* state, because injecting into an already-inlined state does not propagate to the slots that referenced the guard's output.
+`reexecute` installs attacker-chosen values into a principal and runs it forward: install → resolve → rewrite → then either bypass guards the attacker can defeat (`try_guard_bypass`, keyed on the spec's `bypass_key`; the bypass loop is uncapped — each round must flip a fresh `bypass_injected` flag, so it terminates structurally) or truncate at the checked primitive that halts the principal and set `halted_at`. Guard bypass has to work from the *pre-resolution* state, because injecting into an already-inlined state does not propagate to the slots that referenced the guard's output.
 
 The bypass exists because substituting `PUBKEY(nil)` for an identity key fails a signature check — but the attacker knows the private key for `PUBKEY(nil)`, so treating that as a halt would discard the whole man-in-the-middle.
 
