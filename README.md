@@ -12,7 +12,9 @@
 
 Verifpal is new software for verifying the security of cryptographic protocols. Building upon contemporary research in symbolic formal verification, Verifpal’s main aim is to appeal more to real-world practitioners, students and engineers without sacrificing comprehensive formal verification features.
 
-In order to achieve this, Verifpal introduces a new, intuitive language for modeling protocols that is much easier to write and understand than the languages employed by existing tools. At the same time, Verifpal is able to model protocols under an active attacker with unbounded sessions and fresh values, and supports queries for advanced security properties such as forward secrecy or key compromise impersonation.
+In order to achieve this, Verifpal introduces a new, intuitive language for modeling protocols that is much easier to write and understand than the languages employed by existing tools. At the same time, Verifpal models an active attacker that can read the network and tamper with any value you have not explicitly guarded, reasons about fresh values, and supports queries for advanced security properties such as forward secrecy and key compromise impersonation. Verifpal's goal-directed search solves backwards from each query, so an attack requiring several simultaneous substitutions is found without any search budget having to afford it.
+
+Verifpal analyzes each principal once per phase and iterates until attacker knowledge reaches a fixed point, which means knowledge learned while exploring one substitution stays available to the next. This is not the same as the unbounded parallel session replication offered by [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io): attacks needing two concurrently interleaved sessions whose fresh values never reach one another are outside Verifpal's reach. Attacks whose sessions communicate through attacker knowledge — including Millen's FFGG, the standard "necessarily parallel" attack — are found.
 
 Verifpal has already been used to verify security properties for Signal, Scuttlebutt, TLS 1.3, Telegram and other protocols. It is a community-focused project, and available under a GPLv3 license.
 
@@ -23,13 +25,19 @@ The Verifpal language is meant to illustrate protocols close to how one may desc
 Verifpal does not allow users to define their own cryptographic primitives. Instead, it comes with built-in cryptographic functions — this is meant to remove the potential for users to define fundamental cryptographic operations incorrectly.
 
 #### Easy to Understand Analysis Output
-When a contradiction is found for a query, the result is related in a readable format that ties the attack to a real-world scenario. This is done by using terminology to indicate how the attack could have been possible, such as through a man-in-the-middle on ephemeral keys.
+When a contradiction is found for a query, Verifpal first minimizes the attack — dropping every substitution the attack did not actually need — and then narrates what remains as numbered causal steps, in the order the attacker would have to carry them out. Each step is one of three kinds: a substitution on the wire, a checked primitive that passed on attacker-controlled input, or a derivation. Values are named using the names your own model gave them, so the trace reads in your vocabulary rather than the engine's.
+
+When an analysis is performed under declared weakening assumptions, or when the search deliberately declines to explore a branch, Verifpal says so in the output rather than leaving it implicit.
 
 #### Friendly and Integrated Software
 Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it.
 
 ## Verifpal is Beta Software
-Verifpal now benefits from a higher level of assurance due to the formalization of its syntax, semantics and analysis methodology, both by hand and using the Coq theorem prover. However, it remains classified as beta software due to its relatively young age, especially when compared to similar tools, such as [ProVerif](https://proverif.inria.fr), that have been in development for more than twenty years.
+Verifpal is sound but incomplete by design: any attack it reports should be genuine, but its search may still miss one. Soundness is enforced structurally rather than argued. Nothing in the solver can record a query result; it can only *propose* a substitution. Every proposal is materialized into a real principal state, re-executed through the ordinary analysis pipeline, and re-checked against actual attacker knowledge before anything is allowed to resolve. A bug in the solver therefore costs a missed attack and cannot manufacture a false one.
+
+Verifpal nonetheless remains beta software. A passing query means "this search found no attack", which is weaker than a proof; Verifpal does not support observational equivalence or user-defined equational theories; and the tool is young compared to [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io), which have been developed for decades. For production protocol design, cross-checking with those tools remains good practice.
+
+An earlier release shipped a Coq formalization of Verifpal's syntax, semantics and *passive* attacker analysis. That layer covered the half of the tool where little could go wrong and did not reach the active search, where every false attack in the project's history originated; it has been retired in favor of the propose-and-validate architecture described above.
 
 ## Getting Started
 
