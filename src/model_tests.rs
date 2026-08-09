@@ -471,6 +471,18 @@ fn test_needham_schroeder_pk_withfix() {
 	run_model("needham-schroeder-pk-withfix.vp", "a1a1c1c0");
 }
 #[test]
+fn test_needham_schroeder_symmetric() {
+	run_model_at(
+		"examples/transport-layer/needham-schroeder.vp",
+		"needham-schroeder.vp",
+		"c1c1a1a1a1",
+	);
+}
+#[test]
+fn test_replay_pump_reflection() {
+	run_model("replay_pump_reflection.vp", "c0a1");
+}
+#[test]
 fn test_fullresolution() {
 	run_model("fullresolution.vp", "c1c1c1c1c0");
 }

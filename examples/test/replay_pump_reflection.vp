@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Expected: c0a1
+//
+// This is the minimal self-feeding replay pump, and it exists to pin both
+// halves of the cut in `solve/validate.rs::is_self_feeding_pump`.
+//
+// One key `k` covers both directions of Bob's leg, and a growing constructor
+// (HASH) sits on the return path, so Bob's own output is a well-typed input to
+// himself one rung deeper:
+//
+//     e1 = AEAD_ENC(k, m, nil)          rung 0, honest
+//     e2 = AEAD_ENC(k, HASH(m), nil)    rung 1, what Bob echoes
+//     e2'= AEAD_ENC(k, HASH(HASH(m)), nil)   rung 2, if rung 1 is fed back
+//
+// Feeding rung n into e1 yields rung n+1, forever. This is the shape that made
+// `needham-schroeder.vp` diverge.
+//
+// `a1` — the rung-1 reflection attack MUST still be found. The attacker never
+// learns `k`, but it does not need to: `e2` is already a valid ciphertext under
+// `k`, so replaying it into `e1` makes Bob's checked AEAD_DEC succeed on a value
+// Alice never sent. The cut spares the first self-feed precisely so that this
+// class of attack survives; if this query ever starts passing, the cut has
+// become too aggressive and is eating real reflection attacks.
+//
+// `c0` — `m` stays confidential. The attacker can move ciphertexts around but
+// cannot open one, since `k` is shared privately and never leaks. If this ever
+// starts failing, the pump has been allowed to manufacture a false attack.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m
+	e1 = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e1
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, e1, nil)?
+	h = HASH(d)
+	e2 = AEAD_ENC(k, h, nil)
+]
+
+Bob -> Alice: e2
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e1
+]
