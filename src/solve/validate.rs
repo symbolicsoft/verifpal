@@ -60,6 +60,12 @@ pub(crate) fn validate(
 		return Ok(false);
 	}
 
+	for (slot, ground) in &installs {
+		if let Some(ancestor) = pump_ancestor(slot.get(), ground, &ps, attacker) {
+			ctx.lineage_record(ps.id, slot.get(), ground, &ancestor);
+		}
+	}
+
 	let governing = crate::reexec::governing_attacker(ctx, &installs, &ps, attacker);
 	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, &governing, km) else {
 		return Ok(false);
@@ -84,12 +90,16 @@ pub(crate) fn validate(
 ///
 /// It is a cycle test rather than a size test, which is what keeps the cost to
 /// completeness narrow. Rung 1 is learned from the honest run and carries no
-/// diff at `S`, so reflection attacks survive; and the lineage condition asks
+/// diff at `S`, so reflection attacks survive; and the injection condition asks
 /// "do I hold this *because* I injected into this wire", which goal-directed
 /// proposals never satisfy — a protocol that genuinely needs a deep term still
 /// gets it built from the check that demands it. Only the blind-replay route to
-/// that term is lost. Termination is Kruskal's theorem via
-/// [`homeomorphically_embeds`], not a constant.
+/// that term is lost.
+///
+/// The embedding is tested against every term previously installed at `S`, not
+/// against a single recorded ancestor. Kruskal's theorem gives *some* earlier
+/// term embedded in *some* later one; the two need not be adjacent, so a
+/// predecessor-only test does not bound the sequence.
 fn is_self_feeding_pump(
 	ctx: &VerifyContext,
 	slot: usize,
@@ -97,38 +107,32 @@ fn is_self_feeding_pump(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
-	let Some(idx) = attacker.knows(ground) else {
+	// The attacker must hold `ground` by a derivation that already substituted
+	// at this same slot of this same principal. Goal-directed constructions do
+	// not qualify: the attacker builds those because a check demands them, not
+	// because they came back off the wire.
+	let Some(immediate) = pump_ancestor(slot, ground, ps, attacker) else {
 		return false;
 	};
-	let Some(record) = attacker.record(idx) else {
-		return false;
-	};
-	// Slot indices are per-principal.
-	if record.principal_id != ps.id {
-		return false;
-	}
-	let Some(previous) = record
-		.diffs
-		.iter()
-		.find(|d| d.index.get() == slot)
-		.map(|d| &d.value)
+	// Test the whole lineage, not just the immediate ancestor. Kruskal's
+	// theorem yields *some* earlier term embedded in *some* later one, and the
+	// two need not be adjacent, so a predecessor-only test does not bound the
+	// sequence.
+	//
+	// Bare constants are excluded because the blanket substitution installs
+	// `nil`, which embeds into almost every term; the constants are interned
+	// per model and so cannot hide an infinite sequence.
+	let Some(previous) = ctx
+		.lineage_of(ps.id, slot, &immediate)
+		.into_iter()
+		.find(|u| {
+			matches!(u, Value::Primitive(_))
+				&& !u.equivalent(ground, true)
+				&& homeomorphically_embeds(u, ground)
+		})
 	else {
 		return false;
 	};
-	// A bare constant predecessor is the blanket substitution, not a pump: what
-	// came back is a genuine new observation, free to replay once. Allowing it
-	// would also gut the test, since `nil` embeds into almost every term.
-	// Constants are interned per model and so finite, so excluding them cannot
-	// hide an infinite chain.
-	if !matches!(previous, Value::Primitive(_)) {
-		return false;
-	}
-	if previous.equivalent(ground, true) {
-		return false;
-	}
-	if !homeomorphically_embeds(previous, ground) {
-		return false;
-	}
 	if ctx.note_pump_cut(ps.id, slot) {
 		let name = &ps.meta[slot].constant.name;
 		info_message(
@@ -143,6 +147,26 @@ fn is_self_feeding_pump(
 		);
 	}
 	true
+}
+
+/// The term the attacker had substituted at `slot` in the derivation that
+/// produced `ground`, if `ground` is held because of such a substitution.
+fn pump_ancestor(
+	slot: usize,
+	ground: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Value> {
+	let record = attacker.record(attacker.knows(ground)?)?;
+	// Slot indices are per-principal.
+	if record.principal_id != ps.id {
+		return None;
+	}
+	record
+		.diffs
+		.iter()
+		.find(|d| d.index.get() == slot)
+		.map(|d| d.value.clone())
 }
 
 fn phase_permits(

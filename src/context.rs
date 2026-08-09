@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -40,6 +41,7 @@ pub(crate) struct VerifyContext {
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
 	pump_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
+	installs: RwLock<HashMap<(PrincipalId, usize), Vec<Value>>>,
 }
 
 fn derivation_provenance(
@@ -145,6 +147,7 @@ impl VerifyContext {
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
 			pump_cuts: RwLock::new(HashSet::new()),
+			installs: RwLock::new(HashMap::new()),
 		}
 	}
 
@@ -152,6 +155,57 @@ impl VerifyContext {
 	/// and at every rung, and the cut is only worth reporting once.
 	pub(crate) fn note_pump_cut(&self, principal: PrincipalId, slot: usize) -> bool {
 		write_lock(&self.pump_cuts).insert((principal, slot))
+	}
+
+	/// Record that `ground` was installed at `slot` with `ancestor` as the term
+	/// the attacker had substituted there in the derivation that produced it.
+	/// The pairs form the lineage that [`lineage_of`] walks.
+	pub(crate) fn lineage_record(
+		&self,
+		principal: PrincipalId,
+		slot: usize,
+		ground: &Value,
+		ancestor: &Value,
+	) {
+		let mut installs = write_lock(&self.installs);
+		let edges = installs.entry((principal, slot)).or_default();
+		if !edges.chunks(2).any(|e| e[0].equivalent(ground, true)) {
+			edges.push(ground.clone());
+			edges.push(ancestor.clone());
+		}
+	}
+
+	/// Every term reachable from `start` by following recorded lineage edges at
+	/// this slot, `start` included.
+	pub(crate) fn lineage_of(
+		&self,
+		principal: PrincipalId,
+		slot: usize,
+		start: &Value,
+	) -> Vec<Value> {
+		let installs = read_lock(&self.installs);
+		let Some(edges) = installs.get(&(principal, slot)) else {
+			return vec![start.clone()];
+		};
+		let mut chain = vec![start.clone()];
+		let mut current = start.clone();
+		// The chain cannot exceed the number of recorded edges, which bounds
+		// the walk even if a cycle were ever recorded.
+		for _ in 0..edges.len() / 2 {
+			let Some(next) = edges
+				.chunks(2)
+				.find(|e| e[0].equivalent(&current, true))
+				.map(|e| e[1].clone())
+			else {
+				break;
+			};
+			if chain.iter().any(|u| u.equivalent(&next, true)) {
+				break;
+			}
+			chain.push(next.clone());
+			current = next;
+		}
+		chain
 	}
 
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
@@ -329,6 +383,7 @@ impl VerifyContext {
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			pump_cuts: RwLock::new(read_lock(&self.pump_cuts).clone()),
+			installs: RwLock::new(read_lock(&self.installs).clone()),
 		}
 	}
 
