@@ -58,6 +58,51 @@ fn commutative_match(p1: &Primitive, p2: &Primitive) -> bool {
 	u1.equivalent(v2, true) && u2.equivalent(v1, true)
 }
 
+/// Homeomorphic embedding: `small` is recoverable from `large` by deleting
+/// subterms. Used as a termination whistle, where it earns its keep over a
+/// depth bound by Kruskal's tree theorem — over a finite signature every
+/// infinite sequence of terms contains an earlier term embedded in a later one,
+/// so a search cut on this relation cannot run away.
+///
+/// Deliberately structural, ignoring the commutativity [`equivalent_primitives`]
+/// honours: reporting fewer embeddings costs search effort, never an attack.
+pub(crate) fn homeomorphically_embeds(small: &Value, large: &Value) -> bool {
+	embeds_at(small, large, 0)
+}
+
+const MAX_EMBED_DEPTH: usize = 64;
+
+fn embeds_at(small: &Value, large: &Value, depth: usize) -> bool {
+	if depth > MAX_EMBED_DEPTH {
+		return false;
+	}
+	// Coupling.
+	let coupled = match (small, large) {
+		(Value::Constant(a), Value::Constant(b)) => a.id == b.id,
+		(Value::Primitive(s), Value::Primitive(l)) => {
+			s.id == l.id
+				&& s.output == l.output
+				&& s.arguments.len() == l.arguments.len()
+				&& s.arguments
+					.iter()
+					.zip(l.arguments.iter())
+					.all(|(a, b)| embeds_at(a, b, depth + 1))
+		}
+		_ => false,
+	};
+	if coupled {
+		return true;
+	}
+	// Diving.
+	match large {
+		Value::Primitive(l) => l
+			.arguments
+			.iter()
+			.any(|arg| embeds_at(small, arg, depth + 1)),
+		Value::Constant(_) => false,
+	}
+}
+
 pub(crate) fn find_constant_in_trace_primitive(
 	c: &Constant,
 	value: &Value,
@@ -202,5 +247,63 @@ mod tests {
 		assert!(pm.equivalent);
 		assert_eq!(pm.output_left, 0);
 		assert_eq!(pm.output_right, 1);
+	}
+
+	fn hash_of(inner: Value) -> Value {
+		make_primitive(primitive_get_enum("HASH").unwrap(), vec![inner], 0)
+	}
+
+	fn enc(key: Value, plaintext: Value) -> Value {
+		make_primitive(primitive_get_enum("ENC").unwrap(), vec![key, plaintext], 0)
+	}
+
+	#[test]
+	fn embedding_is_reflexive() {
+		let x = make_constant("emb_x");
+		assert!(homeomorphically_embeds(&x, &x));
+		let h = hash_of(x);
+		assert!(homeomorphically_embeds(&h, &h));
+	}
+
+	#[test]
+	fn embedding_dives_into_arguments() {
+		let x = make_constant("emb_dive_x");
+		let h = hash_of(x.clone());
+		// x is recovered from HASH(x) by deleting the HASH.
+		assert!(homeomorphically_embeds(&x, &h));
+		assert!(!homeomorphically_embeds(&h, &x));
+	}
+
+	#[test]
+	fn embedding_detects_the_self_feeding_pump() {
+		// This is the exact relation the solver cuts on: rung n of a replay
+		// ladder embeds in rung n+1, for every n.
+		let k = make_constant("emb_pump_k");
+		let n = make_constant("emb_pump_n");
+		let rung1 = enc(k.clone(), hash_of(n.clone()));
+		let rung2 = enc(k.clone(), hash_of(hash_of(n.clone())));
+		let rung3 = enc(k.clone(), hash_of(hash_of(hash_of(n))));
+		assert!(homeomorphically_embeds(&rung1, &rung2));
+		assert!(homeomorphically_embeds(&rung2, &rung3));
+		assert!(homeomorphically_embeds(&rung1, &rung3));
+		// The ladder only grows one way.
+		assert!(!homeomorphically_embeds(&rung2, &rung1));
+		assert!(!homeomorphically_embeds(&rung3, &rung2));
+	}
+
+	#[test]
+	fn embedding_rejects_unrelated_terms() {
+		let k = make_constant("emb_unrel_k");
+		let m = make_constant("emb_unrel_m");
+		let other = make_constant("emb_unrel_other");
+		assert!(!homeomorphically_embeds(&enc(k.clone(), m), &enc(k, other)));
+	}
+
+	#[test]
+	fn embedding_distinguishes_multi_output_positions() {
+		let a = make_constant("emb_out_a");
+		let p1 = make_primitive(PRIM_HKDF, vec![a.clone(), a.clone(), a.clone()], 0);
+		let p2 = make_primitive(PRIM_HKDF, vec![a.clone(), a.clone(), a], 1);
+		assert!(!homeomorphically_embeds(&p1, &p2));
 	}
 }

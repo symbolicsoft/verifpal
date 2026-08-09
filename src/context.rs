@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -38,6 +39,7 @@ pub(crate) struct VerifyContext {
 	file_name: String,
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
+	pump_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 }
 
 fn derivation_provenance(
@@ -142,7 +144,14 @@ impl VerifyContext {
 			file_name: m.file_name.clone(),
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
+			pump_cuts: RwLock::new(HashSet::new()),
 		}
+	}
+
+	/// True the first time only: the search meets the same chain on every round
+	/// and at every rung, and the cut is only worth reporting once.
+	pub(crate) fn note_pump_cut(&self, principal: PrincipalId, slot: usize) -> bool {
+		write_lock(&self.pump_cuts).insert((principal, slot))
 	}
 
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
@@ -319,6 +328,7 @@ impl VerifyContext {
 			file_name: self.file_name.clone(),
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
+			pump_cuts: RwLock::new(read_lock(&self.pump_cuts).clone()),
 		}
 	}
 

@@ -3,6 +3,8 @@
 
 use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
+use crate::equivalence::homeomorphically_embeds;
+use crate::info::info_message;
 use crate::primitive::primitive_get;
 use crate::reexec::attacker_authored;
 use crate::theory::can_rewrite;
@@ -42,6 +44,9 @@ pub(crate) fn validate(
 		if contains_failed_check(&ground, &ps) {
 			return Ok(false);
 		}
+		if is_self_feeding_pump(ctx, slot, &ground, &ps, attacker) {
+			return Ok(false);
+		}
 		if !phase_permits(ctx, slot, &ground, &ps, attacker.current_phase) {
 			return Ok(false);
 		}
@@ -63,6 +68,81 @@ pub(crate) fn validate(
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)
+}
+
+/// A *self-feeding replay pump*: the attacker offers a value for slot `S` that
+/// it holds only because it already injected a strictly smaller version of that
+/// same value into that same slot, in that same principal's session.
+///
+/// This is what makes an active search diverge. Where one key covers both
+/// directions of a principal's leg and a growing constructor sits on the return
+/// path — `d = AEAD_DEC(k, e, nil)`, `h = HASH(d)`, `e' = AEAD_ENC(k, h, nil)` —
+/// the principal's own output is a well-typed input to itself, one rung deeper.
+/// Feeding it back is new knowledge, so `verify_active`'s round loop sees
+/// progress and goes again, forever. `needham-schroeder.vp` did exactly this:
+/// 213 nested `HASH`es and 132k proposals in 45s, no query resolved.
+///
+/// It is a cycle test rather than a size test, which is what keeps the cost to
+/// completeness narrow. Rung 1 is learned from the honest run and carries no
+/// diff at `S`, so reflection attacks survive; and the lineage condition asks
+/// "do I hold this *because* I injected into this wire", which goal-directed
+/// proposals never satisfy — a protocol that genuinely needs a deep term still
+/// gets it built from the check that demands it. Only the blind-replay route to
+/// that term is lost. Termination is Kruskal's theorem via
+/// [`homeomorphically_embeds`], not a constant.
+fn is_self_feeding_pump(
+	ctx: &VerifyContext,
+	slot: usize,
+	ground: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	let Some(idx) = attacker.knows(ground) else {
+		return false;
+	};
+	let Some(record) = attacker.record(idx) else {
+		return false;
+	};
+	// Slot indices are per-principal.
+	if record.principal_id != ps.id {
+		return false;
+	}
+	let Some(previous) = record
+		.diffs
+		.iter()
+		.find(|d| d.index.get() == slot)
+		.map(|d| &d.value)
+	else {
+		return false;
+	};
+	// A bare constant predecessor is the blanket substitution, not a pump: what
+	// came back is a genuine new observation, free to replay once. Allowing it
+	// would also gut the test, since `nil` embeds into almost every term.
+	// Constants are interned per model and so finite, so excluding them cannot
+	// hide an infinite chain.
+	if !matches!(previous, Value::Primitive(_)) {
+		return false;
+	}
+	if previous.equivalent(ground, true) {
+		return false;
+	}
+	if !homeomorphically_embeds(previous, ground) {
+		return false;
+	}
+	if ctx.note_pump_cut(ps.id, slot) {
+		let name = &ps.meta[slot].constant.name;
+		info_message(
+			&format!(
+				"Search cut a self-feeding replay chain at {}'s {name}: the attacker holds \
+				 {ground} only by replaying its own {previous} back into {name}. Deeper \
+				 replays of this shape were not explored.",
+				ps.name
+			),
+			InfoLevel::Info,
+			false,
+		);
+	}
+	true
 }
 
 fn phase_permits(
