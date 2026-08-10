@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0 at one session and at two.
+//
+// Replication must not manufacture cryptographic material. The secret is
+// long-term, so both sessions split the *same* value, and share_a#2 is the
+// same term as share_a rather than a second, independent share. One share
+// reaches the wire per session; two sessions of one share are still one
+// share, and SHAMIR_JOIN needs two distinct ones.
+//
+// This is the model to look at if session expansion ever starts freshening
+// something it should share, or if the attacker's knowledge set stops
+// deduplicating by equivalence: either mistake would hand the attacker a
+// second share it never received and reconstruct a secret that is safe.
+
+attacker[active]
+
+principal Alice[
+	knows private secret_s
+	share_a, share_b, share_c = SHAMIR_SPLIT(secret_s)
+]
+
+Alice -> Bob: share_a
+
+principal Bob[
+	digest_b = HASH(share_a)
+]
+
+queries[
+	confidentiality? secret_s
+]

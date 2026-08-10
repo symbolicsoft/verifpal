@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// The post-quantum shape of session_psk_cross_feed.vp. Bob's decapsulation
+// key is long-term, so every session's ciphertext decapsulates for every
+// session's Bob, and nothing in the encapsulation says which run it belongs
+// to.
+//
+// The encapsulation is signed, which is what makes this model specifically
+// about sessions. Without that signature there is a one-session attack and
+// the cross-session one never gets a chance to matter: an encapsulation key
+// is public, so the attacker can encapsulate a shared secret of its own to
+// Bob and seal whatever plaintext it likes under it. Signing (ct, e) closes
+// that, since forging the signature would need sk, which never leaks. At one
+// session the attacker is left with corruption, which fails Bob's SIGNVERIF
+// and halts him, so the query holds.
+//
+// At two sessions it does not have to forge anything. The other session's
+// (ct, e, sg) is a genuinely signed triple; relayed as a unit it passes
+// SIGNVERIF, decapsulates under the same long-term dk, and leaves Bob holding
+// m#2 while Alice holds m. Relaying only part of it desynchronizes the
+// signature or the key and merely halts him.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	apk = PUBKEY(sk)
+]
+
+principal Bob[
+	knows private dk
+	ek = PUBKEY(dk)
+]
+
+Alice -> Bob: [apk]
+Bob -> Alice: [ek]
+
+principal Alice[
+	generates r
+	ss, ct = KEM_ENCAP(ek, r)
+	generates m
+	e = AEAD_ENC(ss, m, nil)
+	sg = SIGN(sk, CONCAT(ct, e))
+]
+
+Alice -> Bob: ct, e, sg
+
+principal Bob[
+	_ = SIGNVERIF(apk, CONCAT(ct, e), sg)?
+	ss2 = KEM_DECAP(dk, ct)
+	d = AEAD_DEC(ss2, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

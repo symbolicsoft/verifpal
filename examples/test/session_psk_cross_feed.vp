@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// The minimal statement of cross-session confusion. Alice seals a message
+// under a long-term pre-shared key and nothing in the ciphertext says which
+// session it belongs to.
+//
+// At one session the attacker can only corrupt the ciphertext, which fails
+// Bob's checked AEAD_DEC and halts him. Bob then holds no plaintext at all,
+// and an aborted principal has nothing to disagree with, so the equivalence
+// query holds.
+//
+// At two sessions it holds a second ciphertext that decrypts perfectly under
+// the very same psk. Feeding it to the first session's Bob passes his check
+// and leaves him holding m#2 where Alice sent m: two honest parties, both
+// following the protocol, ending up with different messages. `m` itself is
+// never learned -- psk does not leak -- so confidentiality holds throughout.
+
+attacker[active]
+
+principal Alice[
+	knows private psk
+	generates m
+	e = AEAD_ENC(psk, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private psk
+	d = AEAD_DEC(psk, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

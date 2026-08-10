@@ -204,6 +204,114 @@ fn test_session_pke_stable_two_sessions() {
 	run_model_sessions("pke.vp", 2, "c0a0");
 }
 #[test]
+fn test_session_psk_cross_feed_one_session() {
+	run_model_sessions("session_psk_cross_feed.vp", 1, "c0e0");
+}
+#[test]
+fn test_session_psk_cross_feed() {
+	run_model("session_psk_cross_feed.vp", "c0e1");
+}
+#[test]
+fn test_session_dh_no_cross_feed_one_session() {
+	run_model_sessions("session_dh_no_cross_feed.vp", 1, "c0e0");
+}
+#[test]
+fn test_session_dh_no_cross_feed() {
+	run_model("session_dh_no_cross_feed.vp", "c0e0");
+}
+#[test]
+fn test_session_shamir_no_phantom_shares_one_session() {
+	run_model_sessions("session_shamir_no_phantom_shares.vp", 1, "c0");
+}
+#[test]
+fn test_session_shamir_no_phantom_shares() {
+	run_model("session_shamir_no_phantom_shares.vp", "c0");
+}
+#[test]
+fn test_session_mac_replay_not_attack_one_session() {
+	run_model_sessions("session_mac_replay_not_attack.vp", 1, "a0");
+}
+#[test]
+fn test_session_mac_replay_not_attack() {
+	run_model("session_mac_replay_not_attack.vp", "a0");
+}
+#[test]
+fn test_session_forward_secrecy_one_session() {
+	run_model_sessions("session_forward_secrecy.vp", 1, "c0");
+}
+#[test]
+fn test_session_forward_secrecy() {
+	run_model("session_forward_secrecy.vp", "c0");
+}
+#[test]
+fn test_session_freshness_stable_one_session() {
+	run_model_sessions("session_freshness_stable.vp", 1, "f0f1");
+}
+#[test]
+fn test_session_freshness_stable() {
+	run_model("session_freshness_stable.vp", "f0f1");
+}
+#[test]
+fn test_session_unlink_stable_one_session() {
+	run_model_sessions("session_unlink_stable.vp", 1, "u0");
+}
+#[test]
+fn test_session_unlink_stable() {
+	run_model("session_unlink_stable.vp", "u0");
+}
+#[test]
+fn test_session_signed_challenge_one_session() {
+	run_model_sessions("session_signed_challenge.vp", 1, "a0");
+}
+#[test]
+fn test_session_signed_challenge() {
+	run_model("session_signed_challenge.vp", "a0");
+}
+#[test]
+fn test_session_kem_cross_decap_one_session() {
+	run_model_sessions("session_kem_cross_decap.vp", 1, "c0e0");
+}
+#[test]
+fn test_session_kem_cross_decap() {
+	run_model("session_kem_cross_decap.vp", "c0e1");
+}
+#[test]
+fn test_session_password_no_leverage_one_session() {
+	run_model_sessions("session_password_no_leverage.vp", 1, "c0c0");
+}
+#[test]
+fn test_session_password_no_leverage() {
+	run_model("session_password_no_leverage.vp", "c0c0");
+}
+#[test]
+fn test_session_unguarded_mitm_one_session() {
+	run_model_sessions("session_unguarded_mitm.vp", 1, "c1");
+}
+#[test]
+fn test_session_unguarded_mitm() {
+	run_model("session_unguarded_mitm.vp", "c1");
+}
+#[test]
+fn test_session_three_sessions_one_session() {
+	run_model_sessions("session_three_sessions.vp", 1, "c0");
+}
+#[test]
+fn test_session_three_sessions() {
+	run_model("session_three_sessions.vp", "c0");
+}
+#[test]
+fn test_session_three_sessions_three() {
+	run_model_sessions("session_three_sessions.vp", 3, "c0");
+}
+#[test]
+fn test_equivalence_halt_at_slot_one_session() {
+	run_model_sessions("equivalence_halt_at_slot.vp", 1, "e0");
+}
+#[test]
+fn test_equivalence_halt_at_slot() {
+	run_model("equivalence_halt_at_slot.vp", "e1");
+}
+#[test]
 fn test_hmac_unchecked_assert() {
 	run_model("hmac_unchecked_assert.vp", "c0a1");
 }
@@ -664,7 +772,7 @@ fn test_four_party() {
 }
 #[test]
 fn test_phase_forward_secrecy() {
-	run_model("phase_forward_secrecy.vp", "c0a0e1");
+	run_model("phase_forward_secrecy.vp", "c0a0e0");
 }
 
 #[test]
@@ -737,7 +845,7 @@ fn test_passive_dh_chain() {
 }
 #[test]
 fn test_double_ratchet() {
-	run_model("double_ratchet.vp", "c0c0a0a0e1e1");
+	run_model("double_ratchet.vp", "c0c0a0a0e0e0");
 }
 #[test]
 fn test_many_principals() {

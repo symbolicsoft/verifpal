@@ -15,6 +15,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 | `wire_projection_replay.vp` | `a0` | projecting a wire value back onto itself is a replay |
 | `aead_replay_not_forgery.vp` | `a0c0` | a fully attacker-known ciphertext under an unreachable key is not forgeable |
 | `equivalence_halt_scope.vp` | `e0` | halting a principal is not a divergence: a state truncated at a failed check cannot answer an `equivalence?` query over slots it no longer holds |
+| `equivalence_halt_at_slot.vp` | `e0` at `--sessions 1`, `e1` at `2` | the other half of the same rule: `truncation_point` keeps the *failing* slot, still holding a decryption that did not decrypt, and comparing that is the same false attack. The `e1` at two sessions is the genuine cross-feed, not the bug returning |
 | `examples/transport-layer/piknik.vp` | `c0a0a0a0f0` | a substitution the attacker cannot build is not an attack: every value under Client1's signature stays authenticated, because forging it would need `signprivkey` (never leaked) and the confidential plaintext `m` |
 | `session_replay_not_attack.vp` | `a0` (both `--sessions 1` and `2`) | replaying another session's honestly-signed pair is non-injective agreement, not a forgery — the session-sibling replay carve-out in `query.rs`. Reporting `a1` here is a false attack |
 | `session_nonce_cross.vp` | `a0` at `--sessions 1`, `a1` at `--sessions 2` | pins that session replication finds a genuine cross-session oracle attack: session 2's responder, fed session 1's nonce, forges a MAC session 1 accepts |
@@ -27,7 +28,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 412 tests (unit + model), ~8s once built (also: make test)
+cargo test --release                   # 439 tests (unit + model), ~8s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)

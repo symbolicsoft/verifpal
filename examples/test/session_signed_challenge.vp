@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: a0 at one session and at two.
+//
+// Challenge-response with the responder's signature bound to the verifier's
+// own nonce. This is the shape that is supposed to survive replication, and
+// the model exists to show that it does for a reason rather than by accident.
+//
+// The attacker has two cross-session moves and neither pays. Handing Bob the
+// other session's signature fails SIGNVERIF, because that signature covers
+// nb#2 and this Bob is checking against nb, so Bob halts. Relaying nb into
+// the second session first -- nb is unguarded on its way to Alice#2 -- does
+// make Alice#2 sign nb, but a signature over nb under the same long-term key
+// is the identical term to the one Alice already produced, so delivering it
+// is a replay of a value indistinguishable from the honest one.
+//
+// Both routes are therefore non-attacks for different reasons: the first
+// halts, the second reduces to the honest value. Contrast
+// session_psk_cross_feed.vp, where the responder contributes nothing and the
+// same relay succeeds.
+
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	sg = SIGN(sk, nb)
+]
+
+Alice -> Bob: [pk], sg
+
+principal Bob[
+	_ = SIGNVERIF(pk, nb, sg)?
+	accepted_b = HASH(nb, sg)
+]
+
+queries[
+	authentication? Alice -> Bob: sg
+]

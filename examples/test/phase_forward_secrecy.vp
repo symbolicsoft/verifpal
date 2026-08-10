@@ -1,5 +1,18 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0a0e0
+//
+// The point of the model is the first query: the long-term keys leak in phase
+// 1, and the message still holds, because it was sealed under a key derived
+// from ephemerals that never leak. That is forward secrecy.
+//
+// The equivalence query holds too. `decrypted` is a checked AEAD_DEC, every
+// public value is guarded, and a phase-1 leak of a and b yields long-term
+// keys rather than the ephemerals, so the attacker can never produce a
+// ciphertext Bob accepts -- only corrupt the one he was sent, which halts
+// him. An aborted Bob holds no plaintext to disagree with. This read e1 until
+// `query_equivalence` learned to refuse a value whose own check failed; see
+// equivalence_halt_at_slot.vp.
 
 attacker[active]
 

@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session and at two.
+//
+// The counterpart to session_psk_cross_feed.vp, and the reason that model's
+// failure is a protocol flaw rather than an artifact of replication. Here the
+// key protecting the message is derived per session from ephemerals both
+// parties contribute, so the second session's ciphertext is sealed under a
+// key the first session's Bob never derives.
+//
+// Feeding e#2 to Bob therefore fails his checked AEAD_DEC and halts him
+// exactly as a corrupted ciphertext would, and the equivalence query holds at
+// both session counts. The public keys are guarded, so the man-in-the-middle
+// that would make the two sides derive different keys is unavailable, and no
+// checked primitive fails on the honest path for a guard bypass to exploit.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	k = DH_KEX(gb, a)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	k2 = DH_KEX(ga, b)
+	d = AEAD_DEC(k2, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

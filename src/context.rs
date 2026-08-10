@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -43,6 +43,15 @@ pub(crate) struct VerifyContext {
 	pump_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 	depth_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 	installs: RwLock<HashMap<(PrincipalId, usize), Vec<Value>>>,
+	/// Witness deferral under `--sessions`: a confirmed verdict whose witness
+	/// reproduces only because sessions share freshness is held here instead
+	/// of being recorded, so the query stays unresolved and the search keeps
+	/// looking for a witness that survives per-session freshness. The held
+	/// state is flushed through the ordinary evaluation path at end of phase
+	/// (`verify::finalize_deferred`). First confirmation per query wins.
+	deferred: RwLock<HashMap<usize, PrincipalState>>,
+	defer_enabled: AtomicBool,
+	finalizing: AtomicBool,
 }
 
 fn derivation_provenance(

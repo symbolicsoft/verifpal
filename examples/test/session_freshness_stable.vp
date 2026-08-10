@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: f0f1 at one session and at two.
+//
+// Freshness is the one query kind no attacker choice can influence: it asks
+// whether a value transitively contains a `generates` constant, and the
+// solver proposes nothing for it. Replication must therefore leave both
+// verdicts exactly where they were.
+//
+// `fresh_n` is generated, so it is fresh in every session and the query
+// holds. `stale_s` is a public constant Alice nonetheless feeds into a hash,
+// which is what the query is for, and it fails at any session count. The
+// interesting risk this pins is the other direction: per-session copies are
+// minted by session expansion rather than by the parser, so a copy that lost
+// its `fresh` flag on the way through would silently turn f0 into f1 for the
+// second session's variant.
+
+attacker[active]
+
+principal Alice[
+	knows public stale_s
+	generates fresh_n
+	digest_a = HASH(fresh_n)
+	digest_b = HASH(stale_s)
+]
+
+Alice -> Bob: digest_a, digest_b
+
+principal Bob[
+	digest_c = HASH(digest_a, digest_b)
+]
+
+queries[
+	freshness? fresh_n
+	freshness? stale_s
+]

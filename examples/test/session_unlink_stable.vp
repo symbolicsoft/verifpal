@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: u0 at one session and at two.
+//
+// Two pseudonyms derived from one long-term seed and two per-session
+// randomizers. They do share a secret origin, but the attacker never holds
+// that seed, and `origin_leaves` only reports a link when the common ancestor
+// is a secret the attacker can actually reach. So the query holds.
+//
+// What this pins is that replication does not manufacture a link witness.
+// Doubling the principals doubles the observable pseudonyms and hands the
+// witness search a much larger field to find a coincidence in, and the
+// unlinkability decision procedure is the one most able to mistake structural
+// similarity for a link. Two sessions of a role are two *different* people as
+// far as this query is concerned; nothing about seeing more of them should
+// make the first session's two pseudonyms linkable to each other.
+
+attacker[active]
+
+principal Alice[
+	knows private seed_k
+	generates rand_a
+	generates rand_b
+	pseudo_a = HASH(seed_k, rand_a)
+	pseudo_b = HASH(seed_k, rand_b)
+]
+
+Alice -> Bob: pseudo_a, pseudo_b, rand_a, rand_b
+
+principal Bob[
+	digest_v = HASH(pseudo_a, pseudo_b)
+]
+
+queries[
+	unlinkability? pseudo_a, pseudo_b
+]

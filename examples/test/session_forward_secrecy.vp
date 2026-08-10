@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0 at one session and at two.
+//
+// Phases and sessions crossing. A phase block is not replicated -- both
+// sessions live inside the same phase structure -- so the long-term key
+// leaked in phase 1 is leaked for every session at once. That is the honest
+// reading: one compromise of one identity key, not one per session.
+//
+// The message is protected by an ephemeral Diffie-Hellman key instead, and
+// ephemerals are per-session, so neither session's traffic falls to the
+// leak. Confidentiality holds. If session expansion ever shared `a` between
+// sessions, or if the phase-1 leak were duplicated into a phase the sessions
+// disagreed about, this query would start failing.
+
+attacker[active]
+
+principal Alice[
+	knows private ltk
+	ltpk = PUBKEY(ltk)
+	generates a
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ltpk], [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	k = DH_KEX(gb, a)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	k2 = DH_KEX(ga, b)
+	d = AEAD_DEC(k2, e, nil)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks ltk
+]
+
+queries[
+	confidentiality? m
+]

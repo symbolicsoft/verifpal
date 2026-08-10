@@ -225,15 +225,6 @@ fn query_authentication_get_pass_indices(
 	Ok((indices, sender, c))
 }
 
-/// A received value equivalent to the honest wire value of a session sibling
-/// of `c` is a cross-session replay of something the declared sender honestly
-/// sent: non-injective agreement holds, exactly as under the same-session
-/// replay rule above. Only the authentication verdict treats it as a replay —
-/// `reexec::attacker_authored` stays session-strict, because routing another
-/// session's value here changes what this principal computes downstream and
-/// must remain explorable as a stepping stone. The comparison mirrors
-/// `attacker_authored` (trace resolution, one rewrite reduction) so the two
-/// judgments cannot drift apart.
 fn session_sibling_replay(
 	c: &Constant,
 	used: &Value,
@@ -358,6 +349,13 @@ fn query_unlinkability(
 	Ok(result)
 }
 
+fn value_check_failed(v: &Value, ps: &PrincipalState) -> bool {
+	match v {
+		Value::Primitive(p) => p.instance_check && !can_rewrite(p, ps).0,
+		Value::Constant(_) => false,
+	}
+}
+
 fn query_equivalence(
 	ctx: &VerifyContext,
 	query: &Query,
@@ -370,7 +368,7 @@ fn query_equivalence(
 	let mut values: Vec<Value> = Vec::with_capacity(query.constants.len());
 	for c in &query.constants {
 		let (value, slot) = ps.resolve_constant(c, false);
-		if slot.is_none() {
+		if slot.is_none() || value_check_failed(&value, ps) {
 			return Ok(result);
 		}
 		values.push(value);

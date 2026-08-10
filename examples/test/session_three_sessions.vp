@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0 at one session, at two, and at three.
+//
+// Alice runs a guarded Diffie-Hellman with each of two peers and sends the
+// same message under each derived key. Every public value is guarded and no
+// checked primitive fails on the honest path, so there is no man-in-the-middle
+// and no guard bypass: the message stays confidential at any session count.
+//
+// The protocol is deliberately unremarkable, because the model's job is
+// mechanical rather than cryptographic. Per-session identifiers are minted in
+// bands of a reserved id range, one band per session, so a third session is
+// the first to use band 1 rather than band 0 and the first to show that the
+// banding arithmetic generalizes past the case the default exercises. Three
+// sessions of three principals also puts nine principals in front of the
+// analysis, and a message reaching the wrong session's recipient -- the shape
+// a mistake in principal-id remapping would take -- would show up here as a
+// key agreed with the wrong peer.
+//
+// The verdict is expected to be flat across all three counts. That flatness is
+// the assertion: raising k widens the search without changing its shape.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+principal Charlie[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Alice -> Charlie: [ga]
+Charlie -> Alice: [gc]
+
+principal Alice[
+	kb = DH_KEX(gb, a)
+	kc = DH_KEX(gc, a)
+	eb = AEAD_ENC(kb, m, nil)
+	ec = AEAD_ENC(kc, m, nil)
+]
+
+Alice -> Bob: eb
+Alice -> Charlie: ec
+
+principal Bob[
+	kb2 = DH_KEX(ga, b)
+	db = AEAD_DEC(kb2, eb, nil)?
+]
+
+principal Charlie[
+	kc2 = DH_KEX(ga, c)
+	dc = AEAD_DEC(kc2, ec, nil)?
+]
+
+queries[
+	confidentiality? m
+]

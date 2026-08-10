@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c1 at one session and at two.
+//
+// The plainest attack in the tool's repertoire -- an unauthenticated
+// Diffie-Hellman exchange, where the attacker substitutes its own public key
+// in both directions and reads everything -- checked under replication.
+//
+// It exists to catch the failure nobody thinks to test for: that session
+// expansion, by doubling the principals and the wire slots, somehow *loses*
+// an attack the single-session analysis found. Replication only ever adds
+// principals and messages, so a mutation available before is available still;
+// this model is the assertion that it is. Contrast
+// session_dh_no_cross_feed.vp, the same protocol with the keys guarded.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	k = DH_KEX(gb, a)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	k2 = DH_KEX(ga, b)
+	d = AEAD_DEC(k2, e, nil)?
+]
+
+queries[
+	confidentiality? m
+]

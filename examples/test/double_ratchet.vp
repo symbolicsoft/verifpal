@@ -1,5 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0a0a0e0e0
+//
+// Every Diffie-Hellman input is guarded and no identity key leaks, so the
+// attacker cannot derive a ratchet key and cannot build a ciphertext either
+// side would accept. The messages stay confidential and authentic.
+//
+// Both equivalence queries hold for the same reason. Their right-hand sides,
+// msg1_b and msg2_a, are checked AEAD_DEC applications: the only thing the
+// attacker can do to e1 or e2 is corrupt them, which fails that check and
+// halts the recipient. A halted recipient obtained no plaintext, and an abort
+// is not a disagreement. These read e1e1 until `query_equivalence` learned to
+// refuse a value whose own check failed -- see equivalence_halt_at_slot.vp.
 
 attacker[active]
 

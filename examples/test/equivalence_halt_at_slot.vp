@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: e0 at one session, e1 at two.
+//
+// The companion to equivalence_halt_scope.vp, covering the case that model
+// misses. There, the principal halted at a check declared *before* the
+// queried value, so the queried slot was truncated away and the query had
+// nothing to read. Here the principal halts *at* the queried value itself:
+// `d` is the checked AEAD_DEC that fails.
+//
+// `reexec::truncation_point` truncates to the failing index plus one, so the
+// failing slot survives, still holding its unreduced primitive. Comparing
+// that against `m` reports a divergence -- but Bob aborted. He obtained no
+// plaintext, and a principal that aborted has nothing to disagree with, which
+// is the same principle equivalence_halt_scope.vp pins from the other side.
+//
+// The distinction between the two models is entirely an artifact of where
+// truncation happens to cut, and neither is a divergence, so both hold at one
+// session. The only thing the attacker achieves there is denial of service:
+// `k` never leaks, so no ciphertext it can build decrypts.
+//
+// At two sessions the query fails, and that failure is real rather than the
+// same mistake returning. `k` is long-term, so the other session's ciphertext
+// decrypts perfectly here: Bob's check passes and he ends up holding m#2 while
+// Alice holds m. The contrast between the two codes is what makes this model
+// worth keeping -- an aborted decryption is not a disagreement, and a
+// successful decryption of the wrong session's message is.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, e, nil)?
+]
+
+queries[
+	equivalence? m, d
+]
