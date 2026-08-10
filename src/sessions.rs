@@ -35,7 +35,7 @@
 //! session resolves it. Variants that map to themselves (all-shared
 //! constants, no principals) are dropped.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::info::info_message;
@@ -67,7 +67,7 @@ pub(crate) const DEFAULT_SESSIONS: u8 = 2;
 pub(crate) struct SessionExpansion {
 	pub(crate) model: Model,
 	pub(crate) query_variants: Vec<Vec<Query>>,
-	pub(crate) siblings: HashMap<ValueId, Arc<Vec<ValueId>>>,
+	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 }
 
 fn session_value_id(base: ValueId, s: u8) -> ValueId {
@@ -130,7 +130,7 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		query_variants.push(variants);
 	}
 
-	let mut siblings: HashMap<ValueId, Arc<Vec<ValueId>>> = HashMap::new();
+	let mut siblings: IdMap<ValueId, Arc<Vec<ValueId>>> = IdMap::default();
 	for &base in &freshen {
 		let mut group = Vec::with_capacity(sessions as usize);
 		group.push(base);
@@ -196,8 +196,8 @@ fn declared_principals(m: &Model) -> Vec<(PrincipalId, String)> {
 /// constants and assignment outputs. These are the per-session values;
 /// everything else (`knows`, and by extension whatever `leaks` or messages
 /// mention of it) is long-term and shared.
-fn freshened_constants(m: &Model) -> HashSet<ValueId> {
-	let mut out = HashSet::new();
+fn freshened_constants(m: &Model) -> IdSet<ValueId> {
+	let mut out = IdSet::default();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
 			continue;
@@ -230,7 +230,7 @@ fn clone_principal_ids(
 	Ok(out)
 }
 
-fn map_constant(c: &Constant, s: u8, freshen: &HashSet<ValueId>) -> Constant {
+fn map_constant(c: &Constant, s: u8, freshen: &IdSet<ValueId>) -> Constant {
 	if !freshen.contains(&c.id) {
 		return c.clone();
 	}
@@ -241,7 +241,7 @@ fn map_constant(c: &Constant, s: u8, freshen: &HashSet<ValueId>) -> Constant {
 	}
 }
 
-fn map_value(v: &Value, s: u8, freshen: &HashSet<ValueId>) -> Value {
+fn map_value(v: &Value, s: u8, freshen: &IdSet<ValueId>) -> Value {
 	match v {
 		Value::Constant(c) => Value::Constant(map_constant(c, s, freshen)),
 		Value::Primitive(p) => {
@@ -258,7 +258,7 @@ fn map_value(v: &Value, s: u8, freshen: &HashSet<ValueId>) -> Value {
 fn clone_principal(
 	p: &Principal,
 	s: u8,
-	freshen: &HashSet<ValueId>,
+	freshen: &IdSet<ValueId>,
 	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
 ) -> Principal {
 	let (id, name) = pids
@@ -296,7 +296,7 @@ fn clone_principal(
 fn clone_message(
 	msg: &Message,
 	s: u8,
-	freshen: &HashSet<ValueId>,
+	freshen: &IdSet<ValueId>,
 	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
 ) -> Message {
 	let (sender, sender_name) = pids
@@ -326,7 +326,7 @@ fn clone_message(
 fn clone_query(
 	q: &Query,
 	s: u8,
-	freshen: &HashSet<ValueId>,
+	freshen: &IdSet<ValueId>,
 	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
 ) -> Query {
 	Query {

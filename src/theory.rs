@@ -2,49 +2,68 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::equivalence::equivalent_primitives;
 use crate::primitive::*;
 use crate::types::*;
 
-type RewriteCache = HashMap<u64, Vec<(Primitive, (bool, Value))>>;
+type RewriteCache = IdMap<u64, Vec<(Arc<Primitive>, (bool, Value))>>;
 
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
-	entries: HashMap<u64, Vec<(Value, bool)>>,
+	entries: IdMap<u64, Vec<(Value, bool)>>,
+	index: Arc<StateIndex>,
+}
+
+pub(crate) struct StateIndex {
 	has_passwords: bool,
-	slots_by_hash: HashMap<u64, Vec<usize>>,
+	slots_by_hash: IdMap<u64, Vec<usize>>,
+}
+
+impl StateIndex {
+	pub(crate) fn of(ps: &PrincipalState) -> Arc<Self> {
+		Arc::new(StateIndex {
+			has_passwords: scan_for_passwords(ps),
+			slots_by_hash: index_slots_by_hash(ps),
+		})
+	}
 }
 
 pub(crate) fn slots_equivalent_to(ps: &PrincipalState, value: &Value) -> Vec<usize> {
 	let hash = value.hash_value();
-	let indexed: Option<Vec<usize>> = MEMO.with(|m| {
+	let indexed = MEMO.with(|m| {
 		let borrowed = m.borrow();
 		let memo = borrowed.as_ref()?;
 		if !std::ptr::eq(memo.owner.0, ps) {
 			return None;
 		}
-		Some(memo.slots_by_hash.get(&hash).cloned().unwrap_or_default())
+		Some(
+			memo.index
+				.slots_by_hash
+				.get(&hash)
+				.map(|candidates| {
+					candidates
+						.iter()
+						.copied()
+						.filter(|&i| value.equivalent(&ps.values[i].value, true))
+						.collect()
+				})
+				.unwrap_or_default(),
+		)
 	});
-	match indexed {
-		Some(candidates) => candidates
-			.into_iter()
-			.filter(|&i| value.equivalent(&ps.values[i].value, true))
-			.collect(),
-		None => ps
-			.values
+	indexed.unwrap_or_else(|| {
+		ps.values
 			.iter()
 			.enumerate()
 			.filter(|(_, sv)| value.equivalent(&sv.value, true))
 			.map(|(i, _)| i)
-			.collect(),
-	}
+			.collect()
+	})
 }
 
-fn index_slots_by_hash(ps: &PrincipalState) -> HashMap<u64, Vec<usize>> {
-	let mut index: HashMap<u64, Vec<usize>> = HashMap::new();
+fn index_slots_by_hash(ps: &PrincipalState) -> IdMap<u64, Vec<usize>> {
+	let mut index: IdMap<u64, Vec<usize>> = IdMap::default();
 	for (i, sv) in ps.values.iter().enumerate() {
 		index.entry(sv.value.hash_value()).or_default().push(i);
 	}
@@ -56,7 +75,7 @@ pub(crate) fn state_declares_passwords(ps: &PrincipalState) -> bool {
 		if let Some(memo) = m.borrow().as_ref()
 			&& std::ptr::eq(memo.owner.0, ps)
 		{
-			return Some(memo.has_passwords);
+			return Some(memo.index.has_passwords);
 		}
 		None
 	})
@@ -72,7 +91,7 @@ fn scan_for_passwords(ps: &PrincipalState) -> bool {
 		)
 }
 
-fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
+pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
 	x.id == y.id
 		&& x.output == y.output
 		&& x.instance_check == y.instance_check
@@ -95,29 +114,31 @@ fn structurally_identical(a: &Value, b: &Value) -> bool {
 
 thread_local! {
 	static MEMO: RefCell<Option<ObtainableMemo>> = const { RefCell::new(None) };
-	static REWRITE_CACHE: RefCell<RewriteCache> = RefCell::new(HashMap::new());
+	static REWRITE_CACHE: RefCell<RewriteCache> = RefCell::new(IdMap::default());
 }
 
 pub(crate) fn rewrite_cache_reset() {
 	REWRITE_CACHE.with(|c| c.borrow_mut().clear());
 }
 
-fn rewrite_cache_get(key: u64, p: &Primitive) -> Option<(bool, Value)> {
+fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
 	REWRITE_CACHE.with(|c| {
 		c.borrow()
 			.get(&key)?
 			.iter()
-			.find(|(candidate, _)| structurally_identical_primitive(candidate, p))
+			.find(|(candidate, _)| {
+				Arc::ptr_eq(candidate, p) || structurally_identical_primitive(candidate, p)
+			})
 			.map(|(_, hit)| hit.clone())
 	})
 }
 
-fn rewrite_cache_put(key: u64, p: &Primitive, result: &(bool, Value)) {
+fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
 	REWRITE_CACHE.with(|c| {
 		c.borrow_mut()
 			.entry(key)
 			.or_default()
-			.push((p.clone(), result.clone()));
+			.push((Arc::clone(p), result.clone()));
 	});
 }
 
@@ -126,12 +147,15 @@ pub(crate) struct DeductionMemo {
 }
 
 impl DeductionMemo {
-	pub(crate) fn scoped(ps: &PrincipalState, attacker: &AttackerState) -> Self {
+	pub(crate) fn scoped(
+		ps: &PrincipalState,
+		attacker: &AttackerState,
+		index: &Arc<StateIndex>,
+	) -> Self {
 		let installed = ObtainableMemo {
 			owner: (ps as *const _, attacker as *const _),
-			entries: HashMap::new(),
-			has_passwords: scan_for_passwords(ps),
-			slots_by_hash: index_slots_by_hash(ps),
+			entries: IdMap::default(),
+			index: Arc::clone(index),
 		};
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
@@ -299,9 +323,9 @@ fn obtainable_by_output_projection(
 	(0..outputs.max(0) as usize)
 		.filter(|&j| j != p.output)
 		.any(|j| {
-			let sibling = p.with_output(j);
+			let sibling = Arc::new(p.with_output(j));
 			attacker
-				.knows(&Value::Primitive(Arc::new(sibling.clone())))
+				.knows(&Value::Primitive(Arc::clone(&sibling)))
 				.is_some() && can_decompose(&sibling, ps, attacker).is_some()
 		})
 }
@@ -346,22 +370,22 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 }
 
 pub(crate) fn can_reconstruct_primitive(
-	p: &Primitive,
+	p: &Arc<Primitive>,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
 	can_reconstruct_primitive_directly(p, ps, attacker).or_else(|| {
-		let swapped = commutativity_swap(p)?;
+		let swapped = Arc::new(commutativity_swap(p)?);
 		can_reconstruct_primitive_directly(&swapped, ps, attacker)
 	})
 }
 
 fn can_reconstruct_primitive_directly(
-	p: &Primitive,
+	p: &Arc<Primitive>,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
-	let (rewritten, rewrite_value) = can_rewrite(p, ps);
+	let (rewritten, rewrite_value) = can_rewrite(p);
 	if !rewritten {
 		return None;
 	}
@@ -397,69 +421,71 @@ fn can_reconstruct_primitive_directly(
 	})
 }
 
-pub(crate) fn reduce_once(v: &Value, ps: &PrincipalState) -> Value {
+pub(crate) fn reduce_once(v: &Value) -> Value {
 	match v {
-		Value::Primitive(p) => can_rewrite(p, ps).1,
+		Value::Primitive(p) => can_rewrite(p).1,
 		Value::Constant(_) => v.clone(),
 	}
 }
 
-pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState) -> (bool, Value) {
+pub(crate) fn can_rewrite(p: &Arc<Primitive>) -> (bool, Value) {
 	let key = crate::hashing::primitive_hash(p);
 	if let Some(hit) = rewrite_cache_get(key, p) {
 		return hit;
 	}
-	let result = can_rewrite_uncached(p, ps);
+	let result = can_rewrite_uncached(p);
 	rewrite_cache_put(key, p, &result);
 	result
 }
 
-fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState) -> (bool, Value) {
-	let reduced = p.map_arguments(|a| match a {
-		Value::Primitive(inner_p) => {
-			let (_, replacement) = can_rewrite(inner_p, ps);
-			(!replacement.equivalent(a, true)).then_some(replacement)
-		}
-		_ => None,
-	});
-	let pc_ref: &Primitive = reduced.as_ref().unwrap_or(p);
-	let wrap = |pr: &Primitive| Value::Primitive(Arc::new(pr.clone()));
-	if primitive_is_core(pc_ref.id) {
-		let prim = match primitive_core_get(pc_ref.id) {
+fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
+	let reduced = p
+		.map_arguments(|a| match a {
+			Value::Primitive(inner_p) => {
+				let (_, replacement) = can_rewrite(inner_p);
+				(!replacement.equivalent(a, true)).then_some(replacement)
+			}
+			_ => None,
+		})
+		.map(Arc::new);
+	let pc: &Arc<Primitive> = reduced.as_ref().unwrap_or(p);
+	let wrap = || Value::Primitive(Arc::clone(pc));
+	if primitive_is_core(pc.id) {
+		let prim = match primitive_core_get(pc.id) {
 			Ok(s) => s,
-			Err(_) => return (false, wrap(pc_ref)),
+			Err(_) => return (false, wrap()),
 		};
 		if prim.has_rule
 			&& let Some(rule) = prim.core_rule
 		{
-			return rule(pc_ref);
+			return rule(pc);
 		}
-		return (!prim.definition_check, wrap(pc_ref));
+		return (!prim.definition_check, wrap());
 	}
-	let prim = match primitive_get(pc_ref.id) {
+	let prim = match primitive_get(pc.id) {
 		Ok(s) => s,
-		Err(_) => return (false, wrap(pc_ref)),
+		Err(_) => return (false, wrap()),
 	};
 	if !prim.rewrite.has_rule {
-		return (true, wrap(pc_ref));
+		return (true, wrap());
 	}
-	let from = &pc_ref.arguments[prim.rewrite.from];
+	let from = &pc.arguments[prim.rewrite.from];
 	if let Value::Primitive(from_p) = from {
 		if from_p.id != prim.rewrite.id {
-			return (!prim.definition_check, wrap(pc_ref));
+			return (!prim.definition_check, wrap());
 		}
-		if !can_rewrite_primitive(pc_ref, ps) {
-			return (!prim.definition_check, wrap(pc_ref));
+		if !can_rewrite_primitive(pc) {
+			return (!prim.definition_check, wrap());
 		}
 		if let Some(to_fn) = prim.rewrite.to {
 			let rewrite = to_fn(from_p);
 			return (true, rewrite);
 		}
 	}
-	(!prim.definition_check, wrap(pc_ref))
+	(!prim.definition_check, wrap())
 }
 
-fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState) -> bool {
+fn can_rewrite_primitive(p: &Primitive) -> bool {
 	let Ok(prim) = primitive_get(p.id) else {
 		return false;
 	};
@@ -485,7 +511,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState) -> bool {
 			for item in &mut ax {
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
-						let (r, v) = can_rewrite(inner_p, ps);
+						let (r, v) = can_rewrite(inner_p);
 						if r { Some(v) } else { None }
 					}
 					_ => None,
@@ -554,30 +580,39 @@ pub(crate) fn find_obtainable_passwords(
 	ps: &PrincipalState,
 	out: &mut Vec<Value>,
 ) {
+	if protected || !can_verify {
+		return;
+	}
 	match a {
 		Value::Constant(c) => {
 			let (resolved, _) = ps.resolve_constant(c, true);
-			let is_password = matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password));
-			if is_password && !protected && can_verify {
+			if matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password))
+			{
 				out.push(resolved);
 			}
 		}
 		Value::Primitive(p) => {
-			let is_core = primitive_is_core(p.id);
-			let known: Vec<bool> = p
+			let arity = p.arguments.len();
+			let known_count = p
 				.arguments
 				.iter()
-				.map(|arg| attacker.knows(arg).is_some())
-				.collect();
-			let known_count = known.iter().filter(|k| **k).count();
+				.filter(|arg| attacker.knows(arg).is_some())
+				.count();
+			if known_count + 1 < arity {
+				return;
+			}
+			let hashing: &[usize] = if primitive_is_core(p.id) {
+				&[]
+			} else {
+				primitive_get(p.id).map_or(&[][..], |prim| prim.password_hashing.as_slice())
+			};
 			for (i, arg) in p.arguments.iter().enumerate() {
-				let inherently_protected = !is_core
-					&& primitive_get(p.id).is_ok_and(|prim| prim.password_hashing.contains(&i));
-				let siblings_known = known_count == known.len() - usize::from(!known[i]);
+				let siblings_known = known_count == arity
+					|| (known_count + 1 == arity && attacker.knows(arg).is_none());
 				find_obtainable_passwords(
 					arg,
-					protected || inherently_protected,
-					can_verify && siblings_known,
+					hashing.contains(&i),
+					siblings_known,
 					attacker,
 					ps,
 					out,
@@ -661,17 +696,6 @@ mod tests {
 		let a = make_constant("cr_a");
 		let b = make_constant("cr_b");
 		let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
-		let c_dummy = Constant {
-			name: Arc::from("cr_dummy"),
-			id: test_value_id("cr_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
 		for (output, expected) in [(0, a), (1, b), (2, value_nil())] {
 			let split = Primitive {
 				id: PRIM_SPLIT,
@@ -681,7 +705,7 @@ mod tests {
 				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			};
-			let (rewritten, value) = can_rewrite(&split, &ps);
+			let (rewritten, value) = can_rewrite(&Arc::new(split));
 			assert!(rewritten);
 			assert!(value.equivalent(&expected, true));
 		}
@@ -704,18 +728,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("crpk_dummy"),
-			id: test_value_id("crpk_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
-		let (rewritten, value) = can_rewrite(&dec, &ps);
+		let (rewritten, value) = can_rewrite(&Arc::new(dec));
 		assert!(rewritten);
 		assert!(value.equivalent(&m, true));
 	}
@@ -747,7 +760,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![b]);
-		assert!(can_reconstruct_primitive(&proj, &ps, &attacker).is_some());
+		assert!(can_reconstruct_primitive(&Arc::new(proj), &ps, &attacker).is_some());
 	}
 
 	#[test]
@@ -761,18 +774,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("cra_dummy"),
-			id: test_value_id("cra_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
-		let (rewritten, _) = can_rewrite(&assert_prim, &ps);
+		let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
 		assert!(rewritten);
 	}
 
@@ -788,18 +790,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("cram_dummy"),
-			id: test_value_id("cram_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
-		let (rewritten, _) = can_rewrite(&assert_prim, &ps);
+		let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
 		assert!(!rewritten);
 	}
 
@@ -910,18 +901,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("kr_dummy"),
-			id: test_value_id("kr_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
-		let (rewritten, value) = can_rewrite(&decap, &ps);
+		let (rewritten, value) = can_rewrite(&Arc::new(decap));
 		assert!(rewritten);
 		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
 		assert!(value.equivalent(&expected, true));
@@ -942,18 +922,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("kw_dummy"),
-			id: test_value_id("kw_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
-		let (rewritten, _) = can_rewrite(&decap, &ps);
+		let (rewritten, _) = can_rewrite(&Arc::new(decap));
 		assert!(!rewritten);
 	}
 

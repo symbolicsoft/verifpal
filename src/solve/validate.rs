@@ -51,7 +51,7 @@ pub(crate) fn validate(
 			note_depth_cut(ctx, slot, &ground, &ps, guards.bound);
 			return Ok(false);
 		}
-		if contains_failed_check(&ground, &ps) {
+		if contains_failed_check(&ground) {
 			return Ok(false);
 		}
 		if !attacker_can_derive(ctx, slot, &ground, &ps, attacker) {
@@ -185,16 +185,16 @@ fn forgeable_secret_position(
 		.forgeable_secret_position(p, snapshot.current_phase)
 }
 
-fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {
+fn contains_failed_check(v: &Value) -> bool {
 	match v {
 		Value::Primitive(p) => {
 			if p.instance_check
 				&& primitive_get(p.id).is_ok_and(|spec| spec.rewrite.has_rule)
-				&& !can_rewrite(p, ps).0
+				&& !can_rewrite(p).0
 			{
 				return true;
 			}
-			p.arguments.iter().any(|a| contains_failed_check(a, ps))
+			p.arguments.iter().any(contains_failed_check)
 		}
 		Value::Constant(_) => false,
 	}

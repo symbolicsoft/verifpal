@@ -47,11 +47,12 @@ pub(crate) fn compute_knowledge_closure(
 	ps: &PrincipalState,
 ) -> VResult<()> {
 	let record = compute_slot_diffs(ps, km, ctx.attacker_snapshot().current_phase);
+	let index = crate::theory::StateIndex::of(ps);
 
 	loop {
 		let attacker = ctx.attacker_snapshot();
 
-		if !try_deduction_step(ctx, &attacker, ps, &record) {
+		if !try_deduction_step(ctx, &attacker, ps, &record, &index) {
 			ctx.analysis_count_increment();
 			return Ok(());
 		}
@@ -63,8 +64,9 @@ fn try_deduction_step(
 	attacker: &AttackerState,
 	ps: &PrincipalState,
 	record: &Arc<MutationRecord>,
+	index: &Arc<crate::theory::StateIndex>,
 ) -> bool {
-	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker);
+	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker, index);
 	let mut progress = false;
 	for group in DEDUCTION_RULES {
 		match group.domain {
@@ -397,8 +399,7 @@ mod tests {
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
 		let ctx = VerifyContext::new(&m, &states, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
-		pure.resolve_all_values(&ctx.attacker_snapshot())
-			.expect("resolve");
+		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
 		crate::verify::verify_standard_run(&ctx, &km, &states).expect("run");
 

@@ -4,54 +4,54 @@
 use std::sync::Arc;
 
 use crate::types::*;
-use crate::value::{find_equivalent, push_unique_value};
 
 pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
-	resolve_trace_values(&Value::Constant(c.clone()), trace).0
+	let value = Value::Constant(c.clone());
+	resolve_trace_value(&value, trace).unwrap_or(value)
 }
 
-pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
-	let mut visited: Vec<Value> = Vec::new();
-	let resolved = resolve_trace_value(value, trace, &mut visited);
-	(resolved, visited)
+pub(crate) fn resolve_trace_term(value: &Value, trace: &ProtocolTrace) -> Value {
+	resolve_trace_value(value, trace).unwrap_or_else(|| value.clone())
 }
 
-fn resolve_trace_value(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>) -> Value {
-	let resolved = match value {
-		Value::Constant(c) => {
-			visited.push(value.clone());
-			match trace.index_of(c) {
-				Some(idx) => trace.slots[idx].initial_value.clone(),
-				None => value.clone(),
-			}
-		}
-		_ => value.clone(),
+fn resolve_trace_value(value: &Value, trace: &ProtocolTrace) -> Option<Value> {
+	let Value::Constant(c) = value else {
+		return resolve_trace_primitive(value, trace);
 	};
-	match &resolved {
-		Value::Constant(_) => {
-			push_unique_value(visited, resolved.clone());
-			resolved
+	let idx = trace.index_of(c)?;
+	let resolved = &trace.slots[idx].initial_value;
+	match resolved {
+		Value::Constant(rc) => (rc.id != c.id).then(|| resolved.clone()),
+		Value::Primitive(_) => {
+			Some(resolve_trace_primitive(resolved, trace).unwrap_or_else(|| resolved.clone()))
 		}
-		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, visited),
 	}
 }
 
-fn resolve_trace_primitive(
-	value: &Value,
-	trace: &ProtocolTrace,
-	visited: &mut Vec<Value>,
-) -> Value {
-	let prim = match value.as_primitive() {
-		Some(p) => p,
-		None => return value.clone(),
-	};
-	let mapped = prim.map_arguments(|arg| {
-		let resolved = resolve_trace_value(arg, trace, visited);
-		(!resolved.equivalent(arg, true)).then_some(resolved)
-	});
-	match mapped {
-		Some(mapped) => Value::Primitive(Arc::new(mapped)),
-		None => value.clone(),
+fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace) -> Option<Value> {
+	let prim = value.as_primitive()?;
+	prim.map_arguments(|arg| resolve_trace_value(arg, trace))
+		.map(|mapped| Value::Primitive(Arc::new(mapped)))
+}
+
+pub(crate) fn trace_mentions(value: &Value, trace: &ProtocolTrace, target: ValueId) -> bool {
+	match value {
+		Value::Constant(c) => {
+			if c.id == target {
+				return true;
+			}
+			let Some(idx) = trace.index_of(c) else {
+				return false;
+			};
+			match &trace.slots[idx].initial_value {
+				Value::Constant(rc) => rc.id == target,
+				resolved => trace_mentions(resolved, trace, target),
+			}
+		}
+		Value::Primitive(p) => p
+			.arguments
+			.iter()
+			.any(|arg| trace_mentions(arg, trace, target)),
 	}
 }
 
@@ -82,49 +82,44 @@ fn compute_visibility(
 	}
 }
 
+pub(crate) type ResolveMemo = Vec<[Option<Value>; 2]>;
+
 pub(crate) fn resolve_ps_values(
 	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	attacker: &AttackerState,
 	use_original: bool,
-) -> VResult<Value> {
-	let mut resolved = value.clone();
-	let mut root_idx = root_index;
-	let mut root_val = root_value.clone();
-	let mut use_orig = use_original;
-
-	if let Value::Constant(c) = &resolved {
-		let slot_idx = match ps.index_of(c) {
-			Some(i) => i,
-			None => return Err(VerifpalError::resolution("invalid index".into())),
-		};
-
-		use_orig = compute_visibility(slot_idx, root_idx, &root_val, ps, use_orig);
-
-		if slot_idx == root_idx {
-			resolved = if use_orig {
-				ps.values[slot_idx].perceived().clone()
-			} else {
-				let (val, _) = ps.resolve_constant(c, true);
-				val
-			};
-		} else {
-			resolved = if use_orig {
-				ps.values[slot_idx].perceived().clone()
-			} else {
-				ps.values[slot_idx].value.clone()
-			};
-			root_idx = slot_idx;
-			root_val = resolved.clone();
-		}
+	memo: &mut ResolveMemo,
+) -> VResult<Option<Value>> {
+	let Value::Constant(c) = value else {
+		return resolve_ps_primitive(value, root_value, root_index, ps, use_original, memo);
+	};
+	let Some(slot_idx) = ps.index_of(c) else {
+		return Err(VerifpalError::resolution("invalid index".into()));
+	};
+	let use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
+	let rerooted = slot_idx != root_index;
+	if rerooted && let Some(hit) = &memo[slot_idx][usize::from(use_orig)] {
+		return Ok(Some(hit.clone()));
 	}
-
-	match &resolved {
-		Value::Constant(_) => Ok(resolved),
+	let resolved = if use_orig {
+		ps.values[slot_idx].perceived()
+	} else {
+		&ps.values[slot_idx].value
+	};
+	match resolved {
+		Value::Constant(rc) => Ok((rc.id != c.id).then(|| resolved.clone())),
+		Value::Primitive(_) if !rerooted => {
+			let mapped =
+				resolve_ps_primitive(resolved, root_value, root_index, ps, use_orig, memo)?;
+			Ok(Some(mapped.unwrap_or_else(|| resolved.clone())))
+		}
 		Value::Primitive(_) => {
-			resolve_ps_primitive(&resolved, &root_val, root_idx, ps, attacker, use_orig)
+			let mapped = resolve_ps_primitive(resolved, resolved, slot_idx, ps, use_orig, memo)?;
+			let out = mapped.unwrap_or_else(|| resolved.clone());
+			memo[slot_idx][usize::from(use_orig)] = Some(out.clone());
+			Ok(Some(out))
 		}
 	}
 }
@@ -134,9 +129,9 @@ fn resolve_ps_primitive(
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
-	attacker: &AttackerState,
 	use_original: bool,
-) -> VResult<Value> {
+	memo: &mut ResolveMemo,
+) -> VResult<Option<Value>> {
 	let prim = value.try_as_primitive()?;
 	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
 		false
@@ -144,13 +139,9 @@ fn resolve_ps_primitive(
 		use_original
 	};
 	let mapped = prim.try_map_arguments(|arg| {
-		let resolved = resolve_ps_values(arg, root_value, root_index, ps, attacker, use_orig)?;
-		Ok((!resolved.equivalent(arg, true)).then_some(resolved))
+		resolve_ps_values(arg, root_value, root_index, ps, use_orig, memo)
 	})?;
-	Ok(match mapped {
-		Some(mapped) => Value::Primitive(Arc::new(mapped)),
-		None => value.clone(),
-	})
+	Ok(mapped.map(|mapped| Value::Primitive(Arc::new(mapped))))
 }
 pub(crate) fn constant_used_by_principal(
 	trace: &ProtocolTrace,
@@ -173,7 +164,11 @@ pub(crate) fn constant_used_by_principal(
 		}
 		return false;
 	}
-	let i = trace.index.get(&c.id).copied();
+	let assigned = trace
+		.index
+		.get(&c.id)
+		.and_then(|&idx| trace.slots[idx].initial_value.as_constant())
+		.map(|assigned| assigned.id);
 	for slot in &trace.slots {
 		if slot.creator != principal_id {
 			continue;
@@ -181,14 +176,12 @@ pub(crate) fn constant_used_by_principal(
 		if !matches!(&slot.initial_value, Value::Primitive(_)) {
 			continue;
 		}
-		let (_, v) = resolve_trace_values(&slot.initial_value, trace);
-		if let Some(idx) = i
-			&& find_equivalent(&trace.slots[idx].initial_value, &v).is_some()
+		if let Some(assigned) = assigned
+			&& trace_mentions(&slot.initial_value, trace, assigned)
 		{
 			return true;
 		}
-		let cv = Value::Constant(c.clone());
-		if find_equivalent(&cv, &v).is_some() {
+		if trace_mentions(&slot.initial_value, trace, c.id) {
 			return true;
 		}
 	}

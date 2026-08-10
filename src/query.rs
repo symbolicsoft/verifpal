@@ -177,7 +177,7 @@ fn query_find_constant_usage_indices(
 		if !matches!(&slot.initial_value, Value::Primitive(_)) {
 			continue;
 		}
-		if !find_constant_in_trace_primitive(c, &slot.initial_value, km) {
+		if !trace_mentions(&slot.initial_value, km, c.id) {
 			continue;
 		}
 		let (_, slot_idx) = ps.resolve_constant(&slot.constant, true);
@@ -191,7 +191,7 @@ fn query_find_constant_usage_indices(
 			indices.push(slot_idx);
 			continue;
 		}
-		let (pass, _) = can_rewrite(before_prim, ps);
+		let (pass, _) = can_rewrite(before_prim);
 		if pass || !before_prim.instance_check {
 			indices.push(slot_idx);
 		}
@@ -217,7 +217,7 @@ fn query_authentication_get_pass_indices(
 		if v.equivalent(&ps.values[idx].value, true) {
 			return Ok((vec![], sender, c));
 		}
-		if session_sibling_replay(&c, &ps.values[idx].value, km, ps) {
+		if session_sibling_replay(&c, &ps.values[idx].value, km) {
 			return Ok((vec![], sender, c));
 		}
 	}
@@ -225,22 +225,17 @@ fn query_authentication_get_pass_indices(
 	Ok((indices, sender, c))
 }
 
-fn session_sibling_replay(
-	c: &Constant,
-	used: &Value,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-) -> bool {
+fn session_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
 	let Some(group) = km.session_siblings.get(&c.id) else {
 		return false;
 	};
-	let used_reduct = reduce_once(used, ps);
+	let used_reduct = reduce_once(used);
 	group.iter().filter(|&&sid| sid != c.id).any(|&sid| {
 		let Some(&slot) = km.index.get(&sid) else {
 			return false;
 		};
 		let resolved = resolve_trace_constant(&km.slots[slot].constant, km);
-		reduce_once(&resolved, ps).equivalent(&used_reduct, true)
+		reduce_once(&resolved).equivalent(&used_reduct, true)
 	})
 }
 
@@ -341,9 +336,9 @@ fn query_unlinkability(
 	Ok(result)
 }
 
-fn value_check_failed(v: &Value, ps: &PrincipalState) -> bool {
+fn value_check_failed(v: &Value) -> bool {
 	match v {
-		Value::Primitive(p) => p.instance_check && !can_rewrite(p, ps).0,
+		Value::Primitive(p) => p.instance_check && !can_rewrite(p).0,
 		Value::Constant(_) => false,
 	}
 }
@@ -360,7 +355,7 @@ fn query_equivalence(
 	let mut values: Vec<Value> = Vec::with_capacity(query.constants.len());
 	for c in &query.constants {
 		let (value, slot) = ps.resolve_constant(c, false);
-		if slot.is_none() || value_check_failed(&value, ps) {
+		if slot.is_none() || value_check_failed(&value) {
 			return Ok(result);
 		}
 		values.push(value);

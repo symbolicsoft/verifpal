@@ -252,6 +252,16 @@ fn probe(
 ) -> Option<Witness> {
 	let scratch = ctx.scratch_for_query(query_index);
 	crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
+	for state in ctx.principal_states() {
+		let mut honest = state.clone_for_depth(true);
+		if honest.resolve_all_values().is_err() {
+			continue;
+		}
+		if scratch.attacker_phase_update(km, &honest, phase).is_err() {
+			continue;
+		}
+		let _ = compute_knowledge_closure(&scratch, km, &honest);
+	}
 
 	let ambient = scratch.attacker_snapshot();
 	let governing = governing_attacker(&scratch, installs, base, &ambient);
@@ -292,8 +302,7 @@ mod tests {
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
 		let ctx = VerifyContext::new(&m, &states, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
-		pure.resolve_all_values(&ctx.attacker_snapshot())
-			.expect("resolve");
+		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
 
 		let w = minimize_witness(&ctx, &km, &pure, 0, &[]);

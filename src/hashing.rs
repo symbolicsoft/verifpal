@@ -1,8 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashSet;
-
 use crate::types::*;
 
 pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
@@ -34,7 +32,7 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 	h
 }
 
-pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut HashSet<u64>) {
+pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut IdSet<u64>) {
 	out.insert(v.hash_value());
 	match v {
 		Value::Primitive(p) => {

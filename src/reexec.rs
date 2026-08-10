@@ -9,7 +9,7 @@ use crate::principal::ATTACKER_ID;
 use crate::theory::{obtainable, reduce_once};
 use crate::types::*;
 use crate::util::min_int_in_slice;
-use crate::value::{resolve_trace_constant, resolve_trace_values};
+use crate::value::{resolve_trace_constant, resolve_trace_term};
 
 pub(crate) struct Controllable {
 	principal: PrincipalId,
@@ -159,7 +159,7 @@ pub(crate) fn reexecute(
 	}
 
 	let ps_pre = ps.clone();
-	ps.resolve_all_values(attacker)?;
+	ps.resolve_all_values()?;
 	let failures = ps.perform_all_rewrites();
 
 	let foreign = foreign_halts(&ps, &failures);
@@ -227,7 +227,7 @@ fn try_guard_bypass(
 	}
 
 	loop {
-		ps.resolve_all_values(attacker)?;
+		ps.resolve_all_values()?;
 		let round = ps.perform_all_rewrites();
 		let mut injected = false;
 		for (prim, idx) in &round {
@@ -248,7 +248,7 @@ fn try_guard_bypass(
 		}
 	}
 
-	ps.resolve_all_values(attacker)?;
+	ps.resolve_all_values()?;
 	let remaining = ps.perform_all_rewrites();
 	if let Some((truncate_at, halted_at)) = truncation_point(&ps, &remaining) {
 		ps = drop_after_index(ps, truncate_at);
@@ -264,47 +264,47 @@ pub(crate) fn attacker_authored(
 	ps: &PrincipalState,
 ) -> bool {
 	let honest = &ps.values[slot].value;
-	let (trace_resolved, _) = resolve_trace_values(honest, km);
-	let trace_reduct = reduce_once(&trace_resolved, ps);
-	let ground_reduct = reduce_once(ground, ps);
+	let trace_reduct = reduce_once(&resolve_trace_term(honest, km));
+	let ground_reduct = reduce_once(ground);
 	!ground_reduct.equivalent(&trace_reduct, true)
 }
 
 fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
-	let edges: Vec<Vec<usize>> = ps
-		.values
-		.iter()
-		.map(|sv| {
-			let mut out = Vec::new();
-			for v in [&sv.value, sv.perceived()] {
-				if matches!(v, Value::Primitive(_)) {
-					collect_slot_references(v, ps, &mut out);
-				}
+	let n = ps.values.len();
+	let mut edges: Vec<usize> = Vec::new();
+	let mut bounds: Vec<usize> = Vec::with_capacity(n + 1);
+	bounds.push(0);
+	for sv in &ps.values {
+		let from = edges.len();
+		for v in [&sv.value, sv.perceived()] {
+			if matches!(v, Value::Primitive(_)) {
+				collect_slot_references(v, ps, &mut edges, from);
 			}
-			out
-		})
-		.collect();
+		}
+		bounds.push(edges.len());
+	}
 
 	// Iterative depth-first search: 0 unvisited, 1 on the current path, 2 done.
-	let mut mark = vec![0u8; ps.values.len()];
+	let mut mark = vec![0u8; n];
 	let mut stack: Vec<(usize, usize)> = Vec::new();
-	for start in 0..ps.values.len() {
+	for start in 0..n {
 		if mark[start] != 0 {
 			continue;
 		}
 		mark[start] = 1;
-		stack.push((start, 0));
+		stack.push((start, bounds[start]));
 		while let Some((slot, edge)) = stack.pop() {
-			let Some(&next) = edges[slot].get(edge) else {
+			if edge >= bounds[slot + 1] {
 				mark[slot] = 2;
 				continue;
-			};
+			}
+			let next = edges[edge];
 			stack.push((slot, edge + 1));
 			match mark[next] {
 				1 => return true,
 				0 => {
 					mark[next] = 1;
-					stack.push((next, 0));
+					stack.push((next, bounds[next]));
 				}
 				_ => {}
 			}
@@ -313,18 +313,18 @@ fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
 	false
 }
 
-fn collect_slot_references(v: &Value, ps: &PrincipalState, out: &mut Vec<usize>) {
+fn collect_slot_references(v: &Value, ps: &PrincipalState, out: &mut Vec<usize>, from: usize) {
 	match v {
 		Value::Constant(c) => {
 			if let Some(i) = ps.index_of(c)
-				&& !out.contains(&i)
+				&& !out[from..].contains(&i)
 			{
 				out.push(i);
 			}
 		}
 		Value::Primitive(p) => {
 			for a in &p.arguments {
-				collect_slot_references(a, ps, out);
+				collect_slot_references(a, ps, out, from);
 			}
 		}
 	}

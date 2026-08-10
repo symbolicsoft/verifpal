@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -38,7 +37,7 @@ pub(crate) struct VerifyContext {
 	file_name: String,
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
-	depth_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
+	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -149,7 +148,7 @@ impl VerifyContext {
 			file_name: m.file_name.clone(),
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
-			depth_cuts: RwLock::new(HashSet::new()),
+			depth_cuts: RwLock::new(IdSet::default()),
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
@@ -180,19 +179,12 @@ impl VerifyContext {
 		self.replication_rejected.load(Ordering::SeqCst)
 	}
 
-	/// True the first time only: the search meets the same chain on every round
-	/// and at every rung, and the cut is only worth reporting once.
 	/// True the first time only: the depth bound turns away every term of that
 	/// shape at that slot, and saying so once is what the reader needs.
 	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
 		write_lock(&self.depth_cuts).insert((principal, slot))
 	}
 
-	/// Record that `ground` was installed at `slot` with `ancestor` as the term
-	/// the attacker had substituted there in the derivation that produced it.
-	/// The pairs form the lineage that [`lineage_of`] walks.
-	/// Every term reachable from `start` by following recorded lineage edges at
-	/// this slot, `start` included.
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
 		&self.states
 	}

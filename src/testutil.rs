@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::types::*;
@@ -58,7 +57,7 @@ pub(crate) fn make_primitive(id: PrimitiveId, args: Vec<Value>, output: usize) -
 }
 
 pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
-	let mut known_map: HashMap<u64, Vec<usize>> = HashMap::new();
+	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
 	for (i, v) in known.iter().enumerate() {
 		known_map.entry(v.hash_value()).or_default().push(i);
 	}
@@ -66,7 +65,7 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		current_phase: 0,
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
-		skeleton_hashes: Arc::new(std::collections::HashSet::new()),
+		skeleton_hashes: Arc::new(IdSet::default()),
 		mutation_records: Arc::new(vec![]),
 		derivations: Arc::new(vec![]),
 	}
@@ -78,14 +77,13 @@ pub(crate) fn make_principal_state(
 	meta: Vec<SlotMeta>,
 	values: Vec<SlotValues>,
 ) -> PrincipalState {
-	let mut index = HashMap::new();
+	let mut index = IdMap::default();
 	for (i, m) in meta.iter().enumerate() {
 		index.insert(m.constant.id, i);
 	}
 	PrincipalState {
 		name: name.to_string(),
 		id,
-		max_declared_at: 0,
 		meta: Arc::new(meta),
 		values,
 		index: Arc::new(index),
@@ -116,7 +114,6 @@ pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 		value: v.clone(),
 		pre_rewrite: v.clone(),
 		original: v.clone(),
-		rewritten: false,
 		provenance: Provenance {
 			creator,
 			sender: creator,

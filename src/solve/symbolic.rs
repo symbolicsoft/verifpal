@@ -86,7 +86,7 @@ fn slot_term(
 	let inlined = inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
 	building[idx] = false;
 
-	let reduced = reduce_once(&inlined, ps);
+	let reduced = reduce_once(&inlined);
 	memo[idx] = Some(reduced.clone());
 	reduced
 }
@@ -114,7 +114,7 @@ fn inline(
 					let honest =
 						inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
 					building[idx] = false;
-					return reduce_once(&honest, ps);
+					return reduce_once(&honest);
 				}
 				slot_term(idx, ps, var_terms, memo, building)
 			}

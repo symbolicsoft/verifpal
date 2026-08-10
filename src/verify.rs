@@ -19,6 +19,7 @@ pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 
 pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
 	crate::theory::rewrite_cache_reset();
+	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
@@ -26,7 +27,7 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 		expanded = e.model;
 		(&expanded, e.query_variants, e.siblings)
 	} else {
-		(m, Vec::new(), std::collections::HashMap::new())
+		(m, Vec::new(), IdMap::default())
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
@@ -122,7 +123,7 @@ pub(crate) fn attacker_seed_phase(
 ) -> VResult<()> {
 	ctx.attacker_init();
 	let mut pure = ps.clone_for_depth(true);
-	pure.resolve_all_values(&ctx.attacker_snapshot())?;
+	pure.resolve_all_values()?;
 	ctx.attacker_phase_update(km, &pure, phase)
 }
 
@@ -149,7 +150,7 @@ pub(crate) fn generate_trace(
 	attacker: &AttackerState,
 ) -> VResult<PrincipalState> {
 	let mut ps_resolved = ps.clone_for_depth(false);
-	ps_resolved.resolve_all_values(attacker)?;
+	ps_resolved.resolve_all_values()?;
 
 	let record = compute_slot_diffs(&ps_resolved, km, attacker.current_phase);
 

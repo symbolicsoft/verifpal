@@ -10,9 +10,8 @@ use crate::resolution::constant_used_by_principal;
 use crate::rewrite::perform_primitive_rewrite;
 use crate::types::*;
 
-pub(crate) use crate::equivalence::find_constant_in_trace_primitive;
 pub(crate) use crate::resolution::{
-	resolve_ps_values, resolve_trace_constant, resolve_trace_values,
+	ResolveMemo, resolve_ps_values, resolve_trace_constant, resolve_trace_term, trace_mentions,
 	value_constant_contains_fresh_values,
 };
 
@@ -167,6 +166,13 @@ impl Value {
 			_ => false,
 		}
 	}
+	pub fn same_term(&self, other: &Value) -> bool {
+		match (self, other) {
+			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
+			(Value::Primitive(p1), Value::Primitive(p2)) => Arc::ptr_eq(p1, p2),
+			_ => false,
+		}
+	}
 	pub fn hash_value(&self) -> u64 {
 		match self {
 			Value::Constant(c) => c.id as u64,
@@ -227,35 +233,37 @@ impl PrincipalState {
 		}
 		failures
 	}
-	pub fn resolve_all_values(&mut self, attacker: &AttackerState) -> VResult<()> {
+	pub fn resolve_all_values(&mut self) -> VResult<()> {
 		let n = self.values.len();
-		let mut new_value = Vec::with_capacity(n);
-		let mut new_pre_rewrite = Vec::with_capacity(n);
+		let mut resolved = Vec::with_capacity(n);
+		let mut memo: ResolveMemo = vec![[None, None]; n];
 		let ps_ref: &PrincipalState = &*self;
 		for i in 0..n {
 			let use_original = ps_ref.should_use_original(i);
-			new_value.push(resolve_ps_values(
-				&ps_ref.values[i].value,
-				&ps_ref.values[i].value,
-				i,
-				ps_ref,
-				attacker,
-				use_original,
-			)?);
-			new_pre_rewrite.push(resolve_ps_values(
-				&ps_ref.values[i].pre_rewrite,
-				&ps_ref.values[i].pre_rewrite,
-				i,
-				ps_ref,
-				attacker,
-				use_original,
-			)?);
+			let sv = &ps_ref.values[i];
+			let value =
+				resolve_ps_values(&sv.value, &sv.value, i, ps_ref, use_original, &mut memo)?;
+			let pre_rewrite = if sv.value.same_term(&sv.pre_rewrite) {
+				value.clone()
+			} else {
+				resolve_ps_values(
+					&sv.pre_rewrite,
+					&sv.pre_rewrite,
+					i,
+					ps_ref,
+					use_original,
+					&mut memo,
+				)?
+			};
+			resolved.push((value, pre_rewrite));
 		}
-		for ((sv, value), pre_rewrite) in self.values.iter_mut().zip(new_value).zip(new_pre_rewrite)
-		{
-			sv.value = value;
-			sv.pre_rewrite = pre_rewrite;
-			sv.rewritten = false;
+		for (sv, (value, pre_rewrite)) in self.values.iter_mut().zip(resolved) {
+			if let Some(value) = value {
+				sv.value = value;
+			}
+			if let Some(pre_rewrite) = pre_rewrite {
+				sv.pre_rewrite = pre_rewrite;
+			}
 		}
 		Ok(())
 	}
@@ -448,15 +456,14 @@ mod tests {
 				phases: vec![0],
 			}],
 			index: {
-				let mut m = HashMap::new();
+				let mut m = IdMap::default();
 				m.insert(c.id, 0);
 				m
 			},
-			max_declared_at: 0,
 			max_phase: 0,
-			used_by: HashMap::new(),
+			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
-			session_siblings: HashMap::new(),
+			session_siblings: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -487,15 +494,14 @@ mod tests {
 				phases: vec![0],
 			}],
 			index: {
-				let mut m = HashMap::new();
+				let mut m = IdMap::default();
 				m.insert(c.id, 0);
 				m
 			},
-			max_declared_at: 0,
 			max_phase: 0,
-			used_by: HashMap::new(),
+			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
-			session_siblings: HashMap::new(),
+			session_siblings: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -528,15 +534,14 @@ mod tests {
 				phases: vec![0],
 			}],
 			index: {
-				let mut m = HashMap::new();
+				let mut m = IdMap::default();
 				m.insert(c.id, 0);
 				m
 			},
-			max_declared_at: 0,
 			max_phase: 0,
-			used_by: HashMap::new(),
+			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
-			session_siblings: HashMap::new(),
+			session_siblings: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

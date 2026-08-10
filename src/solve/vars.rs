@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::types::*;
@@ -23,7 +22,7 @@ pub(crate) fn free_var(n: u32) -> Value {
 	})
 }
 
-pub(crate) type Substitution = HashMap<ValueId, Value>;
+pub(crate) type Substitution = IdMap<ValueId, Value>;
 
 pub(crate) fn attacker_var_id(slot: usize) -> ValueId {
 	ATTACKER_VAR_BASE + slot as ValueId
@@ -197,7 +196,7 @@ fn substitution_hash(s: &Substitution) -> u64 {
 
 pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 	let mut out: Vec<Substitution> = Vec::with_capacity(candidates.len());
-	let mut seen: HashMap<u64, Vec<usize>> = HashMap::new();
+	let mut seen: IdMap<u64, Vec<usize>> = IdMap::default();
 	for candidate in candidates {
 		let hash = substitution_hash(&candidate);
 		let duplicate = seen.get(&hash).is_some_and(|bucket| {
@@ -253,9 +252,9 @@ mod tests {
 			}))
 		};
 
-		let mut left = crate::solve::vars::Substitution::new();
+		let mut left = crate::solve::vars::Substitution::default();
 		left.insert(slot, concat(a.clone(), crate::solve::vars::free_var(0)));
-		let mut right = crate::solve::vars::Substitution::new();
+		let mut right = crate::solve::vars::Substitution::default();
 		right.insert(slot, concat(crate::solve::vars::free_var(1), b.clone()));
 
 		let merged = crate::solve::matching::merge(&left, &right).expect("should unify");
@@ -279,7 +278,7 @@ mod tests {
 			}))
 		};
 
-		let mut s = crate::solve::vars::Substitution::new();
+		let mut s = crate::solve::vars::Substitution::default();
 		assert!(!bind(&mut s, slot, enc(k.clone(), var.clone())));
 		assert!(s.is_empty());
 		// The same binding without the self-reference is fine.
@@ -308,7 +307,7 @@ mod tests {
 			}))
 		};
 
-		let mut s = crate::solve::vars::Substitution::new();
+		let mut s = crate::solve::vars::Substitution::default();
 		assert!(bind(
 			&mut s,
 			a,

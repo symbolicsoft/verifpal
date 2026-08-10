@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::primitive::{BypassKeyKind, primitive_check_undoing};
@@ -179,7 +178,7 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 		.filter(|k| !(k.hash_value() == h && k.equivalent(v, true)))
 		.cloned()
 		.collect();
-	let mut known_map: HashMap<u64, Vec<usize>> = HashMap::new();
+	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
 	for (i, k) in known.iter().enumerate() {
 		known_map.entry(k.hash_value()).or_default().push(i);
 	}

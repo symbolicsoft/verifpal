@@ -88,15 +88,18 @@ fn unify_into(a: &Value, b: &Value, s: &mut Substitution) -> bool {
 			}
 			*s = checkpoint;
 			commutative_swap(p1, p2)
-				.is_some_and(|(u1, v1, u2, v2)| unify_into(&u1, &v2, s) && unify_into(&v1, &u2, s))
+				.is_some_and(|(u1, v1, u2, v2)| unify_into(u1, v2, s) && unify_into(v1, u2, s))
 		}
 		_ => false,
 	}
 }
 
-fn commutative_swap(p1: &Primitive, p2: &Primitive) -> Option<(Value, Value, Value, Value)> {
-	let (u1, v1) = crate::primitive::commutativity_parts(p1)?;
-	let (u2, v2) = crate::primitive::commutativity_parts(p2)?;
+fn commutative_swap<'a>(
+	p1: &'a Primitive,
+	p2: &'a Primitive,
+) -> Option<(&'a Value, &'a Value, &'a Value, &'a Value)> {
+	let (u1, v1) = crate::primitive::commutativity_parts_ref(p1)?;
+	let (u2, v2) = crate::primitive::commutativity_parts_ref(p2)?;
 	Some((u1, v1, u2, v2))
 }
 
@@ -176,7 +179,7 @@ fn match_structural(pattern: &Value, target: &Value, s: &mut Substitution) -> bo
 			}
 			*s = checkpoint;
 			commutative_swap(p1, p2)
-				.is_some_and(|(u1, v1, u2, v2)| match_into(&u1, &v2, s) && match_into(&v1, &u2, s))
+				.is_some_and(|(u1, v1, u2, v2)| match_into(u1, v2, s) && match_into(v1, u2, s))
 		}
 		_ => false,
 	}
@@ -203,7 +206,7 @@ mod tests {
 		let var = crate::solve::vars::attacker_var(0, "mtc_slot");
 		let pattern = dh_kex(pubkey(var.clone()), y.clone());
 		let target = dh_kex(pubkey(y), x.clone());
-		let s = match_value(&pattern, &target, &Substitution::new())
+		let s = match_value(&pattern, &target, &Substitution::default())
 			.expect("matches modulo commutativity");
 		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
 	}
@@ -215,7 +218,7 @@ mod tests {
 		let var = crate::solve::vars::attacker_var(1, "unc_slot");
 		let a = dh_kex(pubkey(var.clone()), y.clone());
 		let b = dh_kex(pubkey(y), x.clone());
-		let s = unify(&a, &b, &Substitution::new()).expect("unifies modulo commutativity");
+		let s = unify(&a, &b, &Substitution::default()).expect("unifies modulo commutativity");
 		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
 	}
 
@@ -226,6 +229,6 @@ mod tests {
 		let z = make_constant("dnm_z");
 		let pattern = dh_kex(pubkey(x.clone()), y);
 		let target = dh_kex(pubkey(x), z);
-		assert!(match_value(&pattern, &target, &Substitution::new()).is_none());
+		assert!(match_value(&pattern, &target, &Substitution::default()).is_none());
 	}
 }

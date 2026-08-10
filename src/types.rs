@@ -2,12 +2,45 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
 pub use crate::capability::{Capabilities, Capability, CapabilityIndex, Reach};
+
+#[derive(Default)]
+pub struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+	fn finish(&self) -> u64 {
+		self.0
+	}
+	fn write(&mut self, bytes: &[u8]) {
+		for &b in bytes {
+			self.write_u64(b as u64);
+		}
+	}
+	fn write_u8(&mut self, i: u8) {
+		self.write_u64(i as u64);
+	}
+	fn write_u32(&mut self, i: u32) {
+		self.write_u64(i as u64);
+	}
+	fn write_usize(&mut self, i: usize) {
+		self.write_u64(i as u64);
+	}
+	fn write_u64(&mut self, i: u64) {
+		let mut x = self.0.rotate_left(11) ^ i;
+		x ^= x >> 33;
+		x = x.wrapping_mul(0xff51afd7ed558ccd);
+		x ^= x >> 33;
+		x = x.wrapping_mul(0xc4ceb9fe1a85ec53);
+		self.0 = x ^ (x >> 33);
+	}
+}
+
+pub type IdMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<IdHasher>>;
+pub type IdSet<K> = std::collections::HashSet<K, BuildHasherDefault<IdHasher>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
@@ -647,15 +680,14 @@ pub struct ProtocolTrace {
 	pub principals: Vec<String>,
 	pub principal_ids: Vec<PrincipalId>,
 	pub slots: Vec<TraceSlot>,
-	pub index: HashMap<ValueId, usize>,
-	pub max_declared_at: i32,
+	pub index: IdMap<ValueId, usize>,
 	pub max_phase: i32,
-	pub used_by: HashMap<ValueId, HashMap<PrincipalId, bool>>,
+	pub used_by: IdMap<ValueId, IdMap<PrincipalId, bool>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	/// Session-sibling groups under `--sessions`: every cloned constant (and
 	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
 	/// session. Read by the authentication replay carve-out in `query.rs`.
-	pub session_siblings: HashMap<ValueId, Arc<Vec<ValueId>>>,
+	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -702,7 +734,6 @@ pub struct SlotValues {
 	/// computed. Keeping it here costs one `Option` per slot and lets `original`
 	/// mean exactly what the semantics say it means.
 	pub bypassed: Option<Value>,
-	pub rewritten: bool,
 	pub provenance: Provenance,
 }
 
@@ -740,10 +771,9 @@ impl SlotValues {
 pub struct PrincipalState {
 	pub name: String,
 	pub id: PrincipalId,
-	pub max_declared_at: i32,
 	pub meta: Arc<Vec<SlotMeta>>,
 	pub values: Vec<SlotValues>,
-	pub index: Arc<HashMap<ValueId, usize>>,
+	pub index: Arc<IdMap<ValueId, usize>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
 	pub foreign_halts: Vec<(PrincipalId, usize)>,
@@ -860,8 +890,8 @@ impl DerivationRecord {
 pub struct AttackerState {
 	pub current_phase: i32,
 	pub known: Arc<Vec<Value>>,
-	pub known_map: Arc<HashMap<u64, Vec<usize>>>,
-	pub skeleton_hashes: Arc<HashSet<u64>>,
+	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
+	pub skeleton_hashes: Arc<IdSet<u64>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
 }
@@ -871,8 +901,8 @@ impl Default for AttackerState {
 		AttackerState {
 			current_phase: 0,
 			known: Arc::new(vec![]),
-			known_map: Arc::new(HashMap::new()),
-			skeleton_hashes: Arc::new(HashSet::new()),
+			known_map: Arc::new(IdMap::default()),
+			skeleton_hashes: Arc::new(IdSet::default()),
 			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
 		}

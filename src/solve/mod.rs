@@ -8,8 +8,6 @@ pub(crate) mod symbolic;
 pub(crate) mod validate;
 pub(crate) mod vars;
 
-use std::collections::HashSet;
-
 use crate::context::VerifyContext;
 use crate::hashing::collect_subterm_hashes;
 use crate::info::info_message;
@@ -117,7 +115,7 @@ fn solve_principal(
 	}
 
 	let deducer = Deducer::new(ps, &attacker, &sym);
-	let empty = Substitution::new();
+	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
 	for result in ctx.results_get() {
@@ -157,7 +155,7 @@ fn solve_principal(
 				&attacker, &sym, &deducer, &protocol, &honest, &blanket, slot,
 			) {
 				let var_id = vars::attacker_var_id(slot);
-				let mut alone = Substitution::new();
+				let mut alone = Substitution::default();
 				alone.insert(var_id, candidate.clone());
 				proposals.push(alone);
 				if !blanket.is_empty() {
@@ -281,7 +279,7 @@ fn authentication_goals(
 }
 
 fn slot_substitution(sym: &SymbolicState, slot: usize) -> Substitution {
-	let mut out = Substitution::new();
+	let mut out = Substitution::default();
 	if let Some(term) = &sym.var_terms[slot] {
 		vars::ground_remaining(term, &mut out);
 	}
@@ -289,7 +287,7 @@ fn slot_substitution(sym: &SymbolicState, slot: usize) -> Substitution {
 }
 
 fn blanket_substitution(sym: &SymbolicState) -> Substitution {
-	let mut out = Substitution::new();
+	let mut out = Substitution::default();
 	for &slot in &sym.var_slots {
 		out.extend(slot_substitution(sym, slot));
 	}
@@ -331,7 +329,7 @@ fn relay_substitution(
 	ps: &PrincipalState,
 	sym: &SymbolicState,
 ) -> Substitution {
-	let mut out = Substitution::new();
+	let mut out = Substitution::default();
 	for &slot in &sym.var_slots {
 		let Some(meta) = ps.meta.get(slot) else {
 			continue;
@@ -344,8 +342,8 @@ fn relay_substitution(
 	out
 }
 
-fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> HashSet<u64> {
-	let mut out = HashSet::new();
+fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> IdSet<u64> {
+	let mut out = IdSet::default();
 	for meta in ps.meta.iter() {
 		collect_subterm_hashes(&resolve_trace_constant(&meta.constant, km), &mut out);
 	}
@@ -356,7 +354,7 @@ fn slot_candidates(
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: &Deducer,
-	protocol: &HashSet<u64>,
+	protocol: &IdSet<u64>,
 	honest: &Value,
 	blanket: &Substitution,
 	slot: usize,
@@ -377,7 +375,7 @@ fn slot_candidates(
 		}
 	}
 
-	let mut contexts = vec![Substitution::new()];
+	let mut contexts = vec![Substitution::default()];
 	if !blanket.is_empty() {
 		contexts.push(blanket.clone());
 	}

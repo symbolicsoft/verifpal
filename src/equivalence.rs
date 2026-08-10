@@ -31,16 +31,6 @@ fn commutative_match(p1: &Primitive, p2: &Primitive) -> bool {
 	u1.equivalent(v2, true) && u2.equivalent(v1, true)
 }
 
-pub(crate) fn find_constant_in_trace_primitive(
-	c: &Constant,
-	value: &Value,
-	trace: &ProtocolTrace,
-) -> bool {
-	let target = Value::Constant(c.clone());
-	let (_, resolved_values) = crate::resolution::resolve_trace_values(value, trace);
-	crate::value::find_equivalent(&target, &resolved_values).is_some()
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;

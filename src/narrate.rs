@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::primitive::primitive_name;
@@ -107,7 +106,7 @@ fn reportable(sv: &SlotValues) -> bool {
 }
 
 /// Does `v` mention any constant in `ids`?
-fn mentions(v: &Value, ids: &HashSet<u32>) -> bool {
+fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
 	match v {
 		Value::Constant(c) => ids.contains(&c.id),
 		Value::Primitive(p) => p.arguments.iter().any(|a| mentions(a, ids)),
@@ -115,7 +114,7 @@ fn mentions(v: &Value, ids: &HashSet<u32>) -> bool {
 }
 
 fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
-	let mut ids: HashSet<u32> = ps
+	let mut ids: IdSet<u32> = ps
 		.values
 		.iter()
 		.enumerate()
@@ -199,7 +198,7 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		if !p.arguments.iter().any(|a| value_is_tainted(a, ps)) {
 			continue;
 		}
-		if !can_rewrite(p, ps).0 {
+		if !can_rewrite(p).0 {
 			continue;
 		}
 		let own = [&*ps.meta[i].constant.name];
@@ -791,8 +790,7 @@ mod tests {
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
 		let ctx = VerifyContext::new(&m, &states, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
-		pure.resolve_all_values(&ctx.attacker_snapshot())
-			.expect("resolve");
+		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
 		crate::verify::verify_standard_run(&ctx, &km, &states).expect("run");
 

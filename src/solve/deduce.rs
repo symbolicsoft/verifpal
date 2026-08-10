@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::equivalence::equivalent_primitives;
@@ -27,10 +26,10 @@ pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	capabilities: Arc<CapabilityIndex>,
 	wire_terms: Vec<Value>,
-	memo: RefCell<HashMap<u64, Vec<Substitution>>>,
+	memo: RefCell<IdMap<u64, Vec<Substitution>>>,
 	active: RefCell<Vec<u64>>,
 	cycles_cut: Cell<usize>,
-	basis: HashSet<u64>,
+	basis: IdSet<u64>,
 	fresh: Cell<u32>,
 }
 
@@ -52,7 +51,7 @@ impl<'a> Deducer<'a> {
 				wire_terms.push(term.clone());
 			}
 		}
-		let mut basis = HashSet::new();
+		let mut basis = IdSet::default();
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
@@ -65,7 +64,7 @@ impl<'a> Deducer<'a> {
 			capabilities: ps.capabilities.clone(),
 			wire_terms,
 			basis,
-			memo: RefCell::new(HashMap::new()),
+			memo: RefCell::new(IdMap::default()),
 			active: RefCell::new(Vec::new()),
 			cycles_cut: Cell::new(0),
 			fresh: Cell::new(0),
@@ -374,7 +373,7 @@ impl<'a> Deducer<'a> {
 			return false;
 		}
 		let pattern = Value::Primitive(Arc::new(p.clone()));
-		let empty = Substitution::new();
+		let empty = Substitution::default();
 		self.capabilities.annotated_terms().any(|(term, caps)| {
 			caps.in_force(cap, phase)
 				&& matches!(term, Value::Primitive(q) if q.id == p.id)

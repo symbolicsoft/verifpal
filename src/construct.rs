@@ -6,7 +6,6 @@ use crate::sanity::{sanity_assignment_constants, sanity_primitive};
 use crate::types::*;
 use crate::util::*;
 use crate::value::*;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) fn construct_protocol_trace(
@@ -18,12 +17,11 @@ pub(crate) fn construct_protocol_trace(
 		principals: principals.to_vec(),
 		principal_ids: principal_ids.to_vec(),
 		slots: vec![],
-		index: HashMap::new(),
-		max_declared_at: 0,
+		index: IdMap::default(),
 		max_phase: 0,
-		used_by: HashMap::new(),
+		used_by: IdMap::default(),
 		leaks: Arc::new(Vec::new()),
-		session_siblings: HashMap::new(),
+		session_siblings: IdMap::default(),
 	};
 	let mut leaks: Vec<LeakEvent> = Vec::new();
 	let mut declared_at = 0i32;
@@ -61,7 +59,6 @@ pub(crate) fn construct_protocol_trace(
 			}
 			Block::Message(message) => {
 				declared_at += 1;
-				trace.max_declared_at = declared_at;
 				construct_trace_render_message(&mut trace, message, current_phase, declared_at)
 					.map_err(|e| e.or_span(message.span))?;
 			}
@@ -76,8 +73,8 @@ pub(crate) fn construct_protocol_trace(
 	Ok(trace)
 }
 
-fn construct_trace_used_by(trace: &ProtocolTrace) -> HashMap<ValueId, HashMap<PrincipalId, bool>> {
-	let mut used_by: HashMap<ValueId, HashMap<PrincipalId, bool>> = HashMap::new();
+fn construct_trace_used_by(trace: &ProtocolTrace) -> IdMap<ValueId, IdMap<PrincipalId, bool>> {
+	let mut used_by: IdMap<ValueId, IdMap<PrincipalId, bool>> = IdMap::default();
 	for slot in &trace.slots {
 		match &slot.initial_value {
 			Value::Constant(c) => {
@@ -384,8 +381,10 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 	let mut capability_index = CapabilityIndex::default();
 	for slot in &trace.slots {
 		capability_index.insert(&slot.initial_value);
-		let (resolved, _) = crate::resolution::resolve_trace_values(&slot.initial_value, trace);
-		capability_index.insert(&resolved);
+		capability_index.insert(&crate::resolution::resolve_trace_term(
+			&slot.initial_value,
+			trace,
+		));
 	}
 	let capabilities = Arc::new(capability_index);
 	let mut states = Vec::new();
@@ -393,7 +392,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 		let n = trace.slots.len();
 		let mut meta_vec = Vec::with_capacity(n);
 		let mut values_vec = Vec::with_capacity(n);
-		let mut index_map = HashMap::with_capacity(n);
+		let mut index_map = IdMap::with_capacity_and_hasher(n, Default::default());
 
 		let wire_index = construct_wire_index(m, trace, principal_id);
 
@@ -431,7 +430,6 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				pre_rewrite: slot.initial_value.clone(),
 				original: slot.initial_value.clone(),
 				bypassed: None,
-				rewritten: false,
 				provenance: Provenance {
 					creator: slot.creator,
 					sender,
@@ -443,7 +441,6 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 		states.push(PrincipalState {
 			name: principal_name.clone(),
 			id: principal_id,
-			max_declared_at: trace.max_declared_at,
 			meta: Arc::new(meta_vec),
 			values: values_vec,
 			index: Arc::new(index_map),
@@ -467,8 +464,8 @@ fn construct_wire_index(
 	m: &Model,
 	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
-) -> HashMap<ValueId, WireTravel> {
-	let mut index: HashMap<ValueId, WireTravel> = HashMap::new();
+) -> IdMap<ValueId, WireTravel> {
+	let mut index: IdMap<ValueId, WireTravel> = IdMap::default();
 	for block in &m.blocks {
 		let Block::Message(message) = block else {
 			continue;
@@ -510,7 +507,6 @@ impl PrincipalState {
 					// Purification is now total: a bypassed slot cleans up like
 					// any other, because the honest value was never overwritten.
 					bypassed: if purify { None } else { sv.bypassed.clone() },
-					rewritten: false,
 					provenance: Provenance {
 						creator: sv.provenance.creator,
 						sender: sv.provenance.sender,
@@ -531,7 +527,6 @@ impl PrincipalState {
 		PrincipalState {
 			name: self.name.clone(),
 			id: self.id,
-			max_declared_at: self.max_declared_at,
 			meta: self.meta.clone(),
 			values,
 			index: self.index.clone(),

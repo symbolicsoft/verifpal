@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 mod spec;
@@ -101,15 +100,31 @@ pub(crate) struct PrimitiveSpec {
 	pub malleable_vary: Vec<usize>,
 }
 
-static CORE_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveCoreSpec>> = LazyLock::new(|| {
-	let specs = build_core_specs();
-	specs.into_iter().map(|s| (s.id, s)).collect()
+static CORE_SPECS: LazyLock<[Option<PrimitiveCoreSpec>; 256]> = LazyLock::new(|| {
+	let mut table = [const { None }; 256];
+	for spec in build_core_specs() {
+		let id = spec.id as usize;
+		table[id] = Some(spec);
+	}
+	table
 });
 
-static PRIM_SPECS: LazyLock<HashMap<PrimitiveId, PrimitiveSpec>> = LazyLock::new(|| {
-	let specs = build_primitive_specs();
-	specs.into_iter().map(|s| (s.id, s)).collect()
+static PRIM_SPECS: LazyLock<[Option<PrimitiveSpec>; 256]> = LazyLock::new(|| {
+	let mut table = [const { None }; 256];
+	for spec in build_primitive_specs() {
+		let id = spec.id as usize;
+		table[id] = Some(spec);
+	}
+	table
 });
+
+fn core_specs() -> impl Iterator<Item = &'static PrimitiveCoreSpec> {
+	CORE_SPECS.iter().flatten()
+}
+
+fn prim_specs() -> impl Iterator<Item = &'static PrimitiveSpec> {
+	PRIM_SPECS.iter().flatten()
+}
 
 pub(crate) trait PrimitiveDefinition {
 	fn name(&self) -> &'static str;
@@ -167,24 +182,23 @@ pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDe
 }
 
 pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
-	CORE_SPECS.contains_key(&id)
+	CORE_SPECS[id as usize].is_some()
 }
 
 pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
-	CORE_SPECS
-		.get(&id)
+	CORE_SPECS[id as usize]
+		.as_ref()
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
-	PRIM_SPECS
-		.get(&id)
+	PRIM_SPECS[id as usize]
+		.as_ref()
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
-	PRIM_SPECS
-		.values()
+	prim_specs()
 		.filter(|s| s.definition_check && s.rewrite.has_rule && s.rewrite.id == id)
 		.min_by_key(|s| s.id)
 }
@@ -211,11 +225,10 @@ pub(crate) fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32],
 }
 
 pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
-	CORE_SPECS
-		.values()
+	core_specs()
 		.find(|s| s.name == name)
 		.map(|s| s.id)
-		.or_else(|| PRIM_SPECS.values().find(|s| s.name == name).map(|s| s.id))
+		.or_else(|| prim_specs().find(|s| s.name == name).map(|s| s.id))
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
@@ -223,24 +236,8 @@ pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
 	Ok(primitive_def(p.id)?.arity())
 }
 
-static COMMUTATIVITY_TABLE: LazyLock<[Option<CommutativityRule>; 256]> = LazyLock::new(|| {
-	let mut table = [None; 256];
-	for spec in PRIM_SPECS.values() {
-		table[spec.id as usize] = spec.commutativity;
-	}
-	table
-});
-
-static KEY_DERIVATION_TABLE: LazyLock<[bool; 256]> = LazyLock::new(|| {
-	let mut table = [false; 256];
-	for spec in PRIM_SPECS.values() {
-		table[spec.id as usize] = spec.key_derivation;
-	}
-	table
-});
-
 pub(crate) fn commutativity_rule(id: PrimitiveId) -> Option<&'static CommutativityRule> {
-	COMMUTATIVITY_TABLE[id as usize].as_ref()
+	PRIM_SPECS[id as usize].as_ref()?.commutativity.as_ref()
 }
 
 pub(crate) fn commutativity_parts_ref(p: &Primitive) -> Option<(&Value, &Value)> {
@@ -256,13 +253,10 @@ pub(crate) fn commutativity_parts_ref(p: &Primitive) -> Option<(&Value, &Value)>
 	Some((&w.arguments[0], bare))
 }
 
-pub(crate) fn commutativity_parts(p: &Primitive) -> Option<(Value, Value)> {
-	commutativity_parts_ref(p).map(|(inner, bare)| (inner.clone(), bare.clone()))
-}
-
 pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 	let rule = commutativity_rule(p.id)?;
-	let (inner, bare) = commutativity_parts(p)?;
+	let (inner, bare) = commutativity_parts_ref(p)?;
+	let (inner, bare) = (inner.clone(), bare.clone());
 	let mut arguments = p.arguments.clone();
 	arguments[rule.wrapped] = Value::primitive(rule.constructor, vec![bare], 0);
 	arguments[rule.bare] = inner;
@@ -270,10 +264,7 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 }
 
 pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
-	let id = PRIM_SPECS
-		.values()
-		.find(|s| s.key_derivation)
-		.map(|s| s.id)?;
+	let id = prim_specs().find(|s| s.key_derivation).map(|s| s.id)?;
 	Some(Value::primitive(id, vec![inner], 0))
 }
 
@@ -322,11 +313,15 @@ pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [(usize, Vec<Pr
 }
 
 pub(crate) fn primitive_is_key_derivation(id: PrimitiveId) -> bool {
-	KEY_DERIVATION_TABLE[id as usize]
+	PRIM_SPECS[id as usize]
+		.as_ref()
+		.is_some_and(|s| s.key_derivation)
 }
 
 pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
-	CORE_SPECS.get(&id).is_some_and(|s| s.reveals_args)
+	CORE_SPECS[id as usize]
+		.as_ref()
+		.is_some_and(|s| s.reveals_args)
 }
 
 pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
@@ -484,7 +479,7 @@ mod tests {
 
 	#[test]
 	fn a_commutativity_rule_exchanges_positions_with_equal_restrictions() {
-		for spec in PRIM_SPECS.values() {
+		for spec in prim_specs() {
 			let Some(rule) = &spec.commutativity else {
 				continue;
 			};
