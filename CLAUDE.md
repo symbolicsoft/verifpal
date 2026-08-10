@@ -96,7 +96,7 @@ queries[
 Constraints enforced by the parser and `sanity.rs`:
 
 - Nothing may follow the `queries` block (hard error — it used to be silently ignored and could hide leaks). The `queries` block itself must exist and come last.
-- ≤64 principals. Principal names are title-cased (`alice` → `Alice`); every other identifier is lower-cased, so the language is case-insensitive throughout.
+- ≤128 principals. Principal names are title-cased (`alice` → `Alice`); every other identifier is lower-cased, so the language is case-insensitive throughout.
 - `PUBKEY`/`DH_KEX` argument restrictions are declared in `spec.rs` and enforced by `sanity.rs`: `DH_KEX`'s second argument may not be a public key (this is what makes CDH structural), `DH_KEX` may not nest inside `DH_KEX`, and `PUBKEY` may not take a public key.
 - Primitive names are resolved case-insensitively against the spec registry. Arity, output count, and "may this be checked" all come from the spec.
 - A model file's *name* must end in `.vp` and be ≤64 characters (`parser.rs::parse_file`).
