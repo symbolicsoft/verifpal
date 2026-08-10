@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::theory::can_rewrite;
+use crate::theory::reduce_once;
 use crate::types::*;
 
 use super::vars::attacker_var;
@@ -62,16 +62,6 @@ pub(crate) fn build(
 	}
 }
 
-fn reduce(v: &Value, ps: &PrincipalState) -> Value {
-	match v {
-		Value::Primitive(p) => {
-			let (_, reduced) = can_rewrite(p, ps);
-			reduced
-		}
-		_ => v.clone(),
-	}
-}
-
 fn slot_term(
 	idx: usize,
 	ps: &PrincipalState,
@@ -96,7 +86,7 @@ fn slot_term(
 	let inlined = inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
 	building[idx] = false;
 
-	let reduced = reduce(&inlined, ps);
+	let reduced = reduce_once(&inlined, ps);
 	memo[idx] = Some(reduced.clone());
 	reduced
 }
@@ -124,7 +114,7 @@ fn inline(
 					let honest =
 						inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
 					building[idx] = false;
-					return reduce(&honest, ps);
+					return reduce_once(&honest, ps);
 				}
 				slot_term(idx, ps, var_terms, memo, building)
 			}

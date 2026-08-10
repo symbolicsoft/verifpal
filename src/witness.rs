@@ -6,13 +6,10 @@ use std::cell::Cell;
 use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
+use crate::primitive::attacker_public_key;
 use crate::reexec::{governing_attacker, reexecute};
 use crate::types::*;
 use crate::verify::verify_resolve_queries;
-
-fn attacker_public_key() -> Option<Value> {
-	crate::primitive::nil_key_derivation()
-}
 
 thread_local! {
 	static MINIMIZING: Cell<bool> = const { Cell::new(false) };
@@ -113,7 +110,7 @@ pub(crate) fn minimize_witness(
 							&& crate::primitive::value_is_key_derivation(&slot.initial_value)
 					})
 			})
-			.filter_map(|(i, _)| attacker_public_key().map(|v| (SlotIdx(i), v)))
+			.map(|(i, _)| (SlotIdx(i), attacker_public_key()))
 			.collect()
 	};
 
@@ -122,7 +119,7 @@ pub(crate) fn minimize_witness(
 		.map(|(slot, value)| {
 			let replacement = match value {
 				Value::Primitive(p) if crate::primitive::primitive_is_key_derivation(p.id) => {
-					attacker_public_key().unwrap_or_else(|| value.clone())
+					attacker_public_key()
 				}
 				other => other.clone(),
 			};
@@ -254,10 +251,7 @@ fn probe(
 	phase: i32,
 ) -> Option<Witness> {
 	let scratch = ctx.scratch_for_query(query_index);
-	scratch.attacker_init();
-	let mut pure = base.clone();
-	pure.resolve_all_values(&scratch.attacker_snapshot()).ok()?;
-	scratch.attacker_phase_update(km, &pure, phase).ok()?;
+	crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
 
 	let ambient = scratch.attacker_snapshot();
 	let governing = governing_attacker(&scratch, installs, base, &ambient);

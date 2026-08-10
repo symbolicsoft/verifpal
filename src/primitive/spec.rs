@@ -104,14 +104,11 @@ fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, 
 fn filter_unblind_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		1 => {
-			let blind_prim = Value::Primitive(Arc::new(Primitive {
-				id: PRIM_BLIND,
-				arguments: vec![p.arguments[0].clone(), p.arguments[1].clone()],
-				output: 0,
-				instance_check: false,
-				capabilities: Capabilities::default(),
-				hash: HashCell::default(),
-			}));
+			let blind_prim = Value::primitive(
+				PRIM_BLIND,
+				vec![p.arguments[0].clone(), p.arguments[1].clone()],
+				0,
+			);
 			(blind_prim, true)
 		}
 		_ => (x.clone(), false),
@@ -157,14 +154,7 @@ fn rewrite_to_unblind(p: &Primitive) -> Value {
 		Value::Primitive(inner_p) => inner_p.arguments[1].clone(),
 		_ => value_nil(),
 	};
-	Value::Primitive(Arc::new(Primitive {
-		id: PRIM_SIGN,
-		arguments: vec![p.arguments[0].clone(), inner],
-		output: 0,
-		instance_check: false,
-		capabilities: Capabilities::default(),
-		hash: HashCell::default(),
-	}))
+	Value::primitive(PRIM_SIGN, vec![p.arguments[0].clone(), inner], 0)
 }
 
 pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {

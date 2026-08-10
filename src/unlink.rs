@@ -80,14 +80,9 @@ fn witness_identifying_check(
 		return None;
 	}
 	let identifier = match check.bypass_key {
-		Some(BypassKeyKind::Derived { constructor, .. }) => Value::Primitive(Arc::new(Primitive {
-			id: constructor,
-			arguments: vec![ap.arguments[key_arg].clone()],
-			output: 0,
-			instance_check: false,
-			capabilities: Capabilities::default(),
-			hash: HashCell::default(),
-		})),
+		Some(BypassKeyKind::Derived { constructor, .. }) => {
+			Value::primitive(constructor, vec![ap.arguments[key_arg].clone()], 0)
+		}
 		_ => ap.arguments[key_arg].clone(),
 	};
 	if !crate::theory::obtainable(&identifier, ps, attacker) {

@@ -124,10 +124,6 @@ impl<'a> Deducer<'a> {
 		super::vars::free_var(n)
 	}
 
-	fn rewrite_shape(&self, outer: &Primitive, spec: &PrimitiveSpec) -> Option<Value> {
-		self.rewrite_shapes(outer, spec).into_iter().next()
-	}
-
 	fn rewrite_shapes(&self, outer: &Primitive, spec: &PrimitiveSpec) -> Vec<Value> {
 		build_rewrite_shapes_with(outer, spec, || self.fresh_var())
 	}
@@ -141,6 +137,43 @@ impl<'a> Deducer<'a> {
 		build_rewrite_shapes_with(outer, spec, || fill.clone())
 			.into_iter()
 			.next()
+	}
+
+	fn concat_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
+		let Ok(concat_spec) = primitive_def(PRIM_CONCAT) else {
+			return Vec::new();
+		};
+		let mut out = Vec::new();
+		for arity in concat_spec.arity().iter().map(|a| *a as usize) {
+			if p.output >= arity {
+				continue;
+			}
+			let mut arguments: Vec<Value> = (0..arity).map(|_| self.fresh_var()).collect();
+			if let Some(target) = at_output {
+				arguments[p.output] = target.clone();
+			}
+			out.push(Value::primitive(PRIM_CONCAT, arguments, 0));
+		}
+		out
+	}
+
+	fn bind_from_shape(
+		&self,
+		shape: &Value,
+		var_id: ValueId,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		for candidate in self.solve(shape, s) {
+			let ground = apply(shape, &candidate);
+			if contains_var(&ground) {
+				continue;
+			}
+			let mut extended = candidate;
+			if bind(&mut extended, var_id, ground) {
+				out.push(extended);
+			}
+		}
 	}
 
 	fn solve_rules(&self, g: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -288,16 +321,7 @@ impl<'a> Deducer<'a> {
 		let Some(shape) = self.rewrite_shape_yielding(p, spec, goal) else {
 			return;
 		};
-		for candidate in self.solve(&shape, s) {
-			let ground = apply(&shape, &candidate);
-			if contains_var(&ground) {
-				continue;
-			}
-			let mut extended = candidate;
-			if bind(&mut extended, var_id, ground) {
-				out.push(extended);
-			}
-		}
+		self.bind_from_shape(&shape, var_id, s, out);
 	}
 
 	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -410,10 +434,6 @@ impl<'a> Deducer<'a> {
 		}
 	}
 
-	pub(crate) fn solve_forgeable(&self, term: &Value, s: &Substitution) -> Vec<Substitution> {
-		self.solve(term, s)
-	}
-
 	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
 		let mut out = Vec::new();
 		for term in &sym.terms {
@@ -490,22 +510,8 @@ impl<'a> Deducer<'a> {
 
 		if p.id == PRIM_SPLIT
 			&& let Some(inner) = p.arguments.first()
-			&& let Ok(concat_spec) = primitive_def(PRIM_CONCAT)
 		{
-			for arity in concat_spec.arity().iter().map(|a| *a as usize) {
-				if p.output >= arity {
-					continue;
-				}
-				let mut arguments: Vec<Value> = (0..arity).map(|_| self.fresh_var()).collect();
-				arguments[p.output] = target.clone();
-				let candidate = Value::Primitive(Arc::new(Primitive {
-					id: PRIM_CONCAT,
-					arguments,
-					output: 0,
-					instance_check: false,
-					capabilities: Capabilities::default(),
-					hash: HashCell::default(),
-				}));
+			for candidate in self.concat_shapes(p, Some(target)) {
 				out.extend(self.invert(inner, &candidate, s));
 			}
 		}
@@ -526,22 +532,9 @@ impl<'a> Deducer<'a> {
 
 		if p.id == PRIM_SPLIT
 			&& let Some(inner) = p.arguments.first()
-			&& let Ok(concat_spec) = primitive_def(PRIM_CONCAT)
 		{
 			let mut out = Vec::new();
-			for arity in concat_spec.arity().iter().map(|a| *a as usize) {
-				if p.output >= arity {
-					continue;
-				}
-				let arguments: Vec<Value> = (0..arity).map(|_| self.fresh_var()).collect();
-				let candidate = Value::Primitive(Arc::new(Primitive {
-					id: PRIM_CONCAT,
-					arguments,
-					output: 0,
-					instance_check: false,
-					capabilities: Capabilities::default(),
-					hash: HashCell::default(),
-				}));
+			for candidate in self.concat_shapes(p, None) {
 				for bound in self.invert(inner, &candidate, base) {
 					out.extend(self.require_constructible(&bound, base, false));
 				}
@@ -561,21 +554,12 @@ impl<'a> Deducer<'a> {
 		let Some(var_id) = as_var(from) else {
 			return Vec::new();
 		};
-		let Some(shape) = self.rewrite_shape(p, spec) else {
+		let Some(shape) = self.rewrite_shapes(p, spec).into_iter().next() else {
 			return Vec::new();
 		};
 
 		let mut out = Vec::new();
-		for candidate in self.solve(&shape, base) {
-			let ground = apply(&shape, &candidate);
-			if contains_var(&ground) {
-				continue;
-			}
-			let mut extended = candidate;
-			if bind(&mut extended, var_id, ground) {
-				out.push(extended);
-			}
-		}
+		self.bind_from_shape(&shape, var_id, base, &mut out);
 		out
 	}
 
@@ -612,11 +596,7 @@ impl<'a> Deducer<'a> {
 fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
 	match v {
 		Value::Primitive(p) => {
-			if p.instance_check
-				&& !out
-					.iter()
-					.any(|q| equivalent_primitives(q, p, true).equivalent)
-			{
+			if p.instance_check && !out.iter().any(|q| equivalent_primitives(q, p, true)) {
 				out.push((**p).clone());
 			}
 			for a in &p.arguments {
@@ -675,16 +655,7 @@ fn build_rewrite_shapes_with(
 	partials
 		.into_iter()
 		.map(|(arguments, _)| arguments)
-		.map(|arguments| {
-			Value::Primitive(Arc::new(Primitive {
-				id: spec.rewrite.id,
-				arguments,
-				output: 0,
-				instance_check: false,
-				capabilities: Capabilities::default(),
-				hash: HashCell::default(),
-			}))
-		})
+		.map(|arguments| Value::primitive(spec.rewrite.id, arguments, 0))
 		.collect()
 }
 

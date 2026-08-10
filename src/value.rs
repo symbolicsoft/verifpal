@@ -12,7 +12,8 @@ use crate::types::*;
 
 pub(crate) use crate::equivalence::find_constant_in_trace_primitive;
 pub(crate) use crate::resolution::{
-	resolve_ps_values, resolve_trace_values, value_constant_contains_fresh_values,
+	resolve_ps_values, resolve_trace_constant, resolve_trace_values,
+	value_constant_contains_fresh_values,
 };
 
 pub(crate) struct ValueNames {
@@ -161,7 +162,7 @@ impl Value {
 				if consider_output && primitive_hash(p1) != primitive_hash(p2) {
 					return false;
 				}
-				equivalent_primitives(p1, p2, consider_output).equivalent
+				equivalent_primitives(p1, p2, consider_output)
 			}
 			_ => false,
 		}
@@ -456,6 +457,7 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
+			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -495,6 +497,7 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
+			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -536,6 +539,7 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
+			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

@@ -14,7 +14,7 @@ use crate::context::VerifyContext;
 use crate::hashing::collect_subterm_hashes;
 use crate::info::info_message;
 use crate::types::*;
-use crate::value::{push_unique_value, resolve_trace_values};
+use crate::value::{push_unique_value, resolve_trace_constant};
 use crate::verify::verify_standard_run;
 
 use deduce::Deducer;
@@ -46,10 +46,7 @@ pub(crate) fn verify_active(
 			InfoLevel::Info,
 			false,
 		);
-		ctx.attacker_init();
-		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
-		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
-		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
+		crate::verify::attacker_seed_phase(ctx, km, &principal_states[0], phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
 		if ctx.prefers_replication() {
 			ctx.set_replication_only(true);
@@ -141,46 +138,37 @@ fn solve_principal(
 		proposals.push(blanket.clone());
 
 		for &slot in &sym.var_slots {
-			if let Some(term) = &sym.var_terms[slot] {
-				let mut single = Substitution::new();
-				vars::ground_remaining(term, &mut single);
-				if !single.is_empty() {
-					proposals.push(single);
-				}
+			let single = slot_substitution(&sym, slot);
+			if !single.is_empty() {
+				proposals.push(single);
 			}
 		}
 	}
 
-	let relayed = relay_substitution(km, ps, &sym);
-
-	let protocol = if pass == Pass::Constructed {
-		protocol_terms(km, ps)
-	} else {
-		HashSet::new()
-	};
-	for &slot in &sym.var_slots {
-		if pass != Pass::Constructed {
-			break;
-		}
-		let Some(meta) = ps.meta.get(slot) else {
-			continue;
-		};
-		let (honest, _) = resolve_trace_values(&Value::Constant(meta.constant.clone()), km);
-		for candidate in slot_candidates(
-			&attacker, &sym, &deducer, &protocol, &honest, &blanket, slot,
-		) {
-			let var_id = vars::attacker_var_id(slot);
-			let mut alone = Substitution::new();
-			alone.insert(var_id, candidate.clone());
-			proposals.push(alone);
-			if !blanket.is_empty() {
-				let mut combined = blanket.clone();
-				combined.insert(var_id, candidate.clone());
-				proposals.push(combined);
+	if pass == Pass::Constructed {
+		let relayed = relay_substitution(km, ps, &sym);
+		let protocol = protocol_terms(km, ps);
+		for &slot in &sym.var_slots {
+			let Some(meta) = ps.meta.get(slot) else {
+				continue;
+			};
+			let honest = resolve_trace_constant(&meta.constant, km);
+			for candidate in slot_candidates(
+				&attacker, &sym, &deducer, &protocol, &honest, &blanket, slot,
+			) {
+				let var_id = vars::attacker_var_id(slot);
+				let mut alone = Substitution::new();
+				alone.insert(var_id, candidate.clone());
+				proposals.push(alone);
+				if !blanket.is_empty() {
+					let mut combined = blanket.clone();
+					combined.insert(var_id, candidate.clone());
+					proposals.push(combined);
+				}
+				let mut with_relay = relayed.clone();
+				with_relay.insert(var_id, candidate);
+				proposals.push(with_relay);
 			}
-			let mut with_relay = relayed.clone();
-			with_relay.insert(var_id, candidate);
-			proposals.push(with_relay);
 		}
 	}
 
@@ -283,8 +271,8 @@ fn authentication_goals(
 		}
 	}
 
-	let (honest, _) = resolve_trace_values(&Value::Constant(c.clone()), km);
-	for candidate in deducer.solve_forgeable(&honest, base) {
+	let honest = resolve_trace_constant(c, km);
+	for candidate in deducer.solve(&honest, base) {
 		if let Some(bound) = matching::match_value(var_term, &honest, &candidate) {
 			out.push(bound);
 		}
@@ -292,12 +280,18 @@ fn authentication_goals(
 	out
 }
 
+fn slot_substitution(sym: &SymbolicState, slot: usize) -> Substitution {
+	let mut out = Substitution::new();
+	if let Some(term) = &sym.var_terms[slot] {
+		vars::ground_remaining(term, &mut out);
+	}
+	out
+}
+
 fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	let mut out = Substitution::new();
 	for &slot in &sym.var_slots {
-		if let Some(term) = &sym.var_terms[slot] {
-			vars::ground_remaining(term, &mut out);
-		}
+		out.extend(slot_substitution(sym, slot));
 	}
 	out
 }
@@ -342,8 +336,10 @@ fn relay_substitution(
 		let Some(meta) = ps.meta.get(slot) else {
 			continue;
 		};
-		let (honest, _) = resolve_trace_values(&Value::Constant(meta.constant.clone()), km);
-		out.insert(vars::attacker_var_id(slot), honest);
+		out.insert(
+			vars::attacker_var_id(slot),
+			resolve_trace_constant(&meta.constant, km),
+		);
 	}
 	out
 }
@@ -351,8 +347,7 @@ fn relay_substitution(
 fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> HashSet<u64> {
 	let mut out = HashSet::new();
 	for meta in ps.meta.iter() {
-		let (v, _) = resolve_trace_values(&Value::Constant(meta.constant.clone()), km);
-		collect_subterm_hashes(&v, &mut out);
+		collect_subterm_hashes(&resolve_trace_constant(&meta.constant, km), &mut out);
 	}
 	out
 }
@@ -390,9 +385,10 @@ fn slot_candidates(
 		for context in &contexts {
 			for solution in deducer.solve(&shape, context) {
 				let applied = vars::apply(&shape, &solution);
-				let attacker_key =
-					crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil);
-				for filler in [crate::value::value_nil(), attacker_key] {
+				for filler in [
+					crate::value::value_nil(),
+					crate::primitive::attacker_public_key(),
+				] {
 					let built = vars::ground_free_as(&applied, &filler);
 					if !vars::contains_var(&built) {
 						push_unique_value(&mut out, built);

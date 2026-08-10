@@ -4,16 +4,12 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::primitive::primitive_extract_bypass_key;
+use crate::primitive::{attacker_public_key, primitive_extract_bypass_key};
 use crate::principal::ATTACKER_ID;
-use crate::theory::{can_reconstruct_primitive, can_rewrite};
+use crate::theory::{obtainable, reduce_once};
 use crate::types::*;
 use crate::util::min_int_in_slice;
-use crate::value::resolve_trace_values;
-
-fn attacker_public_key() -> Value {
-	crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil)
-}
+use crate::value::{resolve_trace_constant, resolve_trace_values};
 
 pub(crate) struct Controllable {
 	principal: PrincipalId,
@@ -57,10 +53,7 @@ impl TermBound {
 		let max_depth = km
 			.slots
 			.iter()
-			.map(|slot| {
-				let (v, _) = resolve_trace_values(&Value::Constant(slot.constant.clone()), km);
-				term_depth(&v)
-			})
+			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
 			.max()
 			.unwrap_or(0);
 		TermBound { max_depth }
@@ -217,7 +210,7 @@ fn try_guard_bypass(
 			prim.instance_check
 				&& ps_resolved.values[*idx].provenance.creator == ps_resolved.id
 				&& primitive_extract_bypass_key(prim)
-					.is_some_and(|key| can_obtain(&key, ps_resolved, attacker))
+					.is_some_and(|key| obtainable(&key, ps_resolved, attacker))
 		})
 		.map(|(_, idx)| *idx)
 		.collect();
@@ -244,7 +237,7 @@ fn try_guard_bypass(
 			{
 				continue;
 			}
-			if primitive_extract_bypass_key(prim).is_some_and(|key| can_obtain(&key, &ps, attacker))
+			if primitive_extract_bypass_key(prim).is_some_and(|key| obtainable(&key, &ps, attacker))
 			{
 				ps.values[*idx].override_all_bypassed(attacker_public_key());
 				injected = true;
@@ -264,16 +257,6 @@ fn try_guard_bypass(
 	Ok(Some(ps))
 }
 
-fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool {
-	if attacker.knows(v).is_some() {
-		return true;
-	}
-	match v {
-		Value::Primitive(p) => can_reconstruct_primitive(p, ps, attacker).is_some(),
-		_ => false,
-	}
-}
-
 pub(crate) fn attacker_authored(
 	ground: &Value,
 	slot: usize,
@@ -282,19 +265,9 @@ pub(crate) fn attacker_authored(
 ) -> bool {
 	let honest = &ps.values[slot].value;
 	let (trace_resolved, _) = resolve_trace_values(honest, km);
-	let trace_reduct = reduce(&trace_resolved, ps).unwrap_or(trace_resolved);
-	let ground_reduct = reduce(ground, ps).unwrap_or_else(|| ground.clone());
+	let trace_reduct = reduce_once(&trace_resolved, ps);
+	let ground_reduct = reduce_once(ground, ps);
 	!ground_reduct.equivalent(&trace_reduct, true)
-}
-
-fn reduce(v: &Value, ps: &PrincipalState) -> Option<Value> {
-	let p = v.as_primitive()?;
-	let (_, rewritten) = can_rewrite(p, ps);
-	if rewritten.equivalent(v, true) {
-		None
-	} else {
-		Some(rewritten)
-	}
 }
 
 fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {

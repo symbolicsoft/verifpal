@@ -24,6 +24,7 @@ pub(crate) fn construct_protocol_trace(
 		used_by: HashMap::new(),
 		leaks: Arc::new(Vec::new()),
 		session_siblings: HashMap::new(),
+		session_principals: HashMap::new(),
 	};
 	let mut leaks: Vec<LeakEvent> = Vec::new();
 	let mut declared_at = 0i32;

@@ -21,15 +21,21 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	crate::theory::rewrite_cache_reset();
 	crate::info::info_reset_deductions();
 	let expanded;
-	let (m, variants, siblings) = if sessions > 1 {
+	let (m, variants, siblings, principals) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions)?;
 		expanded = e.model;
-		(&expanded, e.query_variants, e.siblings)
+		(&expanded, e.query_variants, e.siblings, e.principals)
 	} else {
-		(m, Vec::new(), std::collections::HashMap::new())
+		(
+			m,
+			Vec::new(),
+			std::collections::HashMap::new(),
+			std::collections::HashMap::new(),
+		)
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
+	trace.session_principals = principals;
 	capability_reach_notice(&trace, &states);
 	let ctx = VerifyContext::new(m, &states, variants);
 	if sessions > 1 {
@@ -114,6 +120,18 @@ pub(crate) fn verify_resolve_queries(
 	Ok(())
 }
 
+pub(crate) fn attacker_seed_phase(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	phase: i32,
+) -> VResult<()> {
+	ctx.attacker_init();
+	let mut pure = ps.clone_for_depth(true);
+	pure.resolve_all_values(&ctx.attacker_snapshot())?;
+	ctx.attacker_phase_update(km, &pure, phase)
+}
+
 pub(crate) fn verify_standard_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -173,10 +191,7 @@ pub(crate) fn verify_passive(
 ) -> VResult<()> {
 	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
 	for phase in 0..=km.max_phase {
-		ctx.attacker_init();
-		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
-		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
-		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
+		attacker_seed_phase(ctx, km, &principal_states[0], phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
 	}
 	Ok(())

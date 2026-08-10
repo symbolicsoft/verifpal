@@ -179,22 +179,12 @@ fn rule_reconstruct(
 	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
-	reconstruct_recursive(ctx, value, ps, attacker, record)
-}
-
-fn reconstruct_recursive(
-	ctx: &VerifyContext,
-	value: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	record: &Arc<MutationRecord>,
-) -> bool {
 	let mut found = false;
 	let result = match value {
 		Value::Primitive(p) => {
 			let result = can_reconstruct_primitive(p, ps, attacker);
 			for arg in &p.arguments {
-				found |= reconstruct_recursive(ctx, arg, ps, attacker, record);
+				found |= rule_reconstruct(ctx, arg, ps, attacker, record);
 			}
 			result
 		}

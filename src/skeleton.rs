@@ -15,19 +15,12 @@ fn primitive_skeleton(p: &Primitive) -> Primitive {
 		.map(|a| match a {
 			Value::Constant(_) => value_nil(),
 			Value::Primitive(pp) if crate::primitive::primitive_is_key_derivation(pp.id) => {
-				crate::primitive::nil_key_derivation().unwrap_or_else(value_nil)
+				crate::primitive::attacker_public_key()
 			}
 			Value::Primitive(pp) => Value::Primitive(Arc::new(primitive_skeleton(pp))),
 		})
 		.collect();
-	Primitive {
-		id: p.id,
-		arguments,
-		output: p.output,
-		instance_check: false,
-		capabilities: Capabilities::default(),
-		hash: HashCell::default(),
-	}
+	Primitive::new(p.id, arguments, p.output)
 }
 
 pub(crate) fn primitive_skeleton_hash(p: &Primitive) -> u64 {

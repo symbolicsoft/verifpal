@@ -264,23 +264,9 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 	let rule = commutativity_rule(p.id)?;
 	let (inner, bare) = commutativity_parts(p)?;
 	let mut arguments = p.arguments.clone();
-	arguments[rule.wrapped] = Value::Primitive(std::sync::Arc::new(Primitive {
-		id: rule.constructor,
-		arguments: vec![bare],
-		output: 0,
-		instance_check: false,
-		capabilities: Capabilities::default(),
-		hash: HashCell::default(),
-	}));
+	arguments[rule.wrapped] = Value::primitive(rule.constructor, vec![bare], 0);
 	arguments[rule.bare] = inner;
-	Some(Primitive {
-		id: p.id,
-		arguments,
-		output: p.output,
-		instance_check: p.instance_check,
-		capabilities: p.capabilities,
-		hash: HashCell::default(),
-	})
+	Some(p.with_arguments(arguments))
 }
 
 pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
@@ -288,18 +274,11 @@ pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
 		.values()
 		.find(|s| s.key_derivation)
 		.map(|s| s.id)?;
-	Some(Value::Primitive(std::sync::Arc::new(Primitive {
-		id,
-		arguments: vec![inner],
-		output: 0,
-		instance_check: false,
-		capabilities: Capabilities::default(),
-		hash: HashCell::default(),
-	})))
+	Some(Value::primitive(id, vec![inner], 0))
 }
 
-pub(crate) fn nil_key_derivation() -> Option<Value> {
-	key_derivation_of(crate::value::value_nil())
+pub(crate) fn attacker_public_key() -> Value {
+	key_derivation_of(crate::value::value_nil()).unwrap_or_else(crate::value::value_nil)
 }
 
 pub(crate) fn value_is_key_derivation(v: &Value) -> bool {

@@ -6,6 +6,10 @@ use std::sync::Arc;
 use crate::types::*;
 use crate::value::{find_equivalent, push_unique_value};
 
+pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
+	resolve_trace_values(&Value::Constant(c.clone()), trace).0
+}
+
 pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
 	let mut visited: Vec<Value> = Vec::new();
 	let resolved = resolve_trace_value(value, trace, &mut visited);

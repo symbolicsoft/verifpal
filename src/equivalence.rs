@@ -3,49 +3,22 @@
 
 use crate::types::*;
 
-pub(crate) struct PrimitiveMatch {
-	pub equivalent: bool,
-	pub output_left: usize,
-	pub output_right: usize,
-}
-
-impl PrimitiveMatch {
-	fn no_match() -> Self {
-		PrimitiveMatch {
-			equivalent: false,
-			output_left: 0,
-			output_right: 0,
-		}
-	}
-}
-
-pub(crate) fn equivalent_primitives(
-	p1: &Primitive,
-	p2: &Primitive,
-	consider_output: bool,
-) -> PrimitiveMatch {
+pub(crate) fn equivalent_primitives(p1: &Primitive, p2: &Primitive, consider_output: bool) -> bool {
 	if p1.id != p2.id {
-		return PrimitiveMatch::no_match();
+		return false;
 	}
 	if consider_output && (p1.output != p2.output) {
-		return PrimitiveMatch::no_match();
+		return false;
 	}
 	if p1.arguments.len() != p2.arguments.len() {
-		return PrimitiveMatch::no_match();
+		return false;
 	}
 	let pairwise = p1
 		.arguments
 		.iter()
 		.zip(p2.arguments.iter())
 		.all(|(a1, a2)| a1.equivalent(a2, true));
-	if !pairwise && !commutative_match(p1, p2) {
-		return PrimitiveMatch::no_match();
-	}
-	PrimitiveMatch {
-		equivalent: true,
-		output_left: p1.output,
-		output_right: p2.output,
-	}
+	pairwise || commutative_match(p1, p2)
 }
 
 fn commutative_match(p1: &Primitive, p2: &Primitive) -> bool {
@@ -180,7 +153,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		assert!(equivalent_primitives(&p1, &p2, true).equivalent);
+		assert!(equivalent_primitives(&p1, &p2, true));
 	}
 
 	#[test]
@@ -203,7 +176,7 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
+		assert!(!equivalent_primitives(&p1, &p2, true));
 	}
 
 	#[test]
@@ -225,11 +198,8 @@ mod tests {
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
 		};
-		assert!(!equivalent_primitives(&p1, &p2, true).equivalent);
-		let pm = equivalent_primitives(&p1, &p2, false);
-		assert!(pm.equivalent);
-		assert_eq!(pm.output_left, 0);
-		assert_eq!(pm.output_right, 1);
+		assert!(!equivalent_primitives(&p1, &p2, true));
+		assert!(equivalent_primitives(&p1, &p2, false));
 	}
 
 	fn hash_of(inner: Value) -> Value {

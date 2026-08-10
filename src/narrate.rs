@@ -710,7 +710,7 @@ mod tests {
 			)
 			.expect("index");
 		let mut mutated = bob.clone();
-		let attacker_key = crate::primitive::nil_key_derivation().expect("key derivation exists");
+		let attacker_key = crate::primitive::attacker_public_key();
 		crate::reexec::install(&mut mutated, slot, attacker_key, true);
 
 		let table = NameTable::from_state(&mutated);

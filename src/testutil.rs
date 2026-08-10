@@ -54,14 +54,7 @@ pub(crate) fn make_password(name: &str) -> Value {
 }
 
 pub(crate) fn make_primitive(id: PrimitiveId, args: Vec<Value>, output: usize) -> Value {
-	Value::Primitive(Arc::new(Primitive {
-		id,
-		arguments: args,
-		output,
-		instance_check: false,
-		capabilities: Capabilities::default(),
-		hash: HashCell::default(),
-	}))
+	Value::primitive(id, args, output)
 }
 
 pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {

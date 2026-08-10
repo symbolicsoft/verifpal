@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -36,7 +36,6 @@ pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
-	analysis_count: AtomicU32,
 	file_name: String,
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
@@ -150,7 +149,6 @@ impl VerifyContext {
 			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
-			analysis_count: AtomicU32::new(0),
 			file_name: m.file_name.clone(),
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
@@ -427,7 +425,6 @@ impl VerifyContext {
 			attacker: RwLock::new(self.attacker_snapshot()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
-			analysis_count: AtomicU32::new(0),
 			file_name: self.file_name.clone(),
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
@@ -441,7 +438,6 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn analysis_count_increment(&self) {
-		self.analysis_count.fetch_add(1, Ordering::SeqCst);
 		if !crate::info::info_is_quiet() {
 			ANALYSIS_COUNT.with(|c| c.set(c.get() + 1));
 		}

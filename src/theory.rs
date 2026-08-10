@@ -148,14 +148,6 @@ impl Drop for DeductionMemo {
 	}
 }
 
-fn memo_owner_matches(
-	memo: &ObtainableMemo,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> bool {
-	memo.owner == (ps as *const _, attacker as *const _)
-}
-
 fn memo_obtainable_get(
 	key: u64,
 	v: &Value,
@@ -165,7 +157,7 @@ fn memo_obtainable_get(
 	MEMO.with(|m| {
 		let borrowed = m.borrow();
 		let memo = borrowed.as_ref()?;
-		if !memo_owner_matches(memo, ps, attacker) {
+		if memo.owner != (ps as *const _, attacker as *const _) {
 			return None;
 		}
 		memo.entries
@@ -185,7 +177,7 @@ fn memo_obtainable_put(
 ) {
 	MEMO.with(|m| {
 		if let Some(memo) = m.borrow_mut().as_mut()
-			&& memo_owner_matches(memo, ps, attacker)
+			&& memo.owner == (ps as *const _, attacker as *const _)
 		{
 			memo.entries
 				.entry(key)
@@ -327,14 +319,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	for given_set in &prim.recompose.given {
 		let mut candidates = Vec::new();
 		for &output_idx in given_set {
-			let probe = Primitive {
-				id: p.id,
-				arguments: p.arguments.clone(),
-				output: output_idx,
-				instance_check: p.instance_check,
-				capabilities: p.capabilities,
-				hash: HashCell::default(),
-			};
+			let probe = p.with_output(output_idx);
 			let hash = crate::hashing::primitive_hash(&probe);
 			let Some(indices) = attacker.known_map.get(&hash) else {
 				continue;
@@ -343,8 +328,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 				let Some(known @ Value::Primitive(known_prim)) = attacker.known.get(i) else {
 					continue;
 				};
-				let pm = equivalent_primitives(known_prim, p, false);
-				if !pm.equivalent || pm.output_left != output_idx {
+				if !equivalent_primitives(known_prim, p, false) || known_prim.output != output_idx {
 					continue;
 				}
 				candidates.push(known.clone());
@@ -411,6 +395,13 @@ fn can_reconstruct_primitive_directly(
 		from: has,
 		forged: (skipped > 0).then_some(Capability::Forgeable),
 	})
+}
+
+pub(crate) fn reduce_once(v: &Value, ps: &PrincipalState) -> Value {
+	match v {
+		Value::Primitive(p) => can_rewrite(p, ps).1,
+		Value::Constant(_) => v.clone(),
+	}
 }
 
 pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState) -> (bool, Value) {
@@ -540,8 +531,7 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 		}
 		let all_ok = has[1..].iter().all(|has_p| {
 			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has_p) {
-				let pm = equivalent_primitives(h0, hp, false);
-				pm.equivalent && pm.output_left != pm.output_right
+				equivalent_primitives(h0, hp, false) && h0.output != hp.output
 			} else {
 				false
 			}

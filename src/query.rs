@@ -239,17 +239,9 @@ fn session_sibling_replay(
 		let Some(&slot) = km.index.get(&sid) else {
 			return false;
 		};
-		let sibling = Value::Constant(km.slots[slot].constant.clone());
-		let (resolved, _) = resolve_trace_values(&sibling, km);
+		let resolved = resolve_trace_constant(&km.slots[slot].constant, km);
 		reduce_once(&resolved, ps).equivalent(&used_reduct, true)
 	})
-}
-
-fn reduce_once(v: &Value, ps: &PrincipalState) -> Value {
-	match v {
-		Value::Primitive(p) => can_rewrite(p, ps).1,
-		Value::Constant(_) => v.clone(),
-	}
 }
 
 fn query_authentication_handle_pass(
