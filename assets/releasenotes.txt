@@ -1,84 +1,44 @@
-Verifpal 0.80.0 adds parametrized primitives, which let a model say that a
-particular piece of cryptography is broken, and replaces how unlinkability
-queries are decided.
+Verifpal 0.80.1 runs every principal as two concurrent sessions, removes the
+last artificial limits from the analysis, and closes several sources of false
+attacks. Each principal a model declares now runs two sessions at once, each
+drawing its own fresh values while sharing long-term material, with the attacker
+free to route any session's traffic into any other. This reaches a class of
+attack Verifpal could not express at all before: anything that needs two of a
+role's fresh values to coexist, such as nonce swaps between instances of the
+same role, oracle interleavings, reflections and confusion between parallel
+runs. The language is untouched and no existing model needs editing, since
+`generates` versus `knows` already says which values are per-session and which
+are long-term.
 
-PARAMETRIZED PRIMITIVES
+The analysis no longer carries arbitrary limits. The recursion cap in the
+equational theory, the resolution depth cap and the guard-bypass round cap are
+gone, replaced by structural termination arguments: a well-founded descent on
+term depth, an occurs check in the unifier, and a refusal to install an attacker
+value that would make a principal's own computation cyclic. Where a bound is
+still needed, it is derived from the model rather than picked in advance, so a
+result no longer depends on whether a term happened to fit inside a number
+somebody chose. One consequence is visible in the examples: the symmetric-key
+Needham-Schroeder model used to run for many minutes without resolving a single
+query, and now finishes in milliseconds, reporting the classic Denning-Sacco
+replay.
 
-Until now, every primitive in a Verifpal model was perfectly secure. A hash was
-never invertible, a signature was never forgeable, and the only way to model a
-break was to hand the attacker the underlying secrets with `leaks`. That works,
-but it states the wrong thing: a leaks list enumerates values, and it is silently
-wrong the moment you forget one.
+Several false attacks are fixed. Halting a principal is not the same as making
+two principals disagree, so an `equivalence?` query asked of a state truncated
+at a failed check no longer reports a divergence nobody computed. A failed check
+belonging to *another* principal used to be invisible, so values sitting behind
+it were harvested as though that principal had reached them, which handed the
+attacker a message authentication forgery oracle it did not have. And replaying
+a value another session honestly sent is non-injective agreement rather than a
+forgery; without that distinction, every protocol lacking replay protection
+would have reported an authentication attack the moment the default moved to two
+sessions. Each fix ships with a regression model, and so does its counterweight,
+because tightening the analysis must not quietly lose a genuine attack.
 
-A primitive call site may now carry a bracketed list of declared weakening
-assumptions between the name and the arguments:
-
-    ga = PUBKEY[weak](a)
-    s  = SIGN[forgeable](sk, m)
-    e  = AEAD_ENC[weak, forgeable from phase 2](k, m, ad)
-
-`weak` means confidentiality is lost, so holding the term yields what it
-protects: a preimage for `HASH` and `PW_HASH`, the plaintext for `AEAD_ENC`,
-`ENC` and `PKE_ENC`, the shared secret for `KEM_ENCAP`, and the private key for
-`PUBKEY`. `PUBKEY[weak]` is discrete logarithm, and Diffie-Hellman collapses out
-of it without any Diffie-Hellman-specific rule: if the attacker can recover a
-private key it can recompute every shared secret that key was used in.
-
-`forgeable` means authenticity is lost, so the term is constructible without its
-secret. It is declared by `SIGN`, `MAC`, `RINGSIGN` and `AEAD_ENC`. Keeping this
-separate from `weak` is what makes `AEAD_ENC[forgeable]` expressible: a
-ciphertext an attacker can produce but still cannot read.
-
-`from phase N` means "from phase N onward", and binds to the capability it
-follows. Without it, the assumption is in force from the start. This is what
-makes harvest-now-decrypt-later models say what they mean. The new
-`examples/messaging/pqxdh-weak.vp` is Signal's PQXDH with every Diffie-Hellman
-public key annotated `PUBKEY[weak from phase 1]` and nothing leaked at all: the
-KEM encapsulation key is deliberately left unannotated, which is the entire
-hybrid argument, and the model still holds.
-
-Three things are worth knowing before you use this. An assumption a primitive
-does not declare is a hard error naming the alternative that would have worked,
-rather than an annotation that silently does nothing — an assumption that reads
-as a check but performs none is worse than no assumption at all. The same applies
-to `from phase N` naming a phase the model never reaches. And `malleable` is in
-the vocabulary and parses, but no primitive declares it, so any use is rejected:
-the attack it enables needs two coordinated wire substitutions that the current
-solver cannot form, and shipping it as a silent no-op was not an option.
-
-An unannotated model is unaffected, bit for bit. Capabilities are deliberately
-invisible to term hashing and equivalence, because an annotated term and its
-unannotated twin are the same cryptographic object; the engine reads assumptions
-from a model-level index instead.
-
-`weak`, `forgeable`, `malleable` and `from` are contextual keywords recognised
-only inside the parameter brackets, so models already using `weak` or `from` as
-constant names keep working.
-
-Finally, a verification performed under declared assumptions now says so. The
-results block is preceded by a warning listing every annotated term, and
-`internal-json` carries the same information on each result, so a passing result
-copied out of Verifpal cannot lose the caveat that makes it meaningful. The
-result code format is unchanged.
-
-UNLINKABILITY
-
-Previously, an unlinkability query failed if a queried value contained no fresh
-constant, or if two queried values were outputs of the same primitive application
-and the attacker could rebuild it. Neither test consulted what the attacker had
-actually observed. The first reported a property of the model as though it were
-an attack, and disagreed with Verifpal's own freshness query. The second could
-only ever compare values produced by a single primitive application, so
-linkability across sessions or epochs could not be detected at all.
-
-Verifpal now decides unlinkability the way the User Manual has always defined it,
-by searching for a concrete link witness: a value the attacker holds that ties
-both queried values to one participant. It reports that witness as the
-explanation, so a failing query now reads, for example, "Attacker links EphID00A
-and EphID10A via SK0A."
-
-Two consequences worth checking against your own models. Models that used to fail
-on the freshness clause will now pass, because a value the attacker cannot reach
-or observe cannot be linked. And seed-compromise linkability, where one leaked
-secret lets the attacker recompute many derived identifiers, is now detected
-where it previously was not.
+Finally, attack traces read better. A substitution is no longer described in
+terms of its own consequences: on Millen's FFGG, the trace used to say that the
+attacker replaces a message with the encryption of that same message's
+decryption, which was accurate about the tampered state and useless to a reader.
+It now states the rotation outright. Every value the attacker injects is
+accompanied by how it obtained that value, so a substitution no longer arrives
+from nowhere, and a checked primitive with several outputs no longer prints the
+same step once per output.
