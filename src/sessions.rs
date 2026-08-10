@@ -68,7 +68,6 @@ pub(crate) struct SessionExpansion {
 	pub(crate) model: Model,
 	pub(crate) query_variants: Vec<Vec<Query>>,
 	pub(crate) siblings: HashMap<ValueId, Arc<Vec<ValueId>>>,
-	pub(crate) principals: HashMap<PrincipalId, PrincipalId>,
 }
 
 fn session_value_id(base: ValueId, s: u8) -> ValueId {
@@ -173,19 +172,10 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		false,
 	);
 
-	let mut principal_map: HashMap<PrincipalId, PrincipalId> = HashMap::new();
-	for ((base, _), (clone, _)) in &pids {
-		principal_map.insert(*clone, *base);
-	}
-	for (base, _) in &principals {
-		principal_map.insert(*base, *base);
-	}
-
 	Ok(SessionExpansion {
 		model,
 		query_variants,
 		siblings,
-		principals: principal_map,
 	})
 }
 

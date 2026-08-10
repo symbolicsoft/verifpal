@@ -457,7 +457,6 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
-			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -497,7 +496,6 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
-			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -539,7 +537,6 @@ mod tests {
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: HashMap::new(),
-			session_principals: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

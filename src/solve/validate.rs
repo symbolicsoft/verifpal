@@ -3,7 +3,6 @@
 
 use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
-use crate::equivalence::homeomorphically_embeds;
 use crate::info::info_message;
 use crate::primitive::primitive_get;
 use crate::reexec::attacker_authored;
@@ -55,9 +54,6 @@ pub(crate) fn validate(
 		if contains_failed_check(&ground, &ps) {
 			return Ok(false);
 		}
-		if is_self_feeding_pump(ctx, km, slot, &ground, &ps, attacker) {
-			return Ok(false);
-		}
 		if !attacker_can_derive(ctx, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
@@ -73,13 +69,6 @@ pub(crate) fn validate(
 
 	if !worthwhile {
 		return Ok(false);
-	}
-
-	for (slot, ground) in &installs {
-		if let Some(ancestor) = pump_ancestor(km, slot.get(), ground, &ps, attacker) {
-			let (role, ladder) = ladder_key(km, &ps, slot.get());
-			ctx.lineage_record(role, ladder, ground, &ancestor);
-		}
 	}
 
 	let governing = crate::reexec::governing_attacker(ctx, &installs, &ps, attacker);
@@ -144,75 +133,6 @@ fn note_depth_cut(
 		InfoLevel::Info,
 		false,
 	);
-}
-
-fn ladder_key(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> (PrincipalId, usize) {
-	let constant = ps
-		.meta
-		.get(slot)
-		.map(|meta| km.base_constant(meta.constant.id) as usize)
-		.unwrap_or(slot);
-	(km.base_principal(ps.id), constant)
-}
-
-fn is_self_feeding_pump(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	slot: usize,
-	ground: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> bool {
-	let Some(immediate) = pump_ancestor(km, slot, ground, ps, attacker) else {
-		return false;
-	};
-	let (role, ladder) = ladder_key(km, ps, slot);
-	let Some(previous) = ctx
-		.lineage_of(role, ladder, &immediate)
-		.into_iter()
-		.find(|u| {
-			matches!(u, Value::Primitive(_))
-				&& !u.equivalent(ground, true)
-				&& homeomorphically_embeds(u, ground)
-		})
-	else {
-		return false;
-	};
-	if ctx.note_pump_cut(role, ladder) {
-		let name = &ps.meta[slot].constant.name;
-		info_message(
-			&format!(
-				"Search cut a self-feeding replay chain at {}'s {name}: the attacker holds \
-				 {ground} only by replaying its own {previous} back into {name}. Deeper \
-				 replays of this shape were not explored.",
-				ps.name
-			),
-			InfoLevel::Info,
-			false,
-		);
-	}
-	true
-}
-
-fn pump_ancestor(
-	km: &ProtocolTrace,
-	slot: usize,
-	ground: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> Option<Value> {
-	let record = attacker.record(attacker.knows(ground)?)?;
-	// Session clones of one role climb one ladder, so the comparison is by
-	// role and by the constant the slot holds, not by principal and index.
-	if km.base_principal(record.principal_id) != km.base_principal(ps.id) {
-		return None;
-	}
-	let ladder = km.base_constant(ps.meta.get(slot)?.constant.id);
-	record
-		.diffs
-		.iter()
-		.find(|d| km.base_constant(d.constant.id) == ladder)
-		.map(|d| d.value.clone())
 }
 
 fn attacker_can_derive(

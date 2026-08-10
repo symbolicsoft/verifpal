@@ -3,8 +3,8 @@
 
 // Expected: c0a1
 //
-// This is the minimal self-feeding replay pump, and it exists to pin both
-// halves of the cut in `solve/validate.rs::is_self_feeding_pump`.
+// This is the minimal self-feeding replay pump, and it exists to pin that the
+// depth bound of `reexec.rs::TermBound` stops it without costing the attack.
 //
 // One key `k` covers both directions of Bob's leg, and a growing constructor
 // (HASH) sits on the return path, so Bob's own output is a well-typed input to
@@ -14,15 +14,16 @@
 //     e2 = AEAD_ENC(k, HASH(m), nil)    rung 1, what Bob echoes
 //     e2'= AEAD_ENC(k, HASH(HASH(m)), nil)   rung 2, if rung 1 is fed back
 //
-// Feeding rung n into e1 yields rung n+1, forever. This is the shape that made
-// `needham-schroeder.vp` diverge.
+// Feeding rung n into e1 yields rung n+1, and only the depth bound stops it:
+// the ladder climbs until a rung nests deeper than anything the protocol
+// computes, which the tool reports. This is the shape that made
+// `needham-schroeder.vp` diverge before that bound existed.
 //
 // `a1` — the rung-1 reflection attack MUST still be found. The attacker never
 // learns `k`, but it does not need to: `e2` is already a valid ciphertext under
 // `k`, so replaying it into `e1` makes Bob's checked AEAD_DEC succeed on a value
-// Alice never sent. The cut spares the first self-feed precisely so that this
-// class of attack survives; if this query ever starts passing, the cut has
-// become too aggressive and is eating real reflection attacks.
+// Alice never sent. If this query ever starts passing, something has begun
+// discarding real reflection attacks.
 //
 // `c0` — `m` stays confidential. The attacker can move ciphertexts around but
 // cannot open one, since `k` is shared privately and never leaks. If this ever

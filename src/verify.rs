@@ -21,21 +21,15 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	crate::theory::rewrite_cache_reset();
 	crate::info::info_reset_deductions();
 	let expanded;
-	let (m, variants, siblings, principals) = if sessions > 1 {
+	let (m, variants, siblings) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions)?;
 		expanded = e.model;
-		(&expanded, e.query_variants, e.siblings, e.principals)
+		(&expanded, e.query_variants, e.siblings)
 	} else {
-		(
-			m,
-			Vec::new(),
-			std::collections::HashMap::new(),
-			std::collections::HashMap::new(),
-		)
+		(m, Vec::new(), std::collections::HashMap::new())
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
-	trace.session_principals = principals;
 	capability_reach_notice(&trace, &states);
 	let ctx = VerifyContext::new(m, &states, variants);
 	if sessions > 1 {

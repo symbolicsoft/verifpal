@@ -656,22 +656,6 @@ pub struct ProtocolTrace {
 	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
 	/// session. Read by the authentication replay carve-out in `query.rs`.
 	pub session_siblings: HashMap<ValueId, Arc<Vec<ValueId>>>,
-	/// Each cloned principal's id mapped to the id of the session it was
-	/// cloned from. Empty at one session.
-	pub session_principals: HashMap<PrincipalId, PrincipalId>,
-}
-
-impl ProtocolTrace {
-	pub fn base_constant(&self, id: ValueId) -> ValueId {
-		self.session_siblings
-			.get(&id)
-			.and_then(|group| group.first().copied())
-			.unwrap_or(id)
-	}
-
-	pub fn base_principal(&self, id: PrincipalId) -> PrincipalId {
-		self.session_principals.get(&id).copied().unwrap_or(id)
-	}
 }
 
 #[derive(Clone, Debug)]
