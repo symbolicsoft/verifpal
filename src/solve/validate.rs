@@ -20,6 +20,7 @@ pub(crate) fn validate(
 	km: &ProtocolTrace,
 	ps_base: &PrincipalState,
 	sym: &SymbolicState,
+	controllable: &crate::reexec::Controllable,
 	attacker: &AttackerState,
 	subst: &Substitution,
 ) -> VResult<bool> {
@@ -41,7 +42,7 @@ pub(crate) fn validate(
 		if slot >= ps.values.len() {
 			continue;
 		}
-		if !crate::reexec::attacker_controllable(slot, km, &ps, attacker) {
+		if !controllable.admits(&ps, attacker, slot) {
 			return Ok(false);
 		}
 		if contains_failed_check(&ground, &ps) {
@@ -253,33 +254,21 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 ///
 /// A `forgeable` annotation says the scheme has lost authenticity: the attacker
 /// can produce this primitive, under this secret, over a message of its
-/// choosing. The exemption is therefore keyed on the secret argument rather
-/// than on the whole term. `SIGN[forgeable](sk, m)` licenses `SIGN(sk, m')` for
-/// any derivable `m'`, which is the point of the assumption, but licenses
-/// nothing under a different signing key. Matching the whole term instead would
-/// make the annotation useless, since a forgery is by definition over a message
-/// the honest run never signed; matching on the primitive alone would let one
-/// annotation weaken every key in the model.
+/// choosing. The exemption is therefore keyed on the secret argument rather than
+/// on the whole term. `SIGN[forgeable](sk, m)` licenses `SIGN(sk, m')` for any
+/// derivable `m'`, which is the point of the assumption, but licenses nothing
+/// under a different signing key. Matching the whole term instead would make the
+/// annotation useless, since a forgery is by definition over a message the
+/// honest run never signed; matching on the primitive alone would let one
+/// annotation weaken every key in the model. `CapabilityIndex` maintains the
+/// secret-keyed projection this asks for alongside the term-keyed one.
 fn forgeable_secret_position(
 	p: &Primitive,
 	ps: &PrincipalState,
 	snapshot: &AttackerState,
 ) -> Option<usize> {
-	let position = primitive_get(p.id).ok()?.forgeable_secret?;
-	let secret = p.arguments.get(position)?;
-	let phase = snapshot.current_phase;
-	if ps.capabilities.in_force(p, Capability::Forgeable, phase) {
-		return Some(position);
-	}
 	ps.capabilities
-		.annotated_terms()
-		.any(|(term, caps)| {
-			caps.in_force(Capability::Forgeable, phase)
-				&& matches!(term, Value::Primitive(q)
-					if q.id == p.id
-						&& q.arguments.get(position).is_some_and(|s| s.equivalent(secret, true)))
-		})
-		.then_some(position)
+		.forgeable_secret_position(p, snapshot.current_phase)
 }
 
 fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {

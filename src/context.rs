@@ -336,7 +336,14 @@ impl VerifyContext {
 		&self.file_name
 	}
 
-	pub(crate) fn results_put(&self, result: &VerifyResult) -> bool {
+	/// Record a verdict. The token is unforgeable outside `query.rs`, which is
+	/// fact (i) of the soundness theorem expressed as a type rather than as a
+	/// test over the source.
+	pub(crate) fn results_put(
+		&self,
+		result: &VerifyResult,
+		_verdict: &crate::query::QueryVerdict,
+	) -> bool {
 		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index)
 			&& !vr.resolved
@@ -426,7 +433,7 @@ mod tests {
 		let mut r = VerifyResult::new(&m.queries[1], 1);
 		r.resolved = true;
 		r.summary = " probe".to_string();
-		assert!(scratch.results_put(&r));
+		assert!(scratch.results_put(&r, &crate::query::QueryVerdict::for_test()));
 		assert!(scratch.query_is_resolved(1));
 		assert!(scratch.all_resolved());
 

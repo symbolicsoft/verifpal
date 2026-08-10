@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
-pub use crate::capability::{Capabilities, Capability, CapabilityIndex};
+pub use crate::capability::{Capabilities, Capability, CapabilityIndex, Reach};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Span {
@@ -667,6 +667,16 @@ pub struct SlotValues {
 	pub value: Value,
 	pub pre_rewrite: Value,
 	pub original: Value,
+	/// The key a defeated guard was made to accept, when one was.
+	///
+	/// A guard bypass has to be visible to the principal — that is the whole
+	/// point of it, since the principal really did check against the key it was
+	/// handed. It used to be written into `original`, which gave that field two
+	/// meanings and left a bypassed slot impossible to purify: the field
+	/// purification restores from no longer held what the protocol honestly
+	/// computed. Keeping it here costs one `Option` per slot and lets `original`
+	/// mean exactly what the semantics say it means.
+	pub bypassed: Option<Value>,
 	pub rewritten: bool,
 	pub provenance: Provenance,
 }
@@ -685,9 +695,19 @@ impl SlotValues {
 		self.value = v;
 	}
 
+	/// Install `v` as the key a defeated guard accepts, leaving `original`
+	/// holding what the protocol honestly computed.
 	pub fn override_all_bypassed(&mut self, v: Value) {
-		self.override_all(v);
+		self.pre_rewrite = v.clone();
+		self.value = v.clone();
+		self.bypassed = Some(v);
 		self.provenance.bypass_injected = true;
+	}
+
+	/// What the principal perceives at this slot: the bypassed key where a guard
+	/// was defeated, and otherwise what it honestly computed.
+	pub fn perceived(&self) -> &Value {
+		self.bypassed.as_ref().unwrap_or(&self.original)
 	}
 }
 
@@ -714,7 +734,7 @@ impl PrincipalState {
 
 	pub fn effective_value(&self, i: usize) -> &Value {
 		if self.should_use_original(i) {
-			&self.values[i].original
+			self.values[i].perceived()
 		} else {
 			&self.values[i].value
 		}

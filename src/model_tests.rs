@@ -68,6 +68,10 @@ fn test_cap_reach_notice() {
 	run_model("cap_reach_notice.vp", "a1");
 }
 #[test]
+fn test_cap_reach_secret() {
+	run_model("cap_reach_secret.vp", "a1");
+}
+#[test]
 fn test_cap_weak_hash() {
 	run_model("cap_weak_hash.vp", "c1c1");
 }
@@ -289,6 +293,14 @@ fn test_auth_with_signing_false_attack() {
 #[test]
 fn test_halted_principal_false_attack() {
 	run_model("halted_principal_false-attack.vp", "c0");
+}
+#[test]
+fn test_shared_freshness_not_replication() {
+	run_model("shared_freshness_not_replication.vp", "a1");
+}
+#[test]
+fn test_dh_two_public_keys() {
+	run_model("dh_two_public_keys.vp", "c0c0");
 }
 #[test]
 fn test_decompose_is_not_construct() {

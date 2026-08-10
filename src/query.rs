@@ -69,8 +69,17 @@ pub(crate) fn query_start(
 	Ok(())
 }
 
+pub(crate) struct QueryVerdict(());
+
+#[cfg(test)]
+impl QueryVerdict {
+	pub(crate) fn for_test() -> QueryVerdict {
+		QueryVerdict(())
+	}
+}
+
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
-	if ctx.results_put(result) {
+	if ctx.results_put(result, &QueryVerdict(())) {
 		info_message(
 			&format!("{}{}", result.query, result.summary),
 			InfoLevel::Result,
@@ -387,14 +396,6 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 	result
 }
 
-/// Structural invariants behind the soundness theorem.
-///
-/// Three of the theorem's premises are facts about the shape of this codebase
-/// rather than about what any function computes: a query result has exactly one
-/// write path, that path is reached only from query evaluation, and query
-/// evaluation is entered only over a state that was concretely executed. They
-/// are cheap to state and easy to break by accident, so they are checked here
-/// rather than left to a reviewer with `grep`.
 #[cfg(test)]
 mod tcb_tests {
 	use std::fs;
@@ -532,6 +533,39 @@ mod tcb_tests {
 			 over a minimizer probe against a scratch context (witness.rs), and \
 			 nowhere else. A new call site must be shown to hand it a state that \
 			 was concretely executed."
+		);
+	}
+
+	#[test]
+	fn the_solver_holds_no_shared_cell_over_analysis_state() {
+		const ALLOWED: [&str; 4] = ["memo:", "active:", "cycles_cut:", "fresh:"];
+		let mut offenders: Vec<String> = Vec::new();
+		for path in engine_sources() {
+			if !path.to_string_lossy().contains("/solve/") {
+				continue;
+			}
+			let rel = path
+				.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
+				.unwrap_or(&path)
+				.to_string_lossy()
+				.into_owned();
+			for (number, line) in shipping_lines(&path) {
+				let trimmed = line.trim_start();
+				let shared = ["RefCell<", "Cell<", "Mutex<", "RwLock<", "static mut"]
+					.iter()
+					.any(|needle| trimmed.contains(needle));
+				if !shared || trimmed.starts_with("use ") {
+					continue;
+				}
+				if ALLOWED.iter().any(|field| trimmed.starts_with(field)) {
+					continue;
+				}
+				offenders.push(format!("{rel}:{number}: {trimmed}"));
+			}
+		}
+		assert!(
+			offenders.is_empty(),
+			"the solver's interior mutability is confined to its own memo tables; 			 a cell over analysis state would let a search bug reach past the 			 validator: {offenders:?}"
 		);
 	}
 

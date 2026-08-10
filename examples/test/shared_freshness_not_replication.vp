@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — and the trace must carry the shared-freshness note.
+//
+// This model pins the direction of the session model that is easy to forget.
+// Sessions of a role here share that role's generated constants, and the usual
+// consequence is a missed attack. The other consequence is this one: the engine
+// admits a trace that unbounded replication would not.
+//
+// Bob keys w's envelope on a nonce he generates, so a ciphertext under
+// HASH(k, n) is the only thing his AEAD_DEC will open. He later emits v under
+// the same key. In this engine, session 2 of Bob decrypts v happily, because
+// session 2's n is session 1's n; w is then attacker-authored and successfully
+// used, so the authentication query fails. Under `!P` session 2's key is
+// HASH(k, n_2), v was made under HASH(k, n_1), the decryption fails and no
+// attacker-authored value is ever used: there is no attack.
+//
+// The verdict stands as a statement about this engine's semantics. What must
+// not regress is the note, which is what tells the reader that the witness rests
+// on an equality replication would not grant.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public p
+]
+
+principal Bob[
+	knows private k
+	generates n
+]
+
+Bob -> Alice: n
+
+principal Alice[
+	ka = HASH(k, n)
+	w = AEAD_ENC(ka, p, nil)
+]
+
+Alice -> Bob: w
+
+principal Bob[
+	kb = HASH(k, n)
+	pb = AEAD_DEC(kb, w, nil)?
+]
+
+principal Alice[
+	generates u
+]
+
+Alice -> Bob: u
+
+principal Bob[
+	v = AEAD_ENC(kb, u, nil)
+]
+
+Bob -> Alice: v
+
+queries[
+	authentication? Alice -> Bob: w
+]

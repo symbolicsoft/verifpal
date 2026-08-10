@@ -244,10 +244,11 @@ pub(crate) fn derivation_steps(
 	target: &Value,
 	table: &NameTable,
 	home: PrincipalId,
+	carried: &[Value],
 	seen: &mut Vec<KnownIdx>,
 ) -> Vec<Step> {
 	let mut steps: Vec<Step> = Vec::new();
-	walk(km, attacker, target, table, home, seen, &mut steps);
+	walk(km, attacker, target, table, home, carried, seen, &mut steps);
 	steps
 }
 
@@ -258,6 +259,7 @@ fn walk(
 	value: &Value,
 	table: &NameTable,
 	home: PrincipalId,
+	carried: &[Value],
 	seen: &mut Vec<KnownIdx>,
 	steps: &mut Vec<Step>,
 ) {
@@ -278,26 +280,31 @@ fn walk(
 		.cloned()
 		.collect::<Vec<_>>()
 	{
-		walk(km, attacker, &ingredient, table, home, seen, steps);
+		walk(km, attacker, &ingredient, table, home, carried, seen, steps);
 	}
 
-	if let Some(text) = describe(derivation, value, table) {
+	if let Some(text) = describe(derivation, value, table, carried) {
 		let session = attacker
 			.record(idx)
-			.filter(|r| r.principal_id != home)
-			.map(|r| {
-				format!(
-					"In an earlier session with {} (phase {}), ",
-					km.principal_name(r.principal_id),
-					r.phase,
-				)
-			});
+			.and_then(|r| session_prefix(km, r, home));
 		let text = match session {
-			Some(prefix) => format!("{}{}{}", prefix, lowercase_first(&text), ""),
+			Some(prefix) => format!("{}{}", prefix, lowercase_first(&text)),
 			None => text,
 		};
 		steps.push(Step::Derive { text });
 	}
+}
+
+/// Where a derivation happened, when that is not the session being narrated.
+fn session_prefix(km: &ProtocolTrace, r: &MutationRecord, home: PrincipalId) -> Option<String> {
+	if r.principal_id == home {
+		return None;
+	}
+	Some(format!(
+		"In an earlier session with {} (phase {}), ",
+		km.principal_name(r.principal_id),
+		r.phase,
+	))
 }
 
 fn lowercase_first(s: &str) -> String {
@@ -308,12 +315,24 @@ fn lowercase_first(s: &str) -> String {
 	}
 }
 
-fn describe(derivation: &DerivationRecord, value: &Value, table: &NameTable) -> Option<String> {
+fn describe(
+	derivation: &DerivationRecord,
+	value: &Value,
+	table: &NameTable,
+	carried: &[Value],
+) -> Option<String> {
 	let v = table.compress(value);
 	Some(match derivation {
 		DerivationRecord::Initial | DerivationRecord::Injected => return None,
 		DerivationRecord::Leaked { .. } => {
 			format!("Attacker is handed {} by a leaks declaration.", v)
+		}
+		DerivationRecord::Obtained { .. } if carried.iter().any(|c| c.equivalent(value, true)) => {
+			format!(
+				"Attacker holds {} from an earlier session; the honest run does not \
+				 send it, and this trace does not reconstruct that session.",
+				v
+			)
 		}
 		DerivationRecord::Obtained { .. } => format!("Attacker observes {} on the wire.", v),
 		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
@@ -399,18 +418,36 @@ impl Narration {
 	}
 }
 
-/// Appended to a trace whose substitutions were never confirmed to reproduce
-/// the violation on their own.
-///
-/// The minimizer normally returns a witness a probe re-executed to the
-/// reported violation, which is what makes the reproduction guarantee worth
-/// stating. When no candidate reproduces it, the state that resolved the query
-/// is reported as it stands, and the steps below it are the search's record
-/// rather than a checked witness. Saying which one the reader is holding costs
-/// a line and is the difference between a guarantee and an impression.
+fn carried_in(ps: &PrincipalState) -> Vec<Value> {
+	ps.values
+		.iter()
+		.filter(|sv| {
+			sv.provenance.attacker_tainted && sv.provenance.sender == crate::principal::ATTACKER_ID
+		})
+		.map(|sv| sv.pre_rewrite.clone())
+		.collect()
+}
+
 const NOT_MINIMIZED: &str = "\n            Note: these are the substitutions \
 the search recorded; no subset of them was confirmed to reproduce the \
 violation on its own, so this trace is not a minimized witness.";
+
+fn not_separated(who: &str, shares: &[String]) -> String {
+	format!(
+		"\n            Note: this trace reproduces only because sessions of \
+		 {who} share {}. Under per-session freshness this witness does not \
+		 reproduce; an attack may still exist by another route.",
+		join_names(shares)
+	)
+}
+
+fn join_names(names: &[String]) -> String {
+	match names {
+		[] => String::new(),
+		[one] => one.clone(),
+		[rest @ .., last] => format!("{} and {}", rest.join(", "), last),
+	}
+}
 
 pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
@@ -418,6 +455,7 @@ pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Val
 	let shadowed = shadowed_names(km, &witness.ps);
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let pre_table = table.without(&shadowed_refs);
+	let carried = carried_in(&witness.ps);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
 		steps.extend(derivation_steps(
@@ -426,6 +464,7 @@ pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Val
 			&sv.pre_rewrite,
 			&pre_table,
 			witness.ps.id,
+			&carried,
 			&mut seen,
 		));
 	}
@@ -439,12 +478,15 @@ pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Val
 		target,
 		&table,
 		witness.ps.id,
+		&carried,
 		&mut seen,
 	));
 
 	let mut trace = render(&steps);
 	if !witness.reproduced {
 		trace.push_str(NOT_MINIMIZED);
+	} else if !witness.shares.is_empty() {
+		trace.push_str(&not_separated(&witness.ps.name, &witness.shares));
 	}
 	Narration { trace, table }
 }
@@ -701,7 +743,15 @@ mod tests {
 		let attacker = ctx.attacker_snapshot();
 		let target = trace_constant(&km, "dw_m");
 		let table = NameTable::from_state(&pure);
-		let steps = derivation_steps(&km, &attacker, &target, &table, pure.id, &mut Vec::new());
+		let steps = derivation_steps(
+			&km,
+			&attacker,
+			&target,
+			&table,
+			pure.id,
+			&[],
+			&mut Vec::new(),
+		);
 
 		assert!(!steps.is_empty(), "the attacker learned dw_m somehow");
 		let text: Vec<String> = steps
@@ -734,7 +784,8 @@ mod tests {
 		let unknown = make_constant("dw_absent");
 		let trace = make_trace();
 		assert!(
-			derivation_steps(&trace, &attacker, &unknown, &table, 0, &mut Vec::new()).is_empty()
+			derivation_steps(&trace, &attacker, &unknown, &table, 0, &[], &mut Vec::new())
+				.is_empty()
 		);
 	}
 }

@@ -470,6 +470,26 @@ mod tests {
 	}
 
 	#[test]
+	fn normalisation_collapses_an_exchange_of_two_public_keys() {
+		use crate::testutil::*;
+		let a = make_constant("nrm_a");
+		let b = make_constant("nrm_b");
+		let ga = make_primitive(PRIM_PUBKEY, vec![a], 0);
+		let gb = make_primitive(PRIM_PUBKEY, vec![b.clone()], 0);
+		let normalised = normalise_arguments(PRIM_DH_KEX, vec![ga.clone(), gb]);
+		assert!(normalised[0].equivalent(&ga, true));
+		assert!(
+			normalised[1].equivalent(&b, true),
+			"the forbidden PUBKEY at the bare position is peeled away"
+		);
+		let twice = normalise_arguments(PRIM_DH_KEX, normalised.clone());
+		assert!(twice[0].equivalent(&normalised[0], true));
+		assert!(twice[1].equivalent(&normalised[1], true));
+		let gga = normalise_arguments(PRIM_PUBKEY, vec![ga.clone()]);
+		assert!(gga[0].equivalent(&make_constant("nrm_a"), true));
+	}
+
+	#[test]
 	fn primitive_has_rewrite_rule_checks() {
 		assert!(primitive_has_rewrite_rule(PRIM_AEAD_DEC));
 		assert!(primitive_has_rewrite_rule(PRIM_DEC));

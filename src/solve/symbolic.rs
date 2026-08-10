@@ -31,7 +31,7 @@ fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
 }
 
 pub(crate) fn build(
-	km: &ProtocolTrace,
+	controllable: &crate::reexec::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> SymbolicState {
@@ -40,7 +40,7 @@ pub(crate) fn build(
 	let mut var_slots = Vec::new();
 
 	for (idx, slot) in var_terms.iter_mut().enumerate() {
-		if !crate::reexec::attacker_controllable(idx, km, ps, attacker) {
+		if !controllable.admits(ps, attacker, idx) {
 			continue;
 		}
 		let name = &ps.meta[idx].constant.name;

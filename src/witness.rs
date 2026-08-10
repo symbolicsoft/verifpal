@@ -41,6 +41,7 @@ pub(crate) struct Witness {
 	pub ps: PrincipalState,
 	pub attacker: AttackerState,
 	pub reproduced: bool,
+	pub shares: Vec<String>,
 }
 
 pub(crate) fn minimize_witness(
@@ -54,6 +55,7 @@ pub(crate) fn minimize_witness(
 		ps: ps.clone(),
 		attacker: ctx.attacker_snapshot(),
 		reproduced,
+		shares: Vec::new(),
 	};
 
 	if in_minimization() {
@@ -161,8 +163,64 @@ pub(crate) fn minimize_witness(
 	}
 
 	match probe(ctx, km, &base, &keep, query_index, phase) {
-		Some(witness) => witness,
+		Some(mut witness) => {
+			witness.shares = shared_freshness(ctx, km, &base, &keep, query_index, phase);
+			witness
+		}
 		None => unminimized(false),
+	}
+}
+
+fn shared_freshness(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	query_index: usize,
+	phase: i32,
+) -> Vec<String> {
+	let mut shared: Vec<String> = Vec::new();
+	let renamed: Vec<(SlotIdx, Value)> = installs
+		.iter()
+		.map(|(slot, v)| (*slot, rename_own_fresh(v, base, &mut shared)))
+		.collect();
+	if shared.is_empty() {
+		return shared;
+	}
+	if probe(ctx, km, base, &renamed, query_index, phase).is_some() {
+		return Vec::new();
+	}
+	shared.sort();
+	shared.dedup();
+	shared
+}
+
+/// `v` with every constant that `ps` itself generates replaced by the copy a
+/// different session of `ps` would hold, recording which ones those were.
+fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> Value {
+	match v {
+		Value::Constant(c) => {
+			// Read freshness off the slot rather than off the occurrence: a
+			// constant reached by inlining carries the identifier but not
+			// necessarily the declaration flags.
+			let own = ps.index_of(c).is_some_and(|i| {
+				ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id
+			});
+			if own {
+				seen.push(c.name.to_string());
+				crate::value::session_copy(c)
+			} else {
+				v.clone()
+			}
+		}
+		Value::Primitive(p) => {
+			let arguments = p
+				.arguments
+				.iter()
+				.map(|a| rename_own_fresh(a, ps, seen))
+				.collect();
+			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
+		}
 	}
 }
 
@@ -193,6 +251,9 @@ fn probe(
 		attacker: scratch.attacker_snapshot(),
 		// A probe returns only when the re-executed state resolved the query.
 		reproduced: true,
+		// Decided by the caller, which knows whether this probe is the witness
+		// or the separated-freshness re-check of it.
+		shares: Vec::new(),
 	})
 }
 

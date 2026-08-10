@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0 — the shared secret and the message under it both hold.
+//
+// The keys are guarded, so the ordinary man-in-the-middle is unavailable and
+// what is left is the algebraic route: the attacker holds ga and gb, and if it
+// could compute DH_KEX(ga, gb) it would have the shared secret. That term is
+// writable, and `normalise_arguments` peels the forbidden PUBKEY off the bare
+// position, so it *normalises* to DH_KEX(ga, b) — the honest shared secret's own
+// equivalence class. What stops it is the order of operations: normalisation
+// happens where the solver builds the term, and the validator's derivability
+// obligation is then discharged against the normal form, which needs b.
+//
+// If either the restriction or the ordering is disturbed, this model reports a
+// break of computational Diffie-Hellman.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private m
+	ss = DH_KEX(gb, a)
+	e = AEAD_ENC(ss, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	ssb = DH_KEX(ga, b)
+	mb = AEAD_DEC(ssb, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	confidentiality? ss
+]

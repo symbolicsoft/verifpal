@@ -2,6 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 #![warn(unreachable_pub)]
+// The soundness argument of the paper is an argument about what the code can
+// reach, and `unsafe` would let any of it reach anything. There is none, and
+// this keeps it that way.
+#![forbid(unsafe_code)]
 
 pub(crate) mod capability;
 pub(crate) mod construct;

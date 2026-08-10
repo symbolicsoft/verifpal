@@ -131,14 +131,14 @@ fn resolve_ps_values_depth(
 
 		if slot_idx == root_idx {
 			resolved = if use_orig {
-				ps.values[slot_idx].original.clone()
+				ps.values[slot_idx].perceived().clone()
 			} else {
 				let (val, _) = ps.resolve_constant(c, true);
 				val
 			};
 		} else {
 			resolved = if use_orig {
-				ps.values[slot_idx].original.clone()
+				ps.values[slot_idx].perceived().clone()
 			} else {
 				ps.values[slot_idx].value.clone()
 			};

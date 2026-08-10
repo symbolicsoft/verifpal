@@ -429,6 +429,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				value: slot.initial_value.clone(),
 				pre_rewrite: slot.initial_value.clone(),
 				original: slot.initial_value.clone(),
+				bypassed: None,
 				rewritten: false,
 				provenance: Provenance {
 					creator: slot.creator,
@@ -504,6 +505,9 @@ impl PrincipalState {
 					value: value.clone(),
 					pre_rewrite: pre_rewrite.clone(),
 					original: sv.original.clone(),
+					// Purification is now total: a bypassed slot cleans up like
+					// any other, because the honest value was never overwritten.
+					bypassed: if purify { None } else { sv.bypassed.clone() },
 					rewritten: false,
 					provenance: Provenance {
 						creator: sv.provenance.creator,

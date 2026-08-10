@@ -22,6 +22,7 @@ cli = ["clap", "colored"]
 wasm = ["wasm-bindgen"]
 
 [dependencies]
+chrono = "0.4.45"
 clap = { version = "4", features = ["derive"], optional = true }
 colored = { version = "3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }

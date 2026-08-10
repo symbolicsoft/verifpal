@@ -100,6 +100,12 @@ impl Capabilities {
 	}
 }
 
+/// The term in `p`'s declared secret position, if the primitive declares one.
+fn forgeable_secret_of(p: &Primitive) -> Option<&Value> {
+	let position = primitive_get(p.id).ok()?.forgeable_secret?;
+	p.arguments.get(position)
+}
+
 pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
 	if primitive_is_core(id) {
 		return false;
@@ -148,9 +154,16 @@ pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub enum Reach {
+	SameTerm(Value),
+	SameSecret(Value),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CapabilityIndex {
 	buckets: HashMap<u64, Vec<(Value, Capabilities)>>,
+	secrets: HashMap<(PrimitiveId, u64), Vec<(Value, Capabilities)>>,
 }
 
 impl CapabilityIndex {
@@ -168,6 +181,7 @@ impl CapabilityIndex {
 		if p.capabilities.is_empty() {
 			return;
 		}
+		self.insert_secret(p);
 		let hash = v.hash_value();
 		let bucket = self.buckets.entry(hash).or_default();
 		for (existing, caps) in bucket.iter_mut() {
@@ -177,6 +191,42 @@ impl CapabilityIndex {
 			}
 		}
 		bucket.push((v.clone(), p.capabilities));
+	}
+
+	fn insert_secret(&mut self, p: &Primitive) {
+		if !p.capabilities.has(Capability::Forgeable) {
+			return;
+		}
+		let Some(secret) = forgeable_secret_of(p) else {
+			return;
+		};
+		let key = (p.id, secret.hash_value());
+		let bucket = self.secrets.entry(key).or_default();
+		for (existing, caps) in bucket.iter_mut() {
+			if existing.equivalent(secret, true) {
+				caps.merge(&p.capabilities);
+				return;
+			}
+		}
+		bucket.push((secret.clone(), p.capabilities));
+	}
+
+	pub fn forgeable_secret_position(&self, p: &Primitive, phase: i32) -> Option<usize> {
+		let position = primitive_get(p.id).ok()?.forgeable_secret?;
+		if self.in_force(p, Capability::Forgeable, phase) {
+			return Some(position);
+		}
+		if self.secrets.is_empty() {
+			return None;
+		}
+		let secret = p.arguments.get(position)?;
+		let bucket = self.secrets.get(&(p.id, secret.hash_value()))?;
+		bucket
+			.iter()
+			.any(|(annotated, caps)| {
+				caps.in_force(Capability::Forgeable, phase) && annotated.equivalent(secret, true)
+			})
+			.then_some(position)
 	}
 
 	pub fn lookup(&self, p: &Primitive) -> Capabilities {
@@ -220,21 +270,11 @@ impl CapabilityIndex {
 		out
 	}
 
-	/// The occurrences a declared assumption governs without saying so.
-	///
-	/// The index is keyed by equivalence class, so an annotation written at one
-	/// call site governs every other occurrence of the same term. That is
-	/// deliberate: attacker knowledge deduplicates by equivalence, so the
-	/// alternative is a weakening rule that fires or not depending on which
-	/// principal the engine walked first. It is also invisible in the source,
-	/// where those other occurrences read as unannotated and therefore as
-	/// strong. Returns, for each governed occurrence, the slot it was written at
-	/// and the annotated term whose assumption reaches it.
-	pub fn governed_occurrences(&self, slots: &[TraceSlot]) -> Vec<(String, Value)> {
+	pub fn governed_occurrences(&self, slots: &[TraceSlot]) -> Vec<(String, Reach)> {
 		if self.buckets.is_empty() {
 			return Vec::new();
 		}
-		fn walk(index: &CapabilityIndex, name: &str, v: &Value, out: &mut Vec<(String, Value)>) {
+		fn walk(index: &CapabilityIndex, name: &str, v: &Value, out: &mut Vec<(String, Reach)>) {
 			let Value::Primitive(p) = v else {
 				return;
 			};
@@ -245,14 +285,20 @@ impl CapabilityIndex {
 				return;
 			}
 			let probe = Value::Primitive(Arc::new((**p).clone()));
-			let Some(bucket) = index.buckets.get(&probe.hash_value()) else {
+			if let Some(bucket) = index.buckets.get(&probe.hash_value())
+				&& let Some((annotated, _)) = bucket
+					.iter()
+					.find(|(a, caps)| !caps.is_empty() && a.equivalent(&probe, true))
+			{
+				out.push((name.to_string(), Reach::SameTerm(annotated.clone())));
 				return;
-			};
-			for (annotated, caps) in bucket {
-				if !caps.is_empty() && annotated.equivalent(&probe, true) {
-					out.push((name.to_string(), annotated.clone()));
-					return;
-				}
+			}
+			// The secret-keyed reach: this occurrence is not the annotated term,
+			// but a `forgeable` assumption on the same secret licenses forging it.
+			if index.forgeable_secret_position(p, i32::MAX).is_some()
+				&& let Some(secret) = forgeable_secret_of(p)
+			{
+				out.push((name.to_string(), Reach::SameSecret(secret.clone())));
 			}
 		}
 		let mut out = Vec::new();

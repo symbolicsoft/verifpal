@@ -15,6 +15,51 @@ fn attacker_public_key() -> Value {
 	crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil)
 }
 
+/// The slots a substitution may touch, in a form the search cannot fabricate.
+///
+/// `attacker_controllable` answers the question, but answering it involves
+/// resolving trace values, and asking it once per proposal is what turned the
+/// largest model in the corpus from forty seconds into two and a half minutes.
+/// Asking it once per solving pass and handing the answer around is the obvious
+/// repair, and it would also hand the untrusted search a chance to widen the
+/// domain by passing a permissive array. The private field is what stops that:
+/// only this module can build one, `of` is the only constructor, and `admits`
+/// re-checks that the set was built for the principal and phase it is being
+/// consulted about. What the search can choose is which slots to propose at,
+/// never which slots are allowed.
+pub(crate) struct Controllable {
+	principal: PrincipalId,
+	phase: i32,
+	slots: Vec<bool>,
+}
+
+impl Controllable {
+	pub(crate) fn of(
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
+		attacker: &AttackerState,
+	) -> Controllable {
+		Controllable {
+			principal: ps.id,
+			phase: attacker.current_phase,
+			slots: (0..ps.values.len())
+				.map(|i| attacker_controllable(i, km, ps, attacker))
+				.collect(),
+		}
+	}
+
+	pub(crate) fn admits(
+		&self,
+		ps: &PrincipalState,
+		attacker: &AttackerState,
+		slot: usize,
+	) -> bool {
+		self.principal == ps.id
+			&& self.phase == attacker.current_phase
+			&& self.slots.get(slot).copied().unwrap_or(false)
+	}
+}
+
 pub(crate) fn attacker_controllable(
 	idx: usize,
 	km: &ProtocolTrace,

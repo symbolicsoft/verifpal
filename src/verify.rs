@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use chrono;
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
@@ -26,13 +27,6 @@ pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	Ok(ctx)
 }
 
-/// Tell the user where a declared weakening assumption reaches beyond the call
-/// site that declared it.
-///
-/// Capabilities are indexed per equivalence class rather than per call site, so
-/// `SIGN[forgeable](sk, m)` written once weakens every occurrence of that same
-/// term. Silence here would be the worst of both worlds: the other occurrences
-/// read as strong in the source while being analyzed as weak.
 fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 	let Some(index) = states.first().map(|ps| &ps.capabilities) else {
 		return;
@@ -41,16 +35,20 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 	if governed.is_empty() {
 		return;
 	}
-	for (slot, annotated) in &governed {
-		info_message(
-			&format!(
+	for (slot, reach) in &governed {
+		let message = match reach {
+			Reach::SameTerm(annotated) => format!(
 				"{slot} is written without an annotation, but is the same term as \
 				 the annotated {annotated}, so it is analyzed under that assumption \
-				 too.",
+				 too."
 			),
-			InfoLevel::Info,
-			false,
-		);
+			Reach::SameSecret(secret) => format!(
+				"{slot} is written without an annotation, but a `forgeable` \
+				 assumption is declared on {secret}, so the attacker is analyzed as \
+				 able to produce {slot} too."
+			),
+		};
+		info_message(&message, InfoLevel::Info, false);
 	}
 }
 
@@ -236,25 +234,8 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 }
 
 fn chrono_time_string() -> String {
-	use std::time::SystemTime;
-	let now = SystemTime::now()
-		.duration_since(SystemTime::UNIX_EPOCH)
-		.unwrap_or_default()
-		.as_secs();
-	let secs_of_day = (now % 86400) as u32;
-	let hours = secs_of_day / 3600;
-	let minutes = (secs_of_day % 3600) / 60;
-	let seconds = secs_of_day % 60;
-	let (h12, ampm) = if hours == 0 {
-		(12, "AM")
-	} else if hours < 12 {
-		(hours, "AM")
-	} else if hours == 12 {
-		(12, "PM")
-	} else {
-		(hours - 12, "PM")
-	};
-	format!("{:02}:{:02}:{:02} {}", h12, minutes, seconds, ampm)
+	use chrono::Local;
+	Local::now().format("%I:%M:%S %p").to_string()
 }
 
 #[cfg(test)]

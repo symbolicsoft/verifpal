@@ -37,7 +37,7 @@ impl ValueNames {
 		if let Some(&id) = self.map.get(name) {
 			return Ok(id);
 		}
-		if self.counter >= crate::solve::vars::ATTACKER_VAR_BASE {
+		if self.counter >= SESSION_COPY_BASE {
 			return Err(VerifpalError::sanity(
 				"model declares too many distinct constants".into(),
 			));
@@ -47,6 +47,25 @@ impl ValueNames {
 		self.counter += 1;
 		Ok(id)
 	}
+}
+
+/// Base for the per-session copies of a principal's fresh constants.
+///
+/// The separated-freshness re-check of `witness.rs` asks what an attack looks
+/// like when two sessions of a role hold *different* nonces, which means minting
+/// a constant that is not the model's. Interned ids stop below this base, and
+/// the solver's variable ids start well above it, so the three ranges cannot
+/// collide.
+pub(crate) const SESSION_COPY_BASE: ValueId = 0x4000_0000;
+
+/// The copy of `c` that a *different* session of its generating principal would
+/// hold under replication: same name, marked, and a distinct identity.
+pub(crate) fn session_copy(c: &Constant) -> Value {
+	Value::Constant(Constant {
+		name: Arc::from(format!("{}#2", c.name)),
+		id: SESSION_COPY_BASE + c.id,
+		..c.clone()
+	})
 }
 
 static STATIC_NIL: LazyLock<Value> = LazyLock::new(|| {

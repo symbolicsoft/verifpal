@@ -118,6 +118,7 @@ pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 
 pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 	SlotValues {
+		bypassed: None,
 		value: v.clone(),
 		pre_rewrite: v.clone(),
 		original: v.clone(),

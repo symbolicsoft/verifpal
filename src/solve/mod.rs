@@ -21,18 +21,17 @@ use deduce::Deducer;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
-/// A last-resort bound on the round loop.
-///
-/// The loop terminates when attacker knowledge stops growing, and the argument
-/// that it always reaches that point carries a hypothesis we can state but have
-/// not discharged: that each slot admits finitely many independent roots. If the
-/// hypothesis ever fails in the wild, a verifier that simply runs forever is the
-/// exact failure the termination work set out to remove, so the loop stops here
-/// and says so instead. Nothing in the corpus comes near this: across every
-/// shipped and test model the deepest round loop settles in three rounds, so the
-/// bound is a disclosure mechanism rather than a tuning parameter, and no
-/// reported result depends on its value.
-const WATCHDOG_ROUNDS: usize = 1024;
+const WATCHDOG_ROUNDS: usize = 1024 * 128;
+
+fn oracle_basis_notice() {
+	info_message(
+		"Where the search needs a whole term at once, it draws only from terms this \
+		 protocol computes; an attack needing one outside that set is out of reach. \
+		 Unlike the other limits, this one cannot report where it applied.",
+		InfoLevel::Info,
+		false,
+	);
+}
 
 pub(crate) fn verify_active(
 	ctx: &VerifyContext,
@@ -40,6 +39,7 @@ pub(crate) fn verify_active(
 	principal_states: &[PrincipalState],
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
+	oracle_basis_notice();
 
 	for phase in 0..=km.max_phase {
 		info_message(
@@ -118,7 +118,8 @@ fn solve_principal(
 	pass: Pass,
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
-	let sym = symbolic::build(km, ps, &attacker);
+	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
+	let sym = symbolic::build(&controllable, ps, &attacker);
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
@@ -197,7 +198,7 @@ fn solve_principal(
 		if ctx.all_resolved() {
 			break;
 		}
-		let ran = validate::validate(ctx, km, ps, &sym, &attacker, &proposal)?;
+		let ran = validate::validate(ctx, km, ps, &sym, &controllable, &attacker, &proposal)?;
 		trace_proposal(ps, &sym, &proposal, ran);
 	}
 	Ok(())
