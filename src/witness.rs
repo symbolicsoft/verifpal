@@ -40,6 +40,15 @@ impl Drop for MinimizingGuard {
 pub(crate) struct Witness {
 	pub ps: PrincipalState,
 	pub attacker: AttackerState,
+	/// Whether this witness was confirmed by a probe that re-executed it to the
+	/// reported violation.
+	///
+	/// True for every minimized witness, which is the ordinary case. False on
+	/// the fallback path, where no candidate substitution set reproduced the
+	/// violation and the state that resolved the query is reported as it stands.
+	/// The reproduction theorem covers the first case only, so the second says
+	/// so in the trace rather than reading like the first.
+	pub reproduced: bool,
 }
 
 pub(crate) fn minimize_witness(
@@ -49,13 +58,14 @@ pub(crate) fn minimize_witness(
 	query_index: usize,
 	seed: &[(SlotIdx, Value)],
 ) -> Witness {
-	let unminimized = || Witness {
+	let unminimized = |reproduced: bool| Witness {
 		ps: ps.clone(),
 		attacker: ctx.attacker_snapshot(),
+		reproduced,
 	};
 
 	if in_minimization() {
-		return unminimized();
+		return unminimized(true);
 	}
 
 	let mut mutations: Vec<(SlotIdx, Value)> = if seed.is_empty() {
@@ -74,7 +84,9 @@ pub(crate) fn minimize_witness(
 	mutations.sort_by_key(|(slot, _)| *slot);
 
 	if mutations.is_empty() {
-		return unminimized();
+		// A violation reached with no attacker substitution at all: the trace is
+		// a derivation over the honest run, and there is nothing to minimize.
+		return unminimized(true);
 	}
 
 	let _guard = MinimizingGuard::new();
@@ -141,7 +153,7 @@ pub(crate) fn minimize_witness(
 		}
 	}
 	let Some((base, mutations)) = chosen else {
-		return unminimized();
+		return unminimized(false);
 	};
 
 	let mut keep: Vec<(SlotIdx, Value)> = mutations.clone();
@@ -158,7 +170,7 @@ pub(crate) fn minimize_witness(
 
 	match probe(ctx, km, &base, &keep, query_index, phase) {
 		Some(witness) => witness,
-		None => unminimized(),
+		None => unminimized(false),
 	}
 }
 
@@ -187,6 +199,8 @@ fn probe(
 	Some(Witness {
 		ps,
 		attacker: scratch.attacker_snapshot(),
+		// A probe returns only when the re-executed state resolved the query.
+		reproduced: true,
 	})
 }
 

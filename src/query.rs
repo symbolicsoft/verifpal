@@ -386,3 +386,174 @@ fn query_precondition(mut result: VerifyResult, ps: &PrincipalState) -> VerifyRe
 	}
 	result
 }
+
+/// Structural invariants behind the soundness theorem.
+///
+/// Three of the theorem's premises are facts about the shape of this codebase
+/// rather than about what any function computes: a query result has exactly one
+/// write path, that path is reached only from query evaluation, and query
+/// evaluation is entered only over a state that was concretely executed. They
+/// are cheap to state and easy to break by accident, so they are checked here
+/// rather than left to a reviewer with `grep`.
+#[cfg(test)]
+mod tcb_tests {
+	use std::fs;
+	use std::path::{Path, PathBuf};
+
+	/// Whole files declared `#[cfg(test)] mod ...` in lib.rs: no shipping code.
+	const TEST_ONLY: [&str; 2] = ["model_tests.rs", "testutil.rs"];
+
+	fn engine_sources() -> Vec<PathBuf> {
+		fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+			for entry in fs::read_dir(dir).expect("read src/").flatten() {
+				let path = entry.path();
+				if path.is_dir() {
+					walk(&path, out);
+				} else if path.extension().is_some_and(|e| e == "rs") {
+					let name = path.file_name().unwrap_or_default().to_string_lossy();
+					if !TEST_ONLY.contains(&name.as_ref()) {
+						out.push(path);
+					}
+				}
+			}
+		}
+		let mut out = Vec::new();
+		walk(
+			Path::new(env!("CARGO_MANIFEST_DIR")).join("src").as_path(),
+			&mut out,
+		);
+		out.sort();
+		out
+	}
+
+	/// The lines of `path` that ship, with `#[cfg(test)]` modules removed.
+	fn shipping_lines(path: &Path) -> Vec<(usize, String)> {
+		let text = fs::read_to_string(path).expect("read source");
+		let lines: Vec<&str> = text.lines().collect();
+		let mut out = Vec::new();
+		let mut i = 0;
+		while i < lines.len() {
+			let is_test_attr = lines[i].trim() == "#[cfg(test)]";
+			let opens_mod = lines
+				.get(i + 1)
+				.is_some_and(|l| l.trim_start().starts_with("mod ") && l.trim_end().ends_with('{'));
+			if is_test_attr && opens_mod {
+				let mut depth = 0i32;
+				i += 1;
+				while i < lines.len() {
+					depth += lines[i].matches('{').count() as i32;
+					depth -= lines[i].matches('}').count() as i32;
+					i += 1;
+					if depth <= 0 {
+						break;
+					}
+				}
+				continue;
+			}
+			out.push((i + 1, lines[i].to_string()));
+			i += 1;
+		}
+		out
+	}
+
+	/// The files containing shipping call sites of `name`, with a count each.
+	fn call_site_files(name: &str) -> Vec<(String, usize)> {
+		let mut counts: Vec<(String, usize)> = Vec::new();
+		for site in call_sites(name) {
+			let file = site
+				.rsplit_once(':')
+				.map(|(f, _)| f.to_string())
+				.unwrap_or(site);
+			match counts.iter_mut().find(|(f, _)| *f == file) {
+				Some((_, n)) => *n += 1,
+				None => counts.push((file, 1)),
+			}
+		}
+		counts.sort();
+		counts
+	}
+
+	/// Every shipping call site of `name`, excluding its definition and `use`.
+	fn call_sites(name: &str) -> Vec<String> {
+		let needle = format!("{name}(");
+		let mut sites = Vec::new();
+		for path in engine_sources() {
+			let rel = path
+				.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
+				.unwrap_or(&path)
+				.to_string_lossy()
+				.into_owned();
+			for (number, line) in shipping_lines(&path) {
+				if !line.contains(&needle) {
+					continue;
+				}
+				let trimmed = line.trim_start();
+				if trimmed.starts_with("use ") || trimmed.contains(&format!("fn {name}")) {
+					continue;
+				}
+				sites.push(format!("{rel}:{number}"));
+			}
+		}
+		sites
+	}
+
+	#[test]
+	fn a_query_result_has_exactly_one_write_path() {
+		assert_eq!(
+			call_site_files("results_put"),
+			vec![("query.rs".to_string(), 1)],
+			"`results_put` is the only way to record a query result, and it must \
+			 keep exactly one caller. Adding a second write path invalidates fact \
+			 (i) of the soundness theorem."
+		);
+	}
+
+	#[test]
+	fn results_are_recorded_only_by_query_evaluation() {
+		assert_eq!(
+			call_site_files("emit_query_result"),
+			vec![("query.rs".to_string(), 5)],
+			"fact (ii) of the soundness theorem: one call per query kind, every \
+			 one of them inside query.rs."
+		);
+	}
+
+	#[test]
+	fn query_evaluation_is_entered_only_over_an_executed_state() {
+		assert_eq!(
+			call_site_files("verify_resolve_queries"),
+			vec![
+				("solve/validate.rs".to_string(), 1),
+				("verify.rs".to_string(), 1),
+				("witness.rs".to_string(), 1),
+			],
+			"fact (iv) of the soundness theorem: query evaluation runs over the \
+			 honest run (verify.rs), over a re-executed state (validate.rs), or \
+			 over a minimizer probe against a scratch context (witness.rs), and \
+			 nowhere else. A new call site must be shown to hand it a state that \
+			 was concretely executed."
+		);
+	}
+
+	#[test]
+	fn the_solver_cannot_reach_query_evaluation_except_through_the_validator() {
+		let offenders: Vec<String> = engine_sources()
+			.into_iter()
+			.filter(|p| p.to_string_lossy().contains("/solve/"))
+			.filter(|p| !p.ends_with("validate.rs"))
+			.filter(|p| {
+				shipping_lines(p).iter().any(|(_, line)| {
+					line.contains("verify_resolve_queries")
+						|| line.contains("results_put")
+						|| line.contains("emit_query_result")
+				})
+			})
+			.map(|p| p.to_string_lossy().into_owned())
+			.collect();
+		assert!(
+			offenders.is_empty(),
+			"the search is outside the trusted base only for as long as it cannot \
+			 record anything: {offenders:?}"
+		);
+	}
+}

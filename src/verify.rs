@@ -17,12 +17,41 @@ pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	crate::theory::rewrite_cache_reset();
 	crate::info::info_reset_deductions();
 	let (trace, states) = sanity(m)?;
+	capability_reach_notice(&trace, &states);
 	let ctx = VerifyContext::new(m, &states);
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
 	}
 	Ok(ctx)
+}
+
+/// Tell the user where a declared weakening assumption reaches beyond the call
+/// site that declared it.
+///
+/// Capabilities are indexed per equivalence class rather than per call site, so
+/// `SIGN[forgeable](sk, m)` written once weakens every occurrence of that same
+/// term. Silence here would be the worst of both worlds: the other occurrences
+/// read as strong in the source while being analyzed as weak.
+fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
+	let Some(index) = states.first().map(|ps| &ps.capabilities) else {
+		return;
+	};
+	let governed = index.governed_occurrences(&trace.slots);
+	if governed.is_empty() {
+		return;
+	}
+	for (slot, annotated) in &governed {
+		info_message(
+			&format!(
+				"{slot} is written without an annotation, but is the same term as \
+				 the annotated {annotated}, so it is analyzed under that assumption \
+				 too.",
+			),
+			InfoLevel::Info,
+			false,
+		);
+	}
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {

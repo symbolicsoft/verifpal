@@ -290,13 +290,54 @@ pub(crate) fn obtainable(
 	}
 	let result = match v {
 		Value::Primitive(p) => {
-			can_decompose(p, ps, attacker, depth + 1).is_some()
-				|| can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
+			can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
+				|| obtainable_by_output_projection(p, ps, attacker, depth + 1)
 		}
 		Value::Constant(_) => false,
 	};
 	memo_obtainable_put(key, v, ps, attacker, result);
 	result
+}
+
+/// Whether the attacker obtains `p` by decomposing a sibling output of the same
+/// application that it already holds.
+///
+/// `can_decompose` answers a different question from `obtainable`: it assumes
+/// the attacker already holds the term and reports what can be extracted *from*
+/// it. What it yields is therefore an argument of that term, or another of its
+/// outputs — never, in the first case, the term itself. Treating it as evidence
+/// of obtaining the term credits the attacker with a value it can only open, not
+/// build: holding `k` makes `ENC(k, m)` decomposable, but building it still
+/// needs `m`.
+///
+/// The reveal-output variant is the one case where decomposition does yield the
+/// term in hand, and it is real: a KEM ciphertext plus the private key yields
+/// the shared secret, which is a different output of the same application. The
+/// premise that the attacker holds that sibling has to be checked here, since
+/// `can_decompose` presupposes it rather than establishing it.
+fn obtainable_by_output_projection(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	depth: usize,
+) -> bool {
+	let Ok(spec) = primitive_get(p.id) else {
+		return false;
+	};
+	if spec.decompose.reveal_output != Some(p.output) {
+		return false;
+	}
+	let Some(&outputs) = spec.output.iter().max() else {
+		return false;
+	};
+	(0..outputs.max(0) as usize)
+		.filter(|&j| j != p.output)
+		.any(|j| {
+			let sibling = p.with_output(j);
+			attacker
+				.knows(&Value::Primitive(Arc::new(sibling.clone())))
+				.is_some() && can_decompose(&sibling, ps, attacker, depth).is_some()
+		})
 }
 
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {

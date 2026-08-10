@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c0 — every query passes.
+//
+// The AEAD key is k2 = ENC(k1, m). The attacker is given k1, so it could open
+// k2 if it ever held it, but building k2 needs m, which never leaves Alice.
+// So x stays secret.
+//
+// This pins the distinction between opening a term and obtaining one.
+// `obtainable` once accepted "this term is decomposable" as evidence that the
+// attacker held it, so holding k1 was enough to credit the attacker with
+// ENC(k1, m) and therefore with x. That reported an attack no Dolev-Yao
+// attacker can mount, and it did so in the passive closure, where no
+// substitution and no solver is involved.
+//
+// The self-contradiction is the tell, and it is what this model checks: the
+// two queries below assert that the attacker obtains neither m nor k2, so a
+// run that fails `confidentiality? x` claims a decryption under a key the same
+// run certifies to be out of reach.
+attacker[active]
+
+principal Alice[
+	knows private k1
+	knows private m
+	knows private x
+	k2 = ENC(k1, m)
+	c = AEAD_ENC(k2, x, nil)
+	leaks k1
+]
+
+principal Bob[
+	knows private k1
+]
+
+Alice -> Bob: c
+
+queries[
+	confidentiality? x
+	confidentiality? m
+	confidentiality? k2
+]

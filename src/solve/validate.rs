@@ -47,7 +47,7 @@ pub(crate) fn validate(
 		if is_self_feeding_pump(ctx, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
-		if !phase_permits(ctx, slot, &ground, &ps, attacker.current_phase) {
+		if !attacker_can_derive(ctx, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
 		if attacker_authored(&ground, slot, km, &ps) {
@@ -169,36 +169,114 @@ fn pump_ancestor(
 		.map(|d| d.value.clone())
 }
 
-fn phase_permits(
+/// The trusted-region re-derivation of an injected term: `ground` is accepted
+/// only if the Dolev-Yao attacker could itself have constructed it, from
+/// knowledge available no later than slot `S`'s own phase.
+///
+/// This is the check that lets the soundness theorem quantify over an arbitrary
+/// solver. The solver already places every binding under a constructibility
+/// obligation (`require_constructible`), but that obligation lives in the
+/// untrusted search: were it buggy — or replaced wholesale — it could hand the
+/// validator a term the attacker cannot build, such as a signature under a key
+/// it does not hold, and re-execution would install it, the recipient's checks
+/// would pass, and a forgery no attacker can mount would be reported. Re-deriving
+/// `ground` here, against the same closed knowledge the honest analysis trusts,
+/// forecloses that: a term the attacker cannot construct is not an attack.
+///
+/// The predicate is deliberately one-sided. It over-approximates rejection
+/// rather than acceptance: `derivable` is sound (it says yes only when the
+/// attacker genuinely can build the term), so a solver bug can at worst cost a
+/// missed attack here, never a false one — the same trade the rest of the
+/// engine makes. Because `attacker.known` is already closed under the deduction
+/// rules of the knowledge closure, the recursion below adds only the synthesis
+/// direction: applying a public primitive to arguments the attacker can itself
+/// derive.
+fn attacker_can_derive(
 	ctx: &VerifyContext,
 	slot: usize,
 	ground: &Value,
 	ps: &PrincipalState,
-	current_phase: i32,
+	attacker: &AttackerState,
 ) -> bool {
-	let Some(meta) = ps.meta.get(slot) else {
-		return true;
-	};
-	let Ok(earliest) = min_int_in_slice(&meta.phase) else {
-		return true;
-	};
-	if earliest >= current_phase {
-		return true;
-	}
-	match ctx.attacker_knowledge_at(earliest) {
-		Some(snapshot) => available_at(ground, &snapshot),
-		None => false,
+	let earliest = ps
+		.meta
+		.get(slot)
+		.and_then(|meta| min_int_in_slice(&meta.phase).ok());
+	match earliest {
+		Some(earliest) if earliest < attacker.current_phase => {
+			// A value whose slot predates the current phase must be derivable
+			// from knowledge archived at that earlier phase, so that a value
+			// learned later cannot retroactively justify an earlier injection.
+			match ctx.attacker_knowledge_at(earliest) {
+				Some(snapshot) => derivable(ground, ps, &snapshot),
+				None => false,
+			}
+		}
+		_ => derivable(ground, ps, attacker),
 	}
 }
 
-fn available_at(v: &Value, snapshot: &AttackerState) -> bool {
+/// Sound (one-sided) Dolev-Yao derivability of `v` against `snapshot`.
+///
+/// The two branches are the two ways the attacker obtains a term. The trusted
+/// `obtainable` covers analysis — decomposition, and reconstruction that is
+/// capability-aware, so a `forgeable`-annotated primitive is derivable without
+/// its secret argument exactly as the honest closure treats it. The recursive
+/// branch covers synthesis: the attacker applies a public primitive to
+/// arguments it can itself derive, which is what makes `PUBKEY(nil)` and other
+/// `nil`-leafed man-in-the-middle terms constructible without their appearing in
+/// any assigned slot.
+fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 	if snapshot.knows(v).is_some() {
 		return true;
 	}
 	match v {
 		Value::Constant(c) => c.is_nil(),
-		Value::Primitive(p) => p.arguments.iter().all(|a| available_at(a, snapshot)),
+		Value::Primitive(p) => {
+			if crate::theory::obtainable(v, ps, snapshot, 0) {
+				return true;
+			}
+			let exempt = forgeable_secret_position(p, ps, snapshot);
+			p.arguments
+				.iter()
+				.enumerate()
+				.all(|(i, a)| Some(i) == exempt || derivable(a, ps, snapshot))
+		}
 	}
+}
+
+/// The argument position of `p` that a declared `forgeable` assumption exempts
+/// from the derivability obligation, if one is in force for `p`.
+///
+/// A `forgeable` annotation says the scheme has lost authenticity: the attacker
+/// can produce this primitive, under this secret, over a message of its
+/// choosing. The exemption is therefore keyed on the secret argument rather
+/// than on the whole term. `SIGN[forgeable](sk, m)` licenses `SIGN(sk, m')` for
+/// any derivable `m'`, which is the point of the assumption, but licenses
+/// nothing under a different signing key. Matching the whole term instead would
+/// make the annotation useless, since a forgery is by definition over a message
+/// the honest run never signed; matching on the primitive alone would let one
+/// annotation weaken every key in the model.
+fn forgeable_secret_position(
+	p: &Primitive,
+	ps: &PrincipalState,
+	snapshot: &AttackerState,
+) -> Option<usize> {
+	let position = primitive_get(p.id).ok()?.forgeable_secret?;
+	let secret = p.arguments.get(position)?;
+	let phase = snapshot.current_phase;
+	if ps.capabilities.in_force(p, Capability::Forgeable, phase) {
+		return Some(position);
+	}
+	ps.capabilities
+		.annotated_terms()
+		.any(|(term, caps)| {
+			caps.in_force(Capability::Forgeable, phase)
+				&& matches!(term, Value::Primitive(q)
+					if q.id == p.id
+						&& q.arguments.get(position).is_some_and(|s| s.equivalent(secret, true)))
+		})
+		.then_some(position)
 }
 
 fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {
@@ -213,5 +291,66 @@ fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {
 			p.arguments.iter().any(|a| contains_failed_check(a, ps))
 		}
 		Value::Constant(_) => false,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::derivable;
+	use crate::primitive::{PRIM_ENC, PRIM_PUBKEY, PRIM_SIGN};
+	use crate::testutil::*;
+	use crate::value::value_nil;
+
+	fn empty_state() -> crate::types::PrincipalState {
+		make_principal_state("Test", 0, vec![], vec![])
+	}
+
+	#[test]
+	fn derivable_accepts_a_directly_known_term() {
+		let m = make_constant("der_known_m");
+		let attacker = make_attacker_state(vec![m.clone()]);
+		assert!(derivable(&m, &empty_state(), &attacker));
+	}
+
+	#[test]
+	fn derivable_accepts_nil_and_a_primitive_over_nil() {
+		let attacker = make_attacker_state(vec![]);
+		assert!(derivable(&value_nil(), &empty_state(), &attacker));
+		// PUBKEY(nil) is the man-in-the-middle key: nil is public, so the
+		// attacker can apply PUBKEY to it.
+		let pubkey_nil = make_primitive(PRIM_PUBKEY, vec![value_nil()], 0);
+		assert!(derivable(&pubkey_nil, &empty_state(), &attacker));
+	}
+
+	#[test]
+	fn derivable_accepts_synthesis_from_held_arguments() {
+		let k = make_constant("der_k");
+		let m = make_constant("der_m");
+		let attacker = make_attacker_state(vec![k.clone(), m.clone()]);
+		// The attacker holds k and m, so it can encrypt m under k itself.
+		let enc = make_primitive(PRIM_ENC, vec![k, m], 0);
+		assert!(derivable(&enc, &empty_state(), &attacker));
+	}
+
+	#[test]
+	fn derivable_rejects_an_unknown_constant() {
+		let secret = make_constant("der_secret");
+		let unrelated = make_constant("der_unrelated");
+		let attacker = make_attacker_state(vec![unrelated]);
+		assert!(!derivable(&secret, &empty_state(), &attacker));
+	}
+
+	#[test]
+	fn derivable_rejects_a_forgery_under_an_unheld_key() {
+		// The reviewer's counterexample to a solver-quantified soundness claim:
+		// a signature under a key the attacker does not hold, with no forgeable
+		// assumption in force. The attacker holds only the message; SIGN(sk, m)
+		// must not be derivable, or an adversarially buggy solver could inject a
+		// forgery no attacker can mount.
+		let sk = make_constant("der_sk");
+		let m = make_constant("der_msg");
+		let attacker = make_attacker_state(vec![m.clone()]);
+		let forged = make_primitive(PRIM_SIGN, vec![sk, m], 0);
+		assert!(!derivable(&forged, &empty_state(), &attacker));
 	}
 }

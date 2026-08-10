@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
-use crate::types::{Primitive, PrimitiveId, Value};
+use crate::types::{Primitive, PrimitiveId, TraceSlot, Value};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Capability {
@@ -217,6 +217,48 @@ impl CapabilityIndex {
 			.map(|(v, _)| v.clone())
 			.collect();
 		out.sort_by_key(|v| v.hash_value());
+		out
+	}
+
+	/// The occurrences a declared assumption governs without saying so.
+	///
+	/// The index is keyed by equivalence class, so an annotation written at one
+	/// call site governs every other occurrence of the same term. That is
+	/// deliberate: attacker knowledge deduplicates by equivalence, so the
+	/// alternative is a weakening rule that fires or not depending on which
+	/// principal the engine walked first. It is also invisible in the source,
+	/// where those other occurrences read as unannotated and therefore as
+	/// strong. Returns, for each governed occurrence, the slot it was written at
+	/// and the annotated term whose assumption reaches it.
+	pub fn governed_occurrences(&self, slots: &[TraceSlot]) -> Vec<(String, Value)> {
+		if self.buckets.is_empty() {
+			return Vec::new();
+		}
+		fn walk(index: &CapabilityIndex, name: &str, v: &Value, out: &mut Vec<(String, Value)>) {
+			let Value::Primitive(p) = v else {
+				return;
+			};
+			for arg in &p.arguments {
+				walk(index, name, arg, out);
+			}
+			if !p.capabilities.is_empty() {
+				return;
+			}
+			let probe = Value::Primitive(Arc::new((**p).clone()));
+			let Some(bucket) = index.buckets.get(&probe.hash_value()) else {
+				return;
+			};
+			for (annotated, caps) in bucket {
+				if !caps.is_empty() && annotated.equivalent(&probe, true) {
+					out.push((name.to_string(), annotated.clone()));
+					return;
+				}
+			}
+		}
+		let mut out = Vec::new();
+		for slot in slots {
+			walk(self, &slot.constant.name, &slot.initial_value, &mut out);
+		}
 		out
 	}
 

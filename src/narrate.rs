@@ -404,6 +404,19 @@ impl Narration {
 	}
 }
 
+/// Appended to a trace whose substitutions were never confirmed to reproduce
+/// the violation on their own.
+///
+/// The minimizer normally returns a witness a probe re-executed to the
+/// reported violation, which is what makes the reproduction guarantee worth
+/// stating. When no candidate reproduces it, the state that resolved the query
+/// is reported as it stands, and the steps below it are the search's record
+/// rather than a checked witness. Saying which one the reader is holding costs
+/// a line and is the difference between a guarantee and an impression.
+const NOT_MINIMIZED: &str = "\n            Note: these are the substitutions \
+the search recorded; no subset of them was confirmed to reproduce the \
+violation on its own, so this trace is not a minimized witness.";
+
 pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
 	let mut seen: Vec<KnownIdx> = Vec::new();
@@ -434,10 +447,11 @@ pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Val
 		&mut seen,
 	));
 
-	Narration {
-		trace: render(&steps),
-		table,
+	let mut trace = render(&steps);
+	if !witness.reproduced {
+		trace.push_str(NOT_MINIMIZED);
 	}
+	Narration { trace, table }
 }
 
 fn render(steps: &[Step]) -> String {

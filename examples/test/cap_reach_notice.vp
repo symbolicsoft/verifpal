@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — Bob accepts a value Alice never sent, verified against sig_b,
+// which carries no annotation of its own.
+//
+// The point of the model is the notice rather than the codes. sig_b is written
+// without an annotation and is the same term as the annotated sig_a, so the
+// capability index — which is keyed by equivalence class, not by call site —
+// governs it too. Read in the source, sig_b looks like a strong signature; read
+// by the engine, it is forgeable. Verifpal says so at load time rather than
+// leaving the reader to infer it from the assumption footer.
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	sig_a = SIGN[forgeable](sk, m)
+	sig_b = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, sig_a, sig_b
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, sig_b)?
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

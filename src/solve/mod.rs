@@ -21,6 +21,19 @@ use deduce::Deducer;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
+/// A last-resort bound on the round loop.
+///
+/// The loop terminates when attacker knowledge stops growing, and the argument
+/// that it always reaches that point carries a hypothesis we can state but have
+/// not discharged: that each slot admits finitely many independent roots. If the
+/// hypothesis ever fails in the wild, a verifier that simply runs forever is the
+/// exact failure the termination work set out to remove, so the loop stops here
+/// and says so instead. Nothing in the corpus comes near this: across every
+/// shipped and test model the deepest round loop settles in three rounds, so the
+/// bound is a disclosure mechanism rather than a tuning parameter, and no
+/// reported result depends on its value.
+const WATCHDOG_ROUNDS: usize = 1024;
+
 pub(crate) fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -41,6 +54,7 @@ pub(crate) fn verify_active(
 
 		verify_standard_run(ctx, km, principal_states)?;
 
+		let mut rounds = 0usize;
 		loop {
 			if ctx.all_resolved() {
 				break;
@@ -63,6 +77,25 @@ pub(crate) fn verify_active(
 			}
 
 			if ctx.attacker_known_count() == before {
+				break;
+			}
+
+			rounds += 1;
+			if rounds >= WATCHDOG_ROUNDS {
+				info_message(
+					&format!(
+						"Search stopped after {rounds} rounds at phase {phase} with attacker \
+						 knowledge still growing ({} terms). Termination of the round loop \
+						 rests on each slot admitting finitely many independent roots, which \
+						 is unproved; this model appears to be a counterexample, or simply \
+						 very large. Results already reported stand, since each was \
+						 re-executed, but queries still open at this point were not \
+						 exhaustively searched.",
+						ctx.attacker_known_count(),
+					),
+					InfoLevel::Info,
+					false,
+				);
 				break;
 			}
 		}

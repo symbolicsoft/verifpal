@@ -64,6 +64,10 @@ fn test_cap_err_phase_unreached() {
 }
 
 #[test]
+fn test_cap_reach_notice() {
+	run_model("cap_reach_notice.vp", "a1");
+}
+#[test]
 fn test_cap_weak_hash() {
 	run_model("cap_weak_hash.vp", "c1c1");
 }
@@ -285,6 +289,10 @@ fn test_auth_with_signing_false_attack() {
 #[test]
 fn test_halted_principal_false_attack() {
 	run_model("halted_principal_false-attack.vp", "c0");
+}
+#[test]
+fn test_decompose_is_not_construct() {
+	run_model("decompose_is_not_construct.vp", "c0c0c0");
 }
 #[test]
 fn test_hmac_verif() {
