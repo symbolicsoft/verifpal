@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: e0
+//
+// Two unrelated sub-protocols. Alice and Bob exchange a MAC that Bob checks;
+// the tag is unguarded, so the attacker can tamper with it and halt Bob on the
+// failed check. Carol and Dave separately run a guarded Diffie-Hellman, and
+// their derived keys agree by commutativity, so the equivalence query holds.
+//
+// Halting Bob must not decide Carol and Dave's query. When a checked primitive
+// fails, `reexec::drop_after_index` truncates that principal's slots past the
+// failure, and `resolve_constant` answers for a slot that is no longer there
+// with the bare constant. Comparing that bare constant against the other side's
+// real value reports a divergence nobody computed: a false attack, and the
+// worst class of regression this engine has. This model pins the guard in
+// `query_equivalence` that keeps a halted principal from answering for values
+// it never reached.
+//
+// Before that guard, this model reported e1 with a trace whose only step was
+// the attacker replacing `tag` -- a value that appears nowhere in `ck` or `dk`.
+
+attacker[active]
+
+principal Alice[
+	knows private mk
+	generates m
+	tag = MAC(mk, m)
+]
+
+Alice -> Bob: m, tag
+
+principal Bob[
+	knows private mk
+	_ = ASSERT(tag, MAC(mk, m))?
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Dave[
+	generates d
+	gd = PUBKEY(d)
+]
+
+Carol -> Dave: [gc]
+Dave -> Carol: [gd]
+
+principal Carol[
+	ck = DH_KEX(gd, c)
+]
+
+principal Dave[
+	dk = DH_KEX(gc, d)
+]
+
+queries[
+	equivalence? ck, dk
+]

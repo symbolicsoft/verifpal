@@ -328,11 +328,14 @@ fn query_equivalence(
 	_attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
-	let values: Vec<Value> = query
-		.constants
-		.iter()
-		.map(|c| ps.resolve_constant(c, false).0)
-		.collect();
+	let mut values: Vec<Value> = Vec::with_capacity(query.constants.len());
+	for c in &query.constants {
+		let (value, slot) = ps.resolve_constant(c, false);
+		if slot.is_none() {
+			return Ok(result);
+		}
+		values.push(value);
+	}
 	let all_equivalent = values.windows(2).all(|w| w[0].equivalent(&w[1], true));
 	if all_equivalent {
 		return Ok(result);

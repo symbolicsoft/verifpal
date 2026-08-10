@@ -142,7 +142,7 @@ fn test_junglegym_phase_cascade() {
 fn test_junglegym_deep_ratchet() {
 	run_model(
 		"junglegym_deep_ratchet.vp",
-		"c0c0c0c0c0a0a0a0a0f0f1e1e1e1u0u0",
+		"c0c0c0c0c0a0a0a0a0f0f1e1e1e0u0u0",
 	);
 }
 
@@ -590,6 +590,10 @@ fn test_simple_equiv() {
 	run_model("simple_equiv.vp", "e0");
 }
 #[test]
+fn test_equivalence_halt_scope() {
+	run_model("equivalence_halt_scope.vp", "e0");
+}
+#[test]
 fn test_ordering_a() {
 	run_model("ordering_a.vp", "c1a1");
 }
@@ -607,7 +611,7 @@ fn test_deep_nesting() {
 }
 #[test]
 fn test_triple_dh() {
-	run_model("triple_dh.vp", "c0c0a0e1");
+	run_model("triple_dh.vp", "c0c0a0e0");
 }
 #[test]
 fn test_key_ratchet() {
@@ -682,7 +686,7 @@ fn test_concat_bomb_unguarded() {
 }
 #[test]
 fn test_concat_bomb_equiv() {
-	run_model("concat_bomb_equiv.vp", "e1e1e1e1e1f0");
+	run_model("concat_bomb_equiv.vp", "e0e0e0e0e0f0");
 }
 #[test]
 fn test_passive_dh_chain() {

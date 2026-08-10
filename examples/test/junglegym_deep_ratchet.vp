@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c0c0c0c0c0a0a0a0a0f0f1e1e1e1u0u0
+// Expected: c0c0c0c0c0a0a0a0a0f0f1e1e1e0u0u0
 //
 // A five-round ratchet where each round wraps the previous in another layer of
 // CONCAT/SPLIT/HKDF, including a five-way split — the widest the language
@@ -10,9 +10,17 @@
 // substitutes into the middle of the stack. It is the slowest model in the
 // suite at roughly 1.5s.
 //
-// The three equivalence failures are try_guard_bypass at work: the attacker
+// The two equivalence failures are try_guard_bypass at work: the attacker
 // defeats the guard on origin_ephpk by substituting a public key whose private
-// half it holds, and the trace says so in as many words.
+// half it holds, and the trace says so in as many words. Both sides genuinely
+// compute r1/m1 and r4/m4, and under the bypass those keys genuinely differ.
+//
+// `equivalence? cargo, landed` holds, which is the interesting one. Mirror's
+// `landed` is a *checked* AEAD_DEC, so once the bypass has made m4 disagree
+// with r4 that decryption fails and Mirror halts: it never obtains a payload
+// to disagree with `cargo` about. An abort is not a divergence. This query
+// read e1 until `query_equivalence` learned to refuse a state whose slots were
+// truncated at the halt — see equivalence_halt_scope.vp.
 
 attacker[active]
 

@@ -1,5 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+// Expected: e0e0e0e0e0f0
+//
+// A five-way SPLIT of a CONCAT bundle, checked twice on the way in. `k` is
+// shared and never leaks, so the attacker cannot produce any (encrypted, tag)
+// pair other than the honest one: all it can do is corrupt the ciphertext and
+// fail Bob's ASSERT. Bob then computes nothing at all — bundle_b and a_b..e_b
+// never come into existence — so there is no value for a..e to disagree with.
+// An abort is not a divergence, and all five equivalence queries hold.
+//
+// These read e1e1e1e1e1 until `query_equivalence` learned to refuse a state
+// whose slots had been truncated at the halt: the dropped a_b..e_b resolved to
+// bare constants, which compared unequal to a..e. See equivalence_halt_scope.vp.
 
 attacker[active]
 

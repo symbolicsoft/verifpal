@@ -1,5 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0a0e0
+//
+// A 3DH handshake with every public key guarded. The substitution that would
+// make the two masters disagree needs the attacker to replace gb_ident and
+// then forge a signature under its own key; the guard denies it, so Alice
+// halts on the failed SIGNVERIF instead and never derives master.
+//
+// The equivalence query therefore holds, but only because of the guards, not
+// because the engine stopped looking: unguarding gb_ident makes exactly that
+// MitM available and the query fails again, with a trace that builds
+// SIGN(nil, PUBKEY(nil)). It read e1 until `query_equivalence` learned to
+// refuse a state truncated at the halt — see equivalence_halt_scope.vp.
 
 attacker[active]
 
