@@ -27,6 +27,7 @@ pub(crate) mod reexec;
 pub(crate) mod resolution;
 pub(crate) mod rewrite;
 pub(crate) mod sanity;
+pub(crate) mod sessions;
 pub(crate) mod skeleton;
 pub(crate) mod solve;
 #[cfg(test)]
@@ -43,7 +44,7 @@ pub use info::{info_banner, info_message};
 pub use json::handle_internal_json;
 pub use pretty::pretty_print;
 pub use types::*;
-pub use verify::verify;
+pub use verify::{verify, verify_with_sessions};
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;

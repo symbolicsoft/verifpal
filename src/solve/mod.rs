@@ -108,14 +108,9 @@ fn solve_principal(
 		if result.resolved || pass != Pass::Targeted {
 			continue;
 		}
-		proposals.extend(goals_for_query(
-			&result.query,
-			km,
-			ps,
-			&sym,
-			&deducer,
-			&empty,
-		));
+		for query in std::iter::once(&result.query).chain(result.variants.iter()) {
+			proposals.extend(goals_for_query(query, km, ps, &sym, &deducer, &empty));
+		}
 	}
 
 	if pass == Pass::Targeted {

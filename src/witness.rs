@@ -203,8 +203,21 @@ fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> V
 			// Read freshness off the slot rather than off the occurrence: a
 			// constant reached by inlining carries the identifier but not
 			// necessarily the declaration flags.
+			//
+			// A fresh value that travels on the wire or is leaked is one the
+			// attacker actually observes, so injecting it is a real capability,
+			// not two sessions coincidentally drawing the same nonce. Renaming
+			// it would model a counterfactual the attacker never needs — and on
+			// a genuine cross-session attack, where the attacker deliberately
+			// carries one session's wire nonce into another, that renaming
+			// misfires and stamps the trace with a spurious shared-freshness
+			// caveat. Only truly internal fresh values — the ones a reflection
+			// artifact would actually require — are renamed.
 			let own = ps.index_of(c).is_some_and(|i| {
-				ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id
+				ps.meta[i].constant.fresh
+					&& ps.values[i].provenance.creator == ps.id
+					&& ps.meta[i].wire.is_empty()
+					&& !ps.meta[i].constant.leaked
 			});
 			if own {
 				seen.push(c.name.to_string());
@@ -275,7 +288,7 @@ mod tests {
 			]\n";
 		let m = parse_string("mw.vp", src).expect("parse");
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
-		let ctx = VerifyContext::new(&m, &states);
+		let ctx = VerifyContext::new(&m, &states, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
 		pure.resolve_all_values(&ctx.attacker_snapshot())
 			.expect("resolve");

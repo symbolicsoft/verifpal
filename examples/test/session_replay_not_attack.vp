@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Pins the session-sibling replay carve-out (query.rs). At --sessions 2 the
+// attacker can swap session 2's honestly signed pair (na#2, sg#2) into
+// session 1's Bob: SIGNVERIF passes, because sk is long-term and shared, so
+// both sessions' signatures verify under the same key. But Alice honestly
+// sent exactly that pair to Bob in session 2, so non-injective agreement
+// holds and this must stay a replay, not an authentication attack: a0 at
+// both one and two sessions. Reporting a1 here would be a false attack —
+// the cardinal regression. Forgery proper stays impossible (sk never
+// leaks), and mixed pairs (na#2 with session 1's sg) fail SIGNVERIF and
+// halt Bob.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates na
+	sg = SIGN(sk, na)
+]
+
+Alice -> Bob: [pk], na, sg
+
+principal Bob[
+	_ = SIGNVERIF(pk, na, sg)?
+	h = HASH(na)
+]
+
+queries[
+	authentication? Alice -> Bob: na
+]

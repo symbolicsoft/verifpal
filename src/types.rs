@@ -468,6 +468,11 @@ pub struct VerifyResult {
 	pub resolved: bool,
 	pub summary: String,
 	pub options: Vec<QueryOptionResult>,
+	/// Per-session instantiations of `query` under `--sessions`, evaluated
+	/// under the same `query_index`: an attack on any session resolves the
+	/// query the user wrote. Empty at one session. `results_put` leaves this
+	/// and `query` untouched, so display always shows the user's own query.
+	pub variants: Vec<Query>,
 }
 
 impl VerifyResult {
@@ -478,6 +483,7 @@ impl VerifyResult {
 			resolved: false,
 			summary: String::new(),
 			options: vec![],
+			variants: vec![],
 		}
 	}
 
@@ -631,6 +637,10 @@ pub struct ProtocolTrace {
 	pub max_phase: i32,
 	pub used_by: HashMap<ValueId, HashMap<PrincipalId, bool>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
+	/// Session-sibling groups under `--sessions`: every cloned constant (and
+	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
+	/// session. Read by the authentication replay carve-out in `query.rs`.
+	pub session_siblings: HashMap<ValueId, Arc<Vec<ValueId>>>,
 }
 
 #[derive(Clone, Debug)]

@@ -130,12 +130,16 @@ fn attacker_state_absorb(
 }
 
 impl VerifyContext {
-	pub(crate) fn new(m: &Model, states: &[PrincipalState]) -> Self {
+	pub(crate) fn new(m: &Model, states: &[PrincipalState], variants: Vec<Vec<Query>>) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
 			.iter()
 			.enumerate()
-			.map(|(i, q)| VerifyResult::new(q, i))
+			.map(|(i, q)| {
+				let mut r = VerifyResult::new(q, i);
+				r.variants = variants.get(i).cloned().unwrap_or_default();
+				r
+			})
 			.collect();
 		let unresolved = results.len() as i32;
 		analysis_count_reset();
@@ -432,7 +436,7 @@ mod tests {
 			confidentiality? scr_k\n\
 			]\n";
 		let m = parse_string("scratch.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[]);
+		let ctx = VerifyContext::new(&m, &[], Vec::new());
 		let scratch = ctx.scratch_for_query(1);
 
 		assert!(!scratch.query_is_resolved(1));
@@ -464,7 +468,7 @@ mod tests {
 			confidentiality? drv_m\n\
 			]\n";
 		let m = parse_string("drv.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[]);
+		let ctx = VerifyContext::new(&m, &[], Vec::new());
 		let record = Arc::new(MutationRecord {
 			diffs: vec![],
 			principal_id: 0,

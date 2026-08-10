@@ -12,6 +12,14 @@
 // These read e1e1e1e1e1 until `query_equivalence` learned to refuse a state
 // whose slots had been truncated at the halt: the dropped a_b..e_b resolved to
 // bare constants, which compared unequal to a..e. See equivalence_halt_scope.vp.
+//
+// Under `--sessions 2` all five fail again, and this time for real: `k` is
+// long-term, so a second session's (encrypted, tag) verifies perfectly for the
+// first session's Bob. He accepts that bundle, both his checks pass, and he
+// ends up holding a#2..e#2 while Alice holds a..e. Nothing in the ciphertext
+// binds it to a session. The contrast between the two codes is the point —
+// halting Bob was never a divergence, but feeding him another session's
+// bundle is one.
 
 attacker[active]
 
