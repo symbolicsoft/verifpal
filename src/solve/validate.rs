@@ -41,6 +41,9 @@ pub(crate) fn validate(
 		if slot >= ps.values.len() {
 			continue;
 		}
+		if !crate::reexec::attacker_controllable(slot, km, &ps, attacker) {
+			return Ok(false);
+		}
 		if contains_failed_check(&ground, &ps) {
 			return Ok(false);
 		}

@@ -37,11 +37,6 @@ impl NameTable {
 		self.compress_excluding(v, &[])
 	}
 
-	/// A copy of this table with `names` removed, for rendering steps in which
-	/// those names would be misleading. Used for the derivations that explain
-	/// how the attacker obtained what it injects: those run *before* the
-	/// substitution, so a name whose value the substitution caused cannot be
-	/// used to describe them.
 	pub(crate) fn without(&self, names: &[&str]) -> NameTable {
 		NameTable {
 			entries: self

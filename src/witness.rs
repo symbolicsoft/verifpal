@@ -40,14 +40,6 @@ impl Drop for MinimizingGuard {
 pub(crate) struct Witness {
 	pub ps: PrincipalState,
 	pub attacker: AttackerState,
-	/// Whether this witness was confirmed by a probe that re-executed it to the
-	/// reported violation.
-	///
-	/// True for every minimized witness, which is the ordinary case. False on
-	/// the fallback path, where no candidate substitution set reproduced the
-	/// violation and the state that resolved the query is reported as it stands.
-	/// The reproduction theorem covers the first case only, so the second says
-	/// so in the trace rather than reading like the first.
 	pub reproduced: bool,
 }
 

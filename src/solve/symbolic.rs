@@ -20,35 +20,6 @@ impl SymbolicState {
 	}
 }
 
-pub(crate) fn is_mutable_slot(
-	idx: usize,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> bool {
-	let meta = &ps.meta[idx];
-	if meta.constant.is_nil() {
-		return false;
-	}
-	if meta.guard {
-		if !meta
-			.mutatable_to
-			.contains(&ps.values[idx].provenance.sender)
-		{
-			return false;
-		}
-	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
-		return false;
-	}
-	if !meta.phase.iter().any(|&p| p <= attacker.current_phase) {
-		return false;
-	}
-	if !km.constant_used_by(ps.id, &meta.constant) {
-		return false;
-	}
-	true
-}
-
 fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
 	let var = attacker_var(slot, name);
 	match honest {
@@ -69,7 +40,7 @@ pub(crate) fn build(
 	let mut var_slots = Vec::new();
 
 	for (idx, slot) in var_terms.iter_mut().enumerate() {
-		if !is_mutable_slot(idx, km, ps, attacker) {
+		if !crate::reexec::attacker_controllable(idx, km, ps, attacker) {
 			continue;
 		}
 		let name = &ps.meta[idx].constant.name;

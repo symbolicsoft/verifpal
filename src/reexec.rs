@@ -15,6 +15,60 @@ fn attacker_public_key() -> Value {
 	crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil)
 }
 
+/// Whether slot `idx` of `ps` is one the Dolev-Yao attacker may substitute at.
+///
+/// This is the domain restriction on a proposed substitution, and it lives here
+/// rather than in the search for the same reason `attacker_can_derive` does. The
+/// semantics admit a replay transition only over *attacker-controllable* slots: a
+/// value a principal generates itself, or computes from its own state, never
+/// crosses the network, so no attacker can choose it, and a substitution there
+/// describes no attack at all. Enforced only where the symbolic state is built,
+/// the restriction would be enforced in the untrusted region: an arbitrary solver
+/// could propose at a creator slot and have it installed, and replacing a key the
+/// principal generated with `nil` makes every ciphertext under it readable. That
+/// report would be a false attack through the ordinary write path. `validate`
+/// re-tests it, and the search consults this same predicate so the two cannot
+/// drift.
+///
+/// A guarded slot is controllable exactly when the attacker can defeat its guard,
+/// which is what `mutatable_to` records: the senders it can stand in for, because
+/// it holds the private value the guard checks against. That is the same
+/// bypassability `try_guard_bypass` acts on during re-execution, and keeping both
+/// in this file is what keeps them one notion rather than two that can drift.
+pub(crate) fn attacker_controllable(
+	idx: usize,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	let Some(meta) = ps.meta.get(idx) else {
+		return false;
+	};
+	if idx >= ps.values.len() {
+		return false;
+	}
+	if meta.constant.is_nil() {
+		return false;
+	}
+	if meta.guard {
+		if !meta
+			.mutatable_to
+			.contains(&ps.values[idx].provenance.sender)
+		{
+			return false;
+		}
+	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
+		return false;
+	}
+	if !meta.phase.iter().any(|&p| p <= attacker.current_phase) {
+		return false;
+	}
+	if !km.constant_used_by(ps.id, &meta.constant) {
+		return false;
+	}
+	true
+}
+
 pub(crate) fn governing_attacker(
 	ctx: &VerifyContext,
 	installs: &[(SlotIdx, Value)],
@@ -191,7 +245,52 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 #[cfg(test)]
 mod tests {
 	use crate::testutil::*;
-	use crate::types::SlotIdx;
+	use crate::types::{PrincipalState, SlotIdx};
+	#[test]
+	fn a_generated_key_is_not_attacker_controllable() {
+		use crate::parser::parse_string;
+		let src = "attacker[active]\n\
+			principal Bob[\n\
+			knows private ctl_secret\n\
+			generates ctl_kk\n\
+			ctl_c = AEAD_ENC(ctl_kk, ctl_secret, nil)\n\
+			]\n\
+			Bob -> Alice: ctl_c\n\
+			principal Alice[\n\
+			knows private ctl_kk2\n\
+			ctl_m = AEAD_DEC(ctl_kk2, ctl_c, nil)\n\
+			]\n\
+			queries[\n\
+			confidentiality? ctl_secret\n\
+			]\n";
+		let m = parse_string("ctl.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let attacker = make_attacker_state(vec![]);
+
+		let slot_named = |ps: &PrincipalState, name: &str| -> usize {
+			ps.meta
+				.iter()
+				.position(|m| m.constant.name.as_ref() == name)
+				.unwrap_or_else(|| panic!("{name} is a slot"))
+		};
+
+		let bob = states
+			.iter()
+			.find(|s| s.name == "Bob")
+			.expect("Bob");
+		let kk = slot_named(bob, "ctl_kk");
+		assert!(
+			!super::attacker_controllable(kk, &km, bob, &attacker),
+			"a value its own principal generated is not on any wire, so no \
+			 substitution over it describes a Dolev-Yao transition"
+		);
+		let alice = states
+			.iter()
+			.find(|s| s.name == "Alice")
+			.expect("Alice");
+		let c = slot_named(alice, "ctl_c");
+		assert!(super::attacker_controllable(c, &km, alice, &attacker));
+	}
 
 	#[test]
 	fn reexecute_installs_with_attacker_provenance() {
