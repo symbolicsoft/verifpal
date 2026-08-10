@@ -45,6 +45,9 @@ pub(crate) fn validate(
 		if !controllable.admits(&ps, attacker, slot) {
 			return Ok(false);
 		}
+		if !crate::primitive::admissible(&ground) {
+			return Ok(false);
+		}
 		if contains_failed_check(&ground, &ps) {
 			return Ok(false);
 		}
@@ -80,30 +83,6 @@ pub(crate) fn validate(
 	Ok(true)
 }
 
-/// A *self-feeding replay pump*: the attacker offers a value for slot `S` that
-/// it holds only because it already injected a strictly smaller version of that
-/// same value into that same slot, in that same principal's session.
-///
-/// This is what makes an active search diverge. Where one key covers both
-/// directions of a principal's leg and a growing constructor sits on the return
-/// path — `d = AEAD_DEC(k, e, nil)`, `h = HASH(d)`, `e' = AEAD_ENC(k, h, nil)` —
-/// the principal's own output is a well-typed input to itself, one rung deeper.
-/// Feeding it back is new knowledge, so `verify_active`'s round loop sees
-/// progress and goes again, forever. `needham-schroeder.vp` did exactly this:
-/// 213 nested `HASH`es and 132k proposals in 45s, no query resolved.
-///
-/// It is a cycle test rather than a size test, which is what keeps the cost to
-/// completeness narrow. Rung 1 is learned from the honest run and carries no
-/// diff at `S`, so reflection attacks survive; and the injection condition asks
-/// "do I hold this *because* I injected into this wire", which goal-directed
-/// proposals never satisfy — a protocol that genuinely needs a deep term still
-/// gets it built from the check that demands it. Only the blind-replay route to
-/// that term is lost.
-///
-/// The embedding is tested against every term previously installed at `S`, not
-/// against a single recorded ancestor. Kruskal's theorem gives *some* earlier
-/// term embedded in *some* later one; the two need not be adjacent, so a
-/// predecessor-only test does not bound the sequence.
 fn is_self_feeding_pump(
 	ctx: &VerifyContext,
 	slot: usize,
@@ -111,21 +90,9 @@ fn is_self_feeding_pump(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
-	// The attacker must hold `ground` by a derivation that already substituted
-	// at this same slot of this same principal. Goal-directed constructions do
-	// not qualify: the attacker builds those because a check demands them, not
-	// because they came back off the wire.
 	let Some(immediate) = pump_ancestor(slot, ground, ps, attacker) else {
 		return false;
 	};
-	// Test the whole lineage, not just the immediate ancestor. Kruskal's
-	// theorem yields *some* earlier term embedded in *some* later one, and the
-	// two need not be adjacent, so a predecessor-only test does not bound the
-	// sequence.
-	//
-	// Bare constants are excluded because the blanket substitution installs
-	// `nil`, which embeds into almost every term; the constants are interned
-	// per model and so cannot hide an infinite sequence.
 	let Some(previous) = ctx
 		.lineage_of(ps.id, slot, &immediate)
 		.into_iter()
@@ -153,8 +120,6 @@ fn is_self_feeding_pump(
 	true
 }
 
-/// The term the attacker had substituted at `slot` in the derivation that
-/// produced `ground`, if `ground` is held because of such a substitution.
 fn pump_ancestor(
 	slot: usize,
 	ground: &Value,
@@ -173,28 +138,6 @@ fn pump_ancestor(
 		.map(|d| d.value.clone())
 }
 
-/// The trusted-region re-derivation of an injected term: `ground` is accepted
-/// only if the Dolev-Yao attacker could itself have constructed it, from
-/// knowledge available no later than slot `S`'s own phase.
-///
-/// This is the check that lets the soundness theorem quantify over an arbitrary
-/// solver. The solver already places every binding under a constructibility
-/// obligation (`require_constructible`), but that obligation lives in the
-/// untrusted search: were it buggy — or replaced wholesale — it could hand the
-/// validator a term the attacker cannot build, such as a signature under a key
-/// it does not hold, and re-execution would install it, the recipient's checks
-/// would pass, and a forgery no attacker can mount would be reported. Re-deriving
-/// `ground` here, against the same closed knowledge the honest analysis trusts,
-/// forecloses that: a term the attacker cannot construct is not an attack.
-///
-/// The predicate is deliberately one-sided. It over-approximates rejection
-/// rather than acceptance: `derivable` is sound (it says yes only when the
-/// attacker genuinely can build the term), so a solver bug can at worst cost a
-/// missed attack here, never a false one — the same trade the rest of the
-/// engine makes. Because `attacker.known` is already closed under the deduction
-/// rules of the knowledge closure, the recursion below adds only the synthesis
-/// direction: applying a public primitive to arguments the attacker can itself
-/// derive.
 fn attacker_can_derive(
 	ctx: &VerifyContext,
 	slot: usize,
@@ -208,9 +151,6 @@ fn attacker_can_derive(
 		.and_then(|meta| min_int_in_slice(&meta.phase).ok());
 	match earliest {
 		Some(earliest) if earliest < attacker.current_phase => {
-			// A value whose slot predates the current phase must be derivable
-			// from knowledge archived at that earlier phase, so that a value
-			// learned later cannot retroactively justify an earlier injection.
 			match ctx.attacker_knowledge_at(earliest) {
 				Some(snapshot) => derivable(ground, ps, &snapshot),
 				None => false,
@@ -220,16 +160,6 @@ fn attacker_can_derive(
 	}
 }
 
-/// Sound (one-sided) Dolev-Yao derivability of `v` against `snapshot`.
-///
-/// The two branches are the two ways the attacker obtains a term. The trusted
-/// `obtainable` covers analysis — decomposition, and reconstruction that is
-/// capability-aware, so a `forgeable`-annotated primitive is derivable without
-/// its secret argument exactly as the honest closure treats it. The recursive
-/// branch covers synthesis: the attacker applies a public primitive to
-/// arguments it can itself derive, which is what makes `PUBKEY(nil)` and other
-/// `nil`-leafed man-in-the-middle terms constructible without their appearing in
-/// any assigned slot.
 fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 	if snapshot.knows(v).is_some() {
 		return true;
@@ -249,19 +179,6 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 	}
 }
 
-/// The argument position of `p` that a declared `forgeable` assumption exempts
-/// from the derivability obligation, if one is in force for `p`.
-///
-/// A `forgeable` annotation says the scheme has lost authenticity: the attacker
-/// can produce this primitive, under this secret, over a message of its
-/// choosing. The exemption is therefore keyed on the secret argument rather than
-/// on the whole term. `SIGN[forgeable](sk, m)` licenses `SIGN(sk, m')` for any
-/// derivable `m'`, which is the point of the assumption, but licenses nothing
-/// under a different signing key. Matching the whole term instead would make the
-/// annotation useless, since a forgery is by definition over a message the
-/// honest run never signed; matching on the primitive alone would let one
-/// annotation weaken every key in the model. `CapabilityIndex` maintains the
-/// secret-keyed projection this asks for alongside the term-keyed one.
 fn forgeable_secret_position(
 	p: &Primitive,
 	ps: &PrincipalState,
@@ -308,8 +225,6 @@ mod tests {
 	fn derivable_accepts_nil_and_a_primitive_over_nil() {
 		let attacker = make_attacker_state(vec![]);
 		assert!(derivable(&value_nil(), &empty_state(), &attacker));
-		// PUBKEY(nil) is the man-in-the-middle key: nil is public, so the
-		// attacker can apply PUBKEY to it.
 		let pubkey_nil = make_primitive(PRIM_PUBKEY, vec![value_nil()], 0);
 		assert!(derivable(&pubkey_nil, &empty_state(), &attacker));
 	}
@@ -319,7 +234,6 @@ mod tests {
 		let k = make_constant("der_k");
 		let m = make_constant("der_m");
 		let attacker = make_attacker_state(vec![k.clone(), m.clone()]);
-		// The attacker holds k and m, so it can encrypt m under k itself.
 		let enc = make_primitive(PRIM_ENC, vec![k, m], 0);
 		assert!(derivable(&enc, &empty_state(), &attacker));
 	}
@@ -334,11 +248,6 @@ mod tests {
 
 	#[test]
 	fn derivable_rejects_a_forgery_under_an_unheld_key() {
-		// The reviewer's counterexample to a solver-quantified soundness claim:
-		// a signature under a key the attacker does not hold, with no forgeable
-		// assumption in force. The attacker holds only the message; SIGN(sk, m)
-		// must not be derivable, or an adversarially buggy solver could inject a
-		// forgery no attacker can mount.
 		let sk = make_constant("der_sk");
 		let m = make_constant("der_msg");
 		let attacker = make_attacker_state(vec![m.clone()]);

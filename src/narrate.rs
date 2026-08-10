@@ -233,18 +233,13 @@ fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
-/// The derivations explaining how the attacker came to hold `target`.
-///
-/// `seen` is threaded by the caller so that several walks over one narration
-/// (the injected values, then the query's target) do not each re-explain a
-/// derivation the reader has already been shown.
 pub(crate) fn derivation_steps(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	target: &Value,
 	table: &NameTable,
 	home: PrincipalId,
-	carried: &[Value],
+	carried: &[CarriedIn],
 	seen: &mut Vec<KnownIdx>,
 ) -> Vec<Step> {
 	let mut steps: Vec<Step> = Vec::new();
@@ -259,7 +254,7 @@ fn walk(
 	value: &Value,
 	table: &NameTable,
 	home: PrincipalId,
-	carried: &[Value],
+	carried: &[CarriedIn],
 	seen: &mut Vec<KnownIdx>,
 	steps: &mut Vec<Step>,
 ) {
@@ -319,7 +314,7 @@ fn describe(
 	derivation: &DerivationRecord,
 	value: &Value,
 	table: &NameTable,
-	carried: &[Value],
+	carried: &[CarriedIn],
 ) -> Option<String> {
 	let v = table.compress(value);
 	Some(match derivation {
@@ -327,12 +322,35 @@ fn describe(
 		DerivationRecord::Leaked { .. } => {
 			format!("Attacker is handed {} by a leaks declaration.", v)
 		}
-		DerivationRecord::Obtained { .. } if carried.iter().any(|c| c.equivalent(value, true)) => {
-			format!(
-				"Attacker holds {} from an earlier session; the honest run does not \
-				 send it, and this trace does not reconstruct that session.",
-				v
-			)
+		DerivationRecord::Obtained { .. }
+			if let Some(c) = carried.iter().find(|c| c.value.equivalent(value, true)) =>
+		{
+			let via = c
+				.via
+				.iter()
+				.map(|(name, value)| format!("{name} with {}", table.compress(value)))
+				.collect::<Vec<_>>()
+				.join(", ");
+			match (via.is_empty(), c.origin.clone()) {
+				(true, Some(name)) if name == v => {
+					format!("Attacker observes {name} on the wire in an earlier session.")
+				}
+				(true, Some(name)) => format!(
+					"Attacker observes {name} on the wire in an earlier session, where it is {}.",
+					v
+				),
+				(true, None) => format!("Attacker holds {} from an earlier session.", v),
+				(false, Some(name)) => format!(
+					"In an earlier session in which the attacker replaced {via}, {name} \
+					 resolved to {}.",
+					v
+				),
+				(false, None) => format!(
+					"In an earlier session in which the attacker replaced {via}, {} became \
+					 available.",
+					v
+				),
+			}
 		}
 		DerivationRecord::Obtained { .. } => format!("Attacker observes {} on the wire.", v),
 		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
@@ -418,13 +436,46 @@ impl Narration {
 	}
 }
 
-fn carried_in(ps: &PrincipalState) -> Vec<Value> {
+pub(crate) struct CarriedIn {
+	pub value: Value,
+	pub via: Vec<(String, Value)>,
+	pub origin: Option<String>,
+}
+
+fn carried_in(km: &ProtocolTrace, ps: &PrincipalState, ambient: &AttackerState) -> Vec<CarriedIn> {
 	ps.values
 		.iter()
 		.filter(|sv| {
 			sv.provenance.attacker_tainted && sv.provenance.sender == crate::principal::ATTACKER_ID
 		})
-		.map(|sv| sv.pre_rewrite.clone())
+		.map(|sv| {
+			let record = ambient
+				.knows(&sv.pre_rewrite)
+				.and_then(|idx| ambient.record(idx));
+			let origin = ambient
+				.knows(&sv.pre_rewrite)
+				.and_then(|idx| ambient.derivation(idx))
+				.and_then(|d| match d {
+					DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => km
+						.slots
+						.get(slot.get())
+						.map(|s| s.constant.name.to_string()),
+					_ => None,
+				});
+			CarriedIn {
+				value: sv.pre_rewrite.clone(),
+				via: record
+					.map(|r| {
+						r.diffs
+							.iter()
+							.filter(|d| d.tainted && !d.value.equivalent(&sv.pre_rewrite, true))
+							.map(|d| (d.constant.name.to_string(), d.value.clone()))
+							.collect()
+					})
+					.unwrap_or_default(),
+				origin,
+			}
+		})
 		.collect()
 }
 
@@ -449,13 +500,18 @@ fn join_names(names: &[String]) -> String {
 	}
 }
 
-pub(crate) fn narrate_attack(km: &ProtocolTrace, witness: &Witness, target: &Value) -> Narration {
+pub(crate) fn narrate_attack(
+	km: &ProtocolTrace,
+	witness: &Witness,
+	target: &Value,
+	ambient: &AttackerState,
+) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
 	let mut seen: Vec<KnownIdx> = Vec::new();
 	let shadowed = shadowed_names(km, &witness.ps);
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let pre_table = table.without(&shadowed_refs);
-	let carried = carried_in(&witness.ps);
+	let carried = carried_in(km, &witness.ps, ambient);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
 		steps.extend(derivation_steps(

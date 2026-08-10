@@ -299,6 +299,13 @@ fn test_shared_freshness_not_replication() {
 	run_model("shared_freshness_not_replication.vp", "a1");
 }
 #[test]
+fn test_dh_nested_rejected() {
+	run_model_err(
+		"dh_nested_rejected.vp",
+		"PUBKEY cannot take DH_KEX as argument",
+	);
+}
+#[test]
 fn test_dh_two_public_keys() {
 	run_model("dh_two_public_keys.vp", "c0c0");
 }

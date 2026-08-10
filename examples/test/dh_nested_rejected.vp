@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a load-time error naming the position.
+//
+// The companion to dh_two_public_keys.vp, which pins the restriction that
+// normalisation *does* enforce. This one pins the two it does not.
+//
+// `normalise_arguments` enforces a restriction by peeling the forbidden head
+// away, and it can only peel a unary key-derivation constructor — PUBKEY, and
+// nothing else in the table. So DH_KEX under PUBKEY, and DH_KEX in its own base
+// position, are fixed points of normalisation: they survive it untouched. For a
+// term the model writes, the load-time check below is what rejects them. For a
+// term the solver builds there is no load-time check, which is why `validate`
+// tests admissibility of every injected term before installing it.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	ss = DH_KEX(gb, a)
+	nested = PUBKEY(ss)
+]
+
+Alice -> Bob: nested
+
+queries[
+	confidentiality? a
+]

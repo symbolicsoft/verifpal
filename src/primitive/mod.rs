@@ -322,6 +322,20 @@ pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) ->
 	arguments
 }
 
+pub(crate) fn admissible(v: &Value) -> bool {
+	let Value::Primitive(p) = v else {
+		return true;
+	};
+	for (position, banned) in argument_restrictions(p.id) {
+		if let Some(Value::Primitive(inner)) = p.arguments.get(*position)
+			&& banned.contains(&inner.id)
+		{
+			return false;
+		}
+	}
+	p.arguments.iter().all(admissible)
+}
+
 pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [(usize, Vec<PrimitiveId>)] {
 	primitive_get(id)
 		.map(|s| s.argument_restrictions.as_slice())
@@ -487,6 +501,54 @@ mod tests {
 		assert!(twice[1].equivalent(&normalised[1], true));
 		let gga = normalise_arguments(PRIM_PUBKEY, vec![ga.clone()]);
 		assert!(gga[0].equivalent(&make_constant("nrm_a"), true));
+	}
+
+	#[test]
+	fn a_commutativity_rule_exchanges_positions_with_equal_restrictions() {
+		for spec in PRIM_SPECS.values() {
+			let Some(rule) = &spec.commutativity else {
+				continue;
+			};
+			let bare: Vec<PrimitiveId> = argument_restrictions(spec.id)
+				.iter()
+				.find(|(position, _)| *position == rule.bare)
+				.map(|(_, banned)| banned.clone())
+				.unwrap_or_default();
+			let wrapped: Vec<PrimitiveId> = argument_restrictions(rule.constructor)
+				.iter()
+				.find(|(position, _)| *position == 0)
+				.map(|(_, banned)| banned.clone())
+				.unwrap_or_default();
+			let mut bare = bare;
+			let mut wrapped = wrapped;
+			bare.sort_unstable();
+			wrapped.sort_unstable();
+			assert_eq!(
+				bare,
+				wrapped,
+				"{}'s bare position and {}'s argument must forbid the same heads",
+				spec.name,
+				primitive_name(rule.constructor)
+			);
+		}
+	}
+
+	#[test]
+	fn normalisation_does_not_enforce_the_unpeelable_restrictions() {
+		use crate::testutil::*;
+		let a = make_constant("adm_a");
+		let b = make_constant("adm_b");
+		let ga = make_primitive(PRIM_PUBKEY, vec![a.clone()], 0);
+		let shared = make_primitive(PRIM_DH_KEX, vec![ga.clone(), b.clone()], 0);
+		let nested = normalise_arguments(PRIM_PUBKEY, vec![shared.clone()]);
+		assert!(nested[0].equivalent(&shared, true), "not peeled");
+		let violating = make_primitive(PRIM_PUBKEY, vec![shared.clone()], 0);
+		assert!(!admissible(&violating));
+		let stacked = make_primitive(PRIM_DH_KEX, vec![shared.clone(), b], 0);
+		assert!(!admissible(&stacked));
+		assert!(admissible(&shared));
+		assert!(admissible(&ga));
+		assert!(admissible(&a));
 	}
 
 	#[test]

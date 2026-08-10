@@ -22,8 +22,9 @@ fn attack_trace(
 	if in_minimization() {
 		return Narration::none();
 	}
+	let ambient = ctx.attacker_snapshot();
 	let witness = minimize_witness(ctx, km, ps, query_index, seed);
-	narrate_attack(km, &witness, target)
+	narrate_attack(km, &witness, target, &ambient)
 }
 
 fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(SlotIdx, Value)> {
