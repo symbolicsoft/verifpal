@@ -4,74 +4,69 @@
 attacker[active]
 
 principal Client1[
-    knows public SK
-    knows public S
-    knows public 0
-    knows public 1
-    knows public 2
-    knows private skk
-    knows private signprivkey
-    knows private keygen
-    knows private ekid
-    signpubkey = PUBKEY(signprivkey)
-
-    leaks skk
-    leaks ekid
+	knows public SK
+	knows public S
+	knows public zero
+	knows public one
+	knows public two
+	knows private skk
+	knows private signprivkey
+	knows private keygen
+	knows private ekid
+	signpubkey = PUBKEY(signprivkey)
+	leaks skk
+	leaks ekid
 ]
 
 principal Client2[
-    knows private skk
-    knows private ek
-    knows private keygen
+	knows private skk
+	knows private ek
+	knows private keygen
 ]
 
 Client1 -> Client2: [signpubkey]
 
 principal Client1[
-    knows private k
-    generates r
-
-    h0 = HASH(skk, 0, r)
+	knows private k
+	generates r
+	h0 = HASH(skk, zero, r)
 ]
 
 Client1 -> Client2: r, h0
 
 principal Client2[
-    generates rprime
-    _ = ASSERT(h0, HASH(skk, 0, r))?
-    h1 = HASH(skk, 1, rprime, h0)
+	generates rprime
+	_ = ASSERT(h0, HASH(skk, zero, r))?
+	h1 = HASH(skk, one, rprime, h0)
 ]
 
 Client2 -> Client1: rprime, h1
 
 principal Client1[
-    generates ts
-    generates n
-    generates m
-
-    _ = ASSERT(h1, HASH(skk, 1, rprime, h0))?
-
-    gkeygen = PUBKEY(keygen)
-    ct = ENC(DH_KEX(gkeygen, ekid), CONCAT(n, m))
-    signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
-    h2 = HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid))
+	generates ts
+	generates n
+	generates m
+	_ = ASSERT(h1, HASH(skk, one, rprime, h0))?
+	gkeygen = PUBKEY(keygen)
+	ct = ENC(DH_KEX(gkeygen, ekid), CONCAT(n, m))
+	signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
+	h2 = HASH(skk, two, h1, S, CONCAT(ts, signature, ekid))
 ]
 
 Client1 -> Client2: h2, ts, signature, ekid, n, ct
 
 principal Client2[
-    _ = ASSERT(h2, HASH(skk, 2, h1, S, CONCAT(ts, signature, ekid)))?
-    _ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
-
-    gkeygen_ = PUBKEY(keygen)
-    nm_ = DEC(DH_KEX(gkeygen_, ekid), ct)
-    n_, m_ = SPLIT(nm_)
+	_ = ASSERT(h2, HASH(skk, two, h1, S, CONCAT(ts, signature, ekid)))?
+	_ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
+	gkeygen_ = PUBKEY(keygen)
+	nm_ = DEC(DH_KEX(gkeygen_, ekid), ct)
+	n_, m_ = SPLIT(nm_)
 ]
 
 queries[
-    confidentiality? m
-    authentication? Client1 -> Client2: ekid
-    authentication? Client1 -> Client2: n
-    authentication? Client1 -> Client2: ct
-    freshness? m
+	confidentiality? m
+	authentication? Client1 -> Client2: ekid
+	authentication? Client1 -> Client2: n
+	authentication? Client1 -> Client2: ct
+	freshness? m
 ]
