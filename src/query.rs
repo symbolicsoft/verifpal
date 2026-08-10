@@ -217,9 +217,48 @@ fn query_authentication_get_pass_indices(
 		if v.equivalent(&ps.values[idx].value, true) {
 			return Ok((vec![], sender, c));
 		}
+		if session_sibling_replay(&c, &ps.values[idx].value, km, ps) {
+			return Ok((vec![], sender, c));
+		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
 	Ok((indices, sender, c))
+}
+
+/// A received value equivalent to the honest wire value of a session sibling
+/// of `c` is a cross-session replay of something the declared sender honestly
+/// sent: non-injective agreement holds, exactly as under the same-session
+/// replay rule above. Only the authentication verdict treats it as a replay —
+/// `reexec::attacker_authored` stays session-strict, because routing another
+/// session's value here changes what this principal computes downstream and
+/// must remain explorable as a stepping stone. The comparison mirrors
+/// `attacker_authored` (trace resolution, one rewrite reduction) so the two
+/// judgments cannot drift apart.
+fn session_sibling_replay(
+	c: &Constant,
+	used: &Value,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+) -> bool {
+	let Some(group) = km.session_siblings.get(&c.id) else {
+		return false;
+	};
+	let used_reduct = reduce_once(used, ps);
+	group.iter().filter(|&&sid| sid != c.id).any(|&sid| {
+		let Some(&slot) = km.index.get(&sid) else {
+			return false;
+		};
+		let sibling = Value::Constant(km.slots[slot].constant.clone());
+		let (resolved, _) = resolve_trace_values(&sibling, km);
+		reduce_once(&resolved, ps).equivalent(&used_reduct, true)
+	})
+}
+
+fn reduce_once(v: &Value, ps: &PrincipalState) -> Value {
+	match v {
+		Value::Primitive(p) => can_rewrite(p, ps).1,
+		Value::Constant(_) => v.clone(),
+	}
 }
 
 fn query_authentication_handle_pass(

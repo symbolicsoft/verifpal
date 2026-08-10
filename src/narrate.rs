@@ -789,7 +789,7 @@ mod tests {
 			]\n";
 		let m = parse_string("dw.vp", src).expect("parse");
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
-		let ctx = VerifyContext::new(&m, &states);
+		let ctx = VerifyContext::new(&m, &states, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
 		pure.resolve_all_values(&ctx.attacker_snapshot())
 			.expect("resolve");

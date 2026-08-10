@@ -14,11 +14,24 @@ use crate::types::*;
 use crate::value::*;
 
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
+	analyze_sessions(m, crate::sessions::DEFAULT_SESSIONS)
+}
+
+pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
 	crate::theory::rewrite_cache_reset();
 	crate::info::info_reset_deductions();
-	let (trace, states) = sanity(m)?;
+	let expanded;
+	let (m, variants, siblings) = if sessions > 1 {
+		let e = crate::sessions::expand_sessions(m, sessions)?;
+		expanded = e.model;
+		(&expanded, e.query_variants, e.siblings)
+	} else {
+		(m, Vec::new(), std::collections::HashMap::new())
+	};
+	let (mut trace, states) = sanity(m)?;
+	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let ctx = VerifyContext::new(m, &states);
+	let ctx = VerifyContext::new(m, &states, variants);
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
@@ -52,11 +65,19 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
-	let m = parse_file(file_path)?;
-	verify_model(&m).map_err(|e| e.located(&m.file_name, &m.source))
+	verify_with_sessions(file_path, crate::sessions::DEFAULT_SESSIONS)
 }
 
-fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
+/// `verify`, analyzed as `sessions` interleaved sessions per principal
+/// (`sessions.rs`). Every entry point shares one default, so the CLI, the
+/// `internal-json` IDE interface and the wasm build cannot disagree about
+/// what a model means.
+pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
+	let m = parse_file(file_path)?;
+	verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))
+}
+
+fn verify_model(m: &Model, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	info_message(
 		&format!(
 			"Verification initiated for '{}' at {}.",
@@ -66,7 +87,7 @@ fn verify_model(m: &Model) -> VResult<(Vec<VerifyResult>, String)> {
 		InfoLevel::Verifpal,
 		false,
 	);
-	verify_end(&analyze(m)?)
+	verify_end(&analyze_sessions(m, sessions)?)
 }
 
 pub(crate) fn verify_resolve_queries(
@@ -76,8 +97,15 @@ pub(crate) fn verify_resolve_queries(
 ) -> VResult<()> {
 	let results = ctx.results_get();
 	for result in &results {
-		if !result.resolved {
-			query_start(ctx, &result.query, result.query_index, km, ps)?;
+		if result.resolved {
+			continue;
+		}
+		query_start(ctx, &result.query, result.query_index, km, ps)?;
+		for variant in &result.variants {
+			if ctx.query_is_resolved(result.query_index) {
+				break;
+			}
+			query_start(ctx, variant, result.query_index, km, ps)?;
 		}
 	}
 	Ok(())

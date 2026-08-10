@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Verifpal is a symbolic formal verification tool for cryptographic protocols. Users write protocol models in the Verifpal language (`.vp` files), and the engine checks security queries (confidentiality, authentication, freshness, unlinkability, equivalence) against a passive or active attacker with unbounded sessions. It is a single Rust crate (`verifpal` 0.53.0, edition 2024, `rust-version 1.88`, GPL-3.0-only) that builds as a CLI binary and, separately, as a WASM library used by the Verifpal website and the VS Code extension. The [Verifpal User Manual](https://static.verifpal.com/manual.pdf) is the language reference; `README.md` is the user-facing pitch.
+Verifpal is a symbolic formal verification tool for cryptographic protocols. Users write protocol models in the Verifpal language (`.vp` files), and the engine checks security queries (confidentiality, authentication, freshness, unlinkability, equivalence) against a passive or active attacker, with each principal running two concurrent sessions by default (`--sessions k` to change it). Sessions are bounded, not unbounded: a passing query means no attack was found within that many sessions. It is a single Rust crate (`verifpal` 0.53.0, edition 2024, `rust-version 1.88`, GPL-3.0-only) that builds as a CLI binary and, separately, as a WASM library used by the Verifpal website and the VS Code extension. The [Verifpal User Manual](https://static.verifpal.com/manual.pdf) is the language reference; `README.md` is the user-facing pitch.
 
 The engine is **sound but incomplete**: any reported attack must be genuine, but the search may still miss attacks. Soundness is structural rather than argued — the solver in `src/solve/` only ever *proposes* substitutions, and `validate.rs` re-executes each one concretely before any result can be recorded, so a solver bug costs a missed attack and never a false one. A false attack (unsoundness) remains the worst possible regression; four test models exist purely to pin past ones:
 
@@ -16,6 +16,9 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 | `aead_replay_not_forgery.vp` | `a0c0` | a fully attacker-known ciphertext under an unreachable key is not forgeable |
 | `equivalence_halt_scope.vp` | `e0` | halting a principal is not a divergence: a state truncated at a failed check cannot answer an `equivalence?` query over slots it no longer holds |
 | `examples/transport-layer/piknik.vp` | `c0a0a0a0f0` | a substitution the attacker cannot build is not an attack: every value under Client1's signature stays authenticated, because forging it would need `signprivkey` (never leaked) and the confidential plaintext `m` |
+| `session_replay_not_attack.vp` | `a0` (both `--sessions 1` and `2`) | replaying another session's honestly-signed pair is non-injective agreement, not a forgery — the session-sibling replay carve-out in `query.rs`. Reporting `a1` here is a false attack |
+| `session_nonce_cross.vp` | `a0` at `--sessions 1`, `a1` at `--sessions 2` | pins that session replication finds a genuine cross-session oracle attack: session 2's responder, fed session 1's nonce, forges a MAC session 1 accepts |
+| `concat_bomb_equiv.vp` | `e0…f0` at `--sessions 1`, `e1…f0` at `--sessions 2` | the two halves of the same distinction: halting Bob is not a divergence, but feeding him another session's bundle under the same long-term key is one |
 
 "Known to the attacker" is not "forgeable by the attacker" — that distinction is what the last two models exist to hold down. `piknik.vp` is reached through `run_model_at`, which takes a full path; `run_model` still prefixes `examples/test/`.
 
@@ -24,7 +27,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 ```sh
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs (also: make lint)
-cargo test --release                   # 396 tests (unit + model), ~2s once built (also: make test)
+cargo test --release                   # 412 tests (unit + model), ~8s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -39,6 +42,7 @@ Running the tool:
 ```sh
 cargo run --release -- verify examples/simple.vp             # full analysis
 cargo run --release -- verify path/to/model.vp --result-code # appends the compact result code
+cargo run --release -- verify path/to/model.vp --sessions 1  # single-session analysis; the default is 2 per principal
 cargo run --release -- pretty path/to/model.vp               # canonical formatter, to stdout
 VERIFPAL_SOLVE_DEBUG=1 cargo run --release -- verify m.vp    # log every solver proposal to stderr
 ```
@@ -132,7 +136,11 @@ parse_file (parser.rs)              hand-written recursive-descent, comment-pres
   → verify_end                      prints results, returns the results code
 ```
 
-`verify::analyze(&Model)` is the **one** place that sequence exists: it runs sanity, builds the context, dispatches on the attacker kind and returns the `VerifyContext` holding the results. `verify::verify(path)` is the CLI entry point (parse, `analyze`, `verify_end`); `json.rs` and the wasm entry points differ only in how they render what `analyze` returns. Throughout the code, `km` is the `ProtocolTrace` (historical name "knowledge map") and `ps` a `PrincipalState`.
+`verify::analyze(&Model)` is the **one** place that sequence exists: it runs sanity, builds the context, dispatches on the attacker kind and returns the `VerifyContext` holding the results. `analyze` is `analyze_sessions(m, DEFAULT_SESSIONS)`; `verify::verify(path)` is `verify_with_sessions(path, DEFAULT_SESSIONS)`. `json.rs` and the wasm entry points call `analyze`, so the CLI, the IDE interface and the website cannot disagree about what a model means — **that shared default is the point; do not give one entry point its own.** Throughout the code, `km` is the `ProtocolTrace` (historical name "knowledge map") and `ps` a `PrincipalState`.
+
+**Parallel sessions (sessions.rs).** Every principal runs `DEFAULT_SESSIONS` (2) concurrent sessions unless `--sessions k` says otherwise. This is a *front-end* to the same engine: `sessions::expand_sessions` rewrites the parsed `Model` into one where every principal and message block is cloned `k` times **before** `sanity` runs, so everything downstream is unchanged and the feature inherits the engine's attack-soundness — an expanded model is a legal model the user could have typed by hand (the `Alice2`/`na2` workaround, automated), and `sanity` re-validates all of it. The freshening rule falls out of existing syntax: `generates` constants and assignment outputs get per-session copies (`c#s`, rebanded into the session-copy id range — see `value.rs::SESSION_STRIDE`, bands 0..=14 for sessions, band 15 for the minimizer), while `knows` constants stay shared. Clones are emitted in place; the lockstep layout loses nothing because within-phase attacker knowledge is atemporal. Each written query is kept verbatim (session 1) and also given per-session **variants** (`VerifyResult.variants`), all resolving the original `query_index`, so the result code keeps one entry per query and an attack in any session resolves it; `verify_resolve_queries` and `goals_for_query` iterate original + variants. The one new semantic obligation is the **session-sibling replay carve-out** in `query.rs`: a received value equal (after the same resolve-and-reduce recipe as `reexec::attacker_authored`) to a session sibling's honest wire value is a cross-session replay of something the sender honestly sent, hence non-injective agreement, not an authentication attack — this only ever *suppresses* a report, so it cannot cause a false attack. `attacker_authored` itself stays session-strict so such states remain explorable as oracle stepping stones. `k = 1` skips expansion entirely and is bit-for-bit the pre-sessions behavior, which is what makes it the escape hatch for a model too large to afford the roughly 4x that replication costs.
+
+Raising the default from 1 to 2 changed no verdict on any of the 16 shipped protocol models, and exactly two in `examples/test/` — both genuinely: `session_nonce_cross.vp` and `concat_bomb_equiv.vp`. Re-measure both corpora before touching the default again.
 
 ### Core data model (types.rs)
 
@@ -262,7 +270,7 @@ All output is plain text: there is no alternate-screen progress UI and no attack
 
 ## Testing conventions
 
-- Unit tests live in a `#[cfg(test)] mod tests` at the foot of the module they exercise, so they can reach private items directly. `src/testutil.rs` holds the shared value/state builders. `src/model_tests.rs` holds the end-to-end model tests (`run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code).
+- Unit tests live in a `#[cfg(test)] mod tests` at the foot of the module they exercise, so they can reach private items directly. `src/testutil.rs` holds the shared value/state builders. `src/model_tests.rs` holds the end-to-end model tests (`run_model("foo.vp", "c0a1")` runs `examples/test/foo.vp` and asserts the result code). `run_model` goes through `verify`, so it exercises the **shipped default** of two sessions. `run_model_sessions("foo.vp", 1, "a0")` pins an explicit count; a model whose verdict depends on session count should be pinned at both `1` and `2`, so single-session behavior stays a regression guard rather than becoming untested.
 - **Result code format**: one letter+digit per query, in model order — `c`/`a`/`f`/`u`/`e` for the query kind, `0` = holds, `1` = attack found. So `"c1a0"` means the confidentiality query failed and the authentication query passed.
 - Adding an engine regression test: write a model in `examples/test/`, get the code via `cargo run --release -- verify examples/test/foo.vp --result-code | tail -1`, **verify by reading the attack trace that each 0/1 is actually correct** (the tool's own output is only ground truth for regressions, not correctness), then add a `run_model` test. Explaining *why* the expected code is right in a comment at the top of the model is the house style — see `aead_replay_not_forgery.vp`.
 - Golden pretty-printer files live in `examples/test/golden_pretty/` (6 of them) and are compared byte-for-byte via `include_str!`. Update them deliberately when changing the formatter.

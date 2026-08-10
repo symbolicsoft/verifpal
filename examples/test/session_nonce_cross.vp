@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Symmetric challenge-response where Bob binds his MAC to both nonces.
+// With one session per role (the default), the only term that passes
+// Alice's ASSERT is Bob's honest m1: forging MAC(k, CONCAT(na, x)) needs k,
+// and the one oracle available — Bob himself — returns the honest m1 for
+// the honest na, which is a replay, not an authentication attack: a0.
+// With --sessions 2, the attacker uses session 2's Bob as an oracle: it
+// feeds him session 1's na, harvests m1#2 = MAC(k, CONCAT(na, nb#2)), and
+// presents that together with nb#2 to session 1's Alice. Her ASSERT passes,
+// yet the MAC was computed in another session on attacker-chosen input and
+// is no session's honest m1, so authentication fails: a1
+// (run_model_sessions in model_tests.rs pins both codes).
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k
+	generates nb
+	m1 = MAC(k, CONCAT(na, nb))
+]
+
+Bob -> Alice: m1, nb
+
+principal Alice[
+	_ = ASSERT(m1, MAC(k, CONCAT(na, nb)))?
+]
+
+queries[
+	authentication? Bob -> Alice: m1
+]

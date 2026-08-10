@@ -37,7 +37,7 @@ impl ValueNames {
 		if let Some(&id) = self.map.get(name) {
 			return Ok(id);
 		}
-		if self.counter >= SESSION_COPY_BASE {
+		if self.counter >= SESSION_STRIDE {
 			return Err(VerifpalError::sanity(
 				"model declares too many distinct constants".into(),
 			));
@@ -51,19 +51,35 @@ impl ValueNames {
 
 /// Base for the per-session copies of a principal's fresh constants.
 ///
-/// The separated-freshness re-check of `witness.rs` asks what an attack looks
-/// like when two sessions of a role hold *different* nonces, which means minting
-/// a constant that is not the model's. Interned ids stop below this base, and
-/// the solver's variable ids start well above it, so the three ranges cannot
-/// collide.
+/// Two mechanisms mint constants that are not the model's, and both live in
+/// this range: `sessions.rs` clones every `generates` and assignment output
+/// per `--sessions` session, and the separated-freshness re-check of
+/// `witness.rs` asks what an attack looks like when two sessions of a role
+/// hold *different* nonces. Interned ids stop below one [`SESSION_STRIDE`],
+/// and the solver's variable ids start well above the whole range, so none of
+/// the id families can collide.
 pub(crate) const SESSION_COPY_BASE: ValueId = 0x4000_0000;
 
-/// The copy of `c` that a *different* session of its generating principal would
-/// hold under replication: same name, marked, and a distinct identity.
+/// Width of one session's id band inside the session-copy range. Bands 0..=14
+/// hold `--sessions` clones (sessions 2..=16, `sessions.rs`); band 15 holds
+/// the minimizer's hypothetical copies, so the two can never alias. Interned
+/// ids stop below one stride, which is what keeps `base + band` collision-free.
+pub(crate) const SESSION_STRIDE: ValueId = 0x0400_0000;
+
+/// The copy of `c` that a *different* session of its generating principal
+/// would hold under replication: same flags, a marked name, and an identity in
+/// the top session band — above every `--sessions` clone, so a hypothetical
+/// copy of a clone can neither collide with a real session's constant nor
+/// overflow into the solver's variable ranges.
 pub(crate) fn session_copy(c: &Constant) -> Value {
+	let base = if c.id >= SESSION_COPY_BASE {
+		(c.id - SESSION_COPY_BASE) % SESSION_STRIDE
+	} else {
+		c.id
+	};
 	Value::Constant(Constant {
-		name: Arc::from(format!("{}#2", c.name)),
-		id: SESSION_COPY_BASE + c.id,
+		name: Arc::from(format!("{}#other", c.name)),
+		id: SESSION_COPY_BASE + 15 * SESSION_STRIDE + base,
 		..c.clone()
 	})
 }
@@ -306,6 +322,26 @@ mod tests {
 	use std::sync::Arc;
 
 	#[test]
+	fn session_bands_stay_below_the_solver_ranges() {
+		let worst = SESSION_COPY_BASE + 15 * SESSION_STRIDE + (SESSION_STRIDE - 1);
+		assert!(worst < crate::solve::vars::ATTACKER_VAR_BASE);
+	}
+
+	#[test]
+	fn session_copy_of_a_session_clone_stays_out_of_solver_ranges() {
+		let clone_id = SESSION_COPY_BASE + 3 * SESSION_STRIDE + 42;
+		let c = Constant {
+			name: Arc::from("scb_x#5"),
+			id: clone_id,
+			..Constant::default()
+		};
+		let copied = session_copy(&c);
+		let id = copied.as_constant().expect("constant").id;
+		assert!(id < crate::solve::vars::ATTACKER_VAR_BASE);
+		assert_eq!(id, SESSION_COPY_BASE + 15 * SESSION_STRIDE + 42);
+	}
+
+	#[test]
 	fn name_map_idempotent() {
 		let id1 = test_value_id("name_map_test_xyz");
 		let id2 = test_value_id("name_map_test_xyz");
@@ -419,6 +455,7 @@ mod tests {
 			max_phase: 0,
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
+			session_siblings: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -457,6 +494,7 @@ mod tests {
 			max_phase: 0,
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
+			session_siblings: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -497,6 +535,7 @@ mod tests {
 			max_phase: 0,
 			used_by: HashMap::new(),
 			leaks: Arc::new(Vec::new()),
+			session_siblings: HashMap::new(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

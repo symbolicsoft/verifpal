@@ -4,7 +4,7 @@
 use std::io::Read;
 
 use clap::{Parser, Subcommand};
-use verifpal::{InfoLevel, info_banner, info_message, pretty_print, verify};
+use verifpal::{InfoLevel, info_banner, info_message, pretty_print, verify_with_sessions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -22,6 +22,8 @@ enum Commands {
 		model: String,
 		#[arg(long, default_value_t = false)]
 		result_code: bool,
+		#[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=16))]
+		sessions: u8,
 	},
 	#[command(arg_required_else_help = true)]
 	Pretty {
@@ -58,12 +60,16 @@ fn read_stdin() -> String {
 fn main() {
 	let cli = Cli::parse();
 	match cli.command {
-		Commands::Verify { model, result_code } => {
+		Commands::Verify {
+			model,
+			result_code,
+			sessions,
+		} => {
 			if !result_code {
 				info_banner(VERSION);
 				info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
-			match verify(&model) {
+			match verify_with_sessions(&model, sessions) {
 				Ok((_, code)) => {
 					if result_code {
 						println!("{}", code);

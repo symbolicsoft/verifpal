@@ -15,6 +15,17 @@ fn run_model_at(path: &str, model: &str, expected: &str) {
 	);
 }
 
+fn run_model_sessions(model: &str, sessions: u8, expected: &str) {
+	let path = format!("examples/test/{}", model);
+	let (_, results_code) = crate::verify::verify_with_sessions(&path, sessions)
+		.unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
+	assert_eq!(
+		results_code, expected,
+		"FAIL • {} at {} sessions (expected {}, got {})",
+		model, sessions, expected, results_code
+	);
+}
+
 fn run_model_err(model: &str, expected_substring: &str) {
 	let path = format!("examples/test/{}", model);
 	match crate::verify::verify(&path) {
@@ -161,6 +172,36 @@ fn test_ephemerals_sign() {
 #[test]
 fn test_hmac_ok() {
 	run_model("hmac_ok.vp", "c0a0");
+}
+#[test]
+fn test_session_nonce_cross_one_session() {
+	// One session: the only forgery route replays Bob's honest m1, so
+	// authentication holds. This is the pre-sessions behavior, kept.
+	run_model_sessions("session_nonce_cross.vp", 1, "a0");
+}
+#[test]
+fn test_session_nonce_cross_two_sessions() {
+	run_model_sessions("session_nonce_cross.vp", 2, "a1");
+}
+#[test]
+fn test_session_replay_not_attack_one_session() {
+	run_model_sessions("session_replay_not_attack.vp", 1, "a0");
+}
+#[test]
+fn test_session_replay_not_attack_two_sessions() {
+	run_model_sessions("session_replay_not_attack.vp", 2, "a0");
+}
+#[test]
+fn test_session_concat_bomb_cross_feed() {
+	run_model_sessions("concat_bomb_equiv.vp", 2, "e1e1e1e1e1f0");
+}
+#[test]
+fn test_session_hmac_ok_stable_two_sessions() {
+	run_model_sessions("hmac_ok.vp", 2, "c0a0");
+}
+#[test]
+fn test_session_pke_stable_two_sessions() {
+	run_model_sessions("pke.vp", 2, "c0a0");
 }
 #[test]
 fn test_hmac_unchecked_assert() {
@@ -686,7 +727,9 @@ fn test_concat_bomb_unguarded() {
 }
 #[test]
 fn test_concat_bomb_equiv() {
-	run_model("concat_bomb_equiv.vp", "e0e0e0e0e0f0");
+	// Pinned at one session explicitly: the default is two, where this model
+	// legitimately fails (test_session_concat_bomb_cross_feed).
+	run_model_sessions("concat_bomb_equiv.vp", 1, "e0e0e0e0e0f0");
 }
 #[test]
 fn test_passive_dh_chain() {
