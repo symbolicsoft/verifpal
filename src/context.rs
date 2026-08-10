@@ -43,15 +43,9 @@ pub(crate) struct VerifyContext {
 	pump_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 	depth_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 	installs: RwLock<HashMap<(PrincipalId, usize), Vec<Value>>>,
-	/// Witness deferral under `--sessions`: a confirmed verdict whose witness
-	/// reproduces only because sessions share freshness is held here instead
-	/// of being recorded, so the query stays unresolved and the search keeps
-	/// looking for a witness that survives per-session freshness. The held
-	/// state is flushed through the ordinary evaluation path at end of phase
-	/// (`verify::finalize_deferred`). First confirmation per query wins.
-	deferred: RwLock<HashMap<usize, PrincipalState>>,
-	defer_enabled: AtomicBool,
-	finalizing: AtomicBool,
+	prefer_replication: AtomicBool,
+	replication_only: AtomicBool,
+	replication_rejected: AtomicBool,
 }
 
 fn derivation_provenance(
@@ -163,7 +157,34 @@ impl VerifyContext {
 			pump_cuts: RwLock::new(HashSet::new()),
 			depth_cuts: RwLock::new(HashSet::new()),
 			installs: RwLock::new(HashMap::new()),
+			prefer_replication: AtomicBool::new(false),
+			replication_only: AtomicBool::new(false),
+			replication_rejected: AtomicBool::new(false),
 		}
+	}
+
+	pub(crate) fn prefer_replication_valid_witnesses(&self) {
+		self.prefer_replication.store(true, Ordering::SeqCst);
+	}
+
+	pub(crate) fn prefers_replication(&self) -> bool {
+		self.prefer_replication.load(Ordering::SeqCst)
+	}
+
+	pub(crate) fn set_replication_only(&self, on: bool) {
+		self.replication_only.store(on, Ordering::SeqCst);
+	}
+
+	pub(crate) fn replication_only(&self) -> bool {
+		self.replication_only.load(Ordering::SeqCst)
+	}
+
+	pub(crate) fn note_replication_rejection(&self) {
+		self.replication_rejected.store(true, Ordering::SeqCst);
+	}
+
+	pub(crate) fn replication_rejected(&self) -> bool {
+		self.replication_rejected.load(Ordering::SeqCst)
 	}
 
 	/// True the first time only: the search meets the same chain on every round
@@ -413,6 +434,9 @@ impl VerifyContext {
 			pump_cuts: RwLock::new(read_lock(&self.pump_cuts).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			installs: RwLock::new(read_lock(&self.installs).clone()),
+			prefer_replication: AtomicBool::new(false),
+			replication_only: AtomicBool::new(false),
+			replication_rejected: AtomicBool::new(false),
 		}
 	}
 

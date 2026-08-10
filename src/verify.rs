@@ -32,6 +32,9 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
 	let ctx = VerifyContext::new(m, &states, variants);
+	if sessions > 1 {
+		ctx.prefer_replication_valid_witnesses();
+	}
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,

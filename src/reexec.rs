@@ -169,13 +169,40 @@ pub(crate) fn reexecute(
 	ps.resolve_all_values(attacker)?;
 	let failures = ps.perform_all_rewrites();
 
+	let foreign = foreign_halts(&ps, &failures);
+
 	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
 		ps = bypassed;
 	} else if let Some((truncate_at, halted_at)) = truncation_point(&ps, &failures) {
 		ps = drop_after_index(ps, truncate_at);
 		ps.halted_at = Some(halted_at);
 	}
+	ps.foreign_halts = foreign;
 	Ok(ps)
+}
+
+fn foreign_halts(
+	ps: &PrincipalState,
+	failures: &[(Primitive, usize)],
+) -> Vec<(PrincipalId, usize)> {
+	let mut out: Vec<(PrincipalId, usize)> = Vec::new();
+	for (prim, idx) in failures {
+		if !prim.instance_check {
+			continue;
+		}
+		let Some(sv) = ps.values.get(*idx) else {
+			continue;
+		};
+		let creator = sv.provenance.creator;
+		if creator == ps.id || creator == ATTACKER_ID {
+			continue;
+		}
+		match out.iter_mut().find(|(principal, _)| *principal == creator) {
+			Some((_, at)) => *at = (*at).min(*idx),
+			None => out.push((creator, *idx)),
+		}
+	}
+	out
 }
 
 fn try_guard_bypass(

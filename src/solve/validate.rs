@@ -61,6 +61,10 @@ pub(crate) fn validate(
 		if !attacker_can_derive(ctx, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
+		if ctx.replication_only() && replays_own_freshness(km, &ground, &ps, attacker) {
+			ctx.note_replication_rejection();
+			return Ok(false);
+		}
 		if attacker_authored(&ground, slot, km, &ps) {
 			worthwhile = true;
 		}
@@ -85,6 +89,33 @@ pub(crate) fn validate(
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)
+}
+
+fn replays_own_freshness(
+	km: &ProtocolTrace,
+	ground: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	let produced_here = match attacker
+		.knows(ground)
+		.and_then(|idx| attacker.derivation(idx))
+	{
+		Some(DerivationRecord::Obtained { slot }) | Some(DerivationRecord::Leaked { slot }) => {
+			km.slots.get(slot.get()).is_some_and(|s| s.creator == ps.id)
+		}
+		_ => false,
+	};
+	produced_here && carries_own_fresh(ground, ps)
+}
+
+fn carries_own_fresh(v: &Value, ps: &PrincipalState) -> bool {
+	match v {
+		Value::Constant(c) => ps
+			.index_of(c)
+			.is_some_and(|i| ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id),
+		Value::Primitive(p) => p.arguments.iter().any(|a| carries_own_fresh(a, ps)),
+	}
 }
 
 fn note_depth_cut(

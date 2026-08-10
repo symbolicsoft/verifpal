@@ -449,6 +449,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 			index: Arc::new(index_map),
 			leaks: trace.leaks.clone(),
 			halted_at: None,
+			foreign_halts: Vec::new(),
 			capabilities: capabilities.clone(),
 		});
 	}
@@ -536,6 +537,11 @@ impl PrincipalState {
 			index: self.index.clone(),
 			leaks: self.leaks.clone(),
 			halted_at: if purify { None } else { self.halted_at },
+			foreign_halts: if purify {
+				Vec::new()
+			} else {
+				self.foreign_halts.clone()
+			},
 			capabilities: self.capabilities.clone(),
 		}
 	}

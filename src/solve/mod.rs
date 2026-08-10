@@ -51,31 +51,50 @@ pub(crate) fn verify_active(
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
-		loop {
+		if ctx.prefers_replication() {
+			ctx.set_replication_only(true);
+			search_rounds(ctx, km, principal_states, bound)?;
+			ctx.set_replication_only(false);
+			if ctx.replication_rejected() && !ctx.all_resolved() {
+				search_rounds(ctx, km, principal_states, bound)?;
+			}
+		} else {
+			search_rounds(ctx, km, principal_states, bound)?;
+		}
+		ctx.attacker_phase_archive(phase);
+	}
+	Ok(())
+}
+
+fn search_rounds(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	principal_states: &[PrincipalState],
+	bound: &crate::reexec::TermBound,
+) -> VResult<()> {
+	loop {
+		if ctx.all_resolved() {
+			break;
+		}
+		let before = ctx.attacker_known_count();
+
+		for ps in principal_states {
+			solve_principal(ctx, km, ps, Pass::Targeted, bound)?;
 			if ctx.all_resolved() {
 				break;
 			}
-			let before = ctx.attacker_known_count();
-
+		}
+		if !ctx.all_resolved() {
 			for ps in principal_states {
-				solve_principal(ctx, km, ps, Pass::Targeted, bound)?;
+				solve_principal(ctx, km, ps, Pass::Constructed, bound)?;
 				if ctx.all_resolved() {
 					break;
 				}
 			}
-			if !ctx.all_resolved() {
-				for ps in principal_states {
-					solve_principal(ctx, km, ps, Pass::Constructed, bound)?;
-					if ctx.all_resolved() {
-						break;
-					}
-				}
-			}
-			if ctx.attacker_known_count() == before {
-				break;
-			}
 		}
-		ctx.attacker_phase_archive(phase);
+		if ctx.attacker_known_count() == before {
+			break;
+		}
 	}
 	Ok(())
 }

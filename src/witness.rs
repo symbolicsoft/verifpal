@@ -179,10 +179,14 @@ fn shared_freshness(
 	query_index: usize,
 	phase: i32,
 ) -> Vec<String> {
+	let ambient = ctx.attacker_snapshot();
 	let mut shared: Vec<String> = Vec::new();
 	let renamed: Vec<(SlotIdx, Value)> = installs
 		.iter()
-		.map(|(slot, v)| (*slot, rename_own_fresh(v, base, &mut shared)))
+		.map(|(slot, v)| {
+			let strict = produced_by_target(km, &ambient, base.id, v);
+			(*slot, rename_own_fresh(v, base, strict, &mut shared))
+		})
 		.collect();
 	if shared.is_empty() {
 		return shared;
@@ -195,29 +199,33 @@ fn shared_freshness(
 	shared
 }
 
+fn produced_by_target(
+	km: &ProtocolTrace,
+	ambient: &AttackerState,
+	target: PrincipalId,
+	v: &Value,
+) -> bool {
+	match ambient.knows(v).and_then(|idx| ambient.derivation(idx)) {
+		Some(DerivationRecord::Obtained { slot }) | Some(DerivationRecord::Leaked { slot }) => km
+			.slots
+			.get(slot.get())
+			.is_some_and(|s| s.creator == target),
+		_ => true,
+	}
+}
+
 /// `v` with every constant that `ps` itself generates replaced by the copy a
 /// different session of `ps` would hold, recording which ones those were.
-fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> Value {
+fn rename_own_fresh(v: &Value, ps: &PrincipalState, strict: bool, seen: &mut Vec<String>) -> Value {
 	match v {
 		Value::Constant(c) => {
 			// Read freshness off the slot rather than off the occurrence: a
 			// constant reached by inlining carries the identifier but not
 			// necessarily the declaration flags.
-			//
-			// A fresh value that travels on the wire or is leaked is one the
-			// attacker actually observes, so injecting it is a real capability,
-			// not two sessions coincidentally drawing the same nonce. Renaming
-			// it would model a counterfactual the attacker never needs — and on
-			// a genuine cross-session attack, where the attacker deliberately
-			// carries one session's wire nonce into another, that renaming
-			// misfires and stamps the trace with a spurious shared-freshness
-			// caveat. Only truly internal fresh values — the ones a reflection
-			// artifact would actually require — are renamed.
 			let own = ps.index_of(c).is_some_and(|i| {
 				ps.meta[i].constant.fresh
 					&& ps.values[i].provenance.creator == ps.id
-					&& ps.meta[i].wire.is_empty()
-					&& !ps.meta[i].constant.leaked
+					&& (strict || (ps.meta[i].wire.is_empty() && !ps.meta[i].constant.leaked))
 			});
 			if own {
 				seen.push(c.name.to_string());
@@ -230,7 +238,7 @@ fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> V
 			let arguments = p
 				.arguments
 				.iter()
-				.map(|a| rename_own_fresh(a, ps, seen))
+				.map(|a| rename_own_fresh(a, ps, strict, seen))
 				.collect();
 			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
 		}

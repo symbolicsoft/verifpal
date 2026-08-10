@@ -304,6 +304,14 @@ fn test_session_three_sessions_three() {
 	run_model_sessions("session_three_sessions.vp", 3, "c0");
 }
 #[test]
+fn test_foreign_halt_no_oracle_one_session() {
+	run_model_sessions("foreign_halt_no_oracle.vp", 1, "a0");
+}
+#[test]
+fn test_foreign_halt_no_oracle() {
+	run_model("foreign_halt_no_oracle.vp", "a0");
+}
+#[test]
 fn test_equivalence_halt_at_slot_one_session() {
 	run_model_sessions("equivalence_halt_at_slot.vp", 1, "e0");
 }

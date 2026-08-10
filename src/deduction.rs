@@ -76,7 +76,10 @@ fn try_deduction_step(
 				}
 			}
 			RuleDomain::PrincipalAssigned => {
-				for sv in &ps.values {
+				for (slot, sv) in ps.values.iter().enumerate() {
+					if ps.slot_unreached(slot) {
+						continue;
+					}
 					for rule in group.rules {
 						progress |= rule(ctx, &sv.value, ps, attacker, record);
 					}
@@ -290,6 +293,9 @@ fn rule_equivalize(
 	};
 	let mut found = false;
 	for slot in crate::theory::slots_equivalent_to(ps, &resolved) {
+		if ps.slot_unreached(slot) {
+			continue;
+		}
 		let sv = &ps.values[slot];
 		found |= learn(
 			ctx,

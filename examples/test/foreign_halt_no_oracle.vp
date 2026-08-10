@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: a0 at one session and at two.
+//
+// A relay chain under one long-term key, with the two MAC positions domain
+// separated so Alice's tag is not a valid tag for Charlie. Bob only computes
+// tag_b if his own ASSERT over tag_a passed, and forging tag_a needs chain_k,
+// which never leaks. So no value Bob did not genuinely produce can reach
+// Charlie, and the query holds.
+//
+// It reported a1 before the foreign-halt fix, and the false attack is worth
+// stating exactly because the mechanism is not obvious. Each principal's state
+// carries a slot for every constant in the model, not just its own, and
+// `attacker_controllable` lets the attacker install payload_m into *Charlie's*
+// state -- reasonably enough, since Charlie transitively depends on it through
+// relay_r. But `truncation_point` only honours a failed checked primitive
+// whose creator is the principal being re-executed, so Bob's failed ASSERT was
+// invisible while resolving Charlie's state, and Bob's tag_b resolved there as
+// though Bob had accepted a payload he would have rejected. `rule_equivalize`
+// then harvested it, handing the attacker a MAC under a key it does not hold
+// over an input of its own choosing: a forgery oracle, and a false attack.
+//
+// The engine said so itself, in a way worth remembering: the trace carried the
+// unminimized-witness label, because no candidate re-execution reproduced it.
+//
+// The contrast to keep in view is exa.vp, which must stay c1. There a third
+// principal's state is also mutated from upstream, and the resulting decryption
+// oracle is real -- no check fails anywhere in it. Suppressing values behind a
+// *failed* foreign check is what separates the two; refusing every upstream
+// mutation instead would lose exa.vp's genuine attack.
+
+attacker[active]
+
+principal Alice[
+	knows private chain_k
+	knows public label_a, label_b
+	generates payload_m
+	tag_a = MAC(chain_k, CONCAT(label_a, payload_m))
+]
+
+Alice -> Bob: payload_m, tag_a
+
+principal Bob[
+	knows private chain_k
+	_ = ASSERT(tag_a, MAC(chain_k, CONCAT(label_a, payload_m)))?
+	relay_r = HASH(payload_m)
+	tag_b = MAC(chain_k, CONCAT(label_b, relay_r))
+]
+
+Bob -> Charlie: relay_r, tag_b
+
+principal Charlie[
+	knows private chain_k
+	_ = ASSERT(tag_b, MAC(chain_k, CONCAT(label_b, relay_r)))?
+	accepted_c = HASH(relay_r, tag_b)
+]
+
+queries[
+	authentication? Bob -> Charlie: relay_r
+]

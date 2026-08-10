@@ -731,10 +731,21 @@ pub struct PrincipalState {
 	pub index: Arc<HashMap<ValueId, usize>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
+	pub foreign_halts: Vec<(PrincipalId, usize)>,
 	pub capabilities: Arc<CapabilityIndex>,
 }
 
 impl PrincipalState {
+	pub fn slot_unreached(&self, i: usize) -> bool {
+		let Some(sv) = self.values.get(i) else {
+			return false;
+		};
+		let creator = sv.provenance.creator;
+		self.foreign_halts
+			.iter()
+			.any(|&(principal, at)| principal == creator && i >= at)
+	}
+
 	pub fn should_use_original(&self, i: usize) -> bool {
 		!self.values[i].provenance.attacker_tainted
 			|| self.values[i].provenance.creator == self.id
