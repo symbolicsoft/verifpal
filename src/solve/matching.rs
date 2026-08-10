@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use crate::types::*;
 
-use super::vars::{Substitution, as_var, bind, contains_var};
+use super::vars::{Substitution, as_var, bind, contains_var, occurs};
 
 pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
 	let mut out = s.clone();
@@ -21,7 +21,9 @@ pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> 
 	for (id, value) in b {
 		match out.get(id).cloned() {
 			None => {
-				out.insert(*id, value.clone());
+				if !bind(&mut out, *id, value.clone()) {
+					return None;
+				}
 			}
 			Some(existing) => {
 				if existing.equivalent(value, true) {
@@ -29,6 +31,12 @@ pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> 
 				}
 				out = unify(&existing, value, &out)?;
 				let resolved = super::vars::apply(value, &out);
+				// Overwriting an existing binding bypasses `bind`, so the occurs
+				// check has to be repeated here or a cycle re-enters by the one
+				// door left open.
+				if occurs(*id, &resolved, &out) {
+					return None;
+				}
 				out.insert(*id, resolved);
 			}
 		}
@@ -98,6 +106,9 @@ fn unify_bind(id: ValueId, v: &Value, s: &mut Substitution) -> bool {
 	}
 	match s.get(&id).cloned() {
 		None => {
+			if occurs(id, v, s) {
+				return false;
+			}
 			s.insert(id, v.clone());
 			true
 		}

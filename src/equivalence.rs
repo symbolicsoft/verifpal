@@ -58,24 +58,7 @@ fn commutative_match(p1: &Primitive, p2: &Primitive) -> bool {
 	u1.equivalent(v2, true) && u2.equivalent(v1, true)
 }
 
-/// Homeomorphic embedding: `small` is recoverable from `large` by deleting
-/// subterms. Used as a termination whistle, where it earns its keep over a
-/// depth bound by Kruskal's tree theorem — over a finite signature every
-/// infinite sequence of terms contains an earlier term embedded in a later one,
-/// so a search cut on this relation cannot run away.
-///
-/// Deliberately structural, ignoring the commutativity [`equivalent_primitives`]
-/// honours: reporting fewer embeddings costs search effort, never an attack.
 pub(crate) fn homeomorphically_embeds(small: &Value, large: &Value) -> bool {
-	embeds_at(small, large, 0)
-}
-
-const MAX_EMBED_DEPTH: usize = 64;
-
-fn embeds_at(small: &Value, large: &Value, depth: usize) -> bool {
-	if depth > MAX_EMBED_DEPTH {
-		return false;
-	}
 	// Coupling.
 	let coupled = match (small, large) {
 		(Value::Constant(a), Value::Constant(b)) => a.id == b.id,
@@ -86,7 +69,7 @@ fn embeds_at(small: &Value, large: &Value, depth: usize) -> bool {
 				&& s.arguments
 					.iter()
 					.zip(l.arguments.iter())
-					.all(|(a, b)| embeds_at(a, b, depth + 1))
+					.all(|(a, b)| homeomorphically_embeds(a, b))
 		}
 		_ => false,
 	};
@@ -98,7 +81,7 @@ fn embeds_at(small: &Value, large: &Value, depth: usize) -> bool {
 		Value::Primitive(l) => l
 			.arguments
 			.iter()
-			.any(|arg| embeds_at(small, arg, depth + 1)),
+			.any(|arg| homeomorphically_embeds(small, arg)),
 		Value::Constant(_) => false,
 	}
 }

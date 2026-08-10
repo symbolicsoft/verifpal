@@ -15,18 +15,6 @@ fn attacker_public_key() -> Value {
 	crate::primitive::nil_key_derivation().unwrap_or_else(crate::value::value_nil)
 }
 
-/// The slots a substitution may touch, in a form the search cannot fabricate.
-///
-/// `attacker_controllable` answers the question, but answering it involves
-/// resolving trace values, and asking it once per proposal is what turned the
-/// largest model in the corpus from forty seconds into two and a half minutes.
-/// Asking it once per solving pass and handing the answer around is the obvious
-/// repair, and it would also hand the untrusted search a chance to widen the
-/// domain by passing a permissive array. The private field is what stops that:
-/// only this module can build one, `of` is the only constructor, and `admits`
-/// re-checks that the set was built for the principal and phase it is being
-/// consulted about. What the search can choose is which slots to propose at,
-/// never which slots are allowed.
 pub(crate) struct Controllable {
 	principal: PrincipalId,
 	phase: i32,
@@ -57,6 +45,45 @@ impl Controllable {
 		self.principal == ps.id
 			&& self.phase == attacker.current_phase
 			&& self.slots.get(slot).copied().unwrap_or(false)
+	}
+}
+
+pub(crate) struct TermBound {
+	max_depth: usize,
+}
+
+impl TermBound {
+	pub(crate) fn of(km: &ProtocolTrace) -> TermBound {
+		let max_depth = km
+			.slots
+			.iter()
+			.map(|slot| {
+				let (v, _) = resolve_trace_values(&Value::Constant(slot.constant.clone()), km);
+				term_depth(&v)
+			})
+			.max()
+			.unwrap_or(0);
+		TermBound { max_depth }
+	}
+
+	pub(crate) fn admits(&self, v: &Value) -> bool {
+		term_depth(v) <= self.max_depth
+	}
+
+	pub(crate) fn depth(&self) -> usize {
+		self.max_depth
+	}
+}
+
+pub(crate) struct Guards<'a> {
+	pub(crate) controllable: &'a Controllable,
+	pub(crate) bound: &'a TermBound,
+}
+
+fn term_depth(v: &Value) -> usize {
+	match v {
+		Value::Constant(_) => 0,
+		Value::Primitive(p) => 1 + p.arguments.iter().map(term_depth).max().unwrap_or(0),
 	}
 }
 
@@ -130,6 +157,12 @@ pub(crate) fn reexecute(
 		if slot.get() < ps.values.len() {
 			install(&mut ps, slot.get(), ground.clone(), authored);
 		}
+	}
+
+	if slot_graph_is_cyclic(&ps) {
+		return Err(VerifpalError::resolution(
+			"attacker-chosen values would define a slot in terms of itself".into(),
+		));
 	}
 
 	let ps_pre = ps.clone();
@@ -209,7 +242,7 @@ fn can_obtain(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool 
 		return true;
 	}
 	match v {
-		Value::Primitive(p) => can_reconstruct_primitive(p, ps, attacker, 0).is_some(),
+		Value::Primitive(p) => can_reconstruct_primitive(p, ps, attacker).is_some(),
 		_ => false,
 	}
 }
@@ -229,11 +262,71 @@ pub(crate) fn attacker_authored(
 
 fn reduce(v: &Value, ps: &PrincipalState) -> Option<Value> {
 	let p = v.as_primitive()?;
-	let (_, rewritten) = can_rewrite(p, ps, 0);
+	let (_, rewritten) = can_rewrite(p, ps);
 	if rewritten.equivalent(v, true) {
 		None
 	} else {
 		Some(rewritten)
+	}
+}
+
+fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
+	let edges: Vec<Vec<usize>> = ps
+		.values
+		.iter()
+		.map(|sv| {
+			let mut out = Vec::new();
+			for v in [&sv.value, sv.perceived()] {
+				if matches!(v, Value::Primitive(_)) {
+					collect_slot_references(v, ps, &mut out);
+				}
+			}
+			out
+		})
+		.collect();
+
+	// Iterative depth-first search: 0 unvisited, 1 on the current path, 2 done.
+	let mut mark = vec![0u8; ps.values.len()];
+	let mut stack: Vec<(usize, usize)> = Vec::new();
+	for start in 0..ps.values.len() {
+		if mark[start] != 0 {
+			continue;
+		}
+		mark[start] = 1;
+		stack.push((start, 0));
+		while let Some((slot, edge)) = stack.pop() {
+			let Some(&next) = edges[slot].get(edge) else {
+				mark[slot] = 2;
+				continue;
+			};
+			stack.push((slot, edge + 1));
+			match mark[next] {
+				1 => return true,
+				0 => {
+					mark[next] = 1;
+					stack.push((next, 0));
+				}
+				_ => {}
+			}
+		}
+	}
+	false
+}
+
+fn collect_slot_references(v: &Value, ps: &PrincipalState, out: &mut Vec<usize>) {
+	match v {
+		Value::Constant(c) => {
+			if let Some(i) = ps.index_of(c)
+				&& !out.contains(&i)
+			{
+				out.push(i);
+			}
+		}
+		Value::Primitive(p) => {
+			for a in &p.arguments {
+				collect_slot_references(a, ps, out);
+			}
+		}
 	}
 }
 
@@ -309,6 +402,56 @@ mod tests {
 		let alice = states.iter().find(|s| s.name == "Alice").expect("Alice");
 		let c = slot_named(alice, "ctl_c");
 		assert!(super::attacker_controllable(c, &km, alice, &attacker));
+	}
+
+	#[test]
+	fn an_install_that_names_its_own_slot_is_refused() {
+		use crate::parser::parse_string;
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private cyc_m\n\
+			generates cyc_k\n\
+			cyc_e = ENC(cyc_k, cyc_m)\n\
+			]\n\
+			Alice -> Bob: cyc_e\n\
+			principal Bob[\n\
+			knows private cyc_k2\n\
+			cyc_d = DEC(cyc_k2, cyc_e)\n\
+			]\n\
+			queries[\n\
+			confidentiality? cyc_m\n\
+			]\n";
+		let m = parse_string("cyc.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let bob = states.iter().find(|s| s.name == "Bob").expect("Bob");
+		let slot = bob
+			.meta
+			.iter()
+			.position(|m| m.constant.name.as_ref() == "cyc_e")
+			.expect("cyc_e is a slot");
+		let attacker = make_attacker_state(vec![]);
+
+		// A term naming the very slot it is installed into. Honest states never
+		// contain one, and a state that does denotes only its own unfolding.
+		let self_naming = crate::testutil::make_primitive(
+			crate::primitive::PRIM_HASH,
+			vec![crate::types::Value::Constant(
+				bob.meta[slot].constant.clone(),
+			)],
+			0,
+		);
+		assert!(
+			super::reexecute(bob, &[(SlotIdx(slot), self_naming)], &attacker, &km,).is_err(),
+			"a cyclic install must be refused, not analysed"
+		);
+
+		// The same install with a closed term goes through.
+		let closed = crate::testutil::make_primitive(
+			crate::primitive::PRIM_HASH,
+			vec![crate::value::value_nil()],
+			0,
+		);
+		assert!(super::reexecute(bob, &[(SlotIdx(slot), closed)], &attacker, &km).is_ok());
 	}
 
 	#[test]

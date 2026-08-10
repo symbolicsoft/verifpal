@@ -90,7 +90,7 @@ fn witness_identifying_check(
 		})),
 		_ => ap.arguments[key_arg].clone(),
 	};
-	if !crate::theory::obtainable(&identifier, ps, attacker, 0) {
+	if !crate::theory::obtainable(&identifier, ps, attacker) {
 		return None;
 	}
 	Some(LinkWitness {
@@ -198,8 +198,6 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 	}
 }
 
-const MAX_LEAF_DEPTH: usize = 16;
-
 pub(crate) fn origin_leaves(
 	v: &Value,
 	ps: &PrincipalState,
@@ -207,19 +205,17 @@ pub(crate) fn origin_leaves(
 ) -> Option<Vec<Value>> {
 	let without_self = attacker_without(attacker, v);
 	let mut out = Vec::new();
-	collect_leaves(v, ps, &without_self, 0, &mut out).then_some(out)
+	let mut expanded = Vec::new();
+	collect_leaves(v, ps, &without_self, &mut expanded, &mut out).then_some(out)
 }
 
 fn collect_leaves(
 	v: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	depth: usize,
+	expanded: &mut Vec<Value>,
 	out: &mut Vec<Value>,
 ) -> bool {
-	if depth > MAX_LEAF_DEPTH {
-		return false;
-	}
 	let held = attacker.knows(v).is_some();
 	if held {
 		push_leaf(out, v);
@@ -227,14 +223,18 @@ fn collect_leaves(
 	let Value::Primitive(p) = v else {
 		return held;
 	};
-	let used = can_reconstruct_primitive(p, ps, attacker, 0)
+	if expanded.iter().any(|seen| seen.equivalent(v, true)) {
+		return held;
+	}
+	expanded.push(v.clone());
+	let used = can_reconstruct_primitive(p, ps, attacker)
 		.map(|r| r.from)
 		.or_else(|| can_recompose(p, attacker).map(|r| r.used));
 	let Some(used) = used else {
 		return held;
 	};
 	for arg in &used {
-		collect_leaves(arg, ps, attacker, depth + 1, out);
+		collect_leaves(arg, ps, attacker, expanded, out);
 	}
 	true
 }

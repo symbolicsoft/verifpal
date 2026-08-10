@@ -187,6 +187,10 @@ fn test_aead_replay_not_forgery() {
 	run_model("aead_replay_not_forgery.vp", "a0c0");
 }
 #[test]
+fn test_deep_nesting_reconstruct() {
+	run_model("deep_nesting_reconstruct.vp", "c1");
+}
+#[test]
 fn test_dh_exponent_not_dropped() {
 	run_model("dh_exponent_not_dropped.vp", "c0c0");
 }

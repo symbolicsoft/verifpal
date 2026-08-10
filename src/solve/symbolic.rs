@@ -65,7 +65,7 @@ pub(crate) fn build(
 fn reduce(v: &Value, ps: &PrincipalState) -> Value {
 	match v {
 		Value::Primitive(p) => {
-			let (_, reduced) = can_rewrite(p, ps, 0);
+			let (_, reduced) = can_rewrite(p, ps);
 			reduced
 		}
 		_ => v.clone(),

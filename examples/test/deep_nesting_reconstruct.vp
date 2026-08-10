@@ -1,0 +1,102 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1.
+//
+// The key is HASH applied seventy times to a public constant, so the attacker
+// rebuilds it one level at a time and opens the ciphertext. Every leaf here is
+// public and every step is a plain hash, so `c1` is the only defensible
+// verdict.
+//
+// The model is in the tree for its depth rather than its cryptography.
+// `resolution.rs` used to give up inlining a principal's constants after
+// sixty-four levels, and this same model reported `c0` --- a passive attack the
+// engine had all the pieces for, reported as no attack at all, with nothing in
+// the output to say a limit had been reached. Nothing about the protocol
+// changes between sixty-two steps and sixty-three; only the analysis did.
+//
+// Any bound reintroduced on how deep a value may be resolved, deduced or
+// embedded shows up here as `c0`.
+
+attacker[passive]
+
+principal Alice[
+	knows public a
+	knows private m
+	x01 = HASH(a)
+	x02 = HASH(x01)
+	x03 = HASH(x02)
+	x04 = HASH(x03)
+	x05 = HASH(x04)
+	x06 = HASH(x05)
+	x07 = HASH(x06)
+	x08 = HASH(x07)
+	x09 = HASH(x08)
+	x10 = HASH(x09)
+	x11 = HASH(x10)
+	x12 = HASH(x11)
+	x13 = HASH(x12)
+	x14 = HASH(x13)
+	x15 = HASH(x14)
+	x16 = HASH(x15)
+	x17 = HASH(x16)
+	x18 = HASH(x17)
+	x19 = HASH(x18)
+	x20 = HASH(x19)
+	x21 = HASH(x20)
+	x22 = HASH(x21)
+	x23 = HASH(x22)
+	x24 = HASH(x23)
+	x25 = HASH(x24)
+	x26 = HASH(x25)
+	x27 = HASH(x26)
+	x28 = HASH(x27)
+	x29 = HASH(x28)
+	x30 = HASH(x29)
+	x31 = HASH(x30)
+	x32 = HASH(x31)
+	x33 = HASH(x32)
+	x34 = HASH(x33)
+	x35 = HASH(x34)
+	x36 = HASH(x35)
+	x37 = HASH(x36)
+	x38 = HASH(x37)
+	x39 = HASH(x38)
+	x40 = HASH(x39)
+	x41 = HASH(x40)
+	x42 = HASH(x41)
+	x43 = HASH(x42)
+	x44 = HASH(x43)
+	x45 = HASH(x44)
+	x46 = HASH(x45)
+	x47 = HASH(x46)
+	x48 = HASH(x47)
+	x49 = HASH(x48)
+	x50 = HASH(x49)
+	x51 = HASH(x50)
+	x52 = HASH(x51)
+	x53 = HASH(x52)
+	x54 = HASH(x53)
+	x55 = HASH(x54)
+	x56 = HASH(x55)
+	x57 = HASH(x56)
+	x58 = HASH(x57)
+	x59 = HASH(x58)
+	x60 = HASH(x59)
+	x61 = HASH(x60)
+	x62 = HASH(x61)
+	x63 = HASH(x62)
+	x64 = HASH(x63)
+	x65 = HASH(x64)
+	x66 = HASH(x65)
+	x67 = HASH(x66)
+	x68 = HASH(x67)
+	x69 = HASH(x68)
+	x70 = HASH(x69)
+	e = ENC(x70, m)
+	leaks e
+]
+
+queries[
+	confidentiality? m
+]

@@ -21,8 +21,6 @@ use deduce::Deducer;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
-const WATCHDOG_ROUNDS: usize = 1024 * 128;
-
 fn oracle_basis_notice() {
 	info_message(
 		"Where the search needs a whole term at once, it draws only from terms this \
@@ -40,6 +38,7 @@ pub(crate) fn verify_active(
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
 	oracle_basis_notice();
+	let bound = &crate::reexec::TermBound::of(km);
 
 	for phase in 0..=km.max_phase {
 		info_message(
@@ -51,10 +50,7 @@ pub(crate) fn verify_active(
 		let mut ps_pure_resolved = principal_states[0].clone_for_depth(true);
 		ps_pure_resolved.resolve_all_values(&ctx.attacker_snapshot())?;
 		ctx.attacker_phase_update(km, &ps_pure_resolved, phase)?;
-
 		verify_standard_run(ctx, km, principal_states)?;
-
-		let mut rounds = 0usize;
 		loop {
 			if ctx.all_resolved() {
 				break;
@@ -62,44 +58,23 @@ pub(crate) fn verify_active(
 			let before = ctx.attacker_known_count();
 
 			for ps in principal_states {
-				solve_principal(ctx, km, ps, Pass::Targeted)?;
+				solve_principal(ctx, km, ps, Pass::Targeted, bound)?;
 				if ctx.all_resolved() {
 					break;
 				}
 			}
 			if !ctx.all_resolved() {
 				for ps in principal_states {
-					solve_principal(ctx, km, ps, Pass::Constructed)?;
+					solve_principal(ctx, km, ps, Pass::Constructed, bound)?;
 					if ctx.all_resolved() {
 						break;
 					}
 				}
 			}
-
 			if ctx.attacker_known_count() == before {
 				break;
 			}
-
-			rounds += 1;
-			if rounds >= WATCHDOG_ROUNDS {
-				info_message(
-					&format!(
-						"Search stopped after {rounds} rounds at phase {phase} with attacker \
-						 knowledge still growing ({} terms). Termination of the round loop \
-						 rests on each slot admitting finitely many independent roots, which \
-						 is unproved; this model appears to be a counterexample, or simply \
-						 very large. Results already reported stand, since each was \
-						 re-executed, but queries still open at this point were not \
-						 exhaustively searched.",
-						ctx.attacker_known_count(),
-					),
-					InfoLevel::Info,
-					false,
-				);
-				break;
-			}
 		}
-
 		ctx.attacker_phase_archive(phase);
 	}
 	Ok(())
@@ -116,6 +91,7 @@ fn solve_principal(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	pass: Pass,
+	bound: &crate::reexec::TermBound,
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
@@ -198,7 +174,11 @@ fn solve_principal(
 		if ctx.all_resolved() {
 			break;
 		}
-		let ran = validate::validate(ctx, km, ps, &sym, &controllable, &attacker, &proposal)?;
+		let guards = crate::reexec::Guards {
+			controllable: &controllable,
+			bound,
+		};
+		let ran = validate::validate(ctx, km, ps, &sym, &guards, &attacker, &proposal)?;
 		trace_proposal(ps, &sym, &proposal, ran);
 	}
 	Ok(())

@@ -199,7 +199,7 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		if !p.arguments.iter().any(|a| value_is_tainted(a, ps)) {
 			continue;
 		}
-		if !can_rewrite(p, ps, 0).0 {
+		if !can_rewrite(p, ps).0 {
 			continue;
 		}
 		let own = [&*ps.meta[i].constant.name];

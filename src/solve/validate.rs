@@ -20,7 +20,7 @@ pub(crate) fn validate(
 	km: &ProtocolTrace,
 	ps_base: &PrincipalState,
 	sym: &SymbolicState,
-	controllable: &crate::reexec::Controllable,
+	guards: &crate::reexec::Guards,
 	attacker: &AttackerState,
 	subst: &Substitution,
 ) -> VResult<bool> {
@@ -42,10 +42,14 @@ pub(crate) fn validate(
 		if slot >= ps.values.len() {
 			continue;
 		}
-		if !controllable.admits(&ps, attacker, slot) {
+		if !guards.controllable.admits(&ps, attacker, slot) {
 			return Ok(false);
 		}
 		if !crate::primitive::admissible(&ground) {
+			return Ok(false);
+		}
+		if !guards.bound.admits(&ground) {
+			note_depth_cut(ctx, slot, &ground, &ps, guards.bound);
 			return Ok(false);
 		}
 		if contains_failed_check(&ground, &ps) {
@@ -81,6 +85,33 @@ pub(crate) fn validate(
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)
+}
+
+fn note_depth_cut(
+	ctx: &VerifyContext,
+	slot: usize,
+	ground: &Value,
+	ps: &PrincipalState,
+	bound: &crate::reexec::TermBound,
+) {
+	if !ctx.note_depth_cut(ps.id, slot) {
+		return;
+	}
+	let Some(meta) = ps.meta.get(slot) else {
+		return;
+	};
+	info_message(
+		&format!(
+			"Search declined {ground} at {}'s {}: it nests deeper than the {} levels this \
+			 protocol itself computes. Attacks needing a term deeper than the protocol \
+			 builds are out of reach.",
+			ps.name,
+			meta.constant.name,
+			bound.depth(),
+		),
+		InfoLevel::Info,
+		false,
+	);
 }
 
 fn is_self_feeding_pump(
@@ -167,7 +198,7 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 	match v {
 		Value::Constant(c) => c.is_nil(),
 		Value::Primitive(p) => {
-			if crate::theory::obtainable(v, ps, snapshot, 0) {
+			if crate::theory::obtainable(v, ps, snapshot) {
 				return true;
 			}
 			let exempt = forgeable_secret_position(p, ps, snapshot);
@@ -193,7 +224,7 @@ fn contains_failed_check(v: &Value, ps: &PrincipalState) -> bool {
 		Value::Primitive(p) => {
 			if p.instance_check
 				&& primitive_get(p.id).is_ok_and(|spec| spec.rewrite.has_rule)
-				&& !can_rewrite(p, ps, 0).0
+				&& !can_rewrite(p, ps).0
 			{
 				return true;
 			}

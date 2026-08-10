@@ -6,23 +6,13 @@ use std::sync::Arc;
 use crate::types::*;
 use crate::value::{find_equivalent, push_unique_value};
 
-const MAX_RESOLVE_DEPTH: usize = 64;
-
 pub(crate) fn resolve_trace_values(value: &Value, trace: &ProtocolTrace) -> (Value, Vec<Value>) {
 	let mut visited: Vec<Value> = Vec::new();
-	let resolved = resolve_trace_value(value, trace, &mut visited, 0);
+	let resolved = resolve_trace_value(value, trace, &mut visited);
 	(resolved, visited)
 }
 
-fn resolve_trace_value(
-	value: &Value,
-	trace: &ProtocolTrace,
-	visited: &mut Vec<Value>,
-	depth: usize,
-) -> Value {
-	if depth >= MAX_RESOLVE_DEPTH {
-		return value.clone();
-	}
+fn resolve_trace_value(value: &Value, trace: &ProtocolTrace, visited: &mut Vec<Value>) -> Value {
 	let resolved = match value {
 		Value::Constant(c) => {
 			visited.push(value.clone());
@@ -38,7 +28,7 @@ fn resolve_trace_value(
 			push_unique_value(visited, resolved.clone());
 			resolved
 		}
-		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, visited, depth + 1),
+		Value::Primitive(_) => resolve_trace_primitive(&resolved, trace, visited),
 	}
 }
 
@@ -46,34 +36,19 @@ fn resolve_trace_primitive(
 	value: &Value,
 	trace: &ProtocolTrace,
 	visited: &mut Vec<Value>,
-	depth: usize,
 ) -> Value {
 	let prim = match value.as_primitive() {
 		Some(p) => p,
 		None => return value.clone(),
 	};
-	if depth >= MAX_RESOLVE_DEPTH {
-		return value.clone();
-	}
 	let mapped = prim.map_arguments(|arg| {
-		let resolved = resolve_trace_value(arg, trace, visited, depth);
+		let resolved = resolve_trace_value(arg, trace, visited);
 		(!resolved.equivalent(arg, true)).then_some(resolved)
 	});
 	match mapped {
 		Some(mapped) => Value::Primitive(Arc::new(mapped)),
 		None => value.clone(),
 	}
-}
-
-pub(crate) fn resolve_ps_values(
-	value: &Value,
-	root_value: &Value,
-	root_index: usize,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	use_original: bool,
-) -> VResult<Value> {
-	resolve_ps_values_depth(value, root_value, root_index, ps, attacker, use_original, 0)
 }
 
 fn compute_visibility(
@@ -103,19 +78,14 @@ fn compute_visibility(
 	}
 }
 
-fn resolve_ps_values_depth(
+pub(crate) fn resolve_ps_values(
 	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	use_original: bool,
-	depth: usize,
 ) -> VResult<Value> {
-	if depth >= MAX_RESOLVE_DEPTH {
-		return Ok(value.clone());
-	}
-
 	let mut resolved = value.clone();
 	let mut root_idx = root_index;
 	let mut root_val = root_value.clone();
@@ -149,26 +119,19 @@ fn resolve_ps_values_depth(
 
 	match &resolved {
 		Value::Constant(_) => Ok(resolved),
-		Value::Primitive(_) => resolve_ps_primitive_depth(
-			&resolved,
-			&root_val,
-			root_idx,
-			ps,
-			attacker,
-			use_orig,
-			depth + 1,
-		),
+		Value::Primitive(_) => {
+			resolve_ps_primitive(&resolved, &root_val, root_idx, ps, attacker, use_orig)
+		}
 	}
 }
 
-fn resolve_ps_primitive_depth(
+fn resolve_ps_primitive(
 	value: &Value,
 	root_value: &Value,
 	root_index: usize,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	use_original: bool,
-	depth: usize,
 ) -> VResult<Value> {
 	let prim = value.try_as_primitive()?;
 	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
@@ -177,8 +140,7 @@ fn resolve_ps_primitive_depth(
 		use_original
 	};
 	let mapped = prim.try_map_arguments(|arg| {
-		let resolved =
-			resolve_ps_values_depth(arg, root_value, root_index, ps, attacker, use_orig, depth)?;
+		let resolved = resolve_ps_values(arg, root_value, root_index, ps, attacker, use_orig)?;
 		Ok((!resolved.equivalent(arg, true)).then_some(resolved))
 	})?;
 	Ok(match mapped {

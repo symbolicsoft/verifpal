@@ -9,13 +9,11 @@ use crate::equivalence::equivalent_primitives;
 use crate::primitive::*;
 use crate::types::*;
 
-const MAX_DEPTH: usize = 16;
-
-type RewriteCache = HashMap<(u64, usize), Vec<(Primitive, (bool, Value))>>;
+type RewriteCache = HashMap<u64, Vec<(Primitive, (bool, Value))>>;
 
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
-	entries: HashMap<(u64, usize), Vec<(Value, bool)>>,
+	entries: HashMap<u64, Vec<(Value, bool)>>,
 	has_passwords: bool,
 	slots_by_hash: HashMap<u64, Vec<usize>>,
 }
@@ -104,7 +102,7 @@ pub(crate) fn rewrite_cache_reset() {
 	REWRITE_CACHE.with(|c| c.borrow_mut().clear());
 }
 
-fn rewrite_cache_get(key: (u64, usize), p: &Primitive) -> Option<(bool, Value)> {
+fn rewrite_cache_get(key: u64, p: &Primitive) -> Option<(bool, Value)> {
 	REWRITE_CACHE.with(|c| {
 		c.borrow()
 			.get(&key)?
@@ -114,7 +112,7 @@ fn rewrite_cache_get(key: (u64, usize), p: &Primitive) -> Option<(bool, Value)> 
 	})
 }
 
-fn rewrite_cache_put(key: (u64, usize), p: &Primitive, result: &(bool, Value)) {
+fn rewrite_cache_put(key: u64, p: &Primitive, result: &(bool, Value)) {
 	REWRITE_CACHE.with(|c| {
 		c.borrow_mut()
 			.entry(key)
@@ -159,7 +157,7 @@ fn memo_owner_matches(
 }
 
 fn memo_obtainable_get(
-	key: (u64, usize),
+	key: u64,
 	v: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -179,7 +177,7 @@ fn memo_obtainable_get(
 }
 
 fn memo_obtainable_put(
-	key: (u64, usize),
+	key: u64,
 	v: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -201,9 +199,8 @@ pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	depth: usize,
 ) -> Option<DecomposeResult> {
-	if depth > MAX_DEPTH || primitive_is_core(p.id) {
+	if primitive_is_core(p.id) {
 		return None;
 	}
 	let Ok(prim) = primitive_get(p.id) else {
@@ -223,7 +220,7 @@ pub(crate) fn can_decompose(
 		if !valid {
 			continue;
 		}
-		if obtainable(&filtered, ps, attacker, depth) {
+		if obtainable(&filtered, ps, attacker) {
 			has.push(filtered);
 		}
 	}
@@ -271,12 +268,7 @@ pub(crate) fn can_break_weak(
 	Some(revealed)
 }
 
-pub(crate) fn obtainable(
-	v: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	depth: usize,
-) -> bool {
+pub(crate) fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool {
 	let hash = v.hash_value();
 	if attacker.knows_hashed(v, hash).is_some() {
 		return true;
@@ -284,42 +276,24 @@ pub(crate) fn obtainable(
 	if matches!(v, Value::Constant(_)) {
 		return false;
 	}
-	let key = (hash, depth);
-	if let Some(hit) = memo_obtainable_get(key, v, ps, attacker) {
+	if let Some(hit) = memo_obtainable_get(hash, v, ps, attacker) {
 		return hit;
 	}
 	let result = match v {
 		Value::Primitive(p) => {
-			can_reconstruct_primitive(p, ps, attacker, depth + 1).is_some()
-				|| obtainable_by_output_projection(p, ps, attacker, depth + 1)
+			can_reconstruct_primitive(p, ps, attacker).is_some()
+				|| obtainable_by_output_projection(p, ps, attacker)
 		}
 		Value::Constant(_) => false,
 	};
-	memo_obtainable_put(key, v, ps, attacker, result);
+	memo_obtainable_put(hash, v, ps, attacker, result);
 	result
 }
 
-/// Whether the attacker obtains `p` by decomposing a sibling output of the same
-/// application that it already holds.
-///
-/// `can_decompose` answers a different question from `obtainable`: it assumes
-/// the attacker already holds the term and reports what can be extracted *from*
-/// it. What it yields is therefore an argument of that term, or another of its
-/// outputs — never, in the first case, the term itself. Treating it as evidence
-/// of obtaining the term credits the attacker with a value it can only open, not
-/// build: holding `k` makes `ENC(k, m)` decomposable, but building it still
-/// needs `m`.
-///
-/// The reveal-output variant is the one case where decomposition does yield the
-/// term in hand, and it is real: a KEM ciphertext plus the private key yields
-/// the shared secret, which is a different output of the same application. The
-/// premise that the attacker holds that sibling has to be checked here, since
-/// `can_decompose` presupposes it rather than establishing it.
 fn obtainable_by_output_projection(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	depth: usize,
 ) -> bool {
 	let Ok(spec) = primitive_get(p.id) else {
 		return false;
@@ -336,7 +310,7 @@ fn obtainable_by_output_projection(
 			let sibling = p.with_output(j);
 			attacker
 				.knows(&Value::Primitive(Arc::new(sibling.clone())))
-				.is_some() && can_decompose(&sibling, ps, attacker, depth).is_some()
+				.is_some() && can_decompose(&sibling, ps, attacker).is_some()
 		})
 }
 
@@ -391,11 +365,10 @@ pub(crate) fn can_reconstruct_primitive(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	depth: usize,
 ) -> Option<ReconstructResult> {
-	can_reconstruct_primitive_directly(p, ps, attacker, depth).or_else(|| {
+	can_reconstruct_primitive_directly(p, ps, attacker).or_else(|| {
 		let swapped = commutativity_swap(p)?;
-		can_reconstruct_primitive_directly(&swapped, ps, attacker, depth)
+		can_reconstruct_primitive_directly(&swapped, ps, attacker)
 	})
 }
 
@@ -403,12 +376,8 @@ fn can_reconstruct_primitive_directly(
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	depth: usize,
 ) -> Option<ReconstructResult> {
-	if depth > MAX_DEPTH {
-		return None;
-	}
-	let (rewritten, rewrite_value) = can_rewrite(p, ps, 0);
+	let (rewritten, rewrite_value) = can_rewrite(p, ps);
 	if !rewritten {
 		return None;
 	}
@@ -431,7 +400,7 @@ fn can_reconstruct_primitive_directly(
 			skipped += 1;
 			continue;
 		}
-		if obtainable(a, ps, attacker, depth) {
+		if obtainable(a, ps, attacker) {
 			has.push(a.clone());
 		}
 	}
@@ -444,23 +413,20 @@ fn can_reconstruct_primitive_directly(
 	})
 }
 
-pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
-	if depth > MAX_DEPTH {
-		return (false, Value::Primitive(Arc::new(p.clone())));
-	}
-	let key = (crate::hashing::primitive_hash(p), depth);
+pub(crate) fn can_rewrite(p: &Primitive, ps: &PrincipalState) -> (bool, Value) {
+	let key = crate::hashing::primitive_hash(p);
 	if let Some(hit) = rewrite_cache_get(key, p) {
 		return hit;
 	}
-	let result = can_rewrite_uncached(p, ps, depth);
+	let result = can_rewrite_uncached(p, ps);
 	rewrite_cache_put(key, p, &result);
 	result
 }
 
-fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bool, Value) {
+fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState) -> (bool, Value) {
 	let reduced = p.map_arguments(|a| match a {
 		Value::Primitive(inner_p) => {
-			let (_, replacement) = can_rewrite(inner_p, ps, depth + 1);
+			let (_, replacement) = can_rewrite(inner_p, ps);
 			(!replacement.equivalent(a, true)).then_some(replacement)
 		}
 		_ => None,
@@ -491,7 +457,7 @@ fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bo
 		if from_p.id != prim.rewrite.id {
 			return (!prim.definition_check, wrap(pc_ref));
 		}
-		if !can_rewrite_primitive(pc_ref, ps, depth) {
+		if !can_rewrite_primitive(pc_ref, ps) {
 			return (!prim.definition_check, wrap(pc_ref));
 		}
 		if let Some(to_fn) = prim.rewrite.to {
@@ -502,7 +468,7 @@ fn can_rewrite_uncached(p: &Primitive, ps: &PrincipalState, depth: usize) -> (bo
 	(!prim.definition_check, wrap(pc_ref))
 }
 
-fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bool {
+fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState) -> bool {
 	let Ok(prim) = primitive_get(p.id) else {
 		return false;
 	};
@@ -528,7 +494,7 @@ fn can_rewrite_primitive(p: &Primitive, ps: &PrincipalState, depth: usize) -> bo
 			for item in &mut ax {
 				let replacement = match &*item {
 					Value::Primitive(inner_p) => {
-						let (r, v) = can_rewrite(inner_p, ps, depth + 1);
+						let (r, v) = can_rewrite(inner_p, ps);
 						if r { Some(v) } else { None }
 					}
 					_ => None,
@@ -725,7 +691,7 @@ mod tests {
 				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
 			};
-			let (rewritten, value) = can_rewrite(&split, &ps, 0);
+			let (rewritten, value) = can_rewrite(&split, &ps);
 			assert!(rewritten);
 			assert!(value.equivalent(&expected, true));
 		}
@@ -759,7 +725,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, value) = can_rewrite(&dec, &ps, 0);
+		let (rewritten, value) = can_rewrite(&dec, &ps);
 		assert!(rewritten);
 		assert!(value.equivalent(&m, true));
 	}
@@ -791,7 +757,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![b]);
-		assert!(can_reconstruct_primitive(&proj, &ps, &attacker, 0).is_some());
+		assert!(can_reconstruct_primitive(&proj, &ps, &attacker).is_some());
 	}
 
 	#[test]
@@ -816,7 +782,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
+		let (rewritten, _) = can_rewrite(&assert_prim, &ps);
 		assert!(rewritten);
 	}
 
@@ -843,7 +809,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, _) = can_rewrite(&assert_prim, &ps, 0);
+		let (rewritten, _) = can_rewrite(&assert_prim, &ps);
 		assert!(!rewritten);
 	}
 
@@ -871,7 +837,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![key]);
-		let result = can_decompose(&p, &ps, &attacker, 0);
+		let result = can_decompose(&p, &ps, &attacker);
 		assert!(result.is_some());
 		assert!(result.unwrap().revealed.equivalent(&msg, true));
 	}
@@ -901,7 +867,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![dk]);
-		let revealed = can_decompose(&ct, &ps, &attacker, 0)
+		let revealed = can_decompose(&ct, &ps, &attacker)
 			.expect("holder of the private key can decapsulate")
 			.revealed;
 		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
@@ -937,7 +903,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![ek]);
-		assert!(can_decompose(&ct, &ps, &attacker, 0).is_none());
+		assert!(can_decompose(&ct, &ps, &attacker).is_none());
 	}
 
 	#[test]
@@ -965,7 +931,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, value) = can_rewrite(&decap, &ps, 0);
+		let (rewritten, value) = can_rewrite(&decap, &ps);
 		assert!(rewritten);
 		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
 		assert!(value.equivalent(&expected, true));
@@ -997,7 +963,7 @@ mod tests {
 			vec![make_slot_meta(&c_dummy, true)],
 			vec![make_slot_values(&value_nil(), 0)],
 		);
-		let (rewritten, _) = can_rewrite(&decap, &ps, 0);
+		let (rewritten, _) = can_rewrite(&decap, &ps);
 		assert!(!rewritten);
 	}
 
@@ -1025,7 +991,7 @@ mod tests {
 			vec![make_slot_values(&value_nil(), 0)],
 		);
 		let attacker = make_attacker_state(vec![]);
-		assert!(can_decompose(&p, &ps, &attacker, 0).is_none());
+		assert!(can_decompose(&p, &ps, &attacker).is_none());
 	}
 
 	#[test]

@@ -26,7 +26,7 @@ pub(crate) fn perform_primitive_rewrite(
 		Some(p) => p,
 		None => return r,
 	};
-	let (rewritten_root, rewritten_value) = can_rewrite(rewrite_p2, ps, 0);
+	let (rewritten_root, rewritten_value) = can_rewrite(rewrite_p2, ps);
 	if !rewritten_root && let Some(p) = rewritten_value.as_primitive() {
 		r.failed_rewrites.push(p.clone());
 	}

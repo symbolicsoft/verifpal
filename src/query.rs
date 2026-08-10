@@ -191,7 +191,7 @@ fn query_find_constant_usage_indices(
 			indices.push(slot_idx);
 			continue;
 		}
-		let (pass, _) = can_rewrite(before_prim, ps, 0);
+		let (pass, _) = can_rewrite(before_prim, ps);
 		if pass || !before_prim.instance_check {
 			indices.push(slot_idx);
 		}

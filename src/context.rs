@@ -41,6 +41,7 @@ pub(crate) struct VerifyContext {
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
 	pump_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
+	depth_cuts: RwLock<HashSet<(PrincipalId, usize)>>,
 	installs: RwLock<HashMap<(PrincipalId, usize), Vec<Value>>>,
 }
 
@@ -147,6 +148,7 @@ impl VerifyContext {
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
 			pump_cuts: RwLock::new(HashSet::new()),
+			depth_cuts: RwLock::new(HashSet::new()),
 			installs: RwLock::new(HashMap::new()),
 		}
 	}
@@ -155,6 +157,12 @@ impl VerifyContext {
 	/// and at every rung, and the cut is only worth reporting once.
 	pub(crate) fn note_pump_cut(&self, principal: PrincipalId, slot: usize) -> bool {
 		write_lock(&self.pump_cuts).insert((principal, slot))
+	}
+
+	/// True the first time only: the depth bound turns away every term of that
+	/// shape at that slot, and saying so once is what the reader needs.
+	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
+		write_lock(&self.depth_cuts).insert((principal, slot))
 	}
 
 	/// Record that `ground` was installed at `slot` with `ancestor` as the term
@@ -390,6 +398,7 @@ impl VerifyContext {
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			pump_cuts: RwLock::new(read_lock(&self.pump_cuts).clone()),
+			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			installs: RwLock::new(read_lock(&self.installs).clone()),
 		}
 	}

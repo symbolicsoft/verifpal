@@ -111,7 +111,7 @@ fn rule_decompose(
 	let Value::Primitive(prim) = value else {
 		return false;
 	};
-	let Some(result) = can_decompose(prim, ps, attacker, 0) else {
+	let Some(result) = can_decompose(prim, ps, attacker) else {
 		return false;
 	};
 	learn(
@@ -189,7 +189,7 @@ fn reconstruct_recursive(
 	let mut found = false;
 	let result = match value {
 		Value::Primitive(p) => {
-			let result = can_reconstruct_primitive(p, ps, attacker, 0);
+			let result = can_reconstruct_primitive(p, ps, attacker);
 			for arg in &p.arguments {
 				found |= reconstruct_recursive(ctx, arg, ps, attacker, record);
 			}

@@ -70,30 +70,53 @@ pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
 	}
 }
 
+/// Apply `s` throughout `v`, chasing a bound variable into its own binding.
+///
+/// That chase needs no bound because [`bind`] and `matching::unify_bind` both
+/// refuse a binding whose variable occurs in what it is bound to, so the chain
+/// of variables walked here is a DAG over finitely many variables. Descent into
+/// arguments is structural. Break the occurs check and this is where it shows:
+/// the chase never returns.
 pub(crate) fn apply(v: &Value, s: &Substitution) -> Value {
-	apply_depth(v, s, 0)
-}
-
-const MAX_APPLY_DEPTH: usize = 32;
-
-fn apply_depth(v: &Value, s: &Substitution, depth: usize) -> Value {
-	if s.is_empty() || !contains_var(v) || depth >= MAX_APPLY_DEPTH {
+	if s.is_empty() || !contains_var(v) {
 		return v.clone();
 	}
 	match v {
 		Value::Constant(c) => match s.get(&c.id) {
-			Some(bound) => apply_depth(bound, s, depth + 1),
+			Some(bound) => apply(bound, s),
 			None => v.clone(),
 		},
 		Value::Primitive(p) => {
-			let args: Vec<Value> = p
-				.arguments
-				.iter()
-				.map(|a| apply_depth(a, s, depth + 1))
-				.collect();
+			let args: Vec<Value> = p.arguments.iter().map(|a| apply(a, s)).collect();
 			let args = crate::primitive::normalise_arguments(p.id, args);
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
+	}
+}
+
+pub(crate) fn occurs(id: ValueId, v: &Value, s: &Substitution) -> bool {
+	let mut chasing = Vec::new();
+	occurs_in(id, v, s, &mut chasing)
+}
+
+fn occurs_in(id: ValueId, v: &Value, s: &Substitution, chasing: &mut Vec<ValueId>) -> bool {
+	match v {
+		Value::Constant(c) => {
+			if c.id == id {
+				return true;
+			}
+			if !is_attacker_var_id(c.id) || chasing.contains(&c.id) {
+				return false;
+			}
+			let Some(bound) = s.get(&c.id) else {
+				return false;
+			};
+			chasing.push(c.id);
+			let found = occurs_in(id, bound, s, chasing);
+			chasing.pop();
+			found
+		}
+		Value::Primitive(p) => p.arguments.iter().any(|a| occurs_in(id, a, s, chasing)),
 	}
 }
 
@@ -101,6 +124,9 @@ pub(crate) fn bind(s: &mut Substitution, id: ValueId, v: Value) -> bool {
 	match s.get(&id) {
 		Some(existing) => existing.equivalent(&v, true),
 		None => {
+			if occurs(id, &v, s) {
+				return false;
+			}
 			s.insert(id, v);
 			true
 		}
@@ -235,6 +261,70 @@ mod tests {
 		let merged = crate::solve::matching::merge(&left, &right).expect("should unify");
 		let value = merged.get(&slot).expect("slot bound");
 		assert!(value.equivalent(&concat(a, b), true));
+	}
+
+	#[test]
+	fn solver_occurs_check_refuses_a_cyclic_binding() {
+		let k = solver_constant("solver_occurs_k");
+		let slot = crate::solve::vars::attacker_var_id(0);
+		let var = crate::solve::vars::attacker_var(0, "occurs");
+		let enc = |x: Value, y: Value| {
+			Value::Primitive(std::sync::Arc::new(Primitive {
+				id: crate::primitive::PRIM_ENC,
+				arguments: vec![x, y],
+				output: 0,
+				instance_check: false,
+				capabilities: Capabilities::default(),
+				hash: HashCell::default(),
+			}))
+		};
+
+		let mut s = crate::solve::vars::Substitution::new();
+		assert!(!bind(&mut s, slot, enc(k.clone(), var.clone())));
+		assert!(s.is_empty());
+		// The same binding without the self-reference is fine.
+		assert!(bind(
+			&mut s,
+			slot,
+			enc(k, solver_constant("solver_occurs_m"))
+		));
+	}
+
+	#[test]
+	fn solver_occurs_check_sees_through_a_chain() {
+		// $0 -> HASH($1) and $1 -> $2 already bound, so binding $2 to anything
+		// mentioning $0 closes a cycle two hops away.
+		let a = crate::solve::vars::attacker_var_id(0);
+		let b = crate::solve::vars::attacker_var_id(1);
+		let c = crate::solve::vars::attacker_var_id(2);
+		let hash = |x: Value| {
+			Value::Primitive(std::sync::Arc::new(Primitive {
+				id: crate::primitive::PRIM_HASH,
+				arguments: vec![x],
+				output: 0,
+				instance_check: false,
+				capabilities: Capabilities::default(),
+				hash: HashCell::default(),
+			}))
+		};
+
+		let mut s = crate::solve::vars::Substitution::new();
+		assert!(bind(
+			&mut s,
+			a,
+			hash(crate::solve::vars::attacker_var(1, "b"))
+		));
+		assert!(bind(&mut s, b, crate::solve::vars::attacker_var(2, "c")));
+		assert!(occurs(a, &crate::solve::vars::attacker_var(0, "a"), &s));
+		assert!(!bind(
+			&mut s,
+			c,
+			hash(crate::solve::vars::attacker_var(0, "a"))
+		));
+		assert!(bind(&mut s, c, hash(solver_constant("solver_chain_m"))));
+		// With the cycle refused, applying the substitution terminates.
+		let applied = crate::solve::vars::apply(&crate::solve::vars::attacker_var(0, "a"), &s);
+		assert!(!crate::solve::vars::contains_var(&applied));
 	}
 
 	#[test]
