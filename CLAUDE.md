@@ -49,7 +49,7 @@ cargo run --release -- pretty path/to/model.vp               # canonical formatt
 VERIFPAL_SOLVE_DEBUG=1 cargo run --release -- verify m.vp    # log every solver proposal to stderr
 ```
 
-`--result-code` only suppresses the banner and the beta-software warning; the whole analysis still prints and the code is the **last** line (`… | tail -1`). Other subcommands: `about`; `internal-json <knowledgeMap|verify|prettyPrint|prettyDiagram>` reads a model from stdin (to EOF or `0x04`) and emits JSON — this is the VS Code extension interface.
+`--result-code` only suppresses the banner; the whole analysis still prints and the code is the **last** line (`… | tail -1`). Other subcommands: `about`; `internal-json <knowledgeMap|verify|prettyPrint|prettyDiagram>` reads a model from stdin (to EOF or `0x04`) and emits JSON — this is the VS Code extension interface.
 
 Errors carry a `Span` into the model source and print as `file:line:col: kind: message` with the offending line and a caret. Parser errors get the position the parser stopped at automatically; `sanity.rs`/`construct.rs` attach the span of the query or declaration at fault via `VerifpalError::or_span`, which keeps whichever span is narrower. Call `.located(file_name, &model.source)` at an entry point so plain `Display` shows the position — `Model` carries its own source for exactly this.
 

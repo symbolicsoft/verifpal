@@ -4,7 +4,7 @@
 use std::io::Read;
 
 use clap::{Parser, Subcommand};
-use verifpal::{InfoLevel, info_banner, info_message, pretty_print, verify_with_sessions};
+use verifpal::{info_banner, pretty_print, verify_with_sessions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -67,7 +67,6 @@ fn main() {
 		} => {
 			if !result_code {
 				info_banner(VERSION);
-				info_message("Verifpal is Beta software.", InfoLevel::Warning, false);
 			}
 			match verify_with_sessions(&model, sessions) {
 				Ok((_, code)) => {

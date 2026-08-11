@@ -36,10 +36,10 @@ When an analysis is performed under declared weakening assumptions, or when the 
 #### Friendly and Integrated Software
 Verifpal comes with a Visual Studio Code extension that offers syntax highlighting, automatic formatting, live analysis, diagram visualizations and much more, allowing developers to obtain insights on their model as they are writing it.
 
-## Verifpal is Beta Software
+## Sound, but Incomplete
 Verifpal is sound but incomplete by design: any attack it reports should be genuine, but its search may still miss one. Soundness is enforced structurally rather than argued. Nothing in the solver can record a query result; it can only *propose* a substitution. Every proposal is materialized into a real principal state, re-executed through the ordinary analysis pipeline, and re-checked against actual attacker knowledge before anything is allowed to resolve. A bug in the solver therefore costs a missed attack and cannot manufacture a false one.
 
-Verifpal nonetheless remains beta software. A passing query means "this search found no attack", which is weaker than a proof; Verifpal does not support observational equivalence or user-defined equational theories; and the tool is young compared to [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io), which have been developed for decades. For production protocol design, cross-checking with those tools remains good practice.
+Know what a passing query does and does not tell you. It means "this search found no attack", which is weaker than a proof; Verifpal does not support observational equivalence or user-defined equational theories. For production protocol design, cross-checking with [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io) remains good practice.
 
 An earlier release shipped a Coq formalization of Verifpal's syntax, semantics and *passive* attacker analysis. That layer covered the half of the tool where little could go wrong and did not reach the active search, where every false attack in the project's history originated; it has been retired in favor of the propose-and-validate architecture described above.
 
