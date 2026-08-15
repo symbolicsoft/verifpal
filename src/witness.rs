@@ -82,7 +82,6 @@ pub(crate) fn minimize_witness(
 
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
-	let base = ps.clone_for_depth(true);
 	let phase = ctx.attacker_snapshot().current_phase;
 
 	let mut sessions: Vec<PrincipalState> = Vec::new();
@@ -95,7 +94,7 @@ pub(crate) fn minimize_witness(
 		}
 	}
 	if sessions.is_empty() {
-		sessions.push(base.clone());
+		sessions.push(ps.clone_for_depth(true));
 	}
 
 	let mitm_for = |session: &PrincipalState| -> Vec<(SlotIdx, Value)> {

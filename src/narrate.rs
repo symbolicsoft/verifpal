@@ -268,13 +268,8 @@ fn walk(
 		return;
 	};
 
-	for ingredient in derivation
-		.ingredients()
-		.into_iter()
-		.cloned()
-		.collect::<Vec<_>>()
-	{
-		walk(km, attacker, &ingredient, table, home, carried, seen, steps);
+	for ingredient in derivation.ingredients() {
+		walk(km, attacker, ingredient, table, home, carried, seen, steps);
 	}
 
 	if let Some(text) = describe(derivation, value, table, carried) {

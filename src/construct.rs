@@ -27,16 +27,12 @@ pub(crate) fn construct_protocol_trace(
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
-	for builtin in &[value_nil()] {
-		let c = match builtin.as_constant() {
-			Some(c) => c.clone(),
-			None => continue,
-		};
+	if let Value::Constant(nil) = value_nil() {
 		let known_by: Vec<_> = principal_ids.iter().map(|&pid| (pid, pid)).collect();
-		let const_id = c.id;
+		let const_id = nil.id;
 		trace.slots.push(TraceSlot {
-			constant: c,
-			initial_value: builtin.clone(),
+			initial_value: Value::Constant(nil.clone()),
+			constant: nil,
 			creator: ATTACKER_ID,
 			known_by,
 			sent_by: vec![],

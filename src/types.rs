@@ -155,19 +155,18 @@ impl VerifpalError {
 		let Some(span) = self.span else {
 			return format!("{}: {}: {}", file_name, self.kind.label(), self.message);
 		};
-		let (line, col) = span.line_col(source);
+		let (line, line_start, line_end) = span.line_bounds(source);
+		let at = span.start.min(source.len());
+		let lead = source[line_start..at].chars().count();
 		let mut out = format!(
 			"{}:{}:{}: {}: {}",
 			file_name,
 			line,
-			col,
+			lead + 1,
 			self.kind.label(),
 			self.message
 		);
-		let (_, line_start, line_end) = span.line_bounds(source);
 		let text = &source[line_start..line_end];
-		let at = span.start.min(source.len());
-		let lead = source[line_start..at].chars().count();
 		let width = source[at..span.end.min(line_end)].chars().count().max(1);
 		out.push_str(&format!(
 			"\n  {}\n  {}{}",

@@ -186,10 +186,14 @@ pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 fn substitution_hash(s: &Substitution) -> u64 {
 	let mut acc: u64 = s.len() as u64;
 	for (id, v) in s {
-		acc ^= (*id as u64)
+		let mut entry = (*id as u64)
 			.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 			.rotate_left(17)
 			^ v.hash_value().wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+		entry ^= entry >> 31;
+		entry = entry.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+		entry ^= entry >> 32;
+		acc ^= entry;
 	}
 	acc
 }

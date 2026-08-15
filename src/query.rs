@@ -138,30 +138,30 @@ fn query_authentication(
 		return Ok(result);
 	}
 	let (indices, sender, c) = query_authentication_get_pass_indices(query, km, ps)?;
-	for &index in &indices {
-		if query.message.sender == sender {
-			continue;
-		}
-		result.resolved = true;
-		let assigned = &ps.values[index].value;
-		let before = &ps.values[index].pre_rewrite;
-		let seed = attacker
-			.knows(assigned)
-			.map(|i| recorded_mutations(attacker, i))
-			.unwrap_or_default();
-		let mutated_info = attack_trace(ctx, km, ps, query_index, assigned, &seed);
-		result = query_precondition(result, ps);
-		return Ok(query_authentication_handle_pass(
-			ctx,
-			result,
-			&c,
-			before,
-			&mutated_info,
-			km.principal_name(sender),
-			ps,
-		));
+	if query.message.sender == sender {
+		return Ok(result);
 	}
-	Ok(result)
+	let Some(&index) = indices.first() else {
+		return Ok(result);
+	};
+	result.resolved = true;
+	let assigned = &ps.values[index].value;
+	let before = &ps.values[index].pre_rewrite;
+	let seed = attacker
+		.knows(assigned)
+		.map(|i| recorded_mutations(attacker, i))
+		.unwrap_or_default();
+	let mutated_info = attack_trace(ctx, km, ps, query_index, assigned, &seed);
+	result = query_precondition(result, ps);
+	Ok(query_authentication_handle_pass(
+		ctx,
+		result,
+		&c,
+		before,
+		&mutated_info,
+		km.principal_name(sender),
+		ps,
+	))
 }
 
 fn query_find_constant_usage_indices(

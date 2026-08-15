@@ -238,12 +238,6 @@ impl VerifyContext {
 		record: &Arc<MutationRecord>,
 		derivation: DerivationRecord,
 	) -> bool {
-		{
-			let state = read_lock(&self.attacker);
-			if state.knows(known).is_some() {
-				return false;
-			}
-		}
 		let mut state = write_lock(&self.attacker);
 		if state.knows(known).is_some() {
 			return false;

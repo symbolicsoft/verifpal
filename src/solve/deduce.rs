@@ -568,20 +568,20 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		slots_only: bool,
 	) -> Vec<Substitution> {
-		let mut pending: Vec<(&ValueId, &Value)> = s
+		let mut obligations: Vec<(ValueId, &Value)> = s
 			.iter()
 			.filter(|(id, _)| {
 				!base.contains_key(*id) && !(slots_only && super::vars::is_free_var_id(**id))
 			})
+			.map(|(id, v)| (*id, v))
 			.collect();
-		pending.sort_by_key(|(id, _)| **id);
-		let obligations: Vec<Value> = pending.into_iter().map(|(_, v)| v.clone()).collect();
+		obligations.sort_by_key(|(id, _)| *id);
 
 		let mut frontier = vec![s.clone()];
-		for obligation in obligations {
+		for (_, obligation) in obligations {
 			let mut next = Vec::new();
 			for candidate in &frontier {
-				self.solve_into(&obligation, candidate, &mut next);
+				self.solve_into(obligation, candidate, &mut next);
 			}
 			if next.is_empty() {
 				return Vec::new();

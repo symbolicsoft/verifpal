@@ -550,15 +550,14 @@ impl<'a> Parser<'a> {
 				break;
 			}
 			let saved = self.snapshot();
-			if let Ok(_id) = self.parse_identifier() {
+			let starts_next_message = self.parse_identifier().is_ok() && {
 				self.skip_whitespace();
-				if self.remaining().starts_with("->") || self.remaining().starts_with("\u{2192}") {
-					self.restore(saved);
-					break;
-				}
-				self.restore(saved);
-			} else {
-				self.restore(saved);
+				let rem = self.remaining();
+				rem.starts_with("->") || rem.starts_with("\u{2192}")
+			};
+			self.restore(saved);
+			if starts_next_message {
+				break;
 			}
 
 			let constant = if self.peek() == Some(b'[') {
