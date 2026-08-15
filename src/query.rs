@@ -485,6 +485,73 @@ mod tcb_tests {
 		out
 	}
 
+	fn relative(path: &Path) -> String {
+		path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
+			.unwrap_or(path)
+			.to_string_lossy()
+			.into_owned()
+	}
+
+	fn engine_source(relative_path: &str) -> PathBuf {
+		Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("src")
+			.join(relative_path)
+	}
+
+	fn block_lines(path: &Path, is_header: impl Fn(&str) -> bool) -> Vec<(usize, String)> {
+		let lines = shipping_lines(path);
+		let Some(start) = lines
+			.iter()
+			.position(|(_, line)| is_header(line.trim_start()))
+		else {
+			return Vec::new();
+		};
+		let mut depth = 0i32;
+		let mut opened = false;
+		let mut out = Vec::new();
+		for entry in &lines[start..] {
+			depth += entry.1.matches('{').count() as i32;
+			depth -= entry.1.matches('}').count() as i32;
+			out.push(entry.clone());
+			opened |= depth > 0;
+			if opened && depth <= 0 {
+				break;
+			}
+		}
+		out
+	}
+
+	fn fn_body(path: &Path, name: &str) -> Vec<(usize, String)> {
+		let bare = format!("fn {name}(");
+		let exported = format!("pub(crate) fn {name}(");
+		block_lines(path, |header| {
+			header.starts_with(&bare) || header.starts_with(&exported)
+		})
+	}
+
+	fn fn_parameter_types(path: &Path, name: &str) -> Vec<String> {
+		let body = fn_body(path, name);
+		let mut out = Vec::new();
+		for (_, line) in body.iter().skip(1) {
+			let trimmed = line.trim();
+			if trimmed.starts_with(')') {
+				break;
+			}
+			if let Some((_, ty)) = trimmed.split_once(": ") {
+				out.push(ty.trim_end_matches(',').trim().to_string());
+			}
+		}
+		out
+	}
+
+	fn body_hits(body: &[(usize, String)], needle: &str) -> Vec<usize> {
+		body.iter()
+			.enumerate()
+			.filter(|(_, (_, line))| line.contains(needle))
+			.map(|(i, _)| i)
+			.collect()
+	}
+
 	/// The files containing shipping call sites of `name`, with a count each.
 	fn call_site_files(name: &str) -> Vec<(String, usize)> {
 		let mut counts: Vec<(String, usize)> = Vec::new();
@@ -507,11 +574,7 @@ mod tcb_tests {
 		let needle = format!("{name}(");
 		let mut sites = Vec::new();
 		for path in engine_sources() {
-			let rel = path
-				.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
-				.unwrap_or(&path)
-				.to_string_lossy()
-				.into_owned();
+			let rel = relative(&path);
 			for (number, line) in shipping_lines(&path) {
 				if !line.contains(&needle) {
 					continue;
@@ -565,6 +628,177 @@ mod tcb_tests {
 	}
 
 	#[test]
+	fn a_query_evaluator_is_handed_states_and_nothing_else() {
+		const ALLOWED: [&str; 6] = [
+			"&VerifyContext",
+			"&Query",
+			"usize",
+			"&ProtocolTrace",
+			"&PrincipalState",
+			"&AttackerState",
+		];
+		let query_rs = engine_source("query.rs");
+
+		let mut evaluators: Vec<String> = fn_body(&query_rs, "query_start")
+			.iter()
+			.filter_map(|(_, line)| {
+				let trimmed = line.trim();
+				if !trimmed.starts_with("query_") {
+					return None;
+				}
+				trimmed.split_once('(').map(|(name, _)| name.to_string())
+			})
+			.collect();
+		evaluators.sort();
+		evaluators.dedup();
+
+		assert_eq!(
+			evaluators.len(),
+			5,
+			"fact (ii) again, from the dispatch side: `query_start` calls exactly one \
+			 evaluator per query kind. Found {evaluators:?}"
+		);
+
+		for name in &evaluators {
+			let types = fn_parameter_types(&query_rs, name);
+			assert!(
+				types.iter().any(|t| t == "&PrincipalState")
+					&& types.iter().any(|t| t == "&AttackerState"),
+				"fact (iii) of the soundness theorem: {name} must compute its violation \
+				 predicate from a PrincipalState and an AttackerState, so it has to be \
+				 handed both. Its parameters are {types:?}"
+			);
+			for ty in &types {
+				assert!(
+					ALLOWED.contains(&ty.as_str()),
+					"fact (iii) of the soundness theorem: an evaluator takes no verdict, \
+					 score or justification from a caller — all a caller decides is which \
+					 state it is handed. {name} takes a {ty}, which is outside that set. A \
+					 parameter carrying a decision made elsewhere would put that decision \
+					 inside the one write path."
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn an_install_is_proven_controllable_then_derivable_before_it_is_executed() {
+		let validate_rs = engine_source("solve/validate.rs");
+		let body = fn_body(&validate_rs, "validate");
+		assert!(
+			!body.is_empty(),
+			"solve/validate.rs must define `fn validate`: it is the only route from the \
+			 search into query evaluation"
+		);
+
+		let once = |needle: &str| -> usize {
+			let hits = body_hits(&body, needle);
+			assert_eq!(
+				hits.len(),
+				1,
+				"`{needle}` must appear exactly once in `fn validate`; a second one is a \
+				 second policy for the same decision. Found {hits:?}"
+			);
+			hits[0]
+		};
+
+		let controllable = once("controllable.admits(");
+		let derivable = once("attacker_can_derive(");
+		let install = once("installs.push(");
+		let execute = once("reexecute(");
+
+		assert!(
+			controllable < derivable && controllable < install,
+			"fact (vi) of the soundness theorem: controllability is tested in the same \
+			 loop and *first*. A slot the attacker does not control is not a Dolev-Yao \
+			 transition, whatever the term put into it"
+		);
+		assert!(
+			derivable < install,
+			"fact (v) of the soundness theorem: a term is proven derivable against closed \
+			 attacker knowledge before it is queued for installation"
+		);
+		assert!(
+			install < execute,
+			"facts (v) and (vi) of the soundness theorem: every install is queued only \
+			 after both tests pass, and `reexec` runs over the queue afterwards. Executing \
+			 before the tests would make the state unreachable in the replay system"
+		);
+
+		for (fact, guard, at) in [
+			("(vi)", "controllable.admits", controllable),
+			("(v)", "attacker_can_derive", derivable),
+		] {
+			let abandons = body
+				.iter()
+				.skip(at + 1)
+				.take(2)
+				.any(|(_, line)| line.trim() == "return Ok(false);");
+			assert!(
+				abandons,
+				"fact {fact} of the soundness theorem: a failing `{guard}` test abandons \
+				 the whole substitution. Skipping the slot with `continue` instead would \
+				 execute the rest of a substitution whose remainder was never justified"
+			);
+		}
+	}
+
+	#[test]
+	fn controllability_is_minted_only_by_reexec_and_bound_to_one_session() {
+		let mut minted_elsewhere: Vec<String> = Vec::new();
+		for path in engine_sources() {
+			let rel = relative(&path);
+			if rel == "reexec.rs" {
+				continue;
+			}
+			for (number, line) in shipping_lines(&path) {
+				let trimmed = line.trim_start();
+				if trimmed.contains("Controllable {") && !trimmed.contains("struct Controllable") {
+					minted_elsewhere.push(format!("{rel}:{number}: {trimmed}"));
+				}
+			}
+		}
+		assert!(
+			minted_elsewhere.is_empty(),
+			"fact (vi) of the soundness theorem: controllability is decided once per \
+			 solving pass because deciding it is expensive, and a cached answer is exactly \
+			 what an untrusted search would forge. Only reexec.rs may build one: \
+			 {minted_elsewhere:?}"
+		);
+
+		let reexec_rs = engine_source("reexec.rs");
+		let fields = block_lines(&reexec_rs, |header| {
+			header.starts_with("pub(crate) struct Controllable {")
+		});
+		assert!(!fields.is_empty(), "reexec.rs must declare `Controllable`");
+		let exposed: Vec<&str> = fields
+			.iter()
+			.skip(1)
+			.map(|(_, line)| line.trim())
+			.filter(|line| line.starts_with("pub"))
+			.collect();
+		assert!(
+			exposed.is_empty(),
+			"fact (vi) of the soundness theorem: `Controllable`'s fields stay private, or \
+			 another module can assemble one field by field and the private constructor \
+			 buys nothing: {exposed:?}"
+		);
+
+		let checks_session = shipping_lines(&reexec_rs);
+		for needle in [
+			"self.principal == ps.id",
+			"self.phase == attacker.current_phase",
+		] {
+			assert!(
+				checks_session.iter().any(|(_, line)| line.contains(needle)),
+				"fact (vi) of the soundness theorem: the validator must check that the \
+				 controllability value it was handed was built for the principal and phase \
+				 it is currently validating; `{needle}` is missing from reexec.rs"
+			);
+		}
+	}
+
+	#[test]
 	fn the_solver_holds_no_shared_cell_over_analysis_state() {
 		const ALLOWED: [&str; 4] = ["memo:", "active:", "cycles_cut:", "fresh:"];
 		let mut offenders: Vec<String> = Vec::new();
@@ -572,11 +806,7 @@ mod tcb_tests {
 			if !path.to_string_lossy().contains("/solve/") {
 				continue;
 			}
-			let rel = path
-				.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
-				.unwrap_or(&path)
-				.to_string_lossy()
-				.into_owned();
+			let rel = relative(&path);
 			for (number, line) in shipping_lines(&path) {
 				let trimmed = line.trim_start();
 				let shared = ["RefCell<", "Cell<", "Mutex<", "RwLock<", "static mut"]
