@@ -1,19 +1,33 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-
+//
 // Signal PQXDH: X3DH plus a signed KEM prekey, with the KEM shared secret
 // mixed into the master secret. Phase 1 leaks every Diffie-Hellman private
-// value, which is the harvest-now-decrypt-later adversary: the message must
-// survive it, carried by the KEM leg alone.
+// value, which is the harvest-now-decrypt-later adversary: an attacker who
+// records traffic today and breaks discrete log later (say, with a quantum
+// computer). The message must survive it carried by the KEM leg alone —
+// and it does: both queries hold (c0a0).
 //
-// The two prekey signatures are domain-separated with the public tags c2 and
-// c3. Without that separation an attacker swaps the KEM prekey for the DH
-// prekey, carrying Bob's genuine signature with it, and the KEM leg quietly
-// becomes a second classical leg.
+// This is the hybrid argument in miniature. Classically, the four DH legs
+// protect the message even if the KEM falls; post-quantum, the KEM protects
+// it even when every DH private value is on the table. Delete `ss` from the
+// two master-secret hashes and confidentiality fails; that is the entire
+// reason PQXDH exists.
+//
+// The two prekey signatures are domain-separated with the public tags c2
+// and c3. Without that separation an attacker swaps the KEM prekey for the
+// DH prekey, carrying Bob's genuine signature with it, and the KEM leg
+// quietly becomes a second classical leg — a real design lesson: signing
+// two things with one key requires making their signatures unmixable.
+//
+// Compare pqxdh-weak.vp, the same protocol with the adversary expressed as
+// a capability annotation instead of a list of leaks; and signal.vp for the
+// classical handshake this extends.
 
 attacker[active]
 
 principal Alice[
+	// c1: HKDF info string; c2, c3: signature domain-separation tags.
 	knows public c1, c2, c3
 	knows private alongterm
 	galongterm = PUBKEY(alongterm)
@@ -21,24 +35,38 @@ principal Alice[
 
 principal Bob[
 	knows public c1, c2, c3
+	// blongterm: identity key. bs: signed (curve) prekey.
 	knows private blongterm, bs
+	// bo: one-time curve prekey. dkb: the KEM decapsulation key — the
+	// post-quantum secret everything rides on.
 	generates bo, dkb
 	gblongterm = PUBKEY(blongterm)
 	gbs = PUBKEY(bs)
 	gbo = PUBKEY(bo)
+	// ekb: the KEM encapsulation (public) key derived from dkb.
 	ekb = PUBKEY(dkb)
+	// Each prekey is signed under its own domain tag — see the header.
 	gbssig = SIGN(blongterm, HASH(c2, gbs))
 	ekbsig = SIGN(blongterm, HASH(c3, ekb))
 ]
 
+// Bob's prekey bundle. Only the identity key is guarded (verified
+// out-of-band); the prekeys are protected by their signatures.
 Bob -> Alice: [gblongterm], gbs, gbssig, gbo, ekb, ekbsig
 
 principal Alice[
+	// r is the KEM encapsulation randomness.
 	generates m1, ae1, r
 	gae1 = PUBKEY(ae1)
+	// Checked verifications: Alice refuses to proceed on either prekey
+	// unless Bob's signature over it, under the right domain tag, checks.
 	valid = SIGNVERIF(gblongterm, HASH(c2, gbs), gbssig)?
 	kvalid = SIGNVERIF(gblongterm, HASH(c3, ekb), ekbsig)?
+	// KEM_ENCAP returns two values at once: the shared secret ss (kept)
+	// and the ciphertext ct (sent, so Bob can recover the same ss).
 	ss, ct = KEM_ENCAP(ekb, r)
+	// The X3DH master secret with the KEM secret appended: five
+	// ingredients, of which the leak below will hand over four.
 	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss)
 	akenc = HKDF(amaster, c1, nil)
 	e1 = AEAD_ENC(akenc, m1, HASH(galongterm, gblongterm, gae1))
@@ -47,6 +75,7 @@ principal Alice[
 Alice -> Bob: [galongterm], gae1, ct, e1
 
 principal Bob[
+	// Decapsulation recovers the same shared secret from the ciphertext.
 	bss = KEM_DECAP(dkb, ct)
 	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss)
 	bkenc = HKDF(bmaster, c1, nil)
@@ -55,6 +84,8 @@ principal Bob[
 
 phase[1]
 
+// The harvest-now-decrypt-later event: every DH private value falls.
+// Conspicuously absent: dkb, the KEM decapsulation key.
 principal Alice[leaks alongterm, ae1]
 principal Bob[leaks blongterm, bs, bo]
 

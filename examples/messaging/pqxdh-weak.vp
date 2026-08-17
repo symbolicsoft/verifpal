@@ -1,19 +1,29 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-
+//
 // Signal PQXDH, with the harvest-now-decrypt-later adversary written as a
 // declared weakening assumption rather than as a list of leaks.
 //
 // pqxdh.vp says "hand the attacker these five private values in phase 1".
 // This model says "discrete logarithm falls in phase 1" by annotating every
-// Diffie-Hellman public key with PUBKEY[weak from phase 1], and leaks nothing
-// at all. The KEM encapsulation key ekb is deliberately NOT annotated: that is
-// the whole hybrid argument, and it is what the message survives on.
+// Diffie-Hellman public key with PUBKEY[weak from phase 1], and leaks
+// nothing at all. A capability annotation goes between the primitive name
+// and its arguments: `[weak]` declares that the primitive's confidentiality
+// fails — for PUBKEY, that holding the public key yields the private key,
+// i.e. discrete log is broken — and `from phase 1` delays the breakage
+// until phase 1, modeling "the cryptography falls later".
+//
+// The KEM encapsulation key ekb is deliberately NOT annotated: that is the
+// whole hybrid argument, and it is what the message survives on.
 //
 // Both models report c0a0. The difference is what they claim. A leaks list
 // enumerates values and is silently wrong if you forget one; the annotation
 // states the assumption itself, and any key derived through an annotated
 // PUBKEY is covered whether or not you thought of it.
+//
+// The protocol body below is identical to pqxdh.vp — see that file for the
+// line-by-line commentary. Only the annotations and the empty phase 1
+// differ.
 
 attacker[active]
 
@@ -30,6 +40,7 @@ principal Bob[
 	gblongterm = PUBKEY[weak from phase 1](blongterm)
 	gbs = PUBKEY[weak from phase 1](bs)
 	gbo = PUBKEY[weak from phase 1](bo)
+	// The one un-annotated key: the KEM stays unbroken by assumption.
 	ekb = PUBKEY(dkb)
 	gbssig = SIGN(blongterm, HASH(c2, gbs))
 	ekbsig = SIGN(blongterm, HASH(c3, ekb))
@@ -57,6 +68,8 @@ principal Bob[
 	m1_d = AEAD_DEC(bkenc, e1, HASH(galongterm, gblongterm, gae1))?
 ]
 
+// Phase 1 contains no leaks at all: the annotations above are the entire
+// adversary model. When this phase is reached, discrete log falls.
 phase[1]
 
 queries[

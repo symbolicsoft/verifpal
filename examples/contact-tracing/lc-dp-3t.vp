@@ -1,14 +1,53 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The "low-cost" design from DP-3T (Decentralized Privacy-Preserving
+// Proximity Tracing), the academic proposal behind the Apple/Google COVID-19
+// exposure-notification system. Each phone holds a daily secret SK and
+// ratchets it one-way, deriving a batch of short-lived broadcast pseudonyms
+// (ephemeral IDs) from each day's secret:
+//
+//   SK_(t+1) = HASH(SK_t)
+//   EphID_t,0 … EphID_t,2 = HKDF(nil, SK_t, BroadcastKey)
+//
+// Phones broadcast EphIDs to whoever is nearby. On diagnosis, the patient
+// uploads one day's SK to a backend, which republishes it; every phone can
+// then re-derive that day's (and, because the ratchet only goes forward,
+// every LATER day's) EphIDs and check its contact log. Uploading SK_1
+// reveals nothing about day 0: that would require inverting HASH.
+//
+// The verdict is c0a1u0:
+//
+//   confidentiality? EphID02A   HOLDS — an EphID that was derived but
+//     never broadcast stays secret, even after SmartphoneA uploads SK1A:
+//     EphID02A hangs off SK0A, one ratchet step BEFORE anything disclosed.
+//   authentication? SmartphoneA -> BackendServer: m2   FAILS — a genuine
+//     modeling catch. The upload m2 = ENC(ephemeral_sk, SK1A) uses plain
+//     symmetric ENC, which (unlike AEAD_ENC) has no integrity: DEC accepts
+//     any ciphertext and silently returns garbage. Verifpal's trace shows
+//     the attacker substituting a recorded ciphertext under the same key
+//     (the authority's trigger message m1), which the backend "decrypts"
+//     and dutifully concatenates into the infected-patients list. The fix
+//     is AEAD_ENC/AEAD_DEC with a checked (`?`) decryption.
+//   unlinkability? EphID02A, EphID00A, EphID01A   HOLDS — the payoff
+//     query: an eavesdropper who heard EphID00A broadcast cannot link it
+//     to its siblings from the same day. Each is an independent-looking
+//     HKDF output; only a holder of SK0A could connect them, and SK0A
+//     never leaves the phone.
 
 attacker[active]
 
 principal SmartphoneA[
 
+	// Public HKDF context string, fixed by the protocol spec ("broadcast
+	// key" in the DP-3T paper) — same for every phone.
 	knows public BroadcastKey
 
+	// Day-0 secret. `generates` = fresh, private, unguessable.
 	generates SK0A
 
+	// One day's batch of broadcast pseudonyms: a single HKDF call binding
+	// three outputs. Knowing one output reveals nothing about the others.
 	EphID00A, EphID01A, EphID02A = HKDF(nil, SK0A, BroadcastKey)
 ]
 
@@ -24,6 +63,9 @@ principal SmartphoneC[
 	EphID00C, EphID01C, EphID02C = HKDF(nil, SK0C, BroadcastKey)
 ]
 
+// Bluetooth proximity: A and B are near each other, then C and B.
+// Broadcasts are unguarded — anyone in radio range, attacker included,
+// hears them. Each phone logs what it heard.
 SmartphoneA -> SmartphoneB: EphID00A
 SmartphoneB -> SmartphoneA: EphID00B
 
@@ -31,6 +73,8 @@ SmartphoneC -> SmartphoneB: EphID01C
 SmartphoneB -> SmartphoneC: EphID01B
 
 principal BackendServer[
+	// The published infected-patients list, initially empty of anything
+	// interesting.
 	knows private infectedPatients0
 ]
 
@@ -38,6 +82,9 @@ BackendServer -> SmartphoneA: infectedPatients0
 BackendServer -> SmartphoneB: infectedPatients0
 BackendServer -> SmartphoneC: infectedPatients0
 
+// A new day: every phone ratchets its secret forward and derives fresh
+// pseudonyms. The old secret is never reused; the chain cannot run
+// backward.
 principal SmartphoneA[
 	SK1A = HASH(SK0A)
 	EphID10A, EphID11A, EphID12A = HKDF(nil, SK1A, BroadcastKey)
@@ -58,18 +105,27 @@ principal SmartphoneA[
 	EphID20A, EphID21A, EphID22A = HKDF(nil, SK2A, BroadcastKey)
 ]
 
+// SmartphoneA's user tests positive. The health authority issues an upload
+// authorization. ephemeral_sk models the secure channel (in reality TLS)
+// between authority, patient, and backend, as a shared symmetric key.
 principal HealthCareAuthority[
 	generates triggerToken
 	knows private ephemeral_sk
 	m1 = ENC(ephemeral_sk, triggerToken)
 ]
 
+// Guarded toward the backend (the authority's channel to it is
+// authenticated), unguarded toward the phone.
 HealthCareAuthority -> BackendServer : [m1]
 HealthCareAuthority -> SmartphoneA : m1
 
 principal SmartphoneA[
 	knows private ephemeral_sk
 	m1_dec = DEC(ephemeral_sk, m1)
+	// The upload: the day-1 secret, for the backend to republish. Plain
+	// ENC here is the model's deliberate weakness — see the header. Note
+	// SK1A is uploaded, not SK0A: disclosure starts at the contagious
+	// window, and earlier days stay private forever.
 	m2 = ENC(ephemeral_sk, SK1A)
 ]
 
@@ -77,10 +133,16 @@ SmartphoneA -> BackendServer: m2
 
 principal BackendServer [
 	knows private ephemeral_sk
+	// DEC never fails and there is no checked assert after it: whatever
+	// arrived — genuine upload or attacker substitution — flows straight
+	// into the published list. This is what the failing authentication
+	// query is pointing at.
 	m2_dec = DEC(ephemeral_sk, m2)
 	infectedPatients1 = CONCAT(infectedPatients0, m2_dec)
 ]
 
+// The updated list goes out to every phone; each can now derive SK1A's
+// EphIDs and check whether it was near SmartphoneA on day 1 or later.
 BackendServer -> SmartphoneA: infectedPatients1
 BackendServer -> SmartphoneB: infectedPatients1
 BackendServer -> SmartphoneC: infectedPatients1
@@ -88,5 +150,8 @@ BackendServer -> SmartphoneC: infectedPatients1
 queries[
 	confidentiality? EphID02A
 	authentication? SmartphoneA -> BackendServer: m2
+	// An unlinkability query takes two or more constants and asks whether
+	// the attacker can tell they belong together — here, whether observed
+	// and unobserved pseudonyms from the same phone can be connected.
 	unlinkability? EphID02A, EphID00A, EphID01A
 ]

@@ -1,17 +1,66 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// TLS 1.3, one round trip, server-authenticated only — the way a browser
+// actually talks to a website: the server proves its identity with a
+// certificate signature, the client proves nothing. The model follows the
+// RFC 8446 shape closely: the HKDF-based key schedule (early secret →
+// handshake secret → master secret, with "derived" steps between), running
+// transcript hashes folded into every derivation, an encrypted server
+// flight carrying certificate + CertificateVerify + Finished, and separate
+// handshake-traffic and application-traffic keys for each direction.
+//
+// The verdict (c0c1c1c1c1c1a0a1a1a0) looks alarming and is in fact exactly
+// the TLS security story. Read the failures with care:
+//
+//   Everything the SERVER sends is protected:
+//     authentication? Server -> Client: serverFlight   HOLDS
+//     authentication? Server -> Client: appData2       HOLDS
+//     confidentiality? appMsg1                          HOLDS
+//   The client's data (appMsg1) stays confidential even though phase 1
+//   leaks the server's signature key: the session keys came from ephemeral
+//   Diffie-Hellman, so a later key compromise opens nothing recorded
+//   earlier — forward secrecy. And the CertificateVerify signature covers
+//   the transcript hash, which includes the client's own gce, so a client
+//   that completes its checked SIGNVERIF knows it shares keys with the
+//   genuine server: no man-in-the-middle can pass that gate.
+//
+//   Everything that depends on WHO THE CLIENT IS fails, because in this
+//   ceremony the client is nobody:
+//     authentication? Client -> Server: clientFinishedEnc   FAILS
+//     authentication? Client -> Server: appData1            FAILS
+//   The server will run the whole handshake with an attacker playing the
+//   client role (replacing gce with a key of its own choosing) — there is
+//   no client certificate to stop it.
+//     confidentiality? sHsTraffic/cHsTraffic/sApTraffic/cApTraffic  FAIL
+//     confidentiality? appMsg2                                       FAILS
+//   These are the SERVER's session secrets, and "the client" in some
+//   session may simply BE the attacker, in which case the server shares
+//   those secrets — and appMsg2, which it encrypts under them — with the
+//   attacker by design. A TLS session key is secret from third parties,
+//   not from your peer; when the peer is unauthenticated, a query about
+//   the server-side key fails. Add client certificates and these pass.
+//
+// This split — per-direction, per-role guarantees rather than one global
+// verdict — is the most important reading skill for real-world models.
 
 attacker[active]
 
 principal Server[
+	// The server's long-term certificate signing key.
 	knows private sigKey
 	gSigKey = PUBKEY(sigKey)
 ]
 
+// The certificate public key reaches the client guarded ([…]): this stands
+// in for the web PKI. The attacker may know it but not replace it.
 Server -> Client: [gSigKey]
 
 principal Client[
+	// Stand-in for the (empty) extensions in the transcript.
 	knows public noExtensions
+	// ClientHello: a fresh ephemeral key share. Unguarded on the wire —
+	// anyone can open a TLS connection, including the attacker.
 	generates ce
 	gce = PUBKEY(ce)
 ]
@@ -20,19 +69,25 @@ Client -> Server: gce
 
 principal Server[
 	knows public noExtensions
+	// ServerHello: the server's ephemeral share.
 	generates se
 	gse = PUBKEY(se)
 
 	dhe = DH_KEX(gce, se)
 
+	// The RFC 8446 key schedule. With no PSK, the early secret is
+	// HKDF-Extract(0, 0) — a public value; secrecy enters only with dhe.
 	earlySecret = HKDF(nil, nil, nil)
 
 	derivedES = HKDF(earlySecret, nil, nil)
 
 	handshakeSecret = HKDF(dhe, derivedES, nil)
 
+	// Transcript hash after ClientHello + ServerHello. Folding it into
+	// every derivation binds the keys to these exact key shares.
 	transcriptCH_SH = HASH(gce, gse)
 
+	// Handshake traffic keys, one per direction.
 	sHsTraffic = HKDF(handshakeSecret, transcriptCH_SH, nil)
 
 	cHsTraffic = HKDF(handshakeSecret, nil, transcriptCH_SH)
@@ -41,14 +96,21 @@ principal Server[
 
 	masterSecret = HKDF(nil, derivedHS, nil)
 
+	// CertificateVerify: the signature that authenticates the server.
+	// It covers the transcript INCLUDING gce, so it cannot be cut out of
+	// this session and replayed into another.
 	transcriptCV = HASH(gce, gse, noExtensions, gSigKey)
 	certVerify = SIGN(sigKey, transcriptCV)
 
+	// Server Finished: a MAC over the transcript under the handshake key.
 	transcriptSF = HASH(gce, gse, noExtensions, gSigKey, certVerify)
 	serverFinished = MAC(sHsTraffic, transcriptSF)
 
+	// The encrypted server flight: certificate, signature, and Finished,
+	// sealed under the server handshake-traffic key.
 	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, gSigKey, certVerify, serverFinished), transcriptCH_SH)
 
+	// Application-traffic keys, derived once the transcript is complete.
 	transcriptFull = HASH(HASH(gce, gse, noExtensions), gSigKey, certVerify, serverFinished)
 	sApTraffic = HKDF(masterSecret, transcriptFull, nil)
 	cApTraffic = HKDF(masterSecret, nil, transcriptFull)
@@ -57,6 +119,7 @@ principal Server[
 Server -> Client: gse, serverFlight
 
 principal Client[
+	// The client mirrors the schedule from its own view of the wire.
 	dhe_c = DH_KEX(gse, ce)
 
 	earlySecret_c = HKDF(nil, nil, nil)
@@ -68,10 +131,15 @@ principal Client[
 	derivedHS_c = HKDF(handshakeSecret_c, nil, nil)
 	masterSecret_c = HKDF(nil, derivedHS_c, nil)
 
+	// Three checked gates in a row — decrypt the flight, verify the
+	// certificate signature, verify Finished. Any failure halts the
+	// client. This chain is why the client's session cannot be MitM'd.
 	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, transcriptCH_SH_c)?
 
 	_, serverPubKey, certVerify_c, serverFinished_c = SPLIT(serverFlightDec)
 
+	// The signature is checked against gSigKey, the PKI-pinned key from
+	// the guarded message — not against whatever key was in the flight.
 	transcriptCV_c = HASH(gce, gse, noExtensions, serverPubKey)
 	sigValid = SIGNVERIF(gSigKey, transcriptCV_c, certVerify_c)?
 
@@ -79,6 +147,10 @@ principal Client[
 	expectedFinished = MAC(sHsTraffic_c, transcriptSF_c)
 	finishedValid = ASSERT(serverFinished_c, expectedFinished)?
 
+	// Client Finished: a MAC, not a signature — it proves key possession,
+	// not identity. This is precisely why client-to-server authentication
+	// fails: any key holder can produce it, and the attacker playing the
+	// client role holds the keys of its own session.
 	transcriptCF = HASH(HASH(gce, gse, noExtensions), serverPubKey, certVerify_c, serverFinished_c)
 	clientFinished = MAC(cHsTraffic_c, transcriptCF)
 
@@ -99,6 +171,7 @@ principal Server[
 	cfValid = ASSERT(clientFinishedDec, expectedCF)?
 ]
 
+// Application data, one message in each direction.
 principal Client[
 	generates appMsg1
 	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, nil)
@@ -124,6 +197,9 @@ principal Client[
 phase[1]
 
 principal Server[
+	// The server's certificate key is compromised AFTER the session.
+	// appMsg1's confidentiality surviving this is the forward-secrecy
+	// guarantee of ephemeral Diffie-Hellman.
 	leaks sigKey
 ]
 

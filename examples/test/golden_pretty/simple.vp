@@ -1,32 +1,72 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The "hello world" of Verifpal: an unauthenticated Diffie-Hellman key
+// exchange, followed by one encrypted message. Both queries FAIL (c1a1),
+// and that is the whole lesson — a DH exchange whose public keys travel
+// over the network with nothing vouching for them is broken against an
+// active attacker, no matter how good the encryption on top of it is.
+//
+// The attack Verifpal finds is the textbook man-in-the-middle: the attacker
+// replaces Alice's public key ga with a public key of its own, so Bob
+// unknowingly computes a shared secret *with the attacker* and encrypts m1
+// under it. The attacker decrypts m1 off the wire (breaking confidentiality),
+// and can likewise hand Alice a ciphertext of its own making that she will
+// happily decrypt (breaking authentication).
+//
+// Exercise: change the first message to `Alice -> Bob: [ga]`. The square
+// brackets "guard" the value — the attacker can still read it, but can no
+// longer replace it, which models Alice's key being distributed out-of-band
+// (a certificate, a QR code, a trusted directory). Guarding both ga and gb
+// makes both queries pass.
+// An active attacker controls the network completely: it reads every
+// message, and may drop, replay, or replace any unguarded value.
+// (The alternative, attacker[passive], only eavesdrops.)
 
 attacker[active]
 
 principal Alice[
+	// `knows public` introduces a value known to everyone, attacker included.
+	// Here c0 is just a public constant used as associated data below.
 	knows public c0
+	// `generates` introduces a fresh random value, private to Alice:
+	// her ephemeral Diffie-Hellman secret key.
 	generates a
+	// PUBKEY(a) is the public half of a — think g^a. Verifpal understands
+	// that DH_KEX(PUBKEY(a), b) and DH_KEX(PUBKEY(b), a) are the same value.
 	ga = PUBKEY(a)
 ]
 
+// ga crosses the network unguarded: the attacker may replace it.
+// This line is where the protocol's fate is sealed.
 Alice -> Bob: ga
 
 principal Bob[
 	knows public c0
 	generates m1, b
-	gb = PUBKEY(b)
-	gab = DH_KEX(ga, b)
+	gb = PUBKEY(b) // Bob derives the shared secret from whatever "ga" he received —
+	// which, under attack, is the attacker's public key, not Alice's.
+	gab = DH_KEX(ga, b) // AEAD_ENC(key, plaintext, associated data): m1 is only as
+	// confidential as gab is secret.
 	e1 = AEAD_ENC(gab, m1, c0)
 ]
 
 Bob -> Alice: gb, e1
 
 principal Alice[
-	gba = DH_KEX(gb, a)
+	gba = DH_KEX(gb, a) // The trailing `?` makes this a *checked* primitive: if decryption
+	// fails (wrong key, forged ciphertext), Alice halts and executes
+	// nothing further. A check constrains the attacker — but here the
+	// attacker can satisfy it by encrypting under a key it shares with
+	// Alice, so the check alone rescues nothing.
 	e1_dec = AEAD_DEC(gba, e1, c0)?
 ]
 
 queries[
+	// FAILS: the attacker substitutes its own key for ga, so Bob encrypts
+	// m1 under a secret the attacker can compute.
 	confidentiality? m1
+	// FAILS: Alice accepts and successfully uses a ciphertext the attacker
+	// authored — she has no way to know e1 really came from Bob.
 	authentication? Bob -> Alice: e1
 ]

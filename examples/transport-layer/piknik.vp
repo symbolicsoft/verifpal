@@ -1,19 +1,58 @@
 // SPDX-FileCopyrightText: © 2021 Daan Sprenkels <daan@dsprenkels.com>
 // SPDX-License-Identifier: GPL-3.0-only OR CC0-1.0
+//
+// Piknik is a "copy across machines" clipboard tool: two clients that share
+// pre-provisioned secrets store and fetch encrypted, signed clipboard
+// content through an untrusted server. This model checks what survives when
+// some of those shared secrets DON'T stay secret: the keyed-hash key skk
+// and the key identifier ekid are handed to the attacker outright with
+// `leaks`, the wire is fully attacker-controlled, and the untrusted server
+// is simply modeled AS the attacker. All queries hold (c0a0a0a0f0):
+//
+//   confidentiality? m    HOLDS — the clipboard content is encrypted under
+//     a key derived from `keygen`, which is never leaked. Losing the MAC
+//     key costs integrity of the framing, not confidentiality of the data.
+//   authentication? Client1 -> Client2: ekid, n, ct   all HOLD — every one
+//     of these values sits under Client1's signature, and forging that
+//     signature would need signprivkey (never leaked). Note what this
+//     demonstrates about the analysis: the attacker *knows* ekid (it was
+//     leaked!) yet still cannot get Client2 to accept a substituted one,
+//     because known-to-the-attacker is not the same as forgeable-by-the-
+//     attacker once a signature check stands in the way.
+//   freshness? m    HOLDS — m is `generates`-fresh and reaches Client2
+//     inside ct, so Client2's view of it cannot be a replay of an older
+//     value.
+//
+// The protocol has two layers, and the queries separate their fates:
+//   1. A keyed-hash challenge-response (h0, h1, h2 under skk, with the
+//      public tags zero/one/two for domain separation). Since skk is
+//      leaked, the attacker can forge this entire layer — it provides
+//      nothing here.
+//   2. Sign-then-encrypt of the actual content. This is the layer doing
+//      all the work, and it holds on its own.
 
 attacker[active]
 
 principal Client1[
+	// Public protocol constants (version tags and domain separators).
 	knows public SK
 	knows public S
 	knows public zero
 	knows public one
 	knows public two
+	// skk: the shared keyed-hash (MAC) key for the handshake layer.
 	knows private skk
+	// signprivkey: Client1's long-term signing key — the one secret that
+	// must hold for authentication to hold.
 	knows private signprivkey
+	// keygen: the shared secret from which the content-encryption key is
+	// derived — the one secret that must hold for confidentiality to hold.
 	knows private keygen
+	// ekid: identifies which derived key encrypts this clipboard entry.
 	knows private ekid
 	signpubkey = PUBKEY(signprivkey)
+	// The deliberate compromises: the attacker gets the MAC key and the
+	// key id. Everything the queries claim is claimed DESPITE this.
 	leaks skk
 	leaks ekid
 ]
@@ -24,11 +63,15 @@ principal Client2[
 	knows private keygen
 ]
 
+// The verification key is guarded ([…]): distributed out-of-band during
+// provisioning, so the attacker cannot substitute its own.
 Client1 -> Client2: [signpubkey]
 
 principal Client1[
 	knows private k
 	generates r
+	// Handshake challenge: a keyed hash over a fresh random r, domain-
+	// separated by the tag `zero`. Forgeable by the attacker (skk leaked).
 	h0 = HASH(skk, zero, r)
 ]
 
@@ -36,7 +79,9 @@ Client1 -> Client2: r, h0
 
 principal Client2[
 	generates rprime
+	// Checked ASSERT: Client2 halts unless h0 matches its own computation.
 	_ = ASSERT(h0, HASH(skk, zero, r))?
+	// Response: tag `one`, chaining h0 to bind the two flows together.
 	h1 = HASH(skk, one, rprime, h0)
 ]
 
@@ -45,11 +90,17 @@ Client2 -> Client1: rprime, h1
 principal Client1[
 	generates ts
 	generates n
+	// m is the clipboard content being copied — the value under test.
 	generates m
 	_ = ASSERT(h1, HASH(skk, one, rprime, h0))?
+	// The content key: a key-exchange between the shared keygen secret
+	// and the key id. Neither DH half's private value is on the wire.
 	gkeygen = PUBKEY(keygen)
 	ct = ENC(DH_KEX(gkeygen, ekid), CONCAT(n, m))
+	// The signature covers the key id, the nonce, and the ciphertext —
+	// this is what makes all three authentication queries hold.
 	signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
+	// Final keyed-hash transcript over the stored record.
 	h2 = HASH(skk, two, h1, S, CONCAT(ts, signature, ekid))
 ]
 
@@ -57,6 +108,9 @@ Client1 -> Client2: h2, ts, signature, ekid, n, ct
 
 principal Client2[
 	_ = ASSERT(h2, HASH(skk, two, h1, S, CONCAT(ts, signature, ekid)))?
+	// The checked SIGNVERIF is the gate that matters: any substitution of
+	// ekid, n, or ct that isn't Client1's original fails here and halts
+	// Client2 before the values are ever used.
 	_ = SIGNVERIF(signpubkey, CONCAT(ekid, n, ct), signature)?
 	gkeygen_ = PUBKEY(keygen)
 	nm_ = DEC(DH_KEX(gkeygen_, ekid), ct)

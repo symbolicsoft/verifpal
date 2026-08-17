@@ -1,5 +1,33 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// A simplified model of the Firefox Sync account protocol ("onepw"): one
+// password, stretched into two independent keys with different destinies —
+// an encryption key the server must NEVER learn, and an authentication
+// token the server is explicitly given. The security of the whole design
+// rests on that split, and both queries hold (c0a0):
+//
+//   confidentiality? data                        HOLDS — the server (and
+//     the attacker) only ever see h2 and the ciphertext e1; the encryption
+//     key h1 never leaves the client, and HKDF's outputs tell you nothing
+//     about each other.
+//   authentication? Server -> ComputerB: e1     HOLDS — ComputerB accepts
+//     e1 only if the *checked* AEAD_DEC under its own password-derived h1b
+//     succeeds. The attacker cannot forge such a ciphertext without the
+//     password, so the only e1 that passes is the one ComputerA created.
+//
+// The instructive move is the HKDF split:
+//     h1, h2 = HKDF(pass, salt, nil)
+// One primitive call binding two outputs. Handing the server h2 does not
+// help it (or an attacker who breaches it) recover h1 — this is what lets a
+// storage server authenticate users whose data it cannot read.
+//
+// Modeling note: `pass` is declared `knows private`, i.e. an unguessable
+// secret. Declaring it `knows password` instead would model a guessable,
+// brute-forceable value, and confidentiality would then rightly fail —
+// anything derived from a password without PW_HASH is treated as crackable
+// offline. The real protocol PBKDF2-stretches the password; `knows private`
+// models the assumption that the stretching succeeded.
 
 attacker[active]
 
@@ -7,22 +35,35 @@ principal ComputerA[
 	knows private username
 	knows private pass
 	knows public salt
+	// The user's Sync data: bookmarks, history — the thing worth protecting.
 	knows private data
 	hashedPassword = HASH(pass, salt)
+	// The key split described above: h1 stays on the client, h2 goes to
+	// the server as the login credential.
 	h1, h2 = HKDF(pass, salt, nil)
+	// Data is sealed under the client-only key before it ever leaves.
 	e1 = AEAD_ENC(h1, data, nil)
 ]
 
+// Declaring principals before their first block is optional but keeps the
+// cast of the protocol visible up front.
 principal ComputerB[]
 
 principal Server[]
 
+// Registration: the server receives the auth token h2 and the ciphertext —
+// and can decrypt nothing. The attacker sees all of this too.
 ComputerA -> Server: username, h2, e1
 
 principal Server[
+	// The server stores a credential digest binding the username to the
+	// auth token, so it can later recognize a returning device.
 	h3 = HASH(HASH(username), h2)
 ]
 
+// A second device owned by the same user: it knows the same password and
+// salt, so it can re-derive both keys from scratch — no key escrow, no
+// server-side recovery, exactly like adding a device to Sync.
 principal ComputerB[
 	knows private username
 	knows private pass
@@ -31,16 +72,24 @@ principal ComputerB[
 	h1b, h2b = HKDF(pass, salt, nil)
 ]
 
+// Login from the new device: it proves knowledge of the password by
+// presenting the derived token, never the password itself.
 ComputerB -> Server: usernameb, h2b
 
 principal Server[
+	// Checked asserts (`?`): if either comparison fails, the server halts
+	// and never releases e1. This is what stops the attacker from simply
+	// asking for the ciphertext under a made-up identity.
 	_ = ASSERT(HASH(username), usernameb)?
 	_ = ASSERT(h3, HASH(usernameb, h2b))?
 ]
 
+// The server hands back the (to it, opaque) ciphertext.
 Server -> ComputerB: e1
 
 principal ComputerB[
+	// The checked decryption is the authentication: only the genuine e1,
+	// sealed under the password-derived key, can pass it.
 	d1 = AEAD_DEC(h1b, e1, nil)?
 ]
 

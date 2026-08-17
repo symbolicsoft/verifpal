@@ -1,44 +1,98 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The Signal protocol: an X3DH handshake followed by three messages of the
+// Double Ratchet. Phase 1 then leaks BOTH parties' long-term identity keys,
+// and every query still holds (c0a0c0a0c0a0) — the model demonstrates the
+// two properties Signal is famous for:
+//
+//   Forward secrecy: message keys descend from ephemeral Diffie-Hellman
+//   shares (via the X3DH master secret and each ratchet step), so a later
+//   compromise of identity keys opens no recorded ciphertext.
+//
+//   Authentication under compromise: the leak happens after phase 0, and
+//   phases model "later" — within the conversation, every ciphertext is
+//   bound to the sender's ratchet state, which the attacker cannot enter
+//   without a private ephemeral it never gets.
+//
+// X3DH in one paragraph: Bob publishes an identity key (gblongterm), a
+// signed "prekey" (gbs, signature gbssig), and a one-time prekey (gbo).
+// Alice combines four DH computations into the master secret:
+//
+//   DH(identity_A, prekey_B)    — authenticates Alice to Bob
+//   DH(ephemeral_A, identity_B) — authenticates Bob to Alice
+//   DH(ephemeral_A, prekey_B)   — freshness from Alice's side
+//   DH(ephemeral_A, onetime_B)  — freshness from Bob's side
+//
+// No single compromised value breaks all four at once. From the master
+// secret, a chain of HKDF root keys and MAC-derived message keys ratchets
+// forward: each message mixes in a fresh ephemeral DH ("the DH ratchet"),
+// so every message is encrypted under a key that exists only for it.
+//
+// Modeling notes: the identity public keys travel guarded ([…]) — Signal
+// users verify safety numbers out-of-band; try removing a guard and
+// watch the queries fail. The prekey signature is verified with a checked
+// SIGNVERIF before Alice uses gbs. See pqxdh.vp for Signal's post-quantum
+// successor to this handshake, and signal_twelve.vp for this same model
+// extended to twelve ratchet messages.
 
 attacker[active]
 
 principal Alice[
+	// Alice's long-term identity key pair.
 	knows private alongterm
 	galongterm = PUBKEY(alongterm)
 ]
 
 principal Bob[
+	// blongterm: identity key. bs: the signed prekey, uploaded to the
+	// server in advance so Alice can start a session while Bob is offline.
 	knows private blongterm, bs
+	// bo: a one-time prekey, fresh per session.
 	generates bo
 	gblongterm = PUBKEY(blongterm)
 	gbs = PUBKEY(bs)
 	gbo = PUBKEY(bo)
+	// Bob signs his prekey with his identity key: this is what stops an
+	// attacker from handing Alice a prekey of its own.
 	gbssig = SIGN(blongterm, gbs)
 ]
 
+// Bob's "prekey bundle", as fetched from the Signal server. The identity
+// key is guarded — its authenticity is anchored out-of-band (safety
+// numbers) — while the rest is protected by the signature, not the wire.
 Bob -> Alice: [gblongterm], gbssig, gbs, gbo
 
 principal Alice[
 	generates ae1
 	gae1 = PUBKEY(ae1)
+	// The four X3DH shared secrets, hashed into the master secret.
 	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1))
+	// First root key / chain key pair.
 	arkba1, ackba1 = HKDF(amaster, nil, nil)
 ]
 
 principal Alice[
 	generates m1, ae2
 	gae2 = PUBKEY(ae2)
+	// Checked signature verification: Alice halts rather than use an
+	// unsigned prekey.
 	_ = SIGNVERIF(gblongterm, gbs, gbssig)?
+	// DH ratchet step: fresh ephemeral ae2 against Bob's prekey.
 	akshared1 = DH_KEX(gbs, ae2)
 	arkab1, ackab1 = HKDF(akshared1, arkba1, nil)
+	// Message key derivation (the symmetric "chain" of the ratchet).
 	akenc1, akenc2 = HKDF(MAC(ackab1, nil), nil, nil)
+	// The associated data binds the ciphertext to both identities and the
+	// ratchet ephemeral — replaying it in another context fails AEAD_DEC.
 	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
 Alice -> Bob: [galongterm], gae1, gae2, e1
 
 principal Bob[
+	// Bob mirrors X3DH from his side: same four DH values, opposite
+	// private/public halves — DH_KEX(PUBKEY(a), b) = DH_KEX(PUBKEY(b), a).
 	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo))
 	brkba1, bckba1 = HKDF(bmaster, nil, nil)
 ]
@@ -47,9 +101,13 @@ principal Bob[
 	bkshared1 = DH_KEX(gae2, bs)
 	brkab1, bckab1 = HKDF(bkshared1, brkba1, nil)
 	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
+	// Checked decryption: a forged or replayed e1 halts Bob here.
 	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))?
 ]
 
+// Message 2: Bob replies, advancing the DH ratchet with his own fresh
+// ephemeral be. Note the root key chaining: each step's HKDF takes the
+// previous root key as salt, so history is folded into every future key.
 principal Bob[
 	generates m2, be
 	gbe = PUBKEY(be)
@@ -68,6 +126,7 @@ principal Alice[
 	m2_d = AEAD_DEC(akenc3, e2, HASH(gblongterm, galongterm, gbe))?
 ]
 
+// Message 3: back to Alice — another full ratchet step.
 principal Alice[
 	generates m3, ae3
 	gae3 = PUBKEY(ae3)
@@ -88,6 +147,9 @@ principal Bob[
 
 phase[1]
 
+// Both identity keys fall — a full long-term compromise of both parties,
+// after the conversation. The ephemerals (ae1, ae2, ae3, be, bs, bo) do
+// not leak; they are what forward secrecy stands on.
 principal Alice[leaks alongterm]
 principal Bob[leaks blongterm]
 

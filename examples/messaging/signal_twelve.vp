@@ -5,7 +5,22 @@
 // The X3DH handshake and the first three messages are unchanged; messages four
 // through twelve simply continue the Double Ratchet: for each message the sender
 // generates a fresh ephemeral, mixes it with the peer's most recent ephemeral
-// public value, and chains the resulting root key onto the previous one.
+// public value, and chains the resulting root key onto the previous one. Every
+// block below is that same three-derivation step — DH_KEX with the newest peer
+// ephemeral, HKDF chaining the root key, HKDF/MAC deriving the message key —
+// applied twelve times; see signal.vp for the line-by-line commentary on one
+// step and on the X3DH handshake.
+//
+// All 24 queries hold (c0a0 twelve times over): as in signal.vp, phase 1 leaks
+// both long-term identity keys, and every message survives because its key
+// descends from ephemerals the attacker never obtains. The ratchet makes this
+// compounding: each step folds a fresh DH secret into the chain, so the
+// attacker would need an unbroken run of twelve ephemerals to follow along.
+//
+// This model doubles as the engine's heaviest benchmark: it is the slowest
+// model in the tree (roughly 50 seconds) and exists precisely to keep the
+// twelve-deep key schedule honest at scale. If you are editing the protocol
+// itself, work on signal.vp instead.
 
 attacker[active]
 

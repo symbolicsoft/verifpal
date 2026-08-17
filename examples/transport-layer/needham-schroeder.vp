@@ -1,17 +1,56 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The Needham-Schroeder symmetric-key protocol (1978): a trusted server S
+// shares a long-term key with each party (k_as with Alice, k_bs with Bob)
+// and mints a fresh session key k_ab on request, delivering Bob's copy as a
+// "ticket" that only Bob can open, routed through Alice.
+//
+// This protocol is one of the founding case studies of protocol analysis:
+// Denning and Sacco showed in 1981 that it lacks freshness for Bob. Bob has
+// no way to tell a fresh ticket from an old one, so an attacker who ever
+// compromises ONE session key can replay that session's ticket forever and
+// speak to Bob using the stale key. The phase[1] leak of k_ab below models
+// exactly that one-time compromise, and every query fails (c1c1a1a1a1):
+//
+//   confidentiality? k_ab   FAILS — leaked outright in phase 1 (by design).
+//   confidentiality? n_b    FAILS — e_n_b was recorded off the wire in
+//                           phase 0; the leaked k_ab opens it retroactively.
+//                           This is the cost of having no forward secrecy.
+//   authentication? …       All three FAIL — with a compromised session key
+//                           and no freshness in the ticket, the attacker
+//                           replays the old ticket to Bob and forges both
+//                           directions of the nonce handshake. Note how the
+//                           traces lean on values recorded from other
+//                           sessions: replay is the heart of every one.
+//
+// The historical fix (used in Kerberos) is a timestamp — or, as in
+// Needham-Schroeder's own 1987 revision, a nonce from Bob inside the ticket.
+//
+// Modeling notes. The server's reply to Alice is guarded with [e_alice]:
+// the attacker may read it but not replace it. That guard is deliberate
+// generosity — even with the server-to-Alice leg protected, the protocol
+// still falls, which makes the point sharper. The classic "decrement the
+// nonce" operation has no symbolic equivalent, so HASH stands in for it.
 
 attacker[active]
 
 principal Alice[
+	// A and B are the principals' names as protocol data (addresses on
+	// the request to the server), distinct from the principals themselves.
 	knows private A
 	knows private B
+	// Long-term key shared between Alice and the server.
 	knows private k_as
+	// Alice's challenge nonce for the server: proves the server's reply
+	// is an answer to *this* request. Note there is no such nonce for
+	// Bob's ticket — that omission is the protocol's flaw.
 	generates n_a
 ]
 
 principal Bob[
 	knows private B
+	// Long-term key shared between Bob and the server.
 	knows private k_bs
 	generates n_b
 ]
@@ -21,29 +60,50 @@ principal Server[
 	knows private k_bs
 ]
 
+// Carol never acts: an empty principal, declared so the attacker's
+// perspective has a bystander to impersonate if it helps. Harmless to
+// remove, kept for fidelity to the usual presentation.
 principal Carol[]
 
+// Message 1: Alice asks the server for a key to talk to B, quoting n_a.
+// Everything here is attacker-replaceable — it is an unprotected request.
 Alice -> Server: A, B, n_a
 
 principal Server[
+	// The fresh session key this run is meant to establish.
 	generates k_ab
+	// The "ticket": k_ab and the claimed initiator A, sealed for Bob.
+	// Nothing in it is fresh from Bob's point of view — no nonce of his,
+	// no timestamp. This is the Denning-Sacco flaw, verbatim.
 	e_bob = AEAD_ENC(k_bs, CONCAT(k_ab, A), nil)
+	// Alice's copy: her nonce (freshness for her), the key, the peer name,
+	// and the ticket to forward.
 	e_alice = AEAD_ENC(k_as, CONCAT(n_a, k_ab, B, e_bob), nil)
 ]
 
+// Message 2, guarded: the attacker cannot substitute the server's reply.
 Server -> Alice: [e_alice]
 
 principal Alice[
 	e_alice_dec = AEAD_DEC(k_as, e_alice, nil)
+	// SPLIT undoes CONCAT, binding each component to a name.
 	n_a_response, k_ab_alice, B_alice, e_bob_alice = SPLIT(e_alice_dec)
+	// The `?` makes the nonce check *enforced*: if it fails, Alice halts.
+	// Alice's half of the protocol is actually sound — she gets freshness.
 	_ = ASSERT(n_a, n_a_response)?
 ]
 
+// Message 3: Alice forwards the ticket. Unguarded — and Bob will accept
+// ANY well-formed ticket under k_bs here, including one recorded from an
+// old session whose key the attacker has since compromised.
 Alice -> Bob: e_bob_alice
 
 principal Bob[
 	e_bob_dec = AEAD_DEC(k_bs, e_bob_alice, nil)
 	k_ab_bob, A_bob = SPLIT(e_bob_dec)
+	// Bob's challenge: he encrypts his nonce under the session key, so
+	// only a holder of k_ab should be able to answer. With a compromised
+	// k_ab, the attacker answers it directly.
 	e_n_b = AEAD_ENC(k_ab_bob, n_b, nil)
 ]
 
@@ -51,6 +111,8 @@ Bob -> Alice: e_n_b
 
 principal Alice[
 	n_b_alice = AEAD_DEC(k_ab_alice, e_n_b, nil)
+	// Stand-in for "n_b - 1": any agreed transformation proving Alice
+	// could read the challenge works symbolically; HASH is the idiom.
 	n_b_minus_one = HASH(n_b_alice)
 	e_n_b_minus_one = AEAD_ENC(k_ab_alice, n_b_minus_one, nil)
 ]
@@ -59,12 +121,20 @@ Alice -> Bob: e_n_b_minus_one
 
 principal Bob[
 	n_b_minus_one_bob = AEAD_DEC(k_ab_bob, e_n_b_minus_one, nil)
+	// Bob's enforced check that his challenge was answered. The attacker
+	// passes it with the compromised key, so it gates nothing.
 	_ = ASSERT(n_b_minus_one_bob, HASH(n_b))?
 ]
 
+// A phase boundary: everything above happened "then"; what follows happens
+// "later". Wire messages from phase 0 are already in the attacker's hands.
 phase[1]
 
 principal Server[
+	// The one-time session-key compromise. `leaks` hands the value to the
+	// attacker directly — modeling a cryptanalyzed, stolen, or subpoenaed
+	// old session key. The long-term keys k_as and k_bs stay secret;
+	// everything that breaks, breaks through this single stale key.
 	leaks k_ab
 ]
 

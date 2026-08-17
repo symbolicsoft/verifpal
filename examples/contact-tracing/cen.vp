@@ -1,9 +1,43 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The CEN (Contact Event Numbers) protocol, an early decentralized COVID-19
+// contact-tracing design from the TCN Coalition. Each phone derives a
+// forward-only chain of keys from a root it never discloses:
+//
+//   rak                      report authorization key (root secret)
+//   rvk    = PUBKEY(rak)     report verification key
+//   cek_0  = HASH(rak)       first chain key
+//   cek_i  = HASH(rvk, cek_(i-1))   each next chain key
+//   cen_i  = HASH(i, cek_i)  the pseudonym broadcast over Bluetooth
+//
+// Phones broadcast cen_i values as rotating pseudonyms. On a positive
+// diagnosis, the patient publishes a signed report containing rvk and ONE
+// chain key cek_j: from it, anyone can roll the chain FORWARD and recompute
+// cen_j, cen_j+1, … to check their own contact log — but nobody can roll it
+// BACKWARD to cek_(j-1) or to rak, because that would mean inverting HASH.
+//
+// The verdict is c0c1c0, and the middle failure is the protocol WORKING:
+//
+//   confidentiality? cek_0A   HOLDS — Alice's report discloses cek_1A;
+//     walking back to cek_0A needs a hash preimage. Pre-report pseudonyms
+//     stay unlinkable to the reporter.
+//   confidentiality? cek_1A   FAILS — deliberately: cek_1A is IN the
+//     published report; revealing it is what lets contacts match. A failing
+//     confidentiality query is not always an attack — here it documents
+//     exactly which part of the chain a report burns.
+//   confidentiality? cen_0C   HOLDS — Charlie never reported, and his
+//     broadcast cen_1C does not expose sibling or earlier chain values.
+//
+// Instructive detail: the report is signed with rak and verified against
+// rvk — and rvk is itself bound into every chain step. A report therefore
+// proves that whoever signed it also OWNS the broadcast pseudonyms being
+// disclosed; nobody can report someone else's chain.
 
 attacker[active]
 
 principal Server[
+	// i0, i1, i2 are public time-interval indices ("day 0", "day 1", …).
 	knows public i0, i1, i2
 ]
 principal Alice[
@@ -28,6 +62,8 @@ principal Charlie[
 	cen_0C = HASH(i0, cek_0C)
 ]
 
+// Everyone ratchets the chain forward one interval. Binding rvk into the
+// step is what later ties a report to its broadcasts.
 principal Alice[
 	cek_1A = HASH(CONCAT(rvkA, cek_0A))
 	cen_1A = HASH(CONCAT(i1, cek_1A))
@@ -41,26 +77,39 @@ principal Charlie[
 	cen_1C = HASH(CONCAT(i1, cek_1C))
 ]
 
+// Bluetooth proximity broadcasts: whoever is nearby (attacker included —
+// these are unguarded) hears the current pseudonym.
 Alice -> Bob: cen_1A
 Bob -> Alice: cen_1B
 
 Bob -> Charlie: cen_1B
 Charlie -> Bob: cen_1C
 
+// Phase 1: later, Alice tests positive and files a report.
 phase[1]
 
 principal Alice [
+	// The memo carries report metadata (its type, length, and payload —
+	// e.g. a health-authority attestation), private until published.
 	knows private memo_type
 	knows private memo_len
 	knows private memo_data
 	memo = CONCAT(memo_type, memo_len, memo_data)
 	cek_2A = HASH(CONCAT(rvkA, cek_1A))
 	cen_2A = HASH(CONCAT(i1, cek_2A))
+	// The report: verification key, the EARLIEST chain key being
+	// disclosed (cek_1A — not cek_0A, not rakA), the interval range it
+	// covers, and the memo. Publishing cek_1A is the deliberate
+	// disclosure that makes the second query fail.
 	report = CONCAT(rvkA, cek_1A, i1, i2, memo)
 	sig = SIGN(rakA, report)
 	m1 = CONCAT(report, sig)
 ]
 
+// The report travels guarded ([…]): the health-authority submission and
+// distribution channel is authenticated, so the attacker reads reports but
+// cannot substitute them. It learns cek_1A here, exactly as any app user
+// would.
 Alice -> Server: [m1]
 
 Server -> Bob: [m1]

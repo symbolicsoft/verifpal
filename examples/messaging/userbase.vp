@@ -1,5 +1,41 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// The end-to-end encryption scheme of Userbase, a database service for web
+// apps in which the server stores only ciphertext. Two users each run a
+// key hierarchy rooted in a memorable password, and each adds a second
+// device that reconstructs everything from that password alone. All four
+// queries hold (c0c0a0a0): the stored items stay confidential from server
+// and network alike, and a device accepts only genuinely-stored items.
+//
+// The model is the canonical demonstration of Verifpal's password
+// machinery:
+//
+//   `knows password passA` declares a GUESSABLE value. Unlike a `private`
+//   value, anything derived from a password with ordinary primitives is
+//   treated as crackable by offline guessing — the attacker holds the
+//   derivation output, tries candidate passwords, and checks. The ONE
+//   primitive that blocks this is PW_HASH, which models slow, salted
+//   password hashing (scrypt, Argon2). Everything in this file therefore
+//   descends from PW_HASH(HASH(pass, salt)); replace that PW_HASH with a
+//   plain HASH and confidentiality collapses.
+//
+// The hierarchy, top to bottom:
+//
+//   password ──PW_HASH──► passwordHkdfKey ──┬─► passwordToken   (server sees)
+//                                           └─► passwordBasedEncryptionKey
+//   seed (random) ──HKDF──► masterKey ──┬─► encryptionKey  (wraps dbKey)
+//                                       ├─► dhPrivateKey
+//                                       └─► hmacKey
+//   dbKey (random) encrypts the actual items.
+//
+// Two ideas to take away. First, key separation: the server is handed
+// passwordToken as a login credential, and learning it does not help with
+// its sibling passwordBasedEncryptionKey — parallel HKDF outputs are
+// independent. Second, key wrapping: the random seed is stored ON the
+// server, encrypted under a password-derived key, which is what lets a
+// brand-new device bootstrap from nothing but the password while the
+// server hosts only ciphertext.
 
 attacker[active]
 
@@ -10,19 +46,31 @@ principal UserB[]
 principal UserB_OtherDevice[]
 
 principal UserA[
+	// The guessable root — see the header.
 	knows password passA
+	// The TRUE cryptographic root: a random seed. The password's only
+	// job is to wrap and unwrap it.
 	generates seedA
 	generates passwordSaltA
 	generates passwordTokenSaltA
 	generates passwordBasedEncryptionKeySaltA
+	// PW_HASH is the guessing barrier: below this line, values may be
+	// derived from the password and still resist offline attack.
 	passwordHashA = PW_HASH(HASH(passA, passwordSaltA))
 	passwordHkdfKeyA = HKDF(passwordHashA, nil, nil)
+	// Two siblings with opposite destinies: the token is SENT to the
+	// server as a login credential; the encryption key never leaves.
 	passwordTokenA = HKDF(passwordHkdfKeyA, passwordTokenSaltA, nil)
 	passwordBasedEncryptionKeyA = HKDF(passwordHkdfKeyA, passwordBasedEncryptionKeySaltA, nil)
+	// Key wrapping: the seed, sealed under a password-derived key, safe
+	// to park on an untrusted server.
 	passwordEncryptedSeedA = AEAD_ENC(passwordBasedEncryptionKeyA, seedA, nil)
 ]
 
 principal UserA[
+	// From the seed, a master key fans out into per-purpose keys. (The
+	// DH and HMAC keys exist in Userbase for sharing and integrity; they
+	// are derived here to model the full hierarchy.)
 	masterKeyA = HKDF(seedA, nil, nil)
 	generates encryptionKeySaltA
 	generates dhKeySaltA
@@ -33,6 +81,9 @@ principal UserA[
 	publicKeyA = PUBKEY(dhPrivateKeyA)
 ]
 
+// Signup: everything the server ever learns. Note what is in this list —
+// the token, the salts (public by nature), and wrapped ciphertext — and
+// what is not: no password, no seed, no encryption key.
 UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, passwordEncryptedSeedA
 
 principal UserB[
@@ -61,6 +112,8 @@ principal UserB[
 
 UserB -> Server: passwordTokenB, publicKeyB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, dhKeySaltB, hmacKeySaltB, passwordBasedEncryptionKeySaltB, passwordEncryptedSeedB
 
+// Storing data: a per-database key, itself wrapped under the hierarchy
+// (another level of key wrapping), then the item under the database key.
 principal UserA[
 	generates dbKeyA
 	encryptedDbKeyA = AEAD_ENC(encryptionKeyA, dbKeyA, nil)
@@ -89,10 +142,17 @@ principal UserB[
 
 UserB -> Server: encryptedItemB
 
+// Adding a device: the server relays the stored blobs and public salts.
+// Nothing in these two messages is sensitive on its own.
 Server -> UserA_OtherDevice: encryptedItemA, encryptedDbKeyA, passwordEncryptedSeedA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, passwordBasedEncryptionKeySaltA
 
 Server -> UserB_OtherDevice: encryptedItemB, encryptedDbKeyB, passwordEncryptedSeedB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, passwordBasedEncryptionKeySaltB
 
+// The new device knows exactly one secret — the password — and re-derives
+// the entire hierarchy: unwrap the seed, rebuild the master key, unwrap
+// the database key, decrypt the item. Every unwrap is a checked (`?`)
+// AEAD_DEC, so a substituted blob halts the device instead of being
+// accepted — that chain of checks is why the authentication queries hold.
 principal UserA_OtherDevice[
 	knows password passA
 	passwordHashA_ = PW_HASH(HASH(passA, passwordSaltA))
