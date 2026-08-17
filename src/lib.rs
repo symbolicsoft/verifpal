@@ -35,6 +35,8 @@ mod testutil;
 pub(crate) mod theory;
 pub mod types;
 pub(crate) mod unlink;
+#[cfg(feature = "cli")]
+pub(crate) mod update;
 pub(crate) mod util;
 pub(crate) mod value;
 pub(crate) mod verify;
@@ -44,6 +46,8 @@ pub use info::{info_banner, info_message};
 pub use json::handle_internal_json;
 pub use pretty::pretty_print;
 pub use types::*;
+#[cfg(feature = "cli")]
+pub use update::{UpdateCheck, update_check_report, update_check_start};
 pub use verify::{verify, verify_with_sessions};
 
 #[cfg(feature = "wasm")]

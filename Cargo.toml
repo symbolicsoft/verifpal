@@ -18,13 +18,14 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli = ["clap", "colored"]
+cli = ["clap", "colored", "ureq"]
 wasm = ["wasm-bindgen"]
 
 [dependencies]
 chrono = "0.4.45"
 clap = { version = "4", features = ["derive"], optional = true }
 colored = { version = "3", optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [package.metadata.wasm-pack.profile.release]

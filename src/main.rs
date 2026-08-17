@@ -4,7 +4,9 @@
 use std::io::Read;
 
 use clap::{Parser, Subcommand};
-use verifpal::{info_banner, pretty_print, verify_with_sessions};
+use verifpal::{
+	info_banner, pretty_print, update_check_report, update_check_start, verify_with_sessions,
+};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -65,6 +67,7 @@ fn main() {
 			result_code,
 			sessions,
 		} => {
+			let update_check = update_check_start(VERSION);
 			if !result_code {
 				info_banner(VERSION);
 			}
@@ -73,9 +76,11 @@ fn main() {
 					if result_code {
 						println!("{}", code);
 					}
+					update_check_report(&update_check);
 				}
 				Err(e) => {
 					eprintln!("Error: {}", e);
+					update_check_report(&update_check);
 					std::process::exit(1);
 				}
 			}
@@ -92,6 +97,7 @@ fn main() {
 			verifpal::handle_internal_json(&subcommand, &input);
 		}
 		Commands::About => {
+			let update_check = update_check_start(VERSION);
 			info_banner(VERSION);
 			println!("Verifpal is authored by Nadim Kobeissi.");
 			println!("The following individuals have contributed");
@@ -114,6 +120,7 @@ fn main() {
 			println!("  - Renaud Lifchitz");
 			println!("  - Sebastian R. Verschoor");
 			println!("  - Tom Roeder");
+			update_check_report(&update_check);
 		}
 	}
 }
