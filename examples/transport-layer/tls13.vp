@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// TLS 1.3, one round trip, server-authenticated only — the way a browser
-// actually talks to a website: the server proves its identity with a
-// certificate signature, the client proves nothing. The model follows the
-// RFC 8446 shape closely: the HKDF-based key schedule (early secret →
-// handshake secret → master secret, with "derived" steps between), running
-// transcript hashes folded into every derivation, an encrypted server
-// flight carrying certificate + CertificateVerify + Finished, and separate
-// handshake-traffic and application-traffic keys for each direction.
+// TLS 1.3 (RFC 9846, which obsoletes RFC 8446), one round trip,
+// server-authenticated only — the way a browser actually talks to a
+// website: the server proves its identity with a certificate signature,
+// the client proves nothing. The model follows the RFC closely: the
+// HKDF-based key schedule of §7.1 (early secret → handshake secret →
+// main secret, with "derived" steps between, and every Derive-Secret
+// separated by its own label string), the running transcript hash of
+// §4.1 folded into every derivation, an encrypted server flight carrying
+// EncryptedExtensions + Certificate + CertificateVerify + Finished,
+// Finished MACs keyed by the dedicated finished keys of §4.5.3, and
+// separate handshake-traffic and application-traffic secrets for each
+// direction.
 //
 // The verdict (c0c1c1c1c1c1a0a1a1a0) looks alarming and is in fact exactly
 // the TLS security story. Read the failures with care:
@@ -57,10 +61,9 @@ principal Server[
 Server -> Client: [gSigKey]
 
 principal Client[
-	// Stand-in for the (empty) extensions in the transcript.
-	knows public noExtensions
-	// ClientHello: a fresh ephemeral key share. Unguarded on the wire —
-	// anyone can open a TLS connection, including the attacker.
+	// ClientHello: a fresh ephemeral key share — RFC 9846 forbids reusing
+	// key shares between connections, hence `generates`. Unguarded on the
+	// wire: anyone can open a TLS connection, including the attacker.
 	generates ce
 	gce = PUBKEY(ce)
 ]
@@ -68,110 +71,146 @@ principal Client[
 Client -> Server: gce
 
 principal Server[
+	// Stand-in for the (empty) EncryptedExtensions message.
 	knows public noExtensions
+	// The §7.1 Derive-Secret labels ("derived", "finished",
+	// "s hs traffic", …). Every derivation carries its own public label
+	// string; this domain separation is what keeps the two directions'
+	// keys, the "derived" steps and the finished keys distinct even
+	// where they share the same secret.
+	knows public labelDerived, labelFinished
+	knows public labelSHsTraffic, labelCHsTraffic
+	knows public labelSApTraffic, labelCApTraffic
+
 	// ServerHello: the server's ephemeral share.
 	generates se
 	gse = PUBKEY(se)
 
 	dhe = DH_KEX(gce, se)
 
-	// The RFC 8446 key schedule. With no PSK, the early secret is
+	// The §7.1 key schedule. HKDF here stands in for both RFC functions:
+	// HKDF-Extract(salt, ikm) is HKDF(salt, ikm, nil), and
+	// Derive-Secret(secret, label, messages) is HKDF(secret, label,
+	// transcriptHash). With no PSK, the early secret is
 	// HKDF-Extract(0, 0) — a public value; secrecy enters only with dhe.
 	earlySecret = HKDF(nil, nil, nil)
-
-	derivedES = HKDF(earlySecret, nil, nil)
-
-	handshakeSecret = HKDF(dhe, derivedES, nil)
+	derivedES = HKDF(earlySecret, labelDerived, nil)
+	handshakeSecret = HKDF(derivedES, dhe, nil)
 
 	// Transcript hash after ClientHello + ServerHello. Folding it into
 	// every derivation binds the keys to these exact key shares.
 	transcriptCH_SH = HASH(gce, gse)
 
-	// Handshake traffic keys, one per direction.
-	sHsTraffic = HKDF(handshakeSecret, transcriptCH_SH, nil)
+	// Handshake traffic secrets, one per direction.
+	sHsTraffic = HKDF(handshakeSecret, labelSHsTraffic, transcriptCH_SH)
+	cHsTraffic = HKDF(handshakeSecret, labelCHsTraffic, transcriptCH_SH)
 
-	cHsTraffic = HKDF(handshakeSecret, nil, transcriptCH_SH)
+	derivedHS = HKDF(handshakeSecret, labelDerived, nil)
+	// The main secret — RFC 9846's name for what RFC 8446 called the
+	// master secret: HKDF-Extract with the derived secret as salt and a
+	// zero IKM.
+	mainSecret = HKDF(derivedHS, nil, nil)
 
-	derivedHS = HKDF(handshakeSecret, nil, nil)
+	// The transcript is a running hash (§4.1): each point extends the
+	// previous one with the messages since. This one reaches through
+	// EncryptedExtensions + Certificate.
+	transcriptCert = HASH(transcriptCH_SH, noExtensions, gSigKey)
 
-	masterSecret = HKDF(nil, derivedHS, nil)
+	// CertificateVerify (§4.5.2): the signature that authenticates the
+	// server. It covers the transcript INCLUDING gce, so it cannot be
+	// cut out of this session and replayed into another. (The RFC also
+	// prepends a pad and context string before signing — cross-protocol
+	// domain separation, elided here.)
+	certVerify = SIGN(sigKey, transcriptCert)
 
-	// CertificateVerify: the signature that authenticates the server.
-	// It covers the transcript INCLUDING gce, so it cannot be cut out of
-	// this session and replayed into another.
-	transcriptCV = HASH(gce, gse, noExtensions, gSigKey)
-	certVerify = SIGN(sigKey, transcriptCV)
+	// Server Finished (§4.5.3): a MAC over the transcript through
+	// CertificateVerify, keyed by a dedicated finished key expanded from
+	// the handshake-traffic secret — not by the traffic secret itself.
+	sFinishedKey = HKDF(sHsTraffic, labelFinished, nil)
+	transcriptCV = HASH(transcriptCert, certVerify)
+	serverFinished = MAC(sFinishedKey, transcriptCV)
 
-	// Server Finished: a MAC over the transcript under the handshake key.
-	transcriptSF = HASH(gce, gse, noExtensions, gSigKey, certVerify)
-	serverFinished = MAC(sHsTraffic, transcriptSF)
+	// The encrypted server flight: EncryptedExtensions, certificate,
+	// signature and Finished, sealed under the server handshake-traffic
+	// secret (standing in for the record keys §7.3 expands from it).
+	// The AEAD's additional data is the public record header (§5.2),
+	// nil here — it is the KEY that binds these bytes to the transcript.
+	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, gSigKey, certVerify, serverFinished), nil)
 
-	// The encrypted server flight: certificate, signature, and Finished,
-	// sealed under the server handshake-traffic key.
-	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, gSigKey, certVerify, serverFinished), transcriptCH_SH)
-
-	// Application-traffic keys, derived once the transcript is complete.
-	transcriptFull = HASH(HASH(gce, gse, noExtensions), gSigKey, certVerify, serverFinished)
-	sApTraffic = HKDF(masterSecret, transcriptFull, nil)
-	cApTraffic = HKDF(masterSecret, nil, transcriptFull)
+	// Application-traffic secrets, derived once the transcript reaches
+	// through server Finished.
+	transcriptSFin = HASH(transcriptCV, serverFinished)
+	sApTraffic = HKDF(mainSecret, labelSApTraffic, transcriptSFin)
+	cApTraffic = HKDF(mainSecret, labelCApTraffic, transcriptSFin)
 ]
 
 Server -> Client: gse, serverFlight
 
 principal Client[
-	// The client mirrors the schedule from its own view of the wire.
+	knows public labelDerived, labelFinished
+	knows public labelSHsTraffic, labelCHsTraffic
+	knows public labelSApTraffic, labelCApTraffic
+
+	// The client mirrors the key schedule from its own view of the wire.
 	dhe_c = DH_KEX(gse, ce)
 
 	earlySecret_c = HKDF(nil, nil, nil)
-	derivedES_c = HKDF(earlySecret_c, nil, nil)
-	handshakeSecret_c = HKDF(dhe_c, derivedES_c, nil)
+	derivedES_c = HKDF(earlySecret_c, labelDerived, nil)
+	handshakeSecret_c = HKDF(derivedES_c, dhe_c, nil)
 	transcriptCH_SH_c = HASH(gce, gse)
-	sHsTraffic_c = HKDF(handshakeSecret_c, transcriptCH_SH_c, nil)
-	cHsTraffic_c = HKDF(handshakeSecret_c, nil, transcriptCH_SH_c)
-	derivedHS_c = HKDF(handshakeSecret_c, nil, nil)
-	masterSecret_c = HKDF(nil, derivedHS_c, nil)
+	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptCH_SH_c)
+	cHsTraffic_c = HKDF(handshakeSecret_c, labelCHsTraffic, transcriptCH_SH_c)
+	derivedHS_c = HKDF(handshakeSecret_c, labelDerived, nil)
+	mainSecret_c = HKDF(derivedHS_c, nil, nil)
 
 	// Three checked gates in a row — decrypt the flight, verify the
 	// certificate signature, verify Finished. Any failure halts the
 	// client. This chain is why the client's session cannot be MitM'd.
-	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, transcriptCH_SH_c)?
+	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, nil)?
 
-	_, serverPubKey, certVerify_c, serverFinished_c = SPLIT(serverFlightDec)
+	ee_c, serverPubKey, certVerify_c, serverFinished_c = SPLIT(serverFlightDec)
 
-	// The signature is checked against gSigKey, the PKI-pinned key from
-	// the guarded message — not against whatever key was in the flight.
-	transcriptCV_c = HASH(gce, gse, noExtensions, serverPubKey)
-	sigValid = SIGNVERIF(gSigKey, transcriptCV_c, certVerify_c)?
+	// The client extends its running transcript with what it actually
+	// RECEIVED in the flight (§4.1) — but the signature is checked
+	// against gSigKey, the PKI-pinned key from the guarded message, not
+	// against whatever key was in the flight.
+	transcriptCert_c = HASH(transcriptCH_SH_c, ee_c, serverPubKey)
+	sigValid = SIGNVERIF(gSigKey, transcriptCert_c, certVerify_c)?
 
-	transcriptSF_c = HASH(gce, gse, noExtensions, serverPubKey, certVerify_c)
-	expectedFinished = MAC(sHsTraffic_c, transcriptSF_c)
+	sFinishedKey_c = HKDF(sHsTraffic_c, labelFinished, nil)
+	transcriptCV_c = HASH(transcriptCert_c, certVerify_c)
+	expectedFinished = MAC(sFinishedKey_c, transcriptCV_c)
 	finishedValid = ASSERT(serverFinished_c, expectedFinished)?
+
+	transcriptSFin_c = HASH(transcriptCV_c, serverFinished_c)
 
 	// Client Finished: a MAC, not a signature — it proves key possession,
 	// not identity. This is precisely why client-to-server authentication
 	// fails: any key holder can produce it, and the attacker playing the
 	// client role holds the keys of its own session.
-	transcriptCF = HASH(HASH(gce, gse, noExtensions), serverPubKey, certVerify_c, serverFinished_c)
-	clientFinished = MAC(cHsTraffic_c, transcriptCF)
+	cFinishedKey = HKDF(cHsTraffic_c, labelFinished, nil)
+	clientFinished = MAC(cFinishedKey, transcriptSFin_c)
 
-	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, transcriptCF)
+	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, nil)
 
-	transcriptFull_c = HASH(HASH(gce, gse, noExtensions), serverPubKey, certVerify_c, serverFinished_c)
-	sApTraffic_c = HKDF(masterSecret_c, transcriptFull_c, nil)
-	cApTraffic_c = HKDF(masterSecret_c, nil, transcriptFull_c)
+	sApTraffic_c = HKDF(mainSecret_c, labelSApTraffic, transcriptSFin_c)
+	cApTraffic_c = HKDF(mainSecret_c, labelCApTraffic, transcriptSFin_c)
 ]
 
 Client -> Server: clientFinishedEnc
 
 principal Server[
-	transcriptCF_s = HASH(HASH(gce, gse, noExtensions), gSigKey, certVerify, serverFinished)
+	clientFinishedDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, nil)?
 
-	clientFinishedDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, transcriptCF_s)?
-	expectedCF = MAC(cHsTraffic, transcriptCF_s)
+	// The server expects the client's Finished under the client-side
+	// finished key, over the transcript through server Finished (§4.5).
+	cFinishedKey_s = HKDF(cHsTraffic, labelFinished, nil)
+	expectedCF = MAC(cFinishedKey_s, transcriptSFin)
 	cfValid = ASSERT(clientFinishedDec, expectedCF)?
 ]
 
-// Application data, one message in each direction.
+// Application data, one message in each direction, under the
+// per-direction application-traffic secrets.
 principal Client[
 	generates appMsg1
 	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, nil)

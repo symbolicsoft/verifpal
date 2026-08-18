@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // The Signal protocol: an X3DH handshake followed by three messages of the
-// Double Ratchet. Phase 1 then leaks BOTH parties' long-term identity keys,
-// and every query still holds (c0a0c0a0c0a0) — the model demonstrates the
-// two properties Signal is famous for:
+// Double Ratchet, following the two Signal specifications (X3DH revision 1,
+// The Double Ratchet Algorithm revision 4). Phase 1 then leaks BOTH parties'
+// long-term identity keys, and every query still holds (c0a0c0a0c0a0) — the
+// model demonstrates the two properties Signal is famous for:
 //
 //   Forward secrecy: message keys descend from ephemeral Diffie-Hellman
-//   shares (via the X3DH master secret and each ratchet step), so a later
+//   shares (via the X3DH secret and each ratchet step), so a later
 //   compromise of identity keys opens no recorded ciphertext.
 //
 //   Authentication under compromise: the leak happens after phase 0, and
@@ -15,40 +16,62 @@
 //   bound to the sender's ratchet state, which the attacker cannot enter
 //   without a private ephemeral it never gets.
 //
-// X3DH in one paragraph: Bob publishes an identity key (gblongterm), a
-// signed "prekey" (gbs, signature gbssig), and a one-time prekey (gbo).
-// Alice combines four DH computations into the master secret:
+// X3DH in one paragraph: Bob publishes an identity key IK_B (gblongterm), a
+// signed prekey SPK_B (gbs, signature gbssig) and a one-time prekey OPK_B
+// (gbo). Alice verifies the prekey signature, generates an ephemeral EK_A
+// (ae1), and derives the session secret SK (amaster) from four DH values:
 //
-//   DH(identity_A, prekey_B)    — authenticates Alice to Bob
-//   DH(ephemeral_A, identity_B) — authenticates Bob to Alice
-//   DH(ephemeral_A, prekey_B)   — freshness from Alice's side
-//   DH(ephemeral_A, onetime_B)  — freshness from Bob's side
+//   DH1 = DH(IK_A, SPK_B)   — authenticates Alice to Bob
+//   DH2 = DH(EK_A, IK_B)    — authenticates Bob to Alice
+//   DH3 = DH(EK_A, SPK_B)   — forward secrecy from Alice's side
+//   DH4 = DH(EK_A, OPK_B)   — forward secrecy from Bob's side
+//   SK  = KDF(DH1 || DH2 || DH3 || DH4)
 //
-// No single compromised value breaks all four at once. From the master
-// secret, a chain of HKDF root keys and MAC-derived message keys ratchets
-// forward: each message mixes in a fresh ephemeral DH ("the DH ratchet"),
-// so every message is encrypted under a key that exists only for it.
+// No single compromised value breaks all four at once. SK then seeds the
+// Double Ratchet: it is the initial root key, and Bob's signed prekey
+// doubles as his initial ratchet key pair (Double Ratchet §7.1). Every
+// ratchet step below is the spec's key schedule:
+//
+//   RK', CK = KDF_RK(RK, DH(own ratchet key, peer ratchet key))
+//             = HKDF(salt: RK, ikm: the fresh DH share)
+//   mk      = KDF_CK(CK) — an HMAC keyed by the chain key: MAC(ck, nil)
+//
+// and the AEAD key is expanded from mk the way the spec's recommended
+// ENCRYPT does internally: a zero-salt HKDF of mk (§7.2). This conversation
+// alternates strictly, so every send answers a freshly received ratchet
+// public key with a full DH ratchet step; each chain key therefore yields
+// exactly one message key, and KDF_CK's next-chain-key output is elided.
+// New ratchet keys are generated at send time — the deferred variant of
+// §8.5. The associated data models CONCAT(AD, header): the X3DH identity
+// binding AD = Encode(IK_A) || Encode(IK_B), in that fixed order for both
+// directions, plus the header's ratchet public key (its message counters
+// carry no secrets and are elided).
 //
 // Modeling notes: the identity public keys travel guarded ([…]) — Signal
-// users verify safety numbers out-of-band; try removing a guard and
-// watch the queries fail. The prekey signature is verified with a checked
-// SIGNVERIF before Alice uses gbs. See pqxdh.vp for Signal's post-quantum
+// users verify safety numbers out-of-band; try removing a guard and watch
+// the queries fail. The prekey signature is verified with a checked
+// SIGNVERIF before Alice touches gbs, exactly as X3DH §3.3 orders the
+// steps. bs is `knows private` while bo is `generates`: under Verifpal's
+// parallel sessions, the medium-term signed prekey is shared across
+// sessions while each session gets a fresh one-time prekey, matching the
+// two lifetimes in the spec. See pqxdh.vp for Signal's post-quantum
 // successor to this handshake, and signal_twelve.vp for this same model
 // extended to twelve ratchet messages.
 
 attacker[active]
 
 principal Alice[
-	// Alice's long-term identity key pair.
+	// Alice's long-term identity key pair, IK_A.
 	knows private alongterm
 	galongterm = PUBKEY(alongterm)
 ]
 
 principal Bob[
-	// blongterm: identity key. bs: the signed prekey, uploaded to the
-	// server in advance so Alice can start a session while Bob is offline.
+	// blongterm: the identity key IK_B. bs: the signed prekey SPK_B,
+	// uploaded to the server in advance so Alice can start a session while
+	// Bob is offline — it doubles as Bob's initial ratchet key pair.
 	knows private blongterm, bs
-	// bo: a one-time prekey, fresh per session.
+	// bo: a one-time prekey OPK_B, fresh per session.
 	generates bo
 	gblongterm = PUBKEY(blongterm)
 	gbs = PUBKEY(bs)
@@ -64,27 +87,29 @@ principal Bob[
 Bob -> Alice: [gblongterm], gbssig, gbs, gbo
 
 principal Alice[
+	// Checked signature verification, before the prekey is used anywhere:
+	// Alice aborts rather than run X3DH against an unsigned prekey.
+	_ = SIGNVERIF(gblongterm, gbs, gbssig)?
 	generates ae1
 	gae1 = PUBKEY(ae1)
-	// The four X3DH shared secrets, hashed into the master secret.
+	// The four X3DH shared secrets, combined into the session secret SK.
 	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1))
-	// First root key / chain key pair.
-	arkba1, ackba1 = HKDF(amaster, nil, nil)
 ]
 
 principal Alice[
 	generates m1, ae2
+	// ae2 is Alice's initial ratchet key; Bob's half is his signed prekey.
 	gae2 = PUBKEY(ae2)
-	// Checked signature verification: Alice halts rather than use an
-	// unsigned prekey.
-	_ = SIGNVERIF(gblongterm, gbs, gbssig)?
-	// DH ratchet step: fresh ephemeral ae2 against Bob's prekey.
 	akshared1 = DH_KEX(gbs, ae2)
-	arkab1, ackab1 = HKDF(akshared1, arkba1, nil)
-	// Message key derivation (the symmetric "chain" of the ratchet).
-	akenc1, akenc2 = HKDF(MAC(ackab1, nil), nil, nil)
-	// The associated data binds the ciphertext to both identities and the
-	// ratchet ephemeral — replaying it in another context fails AEAD_DEC.
+	// Ratchet initialization, one root-KDF step: SK is the initial root
+	// key, mixed with the first ratchet DH share — KDF_RK(SK, DH(ae2, SPK_B)).
+	arkab1, ackab1 = HKDF(amaster, akshared1, nil)
+	// Message key derivation: KDF_CK is an HMAC keyed by the chain key,
+	// and ENCRYPT expands it into the AEAD key with a zero-salt HKDF.
+	akenc1 = HKDF(nil, MAC(ackab1, nil), nil)
+	// The associated data binds both identities — AD = IK_A || IK_B, the
+	// same order in both directions — and the header's ratchet key, so
+	// replaying the ciphertext in another context fails AEAD_DEC.
 	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
@@ -94,36 +119,37 @@ principal Bob[
 	// Bob mirrors X3DH from his side: same four DH values, opposite
 	// private/public halves — DH_KEX(PUBKEY(a), b) = DH_KEX(PUBKEY(b), a).
 	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo))
-	brkba1, bckba1 = HKDF(bmaster, nil, nil)
 ]
 
 principal Bob[
+	// The receiving half of the same ratchet step.
 	bkshared1 = DH_KEX(gae2, bs)
-	brkab1, bckab1 = HKDF(bkshared1, brkba1, nil)
-	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
+	brkab1, bckab1 = HKDF(bmaster, bkshared1, nil)
+	bkenc1 = HKDF(nil, MAC(bckab1, nil), nil)
 	// Checked decryption: a forged or replayed e1 halts Bob here.
 	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))?
 ]
 
 // Message 2: Bob replies, advancing the DH ratchet with his own fresh
-// ephemeral be. Note the root key chaining: each step's HKDF takes the
-// previous root key as salt, so history is folded into every future key.
+// ephemeral be, generated at send time (the deferred variant of §8.5).
+// Note the root-key chaining: each KDF_RK takes the previous root key as
+// its salt, so history is folded into every future key.
 principal Bob[
 	generates m2, be
 	gbe = PUBKEY(be)
 	bkshared2 = DH_KEX(gae2, be)
-	brkba2, bckba2 = HKDF(bkshared2, brkab1, nil)
-	bkenc3, bkenc4 = HKDF(MAC(bckba2, nil), nil, nil)
-	e2 = AEAD_ENC(bkenc3, m2, HASH(gblongterm, galongterm, gbe))
+	brkba2, bckba2 = HKDF(brkab1, bkshared2, nil)
+	bkenc2 = HKDF(nil, MAC(bckba2, nil), nil)
+	e2 = AEAD_ENC(bkenc2, m2, HASH(galongterm, gblongterm, gbe))
 ]
 
 Bob -> Alice: gbe, e2
 
 principal Alice[
 	akshared2 = DH_KEX(gbe, ae2)
-	arkba2, ackba2 = HKDF(akshared2, arkab1, nil)
-	akenc3, akenc4 = HKDF(MAC(ackba2, nil), nil, nil)
-	m2_d = AEAD_DEC(akenc3, e2, HASH(gblongterm, galongterm, gbe))?
+	arkba2, ackba2 = HKDF(arkab1, akshared2, nil)
+	akenc2 = HKDF(nil, MAC(ackba2, nil), nil)
+	m2_d = AEAD_DEC(akenc2, e2, HASH(galongterm, gblongterm, gbe))?
 ]
 
 // Message 3: back to Alice — another full ratchet step.
@@ -131,18 +157,18 @@ principal Alice[
 	generates m3, ae3
 	gae3 = PUBKEY(ae3)
 	akshared3 = DH_KEX(gbe, ae3)
-	arkab3, ackab3 = HKDF(akshared3, arkba2, nil)
-	akenc5, akenc6 = HKDF(MAC(ackab3, nil), nil, nil)
-	e3 = AEAD_ENC(akenc5, m3, HASH(gblongterm, galongterm, gae3))
+	arkab3, ackab3 = HKDF(arkba2, akshared3, nil)
+	akenc3 = HKDF(nil, MAC(ackab3, nil), nil)
+	e3 = AEAD_ENC(akenc3, m3, HASH(galongterm, gblongterm, gae3))
 ]
 
 Alice -> Bob: gae3, e3
 
 principal Bob[
 	bkshared3 = DH_KEX(gae3, be)
-	brkab3, bckab3 = HKDF(bkshared3, brkba2, nil)
-	bkenc5, bkenc6 = HKDF(MAC(bckab3, nil), nil, nil)
-	m3_d = AEAD_DEC(bkenc5, e3, HASH(gblongterm, galongterm, gae3))?
+	brkab3, bckab3 = HKDF(brkba2, bkshared3, nil)
+	bkenc3 = HKDF(nil, MAC(bckab3, nil), nil)
+	m3_d = AEAD_DEC(bkenc3, e3, HASH(galongterm, gblongterm, gae3))?
 ]
 
 phase[1]

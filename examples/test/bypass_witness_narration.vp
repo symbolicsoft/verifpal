@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+//
+// A cloud-backup shape: Alice encrypts a file to Bob's long-term key under a
+// fresh ephemeral, binding her own public key as associated data, and the
+// Server relays. Nothing signs the upload, so `a1` is genuine: the attacker
+// picks its own ephemeral, computes DH_KEX(g_bob_longterm, nil), and forges a
+// ciphertext Bob's checked AEAD_DEC accepts — `encrypted_file_alice_a` is used
+// without having been sent by the Server. `c0` holds because the honest file
+// is encrypted to Bob's guarded long-term key.
+//
+// The model is pinned for its *narration*, not just its code: resolving the
+// query goes through a defeated check (Bob's AEAD_DEC fails on the substituted
+// ciphertext until the attacker also substitutes g_file_alice_a_key, which
+// makes the decryption key derivable). The witness minimizer once read that
+// bypass consequence back out of the mutation record and installed it directly
+// into Bob's own `decrypted_file_alice_a` slot — narrating an action no
+// attacker can take, and dropping the ephemeral-key substitution the attack
+// actually needs. `a_witness_narrates_only_actions_the_attacker_can_take`
+// in model_tests.rs asserts both halves.
+
+attacker[active]
+
+principal Alice[
+	knows private file_alice_a
+	knows private alice_longterm
+	g_alice_longterm = PUBKEY(alice_longterm)
+]
+
+principal Bob[
+	knows private bob_longterm
+	g_bob_longterm = PUBKEY(bob_longterm)
+]
+
+principal Server[
+	knows private server_longterm
+	g_server_longterm = PUBKEY(server_longterm)
+]
+
+Alice -> Server: [g_alice_longterm]
+
+Server -> Alice: g_server_longterm
+
+Bob -> Alice: [g_bob_longterm]
+
+principal Alice[
+	generates file_alice_a_key
+	g_file_alice_a_key = PUBKEY(file_alice_a_key)
+	file_alice_a_key_alice_shared_secret = DH_KEX(g_bob_longterm, file_alice_a_key)
+	encrypted_file_alice_a = AEAD_ENC(file_alice_a_key_alice_shared_secret, file_alice_a, g_alice_longterm)
+]
+
+Alice -> Server: encrypted_file_alice_a, g_file_alice_a_key
+
+Server -> Bob: encrypted_file_alice_a, [g_alice_longterm], g_file_alice_a_key
+
+principal Bob[
+	bob_alice_shared_secret = DH_KEX(g_file_alice_a_key, bob_longterm)
+	decrypted_file_alice_a = AEAD_DEC(bob_alice_shared_secret, encrypted_file_alice_a, g_alice_longterm)?
+]
+
+queries[
+	confidentiality? file_alice_a
+	authentication? Server -> Bob: encrypted_file_alice_a
+]
