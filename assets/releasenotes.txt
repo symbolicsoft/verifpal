@@ -1,2 +1,1 @@
-Verifpal reaches 1.0. A toy becomes an instrument:
-https://symbolic.software/blog/2026-08-15-verifpal-1-0/
+Verifpal 1.0.1 adds an automatic update checker and improves authentication trace narration.
