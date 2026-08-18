@@ -146,7 +146,10 @@ fn query_authentication(
 	};
 	result.resolved = true;
 	let assigned = &ps.values[index].value;
-	let before = &ps.values[index].pre_rewrite;
+	let before = match (&ps.values[index].bypassed, km.slots.get(index)) {
+		(Some(_), Some(slot)) => &slot.initial_value,
+		_ => &ps.values[index].pre_rewrite,
+	};
 	let seed = attacker
 		.knows(assigned)
 		.map(|i| recorded_mutations(attacker, i))

@@ -947,3 +947,37 @@ fn test_kem_freshness() {
 fn test_minimal_witness() {
 	run_model("minimal_witness.vp", "c1");
 }
+#[test]
+fn test_bypass_witness_narration() {
+	run_model("bypass_witness_narration.vp", "c0a1");
+}
+#[test]
+fn a_witness_narrates_only_actions_the_attacker_can_take() {
+	let (results, _) =
+		crate::verify::verify("examples/test/bypass_witness_narration.vp").expect("verify");
+	let auth = results
+		.iter()
+		.find(|r| r.resolved)
+		.expect("the authentication query fails");
+	assert!(
+		!auth.summary.contains("replaces decrypted_file_alice_a"),
+		"decrypted_file_alice_a is Bob's own computation: no wire crosses it, so a \
+		 trace claiming the attacker replaces it describes an action no attacker can \
+		 take. Narrated: {}",
+		auth.summary
+	);
+	assert!(
+		auth.summary.contains("replaces g_file_alice_a_key"),
+		"the forgery is only accepted because the ephemeral public key was \
+		 substituted; a trace without that step hides the attack's load-bearing \
+		 move. Narrated: {}",
+		auth.summary
+	);
+	assert!(
+		auth.summary.contains("is successfully used in AEAD_DEC"),
+		"the value is used in Bob's decryption; naming the slot whose injected \
+		 key happens to share a term reports a usage that never happened. \
+		 Narrated: {}",
+		auth.summary
+	);
+}

@@ -92,6 +92,11 @@ pub(crate) enum Step {
 		recipient: Arc<str>,
 		items: Vec<MutationItem>,
 	},
+	Bypass {
+		principal: Arc<str>,
+		slot: Arc<str>,
+		key: String,
+	},
 	Gate {
 		principal: Arc<str>,
 		primitive: String,
@@ -147,16 +152,21 @@ pub(crate) fn mutation_steps(
 	let shadowed = shadowed_names(km, ps);
 	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
+	let mut bypasses: Vec<Step> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		if !reportable(sv) {
 			continue;
 		}
 		let sm = &ps.meta[i];
-		let sender = km
-			.slots
-			.get(i)
-			.map(|slot| slot.creator)
-			.unwrap_or(sv.provenance.creator);
+		if sv.provenance.bypass_injected && sv.provenance.sender != ATTACKER_ID {
+			bypasses.push(Step::Bypass {
+				principal: Arc::from(ps.name.as_str()),
+				slot: Arc::clone(&sm.constant.name),
+				key: table.compress_excluding(&sv.pre_rewrite, mutated.as_slice()),
+			});
+			continue;
+		}
+		let sender = wire_sender(km, ps, i);
 		let own = mutated.as_slice();
 		let item = MutationItem {
 			name: Arc::clone(&sm.constant.name),
@@ -183,7 +193,17 @@ pub(crate) fn mutation_steps(
 			recipient: Arc::from(km.principal_name(recipient)),
 			items,
 		})
+		.chain(bypasses)
 		.collect()
+}
+
+fn wire_sender(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> PrincipalId {
+	ps.meta[i]
+		.known_by
+		.iter()
+		.find_map(|&(recipient, from)| (recipient == ps.id).then_some(from))
+		.or_else(|| km.slots.get(i).map(|slot| slot.creator))
+		.unwrap_or(ps.values[i].provenance.creator)
 }
 
 pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
@@ -550,6 +570,15 @@ fn render(steps: &[Step]) -> String {
 				recipient,
 				items,
 			} => render_mutations(sender, recipient, items),
+			Step::Bypass {
+				principal,
+				slot,
+				key,
+			} => format!(
+				"{} does not halt at {}: the check is defeated, accepting {} because \
+				 Attacker holds its private key.",
+				principal, slot, key,
+			),
 			Step::Gate {
 				principal,
 				primitive,
@@ -719,6 +748,110 @@ mod tests {
 			}
 			other => panic!("expected Mutations, got {:?}", other),
 		}
+	}
+
+	#[test]
+	fn mutation_steps_attribute_the_wire_sender_not_the_creator() {
+		use crate::narrate::{NameTable, Step, mutation_steps};
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private ws_a\n\
+			ws_gx = PUBKEY(ws_a)\n\
+			]\n\
+			Alice -> Server: ws_gx\n\
+			principal Server[\n\
+			ws_h = HASH(ws_gx)\n\
+			]\n\
+			Server -> Bob: ws_gx\n\
+			principal Bob[\n\
+			knows private ws_b\n\
+			ws_s = DH_KEX(ws_gx, ws_b)\n\
+			]\n\
+			queries[\n\
+			confidentiality? ws_s\n\
+			]\n";
+		let m = parse_string("ws.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let bob = states
+			.iter()
+			.find(|p| p.name == "Bob")
+			.expect("Bob")
+			.clone();
+		let slot = bob
+			.index_of(
+				&km.slots
+					.iter()
+					.find(|s| &*s.constant.name == "ws_gx")
+					.expect("slot")
+					.constant,
+			)
+			.expect("index");
+		let mut mutated = bob.clone();
+		crate::reexec::install(
+			&mut mutated,
+			slot,
+			crate::primitive::attacker_public_key(),
+			true,
+		);
+
+		let table = NameTable::from_state(&mutated);
+		let steps = mutation_steps(&km, &mutated, &table);
+		assert_eq!(steps.len(), 1);
+		match &steps[0] {
+			Step::Mutations { sender, .. } => {
+				assert_eq!(
+					&**sender, "Server",
+					"the substitution happened on the Server -> Bob delivery; \
+					 naming the creator instead attributes it to a message that \
+					 was never touched"
+				);
+			}
+			other => panic!("expected Mutations, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn a_bypass_injection_is_narrated_as_a_defeated_check_not_a_wire_replacement() {
+		use crate::narrate::{NameTable, Step, mutation_steps, render};
+		let k = make_constant("bwn_k");
+		let e = make_constant("bwn_e");
+		let chk = make_constant("bwn_chk");
+		let dec = Primitive {
+			id: PRIM_AEAD_DEC,
+			arguments: vec![k.clone(), e.clone(), crate::value::value_nil()],
+			output: 0,
+			instance_check: true,
+			capabilities: Capabilities::default(),
+			hash: HashCell::default(),
+		};
+		let meta = vec![
+			make_slot_meta(k.as_constant().expect("c"), true),
+			make_slot_meta(e.as_constant().expect("c"), false),
+			make_slot_meta(chk.as_constant().expect("c"), true),
+		];
+		let mut values = vec![
+			make_slot_values(&k, 1),
+			make_slot_values(&e, 1),
+			make_slot_values(&Value::Primitive(Arc::new(dec)), 1),
+		];
+		values[2].override_all_bypassed(crate::primitive::attacker_public_key());
+		let ps = make_principal_state("Alice", 1, meta, values);
+
+		let table = NameTable::from_state(&ps);
+		let steps = mutation_steps(&make_trace(), &ps, &table);
+		assert!(
+			!steps.iter().any(|s| matches!(s, Step::Mutations { .. })),
+			"the injected key never crossed a wire, so it is not a replacement \
+			 the attacker performed: {:?}",
+			steps
+		);
+		let text = render(&steps);
+		assert!(
+			text.contains("the check is defeated") && text.contains("bwn_chk"),
+			"a defeated check must be narrated as such, or the reader cannot \
+			 tell why the principal did not halt: {}",
+			text
+		);
 	}
 
 	fn gate_state(second: &str) -> PrincipalState {

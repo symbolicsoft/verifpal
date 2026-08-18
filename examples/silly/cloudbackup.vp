@@ -1,0 +1,53 @@
+a// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Really bad "cloud backup" protocol that my students and I randomly invented in class
+// to go through some Verifpal features.
+
+attacker[active]
+
+principal Alice[
+	knows private file_alice_a
+	knows private alice_longterm
+	g_alice_longterm = PUBKEY(alice_longterm)
+]
+
+principal Bob[
+	knows private bob_longterm
+	g_bob_longterm = PUBKEY(bob_longterm)
+]
+
+principal Server[
+	knows private server_longterm
+	g_server_longterm = PUBKEY(server_longterm)
+]
+
+Alice -> Server: [g_alice_longterm]
+
+Server -> Alice: g_server_longterm
+
+Bob -> Alice: [g_bob_longterm]
+
+principal Alice[
+	knows public protocol_context_string
+	generates file_alice_a_key
+	g_file_alice_a_key = PUBKEY(file_alice_a_key)
+	file_alice_a_key_alice_shared_secret = DH_KEX(g_bob_longterm, file_alice_a_key)
+	encrypted_file_alice_a = AEAD_ENC(file_alice_a_key_alice_shared_secret, file_alice_a, g_alice_longterm)
+]
+
+Alice -> Server: encrypted_file_alice_a, g_file_alice_a_key
+
+Server -> Bob: encrypted_file_alice_a, [g_alice_longterm], g_file_alice_a_key
+
+principal Bob[
+	bob_alice_shared_secret = DH_KEX(g_file_alice_a_key, bob_longterm)
+	decrypted_file_alice_a = AEAD_DEC(bob_alice_shared_secret, encrypted_file_alice_a, g_alice_longterm)?
+]
+
+queries[
+	confidentiality? file_alice_a
+	authentication? Server -> Bob: encrypted_file_alice_a
+]
+
+

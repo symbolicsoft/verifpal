@@ -19,23 +19,12 @@ use deduce::Deducer;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
-fn oracle_basis_notice() {
-	info_message(
-		"Where the search needs a whole term at once, it draws only from terms this \
-		 protocol computes; an attack needing one outside that set is out of reach. \
-		 Unlike the other limits, this one cannot report where it applied.",
-		InfoLevel::Info,
-		false,
-	);
-}
-
 pub(crate) fn verify_active(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	principal_states: &[PrincipalState],
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
-	oracle_basis_notice();
 	let bound = &crate::reexec::TermBound::of(km);
 
 	for phase in 0..=km.max_phase {

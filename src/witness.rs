@@ -82,7 +82,8 @@ pub(crate) fn minimize_witness(
 
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
-	let phase = ctx.attacker_snapshot().current_phase;
+	let ambient = ctx.attacker_snapshot();
+	let phase = ambient.current_phase;
 
 	let mut sessions: Vec<PrincipalState> = Vec::new();
 	for state in ctx.principal_states() {
@@ -133,6 +134,7 @@ pub(crate) fn minimize_witness(
 			mutations.clone(),
 			recorded_as_gnil.clone(),
 		] {
+			let candidate = controlled_installs(km, session, &ambient, candidate);
 			if candidate.is_empty() {
 				continue;
 			}
@@ -165,6 +167,19 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
+}
+
+fn controlled_installs(
+	km: &ProtocolTrace,
+	session: &PrincipalState,
+	attacker: &AttackerState,
+	candidate: Vec<(SlotIdx, Value)>,
+) -> Vec<(SlotIdx, Value)> {
+	let controllable = crate::reexec::Controllable::of(km, session, attacker);
+	candidate
+		.into_iter()
+		.filter(|(slot, _)| controllable.admits(session, attacker, slot.get()))
+		.collect()
 }
 
 fn shared_freshness(
