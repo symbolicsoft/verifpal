@@ -12,7 +12,9 @@ use crate::value::value_nil;
 
 use super::matching::match_value;
 use super::symbolic::SymbolicState;
-use super::vars::{Substitution, apply, as_var, bind, compose, contains_var, dedupe};
+use super::vars::{
+	Substitution, apply, as_var, bind, compose, contains_var, dedupe, same_substitution,
+};
 
 fn goal_key(v: &Value) -> u64 {
 	let tag: u64 = match v {
@@ -475,6 +477,10 @@ impl<'a> Deducer<'a> {
 		for term in &sym.terms {
 			collect_checked(term, &mut checked);
 		}
+		let mut splits: Vec<Primitive> = Vec::new();
+		for term in &sym.terms {
+			collect_stuck_splits(term, &mut splits);
+		}
 		let mut out = Vec::new();
 		let mut combined: Vec<Substitution> = vec![base.clone()];
 		for p in &checked {
@@ -485,7 +491,40 @@ impl<'a> Deducer<'a> {
 			combined = combine(&combined, &solved);
 			out.extend(solved);
 		}
+		for p in widest_projections(&splits) {
+			let solved = self.satisfy_split(&p, base);
+			if solved.is_empty() {
+				continue;
+			}
+			combined = combine(&combined, &solved);
+			out.extend(solved);
+		}
+		let mut frontier = dedupe(combined.clone());
 		out.extend(combined);
+		out = dedupe(out);
+
+		for _ in 0..checked.len() {
+			let mut discovered = Vec::new();
+			for p in &checked {
+				for candidate in &frontier {
+					let refined = refine_check(p, candidate);
+					if equivalent_primitives(&refined, p, true)
+						|| !contains_var(&Value::Primitive(Arc::new(refined.clone())))
+						|| check_passes(&refined)
+					{
+						continue;
+					}
+					discovered.extend(self.satisfy_check(&refined, candidate));
+				}
+			}
+			discovered = dedupe(discovered);
+			discovered.retain(|s| !out.iter().any(|seen| same_substitution(seen, s)));
+			if discovered.is_empty() {
+				break;
+			}
+			out.extend(discovered.clone());
+			frontier = discovered;
+		}
 		dedupe(out)
 	}
 
@@ -515,6 +554,19 @@ impl<'a> Deducer<'a> {
 			}
 		}
 
+		dedupe(out)
+	}
+
+	fn satisfy_split(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
+		let Some(inner) = p.arguments.first() else {
+			return Vec::new();
+		};
+		let arguments: Vec<Value> = (0..=p.output).map(|_| self.fresh_var()).collect();
+		let candidate = Value::primitive(PRIM_CONCAT, arguments, 0);
+		let mut out = Vec::new();
+		for bound in self.invert(inner, &candidate, base) {
+			out.extend(self.require_constructible(&bound, base, false));
+		}
 		dedupe(out)
 	}
 
@@ -550,16 +602,19 @@ impl<'a> Deducer<'a> {
 		let Some(from) = p.arguments.get(spec.rewrite.from) else {
 			return Vec::new();
 		};
-		let Some(var_id) = as_var(from) else {
-			return Vec::new();
-		};
 		let Some(shape) = self.rewrite_shapes(p, spec).into_iter().next() else {
 			return Vec::new();
 		};
 
 		let mut out = Vec::new();
-		self.bind_from_shape(&shape, var_id, base, &mut out);
-		out
+		if let Some(var_id) = as_var(from) {
+			self.bind_from_shape(&shape, var_id, base, &mut out);
+			return out;
+		}
+		for bound in self.invert(from, &shape, base) {
+			out.extend(self.require_constructible(&bound, base, false));
+		}
+		dedupe(out)
 	}
 
 	fn require_constructible(
@@ -590,6 +645,57 @@ impl<'a> Deducer<'a> {
 		}
 		frontier
 	}
+}
+
+fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
+	match v {
+		Value::Primitive(p) => {
+			if p.id == PRIM_SPLIT
+				&& p.arguments.first().is_some_and(|a| {
+					matches!(a, Value::Primitive(inner) if inner.instance_check) && contains_var(a)
+				}) && !out.iter().any(|q| equivalent_primitives(q, p, true))
+			{
+				out.push((**p).clone());
+			}
+			for a in &p.arguments {
+				collect_stuck_splits(a, out);
+			}
+		}
+		Value::Constant(_) => {}
+	}
+}
+
+fn widest_projections(splits: &[Primitive]) -> Vec<Primitive> {
+	let mut out: Vec<Primitive> = Vec::new();
+	for p in splits {
+		match out.iter_mut().find(|q| {
+			q.arguments
+				.first()
+				.zip(p.arguments.first())
+				.is_some_and(|(a, b)| a.equivalent(b, true))
+		}) {
+			Some(existing) => {
+				if p.output > existing.output {
+					*existing = p.clone();
+				}
+			}
+			None => out.push(p.clone()),
+		}
+	}
+	out
+}
+
+fn refine_check(p: &Primitive, s: &Substitution) -> Primitive {
+	let arguments: Vec<Value> = p
+		.arguments
+		.iter()
+		.map(|a| crate::theory::reduce_once(&apply(a, s)))
+		.collect();
+	p.with_arguments(arguments)
+}
+
+fn check_passes(p: &Primitive) -> bool {
+	crate::theory::can_rewrite(&Arc::new(p.clone())).0
 }
 
 fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {

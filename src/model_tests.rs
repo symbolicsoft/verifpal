@@ -136,7 +136,7 @@ fn test_junglegym_hybrid_pq() {
 }
 #[test]
 fn test_junglegym_threshold_ring() {
-	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a0a0u0u0u1f0f1e1e1");
+	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a0u0u0u1f0f1e1e1");
 }
 #[test]
 fn test_junglegym_password_maze() {
@@ -338,6 +338,10 @@ fn test_concat_split_replay() {
 #[test]
 fn test_wire_projection_replay() {
 	run_model("wire_projection_replay.vp", "a0");
+}
+#[test]
+fn test_forged_flight_mitm() {
+	run_model("forged_flight_mitm.vp", "a1");
 }
 #[test]
 fn test_aead_replay_not_forgery() {

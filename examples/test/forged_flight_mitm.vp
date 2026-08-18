@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1
+//
+// Server-authenticated handshake whose certificate key travels UNGUARDED, so
+// there is no PKI pinning it. The attacker therefore impersonates the server
+// outright: it substitutes its own gsk and gs, derives the session key from
+// its own share, and hands the client a flight it authored end to end --
+// signature under its own key, Finished MAC under the shared key.
+//
+// Reporting this needs a structured forgery: AEAD_ENC over a CONCAT whose
+// components each satisfy a later check the client runs. A degenerate
+// flight = nil halts the client at its Finished ASSERT instead, which is why
+// this model exists as a solver regression rather than a query one.
+
+attacker[active]
+
+principal Server[
+	knows private sk
+	gsk = PUBKEY(sk)
+]
+
+Server -> Client: gsk
+
+principal Client[
+	generates ce
+	gce = PUBKEY(ce)
+]
+
+Client -> Server: gce
+
+principal Server[
+	generates se
+	gs = PUBKEY(se)
+	k = HKDF(DH_KEX(gce, se), nil, nil)
+	transcript = HASH(gce, gs)
+	sig = SIGN(sk, transcript)
+	fin = MAC(k, sig)
+	flight = AEAD_ENC(k, CONCAT(sig, fin), nil)
+]
+
+Server -> Client: gs, flight
+
+principal Client[
+	k_c = HKDF(DH_KEX(gs, ce), nil, nil)
+	transcript_c = HASH(gce, gs)
+	plain = AEAD_DEC(k_c, flight, nil)?
+	sig_c, fin_c = SPLIT(plain)
+	valid = SIGNVERIF(gsk, transcript_c, sig_c)?
+	finok = ASSERT(fin_c, MAC(k_c, sig_c))?
+	receipt = MAC(k_c, fin_c)
+]
+
+queries[
+	authentication? Server -> Client: flight
+]
