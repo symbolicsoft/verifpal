@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0
+//
+// ENC is unauthenticated, so a stream-cipher-style ciphertext can be mauled:
+// holding ENC(k, CONCAT(lo, lo)) the attacker builds a ciphertext under the
+// same k carrying a payload of its own, without ever learning k. Bob's checked
+// SPLIT then succeeds on a value Alice never sent, and he MACs a half of it.
+//
+// Bob reaches c only through the checked SPLIT, so when the attacker cannot
+// maul, every substitution fails that check and halts him before c is used at
+// all. That is what makes the counterweight sharp: cap_malleable_absent.vp is
+// this same model without the annotation, and there the query holds. The pair
+// keeps `malleable` from being either a no-op or a blanket authenticity break.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public lo
+	c = ENC(k, CONCAT(lo, lo))
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	x, y = SPLIT(DEC(k, c))?
+	receipt = MAC(k, x)
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

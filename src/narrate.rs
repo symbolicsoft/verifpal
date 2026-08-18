@@ -435,6 +435,7 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 pub(crate) struct Narration {
 	pub trace: String,
 	table: NameTable,
+	state: Option<PrincipalState>,
 }
 
 impl Narration {
@@ -442,11 +443,22 @@ impl Narration {
 		Narration {
 			trace: String::new(),
 			table: NameTable::empty(),
+			state: None,
 		}
 	}
 
 	pub(crate) fn term(&self, v: &Value) -> String {
 		self.table.compress(v)
+	}
+
+	pub(crate) fn installed(&self, c: &Constant) -> Option<Value> {
+		let state = self.state.as_ref()?;
+		let (value, idx) = state.resolve_constant(c, false);
+		idx.map(|_| value)
+	}
+
+	pub(crate) fn term_excluding(&self, v: &Value, exclude: &[&str]) -> String {
+		self.table.compress_excluding(v, exclude)
 	}
 }
 
@@ -558,7 +570,11 @@ pub(crate) fn narrate_attack(
 	} else if !witness.shares.is_empty() {
 		trace.push_str(&not_separated(&witness.ps.name, &witness.shares));
 	}
-	Narration { trace, table }
+	Narration {
+		trace,
+		table,
+		state: Some(witness.ps.clone()),
+	}
 }
 
 fn render(steps: &[Step]) -> String {

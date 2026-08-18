@@ -251,13 +251,15 @@ fn query_authentication_handle_pass(
 	sender_name: &str,
 	ps: &PrincipalState,
 ) -> VerifyResult {
-	let (resolved, _) = ps.resolve_constant(c, true);
+	let resolved = mutated_info
+		.installed(c)
+		.unwrap_or_else(|| ps.resolve_constant(c, true).0);
 	result.summary = info_verify_result_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
-			mutated_info.term(&resolved),
+			mutated_info.term_excluding(&resolved, &[&c.name]),
 			sender_name,
 			result.query.message.sender_name,
 			mutated_info.term(b),

@@ -159,10 +159,20 @@ fn solve_principal(
 		}
 	}
 
+	let mut seen: Vec<Vec<(usize, u64)>> = Vec::new();
+	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	for proposal in dedupe(proposals) {
 		if ctx.all_resolved() {
 			break;
 		}
+		let signature = install_signature(&sym, &proposal);
+		let key = signature_hash(&signature);
+		let bucket = buckets.entry(key).or_default();
+		if bucket.iter().any(|&i| seen[i] == signature) {
+			continue;
+		}
+		bucket.push(seen.len());
+		seen.push(signature);
 		let guards = crate::reexec::Guards {
 			controllable: &controllable,
 			bound,
@@ -171,6 +181,35 @@ fn solve_principal(
 		trace_proposal(ps, &sym, &proposal, ran);
 	}
 	Ok(())
+}
+
+fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize, u64)> {
+	let mut out = Vec::new();
+	for &slot in &sym.var_slots {
+		let Some(term) = &sym.var_terms[slot] else {
+			continue;
+		};
+		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
+			continue;
+		}
+		let ground = vars::ground_free(&vars::apply(term, proposal));
+		if vars::contains_var(&ground) {
+			continue;
+		}
+		out.push((slot, ground.hash_value()));
+	}
+	out
+}
+
+fn signature_hash(signature: &[(usize, u64)]) -> u64 {
+	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
+	for (slot, hash) in signature {
+		acc = acc
+			.rotate_left(13)
+			.wrapping_add((*slot as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+			^ hash;
+	}
+	acc
 }
 
 fn goals_for_query(

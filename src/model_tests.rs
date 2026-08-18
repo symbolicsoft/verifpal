@@ -91,6 +91,14 @@ fn test_cap_weak_pubkey_dh() {
 	run_model("cap_weak_pubkey_dh.vp", "c1");
 }
 #[test]
+fn test_cap_malleable_enc() {
+	run_model("cap_malleable_enc.vp", "a1");
+}
+#[test]
+fn test_cap_malleable_absent() {
+	run_model("cap_malleable_absent.vp", "a0");
+}
+#[test]
 fn test_cap_weak_kem_resolved() {
 	run_model("cap_weak_kem_resolved.vp", "c1c1");
 }
@@ -112,7 +120,7 @@ fn test_cap_forgeable_aead() {
 fn test_cap_err_malleable_unsupported() {
 	run_model_err(
 		"cap_err_malleable_unsupported.vp",
-		"`malleable` is not yet supported",
+		"HASH does not support the `malleable` parameter",
 	);
 }
 

@@ -9,6 +9,7 @@ use crate::info::InfoQuiet;
 use crate::primitive::attacker_public_key;
 use crate::reexec::{governing_attacker, reexecute};
 use crate::types::*;
+use crate::value::value_nil;
 use crate::verify::verify_resolve_queries;
 
 thread_local! {
@@ -114,6 +115,60 @@ pub(crate) fn minimize_witness(
 			.collect()
 	};
 
+	let forged_from = |session: &PrincipalState,
+	                   base: Vec<(SlotIdx, Value)>|
+	 -> Vec<Vec<(SlotIdx, Value)>> {
+		let keys = controlled_installs(km, session, &ambient, base);
+		if keys.is_empty() {
+			return Vec::new();
+		}
+		let mut staged = session.clone();
+		for (slot, value) in &keys {
+			crate::reexec::install(&mut staged, slot.get(), value.clone(), true);
+		}
+		if staged.resolve_all_values().is_err() {
+			return Vec::new();
+		}
+		let mut shapes: Vec<Value> = Vec::new();
+		for (prim, _) in staged.perform_all_rewrites() {
+			let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
+				continue;
+			};
+			if !spec.rewrite.has_rule {
+				continue;
+			}
+			for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil) {
+				if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
+					shapes.push(shape);
+				}
+			}
+		}
+		if shapes.is_empty() {
+			return Vec::new();
+		}
+		let mut out = Vec::new();
+		for (i, sm) in session.meta.iter().enumerate() {
+			if !sm.wire.contains(&session.id) {
+				continue;
+			}
+			let Some(slot) = km.slots.get(i) else {
+				continue;
+			};
+			if slot.creator == session.id
+				|| crate::primitive::value_is_key_derivation(&slot.initial_value)
+			{
+				continue;
+			}
+			for shape in &shapes {
+				let mut candidate: Vec<(SlotIdx, Value)> =
+					keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
+				candidate.push((SlotIdx(i), shape.clone()));
+				out.push(candidate);
+			}
+		}
+		out
+	};
+
 	let recorded_as_gnil: Vec<(SlotIdx, Value)> = mutations
 		.iter()
 		.map(|(slot, value)| {
@@ -128,23 +183,34 @@ pub(crate) fn minimize_witness(
 		.collect();
 
 	let mut chosen: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
+	let mut fallback: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
 	'search: for session in &sessions {
-		for candidate in [
+		let mut families = vec![
 			mitm_for(session),
 			mutations.clone(),
 			recorded_as_gnil.clone(),
-		] {
+		];
+		families.extend(forged_from(session, mitm_for(session)));
+		families.extend(forged_from(session, mutations.clone()));
+		for candidate in families {
 			let candidate = controlled_installs(km, session, &ambient, candidate);
 			if candidate.is_empty() {
 				continue;
 			}
-			if probe(ctx, km, session, &candidate, query_index, phase).is_some() {
+			let Some(witness) = probe(ctx, km, session, &candidate, query_index, phase) else {
+				continue;
+			};
+			if !needs_guard_bypass(&witness.ps) {
 				chosen = Some((session.clone(), candidate));
 				break 'search;
 			}
+			if fallback.is_none() {
+				fallback = Some((session.clone(), candidate));
+			}
 		}
 	}
-	let Some((base, mutations)) = chosen else {
+	let explanatory = chosen.is_some();
+	let Some((base, mutations)) = chosen.or(fallback) else {
 		return unminimized(false);
 	};
 
@@ -155,9 +221,13 @@ pub(crate) fn minimize_witness(
 		if trial.len() == keep.len() {
 			continue;
 		}
-		if probe(ctx, km, &base, &trial, query_index, phase).is_some() {
-			keep = trial;
+		let Some(witness) = probe(ctx, km, &base, &trial, query_index, phase) else {
+			continue;
+		};
+		if explanatory && needs_guard_bypass(&witness.ps) {
+			continue;
 		}
+		keep = trial;
 	}
 
 	match probe(ctx, km, &base, &keep, query_index, phase) {
@@ -167,6 +237,10 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
+}
+
+fn needs_guard_bypass(ps: &PrincipalState) -> bool {
+	ps.values.iter().any(|sv| sv.bypassed.is_some())
 }
 
 fn controlled_installs(

@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Sanity error: `malleable` parses and is part of the vocabulary, but no
-// primitive declares it yet, so the engine rejects it rather than accepting an
-// assumption it would silently ignore. An annotation that does nothing reads
-// as a check that was performed when it was not.
+// Sanity error: `malleable` is declared by the primitives whose ciphertexts can
+// actually be mauled, and HASH is not one of them, so the engine rejects the
+// annotation rather than accepting an assumption it would silently ignore. An
+// annotation that does nothing reads as a check that was performed when it was
+// not. See cap_malleable_enc.vp for the supported case.
 attacker[active]
 
 principal Alice[
 	knows private k
 	knows public m
-	c = ENC[malleable](k, m)
+	c = ENC(k, HASH[malleable](m))
 ]
 
 Alice -> Bob: c

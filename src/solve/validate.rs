@@ -167,6 +167,13 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 			if crate::theory::obtainable(v, ps, snapshot) {
 				return true;
 			}
+			if let Some(vary) = malleable_positions(p, ps, snapshot) {
+				return p
+					.arguments
+					.iter()
+					.enumerate()
+					.all(|(i, a)| !vary.contains(&i) || derivable(a, ps, snapshot));
+			}
 			let exempt = forgeable_secret_position(p, ps, snapshot);
 			p.arguments
 				.iter()
@@ -174,6 +181,41 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 				.all(|(i, a)| Some(i) == exempt || derivable(a, ps, snapshot))
 		}
 	}
+}
+
+fn malleable_positions(
+	p: &Primitive,
+	ps: &PrincipalState,
+	snapshot: &AttackerState,
+) -> Option<Vec<usize>> {
+	let spec = primitive_get(p.id).ok()?;
+	if spec.malleable_vary.is_empty() {
+		return None;
+	}
+	for known in snapshot.known.iter() {
+		let Value::Primitive(held) = known else {
+			continue;
+		};
+		if held.id != p.id || held.output != p.output || held.arguments.len() != p.arguments.len() {
+			continue;
+		}
+		if !ps
+			.capabilities
+			.in_force(held, Capability::Malleable, snapshot.current_phase)
+		{
+			continue;
+		}
+		let anchored = p
+			.arguments
+			.iter()
+			.zip(held.arguments.iter())
+			.enumerate()
+			.all(|(i, (a, b))| spec.malleable_vary.contains(&i) || a.equivalent(b, true));
+		if anchored {
+			return Some(spec.malleable_vary.clone());
+		}
+	}
+	None
 }
 
 fn forgeable_secret_position(

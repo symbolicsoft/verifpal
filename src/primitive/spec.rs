@@ -272,6 +272,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: Some(filter_identity),
 			},
 			weak_reveals: vec![1],
+			malleable_vary: vec![1],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {

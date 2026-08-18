@@ -215,11 +215,80 @@ impl<'a> Deducer<'a> {
 		self.solve_by_wire(g, s, out);
 
 		match g {
-			Value::Primitive(p) => self.solve_primitive(p, s, out),
+			Value::Primitive(p) => {
+				self.solve_primitive(p, s, out);
+				self.solve_by_malleability(p, s, out);
+			}
 			Value::Constant(_) => {}
 		}
 
 		self.solve_by_decomposition(g, s, out);
+	}
+
+	fn solve_by_malleability(
+		&self,
+		target: &Primitive,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		let Ok(spec) = primitive_get(target.id) else {
+			return;
+		};
+		if spec.malleable_vary.is_empty() {
+			return;
+		}
+		for known in self.attacker.known.iter() {
+			let Value::Primitive(held) = known else {
+				continue;
+			};
+			if held.id != target.id
+				|| held.output != target.output
+				|| held.arguments.len() != target.arguments.len()
+			{
+				continue;
+			}
+			if !self.capability_in_force(held, Capability::Malleable) {
+				continue;
+			}
+			let mut fixed = s.clone();
+			let mut aligned = true;
+			for (i, (want, have)) in target
+				.arguments
+				.iter()
+				.zip(held.arguments.iter())
+				.enumerate()
+			{
+				if spec.malleable_vary.contains(&i) {
+					continue;
+				}
+				match match_value(want, have, &fixed) {
+					Some(next) => fixed = next,
+					None => {
+						aligned = false;
+						break;
+					}
+				}
+			}
+			if !aligned {
+				continue;
+			}
+			let mut frontier = vec![fixed];
+			for &i in &spec.malleable_vary {
+				let Some(want) = target.arguments.get(i) else {
+					continue;
+				};
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					self.solve_into(want, candidate, &mut next);
+				}
+				if next.is_empty() {
+					frontier.clear();
+					break;
+				}
+				frontier = dedupe(next);
+			}
+			out.extend(frontier);
+		}
 	}
 
 	fn solve_by_wire(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -503,13 +572,27 @@ impl<'a> Deducer<'a> {
 		out.extend(combined);
 		out = dedupe(out);
 
+		let check_vars: Vec<Vec<ValueId>> = checked
+			.iter()
+			.map(|p| {
+				let mut ids = Vec::new();
+				for a in &p.arguments {
+					super::vars::collect_vars(a, &mut ids);
+				}
+				ids
+			})
+			.collect();
+
 		for _ in 0..checked.len() {
 			let mut discovered = Vec::new();
-			for p in &checked {
+			for (p, vars) in checked.iter().zip(check_vars.iter()) {
 				for candidate in &frontier {
+					if !vars.iter().any(|id| candidate.contains_key(id)) {
+						continue;
+					}
 					let refined = refine_check(p, candidate);
 					if equivalent_primitives(&refined, p, true)
-						|| !contains_var(&Value::Primitive(Arc::new(refined.clone())))
+						|| !refined.arguments.iter().any(contains_var)
 						|| check_passes(&refined)
 					{
 						continue;
@@ -602,17 +685,18 @@ impl<'a> Deducer<'a> {
 		let Some(from) = p.arguments.get(spec.rewrite.from) else {
 			return Vec::new();
 		};
-		let Some(shape) = self.rewrite_shapes(p, spec).into_iter().next() else {
-			return Vec::new();
-		};
-
+		let shapes = self.rewrite_shapes(p, spec);
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
-			self.bind_from_shape(&shape, var_id, base, &mut out);
-			return out;
+			for shape in &shapes {
+				self.bind_from_shape(shape, var_id, base, &mut out);
+			}
+			return dedupe(out);
 		}
-		for bound in self.invert(from, &shape, base) {
-			out.extend(self.require_constructible(&bound, base, false));
+		for shape in &shapes {
+			for bound in self.invert(from, shape, base) {
+				out.extend(self.require_constructible(&bound, base, false));
+			}
 		}
 		dedupe(out)
 	}
@@ -651,9 +735,10 @@ fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 	match v {
 		Value::Primitive(p) => {
 			if p.id == PRIM_SPLIT
-				&& p.arguments.first().is_some_and(|a| {
-					matches!(a, Value::Primitive(inner) if inner.instance_check) && contains_var(a)
-				}) && !out.iter().any(|q| equivalent_primitives(q, p, true))
+				&& p.arguments
+					.first()
+					.is_some_and(|a| matches!(a, Value::Primitive(_)) && contains_var(a))
+				&& !out.iter().any(|q| equivalent_primitives(q, p, true))
 			{
 				out.push((**p).clone());
 			}
@@ -712,7 +797,7 @@ fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
 	}
 }
 
-fn build_rewrite_shapes_with(
+pub(crate) fn build_rewrite_shapes_with(
 	outer: &Primitive,
 	spec: &PrimitiveSpec,
 	mut fill: impl FnMut() -> Value,
