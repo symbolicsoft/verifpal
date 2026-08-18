@@ -1,1 +1,3 @@
+Verifpal 1.0.2 improves the solver: Verifpal can now build additional fake encrypted messages an attacker would actually need to impersonate a server, so it catches man-in-the-middle attacks it used to miss on protocols like TLS 1.3.
+
 Verifpal 1.0.1 adds an automatic update checker and improves authentication trace narration.
