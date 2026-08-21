@@ -102,6 +102,8 @@ fn solve_principal(
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
+	#[cfg(test)]
+	ctx.note_search_reached_a_controllable_slot();
 
 	let deducer = Deducer::new(ps, &attacker, &sym);
 	let empty = Substitution::default();
@@ -112,6 +114,8 @@ fn solve_principal(
 			continue;
 		}
 		for query in std::iter::once(&result.query).chain(result.variants.iter()) {
+			#[cfg(test)]
+			ctx.goals_noted(result.query_index, 1);
 			proposals.extend(goals_for_query(query, km, ps, &sym, &deducer, &empty));
 		}
 	}

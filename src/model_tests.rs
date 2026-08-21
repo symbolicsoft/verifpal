@@ -1,37 +1,25 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 16] = [
-	("dec_bypass_leaked_key.vp", 0),
-	("flawed_kem_no_binding.vp", 2),
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 8] = [
 	("flawed_psk_from_serial.vp", 2),
-	("flawed_shared_secret_broadcast.vp", 2),
 	("junglegym_hybrid_pq.vp", 4),
-	("kem_unguarded_ek.vp", 1),
 	("noise_xx_mutual.vp", 0),
 	("noise_xx_mutual.vp", 1),
-	("noise_xx_mutual.vp", 2),
 	("saltchannel.vp", 0),
-	("srp_naive_verifier.vp", 2),
 	("test3.vp", 1),
-	("test3.vp", 5),
 	("test5.vp", 1),
 	("test5.vp", 3),
-	("test5.vp", 5),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 8] = [
-	("flawed_kem_no_binding.vp", 2),
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 4] = [
 	("junglegym_hybrid_pq.vp", 4),
-	("kem_unguarded_ek.vp", 1),
 	("needham-schroeder-pk.vp", 0),
 	("needham-schroeder-pk.vp", 1),
 	("noise_xx_mutual.vp", 1),
-	("noise_xx_mutual.vp", 2),
-	("srp_naive_verifier.vp", 2),
 ];
 
-const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 25] = [
+const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 27] = [
 	("ephemerals_sign.vp", 0),
 	("ephemerals_sign.vp", 1),
 	("exa2.vp", 0),
@@ -47,10 +35,12 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 25] = [
 	("needham-schroeder-pk-withfix.vp", 0),
 	("needham-schroeder-pk-withfix.vp", 1),
 	("needham-schroeder-pk.vp", 3),
+	("noise_xx_mutual.vp", 2),
 	("password_pake_transcript.vp", 2),
 	("pke_unguarded_alice.vp", 1),
 	("saltchannel.vp", 0),
 	("shared_freshness_not_replication.vp", 0),
+	("srp_naive_verifier.vp", 2),
 	("station_to_station.vp", 4),
 	("station_to_station_unsigned.vp", 0),
 	("station_to_station_unsigned.vp", 1),
@@ -59,41 +49,7 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 25] = [
 	("two_phase_commit_forged_ack.vp", 0),
 ];
 
-const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 33] = [
-	("blind_unblind_wrong_factor.vp", 1),
-	("concat_arity_roundtrip.vp", 3),
-	("concat_five_split_five.vp", 2),
-	("concat_nested_projection.vp", 1),
-	("eap_tunnel_channel_binding.vp", 1),
-	("equiv_aead_ad_mismatch.vp", 1),
-	("equiv_dh_cross_principal.vp", 1),
-	("equiv_kem_roundtrip.vp", 1),
-	("equiv_shamir_all_pairs.vp", 2),
-	("equiv_three_constants.vp", 1),
-	("equiv_unblind_roundtrip.vp", 1),
-	("freshness_dh_static.vp", 0),
-	("freshness_hkdf_salt.vp", 1),
-	("freshness_kem_secret.vp", 1),
-	("hash_arity_distinguishes.vp", 0),
-	("hash_arity_distinguishes.vp", 1),
-	("hkdf_five_outputs.vp", 2),
-	("junglegym_deep_ratchet.vp", 10),
-	("junglegym_hybrid_pq.vp", 6),
-	("junglegym_password_maze.vp", 9),
-	("junglegym_phase_cascade.vp", 12),
-	("junglegym_threshold_ring.vp", 10),
-	("kem_freshness.vp", 1),
-	("kem_reused_randomness.vp", 1),
-	("nonce_echo_reflection.vp", 1),
-	("pke_replay_wrong_recipient.vp", 1),
-	("ringsign_ring_order.vp", 1),
-	("ringsign_substitute.vp", 0),
-	("ringsign_substitute.vp", 2),
-	("session_freshness_stable.vp", 1),
-	("shamir_cross_dealer_join.vp", 2),
-	("split_narrower_than_concat.vp", 2),
-	("webauthn_origin_binding.vp", 1),
-];
+const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
 const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 4] = [
 	"examples/transport-layer/piknik.vp",
@@ -238,6 +194,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut undocumented = 0usize;
 
 	for (model, path) in swept_models() {
+		let _ = crate::verify::verify_with_sessions(&path, 1);
 		let Ok((results, _)) = crate::verify::verify(&path) else {
 			continue;
 		};
@@ -281,7 +238,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			if !summary.contains("Attack trace:") {
 				traceless.push(key.clone());
 			}
-			if summary.contains("the check is defeated") {
+			if summary.contains("does not halt at") {
 				bypass.push(key.clone());
 			}
 			if summary.contains("not a minimized witness") {
@@ -292,13 +249,20 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			}
 			for line in summary.lines() {
 				let line = line.trim();
-				let Some(rest) = line.split_once("Attacker replaces ").map(|(_, r)| r) else {
-					continue;
-				};
-				let Some((names, tail)) = rest.split_once(" (sent by ") else {
-					continue;
-				};
-				let Some((route, _)) = tail.split_once(") with ") else {
+				let replaced = line
+					.split_once("Attacker replaces ")
+					.and_then(|(_, rest)| rest.split_once(" (sent by "))
+					.and_then(|(names, tail)| {
+						tail.split_once(") with ").map(|(route, _)| (names, route))
+					});
+				let replayed = line
+					.split_once("Attacker replays ")
+					.and_then(|(_, rest)| rest.split_once(" ("))
+					.and_then(|(names, tail)| {
+						tail.split_once(") from another session")
+							.map(|(route, _)| (names, route))
+					});
+				let Some((names, route)) = replaced.or(replayed) else {
 					continue;
 				};
 				let Some((_, recipient)) = route.split_once(" to ") else {
@@ -396,9 +360,6 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		 new entry elsewhere is an attack the tool asserts and does not explain"
 	);
 }
-
-pub(crate) const TRACE_MAY_OMIT_A_SUBSTITUTION: [(&str, usize); 1] =
-	[("needham-schroeder-pk.vp", 3)];
 
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);

@@ -83,6 +83,8 @@ pub(crate) struct MutationItem {
 	pub new_value: String,
 	pub old_value: String,
 	pub guarded: bool,
+	#[cfg(test)]
+	pub installed: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -95,19 +97,88 @@ pub(crate) enum Step {
 	Bypass {
 		principal: Arc<str>,
 		slot: Arc<str>,
+		check: String,
 		key: String,
+		#[cfg(test)]
+		key_term: Option<Value>,
+	},
+	Replay {
+		sender: Arc<str>,
+		recipient: Arc<str>,
+		name: Arc<str>,
+		value: String,
+		#[cfg(test)]
+		installed: Value,
+	},
+	Resolves {
+		name: Arc<str>,
+		value: String,
+		#[cfg(test)]
+		slot: SlotIdx,
+		#[cfg(test)]
+		term: Value,
+	},
+	Static {
+		name: Arc<str>,
+		leaves: String,
+		#[cfg(test)]
+		terms: Vec<Value>,
+	},
+	Received {
+		name: Arc<str>,
+		sender: Arc<str>,
+		recipient: Arc<str>,
+		#[cfg(test)]
+		slot: SlotIdx,
 	},
 	Gate {
 		principal: Arc<str>,
 		primitive: String,
+		#[cfg(test)]
+		term: Value,
+		#[cfg(test)]
+		slot: SlotIdx,
 	},
 	Derive {
 		text: String,
+		#[cfg(test)]
+		target: Value,
+		#[cfg(test)]
+		ingredients: Vec<Value>,
+		#[cfg(test)]
+		record: DerivationRecord,
 	},
 }
 
 fn reportable(sv: &SlotValues) -> bool {
-	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected
+	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected || replayed(sv)
+}
+
+fn replayed(sv: &SlotValues) -> bool {
+	sv.provenance.creator == ATTACKER_ID
+		&& sv.provenance.attacker_tainted
+		&& sv.provenance.sender != ATTACKER_ID
+		&& !sv.provenance.bypass_injected
+}
+
+pub(crate) fn constant_leaves(v: &Value) -> Vec<Constant> {
+	let mut out: Vec<Constant> = Vec::new();
+	fn walk_leaves(v: &Value, out: &mut Vec<Constant>) {
+		match v {
+			Value::Constant(c) => {
+				if !out.iter().any(|e| e.id == c.id) {
+					out.push(c.clone());
+				}
+			}
+			Value::Primitive(p) => {
+				for a in p.arguments.iter() {
+					walk_leaves(a, out);
+				}
+			}
+		}
+	}
+	walk_leaves(v, &mut out);
+	out
 }
 
 #[cfg(test)]
@@ -115,7 +186,7 @@ pub(crate) fn narrated_installs(ps: &PrincipalState) -> Vec<SlotIdx> {
 	ps.values
 		.iter()
 		.enumerate()
-		.filter(|(_, sv)| sv.provenance.sender == ATTACKER_ID)
+		.filter(|(_, sv)| sv.provenance.sender == ATTACKER_ID || replayed(sv))
 		.map(|(i, _)| SlotIdx(i))
 		.collect()
 }
@@ -163,22 +234,51 @@ pub(crate) fn mutation_steps(
 	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
 	let mut bypasses: Vec<Step> = Vec::new();
+	let mut replays: Vec<Step> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		if !reportable(sv) {
 			continue;
 		}
 		let sm = &ps.meta[i];
 		if sv.provenance.bypass_injected && sv.provenance.sender != ATTACKER_ID {
+			let declared = km.slots.get(i).map(|slot| &slot.initial_value);
+			let bypass_key = match declared {
+				Some(Value::Primitive(p)) => {
+					let shallow = shallow_resolve(ps, p);
+					crate::primitive::primitive_extract_bypass_key(&shallow)
+				}
+				_ => None,
+			};
 			bypasses.push(Step::Bypass {
 				principal: Arc::from(ps.name.as_str()),
 				slot: Arc::clone(&sm.constant.name),
-				key: table.compress_excluding(&sv.pre_rewrite, mutated.as_slice()),
+				#[cfg(test)]
+				key_term: bypass_key.clone(),
+				check: declared
+					.map(|v| table.compress_excluding(v, mutated.as_slice()))
+					.unwrap_or_else(|| sm.constant.name.to_string()),
+				key: bypass_key
+					.map(|k| table.compress_excluding(&k, mutated.as_slice()))
+					.unwrap_or_default(),
 			});
 			continue;
 		}
 		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
+		if replayed(sv) {
+			replays.push(Step::Replay {
+				sender: Arc::from(km.principal_name(sender)),
+				recipient: Arc::from(km.principal_name(recipient)),
+				name: Arc::clone(&sm.constant.name),
+				value: table.compress_excluding(&sv.pre_rewrite, own),
+				#[cfg(test)]
+				installed: sv.pre_rewrite.clone(),
+			});
+			continue;
+		}
 		let item = MutationItem {
+			#[cfg(test)]
+			installed: sv.pre_rewrite.clone(),
 			name: Arc::clone(&sm.constant.name),
 			new_value: table.compress_excluding(&sv.pre_rewrite, own),
 			old_value: km
@@ -203,8 +303,30 @@ pub(crate) fn mutation_steps(
 			recipient: Arc::from(km.principal_name(recipient)),
 			items,
 		})
+		.chain(replays)
 		.chain(bypasses)
 		.collect()
+}
+
+fn deep_resolve(ps: &PrincipalState, v: &Value) -> Value {
+	match v {
+		Value::Constant(c) => {
+			let (resolved, _) = ps.resolve_constant(c, false);
+			match &resolved {
+				Value::Constant(r) if r.id == c.id => resolved,
+				other => deep_resolve(ps, other),
+			}
+		}
+		Value::Primitive(p) => {
+			let arguments = p.arguments.iter().map(|a| deep_resolve(ps, a)).collect();
+			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
+		}
+	}
+}
+
+fn shallow_resolve(ps: &PrincipalState, p: &Primitive) -> Primitive {
+	let arguments = p.arguments.iter().map(|a| deep_resolve(ps, a)).collect();
+	p.with_arguments(arguments)
 }
 
 fn wire_leg(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> (PrincipalId, PrincipalId) {
@@ -250,12 +372,16 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		steps.push(Step::Gate {
 			principal: Arc::from(ps.name.as_str()),
 			primitive,
+			#[cfg(test)]
+			term: sv.pre_rewrite.clone(),
+			#[cfg(test)]
+			slot: SlotIdx(i),
 		});
 	}
 	steps
 }
 
-fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
+pub(crate) fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	if ps
 		.values
 		.iter()
@@ -295,6 +421,11 @@ fn walk(
 	steps: &mut Vec<Step>,
 ) {
 	let Some(idx) = attacker.knows(value) else {
+		if let Value::Primitive(p) = value {
+			for argument in p.arguments.iter() {
+				walk(km, attacker, argument, table, home, carried, seen, steps);
+			}
+		}
 		return;
 	};
 	if seen.contains(&idx) {
@@ -309,7 +440,7 @@ fn walk(
 		walk(km, attacker, ingredient, table, home, carried, seen, steps);
 	}
 
-	if let Some(text) = describe(derivation, value, table, carried) {
+	if let Some(text) = describe(km, derivation, value, table, carried) {
 		let session = attacker
 			.record(idx)
 			.and_then(|r| session_prefix(km, r, home));
@@ -317,7 +448,15 @@ fn walk(
 			Some(prefix) => format!("{}{}", prefix, lowercase_first(&text)),
 			None => text,
 		};
-		steps.push(Step::Derive { text });
+		steps.push(Step::Derive {
+			text,
+			#[cfg(test)]
+			target: value.clone(),
+			#[cfg(test)]
+			ingredients: derivation.ingredients().into_iter().cloned().collect(),
+			#[cfg(test)]
+			record: derivation.clone(),
+		});
 	}
 }
 
@@ -342,6 +481,7 @@ fn lowercase_first(s: &str) -> String {
 }
 
 fn describe(
+	km: &ProtocolTrace,
 	derivation: &DerivationRecord,
 	value: &Value,
 	table: &NameTable,
@@ -383,7 +523,21 @@ fn describe(
 				),
 			}
 		}
-		DerivationRecord::Obtained { .. } => format!("Attacker observes {} on the wire.", v),
+		DerivationRecord::Obtained { slot } => {
+			let travelled = km.slots.get(slot.get()).is_some_and(|s| {
+				!s.sent_by.is_empty()
+					|| s.constant.leaked
+					|| s.constant.qualifier == Some(Qualifier::Public)
+			});
+			if travelled {
+				format!("Attacker observes {} on the wire.", v)
+			} else {
+				format!(
+					"Attacker obtains {}: a value it already holds resolves to it here.",
+					v
+				)
+			}
+		}
 		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
 			format!("Attacker reads {} out of {}.", v, table.compress(of))
 		}
@@ -451,6 +605,8 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 
 pub(crate) struct Narration {
 	pub trace: String,
+	#[cfg(test)]
+	pub steps: Vec<Step>,
 	table: NameTable,
 	state: Option<PrincipalState>,
 }
@@ -459,6 +615,8 @@ impl Narration {
 	pub(crate) fn none() -> Narration {
 		Narration {
 			trace: String::new(),
+			#[cfg(test)]
+			steps: Vec::new(),
 			table: NameTable::empty(),
 			state: None,
 		}
@@ -548,6 +706,7 @@ pub(crate) fn narrate_attack(
 	witness: &Witness,
 	target: &Value,
 	ambient: &AttackerState,
+	prelude: Vec<Step>,
 ) -> Narration {
 	let table = NameTable::from_state(&witness.ps);
 	let mut seen: Vec<KnownIdx> = Vec::new();
@@ -581,6 +740,12 @@ pub(crate) fn narrate_attack(
 		&mut seen,
 	));
 
+	let mut steps = {
+		let mut all = prelude;
+		all.extend(steps);
+		all
+	};
+	steps.dedup_by(|a, b| render_one(a) == render_one(b));
 	let mut trace = render(&steps);
 	if !witness.reproduced {
 		trace.push_str(NOT_MINIMIZED);
@@ -589,6 +754,8 @@ pub(crate) fn narrate_attack(
 	}
 	Narration {
 		trace,
+		#[cfg(test)]
+		steps,
 		table,
 		state: Some(witness.ps.clone()),
 	}
@@ -597,33 +764,72 @@ pub(crate) fn narrate_attack(
 fn render(steps: &[Step]) -> String {
 	let mut out = String::new();
 	for (i, step) in steps.iter().enumerate() {
-		let text = match step {
-			Step::Mutations {
-				sender,
-				recipient,
-				items,
-			} => render_mutations(sender, recipient, items),
-			Step::Bypass {
-				principal,
-				slot,
-				key,
-			} => format!(
-				"{} does not halt at {}: the check is defeated, accepting {} because \
-				 Attacker holds its private key.",
-				principal, slot, key,
-			),
-			Step::Gate {
-				principal,
-				primitive,
-			} => format!(
-				"{}'s {} passes — its inputs are attacker-controlled.",
-				principal, primitive,
-			),
-			Step::Derive { text } => text.clone(),
-		};
+		let text = render_one(step);
 		out.push_str(&format!("\n            {}. {}", i + 1, text));
 	}
 	out
+}
+
+fn render_one(step: &Step) -> String {
+	match step {
+		Step::Mutations {
+			sender,
+			recipient,
+			items,
+		} => render_mutations(sender, recipient, items),
+		Step::Bypass {
+			principal,
+			slot,
+			check,
+			key,
+			..
+		} if !key.is_empty() => format!(
+			"{}'s {} does not halt at {}: Attacker holds {}, so it can supply a value \
+				 this check accepts.",
+			principal, check, slot, key,
+		),
+		Step::Bypass {
+			principal,
+			slot,
+			check,
+			..
+		} => format!(
+			"{}'s {} does not halt at {}: its inputs are attacker-controlled.",
+			principal, check, slot,
+		),
+		Step::Replay {
+			sender,
+			recipient,
+			name,
+			value,
+			..
+		} => format!(
+			"Attacker replays {} ({} to {}) from another session, where it is {}.",
+			name, sender, recipient, value,
+		),
+		Step::Resolves { name, value, .. } => {
+			format!("In this state {} resolves to {}.", name, value)
+		}
+		Step::Static { name, leaves, .. } => format!(
+			"Every value {} is built from is fixed: {} is not generated fresh.",
+			name, leaves
+		),
+		Step::Received {
+			name,
+			sender,
+			recipient,
+			..
+		} => format!("{} received {} from {}.", recipient, name, sender),
+		Step::Gate {
+			principal,
+			primitive,
+			..
+		} => format!(
+			"{}'s {} passes — its inputs are attacker-controlled.",
+			principal, primitive,
+		),
+		Step::Derive { text, .. } => text.clone(),
+	}
 }
 
 fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> String {
@@ -880,7 +1086,7 @@ mod tests {
 		);
 		let text = render(&steps);
 		assert!(
-			text.contains("the check is defeated") && text.contains("bwn_chk"),
+			text.contains("does not halt at bwn_chk"),
 			"a defeated check must be narrated as such, or the reader cannot \
 			 tell why the principal did not halt: {}",
 			text
@@ -972,7 +1178,7 @@ mod tests {
 		let text: Vec<String> = steps
 			.iter()
 			.map(|s| match s {
-				Step::Derive { text } => text.clone(),
+				Step::Derive { text, .. } => text.clone(),
 				other => panic!("expected Derive, got {:?}", other),
 			})
 			.collect();

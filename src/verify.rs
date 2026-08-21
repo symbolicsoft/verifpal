@@ -100,17 +100,19 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<(Vec<VerifyResult>, String)>
 	);
 	let (ctx, trace) = analyze_sessions_traced(m, sessions)?;
 	let out = verify_end(&ctx)?;
-	witness_replay_check(&ctx, &trace);
+	witness_replay_check(&ctx, &trace, m.attacker);
 	Ok(out)
 }
 
 #[cfg(test)]
-fn witness_replay_check(ctx: &VerifyContext, km: &ProtocolTrace) {
+fn witness_replay_check(ctx: &VerifyContext, km: &ProtocolTrace, attacker: AttackerKind) {
 	crate::witness::assert_reported_attacks_replay(ctx, km, ctx.results_file_name());
+	crate::tracecheck::assert_holds_survive_final_knowledge(ctx, km, ctx.results_file_name());
+	crate::tracecheck::assert_holds_were_searched(ctx, attacker, ctx.results_file_name());
 }
 
 #[cfg(not(test))]
-fn witness_replay_check(_ctx: &VerifyContext, _km: &ProtocolTrace) {}
+fn witness_replay_check(_ctx: &VerifyContext, _km: &ProtocolTrace, _attacker: AttackerKind) {}
 
 pub(crate) fn verify_resolve_queries(
 	ctx: &VerifyContext,

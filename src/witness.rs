@@ -173,6 +173,51 @@ pub(crate) fn minimize_witness(
 		out
 	};
 
+	let forged_alone = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
+		let mut out = Vec::new();
+		for (i, sm) in session.meta.iter().enumerate() {
+			if !sm.wire.contains(&session.id) {
+				continue;
+			}
+			let Some(slot) = km.slots.get(i) else {
+				continue;
+			};
+			if slot.creator == session.id
+				|| crate::primitive::value_is_key_derivation(&slot.initial_value)
+			{
+				continue;
+			}
+			let blanked = vec![(SlotIdx(i), value_nil())];
+			if controlled_installs(km, session, &ambient, blanked.clone()).is_empty() {
+				continue;
+			}
+			let mut staged = session.clone();
+			crate::reexec::install(&mut staged, i, value_nil(), true);
+			if staged.resolve_all_values().is_err() {
+				continue;
+			}
+			let mut shapes: Vec<Value> = Vec::new();
+			for (prim, _) in staged.perform_all_rewrites() {
+				let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
+					continue;
+				};
+				if !spec.rewrite.has_rule {
+					continue;
+				}
+				for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil)
+				{
+					if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
+						shapes.push(shape);
+					}
+				}
+			}
+			for shape in shapes {
+				out.push(vec![(SlotIdx(i), shape)]);
+			}
+		}
+		out
+	};
+
 	let recorded_as_gnil: Vec<(SlotIdx, Value)> = mutations
 		.iter()
 		.map(|(slot, value)| {
@@ -196,6 +241,7 @@ pub(crate) fn minimize_witness(
 		];
 		families.extend(forged_from(session, mitm_for(session)));
 		families.extend(forged_from(session, mutations.clone()));
+		families.extend(forged_alone(session));
 		for candidate in families {
 			let candidate = controlled_installs(km, session, &ambient, candidate);
 			if candidate.is_empty() {
@@ -351,7 +397,7 @@ pub(crate) fn assert_reported_attacks_replay(
 		let Some(witness) = ctx.witness_get(result.query_index) else {
 			continue;
 		};
-		if !witness.reproduced || witness.installs.is_empty() {
+		if !witness.reproduced {
 			continue;
 		}
 		let Some(base) = ctx
@@ -402,11 +448,6 @@ pub(crate) fn assert_reported_attacks_replay(
 			listing.join("\n"),
 			caveat,
 		);
-		if crate::model_tests::TRACE_MAY_OMIT_A_SUBSTITUTION
-			.contains(&(file_name, result.query_index))
-		{
-			continue;
-		}
 		let missing: Vec<String> = witness
 			.installs
 			.iter()
@@ -428,6 +469,11 @@ pub(crate) fn assert_reported_attacks_replay(
 			caveat,
 		);
 	}
+}
+
+#[cfg(test)]
+pub(crate) fn minimization_guard() -> impl Drop {
+	MinimizingGuard::new()
 }
 
 #[cfg(test)]

@@ -40,6 +40,10 @@ pub(crate) struct VerifyContext {
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
 	#[cfg(test)]
 	witnesses: RwLock<Vec<Option<ResultWitness>>>,
+	#[cfg(test)]
+	query_goals: RwLock<Vec<usize>>,
+	#[cfg(test)]
+	searched: AtomicBool,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -153,6 +157,10 @@ impl VerifyContext {
 			depth_cuts: RwLock::new(IdSet::default()),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; unresolved as usize]),
+			#[cfg(test)]
+			query_goals: RwLock::new(vec![0; unresolved as usize]),
+			#[cfg(test)]
+			searched: AtomicBool::new(false),
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
@@ -318,6 +326,32 @@ impl VerifyContext {
 	}
 
 	#[cfg(test)]
+	pub(crate) fn goals_noted(&self, query_index: usize, count: usize) {
+		let mut state = write_lock(&self.query_goals);
+		if let Some(slot) = state.get_mut(query_index) {
+			*slot += count;
+		}
+	}
+
+	#[cfg(test)]
+	pub(crate) fn goals_for(&self, query_index: usize) -> usize {
+		read_lock(&self.query_goals)
+			.get(query_index)
+			.copied()
+			.unwrap_or(0)
+	}
+
+	#[cfg(test)]
+	pub(crate) fn note_search_reached_a_controllable_slot(&self) {
+		self.searched.store(true, Ordering::SeqCst);
+	}
+
+	#[cfg(test)]
+	pub(crate) fn search_reached_a_controllable_slot(&self) -> bool {
+		self.searched.load(Ordering::SeqCst)
+	}
+
+	#[cfg(test)]
 	pub(crate) fn witness_get(&self, query_index: usize) -> Option<ResultWitness> {
 		read_lock(&self.witnesses)
 			.get(query_index)
@@ -386,6 +420,10 @@ impl VerifyContext {
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),
+			#[cfg(test)]
+			query_goals: RwLock::new(vec![0; results_len]),
+			#[cfg(test)]
+			searched: AtomicBool::new(false),
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),

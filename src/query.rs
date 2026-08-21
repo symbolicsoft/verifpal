@@ -19,6 +19,19 @@ fn attack_trace(
 	target: &Value,
 	seed: &[(SlotIdx, Value)],
 ) -> Narration {
+	attack_trace_with(ctx, km, ps, query_index, target, seed, Vec::new())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attack_trace_with(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	query_index: usize,
+	target: &Value,
+	seed: &[(SlotIdx, Value)],
+	prelude: Vec<crate::narrate::Step>,
+) -> Narration {
 	if in_minimization() {
 		return Narration::none();
 	}
@@ -36,7 +49,20 @@ fn attack_trace(
 			shares: witness.shares.clone(),
 		},
 	);
-	narrate_attack(km, &witness, target, &ambient)
+	let narration = narrate_attack(km, &witness, target, &ambient, prelude);
+	#[cfg(test)]
+	crate::tracecheck::assert_trace_is_well_founded(&crate::tracecheck::TraceUnderTest {
+		file_name: ctx.results_file_name(),
+		query: &ctx.results_get()[query_index].query,
+		query_index,
+		steps: &narration.steps,
+		km,
+		ps: &witness.ps,
+		attacker: &witness.attacker,
+		target,
+		phase: ambient.current_phase,
+	});
+	narration
 }
 
 fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(SlotIdx, Value)> {
@@ -166,7 +192,18 @@ fn query_authentication(
 		.knows(assigned)
 		.map(|i| recorded_mutations(attacker, i))
 		.unwrap_or_default();
-	let mutated_info = attack_trace(ctx, km, ps, query_index, assigned, &seed);
+	let prelude = if sender == ATTACKER_ID {
+		Vec::new()
+	} else {
+		vec![crate::narrate::Step::Received {
+			name: std::sync::Arc::clone(&c.name),
+			sender: std::sync::Arc::from(km.principal_name(sender)),
+			recipient: std::sync::Arc::from(ps.name.as_str()),
+			#[cfg(test)]
+			slot: SlotIdx(index),
+		}]
+	};
+	let mutated_info = attack_trace_with(ctx, km, ps, query_index, assigned, &seed, prelude);
 	result = query_precondition(result, ps);
 	Ok(query_authentication_handle_pass(
 		ctx,
@@ -305,7 +342,22 @@ fn query_freshness(
 		return Ok(result);
 	}
 	let (resolved, _) = ps.resolve_constant(subject, true);
-	let mutated_info = attack_trace(ctx, km, ps, query_index, &resolved, &[]);
+	let leaves = crate::narrate::constant_leaves(&resolved);
+	let prelude = if leaves.is_empty() {
+		Vec::new()
+	} else {
+		vec![crate::narrate::Step::Static {
+			name: std::sync::Arc::clone(&subject.name),
+			leaves: leaves
+				.iter()
+				.map(|c| c.name.to_string())
+				.collect::<Vec<_>>()
+				.join(", "),
+			#[cfg(test)]
+			terms: leaves.iter().map(|c| Value::Constant(c.clone())).collect(),
+		}]
+	};
+	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &resolved, &[], prelude);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info.trace,
@@ -382,7 +434,24 @@ fn query_equivalence(
 		return Ok(result);
 	}
 	let empty = Value::Constant(Constant::default());
-	let mutated_info = attack_trace(ctx, km, ps, query_index, &empty, &[]);
+	let table = crate::narrate::NameTable::from_state(ps);
+	let prelude: Vec<crate::narrate::Step> = query
+		.constants
+		.iter()
+		.zip(values.iter())
+		.filter_map(|(c, v)| {
+			let _slot = ps.index_of(c)?;
+			Some(crate::narrate::Step::Resolves {
+				name: std::sync::Arc::clone(&c.name),
+				value: table.compress_excluding(v, &[&c.name]),
+				#[cfg(test)]
+				slot: SlotIdx(_slot),
+				#[cfg(test)]
+				term: v.clone(),
+			})
+		})
+		.collect();
+	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &empty, &[], prelude);
 	result.resolved = true;
 	result.summary = info_verify_result_summary(
 		&mutated_info.trace,

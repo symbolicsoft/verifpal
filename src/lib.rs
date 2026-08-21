@@ -33,6 +33,8 @@ pub(crate) mod solve;
 #[cfg(test)]
 mod testutil;
 pub(crate) mod theory;
+#[cfg(test)]
+mod tracecheck;
 pub mod types;
 pub(crate) mod unlink;
 #[cfg(feature = "cli")]
