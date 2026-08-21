@@ -18,6 +18,13 @@ pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 }
 
 pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
+	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
+}
+
+pub(crate) fn analyze_sessions_traced(
+	m: &Model,
+	sessions: u8,
+) -> VResult<(VerifyContext, ProtocolTrace)> {
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
@@ -40,7 +47,7 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
 	}
-	Ok(ctx)
+	Ok((ctx, trace))
 }
 
 fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
@@ -91,8 +98,19 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<(Vec<VerifyResult>, String)>
 		InfoLevel::Verifpal,
 		false,
 	);
-	verify_end(&analyze_sessions(m, sessions)?)
+	let (ctx, trace) = analyze_sessions_traced(m, sessions)?;
+	let out = verify_end(&ctx)?;
+	witness_replay_check(&ctx, &trace);
+	Ok(out)
 }
+
+#[cfg(test)]
+fn witness_replay_check(ctx: &VerifyContext, km: &ProtocolTrace) {
+	crate::witness::assert_reported_attacks_replay(ctx, km, ctx.results_file_name());
+}
+
+#[cfg(not(test))]
+fn witness_replay_check(_ctx: &VerifyContext, _km: &ProtocolTrace) {}
 
 pub(crate) fn verify_resolve_queries(
 	ctx: &VerifyContext,

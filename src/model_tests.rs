@@ -1,29 +1,506 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 16] = [
+	("dec_bypass_leaked_key.vp", 0),
+	("flawed_kem_no_binding.vp", 2),
+	("flawed_psk_from_serial.vp", 2),
+	("flawed_shared_secret_broadcast.vp", 2),
+	("junglegym_hybrid_pq.vp", 4),
+	("kem_unguarded_ek.vp", 1),
+	("noise_xx_mutual.vp", 0),
+	("noise_xx_mutual.vp", 1),
+	("noise_xx_mutual.vp", 2),
+	("saltchannel.vp", 0),
+	("srp_naive_verifier.vp", 2),
+	("test3.vp", 1),
+	("test3.vp", 5),
+	("test5.vp", 1),
+	("test5.vp", 3),
+	("test5.vp", 5),
+];
+
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 8] = [
+	("flawed_kem_no_binding.vp", 2),
+	("junglegym_hybrid_pq.vp", 4),
+	("kem_unguarded_ek.vp", 1),
+	("needham-schroeder-pk.vp", 0),
+	("needham-schroeder-pk.vp", 1),
+	("noise_xx_mutual.vp", 1),
+	("noise_xx_mutual.vp", 2),
+	("srp_naive_verifier.vp", 2),
+];
+
+const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 25] = [
+	("ephemerals_sign.vp", 0),
+	("ephemerals_sign.vp", 1),
+	("exa2.vp", 0),
+	("flawed_anonymous_chat.vp", 0),
+	("flawed_anonymous_chat.vp", 1),
+	("flawed_anonymous_chat.vp", 2),
+	("flawed_anonymous_chat.vp", 3),
+	("flawed_resumption_ticket.vp", 2),
+	("forged_flight_mitm.vp", 0),
+	("identity_misbinding_uks.vp", 1),
+	("kem_direction_reflection.vp", 0),
+	("mutual_auth_both_directions.vp", 1),
+	("needham-schroeder-pk-withfix.vp", 0),
+	("needham-schroeder-pk-withfix.vp", 1),
+	("needham-schroeder-pk.vp", 3),
+	("password_pake_transcript.vp", 2),
+	("pke_unguarded_alice.vp", 1),
+	("saltchannel.vp", 0),
+	("shared_freshness_not_replication.vp", 0),
+	("station_to_station.vp", 4),
+	("station_to_station_unsigned.vp", 0),
+	("station_to_station_unsigned.vp", 1),
+	("station_to_station_unsigned.vp", 2),
+	("station_to_station_unsigned.vp", 3),
+	("two_phase_commit_forged_ack.vp", 0),
+];
+
+const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 33] = [
+	("blind_unblind_wrong_factor.vp", 1),
+	("concat_arity_roundtrip.vp", 3),
+	("concat_five_split_five.vp", 2),
+	("concat_nested_projection.vp", 1),
+	("eap_tunnel_channel_binding.vp", 1),
+	("equiv_aead_ad_mismatch.vp", 1),
+	("equiv_dh_cross_principal.vp", 1),
+	("equiv_kem_roundtrip.vp", 1),
+	("equiv_shamir_all_pairs.vp", 2),
+	("equiv_three_constants.vp", 1),
+	("equiv_unblind_roundtrip.vp", 1),
+	("freshness_dh_static.vp", 0),
+	("freshness_hkdf_salt.vp", 1),
+	("freshness_kem_secret.vp", 1),
+	("hash_arity_distinguishes.vp", 0),
+	("hash_arity_distinguishes.vp", 1),
+	("hkdf_five_outputs.vp", 2),
+	("junglegym_deep_ratchet.vp", 10),
+	("junglegym_hybrid_pq.vp", 6),
+	("junglegym_password_maze.vp", 9),
+	("junglegym_phase_cascade.vp", 12),
+	("junglegym_threshold_ring.vp", 10),
+	("kem_freshness.vp", 1),
+	("kem_reused_randomness.vp", 1),
+	("nonce_echo_reflection.vp", 1),
+	("pke_replay_wrong_recipient.vp", 1),
+	("ringsign_ring_order.vp", 1),
+	("ringsign_substitute.vp", 0),
+	("ringsign_substitute.vp", 2),
+	("session_freshness_stable.vp", 1),
+	("shamir_cross_dealer_join.vp", 2),
+	("split_narrower_than_concat.vp", 2),
+	("webauthn_origin_binding.vp", 1),
+];
+
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 4] = [
+	"examples/transport-layer/piknik.vp",
+	"examples/transport-layer/needham-schroeder.vp",
+	"examples/contact-tracing/lc-dp-3t.vp",
+	"examples/messaging/pqxdh-weak.vp",
+];
+
+fn swept_models() -> Vec<(String, String)> {
+	let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/test");
+	let mut out: Vec<(String, String)> = std::fs::read_dir(&dir)
+		.expect("read examples/test")
+		.flatten()
+		.map(|e| e.path())
+		.filter(|p| p.extension().is_some_and(|x| x == "vp"))
+		.map(|p| {
+			(
+				p.file_name()
+					.unwrap_or_default()
+					.to_string_lossy()
+					.into_owned(),
+				format!(
+					"examples/test/{}",
+					p.file_name().unwrap_or_default().to_string_lossy()
+				),
+			)
+		})
+		.collect();
+	for path in SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST {
+		let name = path.rsplit('/').next().unwrap_or(path).to_string();
+		out.push((name, path.to_string()));
+	}
+	out.sort();
+	out
+}
+
+fn message_legs(source: &str) -> Vec<(String, String, String, bool)> {
+	let mut stripped = String::new();
+	let mut chars = source.chars().peekable();
+	let mut in_block = false;
+	while let Some(c) = chars.next() {
+		if in_block {
+			if c == '*' && chars.peek() == Some(&'/') {
+				chars.next();
+				in_block = false;
+			}
+			continue;
+		}
+		if c == '/' && chars.peek() == Some(&'*') {
+			chars.next();
+			in_block = true;
+			continue;
+		}
+		if c == '/' && chars.peek() == Some(&'/') {
+			for n in chars.by_ref() {
+				if n == '\n' {
+					stripped.push('\n');
+					break;
+				}
+			}
+			continue;
+		}
+		stripped.push(c);
+	}
+	let mut legs = Vec::new();
+	for line in stripped.lines() {
+		let line = line.trim();
+		let arrow = if let Some(i) = line.find("->") {
+			(i, 2)
+		} else if let Some(i) = line.find('\u{2192}') {
+			(i, '\u{2192}'.len_utf8())
+		} else {
+			continue;
+		};
+		let sender = line[..arrow.0].trim();
+		let rest = &line[arrow.0 + arrow.1..];
+		let Some(colon) = rest.find(':') else {
+			continue;
+		};
+		let recipient = rest[..colon].trim();
+		if sender.is_empty() || recipient.is_empty() || sender.contains(char::is_whitespace) {
+			continue;
+		}
+		if recipient.contains(char::is_whitespace) || recipient.contains('[') {
+			continue;
+		}
+		for item in rest[colon + 1..].split(',') {
+			let item = item.trim();
+			if item.is_empty() {
+				continue;
+			}
+			let guarded = item.starts_with('[');
+			let name = item.trim_matches(|c| c == '[' || c == ']').trim();
+			legs.push((
+				sender.to_lowercase(),
+				recipient.to_lowercase(),
+				name.to_lowercase(),
+				guarded,
+			));
+		}
+	}
+	legs
+}
+
+fn stated_result_codes(source: &str) -> Vec<String> {
+	let Some(line) = source
+		.lines()
+		.map(|l| l.trim())
+		.find(|l| l.starts_with("// Expected:"))
+	else {
+		return Vec::new();
+	};
+	let mut out = Vec::new();
+	for token in line.split(|c: char| !c.is_ascii_alphanumeric()) {
+		let bytes = token.as_bytes();
+		if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
+			continue;
+		}
+		if bytes.chunks(2).all(|pair| {
+			matches!(pair[0], b'c' | b'a' | b'f' | b'u' | b'e') && matches!(pair[1], b'0' | b'1')
+		}) {
+			out.push(token.to_string());
+		}
+	}
+	out.sort();
+	out.dedup();
+	out
+}
+
+fn session_base(name: &str) -> String {
+	name.split('#').next().unwrap_or(name).trim().to_lowercase()
+}
+
+#[test]
+fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
+	let mut bypass: Vec<(String, usize)> = Vec::new();
+	let mut unminimized: Vec<(String, usize)> = Vec::new();
+	let mut shared: Vec<(String, usize)> = Vec::new();
+	let mut traceless: Vec<(String, usize)> = Vec::new();
+	let mut incoherent: Vec<String> = Vec::new();
+	let mut header_problems: Vec<String> = Vec::new();
+	let mut undocumented = 0usize;
+
+	for (model, path) in swept_models() {
+		let Ok((results, _)) = crate::verify::verify(&path) else {
+			continue;
+		};
+		let source = std::fs::read_to_string(&path).expect("read model");
+		let legs = message_legs(&source);
+		let stated = stated_result_codes(&source);
+		if stated.is_empty() {
+			undocumented += 1;
+		} else {
+			let code = crate::types::VerifyResult::results_code(&results);
+			let mut produced = vec![code.clone()];
+			if source.contains("session")
+				&& let Ok((one, _)) = crate::verify::verify_with_sessions(&path, 1)
+			{
+				produced.push(crate::types::VerifyResult::results_code(&one));
+			}
+			if !stated.contains(&code) {
+				header_problems.push(format!(
+					"{}: the header says the model produces {}, but at the shipped default it \
+					 produces {}",
+					model,
+					stated.join(" / "),
+					code
+				));
+			}
+			for claim in &stated {
+				if !produced.contains(claim) {
+					header_problems.push(format!(
+						"{}: the header claims a result of {}, which the model does not produce \
+						 at one session or at two (it produces {})",
+						model,
+						claim,
+						produced.join(" / ")
+					));
+				}
+			}
+		}
+		for result in results.iter().filter(|r| r.resolved) {
+			let summary = result.summary.as_str();
+			let key = (model.clone(), result.query_index);
+			if !summary.contains("Attack trace:") {
+				traceless.push(key.clone());
+			}
+			if summary.contains("the check is defeated") {
+				bypass.push(key.clone());
+			}
+			if summary.contains("not a minimized witness") {
+				unminimized.push(key.clone());
+			}
+			if summary.contains("reproduces only because sessions") {
+				shared.push(key.clone());
+			}
+			for line in summary.lines() {
+				let line = line.trim();
+				let Some(rest) = line.split_once("Attacker replaces ").map(|(_, r)| r) else {
+					continue;
+				};
+				let Some((names, tail)) = rest.split_once(" (sent by ") else {
+					continue;
+				};
+				let Some((route, _)) = tail.split_once(") with ") else {
+					continue;
+				};
+				let Some((_, recipient)) = route.split_once(" to ") else {
+					continue;
+				};
+				let recipient = session_base(recipient);
+				for name in names.split(',') {
+					let name = session_base(name);
+					let to_recipient: Vec<&(String, String, String, bool)> = legs
+						.iter()
+						.filter(|(_, r, n, _)| *r == recipient && *n == name)
+						.collect();
+					if to_recipient.is_empty() {
+						incoherent.push(format!(
+							"{} query {}: trace says the attacker replaces `{}` on a message to \
+							 {}, but no message in the model carries `{}` to {}",
+							model, result.query_index, name, recipient, name, recipient
+						));
+						continue;
+					}
+					if to_recipient.iter().all(|(_, _, _, g)| *g)
+						&& !line.contains("The guard is bypassed")
+						&& !legs.iter().any(|(_, _, n, g)| *n == name && !*g)
+					{
+						incoherent.push(format!(
+							"{} query {}: trace says the attacker replaces `{}` on a message to \
+							 {}, but every message carrying `{}` guards it and the step claims no \
+							 guard bypass",
+							model, result.query_index, name, recipient, name
+						));
+					}
+				}
+			}
+		}
+	}
+
+	let pinned = |rows: &[(&str, usize)]| -> Vec<(String, usize)> {
+		let mut v: Vec<(String, usize)> =
+			rows.iter().map(|(m, i)| ((*m).to_string(), *i)).collect();
+		v.sort();
+		v
+	};
+	let sorted = |mut v: Vec<(String, usize)>| -> Vec<(String, usize)> {
+		v.sort();
+		v.dedup();
+		v
+	};
+
+	assert!(
+		header_problems.is_empty(),
+		"a model's header states a result the model does not produce. The header is where the \
+		 reason for a verdict is argued, so a header that disagrees with the run is either a \
+		 stale claim or a verdict nobody has re-justified:\n  {}",
+		header_problems.join("\n  ")
+	);
+	assert!(
+		undocumented <= 145,
+		"{} models in examples/test/ state no expected result code in their header, up from \
+		 145. A new model must say what it expects and why, so that its verdict can be checked \
+		 against an intent rather than against itself",
+		undocumented
+	);
+	assert!(
+		incoherent.is_empty(),
+		"an attack trace names a wire substitution the model cannot support:\n  {}",
+		incoherent.join("\n  ")
+	);
+	assert_eq!(
+		sorted(bypass),
+		pinned(&TRACE_USES_A_GUARD_BYPASS),
+		"the set of traces that explain themselves with a defeated check has moved. A new \
+		 entry means some attack is now narrated as `the attacker sent nil and the check was \
+		 defeated` where a witness that forges a value the recipient accepts on its own would \
+		 explain it; a missing entry means one of those narrations improved and the pin should \
+		 be updated"
+	);
+	assert_eq!(
+		sorted(unminimized),
+		pinned(&TRACE_IS_NOT_A_MINIMIZED_WITNESS),
+		"the set of attacks whose witness could not be minimized has moved. These traces list \
+		 the substitutions the search recorded without confirming any subset reproduces the \
+		 violation, so a new entry is a trace that got less trustworthy"
+	);
+	assert_eq!(
+		sorted(shared),
+		pinned(&TRACE_NEEDS_SHARED_SESSION_FRESHNESS),
+		"the set of attacks that reproduce only because two sessions share a fresh value has \
+		 moved"
+	);
+	assert_eq!(
+		sorted(traceless),
+		pinned(&ATTACK_IS_REPORTED_WITHOUT_A_TRACE),
+		"the set of attacks reported with no trace at all has moved. A freshness or \
+		 equivalence violation the honest run already exhibits needs no attacker action, but a \
+		 new entry elsewhere is an attack the tool asserts and does not explain"
+	);
+}
+
+pub(crate) const TRACE_MAY_OMIT_A_SUBSTITUTION: [(&str, usize); 1] =
+	[("needham-schroeder-pk.vp", 3)];
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }
 
 fn run_model_at(path: &str, model: &str, expected: &str) {
-	let (_, results_code) =
-		crate::verify::verify(path).unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
-	assert_eq!(
-		results_code, expected,
-		"FAIL • {} (expected {}, got {})",
-		model, expected, results_code
-	);
+	let (results, results_code) =
+		crate::verify::verify(path).unwrap_or_else(|e| panic!("ERROR \u{25cf} {} ({})", model, e));
+	assert_code(model, None, &results, &results_code, expected);
 }
 
 fn run_model_sessions(model: &str, sessions: u8, expected: &str) {
 	let path = format!("examples/test/{}", model);
-	let (_, results_code) = crate::verify::verify_with_sessions(&path, sessions)
-		.unwrap_or_else(|e| panic!("ERROR • {} ({})", model, e));
-	assert_eq!(
-		results_code, expected,
-		"FAIL • {} at {} sessions (expected {}, got {})",
-		model, sessions, expected, results_code
+	let (results, results_code) = crate::verify::verify_with_sessions(&path, sessions)
+		.unwrap_or_else(|e| panic!("ERROR \u{25cf} {} ({})", model, e));
+	assert_code(model, Some(sessions), &results, &results_code, expected);
+}
+
+fn kind_name(letter: char) -> &'static str {
+	match letter {
+		'c' => "confidentiality",
+		'a' => "authentication",
+		'f' => "freshness",
+		'u' => "unlinkability",
+		'e' => "equivalence",
+		_ => "unknown",
+	}
+}
+
+fn code_pairs(code: &str) -> Vec<(char, char)> {
+	code.chars()
+		.collect::<Vec<char>>()
+		.chunks(2)
+		.filter(|pair| pair.len() == 2)
+		.map(|pair| (pair[0], pair[1]))
+		.collect()
+}
+
+fn assert_code(
+	model: &str,
+	sessions: Option<u8>,
+	results: &[crate::types::VerifyResult],
+	got: &str,
+	expected: &str,
+) {
+	if got == expected {
+		return;
+	}
+	let at = match sessions {
+		Some(n) => format!(" at {} session{}", n, if n == 1 { "" } else { "s" }),
+		None => String::new(),
+	};
+	let mut out = format!(
+		"FAIL \u{25cf} {}{} (expected {}, got {})\n",
+		model, at, expected, got
 	);
+	let want = code_pairs(expected);
+	let have = code_pairs(got);
+	if want.len() != have.len() {
+		out.push_str(&format!(
+			"\n  the model answers {} quer{}, the expected code pins {}\n",
+			have.len(),
+			if have.len() == 1 { "y" } else { "ies" },
+			want.len()
+		));
+	}
+	for (i, answered) in have.iter().enumerate() {
+		let Some(wanted) = want.get(i) else {
+			break;
+		};
+		if wanted == answered {
+			continue;
+		}
+		let query = results
+			.get(i)
+			.map(|r| format!("{}", r.query))
+			.unwrap_or_else(|| "?".to_string());
+		out.push_str(&format!("\n  query {}: {}\n", i, query));
+		if wanted.0 != answered.0 {
+			out.push_str(&format!(
+				"    the code pins a {} query here, the model asks a {} query\n",
+				kind_name(wanted.0),
+				kind_name(answered.0)
+			));
+			continue;
+		}
+		if answered.1 == '1' {
+			out.push_str("    pinned to hold, but an attack was found:\n");
+			for line in results
+				.get(i)
+				.map(|r| r.summary.as_str())
+				.unwrap_or_default()
+				.lines()
+				.filter(|line| !line.trim().is_empty())
+			{
+				out.push_str(&format!("    {}\n", line.trim()));
+			}
+		} else {
+			out.push_str("    pinned to an attack, but the query held\n");
+		}
+	}
+	panic!("{}", out);
 }
 
 fn run_model_err(model: &str, expected_substring: &str) {

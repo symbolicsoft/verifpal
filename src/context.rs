@@ -38,6 +38,8 @@ pub(crate) struct VerifyContext {
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
+	#[cfg(test)]
+	witnesses: RwLock<Vec<Option<ResultWitness>>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -149,6 +151,8 @@ impl VerifyContext {
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
 			depth_cuts: RwLock::new(IdSet::default()),
+			#[cfg(test)]
+			witnesses: RwLock::new(vec![None; unresolved as usize]),
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
@@ -303,6 +307,24 @@ impl VerifyContext {
 		read_lock(&self.results).clone()
 	}
 
+	#[cfg(test)]
+	pub(crate) fn witness_put(&self, query_index: usize, witness: ResultWitness) {
+		let mut state = write_lock(&self.witnesses);
+		if let Some(slot) = state.get_mut(query_index)
+			&& slot.is_none()
+		{
+			*slot = Some(witness);
+		}
+	}
+
+	#[cfg(test)]
+	pub(crate) fn witness_get(&self, query_index: usize) -> Option<ResultWitness> {
+		read_lock(&self.witnesses)
+			.get(query_index)
+			.cloned()
+			.flatten()
+	}
+
 	pub(crate) fn results_file_name(&self) -> &str {
 		&self.file_name
 	}
@@ -352,6 +374,8 @@ impl VerifyContext {
 			}
 		}
 		let unresolved = i32::from(query_index < results.len());
+		#[cfg(test)]
+		let results_len = results.len();
 		VerifyContext {
 			attacker: RwLock::new(self.attacker_snapshot()),
 			results: RwLock::new(results),
@@ -360,6 +384,8 @@ impl VerifyContext {
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
+			#[cfg(test)]
+			witnesses: RwLock::new(vec![None; results_len]),
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),

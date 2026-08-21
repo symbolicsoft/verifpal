@@ -508,6 +508,17 @@ pub struct Model {
 	pub tail_comments: Vec<Comment>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct ResultWitness {
+	pub installs: Vec<(SlotIdx, Value)>,
+	pub narrated: Vec<SlotIdx>,
+	pub principal: PrincipalId,
+	pub phase: i32,
+	pub reproduced: bool,
+	pub shares: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,

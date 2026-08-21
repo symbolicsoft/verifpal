@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: e0e0e0e0e0f0
+// Expected: e0e0e0e0e0f0 at one session, e1e1e1e1e1f0 at two.
 //
 // A five-way SPLIT of a CONCAT bundle, checked twice on the way in. `k` is
 // shared and never leaks, so the attacker cannot produce any (encrypted, tag)

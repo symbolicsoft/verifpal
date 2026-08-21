@@ -30,7 +30,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 617 tests (unit + model), ~3.5s once built (also: make test)
+cargo test --release                   # 618 tests (unit + model), ~9s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -311,11 +311,21 @@ All output is plain text: there is no alternate-screen progress UI and no attack
 - The engine interns names per model, but the test builders share one table (`testutil::test_value_id`), so **unit tests must still use unique constant names** (existing tests prefix names per-test, e.g. `cbw_m`, `hcm_x`, `ps_fbm_a`). A test that both parses a model *and* builds a value by hand must take the constant from the parsed trace via `testutil::trace_constant` — ids from the shared test table will not match the model's own.
 - Every model in `examples/test/` is wired to a `run_model` test; keep it that way when you add one.
 
+### Checking *why* a verdict happened, not just that it did
+
+A result code pins two bits per query and says nothing about the attack behind a `1`, so three checks sit underneath it. All are test-only: the recording is `#[cfg(test)]` and a shipping build carries none of it.
+
+- **Witness replay.** Every `verify` under `cargo test` ends in `witness::assert_reported_attacks_replay`: for each resolved query it re-executes the reporting principal's pristine session with exactly the substitutions the minimizer kept, and fails if the query no longer resolves. It also fails when the printed trace names *fewer* slots than the witness needed, so a trace cannot silently omit a load-bearing step. `TRACE_MAY_OMIT_A_SUBSTITUTION` in `model_tests.rs` is the one known exception (`needham-schroeder-pk.vp` query 3, whose kept witness includes an install that reproduces Bob's honest `e2` and so is not rendered as a mutation). 220 of the corpus's attack verdicts are replay-checked; dropping one substitution from the replay fails 149 tests, which is the measure of how load-bearing this is.
+- **Narration shape.** `attack_traces_keep_their_shape_and_name_only_wires_that_exist` sweeps every model once and pins four exact sets: traces that explain themselves with a defeated check (`TRACE_USES_A_GUARD_BYPASS`, 16), traces the minimizer could not confirm (`TRACE_IS_NOT_A_MINIMIZED_WITNESS`, 8), traces that need two sessions to share a fresh value (`TRACE_NEEDS_SHARED_SESSION_FRESHNESS`, 25), and attacks reported with no trace at all (`ATTACK_IS_REPORTED_WITHOUT_A_TRACE`, 33). These sets are exactly the narration regressions a verdict cannot catch — the `cloudbackup.vp` hazard described under `witness.rs`. A new entry means some attack got a worse explanation; a missing one means an explanation improved and the pin should move.
+- **Wire coherence and header intent.** The same sweep rejects any trace step that claims the attacker replaced a value on a message the model does not have, or replaced a value every message guards without saying a guard was bypassed. It also reads each model's `// Expected:` header line and requires the stated code to be what the model actually produces — the header is where a verdict is argued, so a header disagreeing with the run is either a stale claim or a verdict nobody re-justified. 201 models state a code; the ceiling on models that do not is a ratchet.
+
+Two invariants worth re-running by hand after an engine change, both currently clean across all 346 models: a passive run's attacks must be a subset of the active run's, and a one-session run's must be a subset of a two-session run's.
+
 ### Performance expectations
 
 Numbers below are wall clock on an Apple-silicon laptop, release build, best of two; re-measure rather than trusting them after an engine change.
 
-Nearly every model in `examples/test/` runs in milliseconds. The exceptions are the five `junglegym_*.vp` stress models — deliberately convoluted — plus two that the forged-flight search made expensive: `junglegym_threshold_ring.vp` ~2.5s, `concat_split_replay.vp` ~1.3s, `junglegym_deep_ratchet.vp` ~1.0s, `junglegym_hybrid_pq.vp` ~0.28s, `junglegym_password_maze.vp` ~0.18s. The junglegym models exist to lean on resolution, the theory descent, `normalise_arguments`, guard bypass and the unlinkability witness search all at once; each carries its expected result code and the reasoning for it in a header comment. `cargo test --release` as a whole is ~3.5s once built.
+Nearly every model in `examples/test/` runs in milliseconds. The exceptions are the five `junglegym_*.vp` stress models — deliberately convoluted — plus two that the forged-flight search made expensive: `junglegym_threshold_ring.vp` ~2.5s, `concat_split_replay.vp` ~1.3s, `junglegym_deep_ratchet.vp` ~1.0s, `junglegym_hybrid_pq.vp` ~0.28s, `junglegym_password_maze.vp` ~0.18s. The junglegym models exist to lean on resolution, the theory descent, `normalise_arguments`, guard bypass and the unlinkability witness search all at once; each carries its expected result code and the reasoning for it in a header comment. `cargo test --release` as a whole is ~9s once built; roughly 5s of that is `attack_traces_keep_their_shape_and_name_only_wires_that_exist`, which re-runs the whole corpus once to audit narration.
 
 Two of those numbers are the price of the forged-flight search and are worth knowing before you try to "fix" them. `junglegym_threshold_ring.vp` went from ~0.44s to ~2.5s because it now finds a genuine extra attack (the `vault` authentication query, `a1`: `escrow` is already `c1`, so the attacker decrypts the honest vault for Anchor's real signature and re-seals it under a key it forces Cipher to derive by swapping the unguarded Shamir shares — it forges no signature). `concat_split_replay.vp` went from ~0.1s to ~1.3s because the stuck-`SPLIT` constraint is no longer gated on the decryption being checked. Both are search cost, not a leak.
 

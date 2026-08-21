@@ -40,6 +40,8 @@ pub(crate) struct Witness {
 	pub attacker: AttackerState,
 	pub reproduced: bool,
 	pub shares: Vec<String>,
+	#[cfg(test)]
+	pub installs: Vec<(SlotIdx, Value)>,
 }
 
 pub(crate) fn minimize_witness(
@@ -54,6 +56,8 @@ pub(crate) fn minimize_witness(
 		attacker: ctx.attacker_snapshot(),
 		reproduced,
 		shares: Vec::new(),
+		#[cfg(test)]
+		installs: Vec::new(),
 	};
 
 	if in_minimization() {
@@ -233,6 +237,10 @@ pub(crate) fn minimize_witness(
 	match probe(ctx, km, &base, &keep, query_index, phase) {
 		Some(mut witness) => {
 			witness.shares = shared_freshness(ctx, km, &base, &keep, query_index, phase);
+			#[cfg(test)]
+			{
+				witness.installs = keep;
+			}
 			witness
 		}
 		None => unminimized(false),
@@ -330,6 +338,112 @@ fn rename_own_fresh(v: &Value, ps: &PrincipalState, strict: bool, seen: &mut Vec
 	}
 }
 
+#[cfg(test)]
+pub(crate) fn assert_reported_attacks_replay(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	file_name: &str,
+) {
+	for result in ctx.results_get() {
+		if !result.resolved {
+			continue;
+		}
+		let Some(witness) = ctx.witness_get(result.query_index) else {
+			continue;
+		};
+		if !witness.reproduced || witness.installs.is_empty() {
+			continue;
+		}
+		let Some(base) = ctx
+			.principal_states()
+			.iter()
+			.find(|s| s.id == witness.principal)
+			.map(|s| s.clone_for_depth(true))
+		else {
+			continue;
+		};
+		let name_of = |slot: &SlotIdx| {
+			base.meta
+				.get(slot.get())
+				.map(|sm| sm.constant.name.to_string())
+				.unwrap_or_else(|| format!("slot {slot}"))
+		};
+		let listing: Vec<String> = witness
+			.installs
+			.iter()
+			.map(|(slot, value)| format!("      {} := {}", name_of(slot), value))
+			.collect();
+		let caveat = if witness.shares.is_empty() {
+			String::new()
+		} else {
+			format!(
+				"\n    and on sessions sharing: {}",
+				witness.shares.join(", ")
+			)
+		};
+		assert!(
+			replays(
+				ctx,
+				km,
+				&base,
+				&witness.installs,
+				result.query_index,
+				witness.phase,
+			),
+			"WITNESS • {} query {} ({}) reports an attack that its own minimized \
+			 witness does not reproduce. Re-executing {}'s session at phase {} with \
+			 exactly these substitutions left the query unresolved, so the verdict \
+			 and the reason recorded for it disagree.\n\n{}{}\n",
+			file_name,
+			result.query_index,
+			result.query,
+			base.name,
+			witness.phase,
+			listing.join("\n"),
+			caveat,
+		);
+		if crate::model_tests::TRACE_MAY_OMIT_A_SUBSTITUTION
+			.contains(&(file_name, result.query_index))
+		{
+			continue;
+		}
+		let missing: Vec<String> = witness
+			.installs
+			.iter()
+			.map(|(slot, _)| *slot)
+			.filter(|slot| !witness.narrated.contains(slot))
+			.map(|slot| name_of(&slot))
+			.collect();
+		assert!(
+			missing.is_empty(),
+			"WITNESS • {} query {} ({}) prints a trace that omits {} substitution(s) \
+			 the witness needed: {}. A reader following the trace cannot reach the \
+			 verdict it reports.\n\n{}{}\n",
+			file_name,
+			result.query_index,
+			result.query,
+			missing.len(),
+			missing.join(", "),
+			listing.join("\n"),
+			caveat,
+		);
+	}
+}
+
+#[cfg(test)]
+pub(crate) fn replays(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	query_index: usize,
+	phase: i32,
+) -> bool {
+	let _guard = MinimizingGuard::new();
+	let _quiet = InfoQuiet::new();
+	probe(ctx, km, base, installs, query_index, phase).is_some()
+}
+
 fn probe(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -360,6 +474,8 @@ fn probe(
 		return None;
 	}
 	Some(Witness {
+		#[cfg(test)]
+		installs: installs.to_vec(),
 		ps,
 		attacker: scratch.attacker_snapshot(),
 		// A probe returns only when the re-executed state resolved the query.

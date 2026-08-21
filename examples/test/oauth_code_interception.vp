@@ -1,24 +1,33 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1a1a0 — an authorization code redeemed with and without proof key
-// binding. The code travels back to the client on a redirect that nobody
+// Expected: c1a0a0 — an authorization code redeemed with and without proof
+// key binding. The code travels back to the client on a redirect that nobody
 // authenticates, so it is a bearer credential: whoever holds it can redeem it,
-// and the attacker holds it.
+// and the attacker holds it. That is the c1.
 //
-// The second redemption adds the one thing that fixes it. The client picks a
-// verifier, publishes only its hash when it asks for authorization, and
-// reveals the verifier when it redeems; the server rebuilds the hash and
-// compares. The attacker holding the intercepted code holds the published hash
-// too and still cannot produce a preimage, so its redemption fails the check.
+// Both redemptions nevertheless authenticate, and the reason is the point of
+// the model. A redemption is HASH(code), and the attacker holding the code can
+// compute exactly that — but exactly that is also the only value the client
+// would ever send. Producing the value the honest party would have produced is
+// a replay, not a forgery: it is non-injective agreement, and Verifpal reports
+// authentication attacks only where the recipient accepts something the
+// declared sender did not author. A bearer credential the attacker can present
+// is a confidentiality failure, and this model says so in the only place where
+// it is true.
+//
+// The proof key half then adds the one thing that would matter if redemptions
+// were forgeable. The client picks a verifier, publishes only its hash when it
+// asks for authorization, and reveals the verifier when it redeems; the server
+// rebuilds the hash and compares. The attacker holding the published hash
+// cannot produce a preimage, so it could not steer the check even if there
+// were something to steer.
 //
 // The authorization request is guarded and the redirect is not, which is the
 // deployment being modelled rather than a convenience: the request goes
 // directly to the server over an authenticated channel, and the redirect is
 // the leg that passes through the user's browser and an attacker-controlled
-// URL. Guard the redirect instead and there is no attack to find; leave the
-// request open and PKCE protects nothing, because the attacker would simply
-// register a challenge of its own.
+// URL.
 //
 // What protects the second redemption is not that the verifier is
 // confidential — it is revealed a moment later, and the first query says so —

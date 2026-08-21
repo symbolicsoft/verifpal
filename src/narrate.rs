@@ -110,6 +110,16 @@ fn reportable(sv: &SlotValues) -> bool {
 	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected
 }
 
+#[cfg(test)]
+pub(crate) fn narrated_installs(ps: &PrincipalState) -> Vec<SlotIdx> {
+	ps.values
+		.iter()
+		.enumerate()
+		.filter(|(_, sv)| sv.provenance.sender == ATTACKER_ID)
+		.map(|(i, _)| SlotIdx(i))
+		.collect()
+}
+
 /// Does `v` mention any constant in `ids`?
 fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
 	match v {
@@ -166,7 +176,7 @@ pub(crate) fn mutation_steps(
 			});
 			continue;
 		}
-		let sender = wire_sender(km, ps, i);
+		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
 		let item = MutationItem {
 			name: Arc::clone(&sm.constant.name),
@@ -180,10 +190,10 @@ pub(crate) fn mutation_steps(
 		};
 		match groups
 			.iter_mut()
-			.find(|(s, r, d, _)| *s == sender && *r == ps.id && *d == sm.declared_at)
+			.find(|(s, r, d, _)| *s == sender && *r == recipient && *d == sm.declared_at)
 		{
 			Some((_, _, _, items)) => items.push(item),
-			None => groups.push((sender, ps.id, sm.declared_at, vec![item])),
+			None => groups.push((sender, recipient, sm.declared_at, vec![item])),
 		}
 	}
 	groups
@@ -197,13 +207,20 @@ pub(crate) fn mutation_steps(
 		.collect()
 }
 
-fn wire_sender(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> PrincipalId {
-	ps.meta[i]
-		.known_by
-		.iter()
-		.find_map(|&(recipient, from)| (recipient == ps.id).then_some(from))
-		.or_else(|| km.slots.get(i).map(|slot| slot.creator))
-		.unwrap_or(ps.values[i].provenance.creator)
+fn wire_leg(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> (PrincipalId, PrincipalId) {
+	let meta = &ps.meta[i];
+	if let Some(&(_, from)) = meta.known_by.iter().find(|&&(to, _)| to == ps.id) {
+		return (from, ps.id);
+	}
+	if let Some(&(to, from)) = meta.known_by.first() {
+		return (from, to);
+	}
+	let creator = km
+		.slots
+		.get(i)
+		.map(|slot| slot.creator)
+		.unwrap_or(ps.values[i].provenance.creator);
+	(creator, ps.id)
 }
 
 pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
