@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — a Diffie-Hellman exchange with a guard on one direction
+// only. Alice receives Bob's public key over a guarded wire and Bob receives
+// Alice's over an open one, so the two of them end up with DIFFERENT secrets
+// and only one of those secrets is known to the attacker.
+//
+// The asymmetry is the whole model, and it is easy to get backwards.
+// Substituting Alice's public key on the way to Bob makes Bob's key a value
+// the attacker shares with him, so what BOB sends falls. What ALICE sends is
+// keyed on Bob's genuine public key and her own exponent, neither of which the
+// attacker has, so it holds — even though the exchange as a whole is
+// thoroughly broken and the two never agree on anything.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private m_alice
+	k_alice = DH_KEX(gb, a)
+	e_alice = AEAD_ENC(k_alice, m_alice, nil)
+]
+
+principal Bob[
+	knows private m_bob
+	k_bob = DH_KEX(ga, b)
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+]
+
+Alice -> Bob: e_alice
+Bob -> Alice: e_bob
+
+principal Bob[
+	_ = HASH(e_alice)
+]
+
+principal Alice[
+	_ = HASH(e_bob)
+]
+
+queries[
+	confidentiality? m_alice
+	confidentiality? m_bob
+]

@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c1 — `nil` is a constant like any other, interned at id 1 and
+// known to the attacker from the first moment of every run. Using it as a key
+// is legal, expressible, and completely transparent, which is worth one model
+// saying out loud: the corpus uses nil constantly as associated data and as an
+// HKDF salt, where it is harmless, and never once as the thing protecting a
+// secret.
+//
+// The middle query is the counterweight and the third is the consequence: a
+// real key protects its message, and a nested seal whose OUTER layer is keyed
+// on nil protects nothing at all, because the attacker peels the outer layer
+// and holds the inner ciphertext exactly as its recipient would.
+
+attacker[passive]
+
+principal Alice[
+	knows private real_key
+	knows private m_nil, m_key
+	e_nil = AEAD_ENC(nil, m_nil, nil)
+	e_key = AEAD_ENC(real_key, m_key, nil)
+	nested = AEAD_ENC(nil, e_key, nil)
+]
+
+Alice -> Bob: e_nil, nested
+
+principal Bob[
+	knows private real_key
+	d_nil = AEAD_DEC(nil, e_nil, nil)?
+	inner = AEAD_DEC(nil, nested, nil)?
+	d_key = AEAD_DEC(real_key, inner, nil)?
+	_ = HASH(d_nil, d_key)
+]
+
+queries[
+	confidentiality? m_nil
+	confidentiality? m_key
+	confidentiality? e_key
+]

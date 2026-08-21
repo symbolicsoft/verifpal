@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0f1 — a fresh salt is enough to make a derived key fresh even
+// when the input keying material never changes, which is the reason handshakes
+// mix a nonce into a KDF over a long-term secret. The two derivations differ
+// in the salt argument alone.
+//
+// HKDF has three arguments and up to five outputs, and freshness has to find a
+// generated constant in ANY argument. An implementation that looked only at
+// the keying material — argument 1, the one that carries the secret — would
+// report f1 for both and declare every nonce-salted key stale.
+
+attacker[active]
+
+principal Alice[
+	knows private ikm_static
+	knows public salt_static, info
+	generates salt_fresh
+	k_fresh, _, _ = HKDF(salt_fresh, ikm_static, info)
+	k_static, _, _ = HKDF(salt_static, ikm_static, info)
+	_ = HASH(k_fresh, k_static)
+]
+
+Alice -> Bob: salt_fresh
+
+principal Bob[
+	_ = HASH(salt_fresh)
+]
+
+queries[
+	freshness? k_fresh
+	freshness? k_static
+]

@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — a signature nobody acts on verifies nothing. Bob runs two
+// SIGNVERIFs; only one carries `?`, and only that one survives.
+//
+// unchecked_aead.vp, hmac_unchecked_assert.vp and pke_unchecked_assert.vp make
+// this point for decryption and for MACs. Signatures are the case most likely
+// to be written without the `?` in a real model, because SIGNVERIF reads like
+// an assertion already — its name contains the word — and it is not one.
+//
+// Two details keep the pair sharp. The signers are different, so the attacker
+// cannot simply present one flight's (message, signature) pair as the other's.
+// The messages are guarded, so it cannot substitute a message on its way to
+// the signer and collect a genuine signature over a value of its choosing —
+// which is a real attack, and a different one, and would fail both queries.
+// What is left to substitute is the signature itself, and the queries ask
+// about exactly that.
+
+attacker[active]
+
+principal Alice[
+	knows private sk_checked, sk_loose
+	knows private m_checked, m_loose
+	pk_checked = PUBKEY(sk_checked)
+	pk_loose = PUBKEY(sk_loose)
+	s_checked = SIGN(sk_checked, m_checked)
+	s_loose = SIGN(sk_loose, m_loose)
+]
+
+Alice -> Bob: [pk_checked], [pk_loose], [m_checked], s_checked, [m_loose], s_loose
+
+principal Bob[
+	_ = SIGNVERIF(pk_checked, m_checked, s_checked)?
+	verdict = SIGNVERIF(pk_loose, m_loose, s_loose)
+	_ = HASH(verdict)
+]
+
+queries[
+	authentication? Alice -> Bob: s_checked
+	authentication? Alice -> Bob: s_loose
+]

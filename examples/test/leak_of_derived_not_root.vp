@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1c1c0 — a key hierarchy with one branch surrendered. The root
+// survives, the surrendered branch does not, its children do not, and its
+// sibling does. Four verdicts describing one leak is the cheapest complete
+// statement of what a hierarchy buys.
+//
+// The last two are the ones that carry weight. A derived key must not lead
+// back up — HASH runs one way, and c0 for the root is what says so — and it
+// must not lead sideways, because the sibling is derived from the same root
+// under a different public label and an attacker holding one branch holds the
+// label of the other. Nothing but the one-wayness of the root derivation
+// stands between them.
+
+attacker[passive]
+
+principal Alice[
+	knows private root
+	knows public label_lost, label_kept, label_child
+	knows private m_lost, m_child, m_kept
+	branch_lost = HASH(root, label_lost)
+	branch_kept = HASH(root, label_kept)
+	child_lost = HASH(branch_lost, label_child)
+	e_lost = AEAD_ENC(branch_lost, m_lost, nil)
+	e_child = AEAD_ENC(child_lost, m_child, nil)
+	e_kept = AEAD_ENC(branch_kept, m_kept, nil)
+	leaks branch_lost
+]
+
+Alice -> Bob: e_lost, e_child, e_kept
+
+principal Bob[
+	_ = HASH(e_lost, e_child, e_kept)
+]
+
+queries[
+	confidentiality? root
+	confidentiality? m_lost
+	confidentiality? m_child
+	confidentiality? m_kept
+]

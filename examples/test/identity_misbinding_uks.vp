@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1 — an unknown key-share attack. Both principals complete the
+// protocol, agree on a key, and are never confused about the key itself; what
+// they are confused about is WHO they agreed it with, because the signature
+// each of them checks covers the ephemeral public key and nothing else.
+//
+// The attacker registers the honest party's ephemeral contribution under its
+// own identity: it forwards Alice's public key unchanged and swaps the
+// identity travelling beside it. Nothing fails, nothing is decrypted that
+// should not be, and Bob ends up believing he shares a key with the attacker
+// while actually sharing it with Alice.
+//
+// sigma_i.vp is the fix and the neighbour to read next: SIGMA signs the peer's
+// contribution and MACs the identity under the agreed key, which is precisely
+// the binding this model is missing.
+
+attacker[active]
+
+principal Alice[
+	knows private a_ident
+	generates a
+	ga_ident = PUBKEY(a_ident)
+	ga = PUBKEY(a)
+	sig_a = SIGN(a_ident, ga)
+]
+
+principal Bob[
+	knows private b_ident
+	generates b
+	gb_ident = PUBKEY(b_ident)
+	gb = PUBKEY(b)
+	sig_b = SIGN(b_ident, gb)
+]
+
+Alice -> Bob: ga_ident, ga, sig_a
+Bob -> Alice: gb_ident, gb, sig_b
+
+principal Bob[
+	knows private m_bob
+	_ = SIGNVERIF(ga_ident, ga, sig_a)?
+	k_bob = DH_KEX(ga, b)
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+]
+
+Bob -> Alice: e_bob
+
+principal Alice[
+	_ = SIGNVERIF(gb_ident, gb, sig_b)?
+	k_alice = DH_KEX(gb, a)
+	got = AEAD_DEC(k_alice, e_bob, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	authentication? Alice -> Bob: ga_ident
+	authentication? Bob -> Alice: gb_ident
+]

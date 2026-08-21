@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1c1c1 — four phase boundaries, one key surrendered at each,
+// and one key never surrendered at all. Only one model in the tree reaches
+// phase 4, and depth is the point: attacker knowledge is reset and re-seeded
+// at every phase, so a re-seed that dropped what was learned two phases ago
+// would let m1 come back from the dead somewhere around phase 3.
+//
+// The first query is the one that has to hold. Nothing about advancing four
+// phases may make a key that was never leaked reachable, and c0 sitting beside
+// three c1s is what says the cascade is driven by the leaks rather than by the
+// passage of time.
+
+attacker[passive]
+
+principal Alice[
+	knows private k_zero, k_one, k_two, k_three
+	knows private m_zero, m_one, m_two, m_three
+	e_zero = AEAD_ENC(k_zero, m_zero, nil)
+	e_one = AEAD_ENC(k_one, m_one, nil)
+	e_two = AEAD_ENC(k_two, m_two, nil)
+	e_three = AEAD_ENC(k_three, m_three, nil)
+]
+
+Alice -> Bob: e_zero, e_one, e_two, e_three
+
+principal Bob[
+	knows private k_zero, k_one, k_two, k_three
+	d_zero = AEAD_DEC(k_zero, e_zero, nil)?
+	d_one = AEAD_DEC(k_one, e_one, nil)?
+	d_two = AEAD_DEC(k_two, e_two, nil)?
+	d_three = AEAD_DEC(k_three, e_three, nil)?
+	_ = HASH(d_zero, d_one, d_two, d_three)
+]
+
+phase[1]
+
+principal Alice[
+	leaks k_one
+]
+
+phase[2]
+
+principal Alice[
+	leaks k_two
+]
+
+phase[3]
+
+principal Alice[
+	leaks k_three
+]
+
+phase[4]
+
+queries[
+	confidentiality? m_zero
+	confidentiality? m_one
+	confidentiality? m_two
+	confidentiality? m_three
+]

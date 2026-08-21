@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0 — a hub topology, where Bob shares a separate Diffie-
+// Hellman secret with Alice and with Carol and relays between them. Bob's
+// exponent leaks, which surrenders both legs he is party to and nothing else:
+// Alice and Carol never share a secret, so there is nothing about the third
+// query for the leak to reach.
+//
+// The third query is a statement about what DH_KEX does NOT do. Holding b, the
+// attacker holds DH_KEX(ga, b) and DH_KEX(gc, b), and combining two secrets
+// that share an exponent into the secret between the other two ends is exactly
+// the thing the group-key literature says you cannot do — and exactly the
+// thing a recompose rule written one step too eagerly would do here.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Carol -> Bob: [gc]
+Bob -> Carol: [gb]
+Alice -> Carol: [ga]
+Carol -> Alice: [gc]
+
+principal Alice[
+	knows private m_ab
+	k_ab = DH_KEX(gb, a)
+	k_ac = DH_KEX(gc, a)
+	knows private m_ac
+	e_ab = AEAD_ENC(k_ab, m_ab, nil)
+	e_ac = AEAD_ENC(k_ac, m_ac, nil)
+]
+
+principal Carol[
+	knows private m_cb
+	k_cb = DH_KEX(gb, c)
+	e_cb = AEAD_ENC(k_cb, m_cb, nil)
+]
+
+Alice -> Bob: e_ab
+Carol -> Bob: e_cb
+Alice -> Carol: e_ac
+
+principal Bob[
+	_ = AEAD_DEC(DH_KEX(ga, b), e_ab, nil)?
+	_ = AEAD_DEC(DH_KEX(gc, b), e_cb, nil)?
+	leaks b
+]
+
+principal Carol[
+	k_ca = DH_KEX(ga, c)
+	_ = AEAD_DEC(k_ca, e_ac, nil)?
+]
+
+queries[
+	confidentiality? m_ab
+	confidentiality? m_cb
+	confidentiality? m_ac
+]

@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0c1 at one session and at two.
+//
+// Session expansion rewrites the parsed model, cloning every principal and
+// every message block before sanity runs. Guards live on messages, so a clone
+// that dropped or added one would change what the attacker may replace — and
+// nothing else in the suite would notice, because a guard's absence only shows
+// up as an attack somewhere far away.
+//
+// Both halves are in one model so the comparison is internal: two Diffie-
+// Hellman exchanges in the same principals, identical but for the guard on the
+// public keys. The guarded one must hold and the open one must fall, at every
+// session count. A clone that lost its guards takes the first verdict to c1; a
+// clone that gained them takes the second to c0.
+
+attacker[active]
+
+principal Bob[
+	knows private b_sealed, b_open
+	gb_sealed = PUBKEY(b_sealed)
+	gb_open = PUBKEY(b_open)
+]
+
+Bob -> Alice: [gb_sealed], gb_open
+
+principal Alice[
+	knows private a_sealed, a_open
+	generates m_sealed, m_open
+	ga_sealed = PUBKEY(a_sealed)
+	ga_open = PUBKEY(a_open)
+	k_sealed = DH_KEX(gb_sealed, a_sealed)
+	k_open = DH_KEX(gb_open, a_open)
+	e_sealed = AEAD_ENC(k_sealed, m_sealed, nil)
+	e_open = AEAD_ENC(k_open, m_open, nil)
+]
+
+Alice -> Bob: [ga_sealed], ga_open, e_sealed, e_open
+
+principal Bob[
+	kb_sealed = DH_KEX(ga_sealed, b_sealed)
+	kb_open = DH_KEX(ga_open, b_open)
+	d_sealed = AEAD_DEC(kb_sealed, e_sealed, nil)?
+	d_open = AEAD_DEC(kb_open, e_open, nil)?
+	_ = HASH(d_sealed, d_open)
+]
+
+queries[
+	confidentiality? m_sealed
+	confidentiality? m_open
+]

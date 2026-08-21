@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — onion routing, two hops. The message is sealed to the exit
+// and the whole sealed thing is sealed again to the relay, and the relay's
+// private key LEAKS. The payload survives that; what does not survive is the
+// inner ciphertext, which the relay hands onward in the clear as a matter of
+// protocol and which the attacker therefore holds whether the relay is
+// compromised or not.
+//
+// Both verdicts are the design working as intended. A relay is trusted to see
+// the next hop and nothing else, and the model is the statement that Verifpal
+// draws that line in the right place: nested PKE_ENC has to peel exactly one
+// layer per decryption, and a decompose rule that surrendered everything
+// inside a ciphertext it could open would take the payload with it.
+
+attacker[active]
+
+principal Relay[
+	knows private rsk
+	rpk = PUBKEY(rsk)
+]
+
+principal Exit[
+	knows private esk
+	epk = PUBKEY(esk)
+]
+
+Relay -> Alice: [rpk]
+Exit -> Alice: [epk]
+
+principal Alice[
+	knows private m
+	inner = PKE_ENC(epk, m)
+	outer = PKE_ENC(rpk, inner)
+]
+
+Alice -> Relay: outer
+
+principal Relay[
+	peeled = PKE_DEC(rsk, outer)
+	_ = HASH(peeled)
+	leaks rsk
+]
+
+Relay -> Exit: peeled
+
+principal Exit[
+	got = PKE_DEC(esk, peeled)
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? m
+	confidentiality? inner
+]

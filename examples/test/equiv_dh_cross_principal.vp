@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — Diffie-Hellman agreement, stated the way a protocol
+// actually reaches it: Alice and Bob compute their shared secret in SEPARATE
+// principal states from opposite sides, and the two values have to come out
+// equal. simple_equiv.vp does this inside one principal, where a single
+// resolution answers both sides at once and the commutativity rule is barely
+// exercised.
+//
+// The second query fixes what the first one means. Alice's secret with Bob and
+// Alice's secret with Carol must NOT be equal, so a commutativity rule that
+// discarded the key material and matched on shape alone would pass the first
+// query for the wrong reason and this one would catch it.
+
+attacker[passive]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+Carol -> Alice: gc
+
+principal Alice[
+	shared_ab = DH_KEX(gb, a)
+	shared_ac = DH_KEX(gc, a)
+	_ = HASH(shared_ab, shared_ac)
+]
+
+principal Bob[
+	shared_ba = DH_KEX(ga, b)
+	_ = HASH(shared_ba)
+]
+
+queries[
+	equivalence? shared_ab, shared_ba
+	equivalence? shared_ab, shared_ac
+]

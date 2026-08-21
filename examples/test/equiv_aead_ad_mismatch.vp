@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1c0 — associated data is part of the ciphertext's identity.
+// Bob opens the same ciphertext twice, once with the associated data Alice
+// used and once with a different public string, and only the first reduces:
+// AEAD_DEC's rewrite matches position 2 against position 2, so a mismatched ad
+// leaves an irreducible term rather than the plaintext.
+//
+// This is worth pinning because the mismatch is SILENT. Neither decryption is
+// checked, so nothing halts and nothing is reported; the only evidence that
+// the second one failed is that its result is not the plaintext, which is
+// precisely what the second query says.
+
+attacker[passive]
+
+principal Alice[
+	knows private aead_key
+	knows private payload
+	knows public ad_real, ad_other
+	sealed = AEAD_ENC(aead_key, payload, ad_real)
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	knows private aead_key
+	knows public ad_real, ad_other
+	opened_right = AEAD_DEC(aead_key, sealed, ad_real)
+	opened_wrong = AEAD_DEC(aead_key, sealed, ad_other)
+	_ = HASH(opened_right, opened_wrong)
+]
+
+queries[
+	equivalence? opened_right, payload
+	equivalence? opened_wrong, payload
+	confidentiality? payload
+]

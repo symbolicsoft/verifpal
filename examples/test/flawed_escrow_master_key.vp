@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1c1 — every message additionally encrypted to a master key
+// "for lawful access", and the master key is exactly as recoverable as any
+// other key in the system. Three correspondents, three properly protected
+// conversations, and one escrow copy each.
+//
+// The escrow copies do not weaken the per-conversation cryptography and do not
+// need to. They stand beside it, so the system is as strong as the weakest of
+// two paths to the same plaintext, and the second path terminates in a single
+// value. What the model asserts is that the engine takes the cheap route: it
+// never touches the conversation keys at all, and the trace should show three
+// decryptions under one key rather than three broken handshakes.
+
+attacker[passive]
+
+principal Authority[
+	knows private master_key
+	leaks master_key
+]
+
+principal Alice[
+	knows private master_key
+	knows private key_ab, key_ac
+	knows private m_to_bob, m_to_carol
+	to_bob = AEAD_ENC(key_ab, m_to_bob, nil)
+	to_carol = AEAD_ENC(key_ac, m_to_carol, nil)
+	escrow_bob = AEAD_ENC(master_key, m_to_bob, nil)
+	escrow_carol = AEAD_ENC(master_key, m_to_carol, nil)
+]
+
+Alice -> Bob: to_bob, escrow_bob
+Alice -> Carol: to_carol, escrow_carol
+
+principal Bob[
+	knows private key_ab
+	got_bob = AEAD_DEC(key_ab, to_bob, nil)?
+	_ = HASH(got_bob)
+]
+
+principal Carol[
+	knows private key_ac
+	got_carol = AEAD_DEC(key_ac, to_carol, nil)?
+	_ = HASH(got_carol)
+]
+
+queries[
+	confidentiality? master_key
+	confidentiality? m_to_bob
+	confidentiality? m_to_carol
+	confidentiality? got_bob
+]

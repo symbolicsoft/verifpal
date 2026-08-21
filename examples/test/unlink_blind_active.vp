@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — the blinded message and the signature that comes back are
+// unlinkable precisely because the blinding factor is secret, and this is the
+// active-attacker statement of it. unlink_blind_signature.vp asks the question
+// of a passive observer; here the attacker may also substitute, and the answer
+// for the sealed pair must not change.
+//
+// The open pair is the same construction with its factor leaked. Holding the
+// factor, the attacker recomputes the blinding from the message and the
+// signature from the blinding, so both values trace back to one secret it
+// holds and the pair links. Blinding is the only thing standing between a
+// signer and a transcript that identifies every signature it ever issued, and
+// the two verdicts side by side are what say so.
+
+attacker[active]
+
+principal Alice[
+	knows public m_open, m_sealed
+	generates r_open, r_sealed
+	b_open = BLIND(r_open, m_open)
+	b_sealed = BLIND(r_sealed, m_sealed)
+	leaks r_open
+]
+
+Alice -> Signer: b_open, b_sealed
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+	bs_open = SIGN(sk, b_open)
+	bs_sealed = SIGN(sk, b_sealed)
+]
+
+Signer -> Alice: [gsk], bs_open, bs_sealed
+
+principal Alice[
+	sig_open = UNBLIND(r_open, m_open, bs_open)
+	sig_sealed = UNBLIND(r_sealed, m_sealed, bs_sealed)
+	leaks sig_open
+	leaks sig_sealed
+]
+
+queries[
+	unlinkability? b_open, sig_open
+	unlinkability? b_sealed, sig_sealed
+]

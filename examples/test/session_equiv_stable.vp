@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: e0 at one session and at two.
+//
+// Diffie-Hellman agreement over guarded public keys is the one thing
+// replication must never disturb: Alice's secret with Bob and Bob's secret
+// with Alice are the same value, in every session, and the commutativity rule
+// has to keep saying so once every constant in it has a per-session copy.
+//
+// The risk is specific. Session expansion freshens generated constants by
+// rebanding their ids into per-session ranges, and hashing.rs hashes DH
+// exponents commutatively so that the two orderings agree. A rebanding that
+// did not travel identically through both sides of that commutative hash would
+// leave session 2's Alice and session 2's Bob holding values that are equal on
+// paper and unequal by hash — and AttackerState looks up by hash bucket first,
+// so the breakage would be silent everywhere except here.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	k_alice = DH_KEX(gb, a)
+	_ = HASH(k_alice)
+]
+
+principal Bob[
+	k_bob = DH_KEX(ga, b)
+	_ = HASH(k_bob)
+]
+
+queries[
+	equivalence? k_alice, k_bob
+]

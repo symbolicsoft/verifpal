@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1c0c1 — two Diffie-Hellman legs in one flight between the same
+// two principals, differing only in whether the ephemeral public key carries a
+// signature under a guarded identity key. The signed leg holds and the bare
+// leg does not, in both the authentication and the confidentiality queries.
+//
+// The bare leg fails twice for two different reasons and it is worth
+// separating them. Bob's key falls to the attacker because Bob's own bare
+// public key reached Alice unguarded, so the attacker can compute the secret
+// Alice used. Alice's ephemeral is accepted by Bob because nothing binds it to
+// her, so he agrees a key with the attacker. Neither failure touches the
+// signed leg, where the substitution fails SIGNVERIF and halts Bob before
+// anything is used.
+
+attacker[active]
+
+principal Bob[
+	knows private b_signed, b_bare
+	gb_signed = PUBKEY(b_signed)
+	gb_bare = PUBKEY(b_bare)
+]
+
+Bob -> Alice: [gb_signed], gb_bare
+
+principal Alice[
+	knows private a_ident
+	knows private m_signed, m_bare
+	generates eph_signed, eph_bare
+	ga_ident = PUBKEY(a_ident)
+	g_signed = PUBKEY(eph_signed)
+	g_bare = PUBKEY(eph_bare)
+	eph_sig = SIGN(a_ident, g_signed)
+	k_signed = DH_KEX(gb_signed, eph_signed)
+	k_bare = DH_KEX(gb_bare, eph_bare)
+	e_signed = AEAD_ENC(k_signed, m_signed, nil)
+	e_bare = AEAD_ENC(k_bare, m_bare, nil)
+]
+
+Alice -> Bob: [ga_ident], g_signed, eph_sig, g_bare, e_signed, e_bare
+
+principal Bob[
+	_ = SIGNVERIF(ga_ident, g_signed, eph_sig)?
+	kb_signed = DH_KEX(g_signed, b_signed)
+	kb_bare = DH_KEX(g_bare, b_bare)
+	d_signed = AEAD_DEC(kb_signed, e_signed, nil)?
+	d_bare = AEAD_DEC(kb_bare, e_bare, nil)?
+	_ = HASH(d_signed, d_bare)
+]
+
+queries[
+	authentication? Alice -> Bob: g_signed
+	authentication? Alice -> Bob: g_bare
+	confidentiality? m_signed
+	confidentiality? m_bare
+]

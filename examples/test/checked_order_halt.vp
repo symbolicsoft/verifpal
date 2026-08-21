@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — two checked decryptions in a row, and the attacker can only
+// pass the first. It holds k_first because it leaked, so it seals a message of
+// its own and Bob's first check passes; it cannot do the same for the second,
+// so any substitution there fails and truncates Bob's state at that point.
+//
+// What the model pins is the ORDER. halted_at records the earliest failed
+// check and reexec truncates there, so a value used before the halt is still
+// used and a value used after it is not. Truncating at the wrong index — or
+// discarding the whole state rather than its tail — would take the first
+// verdict down to a0 and hide a genuine forgery behind an unrelated failure
+// further down the same principal.
+
+attacker[active]
+
+principal Alice[
+	knows private k_first, k_second
+	knows private m_first, m_second
+	e_first = AEAD_ENC(k_first, m_first, nil)
+	e_second = AEAD_ENC(k_second, m_second, nil)
+	leaks k_first
+]
+
+Alice -> Bob: e_first, e_second
+
+principal Bob[
+	knows private k_first, k_second
+	d_first = AEAD_DEC(k_first, e_first, nil)?
+	first_use = HASH(d_first)
+	d_second = AEAD_DEC(k_second, e_second, nil)?
+	second_use = HASH(d_second)
+]
+
+queries[
+	authentication? Alice -> Bob: e_first
+	authentication? Alice -> Bob: e_second
+]

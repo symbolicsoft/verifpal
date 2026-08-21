@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — a symmetric challenge-response in which both principals
+// answer with a MAC over the challenge under one shared key. Without a role
+// label the answer an initiator owes is the same value as the answer a
+// responder owes, so a principal can be made to answer its own question; with
+// one, the two answers are different values and reflecting one is useless.
+//
+// The passing query is the bad news here. e0 says the two roles' answers are
+// indistinguishable, which is exactly the property a reflection attack needs;
+// e1 says the labelled answers are not.
+//
+// The equivalence framing is forced by the shape of the attack, and the reason
+// is worth understanding. A reflected answer is bit-for-bit the answer the
+// honest peer would have given, so the engine classifies presenting it as a
+// replay rather than a forgery and an authentication query holds either way.
+// The flaw is not that the attacker can produce something new — it is that two
+// different things were never different to begin with, and equivalence is the
+// only query kind that can say so.
+//
+// The answers travel guarded, which is housekeeping rather than protocol.
+// Unguarded, Alice resolves what she received to a bare constant the attacker
+// may replace, and both pairs diverge for a reason that has nothing to do with
+// role labels.
+
+attacker[active]
+
+principal Alice[
+	knows private shared_key
+	knows public role_initiator, role_responder
+	generates challenge
+]
+
+Alice -> Bob: challenge
+
+principal Bob[
+	knows private shared_key
+	knows public role_initiator, role_responder
+	answer_bare_as_responder = MAC(shared_key, challenge)
+	answer_bare_as_initiator = MAC(shared_key, challenge)
+	answer_bound_as_responder = MAC(shared_key, CONCAT(role_responder, challenge))
+	answer_bound_as_initiator = MAC(shared_key, CONCAT(role_initiator, challenge))
+]
+
+Bob -> Alice: [answer_bare_as_responder], [answer_bound_as_responder]
+
+principal Alice[
+	_ = ASSERT(MAC(shared_key, challenge), answer_bare_as_responder)?
+	_ = ASSERT(MAC(shared_key, CONCAT(role_responder, challenge)), answer_bound_as_responder)?
+	_ = HASH(answer_bare_as_responder, answer_bound_as_responder)
+]
+
+queries[
+	equivalence? answer_bare_as_responder, answer_bare_as_initiator
+	equivalence? answer_bound_as_responder, answer_bound_as_initiator
+]

@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — public-key encryption tells the recipient nothing about who
+// encrypted. Bob's public key is public, so anyone at all can produce a
+// ciphertext he will decrypt, and the bare flight is a message from whoever
+// spoke last. A signature over the ciphertext is what fixes it.
+//
+// The point is worth a model of its own because the failure is silent: Bob's
+// PKE_DEC succeeds, produces a perfectly good plaintext, and gives him no
+// indication that it came from somebody else. Every other authentication
+// failure in this directory involves a check that had to be passed or evaded;
+// this one involves no check because there is nothing to check.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+]
+
+Bob -> Alice: [bpk]
+
+principal Alice[
+	knows private ask
+	knows private m_bare, m_signed
+	apk = PUBKEY(ask)
+	c_bare = PKE_ENC(bpk, m_bare)
+	c_signed = PKE_ENC(bpk, m_signed)
+	sig = SIGN(ask, c_signed)
+]
+
+Alice -> Bob: [apk], c_bare, c_signed, sig
+
+principal Bob[
+	d_bare = PKE_DEC(bsk, c_bare)
+	_ = SIGNVERIF(apk, c_signed, sig)?
+	d_signed = PKE_DEC(bsk, c_signed)
+	_ = HASH(d_bare, d_signed)
+]
+
+queries[
+	authentication? Alice -> Bob: c_bare
+	authentication? Alice -> Bob: c_signed
+]

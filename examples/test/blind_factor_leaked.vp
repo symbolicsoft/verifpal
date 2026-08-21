@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0 — the blinding factor is the whole secret of a blind
+// signature. BLIND's decompose rule is "knows argument 0, learns argument 1",
+// so a leaked factor opens the blinded message and nothing else does. Both
+// halves are in one model on purpose: m_open and m_sealed are blinded exactly
+// alike and only the factor differs, so a rule that revealed the message from
+// the blinded term itself would flip m_sealed too.
+
+attacker[passive]
+
+principal Alice[
+	knows private m_open
+	knows private m_sealed
+	generates r_open
+	generates r_sealed
+	b_open = BLIND(r_open, m_open)
+	b_sealed = BLIND(r_sealed, m_sealed)
+	leaks r_open
+]
+
+Alice -> Signer: b_open, b_sealed
+
+principal Signer[
+	knows private sk
+	sig_open = SIGN(sk, b_open)
+	sig_sealed = SIGN(sk, b_sealed)
+]
+
+queries[
+	confidentiality? m_open
+	confidentiality? m_sealed
+	confidentiality? r_sealed
+]

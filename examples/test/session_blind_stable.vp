@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0a0 at one session and at two.
+//
+// A blinding factor is generated, so replication gives each session its own,
+// and that is exactly what makes blind signatures immune to the cross-feed
+// that catches every long-term key in this directory. The sibling session's
+// blind signature is over BLIND(r#2, note#2); handed to session 1's Alice it
+// cannot be unblinded with r, because rewrite_to_unblind demands the signed
+// term be a blinding under the factor being removed. Her verification fails
+// and halts her.
+//
+// The model is here to keep that halt honest. A replicated blinding factor —
+// session expansion sharing what it should freshen — would let the sibling's
+// signature unblind cleanly, and Alice would accept a signature over a message
+// from another run.
+
+attacker[active]
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+]
+
+Signer -> Alice: [gsk]
+
+principal Alice[
+	generates note
+	generates r
+	blinded = BLIND(r, note)
+]
+
+Alice -> Signer: blinded
+
+principal Signer[
+	bs = SIGN(sk, blinded)
+]
+
+Signer -> Alice: bs
+
+principal Alice[
+	_ = SIGNVERIF(gsk, blinded, bs)?
+	sig = UNBLIND(r, note, bs)
+	_ = SIGNVERIF(gsk, note, sig)?
+]
+
+queries[
+	confidentiality? note
+	authentication? Signer -> Alice: bs
+]

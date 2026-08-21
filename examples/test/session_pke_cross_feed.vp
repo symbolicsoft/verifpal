@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// Public-key encryption to a long-term key is inherently session-blind: every
+// session's ciphertext opens under the same private key, so the only thing
+// keeping Bob from decrypting the wrong one is the MAC he checks first — and
+// at two sessions the attacker has a matching (ciphertext, tag) pair from the
+// sibling run and hands him both together.
+//
+// The MAC key is long-term too, and that is what makes this a session problem
+// rather than a modelling accident. Nothing here is forged, nothing leaks, and
+// both principals follow the protocol exactly; they simply end up disagreeing
+// about which message was sent. session_psk_cross_feed.vp makes the same point
+// for symmetric AEAD; this one shows that moving to public keys changes
+// nothing, because the property that fails is freshness of the binding and not
+// secrecy of the key.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	knows private mac_key
+	bpk = PUBKEY(bsk)
+]
+
+Bob -> Alice: [bpk]
+
+principal Alice[
+	knows private mac_key
+	generates m
+	e = PKE_ENC(bpk, m)
+	t = MAC(mac_key, e)
+]
+
+Alice -> Bob: e, t
+
+principal Bob[
+	_ = ASSERT(MAC(mac_key, e), t)?
+	d = PKE_DEC(bsk, e)
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

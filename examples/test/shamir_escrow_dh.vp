@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — the secret being split is not an atom but a Diffie-Hellman
+// output, so recomposition has to hand back a term the rest of the theory then
+// keeps reducing: the recovered value is used as an AEAD key, and the AEAD
+// decompose rule has to fire on the reconstructed DH secret exactly as it would
+// on the original one.
+//
+// Two escrow agents is the threshold, and two escrow agents is what leaks. The
+// model exists because every other Shamir model in the tree splits a freshly
+// generated constant, where "recompose gives back the secret" and "recompose
+// gives back a term that still works" are indistinguishable.
+
+attacker[passive]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	knows private minutes
+	session = DH_KEX(gb, a)
+	record = AEAD_ENC(session, minutes, nil)
+	escrow_one, escrow_two, escrow_three = SHAMIR_SPLIT(session)
+]
+
+Alice -> Bob: record
+Alice -> EscrowOne: escrow_one
+Alice -> EscrowTwo: escrow_two
+Alice -> EscrowThree: escrow_three
+
+principal EscrowOne[
+	leaks escrow_one
+]
+
+principal EscrowTwo[
+	leaks escrow_two
+]
+
+principal EscrowThree[
+	_ = HASH(escrow_three)
+]
+
+queries[
+	confidentiality? session
+	confidentiality? minutes
+]

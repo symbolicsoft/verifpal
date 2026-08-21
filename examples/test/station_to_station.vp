@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0a0e1 — Station-to-Station as designed. The Diffie-Hellman
+// exchange is still entirely unguarded, exactly as in
+// station_to_station_unsigned.vp; what changes is that each side signs BOTH
+// public keys under a long-term identity key, and the signature is carried
+// inside the freshly agreed session key so that it also proves possession of
+// the secret.
+//
+// Signing the pair rather than one's own contribution is the detail the whole
+// protocol turns on, and it is the one an implementation gets wrong. A
+// signature over ga alone is a signature the attacker can move into an
+// exchange it is running with Bob; a signature over CONCAT(ga, gb) names the
+// exchange it belongs to and is useless anywhere else. The identity keys are
+// guarded because a PKI is what a real deployment brings; the ephemeral keys
+// are not, which is what makes the result about the protocol.
+
+attacker[active]
+
+principal Alice[
+	knows private a_ident
+	knows public ad_auth, ad_a2b, ad_b2a
+	generates a
+	ga_ident = PUBKEY(a_ident)
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b_ident
+	knows public ad_auth, ad_a2b, ad_b2a
+	generates b
+	gb_ident = PUBKEY(b_ident)
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga_ident], ga
+Bob -> Alice: [gb_ident], gb
+
+principal Bob[
+	k_bob = DH_KEX(ga, b)
+	sig_bob = SIGN(b_ident, CONCAT(ga, gb))
+	sealed_bob = AEAD_ENC(k_bob, sig_bob, ad_auth)
+]
+
+Bob -> Alice: sealed_bob
+
+principal Alice[
+	knows private m_alice
+	k_alice = DH_KEX(gb, a)
+	seen_bob = AEAD_DEC(k_alice, sealed_bob, ad_auth)?
+	_ = SIGNVERIF(gb_ident, CONCAT(ga, gb), seen_bob)?
+	sig_alice = SIGN(a_ident, CONCAT(ga, gb))
+	sealed_alice = AEAD_ENC(k_alice, sig_alice, ad_auth)
+	e_alice = AEAD_ENC(k_alice, m_alice, ad_a2b)
+]
+
+Alice -> Bob: sealed_alice, e_alice
+
+principal Bob[
+	knows private m_bob
+	seen_alice = AEAD_DEC(k_bob, sealed_alice, ad_auth)?
+	_ = SIGNVERIF(ga_ident, CONCAT(ga, gb), seen_alice)?
+	got_alice = AEAD_DEC(k_bob, e_alice, ad_a2b)?
+	e_bob = AEAD_ENC(k_bob, m_bob, ad_b2a)
+]
+
+Bob -> Alice: e_bob
+
+principal Alice[
+	got_bob = AEAD_DEC(k_alice, e_bob, ad_b2a)?
+	_ = HASH(got_bob)
+]
+
+queries[
+	confidentiality? m_alice
+	confidentiality? m_bob
+	authentication? Alice -> Bob: e_alice
+	authentication? Bob -> Alice: e_bob
+	equivalence? k_alice, k_bob
+]

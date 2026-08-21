@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0e1 — two dealers, two secrets, one share of each reaching Bob,
+// who joins them. Shares only reconstruct the secret they were split from, so
+// Bob's join is an irreducible term and not either dealer's key.
+//
+// The equivalence query is the sharp one: it asserts that the joined value is
+// NOT the first dealer's secret. A rebuild rule that matched on share position
+// without checking that both shares came from the same SHAMIR_SPLIT would make
+// this hold, and would hand every protocol in the tree a way to assemble a key
+// out of shares of other keys.
+
+attacker[active]
+
+principal DealerOne[
+	generates key_one
+	one_a, one_b, one_c = SHAMIR_SPLIT(key_one)
+	knows private cargo
+	sealed = AEAD_ENC(key_one, cargo, nil)
+]
+
+principal DealerTwo[
+	generates key_two
+	two_a, two_b, two_c = SHAMIR_SPLIT(key_two)
+]
+
+DealerOne -> Bob: one_a, sealed
+DealerTwo -> Bob: two_a
+
+principal Bob[
+	mixed = SHAMIR_JOIN(one_a, two_a)
+	opened = AEAD_DEC(mixed, sealed, nil)
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? cargo
+	confidentiality? key_one
+	equivalence? key_one, mixed
+]

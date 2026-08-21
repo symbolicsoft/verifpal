@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — a chain of receipts where each step is supposed to cover
+// everything before it. The bare chain's third receipt covers only the third
+// message, so the attacker rewrites the first two and the final receipt still
+// verifies; the bound chain's third receipt covers a running hash of all
+// three, and rewriting anything at all breaks it.
+//
+// This is what a transcript hash is FOR, expressed as a difference in verdict
+// rather than as a convention. The queries are asked about the FIRST message
+// of each chain, which is the one furthest from the receipt that is supposed
+// to protect it — an implementation that folded the chain in the wrong order,
+// or that covered only the immediately preceding step, would pass a query
+// asked about the second message and fail this one.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key
+	knows private step_one_bare, step_two_bare, step_three_bare
+	knows private step_one_bound, step_two_bound, step_three_bound
+	receipt_bare = MAC(mac_key, step_three_bare)
+	running = HASH(step_one_bound, step_two_bound, step_three_bound)
+	receipt_bound = MAC(mac_key, running)
+]
+
+Alice -> Bob: step_one_bare, step_two_bare, step_three_bare, receipt_bare
+Alice -> Bob: step_one_bound, step_two_bound, step_three_bound, receipt_bound
+
+principal Bob[
+	knows private mac_key
+	_ = ASSERT(MAC(mac_key, step_three_bare), receipt_bare)?
+	_ = ASSERT(MAC(mac_key, HASH(step_one_bound, step_two_bound, step_three_bound)), receipt_bound)?
+	_ = HASH(step_one_bare, step_one_bound)
+]
+
+queries[
+	authentication? Alice -> Bob: step_one_bare
+	authentication? Alice -> Bob: step_one_bound
+]

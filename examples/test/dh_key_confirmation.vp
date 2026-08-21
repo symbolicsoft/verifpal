@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0e0 — an anonymous Diffie-Hellman exchange with both public
+// keys sent UNGUARDED, which is normally the definition of a man in the
+// middle, made safe by a pre-shared key used for nothing but confirming the
+// transcript. Every value the attacker might substitute is covered by a MAC it
+// cannot produce, so every substitution halts the recipient instead of
+// steering it.
+//
+// The all-holding verdict is the point: this is the shape the unguarded MitM
+// models in this directory are missing, and it says that guards in a Verifpal
+// model stand in for an authentication mechanism rather than for magic. The
+// equivalence query is the strongest of the three — not merely "the attacker
+// learns nothing" but "the two of them agree", which is what key confirmation
+// is actually for.
+
+attacker[active]
+
+principal Alice[
+	knows private psk
+	generates a
+	ga = PUBKEY(a)
+	conf_a = MAC(psk, ga)
+]
+
+Alice -> Bob: ga, conf_a
+
+principal Bob[
+	knows private psk
+	generates b
+	gb = PUBKEY(b)
+	_ = ASSERT(MAC(psk, ga), conf_a)?
+	conf_b = MAC(psk, gb)
+	k_bob = DH_KEX(ga, b)
+]
+
+Bob -> Alice: gb, conf_b
+
+principal Alice[
+	knows private m
+	_ = ASSERT(MAC(psk, gb), conf_b)?
+	k_alice = DH_KEX(gb, a)
+	sealed = AEAD_ENC(k_alice, m, nil)
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	opened = AEAD_DEC(k_bob, sealed, nil)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: ga
+	equivalence? k_alice, k_bob
+]

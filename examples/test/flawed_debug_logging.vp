@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1c1 — a correctly implemented handshake with a debug log. The
+// ephemeral exponent, the derived key and the plaintext are all written out
+// "for troubleshooting", and the log is the protocol's real output.
+//
+// Every leak here is one line, and each one alone would be enough: the
+// exponent reconstructs the key, the key opens the record, and the plaintext
+// was the thing being protected. The model is here because this is the most
+// common way real deployments lose material, and because a corpus that only
+// contains cryptographic mistakes is missing the operational ones.
+
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private m
+	generates a
+	ga = PUBKEY(a)
+	k = DH_KEX(gb, a)
+	e = AEAD_ENC(k, m, nil)
+	leaks a
+]
+
+Alice -> Bob: [ga], e
+
+principal Bob[
+	kb = DH_KEX(ga, b)
+	got = AEAD_DEC(kb, e, nil)?
+	_ = HASH(got)
+	leaks kb
+]
+
+queries[
+	confidentiality? a
+	confidentiality? k
+	confidentiality? m
+	confidentiality? got
+]

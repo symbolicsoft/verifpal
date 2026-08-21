@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1c0 — a CONCAT may hold another CONCAT, and unpacking it takes
+// two SPLITs at two different levels. The first projection hands Bob a term
+// that is itself a bundle, and the second reduces it; nothing about the outer
+// SPLIT is allowed to flatten the inner one, which is what the second query
+// asserts by demanding that the inner bundle is NOT the outer bundle's second
+// field.
+
+attacker[passive]
+
+principal Alice[
+	knows private inner_a, inner_b, outer_c
+	knows private nesting_key
+	inner = CONCAT(inner_a, inner_b)
+	outer = CONCAT(inner, outer_c)
+	sealed = ENC(nesting_key, outer)
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	knows private nesting_key
+	got_inner, got_c = SPLIT(DEC(nesting_key, sealed))
+	got_a, got_b = SPLIT(got_inner)
+	_ = HASH(got_a, got_b, got_c)
+]
+
+queries[
+	equivalence? got_b, inner_b
+	equivalence? got_inner, outer_c
+	confidentiality? inner_a
+]

@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — ASSERT compares two terms for equality and nothing else, so
+// what protects a value is not the comparison but the `?` that makes a failed
+// comparison halt the principal. Bob runs two of them over four-deep hash
+// chains: one checked, one not.
+//
+// The unchecked comparison fails on every honest run — shallow is not the deep
+// chain and never was — and the model still loads, because an unchecked
+// primitive that does not reduce is not an error. Bob simply carries on and
+// uses the value anyway, which is exactly what makes the second query fail.
+// core_rule_assert has to walk both terms to their leaves to answer the first
+// one, so this is also the deepest equality comparison in the tree.
+
+attacker[active]
+
+principal Alice[
+	knows private secret
+	knows public tag
+	deep = HASH(HASH(HASH(HASH(secret, tag), tag), tag), tag)
+	shallow = HASH(secret, tag)
+]
+
+Alice -> Bob: deep, shallow
+
+principal Bob[
+	knows private secret
+	knows public tag
+	local_deep = HASH(HASH(HASH(HASH(secret, tag), tag), tag), tag)
+	_ = ASSERT(local_deep, deep)?
+	checked_use = HASH(deep)
+	_ = ASSERT(local_deep, shallow)
+	loose_use = HASH(shallow)
+]
+
+queries[
+	authentication? Alice -> Bob: deep
+	authentication? Alice -> Bob: shallow
+]

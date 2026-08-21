@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f0 — a share is exactly as fresh as the secret it was split
+// from. SHAMIR_SPLIT is a multi-output primitive, so its outputs carry an
+// output index alongside the argument, and this is the model that asserts the
+// freshness descent looks THROUGH that index at the argument rather than
+// treating a derived output as a value in its own right.
+
+//
+// The wire values are guarded, and that is not decoration. Under an active
+// attacker an unguarded value is one the attacker may replace, so the
+// recipient's state resolves it to the bare constant rather than to whatever
+// the sender computed — and a bare constant transitively contains nothing at
+// all, fresh or otherwise. Ungarding any message here turns every verdict
+// below into f1 for a reason that has nothing to do with what this model is
+// about. freshness_unguarded_wire.vp is where that effect is the subject.
+
+attacker[active]
+
+principal Dealer[
+	knows private static_secret
+	generates fresh_secret
+	static_one, static_two, static_three = SHAMIR_SPLIT(static_secret)
+	fresh_one, fresh_two, fresh_three = SHAMIR_SPLIT(fresh_secret)
+]
+
+Dealer -> Bob: [static_one], [fresh_one]
+
+principal Bob[
+	_ = HASH(static_one, fresh_one)
+]
+
+queries[
+	freshness? static_one
+	freshness? fresh_one
+]

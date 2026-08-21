@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1e0 — an equivalence query takes two OR MORE constants, and
+// nothing in the tree had ever passed it three. The query is "do they all
+// resolve to the same value", so adding a third that differs must flip a
+// passing pair, and adding a third that agrees must not.
+//
+// The failing middle query is the one that matters: an implementation that
+// compared only the first pair, or only adjacent pairs, would report e0 here
+// because k_one and k_two agree and k_two and k_three do not get looked at
+// together with them.
+
+attacker[passive]
+
+principal Alice[
+	knows private root
+	knows public label_one, label_two
+	k_one = HASH(root, label_one)
+	k_two = HASH(root, label_one)
+	k_three = HASH(root, label_two)
+	k_four = HASH(root, label_one)
+]
+
+Alice -> Bob: k_three
+
+principal Bob[
+	_ = HASH(k_three)
+]
+
+queries[
+	equivalence? k_one, k_two
+	equivalence? k_one, k_two, k_three
+	equivalence? k_one, k_two, k_four
+]

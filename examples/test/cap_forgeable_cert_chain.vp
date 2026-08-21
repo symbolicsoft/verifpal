@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0a1a0 — a forgeable signature at a certificate authority is not
+// a disclosure, it is an impersonation. The attacker mints a certificate over
+// a public key it owns, Bob's SIGNVERIF passes, and Bob encrypts to the
+// attacker instead of to the server. This is the shape of every PKI
+// compromise, and it is the one that shows a declared assumption travelling
+// several primitives away from where it was declared.
+//
+// Both certificates bind a name alongside the key, which is load-bearing.
+// Without the name the attacker never needs the assumption: it hands Bob the
+// soft server's genuine key and certificate in place of the firm one's, and
+// both queries fail through simple certificate substitution. Binding the name
+// makes the two certificates non-interchangeable and leaves the forgery as the
+// only route.
+//
+// The keys reaching the CA are guarded for the same reason blind_signing_oracle
+// .vp keeps one flight guarded: a CA that signs whatever arrives on an open
+// wire is already an oracle, and the annotation would be asserting nothing.
+
+attacker[active]
+
+principal CA[
+	knows private ca_sk
+	ca_pk = PUBKEY(ca_sk)
+]
+
+principal ServerSoft[
+	knows private soft_sk
+	knows public soft_name
+	soft_pk = PUBKEY(soft_sk)
+]
+
+principal ServerFirm[
+	knows private firm_sk
+	knows public firm_name
+	firm_pk = PUBKEY(firm_sk)
+]
+
+ServerSoft -> CA: [soft_pk]
+ServerFirm -> CA: [firm_pk]
+
+principal CA[
+	knows public soft_name, firm_name
+	cert_soft = SIGN[forgeable](ca_sk, CONCAT(soft_name, soft_pk))
+	cert_firm = SIGN(ca_sk, CONCAT(firm_name, firm_pk))
+]
+
+CA -> Bob: [ca_pk]
+CA -> ServerSoft: cert_soft
+CA -> ServerFirm: cert_firm
+
+ServerSoft -> Bob: soft_pk, cert_soft
+ServerFirm -> Bob: firm_pk, cert_firm
+
+principal Bob[
+	knows public soft_name, firm_name
+	knows private m_soft, m_firm
+	_ = SIGNVERIF(ca_pk, CONCAT(soft_name, soft_pk), cert_soft)?
+	_ = SIGNVERIF(ca_pk, CONCAT(firm_name, firm_pk), cert_firm)?
+	sealed_soft = PKE_ENC(soft_pk, m_soft)
+	sealed_firm = PKE_ENC(firm_pk, m_firm)
+]
+
+Bob -> ServerSoft: sealed_soft
+Bob -> ServerFirm: sealed_firm
+
+principal ServerSoft[
+	got_soft = PKE_DEC(soft_sk, sealed_soft)
+	_ = HASH(got_soft)
+]
+
+principal ServerFirm[
+	got_firm = PKE_DEC(firm_sk, sealed_firm)
+	_ = HASH(got_firm)
+]
+
+queries[
+	confidentiality? m_soft
+	confidentiality? m_firm
+	authentication? ServerSoft -> Bob: soft_pk
+	authentication? ServerFirm -> Bob: firm_pk
+]

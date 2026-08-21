@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a sanity error pointing at MAC[forgeable]. Malleability is an
+// authenticity loss, so declaring it on a primitive that already has a
+// dedicated authenticity-loss capability is asking for the wrong one, and the
+// message names the right alternative rather than merely refusing.
+//
+// cap_err_aead_malleable.vp makes this point for AEAD_ENC. MAC is the sharper
+// case: an AEAD at least has a plaintext one might imagine reshaping, whereas
+// a MAC has no ciphertext at all and `malleable` on it is meaningless in every
+// reading.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key
+	knows private order
+	tag = MAC[malleable](mac_key, order)
+]
+
+Alice -> Bob: order, tag
+
+principal Bob[
+	knows private mac_key
+	_ = ASSERT(MAC(mac_key, order), tag)?
+]
+
+queries[
+	authentication? Alice -> Bob: order
+]

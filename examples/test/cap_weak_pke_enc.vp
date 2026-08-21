@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0 — the same statement for public-key encryption, where the
+// distinction between "the protected value" and "the key" is sharper still:
+// breaking one PKE_ENC must not surrender Bob's private key, because that key
+// also protects every other ciphertext ever sent to him. Both ciphertexts here
+// go to the same public key, so an over-broad `weak` shows up immediately.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+]
+
+Bob -> Alice: [bpk]
+
+principal Alice[
+	knows private m_broken, m_sound
+	c_broken = PKE_ENC[weak](bpk, m_broken)
+	c_sound = PKE_ENC(bpk, m_sound)
+]
+
+Alice -> Bob: c_broken, c_sound
+
+principal Bob[
+	d_broken = PKE_DEC(bsk, c_broken)
+	d_sound = PKE_DEC(bsk, c_sound)
+	_ = HASH(d_broken, d_sound)
+]
+
+queries[
+	confidentiality? m_broken
+	confidentiality? m_sound
+	confidentiality? bsk
+]

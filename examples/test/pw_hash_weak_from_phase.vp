@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — harvest now, crack later, spelled out for the one primitive
+// whose whole job is to make cracking expensive. Both password hashes are
+// published in phase 0; only one of them is declared invertible from phase 2
+// onward, and only that password falls. Nothing the attacker LEARNS changes
+// between the phases, which is exactly why no amount of `leaks` could express
+// this and a capability with an onset has to.
+//
+// The pairing with pw_hash_weak_cap.vp is deliberate: that model asserts the
+// assumption fires, this one asserts it does not fire early.
+
+attacker[passive]
+
+principal Alice[
+	knows password pw_now
+	knows password pw_later
+	knows public salt
+	stored_now = PW_HASH(pw_now, salt)
+	stored_later = PW_HASH[weak from phase 2](pw_later, salt)
+]
+
+Alice -> Bob: stored_now, stored_later
+
+principal Bob[
+	_ = HASH(stored_now, stored_later)
+]
+
+phase[1]
+
+phase[2]
+
+queries[
+	confidentiality? pw_now
+	confidentiality? pw_later
+]

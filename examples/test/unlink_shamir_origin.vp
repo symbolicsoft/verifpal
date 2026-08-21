@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — two shares of one secret are linkable to whoever holds the
+// secret, and two shares of two secrets are not, even when BOTH of those
+// secrets are equally well known. Linkability is about a shared ancestor and
+// not about how much the attacker knows, and putting the negative case behind
+// two leaked secrets rather than behind ignorance is what makes that precise.
+//
+// The witness here is common secret origin. origin_leaves withholds each value
+// from the attacker and asks what it would have to recompute it from; for the
+// first pair the answer is one secret in both cases, and for the second it is
+// two different ones. Nothing in the tree had exercised that witness through a
+// multi-output primitive, where the two values are different OUTPUTS of one
+// application rather than two applications of one function.
+
+attacker[passive]
+
+principal Alice[
+	generates secret_shared
+	generates secret_one, secret_two
+	tok_a, tok_b, tok_c = SHAMIR_SPLIT(secret_shared)
+	solo_a, _, _ = SHAMIR_SPLIT(secret_one)
+	solo_b, _, _ = SHAMIR_SPLIT(secret_two)
+	leaks secret_shared
+	leaks secret_one
+	leaks secret_two
+]
+
+Alice -> Bob: tok_a, tok_b, solo_a, solo_b
+
+principal Bob[
+	_ = HASH(tok_a, tok_b, solo_a, solo_b)
+]
+
+queries[
+	unlinkability? tok_a, tok_b
+	unlinkability? solo_a, solo_b
+]

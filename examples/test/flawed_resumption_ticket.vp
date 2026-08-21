@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1 — a session resumption ticket sealed under a long-lived
+// ticket key that the server never rotates and eventually loses. The ticket
+// carries the resumed session key, so surrendering the ticket key surrenders
+// every session that was ever resumed with one.
+//
+// Resumption is where forward secrecy usually goes to die, and the reason is
+// structural rather than cryptographic: the whole point of a ticket is that
+// the server can reconstruct state it did not keep, which means the state is
+// sitting in the ticket, which means the ticket key is the state. Compare
+// phase_key_rotation.vp, where each key is derived from the last and the
+// compromise reaches forward only.
+
+attacker[active]
+
+principal Server[
+	knows private ticket_key
+	generates resumed_key
+	ticket = AEAD_ENC(ticket_key, resumed_key, nil)
+	leaks ticket_key
+]
+
+Server -> Client: ticket, resumed_key
+
+principal Client[
+	knows private m_resumed
+	sealed = AEAD_ENC(resumed_key, m_resumed, nil)
+]
+
+Client -> Server: sealed
+
+principal Server[
+	recovered = AEAD_DEC(ticket_key, ticket, nil)?
+	got = AEAD_DEC(recovered, sealed, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? resumed_key
+	confidentiality? m_resumed
+	authentication? Client -> Server: sealed
+]

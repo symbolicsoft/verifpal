@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u1u1 — a pseudonym scheme whose pseudonyms are all derived from
+// one seed that the service also holds, and the service is breached. Every
+// pair of pseudonyms links, which is the whole property the scheme claimed to
+// provide.
+//
+// Three pairs rather than one, because linkability is transitive here and an
+// implementation that found only adjacent pairs — or only the pair whose
+// values happen to be equal — would report a1 for one query and miss the rest.
+
+attacker[passive]
+
+principal Service[
+	generates seed
+	knows public epoch_one, epoch_two, epoch_three
+	nym_one = HASH(seed, epoch_one)
+	nym_two = HASH(seed, epoch_two)
+	nym_three = HASH(seed, epoch_three)
+	leaks seed
+]
+
+Service -> Observer: nym_one, nym_two, nym_three
+
+principal Observer[
+	_ = HASH(nym_one, nym_two, nym_three)
+]
+
+queries[
+	unlinkability? nym_one, nym_two
+	unlinkability? nym_two, nym_three
+	unlinkability? nym_one, nym_three
+]

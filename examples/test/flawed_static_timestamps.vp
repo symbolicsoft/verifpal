@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f1f1 — three "nonces" that are not. A counter the model treats
+// as a public constant, a device identifier and a build version are all
+// perfectly good inputs to a transcript and none of them differs between runs,
+// so every value derived from them alone is the same in every run.
+//
+// The three are separate queries because they fail at three different depths:
+// one is a bare public constant used directly, one is a hash of two of them,
+// and one is a hash of a hash. A freshness descent that stopped early would
+// report the deepest one fresh.
+
+attacker[active]
+
+principal Device[
+	knows public counter, device_id, build_version
+	direct = HASH(counter)
+	mixed = HASH(counter, device_id)
+	nested = HASH(HASH(build_version, counter), device_id)
+]
+
+Device -> Server: [direct], [mixed], [nested]
+
+principal Server[
+	_ = HASH(direct, mixed, nested)
+]
+
+queries[
+	freshness? direct
+	freshness? mixed
+	freshness? nested
+]

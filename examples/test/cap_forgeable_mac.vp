@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — MAC declares forgeable_secret, and nothing exercised it.
+// The attacker substitutes an order of its own and mints the tag to match, and
+// Bob's ASSERT passes on a message Alice never sent.
+//
+// The two flights use two different MAC keys. Under one key the attacker would
+// not need the assumption at all: it would swap the two (order, tag) pairs and
+// both queries would fail for a reason the annotation has nothing to do with.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key_soft, mac_key_firm
+	knows private order_soft, order_firm
+	tag_soft = MAC[forgeable](mac_key_soft, order_soft)
+	tag_firm = MAC(mac_key_firm, order_firm)
+]
+
+Alice -> Bob: order_soft, tag_soft, order_firm, tag_firm
+
+principal Bob[
+	knows private mac_key_soft, mac_key_firm
+	_ = ASSERT(MAC(mac_key_soft, order_soft), tag_soft)?
+	_ = ASSERT(MAC(mac_key_firm, order_firm), tag_firm)?
+	_ = HASH(order_soft, order_firm)
+]
+
+queries[
+	authentication? Alice -> Bob: order_soft
+	authentication? Alice -> Bob: order_firm
+]

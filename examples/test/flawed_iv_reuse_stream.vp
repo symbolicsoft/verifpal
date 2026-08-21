@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1 — a stream cipher keyed the same way three times over,
+// which is the one mistake that turns a perfectly good cipher into no cipher
+// at all. The declared assumption is what the reuse actually buys the
+// attacker: given several ciphertexts under one keystream the plaintexts fall
+// out of each other, and `weak` on ENC is how the model says the ciphertexts
+// stopped protecting them.
+//
+// All three records share a key deliberately. Reuse is the flaw, so isolating
+// the flights would isolate away the thing being modelled.
+
+attacker[passive]
+
+principal Alice[
+	knows private stream_key
+	knows private m_first, m_second, m_third
+	e_first = ENC[weak](stream_key, m_first)
+	e_second = ENC[weak](stream_key, m_second)
+	e_third = ENC[weak](stream_key, m_third)
+]
+
+Alice -> Bob: e_first, e_second, e_third
+
+principal Bob[
+	knows private stream_key
+	_ = DEC(stream_key, e_first)
+	_ = DEC(stream_key, e_second)
+	_ = DEC(stream_key, e_third)
+]
+
+queries[
+	confidentiality? m_first
+	confidentiality? m_second
+	confidentiality? m_third
+]

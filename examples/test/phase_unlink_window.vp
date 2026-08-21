@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — two pseudonyms derived from one seed are unlinkable until
+// the seed shows up, and then they are not. The linking witness here is common
+// secret origin: origin_leaves finds that both values bottom out on one secret
+// the attacker holds, and it only holds it from phase 1 onward.
+//
+// The second pair is derived from two independent seeds and stays unlinkable
+// with the same leak in force, which is what keeps the first verdict from
+// being an artifact of the attacker simply knowing more. Linkability is about
+// a SHARED origin, not about how much the attacker knows.
+
+attacker[passive]
+
+principal Alice[
+	generates seed_shared
+	generates seed_one, seed_two
+	knows public tag_one, tag_two
+	nym_a = HASH(seed_shared, tag_one)
+	nym_b = HASH(seed_shared, tag_two)
+	solo_a = HASH(seed_one, tag_one)
+	solo_b = HASH(seed_two, tag_two)
+]
+
+Alice -> Bob: nym_a, nym_b, solo_a, solo_b
+
+principal Bob[
+	_ = HASH(nym_a, nym_b, solo_a, solo_b)
+]
+
+phase[1]
+
+principal Alice[
+	leaks seed_shared
+	leaks seed_one
+]
+
+queries[
+	unlinkability? nym_a, nym_b
+	unlinkability? solo_a, solo_b
+]

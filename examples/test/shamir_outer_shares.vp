@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — SHAMIR_SPLIT's recompose rule lists the pairs {0,1}, {0,2}
+// and {1,2}, and the corpus only ever exercised the adjacent one. Here the
+// attacker is handed the FIRST and THIRD shares of one secret and a single
+// share of another, so the model separates "any two of three" from "the first
+// two of three" and, in the same breath, keeps one share from being enough.
+
+attacker[passive]
+
+principal Dealer[
+	generates secret_pair
+	generates secret_lone
+	pair_one, pair_two, pair_three = SHAMIR_SPLIT(secret_pair)
+	lone_one, lone_two, lone_three = SHAMIR_SPLIT(secret_lone)
+	knows private cargo
+	sealed = AEAD_ENC(secret_pair, cargo, nil)
+	leaks pair_one
+	leaks pair_three
+	leaks lone_two
+]
+
+Dealer -> Bob: sealed
+
+principal Bob[
+	_ = HASH(sealed)
+]
+
+queries[
+	confidentiality? secret_pair
+	confidentiality? secret_lone
+]

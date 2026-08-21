@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — the guard bypass, isolated. SIGNVERIF declares its bypass
+// key as PUBKEY-derived from argument 0, which says: if the attacker can put a
+// public key of its OWN in the verification position, the check that was
+// supposed to stop it is one it can pass, because it holds the matching
+// private key. The signature over the identity key does not help, because the
+// signature is the thing being defeated.
+//
+// Both flights are the same three lines with the same structure, and both
+// messages are guarded. That is what leaves the identity key as the only thing
+// to substitute — otherwise the attacker would replace a message on its way to
+// Alice, collect her genuine signature over it, and win without touching a key
+// at all. Here the guarded identity key leaves nothing to substitute and Bob's
+// check halts him; the open one is a complete impersonation.
+//
+// Treating the bypass as a halt would discard the whole man in the middle,
+// which is why reexec.rs has the rule; treating a guarded key as bypassable
+// would report one that does not exist.
+
+attacker[active]
+
+principal Alice[
+	knows private a_sealed, a_open
+	knows private m_sealed, m_open
+	ga_sealed = PUBKEY(a_sealed)
+	ga_open = PUBKEY(a_open)
+	s_sealed = SIGN(a_sealed, m_sealed)
+	s_open = SIGN(a_open, m_open)
+]
+
+Alice -> Bob: [ga_sealed], [m_sealed], s_sealed, ga_open, [m_open], s_open
+
+principal Bob[
+	_ = SIGNVERIF(ga_sealed, m_sealed, s_sealed)?
+	_ = SIGNVERIF(ga_open, m_open, s_open)?
+	_ = HASH(m_sealed, m_open)
+]
+
+queries[
+	authentication? Alice -> Bob: ga_sealed
+	authentication? Alice -> Bob: ga_open
+]

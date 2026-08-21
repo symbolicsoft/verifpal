@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c1 — publishing a public key is what public keys are for, and
+// publishing an exponent is a catastrophe. Alice holds two long-term exponents
+// and deliberately discloses the PUBLIC key of one and the PRIVATE value of
+// the other; the two messages keyed on them come out on opposite sides.
+//
+// PUBKEY runs one way, and nothing in the tree said so directly: the closest
+// statement is cap_weak_pubkey_dh.vp, which declares an assumption that it can
+// be inverted and watches the cascade. This is the same cascade's absence, and
+// it is the baseline that assumption is measured against — without it,
+// "PUBKEY[weak] breaks things" could just as well mean PUBKEY was always
+// broken.
+
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private a_shown, a_leaked
+	knows private m_shown, m_leaked
+	ga_shown = PUBKEY(a_shown)
+	ga_leaked = PUBKEY(a_leaked)
+	k_shown = DH_KEX(gb, a_shown)
+	k_leaked = DH_KEX(gb, a_leaked)
+	e_shown = AEAD_ENC(k_shown, m_shown, nil)
+	e_leaked = AEAD_ENC(k_leaked, m_leaked, nil)
+	leaks ga_shown
+	leaks a_leaked
+]
+
+Alice -> Bob: e_shown, e_leaked
+
+principal Bob[
+	_ = HASH(e_shown, e_leaked)
+]
+
+queries[
+	confidentiality? a_shown
+	confidentiality? m_shown
+	confidentiality? m_leaked
+]

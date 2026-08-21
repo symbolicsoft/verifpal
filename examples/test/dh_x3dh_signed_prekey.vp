@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1e1 — an X3DH-shaped handshake: three Diffie-Hellman secrets
+// combined through a KDF, over a signed prekey and an unsigned ephemeral.
+// Signing the prekey is what keeps the message secret; leaving the ephemeral
+// unsigned is what leaves the handshake without agreement.
+//
+// The attacker substitutes Alice's ephemeral public key on its way to Bob.
+// Two of Bob's three Diffie-Hellman secrets change, so his master key differs
+// from Alice's and he ends up either halted or holding something she never
+// derived — that is the equivalence failure. It cannot read anything, because
+// the third secret is taken over Bob's signed prekey and Alice's identity key
+// and neither exponent ever leaves its owner.
+//
+// triple_dh.vp is the neighbouring model, with every public value guarded and
+// no signature anywhere. This one keeps the signature and drops one guard,
+// which is what the real protocol does, and the verdicts move accordingly.
+
+attacker[active]
+
+principal Bob[
+	knows private b_ident, b_prekey
+	gb_ident = PUBKEY(b_ident)
+	gb_prekey = PUBKEY(b_prekey)
+	prekey_sig = SIGN(b_ident, gb_prekey)
+]
+
+Bob -> Alice: [gb_ident], gb_prekey, prekey_sig
+
+principal Alice[
+	knows private a_ident
+	knows private m
+	generates a_eph
+	ga_ident = PUBKEY(a_ident)
+	ga_eph = PUBKEY(a_eph)
+	_ = SIGNVERIF(gb_ident, gb_prekey, prekey_sig)?
+	dh_one = DH_KEX(gb_prekey, a_ident)
+	dh_two = DH_KEX(gb_ident, a_eph)
+	dh_three = DH_KEX(gb_prekey, a_eph)
+	master_a, _, _ = HKDF(nil, CONCAT(dh_one, dh_two, dh_three), nil)
+	sealed = AEAD_ENC(master_a, m, nil)
+]
+
+Alice -> Bob: [ga_ident], ga_eph, sealed
+
+principal Bob[
+	dh_one_b = DH_KEX(ga_ident, b_prekey)
+	dh_two_b = DH_KEX(ga_eph, b_ident)
+	dh_three_b = DH_KEX(ga_eph, b_prekey)
+	master_b, _, _ = HKDF(nil, CONCAT(dh_one_b, dh_two_b, dh_three_b), nil)
+	opened = AEAD_DEC(master_b, sealed, nil)
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: ga_eph
+	equivalence? master_a, master_b
+]

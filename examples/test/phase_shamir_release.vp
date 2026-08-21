@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — an escrow that releases shares over time crosses its
+// threshold at a particular phase and not before. Both secrets have one share
+// released in phase 1; only one of them gets a second share in phase 2, and
+// only that one is reconstructed.
+//
+// The recompose rule is monotone in attacker knowledge, and phases are the
+// only mechanism in the language that can grow that knowledge without a
+// principal doing anything. This is where the two meet: the second share is
+// not new cryptographic material, it is the same value becoming reachable at a
+// later phase, and the reconstruction has to fire then rather than at once or
+// never.
+
+attacker[passive]
+
+principal Dealer[
+	generates secret_open, secret_kept
+	open_one, open_two, open_three = SHAMIR_SPLIT(secret_open)
+	kept_one, kept_two, kept_three = SHAMIR_SPLIT(secret_kept)
+	knows private cargo_open, cargo_kept
+	sealed_open = AEAD_ENC(secret_open, cargo_open, nil)
+	sealed_kept = AEAD_ENC(secret_kept, cargo_kept, nil)
+]
+
+Dealer -> Bob: sealed_open, sealed_kept
+
+principal Bob[
+	_ = HASH(sealed_open, sealed_kept)
+]
+
+phase[1]
+
+principal Dealer[
+	leaks open_one
+	leaks kept_one
+]
+
+phase[2]
+
+principal Dealer[
+	leaks open_two
+]
+
+queries[
+	confidentiality? cargo_open
+	confidentiality? cargo_kept
+]

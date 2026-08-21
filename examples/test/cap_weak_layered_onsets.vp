@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0c0 — two weakening assumptions with different onsets,
+// stacked so that the later one is only REACHABLE because the earlier one
+// fired. The payload is sealed under an inner key and the whole inner
+// ciphertext sealed again under an outer one; the outer seal is declared
+// invertible from phase 1 and the inner from phase 2.
+//
+// The attacker cannot break what it does not hold. In phase 0 it holds only
+// the outer ciphertext and neither assumption is in force. In phase 1 the
+// outer one opens and the inner ciphertext becomes something the attacker
+// HOLDS for the first time. Only in phase 2 does holding it matter. A
+// capability system that evaluated onsets against the phase a term was created
+// in, rather than against the phase the attacker is currently running, would
+// open both at once in phase 1 or never open the inner one at all.
+//
+// Neither key is ever surrendered, which is the counterweight: `weak` on an
+// AEAD reveals its plaintext and not its key, even twice over.
+
+attacker[passive]
+
+principal Alice[
+	knows private inner_key, outer_key
+	knows private payload
+	inner = AEAD_ENC[weak from phase 2](inner_key, payload, nil)
+	outer = AEAD_ENC[weak from phase 1](outer_key, inner, nil)
+]
+
+Alice -> Bob: outer
+
+principal Bob[
+	knows private inner_key, outer_key
+	seen_inner = AEAD_DEC(outer_key, outer, nil)?
+	seen_payload = AEAD_DEC(inner_key, seen_inner, nil)?
+	_ = HASH(seen_payload)
+]
+
+phase[1]
+
+phase[2]
+
+queries[
+	confidentiality? payload
+	confidentiality? inner
+	confidentiality? outer_key
+	confidentiality? inner_key
+]

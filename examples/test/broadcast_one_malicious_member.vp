@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0 — one message encrypted once under a group key and sent to
+// three members, one of whom leaks. A shared group key is exactly as
+// confidential as its least trustworthy holder, and the pairwise flights
+// beside it are what that costs to avoid.
+//
+// The three flights are the whole design space in one model: a broadcast under
+// a common key, and two pairwise messages under keys derived per recipient
+// from a root the leaker never had. The leaker surrenders the group key and
+// nothing else, so a derivation that let a group member reconstruct the root
+// — or that keyed the pairwise messages on the group key it already holds —
+// would take all three verdicts down together.
+
+attacker[passive]
+
+principal Alice[
+	knows private group_key
+	knows private pairwise_root
+	knows public tag_bob, tag_carol
+	knows private m_group, m_bob, m_carol
+	k_bob = HASH(pairwise_root, tag_bob)
+	k_carol = HASH(pairwise_root, tag_carol)
+	e_group = AEAD_ENC(group_key, m_group, nil)
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+	e_carol = AEAD_ENC(k_carol, m_carol, nil)
+]
+
+Alice -> Bob: e_group, e_bob
+Alice -> Carol: e_group, e_carol
+Alice -> Mallory: e_group
+
+principal Mallory[
+	knows private group_key
+	seen = AEAD_DEC(group_key, e_group, nil)?
+	leaks group_key
+]
+
+principal Bob[
+	knows private pairwise_root
+	knows public tag_bob
+	_ = AEAD_DEC(HASH(pairwise_root, tag_bob), e_bob, nil)?
+]
+
+principal Carol[
+	knows private pairwise_root
+	knows public tag_carol
+	_ = AEAD_DEC(HASH(pairwise_root, tag_carol), e_carol, nil)?
+]
+
+queries[
+	confidentiality? m_group
+	confidentiality? m_bob
+	confidentiality? pairwise_root
+]

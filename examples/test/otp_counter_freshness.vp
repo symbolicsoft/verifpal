@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f0c0 — a one-time password is only one-time if something inside
+// it changes between runs. The first token seals a device identifier and
+// nothing else, so it is the same value in every run; the second seals a
+// counter alongside it and is not.
+//
+// Freshness is the honest query to ask here, and the reason is worth stating.
+// Verifpal has no mutable server state, so it cannot model a server refusing a
+// counter it has already accepted, and an authentication query would therefore
+// report the counter version as no better than the static one. What the
+// language CAN say precisely is which of the two tokens carries a value that
+// differs between runs, and that is exactly the property a replay-detecting
+// server depends on having.
+//
+// Both tokens are guarded and bound to distinct associated data, which is
+// housekeeping rather than protocol: unguarded, the recipient resolves either
+// token to a bare constant and both come out f1; under shared associated data
+// the attacker simply swaps one for the other and the comparison is about
+// nothing.
+
+attacker[active]
+
+principal Device[
+	knows private device_key
+	knows private device_id
+	knows public ad_static, ad_counted
+	generates counter
+	static_token = AEAD_ENC(device_key, device_id, ad_static)
+	counted_token = AEAD_ENC(device_key, CONCAT(device_id, counter), ad_counted)
+]
+
+Device -> Server: [static_token], [counted_token]
+
+principal Server[
+	knows private device_key
+	knows public ad_static, ad_counted
+	seen_static = AEAD_DEC(device_key, static_token, ad_static)?
+	seen_counted = AEAD_DEC(device_key, counted_token, ad_counted)?
+	_ = HASH(seen_static, seen_counted)
+]
+
+queries[
+	freshness? static_token
+	freshness? counted_token
+	confidentiality? device_id
+]

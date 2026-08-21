@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — surrendering a signing key does not rewrite history. The
+// phase 0 flight was verified before the key was anywhere near the attacker,
+// and its authentication query still holds; the phase 2 flight, signed under
+// the same key after it leaked, does not.
+//
+// Signatures are the one place where "the attacker learns the key later" and
+// "the attacker could always have forged" are easy to confuse, because the
+// signature over the phase 0 message is still sitting on the wire and the key
+// to re-make it is now known. What saves the first query is that Bob already
+// accepted a message Alice really sent: reproducing it is a replay of an
+// honest value rather than a forgery, and validate's worthwhile check is what
+// declines to call that an attack.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	knows private order_early
+	pk = PUBKEY(sk)
+	sig_early = SIGN(sk, order_early)
+]
+
+Alice -> Bob: [pk], order_early, sig_early
+
+principal Bob[
+	_ = SIGNVERIF(pk, order_early, sig_early)?
+	_ = HASH(order_early)
+]
+
+phase[1]
+
+principal Alice[
+	leaks sk
+]
+
+phase[2]
+
+principal Alice[
+	knows private order_late
+	sig_late = SIGN(sk, order_late)
+]
+
+Alice -> Bob: order_late, sig_late
+
+principal Bob[
+	_ = SIGNVERIF(pk, order_late, sig_late)?
+	_ = HASH(order_late)
+]
+
+queries[
+	authentication? Alice -> Bob: order_early
+	authentication? Alice -> Bob: order_late
+]

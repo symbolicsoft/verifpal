@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0a0 at one session and at two.
+//
+// A relay is where a phantom cross-session path would show up first: the
+// message passes through a principal that cannot read it, so Proxy's own state
+// holds a ciphertext addressed to somebody else, in every session, and the
+// attacker is free to shuffle them. Carol must still end up with a message
+// Alice actually sent.
+//
+// She does, and for a reason worth naming: replaying the sibling session's
+// ciphertext into this one is a replay of a value Alice honestly sent, which
+// the session-sibling carve-out declines to call an authentication attack.
+// Confidentiality holds throughout because the relay never holds the key. The
+// model is the negative control for session_pke_cross_feed.vp — same public-key
+// encryption, same long-term key, but nothing downstream of Carol's decryption
+// distinguishes which session's message she got, so there is no divergence to
+// report and no forgery to find.
+
+attacker[active]
+
+principal Carol[
+	knows private csk
+	cpk = PUBKEY(csk)
+]
+
+Carol -> Alice: [cpk]
+
+principal Alice[
+	knows private mac_key
+	generates m
+	sealed = PKE_ENC(cpk, m)
+	tag = MAC(mac_key, sealed)
+]
+
+Alice -> Proxy: sealed, tag
+
+principal Proxy[
+	_ = HASH(sealed, tag)
+]
+
+Proxy -> Carol: sealed, tag
+
+principal Carol[
+	knows private mac_key
+	_ = ASSERT(MAC(mac_key, sealed), tag)?
+	got = PKE_DEC(csk, sealed)
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? m
+	authentication? Proxy -> Carol: sealed
+]

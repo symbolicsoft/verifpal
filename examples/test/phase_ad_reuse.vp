@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — associated data is a replay domain, and reusing it across
+// phases hands the attacker one. Bob accepts the phase 1 flight under the same
+// associated data he accepted the phase 0 flight under, so the attacker simply
+// re-sends the old ciphertext and Bob's checked decryption succeeds on a
+// message Alice never sent in this phase.
+//
+// The second flight changes the associated data per phase and nothing else.
+// Its old ciphertext no longer reduces under the new ad — AEAD_DEC's rewrite
+// matches position 2 against position 2 — so the same replay fails the check
+// and halts Bob before the value is used. Domain separation is the entire
+// difference between the two verdicts.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public ad_shared, ad_zero
+	knows private m_shared_zero, m_fresh_zero
+	e_shared_zero = AEAD_ENC(k, m_shared_zero, ad_shared)
+	e_fresh_zero = AEAD_ENC(k, m_fresh_zero, ad_zero)
+]
+
+Alice -> Bob: e_shared_zero, e_fresh_zero
+
+principal Bob[
+	knows private k
+	knows public ad_shared, ad_zero
+	d_shared_zero = AEAD_DEC(k, e_shared_zero, ad_shared)?
+	d_fresh_zero = AEAD_DEC(k, e_fresh_zero, ad_zero)?
+	_ = HASH(d_shared_zero, d_fresh_zero)
+]
+
+phase[1]
+
+principal Alice[
+	knows public ad_one
+	knows private m_shared_one, m_fresh_one
+	e_shared_one = AEAD_ENC(k, m_shared_one, ad_shared)
+	e_fresh_one = AEAD_ENC(k, m_fresh_one, ad_one)
+]
+
+Alice -> Bob: e_shared_one, e_fresh_one
+
+principal Bob[
+	knows public ad_one
+	d_shared_one = AEAD_DEC(k, e_shared_one, ad_shared)?
+	d_fresh_one = AEAD_DEC(k, e_fresh_one, ad_one)?
+	_ = HASH(d_shared_one, d_fresh_one)
+]
+
+queries[
+	authentication? Alice -> Bob: e_shared_one
+	authentication? Alice -> Bob: e_fresh_one
+]

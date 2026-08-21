@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: a0 at one session, a1 at two.
+//
+// The oracle attack of session_nonce_cross.vp, carried out through SIGNVERIF
+// instead of ASSERT. Bob signs the concatenation of the challenge he received
+// and a nonce of his own, and Alice verifies it. With one Bob the only
+// signature that satisfies her check is the one he honestly produced for her,
+// and reproducing it is a replay rather than a forgery.
+//
+// With two Bobs the attacker has a signing oracle that is not itself
+// dishonest: it feeds session 1's challenge to session 2's Bob, collects a
+// signature over CONCAT(na, nb#2), and presents it to session 1's Alice
+// together with nb#2. Her SIGNVERIF passes on a signature no Bob ever made for
+// her, over a nonce she never saw chosen.
+//
+// The two code paths matter. ASSERT compares two terms the recipient built,
+// while SIGNVERIF runs a rewrite rule with its own matching and filter, and
+// the session-sibling carve-out has to reach the second one too — declining
+// this as a replay would lose a genuine attack.
+
+attacker[active]
+
+principal Bob[
+	knows private sk
+	generates nb
+	pk = PUBKEY(sk)
+]
+
+Bob -> Alice: [pk]
+
+principal Alice[
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	sig = SIGN(sk, CONCAT(na, nb))
+]
+
+Bob -> Alice: sig, nb
+
+principal Alice[
+	_ = SIGNVERIF(pk, CONCAT(na, nb), sig)?
+	_ = HASH(sig)
+]
+
+queries[
+	authentication? Bob -> Alice: sig
+]

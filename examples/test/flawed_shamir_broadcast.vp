@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1 — a threshold scheme whose dealer broadcasts all three
+// shares to everybody. Two of three is the threshold and three is more than
+// two, so the secret reconstructs, the archive keyed on it opens, and the
+// share that was never supposed to be enough on its own is beside the point.
+//
+// The model is trivial and belongs in the corpus anyway. Threshold schemes are
+// deployed by distributing shares, and a distribution step that sends every
+// share down one channel converts the whole construction back into a plain
+// secret. The engine has to notice, which means the recompose rule has to fire
+// on shares the attacker collected off the wire rather than only on ones a
+// principal handed it.
+
+attacker[passive]
+
+principal Dealer[
+	generates vault_key
+	share_one, share_two, share_three = SHAMIR_SPLIT(vault_key)
+	knows private archive
+	sealed = AEAD_ENC(vault_key, archive, nil)
+]
+
+Dealer -> Bob: share_one, share_two, share_three, sealed
+
+principal Bob[
+	rejoined = SHAMIR_JOIN(share_one, share_two)
+	got = AEAD_DEC(rejoined, sealed, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? vault_key
+	confidentiality? archive
+	confidentiality? rejoined
+]

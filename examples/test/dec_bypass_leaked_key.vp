@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — AEAD_DEC declares a direct bypass key at argument 0, and a
+// leaked symmetric key is what turns that declaration into an attack: the
+// attacker seals a message of its own under the key it now holds, and Bob's
+// checked decryption succeeds on its own merits. No bypass of the check is
+// even needed; the check simply passes.
+//
+// The second flight is the same construction under a key that never leaves
+// Alice and Bob, and it is what keeps the first verdict specific. Both
+// decryptions are checked, both are in the same block, and the attacker's
+// power over them differs only by one `leaks` line.
+
+attacker[active]
+
+principal Alice[
+	knows private k_lost, k_held
+	knows private m_lost, m_held
+	e_lost = AEAD_ENC(k_lost, m_lost, nil)
+	e_held = AEAD_ENC(k_held, m_held, nil)
+	leaks k_lost
+]
+
+Alice -> Bob: e_lost, e_held
+
+principal Bob[
+	knows private k_lost, k_held
+	d_lost = AEAD_DEC(k_lost, e_lost, nil)?
+	d_held = AEAD_DEC(k_held, e_held, nil)?
+	_ = HASH(d_lost, d_held)
+]
+
+queries[
+	authentication? Alice -> Bob: e_lost
+	authentication? Alice -> Bob: e_held
+]

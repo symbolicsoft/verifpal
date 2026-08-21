@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — one public key, distributed twice: guarded to Alice in
+// phase 0 and unguarded to Carol in phase 1. Guards are a property of the
+// MESSAGE and not of the value, so the same key that Alice can safely encrypt
+// to is a key Carol cannot, and the attacker substitutes its own on the second
+// hop.
+//
+// mutatable_to records the recipients a value reached UNGUARDED, and it is a
+// set rather than a flag for exactly this reason. Collapse it to "was this
+// value ever guarded" and Carol's message is protected by Alice's guard;
+// collapse it the other way and Alice's is exposed by Carol's.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private m_early
+	e_early = PKE_ENC(gb, m_early)
+]
+
+Alice -> Bob: e_early
+
+phase[1]
+
+Bob -> Carol: gb
+
+principal Carol[
+	knows private m_late
+	e_late = PKE_ENC(gb, m_late)
+]
+
+Carol -> Bob: e_late
+
+principal Bob[
+	got_early = PKE_DEC(b, e_early)
+	got_late = PKE_DEC(b, e_late)
+	_ = HASH(got_early, got_late)
+]
+
+queries[
+	confidentiality? m_early
+	confidentiality? m_late
+]

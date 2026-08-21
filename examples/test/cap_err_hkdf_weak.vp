@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a sanity error naming HKDF. A key derivation function protects
+// nothing on its own — its output is only as secret as its input — so there is
+// no confidentiality guarantee to declare broken, and `weak` on it is a
+// modelling mistake rather than a weaker model. The diagnostic has to say so:
+// an assumption that silently did nothing would read as a check that was
+// performed.
+
+attacker[passive]
+
+principal Alice[
+	knows private ikm
+	knows public salt, info
+	k_one, k_two, k_three = HKDF[weak](salt, ikm, info)
+]
+
+Alice -> Bob: k_one
+
+principal Bob[
+	_ = HASH(k_one)
+]
+
+queries[
+	confidentiality? ikm
+]

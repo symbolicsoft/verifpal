@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0a0e1 — SIGMA-I, the "sign and MAC" pattern that fixes the
+// unknown key-share of identity_misbinding_uks.vp. Each side signs the PEER's
+// ephemeral public key and MACs its own identity under a key derived from the
+// agreed secret, so a signature lifted out of one exchange proves nothing in
+// another and an identity swapped in transit fails the MAC.
+//
+// Both halves are needed and it is worth saying which does what: the signature
+// is what binds the identity to the exchange, and the MAC is what binds the
+// identity to the KEY — proving the signer is the party that actually holds the
+// secret, rather than one who watched somebody else establish it.
+//
+// Each signature covers BOTH exponentials, and that is not a detail. Signing
+// only the peer's contribution leaves the signer's own free to be replaced: the
+// attacker swaps gb on its way to Alice, Bob's signature over ga still verifies
+// because ga never changed, and the attacker forges the MAC under the key it now
+// shares with her. Signing the pair names the exchange the signature belongs to,
+// and nothing lifted out of it verifies anywhere else.
+//
+// The equivalence verdict is e1 and it is correct. SIGMA stops the two of them
+// from USING a desynchronised key and cannot stop them from DERIVING one: both
+// the MAC and the signature envelope are checked with the key already in hand,
+// so an aborted principal still holds one. dh_key_confirmation.vp is the
+// contrast, and the difference is purely structural — there the confirmation is
+// checked before the shared key exists, so there is nothing left to disagree.
+
+attacker[active]
+
+principal Alice[
+	knows private a_ident
+	generates a
+	ga_ident = PUBKEY(a_ident)
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b_ident
+	generates b
+	gb_ident = PUBKEY(b_ident)
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga_ident], ga
+Bob -> Alice: [gb_ident], gb
+
+principal Bob[
+	knows public info
+	k_bob = DH_KEX(ga, b)
+	mac_bob, enc_bob, _ = HKDF(nil, k_bob, info)
+	sig_b = SIGN(b_ident, CONCAT(ga, gb))
+	tag_b = MAC(mac_bob, gb_ident)
+]
+
+Bob -> Alice: sig_b, tag_b
+
+principal Alice[
+	knows public info
+	knows private m_alice
+	k_alice = DH_KEX(gb, a)
+	mac_alice, enc_alice, _ = HKDF(nil, k_alice, info)
+	_ = SIGNVERIF(gb_ident, CONCAT(ga, gb), sig_b)?
+	_ = ASSERT(MAC(mac_alice, gb_ident), tag_b)?
+	sig_a = SIGN(a_ident, CONCAT(ga, gb))
+	tag_a = MAC(mac_alice, ga_ident)
+	e_alice = AEAD_ENC(enc_alice, m_alice, nil)
+]
+
+Alice -> Bob: sig_a, tag_a, e_alice
+
+principal Bob[
+	_ = SIGNVERIF(ga_ident, CONCAT(ga, gb), sig_a)?
+	_ = ASSERT(MAC(mac_bob, ga_ident), tag_a)?
+	got = AEAD_DEC(enc_bob, e_alice, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? m_alice
+	authentication? Alice -> Bob: sig_a
+	authentication? Alice -> Bob: e_alice
+	equivalence? k_alice, k_bob
+]

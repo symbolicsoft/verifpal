@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c1c1 — inverting the OUTER hash of a nested pair gives you the
+// inner digest and stops there; inverting both gives you the secret. The two
+// chains are built identically and differ only in whether the inner call also
+// carries the annotation, so this is the model that would catch `weak`
+// propagating down a term instead of applying at the call site it annotates.
+//
+// A weakening assumption is a statement about one primitive application. If
+// breaking the outer HASH implied breaking everything inside it, the second
+// query would fail and every layered construction in the tree would come apart
+// at the first declared assumption anywhere in it.
+
+attacker[passive]
+
+principal Alice[
+	knows private shallow_secret, deep_secret
+	knows public tag
+	shallow_inner = HASH(shallow_secret, tag)
+	shallow_outer = HASH[weak](shallow_inner, tag)
+	deep_inner = HASH[weak](deep_secret, tag)
+	deep_outer = HASH[weak](deep_inner, tag)
+]
+
+Alice -> Bob: shallow_outer, deep_outer
+
+principal Bob[
+	_ = HASH(shallow_outer, deep_outer)
+]
+
+queries[
+	confidentiality? shallow_inner
+	confidentiality? shallow_secret
+	confidentiality? deep_inner
+	confidentiality? deep_secret
+]

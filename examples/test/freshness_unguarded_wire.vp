@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0f1 — the same fresh nonce, sent twice by the same principal in
+// the same message, is fresh to its recipient over a guarded wire and not
+// fresh over an open one.
+//
+// This looks like a quirk and is actually the correct answer. Freshness asks
+// whether the value a principal is USING is guaranteed to differ between runs.
+// Over a guarded wire Bob is holding what Alice computed, and Alice generated
+// it. Over an open wire the attacker may substitute anything at all, including
+// a value replayed verbatim out of an earlier run, so what Bob holds carries
+// no guarantee whatsoever — his state resolves it to the bare constant, which
+// transitively contains nothing, and the query fails.
+//
+// Every other freshness model in the tree keeps its subject inside one
+// principal or behind a guard, so this effect is invisible in all of them and
+// surprising the first time it is met. Pinning it here is what stops it from
+// being "fixed" into f0f0, which would report a replayable value as fresh —
+// the exact failure mode a freshness query exists to catch.
+
+attacker[active]
+
+principal Alice[
+	generates nonce
+	sealed = HASH(nonce)
+	open_copy = HASH(nonce)
+]
+
+Alice -> Bob: [sealed], open_copy
+
+principal Bob[
+	_ = HASH(sealed)
+	_ = HASH(open_copy)
+]
+
+queries[
+	freshness? sealed
+	freshness? open_copy
+]

@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1c0 — a ciphertext addressed to Bob, delivered to Carol. Her
+// PKE_DEC does not fail — nothing about PKE_DEC can fail, it has no check —
+// it simply produces a term that is not the plaintext and not anything else
+// either, and she carries on using it.
+//
+// The first query fixes the baseline: Bob, who was the intended recipient,
+// really does recover m. The second is the misdelivery, and it is an
+// equivalence failure rather than a confidentiality one because nothing was
+// disclosed to anybody: Carol holds an irreducible term and the attacker holds
+// a ciphertext it still cannot open. Getting the wrong answer and learning the
+// right one are different failures, and only one of them happened here.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+]
+
+principal Carol[
+	knows private csk
+	cpk = PUBKEY(csk)
+]
+
+Bob -> Alice: [bpk]
+Carol -> Alice: [cpk]
+
+principal Alice[
+	knows private m
+	sealed = PKE_ENC(bpk, m)
+]
+
+Alice -> Bob: [sealed]
+Alice -> Carol: [sealed]
+
+principal Bob[
+	bob_got = PKE_DEC(bsk, sealed)
+	_ = HASH(bob_got)
+]
+
+principal Carol[
+	carol_got = PKE_DEC(csk, sealed)
+	_ = HASH(carol_got)
+]
+
+queries[
+	equivalence? m, bob_got
+	equivalence? m, carol_got
+	confidentiality? m
+]

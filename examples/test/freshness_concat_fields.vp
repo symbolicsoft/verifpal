@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0f1f0 — a bundle is fresh if ANY field is, but a field projected
+// out of it is fresh only if that field is. Bob splits one bundle into a
+// long-term identifier and a nonce, and the two halves have opposite verdicts
+// even though they came out of the same term.
+//
+// This is the model that would catch freshness being read off the container
+// rather than off the value. got_id resolves through the SPLIT to the
+// identifier alone, and answering that query from the bundle it was projected
+// from would call a replayable identifier fresh — which is the whole failure
+// mode freshness queries exist to detect.
+
+//
+// The wire values are guarded, and that is not decoration. Under an active
+// attacker an unguarded value is one the attacker may replace, so the
+// recipient's state resolves it to the bare constant rather than to whatever
+// the sender computed — and a bare constant transitively contains nothing at
+// all, fresh or otherwise. Ungarding any message here turns every verdict
+// below into f1 for a reason that has nothing to do with what this model is
+// about. freshness_unguarded_wire.vp is where that effect is the subject.
+
+attacker[active]
+
+principal Alice[
+	knows private device_id
+	generates nonce
+	bundle = CONCAT(device_id, nonce)
+]
+
+Alice -> Bob: [bundle]
+
+principal Bob[
+	got_id, got_nonce = SPLIT(bundle)
+	_ = HASH(got_id, got_nonce)
+]
+
+queries[
+	freshness? bundle
+	freshness? got_id
+	freshness? got_nonce
+]

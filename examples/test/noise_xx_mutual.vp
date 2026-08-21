@@ -1,0 +1,83 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1a1 — Noise XX, run exactly as specified and still broken,
+// because XX on its own is not an authenticated handshake. Neither side knows
+// the other's static key in advance; both are transmitted, encrypted under
+// keys the ephemeral exchange has already established. Encrypting a static key
+// hides WHO is speaking from an eavesdropper. It does not tell either party
+// that the key they received belongs to anybody in particular.
+//
+// So the attacker runs two handshakes, presenting a static key of its own to
+// each side, and every stage completes: the decryptions succeed, the chaining
+// KDF advances, the payload is opened by the party that was supposed to open
+// it — the wrong one. XX delivers identity hiding and key confirmation, and
+// authentication only once the transmitted static key is checked against
+// something the handshake did not supply.
+//
+// That is the real content of the pattern, and it makes this the counterweight
+// to noise_nk_anonymous_initiator.vp rather than to
+// wireguard_static_fetched.vp. NK holds because the responder's static key is
+// known in advance, which is precisely the ingredient XX lacks; and the
+// verdicts here are identical to what happens when WireGuard's configured key
+// is fetched over the wire instead, which is the point — a static key you did
+// not already trust buys you nothing, however carefully it is delivered.
+
+attacker[active]
+
+principal Responder[
+	knows private rs
+	knows public protocol_name
+	generates re
+	grs = PUBKEY(rs)
+	gre = PUBKEY(re)
+]
+
+principal Initiator[
+	knows private is_static
+	knows public protocol_name
+	generates ie
+	gis = PUBKEY(is_static)
+	gie = PUBKEY(ie)
+]
+
+Initiator -> Responder: gie
+
+principal Responder[
+	ee_r = DH_KEX(gie, re)
+	k_ee_r, _, _ = HKDF(protocol_name, ee_r, gie)
+	static_r = AEAD_ENC(k_ee_r, grs, gre)
+	se_r = DH_KEX(gie, rs)
+	k_se_r, _, _ = HKDF(k_ee_r, se_r, gre)
+]
+
+Responder -> Initiator: gre, static_r
+
+principal Initiator[
+	knows private payload
+	ee_i = DH_KEX(gre, ie)
+	k_ee_i, _, _ = HKDF(protocol_name, ee_i, gie)
+	seen_rs = AEAD_DEC(k_ee_i, static_r, gre)?
+	es_i = DH_KEX(seen_rs, ie)
+	k_es_i, _, _ = HKDF(k_ee_i, es_i, gre)
+	static_i = AEAD_ENC(k_es_i, gis, gie)
+	ss_i = DH_KEX(seen_rs, is_static)
+	k_final_i, _, _ = HKDF(k_es_i, ss_i, gis)
+	sealed = AEAD_ENC(k_final_i, payload, gis)
+]
+
+Initiator -> Responder: static_i, sealed
+
+principal Responder[
+	seen_is = AEAD_DEC(k_se_r, static_i, gie)?
+	ss_r = DH_KEX(seen_is, rs)
+	k_final_r, _, _ = HKDF(k_se_r, ss_r, seen_is)
+	opened = AEAD_DEC(k_final_r, sealed, seen_is)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? payload
+	authentication? Initiator -> Responder: static_i
+	authentication? Initiator -> Responder: sealed
+]

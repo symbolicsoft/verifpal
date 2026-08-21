@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1c1 — a hash chain ratchet meeting a compromise. Alice derives
+// three message keys by iterating a hash from a generated root and hands the
+// second one to the attacker in phase 1. Everything from that key forward
+// falls; everything before it does not, because HASH runs one way and the
+// attacker cannot climb back up the chain.
+//
+// This is forward secrecy stated as a property of the DERIVATION rather than
+// of the transport. The interesting failure it guards against is
+// can_reconstruct_primitive learning to invert a hash it holds the output of,
+// which would take m_one down and quietly delete forward secrecy from every
+// ratchet in the tree.
+
+attacker[passive]
+
+principal Alice[
+	generates root
+	knows private m_one, m_two, m_three
+	k_one = HASH(root)
+	k_two = HASH(k_one)
+	k_three = HASH(k_two)
+	e_one = AEAD_ENC(k_one, m_one, nil)
+	e_two = AEAD_ENC(k_two, m_two, nil)
+	e_three = AEAD_ENC(k_three, m_three, nil)
+]
+
+Alice -> Bob: e_one, e_two, e_three
+
+principal Bob[
+	_ = HASH(e_one, e_two, e_three)
+]
+
+phase[1]
+
+principal Alice[
+	leaks k_two
+]
+
+queries[
+	confidentiality? m_one
+	confidentiality? m_two
+	confidentiality? m_three
+]

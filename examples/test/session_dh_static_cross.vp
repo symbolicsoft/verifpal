@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// The counterweight session_dh_no_cross_feed.vp was missing. There, both sides
+// contribute an ephemeral, the two sessions agree on different secrets, and no
+// cross-feed exists at any session count. Here both exponents are long-term,
+// so every session agrees on the SAME key and a ciphertext from one run
+// decrypts perfectly in another.
+//
+// Both public keys are guarded, so there is no man in the middle and nothing
+// is ever learned — the confidentiality verdict is c0 at either count. What
+// fails is agreement: Bob's checked decryption succeeds on the sibling
+// session's ciphertext and leaves him holding a message Alice sent elsewhere.
+// Static-static Diffie-Hellman buys authentication and buys no freshness at
+// all, and the pair of models is where that shows up as two different verdicts
+// for two protocols that look identical on the page.
+
+attacker[active]
+
+principal Alice[
+	knows private a_static
+	ga = PUBKEY(a_static)
+]
+
+principal Bob[
+	knows private b_static
+	gb = PUBKEY(b_static)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	generates m
+	k_alice = DH_KEX(gb, a_static)
+	e = AEAD_ENC(k_alice, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	k_bob = DH_KEX(ga, b_static)
+	d = AEAD_DEC(k_bob, e, nil)?
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

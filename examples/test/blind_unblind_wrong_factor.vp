@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0e1 — UNBLIND(r, m, s) only reduces to SIGN(sk, m) when s is a
+// signature over BLIND(r, m) for that same r. Unblinding with the wrong factor
+// leaves an irreducible term, so sig_good and sig_bad are not the same value.
+//
+// The rewrite's factor check lives in filter_unblind_rewrite, which rebuilds
+// BLIND(arg0, arg1) from the UNBLIND's own arguments and demands the signed
+// message equal it. If that filter is ever loosened to "the signature is over
+// some blinding of m", this equivalence query collapses to e0 and every blind
+// signature in the tree becomes transferable to anyone holding the message.
+
+attacker[passive]
+
+principal Alice[
+	generates m
+	generates r_real
+	generates r_other
+	b = BLIND(r_real, m)
+]
+
+Alice -> Signer: b
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+	bs = SIGN(sk, b)
+]
+
+Signer -> Alice: gsk, bs
+
+principal Alice[
+	sig_good = UNBLIND(r_real, m, bs)
+	sig_bad = UNBLIND(r_other, m, bs)
+	_ = HASH(sig_good, sig_bad)
+]
+
+queries[
+	confidentiality? m
+	equivalence? sig_good, sig_bad
+]

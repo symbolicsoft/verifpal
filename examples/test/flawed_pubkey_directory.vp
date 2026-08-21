@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1 — a key directory nobody signs. Both correspondents look up
+// each other's public key from a server that hands them over in the clear, so
+// the attacker publishes its own key under each name and reads and rewrites
+// everything afterwards.
+//
+// The cryptography below the directory is impeccable — public-key encryption
+// with fresh messages, decrypted correctly by the right principal — and it is
+// worth nothing. Key distribution is the protocol, and this is the model that
+// says so in verdicts.
+
+attacker[active]
+
+principal Directory[
+	knows private alice_sk, bob_sk
+	alice_pk = PUBKEY(alice_sk)
+	bob_pk = PUBKEY(bob_sk)
+]
+
+Directory -> Alice: bob_pk
+Directory -> Bob: alice_pk
+Directory -> Alice: alice_sk
+Directory -> Bob: bob_sk
+
+principal Alice[
+	knows private m_alice
+	to_bob = PKE_ENC(bob_pk, m_alice)
+]
+
+Alice -> Bob: to_bob
+
+principal Bob[
+	got_alice = PKE_DEC(bob_sk, to_bob)
+	knows private m_bob
+	to_alice = PKE_ENC(alice_pk, m_bob)
+]
+
+Bob -> Alice: to_alice
+
+principal Alice[
+	got_bob = PKE_DEC(alice_sk, to_alice)
+	_ = HASH(got_bob)
+]
+
+queries[
+	confidentiality? m_alice
+	confidentiality? m_bob
+	authentication? Alice -> Bob: to_bob
+]

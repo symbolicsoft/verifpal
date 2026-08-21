@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — a coordinator collecting votes from two participants before
+// committing. One participant's vote is a bare hash of the transaction and its
+// decision, the other's is a MAC under a key it shares with the coordinator,
+// and only one of the two can be manufactured by somebody who merely watched
+// the proposal go past.
+//
+// The decision is what makes the query answerable. An acknowledgement over the
+// transaction identifier ALONE cannot be attacked even with no key at all,
+// because the only value the coordinator will accept is the one the
+// participant already sent and reproducing it is a replay. A vote carries
+// content the attacker wants to change, and changing a commit into an abort —
+// or the reverse — is the entire threat a commit protocol faces.
+
+attacker[active]
+
+principal Coordinator[
+	knows private ack_key
+	generates txid
+]
+
+Coordinator -> ParticipantOne: txid
+Coordinator -> ParticipantTwo: txid
+
+principal ParticipantOne[
+	knows private decision_one
+	vote_one = HASH(CONCAT(txid, decision_one))
+]
+
+principal ParticipantTwo[
+	knows private ack_key
+	knows private decision_two
+	vote_two = MAC(ack_key, CONCAT(txid, decision_two))
+]
+
+ParticipantOne -> Coordinator: decision_one, vote_one
+ParticipantTwo -> Coordinator: decision_two, vote_two
+
+principal Coordinator[
+	_ = ASSERT(HASH(CONCAT(txid, decision_one)), vote_one)?
+	_ = ASSERT(MAC(ack_key, CONCAT(txid, decision_two)), vote_two)?
+	committed = HASH(decision_one, decision_two)
+]
+
+queries[
+	authentication? ParticipantOne -> Coordinator: decision_one
+	authentication? ParticipantTwo -> Coordinator: decision_two
+]

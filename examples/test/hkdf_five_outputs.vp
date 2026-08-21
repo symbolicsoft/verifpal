@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1e1 — HKDF's five-output form, which nothing in the tree used,
+// together with the property that makes a KDF a KDF: the outputs are
+// independent of each other and dependent on the input keying material. The
+// attacker is handed the second triple's ikm outright and opens the message
+// keyed on its FOURTH output, while the first triple's fourth output stays out
+// of reach with the same salt and the same info.
+//
+// The equivalence query is the separation the whole construction rests on. If
+// output index were ever dropped from a derived value's identity, k_one and
+// k_five would collapse into one term and every HKDF in the tree would be
+// handing out the same key five times.
+
+attacker[passive]
+
+principal Alice[
+	knows private ikm_secret
+	knows private ikm_open
+	knows public salt, info
+	knows private m_secret, m_open
+	k_one, k_two, k_three, k_four, k_five = HKDF(salt, ikm_secret, info)
+	j_one, j_two, j_three, j_four, j_five = HKDF(salt, ikm_open, info)
+	e_secret = ENC(k_four, m_secret)
+	e_open = ENC(j_four, m_open)
+	leaks ikm_open
+]
+
+Alice -> Bob: e_secret, e_open
+
+principal Bob[
+	_ = HASH(e_secret, e_open)
+]
+
+queries[
+	confidentiality? m_secret
+	confidentiality? m_open
+	equivalence? k_one, k_five
+]

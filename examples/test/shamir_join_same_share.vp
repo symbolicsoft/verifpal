@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — a threshold is a threshold. SHAMIR_JOIN's rebuild rule
+// enumerates the ordered pairs of DISTINCT share positions, so joining a share
+// with itself is not one of them and yields an irreducible term rather than
+// the secret. Bob really does compute that term and the attacker really can
+// recompute it, which is why the second query fails; what must not happen is
+// the first query failing with it.
+//
+// Written the obvious way this looks like a typo in a model. It is the
+// cheapest possible statement that two-of-three means two DIFFERENT shares,
+// and it is the one rebuild-rule mistake that no other model would catch:
+// widening `given` to include [0, 0] costs nothing anywhere else.
+
+attacker[active]
+
+principal Dealer[
+	generates secret
+	share_one, share_two, share_three = SHAMIR_SPLIT(secret)
+	knows private payload
+	sealed = AEAD_ENC(secret, payload, nil)
+	leaks share_one
+]
+
+Dealer -> Bob: share_one, sealed
+
+principal Bob[
+	rejoined = SHAMIR_JOIN(share_one, share_one)
+	opened = AEAD_DEC(rejoined, sealed, nil)
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? payload
+	confidentiality? rejoined
+]

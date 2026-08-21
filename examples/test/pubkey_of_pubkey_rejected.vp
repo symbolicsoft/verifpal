@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a load-time error naming the position.
+//
+// PUBKEY's argument_restrictions forbid both PUBKEY and DH_KEX in its one
+// argument. dh_nested_rejected.vp pins the DH_KEX half; this pins the other,
+// which is the half a modeller is far more likely to write by accident, since
+// "the public key of the public key" is what you get from one wrong variable
+// name in a key hierarchy.
+//
+// The restriction is not cosmetic. normalise_arguments enforces restrictions
+// by peeling a forbidden unary key-derivation head off, and PUBKEY is the only
+// head it can peel — so without the load-time check, PUBKEY(PUBKEY(a)) written
+// in a model would silently become PUBKEY(a) and two different slots would
+// hold the same key.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+	gga = PUBKEY(ga)
+]
+
+Alice -> Bob: ga, gga
+
+principal Bob[
+	_ = HASH(ga, gga)
+]
+
+queries[
+	confidentiality? a
+]

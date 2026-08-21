@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1c1 — defence in depth built entirely out of primitives
+// declared broken. Three nested layers, each one an assumption the analyst
+// wrote down, and the attacker peels all three.
+//
+// Layering is a real answer to uncertainty about any one primitive, and the
+// model is the statement of when it stops working: it needs at least one layer
+// nobody has an assumption about. Compare kem_pke_hybrid.vp, where two layers
+// hold because only one of them is ever surrendered at a time. Here the
+// attacker's declared capabilities cover the whole stack, and the closure has
+// to chase them through it — each break exposes the ciphertext the next break
+// applies to, so the model is also the deepest cascade of capability rules in
+// the tree.
+
+attacker[passive]
+
+principal Alice[
+	knows private outer_key, middle_key, inner_key
+	knows private secret
+	inner = AEAD_ENC[weak](inner_key, secret, nil)
+	middle = ENC[weak](middle_key, inner)
+	outer = PKE_ENC[weak](PUBKEY(outer_key), middle)
+]
+
+Alice -> Bob: outer
+
+principal Bob[
+	knows private outer_key, middle_key, inner_key
+	seen_middle = PKE_DEC(outer_key, outer)
+	seen_inner = DEC(middle_key, seen_middle)
+	seen_secret = AEAD_DEC(inner_key, seen_inner, nil)?
+	_ = HASH(seen_secret)
+]
+
+queries[
+	confidentiality? middle
+	confidentiality? inner
+	confidentiality? secret
+	confidentiality? seen_secret
+]

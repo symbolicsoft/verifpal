@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0c0 — a preimage of a five-argument hash recovers all five
+// arguments, which is why `weak` cannot reuse the single-valued
+// DecomposeRule::reveal. cap_weak_hash.vp says this at arity two; this says it
+// at the arity where an off-by-one in weak_reveals actually has somewhere to
+// hide, and it checks the LAST argument as well as the first.
+//
+// The two digests take disjoint arguments on purpose. Capabilities are
+// deliberately absent from primitive_hash, so an annotated term and its
+// unannotated twin over the same arguments would be the same value, the
+// attacker's knowledge set would keep whichever arrived first, and the
+// counterweight would silently become a second copy of the test.
+
+attacker[passive]
+
+principal Alice[
+	knows private w1, w2, w3, w4, w5
+	knows private s1, s2, s3, s4, s5
+	weak_digest = HASH[weak](w1, w2, w3, w4, w5)
+	firm_digest = HASH(s1, s2, s3, s4, s5)
+]
+
+Alice -> Bob: weak_digest, firm_digest
+
+principal Bob[
+	_ = HASH(weak_digest, firm_digest)
+]
+
+queries[
+	confidentiality? w1
+	confidentiality? w5
+	confidentiality? s1
+	confidentiality? s5
+]

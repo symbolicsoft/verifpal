@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1a0 — a message crossing four principals, end-to-end
+// authenticated only on the last hop. Every intermediary forwards without
+// checking anything, so the authentication query asked at an unchecked hop
+// fails and the one asked where the MAC is verified holds.
+//
+// Four hops is the point: attacker knowledge, provenance and the wire metadata
+// on each slot all have to survive being copied from principal to principal
+// several times. `known_by` is a list of (recipient, sender) pairs and
+// `mutatable_to` a set of recipients, and a chain this long is where a
+// single-sender or single-recipient simplification of either would start
+// reporting the wrong provenance — most likely by attributing the message to
+// the first hop rather than to whoever actually put it on the wire.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key
+	knows private m
+	knows private seal_key
+	body = AEAD_ENC(seal_key, m, nil)
+	tag = MAC(mac_key, body)
+]
+
+Alice -> HopOne: body, tag
+
+principal HopOne[
+	_ = HASH(body, tag)
+]
+
+HopOne -> HopTwo: body, tag
+
+principal HopTwo[
+	_ = HASH(body, tag)
+]
+
+HopTwo -> Dana: body, tag
+
+principal Dana[
+	knows private mac_key
+	knows private seal_key
+	_ = ASSERT(MAC(mac_key, body), tag)?
+	got = AEAD_DEC(seal_key, body, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> HopOne: body
+	authentication? HopTwo -> Dana: body
+]

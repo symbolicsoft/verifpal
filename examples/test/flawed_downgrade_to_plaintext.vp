@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1a1 — a protocol that offers an unencrypted mode for
+// compatibility and lets the peer pick. The attacker picks, and the encrypted
+// mode's careful key agreement is never reached.
+//
+// The plaintext branch is modelled the only way a branch can be modelled in a
+// language with no branches: the fallback copy is simply sent in the clear
+// beside the protected one, and the recipient uses both. That is faithful to
+// what the flaw actually is — the recipient will act on either, and the
+// attacker decides which one it acts on — and it is why the two authentication
+// queries fail together. Nothing on a fallback path is authenticated, the hint
+// that accompanies it least of all.
+//
+// The Diffie-Hellman public key is guarded, so the protected branch is
+// genuinely sound and the attacker never touches it. That is the shape worth
+// pinning: a correct construction and an unprotected copy of its input,
+// travelling together, and the verdicts follow the copy.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private payload, hint
+	generates a
+	ga = PUBKEY(a)
+	k = DH_KEX(gb, a)
+	protected = AEAD_ENC(k, payload, nil)
+]
+
+Alice -> Bob: [ga], protected, payload, hint
+
+principal Bob[
+	kb = DH_KEX(ga, b)
+	got_protected = AEAD_DEC(kb, protected, nil)?
+	_ = HASH(got_protected, payload, hint)
+]
+
+queries[
+	confidentiality? payload
+	authentication? Alice -> Bob: payload
+	authentication? Alice -> Bob: hint
+]

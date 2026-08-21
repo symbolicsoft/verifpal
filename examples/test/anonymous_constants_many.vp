@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0 — anonymous constants, used everywhere they are allowed and
+// several at a time: as a whole assignment, as some of a multi-output
+// primitive's outputs, and interleaved with named ones in the same block.
+//
+// Every `_` becomes a distinct unnamed_N, minted by a counter that lives on
+// the parser rather than in process-global state. A counter that reused a name
+// would silently alias two slots — and aliasing a discarded Shamir share onto
+// a discarded KDF output is the kind of collision that produces attacker
+// knowledge out of nothing. Nothing else in the tree puts this many in one
+// principal, and none of the existing models mixes the assignment form with
+// the multi-output form.
+
+attacker[active]
+
+principal Alice[
+	knows private root
+	generates salt
+	_ = HASH(root)
+	_, share_two, _ = SHAMIR_SPLIT(root)
+	_, _, _ = HKDF(salt, root, nil)
+	key_one, _, _ = HKDF(salt, root, salt)
+	_ = MAC(root, salt)
+	sealed = AEAD_ENC(key_one, share_two, nil)
+]
+
+Alice -> Bob: sealed, [salt]
+
+principal Bob[
+	knows private root
+	key_b, _, _ = HKDF(salt, root, salt)
+	got = AEAD_DEC(key_b, sealed, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? share_two
+	confidentiality? root
+	authentication? Alice -> Bob: sealed
+]

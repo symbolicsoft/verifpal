@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — two chains stepping from one root stay equal step for step,
+// and one substituted input desynchronises them permanently. The first query
+// is over the pair Alice and Bob both derive honestly; the second is over the
+// pair whose Bob-side input crossed an unguarded wire, and the attacker's only
+// power here is to make the two sides disagree.
+//
+// This is the divergence case that is NOT a halt. Nothing in Bob's state is
+// checked, so he never stops and always produces a value; it is simply the
+// wrong one. Compare concat_bomb_equiv.vp and equivalence_halt_scope.vp, where
+// the attacker can only truncate the recipient and the query therefore has to
+// hold.
+
+attacker[active]
+
+principal Alice[
+	knows private root
+	generates step_guarded, step_open
+	chain_guarded_a = HASH(root, step_guarded)
+	chain_open_a = HASH(root, step_open)
+	next_guarded_a = HASH(chain_guarded_a, step_guarded)
+	next_open_a = HASH(chain_open_a, step_open)
+]
+
+Alice -> Bob: [step_guarded], step_open
+
+principal Bob[
+	knows private root
+	chain_guarded_b = HASH(root, step_guarded)
+	chain_open_b = HASH(root, step_open)
+	next_guarded_b = HASH(chain_guarded_b, step_guarded)
+	next_open_b = HASH(chain_open_b, step_open)
+	_ = HASH(next_guarded_b, next_open_b)
+]
+
+queries[
+	equivalence? next_guarded_a, next_guarded_b
+	equivalence? next_open_a, next_open_b
+]

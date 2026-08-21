@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f0 — a Diffie-Hellman secret between two long-term keys is the
+// same value in every run, which is precisely what a freshness query is for.
+// Swapping one side for an ephemeral makes it fresh, and the two secrets sit
+// in the same principal over the same static exponent so that nothing but the
+// other side's key differs.
+//
+// Freshness has to descend through DH_KEX and PUBKEY into the exponent to see
+// this. An implementation that treated a key-agreement output as fresh because
+// it is a derived value — a tempting shortcut, since most DH in most models is
+// ephemeral — would report f0 for both and quietly bless every static-static
+// handshake in the tree.
+
+//
+// The wire values are guarded, and that is not decoration. Under an active
+// attacker an unguarded value is one the attacker may replace, so the
+// recipient's state resolves it to the bare constant rather than to whatever
+// the sender computed — and a bare constant transitively contains nothing at
+// all, fresh or otherwise. Ungarding any message here turns every verdict
+// below into f1 for a reason that has nothing to do with what this model is
+// about. freshness_unguarded_wire.vp is where that effect is the subject.
+
+attacker[active]
+
+principal Alice[
+	knows private a_static
+	ga = PUBKEY(a_static)
+]
+
+principal Bob[
+	knows private b_static
+	generates b_eph
+	gb_static = PUBKEY(b_static)
+	gb_eph = PUBKEY(b_eph)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb_static], [gb_eph]
+
+principal Alice[
+	shared_static = DH_KEX(gb_static, a_static)
+	shared_eph = DH_KEX(gb_eph, a_static)
+	_ = HASH(shared_static, shared_eph)
+]
+
+queries[
+	freshness? shared_static
+	freshness? shared_eph
+]

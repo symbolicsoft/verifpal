@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 — a Noise NK handshake, where the responder's static key is
+// known to the initiator in advance and the initiator has no static key at
+// all. The message reaches the responder confidentially and the responder has
+// no idea who sent it, which is not a flaw: it is the pattern's stated
+// property, and NK is chosen precisely when that trade is wanted.
+//
+// The pairing of verdicts is the reason to have the model. c0 beside a1 is the
+// signature of an anonymous-initiator pattern, and an engine that reported a1
+// for confidentiality here would be claiming that a known responder key buys
+// nothing, while one that reported a0 for authentication would be inventing an
+// identity the protocol never established.
+
+attacker[active]
+
+principal Responder[
+	knows private rs
+	grs = PUBKEY(rs)
+]
+
+Responder -> Initiator: [grs]
+
+principal Initiator[
+	knows public protocol_name
+	knows private payload
+	generates e
+	ge = PUBKEY(e)
+	es = DH_KEX(grs, e)
+	k_init, _, _ = HKDF(protocol_name, es, ge)
+	sealed = AEAD_ENC(k_init, payload, ge)
+]
+
+Initiator -> Responder: ge, sealed
+
+principal Responder[
+	knows public protocol_name
+	se = DH_KEX(ge, rs)
+	k_resp, _, _ = HKDF(protocol_name, se, ge)
+	opened = AEAD_DEC(k_resp, sealed, ge)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? payload
+	authentication? Initiator -> Responder: sealed
+]

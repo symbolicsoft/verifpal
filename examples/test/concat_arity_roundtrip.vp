@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e0e0e1 — CONCAT and SPLIT at every arity the language allows,
+// two through five, projected back out in one principal. The first three
+// queries confirm the last field of each bundle survives the round trip; the
+// fourth confirms that the fields of DIFFERENT bundles are not
+// interchangeable.
+//
+// Arity four had no coverage anywhere in the tree — CONCAT appears at two,
+// three and five and never at four — and a projection table written by hand is
+// exactly the kind of code that has a hole at one index. The failing query is
+// there so that three passing equivalences cannot be satisfied by a rule that
+// simply returned its argument.
+
+attacker[passive]
+
+principal Alice[
+	knows private f1, f2, f3, f4, f5
+	pair = CONCAT(f1, f2)
+	triple = CONCAT(f1, f2, f3)
+	quad = CONCAT(f1, f2, f3, f4)
+	quint = CONCAT(f1, f2, f3, f4, f5)
+	p1, p2 = SPLIT(pair)
+	t1, t2, t3 = SPLIT(triple)
+	q1, q2, q3, q4 = SPLIT(quad)
+	c1, c2, c3, c4, c5 = SPLIT(quint)
+	_ = HASH(p2, t3, q4, c5)
+]
+
+queries[
+	equivalence? p2, f2
+	equivalence? q4, f4
+	equivalence? c5, f5
+	equivalence? q4, c5
+]

@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — mutual authentication that is only mutual in one direction.
+// Both principals answer the other's challenge with a proof over the challenge
+// AND a status of their own; Alice signs hers under a private key, Bob MACs his
+// under a key that has leaked, and the attacker rewrites Bob's status and
+// mints the matching tag.
+//
+// Binding a status into each proof is what makes the queries answerable at
+// all. A proof over the challenge alone cannot be attacked even with the key
+// in hand, because the only value the verifier will accept is the one that was
+// already sent and reproducing it is a replay. It takes something the attacker
+// can VARY for a compromised key to become a forgery, which is a distinction
+// worth having a model make.
+//
+// The asymmetry is deliberate and common: a protocol is designed carefully in
+// the direction its author was thinking about and left thin in the other. Both
+// queries are asked about a challenge-response exchange between the same two
+// principals in the same model, so what separates them is the strength of the
+// response and nothing else.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	knows private weak_key
+	generates challenge_b
+	bpk = PUBKEY(bsk)
+	leaks weak_key
+]
+
+principal Alice[
+	knows private ask
+	knows private weak_key
+	generates challenge_a
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk], challenge_a
+Bob -> Alice: [bpk], challenge_b
+
+principal Alice[
+	knows private status_a
+	proof_a = SIGN(ask, CONCAT(challenge_b, status_a))
+]
+
+Alice -> Bob: status_a, proof_a
+
+principal Bob[
+	knows private status_b
+	_ = SIGNVERIF(apk, CONCAT(challenge_b, status_a), proof_a)?
+	proof_b = MAC(weak_key, CONCAT(challenge_a, status_b))
+]
+
+Bob -> Alice: status_b, proof_b
+
+principal Alice[
+	_ = ASSERT(MAC(weak_key, CONCAT(challenge_a, status_b)), proof_b)?
+	_ = HASH(status_a, status_b)
+]
+
+queries[
+	authentication? Alice -> Bob: status_a
+	authentication? Bob -> Alice: status_b
+]

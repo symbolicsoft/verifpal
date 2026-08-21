@@ -1,0 +1,80 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1c0 — an inner authentication carried inside an outer tunnel,
+// with and without channel binding. The client runs the inner exchange over
+// two different tunnels; without binding, the credential it computes is the
+// same value in both, which is exactly what lets an attacker terminate one
+// tunnel, collect the credential, and present it inside another. With binding
+// the tunnel key is mixed into the credential and the two are different
+// values.
+//
+// The passing query is the bad news. e0 says the credential is transferable
+// between tunnels — that is the tunnel attack; e1 says it is not.
+//
+// Equivalence is the query kind that can state this, and an authentication
+// query is not. What the attacker presents to the real server is bit-for-bit
+// the credential the honest client produced, so the engine classifies it as a
+// replay rather than a forgery and answers a0 with or without the binding.
+// webauthn_origin_binding.vp and nonce_echo_reflection.vp are the same shape:
+// three protocols, three different context-binding rules, one underlying
+// statement that two contexts must not produce the same value.
+//
+// The third query is the counterweight. Nothing about either flight discloses
+// the long-term secret itself, so the difference between them is transferability
+// and not secrecy.
+
+attacker[active]
+
+principal ServerOne[
+	knows private sk_one
+	knows private inner_secret
+	pk_one = PUBKEY(sk_one)
+]
+
+principal ServerTwo[
+	knows private sk_two
+	knows private inner_secret
+	pk_two = PUBKEY(sk_two)
+]
+
+ServerOne -> Client: [pk_one]
+ServerTwo -> Client: [pk_two]
+
+principal Client[
+	knows private inner_secret
+	generates eph_one, eph_two
+	pub_one = PUBKEY(eph_one)
+	pub_two = PUBKEY(eph_two)
+	tunnel_one = DH_KEX(pk_one, eph_one)
+	tunnel_two = DH_KEX(pk_two, eph_two)
+	bare_in_one = HASH(inner_secret)
+	bare_in_two = HASH(inner_secret)
+	bound_in_one = HASH(inner_secret, tunnel_one)
+	bound_in_two = HASH(inner_secret, tunnel_two)
+	sealed_one = AEAD_ENC(tunnel_one, CONCAT(bare_in_one, bound_in_one), nil)
+	sealed_two = AEAD_ENC(tunnel_two, CONCAT(bare_in_two, bound_in_two), nil)
+]
+
+Client -> ServerOne: [pub_one], sealed_one
+Client -> ServerTwo: [pub_two], sealed_two
+
+principal ServerOne[
+	server_tunnel_one = DH_KEX(pub_one, sk_one)
+	seen_bare_one, seen_bound_one = SPLIT(AEAD_DEC(server_tunnel_one, sealed_one, nil))?
+	_ = ASSERT(HASH(inner_secret), seen_bare_one)?
+	_ = ASSERT(HASH(inner_secret, server_tunnel_one), seen_bound_one)?
+]
+
+principal ServerTwo[
+	server_tunnel_two = DH_KEX(pub_two, sk_two)
+	seen_bare_two, seen_bound_two = SPLIT(AEAD_DEC(server_tunnel_two, sealed_two, nil))?
+	_ = ASSERT(HASH(inner_secret), seen_bare_two)?
+	_ = ASSERT(HASH(inner_secret, server_tunnel_two), seen_bound_two)?
+]
+
+queries[
+	equivalence? bare_in_one, bare_in_two
+	equivalence? bound_in_one, bound_in_two
+	confidentiality? inner_secret
+]

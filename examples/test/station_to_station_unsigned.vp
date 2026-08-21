@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1a1 — Station-to-Station with the signatures removed, which
+// is to say anonymous Diffie-Hellman with extra steps. Both public keys cross
+// unguarded wires, the attacker runs a key exchange with each side
+// separately, and everything either of them sends is read and everything
+// either of them receives is chosen.
+//
+// The model is the baseline that station_to_station.vp is measured against.
+// STS adds exactly one thing — each side signs the pair of public keys under a
+// long-term identity — and it is worth being able to point at what the
+// protocol looks like without it: not weaker, but completely absent.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	knows private m_alice
+	k_alice = DH_KEX(gb, a)
+	e_alice = AEAD_ENC(k_alice, m_alice, nil)
+]
+
+Alice -> Bob: e_alice
+
+principal Bob[
+	knows private m_bob
+	k_bob = DH_KEX(ga, b)
+	got_alice = AEAD_DEC(k_bob, e_alice, nil)?
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+]
+
+Bob -> Alice: e_bob
+
+principal Alice[
+	got_bob = AEAD_DEC(k_alice, e_bob, nil)?
+	_ = HASH(got_bob)
+]
+
+queries[
+	confidentiality? m_alice
+	confidentiality? m_bob
+	authentication? Alice -> Bob: e_alice
+	authentication? Bob -> Alice: e_bob
+]

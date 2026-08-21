@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1 — a KEM used as if it were an authenticated exchange. The
+// recipient's public key is fetched over the wire, so the attacker
+// encapsulates to a key of its own on one side and to the recipient's on the
+// other, and sits between two perfectly correct KEM operations.
+//
+// A KEM authenticates nobody by construction, and fetching the encapsulation
+// key over the same channel removes even the confidentiality it would
+// otherwise provide. kem_roundtrip.vp keeps the key guarded and holds
+// confidentiality while losing authentication; this is the same protocol with
+// the guard removed, and it loses both.
+//
+// The decapsulation is unchecked, as it is in kem_roundtrip.vp, and that is
+// the honest modelling choice rather than a convenience: a KEM decapsulation
+// does not fail in any way the recipient can observe. It produces a shared
+// secret, correct or otherwise, and whether it was the right one is a question
+// only the next primitive can answer.
+
+attacker[active]
+
+principal Bob[
+	knows private dk
+	ek = PUBKEY(dk)
+]
+
+Bob -> Alice: ek
+
+principal Alice[
+	knows private m_first, m_second
+	generates r_first, r_second
+	ss_first, ct_first = KEM_ENCAP(ek, r_first)
+	ss_second, ct_second = KEM_ENCAP(ek, r_second)
+	e_first = AEAD_ENC(ss_first, m_first, nil)
+	e_second = AEAD_ENC(ss_second, m_second, nil)
+]
+
+Alice -> Bob: ct_first, e_first, ct_second, e_second
+
+principal Bob[
+	back_first = KEM_DECAP(dk, ct_first)
+	back_second = KEM_DECAP(dk, ct_second)
+	_ = AEAD_DEC(back_first, e_first, nil)?
+	_ = AEAD_DEC(back_second, e_second, nil)?
+]
+
+queries[
+	confidentiality? m_first
+	confidentiality? m_second
+	authentication? Alice -> Bob: e_first
+]

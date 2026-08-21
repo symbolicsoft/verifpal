@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — the same completely unauthenticated Diffie-Hellman
+// exchange, used twice, once with a pre-shared key mixed into the derivation
+// and once without. The attacker runs an unimpeded man in the middle on both
+// legs and learns only one message.
+//
+// This is the hybrid argument every modern handshake relies on, and it is a
+// statement about the KDF rather than about the exchange: the attacker holds
+// the Diffie-Hellman secret it negotiated with Alice, and it is still short
+// one of HKDF's inputs. An implementation that let attacker knowledge of ANY
+// argument stand in for knowledge of the output would flatten the two verdicts
+// into one and delete the entire benefit of PSK hybridisation.
+
+attacker[active]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: gb
+
+principal Alice[
+	knows private psk
+	knows private m_hybrid, m_bare
+	knows public info
+	generates a
+	ga = PUBKEY(a)
+	raw = DH_KEX(gb, a)
+	k_hybrid, _, _ = HKDF(psk, raw, info)
+	k_bare, _, _ = HKDF(nil, raw, info)
+	e_hybrid = AEAD_ENC(k_hybrid, m_hybrid, nil)
+	e_bare = AEAD_ENC(k_bare, m_bare, nil)
+]
+
+Alice -> Bob: ga, e_hybrid, e_bare
+
+principal Bob[
+	knows private psk
+	knows public info
+	raw_b = DH_KEX(ga, b)
+	kb_hybrid, _, _ = HKDF(psk, raw_b, info)
+	kb_bare, _, _ = HKDF(nil, raw_b, info)
+	d_hybrid = AEAD_DEC(kb_hybrid, e_hybrid, nil)
+	d_bare = AEAD_DEC(kb_bare, e_bare, nil)
+	_ = HASH(d_hybrid, d_bare)
+]
+
+queries[
+	confidentiality? m_hybrid
+	confidentiality? m_bare
+]

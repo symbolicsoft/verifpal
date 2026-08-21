@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — one KEM shared secret used for both directions, which is
+// a reflection attack waiting to happen. The attacker takes the ciphertext
+// Alice sent to Bob and hands it back to Alice as if it were Bob's reply; the
+// key is the same in both directions, so her checked decryption succeeds and
+// she accepts her own message as his.
+//
+// The second flight differs by one argument: the direction label sits in the
+// associated data, so Alice's outbound record is bound to "A to B" and the
+// record she will accept must be bound to "B to A". AEAD_DEC's rewrite matches
+// position 2 against position 2, the reflected record no longer reduces, and
+// the check halts her.
+//
+// This is the cheapest possible statement of why every real protocol derives
+// two keys or labels two directions, and nothing in the tree said it.
+
+attacker[active]
+
+principal Bob[
+	knows private dk
+	ek = PUBKEY(dk)
+]
+
+Bob -> Alice: [ek]
+
+principal Alice[
+	generates r
+	knows private m_alice
+	knows public dir_out, dir_back
+	ss_alice, ct = KEM_ENCAP(ek, r)
+	loose_out = AEAD_ENC(ss_alice, m_alice, nil)
+	bound_out = AEAD_ENC(ss_alice, m_alice, dir_out)
+]
+
+Alice -> Bob: ct, loose_out, bound_out
+
+principal Bob[
+	knows private m_bob
+	knows public dir_out, dir_back
+	ss_bob = KEM_DECAP(dk, ct)?
+	_ = AEAD_DEC(ss_bob, loose_out, nil)?
+	_ = AEAD_DEC(ss_bob, bound_out, dir_out)?
+	loose_back = AEAD_ENC(ss_bob, m_bob, nil)
+	bound_back = AEAD_ENC(ss_bob, m_bob, dir_back)
+]
+
+Bob -> Alice: loose_back, bound_back
+
+principal Alice[
+	got_loose = AEAD_DEC(ss_alice, loose_back, nil)?
+	got_bound = AEAD_DEC(ss_alice, bound_back, dir_back)?
+	_ = HASH(got_loose, got_bound)
+]
+
+queries[
+	authentication? Bob -> Alice: loose_back
+	authentication? Bob -> Alice: bound_back
+]

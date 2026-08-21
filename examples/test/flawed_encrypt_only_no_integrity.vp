@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1 — a protocol that encrypts and never authenticates, using a
+// cipher declared malleable. Bob accepts two records, reshapes of which the
+// attacker can produce without ever learning the key, and acts on both.
+//
+// The two records use the same key deliberately, unlike the isolated flights
+// elsewhere in this directory: there is nothing here to keep apart, because
+// nothing here is protected. A malleable cipher with no MAC over it is a
+// message the attacker writes.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public lo, hi
+	first = ENC[malleable](k, CONCAT(lo, hi))
+	second = ENC[malleable](k, CONCAT(hi, lo))
+]
+
+Alice -> Bob: first, second
+
+principal Bob[
+	knows private k
+	a_one, a_two = SPLIT(DEC(k, first))?
+	b_one, b_two = SPLIT(DEC(k, second))?
+	_ = MAC(k, a_one)
+	_ = MAC(k, b_one)
+]
+
+queries[
+	authentication? Alice -> Bob: first
+	authentication? Alice -> Bob: second
+]

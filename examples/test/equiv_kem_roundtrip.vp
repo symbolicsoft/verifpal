@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1c0 — the KEM round trip, stated as an equality rather than as
+// a decryption that happened to work. Alice's encapsulated secret and Bob's
+// decapsulated one are the same value; decapsulating the same ciphertext under
+// a DIFFERENT private key is not.
+//
+// rewrite_to_kem_secret has to reach into the encapsulation and hand back its
+// first output, and filter_kem_decap_rewrite has to insist the decapsulation
+// key matches the public key that was encapsulated to. The second query is the
+// only thing in the tree that would notice if that filter stopped checking,
+// because a KEM decapsulation under the wrong key does not fail loudly — it
+// just quietly produces a term nobody can use.
+
+attacker[passive]
+
+principal Bob[
+	knows private dk_real
+	knows private dk_other
+	ek_real = PUBKEY(dk_real)
+]
+
+Bob -> Alice: [ek_real]
+
+principal Alice[
+	generates r
+	ss_alice, ct = KEM_ENCAP(ek_real, r)
+	_ = HASH(ss_alice)
+]
+
+Alice -> Bob: ct
+
+principal Bob[
+	ss_right = KEM_DECAP(dk_real, ct)
+	ss_wrong = KEM_DECAP(dk_other, ct)
+	_ = HASH(ss_right, ss_wrong)
+]
+
+queries[
+	equivalence? ss_alice, ss_right
+	equivalence? ss_alice, ss_wrong
+	confidentiality? ss_alice
+]

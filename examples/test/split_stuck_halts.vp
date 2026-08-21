@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — SPLIT is a definition_check primitive, so it may carry `?`,
+// and a SPLIT whose argument does not reduce to a CONCAT is a FAILED CHECK
+// rather than merely a stuck term. The two flights are identical but for that
+// one character.
+//
+// Under the check, every ciphertext the attacker can build decrypts to
+// something that is not a bundle, the projection fails, and Bob is truncated
+// before the field is used. Without it Bob carries on holding an irreducible
+// SPLIT, uses its first projection anyway, and the authentication query sees a
+// value the attacker chose.
+//
+// The two flights are keyed separately, which is load-bearing: under one key
+// the attacker would swap the two ciphertexts, the checked SPLIT would succeed
+// on a genuine bundle, and both queries would fail for a reason that has
+// nothing to do with checking.
+
+attacker[active]
+
+principal Alice[
+	knows private k_checked, k_loose
+	knows private lo, hi
+	bundle_checked = ENC(k_checked, CONCAT(lo, hi))
+	bundle_loose = ENC(k_loose, CONCAT(hi, lo))
+]
+
+Alice -> Bob: bundle_checked, bundle_loose
+
+principal Bob[
+	knows private k_checked, k_loose
+	x_checked, y_checked = SPLIT(DEC(k_checked, bundle_checked))?
+	x_loose, y_loose = SPLIT(DEC(k_loose, bundle_loose))
+	_ = HASH(x_checked, x_loose)
+]
+
+queries[
+	authentication? Alice -> Bob: bundle_checked
+	authentication? Alice -> Bob: bundle_loose
+]

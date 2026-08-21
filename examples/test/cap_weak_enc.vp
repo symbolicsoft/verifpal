@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0 — ENC declares weak_reveals on position 1, and position 1
+// is the PLAINTEXT. Breaking a weak cipher hands over what it was hiding and
+// not the key that hid it, which is the third query and the reason this model
+// has three: the two ciphertexts share one key, so a `weak` that surrendered
+// the key argument instead of the protected one would take m_sound down beside
+// m_broken and the counterweight would vanish.
+
+attacker[passive]
+
+principal Alice[
+	knows private stream_key
+	knows private m_broken, m_sound
+	e_broken = ENC[weak](stream_key, m_broken)
+	e_sound = ENC(stream_key, m_sound)
+]
+
+Alice -> Bob: e_broken, e_sound
+
+principal Bob[
+	knows private stream_key
+	d_broken = DEC(stream_key, e_broken)
+	d_sound = DEC(stream_key, e_sound)
+	_ = HASH(d_broken, d_sound)
+]
+
+queries[
+	confidentiality? m_broken
+	confidentiality? m_sound
+	confidentiality? stream_key
+]

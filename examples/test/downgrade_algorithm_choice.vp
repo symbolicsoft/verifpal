@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1c0a0 — a negotiated cipher suite with nothing binding the
+// negotiation. The client offers two suites, the attacker deletes the strong
+// one, and the server picks what is left. The traffic under the weak suite is
+// readable because the weak suite is declared invertible; the traffic that
+// would have been under the strong one never happens.
+//
+// The second exchange runs the identical negotiation with the offer bound into
+// a transcript MAC, and the same deletion fails the server's check. Downgrade
+// protection is not about the algorithms at all — it is about whether the
+// choice is authenticated afterwards — and this is the model that separates
+// those two things.
+
+attacker[active]
+
+principal Client[
+	knows private psk
+	knows public suite_weak, suite_strong
+	knows private m_open, m_bound
+	offer_open = CONCAT(suite_weak, suite_strong)
+	offer_bound = CONCAT(suite_weak, suite_strong)
+	offer_tag = MAC(psk, offer_bound)
+	weak_open = AEAD_ENC[weak](psk, m_open, suite_weak)
+	weak_bound = AEAD_ENC(psk, m_bound, suite_weak)
+]
+
+Client -> Server: offer_open, weak_open, offer_bound, offer_tag, weak_bound
+
+principal Server[
+	knows private psk
+	knows public suite_weak, suite_strong
+	chosen_open, _ = SPLIT(offer_open)?
+	_ = ASSERT(MAC(psk, offer_bound), offer_tag)?
+	chosen_bound, _ = SPLIT(offer_bound)?
+	got_open = AEAD_DEC(psk, weak_open, chosen_open)?
+	got_bound = AEAD_DEC(psk, weak_bound, chosen_bound)?
+	_ = HASH(got_open, got_bound)
+]
+
+queries[
+	confidentiality? m_open
+	authentication? Client -> Server: offer_open
+	confidentiality? m_bound
+	authentication? Client -> Server: offer_bound
+]

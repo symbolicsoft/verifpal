@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1a0 — a password-authenticated exchange whose verifier is
+// stored as a plain hash of the password and a public salt. The verifier is on
+// the server, the server is breached, and the hash is a complete offline
+// oracle: the password falls, the session key derived from it falls, and the
+// attacker authenticates as the client.
+//
+// The last verdict is the one that keeps the model honest. Even holding the
+// password, the attacker cannot forge the response to a challenge the server
+// generated FRESH and bound nothing else to — the only accepted answer is the
+// one the client already sent, and reproducing it is a replay. Recovering a
+// password is not automatically a forgery; it becomes one when the protocol
+// gives the attacker something it can vary, which is what the third query has
+// and the fourth does not.
+
+attacker[active]
+
+principal Server[
+	knows password client_pw
+	knows public salt
+	generates challenge
+	verifier = HASH(client_pw, salt)
+	leaks verifier
+]
+
+Server -> Client: challenge
+
+principal Client[
+	knows password client_pw
+	knows public salt
+	knows private request
+	local_verifier = HASH(client_pw, salt)
+	session = HASH(local_verifier, challenge)
+	sealed = AEAD_ENC(session, request, nil)
+	plain_proof = MAC(local_verifier, challenge)
+]
+
+Client -> Server: sealed, plain_proof
+
+principal Server[
+	server_session = HASH(verifier, challenge)
+	got = AEAD_DEC(server_session, sealed, nil)?
+	_ = ASSERT(MAC(verifier, challenge), plain_proof)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? client_pw
+	confidentiality? request
+	authentication? Client -> Server: sealed
+	authentication? Client -> Server: plain_proof
+]

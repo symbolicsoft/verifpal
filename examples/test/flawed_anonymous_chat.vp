@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1a1 — every query fails, which is the point of having it. A
+// chat that agrees a key over unauthenticated Diffie-Hellman and encrypts with
+// it is the most common thing a first-time protocol designer writes, and it is
+// broken in all four directions at once: both messages are read and both are
+// forged, by one attacker running two exchanges.
+//
+// A corpus of models that mostly hold is a corpus that mostly tests the
+// engine's ability to say no. This one, and its neighbours named flawed_*,
+// exist to keep the other direction covered: each is a construction with no
+// redeeming feature, and every verdict in it is an attack the search has to
+// keep finding.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	knows private m_alice
+	k_alice = DH_KEX(gb, a)
+	e_alice = AEAD_ENC(k_alice, m_alice, nil)
+]
+
+Alice -> Bob: e_alice
+
+principal Bob[
+	knows private m_bob
+	k_bob = DH_KEX(ga, b)
+	got_alice = AEAD_DEC(k_bob, e_alice, nil)?
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+]
+
+Bob -> Alice: e_bob
+
+principal Alice[
+	got_bob = AEAD_DEC(k_alice, e_bob, nil)?
+	_ = HASH(got_bob)
+]
+
+queries[
+	confidentiality? m_alice
+	confidentiality? m_bob
+	authentication? Alice -> Bob: e_alice
+	authentication? Bob -> Alice: e_bob
+]

@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — encrypt-then-MAC and MAC-then-encrypt, distinguished by
+// what happens when the MAC key alone is compromised. Under encrypt-then-MAC
+// the tag covers the ciphertext, so an attacker holding the MAC key rewrites
+// the ciphertext and re-tags it; Bob's ASSERT passes and he decrypts something
+// Alice never sent. Under MAC-then-encrypt the tag lives INSIDE the
+// encryption, so producing an acceptable record needs the encryption key,
+// which the attacker does not have.
+//
+// The composition order is usually argued the other way round — encrypt-then-
+// MAC is the one the literature recommends, and rightly, because it lets the
+// recipient reject forgeries without touching the decryption. This model is
+// the narrow case where the other order survives something it does not, and
+// having it in the corpus keeps "encrypt-then-MAC is better" from being read
+// as "encrypt-then-MAC is better at everything".
+//
+// Both flights use the same leaked MAC key and different encryption keys. The
+// separate encryption keys are what stop the attacker from moving a record
+// between the flights, which would fail both queries for a reason that has
+// nothing to do with ordering.
+//
+// The inner cipher is ENC rather than AEAD_ENC in both flights, which is what
+// the composition question is about: you compose a MAC with an unauthenticated
+// cipher precisely because the cipher provides no integrity of its own. With an
+// AEAD inside there is nothing left for the ordering to decide — the decryption
+// rejects the forgery on its own and both flights hold, which says something
+// about AEADs and nothing about ordering.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key
+	knows private enc_key_etm, enc_key_mte
+	knows private m_etm, m_mte
+	record_etm = ENC(enc_key_etm, m_etm)
+	tag_etm = MAC(mac_key, record_etm)
+	record_mte = ENC(enc_key_mte, CONCAT(m_mte, MAC(mac_key, m_mte)))
+	leaks mac_key
+]
+
+Alice -> Bob: record_etm, tag_etm, record_mte
+
+principal Bob[
+	knows private mac_key
+	knows private enc_key_etm, enc_key_mte
+	_ = ASSERT(MAC(mac_key, record_etm), tag_etm)?
+	got_etm = DEC(enc_key_etm, record_etm)
+	seen_mte, seen_tag = SPLIT(DEC(enc_key_mte, record_mte))?
+	_ = ASSERT(MAC(mac_key, seen_mte), seen_tag)?
+	_ = HASH(got_etm, seen_mte)
+]
+
+queries[
+	authentication? Alice -> Bob: record_etm
+	authentication? Alice -> Bob: record_mte
+]

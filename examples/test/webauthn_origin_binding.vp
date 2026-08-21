@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — an authenticator answering the same challenge for two
+// origins. Without origin binding the two answers are LITERALLY THE SAME
+// VALUE, which is what makes a response minted at a phishing site usable at
+// the site it was phished from; with it they are different values and neither
+// is usable at the other.
+//
+// Read the verdicts carefully, because the passing query is the bad news. e0
+// says the two bare responses are indistinguishable — that is the flaw. e1
+// says the two bound responses are not — that is the fix.
+//
+// The equivalence framing is not a stylistic choice. An authentication query
+// cannot see this attack: the transferred response is bit-for-bit the response
+// the honest authenticator would have produced for the real relying party, so
+// the engine correctly classifies presenting it as a replay rather than a
+// forgery, and answers a0 whether the binding is there or not. Phishing
+// resistance is a statement about two contexts producing distinguishable
+// outputs, and equivalence is the query kind that can state it.
+//
+// The responses travel guarded. Unguarded, the relying party resolves the copy
+// it received to a bare constant that the attacker may replace, so the pair
+// diverges for a reason that has nothing to do with origins and both queries
+// report e1. The guard is what makes the comparison about the construction
+// rather than about the wire.
+
+attacker[active]
+
+principal RelyingParty[
+	knows public origin_real, origin_evil
+	generates challenge
+]
+
+RelyingParty -> Authenticator: challenge
+
+principal Authenticator[
+	knows private credential_key
+	knows public origin_real, origin_evil
+	credential_pk = PUBKEY(credential_key)
+	bare_for_real = SIGN(credential_key, challenge)
+	bare_for_evil = SIGN(credential_key, challenge)
+	bound_for_real = SIGN(credential_key, CONCAT(origin_real, challenge))
+	bound_for_evil = SIGN(credential_key, CONCAT(origin_evil, challenge))
+]
+
+Authenticator -> RelyingParty: [credential_pk], [bare_for_real], [bound_for_real]
+
+principal RelyingParty[
+	_ = SIGNVERIF(credential_pk, challenge, bare_for_real)?
+	_ = SIGNVERIF(credential_pk, CONCAT(origin_real, challenge), bound_for_real)?
+	_ = HASH(bare_for_real, bound_for_real)
+]
+
+queries[
+	equivalence? bare_for_real, bare_for_evil
+	equivalence? bound_for_real, bound_for_evil
+]

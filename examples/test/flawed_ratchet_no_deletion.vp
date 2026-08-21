@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1 — a ratchet that derives a fresh key per message and then
+// keeps every one of them. The chain is impeccable and runs one way, and it
+// buys nothing, because the compromise finds all three keys sitting in memory
+// rather than having to climb back up.
+//
+// phase_key_rotation.vp is the same three-step chain with only the middle key
+// surrendered, and there the first message survives. The difference between
+// the two models is deletion, and deletion is the entire mechanism: forward
+// secrecy is a property of what a principal throws away, not of how the keys
+// were derived.
+
+attacker[passive]
+
+principal Alice[
+	generates root
+	knows private m_one, m_two, m_three
+	k_one = HASH(root)
+	k_two = HASH(k_one)
+	k_three = HASH(k_two)
+	e_one = AEAD_ENC(k_one, m_one, nil)
+	e_two = AEAD_ENC(k_two, m_two, nil)
+	e_three = AEAD_ENC(k_three, m_three, nil)
+	leaks k_one
+	leaks k_two
+	leaks k_three
+]
+
+Alice -> Bob: e_one, e_two, e_three
+
+principal Bob[
+	_ = HASH(e_one, e_two, e_three)
+]
+
+queries[
+	confidentiality? m_one
+	confidentiality? m_two
+	confidentiality? m_three
+]

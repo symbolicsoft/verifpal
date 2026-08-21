@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — two blindings nest, and so do the two unblindings: the
+// signature over BLIND(r_outer, BLIND(r_inner, m)) is peeled by an UNBLIND at
+// the outer factor into a signature over the inner blinding, and only then by
+// a second UNBLIND into a signature over m. Each rewrite matches its own
+// factor, so this is the model that breaks if rewrite_to_unblind stops
+// descending into the signed term and simply returns the message argument.
+//
+// The leaked factor is the outer one, and it is deliberately shared with a
+// second, singly blinded value. One blinding removed is not zero blindings:
+// shell gives the attacker m_outer outright, while the same factor applied to
+// b_outer only uncovers another blinded term.
+
+attacker[passive]
+
+principal Alice[
+	knows private m
+	knows private m_outer
+	generates r_inner
+	generates r_outer
+	b_inner = BLIND(r_inner, m)
+	b_outer = BLIND(r_outer, b_inner)
+	shell = BLIND(r_outer, m_outer)
+	leaks r_outer
+]
+
+Alice -> Signer: b_outer, shell
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+	bs = SIGN(sk, b_outer)
+]
+
+Signer -> Alice: gsk, bs
+
+principal Alice[
+	half = UNBLIND(r_outer, b_inner, bs)
+	full = UNBLIND(r_inner, m, half)
+	_ = HASH(full)
+]
+
+queries[
+	confidentiality? m_outer
+	confidentiality? m
+]

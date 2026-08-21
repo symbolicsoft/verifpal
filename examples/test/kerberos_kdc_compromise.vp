@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0a1 — a ticket-granting exchange in which the key distribution
+// centre's own long-term key leaks. Kerberos concentrates all trust in one
+// place by design, and this is what that concentration costs: the attacker
+// opens the ticket, recovers the session key inside it, reads the client's
+// traffic and mints tickets of its own that the service accepts.
+//
+// Three of the four verdicts are consequences of one `leaks` line, and the
+// model is a cascade rather than a single break: service key, then session key,
+// then payload, then forgery. What it exercises is the closure reaching a fixed
+// point through four dependent layers rather than stopping at the first thing
+// it can open.
+//
+// The third query is the counterweight and it holds. The client's own long-term
+// key is never surrendered — the attacker recovers the session key by the other
+// route, out of the ticket — so a deduction that ran a decryption backwards out
+// of a plaintext and a ciphertext it holds would take it down and would be
+// wrong. Recovering what a key protected is not recovering the key.
+
+attacker[active]
+
+principal KDC[
+	knows private kdc_service_key
+	knows private kdc_client_key
+	generates session_key
+	ticket = AEAD_ENC(kdc_service_key, session_key, nil)
+	client_part = AEAD_ENC(kdc_client_key, session_key, nil)
+	leaks kdc_service_key
+]
+
+KDC -> Client: ticket, client_part
+
+principal Client[
+	knows private kdc_client_key
+	knows private request
+	got_session = AEAD_DEC(kdc_client_key, client_part, nil)?
+	authenticator = AEAD_ENC(got_session, request, nil)
+]
+
+Client -> Service: ticket, authenticator
+
+principal Service[
+	knows private kdc_service_key
+	service_session = AEAD_DEC(kdc_service_key, ticket, nil)?
+	got_request = AEAD_DEC(service_session, authenticator, nil)?
+	_ = HASH(got_request)
+]
+
+queries[
+	confidentiality? session_key
+	confidentiality? request
+	confidentiality? kdc_client_key
+	authentication? Client -> Service: authenticator
+]

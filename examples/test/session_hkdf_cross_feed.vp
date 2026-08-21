@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// A per-session salt does not bind a session. Alice mixes a fresh salt into a
+// KDF over long-term keying material, so the two sessions derive genuinely
+// different keys — and it makes no difference, because the salt travels on the
+// wire beside the ciphertext it keyed. At two sessions the attacker hands
+// Bob the OTHER session's salt and the other session's ciphertext together,
+// the pair is internally consistent, his checked decryption succeeds, and he
+// ends up holding a message Alice sent to a different run of the protocol.
+//
+// At one session there is no second consistent pair to hand him. Nothing the
+// attacker can build satisfies AEAD_DEC under a key it cannot compute, so
+// every substitution halts him and the query holds.
+//
+// The confidentiality verdict is unchanged at either count: ikm never leaves
+// either principal, so the attacker learns nothing at all. Being able to
+// choose WHICH honest message a principal ends up with is not the same as
+// reading it, and this is the model that keeps the two apart.
+
+attacker[active]
+
+principal Alice[
+	knows private ikm
+	knows public info
+	generates salt
+	generates m
+	k_alice, _, _ = HKDF(salt, ikm, info)
+	e = AEAD_ENC(k_alice, m, nil)
+]
+
+Alice -> Bob: salt, e
+
+principal Bob[
+	knows private ikm
+	knows public info
+	k_bob, _, _ = HKDF(salt, ikm, info)
+	d = AEAD_DEC(k_bob, e, nil)?
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+	equivalence? m, d
+]

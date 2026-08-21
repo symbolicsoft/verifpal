@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: c0 at one session and at two.
+//
+// The other half of session_shamir_no_phantom_shares.vp. There the secret is
+// long-term, so both sessions split the same value and two sessions of one
+// share are still one share. Here the secret is GENERATED, so the two sessions
+// split two different secrets and the attacker collects one share of each.
+//
+// Neither route reaches a threshold, and they fail for opposite reasons: one
+// because the shares are the same value twice, the other because they belong
+// to different splits entirely. A recompose rule that matched shares by
+// position rather than by the split they came from would combine share_a with
+// share_a#2 and reconstruct a secret that exists in no session at all.
+
+attacker[active]
+
+principal Alice[
+	generates secret_s
+	share_a, share_b, share_c = SHAMIR_SPLIT(secret_s)
+	knows private cargo
+	sealed = AEAD_ENC(secret_s, cargo, nil)
+]
+
+Alice -> Bob: share_a, sealed
+
+principal Bob[
+	digest_b = HASH(share_a, sealed)
+]
+
+queries[
+	confidentiality? cargo
+]

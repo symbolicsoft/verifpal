@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — the identifying-check witness, run through KEM_DECAP, and
+// the surprise it carries: the check needs only the PUBLIC key. KEM_DECAP
+// declares identifying_positions [0], and the attacker discharges it with the
+// encapsulation key it watched go past on the wire, so any two ciphertexts
+// addressed to one recipient are linkable to anyone who has ever seen that
+// recipient's public key.
+//
+// Nothing about the encapsulations is shared — each uses its own generated
+// randomness, so the pair has no common ancestor for origin_leaves to find.
+// What they share is a recipient, and a KEM ciphertext does not hide who it is
+// for. The second pair is the same construction split across two recipients,
+// and it must stay unlinkable: the witness is about the key the ciphertexts
+// agree on, not about the fact that a check can be run at all.
+
+attacker[passive]
+
+principal Bob[
+	knows private dk_one
+	ek_one = PUBKEY(dk_one)
+]
+
+principal Carol[
+	knows private dk_two
+	ek_two = PUBKEY(dk_two)
+]
+
+Bob -> Alice: [ek_one]
+Carol -> Alice: [ek_two]
+
+principal Alice[
+	generates r_one, r_two, r_three, r_four
+	ss_one, tok_same_one = KEM_ENCAP(ek_one, r_one)
+	ss_two, tok_same_two = KEM_ENCAP(ek_one, r_two)
+	ss_three, tok_split_one = KEM_ENCAP(ek_one, r_three)
+	ss_four, tok_split_two = KEM_ENCAP(ek_two, r_four)
+]
+
+Alice -> Bob: tok_same_one, tok_same_two, tok_split_one
+Alice -> Carol: tok_split_two
+
+principal Bob[
+	_ = KEM_DECAP(dk_one, tok_same_one)?
+	_ = KEM_DECAP(dk_one, tok_same_two)?
+	_ = KEM_DECAP(dk_one, tok_split_one)?
+]
+
+principal Carol[
+	_ = KEM_DECAP(dk_two, tok_split_two)?
+]
+
+queries[
+	unlinkability? tok_same_one, tok_same_two
+	unlinkability? tok_split_one, tok_split_two
+]

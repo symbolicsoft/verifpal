@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 — the same declared malleability, on two ciphertexts written
+// the same way in the same block, with an onset at phase 1. The flight Bob
+// processes in phase 0 is safe and the flight he processes in phase 1 is not.
+//
+// `from phase N` had only ever been tested on `weak`, where the effect is a
+// disclosure. On `malleable` the effect is a construction the solver is
+// allowed to propose, which travels through a completely different pair of
+// code paths — solve_by_malleability offering the goal and malleable_positions
+// granting the validator's exemption — and both of them have to agree about
+// what phase it is.
+//
+// The two flights are keyed separately, and the control run is what forces
+// that: under one key the attacker needs no malleability at all in phase 1,
+// because the phase 0 ciphertext is still in its hands and Bob's later SPLIT
+// accepts it verbatim. Stripping the annotation from this model must take the
+// second verdict back to a0, and with a shared key it does not.
+
+attacker[active]
+
+principal Alice[
+	knows private k_now, k_later
+	knows public lo, hi
+	c_now = ENC[malleable from phase 1](k_now, CONCAT(lo, lo))
+	c_later = ENC[malleable from phase 1](k_later, CONCAT(hi, hi))
+]
+
+Alice -> Bob: c_now
+
+principal Bob[
+	knows private k_now, k_later
+	x_now, y_now = SPLIT(DEC(k_now, c_now))?
+	receipt_now = MAC(k_now, x_now)
+]
+
+phase[1]
+
+Alice -> Bob: c_later
+
+principal Bob[
+	x_later, y_later = SPLIT(DEC(k_later, c_later))?
+	receipt_later = MAC(k_later, x_later)
+]
+
+queries[
+	authentication? Alice -> Bob: c_now
+	authentication? Alice -> Bob: c_later
+]

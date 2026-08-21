@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: e0e0 at one session, e1e0 at two.
+//
+// Associated data is where a session identifier belongs, and this is the model
+// that shows why. Two ciphertexts under one pre-shared key travel together:
+// one bound to a long-term public string, one bound to a per-session value
+// that reaches Bob on a GUARDED wire. At two sessions the attacker replays the
+// sibling session's loose ciphertext and Bob accepts it, while the bound one
+// no longer reduces under the associated data Bob actually holds.
+//
+// The guard on the session identifier is the whole mechanism. Unguarded, the
+// attacker would substitute the sibling's identifier alongside the sibling's
+// ciphertext and both flights would fall together — which is precisely the
+// mistake a real protocol makes when it lets the peer choose the context
+// string it will be bound to.
+//
+// A halted Bob is not a diverged Bob: the bound flight fails his check and
+// truncates his state, and reporting that as an equivalence failure would be
+// the false attack equivalence_halt_scope.vp exists to prevent.
+
+attacker[active]
+
+principal Alice[
+	knows private psk
+	knows public ad_static
+	generates ad_session
+	generates m_loose, m_bound
+	e_loose = AEAD_ENC(psk, m_loose, ad_static)
+	e_bound = AEAD_ENC(psk, m_bound, ad_session)
+]
+
+Alice -> Bob: e_loose, e_bound, [ad_session]
+
+principal Bob[
+	knows private psk
+	knows public ad_static
+	d_loose = AEAD_DEC(psk, e_loose, ad_static)?
+	d_bound = AEAD_DEC(psk, e_bound, ad_session)?
+	_ = HASH(d_loose, d_bound)
+]
+
+queries[
+	equivalence? m_loose, d_loose
+	equivalence? m_bound, d_bound
+]

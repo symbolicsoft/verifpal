@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0e0e1 — CONCAT accepts up to five arguments and SPLIT returns up
+// to five outputs, and until this model nothing in the tree used more than
+// three. The queries pin the projection INDEX rather than merely the round
+// trip: the fifth output is the fifth argument and not the first, which is the
+// one thing a re-indexing bug in core_rule_split would silently get wrong at
+// arities the suite never reached.
+
+attacker[active]
+
+principal Alice[
+	knows private f1, f2, f3, f4, f5
+	knows private bundle_key
+	bundle = CONCAT(f1, f2, f3, f4, f5)
+	sealed = AEAD_ENC(bundle_key, bundle, nil)
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	knows private bundle_key
+	g1, g2, g3, g4, g5 = SPLIT(AEAD_DEC(bundle_key, sealed, nil))?
+	_ = HASH(g1, g2, g3, g4, g5)
+]
+
+queries[
+	confidentiality? f5
+	equivalence? g5, f5
+	equivalence? g1, f5
+]

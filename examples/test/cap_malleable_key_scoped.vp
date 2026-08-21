@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — cap_malleable_enc.vp and cap_malleable_absent.vp say this
+// across two files; saying it in one, under one attacker, with two ciphertexts
+// of IDENTICAL shape differing only in their key and their annotation, closes
+// the gap those two leave open. Mauling is licensed per call site, so holding
+// one maulable ciphertext must not license reshaping a structurally identical
+// one under a different key.
+//
+// Both of Bob's SPLITs are checked, so in the unmauled flight every
+// substitution the attacker can build fails the check and halts him before the
+// projected field is ever used. That is what makes a1 against a0 the sharp
+// pair rather than two shades of the same verdict.
+
+attacker[active]
+
+principal Alice[
+	knows private k_maul, k_firm
+	knows public lo
+	c_maul = ENC[malleable](k_maul, CONCAT(lo, lo))
+	c_firm = ENC(k_firm, CONCAT(lo, lo))
+]
+
+Alice -> Bob: c_maul, c_firm
+
+principal Bob[
+	knows private k_maul, k_firm
+	x_maul, y_maul = SPLIT(DEC(k_maul, c_maul))?
+	x_firm, y_firm = SPLIT(DEC(k_firm, c_firm))?
+	receipt_maul = MAC(k_maul, x_maul)
+	receipt_firm = MAC(k_firm, x_firm)
+]
+
+queries[
+	authentication? Alice -> Bob: c_maul
+	authentication? Alice -> Bob: c_firm
+]

@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1 — trust on first use, attacked on first use. The client
+// pins whatever key it is handed the first time and then uses it faithfully
+// forever, so an attacker present for one message owns the relationship from
+// then on.
+//
+// The model is deliberately generous to the scheme: the pinned key really is
+// reused, the second message really is protected by the same pin, and no key
+// is ever leaked. None of that matters, because the pin was taken over an
+// unauthenticated channel. TOFU converts a continuous requirement into a
+// single-point one, and this is the model of the point.
+
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+Server -> Client: server_pk
+
+principal Client[
+	knows private first_message, second_message
+	sealed_first = PKE_ENC(server_pk, first_message)
+	sealed_second = PKE_ENC(server_pk, second_message)
+]
+
+Client -> Server: sealed_first, sealed_second
+
+principal Server[
+	got_first = PKE_DEC(server_sk, sealed_first)
+	got_second = PKE_DEC(server_sk, sealed_second)
+	_ = HASH(got_first, got_second)
+]
+
+queries[
+	confidentiality? first_message
+	confidentiality? second_message
+	authentication? Client -> Server: sealed_first
+]

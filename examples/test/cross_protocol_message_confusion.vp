@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — one key, two message formats, no domain separation. Bob
+// runs two protocols with Alice under the same MAC key, and a tag minted for
+// one of them is a valid tag for the other, so the attacker moves a message
+// between protocols and Bob accepts it in the wrong role.
+//
+// The second pair prefixes a distinct public label into the MAC and nothing
+// else changes. That is the entire fix, and the model exists to show it as a
+// change in verdict rather than as advice: a tag over CONCAT(label, body)
+// cannot be reused where a different label is expected, because CONCAT is not
+// commutative and the recipient rebuilds the term it will compare against.
+
+attacker[active]
+
+principal Alice[
+	knows private mac_key
+	knows public label_query, label_command
+	knows private body_query, body_command
+	knows private body_query_bound, body_command_bound
+	tag_query = MAC(mac_key, body_query)
+	tag_command = MAC(mac_key, body_command)
+	tag_query_bound = MAC(mac_key, CONCAT(label_query, body_query_bound))
+	tag_command_bound = MAC(mac_key, CONCAT(label_command, body_command_bound))
+]
+
+Alice -> Bob: body_query, tag_query, body_command, tag_command, body_query_bound, tag_query_bound, body_command_bound, tag_command_bound
+
+principal Bob[
+	knows private mac_key
+	knows public label_query, label_command
+	_ = ASSERT(MAC(mac_key, body_command), tag_command)?
+	_ = ASSERT(MAC(mac_key, CONCAT(label_command, body_command_bound)), tag_command_bound)?
+	_ = HASH(body_command, body_command_bound)
+]
+
+queries[
+	authentication? Alice -> Bob: body_command
+	authentication? Alice -> Bob: body_command_bound
+]

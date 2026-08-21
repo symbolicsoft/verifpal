@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — the blind signature round trip as an equality. A signature
+// obtained by blinding, signing and unblinding is THE SAME VALUE as the
+// signature the signer would have produced over the bare message, which is the
+// entire reason the scheme is useful and the exact statement rewrite_to_unblind
+// has to make true.
+//
+// The signer is given the message directly so the reference signature can
+// exist to compare against; nothing in the protocol depends on that, and the
+// blinded path never uses it. The second query keeps the first honest: the
+// unblinded signature must not equal a signature over a DIFFERENT message, so
+// a rewrite that returned SIGN(sk, anything) would be caught.
+
+attacker[passive]
+
+principal Alice[
+	knows private msg
+	knows private decoy
+	generates r
+	blinded = BLIND(r, msg)
+]
+
+Alice -> Signer: blinded, msg, decoy
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+	blind_sig = SIGN(sk, blinded)
+	direct_sig = SIGN(sk, msg)
+	decoy_sig = SIGN(sk, decoy)
+	_ = HASH(direct_sig, decoy_sig)
+]
+
+Signer -> Alice: gsk, blind_sig
+
+principal Alice[
+	unblinded = UNBLIND(r, msg, blind_sig)
+	_ = SIGNVERIF(gsk, msg, unblinded)?
+]
+
+queries[
+	equivalence? unblinded, direct_sig
+	equivalence? unblinded, decoy_sig
+]

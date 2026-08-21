@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1 — a signature that covers only values everybody already has.
+// The server signs its own name and the protocol version, and then sends a
+// key and a payload beside the signature that the signature says nothing
+// about. The attacker replaces both and leaves the signature alone.
+//
+// This is the mistake of signing the wrong thing rather than of not signing,
+// and it is invisible in a protocol diagram: there is a signature, it is
+// checked, and it verifies. Nothing in the model fails until the query asks
+// about the values that actually matter.
+
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	knows public server_name, version
+	knows private payload
+	generates content_key
+	server_pk = PUBKEY(server_sk)
+	banner_sig = SIGN(server_sk, CONCAT(server_name, version))
+	sealed = AEAD_ENC(content_key, payload, nil)
+]
+
+Server -> Client: [server_pk], banner_sig, content_key, sealed
+
+principal Client[
+	knows public server_name, version
+	_ = SIGNVERIF(server_pk, CONCAT(server_name, version), banner_sig)?
+	got = AEAD_DEC(content_key, sealed, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	authentication? Server -> Client: content_key
+	authentication? Server -> Client: sealed
+]

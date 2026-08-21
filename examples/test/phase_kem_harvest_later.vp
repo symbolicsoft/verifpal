@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — harvest now, decapsulate later, which is the entire
+// argument for post-quantum migration and had no model. Both KEM ciphertexts
+// are recorded by the attacker in phase 0; the long-term decapsulation key is
+// surrendered in phase 2 and opens the one encapsulated to it, while the
+// ephemeral key that was never stored keeps its message.
+//
+// The distinction is the one kem_ephemeral_forward_secrecy.vp and
+// kem_static_key_no_forward_secrecy.vp make separately. Putting both keys in
+// one principal under one leak is what rules out the alternative explanation:
+// the two ciphertexts differ in which key they were encapsulated to and in
+// nothing else.
+
+attacker[passive]
+
+principal Bob[
+	knows private dk_static
+	generates dk_ephemeral
+	ek_static = PUBKEY(dk_static)
+	ek_ephemeral = PUBKEY(dk_ephemeral)
+]
+
+Bob -> Alice: [ek_static], [ek_ephemeral]
+
+principal Alice[
+	generates r_static, r_ephemeral
+	knows private m_static, m_ephemeral
+	ss_static, ct_static = KEM_ENCAP(ek_static, r_static)
+	ss_ephemeral, ct_ephemeral = KEM_ENCAP(ek_ephemeral, r_ephemeral)
+	sealed_static = AEAD_ENC(ss_static, m_static, nil)
+	sealed_ephemeral = AEAD_ENC(ss_ephemeral, m_ephemeral, nil)
+]
+
+Alice -> Bob: ct_static, sealed_static, ct_ephemeral, sealed_ephemeral
+
+principal Bob[
+	back_static = KEM_DECAP(dk_static, ct_static)
+	back_ephemeral = KEM_DECAP(dk_ephemeral, ct_ephemeral)
+	_ = AEAD_DEC(back_static, sealed_static, nil)?
+	_ = AEAD_DEC(back_ephemeral, sealed_ephemeral, nil)?
+]
+
+phase[1]
+
+phase[2]
+
+principal Bob[
+	leaks dk_static
+]
+
+queries[
+	confidentiality? m_static
+	confidentiality? m_ephemeral
+]

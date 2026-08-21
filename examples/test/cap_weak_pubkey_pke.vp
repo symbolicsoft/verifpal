@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c1c0 — PUBKEY[weak] is discrete log, and the cascade it starts
+// is not DH-specific. cap_weak_pubkey_dh.vp follows it into a key agreement;
+// this follows it into public-key encryption, where recovering the exponent
+// makes the attacker the recipient of every ciphertext addressed to that key.
+//
+// Nothing in the theory knows about this cascade. can_reconstruct_primitive
+// simply finds that PKE_DEC's key argument has become obtainable, and the
+// existing decompose rule does the rest — which is the property worth having a
+// second model for, since a cascade that needed a rule per primitive would
+// work for DH and quietly not work here.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk_broken, bsk_sound
+	bpk_broken = PUBKEY[weak](bsk_broken)
+	bpk_sound = PUBKEY(bsk_sound)
+]
+
+Bob -> Alice: [bpk_broken], [bpk_sound]
+
+principal Alice[
+	knows private m_broken, m_sound
+	c_broken = PKE_ENC(bpk_broken, m_broken)
+	c_sound = PKE_ENC(bpk_sound, m_sound)
+]
+
+Alice -> Bob: c_broken, c_sound
+
+principal Bob[
+	d_broken = PKE_DEC(bsk_broken, c_broken)
+	d_sound = PKE_DEC(bsk_sound, c_sound)
+	_ = HASH(d_broken, d_sound)
+]
+
+queries[
+	confidentiality? bsk_broken
+	confidentiality? bsk_sound
+	confidentiality? m_broken
+	confidentiality? m_sound
+]

@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: a0 at one session and at two.
+//
+// Ring signatures are the primitive most likely to be confused by replication,
+// because a ring names a SET of public keys and session expansion mints a
+// second copy of every principal. If the per-session ring members were ever
+// treated as additional members of one ring — or if session 2's signature were
+// accepted against session 1's ring — the anonymity set would silently double
+// and this query would fail.
+//
+// It must not. Every ring key here is long-term and therefore shared between
+// sessions, while the message is generated and therefore per-session, so the
+// sibling session's signature is over a message Damian is not verifying. What
+// the attacker can do is replay session 2's (message, signature) pair whole,
+// and that is a session-sibling replay of something Bob honestly signed: non-
+// injective agreement, not a forgery.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: [ga]
+Carol -> Bob: [gc]
+Alice -> Damian: [ga]
+Bob -> Damian: [gb]
+Carol -> Damian: [gc]
+
+principal Bob[
+	generates note
+	ring_sig = RINGSIGN(b, ga, gc, note)
+]
+
+Bob -> Damian: note, ring_sig
+
+principal Damian[
+	_ = RINGSIGNVERIF(ga, gb, gc, note, ring_sig)?
+	_ = HASH(note)
+]
+
+queries[
+	authentication? Bob -> Damian: note
+]

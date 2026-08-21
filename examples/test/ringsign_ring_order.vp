@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1a0 — a ring is a set, and RINGSIGNVERIF says so: its rewrite
+// matches each of the first three arguments against ANY of the signature's
+// three key positions, so a verifier may list the ring in an order the signer
+// never used and the check still passes.
+//
+// Both verdicts are read off the same trick, because an authentication query
+// cannot see the difference: a ring verification that FAILS merely halts the
+// verifier, and a halted verifier never uses the message, so the query holds
+// either way. RINGSIGNVERIF's rewrite reduces to nil on success and stays put
+// on failure, so comparing the unchecked verdict against nil is the one signal
+// that separates "verified" from "did not verify". reordered is the same ring
+// Bob signed under, permuted, and it reduces; foreign swaps Carol for Dana and
+// does not.
+//
+// Every other ring model in the tree hands the verifier its keys in signing
+// order, so a matching rule narrowed to position-wise equality would pass the
+// whole suite while silently breaking every verifier that sorts its ring.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Dana[
+	knows private d
+	gd = PUBKEY(d)
+]
+
+Alice -> Bob: [ga]
+Carol -> Bob: [gc]
+Alice -> Damian: [ga]
+Bob -> Damian: [gb]
+Carol -> Damian: [gc]
+Dana -> Damian: [gd]
+
+principal Bob[
+	knows private note
+	ring_sig = RINGSIGN(b, ga, gc, note)
+]
+
+Bob -> Damian: note, ring_sig
+
+principal Damian[
+	reordered = RINGSIGNVERIF(gc, gb, ga, note, ring_sig)
+	foreign = RINGSIGNVERIF(ga, gb, gd, note, ring_sig)
+	_ = HASH(reordered, foreign)
+]
+
+queries[
+	equivalence? reordered, nil
+	equivalence? foreign, nil
+	authentication? Bob -> Damian: note
+]

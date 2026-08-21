@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1a0 — an authorization code redeemed with and without proof key
+// binding. The code travels back to the client on a redirect that nobody
+// authenticates, so it is a bearer credential: whoever holds it can redeem it,
+// and the attacker holds it.
+//
+// The second redemption adds the one thing that fixes it. The client picks a
+// verifier, publishes only its hash when it asks for authorization, and
+// reveals the verifier when it redeems; the server rebuilds the hash and
+// compares. The attacker holding the intercepted code holds the published hash
+// too and still cannot produce a preimage, so its redemption fails the check.
+//
+// The authorization request is guarded and the redirect is not, which is the
+// deployment being modelled rather than a convenience: the request goes
+// directly to the server over an authenticated channel, and the redirect is
+// the leg that passes through the user's browser and an attacker-controlled
+// URL. Guard the redirect instead and there is no attack to find; leave the
+// request open and PKCE protects nothing, because the attacker would simply
+// register a challenge of its own.
+//
+// What protects the second redemption is not that the verifier is
+// confidential — it is revealed a moment later, and the first query says so —
+// but that it could not be derived from what was published first. A one-way
+// function doing structural work rather than hiding a secret is a shape worth
+// having in the corpus.
+
+attacker[active]
+
+principal Client[
+	knows public method
+	generates verifier
+	challenge = HASH(verifier, method)
+]
+
+Client -> Server: [challenge]
+
+principal Server[
+	generates code
+]
+
+Server -> Client: code
+
+principal Client[
+	redeem_bare = HASH(code)
+]
+
+Client -> Server: redeem_bare, verifier
+
+principal Server[
+	knows public method
+	_ = ASSERT(HASH(code), redeem_bare)?
+	_ = ASSERT(HASH(verifier, method), challenge)?
+	_ = HASH(verifier)
+]
+
+queries[
+	confidentiality? code
+	authentication? Client -> Server: redeem_bare
+	authentication? Client -> Server: verifier
+]

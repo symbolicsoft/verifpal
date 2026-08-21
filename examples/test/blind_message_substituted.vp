@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1c0 — a blind signer signs what it is handed and cannot tell it
+// apart from what Alice sent, so an unguarded blinded message is a signing
+// oracle: the attacker substitutes a blinding of its own and walks away with
+// the signer's signature over a message the signer never agreed to sign.
+//
+// The confidentiality query is the counterweight. Substituting the blinded
+// term does not teach the attacker Alice's message: BLIND is opened by its
+// factor, and replacing the ciphertext-shaped term on the wire never hands
+// over the factor that was never on it.
+
+attacker[active]
+
+principal Signer[
+	knows private sk
+	gsk = PUBKEY(sk)
+]
+
+Signer -> Alice: [gsk]
+
+principal Alice[
+	knows private m
+	generates r
+	b = BLIND(r, m)
+]
+
+Alice -> Signer: b
+
+principal Signer[
+	bs = SIGN(sk, b)
+	_ = HASH(bs)
+]
+
+queries[
+	authentication? Alice -> Signer: b
+	confidentiality? m
+]

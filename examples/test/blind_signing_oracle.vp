@@ -1,0 +1,79 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — a blind signer signs a term it cannot read, so an unguarded
+// blinded value makes it a signing oracle, and the oracle's output SURVIVES
+// UNBLIND: the attacker feeds the signer a blinding of its own, and the
+// signature it gets back is one a verifier who never saw any blinding accepts
+// over a bare message of the attacker's choosing.
+//
+// blind_message_substituted.vp stops at the signer, where the substitution is
+// visible as a plain authentication failure. This model is the half that
+// matters cryptographically, and it needs the engine to run the substituted
+// blind signature back through rewrite_to_unblind and out the far side as an
+// ordinary signature. No weakening assumption is involved: the honest signer
+// really did sign, which is precisely what makes the result transferable.
+//
+// The sealed flight is the counterweight, and its two differences from the
+// open one are the guard on the blinded value and a signer key of its own.
+// The guard closes the oracle; the separate key is what stops the attacker
+// from simply handing the verifier the open flight's (message, signature) pair
+// in place of the sealed one, which would fail the query for a reason that has
+// nothing to do with blinding at all.
+
+attacker[active]
+
+principal SignerOpen[
+	knows private sk_open
+	gsk_open = PUBKEY(sk_open)
+]
+
+principal SignerSealed[
+	knows private sk_sealed
+	gsk_sealed = PUBKEY(sk_sealed)
+]
+
+SignerOpen -> Alice: [gsk_open]
+SignerSealed -> Alice: [gsk_sealed]
+SignerOpen -> Verifier: [gsk_open]
+SignerSealed -> Verifier: [gsk_sealed]
+
+principal Alice[
+	knows private note_open
+	knows private note_sealed
+	generates r_open
+	generates r_sealed
+	blinded_open = BLIND(r_open, note_open)
+	blinded_sealed = BLIND(r_sealed, note_sealed)
+]
+
+Alice -> SignerOpen: blinded_open
+Alice -> SignerSealed: [blinded_sealed]
+
+principal SignerOpen[
+	bs_open = SIGN(sk_open, blinded_open)
+]
+
+principal SignerSealed[
+	bs_sealed = SIGN(sk_sealed, blinded_sealed)
+]
+
+SignerOpen -> Alice: bs_open
+SignerSealed -> Alice: bs_sealed
+
+principal Alice[
+	sig_open = UNBLIND(r_open, note_open, bs_open)
+	sig_sealed = UNBLIND(r_sealed, note_sealed, bs_sealed)
+]
+
+Alice -> Verifier: note_open, sig_open, note_sealed, sig_sealed
+
+principal Verifier[
+	_ = SIGNVERIF(gsk_open, note_open, sig_open)?
+	_ = SIGNVERIF(gsk_sealed, note_sealed, sig_sealed)?
+]
+
+queries[
+	authentication? Alice -> Verifier: note_open
+	authentication? Alice -> Verifier: note_sealed
+]

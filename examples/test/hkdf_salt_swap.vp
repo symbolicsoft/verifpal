@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0e1 — the salt is the one HKDF argument that usually travels in
+// the clear, and it is enough to desynchronise a key agreement. The attacker
+// cannot read anything (ikm never leaves either principal) and cannot forge
+// anything (Bob's AEAD_DEC halts him on the substituted key), but it CAN make
+// the two sides derive different keys, and the equivalence query is where that
+// shows up.
+//
+// The three verdicts together are the point: a denial of agreement is neither
+// a confidentiality break nor an authentication break, and an engine that
+// reported it as either would be reporting a false attack. Compare
+// concat_bomb_equiv.vp, where halting the recipient is deliberately NOT a
+// divergence — here Bob really does compute a key, and it really is the wrong
+// one.
+
+attacker[active]
+
+principal Alice[
+	knows private ikm
+	knows public info
+	knows private m
+	generates salt
+	k_alice, _, _ = HKDF(salt, ikm, info)
+	sealed = AEAD_ENC(k_alice, m, nil)
+]
+
+Alice -> Bob: salt, sealed
+
+principal Bob[
+	knows private ikm
+	knows public info
+	k_bob, _, _ = HKDF(salt, ikm, info)
+	opened = AEAD_DEC(k_bob, sealed, nil)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: sealed
+	equivalence? k_alice, k_bob
+]

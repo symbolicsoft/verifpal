@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — PKE_DEC declares NO identifying positions, unlike AEAD_DEC,
+// SIGNVERIF and KEM_DECAP, so two ciphertexts to one recipient cannot be
+// linked by running a check over both. The only witness left is common secret
+// origin, and it needs the seed the pseudonyms were derived from.
+//
+// Both pairs are encrypted to the same public key and observed on the same
+// wire, so an implementation that quietly gave PKE_DEC an identifying position
+// — a plausible-looking symmetry with the other decryption primitives — would
+// link the second pair too and report an attack on a protocol that does not
+// have one. That is the reason this model exists rather than a third seed
+// model: the negative case is about the SPEC and not about the attacker's
+// knowledge.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+]
+
+Bob -> Alice: [bpk]
+
+principal Alice[
+	generates seed_open, seed_sealed
+	knows public label_one, label_two
+	nym_open_one = PKE_ENC(bpk, HASH(seed_open, label_one))
+	nym_open_two = PKE_ENC(bpk, HASH(seed_open, label_two))
+	nym_sealed_one = PKE_ENC(bpk, HASH(seed_sealed, label_one))
+	nym_sealed_two = PKE_ENC(bpk, HASH(seed_sealed, label_two))
+	leaks seed_open
+]
+
+Alice -> Bob: nym_open_one, nym_open_two, nym_sealed_one, nym_sealed_two
+
+principal Bob[
+	_ = HASH(nym_open_one, nym_open_two, nym_sealed_one, nym_sealed_two)
+]
+
+queries[
+	unlinkability? nym_open_one, nym_open_two
+	unlinkability? nym_sealed_one, nym_sealed_two
+]

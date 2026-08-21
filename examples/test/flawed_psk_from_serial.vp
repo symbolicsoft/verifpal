@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1a1 — a fleet of devices whose pre-shared key is derived from
+// the serial number printed on the case. The derivation is a proper KDF over a
+// proper public identifier and produces a key that anyone holding the device,
+// or the manufacturing spreadsheet, can recompute.
+//
+// This is flawed_key_from_public_data.vp's sibling in the field rather than in
+// the session: there the mistake is in the handshake, here it is in
+// provisioning, and the engine cannot tell the difference — which is the
+// point. A key is secret if the values it is computed from are secret, and the
+// serial number is on the box.
+
+attacker[active]
+
+principal Factory[
+	knows public serial_number, model_code
+]
+
+principal Device[
+	knows public serial_number, model_code
+	knows private telemetry
+	psk = HASH(serial_number, model_code)
+	report = AEAD_ENC(psk, telemetry, nil)
+	tag = MAC(psk, report)
+]
+
+Device -> Collector: report, tag
+
+principal Collector[
+	knows public serial_number, model_code
+	collector_psk = HASH(serial_number, model_code)
+	_ = ASSERT(MAC(collector_psk, report), tag)?
+	got = AEAD_DEC(collector_psk, report, nil)?
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? psk
+	confidentiality? telemetry
+	authentication? Device -> Collector: report
+]

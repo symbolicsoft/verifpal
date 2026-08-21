@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — a message forwarded by re-encrypting it under a key the
+// forwarder shares with somebody else, which is what every mail gateway and
+// every group-chat bridge does. The forwarding key is the weakest link and it
+// leaks; the original message falls with it, while the one the same sender
+// delivered end-to-end does not.
+//
+// The point is that the sender's own cryptography is irrelevant to the
+// outcome. m_forwarded is sealed to the gateway exactly as carefully as
+// m_direct is sealed to Dana, and it falls anyway, because the gateway opened
+// it and sealed it again under something else. Confidentiality is a property
+// of the whole path.
+
+attacker[passive]
+
+principal Alice[
+	knows private gateway_key, direct_key
+	knows private m_forwarded, m_direct
+	e_forwarded = AEAD_ENC(gateway_key, m_forwarded, nil)
+	e_direct = AEAD_ENC(direct_key, m_direct, nil)
+]
+
+Alice -> Gateway: e_forwarded
+Alice -> Dana: e_direct
+
+principal Gateway[
+	knows private gateway_key
+	knows private onward_key
+	opened = AEAD_DEC(gateway_key, e_forwarded, nil)?
+	resealed = AEAD_ENC(onward_key, opened, nil)
+	leaks onward_key
+]
+
+Gateway -> Dana: resealed
+
+principal Dana[
+	knows private onward_key, direct_key
+	got_forwarded = AEAD_DEC(onward_key, resealed, nil)?
+	got_direct = AEAD_DEC(direct_key, e_direct, nil)?
+	_ = HASH(got_forwarded, got_direct)
+]
+
+queries[
+	confidentiality? m_forwarded
+	confidentiality? m_direct
+]

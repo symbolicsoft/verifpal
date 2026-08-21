@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — one private value used both as a signing key and as a
+// Diffie-Hellman exponent, which is the cross-protocol mistake every key
+// separation rule exists to prevent. Here it is expressed the way Verifpal can
+// see it: the shared key derived from the reused exponent falls when that
+// exponent leaks for signing reasons, while the key derived from a separate
+// exponent does not.
+//
+// filter_extract_dh_exponent is what makes the reuse expressible at all — it
+// is the reason SIGNVERIF can be handed a value that is simultaneously a
+// verification key and a Diffie-Hellman public key. This model is where that
+// dual reading has consequences rather than merely being accepted.
+
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows private a_shared, a_separate
+	knows private m_shared, m_separate
+	knows private doc
+	ga_shared = PUBKEY(a_shared)
+	ga_separate = PUBKEY(a_separate)
+	doc_sig = SIGN(a_shared, doc)
+	k_shared = DH_KEX(gb, a_shared)
+	k_separate = DH_KEX(gb, a_separate)
+	e_shared = AEAD_ENC(k_shared, m_shared, nil)
+	e_separate = AEAD_ENC(k_separate, m_separate, nil)
+	leaks a_shared
+]
+
+Alice -> Bob: [ga_shared], [ga_separate], doc, doc_sig, e_shared, e_separate
+
+principal Bob[
+	_ = SIGNVERIF(ga_shared, doc, doc_sig)?
+	_ = AEAD_DEC(DH_KEX(ga_shared, b), e_shared, nil)?
+	_ = AEAD_DEC(DH_KEX(ga_separate, b), e_separate, nil)?
+]
+
+queries[
+	confidentiality? m_shared
+	confidentiality? m_separate
+]

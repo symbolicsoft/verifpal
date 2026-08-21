@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1a1 — three requests "authenticated" by a hash over values the
+// attacker already holds. A hash is not a MAC; without a key in it there is
+// nothing the attacker cannot recompute, and the server's checks pass on
+// whatever it is handed.
+//
+// Every request carries a different field, so none of the three is a replay of
+// another and each has to be forged on its own. That is the reason for three
+// rather than one: a search that found the first by accident — by replaying
+// something — would not find the other two.
+
+attacker[active]
+
+principal Client[
+	knows public account
+	knows private amount_one, amount_two, amount_three
+	proof_one = HASH(account, amount_one)
+	proof_two = HASH(account, amount_two)
+	proof_three = HASH(account, amount_three)
+]
+
+Client -> Server: amount_one, proof_one, amount_two, proof_two, amount_three, proof_three
+
+principal Server[
+	knows public account
+	_ = ASSERT(HASH(account, amount_one), proof_one)?
+	_ = ASSERT(HASH(account, amount_two), proof_two)?
+	_ = ASSERT(HASH(account, amount_three), proof_three)?
+	_ = HASH(amount_one, amount_two, amount_three)
+]
+
+queries[
+	authentication? Client -> Server: amount_one
+	authentication? Client -> Server: amount_two
+	authentication? Client -> Server: amount_three
+]

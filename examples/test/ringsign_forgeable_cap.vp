@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 — RINGSIGN declares forgeable_secret, and this is the only
+// model that exercises it. Bob issues two ring signatures with the same key,
+// one annotated and one not, and only the annotated message loses
+// authentication.
+//
+// The two rings are deliberately different. Over one shared ring the attacker
+// needs no forgery: both signatures verify under the same three keys, so it
+// simply swaps the two (message, signature) pairs and both queries fail for a
+// reason the annotation has nothing to do with. Disjoint membership makes the
+// pairs non-interchangeable, which is what leaves the declared forgery as the
+// only way through.
+//
+// Ring signatures are also the awkward case for the capability index: the term
+// has three key arguments and only the first is secret, so an exemption keyed
+// on "a key position" rather than on forgeable_secret's position 0 would let
+// the attacker forge by way of a ring member's PUBLIC key and take the second
+// query down with the first.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Dana[
+	knows private d
+	gd = PUBKEY(d)
+]
+
+Alice -> Bob: [ga]
+Carol -> Bob: [gc]
+Dana -> Bob: [gd]
+Alice -> Damian: [ga]
+Bob -> Damian: [gb]
+Carol -> Damian: [gc]
+Dana -> Damian: [gd]
+
+principal Bob[
+	knows private soft
+	knows private firm
+	soft_sig = RINGSIGN[forgeable](b, ga, gc, soft)
+	firm_sig = RINGSIGN(b, gc, gd, firm)
+]
+
+Bob -> Damian: soft, soft_sig, firm, firm_sig
+
+principal Damian[
+	_ = RINGSIGNVERIF(ga, gb, gc, soft, soft_sig)?
+	_ = RINGSIGNVERIF(gb, gc, gd, firm, firm_sig)?
+]
+
+queries[
+	authentication? Bob -> Damian: soft
+	authentication? Bob -> Damian: firm
+]

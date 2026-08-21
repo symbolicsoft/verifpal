@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c1c1 — hybrid key establishment where the classical half is
+// public-key ENCRYPTION rather than a key agreement. The kem_hybrid_*.vp
+// family pairs a KEM with DH_KEX; a KEM-plus-PKE construction reaches the same
+// shared secret by a completely different route — a value Alice chooses and
+// seals, rather than one the two sides compute together — and has to be just
+// as robust.
+//
+// Two independent hybrids, each with a DIFFERENT half compromised, are what
+// make the claim precise: the hybrid survives whichever component you break,
+// not merely the one the model happened to leave alone. Beside them sit the
+// two single-primitive flights keyed on the broken halves, and those fall.
+//
+// All four keys are surrendered in one run. An engine that let knowledge of
+// any single HKDF argument stand in for knowledge of its output would take the
+// first two verdicts down with the last two and delete the point of hybridising
+// anything.
+
+attacker[passive]
+
+principal Bob[
+	knows private dk_pq_first, sk_classical_first
+	knows private dk_pq_second, sk_classical_second
+	ek_pq_first = PUBKEY(dk_pq_first)
+	pk_classical_first = PUBKEY(sk_classical_first)
+	ek_pq_second = PUBKEY(dk_pq_second)
+	pk_classical_second = PUBKEY(sk_classical_second)
+]
+
+Bob -> Alice: [ek_pq_first], [pk_classical_first], [ek_pq_second], [pk_classical_second]
+
+principal Alice[
+	knows public info
+	knows private m_pq_broken, m_classical_broken
+	knows private m_pq_only, m_classical_only
+	generates r_first, r_second
+	generates share_first, share_second
+	ss_first, ct_pq_first = KEM_ENCAP(ek_pq_first, r_first)
+	ss_second, ct_pq_second = KEM_ENCAP(ek_pq_second, r_second)
+	ct_classical_first = PKE_ENC(pk_classical_first, share_first)
+	ct_classical_second = PKE_ENC(pk_classical_second, share_second)
+	k_pq_broken, _, _ = HKDF(ss_first, share_first, info)
+	k_classical_broken, _, _ = HKDF(ss_second, share_second, info)
+	e_pq_broken = AEAD_ENC(k_pq_broken, m_pq_broken, nil)
+	e_classical_broken = AEAD_ENC(k_classical_broken, m_classical_broken, nil)
+	e_pq_only = AEAD_ENC(ss_first, m_pq_only, nil)
+	e_classical_only = AEAD_ENC(share_second, m_classical_only, nil)
+]
+
+Alice -> Bob: ct_pq_first, ct_classical_first, ct_pq_second, ct_classical_second
+Alice -> Bob: e_pq_broken, e_classical_broken, e_pq_only, e_classical_only
+
+principal Bob[
+	leaks dk_pq_first
+	leaks sk_classical_second
+]
+
+queries[
+	confidentiality? m_pq_broken
+	confidentiality? m_classical_broken
+	confidentiality? m_pq_only
+	confidentiality? m_classical_only
+]

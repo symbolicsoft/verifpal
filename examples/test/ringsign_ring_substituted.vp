@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — anonymity is not authenticity. Damian receives the ring he
+// verifies against on an UNGUARDED wire, so the attacker hands him a ring it
+// is itself a member of and signs with the matching private key. The check
+// passes on its own merits and Damian attributes the message to the ring.
+//
+// Compare ringsign.vp, where every public key reaching the verifier is
+// guarded and the same query holds. The pair is the statement that a ring
+// signature authenticates a membership claim about a ring the verifier has to
+// have obtained some other way, and nothing at all about the ring itself.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: [ga]
+Carol -> Bob: [gc]
+Alice -> Damian: ga
+Bob -> Damian: gb
+Carol -> Damian: gc
+
+principal Bob[
+	knows private order
+	order_sig = RINGSIGN(b, ga, gc, order)
+]
+
+Bob -> Damian: order, order_sig
+
+principal Damian[
+	_ = RINGSIGNVERIF(ga, gb, gc, order, order_sig)?
+	acted = HASH(order)
+]
+
+queries[
+	authentication? Bob -> Damian: order
+]

@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0c0 — halting a principal is not making two principals disagree,
+// said over public-key encryption rather than over the AEAD that
+// equivalence_halt_scope.vp uses. Bob's public key is guarded, so the attacker
+// cannot encrypt anything Bob will decrypt to a value of the attacker's
+// choosing; all it can do is corrupt the ciphertext, which fails Bob's ASSERT
+// and truncates his state at that point.
+//
+// A state truncated at a failed check no longer HOLDS the plaintext slot, and
+// resolve_constant answers for a missing slot with the bare constant. Comparing
+// that placeholder against Alice's real plaintext is a divergence nobody
+// computed, and reporting it would be a false attack of exactly the kind this
+// engine is built not to produce.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+]
+
+Bob -> Alice: [bpk]
+
+principal Alice[
+	knows private plain_a
+	knows private mac_key
+	sealed = PKE_ENC(bpk, plain_a)
+	tag = MAC(mac_key, sealed)
+]
+
+Alice -> Bob: sealed, tag
+
+principal Bob[
+	knows private mac_key
+	_ = ASSERT(MAC(mac_key, sealed), tag)?
+	plain_b = PKE_DEC(bsk, sealed)
+	_ = HASH(plain_b)
+]
+
+queries[
+	equivalence? plain_a, plain_b
+	confidentiality? plain_a
+]

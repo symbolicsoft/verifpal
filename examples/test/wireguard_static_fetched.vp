@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1 — a WireGuard-shaped handshake whose one indispensable
+// assumption has been dropped. WireGuard mixes a static-static Diffie-Hellman
+// and two ephemeral ones into a chaining KDF, and every bit of its security
+// rests on each peer having the other's static public key CONFIGURED in
+// advance. Fetch that key over the wire instead and the whole construction is
+// anonymous key exchange with extra hashing.
+//
+// The model is worth having because the handshake looks strong right up until
+// the query fails: three Diffie-Hellman operations, a chained KDF, a
+// transcript hash, an authenticated payload — and the attacker substitutes one
+// public key at the start and computes every one of them alongside the victim.
+
+attacker[active]
+
+principal Responder[
+	knows private rs
+	generates re
+	grs = PUBKEY(rs)
+	gre = PUBKEY(re)
+]
+
+Responder -> Initiator: grs
+
+principal Initiator[
+	knows private is_static
+	knows public construction
+	knows private payload
+	generates ie
+	gis = PUBKEY(is_static)
+	gie = PUBKEY(ie)
+	es = DH_KEX(grs, ie)
+	ss = DH_KEX(grs, is_static)
+	chain_one, _, _ = HKDF(construction, es, gie)
+	chain_two, _, _ = HKDF(chain_one, ss, gis)
+	sealed = AEAD_ENC(chain_two, payload, gie)
+]
+
+Initiator -> Responder: gis, gie, sealed
+
+principal Responder[
+	knows public construction
+	se = DH_KEX(gie, rs)
+	sss = DH_KEX(gis, rs)
+	chain_one_r, _, _ = HKDF(construction, se, gie)
+	chain_two_r, _, _ = HKDF(chain_one_r, sss, gis)
+	opened = AEAD_DEC(chain_two_r, sealed, gie)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? payload
+	authentication? Initiator -> Responder: sealed
+]

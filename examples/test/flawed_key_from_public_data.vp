@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1 — a session key derived entirely from values the attacker
+// can see. The username is public, the timestamp travels in the clear, the
+// device identifier is printed on the case, and hashing all three together
+// produces something that looks like a key and is not one.
+//
+// Every ingredient is individually harmless, which is exactly why this
+// construction gets written. What the model asserts is that the engine follows
+// the derivation rather than the shape: HASH of three known values is a known
+// value, the AEAD keyed on it opens, and the plaintext under it opens with it.
+
+attacker[passive]
+
+principal Alice[
+	knows public username, device_id
+	generates timestamp
+	knows private m_first, m_second
+	session_key = HASH(username, timestamp, device_id)
+	e_first = AEAD_ENC(session_key, m_first, nil)
+	e_second = AEAD_ENC(session_key, m_second, nil)
+]
+
+Alice -> Bob: timestamp, e_first, e_second
+
+principal Bob[
+	knows public username, device_id
+	bob_key = HASH(username, timestamp, device_id)
+	_ = AEAD_DEC(bob_key, e_first, nil)?
+	_ = AEAD_DEC(bob_key, e_second, nil)?
+]
+
+queries[
+	confidentiality? session_key
+	confidentiality? m_first
+	confidentiality? m_second
+]

@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c1a0a1a1 — the whole point of splitting `weak` from
+// `forgeable`, written out as a truth table. AEAD_ENC is the only primitive
+// that declares both, so it is the only place the two can be told apart, and
+// three ciphertexts under three keys cover every combination:
+//
+//   [weak]             readable, unforgeable   c1 a0
+//   [forgeable]        unreadable, forgeable   c0 a1
+//   [weak, forgeable]  readable and forgeable  c1 a1
+//
+// Collapse the two capabilities into one and this model reports the same
+// verdict three times. Three keys rather than one is what keeps the rows
+// independent: under a shared key the forged ciphertext from one row would be
+// accepted in another, and the table would fill in for the wrong reason.
+
+attacker[active]
+
+principal Alice[
+	knows private k_weak, k_forge, k_both
+	knows private m_weak, m_forge, m_both
+	knows public ad
+	e_weak = AEAD_ENC[weak](k_weak, m_weak, ad)
+	e_forge = AEAD_ENC[forgeable](k_forge, m_forge, ad)
+	e_both = AEAD_ENC[weak, forgeable](k_both, m_both, ad)
+]
+
+Alice -> Bob: e_weak, e_forge, e_both
+
+principal Bob[
+	knows private k_weak, k_forge, k_both
+	knows public ad
+	d_weak = AEAD_DEC(k_weak, e_weak, ad)?
+	d_forge = AEAD_DEC(k_forge, e_forge, ad)?
+	d_both = AEAD_DEC(k_both, e_both, ad)?
+	_ = HASH(d_weak, d_forge, d_both)
+]
+
+queries[
+	confidentiality? m_weak
+	confidentiality? m_forge
+	confidentiality? m_both
+	authentication? Alice -> Bob: e_weak
+	authentication? Alice -> Bob: e_forge
+	authentication? Alice -> Bob: e_both
+]

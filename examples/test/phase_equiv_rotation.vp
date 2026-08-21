@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e1 — two principals agree on a derived key in phase 0 and are
+// made to disagree in phase 1, when the rotation input crosses an unguarded
+// wire and the attacker substitutes it. Nothing is disclosed and nothing is
+// forged; the phases exist so that the same pair of principals can be observed
+// agreeing and then not agreeing.
+//
+// Equivalence is the query kind that reads the MUTATED value rather than the
+// original, so it is the one that can see a desynchronisation at all. The
+// phase 0 pair is derived from a guarded input and must stay equal, which is
+// what stops the second verdict from being read as "the attacker can always
+// make two principals disagree".
+
+attacker[active]
+
+principal Alice[
+	knows private root
+	generates step_zero
+	key_zero_a = HASH(root, step_zero)
+]
+
+Alice -> Bob: [step_zero]
+
+principal Bob[
+	knows private root
+	key_zero_b = HASH(root, step_zero)
+	_ = HASH(key_zero_b)
+]
+
+phase[1]
+
+principal Alice[
+	generates step_one
+	key_one_a = HASH(root, step_one)
+]
+
+Alice -> Bob: step_one
+
+principal Bob[
+	key_one_b = HASH(root, step_one)
+	_ = HASH(key_one_b)
+]
+
+queries[
+	equivalence? key_zero_a, key_zero_b
+	equivalence? key_one_a, key_one_b
+]

@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f0 — freshness is transitive through arbitrary depth, and five
+// levels is where a bounded traversal would start reporting the wrong answer.
+// The two chains are built identically over public tags; the only difference
+// is at the very bottom, where one root is a long-term secret and the other is
+// generated.
+//
+// A depth limit anywhere in the freshness descent turns fresh_five into f1 by
+// never reaching the generated constant. A descent that stopped at the first
+// constant it met would turn stale_five into f0 by finding the public tag and
+// calling the job done.
+
+//
+// The wire values are guarded, and that is not decoration. Under an active
+// attacker an unguarded value is one the attacker may replace, so the
+// recipient's state resolves it to the bare constant rather than to whatever
+// the sender computed — and a bare constant transitively contains nothing at
+// all, fresh or otherwise. Ungarding any message here turns every verdict
+// below into f1 for a reason that has nothing to do with what this model is
+// about. freshness_unguarded_wire.vp is where that effect is the subject.
+
+attacker[active]
+
+principal Alice[
+	knows public tag
+	knows private stale_root
+	generates fresh_root
+	stale_five = HASH(HASH(HASH(HASH(HASH(stale_root, tag), tag), tag), tag), tag)
+	fresh_five = HASH(HASH(HASH(HASH(HASH(fresh_root, tag), tag), tag), tag), tag)
+]
+
+Alice -> Bob: [stale_five], [fresh_five]
+
+principal Bob[
+	_ = HASH(stale_five, fresh_five)
+]
+
+queries[
+	freshness? stale_five
+	freshness? fresh_five
+]

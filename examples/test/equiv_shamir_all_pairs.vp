@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e0e1 — any two of three shares reconstruct the SAME secret. The
+// rebuild rule enumerates six ordered pairs, and the three-way equivalence
+// query is what asserts they all land on one value rather than merely each
+// producing something: a rule that reconstructed a per-pair term would satisfy
+// every two-argument query in the tree and fail this one.
+//
+// The reversed pair is in there deliberately. SHAMIR_JOIN's given list carries
+// both orders of every pair, so joining the third share with the first must
+// agree with joining the first with the third, and an omission in that list
+// would show up here and nowhere else.
+
+attacker[passive]
+
+principal Dealer[
+	generates secret
+	generates decoy
+	share_one, share_two, share_three = SHAMIR_SPLIT(secret)
+	join_low = SHAMIR_JOIN(share_one, share_two)
+	join_mid = SHAMIR_JOIN(share_two, share_three)
+	join_rev = SHAMIR_JOIN(share_three, share_one)
+	_ = HASH(join_low, join_mid, join_rev, decoy)
+]
+
+queries[
+	equivalence? join_low, join_mid, join_rev
+	equivalence? secret, join_rev
+	equivalence? decoy, join_low
+]

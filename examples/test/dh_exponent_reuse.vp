@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0 — Alice reuses one private exponent with two peers, and one
+// of the peers is dishonest. The compromised leg falls and the honest leg does
+// not, because a Diffie-Hellman secret is determined by BOTH exponents and
+// knowing one of them plus the other side's public key is only enough for the
+// pair you already had.
+//
+// The third query is the one that keeps this honest: Carol leaking her own
+// exponent must not surrender Alice's. If can_reconstruct_primitive ever
+// learned to run DH_KEX backwards out of a secret and a public key it holds,
+// the third verdict would flip and take every reused-key protocol in the tree
+// with it.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Alice -> Bob: [ga]
+Alice -> Carol: [ga]
+Bob -> Alice: [gb]
+Carol -> Alice: [gc]
+
+principal Alice[
+	knows private m_bob, m_carol
+	k_bob = DH_KEX(gb, a)
+	k_carol = DH_KEX(gc, a)
+	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+	e_carol = AEAD_ENC(k_carol, m_carol, nil)
+]
+
+Alice -> Bob: e_bob
+Alice -> Carol: e_carol
+
+principal Bob[
+	_ = AEAD_DEC(DH_KEX(ga, b), e_bob, nil)?
+]
+
+principal Carol[
+	_ = AEAD_DEC(DH_KEX(ga, c), e_carol, nil)?
+	leaks c
+]
+
+queries[
+	confidentiality? m_carol
+	confidentiality? m_bob
+	confidentiality? a
+]
