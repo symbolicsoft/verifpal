@@ -61,10 +61,6 @@ Verifpal ships a language server (`verifpal lsp`), and the project maintains an 
 - [Neovim](https://github.com/symbolicsoft/verifpal-nvim): syntax highlighting, verification diagnostics on each query line, formatting and hover documentation.
 - [Zed](https://github.com/symbolicsoft/verifpal-zed): syntax highlighting, live error checking and attacker analysis.
 
-## Discussion
-
-Sign up to the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal) for news, announcements and discussion.
-
 ## License
 
 Verifpal and its editor extensions are published by Symbolic Software as free and open source software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The Verifpal User Manual is provided under the [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
