@@ -103,6 +103,8 @@ fn starts_with_keyword(s: &str, keyword: &str) -> bool {
 
 struct Parser<'a> {
 	input: &'a [u8],
+	source: &'a str,
+	tokens: Option<crate::tokens::TokenIndex>,
 	pos: usize,
 	pending_leading: Vec<Comment>,
 	unterminated_block_at: Option<usize>,
@@ -116,6 +118,8 @@ impl<'a> Parser<'a> {
 	fn new(input: &'a str) -> Self {
 		Parser {
 			input: input.as_bytes(),
+			source: input,
+			tokens: None,
 			pos: 0,
 			last_ident: Span::default(),
 			pending_leading: Vec::new(),
@@ -185,10 +189,12 @@ impl<'a> Parser<'a> {
 				(0, 0)
 			};
 			if two == (b'/', b'/') {
+				let at = self.pos;
 				let start = self.pos + 2;
 				while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
 					self.pos += 1;
 				}
+				self.record_from(at, crate::tokens::TokenKind::Comment);
 				if capture {
 					let text = std::str::from_utf8(&self.input[start..self.pos])
 						.unwrap_or("")
@@ -211,6 +217,7 @@ impl<'a> Parser<'a> {
 					if self.input[self.pos] == b'*' && self.input[self.pos + 1] == b'/' {
 						let end = self.pos;
 						self.pos += 2;
+						self.record(Span::new(open, self.pos), crate::tokens::TokenKind::Comment);
 						if capture {
 							let text = std::str::from_utf8(&self.input[start..end])
 								.unwrap_or("")
@@ -234,13 +241,31 @@ impl<'a> Parser<'a> {
 		std::mem::take(&mut self.pending_leading)
 	}
 
-	fn snapshot(&self) -> (usize, usize) {
-		(self.pos, self.pending_leading.len())
+	fn snapshot(&self) -> (usize, usize, usize) {
+		let tokens = self.tokens.as_ref().map_or(0, |t| t.len());
+		(self.pos, self.pending_leading.len(), tokens)
 	}
 
-	fn restore(&mut self, (pos, leading_len): (usize, usize)) {
+	/// Rewind. The token count is part of the snapshot because a speculative
+	/// parse records tokens too, and an index that kept them would describe
+	/// text the parser went on to read as something else.
+	fn restore(&mut self, (pos, leading_len, tokens): (usize, usize, usize)) {
 		self.pos = pos;
 		self.pending_leading.truncate(leading_len);
+		if let Some(index) = self.tokens.as_mut() {
+			index.truncate(tokens);
+		}
+	}
+
+	/// Record a token, if this parse is indexing. One `Option` check when not.
+	fn record(&mut self, span: Span, kind: crate::tokens::TokenKind) {
+		if let Some(index) = self.tokens.as_mut() {
+			index.push(span, kind, self.source);
+		}
+	}
+
+	fn record_from(&mut self, start: usize, kind: crate::tokens::TokenKind) {
+		self.record(Span::new(start, self.pos), kind);
 	}
 
 	fn check_unterminated_block(&self) -> VResult<()> {
@@ -262,11 +287,13 @@ impl<'a> Parser<'a> {
 		}
 		let two = (self.input[self.pos], self.input[self.pos + 1]);
 		if two == (b'/', b'/') {
+			let at = self.pos;
 			let start = self.pos + 2;
 			self.pos += 2;
 			while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
 				self.pos += 1;
 			}
+			self.record_from(at, crate::tokens::TokenKind::Comment);
 			let text = std::str::from_utf8(&self.input[start..self.pos])
 				.unwrap_or("")
 				.to_string();
@@ -275,6 +302,7 @@ impl<'a> Parser<'a> {
 				style: CommentStyle::Line,
 			})
 		} else if two == (b'/', b'*') {
+			let at = self.pos;
 			let probe_start = self.pos + 2;
 			let mut probe = probe_start;
 			loop {
@@ -292,6 +320,7 @@ impl<'a> Parser<'a> {
 						.unwrap_or("")
 						.to_string();
 					self.pos = probe + 2;
+					self.record_from(at, crate::tokens::TokenKind::Comment);
 					return Some(Comment {
 						text,
 						style: CommentStyle::Block,
@@ -456,6 +485,7 @@ impl<'a> Parser<'a> {
 		self.check_unterminated_block()?;
 		let pre_attacker_comments = self.take_leading();
 
+		let attacker_kw = self.pos;
 		if !self.try_expect("attacker") {
 			return Err(VerifpalError::parse(
 				"model does not open with an `attacker` block".into(),
@@ -465,10 +495,12 @@ impl<'a> Parser<'a> {
 			.note("every model states which attacker it is analyzed against, before anything else")
 			.help("add `attacker[active]` or `attacker[passive]` as the first line"));
 		}
+		self.record_from(attacker_kw, crate::tokens::TokenKind::Keyword);
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
 		self.consume_trivia_nocapture();
 		let attacker_str = self.parse_identifier()?;
+		self.record(self.last_ident, crate::tokens::TokenKind::AttackerMode);
 		let attacker_type = match attacker_str.as_str() {
 			"active" => AttackerKind::Active,
 			"passive" => AttackerKind::Passive,
@@ -514,6 +546,7 @@ impl<'a> Parser<'a> {
 
 		self.consume_trivia();
 		let queries_leading_comments = self.take_leading();
+		let queries_kw = self.pos;
 		if !self.try_expect("queries") {
 			return Err(VerifpalError::parse("model has no `queries` block".into())
 				.at(self.here())
@@ -521,6 +554,7 @@ impl<'a> Parser<'a> {
 				.note("a model must ask at least one question, or there is nothing to verify")
 				.help("add `queries[ confidentiality? m ]` at the end of the model"));
 		}
+		self.record_from(queries_kw, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		self.expect("[")?;
 		let queries_header_trailing = self.try_take_trailing();
@@ -602,8 +636,10 @@ impl<'a> Parser<'a> {
 	fn parse_principal(&mut self) -> VResult<Block> {
 		let start = self.pos;
 		self.expect("principal")?;
+		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let name = self.parse_identifier()?;
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		let name = title_case(&name);
 		self.skip_whitespace();
 		let open_bracket = self.pos;
@@ -652,9 +688,12 @@ impl<'a> Parser<'a> {
 	fn parse_message_block(&mut self) -> VResult<Block> {
 		let start = self.pos;
 		let sender_name = self.parse_identifier()?;
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
+		let arrow_at = self.pos;
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
+			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
 		} else {
 			return Err(
 				VerifpalError::parse("expected `->` after the sender's name".into())
@@ -665,6 +704,7 @@ impl<'a> Parser<'a> {
 		}
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		let recipient_name = title_case(&recipient_name);
 		self.skip_whitespace();
 		self.expect_where(":", "after the recipient's name")
@@ -765,6 +805,7 @@ impl<'a> Parser<'a> {
 	fn parse_knows(&mut self) -> VResult<Expression> {
 		let start = self.pos;
 		self.expect("knows")?;
+		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let qualifier_str = self.parse_identifier()?;
 		let qualifier = match qualifier_str.as_str() {
@@ -772,6 +813,7 @@ impl<'a> Parser<'a> {
 			"public" => Qualifier::Public,
 			"password" => Qualifier::Password,
 			_ => {
+				// falls through to the error below
 				return Err(VerifpalError::parse(
 					format!("unknown qualifier `{}`", qualifier_str).into(),
 				)
@@ -784,6 +826,7 @@ impl<'a> Parser<'a> {
 				)));
 			}
 		};
+		self.record(self.last_ident, crate::tokens::TokenKind::Qualifier);
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
@@ -800,6 +843,7 @@ impl<'a> Parser<'a> {
 	fn parse_simple_expression(&mut self, keyword: &str, kind: Declaration) -> VResult<Expression> {
 		let start = self.pos;
 		self.expect(keyword)?;
+		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
@@ -817,7 +861,9 @@ impl<'a> Parser<'a> {
 		let start = self.pos;
 		let constants = self.parse_constants()?;
 		self.skip_whitespace();
+		let assign_at = self.pos;
 		self.expect("=")?;
+		self.record_from(assign_at, crate::tokens::TokenKind::Assign);
 		self.skip_whitespace();
 		let value = self.parse_value()?;
 		if let Value::Constant(c) = &value {
@@ -899,6 +945,14 @@ impl<'a> Parser<'a> {
 	fn parse_constant(&mut self) -> VResult<Constant> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name).map_err(|e| e.at(self.last_ident))?;
+		self.record(
+			self.last_ident,
+			if name == "_" {
+				crate::tokens::TokenKind::Anonymous
+			} else {
+				crate::tokens::TokenKind::ConstantName
+			},
+		);
 		let actual_name: Arc<str> = if name == "_" {
 			let n = self.unnamed_counter;
 			self.unnamed_counter += 1;
@@ -953,6 +1007,7 @@ impl<'a> Parser<'a> {
 			self.restore(saved);
 			return Ok(0);
 		}
+		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
 		self.consume_trivia_nocapture();
 		let kw = self.parse_identifier()?;
 		if !kw.eq_ignore_ascii_case("phase") {
@@ -962,11 +1017,13 @@ impl<'a> Parser<'a> {
 				.note("an assumption that starts later is written `from phase N`")
 				.help("write it as `from phase 1`"));
 		}
+		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
 		self.consume_trivia_nocapture();
 		let start = self.pos;
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
 		}
+		self.record_from(start, crate::tokens::TokenKind::PhaseNumber);
 		if start == self.pos {
 			return Err(
 				VerifpalError::parse("expected a phase number after `from phase`".into())
@@ -991,6 +1048,7 @@ impl<'a> Parser<'a> {
 		loop {
 			self.consume_trivia_nocapture();
 			let word = self.parse_identifier()?;
+			let word_span = self.last_ident;
 			let cap = Capability::from_name(&word).ok_or_else(|| {
 				VerifpalError::parse(format!("unknown weakening assumption `{}`", word).into())
 					.at(Span::new(start, self.pos))
@@ -1011,6 +1069,7 @@ impl<'a> Parser<'a> {
 				.labelled("declared again here")
 				.help("remove the duplicate"));
 			}
+			self.record(word_span, crate::tokens::TokenKind::Capability);
 			self.consume_trivia_nocapture();
 			let onset = self.parse_capability_onset()?;
 			caps.set(cap, onset);
@@ -1030,6 +1089,10 @@ impl<'a> Parser<'a> {
 		let name_start = self.pos;
 		let name = self.parse_identifier()?;
 		let name_end = self.pos;
+		self.record(
+			Span::new(name_start, name_end),
+			crate::tokens::TokenKind::PrimitiveName,
+		);
 		let prim_name = name.to_uppercase();
 		self.skip_whitespace();
 		let capabilities = if self.peek() == Some(b'[') {
@@ -1062,7 +1125,11 @@ impl<'a> Parser<'a> {
 			}
 		}
 		self.expect(")")?;
+		let check_at = self.pos;
 		let check = self.try_expect("?");
+		if check {
+			self.record_from(check_at, crate::tokens::TokenKind::Check);
+		}
 		self.skip_whitespace();
 		if self.peek() == Some(b',') {
 			self.advance();
@@ -1086,6 +1153,7 @@ impl<'a> Parser<'a> {
 	fn parse_phase(&mut self) -> VResult<Block> {
 		let block_start = self.pos;
 		self.expect("phase")?;
+		self.record_from(block_start, crate::tokens::TokenKind::Keyword);
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
 		self.consume_trivia_nocapture();
@@ -1093,6 +1161,7 @@ impl<'a> Parser<'a> {
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
 		}
+		self.record_from(start, crate::tokens::TokenKind::PhaseNumber);
 		let num_str = std::str::from_utf8(&self.input[start..self.pos])
 			.map_err(|_| VerifpalError::parse("invalid UTF-8 in phase number".into()))?;
 		let number: i32 = num_str.parse().map_err(|_| {
@@ -1163,6 +1232,7 @@ impl<'a> Parser<'a> {
 	fn parse_query_single_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
 		let start = self.pos;
 		self.expect(keyword)?;
+		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
 		self.skip_inline_whitespace();
@@ -1181,10 +1251,15 @@ impl<'a> Parser<'a> {
 	fn parse_query_authentication(&mut self) -> VResult<Query> {
 		let start = self.pos;
 		self.expect("authentication?")?;
+		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let sender_name = title_case(&self.parse_identifier()?);
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		self.skip_whitespace();
-		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
+		let arrow_at = self.pos;
+		if self.try_expect("->") || self.try_expect("\u{2192}") {
+			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
+		} else {
 			return Err(
 				VerifpalError::parse("expected `->` after the sender's name".into())
 					.at(self.here())
@@ -1194,6 +1269,7 @@ impl<'a> Parser<'a> {
 		}
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		self.skip_whitespace();
 		self.expect(":")?;
 		self.skip_whitespace();
@@ -1225,6 +1301,7 @@ impl<'a> Parser<'a> {
 	fn parse_query_multi_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
 		let start = self.pos;
 		self.expect(keyword)?;
+		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
 		self.skip_inline_whitespace();
@@ -1377,6 +1454,32 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 		.map_err(|e| VerifpalError::parse(format!("cannot read `{}`: {}", file_path, e).into()))?;
 
 	parse_string(&file_name, &content)
+}
+
+/// `parse_string`, also returning every token the parser recognised.
+///
+/// The index is returned **whether or not the model parsed**. A model
+/// mid-edit is the common case in an editor, and hover, folding and semantic
+/// tokens have to keep working across a transient syntax error — so the
+/// tokens up to the failure are exactly what is wanted.
+// Consumed by `src/lsp/`, which lands next; the tests are its only caller now.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn parse_string_indexed(
+	file_name: &str,
+	input: &str,
+) -> (VResult<Model>, crate::tokens::TokenIndex) {
+	let mut parser = Parser::new(input);
+	parser.tokens = Some(crate::tokens::TokenIndex::default());
+	let parsed = parser
+		.parse_model()
+		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input));
+	let index = parser.tokens.take().unwrap_or_default();
+	let model = parsed.map(|mut model| {
+		model.file_name = file_name.to_string();
+		model.source = Source::from(input);
+		model
+	});
+	(model, index)
 }
 
 pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {

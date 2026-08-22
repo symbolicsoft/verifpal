@@ -33,6 +33,7 @@ pub(crate) mod solve;
 #[cfg(test)]
 mod testutil;
 pub(crate) mod theory;
+pub(crate) mod tokens;
 #[cfg(test)]
 mod tracecheck;
 pub mod types;
