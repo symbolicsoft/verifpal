@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml/badge.svg)](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml)
 
-<img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="260" style="margin:10px" />
+<img src="https://verifpal.com/res/img/png/pose1.png" alt="" align="left" height="265" style="margin:10px" />
 
 Verifpal is software for verifying the security of cryptographic protocols. It comes out of the same symbolic verification tradition as [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io), but is written for practitioners and students rather than for specialists.
 
