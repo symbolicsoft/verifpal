@@ -296,6 +296,46 @@ mod tests {
 	}
 
 	#[test]
+	fn a_report_lists_declared_assumptions() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private rcap_m\n\
+			rcap_h = HASH[weak](rcap_m)\n\
+			]\n\
+			Alice -> Bob: rcap_h\n\
+			principal Bob[\n\
+			_ = HASH(rcap_h)\n\
+			]\n\
+			queries[\n\
+			confidentiality? rcap_m\n\
+			]\n";
+		let m = crate::parser::parse_string("rcap.vp", src).expect("parses");
+		let ctx = crate::verify::analyze(&m).expect("analyzes");
+		let assumptions = ctx.capability_assumptions();
+		assert_eq!(assumptions.len(), 1);
+		assert_eq!(assumptions[0].1.name(), "weak");
+	}
+
+	#[test]
+	fn a_report_omits_assumptions_when_none_are_declared() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private rnoc_m\n\
+			rnoc_h = HASH(rnoc_m)\n\
+			]\n\
+			Alice -> Bob: rnoc_h\n\
+			principal Bob[\n\
+			_ = HASH(rnoc_h)\n\
+			]\n\
+			queries[\n\
+			confidentiality? rnoc_m\n\
+			]\n";
+		let m = crate::parser::parse_string("rnoc.vp", src).expect("parses");
+		let ctx = crate::verify::analyze(&m).expect("analyzes");
+		assert!(ctx.capability_assumptions().is_empty());
+	}
+
+	#[test]
 	fn a_failed_model_reports_its_error_and_no_analysis() {
 		let run = Run {
 			version: "1.0.4".to_string(),

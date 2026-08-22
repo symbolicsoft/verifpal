@@ -1,8 +1,6 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::io::Read;
-
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
 	ColorChoice, Run, Verbosity, VerifyReport, diagram, info_banner, pretty_print,
@@ -82,31 +80,6 @@ enum Commands {
 		color: ColorArg,
 	},
 	About,
-	#[command(name = "internal-json", arg_required_else_help = true)]
-	InternalJson {
-		subcommand: String,
-	},
-}
-
-fn read_stdin() -> String {
-	let mut input: Vec<u8> = Vec::new();
-	let mut buf = [0u8; 4096];
-	let stdin = std::io::stdin();
-	let mut handle = stdin.lock();
-	loop {
-		match handle.read(&mut buf) {
-			Ok(0) => break,
-			Ok(n) => {
-				if let Some(eot) = buf[..n].iter().position(|&b| b == 0x04) {
-					input.extend_from_slice(&buf[..eot]);
-					break;
-				}
-				input.extend_from_slice(&buf[..n]);
-			}
-			Err(_) => break,
-		}
-	}
-	String::from_utf8_lossy(&input).into_owned()
 }
 
 fn verify_verbosity(json: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
@@ -276,11 +249,6 @@ fn main() {
 					EXIT_ERROR
 				}
 			}
-		}
-		Commands::InternalJson { subcommand } => {
-			let input = read_stdin();
-			verifpal::handle_internal_json(&subcommand, &input);
-			0
 		}
 		Commands::About => {
 			let update_check = update_check_start(VERSION);

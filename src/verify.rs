@@ -13,10 +13,16 @@ use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
 
+// The shared entry point every consumer is required to go through, so that
+// the CLI, the wasm build and the language server cannot disagree about what a
+// model means. `internal-json` was its last caller in a `cli`-only build; the
+// tests and the wasm build still call it, and `src/lsp/` will.
+#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	analyze_sessions(m, crate::sessions::DEFAULT_SESSIONS)
 }
 
+#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
 	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
 }

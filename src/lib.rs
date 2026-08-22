@@ -14,7 +14,6 @@ pub(crate) mod deduction;
 pub(crate) mod equivalence;
 pub(crate) mod hashing;
 pub(crate) mod info;
-pub(crate) mod json;
 #[cfg(test)]
 mod model_tests;
 pub(crate) mod narrate;
@@ -46,8 +45,7 @@ pub(crate) mod verify;
 pub(crate) mod witness;
 
 pub use info::{Verbosity, info_banner, info_message, set_verbosity};
-pub use json::{diagram, handle_internal_json};
-pub use pretty::pretty_print;
+pub use pretty::{diagram, pretty_print};
 pub use report::Run;
 pub use types::*;
 #[cfg(feature = "cli")]
@@ -62,74 +60,107 @@ pub use verify::{
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
-use json::{json_escape, json_string_array};
-
-#[cfg(feature = "wasm")]
-fn wasm_verify_error(e: &VerifpalError, messages: &[String]) -> String {
-	format!(
-		r#"{{"ok":false,"error":"{}","results":[],"code":"","messages":{}}}"#,
-		json_escape(&e.to_string()),
-		json_string_array(messages),
-	)
+#[derive(serde::Serialize)]
+struct WasmVerify {
+	ok: bool,
+	error: String,
+	results: Vec<WasmResult>,
+	code: String,
+	assumptions: Vec<WasmAssumption>,
+	messages: Vec<String>,
 }
 
 #[cfg(feature = "wasm")]
-fn wasm_pretty_error(e: &VerifpalError) -> String {
-	format!(
-		r#"{{"ok":false,"error":"{}","output":""}}"#,
-		json_escape(&e.to_string())
-	)
+#[derive(serde::Serialize)]
+struct WasmResult {
+	query: String,
+	resolved: bool,
+	kind: String,
+	summary: String,
 }
 
 #[cfg(feature = "wasm")]
-fn wasm_verify_inner(input: &str) -> VResult<String> {
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmAssumption {
+	term: String,
+	capability: String,
+	from_phase: i32,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(serde::Serialize)]
+struct WasmPretty {
+	ok: bool,
+	error: String,
+	output: String,
+}
+
+#[cfg(feature = "wasm")]
+fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 	let m = parser::parse_string("workbench.vp", input)?;
 	let ctx = verify::analyze(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
 	let results = ctx.results_get();
-	let results_json = json::json_array(results.iter(), |r| {
-		format!(
-			r#"{{"query":"{}","resolved":{},"kind":"{}","summary":"{}"}}"#,
-			json_escape(&r.query.to_string()),
-			r.resolved,
-			r.query.kind.name(),
-			json_escape(&r.summary),
-		)
-	});
-	let assumptions = ctx.capability_assumptions();
-	let assumptions_json = json::json_array(assumptions.iter(), |(term, capability, onset)| {
-		format!(
-			r#"{{"term":"{}","capability":"{}","fromPhase":{}}}"#,
-			json_escape(&term.to_string()),
-			capability.name(),
-			onset,
-		)
-	});
-	Ok(format!(
-		r#"{{"ok":true,"results":{},"code":"{}","assumptions":{},"messages":{}}}"#,
-		results_json,
-		json_escape(&types::VerifyResult::results_code(&results)),
-		assumptions_json,
-		json_string_array(&info::wasm_messages_drain()),
-	))
+	Ok(WasmVerify {
+		ok: true,
+		error: String::new(),
+		code: types::VerifyResult::results_code(&results),
+		results: results
+			.iter()
+			.map(|r| WasmResult {
+				query: r.query.to_string(),
+				resolved: r.resolved,
+				kind: r.query.kind.name().to_string(),
+				summary: r.summary.clone(),
+			})
+			.collect(),
+		assumptions: ctx
+			.capability_assumptions()
+			.iter()
+			.map(|(term, capability, onset)| WasmAssumption {
+				term: term.to_string(),
+				capability: capability.name().to_string(),
+				from_phase: *onset,
+			})
+			.collect(),
+		messages: info::wasm_messages_drain(),
+	})
 }
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_verify(input: &str) -> String {
 	info::wasm_messages_init();
-	wasm_verify_inner(input).unwrap_or_else(|e| wasm_verify_error(&e, &info::wasm_messages_drain()))
+	let payload = wasm_verify_inner(input).unwrap_or_else(|e| WasmVerify {
+		ok: false,
+		error: e.to_string(),
+		results: vec![],
+		code: String::new(),
+		assumptions: vec![],
+		messages: info::wasm_messages_drain(),
+	});
+	serde_json::to_string(&payload).unwrap_or_else(|_| {
+		r#"{"ok":false,"error":"could not serialize the result","results":[],"code":"","assumptions":[],"messages":[]}"#
+			.to_string()
+	})
 }
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {
-	let rendered =
-		parser::parse_string("workbench.vp", input).and_then(|m| pretty::pretty_model(&m));
-	match rendered {
-		Ok(output) => format!(
-			r#"{{"ok":true,"error":"","output":"{}"}}"#,
-			json_escape(&output)
-		),
-		Err(e) => wasm_pretty_error(&e),
-	}
+	let payload =
+		match parser::parse_string("workbench.vp", input).and_then(|m| pretty::pretty_model(&m)) {
+			Ok(output) => WasmPretty {
+				ok: true,
+				error: String::new(),
+				output,
+			},
+			Err(e) => WasmPretty {
+				ok: false,
+				error: e.to_string(),
+				output: String::new(),
+			},
+		};
+	serde_json::to_string(&payload)
+		.unwrap_or_else(|_| r#"{"ok":false,"error":"could not serialize","output":""}"#.to_string())
 }
