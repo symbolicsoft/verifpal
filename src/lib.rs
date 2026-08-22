@@ -24,6 +24,7 @@ pub(crate) mod primitive;
 pub(crate) mod principal;
 pub(crate) mod query;
 pub(crate) mod reexec;
+pub(crate) mod report;
 pub(crate) mod resolution;
 pub(crate) mod rewrite;
 pub(crate) mod sanity;
@@ -47,6 +48,7 @@ pub(crate) mod witness;
 pub use info::{Verbosity, info_banner, info_message, set_verbosity};
 pub use json::{diagram, handle_internal_json, json_report};
 pub use pretty::pretty_print;
+pub use report::Run;
 pub use types::*;
 #[cfg(feature = "cli")]
 pub use update::{UpdateCheck, update_check_report, update_check_start};
