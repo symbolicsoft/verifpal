@@ -223,6 +223,27 @@ impl VerifpalError {
 		}
 	}
 
+	pub fn labels(&self) -> &[(Span, Cow<'static, str>)] {
+		match self.extra.as_deref() {
+			Some(extra) => &extra.labels,
+			None => &[],
+		}
+	}
+
+	pub fn notes(&self) -> Vec<&str> {
+		self.extra
+			.as_deref()
+			.map(|e| e.notes.iter().map(|n| n.as_ref()).collect())
+			.unwrap_or_default()
+	}
+
+	pub fn helps(&self) -> Vec<&str> {
+		self.extra
+			.as_deref()
+			.map(|e| e.helps.iter().map(|h| h.as_ref()).collect())
+			.unwrap_or_default()
+	}
+
 	pub fn has_labels(&self) -> bool {
 		self.extra.as_ref().is_some_and(|e| !e.labels.is_empty())
 	}

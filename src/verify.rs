@@ -24,7 +24,6 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn analyze_sessions_cancellable(
 	m: &Model,
 	sessions: u8,

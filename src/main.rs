@@ -80,6 +80,11 @@ enum Commands {
 		color: ColorArg,
 	},
 	About,
+	#[command(name = "lsp")]
+	Lsp {
+		#[arg(long, default_value_t = false)]
+		stdio: bool,
+	},
 }
 
 fn verify_verbosity(json: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
@@ -237,6 +242,13 @@ fn main() {
 			write,
 			check,
 		} => run_pretty(models, write, check),
+		Commands::Lsp { stdio: _ } => match verifpal::lsp_run() {
+			Ok(()) => 0,
+			Err(e) => {
+				eprintln!("{}", e);
+				EXIT_ERROR
+			}
+		},
 		Commands::Diagram { model, color } => {
 			set_color_choice(color.into());
 			match diagram(&model) {

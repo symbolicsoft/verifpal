@@ -14,6 +14,8 @@ pub(crate) mod deduction;
 pub(crate) mod equivalence;
 pub(crate) mod hashing;
 pub(crate) mod info;
+#[cfg(feature = "lsp")]
+pub(crate) mod lsp;
 #[cfg(test)]
 mod model_tests;
 pub(crate) mod narrate;
@@ -46,6 +48,8 @@ pub(crate) mod verify;
 pub(crate) mod witness;
 
 pub use info::{Verbosity, info_banner, info_message, set_verbosity};
+#[cfg(feature = "lsp")]
+pub use lsp::run as lsp_run;
 pub use pretty::{diagram, pretty_print};
 pub use report::Run;
 pub use types::*;

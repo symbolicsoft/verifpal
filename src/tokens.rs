@@ -1,8 +1,6 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use crate::types::{ProtocolTrace, Span};
@@ -35,7 +33,6 @@ pub(crate) struct Token {
 #[derive(Clone, Debug)]
 pub(crate) struct Symbol {
 	pub name: Arc<str>,
-	pub declaration: Option<Span>,
 	pub creator: Option<Arc<str>>,
 	pub assigned: Option<String>,
 	pub known_by: Vec<(Arc<str>, Arc<str>)>,
@@ -61,10 +58,6 @@ impl TokenIndex {
 
 	pub(crate) fn tokens(&self) -> &[Token] {
 		&self.tokens
-	}
-
-	pub(crate) fn is_empty(&self) -> bool {
-		self.tokens.is_empty()
 	}
 
 	pub(crate) fn len(&self) -> usize {
@@ -102,7 +95,6 @@ impl TokenIndex {
 			.find(|slot| slot.constant.name.to_lowercase() == needle)?;
 		Some(Symbol {
 			name: Arc::clone(&slot.constant.name),
-			declaration: self.declaration_of(&token.text),
 			creator: Some(Arc::from(trace.principal_name(slot.creator))),
 			assigned: Some(slot.initial_value.to_string()),
 			known_by: slot
@@ -236,7 +228,7 @@ mod tests {
 	#[test]
 	fn every_token_span_quotes_its_own_text() {
 		let index = index_of(SRC);
-		assert!(!index.is_empty());
+		assert!(!index.tokens().is_empty());
 		for token in index.tokens() {
 			assert_eq!(
 				&SRC[token.span.start..token.span.end],
