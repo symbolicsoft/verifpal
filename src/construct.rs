@@ -53,18 +53,19 @@ pub(crate) fn construct_protocol_trace(
 
 	if let Value::Constant(nil) = value_nil() {
 		let known_by: Vec<_> = principal_ids.iter().map(|&pid| (pid, pid)).collect();
-		let const_id = nil.id;
-		trace.slots.push(TraceSlot {
-			declared_span: Span::default(),
-			initial_value: Value::Constant(nil.clone()),
-			constant: nil,
-			creator: ATTACKER_ID,
-			known_by,
-			sent_by: vec![],
-			declared_at,
-			phases: vec![current_phase],
-		});
-		trace.index.insert(const_id, trace.slots.len() - 1);
+		trace_declare(
+			&mut trace,
+			TraceSlot {
+				declared_span: Span::default(),
+				initial_value: Value::Constant(nil.clone()),
+				constant: nil,
+				creator: ATTACKER_ID,
+				known_by,
+				sent_by: vec![],
+				declared_at,
+				phases: vec![current_phase],
+			},
+		);
 	}
 
 	for block in &m.blocks {
@@ -195,19 +196,19 @@ fn construct_trace_render_knows(
 			declaration: Some(Declaration::Knows),
 			qualifier: expr.qualifier,
 		};
-		let const_id = new_c.id;
-		trace.slots.push(TraceSlot {
-			declared_span: expr.span,
-			initial_value: Value::Constant(new_c.clone()),
-			constant: new_c,
-			creator: principal.id,
-			known_by: vec![],
-			sent_by: vec![],
-			declared_at,
-			phases: vec![],
-		});
-		let slot_idx = trace.slots.len() - 1;
-		trace.index.insert(const_id, slot_idx);
+		let slot_idx = trace_declare(
+			trace,
+			TraceSlot {
+				declared_span: expr.span,
+				initial_value: Value::Constant(new_c.clone()),
+				constant: new_c,
+				creator: principal.id,
+				known_by: vec![],
+				sent_by: vec![],
+				declared_at,
+				phases: vec![],
+			},
+		);
 		if expr.qualifier != Some(Qualifier::Public) {
 			continue;
 		}
@@ -218,6 +219,20 @@ fn construct_trace_render_knows(
 		}
 	}
 	Ok(())
+}
+
+fn trace_declare(trace: &mut ProtocolTrace, slot: TraceSlot) -> usize {
+	let const_id = slot.constant.id;
+	trace.slots.push(slot);
+	let slot_idx = trace.slots.len() - 1;
+	trace.index.insert(const_id, slot_idx);
+	slot_idx
+}
+
+fn trace_slot_of(trace: &ProtocolTrace, c: &Constant) -> VResult<usize> {
+	trace.index_of(c).ok_or_else(|| {
+		unknown_constant(&c.name, trace, "not declared by any principal".to_string())
+	})
 }
 
 fn construct_trace_render_generates(
@@ -251,18 +266,19 @@ fn construct_trace_render_generates(
 			declaration: Some(Declaration::Generates),
 			qualifier: Some(Qualifier::Private),
 		};
-		let const_id = new_c.id;
-		trace.slots.push(TraceSlot {
-			declared_span: expr.span,
-			initial_value: Value::Constant(new_c.clone()),
-			constant: new_c,
-			creator: principal.id,
-			known_by: vec![],
-			sent_by: vec![],
-			declared_at,
-			phases: vec![],
-		});
-		trace.index.insert(const_id, trace.slots.len() - 1);
+		trace_declare(
+			trace,
+			TraceSlot {
+				declared_span: expr.span,
+				initial_value: Value::Constant(new_c.clone()),
+				constant: new_c,
+				creator: principal.id,
+				known_by: vec![],
+				sent_by: vec![],
+				declared_at,
+				phases: vec![],
+			},
+		);
 	}
 	Ok(())
 }
@@ -282,16 +298,7 @@ fn construct_trace_render_assignment(
 		sanity_primitive(p, &expr.constants)?;
 	}
 	for c in &constants {
-		let idx = match trace.index_of(c) {
-			Some(idx) => idx,
-			None => {
-				return Err(unknown_constant(
-					&c.name,
-					trace,
-					"not declared by any principal".to_string(),
-				));
-			}
-		};
+		let idx = trace_slot_of(trace, c)?;
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
 			return Err(VerifpalError::sanity(
@@ -348,18 +355,19 @@ fn construct_trace_render_assignment(
 			mutable.output = output_idx;
 			mutable.hash.clear();
 		}
-		let const_id = new_c.id;
-		trace.slots.push(TraceSlot {
-			declared_span: expr.span,
-			constant: new_c,
-			initial_value,
-			creator: principal.id,
-			known_by: vec![],
-			sent_by: vec![],
-			declared_at,
-			phases: vec![],
-		});
-		trace.index.insert(const_id, trace.slots.len() - 1);
+		trace_declare(
+			trace,
+			TraceSlot {
+				declared_span: expr.span,
+				constant: new_c,
+				initial_value,
+				creator: principal.id,
+				known_by: vec![],
+				sent_by: vec![],
+				declared_at,
+				phases: vec![],
+			},
+		);
 	}
 	Ok(())
 }
@@ -373,16 +381,7 @@ fn construct_trace_render_leaks(
 	declared_at: i32,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		let idx = match trace.index_of(c) {
-			Some(idx) => idx,
-			None => {
-				return Err(unknown_constant(
-					&c.name,
-					trace,
-					"not declared by any principal".to_string(),
-				));
-			}
-		};
+		let idx = trace_slot_of(trace, c)?;
 		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
 			return Err(VerifpalError::sanity(
@@ -422,16 +421,7 @@ fn construct_trace_render_message(
 	declared_at: i32,
 ) -> VResult<()> {
 	for c in &message.constants {
-		let idx = match trace.index_of(c) {
-			Some(idx) => idx,
-			None => {
-				return Err(unknown_constant(
-					&c.name,
-					trace,
-					"not declared by any principal".to_string(),
-				));
-			}
-		};
+		let idx = trace_slot_of(trace, c)?;
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {

@@ -119,99 +119,36 @@ pub(crate) fn minimize_witness(
 			.collect()
 	};
 
-	let forged_from = |session: &PrincipalState,
-	                   base: Vec<(SlotIdx, Value)>|
-	 -> Vec<Vec<(SlotIdx, Value)>> {
-		let keys = controlled_installs(km, session, &ambient, base);
-		if keys.is_empty() {
-			return Vec::new();
-		}
-		let mut staged = session.clone();
-		for (slot, value) in &keys {
-			crate::reexec::install(&mut staged, slot.get(), value.clone(), true);
-		}
-		if staged.resolve_all_values().is_err() {
-			return Vec::new();
-		}
-		let mut shapes: Vec<Value> = Vec::new();
-		for (prim, _) in staged.perform_all_rewrites() {
-			let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
-				continue;
-			};
-			if !spec.rewrite.has_rule {
-				continue;
+	let forged_from =
+		|session: &PrincipalState, base: Vec<(SlotIdx, Value)>| -> Vec<Vec<(SlotIdx, Value)>> {
+			let keys = controlled_installs(km, session, &ambient, base);
+			if keys.is_empty() {
+				return Vec::new();
 			}
-			for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil) {
-				if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
-					shapes.push(shape);
+			let shapes = shapes_the_checks_wanted(session, &keys);
+			if shapes.is_empty() {
+				return Vec::new();
+			}
+			let mut out = Vec::new();
+			for i in forgeable_slots(km, session) {
+				for shape in &shapes {
+					let mut candidate: Vec<(SlotIdx, Value)> =
+						keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
+					candidate.push((SlotIdx(i), shape.clone()));
+					out.push(candidate);
 				}
 			}
-		}
-		if shapes.is_empty() {
-			return Vec::new();
-		}
-		let mut out = Vec::new();
-		for (i, sm) in session.meta.iter().enumerate() {
-			if !sm.wire.contains(&session.id) {
-				continue;
-			}
-			let Some(slot) = km.slots.get(i) else {
-				continue;
-			};
-			if slot.creator == session.id
-				|| crate::primitive::value_is_key_derivation(&slot.initial_value)
-			{
-				continue;
-			}
-			for shape in &shapes {
-				let mut candidate: Vec<(SlotIdx, Value)> =
-					keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
-				candidate.push((SlotIdx(i), shape.clone()));
-				out.push(candidate);
-			}
-		}
-		out
-	};
+			out
+		};
 
 	let forged_alone = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
 		let mut out = Vec::new();
-		for (i, sm) in session.meta.iter().enumerate() {
-			if !sm.wire.contains(&session.id) {
-				continue;
-			}
-			let Some(slot) = km.slots.get(i) else {
-				continue;
-			};
-			if slot.creator == session.id
-				|| crate::primitive::value_is_key_derivation(&slot.initial_value)
-			{
-				continue;
-			}
+		for i in forgeable_slots(km, session) {
 			let blanked = vec![(SlotIdx(i), value_nil())];
 			if controlled_installs(km, session, &ambient, blanked.clone()).is_empty() {
 				continue;
 			}
-			let mut staged = session.clone();
-			crate::reexec::install(&mut staged, i, value_nil(), true);
-			if staged.resolve_all_values().is_err() {
-				continue;
-			}
-			let mut shapes: Vec<Value> = Vec::new();
-			for (prim, _) in staged.perform_all_rewrites() {
-				let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
-					continue;
-				};
-				if !spec.rewrite.has_rule {
-					continue;
-				}
-				for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil)
-				{
-					if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
-						shapes.push(shape);
-					}
-				}
-			}
-			for shape in shapes {
+			for shape in shapes_the_checks_wanted(session, &blanked) {
 				out.push(vec![(SlotIdx(i), shape)]);
 			}
 		}
@@ -291,6 +228,47 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
+}
+
+fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
+	session
+		.meta
+		.iter()
+		.enumerate()
+		.filter(|(i, sm)| {
+			sm.wire.contains(&session.id)
+				&& km.slots.get(*i).is_some_and(|slot| {
+					slot.creator != session.id
+						&& !crate::primitive::value_is_key_derivation(&slot.initial_value)
+				})
+		})
+		.map(|(i, _)| i)
+		.collect()
+}
+
+fn shapes_the_checks_wanted(session: &PrincipalState, installs: &[(SlotIdx, Value)]) -> Vec<Value> {
+	let mut staged = session.clone();
+	for (slot, value) in installs {
+		crate::reexec::install(&mut staged, slot.get(), value.clone(), true);
+	}
+	if staged.resolve_all_values().is_err() {
+		return Vec::new();
+	}
+	let mut shapes: Vec<Value> = Vec::new();
+	for (prim, _) in staged.perform_all_rewrites() {
+		let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
+			continue;
+		};
+		if !spec.rewrite.has_rule {
+			continue;
+		}
+		for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil) {
+			if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
+				shapes.push(shape);
+			}
+		}
+	}
+	shapes
 }
 
 fn needs_guard_bypass(ps: &PrincipalState) -> bool {

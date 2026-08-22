@@ -33,9 +33,20 @@ pub(crate) fn analyze(
 	Ok(Analysis::of(&report, text))
 }
 
+struct Live {
+	cancel: Arc<AtomicBool>,
+	finished: AtomicBool,
+}
+
+impl Live {
+	fn is_running(&self) -> bool {
+		!self.finished.load(Ordering::Relaxed)
+	}
+}
+
 pub(crate) struct Runner {
 	sender: crossbeam_channel::Sender<Message>,
-	running: HashMap<String, Arc<AtomicBool>>,
+	running: HashMap<String, Arc<Live>>,
 }
 
 impl Runner {
@@ -47,18 +58,19 @@ impl Runner {
 	}
 
 	pub(crate) fn cancel(&mut self, uri: &str) -> bool {
-		match self.running.remove(uri) {
-			Some(flag) => {
-				flag.store(true, Ordering::Relaxed);
-				true
-			}
-			None => false,
+		let Some(live) = self.running.remove(uri) else {
+			return false;
+		};
+		if !live.is_running() {
+			return false;
 		}
+		live.cancel.store(true, Ordering::Relaxed);
+		true
 	}
 
 	pub(crate) fn cancel_all(&mut self) {
-		for (_, flag) in self.running.drain() {
-			flag.store(true, Ordering::Relaxed);
+		for (_, live) in self.running.drain() {
+			live.cancel.store(true, Ordering::Relaxed);
 		}
 	}
 
@@ -74,10 +86,16 @@ impl Runner {
 		encoding: PositionEncodingKind,
 	) {
 		self.cancel(&uri);
+		self.running.retain(|_, live| live.is_running());
 		let cancel = Arc::new(AtomicBool::new(false));
-		self.running.insert(uri.clone(), Arc::clone(&cancel));
+		let live = Arc::new(Live {
+			cancel: Arc::clone(&cancel),
+			finished: AtomicBool::new(false),
+		});
+		self.running.insert(uri.clone(), Arc::clone(&live));
 		let sender = self.sender.clone();
 		std::thread::spawn(move || {
+			let _done = Finished(live);
 			crate::info::set_verbosity(crate::info::Verbosity::Silent);
 			progress(
 				&sender,
@@ -132,6 +150,14 @@ impl Runner {
 	}
 }
 
+struct Finished(Arc<Live>);
+
+impl Drop for Finished {
+	fn drop(&mut self) {
+		self.0.finished.store(true, Ordering::Relaxed);
+	}
+}
+
 fn progress(sender: &crossbeam_channel::Sender<Message>, token: &str, value: serde_json::Value) {
 	let _ = sender.send(Message::Notification(Notification::new(
 		"$/progress".to_string(),
@@ -181,5 +207,62 @@ mod tests {
 	fn a_model_that_does_not_parse_is_an_error_not_a_panic() {
 		let quiet = Arc::new(AtomicBool::new(false));
 		assert!(analyze("an.vp", "attacker[active]\nprincipal Alice[\n", 1, &quiet).is_err());
+	}
+
+	#[test]
+	fn an_analysis_that_already_finished_is_not_cancellable() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		let uri = "file:///an.vp".to_string();
+		runner.start(
+			uri.clone(),
+			"an.vp".to_string(),
+			ATTACKED.to_string(),
+			1,
+			1,
+			"t1".to_string(),
+			PositionEncodingKind::UTF8,
+		);
+
+		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+		let mut reported = false;
+		while std::time::Instant::now() < deadline {
+			let Ok(Message::Notification(note)) =
+				receiver.recv_timeout(std::time::Duration::from_secs(30))
+			else {
+				break;
+			};
+			if note.method == "verifpal/analysisReport" {
+				reported = true;
+				break;
+			}
+		}
+		assert!(reported, "the worker sent its report");
+
+		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+		while std::time::Instant::now() < deadline
+			&& runner
+				.running
+				.get(&uri)
+				.is_some_and(|live| live.is_running())
+		{
+			std::thread::yield_now();
+		}
+
+		assert!(
+			!runner.cancel(&uri),
+			"a completed analysis must not report itself as cancelled"
+		);
+		assert!(
+			!runner.running.contains_key(&uri),
+			"and its entry must not be kept"
+		);
+	}
+
+	#[test]
+	fn cancelling_an_unknown_document_reports_nothing_cancelled() {
+		let (sender, _receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		assert!(!runner.cancel("file:///never-started.vp"));
 	}
 }

@@ -5,12 +5,10 @@ use std::fmt;
 
 use crate::parser::parse_file;
 use crate::primitive::primitive_name;
-use crate::sanity::sanity;
 use crate::types::*;
 
 pub fn pretty_print(model_file: &str) -> VResult<String> {
-	let m = parse_file(model_file)?;
-	pretty_model(&m).map_err(|e| e.located(&m.file_name, &m.source))
+	Ok(pretty_model(&parse_file(model_file)?))
 }
 
 impl fmt::Display for Constant {
@@ -249,8 +247,7 @@ pub(crate) fn pretty_message(message: &Message) -> String {
 	)
 }
 
-pub(crate) fn pretty_model(m: &Model) -> VResult<String> {
-	sanity(m)?;
+pub(crate) fn pretty_model(m: &Model) -> String {
 	let mut output = String::new();
 
 	if !m.pre_attacker_comments.is_empty() {
@@ -314,7 +311,7 @@ pub(crate) fn pretty_model(m: &Model) -> VResult<String> {
 		}
 	}
 
-	Ok(output)
+	output
 }
 
 pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
@@ -332,13 +329,17 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 pub fn diagram(model_file: &str) -> VResult<String> {
 	let m = parse_file(model_file)?;
 	let body = pretty_diagram(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+	Ok(mermaid_of(&body))
+}
+
+pub(crate) fn mermaid_of(body: &str) -> String {
 	let mut out = String::from("sequenceDiagram\n");
 	for line in body.lines() {
 		out.push_str("    ");
 		out.push_str(line);
 		out.push('\n');
 	}
-	Ok(out)
+	out
 }
 pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 	let anchor = m.blocks.iter().find_map(|block| match block {
@@ -383,9 +384,9 @@ mod tests {
 	fn pretty_round_trips_primitive_capabilities() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private prc_k\n\tknows private prc_m\n\tknows private prc_ad\n\tprc_e = AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)\n]\n\nphase[1]\n\nphase[2]\n\nqueries[\n\tconfidentiality? prc_m\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let once = pretty_model(&m).expect("pretty");
+		let once = pretty_model(&m);
 		let m2 = parse_string("t.vp", &once).expect("reparse");
-		let twice = pretty_model(&m2).expect("pretty again");
+		let twice = pretty_model(&m2);
 		assert_eq!(once, twice);
 		assert!(
 			once.contains("AEAD_ENC[weak, forgeable from phase 2](prc_k, prc_m, prc_ad)"),
@@ -398,9 +399,9 @@ mod tests {
 	fn pretty_round_trips_dh_to_new_syntax() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private dsz_a\n\tknows private dsz_b\n\tdsz_ga = PUBKEY(dsz_a)\n\tdsz_k = DH_KEX(dsz_ga, dsz_b)\n]\n\nqueries[\n\tconfidentiality? dsz_k\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let once = pretty_model(&m).expect("pretty");
+		let once = pretty_model(&m);
 		let m2 = parse_string("t.vp", &once).expect("reparse");
-		let twice = pretty_model(&m2).expect("pretty again");
+		let twice = pretty_model(&m2);
 		assert_eq!(once, twice);
 		assert!(once.contains("dsz_ga = PUBKEY(dsz_a)"), "got: {}", once);
 		assert!(
@@ -415,7 +416,7 @@ mod tests {
 	fn pretty_emits_pre_attacker_comments() {
 		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(
 			out.starts_with("// hello\n\nattacker[active]"),
 			"got: {}",
@@ -427,7 +428,7 @@ mod tests {
 	fn pretty_emits_leading_on_block() {
 		let src = "attacker[active]\n\n// before alice\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(
 			out.contains("// before alice\nprincipal Alice["),
 			"got: {}",
@@ -439,7 +440,7 @@ mod tests {
 	fn pretty_emits_trailing_on_expression() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a // lt\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(out.contains("knows private a // lt"), "got: {}", out);
 	}
 
@@ -447,7 +448,7 @@ mod tests {
 	fn pretty_emits_block_comment_inline() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a /* lt */\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(out.contains("knows private a /* lt */"), "got: {}", out);
 	}
 
@@ -455,16 +456,16 @@ mod tests {
 	fn pretty_emits_block_comment_multiline() {
 		let src = "/* line1\n   line2 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(out.contains("/* line1"), "missing /* line1 in:\n{}", out);
 		assert!(out.contains("line2 */"), "missing 'line2 */':\n{}", out);
 	}
 
 	fn assert_round_trip_idempotent(src: &str) {
 		let m1 = parse_string("rt.vp", src).expect("parse 1");
-		let s1 = pretty_model(&m1).expect("pretty 1");
+		let s1 = pretty_model(&m1);
 		let m2 = parse_string("rt.vp", &s1).expect("parse 2");
-		let s2 = pretty_model(&m2).expect("pretty 2");
+		let s2 = pretty_model(&m2);
 		assert_eq!(
 			s1, s2,
 			"not idempotent\n--- s1 ---\n{}\n--- s2 ---\n{}",
@@ -539,7 +540,7 @@ mod tests {
 	fn block_comment_multiline_in_leading_position_renders() {
 		let src = "attacker[active]\n\n/* multi\n   line\n   header */\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert!(out.contains("/* multi"), "missing /* multi in:\n{}", out);
 		assert!(out.contains("line"), "missing 'line':\n{}", out);
 		assert!(out.contains("header */"), "missing 'header */':\n{}", out);
@@ -591,7 +592,7 @@ mod tests {
 
 	fn assert_golden(input: &str, golden: &str) {
 		let m = parse_string("g.vp", input).expect("parse");
-		let out = pretty_model(&m).expect("pretty");
+		let out = pretty_model(&m);
 		assert_eq!(
 			out, golden,
 			"golden mismatch\n--- expected ---\n{}\n--- got ---\n{}",

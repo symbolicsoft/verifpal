@@ -681,23 +681,27 @@ impl<'a> Parser<'a> {
 		}))
 	}
 
+	fn expect_arrow(&mut self, note: &'static str) -> VResult<()> {
+		let arrow_at = self.pos;
+		if self.try_expect("->") || self.try_expect("\u{2192}") {
+			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
+			return Ok(());
+		}
+		Err(
+			VerifpalError::parse("expected `->` after the sender's name".into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note(note),
+		)
+	}
+
 	fn parse_message_block(&mut self) -> VResult<Block> {
 		let start = self.pos;
 		let sender_name = self.parse_identifier()?;
 		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
-		let arrow_at = self.pos;
-		if self.try_expect("->") || self.try_expect("\u{2192}") {
-			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
-		} else {
-			return Err(
-				VerifpalError::parse("expected `->` after the sender's name".into())
-					.at(self.here())
-					.labelled(self.found_here())
-					.note("a message is written `Sender -> Recipient: constant, ...`"),
-			);
-		}
+		self.expect_arrow("a message is written `Sender -> Recipient: constant, ...`")?;
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
 		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
@@ -1251,17 +1255,7 @@ impl<'a> Parser<'a> {
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 		self.skip_whitespace();
-		let arrow_at = self.pos;
-		if self.try_expect("->") || self.try_expect("\u{2192}") {
-			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
-		} else {
-			return Err(
-				VerifpalError::parse("expected `->` after the sender's name".into())
-					.at(self.here())
-					.labelled(self.found_here())
-					.note("an authentication query is written `authentication? Alice -> Bob: m`"),
-			);
-		}
+		self.expect_arrow("an authentication query is written `authentication? Alice -> Bob: m`")?;
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
 		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
@@ -1362,14 +1356,7 @@ impl<'a> Parser<'a> {
 			self.skip_whitespace();
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
-			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-				return Err(
-					VerifpalError::parse("expected `->` after the sender's name".into())
-						.at(self.here())
-						.labelled(self.found_here())
-						.note("a precondition is written `precondition[ Bob -> Alice: ack ]`"),
-				);
-			}
+			self.expect_arrow("a precondition is written `precondition[ Bob -> Alice: ack ]`")?;
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();

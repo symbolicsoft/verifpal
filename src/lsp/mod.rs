@@ -515,12 +515,7 @@ impl Server {
 		let Ok(readable) = crate::pretty::pretty_diagram(model) else {
 			return serde_json::Value::Null;
 		};
-		let mut mermaid = String::from("sequenceDiagram\n");
-		for line in readable.lines() {
-			mermaid.push_str("    ");
-			mermaid.push_str(line);
-			mermaid.push('\n');
-		}
+		let mermaid = crate::pretty::mermaid_of(&readable);
 		serde_json::json!(proto::DiagramResult { mermaid, readable })
 	}
 
@@ -531,9 +526,7 @@ impl Server {
 		let Ok(model) = &doc.model else {
 			return Vec::new();
 		};
-		let Ok(text) = crate::pretty::pretty_model(model) else {
-			return Vec::new();
-		};
+		let text = crate::pretty::pretty_model(model);
 		if text == doc.text {
 			return Vec::new();
 		}

@@ -154,7 +154,7 @@ pub fn wasm_verify(input: &str) -> String {
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {
 	let payload =
-		match parser::parse_string("workbench.vp", input).and_then(|m| pretty::pretty_model(&m)) {
+		match parser::parse_string("workbench.vp", input).map(|m| pretty::pretty_model(&m)) {
 			Ok(output) => WasmPretty {
 				ok: true,
 				error: String::new(),

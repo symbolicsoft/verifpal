@@ -576,6 +576,170 @@ mod tests {
 	}
 
 	#[test]
+	fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
+		fn narrowest(arity: &[i32]) -> usize {
+			arity.iter().copied().min().unwrap_or(0).max(0) as usize
+		}
+		fn widest(arity: &[i32]) -> usize {
+			arity.iter().copied().max().unwrap_or(0).max(0) as usize
+		}
+
+		for spec in prim_specs() {
+			let name = spec.name;
+			let least = narrowest(&spec.arity);
+			let most = widest(&spec.arity);
+			let outputs = widest(&spec.output);
+			assert!(least > 0, "{name} declares no arity");
+
+			let must = |what: &str, i: usize| {
+				assert!(
+					i < least,
+					"{name}.{what} is argument {i}, but a {name} call may have as few as \
+					 {least} arguments, and the engine indexes this position directly"
+				);
+			};
+			let may = |what: &str, i: usize| {
+				assert!(
+					i < most,
+					"{name}.{what} is argument {i}, but {name} takes at most {most} \
+					 arguments, so this entry can never apply"
+				);
+			};
+			let out = |what: &str, i: usize| {
+				assert!(
+					i < outputs,
+					"{name}.{what} is output {i}, but {name} has {outputs} outputs"
+				);
+			};
+
+			if spec.decompose.has_rule {
+				must("decompose.reveal", spec.decompose.reveal);
+				for &i in &spec.decompose.given {
+					may("decompose.given", i);
+				}
+				if let Some(i) = spec.decompose.reveal_output {
+					out("decompose.reveal_output", i);
+				}
+			}
+
+			if spec.recompose.has_rule {
+				must("recompose.reveal", spec.recompose.reveal);
+				for set in &spec.recompose.given {
+					for &i in set {
+						out("recompose.given", i);
+					}
+				}
+			}
+
+			if spec.rewrite.has_rule {
+				must("rewrite.from", spec.rewrite.from);
+				let inner = primitive_get(spec.rewrite.id)
+					.unwrap_or_else(|_| panic!("{name}.rewrite.id is not a primitive"));
+				for (outer, inners) in &spec.rewrite.matching {
+					may("rewrite.matching", *outer);
+					for &i in inners {
+						assert!(
+							i < widest(&inner.arity),
+							"{name}.rewrite.matching points at argument {i} of {}, which \
+							 takes at most {} arguments",
+							inner.name,
+							widest(&inner.arity)
+						);
+					}
+				}
+			}
+
+			if spec.rebuild.has_rule {
+				let inner = primitive_get(spec.rebuild.id)
+					.unwrap_or_else(|_| panic!("{name}.rebuild.id is not a primitive"));
+				assert!(
+					spec.rebuild.reveal < narrowest(&inner.arity),
+					"{name}.rebuild.reveal is argument {} of {}, which may have as few \
+					 as {} arguments, and the engine indexes it directly",
+					spec.rebuild.reveal,
+					inner.name,
+					narrowest(&inner.arity)
+				);
+				for set in &spec.rebuild.given {
+					for &i in set {
+						may("rebuild.given", i);
+					}
+				}
+			}
+
+			match spec.bypass_key {
+				Some(BypassKeyKind::Direct(i)) => must("bypass_key", i),
+				Some(BypassKeyKind::Derived {
+					arg: i,
+					constructor,
+				}) => {
+					must("bypass_key", i);
+					assert!(
+						primitive_get(constructor).is_ok(),
+						"{name}.bypass_key names a constructor that is not a primitive"
+					);
+				}
+				None => {}
+			}
+
+			if let Some(rule) = &spec.commutativity {
+				must("commutativity.wrapped", rule.wrapped);
+				must("commutativity.bare", rule.bare);
+				assert!(
+					primitive_get(rule.constructor).is_ok(),
+					"{name}.commutativity names a constructor that is not a primitive"
+				);
+			}
+
+			for &i in &spec.weak_reveals {
+				may("weak_reveals", i);
+			}
+			if let Some(i) = spec.weak_reveals_output {
+				out("weak_reveals_output", i);
+			}
+			if let Some(i) = spec.forgeable_secret {
+				may("forgeable_secret", i);
+			}
+			for &i in &spec.malleable_vary {
+				may("malleable_vary", i);
+			}
+			for &i in &spec.identifying_positions {
+				may("identifying_positions", i);
+			}
+			for &i in &spec.password_hashing {
+				may("password_hashing", i);
+			}
+			for (position, banned) in &spec.argument_restrictions {
+				may("argument_restrictions", *position);
+				for &id in banned {
+					assert!(
+						primitive_get(id).is_ok() || primitive_core_get(id).is_ok(),
+						"{name}.argument_restrictions bans an id that is not a primitive"
+					);
+				}
+			}
+
+			assert_eq!(
+				spec.arg_names.len(),
+				most,
+				"{name} names {} arguments but takes up to {most}",
+				spec.arg_names.len(),
+			);
+		}
+
+		for spec in core_specs() {
+			assert_eq!(
+				spec.arg_names.len(),
+				widest(&spec.arity),
+				"{} names {} arguments but takes up to {}",
+				spec.name,
+				spec.arg_names.len(),
+				widest(&spec.arity),
+			);
+		}
+	}
+
+	#[test]
 	fn primitive_has_rewrite_rule_checks() {
 		assert!(primitive_has_rewrite_rule(PRIM_AEAD_DEC));
 		assert!(primitive_has_rewrite_rule(PRIM_DEC));

@@ -7,7 +7,7 @@ use lsp_types::{
 
 use crate::lsp::line::LineIndex;
 use crate::lsp::state::Document;
-use crate::types::{ErrorKind, VerifpalError};
+use crate::types::VerifpalError;
 
 pub(crate) fn for_document(doc: &Document, uri: &Uri) -> Vec<Diagnostic> {
 	if let Err(e) = &doc.model {
@@ -51,7 +51,7 @@ pub(crate) fn of_error(e: &VerifpalError, line: &LineIndex, uri: &Uri) -> Diagno
 	Diagnostic {
 		range,
 		severity: Some(DiagnosticSeverity::ERROR),
-		code: Some(NumberOrString::String(label(e.kind).to_string())),
+		code: Some(NumberOrString::String(e.kind.label().to_string())),
 		source: Some("verifpal".to_string()),
 		message,
 		related_information: (!related.is_empty()).then_some(related),
@@ -87,16 +87,6 @@ pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) 
 			}
 		})
 		.collect()
-}
-
-fn label(kind: ErrorKind) -> &'static str {
-	match kind {
-		ErrorKind::Parse => "parse error",
-		ErrorKind::Sanity => "sanity error",
-		ErrorKind::Resolution => "resolution error",
-		ErrorKind::Internal => "internal error",
-		ErrorKind::Cancelled => "cancelled",
-	}
 }
 
 #[cfg(test)]

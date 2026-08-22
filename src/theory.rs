@@ -16,6 +16,16 @@ struct ObtainableMemo {
 	index: Arc<StateIndex>,
 }
 
+impl ObtainableMemo {
+	fn is_for_state(&self, ps: &PrincipalState) -> bool {
+		std::ptr::eq(self.owner.0, ps)
+	}
+
+	fn is_for(&self, ps: &PrincipalState, attacker: &AttackerState) -> bool {
+		self.is_for_state(ps) && std::ptr::eq(self.owner.1, attacker)
+	}
+}
+
 pub(crate) struct StateIndex {
 	has_passwords: bool,
 	slots_by_hash: IdMap<u64, Vec<usize>>,
@@ -35,7 +45,7 @@ pub(crate) fn slots_equivalent_to(ps: &PrincipalState, value: &Value) -> Vec<usi
 	let indexed = MEMO.with(|m| {
 		let borrowed = m.borrow();
 		let memo = borrowed.as_ref()?;
-		if !std::ptr::eq(memo.owner.0, ps) {
+		if !memo.is_for_state(ps) {
 			return None;
 		}
 		Some(
@@ -73,7 +83,7 @@ fn index_slots_by_hash(ps: &PrincipalState) -> IdMap<u64, Vec<usize>> {
 pub(crate) fn state_declares_passwords(ps: &PrincipalState) -> bool {
 	MEMO.with(|m| {
 		if let Some(memo) = m.borrow().as_ref()
-			&& std::ptr::eq(memo.owner.0, ps)
+			&& memo.is_for_state(ps)
 		{
 			return Some(memo.index.has_passwords);
 		}
@@ -142,16 +152,17 @@ fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
 	});
 }
 
-pub(crate) struct DeductionMemo {
+pub(crate) struct DeductionMemo<'a> {
 	previous: Option<Option<ObtainableMemo>>,
+	borrowed: std::marker::PhantomData<(&'a PrincipalState, &'a AttackerState)>,
 }
 
-impl DeductionMemo {
+impl<'a> DeductionMemo<'a> {
 	pub(crate) fn scoped(
-		ps: &PrincipalState,
-		attacker: &AttackerState,
+		ps: &'a PrincipalState,
+		attacker: &'a AttackerState,
 		index: &Arc<StateIndex>,
-	) -> Self {
+	) -> DeductionMemo<'a> {
 		let installed = ObtainableMemo {
 			owner: (ps as *const _, attacker as *const _),
 			entries: IdMap::default(),
@@ -160,11 +171,12 @@ impl DeductionMemo {
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
 			previous: Some(previous),
+			borrowed: std::marker::PhantomData,
 		}
 	}
 }
 
-impl Drop for DeductionMemo {
+impl Drop for DeductionMemo<'_> {
 	fn drop(&mut self) {
 		if let Some(previous) = self.previous.take() {
 			MEMO.with(|m| *m.borrow_mut() = previous);
@@ -181,7 +193,7 @@ fn memo_obtainable_get(
 	MEMO.with(|m| {
 		let borrowed = m.borrow();
 		let memo = borrowed.as_ref()?;
-		if memo.owner != (ps as *const _, attacker as *const _) {
+		if !memo.is_for(ps, attacker) {
 			return None;
 		}
 		memo.entries
@@ -201,7 +213,7 @@ fn memo_obtainable_put(
 ) {
 	MEMO.with(|m| {
 		if let Some(memo) = m.borrow_mut().as_mut()
-			&& memo.owner == (ps as *const _, attacker as *const _)
+			&& memo.is_for(ps, attacker)
 		{
 			memo.entries
 				.entry(key)

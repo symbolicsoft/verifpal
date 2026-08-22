@@ -438,14 +438,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			rebuild: RebuildRule {
 				has_rule: true,
 				id: PRIM_SHAMIR_SPLIT,
-				given: vec![
-					vec![0, 1],
-					vec![1, 0],
-					vec![0, 2],
-					vec![2, 0],
-					vec![1, 2],
-					vec![2, 1],
-				],
+				given: vec![vec![0, 1], vec![1, 0]],
 				reveal: 0,
 			},
 			..PrimitiveSpec::default()
