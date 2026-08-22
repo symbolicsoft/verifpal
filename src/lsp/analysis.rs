@@ -78,6 +78,7 @@ impl Runner {
 		self.running.insert(uri.clone(), Arc::clone(&cancel));
 		let sender = self.sender.clone();
 		std::thread::spawn(move || {
+			crate::info::set_verbosity(crate::info::Verbosity::Silent);
 			progress(
 				&sender,
 				&token,

@@ -34,6 +34,7 @@ pub fn run() -> Fallible {
 }
 
 pub(crate) fn serve(connection: &Connection) -> Fallible {
+	crate::info::set_verbosity(crate::info::Verbosity::Silent);
 	let (id, params) = connection.initialize_start()?;
 	let params: InitializeParams = serde_json::from_value(params)?;
 	let encoding = negotiate_encoding(&params);
