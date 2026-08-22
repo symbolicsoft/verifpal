@@ -89,8 +89,19 @@ pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 }
 
 pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
+	verify_report_with_source(file_path, sessions).map(|(report, _)| report)
+}
+
+/// `verify_report`, returning the model source alongside the report.
+///
+/// A report's query spans are offsets into *this* text. Re-reading the file to
+/// resolve them would be a race with whatever wrote it, so the text the
+/// analysis actually ran on travels with the report.
+pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(VerifyReport, String)> {
 	let m = parse_file(file_path)?;
-	verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))
+	let source = m.source.to_string();
+	let report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
+	Ok((report, source))
 }
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal

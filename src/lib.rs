@@ -46,7 +46,7 @@ pub(crate) mod verify;
 pub(crate) mod witness;
 
 pub use info::{Verbosity, info_banner, info_message, set_verbosity};
-pub use json::{diagram, handle_internal_json, json_report};
+pub use json::{diagram, handle_internal_json};
 pub use pretty::pretty_print;
 pub use report::Run;
 pub use types::*;
@@ -54,7 +54,9 @@ pub use types::*;
 pub use update::{UpdateCheck, update_check_report, update_check_start};
 #[cfg(feature = "cli")]
 pub use util::{ColorChoice, set_color_choice};
-pub use verify::{VerifyReport, verify, verify_report, verify_with_sessions};
+pub use verify::{
+	VerifyReport, verify, verify_report, verify_report_with_source, verify_with_sessions,
+};
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;

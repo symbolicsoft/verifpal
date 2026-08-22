@@ -5,8 +5,9 @@ use std::io::Read;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
-	ColorChoice, Verbosity, VerifyReport, diagram, info_banner, json_report, pretty_print,
-	set_color_choice, set_verbosity, update_check_report, update_check_start, verify_report,
+	ColorChoice, Run, Verbosity, VerifyReport, diagram, info_banner, pretty_print,
+	set_color_choice, set_verbosity, update_check_report, update_check_start,
+	verify_report_with_source,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -147,6 +148,7 @@ fn run_verify(
 
 	let single = models.len() == 1;
 	let mut outcomes: Vec<(String, Result<VerifyReport, String>)> = Vec::new();
+	let mut sources: Vec<String> = Vec::new();
 	let mut had_error = false;
 	let mut had_attack = false;
 
@@ -154,8 +156,8 @@ fn run_verify(
 		if index > 0 && !json && !result_code {
 			println!();
 		}
-		match verify_report(model, sessions) {
-			Ok(report) => {
+		match verify_report_with_source(model, sessions) {
+			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
 					if single {
@@ -165,6 +167,7 @@ fn run_verify(
 					}
 				}
 				outcomes.push((model.clone(), Ok(report)));
+				sources.push(source);
 			}
 			Err(e) => {
 				had_error = true;
@@ -173,12 +176,20 @@ fn run_verify(
 					eprintln!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
+				sources.push(String::new());
 			}
 		}
 	}
 
 	if json {
-		println!("{}", json_report(VERSION, &outcomes));
+		let run = Run::of(VERSION, &outcomes, &sources);
+		match serde_json::to_string(&run) {
+			Ok(text) => println!("{}", text),
+			Err(e) => {
+				eprintln!("could not serialize the report: {}", e);
+				return EXIT_ERROR;
+			}
+		}
 	}
 	update_check_report(&update_check);
 
