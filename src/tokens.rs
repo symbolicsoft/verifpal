@@ -23,6 +23,7 @@ pub(crate) enum TokenKind {
 	Comment,
 }
 
+#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(crate) struct Token {
 	pub span: Span,
@@ -30,6 +31,7 @@ pub(crate) struct Token {
 	pub text: Arc<str>,
 }
 
+#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(crate) struct Symbol {
 	pub name: Arc<str>,
@@ -56,6 +58,7 @@ impl TokenIndex {
 		});
 	}
 
+	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 	pub(crate) fn tokens(&self) -> &[Token] {
 		&self.tokens
 	}
@@ -68,6 +71,7 @@ impl TokenIndex {
 		self.tokens.truncate(len);
 	}
 
+	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 	pub(crate) fn references(&self, name: &str) -> Vec<Span> {
 		let needle = name.to_lowercase();
 		self.tokens
@@ -80,10 +84,12 @@ impl TokenIndex {
 			.collect()
 	}
 
+	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 	pub(crate) fn declaration_of(&self, name: &str) -> Option<Span> {
 		self.references(name).first().copied()
 	}
 
+	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 	pub(crate) fn resolve(&self, token: &Token, trace: &ProtocolTrace) -> Option<Symbol> {
 		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
 			return None;
@@ -111,6 +117,7 @@ impl TokenIndex {
 		})
 	}
 
+	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 	pub(crate) fn at(&self, offset: usize) -> Option<&Token> {
 		let i = self
 			.tokens

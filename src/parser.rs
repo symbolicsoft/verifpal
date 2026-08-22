@@ -1451,6 +1451,7 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	parse_string(&file_name, &content)
 }
 
+#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
 pub(crate) fn parse_string_indexed(
 	file_name: &str,
 	input: &str,
