@@ -53,9 +53,13 @@ Both give you automatic updates. Otherwise, grab a [release](https://github.com/
 
 With [Rust](https://www.rust-lang.org/tools/install) installed, `cargo build --release` produces the binary under `target/release/`. `cargo test --release` runs the full test suite.
 
-### Visual Studio Code
+### Editor Support
 
-The [Verifpal extension](https://github.com/symbolicsoft/verifpal-vscode) offers syntax highlighting, automatic formatting, live analysis and diagram visualizations. Search for "Verifpal" from inside Visual Studio Code to install it.
+Verifpal ships a language server (`verifpal lsp`), and the project maintains an extension for each of these editors on top of it:
+
+- [Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=symbolicsoft.verifpal) ([source](https://github.com/symbolicsoft/verifpal-vscode)): syntax highlighting, automatic formatting, live query analysis and protocol diagrams as you write the model. Search for "Verifpal" from inside Visual Studio Code to install it.
+- [Neovim](https://github.com/symbolicsoft/verifpal-nvim): syntax highlighting, verification diagnostics on each query line, formatting and hover documentation.
+- [Zed](https://github.com/symbolicsoft/verifpal-zed): syntax highlighting, live error checking and attacker analysis.
 
 ## Discussion
 
@@ -63,6 +67,6 @@ Sign up to the [Verifpal Mailing List](https://lists.symbolic.software/mailman/l
 
 ## License
 
-Verifpal and Verifpal for Visual Studio Code are published by Symbolic Software as free and open source software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The Verifpal User Manual is provided under the [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
+Verifpal and its editor extensions are published by Symbolic Software as free and open source software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The Verifpal User Manual is provided under the [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
 
 © Copyright 2019-2026 Nadim Kobeissi. All Rights Reserved. “Verifpal” and the “Verifpal” logo/mascot are registered trademarks of Nadim Kobeissi.
