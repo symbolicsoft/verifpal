@@ -75,8 +75,22 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 	}
 }
 
+pub struct VerifyReport {
+	pub file_name: String,
+	pub sessions: u8,
+	pub results: Vec<VerifyResult>,
+	pub code: String,
+	pub elapsed: Option<std::time::Duration>,
+	pub assumptions: Vec<(Value, Capability, i32)>,
+}
+
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_with_sessions(file_path, crate::sessions::DEFAULT_SESSIONS)
+}
+
+pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
+	let m = parse_file(file_path)?;
+	verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))
 }
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal
@@ -84,11 +98,11 @@ pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 /// `internal-json` IDE interface and the wasm build cannot disagree about
 /// what a model means.
 pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
-	let m = parse_file(file_path)?;
-	verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))
+	verify_report(file_path, sessions).map(|report| (report.results, report.code))
 }
 
-fn verify_model(m: &Model, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
+fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
+	crate::info::info_status_begin();
 	info_message(
 		&format!(
 			"Verification initiated for '{}' at {}.",
@@ -98,10 +112,20 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<(Vec<VerifyResult>, String)>
 		InfoLevel::Verifpal,
 		false,
 	);
-	let (ctx, trace) = analyze_sessions_traced(m, sessions)?;
-	let out = verify_end(&ctx)?;
+	let analyzed = analyze_sessions_traced(m, sessions);
+	let elapsed = crate::info::info_status_elapsed();
+	crate::info::info_status_end();
+	let (ctx, trace) = analyzed?;
+	let (results, code) = verify_end(&ctx, elapsed)?;
 	witness_replay_check(&ctx, &trace, m.attacker);
-	Ok(out)
+	Ok(VerifyReport {
+		file_name: ctx.results_file_name().to_string(),
+		sessions,
+		results,
+		code,
+		elapsed,
+		assumptions: ctx.capability_assumptions(),
+	})
 }
 
 #[cfg(test)]
@@ -154,6 +178,9 @@ pub(crate) fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
+		crate::info::info_status_update(|| {
+			status_line(ctx, attacker.current_phase, &ps.name, "running")
+		});
 		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
 
 		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved)?;
@@ -212,24 +239,46 @@ pub(crate) fn verify_passive(
 	Ok(())
 }
 
-fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
+pub(crate) fn status_line(
+	ctx: &VerifyContext,
+	phase: i32,
+	principal: &str,
+	activity: &str,
+) -> String {
+	let (done, total) = ctx.query_counts();
+	let elapsed = crate::info::info_status_elapsed()
+		.map(crate::info::info_elapsed_text)
+		.unwrap_or_default();
+	format!(
+		"  phase {phase} \u{00b7} {principal} \u{00b7} {activity} \u{00b7} {done}/{total} queries resolved \u{00b7} {elapsed}"
+	)
+}
+
+fn verify_end(
+	ctx: &VerifyContext,
+	elapsed: Option<std::time::Duration>,
+) -> VResult<(Vec<VerifyResult>, String)> {
 	let results = ctx.results_get();
 	let file_name = ctx.results_file_name();
 	let fail_count = results.iter().filter(|r| r.resolved).count();
 	let total = results.len();
 
-	println!();
+	crate::info::info_blank_line();
 	crate::info::info_separator();
+	let took = elapsed
+		.map(|d| format!(" in {}", crate::info::info_elapsed_text(d)))
+		.unwrap_or_default();
 	info_message(
 		&format!(
-			"Verification completed for '{}' at {}.",
+			"Verification completed for '{}' at {}{}.",
 			file_name,
 			chrono_time_string(),
+			took,
 		),
 		InfoLevel::Verifpal,
 		false,
 	);
-	println!();
+	crate::info::info_blank_line();
 
 	let assumptions = ctx.capability_assumption_terms();
 	if !assumptions.is_empty() {
@@ -245,7 +294,7 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 		for term in &assumptions {
 			info_message(&format!("{}", term), InfoLevel::Warning, false);
 		}
-		println!();
+		crate::info::info_blank_line();
 	}
 
 	for r in &results {
@@ -260,7 +309,7 @@ fn verify_end(ctx: &VerifyContext) -> VResult<(Vec<VerifyResult>, String)> {
 		}
 	}
 
-	println!();
+	crate::info::info_blank_line();
 	crate::info::info_separator();
 
 	let suppressed = crate::info::info_deductions_suppressed();

@@ -83,6 +83,21 @@ impl Span {
 	}
 }
 
+fn last_line_with_text(source: &str) -> Option<(usize, usize, usize)> {
+	let trimmed = source.trim_end();
+	if trimmed.is_empty() {
+		return None;
+	}
+	let end = trimmed.len();
+	let start = trimmed.rfind('\n').map(|i| i + 1).unwrap_or(0);
+	let line = source.as_bytes()[..start]
+		.iter()
+		.filter(|&&b| b == b'\n')
+		.count()
+		+ 1;
+	Some((line, start, end))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
 	Parse,
@@ -155,8 +170,17 @@ impl VerifpalError {
 		let Some(span) = self.span else {
 			return format!("{}: {}: {}", file_name, self.kind.label(), self.message);
 		};
-		let (line, line_start, line_end) = span.line_bounds(source);
-		let at = span.start.min(source.len());
+		let (mut line, mut line_start, mut line_end) = span.line_bounds(source);
+		let mut at = span.start.min(source.len());
+		if source[line_start..line_end].trim().is_empty()
+			&& at >= source.trim_end().len()
+			&& let Some((anchor_line, anchor_start, anchor_end)) = last_line_with_text(source)
+		{
+			line = anchor_line;
+			line_start = anchor_start;
+			line_end = anchor_end;
+			at = anchor_end;
+		}
 		let lead = source[line_start..at].chars().count();
 		let mut out = format!(
 			"{}:{}:{}: {}: {}",
@@ -525,6 +549,8 @@ pub struct VerifyResult {
 	pub query_index: usize,
 	pub resolved: bool,
 	pub summary: String,
+	pub conclusion: String,
+	pub trace: Vec<String>,
 	pub options: Vec<QueryOptionResult>,
 	/// Per-session instantiations of `query` under `--sessions`, evaluated
 	/// under the same `query_index`: an attack on any session resolves the
@@ -540,9 +566,23 @@ impl VerifyResult {
 			query_index,
 			resolved: false,
 			summary: String::new(),
+			conclusion: String::new(),
+			trace: vec![],
 			options: vec![],
 			variants: vec![],
 		}
+	}
+
+	pub fn set_summary(&mut self, mutated_info: &str, conclusion: &str) {
+		self.trace = mutated_info
+			.lines()
+			.map(str::trim)
+			.filter(|line| !line.is_empty())
+			.map(str::to_string)
+			.collect();
+		self.conclusion = conclusion.to_string();
+		self.summary =
+			crate::info::info_verify_result_summary(mutated_info, conclusion, &self.options);
 	}
 
 	pub fn results_code(results: &[VerifyResult]) -> String {
@@ -1165,6 +1205,25 @@ mod span_tests {
 		);
 		let caret_line = rendered.lines().last().expect("caret line");
 		assert_eq!(caret_line, "   ^^^^^");
+	}
+
+	#[test]
+	fn an_error_at_end_of_input_anchors_past_the_last_line_with_text() {
+		let source = "principal Alice[\n\tknows private m\n";
+		let e = VerifpalError::parse("expected `]`".into()).at(Span::at(source.len()));
+		let rendered = e.render("m.vp", source);
+		let mut lines = rendered.lines();
+		assert_eq!(lines.next(), Some("m.vp:2:17: parse error: expected `]`"));
+		assert_eq!(lines.next(), Some("   knows private m"));
+		assert_eq!(lines.next(), Some("                  ^"));
+	}
+
+	#[test]
+	fn an_error_inside_the_source_is_not_moved_to_the_last_line() {
+		let at_knows = SRC.find("knows").expect("knows");
+		let e = VerifpalError::sanity("bad".into()).at(Span::new(at_knows, at_knows + 5));
+		let rendered = e.render("m.vp", SRC);
+		assert!(rendered.starts_with("m.vp:4:2:"), "{rendered}");
 	}
 
 	#[test]

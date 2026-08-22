@@ -1,11 +1,11 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::parser::parse_string;
+use crate::parser::{parse_file, parse_string};
 use crate::pretty::{pretty_constants, pretty_model};
 use crate::sanity::sanity;
 use crate::types::*;
-use crate::verify::analyze;
+use crate::verify::{VerifyReport, analyze};
 
 pub(crate) fn json_escape(s: &str) -> String {
 	let mut out = String::with_capacity(s.len());
@@ -133,6 +133,66 @@ fn json_assumptions(assumptions: &[(Value, Capability, i32)]) -> String {
 	}
 	out.push(']');
 	out
+}
+
+pub fn diagram(model_file: &str) -> VResult<String> {
+	let m = parse_file(model_file)?;
+	let body = pretty_diagram(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+	let mut out = String::from("sequenceDiagram\n");
+	for line in body.lines() {
+		out.push_str("    ");
+		out.push_str(line);
+		out.push('\n');
+	}
+	Ok(out)
+}
+
+pub fn json_report(version: &str, outcomes: &[(String, Result<VerifyReport, String>)]) -> String {
+	let models = json_array(outcomes.iter(), |(path, outcome)| match outcome {
+		Ok(report) => json_model_report(path, report),
+		Err(error) => format!(
+			r#"{{"file":"{}","ok":false,"error":"{}"}}"#,
+			json_escape(path),
+			json_escape(error)
+		),
+	});
+	let ok = outcomes.iter().all(|(_, outcome)| outcome.is_ok());
+	format!(
+		r#"{{"version":"{}","ok":{},"models":{}}}"#,
+		json_escape(version),
+		ok,
+		models
+	)
+}
+
+fn json_model_report(path: &str, report: &VerifyReport) -> String {
+	let queries = json_array(report.results.iter(), |r| {
+		let preconditions = json_array(r.options.iter().filter(|o| o.resolved), |o| {
+			format!(r#""{}""#, json_escape(&o.summary))
+		});
+		format!(
+			r#"{{"query":"{}","kind":"{}","resolved":{},"conclusion":"{}","trace":{},"preconditions":{}}}"#,
+			json_escape(&json_query_display(&r.query)),
+			r.query.kind.name(),
+			r.resolved,
+			json_escape(&r.conclusion),
+			json_string_array(&r.trace),
+			preconditions,
+		)
+	});
+	let attacks = report.results.iter().filter(|r| r.resolved).count();
+	let elapsed = report.elapsed.map(|d| d.as_millis()).unwrap_or_default();
+	format!(
+		r#"{{"file":"{}","model":"{}","ok":true,"sessions":{},"code":"{}","attacks":{},"elapsedMs":{},"assumptions":{},"queries":{}}}"#,
+		json_escape(path),
+		json_escape(&report.file_name),
+		report.sessions,
+		json_escape(&report.code),
+		attacks,
+		elapsed,
+		json_assumptions(&report.assumptions),
+		queries,
+	)
 }
 
 pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {

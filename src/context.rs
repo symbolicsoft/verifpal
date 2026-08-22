@@ -377,6 +377,8 @@ impl VerifyContext {
 		{
 			vr.resolved = result.resolved;
 			vr.summary = result.summary.clone();
+			vr.conclusion = result.conclusion.clone();
+			vr.trace = result.trace.clone();
 			vr.options = result.options.clone();
 			if result.resolved {
 				self.unresolved.fetch_sub(1, Ordering::SeqCst);
@@ -384,6 +386,12 @@ impl VerifyContext {
 			return true;
 		}
 		false
+	}
+
+	pub(crate) fn query_counts(&self) -> (usize, usize) {
+		let total = read_lock(&self.results).len();
+		let remaining = self.unresolved.load(Ordering::SeqCst).max(0) as usize;
+		(total.saturating_sub(remaining), total)
 	}
 
 	pub(crate) fn all_resolved(&self) -> bool {

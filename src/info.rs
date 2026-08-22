@@ -14,14 +14,152 @@ use colored::*;
 
 const DEDUCTION_MESSAGE_LIMIT: usize = 1000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Verbosity {
+	Silent,
+	Quiet,
+	Normal,
+	Verbose,
+}
+
 thread_local! {
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SHOWN: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SUPPRESSED: Cell<usize> = const { Cell::new(0) };
+	static VERBOSITY: Cell<u8> = const { Cell::new(2) };
+}
+
+#[cfg(feature = "cli")]
+thread_local! {
+	static STATUS_DRAWN: Cell<bool> = const { Cell::new(false) };
+	static STATUS_LAST: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
+	static STATUS_START: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
+}
+
+#[cfg(feature = "cli")]
+const STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+
+#[cfg(feature = "cli")]
+const STATUS_WIDTH: usize = 96;
+
+pub fn set_verbosity(level: Verbosity) {
+	VERBOSITY.with(|v| v.set(level as u8));
+}
+
+pub(crate) fn verbosity() -> Verbosity {
+	match VERBOSITY.with(|v| v.get()) {
+		0 => Verbosity::Silent,
+		1 => Verbosity::Quiet,
+		3 => Verbosity::Verbose,
+		_ => Verbosity::Normal,
+	}
+}
+
+fn level_is_visible(level: InfoLevel) -> bool {
+	match verbosity() {
+		Verbosity::Silent => false,
+		Verbosity::Quiet => matches!(
+			level,
+			InfoLevel::Result | InfoLevel::Pass | InfoLevel::Warning
+		),
+		Verbosity::Normal => !matches!(level, InfoLevel::Analysis | InfoLevel::Deduction),
+		Verbosity::Verbose => true,
+	}
+}
+
+fn chrome_is_visible() -> bool {
+	verbosity() >= Verbosity::Normal
 }
 
 pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
+}
+
+#[cfg(feature = "cli")]
+fn status_enabled() -> bool {
+	!info_is_quiet() && verbosity() >= Verbosity::Normal && crate::util::stderr_is_terminal()
+}
+
+pub(crate) fn info_status_begin() {
+	#[cfg(feature = "cli")]
+	{
+		STATUS_START.with(|c| c.set(Some(std::time::Instant::now())));
+		STATUS_LAST.with(|c| c.set(None));
+	}
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+	STATUS_START.with(|c| c.get()).map(|start| start.elapsed())
+}
+
+#[cfg(not(feature = "cli"))]
+pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+	None
+}
+
+pub(crate) fn info_status_update(_text: impl FnOnce() -> String) {
+	#[cfg(feature = "cli")]
+	{
+		if !status_enabled() {
+			return;
+		}
+		let now = std::time::Instant::now();
+		if let Some(last) = STATUS_LAST.with(|c| c.get())
+			&& now.duration_since(last) < STATUS_INTERVAL
+		{
+			return;
+		}
+		STATUS_LAST.with(|c| c.set(Some(now)));
+		status_draw(&_text());
+	}
+}
+
+#[cfg(feature = "cli")]
+fn status_draw(text: &str) {
+	use std::io::Write;
+	let trimmed: String = text.chars().take(STATUS_WIDTH).collect();
+	let _ = std::io::stdout().flush();
+	let mut err = std::io::stderr();
+	let _ = write!(err, "\r\u{1b}[2K{}", trimmed.dimmed());
+	let _ = err.flush();
+	STATUS_DRAWN.with(|c| c.set(true));
+}
+
+pub(crate) fn info_status_erase() {
+	#[cfg(feature = "cli")]
+	{
+		if !STATUS_DRAWN.with(|c| c.get()) {
+			return;
+		}
+		use std::io::Write;
+		let mut err = std::io::stderr();
+		let _ = write!(err, "\r\u{1b}[2K");
+		let _ = err.flush();
+		STATUS_DRAWN.with(|c| c.set(false));
+	}
+}
+
+pub(crate) fn info_status_end() {
+	info_status_erase();
+	#[cfg(feature = "cli")]
+	STATUS_LAST.with(|c| c.set(None));
+}
+
+pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
+	let seconds = elapsed.as_secs_f64();
+	if seconds >= 1.0 {
+		return format!("{:.2}s", seconds);
+	}
+	format!("{}ms", elapsed.as_millis())
+}
+
+pub(crate) fn info_blank_line() {
+	if !chrome_is_visible() {
+		return;
+	}
+	info_status_erase();
+	println!();
 }
 
 pub(crate) fn info_reset_deductions() {
@@ -34,7 +172,7 @@ pub(crate) fn info_deductions_suppressed() -> usize {
 }
 
 pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
-	if info_is_quiet() {
+	if info_is_quiet() || !level_is_visible(InfoLevel::Deduction) {
 		return;
 	}
 	let shown = DEDUCTIONS_SHOWN.with(|c| c.get());
@@ -58,6 +196,14 @@ pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
 	}
 	DEDUCTIONS_SHOWN.with(|c| c.set(shown + 1));
 	info_message(&message(), InfoLevel::Deduction, true);
+}
+
+pub(crate) fn info_analysis_result(headline: &str, full: impl FnOnce() -> String) {
+	match verbosity() {
+		Verbosity::Silent | Verbosity::Quiet => {}
+		Verbosity::Normal => info_message(headline, InfoLevel::Result, true),
+		Verbosity::Verbose => info_message(&full(), InfoLevel::Result, true),
+	}
 }
 
 pub(crate) struct InfoQuiet;
@@ -112,6 +258,9 @@ pub fn info_banner(version: &str) {
 		wasm_push(format!("Verifpal {} - https://verifpal.com", version));
 		return;
 	}
+	if !chrome_is_visible() {
+		return;
+	}
 	#[cfg(feature = "cli")]
 	if color_output_support() {
 		println!("{}", "\u{2500}".repeat(50).dimmed());
@@ -132,6 +281,10 @@ pub(crate) fn info_separator() {
 	if cfg!(target_arch = "wasm32") {
 		return;
 	}
+	if !chrome_is_visible() {
+		return;
+	}
+	info_status_erase();
 	#[cfg(feature = "cli")]
 	if color_output_support() {
 		println!("{}", "\u{2500}".repeat(50).dimmed());
@@ -182,6 +335,10 @@ pub fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
 		wasm_push(format!("[{}] {}", plain_label, msg));
 		return;
 	}
+	if !level_is_visible(level) {
+		return;
+	}
+	info_status_erase();
 	let analysis_count = if show_analysis {
 		crate::context::analysis_count_get()
 	} else {
@@ -369,6 +526,35 @@ pub(crate) fn info_output_text(revealed: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+
+	#[test]
+	fn verbosity_decides_which_levels_reach_the_terminal() {
+		use crate::info::{Verbosity, level_is_visible, set_verbosity};
+		use crate::types::InfoLevel;
+		set_verbosity(Verbosity::Normal);
+		assert!(level_is_visible(InfoLevel::Result));
+		assert!(level_is_visible(InfoLevel::Info));
+		assert!(!level_is_visible(InfoLevel::Analysis));
+		assert!(!level_is_visible(InfoLevel::Deduction));
+		set_verbosity(Verbosity::Verbose);
+		assert!(level_is_visible(InfoLevel::Deduction));
+		set_verbosity(Verbosity::Quiet);
+		assert!(level_is_visible(InfoLevel::Result));
+		assert!(level_is_visible(InfoLevel::Warning));
+		assert!(!level_is_visible(InfoLevel::Info));
+		set_verbosity(Verbosity::Silent);
+		assert!(!level_is_visible(InfoLevel::Result));
+		set_verbosity(Verbosity::Normal);
+	}
+
+	#[test]
+	fn elapsed_text_switches_unit_at_one_second() {
+		use crate::info::info_elapsed_text;
+		use std::time::Duration;
+		assert_eq!(info_elapsed_text(Duration::from_millis(7)), "7ms");
+		assert_eq!(info_elapsed_text(Duration::from_millis(999)), "999ms");
+		assert_eq!(info_elapsed_text(Duration::from_millis(1400)), "1.40s");
+	}
 
 	#[test]
 	fn info_quiet_guard_nests_and_restores() {

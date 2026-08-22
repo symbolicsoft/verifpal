@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::context::VerifyContext;
-use crate::info::*;
 use crate::narrate::{Narration, narrate_attack};
 use crate::primitive::*;
 use crate::principal::*;
@@ -119,11 +118,9 @@ impl QueryVerdict {
 
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result, &QueryVerdict(())) {
-		info_message(
-			&format!("{}{}", result.query, result.summary),
-			InfoLevel::Result,
-			true,
-		);
+		crate::info::info_analysis_result(&result.query.to_string(), || {
+			format!("{}{}", result.query, result.summary)
+		});
 	}
 }
 
@@ -149,14 +146,13 @@ fn query_confidentiality(
 	let seed = recorded_mutations(attacker, attacker_idx);
 	let mutated_info = attack_trace(ctx, km, ps, query_index, resolved_value, &seed);
 	result.resolved = true;
-	result.summary = info_verify_result_summary(
+	result.set_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}) is obtained by Attacker.",
 			subject,
 			mutated_info.term(&attacker.known[attacker_idx.get()]),
 		),
-		&result.options,
 	);
 	result = query_precondition(result, ps);
 	emit_query_result(ctx, &result);
@@ -303,7 +299,7 @@ fn query_authentication_handle_pass(
 	let resolved = mutated_info
 		.installed(c)
 		.unwrap_or_else(|| ps.resolve_constant(c, true).0);
-	result.summary = info_verify_result_summary(
+	result.set_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
@@ -314,7 +310,6 @@ fn query_authentication_handle_pass(
 			mutated_info.term(b),
 			result.query.message.recipient_name,
 		),
-		&result.options,
 	);
 	emit_query_result(ctx, &result);
 	result
@@ -359,7 +354,7 @@ fn query_freshness(
 	};
 	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &resolved, &[], prelude);
 	result.resolved = true;
-	result.summary = info_verify_result_summary(
+	result.set_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
@@ -368,7 +363,6 @@ fn query_freshness(
 			ps.name,
 			mutated_info.term(&ps.values[indices[0]].pre_rewrite),
 		),
-		&result.options,
 	);
 	result = query_precondition(result, ps);
 	emit_query_result(ctx, &result);
@@ -392,10 +386,9 @@ fn query_unlinkability(
 			let mutated_info = attack_trace(ctx, km, ps, query_index, &witness.value, &[]);
 			let clause = witness.describe(&mutated_info.term(&witness.value));
 			result.resolved = true;
-			result.summary = info_verify_result_summary(
+			result.set_summary(
 				&mutated_info.trace,
 				&format!("Attacker links {a} and {b} {clause}."),
-				&result.options,
 			);
 			result = query_precondition(result, ps);
 			emit_query_result(ctx, &result);
@@ -453,7 +446,7 @@ fn query_equivalence(
 		.collect();
 	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &empty, &[], prelude);
 	result.resolved = true;
-	result.summary = info_verify_result_summary(
+	result.set_summary(
 		&mutated_info.trace,
 		&format!(
 			"{} are not equivalent.",
@@ -463,7 +456,6 @@ fn query_equivalence(
 				.collect::<Vec<_>>()
 				.join(", "),
 		),
-		&result.options,
 	);
 	result = query_precondition(result, ps);
 	emit_query_result(ctx, &result);

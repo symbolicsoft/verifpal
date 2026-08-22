@@ -89,6 +89,15 @@ enum Pass {
 	Constructed,
 }
 
+impl Pass {
+	fn name(self) -> &'static str {
+		match self {
+			Pass::Targeted => "targeted search",
+			Pass::Constructed => "constructed search",
+		}
+	}
+}
+
 fn solve_principal(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -165,6 +174,7 @@ fn solve_principal(
 
 	let mut seen: Vec<Vec<(usize, u64)>> = Vec::new();
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
+	let mut checked = 0usize;
 	for proposal in dedupe(proposals) {
 		if ctx.all_resolved() {
 			break;
@@ -181,6 +191,20 @@ fn solve_principal(
 			controllable: &controllable,
 			bound,
 		};
+		checked += 1;
+		crate::info::info_status_update(|| {
+			crate::verify::status_line(
+				ctx,
+				attacker.current_phase,
+				&ps.name,
+				&format!(
+					"{}, {} state{} checked",
+					pass.name(),
+					checked,
+					if checked == 1 { "" } else { "s" }
+				),
+			)
+		});
 		let ran = validate::validate(ctx, km, ps, &sym, &guards, &attacker, &proposal)?;
 		trace_proposal(ps, &sym, &proposal, ran);
 	}
