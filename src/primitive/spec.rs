@@ -168,6 +168,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			core_rule: Some(core_rule_assert),
 			definition_check: true,
 			reveals_args: false,
+			arg_names: vec!["value1", "value2"],
 		},
 		PrimitiveCoreSpec {
 			id: PRIM_CONCAT,
@@ -178,6 +179,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			core_rule: None,
 			definition_check: false,
 			reveals_args: true,
+			arg_names: vec!["value1", "value2", "value3", "value4", "value5"],
 		},
 		PrimitiveCoreSpec {
 			id: PRIM_SPLIT,
@@ -188,6 +190,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			core_rule: Some(core_rule_split),
 			definition_check: true,
 			reveals_args: false,
+			arg_names: vec!["concatenation"],
 		},
 	]
 }
@@ -196,6 +199,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 	vec![
 		PrimitiveSpec {
 			id: PRIM_PWHASH,
+			arg_names: vec!["value1", "value2", "value3", "value4", "value5"],
 			name: "PW_HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
@@ -205,6 +209,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_HASH,
+			arg_names: vec!["value1", "value2", "value3", "value4", "value5"],
 			name: "HASH",
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
@@ -213,6 +218,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_HKDF,
+			arg_names: vec!["salt", "ikm", "info"],
 			name: "HKDF",
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
@@ -220,6 +226,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_AEAD_ENC,
+			arg_names: vec!["key", "plaintext", "ad"],
 			name: "AEAD_ENC",
 			arity: vec![3],
 			output: vec![1],
@@ -236,6 +243,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_AEAD_DEC,
+			arg_names: vec!["key", "ciphertext", "ad"],
 			name: "AEAD_DEC",
 			arity: vec![3],
 			output: vec![1],
@@ -261,6 +269,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_ENC,
+			arg_names: vec!["key", "plaintext"],
 			name: "ENC",
 			arity: vec![2],
 			output: vec![1],
@@ -277,6 +286,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_DEC,
+			arg_names: vec!["key", "ciphertext"],
 			name: "DEC",
 			arity: vec![2],
 			output: vec![1],
@@ -300,6 +310,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_MAC,
+			arg_names: vec!["key", "message"],
 			name: "MAC",
 			arity: vec![2],
 			output: vec![1],
@@ -308,6 +319,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_PUBKEY,
+			arg_names: vec!["private_key"],
 			name: "PUBKEY",
 			arity: vec![1],
 			output: vec![1],
@@ -318,6 +330,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_DH_KEX,
+			arg_names: vec!["public_key", "private_key"],
 			name: "DH_KEX",
 			arity: vec![2],
 			output: vec![1],
@@ -334,6 +347,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_SIGN,
+			arg_names: vec!["private_key", "message"],
 			name: "SIGN",
 			arity: vec![2],
 			output: vec![1],
@@ -342,6 +356,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_SIGNVERIF,
+			arg_names: vec!["public_key", "message", "signature"],
 			name: "SIGNVERIF",
 			arity: vec![3],
 			output: vec![1],
@@ -363,6 +378,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_PKE_ENC,
+			arg_names: vec!["public_key", "plaintext"],
 			name: "PKE_ENC",
 			arity: vec![2],
 			output: vec![1],
@@ -378,6 +394,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_PKE_DEC,
+			arg_names: vec!["private_key", "ciphertext"],
 			name: "PKE_DEC",
 			arity: vec![2],
 			output: vec![1],
@@ -401,6 +418,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_SPLIT,
+			arg_names: vec!["secret"],
 			name: "SHAMIR_SPLIT",
 			arity: vec![1],
 			output: vec![3],
@@ -413,6 +431,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_SHAMIR_JOIN,
+			arg_names: vec!["share_a", "share_b"],
 			name: "SHAMIR_JOIN",
 			arity: vec![2],
 			output: vec![1],
@@ -433,6 +452,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_RINGSIGN,
+			arg_names: vec!["signer_key", "public_key_b", "public_key_c", "message"],
 			name: "RINGSIGN",
 			arity: vec![4],
 			output: vec![1],
@@ -441,6 +461,13 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_RINGSIGNVERIF,
+			arg_names: vec![
+				"public_key_a",
+				"public_key_b",
+				"public_key_c",
+				"message",
+				"signature",
+			],
 			name: "RINGSIGNVERIF",
 			arity: vec![5],
 			output: vec![1],
@@ -467,6 +494,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_BLIND,
+			arg_names: vec!["blinding_factor", "message"],
 			name: "BLIND",
 			arity: vec![2],
 			output: vec![1],
@@ -481,6 +509,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_UNBLIND,
+			arg_names: vec!["blinding_factor", "message", "blinded_signature"],
 			name: "UNBLIND",
 			arity: vec![3],
 			output: vec![1],
@@ -496,6 +525,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_KEM_ENCAP,
+			arg_names: vec!["public_key", "seed"],
 			name: "KEM_ENCAP",
 			arity: vec![2],
 			output: vec![2],
@@ -515,6 +545,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 		},
 		PrimitiveSpec {
 			id: PRIM_KEM_DECAP,
+			arg_names: vec!["private_key", "ciphertext"],
 			name: "KEM_DECAP",
 			arity: vec![2],
 			output: vec![1],

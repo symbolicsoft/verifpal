@@ -206,8 +206,13 @@ pub(crate) fn generate_trace(
 	let failures = ps_resolved.perform_all_rewrites();
 
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
-	for sv in &ps_resolved.values {
-		sanity_check_argument_restrictions(&sv.value)?;
+	for (index, sv) in ps_resolved.values.iter().enumerate() {
+		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
+			return Err(match km.slots.get(index) {
+				Some(slot) => e.or_span(slot.declared_span),
+				None => e,
+			});
+		}
 	}
 
 	Ok(ps_resolved)

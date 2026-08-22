@@ -170,7 +170,7 @@ fn run_verify(
 				had_error = true;
 				let text = e.to_string();
 				if !json {
-					eprintln!("Error: {}", text);
+					eprintln!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
 			}
@@ -198,7 +198,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 		let output = match pretty_print(model) {
 			Ok(output) => output,
 			Err(e) => {
-				eprintln!("Error: {}", e);
+				eprintln!("{}", e);
 				status = EXIT_ERROR;
 				continue;
 			}
@@ -213,7 +213,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 		}
 		changed.push(model.clone());
 		if write && let Err(e) = std::fs::write(model, &output) {
-			eprintln!("Error: {}: {}", model, e);
+			eprintln!("{}: {}", model, e);
 			status = EXIT_ERROR;
 		}
 	}
@@ -261,7 +261,7 @@ fn main() {
 					0
 				}
 				Err(e) => {
-					eprintln!("Error: {}", e);
+					eprintln!("{}", e);
 					EXIT_ERROR
 				}
 			}

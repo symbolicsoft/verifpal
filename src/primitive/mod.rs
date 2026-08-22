@@ -59,6 +59,7 @@ pub(crate) struct PrimitiveCoreSpec {
 	pub core_rule: Option<CoreRuleFn>,
 	pub definition_check: bool,
 	pub reveals_args: bool,
+	pub arg_names: Vec<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +99,7 @@ pub(crate) struct PrimitiveSpec {
 	pub weak_reveals_output: Option<usize>,
 	pub forgeable_secret: Option<usize>,
 	pub malleable_vary: Vec<usize>,
+	pub arg_names: Vec<&'static str>,
 }
 
 static CORE_SPECS: LazyLock<[Option<PrimitiveCoreSpec>; 256]> = LazyLock::new(|| {
@@ -132,6 +134,7 @@ pub(crate) trait PrimitiveDefinition {
 	fn output(&self) -> &[i32];
 	fn definition_check(&self) -> bool;
 	fn has_rewrite_rule(&self) -> bool;
+	fn arg_names(&self) -> &[&'static str];
 	fn has_single_output(&self) -> bool {
 		self.output().len() == 1 && self.output()[0] == 1
 	}
@@ -153,6 +156,9 @@ impl PrimitiveDefinition for PrimitiveCoreSpec {
 	fn has_rewrite_rule(&self) -> bool {
 		self.has_rule
 	}
+	fn arg_names(&self) -> &[&'static str] {
+		&self.arg_names
+	}
 }
 
 impl PrimitiveDefinition for PrimitiveSpec {
@@ -170,6 +176,9 @@ impl PrimitiveDefinition for PrimitiveSpec {
 	}
 	fn has_rewrite_rule(&self) -> bool {
 		self.rewrite.has_rule
+	}
+	fn arg_names(&self) -> &[&'static str] {
+		&self.arg_names
 	}
 }
 
@@ -211,6 +220,47 @@ pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
 
 pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
 	primitive_def(id).map(|d| d.name()).unwrap_or("")
+}
+
+pub(crate) fn primitive_names() -> Vec<&'static str> {
+	let mut names: Vec<&'static str> = core_specs()
+		.map(|s| s.name)
+		.chain(prim_specs().map(|s| s.name))
+		.collect();
+	names.sort_unstable();
+	names
+}
+
+pub(crate) fn primitive_checkable_names() -> Vec<String> {
+	let mut names: Vec<String> = core_specs()
+		.filter(|s| s.definition_check)
+		.map(|s| s.name.to_string())
+		.chain(
+			prim_specs()
+				.filter(|s| s.definition_check)
+				.map(|s| s.name.to_string()),
+		)
+		.collect();
+	names.sort();
+	names
+}
+
+pub(crate) fn primitive_signature(id: PrimitiveId) -> String {
+	let Ok(def) = primitive_def(id) else {
+		return String::new();
+	};
+	let names = def.arg_names();
+	let name = def.name();
+	if names.is_empty() {
+		return format!("{}(…)", name);
+	}
+	let arity = def.arity();
+	if arity.len() > 1 {
+		let widest = *arity.last().unwrap_or(&1) as usize;
+		let last = names.get(widest.saturating_sub(1)).copied().unwrap_or("…");
+		return format!("{}({}, …, {})", name, names[0], last);
+	}
+	format!("{}({})", name, names.join(", "))
 }
 
 pub(crate) fn primitive_has_single_output(id: PrimitiveId) -> bool {

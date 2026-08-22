@@ -244,7 +244,7 @@ pub fn handle_internal_json(subcommand: &str, input: &str) {
 	match result {
 		Ok(output) => print!("{}", output),
 		Err(e) => {
-			eprintln!("Error: {}", e);
+			eprintln!("{}", e);
 			std::process::exit(1);
 		}
 	}

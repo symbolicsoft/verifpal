@@ -1,9 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::primitive::primitive_get_enum;
+use crate::primitive::{primitive_get_enum, primitive_names};
 use crate::principal::PrincipalNames;
 use crate::types::*;
+use crate::util::did_you_mean;
 use crate::value::ValueNames;
 use std::sync::Arc;
 
@@ -63,8 +64,14 @@ fn check_reserved(s: &str) -> VResult<()> {
 		|| lower.starts_with("unnamed")
 	{
 		return Err(VerifpalError::parse(
-			format!("cannot use reserved keyword in name: {}", s).into(),
-		));
+			format!("`{}` is a reserved word and cannot name a constant", s).into(),
+		)
+		.narrow(s.to_string())
+		.note(
+			"the language keywords, and any name beginning with `attacker` or \
+			 `unnamed`, are reserved so that a model cannot shadow them",
+		)
+		.help(format!("rename it, for example to `{}_value`", s)));
 	}
 	Ok(())
 }
@@ -102,6 +109,7 @@ struct Parser<'a> {
 	values: ValueNames,
 	principals: PrincipalNames,
 	unnamed_counter: usize,
+	last_ident: Span,
 }
 
 impl<'a> Parser<'a> {
@@ -109,6 +117,7 @@ impl<'a> Parser<'a> {
 		Parser {
 			input: input.as_bytes(),
 			pos: 0,
+			last_ident: Span::default(),
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
 			values: ValueNames::new(),
@@ -236,7 +245,10 @@ impl<'a> Parser<'a> {
 
 	fn check_unterminated_block(&self) -> VResult<()> {
 		if let Some(pos) = self.unterminated_block_at {
-			return Err(VerifpalError::parse("unterminated block comment".into()).at(Span::at(pos)));
+			return Err(VerifpalError::parse("unterminated block comment".into())
+				.at(Span::at(pos))
+				.labelled("this `/*` is never closed")
+				.help("add the missing `*/`"));
 		}
 		Ok(())
 	}
@@ -294,14 +306,113 @@ impl<'a> Parser<'a> {
 	}
 
 	fn expect(&mut self, s: &str) -> VResult<()> {
+		self.expect_where(s, "")
+	}
+
+	fn expect_where(&mut self, s: &str, context: &str) -> VResult<()> {
 		let bytes = s.as_bytes();
 		if self.pos + bytes.len() <= self.input.len()
 			&& &self.input[self.pos..self.pos + bytes.len()] == bytes
 		{
 			self.pos += bytes.len();
-			Ok(())
+			return Ok(());
+		}
+		let message = if context.is_empty() {
+			format!("expected `{}`", s)
 		} else {
-			Err(VerifpalError::parse(format!("expected '{}'", s).into()).at(Span::at(self.pos)))
+			format!("expected `{}` {}", s, context)
+		};
+		Err(VerifpalError::parse(message.into())
+			.at(self.here())
+			.labelled(self.found_here()))
+	}
+
+	fn unclosed_hint(&self, error: VerifpalError, opened_at: usize) -> VerifpalError {
+		if error.has_labels() || self.delimiter_is_closed(opened_at) {
+			return error;
+		}
+		let opener = self.input.get(opened_at).copied().unwrap_or(b'(');
+		let closer = if opener == b'[' { b']' } else { b')' };
+		error
+			.label(
+				Span::at(opened_at),
+				format!("this `{}` is never closed", opener as char),
+			)
+			.help(format!("add the missing `{}`", closer as char))
+	}
+
+	fn delimiter_is_closed(&self, opened_at: usize) -> bool {
+		let opener = match self.input.get(opened_at).copied() {
+			Some(b) if b == b'[' || b == b'(' => b,
+			_ => return true,
+		};
+		let closer = if opener == b'[' { b']' } else { b')' };
+		let mut depth = 0usize;
+		let mut at = opened_at;
+		while at < self.input.len() {
+			match self.input[at] {
+				b'/' if self.input.get(at + 1) == Some(&b'/') => {
+					while at < self.input.len() && self.input[at] != b'\n' {
+						at += 1;
+					}
+					continue;
+				}
+				b'/' if self.input.get(at + 1) == Some(&b'*') => {
+					at += 2;
+					while at + 1 < self.input.len()
+						&& !(self.input[at] == b'*' && self.input[at + 1] == b'/')
+					{
+						at += 1;
+					}
+					at += 2;
+					continue;
+				}
+				b if b == opener => depth += 1,
+				b if b == closer => {
+					depth -= 1;
+					if depth == 0 {
+						return true;
+					}
+				}
+				_ => {}
+			}
+			at += 1;
+		}
+		false
+	}
+
+	fn here(&self) -> Span {
+		let rest = self.remaining();
+		let Some(first) = rest.chars().next() else {
+			return Span::at(self.pos);
+		};
+		let word: String = rest
+			.chars()
+			.take_while(|c| c.is_alphanumeric() || *c == '_')
+			.collect();
+		let width = if word.is_empty() {
+			first.len_utf8()
+		} else {
+			word.len()
+		};
+		Span::new(self.pos, self.pos + width)
+	}
+
+	fn found_here(&self) -> String {
+		let rest = self.remaining();
+		let Some(first) = rest.chars().next() else {
+			return "end of file".to_string();
+		};
+		let word: String = rest
+			.chars()
+			.take_while(|c| c.is_alphanumeric() || *c == '_')
+			.collect();
+		if !word.is_empty() {
+			return format!("found `{}`", word);
+		}
+		match first {
+			'\n' => "end of line".to_string(),
+			c => format!("found `{}`", c),
 		}
 	}
 
@@ -319,6 +430,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_identifier(&mut self) -> VResult<String> {
 		let start = self.pos;
+		self.last_ident = Span::at(start);
 		while self.pos < self.input.len() {
 			let c = self.input[self.pos];
 			if c.is_ascii_alphanumeric() || c == b'_' {
@@ -328,8 +440,12 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if self.pos == start {
-			return Err(VerifpalError::parse("expected identifier".into()).at(Span::at(self.pos)));
+			return Err(VerifpalError::parse("expected a name".into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note("a name is made of letters, digits and underscores"));
 		}
+		self.last_ident = Span::new(start, self.pos);
 		let s = std::str::from_utf8(&self.input[start..self.pos])
 			.map_err(|_| VerifpalError::parse("invalid UTF-8 in identifier".into()))?;
 		Ok(s.to_lowercase())
@@ -341,7 +457,13 @@ impl<'a> Parser<'a> {
 		let pre_attacker_comments = self.take_leading();
 
 		if !self.try_expect("attacker") {
-			return Err(VerifpalError::parse("no `attacker` block defined".into()));
+			return Err(VerifpalError::parse(
+				"model does not open with an `attacker` block".into(),
+			)
+			.at(self.here())
+			.labelled(self.found_here())
+			.note("every model states which attacker it is analyzed against, before anything else")
+			.help("add `attacker[active]` or `attacker[passive]` as the first line"));
 		}
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
@@ -352,8 +474,12 @@ impl<'a> Parser<'a> {
 			"passive" => AttackerKind::Passive,
 			_ => {
 				return Err(VerifpalError::parse(
-					format!("invalid attacker type: {}", attacker_str).into(),
-				));
+					format!("unknown attacker type `{}`", attacker_str).into(),
+				)
+				.at(self.last_ident)
+				.narrow(attacker_str.clone())
+				.note("an attacker is either `active` or `passive`")
+				.suggest(did_you_mean(&attacker_str, ["active", "passive"])));
 			}
 		};
 		self.consume_trivia_nocapture();
@@ -379,14 +505,21 @@ impl<'a> Parser<'a> {
 
 		if blocks.is_empty() {
 			return Err(VerifpalError::parse(
-				"no principal or message blocks defined".into(),
-			));
+				"model declares no principals and no messages".into(),
+			)
+			.at(self.here())
+			.note("a model describes principals computing values and sending them to each other")
+			.help("add a principal block, e.g. `principal Alice[ knows private m ]`"));
 		}
 
 		self.consume_trivia();
 		let queries_leading_comments = self.take_leading();
 		if !self.try_expect("queries") {
-			return Err(VerifpalError::parse("no `queries` block defined".into()));
+			return Err(VerifpalError::parse("model has no `queries` block".into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note("a model must ask at least one question, or there is nothing to verify")
+				.help("add `queries[ confidentiality? m ]` at the end of the model"));
 		}
 		self.skip_whitespace();
 		self.expect("[")?;
@@ -419,10 +552,17 @@ impl<'a> Parser<'a> {
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
 		if !self.at_end() {
-			return Err(VerifpalError::parse(
-				"the `queries` block must be at the end of the model; found content after `queries`"
-					.into(),
-			));
+			return Err(
+				VerifpalError::parse("content appears after the `queries` block".into())
+					.at(self.here())
+					.labelled(self.found_here())
+					.note(
+						"`queries` closes the model, so anything after it would never be \
+				 analyzed; this is rejected rather than ignored, because a principal \
+				 written down here would silently not be checked",
+					)
+					.help("move this above the `queries` block"),
+			);
 		}
 		Ok(Model {
 			file_name: String::new(),
@@ -466,7 +606,8 @@ impl<'a> Parser<'a> {
 		let name = self.parse_identifier()?;
 		let name = title_case(&name);
 		self.skip_whitespace();
-		self.expect("[")?;
+		let open_bracket = self.pos;
+		self.expect_where("[", &format!("after `principal {}`", name))?;
 		let header_trailing = self.try_take_trailing();
 		self.consume_trivia();
 		let mut expressions = Vec::new();
@@ -475,8 +616,17 @@ impl<'a> Parser<'a> {
 			if self.peek() == Some(b']') {
 				break;
 			}
+			if self.at_end() {
+				return Err(self.unclosed_hint(
+					VerifpalError::parse(format!("`{}`'s block is never closed", name).into())
+						.at(self.here()),
+					open_bracket,
+				));
+			}
 			let leading = self.take_leading();
-			let mut expr = self.parse_expression()?;
+			let mut expr = self
+				.parse_expression()
+				.map_err(|e| self.unclosed_hint(e, open_bracket))?;
 			expr.leading_comments = leading;
 			expr.trailing_comment = self.try_take_trailing();
 			expressions.push(expr);
@@ -507,14 +657,18 @@ impl<'a> Parser<'a> {
 		if self.try_expect("->") || self.try_expect("\u{2192}") {
 		} else {
 			return Err(
-				VerifpalError::parse("expected '->' in message".into()).at(Span::at(self.pos))
+				VerifpalError::parse("expected `->` after the sender's name".into())
+					.at(self.here())
+					.labelled(self.found_here())
+					.note("a message is written `Sender -> Recipient: constant, ...`"),
 			);
 		}
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
 		let recipient_name = title_case(&recipient_name);
 		self.skip_whitespace();
-		self.expect(":")?;
+		self.expect_where(":", "after the recipient's name")
+			.map_err(|e| e.note("a message is written `Sender -> Recipient: constant, ...`"))?;
 		self.skip_whitespace();
 		let constants = self.parse_message_constants()?;
 		let trailing = self.try_take_trailing();
@@ -572,9 +726,11 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::parse(
-				"message constants are not defined".into(),
-			));
+			return Err(VerifpalError::parse("message carries no constants".into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note("a message has to carry at least one value")
+				.help("name the values being sent, e.g. `Alice -> Bob: ga, e`"));
 		}
 		Ok(constants)
 	}
@@ -617,8 +773,15 @@ impl<'a> Parser<'a> {
 			"password" => Qualifier::Password,
 			_ => {
 				return Err(VerifpalError::parse(
-					format!("invalid qualifier: {}", qualifier_str).into(),
-				));
+					format!("unknown qualifier `{}`", qualifier_str).into(),
+				)
+				.at(self.last_ident)
+				.narrow(qualifier_str.clone())
+				.note("`knows` takes one of `private`, `public` or `password`")
+				.suggest(did_you_mean(
+					&qualifier_str,
+					["private", "public", "password"],
+				)));
 			}
 		};
 		self.skip_whitespace();
@@ -657,8 +820,18 @@ impl<'a> Parser<'a> {
 		self.expect("=")?;
 		self.skip_whitespace();
 		let value = self.parse_value()?;
-		if let Value::Constant(_) = &value {
-			return Err(VerifpalError::parse("cannot assign value to value".into()));
+		if let Value::Constant(c) = &value {
+			return Err(VerifpalError::parse(
+				"the right of an `=` must be a primitive, not a constant".into(),
+			)
+			.at(Span::new(start, self.pos))
+			.narrow(c.name.to_string())
+			.labelled("this is just another name for an existing value")
+			.note(
+				"assignment in Verifpal names the result of a computation; renaming \
+				 a value would give the same value two names and make queries ambiguous",
+			)
+			.help(format!("compute something, e.g. `= HASH({})`", c)));
 		}
 		Ok(Expression {
 			span: Span::new(start, self.pos),
@@ -714,16 +887,18 @@ impl<'a> Parser<'a> {
 			}
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::parse(
-				"expected at least one constant".into(),
-			));
+			return Err(
+				VerifpalError::parse("expected at least one constant".into())
+					.at(self.here())
+					.labelled(self.found_here()),
+			);
 		}
 		Ok(constants)
 	}
 
 	fn parse_constant(&mut self) -> VResult<Constant> {
 		let name = self.parse_identifier()?;
-		check_reserved(&name)?;
+		check_reserved(&name).map_err(|e| e.at(self.last_ident))?;
 		let actual_name: Arc<str> = if name == "_" {
 			let n = self.unnamed_counter;
 			self.unnamed_counter += 1;
@@ -762,7 +937,10 @@ impl<'a> Parser<'a> {
 			return self.parse_constant_value();
 		}
 		self.restore(saved);
-		Err(VerifpalError::parse("expected value".into()).at(Span::at(self.pos)))
+		Err(VerifpalError::parse("expected a value".into())
+			.at(self.here())
+			.labelled(self.found_here())
+			.note("a value is a constant, or a primitive such as `HASH(m)`"))
 	}
 
 	fn parse_capability_onset(&mut self) -> VResult<i32> {
@@ -778,10 +956,11 @@ impl<'a> Parser<'a> {
 		self.consume_trivia_nocapture();
 		let kw = self.parse_identifier()?;
 		if !kw.eq_ignore_ascii_case("phase") {
-			return Err(VerifpalError::parse(
-				"expected `phase` after `from` in primitive parameter".into(),
-			)
-			.at(Span::at(self.pos)));
+			return Err(VerifpalError::parse("expected `phase` after `from`".into())
+				.at(self.last_ident)
+				.labelled(format!("found `{}`", kw))
+				.note("an assumption that starts later is written `from phase N`")
+				.help("write it as `from phase 1`"));
 		}
 		self.consume_trivia_nocapture();
 		let start = self.pos;
@@ -789,10 +968,12 @@ impl<'a> Parser<'a> {
 			self.pos += 1;
 		}
 		if start == self.pos {
-			return Err(VerifpalError::parse(
-				"expected a phase number in primitive parameter".into(),
-			)
-			.at(Span::at(self.pos)));
+			return Err(
+				VerifpalError::parse("expected a phase number after `from phase`".into())
+					.at(self.here())
+					.labelled(self.found_here())
+					.note("`from phase N` means the assumption holds from phase N onward"),
+			);
 		}
 		std::str::from_utf8(&self.input[start..self.pos])
 			.ok()
@@ -811,14 +992,24 @@ impl<'a> Parser<'a> {
 			self.consume_trivia_nocapture();
 			let word = self.parse_identifier()?;
 			let cap = Capability::from_name(&word).ok_or_else(|| {
-				VerifpalError::parse(format!("unknown primitive parameter `{}`", word).into())
-					.at(Span::at(start))
+				VerifpalError::parse(format!("unknown weakening assumption `{}`", word).into())
+					.at(Span::new(start, self.pos))
+					.narrow(word.clone())
+					.note(
+						"an assumption names a property the primitive loses: `weak` \
+						 (confidentiality), `forgeable` (authenticity) or `malleable` \
+						 (a ciphertext can be reshaped)",
+					)
+					.suggest(did_you_mean(&word, ["weak", "forgeable", "malleable"]))
 			})?;
 			if caps.has(cap) {
 				return Err(VerifpalError::parse(
-					format!("duplicate primitive parameter `{}`", cap.name()).into(),
+					format!("`{}` is declared twice on this primitive", cap.name()).into(),
 				)
-				.at(Span::at(start)));
+				.at(Span::new(start, self.pos))
+				.narrow_occurrence(cap.name(), 1)
+				.labelled("declared again here")
+				.help("remove the duplicate"));
 			}
 			self.consume_trivia_nocapture();
 			let onset = self.parse_capability_onset()?;
@@ -836,7 +1027,9 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
+		let name_start = self.pos;
 		let name = self.parse_identifier()?;
+		let name_end = self.pos;
 		let prim_name = name.to_uppercase();
 		self.skip_whitespace();
 		let capabilities = if self.peek() == Some(b'[') {
@@ -845,14 +1038,22 @@ impl<'a> Parser<'a> {
 			Capabilities::default()
 		};
 		self.skip_whitespace();
-		self.expect("(")?;
+		let open_paren = self.pos;
+		self.expect_where("(", &format!("after `{}`", prim_name))?;
 		self.consume_trivia_nocapture();
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
-				return Err(VerifpalError::parse("unterminated primitive".into()));
+				return Err(VerifpalError::parse(
+					format!("unterminated arguments to `{}`", prim_name).into(),
+				)
+				.at(self.here())
+				.label(Span::at(open_paren), "this `(` is never closed")
+				.help("add the missing `)`"));
 			}
-			let arg = self.parse_value()?;
+			let arg = self
+				.parse_value()
+				.map_err(|e| self.unclosed_hint(e, open_paren))?;
 			arguments.push(arg);
 			self.consume_trivia_nocapture();
 			if self.peek() == Some(b',') {
@@ -866,7 +1067,12 @@ impl<'a> Parser<'a> {
 		if self.peek() == Some(b',') {
 			self.advance();
 		}
-		let prim_id = primitive_get_enum(&prim_name)?;
+		let prim_id = primitive_get_enum(&prim_name).map_err(|_| {
+			VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into())
+				.at(Span::new(name_start, name_end))
+				.labelled("not a Verifpal primitive")
+				.suggest(did_you_mean(&prim_name, primitive_names()))
+		})?;
 		Ok(Value::Primitive(Arc::new(Primitive {
 			id: prim_id,
 			arguments,
@@ -878,6 +1084,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_phase(&mut self) -> VResult<Block> {
+		let block_start = self.pos;
 		self.expect("phase")?;
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
@@ -888,14 +1095,19 @@ impl<'a> Parser<'a> {
 		}
 		let num_str = std::str::from_utf8(&self.input[start..self.pos])
 			.map_err(|_| VerifpalError::parse("invalid UTF-8 in phase number".into()))?;
-		let number: i32 = num_str
-			.parse()
-			.map_err(|_| VerifpalError::parse("invalid phase number".into()))?;
+		let number: i32 = num_str.parse().map_err(|_| {
+			VerifpalError::parse("expected a phase number".into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note("a phase is written `phase[1]`, `phase[2]`, and so on")
+		})?;
 		self.consume_trivia_nocapture();
 		self.expect("]")?;
+		let block_end = self.pos;
 		let trailing = self.try_take_trailing();
 		self.consume_trivia();
 		Ok(Block::Phase(Phase {
+			span: Span::new(block_start, block_end),
 			number,
 			leading_comments: Vec::new(),
 			trailing_comment: trailing,
@@ -916,7 +1128,35 @@ impl<'a> Parser<'a> {
 		} else if rem.starts_with("equivalence?") {
 			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
-			Err(VerifpalError::parse("unknown query type".into()).at(Span::at(self.pos)))
+			{
+				let word: String = rem
+					.chars()
+					.take_while(|c| c.is_alphanumeric() || *c == '_')
+					.collect();
+				Err(VerifpalError::parse(
+					if word.is_empty() {
+						"expected a query".to_string()
+					} else {
+						format!("unknown query type `{}`", word)
+					}
+					.into(),
+				)
+				.at(Span::new(self.pos, self.pos + word.len().max(1)))
+				.note(
+					"a query is one of `confidentiality?`, `authentication?`, \
+					 `freshness?`, `unlinkability?` or `equivalence?`",
+				)
+				.suggest(did_you_mean(
+					&word,
+					[
+						"confidentiality",
+						"authentication",
+						"freshness",
+						"unlinkability",
+						"equivalence",
+					],
+				)))
+			}
 		}
 	}
 
@@ -945,9 +1185,12 @@ impl<'a> Parser<'a> {
 		let sender_name = title_case(&self.parse_identifier()?);
 		self.skip_whitespace();
 		if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-			return Err(VerifpalError::parse(
-				"expected '->' in authentication query".into(),
-			));
+			return Err(
+				VerifpalError::parse("expected `->` after the sender's name".into())
+					.at(self.here())
+					.labelled(self.found_here())
+					.note("an authentication query is written `authentication? Alice -> Bob: m`"),
+			);
 		}
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
@@ -1048,7 +1291,12 @@ impl<'a> Parser<'a> {
 			let sender_name = title_case(&self.parse_identifier()?);
 			self.skip_whitespace();
 			if !self.try_expect("->") && !self.try_expect("\u{2192}") {
-				return Err(VerifpalError::parse("expected '->' in query option".into()));
+				return Err(
+					VerifpalError::parse("expected `->` after the sender's name".into())
+						.at(self.here())
+						.labelled(self.found_here())
+						.note("a precondition is written `precondition[ Bob -> Alice: ack ]`"),
+				);
 			}
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
@@ -1065,8 +1313,12 @@ impl<'a> Parser<'a> {
 				"precondition" => QueryOptionKind::Precondition,
 				_ => {
 					return Err(VerifpalError::parse(
-						format!("unknown query option: {}", option_name).into(),
-					));
+						format!("unknown query option `{}`", option_name).into(),
+					)
+					.at(self.last_ident)
+					.narrow(option_name.clone())
+					.note("the only query option is `precondition`")
+					.suggest(did_you_mean(&option_name, ["precondition"])));
 				}
 			};
 			let (sender, sender_name) = self.principal_id(&sender_name)?;
@@ -1105,17 +1357,24 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 
 	if file_name.len() > 64 {
 		return Err(VerifpalError::parse(
-			"model file name must be 64 characters or less".into(),
-		));
+			format!(
+				"model file name is {} characters long, and must be 64 or less",
+				file_name.len()
+			)
+			.into(),
+		)
+		.help("rename the file to something shorter"));
 	}
 	if !file_name.ends_with(".vp") {
 		return Err(VerifpalError::parse(
-			"model file name must have a '.vp' extension".into(),
-		));
+			format!("`{}` is not a Verifpal model file name", file_name).into(),
+		)
+		.note("Verifpal models are named with a `.vp` extension")
+		.help(format!("rename it to `{}.vp`", file_name)));
 	}
 
 	let content = std::fs::read_to_string(file_path)
-		.map_err(|e| VerifpalError::parse(format!("failed to read file: {}", e).into()))?;
+		.map_err(|e| VerifpalError::parse(format!("cannot read `{}`: {}", file_path, e).into()))?;
 
 	parse_string(&file_name, &content)
 }
@@ -1183,7 +1442,7 @@ mod tests {
 		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap3_m\n\tcap3_h = HASH[bogus](cap3_m)\n]\nqueries[\n\tconfidentiality? cap3_m\n]\n";
 		let err = parse_string("cap3.vp", src).expect_err("should reject");
 		assert!(
-			format!("{}", err).contains("unknown primitive parameter"),
+			format!("{}", err).contains("unknown weakening assumption"),
 			"got: {}",
 			err
 		);
@@ -1194,7 +1453,7 @@ mod tests {
 		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap4_m\n\tcap4_h = HASH[weak, weak](cap4_m)\n]\nqueries[\n\tconfidentiality? cap4_m\n]\n";
 		let err = parse_string("cap4.vp", src).expect_err("should reject");
 		assert!(
-			format!("{}", err).contains("duplicate primitive parameter"),
+			format!("{}", err).contains("is declared twice on this primitive"),
 			"got: {}",
 			err
 		);
@@ -1230,6 +1489,96 @@ mod tests {
 		assert_eq!(inner.id, primitive_get_enum("PUBKEY").unwrap());
 	}
 
+	fn model_error(src: &str) -> String {
+		let m = match parse_string("diag.vp", src) {
+			Ok(m) => m,
+			Err(e) => return e.to_string(),
+		};
+		crate::sanity::sanity(&m)
+			.err()
+			.map(|e| e.located(&m.file_name, &m.source).to_string())
+			.unwrap_or_default()
+	}
+
+	#[test]
+	fn a_mistyped_primitive_is_a_parse_error_that_suggests_the_real_one() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private dm_m\n\tdm_e = AEAD_ENCC(dm_m, dm_m, dm_m)\n]\nqueries[\n\tconfidentiality? dm_m\n]\n",
+		);
+		assert!(
+			text.contains("parse error: unknown primitive `AEAD_ENCC`"),
+			"{text}"
+		);
+		assert!(text.contains("diag.vp:4:9"), "{text}");
+		assert!(text.contains("did you mean `AEAD_ENC`?"), "{text}");
+	}
+
+	#[test]
+	fn a_wrong_arity_names_the_primitive_signature() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private wa_m\n\twa_e = AEAD_ENC(wa_m, wa_m)\n]\nqueries[\n\tconfidentiality? wa_m\n]\n",
+		);
+		assert!(
+			text.contains("`AEAD_ENC` takes 3 arguments, but 2 were given"),
+			"{text}"
+		);
+		assert!(
+			text.contains("its signature is `AEAD_ENC(key, plaintext, ad)`"),
+			"{text}"
+		);
+	}
+
+	#[test]
+	fn a_mistyped_constant_suggests_one_that_exists() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private mc_secret\n\tmc_x = HASH(mc_secret)\n]\nqueries[\n\tconfidentiality? mc_secrt\n]\n",
+		);
+		assert!(text.contains("unknown constant `mc_secrt`"), "{text}");
+		assert!(text.contains("did you mean `mc_secret`?"), "{text}");
+	}
+
+	#[test]
+	fn a_rebound_constant_points_at_both_assignments() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private rb_m\n\trb_x = HASH(rb_m)\n\trb_x = HASH(rb_x)\n]\nqueries[\n\tconfidentiality? rb_m\n]\n",
+		);
+		assert!(text.contains("`rb_x` is assigned twice"), "{text}");
+		assert!(text.contains("already assigned here"), "{text}");
+		assert!(text.contains("assigned again here"), "{text}");
+		assert!(text.contains("\n4 |"), "{text}");
+		assert!(text.contains("\n5 |"), "{text}");
+	}
+
+	#[test]
+	fn an_unclosed_delimiter_is_pointed_at_from_where_parsing_failed() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private ud_m\n\tud_x = HASH(ud_m\n]\nqueries[\n\tconfidentiality? ud_m\n]\n",
+		);
+		assert!(text.contains("this `(` is never closed"), "{text}");
+		assert!(text.contains("add the missing `)`"), "{text}");
+	}
+
+	#[test]
+	fn a_closed_delimiter_is_never_reported_as_unclosed() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private cd_m\n\tcd_x = NOTAPRIM(cd_m)\n]\nqueries[\n\tconfidentiality? cd_m\n]\n",
+		);
+		assert!(text.contains("unknown primitive `NOTAPRIM`"), "{text}");
+		assert!(!text.contains("is never closed"), "{text}");
+	}
+
+	#[test]
+	fn an_undeclared_principal_is_named_where_it_is_used() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private up_m\n\tup_x = HASH(up_m)\n]\nAlice -> Bobb: up_x\nqueries[\n\tconfidentiality? up_m\n]\n",
+		);
+		assert!(
+			text.contains("`Bobb` is never declared as a principal"),
+			"{text}"
+		);
+		assert!(text.contains("no block declares this principal"), "{text}");
+	}
+
 	fn sanity_error_for(assignment: &str) -> String {
 		let src = format!(
 			"attacker[active]\n\nprincipal Alice[\n\tknows private brc_a\n\t{}\n]\n\nqueries[\n\tconfidentiality? brc_a\n]\n",
@@ -1244,16 +1593,30 @@ mod tests {
 
 	#[test]
 	fn bridged_primitives_reject_checking_like_any_other() {
-		let baseline = sanity_error_for("brc_x = HASH(brc_a)?");
-		assert!(!baseline.is_empty());
-		assert_eq!(sanity_error_for("brc_x = PUBKEY(brc_a)?"), baseline);
-		assert_eq!(sanity_error_for("brc_x = DH_KEX(brc_a, brc_a)?"), baseline);
+		for assignment in [
+			"brc_x = HASH(brc_a)?",
+			"brc_x = PUBKEY(brc_a)?",
+			"brc_x = DH_KEX(brc_a, brc_a)?",
+		] {
+			let error = sanity_error_for(assignment);
+			assert!(
+				error.contains("cannot be checked with `?`"),
+				"got: {}",
+				error
+			);
+		}
 	}
 
 	#[test]
 	fn bridged_primitives_reject_bad_arity_from_the_spec() {
-		assert!(sanity_error_for("brc_x = PUBKEY(brc_a, brc_a)").contains("expecting 1"));
-		assert!(sanity_error_for("brc_x = DH_KEX(brc_a)").contains("expecting 2"));
+		assert!(
+			sanity_error_for("brc_x = PUBKEY(brc_a, brc_a)")
+				.contains("takes 1 argument, but 2 were given")
+		);
+		assert!(
+			sanity_error_for("brc_x = DH_KEX(brc_a)")
+				.contains("takes 2 arguments, but 1 was given")
+		);
 	}
 
 	#[test]

@@ -2,11 +2,35 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::principal::*;
-use crate::sanity::{sanity_assignment_constants, sanity_primitive};
+use crate::sanity::{sanity_assignment_constants, sanity_primitive, unknown_constant};
 use crate::types::*;
 use crate::util::*;
 use crate::value::*;
 use std::sync::Arc;
+
+fn declared_as(c: &Constant) -> String {
+	match (c.declaration, c.qualifier) {
+		(Some(Declaration::Generates), _) => "generated".to_string(),
+		(Some(Declaration::Assignment), _) => "assigned".to_string(),
+		(Some(Declaration::Leaks), _) => "leaked".to_string(),
+		(Some(Declaration::Knows), Some(Qualifier::Public)) => "known publicly".to_string(),
+		(Some(Declaration::Knows), Some(Qualifier::Private)) => "known privately".to_string(),
+		(Some(Declaration::Knows), Some(Qualifier::Password)) => "known as a password".to_string(),
+		_ => "declared".to_string(),
+	}
+}
+
+fn holders_of(trace: &ProtocolTrace, idx: usize) -> String {
+	let slot = &trace.slots[idx];
+	let mut names: Vec<String> = vec![base_name(trace.principal_name(slot.creator)).to_string()];
+	for &(recipient, _) in &slot.known_by {
+		let name = base_name(trace.principal_name(recipient)).to_string();
+		if !names.contains(&name) {
+			names.push(name);
+		}
+	}
+	quoted_list(&names)
+}
 
 pub(crate) fn construct_protocol_trace(
 	m: &Model,
@@ -31,6 +55,7 @@ pub(crate) fn construct_protocol_trace(
 		let known_by: Vec<_> = principal_ids.iter().map(|&pid| (pid, pid)).collect();
 		let const_id = nil.id;
 		trace.slots.push(TraceSlot {
+			declared_span: Span::default(),
 			initial_value: Value::Constant(nil.clone()),
 			constant: nil,
 			creator: ATTACKER_ID,
@@ -136,13 +161,27 @@ fn construct_trace_render_knows(
 				|| existing.qualifier != expr.qualifier
 				|| existing.fresh
 			{
+				let was = declared_as(existing);
+				let now = declared_as(&Constant {
+					declaration: Some(Declaration::Knows),
+					qualifier: expr.qualifier,
+					..c.clone()
+				});
 				return Err(VerifpalError::sanity(
-					format!(
-						"constant is known more than once and in different ways ({})",
-						c
-					)
-					.into(),
-				));
+					format!("`{}` is introduced in two different ways", c).into(),
+				)
+				.narrow(c.name.to_string())
+				.labelled(format!("here it is {}", now))
+				.label(
+					trace.slots[idx].declared_span,
+					format!("but here it is {}", was),
+				)
+				.note(
+					"every principal that knows a constant has to agree on where it \
+					 came from, because that is what decides whether the attacker \
+					 knows it too",
+				)
+				.help("use the same declaration in both places"));
 			}
 			trace.slots[idx].known_by.push((principal.id, principal.id));
 			continue;
@@ -158,6 +197,7 @@ fn construct_trace_render_knows(
 		};
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
+			declared_span: expr.span,
 			initial_value: Value::Constant(new_c.clone()),
 			constant: new_c,
 			creator: principal.id,
@@ -187,10 +227,20 @@ fn construct_trace_render_generates(
 	expr: &Expression,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::sanity(
-				format!("generated constant already exists ({})", c).into(),
-			));
+		if let Some(idx) = trace.index_of(c) {
+			return Err(
+				VerifpalError::sanity(format!("`{}` already exists", c).into())
+					.narrow(c.name.to_string())
+					.labelled("generated again here")
+					.label(
+						trace.slots[idx].declared_span,
+						format!("already {} here", declared_as(&trace.slots[idx].constant)),
+					)
+					.note(
+						"`generates` introduces a value that exists nowhere else, so its name must be new",
+					)
+					.help("pick a name no principal has used yet"),
+			);
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -203,6 +253,7 @@ fn construct_trace_render_generates(
 		};
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
+			declared_span: expr.span,
 			initial_value: Value::Constant(new_c.clone()),
 			constant: new_c,
 			creator: principal.id,
@@ -222,10 +273,10 @@ fn construct_trace_render_assignment(
 	declared_at: i32,
 	expr: &Expression,
 ) -> VResult<()> {
-	let assigned = expr
-		.assigned
-		.as_ref()
-		.ok_or_else(|| VerifpalError::sanity("missing assignment value".into()))?;
+	let assigned = expr.assigned.as_ref().ok_or_else(|| {
+		VerifpalError::sanity("assignment has nothing on the right of the `=`".into())
+			.help("write the value being computed, e.g. `x = HASH(m)`")
+	})?;
 	let constants = sanity_assignment_constants(assigned, &[], trace)?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
@@ -234,27 +285,53 @@ fn construct_trace_render_assignment(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::sanity(
-					format!("constant does not exist ({})", c).into(),
+				return Err(unknown_constant(
+					&c.name,
+					trace,
+					"not declared by any principal".to_string(),
 				));
 			}
 		};
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
 			return Err(VerifpalError::sanity(
-				format!(
-					"{} is using constant ({}) despite not knowing it",
-					principal.name, c
-				)
-				.into(),
-			));
+				format!("{} does not know `{}`", principal.name, c).into(),
+			)
+			.narrow(c.name.to_string())
+			.labelled(format!("{} cannot compute with this value", principal.name))
+			.label(
+				trace.slots[idx].declared_span,
+				format!("`{}` is held only by {}", c, holders_of(trace, idx)),
+			)
+			.note(
+				"a principal can use a value only if it declares, generates, \
+				 computes or receives it",
+			)
+			.help(format!(
+				"send it first, e.g. `{} -> {}: {}`",
+				base_name(trace.principal_name(trace.slots[idx].creator)),
+				principal.name,
+				c
+			)));
 		}
 	}
 	for (output_idx, c) in expr.constants.iter().enumerate() {
-		if trace.index_of(c).is_some() {
-			return Err(VerifpalError::sanity(
-				format!("constant assigned twice ({})", c).into(),
-			));
+		if let Some(idx) = trace.index_of(c) {
+			return Err(
+				VerifpalError::sanity(format!("`{}` is assigned twice", c).into())
+					.narrow(c.name.to_string())
+					.labelled("assigned again here")
+					.label(
+						trace.slots[idx].declared_span,
+						format!("already {} here", declared_as(&trace.slots[idx].constant)),
+					)
+					.note(
+						"a constant names one value for the whole model, so it can never \
+				 be rebound; this is what lets a query name a value without saying \
+				 when it means",
+					)
+					.help("give this one a different name"),
+			);
 		}
 		let new_c = Constant {
 			name: c.name.clone(),
@@ -273,6 +350,7 @@ fn construct_trace_render_assignment(
 		}
 		let const_id = new_c.id;
 		trace.slots.push(TraceSlot {
+			declared_span: expr.span,
 			constant: new_c,
 			initial_value,
 			creator: principal.id,
@@ -298,8 +376,10 @@ fn construct_trace_render_leaks(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::sanity(
-					format!("leaked constant does not exist ({})", c).into(),
+				return Err(unknown_constant(
+					&c.name,
+					trace,
+					"not declared by any principal".to_string(),
 				));
 			}
 		};
@@ -307,11 +387,21 @@ fn construct_trace_render_leaks(
 		if !known {
 			return Err(VerifpalError::sanity(
 				format!(
-					"{} leaks a constant that they do not know ({})",
+					"{} does not know `{}`, so cannot leak it",
 					principal.name, c
 				)
 				.into(),
-			));
+			)
+			.narrow(c.name.to_string())
+			.label(
+				trace.slots[idx].declared_span,
+				format!("`{}` is held only by {}", c, holders_of(trace, idx)),
+			)
+			.note("`leaks` hands the attacker a value the principal already holds")
+			.help(format!(
+				"leak it from {} instead",
+				base_name(trace.principal_name(trace.slots[idx].creator))
+			)));
 		}
 		trace.slots[idx].constant.leaked = true;
 		append_unique(&mut trace.slots[idx].phases, current_phase);
@@ -335,12 +425,10 @@ fn construct_trace_render_message(
 		let idx = match trace.index_of(c) {
 			Some(idx) => idx,
 			None => {
-				return Err(VerifpalError::sanity(
-					format!(
-						"{} sends unknown constant to {} ({})",
-						message.sender_name, message.recipient_name, c
-					)
-					.into(),
+				return Err(unknown_constant(
+					&c.name,
+					trace,
+					"not declared by any principal".to_string(),
 				));
 			}
 		};
@@ -348,21 +436,37 @@ fn construct_trace_render_message(
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {
 			return Err(VerifpalError::sanity(
-				format!(
-					"{} is sending constant ({}) despite not knowing it",
-					message.sender_name, c
-				)
-				.into(),
-			));
+				format!("{} does not know `{}`", message.sender_name, c).into(),
+			)
+			.narrow(c.name.to_string())
+			.labelled(format!("{} has nothing to send here", message.sender_name))
+			.label(
+				trace.slots[idx].declared_span,
+				format!("`{}` is held only by {}", c, holders_of(trace, idx)),
+			)
+			.note("a principal can only send a value it declares, generates, computes or receives")
+			.help(format!(
+				"have {} send it, or give {} a way to obtain it first",
+				base_name(trace.principal_name(trace.slots[idx].creator)),
+				message.sender_name
+			)));
 		}
 		if recipient_knows {
 			return Err(VerifpalError::sanity(
-				format!(
-					"{} is receiving constant ({}) despite already knowing it",
-					message.recipient_name, c
-				)
-				.into(),
-			));
+				format!("{} already knows `{}`", message.recipient_name, c).into(),
+			)
+			.narrow(c.name.to_string())
+			.labelled("nothing new arrives here")
+			.label(
+				trace.slots[idx].declared_span,
+				format!("{} already holds `{}` from here", message.recipient_name, c),
+			)
+			.note(
+				"a constant names one value for the whole model, so re-sending it \
+				 tells the recipient nothing it did not already have; sending a \
+				 second, different value means giving it its own name",
+			)
+			.help("drop this constant from the message, or send a differently named value"));
 		}
 		trace.slots[idx]
 			.known_by

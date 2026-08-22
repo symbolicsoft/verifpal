@@ -509,7 +509,10 @@ fn test_cap_err_core_primitive() {
 }
 #[test]
 fn test_cap_err_phase_unreached() {
-	run_model_err("cap_err_phase_unreached.vp", "is never reached");
+	run_model_err(
+		"cap_err_phase_unreached.vp",
+		"which the model never reaches",
+	);
 }
 
 #[test]
@@ -913,7 +916,7 @@ fn test_shared_freshness_not_replication() {
 fn test_dh_nested_rejected() {
 	run_model_err(
 		"dh_nested_rejected.vp",
-		"PUBKEY cannot take DH_KEX as argument",
+		"`PUBKEY` cannot take `DH_KEX` as its first argument",
 	);
 }
 #[test]
@@ -1888,7 +1891,7 @@ fn test_pke_replay_wrong_recipient() {
 fn test_pubkey_of_pubkey_rejected() {
 	run_model_err(
 		"pubkey_of_pubkey_rejected.vp",
-		"PUBKEY cannot take PUBKEY as argument",
+		"`PUBKEY` cannot take `PUBKEY` as its first argument",
 	);
 }
 #[test]

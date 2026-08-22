@@ -93,11 +93,16 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 				MAX_PRINCIPALS
 			)
 			.into(),
-		));
+		)
+		.note("session expansion clones every principal once per session")
+		.help(format!(
+			"analyze it with `--sessions {}` or fewer",
+			(MAX_PRINCIPALS / principals.len().max(1)).max(1)
+		)));
 	}
 
 	let freshen = freshened_constants(m);
-	let pids = clone_principal_ids(&principals, sessions)?;
+	let pids = clone_principal_ids(&principals, sessions, highest_referenced_principal(m))?;
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * sessions as usize);
 	for block in &m.blocks {
@@ -213,11 +218,39 @@ fn freshened_constants(m: &Model) -> IdSet<ValueId> {
 	out
 }
 
+fn highest_referenced_principal(m: &Model) -> PrincipalId {
+	let mut highest = 0;
+	for block in &m.blocks {
+		match block {
+			Block::Principal(p) => highest = highest.max(p.id),
+			Block::Message(msg) => highest = highest.max(msg.sender).max(msg.recipient),
+			Block::Phase(_) => {}
+		}
+	}
+	for query in &m.queries {
+		highest = highest
+			.max(query.message.sender)
+			.max(query.message.recipient);
+		for option in &query.options {
+			highest = highest
+				.max(option.message.sender)
+				.max(option.message.recipient);
+		}
+	}
+	highest
+}
+
 fn clone_principal_ids(
 	principals: &[(PrincipalId, String)],
 	sessions: u8,
+	highest: PrincipalId,
 ) -> VResult<HashMap<(PrincipalId, u8), (PrincipalId, String)>> {
-	let mut next = principals.iter().map(|&(id, _)| id).max().unwrap_or(0);
+	let mut next = principals
+		.iter()
+		.map(|&(id, _)| id)
+		.max()
+		.unwrap_or(0)
+		.max(highest);
 	let mut out = HashMap::new();
 	for s in 2..=sessions {
 		for (id, name) in principals {

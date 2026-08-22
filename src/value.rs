@@ -447,6 +447,7 @@ mod tests {
 			principals: vec!["Alice".to_string()],
 			principal_ids: vec![0],
 			slots: vec![TraceSlot {
+				declared_span: Span::default(),
 				constant: c.clone(),
 				initial_value: val.clone(),
 				creator: 0,
@@ -485,6 +486,7 @@ mod tests {
 			principals: vec!["Alice".to_string()],
 			principal_ids: vec![0],
 			slots: vec![TraceSlot {
+				declared_span: Span::default(),
 				constant: c.clone(),
 				initial_value: original.clone(),
 				creator: 0,
@@ -525,6 +527,7 @@ mod tests {
 			principals: vec!["Bob".to_string()],
 			principal_ids: vec![3],
 			slots: vec![TraceSlot {
+				declared_span: Span::default(),
 				constant: c.clone(),
 				initial_value: val.clone(),
 				creator: 3,
