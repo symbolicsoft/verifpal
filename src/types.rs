@@ -155,9 +155,6 @@ impl VerifpalError {
 		Self::of(ErrorKind::Internal, message)
 	}
 
-	/// The analysis was asked to stop. It carries no verdicts: a search cut
-	/// short has not established that anything holds, and the only safe thing
-	/// to report is nothing at all.
 	pub fn cancelled() -> Self {
 		Self::of(ErrorKind::Cancelled, "analysis cancelled".into())
 	}
@@ -771,12 +768,6 @@ pub(crate) struct ResultWitness {
 	pub shares: Vec<String>,
 }
 
-/// One narrated step of an attack trace: what kind of step it is, and the
-/// line `narrate::render_one` produced for it.
-///
-/// The step's structured operands stay `#[cfg(test)]` in `narrate::Step`.
-/// Only the variant name escapes, which is enough for a client to style a
-/// step and not enough to put engine types into a wire format.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct TraceStep {
 	pub kind: &'static str,
@@ -791,7 +782,6 @@ pub struct VerifyResult {
 	pub summary: String,
 	pub conclusion: String,
 	pub trace: Vec<String>,
-	/// `trace`, tagged. Parallel to `trace`: same length, same order.
 	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
 	/// Per-session instantiations of `query` under `--sessions`, evaluated

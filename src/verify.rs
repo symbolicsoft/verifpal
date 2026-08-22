@@ -14,10 +14,6 @@ use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
 
-// The shared entry point every consumer is required to go through, so that
-// the CLI, the wasm build and the language server cannot disagree about what a
-// model means. `internal-json` was its last caller in a `cli`-only build; the
-// tests and the wasm build still call it, and `src/lsp/` will.
 #[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	analyze_sessions(m, crate::sessions::DEFAULT_SESSIONS)
@@ -28,13 +24,6 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
 }
 
-/// `analyze_sessions`, stoppable through `cancel`.
-///
-/// The flag stops the search loops; `analyze_sessions_traced_cancellable` is
-/// the **only** place it becomes a verdict, and the verdict it becomes is
-/// `Err`. No caller reads a result set out of an `Err`, so an interrupted
-/// search reports nothing rather than reporting queries it never got to as
-/// holding.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn analyze_sessions_cancellable(
 	m: &Model,
@@ -80,10 +69,6 @@ fn analyze_sessions_traced_cancellable(
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
 	}
-	// The one place the flag becomes a verdict, and the verdict is `Err`.
-	// Every loop above merely stops; nothing reads results out of an `Err`,
-	// so a search cut short reports nothing rather than reporting a query it
-	// never got to as holding.
 	if ctx.cancelled() {
 		return Err(VerifpalError::cancelled());
 	}
@@ -132,11 +117,6 @@ pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
 	verify_report_with_source(file_path, sessions).map(|(report, _)| report)
 }
 
-/// `verify_report`, returning the model source alongside the report.
-///
-/// A report's query spans are offsets into *this* text. Re-reading the file to
-/// resolve them would be a race with whatever wrote it, so the text the
-/// analysis actually ran on travels with the report.
 pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(VerifyReport, String)> {
 	let m = parse_file(file_path)?;
 	let source = m.source.to_string();
@@ -146,7 +126,7 @@ pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(Veri
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal
 /// (`sessions.rs`). Every entry point shares one default, so the CLI, the
-/// language server and the wasm build cannot disagree about
+/// `internal-json` IDE interface and the wasm build cannot disagree about
 /// what a model means.
 pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report(file_path, sessions).map(|report| (report.results, report.code))

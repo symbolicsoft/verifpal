@@ -173,9 +173,6 @@ impl VerifyContext {
 		self.cancel = cancel;
 	}
 
-	/// Checked beside every `all_resolved()` short-circuit. `Relaxed` is
-	/// correct: this is a one-way flag and no other state is ordered against
-	/// it.
 	pub(crate) fn cancelled(&self) -> bool {
 		self.cancel.load(Ordering::Relaxed)
 	}
@@ -488,7 +485,6 @@ mod tests {
 			]\n";
 		let m = parse_string("cx.vp", src).expect("parses");
 
-		// Cancelled before a single loop iteration runs.
 		let cancel = Arc::new(AtomicBool::new(true));
 		let outcome = crate::verify::analyze_sessions_cancellable(&m, 1, cancel);
 
@@ -519,8 +515,6 @@ mod tests {
 
 	#[test]
 	fn cancelling_mid_run_yields_no_verdicts_at_all() {
-		// A model with a genuine attack: were results to escape a cancelled
-		// run, this is where an unsearched "holds" would show up.
 		let src = "attacker[active]\n\
 			principal Alice[\n\
 			knows private cz_a\n\
@@ -546,7 +540,6 @@ mod tests {
 		let cancel = Arc::new(AtomicBool::new(false));
 		let flag = Arc::clone(&cancel);
 
-		// Flip the flag the instant the analysis begins.
 		let worker = std::thread::spawn(move || {
 			let m = parse_string("cz.vp", src).expect("parses");
 			crate::verify::analyze_sessions_cancellable(&m, 1, cancel).map(|ctx| ctx.results_get())
@@ -554,10 +547,7 @@ mod tests {
 		flag.store(true, Ordering::Relaxed);
 
 		match worker.join().expect("the worker did not panic") {
-			// Won the race: it finished before the flag was seen. Fine — a
-			// completed analysis is a real one.
 			Ok(results) => assert_eq!(results.len(), 2),
-			// Saw the flag: no results escaped.
 			Err(e) => assert_eq!(e.kind, ErrorKind::Cancelled),
 		}
 	}

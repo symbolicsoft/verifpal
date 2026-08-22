@@ -1,19 +1,6 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-//! The one serializable description of an analysis.
-//!
-//! `verify --format json` and the language server's `verifpal/analysisReport`
-//! notification are both this type. They share it so they cannot drift: a
-//! query that reads one way on the command line reads the same way in an
-//! editor, because there is only one shape.
-//!
-//! Ranges here are byte offsets into the model source plus the 1-based line
-//! and column the CLI's own error output uses. They are deliberately *not*
-//! LSP `Position`s: LSP counts UTF-16 code units against an encoding
-//! negotiated at `initialize`, which is the server's business and not the
-//! engine's. The server converts offsets itself.
-
 use serde::Serialize;
 
 use crate::types::{Span, VerifyResult};
@@ -28,13 +15,10 @@ pub struct Run {
 
 #[derive(Debug, Serialize)]
 pub struct ModelReport {
-	/// The path as it was given on the command line.
 	pub file: String,
 	pub ok: bool,
-	/// Present exactly when `ok` is false.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub error: Option<String>,
-	/// Present exactly when `ok` is true.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub analysis: Option<Analysis>,
 }
@@ -42,10 +26,8 @@ pub struct ModelReport {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
-	/// The model's own file name, as the engine recorded it.
 	pub model: String,
 	pub sessions: u8,
-	/// The compact result code: one letter+digit per query, in model order.
 	pub code: String,
 	pub attacks: usize,
 	pub elapsed_ms: u128,
@@ -58,7 +40,6 @@ pub struct Analysis {
 pub struct Assumption {
 	pub term: String,
 	pub capability: String,
-	/// 0 unless the assumption was delayed with `from phase N`.
 	pub from_phase: i32,
 }
 
@@ -67,15 +48,12 @@ pub struct Assumption {
 pub struct QueryReport {
 	pub query: String,
 	pub kind: String,
-	/// True when the attacker contradicted the query.
 	pub resolved: bool,
 	pub range: SourceRange,
 	pub summary: String,
 	pub conclusion: String,
 	pub steps: Vec<ReportStep>,
 	pub preconditions: Vec<String>,
-	/// Per-session instantiations of this query that were evaluated under it.
-	/// 0 at one session.
 	pub variants: usize,
 }
 
@@ -85,8 +63,6 @@ pub struct ReportStep {
 	pub text: String,
 }
 
-/// Byte offsets into the model source, plus the 1-based line and column that
-/// `file:line:col` error output uses.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct SourceRange {
 	pub start: usize,
@@ -96,10 +72,6 @@ pub struct SourceRange {
 }
 
 impl Run {
-	/// Build a run report. `sources` is parallel to `outcomes`: the model
-	/// source each outcome was computed from, used to turn a `Span` into a
-	/// line and column. An outcome with no source gets zeroed ranges rather
-	/// than a panic, which is what a failed parse leaves behind.
 	pub fn of(
 		version: &str,
 		outcomes: &[(String, Result<VerifyReport, String>)],

@@ -193,11 +193,6 @@ fn render_trailing(comment: Option<&Comment>) -> String {
 	}
 }
 
-/// A query as it reads in a report: the same text the user wrote, normalised.
-///
-/// `Display for Query` cannot do this because an authentication query needs
-/// its message's principal names, which the `Query` carries but the generic
-/// rendering path does not reach.
 pub(crate) fn query_display(q: &Query) -> String {
 	match q.kind {
 		QueryKind::Authentication => format!(

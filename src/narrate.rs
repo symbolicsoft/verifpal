@@ -604,8 +604,6 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 }
 
 impl Step {
-	/// The variant name, as it appears in the report. Stable: clients key
-	/// styling off it.
 	pub(crate) fn kind(&self) -> &'static str {
 		match self {
 			Step::Mutations { .. } => "mutations",
@@ -651,7 +649,6 @@ impl Narration {
 		self.table.compress_excluding(v, exclude)
 	}
 
-	/// Each step tagged with its kind, rendered exactly as `trace` renders it.
 	pub(crate) fn kinded(&self) -> Vec<crate::types::TraceStep> {
 		self.steps
 			.iter()

@@ -246,9 +246,6 @@ impl<'a> Parser<'a> {
 		(self.pos, self.pending_leading.len(), tokens)
 	}
 
-	/// Rewind. The token count is part of the snapshot because a speculative
-	/// parse records tokens too, and an index that kept them would describe
-	/// text the parser went on to read as something else.
 	fn restore(&mut self, (pos, leading_len, tokens): (usize, usize, usize)) {
 		self.pos = pos;
 		self.pending_leading.truncate(leading_len);
@@ -257,7 +254,6 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Record a token, if this parse is indexing. One `Option` check when not.
 	fn record(&mut self, span: Span, kind: crate::tokens::TokenKind) {
 		if let Some(index) = self.tokens.as_mut() {
 			index.push(span, kind, self.source);
@@ -813,7 +809,6 @@ impl<'a> Parser<'a> {
 			"public" => Qualifier::Public,
 			"password" => Qualifier::Password,
 			_ => {
-				// falls through to the error below
 				return Err(VerifpalError::parse(
 					format!("unknown qualifier `{}`", qualifier_str).into(),
 				)
@@ -1456,13 +1451,6 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	parse_string(&file_name, &content)
 }
 
-/// `parse_string`, also returning every token the parser recognised.
-///
-/// The index is returned **whether or not the model parsed**. A model
-/// mid-edit is the common case in an editor, and hover, folding and semantic
-/// tokens have to keep working across a transient syntax error — so the
-/// tokens up to the failure are exactly what is wanted.
-// Consumed by `src/lsp/`, which lands next; the tests are its only caller now.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn parse_string_indexed(
 	file_name: &str,

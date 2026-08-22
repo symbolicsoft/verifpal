@@ -1,56 +1,26 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-// Every consumer of this module is `src/lsp/`, which lands next. Until then
-// the only callers are the tests below. Remove this attribute when the server
-// arrives; it should start failing the moment it is no longer needed.
 #![allow(dead_code)]
-
-//! Source spans for individual tokens.
-//!
-//! `Constant` carries no `Span` and must not gain one: it is half of `Value`,
-//! the term type the solver clones, hashes and compares throughout, and its
-//! size is load-bearing. Spans therefore come from the parser, which already
-//! walks the bytes and already knows what each one is.
-//!
-//! This is emitted *by* the parser rather than by a second scanner. A second
-//! scanner would drift from the first, which is the exact failure this whole
-//! effort exists to end.
 
 use std::sync::Arc;
 
 use crate::types::{ProtocolTrace, Span};
 
-/// What the parser decided a token was, lexically.
-///
-/// This is the *lexical* role. Whether a `ConstantName` is a declaration or a
-/// use, and what it resolves to, is answered by cross-referencing the `Model`
-/// and `ProtocolTrace`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TokenKind {
-	/// `attacker`, `principal`, `knows`, `generates`, `leaks`, `phase`, `queries`
 	Keyword,
-	/// `active` or `passive`
 	AttackerMode,
-	/// `public`, `private`, `password`
 	Qualifier,
 	PrincipalName,
 	ConstantName,
 	PrimitiveName,
-	/// `confidentiality?`, `authentication?`, `freshness?`, `unlinkability?`,
-	/// `equivalence?` — the `?` is part of the keyword, not a check marker.
 	QueryKind,
-	/// `weak`, `forgeable`, `malleable`, and the `from`/`phase` of an onset
 	Capability,
-	/// The integer in `phase[N]` or `from phase N`
 	PhaseNumber,
-	/// `->` or `→`
 	Arrow,
-	/// `=`
 	Assign,
-	/// `?` marking a checked primitive
 	Check,
-	/// The `_` anonymous constant
 	Anonymous,
 	Comment,
 }
@@ -59,24 +29,19 @@ pub(crate) enum TokenKind {
 pub(crate) struct Token {
 	pub span: Span,
 	pub kind: TokenKind,
-	/// The text exactly as written, before the parser case-folds it.
 	pub text: Arc<str>,
 }
 
-/// Everything the protocol trace records about one constant, keyed off a token
-/// in the source. This is what a hover shows and what a definition jumps to.
 #[derive(Clone, Debug)]
 pub(crate) struct Symbol {
 	pub name: Arc<str>,
 	pub declaration: Option<Span>,
 	pub creator: Option<Arc<str>>,
 	pub assigned: Option<String>,
-	/// `(recipient, sender)` pairs, as the trace records them.
 	pub known_by: Vec<(Arc<str>, Arc<str>)>,
 	pub phases: Vec<i32>,
 }
 
-/// Every token the parser recognised, in source order.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TokenIndex {
 	tokens: Vec<Token>,
@@ -84,8 +49,6 @@ pub(crate) struct TokenIndex {
 
 impl TokenIndex {
 	pub(crate) fn push(&mut self, span: Span, kind: TokenKind, source: &str) {
-		// A zero-width or out-of-bounds span records nothing: it would quote
-		// text it does not cover, and every consumer here slices by span.
 		if span.start >= span.end || span.end > source.len() {
 			return;
 		}
@@ -112,11 +75,6 @@ impl TokenIndex {
 		self.tokens.truncate(len);
 	}
 
-	/// Every occurrence of `name`, declaration included, in source order.
-	///
-	/// Matching is case-insensitive because the language is: `pubkey(a)` and
-	/// `PUBKEY(a)` are the same call, and `Alice` and `alice` the same
-	/// principal.
 	pub(crate) fn references(&self, name: &str) -> Vec<Span> {
 		let needle = name.to_lowercase();
 		self.tokens
@@ -129,21 +87,10 @@ impl TokenIndex {
 			.collect()
 	}
 
-	/// Where `name` was introduced: the first occurrence.
-	///
-	/// The first occurrence *is* the declaration, and unambiguously so:
-	/// `sanity.rs` forbids assigning a constant twice, generating it twice, or
-	/// knowing it two different ways, so nothing can introduce a name that a
-	/// later line re-introduces.
 	pub(crate) fn declaration_of(&self, name: &str) -> Option<Span> {
 		self.references(name).first().copied()
 	}
 
-	/// What the protocol trace records about the constant a token names.
-	///
-	/// `None` for any token that is not a constant, and for a constant the
-	/// trace does not carry — which happens when the model parsed but did not
-	/// pass sanity, and is a legitimate mid-edit state.
 	pub(crate) fn resolve(&self, token: &Token, trace: &ProtocolTrace) -> Option<Symbol> {
 		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
 			return None;
@@ -172,11 +119,6 @@ impl TokenIndex {
 		})
 	}
 
-	/// The token covering `offset`, if any. `offset` is a byte offset into the
-	/// same source the index was built from.
-	///
-	/// A position at a token's very end belongs to no token, which is what an
-	/// editor wants: the caret after `PUBKEY` is not inside `PUBKEY`.
 	pub(crate) fn at(&self, offset: usize) -> Option<&Token> {
 		let i = self
 			.tokens
@@ -253,9 +195,7 @@ mod tests {
 	#[test]
 	fn references_finds_every_occurrence_including_the_declaration() {
 		let (_, index) = resolve_fixture();
-		// tr_ga: the assignment, the message, and HASH(tr_ga).
 		assert_eq!(index.references("tr_ga").len(), 3);
-		// tr_a: the knows, the PUBKEY argument, and the query.
 		assert_eq!(index.references("tr_a").len(), 3);
 	}
 
@@ -352,7 +292,6 @@ mod tests {
 
 	#[test]
 	fn an_index_survives_a_parse_failure() {
-		// `PUBKEY` is fine; the missing `]` is not.
 		let broken = "attacker[active]\n\
 			principal Alice[\n\
 			\tknows private tb_a\n\
@@ -369,17 +308,10 @@ mod tests {
 	#[test]
 	fn at_returns_nothing_between_tokens() {
 		let index = index_of(SRC);
-		// The space just past `->`.
 		let arrow = SRC.find("->").expect("the arrow is in the source");
 		assert!(index.at(arrow + 2).is_none());
 	}
 
-	/// Walks every model in the tree, not one hand-written source.
-	///
-	/// A recording site that captures the wrong span is the mistake this whole
-	/// mechanism is prone to, and it shows up as a token whose text does not
-	/// match the bytes it claims. One malformed site anywhere in the corpus
-	/// fails this.
 	#[test]
 	fn every_model_in_the_tree_indexes_coherently() {
 		fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -424,7 +356,6 @@ mod tests {
 					token
 				);
 				previous = token.span.end;
-				// `at` must find every token the index holds.
 				let found = index.at(token.span.start).expect("at() finds each token");
 				assert_eq!(found.span.start, token.span.start);
 			}
