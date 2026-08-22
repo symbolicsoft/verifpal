@@ -603,9 +603,25 @@ fn join_terms(values: &[Value], table: &NameTable) -> String {
 		.join(", ")
 }
 
+impl Step {
+	/// The variant name, as it appears in the report. Stable: clients key
+	/// styling off it.
+	pub(crate) fn kind(&self) -> &'static str {
+		match self {
+			Step::Mutations { .. } => "mutations",
+			Step::Bypass { .. } => "bypass",
+			Step::Replay { .. } => "replay",
+			Step::Resolves { .. } => "resolves",
+			Step::Static { .. } => "static",
+			Step::Received { .. } => "received",
+			Step::Gate { .. } => "gate",
+			Step::Derive { .. } => "derive",
+		}
+	}
+}
+
 pub(crate) struct Narration {
 	pub trace: String,
-	#[cfg(test)]
 	pub steps: Vec<Step>,
 	table: NameTable,
 	state: Option<PrincipalState>,
@@ -615,7 +631,6 @@ impl Narration {
 	pub(crate) fn none() -> Narration {
 		Narration {
 			trace: String::new(),
-			#[cfg(test)]
 			steps: Vec::new(),
 			table: NameTable::empty(),
 			state: None,
@@ -634,6 +649,17 @@ impl Narration {
 
 	pub(crate) fn term_excluding(&self, v: &Value, exclude: &[&str]) -> String {
 		self.table.compress_excluding(v, exclude)
+	}
+
+	/// Each step tagged with its kind, rendered exactly as `trace` renders it.
+	pub(crate) fn kinded(&self) -> Vec<crate::types::TraceStep> {
+		self.steps
+			.iter()
+			.map(|s| crate::types::TraceStep {
+				kind: s.kind(),
+				text: render_one(s),
+			})
+			.collect()
 	}
 }
 
@@ -754,7 +780,6 @@ pub(crate) fn narrate_attack(
 	}
 	Narration {
 		trace,
-		#[cfg(test)]
 		steps,
 		table,
 		state: Some(witness.ps.clone()),
@@ -878,6 +903,53 @@ mod tests {
 	use crate::parser::parse_string;
 	use crate::primitive::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn every_narrated_step_carries_its_kind() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private nsk_a\n\
+			nsk_ga = PUBKEY(nsk_a)\n\
+			generates nsk_m\n\
+			]\n\
+			Alice -> Bob: nsk_ga\n\
+			principal Bob[\n\
+			knows private nsk_b\n\
+			nsk_gb = PUBKEY(nsk_b)\n\
+			nsk_k = DH_KEX(nsk_ga, nsk_b)\n\
+			generates nsk_n\n\
+			nsk_e = AEAD_ENC(nsk_k, nsk_n, nil)\n\
+			]\n\
+			Bob -> Alice: nsk_gb, nsk_e\n\
+			queries[\n\
+			confidentiality? nsk_n\n\
+			]\n";
+		let m = parse_string("nsk.vp", src).expect("parses");
+		let ctx = crate::verify::analyze(&m).expect("analyzes");
+		let results = ctx.results_get();
+		let attacked = results.iter().find(|r| r.resolved).expect("an attack");
+
+		assert!(!attacked.steps.is_empty(), "an attack must narrate steps");
+		assert_eq!(
+			attacked.steps.len(),
+			attacked.trace.len(),
+			"one kind per rendered trace line"
+		);
+		const KINDS: &[&str] = &[
+			"mutations",
+			"bypass",
+			"replay",
+			"resolves",
+			"static",
+			"received",
+			"gate",
+			"derive",
+		];
+		for step in &attacked.steps {
+			assert!(KINDS.contains(&step.kind), "unknown kind {:?}", step.kind);
+			assert!(!step.text.is_empty(), "a step must render to text");
+		}
+	}
 
 	fn name_table_state() -> PrincipalState {
 		let a = make_constant("nt_a");

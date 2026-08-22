@@ -379,6 +379,7 @@ impl VerifyContext {
 			vr.summary = result.summary.clone();
 			vr.conclusion = result.conclusion.clone();
 			vr.trace = result.trace.clone();
+			vr.steps = result.steps.clone();
 			vr.options = result.options.clone();
 			if result.resolved {
 				self.unresolved.fetch_sub(1, Ordering::SeqCst);

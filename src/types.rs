@@ -762,6 +762,18 @@ pub(crate) struct ResultWitness {
 	pub shares: Vec<String>,
 }
 
+/// One narrated step of an attack trace: what kind of step it is, and the
+/// line `narrate::render_one` produced for it.
+///
+/// The step's structured operands stay `#[cfg(test)]` in `narrate::Step`.
+/// Only the variant name escapes, which is enough for a client to style a
+/// step and not enough to put engine types into a wire format.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TraceStep {
+	pub kind: &'static str,
+	pub text: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,
@@ -770,6 +782,8 @@ pub struct VerifyResult {
 	pub summary: String,
 	pub conclusion: String,
 	pub trace: Vec<String>,
+	/// `trace`, tagged. Parallel to `trace`: same length, same order.
+	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
 	/// Per-session instantiations of `query` under `--sessions`, evaluated
 	/// under the same `query_index`: an attack on any session resolves the
@@ -787,18 +801,20 @@ impl VerifyResult {
 			summary: String::new(),
 			conclusion: String::new(),
 			trace: vec![],
+			steps: vec![],
 			options: vec![],
 			variants: vec![],
 		}
 	}
 
-	pub fn set_summary(&mut self, mutated_info: &str, conclusion: &str) {
+	pub fn set_summary(&mut self, mutated_info: &str, steps: Vec<TraceStep>, conclusion: &str) {
 		self.trace = mutated_info
 			.lines()
 			.map(str::trim)
 			.filter(|line| !line.is_empty())
 			.map(str::to_string)
 			.collect();
+		self.steps = steps;
 		self.conclusion = conclusion.to_string();
 		self.summary =
 			crate::info::info_verify_result_summary(mutated_info, conclusion, &self.options);
