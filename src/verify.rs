@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::context::VerifyContext;
 use crate::info::info_message;
@@ -27,9 +28,33 @@ pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext
 	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
 }
 
+/// `analyze_sessions`, stoppable through `cancel`.
+///
+/// The flag stops the search loops; `analyze_sessions_traced_cancellable` is
+/// the **only** place it becomes a verdict, and the verdict it becomes is
+/// `Err`. No caller reads a result set out of an `Err`, so an interrupted
+/// search reports nothing rather than reporting queries it never got to as
+/// holding.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn analyze_sessions_cancellable(
+	m: &Model,
+	sessions: u8,
+	cancel: Arc<AtomicBool>,
+) -> VResult<VerifyContext> {
+	analyze_sessions_traced_cancellable(m, sessions, cancel).map(|(ctx, _)| ctx)
+}
+
 pub(crate) fn analyze_sessions_traced(
 	m: &Model,
 	sessions: u8,
+) -> VResult<(VerifyContext, ProtocolTrace)> {
+	analyze_sessions_traced_cancellable(m, sessions, Arc::new(AtomicBool::new(false)))
+}
+
+fn analyze_sessions_traced_cancellable(
+	m: &Model,
+	sessions: u8,
+	cancel: Arc<AtomicBool>,
 ) -> VResult<(VerifyContext, ProtocolTrace)> {
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
@@ -45,13 +70,22 @@ pub(crate) fn analyze_sessions_traced(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let ctx = VerifyContext::new(m, &states, variants);
+	let mut ctx = VerifyContext::new(m, &states, variants);
+	ctx.set_cancel(cancel);
+	let ctx = ctx;
 	if sessions > 1 {
 		ctx.prefer_replication_valid_witnesses();
 	}
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
+	}
+	// The one place the flag becomes a verdict, and the verdict is `Err`.
+	// Every loop above merely stops; nothing reads results out of an `Err`,
+	// so a search cut short reports nothing rather than reporting a query it
+	// never got to as holding.
+	if ctx.cancelled() {
+		return Err(VerifpalError::cancelled());
 	}
 	Ok((ctx, trace))
 }
@@ -195,6 +229,9 @@ pub(crate) fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
+		if ctx.cancelled() {
+			return Ok(());
+		}
 		crate::info::info_status_update(|| {
 			status_line(ctx, attacker.current_phase, &ps.name, "running")
 		});

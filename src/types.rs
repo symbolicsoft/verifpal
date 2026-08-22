@@ -104,6 +104,7 @@ pub enum ErrorKind {
 	Sanity,
 	Resolution,
 	Internal,
+	Cancelled,
 }
 
 impl ErrorKind {
@@ -113,6 +114,7 @@ impl ErrorKind {
 			ErrorKind::Sanity => "sanity error",
 			ErrorKind::Resolution => "resolution error",
 			ErrorKind::Internal => "internal error",
+			ErrorKind::Cancelled => "cancelled",
 		}
 	}
 }
@@ -151,6 +153,13 @@ impl VerifpalError {
 
 	pub fn internal(message: Cow<'static, str>) -> Self {
 		Self::of(ErrorKind::Internal, message)
+	}
+
+	/// The analysis was asked to stop. It carries no verdicts: a search cut
+	/// short has not established that anything holds, and the only safe thing
+	/// to report is nothing at all.
+	pub fn cancelled() -> Self {
+		Self::of(ErrorKind::Cancelled, "analysis cancelled".into())
 	}
 
 	fn of(kind: ErrorKind, message: Cow<'static, str>) -> Self {

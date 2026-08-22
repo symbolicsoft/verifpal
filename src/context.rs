@@ -47,6 +47,7 @@ pub(crate) struct VerifyContext {
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
+	cancel: Arc<AtomicBool>,
 }
 
 fn derivation_provenance(
@@ -164,7 +165,19 @@ impl VerifyContext {
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
+			cancel: Arc::new(AtomicBool::new(false)),
 		}
+	}
+
+	pub(crate) fn set_cancel(&mut self, cancel: Arc<AtomicBool>) {
+		self.cancel = cancel;
+	}
+
+	/// Checked beside every `all_resolved()` short-circuit. `Relaxed` is
+	/// correct: this is a one-way flag and no other state is ordered against
+	/// it.
+	pub(crate) fn cancelled(&self) -> bool {
+		self.cancel.load(Ordering::Relaxed)
 	}
 
 	pub(crate) fn prefer_replication_valid_witnesses(&self) {
@@ -436,6 +449,7 @@ impl VerifyContext {
 			prefer_replication: AtomicBool::new(false),
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
+			cancel: Arc::clone(&self.cancel),
 		}
 	}
 
@@ -452,6 +466,101 @@ mod tests {
 	use crate::parser::parse_string;
 	use crate::testutil::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn a_cancelled_analysis_returns_an_error_and_no_results() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private cx_a\n\
+			cx_ga = PUBKEY(cx_a)\n\
+			]\n\
+			Alice -> Bob: cx_ga\n\
+			principal Bob[\n\
+			knows private cx_b\n\
+			cx_gb = PUBKEY(cx_b)\n\
+			cx_k = DH_KEX(cx_ga, cx_b)\n\
+			generates cx_m\n\
+			cx_e = AEAD_ENC(cx_k, cx_m, nil)\n\
+			]\n\
+			Bob -> Alice: cx_gb, cx_e\n\
+			queries[\n\
+			confidentiality? cx_m\n\
+			]\n";
+		let m = parse_string("cx.vp", src).expect("parses");
+
+		// Cancelled before a single loop iteration runs.
+		let cancel = Arc::new(AtomicBool::new(true));
+		let outcome = crate::verify::analyze_sessions_cancellable(&m, 1, cancel);
+
+		let err = outcome.err().expect("a cancelled analysis is an error");
+		assert_eq!(err.kind, ErrorKind::Cancelled);
+	}
+
+	#[test]
+	fn an_uncancelled_analysis_still_succeeds() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private cy_m\n\
+			cy_h = HASH(cy_m)\n\
+			]\n\
+			Alice -> Bob: cy_h\n\
+			principal Bob[\n\
+			_ = HASH(cy_h)\n\
+			]\n\
+			queries[\n\
+			confidentiality? cy_m\n\
+			]\n";
+		let m = parse_string("cy.vp", src).expect("parses");
+		let cancel = Arc::new(AtomicBool::new(false));
+		let ctx = crate::verify::analyze_sessions_cancellable(&m, 1, cancel)
+			.expect("an uncancelled analysis succeeds");
+		assert_eq!(ctx.results_get().len(), 1);
+	}
+
+	#[test]
+	fn cancelling_mid_run_yields_no_verdicts_at_all() {
+		// A model with a genuine attack: were results to escape a cancelled
+		// run, this is where an unsearched "holds" would show up.
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private cz_a\n\
+			cz_ga = PUBKEY(cz_a)\n\
+			]\n\
+			Alice -> Bob: cz_ga\n\
+			principal Bob[\n\
+			knows private cz_b\n\
+			cz_gb = PUBKEY(cz_b)\n\
+			cz_k = DH_KEX(cz_ga, cz_b)\n\
+			generates cz_m\n\
+			cz_e = AEAD_ENC(cz_k, cz_m, nil)\n\
+			]\n\
+			Bob -> Alice: cz_gb, cz_e\n\
+			principal Alice[\n\
+			cz_k2 = DH_KEX(cz_gb, cz_a)\n\
+			cz_d = AEAD_DEC(cz_k2, cz_e, nil)\n\
+			]\n\
+			queries[\n\
+			confidentiality? cz_m\n\
+			authentication? Bob -> Alice: cz_e\n\
+			]\n";
+		let cancel = Arc::new(AtomicBool::new(false));
+		let flag = Arc::clone(&cancel);
+
+		// Flip the flag the instant the analysis begins.
+		let worker = std::thread::spawn(move || {
+			let m = parse_string("cz.vp", src).expect("parses");
+			crate::verify::analyze_sessions_cancellable(&m, 1, cancel).map(|ctx| ctx.results_get())
+		});
+		flag.store(true, Ordering::Relaxed);
+
+		match worker.join().expect("the worker did not panic") {
+			// Won the race: it finished before the flag was seen. Fine — a
+			// completed analysis is a real one.
+			Ok(results) => assert_eq!(results.len(), 2),
+			// Saw the flag: no results escaped.
+			Err(e) => assert_eq!(e.kind, ErrorKind::Cancelled),
+		}
+	}
 
 	#[test]
 	fn scratch_context_isolates_single_query() {
