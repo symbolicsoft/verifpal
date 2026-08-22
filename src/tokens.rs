@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use crate::types::Span;
+use crate::types::{ProtocolTrace, Span};
 
 /// What the parser decided a token was, lexically.
 ///
@@ -63,6 +63,19 @@ pub(crate) struct Token {
 	pub text: Arc<str>,
 }
 
+/// Everything the protocol trace records about one constant, keyed off a token
+/// in the source. This is what a hover shows and what a definition jumps to.
+#[derive(Clone, Debug)]
+pub(crate) struct Symbol {
+	pub name: Arc<str>,
+	pub declaration: Option<Span>,
+	pub creator: Option<Arc<str>>,
+	pub assigned: Option<String>,
+	/// `(recipient, sender)` pairs, as the trace records them.
+	pub known_by: Vec<(Arc<str>, Arc<str>)>,
+	pub phases: Vec<i32>,
+}
+
 /// Every token the parser recognised, in source order.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TokenIndex {
@@ -97,6 +110,66 @@ impl TokenIndex {
 
 	pub(crate) fn truncate(&mut self, len: usize) {
 		self.tokens.truncate(len);
+	}
+
+	/// Every occurrence of `name`, declaration included, in source order.
+	///
+	/// Matching is case-insensitive because the language is: `pubkey(a)` and
+	/// `PUBKEY(a)` are the same call, and `Alice` and `alice` the same
+	/// principal.
+	pub(crate) fn references(&self, name: &str) -> Vec<Span> {
+		let needle = name.to_lowercase();
+		self.tokens
+			.iter()
+			.filter(|t| {
+				matches!(t.kind, TokenKind::ConstantName | TokenKind::PrincipalName)
+					&& t.text.to_lowercase() == needle
+			})
+			.map(|t| t.span)
+			.collect()
+	}
+
+	/// Where `name` was introduced: the first occurrence.
+	///
+	/// The first occurrence *is* the declaration, and unambiguously so:
+	/// `sanity.rs` forbids assigning a constant twice, generating it twice, or
+	/// knowing it two different ways, so nothing can introduce a name that a
+	/// later line re-introduces.
+	pub(crate) fn declaration_of(&self, name: &str) -> Option<Span> {
+		self.references(name).first().copied()
+	}
+
+	/// What the protocol trace records about the constant a token names.
+	///
+	/// `None` for any token that is not a constant, and for a constant the
+	/// trace does not carry — which happens when the model parsed but did not
+	/// pass sanity, and is a legitimate mid-edit state.
+	pub(crate) fn resolve(&self, token: &Token, trace: &ProtocolTrace) -> Option<Symbol> {
+		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
+			return None;
+		}
+		let needle = token.text.to_lowercase();
+		let slot = trace
+			.slots
+			.iter()
+			.find(|slot| slot.constant.name.to_lowercase() == needle)?;
+		Some(Symbol {
+			name: Arc::clone(&slot.constant.name),
+			declaration: self.declaration_of(&token.text),
+			creator: Some(Arc::from(trace.principal_name(slot.creator))),
+			assigned: Some(slot.initial_value.to_string()),
+			known_by: slot
+				.known_by
+				.iter()
+				.map(|&(recipient, sender)| {
+					(
+						Arc::from(trace.principal_name(recipient)),
+						Arc::from(trace.principal_name(sender)),
+					)
+				})
+				.collect(),
+			phases: slot.phases.clone(),
+		})
 	}
 
 	/// The token covering `offset`, if any. `offset` is a byte offset into the
@@ -135,6 +208,89 @@ mod tests {
 		let (model, index) = crate::parser::parse_string_indexed("tk.vp", src);
 		model.expect("parses");
 		index
+	}
+
+	const RESOLVE_SRC: &str = "attacker[passive]\n\
+		principal Alice[\n\
+		\tknows private tr_a\n\
+		\ttr_ga = PUBKEY(tr_a)\n\
+		]\n\
+		Alice -> Bob: tr_ga\n\
+		principal Bob[\n\
+		\t_ = HASH(tr_ga)\n\
+		]\n\
+		queries[\n\
+		\tconfidentiality? tr_a\n\
+		]\n";
+
+	fn resolve_fixture() -> (crate::types::ProtocolTrace, TokenIndex) {
+		let (model, index) = crate::parser::parse_string_indexed("tr.vp", RESOLVE_SRC);
+		let model = model.expect("parses");
+		let (trace, _) = crate::sanity::sanity(&model).expect("passes sanity");
+		(trace, index)
+	}
+
+	#[test]
+	fn a_constants_declaration_is_where_it_was_assigned() {
+		let (_, index) = resolve_fixture();
+		let declaration = index.declaration_of("tr_ga").expect("tr_ga is declared");
+		let at = RESOLVE_SRC
+			.find("tr_ga = PUBKEY")
+			.expect("the assignment is in the source");
+		assert_eq!(declaration.start, at);
+	}
+
+	#[test]
+	fn a_knowns_declaration_is_the_knows_line() {
+		let (_, index) = resolve_fixture();
+		let declaration = index.declaration_of("tr_a").expect("tr_a is declared");
+		let at = RESOLVE_SRC
+			.find("tr_a\n")
+			.expect("the knows line is in the source");
+		assert_eq!(declaration.start, at);
+	}
+
+	#[test]
+	fn references_finds_every_occurrence_including_the_declaration() {
+		let (_, index) = resolve_fixture();
+		// tr_ga: the assignment, the message, and HASH(tr_ga).
+		assert_eq!(index.references("tr_ga").len(), 3);
+		// tr_a: the knows, the PUBKEY argument, and the query.
+		assert_eq!(index.references("tr_a").len(), 3);
+	}
+
+	#[test]
+	fn references_is_case_insensitive_because_the_language_is() {
+		let (_, index) = resolve_fixture();
+		assert_eq!(index.references("TR_GA").len(), 3);
+	}
+
+	#[test]
+	fn resolving_a_constant_names_its_creator_and_assignment() {
+		let (trace, index) = resolve_fixture();
+		let at = RESOLVE_SRC.find("HASH(tr_ga)").expect("in the source") + "HASH(".len();
+		let token = index.at(at).expect("a token at the HASH argument");
+		let symbol = index.resolve(token, &trace).expect("resolves");
+
+		assert_eq!(&*symbol.name, "tr_ga");
+		assert_eq!(symbol.creator.as_deref(), Some("Alice"));
+		assert_eq!(symbol.assigned.as_deref(), Some("PUBKEY(tr_a)"));
+		assert!(
+			symbol
+				.known_by
+				.iter()
+				.any(|(recipient, sender)| &**recipient == "Bob" && &**sender == "Alice"),
+			"Bob knows tr_ga from Alice: {:?}",
+			symbol.known_by
+		);
+	}
+
+	#[test]
+	fn a_primitive_token_resolves_to_nothing() {
+		let (trace, index) = resolve_fixture();
+		let at = RESOLVE_SRC.find("PUBKEY").expect("in the source");
+		let token = index.at(at).expect("a token at PUBKEY");
+		assert!(index.resolve(token, &trace).is_none());
 	}
 
 	#[test]
