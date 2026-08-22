@@ -146,7 +146,7 @@ pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(Veri
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal
 /// (`sessions.rs`). Every entry point shares one default, so the CLI, the
-/// `internal-json` IDE interface and the wasm build cannot disagree about
+/// language server and the wasm build cannot disagree about
 /// what a model means.
 pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report(file_path, sessions).map(|report| (report.results, report.code))
