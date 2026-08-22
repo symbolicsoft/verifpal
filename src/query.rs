@@ -148,6 +148,7 @@ fn query_confidentiality(
 	result.resolved = true;
 	result.set_summary(
 		&mutated_info.trace,
+		mutated_info.kinded(),
 		&format!(
 			"{} ({}) is obtained by Attacker.",
 			subject,
@@ -301,6 +302,7 @@ fn query_authentication_handle_pass(
 		.unwrap_or_else(|| ps.resolve_constant(c, true).0);
 	result.set_summary(
 		&mutated_info.trace,
+		mutated_info.kinded(),
 		&format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
@@ -356,6 +358,7 @@ fn query_freshness(
 	result.resolved = true;
 	result.set_summary(
 		&mutated_info.trace,
+		mutated_info.kinded(),
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
 			subject,
@@ -388,6 +391,7 @@ fn query_unlinkability(
 			result.resolved = true;
 			result.set_summary(
 				&mutated_info.trace,
+				mutated_info.kinded(),
 				&format!("Attacker links {a} and {b} {clause}."),
 			);
 			result = query_precondition(result, ps);
@@ -448,6 +452,7 @@ fn query_equivalence(
 	result.resolved = true;
 	result.set_summary(
 		&mutated_info.trace,
+		mutated_info.kinded(),
 		&format!(
 			"{} are not equivalent.",
 			values

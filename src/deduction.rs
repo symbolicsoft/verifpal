@@ -50,6 +50,9 @@ pub(crate) fn compute_knowledge_closure(
 	let index = crate::theory::StateIndex::of(ps);
 
 	loop {
+		if ctx.cancelled() {
+			return Ok(());
+		}
 		let attacker = ctx.attacker_snapshot();
 
 		if !try_deduction_step(ctx, &attacker, ps, &record, &index) {

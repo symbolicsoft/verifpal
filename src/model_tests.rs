@@ -2102,3 +2102,22 @@ fn test_webauthn_origin_binding() {
 fn test_wireguard_static_fetched() {
 	run_model("wireguard_static_fetched.vp", "c1a1");
 }
+
+#[test]
+fn the_json_report_carries_query_ranges_and_step_kinds() {
+	let (report, source) =
+		crate::verify::verify_report_with_source("examples/test/hmac_ok.vp", 2).expect("verifies");
+	let run = crate::report::Run::of(
+		"test",
+		&[("examples/test/hmac_ok.vp".to_string(), Ok(report))],
+		std::slice::from_ref(&source),
+	);
+	let json = serde_json::to_string(&run).expect("serializes");
+	assert!(json.contains(r#""ok":true"#), "{json}");
+	assert!(json.contains(r#""range":{"start":"#), "{json}");
+	assert!(json.contains(r#""kind":"confidentiality""#), "{json}");
+	assert!(
+		!json.contains(r#""Query":"#),
+		"old capitalised keys are gone: {json}"
+	);
+}

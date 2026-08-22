@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::context::VerifyContext;
 use crate::info::info_message;
@@ -13,17 +14,35 @@ use crate::solve::verify_active;
 use crate::types::*;
 use crate::value::*;
 
+#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	analyze_sessions(m, crate::sessions::DEFAULT_SESSIONS)
 }
 
+#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
 	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
+}
+
+pub(crate) fn analyze_sessions_cancellable(
+	m: &Model,
+	sessions: u8,
+	cancel: Arc<AtomicBool>,
+) -> VResult<VerifyContext> {
+	analyze_sessions_traced_cancellable(m, sessions, cancel).map(|(ctx, _)| ctx)
 }
 
 pub(crate) fn analyze_sessions_traced(
 	m: &Model,
 	sessions: u8,
+) -> VResult<(VerifyContext, ProtocolTrace)> {
+	analyze_sessions_traced_cancellable(m, sessions, Arc::new(AtomicBool::new(false)))
+}
+
+fn analyze_sessions_traced_cancellable(
+	m: &Model,
+	sessions: u8,
+	cancel: Arc<AtomicBool>,
 ) -> VResult<(VerifyContext, ProtocolTrace)> {
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
@@ -39,13 +58,18 @@ pub(crate) fn analyze_sessions_traced(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let ctx = VerifyContext::new(m, &states, variants);
+	let mut ctx = VerifyContext::new(m, &states, variants);
+	ctx.set_cancel(cancel);
+	let ctx = ctx;
 	if sessions > 1 {
 		ctx.prefer_replication_valid_witnesses();
 	}
 	match m.attacker {
 		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
 		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
+	}
+	if ctx.cancelled() {
+		return Err(VerifpalError::cancelled());
 	}
 	Ok((ctx, trace))
 }
@@ -89,14 +113,19 @@ pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
 }
 
 pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
+	verify_report_with_source(file_path, sessions).map(|(report, _)| report)
+}
+
+pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(VerifyReport, String)> {
 	let m = parse_file(file_path)?;
-	verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))
+	let source = m.source.to_string();
+	let report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
+	Ok((report, source))
 }
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal
 /// (`sessions.rs`). Every entry point shares one default, so the CLI, the
-/// `internal-json` IDE interface and the wasm build cannot disagree about
-/// what a model means.
+/// LSP and the wasm build cannot disagree about what a model means.
 pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report(file_path, sessions).map(|report| (report.results, report.code))
 }
@@ -178,6 +207,9 @@ pub(crate) fn verify_standard_run(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	for ps in principal_states {
+		if ctx.cancelled() {
+			return Ok(());
+		}
 		crate::info::info_status_update(|| {
 			status_line(ctx, attacker.current_phase, &ps.name, "running")
 		});

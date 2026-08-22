@@ -1,1 +1,3 @@
-Verifpal 1.0.4 contains further minor solver, attack trace narrator and performance improvements.
+Verifpal 1.1.0 adds a language server. `verifpal lsp` speaks LSP over stdio, giving any editor live error checking, hover documentation, context-aware completion, signature help, go-to-definition, find-references, rename, document symbols, folding, semantic highlighting, canonical formatting and a cancellable attacker analysis. The Visual Studio Code extension and the Neovim plugin are now thin clients of it, so the language has one implementation instead of three.
+
+Two breaking changes come with it. The `internal-json` subcommand is removed: editors use the language server, and `verify --format json` remains for scripts. That JSON output has been redesigned — query results now carry the source range of the query they describe and their attack traces arrive as tagged steps rather than flat strings — so a consumer parsing the previous shape will need updating.

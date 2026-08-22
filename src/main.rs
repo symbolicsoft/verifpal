@@ -1,12 +1,11 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::io::Read;
-
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
-	ColorChoice, Verbosity, VerifyReport, diagram, info_banner, json_report, pretty_print,
-	set_color_choice, set_verbosity, update_check_report, update_check_start, verify_report,
+	ColorChoice, Run, Verbosity, VerifyReport, diagram, info_banner, pretty_print,
+	set_color_choice, set_verbosity, update_check_report, update_check_start,
+	verify_report_with_source,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -81,31 +80,11 @@ enum Commands {
 		color: ColorArg,
 	},
 	About,
-	#[command(name = "internal-json", arg_required_else_help = true)]
-	InternalJson {
-		subcommand: String,
+	#[command(name = "lsp")]
+	Lsp {
+		#[arg(long, default_value_t = false)]
+		stdio: bool,
 	},
-}
-
-fn read_stdin() -> String {
-	let mut input: Vec<u8> = Vec::new();
-	let mut buf = [0u8; 4096];
-	let stdin = std::io::stdin();
-	let mut handle = stdin.lock();
-	loop {
-		match handle.read(&mut buf) {
-			Ok(0) => break,
-			Ok(n) => {
-				if let Some(eot) = buf[..n].iter().position(|&b| b == 0x04) {
-					input.extend_from_slice(&buf[..eot]);
-					break;
-				}
-				input.extend_from_slice(&buf[..n]);
-			}
-			Err(_) => break,
-		}
-	}
-	String::from_utf8_lossy(&input).into_owned()
 }
 
 fn verify_verbosity(json: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
@@ -147,6 +126,7 @@ fn run_verify(
 
 	let single = models.len() == 1;
 	let mut outcomes: Vec<(String, Result<VerifyReport, String>)> = Vec::new();
+	let mut sources: Vec<String> = Vec::new();
 	let mut had_error = false;
 	let mut had_attack = false;
 
@@ -154,8 +134,8 @@ fn run_verify(
 		if index > 0 && !json && !result_code {
 			println!();
 		}
-		match verify_report(model, sessions) {
-			Ok(report) => {
+		match verify_report_with_source(model, sessions) {
+			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
 					if single {
@@ -165,6 +145,7 @@ fn run_verify(
 					}
 				}
 				outcomes.push((model.clone(), Ok(report)));
+				sources.push(source);
 			}
 			Err(e) => {
 				had_error = true;
@@ -173,12 +154,20 @@ fn run_verify(
 					eprintln!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
+				sources.push(String::new());
 			}
 		}
 	}
 
 	if json {
-		println!("{}", json_report(VERSION, &outcomes));
+		let run = Run::of(VERSION, &outcomes, &sources);
+		match serde_json::to_string(&run) {
+			Ok(text) => println!("{}", text),
+			Err(e) => {
+				eprintln!("could not serialize the report: {}", e);
+				return EXIT_ERROR;
+			}
+		}
 	}
 	update_check_report(&update_check);
 
@@ -253,6 +242,13 @@ fn main() {
 			write,
 			check,
 		} => run_pretty(models, write, check),
+		Commands::Lsp { stdio: _ } => match verifpal::lsp_run() {
+			Ok(()) => 0,
+			Err(e) => {
+				eprintln!("{}", e);
+				EXIT_ERROR
+			}
+		},
 		Commands::Diagram { model, color } => {
 			set_color_choice(color.into());
 			match diagram(&model) {
@@ -265,11 +261,6 @@ fn main() {
 					EXIT_ERROR
 				}
 			}
-		}
-		Commands::InternalJson { subcommand } => {
-			let input = read_stdin();
-			verifpal::handle_internal_json(&subcommand, &input);
-			0
 		}
 		Commands::About => {
 			let update_check = update_check_start(VERSION);

@@ -1,6 +1,6 @@
 [package]
 name = "verifpal"
-version = "1.0.4"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.96"
 license = "GPL-3.0-only"
@@ -19,13 +19,19 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli = ["clap", "colored", "ureq"]
+cli = ["clap", "colored", "ureq", "lsp"]
+lsp = ["dep:crossbeam-channel", "dep:lsp-server", "dep:lsp-types"]
 wasm = ["wasm-bindgen"]
 
 [dependencies]
 chrono = "0.4.45"
 clap = { version = "4", features = ["derive"], optional = true }
 colored = { version = "3", optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
+lsp-server = { version = "0.10", optional = true }
+lsp-types = { version = "0.97", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 

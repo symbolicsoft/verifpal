@@ -104,6 +104,7 @@ pub enum ErrorKind {
 	Sanity,
 	Resolution,
 	Internal,
+	Cancelled,
 }
 
 impl ErrorKind {
@@ -113,6 +114,7 @@ impl ErrorKind {
 			ErrorKind::Sanity => "sanity error",
 			ErrorKind::Resolution => "resolution error",
 			ErrorKind::Internal => "internal error",
+			ErrorKind::Cancelled => "cancelled",
 		}
 	}
 }
@@ -151,6 +153,10 @@ impl VerifpalError {
 
 	pub fn internal(message: Cow<'static, str>) -> Self {
 		Self::of(ErrorKind::Internal, message)
+	}
+
+	pub fn cancelled() -> Self {
+		Self::of(ErrorKind::Cancelled, "analysis cancelled".into())
 	}
 
 	fn of(kind: ErrorKind, message: Cow<'static, str>) -> Self {
@@ -215,6 +221,27 @@ impl VerifpalError {
 			Some(name) => self.help(format!("did you mean `{}`?", name)),
 			None => self,
 		}
+	}
+
+	pub fn labels(&self) -> &[(Span, Cow<'static, str>)] {
+		match self.extra.as_deref() {
+			Some(extra) => &extra.labels,
+			None => &[],
+		}
+	}
+
+	pub fn notes(&self) -> Vec<&str> {
+		self.extra
+			.as_deref()
+			.map(|e| e.notes.iter().map(|n| n.as_ref()).collect())
+			.unwrap_or_default()
+	}
+
+	pub fn helps(&self) -> Vec<&str> {
+		self.extra
+			.as_deref()
+			.map(|e| e.helps.iter().map(|h| h.as_ref()).collect())
+			.unwrap_or_default()
 	}
 
 	pub fn has_labels(&self) -> bool {
@@ -762,6 +789,12 @@ pub(crate) struct ResultWitness {
 	pub shares: Vec<String>,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TraceStep {
+	pub kind: &'static str,
+	pub text: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,
@@ -770,6 +803,7 @@ pub struct VerifyResult {
 	pub summary: String,
 	pub conclusion: String,
 	pub trace: Vec<String>,
+	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
 	/// Per-session instantiations of `query` under `--sessions`, evaluated
 	/// under the same `query_index`: an attack on any session resolves the
@@ -787,18 +821,20 @@ impl VerifyResult {
 			summary: String::new(),
 			conclusion: String::new(),
 			trace: vec![],
+			steps: vec![],
 			options: vec![],
 			variants: vec![],
 		}
 	}
 
-	pub fn set_summary(&mut self, mutated_info: &str, conclusion: &str) {
+	pub fn set_summary(&mut self, mutated_info: &str, steps: Vec<TraceStep>, conclusion: &str) {
 		self.trace = mutated_info
 			.lines()
 			.map(str::trim)
 			.filter(|line| !line.is_empty())
 			.map(str::to_string)
 			.collect();
+		self.steps = steps;
 		self.conclusion = conclusion.to_string();
 		self.summary =
 			crate::info::info_verify_result_summary(mutated_info, conclusion, &self.options);

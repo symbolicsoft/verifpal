@@ -57,7 +57,7 @@ fn search_rounds(
 	bound: &crate::reexec::TermBound,
 ) -> VResult<()> {
 	loop {
-		if ctx.all_resolved() {
+		if ctx.all_resolved() || ctx.cancelled() {
 			break;
 		}
 		let before = ctx.attacker_known_count();
@@ -176,7 +176,7 @@ fn solve_principal(
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	let mut checked = 0usize;
 	for proposal in dedupe(proposals) {
-		if ctx.all_resolved() {
+		if ctx.all_resolved() || ctx.cancelled() {
 			break;
 		}
 		let signature = install_signature(&sym, &proposal);

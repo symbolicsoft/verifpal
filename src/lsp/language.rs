@@ -1,0 +1,924 @@
+/* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+use lsp_types::{
+	CompletionItem, CompletionItemKind, DocumentHighlight, DocumentHighlightKind, DocumentSymbol,
+	Documentation, FoldingRange, FoldingRangeKind, InlayHint, InlayHintLabel, Location,
+	MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
+	SignatureHelp, SignatureInformation, SymbolKind, TextEdit, Uri,
+};
+
+use crate::lsp::docs;
+use crate::lsp::state::Document;
+use crate::tokens::{Token, TokenKind};
+use crate::types::{Block, Declaration, Span};
+
+pub(crate) const TOKEN_TYPES: &[&str] = &[
+	"namespace",
+	"variable",
+	"function",
+	"keyword",
+	"parameter",
+	"type",
+	"decorator",
+	"number",
+	"operator",
+	"comment",
+];
+
+pub(crate) const TOKEN_MODIFIERS: &[&str] = &["declaration", "defaultLibrary"];
+
+fn token_type(kind: TokenKind) -> Option<u32> {
+	let name = match kind {
+		TokenKind::PrincipalName => "namespace",
+		TokenKind::ConstantName | TokenKind::Anonymous => "variable",
+		TokenKind::PrimitiveName => "function",
+		TokenKind::Keyword | TokenKind::AttackerMode => "keyword",
+		TokenKind::Qualifier => "parameter",
+		TokenKind::QueryKind => "type",
+		TokenKind::Capability => "decorator",
+		TokenKind::PhaseNumber => "number",
+		TokenKind::Arrow | TokenKind::Assign | TokenKind::Check => "operator",
+		TokenKind::Comment => "comment",
+	};
+	TOKEN_TYPES
+		.iter()
+		.position(|t| *t == name)
+		.map(|i| i as u32)
+}
+
+pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
+	let mut data = Vec::new();
+	let mut previous = Position::new(0, 0);
+	for token in doc.tokens.tokens() {
+		let Some(ty) = token_type(token.kind) else {
+			continue;
+		};
+		let mut modifiers = 0u32;
+		if token.kind == TokenKind::PrimitiveName {
+			modifiers |= 1 << 1;
+		}
+		if matches!(token.kind, TokenKind::ConstantName)
+			&& doc
+				.tokens
+				.declaration_of(&token.text)
+				.is_some_and(|d| d.start == token.span.start)
+		{
+			modifiers |= 1 << 0;
+		}
+		let start = doc.line.position(token.span.start);
+		let end = doc.line.position(token.span.end);
+		if start.line != end.line {
+			continue;
+		}
+		let delta_line = start.line - previous.line;
+		let delta_start = if delta_line == 0 {
+			start.character - previous.character
+		} else {
+			start.character
+		};
+		data.extend_from_slice(&[
+			delta_line,
+			delta_start,
+			end.character.saturating_sub(start.character),
+			ty,
+			modifiers,
+		]);
+		previous = start;
+	}
+	data
+}
+
+pub(crate) fn token_at(doc: &Document, position: Position) -> Option<&Token> {
+	doc.tokens.at(doc.line.offset(position))
+}
+
+fn markdown(value: String) -> Documentation {
+	Documentation::MarkupContent(MarkupContent {
+		kind: MarkupKind::Markdown,
+		value,
+	})
+}
+
+fn primitive_facts(name: &str) -> Option<String> {
+	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
+	let def = crate::primitive::primitive_def(id).ok()?;
+	let arity = def.arity();
+	let output = def.output();
+	let args = if arity.len() == 1 {
+		format!(
+			"{} argument{}",
+			arity[0],
+			if arity[0] == 1 { "" } else { "s" }
+		)
+	} else {
+		format!("{}\u{2013}{} arguments", arity[0], arity[arity.len() - 1])
+	};
+	let outs = if output.len() == 1 {
+		format!(
+			"{} output{}",
+			output[0],
+			if output[0] == 1 { "" } else { "s" }
+		)
+	} else {
+		format!("{}\u{2013}{} outputs", output[0], output[output.len() - 1])
+	};
+	let mut notes = vec![format!("{args}, {outs}")];
+	if def.definition_check() {
+		notes.push("may be checked with `?`".to_string());
+	}
+	let accepted: Vec<&str> = crate::types::Capability::ALL
+		.iter()
+		.filter(|c| crate::capability::supports(id, **c))
+		.map(|c| c.name())
+		.collect();
+	if !accepted.is_empty() {
+		notes.push(format!("accepts [{}]", accepted.join(", ")));
+	}
+	Some(notes.join("; "))
+}
+
+pub(crate) fn hover(doc: &Document, position: Position) -> Option<lsp_types::Hover> {
+	let token = token_at(doc, position)?;
+	let range = doc.line.range(token.span);
+	let value = match token.kind {
+		TokenKind::ConstantName | TokenKind::Anonymous => constant_hover(doc, token)?,
+		TokenKind::PrimitiveName => {
+			let entry = docs::primitive(&token.text)?;
+			let mut out = format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help);
+			if let Some(facts) = primitive_facts(&token.text) {
+				out.push_str("\n\n");
+				out.push_str(&facts);
+			}
+			out
+		}
+		TokenKind::PrincipalName => format!("**{}**\n\nA principal in this model.", token.text),
+		_ => {
+			let entry = docs::any(&token.text)?;
+			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
+		}
+	};
+	Some(lsp_types::Hover {
+		contents: lsp_types::HoverContents::Markup(MarkupContent {
+			kind: MarkupKind::Markdown,
+			value,
+		}),
+		range: Some(range),
+	})
+}
+
+fn constant_hover(doc: &Document, token: &Token) -> Option<String> {
+	let trace = doc.trace.as_ref()?;
+	let symbol = doc.tokens.resolve(token, trace)?;
+	let mut out = format!("```verifpal\n{}\n```", symbol.name);
+	if let Some(assigned) = &symbol.assigned {
+		out.push_str(&format!("\n\nAssigned: `{assigned}`"));
+	}
+	if let Some(creator) = &symbol.creator {
+		out.push_str(&format!("\n\nCreated by **{creator}**"));
+	}
+	if !symbol.known_by.is_empty() {
+		let known: Vec<String> = symbol
+			.known_by
+			.iter()
+			.map(|(recipient, sender)| format!("{recipient} (from {sender})"))
+			.collect();
+		out.push_str(&format!("\n\nKnown by: {}", known.join(", ")));
+	}
+	if !symbol.phases.is_empty() {
+		let phases: Vec<String> = symbol.phases.iter().map(|p| p.to_string()).collect();
+		out.push_str(&format!("\n\nPhases: {}", phases.join(", ")));
+	}
+	Some(out)
+}
+
+pub(crate) fn definition(doc: &Document, position: Position, uri: &Uri) -> Option<Location> {
+	let token = token_at(doc, position)?;
+	if !matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	) {
+		return None;
+	}
+	let span = doc.tokens.declaration_of(&token.text)?;
+	Some(Location {
+		uri: uri.clone(),
+		range: doc.line.range(span),
+	})
+}
+
+pub(crate) fn references(doc: &Document, position: Position, uri: &Uri) -> Vec<Location> {
+	let Some(token) = token_at(doc, position) else {
+		return Vec::new();
+	};
+	if !matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	) {
+		return Vec::new();
+	}
+	doc.tokens
+		.references(&token.text)
+		.into_iter()
+		.map(|span| Location {
+			uri: uri.clone(),
+			range: doc.line.range(span),
+		})
+		.collect()
+}
+
+pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHighlight> {
+	let Some(token) = token_at(doc, position) else {
+		return Vec::new();
+	};
+	if !matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	) {
+		return Vec::new();
+	}
+	let declaration = doc.tokens.declaration_of(&token.text);
+	doc.tokens
+		.references(&token.text)
+		.into_iter()
+		.map(|span| DocumentHighlight {
+			range: doc.line.range(span),
+			kind: Some(if declaration.is_some_and(|d| d.start == span.start) {
+				DocumentHighlightKind::WRITE
+			} else {
+				DocumentHighlightKind::READ
+			}),
+		})
+		.collect()
+}
+
+pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Option<Vec<TextEdit>> {
+	let token = token_at(doc, position)?;
+	if !matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	) {
+		return None;
+	}
+	Some(
+		doc.tokens
+			.references(&token.text)
+			.into_iter()
+			.map(|span| TextEdit {
+				range: doc.line.range(span),
+				new_text: new_name.to_string(),
+			})
+			.collect(),
+	)
+}
+
+pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
+	let mut ranges = Vec::new();
+	if let Ok(model) = &doc.model {
+		for block in &model.blocks {
+			if let Block::Principal(p) = block {
+				push_fold(&mut ranges, doc, p.span, None);
+			}
+		}
+	}
+	for token in doc.tokens.tokens() {
+		if token.kind == TokenKind::Comment && token.text.starts_with("/*") {
+			push_fold(
+				&mut ranges,
+				doc,
+				token.span,
+				Some(FoldingRangeKind::Comment),
+			);
+		}
+		if token.kind == TokenKind::Keyword && token.text.eq_ignore_ascii_case("queries") {
+			push_fold(
+				&mut ranges,
+				doc,
+				Span::new(token.span.start, doc.text.trim_end().len()),
+				None,
+			);
+		}
+	}
+	ranges
+}
+
+fn push_fold(
+	out: &mut Vec<FoldingRange>,
+	doc: &Document,
+	span: Span,
+	kind: Option<FoldingRangeKind>,
+) {
+	let text = &doc.text[span.start.min(doc.text.len())..span.end.min(doc.text.len())];
+	let trimmed = span.start + text.trim_end().len();
+	let start = doc.line.position(span.start);
+	let end = doc.line.position(trimmed);
+	if end.line <= start.line {
+		return;
+	}
+	out.push(FoldingRange {
+		start_line: start.line,
+		end_line: end.line,
+		kind,
+		..Default::default()
+	});
+}
+
+pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
+	let Ok(model) = &doc.model else {
+		return Vec::new();
+	};
+	let mut symbols = Vec::new();
+	for block in &model.blocks {
+		match block {
+			Block::Principal(p) => {
+				let children: Vec<DocumentSymbol> = p
+					.expressions
+					.iter()
+					.map(|e| {
+						let names: Vec<String> =
+							e.constants.iter().map(|c| c.name.to_string()).collect();
+						symbol(
+							names.join(", "),
+							expression_detail(e),
+							match e.kind {
+								Declaration::Assignment => SymbolKind::VARIABLE,
+								_ => SymbolKind::CONSTANT,
+							},
+							doc.line.range(e.span),
+							Vec::new(),
+						)
+					})
+					.collect();
+				symbols.push(symbol(
+					p.name.clone(),
+					String::new(),
+					SymbolKind::NAMESPACE,
+					doc.line.range(p.span),
+					children,
+				));
+			}
+			Block::Message(m) => symbols.push(symbol(
+				format!("{} \u{2192} {}", m.sender_name, m.recipient_name),
+				crate::pretty::pretty_constants(&m.constants),
+				SymbolKind::EVENT,
+				doc.line.range(m.span),
+				Vec::new(),
+			)),
+			Block::Phase(p) => symbols.push(symbol(
+				format!("phase[{}]", p.number),
+				String::new(),
+				SymbolKind::NUMBER,
+				doc.line.range(p.span),
+				Vec::new(),
+			)),
+		}
+	}
+	let queries: Vec<DocumentSymbol> = model
+		.queries
+		.iter()
+		.map(|q| {
+			symbol(
+				crate::pretty::query_display(q),
+				String::new(),
+				SymbolKind::BOOLEAN,
+				doc.line.range(q.span),
+				Vec::new(),
+			)
+		})
+		.collect();
+	if let Some(first) = model.queries.first() {
+		let last = model.queries.last().unwrap_or(first);
+		symbols.push(symbol(
+			"queries".to_string(),
+			String::new(),
+			SymbolKind::INTERFACE,
+			doc.line.range(Span::new(first.span.start, last.span.end)),
+			queries,
+		));
+	}
+	symbols
+}
+
+fn expression_detail(e: &crate::types::Expression) -> String {
+	match (&e.kind, &e.assigned) {
+		(Declaration::Assignment, Some(v)) => v.to_string(),
+		(Declaration::Knows, _) => match &e.qualifier {
+			Some(q) => format!("knows {q}"),
+			None => "knows".to_string(),
+		},
+		(Declaration::Generates, _) => "generates".to_string(),
+		(Declaration::Leaks, _) => "leaks".to_string(),
+		_ => String::new(),
+	}
+}
+
+#[allow(deprecated)]
+fn symbol(
+	name: String,
+	detail: String,
+	kind: SymbolKind,
+	range: Range,
+	children: Vec<DocumentSymbol>,
+) -> DocumentSymbol {
+	DocumentSymbol {
+		name,
+		detail: (!detail.is_empty()).then_some(detail),
+		kind,
+		tags: None,
+		deprecated: None,
+		range,
+		selection_range: range,
+		children: (!children.is_empty()).then_some(children),
+	}
+}
+
+fn item(label: &str, kind: CompletionItemKind, entry: Option<&docs::Entry>) -> CompletionItem {
+	CompletionItem {
+		label: label.to_string(),
+		kind: Some(kind),
+		detail: entry.map(|e| e.eg.to_string()),
+		documentation: entry.map(|e| markdown(e.help.to_string())),
+		..Default::default()
+	}
+}
+
+pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionItem> {
+	let offset = doc.line.offset(position);
+	let before = &doc.text[..offset.min(doc.text.len())];
+
+	if in_capability_brackets(doc, offset) {
+		return docs::CAPABILITIES
+			.iter()
+			.filter(|e| e.name != "from")
+			.map(|e| item(e.name, CompletionItemKind::ENUM_MEMBER, Some(e)))
+			.collect();
+	}
+
+	let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
+	if trimmed.trim_end().ends_with("knows") {
+		return ["public", "private", "password"]
+			.iter()
+			.map(|q| item(q, CompletionItemKind::KEYWORD, docs::keyword(q)))
+			.collect();
+	}
+
+	if in_queries_block(doc, offset) {
+		return docs::QUERIES
+			.iter()
+			.filter(|e| e.name != "precondition")
+			.map(|e| {
+				let mut c = item(e.name, CompletionItemKind::EVENT, Some(e));
+				c.insert_text = Some(format!("{}? ", e.name));
+				c
+			})
+			.collect();
+	}
+
+	let mut out: Vec<CompletionItem> = crate::primitive::primitive_names()
+		.into_iter()
+		.map(|name| item(name, CompletionItemKind::FUNCTION, docs::primitive(name)))
+		.collect();
+	for e in docs::KEYWORDS {
+		out.push(item(e.name, CompletionItemKind::KEYWORD, Some(e)));
+	}
+	let mut seen: Vec<&str> = Vec::new();
+	for token in doc.tokens.tokens() {
+		if token.kind == TokenKind::ConstantName && !seen.contains(&&*token.text) {
+			seen.push(&token.text);
+			out.push(item(&token.text, CompletionItemKind::VARIABLE, None));
+		}
+	}
+	out
+}
+
+fn in_capability_brackets(doc: &Document, offset: usize) -> bool {
+	let before = &doc.text[..offset.min(doc.text.len())];
+	let Some(open) = before.rfind('[') else {
+		return false;
+	};
+	if before[open..].contains(']') || before[open..].contains('\n') {
+		return false;
+	}
+	let head = before[..open].trim_end();
+	let name: String = head
+		.chars()
+		.rev()
+		.take_while(|c| c.is_alphanumeric() || *c == '_')
+		.collect();
+	let name: String = name.chars().rev().collect();
+	!name.is_empty() && crate::primitive::primitive_get_enum(&name.to_uppercase()).is_ok()
+}
+
+fn in_queries_block(doc: &Document, offset: usize) -> bool {
+	doc.tokens.tokens().iter().any(|t| {
+		t.kind == TokenKind::Keyword
+			&& t.text.eq_ignore_ascii_case("queries")
+			&& t.span.start < offset
+	})
+}
+
+pub(crate) fn signature_help(doc: &Document, position: Position) -> Option<SignatureHelp> {
+	let offset = doc.line.offset(position);
+	let before = &doc.text[..offset.min(doc.text.len())];
+	let (name, active) = enclosing_call(before)?;
+	let entry = docs::primitive(&name)?;
+	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
+	let def = crate::primitive::primitive_def(id).ok()?;
+	let args = def.arg_names();
+	let widest = *def.arity().last()? as usize;
+	let shown: Vec<String> = (0..widest)
+		.map(|i| {
+			args.get(i)
+				.map(|s| s.to_string())
+				.unwrap_or_else(|| format!("value{}", i + 1))
+		})
+		.collect();
+	let label = format!("{}({})", name.to_uppercase(), shown.join(", "));
+	Some(SignatureHelp {
+		signatures: vec![SignatureInformation {
+			label,
+			documentation: Some(markdown(entry.help.to_string())),
+			parameters: Some(
+				shown
+					.iter()
+					.map(|p| ParameterInformation {
+						label: ParameterLabel::Simple(p.clone()),
+						documentation: None,
+					})
+					.collect(),
+			),
+			active_parameter: Some(active as u32),
+		}],
+		active_signature: Some(0),
+		active_parameter: Some(active as u32),
+	})
+}
+
+fn enclosing_call(before: &str) -> Option<(String, usize)> {
+	let bytes = before.as_bytes();
+	let mut depth = 0i32;
+	let mut commas = 0usize;
+	let mut i = bytes.len();
+	while i > 0 {
+		i -= 1;
+		match bytes[i] {
+			b')' => depth += 1,
+			b'(' => {
+				if depth == 0 {
+					let head = before[..i].trim_end();
+					let name: String = head
+						.chars()
+						.rev()
+						.take_while(|c| c.is_alphanumeric() || *c == '_')
+						.collect();
+					let name: String = name.chars().rev().collect();
+					if name.is_empty() {
+						return None;
+					}
+					return Some((name, commas));
+				}
+				depth -= 1;
+			}
+			b',' if depth == 0 => commas += 1,
+			b'\n' if depth == 0 => return None,
+			_ => {}
+		}
+	}
+	None
+}
+
+pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
+	let from = doc.line.offset(range.start);
+	let to = doc.line.offset(range.end);
+	let mut hints = Vec::new();
+	for token in doc.tokens.tokens() {
+		if token.kind != TokenKind::PrimitiveName
+			|| token.span.start < from
+			|| token.span.start > to
+		{
+			continue;
+		}
+		let Ok(id) = crate::primitive::primitive_get_enum(&token.text.to_uppercase()) else {
+			continue;
+		};
+		let Ok(def) = crate::primitive::primitive_def(id) else {
+			continue;
+		};
+		for (i, at) in argument_offsets(&doc.text, token.span.end)
+			.into_iter()
+			.enumerate()
+		{
+			let Some(name) = def.arg_names().get(i) else {
+				break;
+			};
+			let written: String = doc.text[at..]
+				.chars()
+				.take_while(|c| c.is_alphanumeric() || *c == '_')
+				.collect();
+			if written.eq_ignore_ascii_case(name) {
+				continue;
+			}
+			hints.push(InlayHint {
+				position: doc.line.position(at),
+				label: InlayHintLabel::String(format!("{name}: ")),
+				kind: Some(lsp_types::InlayHintKind::PARAMETER),
+				text_edits: None,
+				tooltip: None,
+				padding_left: None,
+				padding_right: None,
+				data: None,
+			});
+		}
+	}
+	hints
+}
+
+fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
+	let bytes = text.as_bytes();
+	let mut i = after_name;
+	while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+		i += 1;
+	}
+	if i < bytes.len() && bytes[i] == b'[' {
+		while i < bytes.len() && bytes[i] != b']' {
+			i += 1;
+		}
+		i += 1;
+		while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+			i += 1;
+		}
+	}
+	if i >= bytes.len() || bytes[i] != b'(' {
+		return Vec::new();
+	}
+	i += 1;
+	let mut starts = Vec::new();
+	let mut depth = 0i32;
+	let mut expecting = true;
+	while i < bytes.len() {
+		match bytes[i] {
+			b'(' => depth += 1,
+			b')' => {
+				if depth == 0 {
+					break;
+				}
+				depth -= 1;
+			}
+			b',' if depth == 0 => expecting = true,
+			c if (c as char).is_whitespace() => {}
+			_ => {
+				if expecting {
+					starts.push(i);
+					expecting = false;
+				}
+			}
+		}
+		i += 1;
+	}
+	starts
+}
+
+pub(crate) fn prepare_rename(doc: &Document, position: Position) -> Option<Range> {
+	let token = token_at(doc, position)?;
+	matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	)
+	.then(|| doc.line.range(token.span))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::lsp::state::Documents;
+	use lsp_types::PositionEncodingKind;
+	use std::str::FromStr;
+
+	const SRC: &str = "attacker[passive]\n\
+principal Alice[\n\
+\tknows private lg_a\n\
+\tlg_ga = PUBKEY(lg_a)\n\
+]\n\
+Alice -> Bob: lg_ga\n\
+principal Bob[\n\
+\t_ = HASH(lg_ga)\n\
+]\n\
+queries[\n\
+\tconfidentiality? lg_a\n\
+]\n";
+
+	fn doc() -> Documents {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///l.vp".to_string(),
+			"l.vp".to_string(),
+			1,
+			SRC.to_string(),
+		);
+		docs
+	}
+
+	fn at(needle: &str) -> Position {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		d.line.position(SRC.find(needle).expect("in the source"))
+	}
+
+	fn uri() -> Uri {
+		Uri::from_str("file:///l.vp").expect("a uri")
+	}
+
+	#[test]
+	fn hovering_a_primitive_shows_its_signature_and_arity() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let h = hover(d, at("PUBKEY")).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		assert!(m.value.contains("PUBKEY(private_key)"), "{}", m.value);
+		assert!(m.value.contains("1 argument, 1 output"), "{}", m.value);
+		assert!(m.value.contains("accepts [weak]"), "{}", m.value);
+	}
+
+	#[test]
+	fn hovering_a_constant_shows_what_the_trace_records() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let h = hover(d, at("lg_ga = PUBKEY")).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		assert!(m.value.contains("PUBKEY(lg_a)"), "{}", m.value);
+		assert!(m.value.contains("Alice"), "{}", m.value);
+	}
+
+	#[test]
+	fn definition_jumps_to_the_assignment() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let loc = definition(d, at("HASH(lg_ga)"), &uri());
+		assert!(loc.is_none(), "HASH is a primitive, not a constant");
+		let loc = definition(d, at("lg_ga)"), &uri()).expect("a definition");
+		let want = d
+			.line
+			.position(SRC.find("lg_ga = PUBKEY").expect("in the source"));
+		assert_eq!(loc.range.start, want);
+	}
+
+	#[test]
+	fn references_finds_all_three_occurrences() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		assert_eq!(references(d, at("lg_ga = PUBKEY"), &uri()).len(), 3);
+	}
+
+	#[test]
+	fn the_declaration_highlights_as_a_write() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let hs = highlights(d, at("lg_ga = PUBKEY"));
+		assert_eq!(hs.len(), 3);
+		assert_eq!(hs[0].kind, Some(DocumentHighlightKind::WRITE));
+		assert_eq!(hs[1].kind, Some(DocumentHighlightKind::READ));
+	}
+
+	#[test]
+	fn rename_rewrites_every_occurrence() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let edits = rename(d, at("lg_ga = PUBKEY"), "renamed").expect("edits");
+		assert_eq!(edits.len(), 3);
+		assert!(edits.iter().all(|e| e.new_text == "renamed"));
+	}
+
+	#[test]
+	fn rename_refuses_a_primitive() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		assert!(rename(d, at("PUBKEY"), "nope").is_none());
+		assert!(prepare_rename(d, at("PUBKEY")).is_none());
+	}
+
+	#[test]
+	fn folding_covers_each_principal_block() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let folds = folding_ranges(d);
+		assert!(folds.len() >= 2, "{folds:?}");
+		assert!(
+			folds.iter().any(|f| f.start_line == 1 && f.end_line == 4),
+			"{folds:?}"
+		);
+	}
+
+	#[test]
+	fn document_symbols_nest_expressions_under_principals() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let symbols = document_symbols(d);
+		let alice = symbols.iter().find(|s| s.name == "Alice").expect("Alice");
+		assert_eq!(alice.kind, SymbolKind::NAMESPACE);
+		assert_eq!(alice.children.as_ref().expect("children").len(), 2);
+		assert!(symbols.iter().any(|s| s.name == "queries"));
+	}
+
+	#[test]
+	fn completion_offers_query_kinds_inside_the_queries_block() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let items = completions(d, at("confidentiality? lg_a"));
+		assert!(items.iter().any(|i| i.label == "equivalence"), "{items:?}");
+		assert!(!items.iter().any(|i| i.label == "PUBKEY"), "{items:?}");
+	}
+
+	#[test]
+	fn completion_offers_qualifiers_after_knows() {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		let src = "attacker[passive]\nprincipal Alice[\n\tknows ";
+		docs.open(
+			"file:///k.vp".to_string(),
+			"k.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///k.vp").expect("open");
+		let items = completions(d, d.line.position(src.len()));
+		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+		assert_eq!(labels, vec!["public", "private", "password"]);
+	}
+
+	#[test]
+	fn completion_offers_capabilities_inside_primitive_brackets() {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		let src = "attacker[passive]\nprincipal Alice[\n\tknows private c_m\n\tc_h = HASH[";
+		docs.open(
+			"file:///c.vp".to_string(),
+			"c.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///c.vp").expect("open");
+		let items = completions(d, d.line.position(src.len()));
+		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+		assert_eq!(labels, vec!["weak", "forgeable", "malleable"]);
+	}
+
+	#[test]
+	fn signature_help_names_the_active_argument() {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		let src =
+			"attacker[passive]\nprincipal Alice[\n\tknows private s_k\n\ts_e = AEAD_ENC(s_k, ";
+		docs.open(
+			"file:///s.vp".to_string(),
+			"s.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///s.vp").expect("open");
+		let help = signature_help(d, d.line.position(src.len())).expect("help");
+		assert_eq!(help.signatures[0].label, "AEAD_ENC(key, plaintext, ad)");
+		assert_eq!(help.active_parameter, Some(1));
+	}
+
+	#[test]
+	fn semantic_tokens_are_five_tuples_in_source_order() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let data = semantic_tokens(d);
+		assert!(!data.is_empty());
+		assert_eq!(data.len() % 5, 0);
+		for chunk in data.chunks(5) {
+			assert!((chunk[3] as usize) < TOKEN_TYPES.len());
+		}
+	}
+
+	#[test]
+	fn a_primitive_is_tagged_as_a_default_library_function() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let data = semantic_tokens(d);
+		let function = TOKEN_TYPES
+			.iter()
+			.position(|t| *t == "function")
+			.expect("function") as u32;
+		assert!(
+			data.chunks(5).any(|c| c[3] == function && c[4] & 0b10 != 0),
+			"no primitive carries defaultLibrary"
+		);
+	}
+
+	#[test]
+	fn inlay_hints_name_primitive_arguments() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let whole = Range::new(Position::new(0, 0), d.line.end());
+		let hints = inlay_hints(d, whole);
+		assert!(
+			hints
+				.iter()
+				.any(|h| matches!(&h.label, InlayHintLabel::String(s) if s == "private_key: ")),
+			"{hints:?}"
+		);
+	}
+}

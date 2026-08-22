@@ -193,6 +193,18 @@ fn render_trailing(comment: Option<&Comment>) -> String {
 	}
 }
 
+pub(crate) fn query_display(q: &Query) -> String {
+	match q.kind {
+		QueryKind::Authentication => format!(
+			"authentication? {} -> {}: {}",
+			q.message.sender_name,
+			q.message.recipient_name,
+			pretty_constants(&q.message.constants),
+		),
+		_ => format!("{}? {}", q.kind.name(), pretty_constants(&q.constants)),
+	}
+}
+
 pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()
@@ -317,6 +329,51 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 	}
 }
 
+pub fn diagram(model_file: &str) -> VResult<String> {
+	let m = parse_file(model_file)?;
+	let body = pretty_diagram(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+	let mut out = String::from("sequenceDiagram\n");
+	for line in body.lines() {
+		out.push_str("    ");
+		out.push_str(line);
+		out.push('\n');
+	}
+	Ok(out)
+}
+pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
+	let anchor = m.blocks.iter().find_map(|block| match block {
+		Block::Principal(p) => Some(p.name.clone()),
+		Block::Message(msg) => Some(msg.sender_name.to_string()),
+		Block::Phase(_) => None,
+	});
+	let mut output = String::new();
+	for block in &m.blocks {
+		match block {
+			Block::Principal(p) => {
+				for expr in &p.expressions {
+					output.push_str(&format!("Note over {}: {}\n", p.name, expr));
+				}
+			}
+			Block::Message(msg) => {
+				output.push_str(&format!(
+					"{}->{}:{}\n",
+					msg.sender_name,
+					msg.recipient_name,
+					pretty_constants(&msg.constants),
+				));
+			}
+			Block::Phase(phase) => {
+				if let Some(anchor) = &anchor {
+					output.push_str(&format!(
+						"Note right of {}: phase[{}]\n",
+						anchor, phase.number
+					));
+				}
+			}
+		}
+	}
+	Ok(output)
+}
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -588,5 +645,23 @@ mod tests {
 			include_str!("../examples/simple.vp"),
 			include_str!("../examples/test/golden_pretty/simple.vp"),
 		);
+	}
+	#[test]
+	fn phase_notes_name_a_participant() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private pd_x\n\
+			]\n\
+			phase[1]\n\
+			principal Alice[\n\
+			leaks pd_x\n\
+			]\n\
+			queries[\n\
+			confidentiality? pd_x\n\
+			]\n";
+		let m = parse_string("pd.vp", src).expect("parse");
+		let out = pretty_diagram(&m).expect("diagram");
+		assert!(out.contains("Note right of Alice: phase[1]"), "{out}");
+		assert!(!out.contains("of :"), "{out}");
 	}
 }
