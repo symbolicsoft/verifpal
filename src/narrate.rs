@@ -107,6 +107,7 @@ pub(crate) enum Step {
 		recipient: Arc<str>,
 		name: Arc<str>,
 		value: String,
+		sibling: bool,
 		#[cfg(test)]
 		installed: Value,
 	},
@@ -265,12 +266,14 @@ pub(crate) fn mutation_steps(
 		}
 		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
-		if replayed(sv) || crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km) {
+		let sibling = crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
+		if replayed(sv) || sibling {
 			replays.push(Step::Replay {
 				sender: Arc::from(km.principal_name(sender)),
 				recipient: Arc::from(km.principal_name(recipient)),
 				name: Arc::clone(&sm.constant.name),
 				value: table.compress_excluding(&sv.pre_rewrite, own),
+				sibling,
 				#[cfg(test)]
 				installed: sv.pre_rewrite.clone(),
 			});
@@ -460,13 +463,15 @@ fn walk(
 	}
 }
 
-/// Where a derivation happened, when that is not the session being narrated.
+/// Where a derivation happened, when that is not the run being narrated. The
+/// record names a principal, which under session expansion is a session too;
+/// it does not order the two, so nothing here may call the other one earlier.
 fn session_prefix(km: &ProtocolTrace, r: &MutationRecord, home: PrincipalId) -> Option<String> {
 	if r.principal_id == home {
 		return None;
 	}
 	Some(format!(
-		"In an earlier session with {} (phase {}), ",
+		"During {}'s run (phase {}), ",
 		km.principal_name(r.principal_id),
 		r.phase,
 	))
@@ -504,40 +509,41 @@ fn describe(
 				.join(", ");
 			match (via.is_empty(), c.origin.clone()) {
 				(true, Some(name)) if name == v => {
-					format!("Attacker observes {name} on the wire in an earlier session.")
+					format!("Attacker observes {name} on the wire.")
 				}
-				(true, Some(name)) => format!(
-					"Attacker observes {name} on the wire in an earlier session, where it is {}.",
-					v
-				),
-				(true, None) => format!("Attacker holds {} from an earlier session.", v),
-				(false, Some(name)) => format!(
-					"In an earlier session in which the attacker replaced {via}, {name} \
-					 resolved to {}.",
-					v
-				),
-				(false, None) => format!(
-					"In an earlier session in which the attacker replaced {via}, {} became \
-					 available.",
-					v
-				),
+				(true, Some(name)) => {
+					format!("Attacker observes {name} on the wire, where it is {}.", v)
+				}
+				(true, None) => format!("Attacker holds {}.", v),
+				(false, Some(name)) => {
+					format!(
+						"Attacker replaced {via}, after which {name} resolved to {}.",
+						v
+					)
+				}
+				(false, None) => {
+					format!(
+						"Attacker replaced {via}, after which {} became available.",
+						v
+					)
+				}
 			}
 		}
-		DerivationRecord::Obtained { slot } => {
-			let travelled = km.slots.get(slot.get()).is_some_and(|s| {
-				!s.sent_by.is_empty()
-					|| s.constant.leaked
-					|| s.constant.qualifier == Some(Qualifier::Public)
-			});
-			if travelled {
+		DerivationRecord::Obtained { slot } => match km.slots.get(slot.get()) {
+			Some(s) if !s.sent_by.is_empty() => {
 				format!("Attacker observes {} on the wire.", v)
-			} else {
-				format!(
-					"Attacker obtains {}: a value it already holds resolves to it here.",
-					v
-				)
 			}
-		}
+			Some(s) if s.constant.leaked => {
+				format!("Attacker holds {}: the model leaks it.", v)
+			}
+			Some(s) if s.constant.qualifier == Some(Qualifier::Public) => {
+				format!("Attacker knows {}: it is public.", v)
+			}
+			_ => format!(
+				"Attacker obtains {}: a value it already holds resolves to it here.",
+				v
+			),
+		},
 		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
 			format!("Attacker reads {} out of {}.", v, table.compress(of))
 		}
@@ -707,12 +713,14 @@ const NOT_MINIMIZED: &str = "\n            Note: these are the substitutions \
 the search recorded; no subset of them was confirmed to reproduce the \
 violation on its own, so this trace is not a minimized witness.";
 
-fn not_separated(who: &str, shares: &[String]) -> String {
+fn out_of_order_note(who: &str, values: &[String]) -> String {
 	format!(
-		"\n            Note: this trace reproduces only because sessions of \
-		 {who} share {}. Under per-session freshness this witness does not \
-		 reproduce; an attack may still exist by another route.",
-		join_names(shares)
+		"\n            Note: this trace feeds {who} a value {who} itself only \
+		 computes later in the same run, and that value is built from {who}'s own \
+		 {}, so no earlier run of {who} could have supplied it either. Only the \
+		 atemporal within-phase knowledge model admits this witness; an attack may \
+		 still exist by another route.",
+		join_names(values)
 	)
 }
 
@@ -772,8 +780,8 @@ pub(crate) fn narrate_attack(
 	let mut trace = render(&steps);
 	if !witness.reproduced {
 		trace.push_str(NOT_MINIMIZED);
-	} else if !witness.shares.is_empty() {
-		trace.push_str(&not_separated(&witness.ps.name, &witness.shares));
+	} else if !witness.out_of_order.is_empty() {
+		trace.push_str(&out_of_order_note(&witness.ps.name, &witness.out_of_order));
 	}
 	Narration {
 		trace,
@@ -816,8 +824,20 @@ fn render_one(step: &Step) -> String {
 			check,
 			..
 		} => format!(
-			"{}'s {} does not halt at {}: its inputs are attacker-controlled.",
+			"{}'s {} does not halt at {}: Attacker holds the key it verifies \
+			 against, so it can supply a value this check accepts.",
 			principal, check, slot,
+		),
+		Step::Replay {
+			sender,
+			recipient,
+			name,
+			value,
+			sibling,
+			..
+		} if *sibling => format!(
+			"Attacker replays {} ({} to {}) from another session, where it is {}.",
+			name, sender, recipient, value,
 		),
 		Step::Replay {
 			sender,
@@ -826,14 +846,14 @@ fn render_one(step: &Step) -> String {
 			value,
 			..
 		} => format!(
-			"Attacker replays {} ({} to {}) from another session, where it is {}.",
-			name, sender, recipient, value,
+			"Attacker replays {} ({} to {}) unaltered: {} is what {} sent.",
+			name, sender, recipient, value, sender,
 		),
 		Step::Resolves { name, value, .. } => {
 			format!("In this state {} resolves to {}.", name, value)
 		}
 		Step::Static { name, leaves, .. } => format!(
-			"Every value {} is built from is fixed: {} is not generated fresh.",
+			"No value {} is built from is generated fresh: {}.",
 			name, leaves
 		),
 		Step::Received {
@@ -847,7 +867,7 @@ fn render_one(step: &Step) -> String {
 			primitive,
 			..
 		} => format!(
-			"{}'s {} passes — its inputs are attacker-controlled.",
+			"{}'s {} passes — the attacker controls one of its inputs.",
 			principal, primitive,
 		),
 		Step::Derive { text, .. } => text.clone(),
@@ -882,14 +902,24 @@ fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> St
 	if !impersonated.is_empty() {
 		let names: Vec<String> = impersonated.iter().map(|i| i.name.to_string()).collect();
 		parts.push(format!(
-			"Attacker, not {}, is what sends {} to {}.",
+			"It is Attacker, not {}, that delivers {} to {}.",
 			sender,
 			names.join(", "),
 			recipient,
 		));
 	}
-	if items.iter().any(|i| i.guarded) {
-		parts.push("The guard is bypassed: Attacker holds its key.".to_string());
+	let guarded: Vec<String> = items
+		.iter()
+		.filter(|i| i.guarded)
+		.map(|i| i.name.to_string())
+		.collect();
+	if !guarded.is_empty() {
+		parts.push(format!(
+			"The guard on {} does not stop this: it reached {} unguarded earlier, \
+			 so the substitution is upstream of the guard.",
+			guarded.join(", "),
+			sender,
+		));
 	}
 	parts.join(" ")
 }

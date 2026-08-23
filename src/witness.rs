@@ -39,7 +39,7 @@ pub(crate) struct Witness {
 	pub ps: PrincipalState,
 	pub attacker: AttackerState,
 	pub reproduced: bool,
-	pub shares: Vec<String>,
+	pub out_of_order: Vec<String>,
 	#[cfg(test)]
 	pub installs: Vec<(SlotIdx, Value)>,
 }
@@ -55,7 +55,7 @@ pub(crate) fn minimize_witness(
 		ps: ps.clone(),
 		attacker: ctx.attacker_snapshot(),
 		reproduced,
-		shares: Vec::new(),
+		out_of_order: Vec::new(),
 		#[cfg(test)]
 		installs: Vec::new(),
 	};
@@ -125,34 +125,46 @@ pub(crate) fn minimize_witness(
 			if keys.is_empty() {
 				return Vec::new();
 			}
-			let shapes = shapes_the_checks_wanted(session, &keys);
-			if shapes.is_empty() {
-				return Vec::new();
-			}
-			let mut out = Vec::new();
+			let checks = checks_wanting_shapes(session, &keys);
+			let blank = shapes_the_checks_wanted(&checks, &mut |_| value_nil());
+			let mut carrying = Vec::new();
+			let mut hollow = Vec::new();
 			for i in forgeable_slots(km, session) {
-				for shape in &shapes {
-					let mut candidate: Vec<(SlotIdx, Value)> =
+				let candidate = |shape: &Value| -> Vec<(SlotIdx, Value)> {
+					let mut c: Vec<(SlotIdx, Value)> =
 						keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
-					candidate.push((SlotIdx(i), shape.clone()));
-					out.push(candidate);
+					c.push((SlotIdx(i), shape.clone()));
+					c
+				};
+				for shape in payload_shapes(km, &ambient, &checks, i) {
+					carrying.push(candidate(&shape));
+				}
+				for shape in &blank {
+					hollow.push(candidate(shape));
 				}
 			}
-			out
+			carrying.extend(hollow);
+			carrying
 		};
 
 	let forged_alone = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
-		let mut out = Vec::new();
+		let mut carrying = Vec::new();
+		let mut hollow = Vec::new();
 		for i in forgeable_slots(km, session) {
 			let blanked = vec![(SlotIdx(i), value_nil())];
 			if controlled_installs(km, session, &ambient, blanked.clone()).is_empty() {
 				continue;
 			}
-			for shape in shapes_the_checks_wanted(session, &blanked) {
-				out.push(vec![(SlotIdx(i), shape)]);
+			let checks = checks_wanting_shapes(session, &blanked);
+			for shape in payload_shapes(km, &ambient, &checks, i) {
+				carrying.push(vec![(SlotIdx(i), shape)]);
+			}
+			for shape in shapes_the_checks_wanted(&checks, &mut |_| value_nil()) {
+				hollow.push(vec![(SlotIdx(i), shape)]);
 			}
 		}
-		out
+		carrying.extend(hollow);
+		carrying
 	};
 
 	let recorded_as_gnil: Vec<(SlotIdx, Value)> = mutations
@@ -169,25 +181,25 @@ pub(crate) fn minimize_witness(
 		.collect();
 
 	let replayed_from = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
-		let mut every: Vec<(SlotIdx, Value)> = Vec::new();
+		let mut flights: Vec<Vec<(SlotIdx, Value)>> = Vec::new();
 		let mut singles: Vec<Vec<(SlotIdx, Value)>> = Vec::new();
 		for (i, sm) in session.meta.iter().enumerate() {
 			if sm.wire.is_empty() {
 				continue;
 			}
-			let Some(sibling) = crate::query::session_sibling_values(&sm.constant, km)
-				.into_iter()
-				.next()
-			else {
-				continue;
-			};
-			every.push((SlotIdx(i), sibling.clone()));
-			singles.push(vec![(SlotIdx(i), sibling)]);
+			let siblings = crate::query::session_sibling_values(&sm.constant, km);
+			for (n, sibling) in siblings.into_iter().enumerate() {
+				if flights.len() <= n {
+					flights.push(Vec::new());
+				}
+				flights[n].push((SlotIdx(i), sibling.clone()));
+				singles.push(vec![(SlotIdx(i), sibling)]);
+			}
 		}
-		if every.len() > 1 {
-			singles.insert(0, every);
-		}
-		singles
+		let mut out: Vec<Vec<(SlotIdx, Value)>> =
+			flights.into_iter().filter(|f| f.len() > 1).collect();
+		out.extend(singles);
+		out
 	};
 
 	let mut chosen: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
@@ -242,7 +254,7 @@ pub(crate) fn minimize_witness(
 
 	match probe(ctx, km, &base, &keep, query_index, phase) {
 		Some(mut witness) => {
-			witness.shares = shared_freshness(ctx, km, &base, &keep, query_index, phase);
+			witness.out_of_order = out_of_order_harvest(ctx, km, &base, &keep, query_index, phase);
 			#[cfg(test)]
 			{
 				witness.installs = keep;
@@ -269,7 +281,12 @@ fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
 		.collect()
 }
 
-fn shapes_the_checks_wanted(session: &PrincipalState, installs: &[(SlotIdx, Value)]) -> Vec<Value> {
+type WantedCheck = (Primitive, &'static crate::primitive::PrimitiveSpec);
+
+fn checks_wanting_shapes(
+	session: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+) -> Vec<WantedCheck> {
 	let mut staged = session.clone();
 	for (slot, value) in installs {
 		crate::reexec::install(&mut staged, slot.get(), value.clone(), true);
@@ -277,21 +294,98 @@ fn shapes_the_checks_wanted(session: &PrincipalState, installs: &[(SlotIdx, Valu
 	if staged.resolve_all_values().is_err() {
 		return Vec::new();
 	}
+	staged
+		.perform_all_rewrites()
+		.into_iter()
+		.filter_map(|(prim, _)| {
+			let spec = crate::primitive::primitive_get(prim.id).ok()?;
+			spec.rewrite.has_rule.then_some((prim, spec))
+		})
+		.collect()
+}
+
+fn shapes_the_checks_wanted(
+	checks: &[WantedCheck],
+	fill: &mut dyn FnMut(usize) -> Value,
+) -> Vec<Value> {
 	let mut shapes: Vec<Value> = Vec::new();
-	for (prim, _) in staged.perform_all_rewrites() {
-		let Ok(spec) = crate::primitive::primitive_get(prim.id) else {
-			continue;
+	for (prim, spec) in checks {
+		let mut at = 0usize;
+		let filler = || {
+			let position = at;
+			at += 1;
+			fill(position)
 		};
-		if !spec.rewrite.has_rule {
-			continue;
-		}
-		for shape in crate::solve::deduce::build_rewrite_shapes_with(&prim, spec, value_nil) {
+		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, spec, filler) {
 			if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
 				shapes.push(shape);
 			}
 		}
 	}
 	shapes
+}
+
+/// The forgeries for slot `i` that carry what the protocol itself put there.
+///
+/// `build_rewrite_shapes_with` fixes the positions the recipient's rewrite rule
+/// matches on — the key, the associated data — and leaves the rest to a filler.
+/// Filling those with `nil` always type-checks and always resolves an
+/// authentication query, which is exactly why it explains nothing: "Bob accepted
+/// an empty record" is a weaker claim than "Bob accepted the real file, resealed
+/// under a key the attacker owns", and both resolve the same `a1`. So whenever
+/// the attacker holds the honest term's own argument for a free position, offer
+/// that first and let `nil` be the fallback it was meant to be.
+fn payload_shapes(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	checks: &[WantedCheck],
+	slot: usize,
+) -> Vec<Value> {
+	if checks.is_empty() {
+		return Vec::new();
+	}
+	let Some(honest) = km.slots.get(slot) else {
+		return Vec::new();
+	};
+	let resolved = crate::resolution::resolve_trace_term(&honest.initial_value, km);
+	let Value::Primitive(carried) = resolved else {
+		return Vec::new();
+	};
+	let usable = |v: &Value| !v.equivalent(&value_nil(), true) && attacker.knows(v).is_some();
+	if !carried.arguments.iter().any(usable) {
+		return Vec::new();
+	}
+	let mut meaningful = false;
+	let mut fill = |position: usize| -> Value {
+		match carried.arguments.get(position) {
+			Some(argument) if usable(argument) => {
+				meaningful = true;
+				argument.clone()
+			}
+			_ => value_nil(),
+		}
+	};
+	let shapes = shapes_the_checks_wanted(checks, &mut fill);
+	if !meaningful {
+		return Vec::new();
+	}
+	shapes
+		.into_iter()
+		.filter(|shape| attacker_can_build(shape, attacker))
+		.collect()
+}
+
+/// A forged term is only an explanation if the attacker could have produced it.
+/// The minimizer never records a verdict, so this cannot cost an attack — but a
+/// witness naming a term nothing derives is a trace a reader cannot follow.
+fn attacker_can_build(shape: &Value, attacker: &AttackerState) -> bool {
+	if attacker.knows(shape).is_some() {
+		return true;
+	}
+	match shape {
+		Value::Constant(_) => false,
+		Value::Primitive(p) => p.arguments.iter().all(|a| attacker_can_build(a, attacker)),
+	}
 }
 
 fn needs_guard_bypass(ps: &PrincipalState) -> bool {
@@ -311,7 +405,7 @@ fn controlled_installs(
 		.collect()
 }
 
-fn shared_freshness(
+fn out_of_order_harvest(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	base: &PrincipalState,
@@ -320,52 +414,64 @@ fn shared_freshness(
 	phase: i32,
 ) -> Vec<String> {
 	let ambient = ctx.attacker_snapshot();
-	let mut shared: Vec<String> = Vec::new();
+	let mut harvested: Vec<String> = Vec::new();
 	let renamed: Vec<(SlotIdx, Value)> = installs
 		.iter()
-		.map(|(slot, v)| {
-			let strict = produced_by_target(km, &ambient, base.id, v);
-			(*slot, rename_own_fresh(v, base, strict, &mut shared))
-		})
+		.map(
+			|(slot, v)| match harvested_late(km, &ambient, base.id, *slot, v) {
+				true => (*slot, rename_own_fresh(v, base, &mut harvested)),
+				false => (*slot, v.clone()),
+			},
+		)
 		.collect();
-	if shared.is_empty() {
-		return shared;
+	if harvested.is_empty() {
+		return harvested;
 	}
 	if probe(ctx, km, base, &renamed, query_index, phase).is_some() {
 		return Vec::new();
 	}
-	shared.sort();
-	shared.dedup();
-	shared
+	harvested.sort();
+	harvested.dedup();
+	harvested
 }
 
-fn produced_by_target(
+/// Was `v` lifted straight out of `target`'s own state, from a slot `target`
+/// only reaches at or after the one being overwritten? A value the principal
+/// published earlier is available to the attacker in the same run, so
+/// reflecting it back is an ordinary attack; a value it only computes later is
+/// one the run cannot supply in time, and only the atemporal within-phase
+/// knowledge model admits it. Terms the attacker built itself are excluded the
+/// way `solve::validate::replays_own_freshness` excludes them: their shape says
+/// nothing about which run they came from.
+fn harvested_late(
 	km: &ProtocolTrace,
 	ambient: &AttackerState,
 	target: PrincipalId,
+	into: SlotIdx,
 	v: &Value,
 ) -> bool {
 	match ambient.knows(v).and_then(|idx| ambient.derivation(idx)) {
-		Some(DerivationRecord::Obtained { slot }) | Some(DerivationRecord::Leaked { slot }) => km
-			.slots
-			.get(slot.get())
-			.is_some_and(|s| s.creator == target),
-		_ => true,
+		Some(DerivationRecord::Obtained { slot }) | Some(DerivationRecord::Leaked { slot }) => {
+			slot.get() >= into.get()
+				&& km
+					.slots
+					.get(slot.get())
+					.is_some_and(|s| s.creator == target)
+		}
+		_ => false,
 	}
 }
 
 /// `v` with every constant that `ps` itself generates replaced by the copy a
 /// different session of `ps` would hold, recording which ones those were.
-fn rename_own_fresh(v: &Value, ps: &PrincipalState, strict: bool, seen: &mut Vec<String>) -> Value {
+fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> Value {
 	match v {
 		Value::Constant(c) => {
 			// Read freshness off the slot rather than off the occurrence: a
 			// constant reached by inlining carries the identifier but not
 			// necessarily the declaration flags.
 			let own = ps.index_of(c).is_some_and(|i| {
-				ps.meta[i].constant.fresh
-					&& ps.values[i].provenance.creator == ps.id
-					&& (strict || (ps.meta[i].wire.is_empty() && !ps.meta[i].constant.leaked))
+				ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id
 			});
 			if own {
 				seen.push(c.name.to_string());
@@ -378,7 +484,7 @@ fn rename_own_fresh(v: &Value, ps: &PrincipalState, strict: bool, seen: &mut Vec
 			let arguments = p
 				.arguments
 				.iter()
-				.map(|a| rename_own_fresh(a, ps, strict, seen))
+				.map(|a| rename_own_fresh(a, ps, seen))
 				.collect();
 			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
 		}
@@ -420,12 +526,13 @@ pub(crate) fn assert_reported_attacks_replay(
 			.iter()
 			.map(|(slot, value)| format!("      {} := {}", name_of(slot), value))
 			.collect();
-		let caveat = if witness.shares.is_empty() {
+		let caveat = if witness.out_of_order.is_empty() {
 			String::new()
 		} else {
 			format!(
-				"\n    and on sessions sharing: {}",
-				witness.shares.join(", ")
+				"\n    and on {} being fed a value it only computes later, built from {}",
+				base.name,
+				witness.out_of_order.join(", ")
 			)
 		};
 		assert!(
@@ -528,8 +635,8 @@ fn probe(
 		// A probe returns only when the re-executed state resolved the query.
 		reproduced: true,
 		// Decided by the caller, which knows whether this probe is the witness
-		// or the separated-freshness re-check of it.
-		shares: Vec::new(),
+		// or the out-of-order re-check of it.
+		out_of_order: Vec::new(),
 	})
 }
 

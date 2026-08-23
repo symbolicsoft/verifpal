@@ -45,7 +45,7 @@ fn attack_trace_with(
 			principal: witness.ps.id,
 			phase: ambient.current_phase,
 			reproduced: witness.reproduced,
-			shares: witness.shares.clone(),
+			out_of_order: witness.out_of_order.clone(),
 		},
 	);
 	let narration = narrate_attack(km, &witness, target, &ambient, prelude);

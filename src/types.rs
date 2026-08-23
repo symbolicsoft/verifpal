@@ -786,7 +786,7 @@ pub(crate) struct ResultWitness {
 	pub principal: PrincipalId,
 	pub phase: i32,
 	pub reproduced: bool,
-	pub shares: Vec<String>,
+	pub out_of_order: Vec<String>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]

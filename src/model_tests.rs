@@ -1,10 +1,9 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 7] = [
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 6] = [
 	("flawed_psk_from_serial.vp", 2),
 	("junglegym_hybrid_pq.vp", 4),
-	("noise_xx_mutual.vp", 0),
 	("noise_xx_mutual.vp", 1),
 	("test3.vp", 1),
 	("test5.vp", 1),
@@ -19,52 +18,18 @@ const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 5] = [
 	("piknik.vp", 3),
 ];
 
-const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 34] = [
-	("ephemerals_sign.vp", 0),
-	("ephemerals_sign.vp", 1),
-	("exa2.vp", 0),
-	("flawed_anonymous_chat.vp", 0),
-	("flawed_anonymous_chat.vp", 1),
-	("flawed_anonymous_chat.vp", 2),
-	("flawed_anonymous_chat.vp", 3),
-	("flawed_resumption_ticket.vp", 2),
-	("forged_flight_mitm.vp", 0),
-	("identity_misbinding_uks.vp", 1),
-	("kem_direction_reflection.vp", 0),
-	("mutual_auth_both_directions.vp", 1),
-	("needham-schroeder-pk-withfix.vp", 1),
-	("needham-schroeder-pk.vp", 3),
-	("noise_xx_mutual.vp", 2),
-	("password_pake_transcript.vp", 2),
-	("pke_unguarded_alice.vp", 1),
-	("saltchannel.vp", 0),
-	("shared_freshness_not_replication.vp", 0),
-	("srp_naive_verifier.vp", 2),
-	("station_to_station.vp", 4),
-	("station_to_station_unsigned.vp", 0),
-	("station_to_station_unsigned.vp", 1),
-	("station_to_station_unsigned.vp", 2),
-	("station_to_station_unsigned.vp", 3),
-	("tls13.vp", 1),
-	("tls13.vp", 2),
-	("tls13.vp", 3),
-	("tls13.vp", 4),
-	("tls13.vp", 5),
-	("tls13.vp", 7),
-	("tls13.vp", 8),
-	("two_phase_commit_forged_ack.vp", 0),
-	("unpinned_cert_flight.vp", 0),
-];
+const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 1] = [("later_value_fed_back.vp", 0)];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 6] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 7] = [
 	"examples/transport-layer/tls13.vp",
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
 	"examples/contact-tracing/lc-dp-3t.vp",
 	"examples/messaging/pqxdh-weak.vp",
+	"examples/silly/cloudbackup.vp",
 ];
 
 fn swept_models() -> Vec<(String, String)> {
@@ -196,7 +161,7 @@ fn session_base(name: &str) -> String {
 fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut bypass: Vec<(String, usize)> = Vec::new();
 	let mut unminimized: Vec<(String, usize)> = Vec::new();
-	let mut shared: Vec<(String, usize)> = Vec::new();
+	let mut harvested: Vec<(String, usize)> = Vec::new();
 	let mut traceless: Vec<(String, usize)> = Vec::new();
 	let mut incoherent: Vec<String> = Vec::new();
 	let mut header_problems: Vec<String> = Vec::new();
@@ -253,8 +218,8 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			if summary.contains("not a minimized witness") {
 				unminimized.push(key.clone());
 			}
-			if summary.contains("reproduces only because sessions") {
-				shared.push(key.clone());
+			if summary.contains("itself only computes later in the same run") {
+				harvested.push(key.clone());
 			}
 			for line in summary.lines() {
 				let line = line.trim();
@@ -268,8 +233,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 					.split_once("Attacker replays ")
 					.and_then(|(_, rest)| rest.split_once(" ("))
 					.and_then(|(names, tail)| {
-						tail.split_once(") from another session")
-							.map(|(route, _)| (names, route))
+						tail.split_once(") ").map(|(route, _)| (names, route))
 					});
 				let Some((names, route)) = replaced.or(replayed) else {
 					continue;
@@ -293,7 +257,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 						continue;
 					}
 					if to_recipient.iter().all(|(_, _, _, g)| *g)
-						&& !line.contains("The guard is bypassed")
+						&& !line.contains("upstream of the guard")
 						&& !legs.iter().any(|(_, _, n, g)| *n == name && !*g)
 					{
 						incoherent.push(format!(
@@ -328,10 +292,10 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		header_problems.join("\n  ")
 	);
 	assert!(
-		undocumented <= 145,
-		"{} models in examples/test/ state no expected result code in their header, up from \
-		 145. A new model must say what it expects and why, so that its verdict can be checked \
-		 against an intent rather than against itself",
+		undocumented <= 141,
+		"{} swept models state no expected result code in their header, up from 141. A new \
+		 model must say what it expects and why, so that its verdict can be checked against \
+		 an intent rather than against itself",
 		undocumented
 	);
 	assert!(
@@ -356,10 +320,11 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		 violation, so a new entry is a trace that got less trustworthy"
 	);
 	assert_eq!(
-		sorted(shared),
-		pinned(&TRACE_NEEDS_SHARED_SESSION_FRESHNESS),
-		"the set of attacks that reproduce only because two sessions share a fresh value has \
-		 moved"
+		sorted(harvested),
+		pinned(&TRACE_FEEDS_BACK_A_LATER_VALUE),
+		"the set of attacks whose witness feeds a principal a value that principal only \
+		 computes later in the same run has moved. Such a witness rests on the atemporal \
+		 within-phase knowledge model rather than on anything the protocol permits"
 	);
 	assert_eq!(
 		sorted(traceless),
@@ -934,8 +899,8 @@ fn test_halted_principal_false_attack() {
 	run_model("halted_principal_false-attack.vp", "c0");
 }
 #[test]
-fn test_shared_freshness_not_replication() {
-	run_model("shared_freshness_not_replication.vp", "a1");
+fn test_later_value_fed_back() {
+	run_model("later_value_fed_back.vp", "a1");
 }
 #[test]
 fn test_dh_nested_rejected() {

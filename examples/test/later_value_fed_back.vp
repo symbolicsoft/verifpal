@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — and the trace must carry the out-of-order note.
+//
+// Within a phase the attacker's knowledge is atemporal: attacker_phase_update
+// seeds every wire value the phase reaches before any principal runs. That is
+// what lets an attack route one session's traffic into another regardless of
+// block order, and it is load-bearing. This model pins its one bad consequence.
+//
+// Bob keys w's envelope on a nonce he generates, so a ciphertext under
+// HASH(k, n) is the only thing his AEAD_DEC will open. The single ciphertext
+// with that shape is v — which Bob himself produces two blocks later, and only
+// if the very check being attacked did not halt him first. The engine hands it
+// to the attacker anyway, w becomes attacker-authored and successfully used,
+// and the authentication query fails.
+//
+// No other run supplies it either: v is built from Bob's own generated n, so a
+// concurrent Bob's v is under HASH(k, n#2) and does not open this one. That is
+// the second half of what the note checks, and it is what separates this model
+// from exa2.vp and kem_direction_reflection.vp, where the reflected value is on
+// the wire before it is replayed and the attack is real.
+//
+// The verdict stands as a statement about this engine's semantics. What must
+// not regress is the note, which is what tells the reader that the witness rests
+// on an ordering no run permits.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public p
+]
+
+principal Bob[
+	knows private k
+	generates n
+]
+
+Bob -> Alice: n
+
+principal Alice[
+	ka = HASH(k, n)
+	w = AEAD_ENC(ka, p, nil)
+]
+
+Alice -> Bob: w
+
+principal Bob[
+	kb = HASH(k, n)
+	pb = AEAD_DEC(kb, w, nil)?
+]
+
+principal Alice[
+	generates u
+]
+
+Alice -> Bob: u
+
+principal Bob[
+	v = AEAD_ENC(kb, u, nil)
+]
+
+Bob -> Alice: v
+
+queries[
+	authentication? Alice -> Bob: w
+]
