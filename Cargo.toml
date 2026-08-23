@@ -2,7 +2,7 @@
 name = "verifpal"
 version = "1.2.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.98"
 license = "GPL-3.0-only"
 description = "Verifpal - cryptographic protocol analysis"
 repository = "https://github.com/symbolicsoft/verifpal"
