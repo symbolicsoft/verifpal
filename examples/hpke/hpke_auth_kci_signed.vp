@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// RFC 9180 HPKE in mode_auth with a compromised recipient key, plus the
+// mitigation §9.1.1 itself recommends: "produce a digital signature over
+// (enc, ct) tuples using a sender's private key".
+//
+// Expected: c1a0, at one session and at two.
+//
+// hpke_auth_kci.vp is c1a1. Adding the signature moves the authentication
+// query back to a0 and leaves confidentiality at c1, and both halves of that
+// are the point.
+//
+// a0, because key-compromise impersonation works by rebuilding the KEM
+// shared secret from sk_r alone, and a signature does not live in the KEM
+// shared secret. The attacker can still derive r_key and still produce a
+// ciphertext the AEAD would open, but the recipient checks the signature
+// first and halts, so the forged ct is never used. This is the difference
+// between authenticating a key exchange and authenticating a message: §9.1.1
+// says the underlying problem is that "KEM ciphertexts are not bound to HPKE
+// messages", and the signature is what binds them.
+//
+// c1, because a signature over the ciphertext cannot make a compromised
+// recipient key forget how to decrypt. §9.1 is explicit that Base and Auth
+// mode secrecy holds only if sk_r is never compromised, and no amount of
+// sender-side authentication changes that. A model where adding a signature
+// repaired confidentiality would be a model to distrust.
+//
+// The signing key is separate from the KEM key. RFC 9180 says only "a
+// sender's private key"; reusing sk_s for both DH_KEX and SIGN would be the
+// kind of cross-algorithm key reuse the surrounding text warns about, and
+// nothing in this construction needs it.
+attacker[active]
+
+principal Recipient[
+	knows private sk_r
+	pk_r = PUBKEY(sk_r)
+	leaks sk_r
+]
+
+principal Sender[
+	knows private sk_s, sk_sig
+	pk_s = PUBKEY(sk_s)
+	pk_sig = PUBKEY(sk_sig)
+]
+
+Recipient -> Sender: [pk_r]
+Sender -> Recipient: [pk_s], [pk_sig]
+
+principal Sender[
+	knows public info, aad, l_kem, mode_auth
+	generates sk_e, pt
+	kem_enc = PUBKEY(sk_e)
+	dh = CONCAT(DH_KEX(pk_r, sk_e), DH_KEX(pk_r, sk_s))
+	kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	shared_secret = HKDF(nil, dh, kem_context)
+	ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
+	ct = AEAD_ENC(key, pt, aad)
+	// The mitigation: a signature over the (enc, ct) tuple.
+	sig = SIGN(sk_sig, HASH(kem_enc, ct))
+]
+
+Sender -> Recipient: kem_enc, ct, sig
+
+principal Recipient[
+	knows public info, aad, l_kem, mode_auth
+	// Verify before opening: on a forged tuple the recipient halts here and
+	// never reaches the AEAD.
+	r_sig_ok = SIGNVERIF(pk_sig, HASH(kem_enc, ct), sig)?
+	r_dh = CONCAT(DH_KEX(kem_enc, sk_r), DH_KEX(pk_s, sk_r))
+	r_kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	r_shared_secret = HKDF(nil, r_dh, r_kem_context)
+	r_ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	r_key, r_base_nonce, r_exporter_secret = HKDF(r_shared_secret, nil, r_ks_context)
+	r_pt = AEAD_DEC(r_key, ct, aad)?
+]
+
+queries[
+	confidentiality? pt
+	authentication? Sender -> Recipient: ct
+]

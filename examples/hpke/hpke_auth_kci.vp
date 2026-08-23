@@ -1,0 +1,76 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// RFC 9180 HPKE in mode_auth, with the recipient's private key compromised:
+// key-compromise impersonation, §9.1.1.
+//
+// Expected: c1a1, at one session and at two.
+//
+// This is hpke_auth.vp plus a single `leaks sk_r` line, and both queries
+// flip. Neither failure is a flaw Verifpal found in HPKE; both are properties
+// RFC 9180 states about itself, reproduced here from the protocol text alone.
+//
+// a1 is the key-compromise impersonation of §9.1.1: "an adversary who knows
+// a recipient's private key can decapsulate an observed KEM ciphertext,
+// compute the key schedule, and encrypt an arbitrary message that the
+// recipient will accept as coming from the original sender." That is exactly
+// the trace Verifpal prints. The reason it works is visible in the model:
+// AuthDecap's second leg is DH_KEX(pk_s, sk_r), and sk_r alone computes it —
+// the sender's private key is never needed to *rebuild* the shared secret,
+// only to have built it first. §4.1 flags the same thing about DHKEM, and
+// notes NaCl's box interface shares it.
+//
+// c1 is the separate statement in §9.1 that HPKE offers no forward secrecy
+// with respect to recipient compromise: in Base and Auth modes the secrecy
+// properties hold only if sk_r is never compromised, full stop. The attacker
+// here simply decapsulates the honest kem_enc and opens the honest ct.
+//
+// The RFC's suggested mitigation for the authentication half is in
+// hpke_auth_kci_signed.vp, which recovers a0 and — correctly — leaves c1
+// standing, because a signature over the ciphertext cannot make a
+// compromised recipient key forget how to decrypt.
+attacker[active]
+
+principal Recipient[
+	knows private sk_r
+	pk_r = PUBKEY(sk_r)
+	// The whole of the difference from hpke_auth.vp.
+	leaks sk_r
+]
+
+principal Sender[
+	knows private sk_s
+	pk_s = PUBKEY(sk_s)
+]
+
+Recipient -> Sender: [pk_r]
+Sender -> Recipient: [pk_s]
+
+principal Sender[
+	knows public info, aad, l_kem, mode_auth
+	generates sk_e, pt
+	kem_enc = PUBKEY(sk_e)
+	dh = CONCAT(DH_KEX(pk_r, sk_e), DH_KEX(pk_r, sk_s))
+	kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	shared_secret = HKDF(nil, dh, kem_context)
+	ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
+	ct = AEAD_ENC(key, pt, aad)
+]
+
+Sender -> Recipient: kem_enc, ct
+
+principal Recipient[
+	knows public info, aad, l_kem, mode_auth
+	r_dh = CONCAT(DH_KEX(kem_enc, sk_r), DH_KEX(pk_s, sk_r))
+	r_kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	r_shared_secret = HKDF(nil, r_dh, r_kem_context)
+	r_ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	r_key, r_base_nonce, r_exporter_secret = HKDF(r_shared_secret, nil, r_ks_context)
+	r_pt = AEAD_DEC(r_key, ct, aad)?
+]
+
+queries[
+	confidentiality? pt
+	authentication? Sender -> Recipient: ct
+]

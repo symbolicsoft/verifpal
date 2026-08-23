@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// RFC 9180 HPKE in mode_auth (§5.1.3), over DHKEM's AuthEncap/AuthDecap
+// (§4.1).
+//
+// Expected: c0a0, at one session and at two.
+//
+// This is hpke_base.vp with one leg added to the KEM and one identity added
+// to the KEM context, which is precisely how the RFC describes the
+// difference: "the calls to Encap() and Decap() are replaced with calls to
+// AuthEncap() and AuthDecap(), which add the sender public key to their
+// internal context string" (§5.1.3). The pair is worth reading side by side
+// — the authentication query goes from a1 to a0 on the strength of those two
+// lines, and nothing else in the two models differs.
+//
+// Why authentication now holds. AuthEncap mixes DH(sk_s, pk_r) into the KEM
+// shared secret, so deriving the key schedule requires sk_s or sk_r, and the
+// attacker holds neither. §5.1.3 puts it as a counting argument: at most two
+// entities could have produced this secret, so if the recipient is one, the
+// sender is the other. Verifpal reaches the same conclusion structurally,
+// because DH_KEX commutativity is declared on the primitive rather than
+// coded as a DH-specific rule: DH_KEX(pk_r, sk_s) and DH_KEX(pk_s, sk_r) are
+// the same term, so the two sides agree and no third party can join them.
+//
+// Read this verdict for what it is. a0 means no attack was found within two
+// sessions of each principal, under the abstractions listed in hpke_base.vp
+// — not that mode_auth is unconditionally authenticated. hpke_auth_kci.vp is
+// the same model plus one `leaks` line, and it is a1: the assurance here is
+// conditional on sk_r staying secret, which is the key-compromise
+// impersonation caveat of §9.1.1 and not a detail the RFC leaves implicit.
+attacker[active]
+
+principal Recipient[
+	knows private sk_r
+	pk_r = PUBKEY(sk_r)
+]
+
+principal Sender[
+	knows private sk_s
+	pk_s = PUBKEY(sk_s)
+]
+
+// Both guarded: mode_auth assumes each party already holds the other's
+// genuine public key. Unguarding either measures key distribution, not HPKE.
+Recipient -> Sender: [pk_r]
+Sender -> Recipient: [pk_s]
+
+principal Sender[
+	knows public info, aad, l_kem, mode_auth
+	generates sk_e, pt
+	// DHKEM AuthEncap(pk_r, sk_s): two DH legs, and pk_s joins kem_context.
+	kem_enc = PUBKEY(sk_e)
+	dh = CONCAT(DH_KEX(pk_r, sk_e), DH_KEX(pk_r, sk_s))
+	kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	shared_secret = HKDF(nil, dh, kem_context)
+	// KeyScheduleS(mode_auth, shared_secret, info, default_psk,
+	// default_psk_id) — identical to base mode but for the mode byte.
+	ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
+	ct = AEAD_ENC(key, pt, aad)
+]
+
+Sender -> Recipient: kem_enc, ct
+
+principal Recipient[
+	knows public info, aad, l_kem, mode_auth
+	// DHKEM AuthDecap(kem_enc, sk_r, pk_s). Both legs match the sender's by
+	// DH_KEX commutativity.
+	r_dh = CONCAT(DH_KEX(kem_enc, sk_r), DH_KEX(pk_s, sk_r))
+	r_kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
+	r_shared_secret = HKDF(nil, r_dh, r_kem_context)
+	r_ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
+	r_key, r_base_nonce, r_exporter_secret = HKDF(r_shared_secret, nil, r_ks_context)
+	r_pt = AEAD_DEC(r_key, ct, aad)?
+]
+
+queries[
+	confidentiality? pt
+	authentication? Sender -> Recipient: ct
+]

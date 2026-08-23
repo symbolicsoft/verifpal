@@ -1,0 +1,103 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// RFC 9180 HPKE in mode_psk (§5.1.2) against an adversary who breaks the
+// KEM, which is the scenario §9.1.1 closes on: "if a non-quantum-resistant
+// KEM used with HPKE is broken by a quantum computer, the security
+// properties are preserved through the use of a pre-shared key".
+//
+// Expected: c1c0, at one session and at two.
+//
+// The claim is a comparative one, so the experiment is run inside a single
+// model: the same sender seals two plaintexts to the same recipient over the
+// same DHKEM, once in mode_base and once in mode_psk, and discrete log falls
+// at phase 1 underneath both of them. pt_base is lost, pt_psk survives, and
+// the only difference between the two pipelines is the psk that mode_psk
+// mixes into the key schedule. Splitting this across two files would leave
+// room to argue something else moved.
+//
+// The adversary is `PUBKEY[weak from phase 1]`: a capability parameter, not
+// a `leaks` line. That distinction matters here. `leaks sk_r` would hand
+// over one private value; PUBKEY[weak] says the *operation* is invertible,
+// so every private key behind every annotated PUBKEY falls at once —
+// including the per-session ephemerals the sender never transmits. Verifpal
+// then rebuilds the DHKEM shared secret through the ordinary reconstruction
+// rules, with no DH-specific machinery involved. This is harvest-now-
+// decrypt-later: everything happens in phase 0 and is opened in phase 1.
+// Compare pqxdh-weak.vp in examples/messaging, which uses the same adversary
+// against the same problem and solves it with a KEM instead of a PSK.
+//
+// What c0 on pt_psk does and does not say. The PSK is doing the work alone:
+// once the KEM is broken, HKDF(ss2, psk, ks_context2) is the only step the
+// attacker cannot recompute, and §9.5's requirement that the PSK carry at
+// least 32 bytes of entropy is what makes that assumption legitimate.
+// Verifpal does not check that requirement here, and it is worth knowing
+// exactly why. Declare the PSK as `knows password` rather than `knows
+// private` and this model still reports c1c0: offline guessing in Verifpal
+// means recomputing the whole enclosing term, and psk sits under key2, which
+// sits beside the unknown pt_psk inside AEAD_ENC, so there is nothing to
+// check a guess against. Make pt_psk public and the same model reports c1c1
+// — the password falls the instant a known sibling appears. A real attacker
+// would verify the guess through AEAD authentication instead, which is
+// outside this abstraction. So read the c0 as conditional on §9.5 being
+// honoured, not as evidence that it has been.
+attacker[active]
+
+principal Recipient[
+	knows private sk_r
+	knows private psk
+	// Discrete log falls at phase 1: the attacker recovers sk_r from pk_r.
+	pk_r = PUBKEY[weak from phase 1](sk_r)
+]
+
+Recipient -> Sender: [pk_r]
+
+principal Sender[
+	knows private psk
+	knows public info, aad, l_kem, mode_base, mode_psk, psk_id
+	generates sk_e1, sk_e2, pt_base, pt_psk
+	// SealBase(pk_r, info, aad, pt_base).
+	kem_enc1 = PUBKEY[weak from phase 1](sk_e1)
+	dh1 = DH_KEX(pk_r, sk_e1)
+	kem_context1 = CONCAT(l_kem, kem_enc1, pk_r)
+	ss1 = HKDF(nil, dh1, kem_context1)
+	ks_context1 = CONCAT(mode_base, HASH(nil), HASH(info))
+	key1, nonce1, exp1 = HKDF(ss1, nil, ks_context1)
+	ct_base = AEAD_ENC(key1, pt_base, aad)
+	// SealPSK(pk_r, info, aad, pt_psk, psk, psk_id). Same KEM, same
+	// adversary; the key schedule differs by the mode byte, the psk_id hash
+	// and — the point — the psk in the ikm position.
+	kem_enc2 = PUBKEY[weak from phase 1](sk_e2)
+	dh2 = DH_KEX(pk_r, sk_e2)
+	kem_context2 = CONCAT(l_kem, kem_enc2, pk_r)
+	ss2 = HKDF(nil, dh2, kem_context2)
+	ks_context2 = CONCAT(mode_psk, HASH(psk_id), HASH(info))
+	key2, nonce2, exp2 = HKDF(ss2, psk, ks_context2)
+	ct_psk = AEAD_ENC(key2, pt_psk, aad)
+]
+
+Sender -> Recipient: kem_enc1, ct_base, kem_enc2, ct_psk
+
+principal Recipient[
+	knows public info, aad, l_kem, mode_base, mode_psk, psk_id
+	r_dh1 = DH_KEX(kem_enc1, sk_r)
+	r_kem_context1 = CONCAT(l_kem, kem_enc1, pk_r)
+	r_ss1 = HKDF(nil, r_dh1, r_kem_context1)
+	r_ks_context1 = CONCAT(mode_base, HASH(nil), HASH(info))
+	r_key1, r_nonce1, r_exp1 = HKDF(r_ss1, nil, r_ks_context1)
+	r_pt_base = AEAD_DEC(r_key1, ct_base, aad)?
+	r_dh2 = DH_KEX(kem_enc2, sk_r)
+	r_kem_context2 = CONCAT(l_kem, kem_enc2, pk_r)
+	r_ss2 = HKDF(nil, r_dh2, r_kem_context2)
+	r_ks_context2 = CONCAT(mode_psk, HASH(psk_id), HASH(info))
+	r_key2, r_nonce2, r_exp2 = HKDF(r_ss2, psk, r_ks_context2)
+	r_pt_psk = AEAD_DEC(r_key2, ct_psk, aad)?
+]
+
+// Discrete log falls here. Everything above was recorded in phase 0.
+phase[1]
+
+queries[
+	confidentiality? pt_base
+	confidentiality? pt_psk
+]

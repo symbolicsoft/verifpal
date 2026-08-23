@@ -1,0 +1,87 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// RFC 9180 HPKE in mode_base (§5.1.1), over DHKEM (§4.1), using the
+// single-shot Seal/Open API (§6.1).
+//
+// Expected: c0a1, at one session and at two.
+//
+// HPKE needs no primitive of its own. Verifpal's HKDF(salt, ikm, info) is
+// position-for-position the shape of the HPKE key schedule: LabeledExtract(
+// shared_secret, "secret", psk) is salt=shared_secret, ikm=psk, and the three
+// LabeledExpand calls that follow it are the three outputs of one HKDF. The
+// KEM, the key schedule and the AEAD are all written out, which is the point:
+// every property RFC 9180 §9.1 discusses lives in what feeds the key
+// schedule, and a model that hid that behind an HPKE_SEAL primitive could not
+// see any of it. Compare hpke_auth.vp, which differs by the KEM leg alone.
+//
+// Confidentiality holds: this is the IND-CCA2 statement of §9.1.2, and the
+// attacker never learns the DHKEM shared secret because it holds neither
+// sk_r nor sk_e.
+//
+// The authentication query FAILS, and that is mode_base working as
+// specified. Base mode offers no sender authentication whatsoever (§5, §9.1:
+// authentication is a property of the PSK, Auth and AuthPSK modes). pk_r is
+// public, so anyone may run Encap against it, derive the whole key schedule
+// and produce a ciphertext the recipient opens. The reported attack is
+// exactly that, and nothing subtler: the attacker picks its own ephemeral
+// key, seals under the context that results, and the recipient's AEAD_DEC
+// succeeds on a message the sender never wrote. hpke_auth.vp is the fix.
+//
+// Modeling notes. sk_r is a long-term key, so it is `knows private` rather
+// than `generates`; only the ephemeral sk_e is freshened per session. `nil`
+// is the RFC's default_psk and default_psk_id, both the empty string (§5.1).
+// l_kem stands for the KEM suite_id and the "shared_secret" label of §4.1;
+// mode_base is the one-byte mode value of Table 1, and it is the domain
+// separator that keeps this key schedule distinct from the PSK-mode one in
+// hpke_psk_pq.vp. Per-message nonces (base_nonce XOR seq, §5.2) are outside
+// the symbolic model: AEAD_ENC takes no nonce, so the multi-shot context
+// collapses to encryption under a single key, and the message-ordering and
+// replay non-goals of §9.7.1 and §9.7.3 are out of reach here by
+// construction.
+attacker[active]
+
+principal Recipient[
+	knows private sk_r
+	pk_r = PUBKEY(sk_r)
+]
+
+// Guarded: HPKE assumes the sender already holds the recipient's genuine
+// public key. Unguard it and the attacker simply substitutes its own,
+// which measures unauthenticated key distribution rather than HPKE.
+Recipient -> Sender: [pk_r]
+
+principal Sender[
+	knows public info, aad, l_kem, mode_base
+	generates sk_e, pt
+	// DHKEM Encap(pk_r): the encapsulated key is the ephemeral public key.
+	kem_enc = PUBKEY(sk_e)
+	dh = DH_KEX(pk_r, sk_e)
+	kem_context = CONCAT(l_kem, kem_enc, pk_r)
+	shared_secret = HKDF(nil, dh, kem_context)
+	// KeyScheduleS(mode_base, shared_secret, info, default_psk,
+	// default_psk_id), with key_schedule_context as in the KeyScheduleContext
+	// struct of §5.1.
+	ks_context = CONCAT(mode_base, HASH(nil), HASH(info))
+	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
+	ct = AEAD_ENC(key, pt, aad)
+]
+
+Sender -> Recipient: kem_enc, ct
+
+principal Recipient[
+	knows public info, aad, l_kem, mode_base
+	// DHKEM Decap(kem_enc, sk_r). DH_KEX commutativity is declared on the
+	// primitive, so this is the same shared secret the sender computed.
+	r_dh = DH_KEX(kem_enc, sk_r)
+	r_kem_context = CONCAT(l_kem, kem_enc, pk_r)
+	r_shared_secret = HKDF(nil, r_dh, r_kem_context)
+	r_ks_context = CONCAT(mode_base, HASH(nil), HASH(info))
+	r_key, r_base_nonce, r_exporter_secret = HKDF(r_shared_secret, nil, r_ks_context)
+	r_pt = AEAD_DEC(r_key, ct, aad)?
+]
+
+queries[
+	confidentiality? pt
+	authentication? Sender -> Recipient: ct
+]
