@@ -167,12 +167,12 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "authentication",
 		eg: "authentication? Alice -> Bob: m",
-		help: "Checks whether Bob will rely on some value m in an important protocol operation (such as signature verification or authenticated decryption) if and only if Alice sent him that value, in this session and not in another one. This is injective agreement: it is violated if the attacker can forge m, and equally if the attacker can take an m that Alice genuinely sent in one session and have Bob accept it a second time. A replay forges nothing, but Alice sent the value once and Bob accepted it twice, so the correspondence between their runs is broken. Note that a replay needs two runs to exist at all, so it can only be found when more than one session per principal is analyzed.",
+		help: "Checks that Bob only uses m in a meaningful way (verifying a signature, decrypting authentically) if Alice really sent it to him, in this very session. This is injective agreement, so it fails both when the attacker can forge m and when the attacker can replay an m Alice sent once and make Bob accept it twice. Replays need two runs to appear, so analyze more than one session per principal to catch them.",
 	},
 	Entry {
 		name: "freshness",
 		eg: "freshness? a",
-		help: "Freshness queries are useful for detecting replay attacks, where an attacker could manipulate one message to make it seem valid in two different contexts. In passive attacker mode, a freshness query will check whether a value is fresh between sessions (i.e. if it has at least one composing element that is generated, non-static). In active attacker mode, it will check whether a value can be rendered non-fresh (i.e. static between sessions) and subsequently successfully used between sessions.",
+		help: "Checks that a value differs from session to session, which is what stops an old message from being reused as a new one. Against a passive attacker, this simply asks whether the value contains something freshly generated. Against an active attacker, it also asks whether the attacker can force the value to stay the same across sessions and then get it accepted again.",
 	},
 	Entry {
 		name: "unlinkability",
