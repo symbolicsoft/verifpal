@@ -1,0 +1,111 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// PLACEHOLDER HEADER
+
+attacker[active]
+
+principal Client[
+	knows private psk
+	knows public labelResBinder, labelCEtraffic, labelDerived
+	knows public labelSHsTraffic, labelCHsTraffic, labelFinished
+	knows public labelSApTraffic, labelCApTraffic
+
+	generates ce
+	gce = PUBKEY(ce)
+
+	earlySecret = HKDF(nil, psk, nil)
+	binderKey = HKDF(earlySecret, labelResBinder, nil)
+	transcriptTrunc = HASH(gce)
+	binder = MAC(binderKey, transcriptTrunc)
+	transcriptCH = HASH(gce, binder)
+	cEarlyTraffic = HKDF(earlySecret, labelCEtraffic, transcriptCH)
+
+	generates earlyMsg
+	earlyData = AEAD_ENC(cEarlyTraffic, earlyMsg, nil)
+]
+
+Client -> Server: gce, binder, earlyData
+
+principal Server[
+	knows private psk
+	knows public labelResBinder, labelCEtraffic, labelDerived
+	knows public labelSHsTraffic, labelCHsTraffic, labelFinished
+	knows public labelSApTraffic, labelCApTraffic
+
+	earlySecret_s = HKDF(nil, psk, nil)
+	binderKey_s = HKDF(earlySecret_s, labelResBinder, nil)
+	transcriptTrunc_s = HASH(gce)
+	expectedBinder = MAC(binderKey_s, transcriptTrunc_s)
+	binderOk = ASSERT(binder, expectedBinder)?
+
+	transcriptCH_s = HASH(gce, binder)
+	cEarlyTraffic_s = HKDF(earlySecret_s, labelCEtraffic, transcriptCH_s)
+	earlyMsg_dec = AEAD_DEC(cEarlyTraffic_s, earlyData, nil)?
+
+	generates se
+	gse = PUBKEY(se)
+	dhe = DH_KEX(gce, se)
+	derivedES_s = HKDF(earlySecret_s, labelDerived, nil)
+	handshakeSecret_s = HKDF(derivedES_s, dhe, nil)
+	transcriptSH_s = HASH(transcriptCH_s, gse)
+	sHsTraffic = HKDF(handshakeSecret_s, labelSHsTraffic, transcriptSH_s)
+	cHsTraffic = HKDF(handshakeSecret_s, labelCHsTraffic, transcriptSH_s)
+	sFinishedKey_s = HKDF(sHsTraffic, labelFinished, nil)
+	serverFinished = MAC(sFinishedKey_s, transcriptSH_s)
+	derivedHS_s = HKDF(handshakeSecret_s, labelDerived, nil)
+	mainSecret_s = HKDF(derivedHS_s, nil, nil)
+	transcriptSFin_s = HASH(transcriptSH_s, serverFinished)
+	sApTraffic = HKDF(mainSecret_s, labelSApTraffic, transcriptSFin_s)
+	cApTraffic = HKDF(mainSecret_s, labelCApTraffic, transcriptSFin_s)
+]
+
+Server -> Client: gse, serverFinished
+
+principal Client[
+	dhe_c = DH_KEX(gse, ce)
+	derivedES_c = HKDF(earlySecret, labelDerived, nil)
+	handshakeSecret_c = HKDF(derivedES_c, dhe_c, nil)
+	transcriptSH_c = HASH(transcriptCH, gse)
+	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptSH_c)
+	cHsTraffic_c = HKDF(handshakeSecret_c, labelCHsTraffic, transcriptSH_c)
+	sFinishedKey_c = HKDF(sHsTraffic_c, labelFinished, nil)
+	expectedSF = MAC(sFinishedKey_c, transcriptSH_c)
+	sfOk = ASSERT(serverFinished, expectedSF)?
+
+	derivedHS_c = HKDF(handshakeSecret_c, labelDerived, nil)
+	mainSecret_c = HKDF(derivedHS_c, nil, nil)
+	transcriptSFin_c = HASH(transcriptSH_c, serverFinished)
+	cApTraffic_c = HKDF(mainSecret_c, labelCApTraffic, transcriptSFin_c)
+	sApTraffic_c = HKDF(mainSecret_c, labelSApTraffic, transcriptSFin_c)
+
+	cFinishedKey_c = HKDF(cHsTraffic_c, labelFinished, nil)
+	clientFinished = MAC(cFinishedKey_c, transcriptSFin_c)
+	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, nil)
+
+	generates appMsg
+	appData = AEAD_ENC(cApTraffic_c, appMsg, nil)
+]
+
+Client -> Server: clientFinishedEnc, appData
+
+principal Server[
+	cfDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, nil)?
+	cFinishedKey_s = HKDF(cHsTraffic, labelFinished, nil)
+	expectedCF = MAC(cFinishedKey_s, transcriptSFin_s)
+	cfOk = ASSERT(cfDec, expectedCF)?
+	appMsg_dec = AEAD_DEC(cApTraffic, appData, nil)?
+]
+
+phase[1]
+
+principal Client[
+	leaks psk
+]
+
+queries[
+	confidentiality? earlyMsg
+	confidentiality? appMsg
+	authentication? Client -> Server: earlyData
+	authentication? Client -> Server: appData
+]
