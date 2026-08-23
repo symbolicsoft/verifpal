@@ -265,7 +265,7 @@ pub(crate) fn mutation_steps(
 		}
 		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
-		if replayed(sv) {
+		if replayed(sv) || crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km) {
 			replays.push(Step::Replay {
 				sender: Arc::from(km.principal_name(sender)),
 				recipient: Arc::from(km.principal_name(recipient)),

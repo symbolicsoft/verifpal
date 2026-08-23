@@ -167,7 +167,7 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "authentication",
 		eg: "authentication? Alice -> Bob: m",
-		help: "Checks whether Bob will rely on some value m in an important protocol operation (such as signature verification or authenticated decryption) if and only if he received that value from Alice. If Bob is successful in using m for signature verification or a similar operation without it having been necessarily sent by Alice, then authentication is violated for m, and the attacker was able to impersonate Alice in communicating that value.",
+		help: "Checks whether Bob will rely on some value m in an important protocol operation (such as signature verification or authenticated decryption) if and only if Alice sent him that value, in this session and not in another one. This is injective agreement: it is violated if the attacker can forge m, and equally if the attacker can take an m that Alice genuinely sent in one session and have Bob accept it a second time. A replay forges nothing, but Alice sent the value once and Bob accepted it twice, so the correspondence between their runs is broken. Note that a replay needs two runs to exist at all, so it can only be found when more than one session per principal is analyzed.",
 	},
 	Entry {
 		name: "freshness",

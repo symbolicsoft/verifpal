@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// Expected: a0 at one session and at two.
+// Expected: a1 at two sessions, a0 at one.
 //
 // Ring signatures are the primitive most likely to be confused by replication,
 // because a ring names a SET of public keys and session expansion mints a
@@ -12,9 +12,12 @@
 // It must not. Every ring key here is long-term and therefore shared between
 // sessions, while the message is generated and therefore per-session, so the
 // sibling session's signature is over a message Damian is not verifying. What
-// the attacker can do is replay session 2's (message, signature) pair whole,
-// and that is a session-sibling replay of something Bob honestly signed: non-
-// injective agreement, not a forgery.
+// the attacker can do is replay session 2's (message, signature) pair whole.
+// That is a genuine injectivity failure -- Bob signed it once, Damian accepts
+// it twice -- but it is not a forgery and, the point of this model, not a ring
+// that grew: the anonymity set stays exactly the size the model declares. The
+// a1 is the replay. At one session there is no sibling pair to replay and the
+// query holds, which is where ring stability is pinned on its own.
 
 attacker[active]
 

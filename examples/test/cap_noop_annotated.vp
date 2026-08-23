@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0 — identical to hmac_ok.vp.
+// Expected: c0a1 — identical to hmac_ok.vp.
 //
 // This model pins the central claim of the capability feature: an annotation
 // the engine never puts in force changes nothing. The MAC is declared

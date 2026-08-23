@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0e1 — the salt is the one HKDF argument that usually travels in
+// Expected: c0a1e1 at two sessions, c0a0e1 at one. Read the one-session
+// verdict for the argument this model exists to make; at two sessions the
+// authentication query additionally fails to a plain replay of Alice's own
+// (salt#2, sealed#2), which forges nothing and is a separate finding from the
+// desynchronisation below.
+//
+// The salt is the one HKDF argument that usually travels in
 // the clear, and it is enough to desynchronise a key agreement. The attacker
 // cannot read anything (ikm never leaves either principal) and cannot forge
 // anything (Bob's AEAD_DEC halts him on the substituted key), but it CAN make

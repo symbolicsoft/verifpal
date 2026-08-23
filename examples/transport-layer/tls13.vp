@@ -14,13 +14,28 @@
 // separate handshake-traffic and application-traffic secrets for each
 // direction.
 //
-// The verdict (c0c1c1c1c1c1a0a1a1a0) looks alarming and is in fact exactly
-// the TLS security story. Read the failures with care:
+// Expected: c0c1c1c1c1c1a0a1a1a0f0f0
+//
+// The verdict looks alarming and is in fact exactly the TLS security
+// story. Read the failures with care:
 //
 //   Everything the SERVER sends is protected:
 //     authentication? Server -> Client: serverFlight   HOLDS
 //     authentication? Server -> Client: appData2       HOLDS
 //     confidentiality? appMsg1                          HOLDS
+//     freshness? sApTraffic / cApTraffic                HOLD
+//   Verifpal's authentication query is injective agreement, so those two
+//   holds rule out replay as well as forgery, and one mechanism earns both.
+//   Every record here is sealed under a key descending from
+//   dhe = DH_KEX(gce, se), which mixes the client's key share with the
+//   server's. A flight captured from a concurrent handshake decrypts under
+//   that handshake's keys and nowhere else, so redelivering it here halts
+//   the client at AEAD_DEC rather than being accepted a second time. The
+//   freshness queries say the same thing from the other side: the traffic
+//   secrets descend from `se`, drawn anew per handshake, so no two runs
+//   share them. That is RFC 9846 §F.1's "uniqueness of the session keys".
+//   Note that --sessions 1 leaves the replay half of the claim untested. A
+//   second run has to exist before injective agreement can be broken at all.
 //   The client's data (appMsg1) stays confidential even though phase 1
 //   leaks the server's signature key: the session keys came from ephemeral
 //   Diffie-Hellman, so a later key compromise opens nothing recorded
@@ -118,9 +133,11 @@ principal Server[
 
 	// CertificateVerify (§4.5.2): the signature that authenticates the
 	// server. It covers the transcript INCLUDING gce, so it cannot be
-	// cut out of this session and replayed into another. (The RFC also
-	// prepends a pad and context string before signing — cross-protocol
-	// domain separation, elided here.)
+	// cut out of this session and replayed into another. At two sessions
+	// that last clause is checked rather than asserted: the injective
+	// authentication query on serverFlight is what fails if it stops being
+	// true. (The RFC also prepends a pad and context string before signing,
+	// for cross-protocol domain separation, elided here.)
 	certVerify = SIGN(sigKey, transcriptCert)
 
 	// Server Finished (§4.5.3): a MAC over the transcript through
@@ -258,4 +275,9 @@ queries[
 
 	authentication? Client -> Server: appData1
 	authentication? Server -> Client: appData2
+
+	// RFC 9846 §F.1, "uniqueness of the session keys": both traffic
+	// secrets descend from the server's per-handshake `se`.
+	freshness? sApTraffic
+	freshness? cApTraffic
 ]

@@ -168,6 +168,28 @@ pub(crate) fn minimize_witness(
 		})
 		.collect();
 
+	let replayed_from = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
+		let mut every: Vec<(SlotIdx, Value)> = Vec::new();
+		let mut singles: Vec<Vec<(SlotIdx, Value)>> = Vec::new();
+		for (i, sm) in session.meta.iter().enumerate() {
+			if sm.wire.is_empty() {
+				continue;
+			}
+			let Some(sibling) = crate::query::session_sibling_values(&sm.constant, km)
+				.into_iter()
+				.next()
+			else {
+				continue;
+			};
+			every.push((SlotIdx(i), sibling.clone()));
+			singles.push(vec![(SlotIdx(i), sibling)]);
+		}
+		if every.len() > 1 {
+			singles.insert(0, every);
+		}
+		singles
+	};
+
 	let mut chosen: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
 	let mut fallback: Option<(PrincipalState, Vec<(SlotIdx, Value)>)> = None;
 	'search: for session in &sessions {
@@ -179,6 +201,7 @@ pub(crate) fn minimize_witness(
 		families.extend(forged_from(session, mitm_for(session)));
 		families.extend(forged_from(session, mutations.clone()));
 		families.extend(forged_alone(session));
+		families.extend(replayed_from(session));
 		for candidate in families {
 			let candidate = controlled_installs(km, session, &ambient, candidate);
 			if candidate.is_empty() {

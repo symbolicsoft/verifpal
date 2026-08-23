@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Expected: a1 at two sessions, a0 at one.
+//
+// Injective agreement reached through a MAC rather than the signature of
+// session_replay_breaks_injectivity.vp, so the two exercise different rewrite
+// paths into the same rule.
+//
+// At two sessions the attacker can hand Bob the pair (m#2, tag#2) drawn from
+// the other session. Bob's ASSERT passes, because the MAC key is long-term
+// and shared, and Bob ends up using a value the declared sender did not send
+// *in this session*. Alice -- the identity the query names -- did honestly
+// produce that value, so nothing is forged: `m` cannot be manufactured, only
+// relocated. It is still an authentication failure, because Alice sent it
+// once and Bob accepts it twice.
+//
+// The distinction being pinned is that relocation alone is enough. At one
+// session there is no other run to relocate from and the query holds, which
+// is where non-forgeability stays pinned.
+
+attacker[active]
+
+principal Alice[
+	knows private mk
+	generates m
+	tag = MAC(mk, m)
+]
+
+Alice -> Bob: m, tag
+
+principal Bob[
+	knows private mk
+	_ = ASSERT(tag, MAC(mk, m))?
+	used_b = HASH(m, mk)
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

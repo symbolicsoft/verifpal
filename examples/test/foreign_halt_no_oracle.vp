@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// Expected: a0 at one session and at two.
+// Expected: a1 at two sessions, a0 at one.
+//
+// Read the one-session verdict first: a0 is what pins the foreign-halt fix
+// described below, and it is pinned at one session precisely because no
+// replay is available there to mask a regression of it. At two sessions the
+// query fails for an unrelated and much duller reason -- the attacker replays
+// Bob's honestly produced (relay_r#2, tag_b#2) into this session, forging
+// nothing and choosing nothing -- so injective agreement fails while every
+// claim below still holds.
 //
 // A relay chain under one long-term key, with the two MAC positions domain
 // separated so Alice's tag is not a valid tag for Charlie. Bob only computes

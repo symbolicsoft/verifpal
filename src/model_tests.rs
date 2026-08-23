@@ -12,14 +12,15 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 8] = [
 	("test5.vp", 3),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 4] = [
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 5] = [
 	("junglegym_hybrid_pq.vp", 4),
-	("needham-schroeder-pk.vp", 0),
 	("needham-schroeder-pk.vp", 1),
 	("noise_xx_mutual.vp", 1),
+	("piknik.vp", 2),
+	("piknik.vp", 3),
 ];
 
-const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 27] = [
+const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 33] = [
 	("ephemerals_sign.vp", 0),
 	("ephemerals_sign.vp", 1),
 	("exa2.vp", 0),
@@ -32,7 +33,6 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 27] = [
 	("identity_misbinding_uks.vp", 1),
 	("kem_direction_reflection.vp", 0),
 	("mutual_auth_both_directions.vp", 1),
-	("needham-schroeder-pk-withfix.vp", 0),
 	("needham-schroeder-pk-withfix.vp", 1),
 	("needham-schroeder-pk.vp", 3),
 	("noise_xx_mutual.vp", 2),
@@ -46,12 +46,20 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 27] = [
 	("station_to_station_unsigned.vp", 1),
 	("station_to_station_unsigned.vp", 2),
 	("station_to_station_unsigned.vp", 3),
+	("tls13.vp", 1),
+	("tls13.vp", 2),
+	("tls13.vp", 3),
+	("tls13.vp", 4),
+	("tls13.vp", 5),
+	("tls13.vp", 7),
+	("tls13.vp", 8),
 	("two_phase_commit_forged_ack.vp", 0),
 ];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 4] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 5] = [
+	"examples/transport-layer/tls13.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
 	"examples/contact-tracing/lc-dp-3t.vp",
@@ -571,7 +579,7 @@ fn test_cap_multi_annotation() {
 }
 #[test]
 fn test_cap_noop_annotated() {
-	run_model("cap_noop_annotated.vp", "c0a0");
+	run_model("cap_noop_annotated.vp", "c0a1");
 }
 
 #[test]
@@ -612,7 +620,7 @@ fn test_challengeresponse() {
 }
 #[test]
 fn test_checked_aead() {
-	run_model("checked_aead.vp", "c0a0a0");
+	run_model("checked_aead.vp", "c0a1a1");
 }
 #[test]
 fn test_ephemerals_sign() {
@@ -620,7 +628,7 @@ fn test_ephemerals_sign() {
 }
 #[test]
 fn test_hmac_ok() {
-	run_model("hmac_ok.vp", "c0a0");
+	run_model("hmac_ok.vp", "c0a1");
 }
 #[test]
 fn test_session_nonce_cross_one_session() {
@@ -633,12 +641,12 @@ fn test_session_nonce_cross_two_sessions() {
 	run_model_sessions("session_nonce_cross.vp", 2, "a1");
 }
 #[test]
-fn test_session_replay_not_attack_one_session() {
-	run_model_sessions("session_replay_not_attack.vp", 1, "a0");
+fn test_session_replay_breaks_injectivity_one_session() {
+	run_model_sessions("session_replay_breaks_injectivity.vp", 1, "a0");
 }
 #[test]
-fn test_session_replay_not_attack_two_sessions() {
-	run_model_sessions("session_replay_not_attack.vp", 2, "a0");
+fn test_session_replay_breaks_injectivity_two_sessions() {
+	run_model_sessions("session_replay_breaks_injectivity.vp", 2, "a1");
 }
 #[test]
 fn test_session_concat_bomb_cross_feed() {
@@ -646,7 +654,7 @@ fn test_session_concat_bomb_cross_feed() {
 }
 #[test]
 fn test_session_hmac_ok_stable_two_sessions() {
-	run_model_sessions("hmac_ok.vp", 2, "c0a0");
+	run_model_sessions("hmac_ok.vp", 2, "c0a1");
 }
 #[test]
 fn test_session_pke_stable_two_sessions() {
@@ -677,12 +685,12 @@ fn test_session_shamir_no_phantom_shares() {
 	run_model("session_shamir_no_phantom_shares.vp", "c0");
 }
 #[test]
-fn test_session_mac_replay_not_attack_one_session() {
-	run_model_sessions("session_mac_replay_not_attack.vp", 1, "a0");
+fn test_session_mac_replay_breaks_injectivity_one_session() {
+	run_model_sessions("session_mac_replay_breaks_injectivity.vp", 1, "a0");
 }
 #[test]
-fn test_session_mac_replay_not_attack() {
-	run_model("session_mac_replay_not_attack.vp", "a0");
+fn test_session_mac_replay_breaks_injectivity() {
+	run_model("session_mac_replay_breaks_injectivity.vp", "a1");
 }
 #[test]
 fn test_session_forward_secrecy_one_session() {
@@ -758,7 +766,7 @@ fn test_foreign_halt_no_oracle_one_session() {
 }
 #[test]
 fn test_foreign_halt_no_oracle() {
-	run_model("foreign_halt_no_oracle.vp", "a0");
+	run_model("foreign_halt_no_oracle.vp", "a1");
 }
 #[test]
 fn test_equivalence_halt_at_slot_one_session() {
@@ -778,7 +786,7 @@ fn test_hmac_unguarded_alice() {
 }
 #[test]
 fn test_hmac_unguarded_bob() {
-	run_model("hmac_unguarded_bob.vp", "c1a0");
+	run_model("hmac_unguarded_bob.vp", "c1a1");
 }
 #[test]
 fn test_concat_split_replay() {
@@ -794,7 +802,7 @@ fn test_forged_flight_mitm() {
 }
 #[test]
 fn test_aead_replay_not_forgery() {
-	run_model("aead_replay_not_forgery.vp", "a0c0");
+	run_model("aead_replay_not_forgery.vp", "a1c0");
 }
 #[test]
 fn test_deep_nesting_reconstruct() {
@@ -806,7 +814,7 @@ fn test_dh_exponent_not_dropped() {
 }
 #[test]
 fn test_ok() {
-	run_model("ok.vp", "c0a0a0");
+	run_model("ok.vp", "c0a1a1");
 }
 #[test]
 fn test_pke() {
@@ -866,7 +874,7 @@ fn test_unguarded_alice() {
 }
 #[test]
 fn test_unguarded_bob() {
-	run_model("unguarded_bob.vp", "c1a0a0e1");
+	run_model("unguarded_bob.vp", "c1a1a1e1");
 }
 #[test]
 fn test_signal_small_nophase() {
@@ -933,11 +941,11 @@ fn test_hmac_verif() {
 }
 #[test]
 fn test_sign_ciphertext() {
-	run_model("sign_ciphertext.vp", "c0a0");
+	run_model("sign_ciphertext.vp", "c0a1");
 }
 #[test]
 fn test_signature() {
-	run_model("signature.vp", "c0a0a0");
+	run_model("signature.vp", "c0a1a1");
 }
 #[test]
 fn test_precondition() {
@@ -1225,11 +1233,11 @@ fn test_triple_dh() {
 }
 #[test]
 fn test_key_ratchet() {
-	run_model("key_ratchet.vp", "c0c0c0a0a0a0");
+	run_model("key_ratchet.vp", "c0c0c0a1a1a1");
 }
 #[test]
 fn test_four_party() {
-	run_model("four_party.vp", "c1a0a0a0");
+	run_model("four_party.vp", "c1a1a1a1");
 }
 #[test]
 fn test_phase_forward_secrecy() {
@@ -1258,7 +1266,7 @@ fn test_phase_retroactive_forgery() {
 
 #[test]
 fn test_phase_retroactive_aead_bypass() {
-	run_model("phase_retroactive_aead_bypass.vp", "c1a0");
+	run_model("phase_retroactive_aead_bypass.vp", "c1a1");
 }
 
 #[test]
@@ -1280,11 +1288,11 @@ fn test_blind_signature() {
 }
 #[test]
 fn test_relay_not_forgery() {
-	run_model("relay_not_forgery.vp", "a0");
+	run_model("relay_not_forgery.vp", "a1");
 }
 #[test]
 fn test_concat_bomb() {
-	run_model("concat_bomb.vp", "c0c0c0c0c0a0");
+	run_model("concat_bomb.vp", "c0c0c0c0c0a1");
 }
 #[test]
 fn test_concat_bomb_leak() {
@@ -1310,7 +1318,7 @@ fn test_double_ratchet() {
 }
 #[test]
 fn test_many_principals() {
-	run_model("many_principals.vp", "c1a0a0a0a0a0f0");
+	run_model("many_principals.vp", "c1a1a1a1a1a1f0");
 }
 #[test]
 fn test_psk_with_dh() {
@@ -1341,7 +1349,7 @@ fn test_piknik_signature_not_forgeable() {
 	run_model_at(
 		"examples/transport-layer/piknik.vp",
 		"piknik.vp",
-		"c0a0a0a0f0",
+		"c0a0a1a1f0",
 	);
 }
 #[test]
@@ -1350,7 +1358,7 @@ fn test_kem_roundtrip() {
 }
 #[test]
 fn test_kem_signed_ct() {
-	run_model("kem_signed_ct.vp", "c0a0");
+	run_model("kem_signed_ct.vp", "c0a1");
 }
 #[test]
 fn test_kem_unguarded_ek() {
@@ -1390,7 +1398,93 @@ fn test_kem_secret_not_forgeable() {
 }
 #[test]
 fn test_kem_checked_decap() {
-	run_model("kem_checked_decap.vp", "c0a0");
+	run_model("kem_checked_decap.vp", "c0a1");
+}
+#[test]
+fn a_replayed_value_is_narrated_as_a_replay_and_not_as_a_forgery() {
+	let (results, _) = crate::verify::verify("examples/test/hmac_ok.vp").expect("verify");
+	let auth = results
+		.iter()
+		.find(|r| r.resolved)
+		.expect("the authentication query fails");
+	assert!(
+		!auth.summary.contains("sent by Attacker"),
+		"Alice did send this value, in another session; naming the attacker as its \
+		 sender describes a forgery that did not happen. Narrated: {}",
+		auth.summary
+	);
+	assert!(
+		auth.summary.contains("another session"),
+		"a replay is only legible if the trace says where the value came from. \
+		 Narrated: {}",
+		auth.summary
+	);
+	assert!(
+		auth.summary.contains("not injective"),
+		"the reader needs to be told which agreement property failed, or the \
+		 verdict reads as a forgery. Narrated: {}",
+		auth.summary
+	);
+}
+#[test]
+fn a_replayed_wire_value_is_stepped_as_a_replay_not_a_substitution() {
+	let (results, _) = crate::verify::verify("examples/test/hmac_ok.vp").expect("verify");
+	let auth = results
+		.iter()
+		.find(|r| r.resolved)
+		.expect("the authentication query fails");
+	assert!(
+		auth.summary.contains("Attacker replays ciphertext"),
+		"the attacker copied a value off the wire; a step saying it replaced one \
+		 invites the reader to look for a forgery that is not there. Narrated: {}",
+		auth.summary
+	);
+	assert!(
+		!auth.summary.contains("Attacker replaces ciphertext"),
+		"a replay and a substitution are different attacker actions and must not \
+		 share a step wording. Narrated: {}",
+		auth.summary
+	);
+}
+#[test]
+fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
+	let (results, _) =
+		crate::verify::verify("examples/test/needham-schroeder-pk-withfix.vp").expect("verify");
+	let auth = results
+		.iter()
+		.find(|r| r.resolved && r.query.message.constant().is_ok_and(|c| &*c.name == "e1"))
+		.expect("the e1 authentication query fails");
+	assert!(
+		!auth.summary.contains("not a minimized witness"),
+		"a replay needs one install to reproduce, so falling back to the unconfirmed \
+		 witness here means the minimizer has no candidate family that can express \
+		 one. Narrated: {}",
+		auth.summary
+	);
+}
+#[test]
+fn a_false_attack_pin_survives_at_one_session() {
+	run_model_sessions("foreign_halt_no_oracle.vp", 1, "a0");
+	run_model_sessions("aead_replay_not_forgery.vp", 1, "a0c0");
+	run_model_sessions("relay_not_forgery.vp", 1, "a0");
+	let (_, code) = crate::verify::verify_with_sessions("examples/transport-layer/piknik.vp", 1)
+		.expect("piknik verifies");
+	assert_eq!(
+		code, "c0a0a0a0f0",
+		"these four models exist to pin that something is NOT a forgery. At two \
+		 sessions each also admits a replay, and a replay reports a1 -- which is the \
+		 same letter a regression of the original bug would report. One session has \
+		 no sibling run to replay from, so it is the only place the original claim \
+		 is still pinned on its own."
+	);
+}
+#[test]
+fn test_tls13() {
+	run_model_at(
+		"examples/transport-layer/tls13.vp",
+		"tls13.vp",
+		"c0c1c1c1c1c1a0a1a1a0f0f0",
+	);
 }
 #[test]
 fn test_kem_freshness() {
@@ -1757,7 +1851,7 @@ fn test_hkdf_five_outputs() {
 }
 #[test]
 fn test_hkdf_salt_swap() {
-	run_model("hkdf_salt_swap.vp", "c0a0e1");
+	run_model("hkdf_salt_swap.vp", "c0a1e1");
 }
 #[test]
 fn test_identity_misbinding_uks() {
@@ -1821,7 +1915,7 @@ fn test_password_deep_siblings() {
 }
 #[test]
 fn test_password_kem_transcript() {
-	run_model("password_kem_transcript.vp", "c1c0a1a0");
+	run_model("password_kem_transcript.vp", "c1c0a1a1");
 }
 #[test]
 fn test_password_mac_chain() {
@@ -2000,7 +2094,7 @@ fn test_session_ringsign_stable_one_session() {
 }
 #[test]
 fn test_session_ringsign_stable_two_sessions() {
-	run_model_sessions("session_ringsign_stable.vp", 2, "a0");
+	run_model_sessions("session_ringsign_stable.vp", 2, "a1");
 }
 #[test]
 fn test_session_shamir_dealer_cross_one_session() {
@@ -2024,7 +2118,7 @@ fn test_session_three_party_relay_one_session() {
 }
 #[test]
 fn test_session_three_party_relay_two_sessions() {
-	run_model_sessions("session_three_party_relay.vp", 2, "c0a0");
+	run_model_sessions("session_three_party_relay.vp", 2, "c0a1");
 }
 #[test]
 fn test_shamir_cross_dealer_join() {

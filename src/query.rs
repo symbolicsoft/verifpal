@@ -172,7 +172,8 @@ fn query_authentication(
 	if query.message.recipient != ps.id {
 		return Ok(result);
 	}
-	let (indices, sender, c) = query_authentication_get_pass_indices(query, km, ps)?;
+	let (indices, sender, c, sibling_replay) =
+		query_authentication_get_pass_indices(query, km, ps)?;
 	if query.message.sender == sender {
 		return Ok(result);
 	}
@@ -208,9 +209,18 @@ fn query_authentication(
 		&c,
 		before,
 		&mutated_info,
-		km.principal_name(sender),
+		if sibling_replay {
+			AuthFailure::Replayed
+		} else {
+			AuthFailure::Substituted(km.principal_name(sender))
+		},
 		ps,
 	))
+}
+
+enum AuthFailure<'a> {
+	Substituted(&'a str),
+	Replayed,
 }
 
 fn query_find_constant_usage_indices(
@@ -252,40 +262,46 @@ fn query_authentication_get_pass_indices(
 	query: &Query,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-) -> VResult<(Vec<usize>, PrincipalId, Constant)> {
+) -> VResult<(Vec<usize>, PrincipalId, Constant, bool)> {
 	let empty_c = Constant::default();
 	let (_, idx) = ps.resolve_constant(query.message.constant()?, true);
 	let idx = match idx {
 		Some(i) => i,
-		None => return Ok((vec![], 0, empty_c)),
+		None => return Ok((vec![], 0, empty_c, false)),
 	};
 	let c = km.slots[idx].constant.clone();
 	let sender = ps.values[idx].provenance.sender;
+	let mut sibling_replay = false;
 	if sender == ATTACKER_ID {
 		let v = &ps.values[idx].original;
 		if v.equivalent(&ps.values[idx].value, true) {
-			return Ok((vec![], sender, c));
+			return Ok((vec![], sender, c, false));
 		}
-		if session_sibling_replay(&c, &ps.values[idx].value, km) {
-			return Ok((vec![], sender, c));
-		}
+		sibling_replay = session_sibling_replay(&c, &ps.values[idx].value, km);
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
-	Ok((indices, sender, c))
+	Ok((indices, sender, c, sibling_replay))
 }
 
-fn session_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
+pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
 	let Some(group) = km.session_siblings.get(&c.id) else {
-		return false;
+		return Vec::new();
 	};
+	group
+		.iter()
+		.filter(|&&sid| sid != c.id)
+		.filter_map(|&sid| {
+			let &slot = km.index.get(&sid)?;
+			Some(resolve_trace_constant(&km.slots[slot].constant, km))
+		})
+		.collect()
+}
+
+pub(crate) fn session_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
 	let used_reduct = reduce_once(used);
-	group.iter().filter(|&&sid| sid != c.id).any(|&sid| {
-		let Some(&slot) = km.index.get(&sid) else {
-			return false;
-		};
-		let resolved = resolve_trace_constant(&km.slots[slot].constant, km);
-		reduce_once(&resolved).equivalent(&used_reduct, true)
-	})
+	session_sibling_values(c, km)
+		.iter()
+		.any(|v| reduce_once(v).equivalent(&used_reduct, true))
 }
 
 fn query_authentication_handle_pass(
@@ -294,16 +310,26 @@ fn query_authentication_handle_pass(
 	c: &Constant,
 	b: &Value,
 	mutated_info: &Narration,
-	sender_name: &str,
+	failure: AuthFailure<'_>,
 	ps: &PrincipalState,
 ) -> VerifyResult {
 	let resolved = mutated_info
 		.installed(c)
 		.unwrap_or_else(|| ps.resolve_constant(c, true).0);
-	result.set_summary(
-		&mutated_info.trace,
-		mutated_info.kinded(),
-		&format!(
+	let summary = match failure {
+		AuthFailure::Replayed => format!(
+			"{} ({}), which {} sent in another session and not in this one, is successfully \
+			 used in {} within {}'s state: {} sent it once, {} accepts it twice, so agreement \
+			 is not injective.",
+			c,
+			mutated_info.term_excluding(&resolved, &[&c.name]),
+			result.query.message.sender_name,
+			mutated_info.term(b),
+			result.query.message.recipient_name,
+			result.query.message.sender_name,
+			result.query.message.recipient_name,
+		),
+		AuthFailure::Substituted(sender_name) => format!(
 			"{} ({}), sent by {} and not by {}, is successfully used in {} within {}'s state.",
 			c,
 			mutated_info.term_excluding(&resolved, &[&c.name]),
@@ -312,7 +338,8 @@ fn query_authentication_handle_pass(
 			mutated_info.term(b),
 			result.query.message.recipient_name,
 		),
-	);
+	};
+	result.set_summary(&mutated_info.trace, mutated_info.kinded(), &summary);
 	emit_query_result(ctx, &result);
 	result
 }

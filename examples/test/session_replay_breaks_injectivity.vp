@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Expected: a1 at two sessions, a0 at one.
+//
+// Pins injective agreement (query.rs). At --sessions 2 the attacker swaps
+// session 2's honestly signed pair (na#2, sg#2) into session 1's Bob:
+// SIGNVERIF passes, because sk is long-term and shared, so both sessions'
+// signatures verify under the same key. Alice honestly produced that pair, so
+// nothing here is forged — but she sent it once and Bob now accepts it twice,
+// which is exactly what injective agreement forbids.
+//
+// At one session there is no sibling run to draw the pair from, so the query
+// holds: injectivity needs two runs before it can be violated at all. That
+// makes the one-session verdict the place where forgery proper stays pinned —
+// sk never leaks, and mixed pairs (na#2 with session 1's sg) fail SIGNVERIF
+// and halt Bob.
+//
+// The trace must narrate this as a replay and not as a substitution; see
+// a_replayed_value_is_narrated_as_a_replay_and_not_as_a_forgery.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates na
+	sg = SIGN(sk, na)
+]
+
+Alice -> Bob: [pk], na, sg
+
+principal Bob[
+	_ = SIGNVERIF(pk, na, sg)?
+	h = HASH(na)
+]
+
+queries[
+	authentication? Alice -> Bob: na
+]
