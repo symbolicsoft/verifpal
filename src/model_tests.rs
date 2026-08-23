@@ -58,8 +58,9 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 33] = [
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 5] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 6] = [
 	"examples/transport-layer/tls13.vp",
+	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
 	"examples/contact-tracing/lc-dp-3t.vp",
@@ -910,7 +911,7 @@ fn test_auth_with_signing() {
 }
 #[test]
 fn test_auth_with_signing_false_attack() {
-	run_model("auth_with_signing_false-attack.vp", "c0a1a0");
+	run_model("auth_with_signing_false-attack.vp", "c0a1a1");
 }
 #[test]
 fn test_halted_principal_false_attack() {
@@ -1261,7 +1262,7 @@ fn test_phase_tamper_compromise_three_phases() {
 
 #[test]
 fn test_phase_retroactive_forgery() {
-	run_model("phase_retroactive_forgery.vp", "c0a0");
+	run_model("phase_retroactive_forgery.vp", "c0a1");
 }
 
 #[test]
@@ -1467,6 +1468,8 @@ fn a_false_attack_pin_survives_at_one_session() {
 	run_model_sessions("foreign_halt_no_oracle.vp", 1, "a0");
 	run_model_sessions("aead_replay_not_forgery.vp", 1, "a0c0");
 	run_model_sessions("relay_not_forgery.vp", 1, "a0");
+	run_model_sessions("auth_with_signing_false-attack.vp", 1, "c0a1a0");
+	run_model_sessions("phase_retroactive_forgery.vp", 1, "c0a0");
 	let (_, code) = crate::verify::verify_with_sessions("examples/transport-layer/piknik.vp", 1)
 		.expect("piknik verifies");
 	assert_eq!(
@@ -1484,6 +1487,14 @@ fn test_tls13() {
 		"examples/transport-layer/tls13.vp",
 		"tls13.vp",
 		"c0c1c1c1c1c1a0a1a1a0f0f0",
+	);
+}
+#[test]
+fn test_tls13_0rtt() {
+	run_model_at(
+		"examples/transport-layer/tls13-0rtt.vp",
+		"tls13-0rtt.vp",
+		"c1c0a1a0",
 	);
 }
 #[test]
@@ -1647,7 +1658,7 @@ fn test_dh_exponent_reuse() {
 }
 #[test]
 fn test_dh_key_confirmation() {
-	run_model("dh_key_confirmation.vp", "c0a0e0");
+	run_model("dh_key_confirmation.vp", "c0a0e1");
 }
 #[test]
 fn test_dh_mitm_half_guarded() {
@@ -1663,7 +1674,7 @@ fn test_dh_pubkey_leak_not_exponent() {
 }
 #[test]
 fn test_dh_signed_ephemeral() {
-	run_model("dh_signed_ephemeral.vp", "a0a1c0c1");
+	run_model("dh_signed_ephemeral.vp", "a1a1c0c1");
 }
 #[test]
 fn test_dh_three_party_hub() {

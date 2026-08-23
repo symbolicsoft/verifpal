@@ -1,14 +1,27 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0e0 — an anonymous Diffie-Hellman exchange with both public
+// Expected: c0a0e1 at two sessions, c0a0e0 at one. Read the one-session
+// verdict for the argument this model was written to make; the two-session
+// divergence is a separate and later finding, described after it.
+//
+// An anonymous Diffie-Hellman exchange with both public
 // keys sent UNGUARDED, which is normally the definition of a man in the
 // middle, made safe by a pre-shared key used for nothing but confirming the
 // transcript. Every value the attacker might substitute is covered by a MAC it
 // cannot produce, so every substitution halts the recipient instead of
 // steering it.
 //
-// The all-holding verdict is the point: this is the shape the unguarded MitM
+// At two sessions the equivalence query fails, and the reason is worth the
+// space. The confirmation MAC covers `gb` and nothing else, so replaying a
+// sibling session's (gb, conf_b) pair whole gets past Alice's ASSERT on its
+// own merits: the MAC is Bob's, just from the wrong run. Alice then derives
+// DH_KEX(gb#2, a) while Bob still holds DH_KEX(ga, b), and the two disagree.
+// Confirming the transcript is not the same as confirming which run produced
+// it, and nothing here binds the exchange to one. Substitution is still
+// impossible, which is why both other queries hold at either session count.
+//
+// The one-session verdict is the point: this is the shape the unguarded MitM
 // models in this directory are missing, and it says that guards in a Verifpal
 // model stand in for an authentication mechanism rather than for magic. The
 // equivalence query is the strongest of the three — not merely "the attacker

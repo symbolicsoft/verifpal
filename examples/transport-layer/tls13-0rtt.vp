@@ -1,7 +1,63 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// PLACEHOLDER HEADER
+// TLS 1.3 resumption with 0-RTT early data (RFC 9846 §2.2 and §2.3): a
+// client that already holds a resumption PSK opens a new connection and
+// sends application data in its first flight, before it has heard anything
+// back. The companion model tls13.vp is the full handshake this one resumes
+// from; read that first. The key schedule here is §7.1's PSK branch, where
+// the early secret comes from HKDF-Extract(0, PSK) rather than from nothing,
+// and the client_early_traffic_secret hangs off it under the "c e traffic"
+// label with the ClientHello transcript folded in. The PskBinderEntry of
+// §4.3.11.2 is a MAC over the truncated ClientHello under binder_key, and
+// the server checks it before touching the early data.
+//
+// Expected: c1c0a1a0 at two sessions, c1c0a0a0 at one.
+//
+// RFC 9846 §2.3 names two ways 0-RTT is weaker than the rest of TLS, and
+// this model exists to show both against the 1-RTT traffic in the same file.
+//
+//   1. "The protocol does not provide any forward secrecy guarantees for
+//      this data."
+//        confidentiality? earlyMsg   FAILS
+//        confidentiality? appMsg     HOLDS
+//      Phase 1 leaks the PSK, standing in for a compromise after the
+//      connection closes. The early data was encrypted under a key whose
+//      only secret ingredient is that PSK, so it opens. The 1-RTT data does
+//      not, because its key descends from dhe = DH_KEX(gce, se) and the
+//      ephemerals are gone. Same attacker, same moment, two answers.
+//
+//   2. "There are no guarantees of non-replay between connections."
+//        authentication? Client -> Server: earlyData   FAILS
+//        authentication? Client -> Server: appData     HOLDS
+//      Verifpal's authentication query is injective agreement, so this is
+//      the replay reported as what it is. The attacker copies the whole
+//      first flight (gce, binder, earlyData) off the wire in one session and
+//      delivers it again in another. Nothing is forged: the PSK never leaves
+//      either principal before phase 1, and the binder the server checks is
+//      the client's own. It passes on its own merits, and the server
+//      decrypts and processes the early data a second time.
+//
+// The binder is the part worth dwelling on, because it looks like it should
+// stop this. It does bind the PSK to the handshake, which is what §4.3.11.2
+// claims for it, and it is why the attacker has to replay gce alongside the
+// early data instead of pairing one session's key share with another's
+// ciphertext. What it does not do is bind the flight to one occurrence.
+// Nothing in a ClientHello distinguishes the first delivery from the second,
+// and by §8.2 nothing can: the server has to remember that it has seen this
+// ClientHello before. That memory is server state across connections, which
+// Verifpal has no way to express, so the model is honest about the tool's
+// boundary as well as the protocol's. A Verifpal model can show that the
+// replay lands. It cannot show a single-use ticket database stopping it.
+//
+// appData holds for the reason earlyData does not: it is sealed under a key
+// mixing the server's per-connection `se`, so a flight lifted from another
+// connection decrypts nowhere. That contrast is the whole argument for
+// waiting one round trip, and it is visible here as two adjacent verdicts.
+//
+// At one session neither replay is reachable, because injective agreement
+// needs a second run before it can be broken. The forward-secrecy half of
+// the story is unaffected and shows up at either session count.
 
 attacker[active]
 

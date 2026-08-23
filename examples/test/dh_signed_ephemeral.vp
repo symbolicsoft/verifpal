@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a1c0c1 — two Diffie-Hellman legs in one flight between the same
+// Expected: a1a1c0c1 at two sessions, a0a1c0c1 at one. The first query holds
+// at one session and fails at two, to a replay rather than a forgery: Alice's
+// signature over her own ephemeral is genuine, and the attacker redelivers the
+// whole flight it came in. A signed ephemeral proves who chose the key, never
+// which run chose it, and nothing here binds the two.
+//
+// Two Diffie-Hellman legs in one flight between the same
 // two principals, differing only in whether the ephemeral public key carries a
 // signature under a guarded identity key. The signed leg holds and the bare
 // leg does not, in both the authentication and the confidentiality queries.

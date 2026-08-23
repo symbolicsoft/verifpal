@@ -146,6 +146,7 @@ fn solve_principal(
 	}
 
 	if pass == Pass::Constructed {
+		proposals.extend(sibling_flight_substitutions(km, ps, &sym));
 		let relayed = relay_substitution(km, ps, &sym);
 		let protocol = protocol_terms(km, ps);
 		for &slot in &sym.var_slots {
@@ -378,6 +379,36 @@ fn binding_summary(
 			}
 		})
 		.collect()
+}
+
+fn sibling_flight_substitutions(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+) -> Vec<Substitution> {
+	let mut widest = 0;
+	for &slot in &sym.var_slots {
+		if let Some(meta) = ps.meta.get(slot) {
+			widest = widest.max(crate::query::session_sibling_values(&meta.constant, km).len());
+		}
+	}
+	let mut out = Vec::new();
+	for i in 0..widest {
+		let mut flight = Substitution::default();
+		for &slot in &sym.var_slots {
+			let Some(meta) = ps.meta.get(slot) else {
+				continue;
+			};
+			let siblings = crate::query::session_sibling_values(&meta.constant, km);
+			if let Some(v) = siblings.get(i) {
+				flight.insert(vars::attacker_var_id(slot), v.clone());
+			}
+		}
+		if !flight.is_empty() {
+			out.push(flight);
+		}
+	}
+	out
 }
 
 fn relay_substitution(
