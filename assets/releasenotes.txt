@@ -1,3 +1,5 @@
+Verifpal 1.2.1 makes improvements to Verifpal's attack trace narration.
+
 Verifpal 1.2.0 makes authentication queries injective.
 
 Verifpal's authentication queries used to ask a weaker question than their
