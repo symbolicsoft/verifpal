@@ -167,4 +167,5 @@ queries[
 	authentication? Bob -> Alice: secretBox1Bob
 	authentication? Alice -> Bob: secretBoxM1Alice
 	authentication? Bob -> Alice: secretBoxM2Bob
+	equivalence? masterSecret2Alice, masterSecret2Bob
 ]
