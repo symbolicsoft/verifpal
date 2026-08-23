@@ -568,9 +568,9 @@ impl<'a> Deducer<'a> {
 			combined = combine(&combined, &solved);
 			out.extend(solved);
 		}
-		let mut frontier = dedupe(combined.clone());
 		out.extend(combined);
 		out = dedupe(out);
+		let mut frontier = out.clone();
 
 		let check_vars: Vec<Vec<ValueId>> = checked
 			.iter()
@@ -654,6 +654,15 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn satisfy_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
+		self.satisfy_check_shaped(p, base, true)
+	}
+
+	fn satisfy_check_shaped(
+		&self,
+		p: &Primitive,
+		base: &Substitution,
+		may_shape: bool,
+	) -> Vec<Substitution> {
 		if p.id == PRIM_ASSERT && p.arguments.len() == 2 {
 			let mut out = Vec::new();
 			for (pattern, target) in [(0usize, 1usize), (1, 0)] {
@@ -686,6 +695,12 @@ impl<'a> Deducer<'a> {
 			return Vec::new();
 		};
 		let shapes = self.rewrite_shapes(p, spec);
+		if shapes.is_empty() {
+			if !may_shape {
+				return Vec::new();
+			}
+			return self.satisfy_check_by_shaping(p, spec, base);
+		}
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
 			for shape in &shapes {
@@ -696,6 +711,43 @@ impl<'a> Deducer<'a> {
 		for shape in &shapes {
 			for bound in self.invert(from, shape, base) {
 				out.extend(self.require_constructible(&bound, base, false));
+			}
+		}
+		dedupe(out)
+	}
+
+	fn satisfy_check_by_shaping(
+		&self,
+		p: &Primitive,
+		spec: &PrimitiveSpec,
+		base: &Substitution,
+	) -> Vec<Substitution> {
+		let Some(filter) = spec.rewrite.filter else {
+			return Vec::new();
+		};
+		let mut out = Vec::new();
+		for (outer_idx, inner_idxs) in &spec.rewrite.matching {
+			let Some(outer_arg) = p.arguments.get(*outer_idx) else {
+				continue;
+			};
+			if !contains_var(outer_arg) {
+				continue;
+			}
+			if inner_idxs.iter().any(|&i| filter(p, outer_arg, i).1) {
+				continue;
+			}
+			let Some(required) = crate::primitive::key_derivation_of(self.fresh_var()) else {
+				continue;
+			};
+			if !inner_idxs.iter().any(|&i| filter(p, &required, i).1) {
+				continue;
+			}
+			for bound in self.invert(outer_arg, &required, base) {
+				let refined = refine_check(p, &bound);
+				if equivalent_primitives(&refined, p, true) {
+					continue;
+				}
+				out.extend(self.satisfy_check_shaped(&refined, &bound, false));
 			}
 		}
 		dedupe(out)

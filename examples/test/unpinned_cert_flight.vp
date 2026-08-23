@@ -1,0 +1,72 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1
+//
+// A TLS-shaped server-authenticated handshake whose certificate key IS pinned
+// on the wire ([pk], standing in for the web PKI) but whose client then
+// verifies CertificateVerify against the key it read out of the encrypted
+// flight instead of against the pinned one. That is a total break, and the
+// point of this model is that reporting it needs the attacker to MINT a
+// signature under a key it owns and carry that key inside the same flight,
+// while a second gate -- a Finished MAC over a transcript that includes the
+// minted signature -- has to keep passing.
+//
+// The attacker sends gb := PUBKEY(nil), so k_a = DH_KEX(ga, nil) is its own;
+// then pk_a := PUBKEY(nil), s_a := SIGN(nil, t_a), and fin_a := MAC over the
+// transcript that names both. Every one of Alice's three checked primitives
+// passes and alicesecret is sealed under a key the attacker holds.
+//
+// pinned_cert_flight.vp is the same model verifying against the pinned key,
+// and holds. The pair is what keeps this from being reported either way.
+
+attacker[active]
+
+principal Bob[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+
+Bob -> Alice: [pk]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	knows public labelFin
+	generates b
+	gb = PUBKEY(b)
+	k = DH_KEX(ga, b)
+	t = HASH(ga, gb, pk)
+	s = SIGN(sk, t)
+	fk = HASH(k, labelFin)
+	tcv = HASH(t, s)
+	fin = MAC(fk, tcv)
+	msg = AEAD_ENC(k, CONCAT(pk, s, fin), nil)
+]
+
+Bob -> Alice: gb, msg
+
+principal Alice[
+	knows public labelFin
+	k_a = DH_KEX(gb, a)
+	d = AEAD_DEC(k_a, msg, nil)?
+	pk_a, s_a, fin_a = SPLIT(d)
+	t_a = HASH(ga, gb, pk_a)
+	ok = SIGNVERIF(pk_a, t_a, s_a)?
+	fk_a = HASH(k_a, labelFin)
+	tcv_a = HASH(t_a, s_a)
+	expFin = MAC(fk_a, tcv_a)
+	finOk = ASSERT(fin_a, expFin)?
+	generates aliceSecret
+	ct = AEAD_ENC(k_a, aliceSecret, nil)
+]
+
+Alice -> Bob: ct
+
+queries[
+	confidentiality? aliceSecret
+]

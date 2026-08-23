@@ -1,12 +1,11 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 8] = [
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 7] = [
 	("flawed_psk_from_serial.vp", 2),
 	("junglegym_hybrid_pq.vp", 4),
 	("noise_xx_mutual.vp", 0),
 	("noise_xx_mutual.vp", 1),
-	("saltchannel.vp", 0),
 	("test3.vp", 1),
 	("test5.vp", 1),
 	("test5.vp", 3),
@@ -20,7 +19,7 @@ const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 5] = [
 	("piknik.vp", 3),
 ];
 
-const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 33] = [
+const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 34] = [
 	("ephemerals_sign.vp", 0),
 	("ephemerals_sign.vp", 1),
 	("exa2.vp", 0),
@@ -54,6 +53,7 @@ const TRACE_NEEDS_SHARED_SESSION_FRESHNESS: [(&str, usize); 33] = [
 	("tls13.vp", 7),
 	("tls13.vp", 8),
 	("two_phase_commit_forged_ack.vp", 0),
+	("unpinned_cert_flight.vp", 0),
 ];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
@@ -800,6 +800,22 @@ fn test_wire_projection_replay() {
 #[test]
 fn test_forged_flight_mitm() {
 	run_model("forged_flight_mitm.vp", "a1");
+}
+#[test]
+fn test_unpinned_cert_flight() {
+	run_model("unpinned_cert_flight.vp", "c1");
+}
+#[test]
+fn test_unpinned_cert_flight_one_session() {
+	run_model_sessions("unpinned_cert_flight.vp", 1, "c1");
+}
+#[test]
+fn test_pinned_cert_flight() {
+	run_model("pinned_cert_flight.vp", "c0");
+}
+#[test]
+fn test_pinned_cert_flight_one_session() {
+	run_model_sessions("pinned_cert_flight.vp", 1, "c0");
 }
 #[test]
 fn test_aead_replay_not_forgery() {

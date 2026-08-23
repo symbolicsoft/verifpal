@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0
+//
+// The control for unpinned_cert_flight.vp: the same handshake, with the
+// client verifying CertificateVerify against the PKI-pinned pk rather than
+// against the key carried in the encrypted flight. The attacker can still
+// own k_a by sending gb := PUBKEY(nil), but it cannot produce a signature
+// under sk, so Alice halts at SIGNVERIF and never seals alicesecret.
+//
+// The pair matters more than either half: the solver reaches the forged
+// flight in the sibling model by shaping SIGNVERIF's key argument into a
+// PUBKEY it owns, and this model is what proves that shaping still has to
+// clear the derivability check in solve/validate.rs rather than being a
+// blanket authenticity break.
+
+attacker[active]
+
+principal Bob[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+
+Bob -> Alice: [pk]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	knows public labelFin
+	generates b
+	gb = PUBKEY(b)
+	k = DH_KEX(ga, b)
+	t = HASH(ga, gb, pk)
+	s = SIGN(sk, t)
+	fk = HASH(k, labelFin)
+	tcv = HASH(t, s)
+	fin = MAC(fk, tcv)
+	msg = AEAD_ENC(k, CONCAT(pk, s, fin), nil)
+]
+
+Bob -> Alice: gb, msg
+
+principal Alice[
+	knows public labelFin
+	k_a = DH_KEX(gb, a)
+	d = AEAD_DEC(k_a, msg, nil)?
+	pk_a, s_a, fin_a = SPLIT(d)
+	t_a = HASH(ga, gb, pk_a)
+	ok = SIGNVERIF(pk, t_a, s_a)?
+	fk_a = HASH(k_a, labelFin)
+	tcv_a = HASH(t_a, s_a)
+	expFin = MAC(fk_a, tcv_a)
+	finOk = ASSERT(fin_a, expFin)?
+	generates aliceSecret
+	ct = AEAD_ENC(k_a, aliceSecret, nil)
+]
+
+Alice -> Bob: ct
+
+queries[
+	confidentiality? aliceSecret
+]
