@@ -1,3 +1,30 @@
-Verifpal 1.1.0 adds a language server. `verifpal lsp` speaks LSP over stdio, giving any editor live error checking, hover documentation, context-aware completion, signature help, go-to-definition, find-references, rename, document symbols, folding, semantic highlighting, canonical formatting and a cancellable attacker analysis. The Visual Studio Code extension and the Neovim plugin are now thin clients of it, so the language has one implementation instead of three.
+Verifpal 1.2.0 makes authentication queries injective.
 
-Two breaking changes come with it. The `internal-json` subcommand is removed: editors use the language server, and `verify --format json` remains for scripts. That JSON output has been redesigned — query results now carry the source range of the query they describe and their attack traces arrive as tagged steps rather than flat strings — so a consumer parsing the previous shape will need updating.
+Verifpal's authentication queries used to ask a weaker question than their
+name suggests. The old rule was simple: did the recipient end up using a
+value that the named sender never sent? If the attacker forged something,
+the query failed, which is correct. But if the attacker copied a message
+the sender really did send in one session and delivered it again somewhere
+else, the old rule let it pass. Nothing had been forged, so nothing was
+reported, and replay attacks went unmentioned. The query now asks for more.
+For every time the recipient accepts a value, the sender has to have sent it
+a separate time. If Alice sends a message once and Bob accepts it twice,
+that is a failure, even though the attacker made nothing up. This stronger
+property is called injective agreement, and it is now the only mode Verifpal
+offers. There is no flag to turn it off.
+
+The code change was small. One test in query.rs had been throwing these
+results away before anyone saw them, so we stopped it from hiding them and
+reused the same test to label them instead. Attack traces now say "Attacker
+replays" where they used to say "Attacker replaces", and the summary line
+spells out that the sender sent the value once while the recipient took it
+twice. We also taught the trace minimizer to try a replay on its own, so
+these attacks shrink to the single step that causes them rather than
+printing a pile of substitutions that had nothing to do with it.
+Twenty-four test models flipped from pass to fail. We read every one of
+those traces to confirm each is a copied message and not a false alarm.
+They all fail only when two sessions are analyzed, which follows from what
+a replay is: with a single session there is no second run to copy a message
+from. That gave us somewhere to keep the old guarantees, so the models that
+exist to prove a particular attack is not a forgery still prove it at one
+session.
