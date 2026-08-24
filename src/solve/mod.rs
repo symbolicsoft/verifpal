@@ -26,6 +26,9 @@ pub(crate) fn verify_active(
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
 	let bound = &crate::reexec::TermBound::of(km);
+	let Some(seed) = principal_states.first() else {
+		return Ok(());
+	};
 
 	for phase in 0..=km.max_phase {
 		info_message(
@@ -33,7 +36,7 @@ pub(crate) fn verify_active(
 			InfoLevel::Info,
 			false,
 		);
-		crate::verify::attacker_seed_phase(ctx, km, &principal_states[0], phase)?;
+		crate::verify::attacker_seed_phase(ctx, km, seed, phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
 		if ctx.prefers_replication() {
 			ctx.set_replication_only(true);
@@ -351,15 +354,17 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	out
 }
 
+fn solve_debug() -> bool {
+	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some())
+}
+
 fn trace_proposal(ps: &PrincipalState, sym: &SymbolicState, proposal: &Substitution, ran: bool) {
-	let debug = std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some();
-	if !debug && !ran {
+	if !solve_debug() {
 		return;
 	}
 	let bindings = binding_summary(ps, sym, proposal);
-	if debug {
-		eprintln!("[solve] {} ran={ran} [{}]", ps.name, bindings.join(" "));
-	}
+	eprintln!("[solve] {} ran={ran} [{}]", ps.name, bindings.join(" "));
 }
 
 fn binding_summary(

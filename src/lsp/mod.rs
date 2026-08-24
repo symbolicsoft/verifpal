@@ -489,7 +489,10 @@ impl Server {
 		};
 		self.next_token += 1;
 		let token = format!("verifpal-analysis-{}", self.next_token);
-		let sessions = args.sessions.unwrap_or(crate::sessions::DEFAULT_SESSIONS);
+		let sessions = args
+			.sessions
+			.unwrap_or(crate::sessions::DEFAULT_SESSIONS)
+			.clamp(1, crate::sessions::MAX_SESSIONS);
 		self.runner.start(
 			args.uri.clone(),
 			doc.name.clone(),
@@ -797,6 +800,31 @@ mod tests {
 		assert_eq!(queries.len(), 1);
 		assert_eq!(queries[0]["resolved"], true);
 		assert!(!queries[0]["steps"].as_array().expect("steps").is_empty());
+		stop(client, handle);
+	}
+
+	#[test]
+	fn an_out_of_range_session_count_is_clamped_rather_than_reported_as_run() {
+		let (client, handle, _) = start(ClientCapabilities::default());
+		open(&client, "file:///s.vp", VALID);
+		for (asked, ran) in [(0u8, 1u8), (200u8, crate::sessions::MAX_SESSIONS)] {
+			let accepted = request(
+				&client,
+				1,
+				"workspace/executeCommand",
+				serde_json::json!({
+					"command": "verifpal.analyze",
+					"arguments": [{"uri": "file:///s.vp", "sessions": asked}],
+				}),
+			);
+			assert_eq!(accepted["accepted"], true, "{accepted}");
+			let report = await_notification(&client, "verifpal/analysisReport");
+			assert_eq!(report["ok"], true, "{report}");
+			assert_eq!(
+				report["sessions"], ran,
+				"asking for {asked} sessions must report the count actually analyzed: {report}"
+			);
+		}
 		stop(client, handle);
 	}
 

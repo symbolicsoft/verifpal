@@ -478,6 +478,10 @@ fn test_cap_err_aead_malleable() {
 	);
 }
 #[test]
+fn test_err_no_principals() {
+	run_model_err("err_no_principals.vp", "declares no principals");
+}
+#[test]
 fn test_cap_err_core_primitive() {
 	run_model_err("cap_err_core_primitive.vp", "no cryptographic guarantee");
 }

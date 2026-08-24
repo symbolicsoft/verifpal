@@ -172,23 +172,35 @@ fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
 
 fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 	let h = v.hash_value();
-	let known: Vec<Value> = attacker
+	let size = attacker.known.len();
+	let mut known: Vec<Value> = Vec::with_capacity(size);
+	let mut mutation_records: Vec<Arc<MutationRecord>> = Vec::with_capacity(size);
+	let mut derivations: Vec<DerivationRecord> = Vec::with_capacity(size);
+	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
+	let entries = attacker
 		.known
 		.iter()
-		.filter(|k| !(k.hash_value() == h && k.equivalent(v, true)))
-		.cloned()
-		.collect();
-	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, k) in known.iter().enumerate() {
-		known_map.entry(k.hash_value()).or_default().push(i);
+		.zip(attacker.mutation_records.iter())
+		.zip(attacker.derivations.iter());
+	for ((k, record), derivation) in entries {
+		if k.hash_value() == h && k.equivalent(v, true) {
+			continue;
+		}
+		known_map
+			.entry(k.hash_value())
+			.or_default()
+			.push(known.len());
+		known.push(k.clone());
+		mutation_records.push(Arc::clone(record));
+		derivations.push(derivation.clone());
 	}
 	AttackerState {
 		current_phase: attacker.current_phase,
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 		skeleton_hashes: attacker.skeleton_hashes.clone(),
-		mutation_records: Arc::new(vec![]),
-		derivations: Arc::new(vec![]),
+		mutation_records: Arc::new(mutation_records),
+		derivations: Arc::new(derivations),
 	}
 }
 
@@ -288,6 +300,29 @@ mod tests {
 
 		let attacker = make_attacker_state(vec![tok.clone()]);
 		assert!(origin_leaves(&tok, &ps, &attacker).is_none());
+	}
+
+	#[test]
+	fn withholding_a_value_keeps_knowledge_and_its_explanation_in_step() {
+		let seed = make_password("ulw_seed");
+		let label = make_constant("ulw_label");
+		let tok = make_primitive(PRIM_HASH, vec![seed.clone(), label.clone()], 0);
+		let attacker = make_attacker_state(vec![tok.clone(), seed.clone(), label.clone()]);
+
+		let without = attacker_without(&attacker, &tok);
+
+		assert_eq!(without.known.len(), 2);
+		assert!(without.knows(&tok).is_none());
+		assert_eq!(without.mutation_records.len(), without.known.len());
+		assert_eq!(without.derivations.len(), without.known.len());
+		for value in [&seed, &label] {
+			let idx = without.knows(value).expect("still known");
+			assert!(
+				without.derivation(idx).is_some() && without.record(idx).is_some(),
+				"a value the attacker still holds must still carry the derivation \
+				 that explains it"
+			);
+		}
 	}
 
 	#[test]

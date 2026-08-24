@@ -253,7 +253,7 @@ fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 				sanity_queries_authentication(query, km).map_err(located)?
 			}
 			QueryKind::Confidentiality | QueryKind::Freshness => {
-				sanity_queries_single_constant(query, km, query.kind.name()).map_err(located)?
+				sanity_queries_single_constant(query, km).map_err(located)?
 			}
 			QueryKind::Unlinkability | QueryKind::Equivalence => {
 				sanity_queries_multi_constant(query, km, query.kind.name()).map_err(located)?
@@ -264,10 +264,9 @@ fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	Ok(())
 }
 
-fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
+fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 	let subject = query.subject()?;
 	if km.index_of(subject).is_none() {
-		let _ = kind;
 		return Err(unknown_constant(
 			&subject.name,
 			km,
@@ -322,7 +321,7 @@ fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<(
 		)));
 	}
 	sanity_queries_check_message_principals(&query.message)?;
-	sanity_queries_check_known(query, &query.message, c, km)
+	sanity_queries_check_known(&query.message, c, km)
 }
 
 fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
@@ -401,7 +400,7 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 				}
 				let c = option.message.constant()?;
 				sanity_queries_check_message_principals(&option.message)?;
-				sanity_queries_check_known(query, &option.message, c, km)?;
+				sanity_queries_check_known(&option.message, c, km)?;
 			}
 		}
 	}
@@ -428,12 +427,7 @@ fn sanity_queries_check_message_principals(message: &Message) -> VResult<()> {
 	Ok(())
 }
 
-fn sanity_queries_check_known(
-	query: &Query,
-	m: &Message,
-	c: &Constant,
-	km: &ProtocolTrace,
-) -> VResult<()> {
+fn sanity_queries_check_known(m: &Message, c: &Constant, km: &ProtocolTrace) -> VResult<()> {
 	let idx = match km.index_of(c) {
 		Some(idx) => idx,
 		None => {
@@ -447,7 +441,6 @@ fn sanity_queries_check_known(
 	let sender_knows = km.slots[idx].known_by_principal(m.sender);
 	let recipient_knows = km.slots[idx].known_by_principal(m.recipient);
 	let used = km.constant_used_by(m.recipient, c);
-	let _ = query;
 	if !sender_knows {
 		return Err(
 			VerifpalError::sanity(format!("{} never knows `{}`", m.sender_name, c).into())
@@ -565,6 +558,16 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 			))
 			.suggest(did_you_mean(&name, declared)));
 		}
+	}
+	if declared_names.is_empty() {
+		return Err(
+			VerifpalError::sanity("this model declares no principals".into())
+				.note(
+					"a model describes principals computing values and sending them \
+					 to each other; with none declared there is nothing to analyze",
+				)
+				.help("add a block, e.g. `principal Alice[ knows private m ]`"),
+		);
 	}
 	if declared_names.len() > MAX_PRINCIPALS {
 		return Err(VerifpalError::sanity(

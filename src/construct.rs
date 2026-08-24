@@ -95,19 +95,62 @@ pub(crate) fn construct_protocol_trace(
 	Ok(trace)
 }
 
-fn construct_trace_used_by(trace: &ProtocolTrace) -> IdMap<ValueId, IdMap<PrincipalId, bool>> {
-	let mut used_by: IdMap<ValueId, IdMap<PrincipalId, bool>> = IdMap::default();
+type MentionMemo = IdMap<ValueId, Arc<IdSet<ValueId>>>;
+
+fn construct_trace_used_by(trace: &ProtocolTrace) -> IdMap<ValueId, IdSet<PrincipalId>> {
+	let mut memo: MentionMemo = IdMap::default();
+	let mut used_by: IdMap<ValueId, IdSet<PrincipalId>> = IdMap::default();
 	for slot in &trace.slots {
-		match &slot.initial_value {
-			Value::Constant(c) => {
-				if c.id != slot.constant.id {
-					used_by.entry(c.id).or_default().insert(slot.creator, true);
-				}
-			}
-			Value::Primitive(_) => {}
+		if !matches!(&slot.initial_value, Value::Primitive(_)) {
+			continue;
+		}
+		let mut mentioned = IdSet::default();
+		collect_mentions(&slot.initial_value, trace, &mut memo, &mut mentioned);
+		for id in mentioned {
+			used_by.entry(id).or_default().insert(slot.creator);
 		}
 	}
 	used_by
+}
+
+fn collect_mentions(
+	value: &Value,
+	trace: &ProtocolTrace,
+	memo: &mut MentionMemo,
+	out: &mut IdSet<ValueId>,
+) {
+	match value {
+		Value::Constant(c) => out.extend(mentions_of_constant(c, trace, memo).iter().copied()),
+		Value::Primitive(p) => {
+			for argument in &p.arguments {
+				collect_mentions(argument, trace, memo, out);
+			}
+		}
+	}
+}
+
+fn mentions_of_constant(
+	c: &Constant,
+	trace: &ProtocolTrace,
+	memo: &mut MentionMemo,
+) -> Arc<IdSet<ValueId>> {
+	if let Some(hit) = memo.get(&c.id) {
+		return Arc::clone(hit);
+	}
+	let mut out: IdSet<ValueId> = IdSet::default();
+	out.insert(c.id);
+	memo.insert(c.id, Arc::new(out.clone()));
+	if let Some(idx) = trace.index_of(c) {
+		match &trace.slots[idx].initial_value {
+			Value::Constant(resolved) => {
+				out.insert(resolved.id);
+			}
+			assigned @ Value::Primitive(_) => collect_mentions(assigned, trace, memo, &mut out),
+		}
+	}
+	let out = Arc::new(out);
+	memo.insert(c.id, Arc::clone(&out));
+	out
 }
 
 fn construct_trace_render_principal(

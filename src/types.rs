@@ -989,7 +989,7 @@ pub struct ProtocolTrace {
 	pub slots: Vec<TraceSlot>,
 	pub index: IdMap<ValueId, usize>,
 	pub max_phase: i32,
-	pub used_by: IdMap<ValueId, IdMap<PrincipalId, bool>>,
+	pub used_by: IdMap<ValueId, IdSet<PrincipalId>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	/// Session-sibling groups under `--sessions`: every cloned constant (and
 	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one

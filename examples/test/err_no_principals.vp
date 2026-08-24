@@ -1,0 +1,13 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: a model whose only block is a phase declares no principals, so
+// there is no session to run. Both attacker kinds used to seed their first
+// phase from principal_states[0] and abort the process on the empty slice --
+// under `verifpal lsp` that took the server down with it.
+attacker[active]
+
+phase[1]
+
+queries[
+]

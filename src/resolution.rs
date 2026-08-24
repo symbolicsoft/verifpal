@@ -143,49 +143,16 @@ fn resolve_ps_primitive(
 	})?;
 	Ok(mapped.map(|mapped| Value::Primitive(Arc::new(mapped))))
 }
+
 pub(crate) fn constant_used_by_principal(
 	trace: &ProtocolTrace,
 	principal_id: PrincipalId,
 	c: &Constant,
 ) -> bool {
-	if !trace.used_by.is_empty() {
-		if let Some(principals) = trace.used_by.get(&c.id)
-			&& let Some(&used) = principals.get(&principal_id)
-		{
-			return used;
-		}
-		let i = trace.index.get(&c.id).copied();
-		if let Some(idx) = i
-			&& let Value::Constant(assigned_c) = &trace.slots[idx].initial_value
-			&& let Some(principals) = trace.used_by.get(&assigned_c.id)
-			&& let Some(&used) = principals.get(&principal_id)
-		{
-			return used;
-		}
-		return false;
-	}
-	let assigned = trace
-		.index
+	trace
+		.used_by
 		.get(&c.id)
-		.and_then(|&idx| trace.slots[idx].initial_value.as_constant())
-		.map(|assigned| assigned.id);
-	for slot in &trace.slots {
-		if slot.creator != principal_id {
-			continue;
-		}
-		if !matches!(&slot.initial_value, Value::Primitive(_)) {
-			continue;
-		}
-		if let Some(assigned) = assigned
-			&& trace_mentions(&slot.initial_value, trace, assigned)
-		{
-			return true;
-		}
-		if trace_mentions(&slot.initial_value, trace, c.id) {
-			return true;
-		}
-	}
-	false
+		.is_some_and(|principals| principals.contains(&principal_id))
 }
 
 pub(crate) fn value_constant_contains_fresh_values(

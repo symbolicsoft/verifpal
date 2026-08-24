@@ -270,8 +270,11 @@ pub(crate) fn verify_passive(
 	principal_states: &[PrincipalState],
 ) -> VResult<()> {
 	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
+	let Some(seed) = principal_states.first() else {
+		return Ok(());
+	};
 	for phase in 0..=km.max_phase {
-		attacker_seed_phase(ctx, km, &principal_states[0], phase)?;
+		attacker_seed_phase(ctx, km, seed, phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
 	}
 	Ok(())
