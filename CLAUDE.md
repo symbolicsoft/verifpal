@@ -30,7 +30,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 763 tests (unit + model), ~30s once built (also: make test)
+cargo test --release                   # 776 tests (unit + model), ~30s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -255,6 +255,8 @@ Proposal families, in the order they are offered: goals derived from each unreso
 
 The rounds must only ever **add** proposals. Making them replace the first pass loses attacks, because one check's constructibility obligation will ground a free position to `nil` and destroy another check's structural requirement for it — the hazard `vars.rs` warns about, one level up. For the same reason `bind_from_shape` still refuses a shape with an unbound position: a structure-less partial forgery satisfies the decryption check and stops the search from ever pursuing the structured one. Both were tried the other way and both cost real attacks; `forged_flight_mitm.vp` is the regression that catches it.
 
+**The attacker's option set is the thing to be careful with, and narrowing it silently is this engine's characteristic bug.** At every position the attacker chooses, the options are `{honest value}` together with everything derivable. Two separate missed attacks have come from replacing that set with a single representative at a point where nothing downstream could recover the rest: `vars::ground_free` collapses every free position to `nil` (which is why an `equivalence?` over two projections of one term always held, and what `diverge::distinguish` restores), and `symbolic::build` collapses every controllable slot to a variable, so the option "this slot stays honest" exists when the search *guesses* and not when it *reasons* — `relay_substitution` supplies honest values as a proposal and cannot help the Deducer, which is why `exa.vp` loses its decryption-oracle attack the moment `msg2` is unguarded. Unlike `TermBound`, neither narrowing was named, budgeted or reported. **A third instance of this shape gets one fix at the level where the shape lives, not a third special case**; if a proposed change closes exactly one of these sites, it is a shim and the right response is more evidence rather than more code. `src/metamorphic.rs` is the instrument for gathering it.
+
 Proposals are deduped by what they would actually **install** (`solve/mod.rs::install_signature`), not by substitution identity: two substitutions differing only in free-var bindings nobody reads materialise to the same concrete state, and validating both is pure waste. On `tls13.vp` at the shipped default that collapses 11653 proposals to 3861 distinct states (1681 to 569 at one session), which is what pays for the search above. The dedupe deliberately does not span search rounds — attacker knowledge grows between them, so the same installs can resolve on a later round what they could not on an earlier one.
 
 Variables the solver never bound are deliberately left free, and `validate` skips those slots: the attacker has no reason to touch that wire value, and grounding it would fail an unrelated check and halt the principal before the attack could land.
@@ -342,7 +344,32 @@ A result code pins one bit per query and says nothing about the attack behind a 
 - **Both session counts.** The sweep verifies every model at one session as well as at the shipped default, so the per-`verify` trace and hold checks above run over both. The four narration-shape sets are measured at the default only.
 - **Wire coherence and header intent.** The same sweep rejects any trace step that claims the attacker replaced a value on a message the model does not have, or replaced a value every message guards without saying a guard was bypassed. It also reads each model's `// Expected:` header line and requires the stated code to be what the model actually produces — the header is where a verdict is argued, so a header disagreeing with the run is either a stale claim or a verdict nobody re-justified. 209 of the 350 swept models that analyse state a code; the ceiling on the 141 that do not (`undocumented <= 141`) is a ratchet, and it currently sits exactly on the line.
 
-Two invariants worth re-running by hand after an engine change, both currently clean across all 355 swept models: a passive run's attacks must be a subset of the active run's, and a one-session run's must be a subset of a two-session run's. The second was also checked from two sessions to three across `examples/test/`, and is clean there too.
+### The metamorphic harness (`src/metamorphic.rs`)
+
+The checks above all measure one run of one model. They cannot see a *missed* attack, because the tool's own output is the only oracle they have. The harness closes that: it transforms each swept model and asserts a relation between the two result codes. Every property is a theorem about the **language**, so a violation is an engine bug and never a judgment call — which is what makes it worth keeping rather than a one-off audit script.
+
+Transformations are AST-level and go back through the printer: parse → transform → `pretty_model` → **re-parse** → `analyze_sessions`. Re-parsing is not ceremony. `ValueNames` and `PrincipalNames` are owned by the `Parser`, so a hand-mutated AST carries ids from the interner that read the *original*; rendering and re-parsing is what makes the variant a legal model a user could have typed. The no-op case is its own test, and it is the reason every number below measures the engine rather than the printer.
+
+*Monotone* properties transform the model so the attacker is strictly stronger, and no `1` may become a `0`. *Invariant* properties preserve meaning, so the codes must match exactly. Measured at one session on an Apple-silicon laptop:
+
+| property | transformation | direction | compared | trace faults | missed attacks |
+| --- | --- | --- | --- | --- | --- |
+| `unguard` | remove one `[guard]` | monotone | 299 | 4 | **1** (`exa.vp`) |
+| `leaks` | add `leaks c` | monotone | 1113 | 12 | 0 |
+| `weaken` | add `weak` / `forgeable` | monotone | 1192 | 11 | 0 |
+| `promote` | `passive` → `active` | monotone | 99 | 1 | 0 |
+| `demote` | `active` → `passive` | monotone | 246 | 0 | 0 |
+| `rotate` | reorder the `queries` block | invariant | 253 | 0 | 0 |
+| `rename` | alpha-rename every identifier | invariant | 346 | 0 | 0 |
+| `pad` | prepend an unused `knows private` | invariant | 346 | 0 | 0 |
+
+`promote` and `demote` are the same theorem over different populations — 99 passive models promoted against 246 active ones demoted — which is why both exist. `rename` and `pad` are the two that probe the interner, the reserved id bands and slot indexing; both are clean, so no verdict depends on an id or a position.
+
+**Two ratchets, both failing in *both* directions.** `KNOWN_MISSED_ATTACKS` holds confirmed missed attacks and `KNOWN_BAD_TRACES` holds models where the engine's own `tracecheck` assertions fire under transformation. A violation outside a list fails the build; an entry that *stops* violating also fails, so a fix cannot leave a stale exception behind and quietly stop meaning anything. Staleness is judged only over models a run actually exercised, so a model near the cost budget cannot flap the gate between machines.
+
+**Cost is bounded with the engine's own cancellation flag**, not with a timer on the baseline. A cheap model can produce a ruinously expensive variant — unguarding one slot in a mid-size model took the sweep from four seconds past twenty minutes — so timing the baseline measures the wrong thing. Each analysis carries a deadline; a cancelled one counts as *deferred*, and the deferred total is asserted against a ceiling, because a sweep that quietly stops covering models reads exactly like one that covers everything. Sixteen to eighteen models defer per property, against a ceiling of 60. The harness adds about ten seconds to the suite.
+
+Two invariants still worth re-running by hand after an engine change, both currently clean across all 355 swept models: a one-session run's attacks must be a subset of a two-session run's, checked from two sessions to three across `examples/test/` as well. Session and phase-deletion monotonicity are the two properties the harness does not yet automate.
 
 ### Performance expectations
 

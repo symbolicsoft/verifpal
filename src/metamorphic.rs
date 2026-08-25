@@ -361,6 +361,35 @@ fn variant_renamed(model: &Model) -> Option<Model> {
 	Some(out)
 }
 
+fn variant_padded(model: &Model) -> Option<Model> {
+	let mut out = model.clone();
+	let block = out.blocks.iter_mut().find_map(|b| match b {
+		Block::Principal(p) => Some(p),
+		_ => None,
+	})?;
+	block.expressions.insert(
+		0,
+		Expression {
+			span: Span::default(),
+			kind: Declaration::Knows,
+			qualifier: Some(Qualifier::Private),
+			constants: vec![Constant {
+				name: std::sync::Arc::from("padding_constant_qq"),
+				id: 0,
+				guard: false,
+				fresh: false,
+				leaked: false,
+				declaration: Some(Declaration::Knows),
+				qualifier: Some(Qualifier::Private),
+			}],
+			assigned: None,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
+		},
+	);
+	Some(out)
+}
+
 fn check_invariant(
 	property: &str,
 	variant: fn(&Model) -> Option<Model>,
@@ -566,6 +595,11 @@ mod tests {
 			 engine:\n  {}",
 			drifted.join("\n  ")
 		);
+	}
+
+	#[test]
+	fn an_unused_declaration_changes_no_verdict() {
+		check_invariant("pad", variant_padded, |before| before.to_string(), 300);
 	}
 
 	#[test]
