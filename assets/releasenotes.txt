@@ -1,3 +1,8 @@
+Verifpal 1.2.2 adds an exciting new output format: HTML reports!
+Verifpal can now output highly informative, self-contained HTML reports
+that contain diagrams and other explanations of your analysis' results.
+Try it using: verifpal verify --format html your-model.vp.
+
 Verifpal 1.2.1 makes improvements to Verifpal's attack trace narration.
 
 Verifpal 1.2.0 makes authentication queries injective.

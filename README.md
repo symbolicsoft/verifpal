@@ -17,6 +17,8 @@ Every principal runs two concurrent sessions by default, so you get cross-sessio
 
 When a query is contradicted, Verifpal minimizes the attack and then narrates what remains as numbered causal steps, using the names your model gave the values. If the analysis ran under declared weakening assumptions, or the search declined a branch, the output says so.
 
+`verifpal verify model.vp --format html > report.html` renders the whole analysis as a single self-contained HTML page — verdicts, attack traces each drawn as a sequence diagram with the attacker's lane, an annotated protocol diagram, and the syntax-highlighted model source with each query marked by its verdict — with no external resources, so it opens identically offline and can be attached to a review or mailed to a colleague. `--format json` emits the same report as machine-readable JSON, including the structured attack steps.
+
 Verifpal has been used to verify security properties for Signal, Scuttlebutt, TLS 1.3, Telegram and other protocols.
 
 ## Scientific Paper

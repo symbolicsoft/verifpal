@@ -13,6 +13,7 @@ pub(crate) mod context;
 pub(crate) mod deduction;
 pub(crate) mod equivalence;
 pub(crate) mod hashing;
+pub(crate) mod html;
 pub(crate) mod info;
 #[cfg(feature = "lsp")]
 pub(crate) mod lsp;
@@ -47,6 +48,7 @@ pub(crate) mod value;
 pub(crate) mod verify;
 pub(crate) mod witness;
 
+pub use html::html_report;
 pub use info::{Verbosity, info_banner, info_message, set_verbosity};
 #[cfg(feature = "lsp")]
 pub use lsp::run as lsp_run;

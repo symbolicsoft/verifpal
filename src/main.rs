@@ -3,7 +3,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
-	ColorChoice, Run, Verbosity, VerifyReport, diagram, info_banner, pretty_print,
+	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
 	set_color_choice, set_verbosity, update_check_report, update_check_start,
 	verify_report_with_source,
 };
@@ -41,6 +41,7 @@ impl From<ColorArg> for ColorChoice {
 enum FormatArg {
 	Text,
 	Json,
+	Html,
 }
 
 #[derive(Subcommand)]
@@ -87,8 +88,8 @@ enum Commands {
 	},
 }
 
-fn verify_verbosity(json: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
-	if json || (result_code && quiet) {
+fn verify_verbosity(structured: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
+	if structured || (result_code && quiet) {
 		return Verbosity::Silent;
 	}
 	if verbose {
@@ -111,16 +112,16 @@ fn run_verify(
 	verbose: bool,
 	color: ColorArg,
 ) -> i32 {
-	let json = format == FormatArg::Json;
-	set_color_choice(if json {
+	let structured = format != FormatArg::Text;
+	set_color_choice(if structured {
 		ColorChoice::Never
 	} else {
 		color.into()
 	});
-	set_verbosity(verify_verbosity(json, result_code, quiet, verbose));
+	set_verbosity(verify_verbosity(structured, result_code, quiet, verbose));
 
 	let update_check = update_check_start(VERSION);
-	if !result_code && !json {
+	if !result_code && !structured {
 		info_banner(VERSION);
 	}
 
@@ -131,7 +132,7 @@ fn run_verify(
 	let mut had_attack = false;
 
 	for (index, model) in models.iter().enumerate() {
-		if index > 0 && !json && !result_code {
+		if index > 0 && !structured && !result_code {
 			println!();
 		}
 		match verify_report_with_source(model, sessions) {
@@ -150,7 +151,7 @@ fn run_verify(
 			Err(e) => {
 				had_error = true;
 				let text = e.to_string();
-				if !json {
+				if !structured {
 					eprintln!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
@@ -159,14 +160,21 @@ fn run_verify(
 		}
 	}
 
-	if json {
-		let run = Run::of(VERSION, &outcomes, &sources);
-		match serde_json::to_string(&run) {
-			Ok(text) => println!("{}", text),
-			Err(e) => {
-				eprintln!("could not serialize the report: {}", e);
-				return EXIT_ERROR;
+	match format {
+		FormatArg::Text => {}
+		FormatArg::Json => {
+			let run = Run::of(VERSION, &outcomes, &sources);
+			match serde_json::to_string(&run) {
+				Ok(text) => println!("{}", text),
+				Err(e) => {
+					eprintln!("could not serialize the report: {}", e);
+					return EXIT_ERROR;
+				}
 			}
+		}
+		FormatArg::Html => {
+			let run = Run::of(VERSION, &outcomes, &sources);
+			print!("{}", html_report(&run, &sources));
 		}
 	}
 	update_check_report(&update_check);

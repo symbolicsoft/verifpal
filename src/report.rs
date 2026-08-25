@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::types::{Span, VerifyResult};
+use crate::types::{Span, TraceValue, VerifyResult};
 use crate::verify::VerifyReport;
 
 #[derive(Debug, Serialize)]
@@ -61,6 +61,27 @@ pub struct QueryReport {
 pub struct ReportStep {
 	pub kind: String,
 	pub text: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub sender: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub recipient: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub principal: Option<String>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub values: Vec<TraceValue>,
+}
+
+impl ReportStep {
+	pub fn new(kind: String, text: String) -> ReportStep {
+		ReportStep {
+			kind,
+			text,
+			sender: None,
+			recipient: None,
+			principal: None,
+			values: vec![],
+		}
+	}
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -147,6 +168,10 @@ impl QueryReport {
 				.map(|s| ReportStep {
 					kind: s.kind.to_string(),
 					text: s.text.clone(),
+					sender: s.sender.clone(),
+					recipient: s.recipient.clone(),
+					principal: s.principal.clone(),
+					values: s.values.clone(),
 				})
 				.collect(),
 			preconditions: r
@@ -208,10 +233,25 @@ mod tests {
 						},
 						summary: "m1 is obtained by Attacker.".to_string(),
 						conclusion: "m1 is obtained by Attacker.".to_string(),
-						steps: vec![ReportStep {
-							kind: "derive".to_string(),
-							text: "Attacker constructs PUBKEY(nil) from nil.".to_string(),
-						}],
+						steps: vec![
+							ReportStep::new(
+								"derive".to_string(),
+								"Attacker constructs PUBKEY(nil) from nil.".to_string(),
+							),
+							ReportStep {
+								kind: "mutations".to_string(),
+								text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
+								sender: Some("Alice".to_string()),
+								recipient: Some("Bob".to_string()),
+								principal: None,
+								values: vec![TraceValue {
+									name: "ga".to_string(),
+									installed: Some("PUBKEY(nil)".to_string()),
+									was: Some("PUBKEY(a)".to_string()),
+									guarded: false,
+								}],
+							},
+						],
 						preconditions: vec![],
 						variants: 2,
 					}],
@@ -230,7 +270,10 @@ mod tests {
 			r#""summary":"m1 is obtained by Attacker.","#,
 			r#""conclusion":"m1 is obtained by Attacker.","#,
 			r#""steps":[{"kind":"derive","#,
-			r#""text":"Attacker constructs PUBKEY(nil) from nil."}],"#,
+			r#""text":"Attacker constructs PUBKEY(nil) from nil."},"#,
+			r#"{"kind":"mutations","text":"Attacker replaces ga with PUBKEY(nil).","#,
+			r#""sender":"Alice","recipient":"Bob","values":[{"name":"ga","#,
+			r#""installed":"PUBKEY(nil)","was":"PUBKEY(a)"}]}],"#,
 			r#""preconditions":[],"variants":2}]}}]}"#,
 		);
 		assert_eq!(json, expected);

@@ -656,14 +656,76 @@ impl Narration {
 	}
 
 	pub(crate) fn kinded(&self) -> Vec<crate::types::TraceStep> {
-		self.steps
-			.iter()
-			.map(|s| crate::types::TraceStep {
-				kind: s.kind(),
-				text: render_one(s),
-			})
-			.collect()
+		self.steps.iter().map(step_data).collect()
 	}
+}
+
+fn step_data(s: &Step) -> crate::types::TraceStep {
+	let mut out = crate::types::TraceStep::new(s.kind(), render_one(s));
+	let value = |name: &Arc<str>, installed: Option<String>, was: Option<String>, guarded: bool| {
+		crate::types::TraceValue {
+			name: name.to_string(),
+			installed,
+			was,
+			guarded,
+		}
+	};
+	match s {
+		Step::Mutations {
+			sender,
+			recipient,
+			items,
+		} => {
+			out.sender = Some(sender.to_string());
+			out.recipient = Some(recipient.to_string());
+			out.values = items
+				.iter()
+				.map(|i| {
+					value(
+						&i.name,
+						Some(i.new_value.clone()),
+						Some(i.old_value.clone()).filter(|o| !o.is_empty()),
+						i.guarded,
+					)
+				})
+				.collect();
+		}
+		Step::Replay {
+			sender,
+			recipient,
+			name,
+			value: installed,
+			..
+		} => {
+			out.sender = Some(sender.to_string());
+			out.recipient = Some(recipient.to_string());
+			out.values = vec![value(name, Some(installed.clone()), None, false)];
+		}
+		Step::Bypass {
+			principal,
+			slot,
+			key,
+			..
+		} => {
+			out.principal = Some(principal.to_string());
+			out.values = vec![value(slot, Some(key.clone()), None, false)];
+		}
+		Step::Gate { principal, .. } => {
+			out.principal = Some(principal.to_string());
+		}
+		Step::Received {
+			name,
+			sender,
+			recipient,
+			..
+		} => {
+			out.sender = Some(sender.to_string());
+			out.recipient = Some(recipient.to_string());
+			out.values = vec![value(name, None, None, false)];
+		}
+		Step::Resolves { .. } | Step::Static { .. } | Step::Derive { .. } => {}
+	}
+	out
 }
 
 pub(crate) struct CarriedIn {

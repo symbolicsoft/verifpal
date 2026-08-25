@@ -793,6 +793,38 @@ pub(crate) struct ResultWitness {
 pub struct TraceStep {
 	pub kind: &'static str,
 	pub text: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub sender: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub recipient: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub principal: Option<String>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub values: Vec<TraceValue>,
+}
+
+impl TraceStep {
+	pub fn new(kind: &'static str, text: String) -> TraceStep {
+		TraceStep {
+			kind,
+			text,
+			sender: None,
+			recipient: None,
+			principal: None,
+			values: vec![],
+		}
+	}
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TraceValue {
+	pub name: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub installed: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub was: Option<String>,
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub guarded: bool,
 }
 
 #[derive(Clone, Debug)]
