@@ -18,6 +18,8 @@ pub(crate) mod info;
 #[cfg(feature = "lsp")]
 pub(crate) mod lsp;
 #[cfg(test)]
+mod metamorphic;
+#[cfg(test)]
 mod model_tests;
 pub(crate) mod narrate;
 pub(crate) mod parser;

@@ -32,7 +32,7 @@ const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 7] = [
 	"examples/silly/cloudbackup.vp",
 ];
 
-fn swept_models() -> Vec<(String, String)> {
+pub(crate) fn swept_models() -> Vec<(String, String)> {
 	let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/test");
 	let mut out: Vec<(String, String)> = std::fs::read_dir(&dir)
 		.expect("read examples/test")
