@@ -6,12 +6,6 @@ use crate::types::*;
 
 const SESSIONS: u8 = 1;
 
-const VARIANT_CAP: usize = 4;
-
-const ANALYSIS_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
-
-const DEFERRED_CEILING: usize = 60;
-
 const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 0] = [];
 
 const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
@@ -48,41 +42,18 @@ const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
 enum Outcome {
 	Code(String),
 	Rejected,
-	Cancelled,
 	Panicked,
 }
 
 fn analysed(model: &Model, sessions: u8) -> Outcome {
-	use std::sync::Arc;
-	use std::sync::atomic::{AtomicBool, Ordering};
-
-	let cancel = Arc::new(AtomicBool::new(false));
-	let finished = Arc::new(AtomicBool::new(false));
-	let watch_cancel = Arc::clone(&cancel);
-	let watch_finished = Arc::clone(&finished);
-	let watchdog = std::thread::spawn(move || {
-		let deadline = std::time::Instant::now() + ANALYSIS_BUDGET;
-		while std::time::Instant::now() < deadline {
-			if watch_finished.load(Ordering::Relaxed) {
-				return;
-			}
-			std::thread::sleep(std::time::Duration::from_millis(2));
-		}
-		watch_cancel.store(true, Ordering::SeqCst);
-	});
-
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
-		crate::verify::analyze_sessions_cancellable(model, sessions, Arc::clone(&cancel))
+		crate::verify::analyze_sessions(model, sessions)
 			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
 	}));
-	finished.store(true, Ordering::SeqCst);
-	let _ = watchdog.join();
-
 	match attempt {
 		Ok(Some(code)) => Outcome::Code(code),
-		Ok(None) if cancel.load(Ordering::SeqCst) => Outcome::Cancelled,
 		Ok(None) => Outcome::Rejected,
 		Err(_) => Outcome::Panicked,
 	}
@@ -200,23 +171,24 @@ fn variants_leaked(model: &Model) -> Vec<Model> {
 	out
 }
 
-fn annotate_first(value: &Value, cap: Capability) -> Option<Value> {
+fn annotations(value: &Value, cap: Capability) -> Vec<Value> {
 	let Value::Primitive(p) = value else {
-		return None;
+		return Vec::new();
 	};
+	let mut out = Vec::new();
 	if crate::capability::supports(p.id, cap) && !p.capabilities.has(cap) {
 		let mut updated = (**p).clone();
 		updated.capabilities.set(cap, 0);
-		return Some(Value::Primitive(std::sync::Arc::new(updated)));
+		out.push(Value::Primitive(std::sync::Arc::new(updated)));
 	}
 	for (i, argument) in p.arguments.iter().enumerate() {
-		if let Some(replaced) = annotate_first(argument, cap) {
+		for replaced in annotations(argument, cap) {
 			let mut updated = (**p).clone();
 			updated.arguments[i] = replaced;
-			return Some(Value::Primitive(std::sync::Arc::new(updated)));
+			out.push(Value::Primitive(std::sync::Arc::new(updated)));
 		}
 	}
-	None
+	out
 }
 
 fn variants_weakened(model: &Model) -> Vec<Model> {
@@ -230,15 +202,14 @@ fn variants_weakened(model: &Model) -> Vec<Model> {
 				let Some(assigned) = expression.assigned.as_ref() else {
 					continue;
 				};
-				let Some(annotated) = annotate_first(assigned, cap) else {
-					continue;
-				};
-				let mut variant = model.clone();
-				if let Some(Block::Principal(p)) = variant.blocks.get_mut(bi)
-					&& let Some(e) = p.expressions.get_mut(ei)
-				{
-					e.assigned = Some(annotated);
-					out.push(variant);
+				for annotated in annotations(assigned, cap) {
+					let mut variant = model.clone();
+					if let Some(Block::Principal(p)) = variant.blocks.get_mut(bi)
+						&& let Some(e) = p.expressions.get_mut(ei)
+					{
+						e.assigned = Some(annotated);
+						out.push(variant);
+					}
 				}
 			}
 		}
@@ -251,8 +222,7 @@ struct Report {
 	compared: usize,
 	violations: Vec<String>,
 	panicked: Vec<String>,
-	deferred: Vec<String>,
-	exercised: Vec<String>,
+	ran: Vec<String>,
 }
 
 fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<&'a str> {
@@ -399,18 +369,16 @@ fn check_sessions(property: &str, floor: usize) {
 	let mut report = Report::default();
 	for (name, model) in corpus() {
 		let Outcome::Code(one) = code_of(&model, 1) else {
-			report.deferred.push(name.clone());
 			continue;
 		};
 		match code_of(&model, 2) {
 			Outcome::Rejected => continue,
-			Outcome::Cancelled => report.deferred.push(name.clone()),
 			Outcome::Panicked => {
-				report.exercised.push(name.clone());
+				report.ran.push(name.clone());
 				report.panicked.push(name.clone());
 			}
 			Outcome::Code(two) => {
-				report.exercised.push(name.clone());
+				report.ran.push(name.clone());
 				report.compared += 1;
 				for q in lost_attacks(&one, &two) {
 					report.violations.push(format!(
@@ -422,8 +390,6 @@ fn check_sessions(property: &str, floor: usize) {
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	report.deferred.sort();
-	report.deferred.dedup();
 	settle(property, report, floor);
 }
 
@@ -436,7 +402,6 @@ fn check_invariant(
 	let mut report = Report::default();
 	for (name, model) in corpus() {
 		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
-			report.deferred.push(name.clone());
 			continue;
 		};
 		let Some(transformed) = variant(&model) else {
@@ -444,13 +409,12 @@ fn check_invariant(
 		};
 		match code_of(&transformed, SESSIONS) {
 			Outcome::Rejected => continue,
-			Outcome::Cancelled => report.deferred.push(name.clone()),
 			Outcome::Panicked => {
-				report.exercised.push(name.clone());
+				report.ran.push(name.clone());
 				report.panicked.push(name.clone());
 			}
 			Outcome::Code(after) => {
-				report.exercised.push(name.clone());
+				report.ran.push(name.clone());
 				report.compared += 1;
 				let want = expected(&before);
 				if after != want {
@@ -463,20 +427,10 @@ fn check_invariant(
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	report.deferred.sort();
-	report.deferred.dedup();
 	settle(property, report, floor);
 }
 
 fn settle(property: &str, report: Report, floor: usize) {
-	assert!(
-		report.deferred.len() <= DEFERRED_CEILING,
-		"the `{property}` property deferred {} models whose analysis outran the budget, \
-		 against a ceiling of {DEFERRED_CEILING}. A sweep that quietly stops covering \
-		 models reads as full coverage: {:?}",
-		report.deferred.len(),
-		report.deferred
-	);
 	assert!(
 		report.compared >= floor,
 		"the `{property}` property compared only {} pairs against a floor of {floor}, so it \
@@ -498,7 +452,7 @@ fn settle(property: &str, report: Report, floor: usize) {
 	);
 	let stale_panics: Vec<&str> = expected_panics
 		.iter()
-		.filter(|m| report.exercised.iter().any(|e| e == *m))
+		.filter(|m| report.ran.iter().any(|e| e == *m))
 		.filter(|m| !report.panicked.iter().any(|p| p == *m))
 		.copied()
 		.collect();
@@ -528,7 +482,7 @@ fn settle(property: &str, report: Report, floor: usize) {
 	);
 	let stale: Vec<&str> = expected
 		.iter()
-		.filter(|m| report.exercised.iter().any(|e| e == *m))
+		.filter(|m| report.ran.iter().any(|e| e == *m))
 		.filter(|m| !report.violations.iter().any(|v| v.starts_with(*m)))
 		.copied()
 		.collect();
@@ -548,20 +502,18 @@ fn check_monotone(
 	let mut report = Report::default();
 	for (name, model) in corpus() {
 		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
-			report.deferred.push(name.clone());
 			continue;
 		};
-		let mut exercised = false;
-		for variant in variants(&model).into_iter().take(VARIANT_CAP) {
+		let mut ran = false;
+		for variant in variants(&model) {
 			match code_of(&variant, SESSIONS) {
 				Outcome::Rejected => continue,
-				Outcome::Cancelled => report.deferred.push(name.clone()),
 				Outcome::Panicked => {
-					exercised = true;
+					ran = true;
 					report.panicked.push(name.clone());
 				}
 				Outcome::Code(after) => {
-					exercised = true;
+					ran = true;
 					report.compared += 1;
 					let lost = match strength {
 						Strength::Stronger => lost_attacks(&before, &after),
@@ -575,14 +527,12 @@ fn check_monotone(
 				}
 			}
 		}
-		if exercised {
-			report.exercised.push(name.clone());
+		if ran {
+			report.ran.push(name.clone());
 		}
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	report.deferred.sort();
-	report.deferred.dedup();
 	settle(property, report, floor);
 }
 
@@ -607,7 +557,6 @@ mod tests {
 			};
 			compared += 1;
 			match code_of(&model, SESSIONS) {
-				Outcome::Cancelled => continue,
 				Outcome::Code(round_tripped) if round_tripped == direct => {}
 				Outcome::Code(other) => {
 					drifted.push(format!("{name}: direct={direct} round-tripped={other}"))

@@ -1,10 +1,43 @@
 name: CI
 
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.title.outputs.run }}
+    steps:
+    - name: Checkout the commit under test
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        fetch-depth: 1
+    - name: Look for [ci] in the commit title
+      id: title
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::running because it was dispatched by hand"
+          exit 0
+        fi
+        title=$(git log -1 --pretty=%s)
+        echo "commit title: ${title}"
+        case "${title}" in
+          *"[ci]"*)
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::skipped: the commit title carries no [ci] marker"
+            ;;
+        esac
+
   test:
     name: test (${{ matrix.os }})
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -13,6 +46,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -34,10 +69,14 @@ jobs:
 
   wasm:
     name: wasm build
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
