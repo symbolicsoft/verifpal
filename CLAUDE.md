@@ -30,7 +30,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 776 tests (unit + model), ~30s once built (also: make test)
+cargo test --release                   # 778 tests (unit + model), ~30s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -354,20 +354,22 @@ Transformations are AST-level and go back through the printer: parse → transfo
 
 | property | transformation | direction | compared | trace faults | missed attacks |
 | --- | --- | --- | --- | --- | --- |
-| `unguard` | remove one `[guard]` | monotone | 299 | 4 | **1** (`exa.vp`) |
+| `unguard` | remove one `[guard]` | monotone | 298 | 4 | **1** (`exa.vp`) |
 | `leaks` | add `leaks c` | monotone | 1113 | 12 | 0 |
 | `weaken` | add `weak` / `forgeable` | monotone | 1192 | 11 | 0 |
+| `sessions` | `--sessions 1` → `2` | monotone | 341 | 0 | 0 |
+| `dephase` | delete the last `phase[N]` | monotone | 37 | 0 | 0 |
 | `promote` | `passive` → `active` | monotone | 99 | 1 | 0 |
-| `demote` | `active` → `passive` | monotone | 246 | 0 | 0 |
+| `demote` | `active` → `passive` | monotone | 245 | 0 | 0 |
 | `rotate` | reorder the `queries` block | invariant | 253 | 0 | 0 |
 | `rename` | alpha-rename every identifier | invariant | 346 | 0 | 0 |
 | `pad` | prepend an unused `knows private` | invariant | 346 | 0 | 0 |
 
-`promote` and `demote` are the same theorem over different populations — 99 passive models promoted against 246 active ones demoted — which is why both exist. `rename` and `pad` are the two that probe the interner, the reserved id bands and slot indexing; both are clean, so no verdict depends on an id or a position.
+`sessions` is the only property that changes the analysis parameter rather than the model, and `dephase` deletes the *last* phase boundary so nothing needs renumbering — deleting a middle one would, since phases must increment by exactly one. Its direction is worth stating because it is the one property whose sign is not obvious: merging a phase into its predecessor hands the attacker every later-phase value sooner, `attacker_phase_update` withholds a value only while its earliest phase exceeds the current one, so the attacker gains and never loses. `promote` and `demote` are the same theorem over different populations — 99 passive models promoted against 246 active ones demoted — which is why both exist. `rename` and `pad` are the two that probe the interner, the reserved id bands and slot indexing; both are clean, so no verdict depends on an id or a position.
 
 **Two ratchets, both failing in *both* directions.** `KNOWN_MISSED_ATTACKS` holds confirmed missed attacks and `KNOWN_BAD_TRACES` holds models where the engine's own `tracecheck` assertions fire under transformation. A violation outside a list fails the build; an entry that *stops* violating also fails, so a fix cannot leave a stale exception behind and quietly stop meaning anything. Staleness is judged only over models a run actually exercised, so a model near the cost budget cannot flap the gate between machines.
 
-**Cost is bounded with the engine's own cancellation flag**, not with a timer on the baseline. A cheap model can produce a ruinously expensive variant — unguarding one slot in a mid-size model took the sweep from four seconds past twenty minutes — so timing the baseline measures the wrong thing. Each analysis carries a deadline; a cancelled one counts as *deferred*, and the deferred total is asserted against a ceiling, because a sweep that quietly stops covering models reads exactly like one that covers everything. Sixteen to eighteen models defer per property, against a ceiling of 60. The harness adds about ten seconds to the suite.
+**Cost is bounded with the engine's own cancellation flag**, not with a timer on the baseline. A cheap model can produce a ruinously expensive variant — unguarding one slot in a mid-size model took the sweep from four seconds past twenty minutes — so timing the baseline measures the wrong thing. Each analysis carries a deadline; a cancelled one counts as *deferred*, and the deferred total is asserted against a ceiling, because a sweep that quietly stops covering models reads exactly like one that covers everything. Sixteen to eighteen models defer per property, against a ceiling of 60. The harness adds about twelve seconds to the suite.
 
 ### The completeness inventory
 
@@ -390,7 +392,7 @@ Every site in the analysis path that **collapses** a set to one representative, 
 
 Two rows say *no model depends on it* about a guard this file describes as load-bearing. That is the audit's most useful output: a comment asserting a protection is not evidence the protection is still wired up, and a mutation that changes nothing is the cheapest way to find out.
 
-Two invariants still worth re-running by hand after an engine change, both currently clean across all 355 swept models: a one-session run's attacks must be a subset of a two-session run's, checked from two sessions to three across `examples/test/` as well. Session and phase-deletion monotonicity are the two properties the harness does not yet automate.
+One invariant is still worth re-running by hand after an engine change and is not automated here: a two-session run's attacks must be a subset of a three-session run's, clean across `examples/test/` when last measured. One and two sessions are covered by the `sessions` property above.
 
 ### Performance expectations
 

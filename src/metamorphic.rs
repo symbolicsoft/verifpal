@@ -390,6 +390,51 @@ fn variant_padded(model: &Model) -> Option<Model> {
 	Some(out)
 }
 
+fn variants_dephased(model: &Model) -> Vec<Model> {
+	let Some(last) = model
+		.blocks
+		.iter()
+		.rposition(|b| matches!(b, Block::Phase(_)))
+	else {
+		return Vec::new();
+	};
+	let mut variant = model.clone();
+	variant.blocks.remove(last);
+	vec![variant]
+}
+
+fn check_sessions(property: &str, floor: usize) {
+	let mut report = Report::default();
+	for (name, model) in corpus() {
+		let Outcome::Code(one) = code_of(&model, 1) else {
+			report.deferred.push(name.clone());
+			continue;
+		};
+		match code_of(&model, 2) {
+			Outcome::Rejected => continue,
+			Outcome::Cancelled => report.deferred.push(name.clone()),
+			Outcome::Panicked => {
+				report.exercised.push(name.clone());
+				report.panicked.push(name.clone());
+			}
+			Outcome::Code(two) => {
+				report.exercised.push(name.clone());
+				report.compared += 1;
+				for q in lost_attacks(&one, &two) {
+					report.violations.push(format!(
+						"{name}: sessions=1 {one}, sessions=2 {two}, query {q} lost"
+					));
+				}
+			}
+		}
+	}
+	report.panicked.sort();
+	report.panicked.dedup();
+	report.deferred.sort();
+	report.deferred.dedup();
+	settle(property, report, floor);
+}
+
 fn check_invariant(
 	property: &str,
 	variant: fn(&Model) -> Option<Model>,
@@ -595,6 +640,16 @@ mod tests {
 			 engine:\n  {}",
 			drifted.join("\n  ")
 		);
+	}
+
+	#[test]
+	fn deleting_a_phase_boundary_never_loses_an_attack() {
+		check_monotone("dephase", variants_dephased, Strength::Stronger, 15);
+	}
+
+	#[test]
+	fn adding_a_session_never_loses_an_attack() {
+		check_sessions("sessions", 250);
 	}
 
 	#[test]
