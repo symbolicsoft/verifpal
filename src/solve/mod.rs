@@ -59,6 +59,25 @@ fn search_rounds(
 	principal_states: &[PrincipalState],
 	bound: &crate::reexec::TermBound,
 ) -> VResult<()> {
+	search_fixpoint(ctx, km, principal_states, bound, Search::Direct)?;
+	if ctx.all_resolved() || ctx.cancelled() {
+		return Ok(());
+	}
+	let before = ctx.attacker_known_count();
+	search_fixpoint(ctx, km, principal_states, bound, Search::Refined)?;
+	if ctx.attacker_known_count() != before && !ctx.all_resolved() {
+		search_fixpoint(ctx, km, principal_states, bound, Search::Direct)?;
+	}
+	Ok(())
+}
+
+fn search_fixpoint(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	principal_states: &[PrincipalState],
+	bound: &crate::reexec::TermBound,
+	search: Search,
+) -> VResult<()> {
 	loop {
 		if ctx.all_resolved() || ctx.cancelled() {
 			break;
@@ -66,14 +85,14 @@ fn search_rounds(
 		let before = ctx.attacker_known_count();
 
 		for ps in principal_states {
-			solve_principal(ctx, km, ps, Pass::Targeted, bound)?;
+			solve_principal(ctx, km, ps, Pass::Targeted, bound, search)?;
 			if ctx.all_resolved() {
 				break;
 			}
 		}
 		if !ctx.all_resolved() {
 			for ps in principal_states {
-				solve_principal(ctx, km, ps, Pass::Constructed, bound)?;
+				solve_principal(ctx, km, ps, Pass::Constructed, bound, search)?;
 				if ctx.all_resolved() {
 					break;
 				}
@@ -84,6 +103,12 @@ fn search_rounds(
 		}
 	}
 	Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Search {
+	Direct,
+	Refined,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -107,6 +132,7 @@ fn solve_principal(
 	ps: &PrincipalState,
 	pass: Pass,
 	bound: &crate::reexec::TermBound,
+	search: Search,
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
@@ -114,10 +140,64 @@ fn solve_principal(
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
+	if search == Search::Direct || pass != Pass::Targeted {
+		return solve_with(ctx, km, ps, pass, bound, &attacker, &controllable, &sym);
+	}
+	for honest in slots_blocking_reduction(&sym) {
+		if ctx.all_resolved() || ctx.cancelled() {
+			return Ok(());
+		}
+		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, Some(honest));
+		if !refined.var_slots.is_empty() {
+			solve_with(ctx, km, ps, pass, bound, &attacker, &controllable, &refined)?;
+		}
+	}
+	Ok(())
+}
+
+fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<usize> {
+	let mut out: Vec<usize> = Vec::new();
+	for term in &sym.terms {
+		collect_blocking_slots(term, &mut out);
+	}
+	out.sort();
+	out.dedup();
+	out
+}
+
+fn collect_blocking_slots(v: &Value, out: &mut Vec<usize>) {
+	let Value::Primitive(p) = v else {
+		return;
+	};
+	if let Ok(spec) = crate::primitive::primitive_get(p.id)
+		&& spec.rewrite.has_rule
+		&& !crate::theory::can_rewrite(p).0
+		&& let Some(Value::Constant(c)) = p.arguments.get(spec.rewrite.from)
+		&& vars::is_attacker_var_id(c.id)
+		&& !vars::is_free_var_id(c.id)
+	{
+		out.push((c.id - vars::ATTACKER_VAR_BASE) as usize);
+	}
+	for a in &p.arguments {
+		collect_blocking_slots(a, out);
+	}
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_with(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	pass: Pass,
+	bound: &crate::reexec::TermBound,
+	attacker: &AttackerState,
+	controllable: &crate::reexec::Controllable,
+	sym: &SymbolicState,
+) -> VResult<()> {
 	#[cfg(test)]
 	ctx.note_search_reached_a_controllable_slot();
 
-	let deducer = Deducer::new(ps, &attacker, &sym);
+	let deducer = Deducer::new(ps, attacker, sym);
 	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
@@ -129,20 +209,20 @@ fn solve_principal(
 		for query in std::iter::once(&result.query).chain(result.variants.iter()) {
 			#[cfg(test)]
 			ctx.goals_noted(result.query_index, 1);
-			proposals.extend(goals_for_query(query, km, ps, &sym, &deducer, &empty));
+			proposals.extend(goals_for_query(query, km, ps, sym, &deducer, &empty));
 		}
 	}
 
 	if pass == Pass::Targeted {
-		proposals.extend(deducer.constraint_goals(&sym, &empty));
+		proposals.extend(deducer.constraint_goals(sym, &empty));
 	}
 
-	let blanket = blanket_substitution(&sym);
+	let blanket = blanket_substitution(sym);
 	if pass == Pass::Targeted && !blanket.is_empty() {
 		proposals.push(blanket.clone());
 
 		for &slot in &sym.var_slots {
-			let single = slot_substitution(&sym, slot);
+			let single = slot_substitution(sym, slot);
 			if !single.is_empty() {
 				proposals.push(single);
 			}
@@ -150,17 +230,17 @@ fn solve_principal(
 	}
 
 	if pass == Pass::Constructed {
-		proposals.extend(sibling_flight_substitutions(km, ps, &sym));
-		let relayed = relay_substitution(km, ps, &sym);
+		proposals.extend(sibling_flight_substitutions(km, ps, sym));
+		let relayed = relay_substitution(km, ps, sym);
 		let protocol = protocol_terms(km, ps);
 		for &slot in &sym.var_slots {
 			let Some(meta) = ps.meta.get(slot) else {
 				continue;
 			};
 			let honest = resolve_trace_constant(&meta.constant, km);
-			for candidate in slot_candidates(
-				&attacker, &sym, &deducer, &protocol, &honest, &blanket, slot,
-			) {
+			for candidate in
+				slot_candidates(attacker, sym, &deducer, &protocol, &honest, &blanket, slot)
+			{
 				let var_id = vars::attacker_var_id(slot);
 				let mut alone = Substitution::default();
 				alone.insert(var_id, candidate.clone());
@@ -183,7 +263,7 @@ fn solve_principal(
 	{
 		let distinguished: Vec<Substitution> = proposals
 			.iter()
-			.filter_map(|proposal| diverge::distinguish(&sym, proposal))
+			.filter_map(|proposal| diverge::distinguish(sym, proposal))
 			.collect();
 		proposals.extend(distinguished);
 	}
@@ -195,7 +275,7 @@ fn solve_principal(
 		if ctx.all_resolved() || ctx.cancelled() {
 			break;
 		}
-		let signature = install_signature(&sym, &proposal);
+		let signature = install_signature(sym, &proposal);
 		let key = signature_hash(&signature);
 		let bucket = buckets.entry(key).or_default();
 		if bucket.iter().any(|&i| seen[i] == signature) {
@@ -204,7 +284,7 @@ fn solve_principal(
 		bucket.push(seen.len());
 		seen.push(signature);
 		let guards = crate::reexec::Guards {
-			controllable: &controllable,
+			controllable,
 			bound,
 		};
 		checked += 1;
@@ -221,8 +301,8 @@ fn solve_principal(
 				),
 			)
 		});
-		let ran = validate::validate(ctx, km, ps, &sym, &guards, &attacker, &proposal)?;
-		trace_proposal(ps, &sym, &proposal, ran);
+		let ran = validate::validate(ctx, km, ps, sym, &guards, attacker, &proposal)?;
+		trace_proposal(ps, sym, &proposal, ran);
 	}
 	Ok(())
 }

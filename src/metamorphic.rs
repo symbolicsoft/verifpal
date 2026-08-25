@@ -12,15 +12,7 @@ const ANALYSIS_BUDGET: std::time::Duration = std::time::Duration::from_millis(20
 
 const DEFERRED_CEILING: usize = 60;
 
-const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 1] = [(
-	"exa.vp",
-	"unguard",
-	"unguarding msg2 makes P3's clear = AEAD_DEC(k2, $msg2, c) irreducible in \
-	 symbolic::build, so the goal that produces msg1=c is never generated and the \
-	 decryption-oracle attack is lost. The winning substitution never touches msg2, \
-	 so the attack is still available; the search stops being able to reason its \
-	 way to it once the slot becomes a variable.",
-)];
+const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 0] = [];
 
 const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
 	("passive_dh_chain.vp", "promote"),

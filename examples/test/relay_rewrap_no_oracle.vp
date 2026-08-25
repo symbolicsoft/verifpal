@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — relay_rewrap_oracle.vp with the answer withheld. Client still
+// recovers a key from what Relay forwarded and still opens whatever Server
+// sent, but it keeps the result, so there is nothing for the attacker to read.
+//
+// This is the counterweight to the refinement search. Building an abstraction
+// in which a slot holds its honest value hands the solver more terms to reason
+// about, and the hazard is that it starts deriving values the attacker cannot
+// actually obtain. Every proposal still goes through the validator's own
+// derivability proof, and this model is what says so: the same relay shape,
+// the same reachable slots, and no attack.
+
+attacker[active]
+
+principal Server[
+	knows private storage_key
+	knows private document
+	knows public label
+	wrapping = AEAD_ENC(storage_key, label, label)
+	sealed_doc = AEAD_ENC(wrapping, document, label)
+	rewrap_request = AEAD_ENC(AEAD_ENC(storage_key, sealed_doc, label), label, label)
+]
+
+Server -> Relay: sealed_doc
+
+principal Relay[
+	knows private storage_key
+	knows private relay_key
+	knows public label
+	forwarded = AEAD_ENC(relay_key, AEAD_ENC(storage_key, sealed_doc, label), label)
+]
+
+Relay -> Client: forwarded
+
+Server -> Client: rewrap_request
+
+principal Client[
+	knows private relay_key
+	knows public label
+	recovered = AEAD_DEC(relay_key, forwarded, label)?
+	opened = AEAD_DEC(recovered, rewrap_request, label)?
+	_ = HASH(opened)
+]
+
+queries[
+	confidentiality? document
+]
