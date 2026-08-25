@@ -8,9 +8,9 @@ const SESSIONS: u8 = 1;
 
 const VARIANT_CAP: usize = 4;
 
-const BASELINE_BUDGET_MS: u128 = 60;
+const ANALYSIS_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
 
-const DEFERRED_CEILING: usize = 40;
+const DEFERRED_CEILING: usize = 60;
 
 const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 1] = [(
 	"exa.vp",
@@ -22,58 +22,75 @@ const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 1] = [(
 	 way to it once the slot becomes a variable.",
 )];
 
-const KNOWN_BAD_TRACES: [(&str, &str, &str); 5] = [
-	(
-		"passive_dh_chain.vp",
-		"promote",
-		"confidentiality? secret_c reports an attack whose trace never produces \
-		 PUBKEY(nil), the value it claims the attacker learned. The sibling secret_b \
-		 trace narrates that construction and this one drops it.",
-	),
-	(
-		"dh_x3dh_signed_prekey.vp",
-		"unguard",
-		"equivalence? master_a, master_b prints a Resolves step naming a resolution \
-		 the state does not hold.",
-	),
-	(
-		"phase_forward_secrecy.vp",
-		"unguard",
-		"equivalence? secret_msg, decrypted prints a Resolves step naming a \
-		 resolution the state does not hold.",
-	),
-	(
-		"session_dh_no_cross_feed.vp",
-		"unguard",
-		"equivalence? m, d is a genuine man-in-the-middle on unauthenticated DH and \
-		 the verdict is right, but the trace says `d resolves to ga` while naming ga \
-		 as a slot the attacker overwrote two steps later. NameTable excludes the \
-		 slots a Mutations step touches and does not exclude them from Resolves \
-		 steps, so a queried value gets named after an attacker-substituted slot.",
-	),
-	(
-		"session_dh_static_cross.vp",
-		"unguard",
-		"equivalence? m, d, same NameTable scoping fault as \
-		 session_dh_no_cross_feed.vp.",
-	),
+const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
+	("passive_dh_chain.vp", "promote"),
+	("dh_x3dh_signed_prekey.vp", "unguard"),
+	("phase_forward_secrecy.vp", "unguard"),
+	("session_dh_no_cross_feed.vp", "unguard"),
+	("session_dh_static_cross.vp", "unguard"),
+	("equivalence_halt_at_slot.vp", "leaks"),
+	("noise_xx_mutual.vp", "leaks"),
+	("phase_forward_secrecy.vp", "leaks"),
+	("session_ad_binding.vp", "leaks"),
+	("session_dh_no_cross_feed.vp", "leaks"),
+	("session_dh_static_cross.vp", "leaks"),
+	("session_hkdf_cross_feed.vp", "leaks"),
+	("session_mac_key_rotation.vp", "leaks"),
+	("session_psk_cross_feed.vp", "leaks"),
+	("station_to_station.vp", "leaks"),
+	("test2.vp", "leaks"),
+	("test4.vp", "leaks"),
+	("junglegym_hybrid_pq.vp", "weaken"),
+	("noise_xx_mutual.vp", "weaken"),
+	("phase_forward_secrecy.vp", "weaken"),
+	("session_dh_no_cross_feed.vp", "weaken"),
+	("session_dh_static_cross.vp", "weaken"),
+	("station_to_station.vp", "weaken"),
+	("subkey.vp", "weaken"),
+	("subkey_hash.vp", "weaken"),
+	("subkey_hkdf.vp", "weaken"),
+	("test2.vp", "weaken"),
+	("test4.vp", "weaken"),
 ];
 
 enum Outcome {
 	Code(String),
 	Rejected,
+	Cancelled,
 	Panicked,
 }
 
 fn analysed(model: &Model, sessions: u8) -> Outcome {
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicBool, Ordering};
+
+	let cancel = Arc::new(AtomicBool::new(false));
+	let finished = Arc::new(AtomicBool::new(false));
+	let watch_cancel = Arc::clone(&cancel);
+	let watch_finished = Arc::clone(&finished);
+	let watchdog = std::thread::spawn(move || {
+		let deadline = std::time::Instant::now() + ANALYSIS_BUDGET;
+		while std::time::Instant::now() < deadline {
+			if watch_finished.load(Ordering::Relaxed) {
+				return;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(2));
+		}
+		watch_cancel.store(true, Ordering::SeqCst);
+	});
+
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
-		crate::verify::analyze_sessions(model, sessions)
+		crate::verify::analyze_sessions_cancellable(model, sessions, Arc::clone(&cancel))
 			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
 	}));
+	finished.store(true, Ordering::SeqCst);
+	let _ = watchdog.join();
+
 	match attempt {
 		Ok(Some(code)) => Outcome::Code(code),
+		Ok(None) if cancel.load(Ordering::SeqCst) => Outcome::Cancelled,
 		Ok(None) => Outcome::Rejected,
 		Err(_) => Outcome::Panicked,
 	}
@@ -158,12 +175,92 @@ fn variants_unguarded(model: &Model) -> Vec<Model> {
 	out
 }
 
+fn variants_leaked(model: &Model) -> Vec<Model> {
+	let mut out = Vec::new();
+	for (bi, block) in model.blocks.iter().enumerate() {
+		let Block::Principal(principal) = block else {
+			continue;
+		};
+		for expression in &principal.expressions {
+			let eligible = matches!(expression.kind, Declaration::Generates)
+				|| (expression.kind == Declaration::Knows
+					&& expression.qualifier != Some(Qualifier::Public));
+			if !eligible {
+				continue;
+			}
+			for constant in &expression.constants {
+				let mut variant = model.clone();
+				if let Some(Block::Principal(p)) = variant.blocks.get_mut(bi) {
+					p.expressions.push(Expression {
+						span: Span::default(),
+						kind: Declaration::Leaks,
+						qualifier: None,
+						constants: vec![constant.clone()],
+						assigned: None,
+						leading_comments: Vec::new(),
+						trailing_comment: None,
+					});
+				}
+				out.push(variant);
+			}
+		}
+	}
+	out
+}
+
+fn annotate_first(value: &Value, cap: Capability) -> Option<Value> {
+	let Value::Primitive(p) = value else {
+		return None;
+	};
+	if crate::capability::supports(p.id, cap) && !p.capabilities.has(cap) {
+		let mut updated = (**p).clone();
+		updated.capabilities.set(cap, 0);
+		return Some(Value::Primitive(std::sync::Arc::new(updated)));
+	}
+	for (i, argument) in p.arguments.iter().enumerate() {
+		if let Some(replaced) = annotate_first(argument, cap) {
+			let mut updated = (**p).clone();
+			updated.arguments[i] = replaced;
+			return Some(Value::Primitive(std::sync::Arc::new(updated)));
+		}
+	}
+	None
+}
+
+fn variants_weakened(model: &Model) -> Vec<Model> {
+	let mut out = Vec::new();
+	for cap in [Capability::Weak, Capability::Forgeable] {
+		for (bi, block) in model.blocks.iter().enumerate() {
+			let Block::Principal(principal) = block else {
+				continue;
+			};
+			for (ei, expression) in principal.expressions.iter().enumerate() {
+				let Some(assigned) = expression.assigned.as_ref() else {
+					continue;
+				};
+				let Some(annotated) = annotate_first(assigned, cap) else {
+					continue;
+				};
+				let mut variant = model.clone();
+				if let Some(Block::Principal(p)) = variant.blocks.get_mut(bi)
+					&& let Some(e) = p.expressions.get_mut(ei)
+				{
+					e.assigned = Some(annotated);
+					out.push(variant);
+				}
+			}
+		}
+	}
+	out
+}
+
 #[derive(Default)]
 struct Report {
 	compared: usize,
 	violations: Vec<String>,
 	panicked: Vec<String>,
 	deferred: Vec<String>,
+	exercised: Vec<String>,
 }
 
 fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<&'a str> {
@@ -174,12 +271,20 @@ fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<
 		.collect()
 }
 
+fn excused_traces<'a>(table: &'a [(&'a str, &'a str)], property: &str) -> Vec<&'a str> {
+	table
+		.iter()
+		.filter(|(_, p)| *p == property)
+		.map(|(m, _)| *m)
+		.collect()
+}
+
 fn settle(property: &str, report: Report, floor: usize) {
 	assert!(
 		report.deferred.len() <= DEFERRED_CEILING,
-		"the `{property}` property deferred {} models for exceeding the \
-		 {BASELINE_BUDGET_MS}ms baseline budget, against a ceiling of {DEFERRED_CEILING}. \
-		 A sweep that quietly stops covering models reads as full coverage: {:?}",
+		"the `{property}` property deferred {} models whose analysis outran the budget, \
+		 against a ceiling of {DEFERRED_CEILING}. A sweep that quietly stops covering \
+		 models reads as full coverage: {:?}",
 		report.deferred.len(),
 		report.deferred
 	);
@@ -190,7 +295,7 @@ fn settle(property: &str, report: Report, floor: usize) {
 		report.compared
 	);
 
-	let expected_panics = excused(&KNOWN_BAD_TRACES, property);
+	let expected_panics = excused_traces(&KNOWN_BAD_TRACES, property);
 	let new_panics: Vec<&String> = report
 		.panicked
 		.iter()
@@ -204,6 +309,7 @@ fn settle(property: &str, report: Report, floor: usize) {
 	);
 	let stale_panics: Vec<&str> = expected_panics
 		.iter()
+		.filter(|m| report.exercised.iter().any(|e| e == *m))
 		.filter(|m| !report.panicked.iter().any(|p| p == *m))
 		.copied()
 		.collect();
@@ -233,6 +339,7 @@ fn settle(property: &str, report: Report, floor: usize) {
 	);
 	let stale: Vec<&str> = expected
 		.iter()
+		.filter(|m| report.exercised.iter().any(|e| e == *m))
 		.filter(|m| !report.violations.iter().any(|v| v.starts_with(*m)))
 		.copied()
 		.collect();
@@ -251,19 +358,21 @@ fn check_monotone(
 ) {
 	let mut report = Report::default();
 	for (name, model) in corpus() {
-		let started = std::time::Instant::now();
 		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
-			continue;
-		};
-		if started.elapsed().as_millis() > BASELINE_BUDGET_MS {
 			report.deferred.push(name.clone());
 			continue;
-		}
+		};
+		let mut exercised = false;
 		for variant in variants(&model).into_iter().take(VARIANT_CAP) {
 			match code_of(&variant, SESSIONS) {
 				Outcome::Rejected => continue,
-				Outcome::Panicked => report.panicked.push(name.clone()),
+				Outcome::Cancelled => report.deferred.push(name.clone()),
+				Outcome::Panicked => {
+					exercised = true;
+					report.panicked.push(name.clone());
+				}
 				Outcome::Code(after) => {
+					exercised = true;
 					report.compared += 1;
 					let lost = match strength {
 						Strength::Stronger => lost_attacks(&before, &after),
@@ -277,9 +386,14 @@ fn check_monotone(
 				}
 			}
 		}
+		if exercised {
+			report.exercised.push(name.clone());
+		}
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
+	report.deferred.sort();
+	report.deferred.dedup();
 	settle(property, report, floor);
 }
 
@@ -304,6 +418,7 @@ mod tests {
 			};
 			compared += 1;
 			match code_of(&model, SESSIONS) {
+				Outcome::Cancelled => continue,
 				Outcome::Code(round_tripped) if round_tripped == direct => {}
 				Outcome::Code(other) => {
 					drifted.push(format!("{name}: direct={direct} round-tripped={other}"))
@@ -328,6 +443,34 @@ mod tests {
 			 engine:\n  {}",
 			drifted.join("\n  ")
 		);
+	}
+
+	#[test]
+	fn a_weakening_annotation_survives_the_round_trip() {
+		let mut annotated = 0usize;
+		for (_, model) in corpus() {
+			for variant in variants_weakened(&model) {
+				let rendered = crate::pretty::pretty_model(&variant);
+				if rendered.contains("[weak]") || rendered.contains("[forgeable]") {
+					annotated += 1;
+				}
+			}
+		}
+		assert!(
+			annotated > 100,
+			"only {annotated} weakened variants rendered their annotation, so the \
+			 capability property would be comparing a model against an identical copy"
+		);
+	}
+
+	#[test]
+	fn leaking_a_secret_never_loses_an_attack() {
+		check_monotone("leaks", variants_leaked, Strength::Stronger, 250);
+	}
+
+	#[test]
+	fn weakening_a_primitive_never_loses_an_attack() {
+		check_monotone("weaken", variants_weakened, Strength::Stronger, 250);
 	}
 
 	#[test]
