@@ -1,12 +1,12 @@
 {
-    "version": "1.2.1",
+    "version": "1.2.2",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.2.1/verifpal_1.2.1_windows_amd64.zip",
+            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.2.2/verifpal_1.2.2_windows_amd64.zip",
             "bin": [
-                "verifpal_1.2.1_windows_amd64/verifpal.exe"
+                "verifpal_1.2.2_windows_amd64/verifpal.exe"
             ],
-            "hash": "62026a21c54c7e4946020fa87d3eb7e7501d1f9b4460ed53c369898f814d2f58"
+            "hash": "8d5761a1e444c51cec1abc36b85f6348f3fcd30b991b665b5f68fe455d5253c7"
         }
     },
     "homepage": "https://verifpal.com",
