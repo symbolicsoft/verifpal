@@ -225,6 +225,57 @@ struct Report {
 	ran: Vec<String>,
 }
 
+impl Report {
+	fn absorb(&mut self, other: Report) {
+		self.compared += other.compared;
+		self.violations.extend(other.violations);
+		self.panicked.extend(other.panicked);
+		self.ran.extend(other.ran);
+	}
+}
+
+fn spread<T, R>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R>
+where
+	T: Sync,
+	R: Send,
+{
+	use std::sync::atomic::{AtomicUsize, Ordering};
+
+	if items.is_empty() {
+		return Vec::new();
+	}
+	let workers = std::thread::available_parallelism()
+		.map(|p| p.get())
+		.unwrap_or(1)
+		.min(items.len());
+	let next = AtomicUsize::new(0);
+	let work = &work;
+	let next = &next;
+	let mut collected: Vec<(usize, R)> = std::thread::scope(|scope| {
+		let handles: Vec<_> = (0..workers)
+			.map(|_| {
+				scope.spawn(move || {
+					let mut mine = Vec::new();
+					loop {
+						let i = next.fetch_add(1, Ordering::Relaxed);
+						if i >= items.len() {
+							break;
+						}
+						mine.push((i, work(&items[i])));
+					}
+					mine
+				})
+			})
+			.collect();
+		handles
+			.into_iter()
+			.flat_map(|h| h.join().expect("metamorphic worker"))
+			.collect()
+	});
+	collected.sort_by_key(|(i, _)| *i);
+	collected.into_iter().map(|(_, r)| r).collect()
+}
+
 fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<&'a str> {
 	table
 		.iter()
@@ -366,27 +417,33 @@ fn variants_dephased(model: &Model) -> Vec<Model> {
 }
 
 fn check_sessions(property: &str, floor: usize) {
-	let mut report = Report::default();
-	for (name, model) in corpus() {
-		let Outcome::Code(one) = code_of(&model, 1) else {
-			continue;
+	let models = corpus();
+	let parts = spread(&models, |(name, model)| {
+		let mut local = Report::default();
+		let Outcome::Code(one) = code_of(model, 1) else {
+			return local;
 		};
-		match code_of(&model, 2) {
-			Outcome::Rejected => continue,
+		match code_of(model, 2) {
+			Outcome::Rejected => {}
 			Outcome::Panicked => {
-				report.ran.push(name.clone());
-				report.panicked.push(name.clone());
+				local.ran.push(name.clone());
+				local.panicked.push(name.clone());
 			}
 			Outcome::Code(two) => {
-				report.ran.push(name.clone());
-				report.compared += 1;
+				local.ran.push(name.clone());
+				local.compared += 1;
 				for q in lost_attacks(&one, &two) {
-					report.violations.push(format!(
+					local.violations.push(format!(
 						"{name}: sessions=1 {one}, sessions=2 {two}, query {q} lost"
 					));
 				}
 			}
 		}
+		local
+	});
+	let mut report = Report::default();
+	for part in parts {
+		report.absorb(part);
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
@@ -399,31 +456,37 @@ fn check_invariant(
 	expected: fn(&str) -> String,
 	floor: usize,
 ) {
-	let mut report = Report::default();
-	for (name, model) in corpus() {
-		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
-			continue;
+	let models = corpus();
+	let parts = spread(&models, |(name, model)| {
+		let mut local = Report::default();
+		let Outcome::Code(before) = code_of(model, SESSIONS) else {
+			return local;
 		};
-		let Some(transformed) = variant(&model) else {
-			continue;
+		let Some(transformed) = variant(model) else {
+			return local;
 		};
 		match code_of(&transformed, SESSIONS) {
-			Outcome::Rejected => continue,
+			Outcome::Rejected => {}
 			Outcome::Panicked => {
-				report.ran.push(name.clone());
-				report.panicked.push(name.clone());
+				local.ran.push(name.clone());
+				local.panicked.push(name.clone());
 			}
 			Outcome::Code(after) => {
-				report.ran.push(name.clone());
-				report.compared += 1;
+				local.ran.push(name.clone());
+				local.compared += 1;
 				let want = expected(&before);
 				if after != want {
-					report.violations.push(format!(
+					local.violations.push(format!(
 						"{name}: original={before} variant={after} expected={want}"
 					));
 				}
 			}
 		}
+		local
+	});
+	let mut report = Report::default();
+	for part in parts {
+		report.absorb(part);
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
@@ -499,28 +562,29 @@ fn check_monotone(
 	strength: Strength,
 	floor: usize,
 ) {
-	let mut report = Report::default();
-	for (name, model) in corpus() {
-		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
-			continue;
+	let models = corpus();
+	let parts = spread(&models, |(name, model)| {
+		let mut local = Report::default();
+		let Outcome::Code(before) = code_of(model, SESSIONS) else {
+			return local;
 		};
 		let mut ran = false;
-		for variant in variants(&model) {
+		for variant in variants(model) {
 			match code_of(&variant, SESSIONS) {
 				Outcome::Rejected => continue,
 				Outcome::Panicked => {
 					ran = true;
-					report.panicked.push(name.clone());
+					local.panicked.push(name.clone());
 				}
 				Outcome::Code(after) => {
 					ran = true;
-					report.compared += 1;
+					local.compared += 1;
 					let lost = match strength {
 						Strength::Stronger => lost_attacks(&before, &after),
 						Strength::Weaker => lost_attacks(&after, &before),
 					};
 					for q in lost {
-						report.violations.push(format!(
+						local.violations.push(format!(
 							"{name}: before={before} after={after}, query {q} lost"
 						));
 					}
@@ -528,8 +592,13 @@ fn check_monotone(
 			}
 		}
 		if ran {
-			report.ran.push(name.clone());
+			local.ran.push(name.clone());
 		}
+		local
+	});
+	let mut report = Report::default();
+	for part in parts {
+		report.absorb(part);
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
@@ -549,26 +618,27 @@ mod tests {
 
 	#[test]
 	fn rendering_and_reparsing_a_model_preserves_every_verdict() {
-		let mut drifted = Vec::new();
-		let mut compared = 0usize;
-		for (name, model) in corpus() {
-			let Outcome::Code(direct) = analysed(&model, SESSIONS) else {
-				continue;
+		let models = corpus();
+		let parts = spread(&models, |(name, model)| {
+			let Outcome::Code(direct) = analysed(model, SESSIONS) else {
+				return (0usize, None);
 			};
-			compared += 1;
-			match code_of(&model, SESSIONS) {
-				Outcome::Code(round_tripped) if round_tripped == direct => {}
+			let drift = match code_of(model, SESSIONS) {
+				Outcome::Code(round_tripped) if round_tripped == direct => None,
 				Outcome::Code(other) => {
-					drifted.push(format!("{name}: direct={direct} round-tripped={other}"))
+					Some(format!("{name}: direct={direct} round-tripped={other}"))
 				}
-				Outcome::Rejected => drifted.push(format!(
+				Outcome::Rejected => Some(format!(
 					"{name}: direct={direct} but the render did not parse"
 				)),
 				Outcome::Panicked => {
-					drifted.push(format!("{name}: direct={direct} but the render panicked"))
+					Some(format!("{name}: direct={direct} but the render panicked"))
 				}
-			}
-		}
+			};
+			(1usize, drift)
+		});
+		let compared: usize = parts.iter().map(|(c, _)| c).sum();
+		let drifted: Vec<String> = parts.into_iter().filter_map(|(_, d)| d).collect();
 		assert!(
 			compared > 300,
 			"only {compared} models reached the comparison, so this test is passing \
