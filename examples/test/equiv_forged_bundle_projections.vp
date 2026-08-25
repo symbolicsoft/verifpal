@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1 — the two halves of a bundle agree honestly, and the attacker
+// pulls them apart by sending a bundle whose halves are different. Nothing
+// here is secret and nothing is forged: CONCAT is a public constructor, the
+// wire is unguarded, and Bob's SPLIT accepts any bundle at all.
+//
+// This is the shape the search used to miss. The solver mints one free
+// variable per projection when it makes Bob's SPLIT succeed — they are
+// independent attacker choices and it says so — and materialisation then
+// filled every one of them with `nil`, which is the single assignment that
+// cannot make two projections disagree. The bundle is not a protocol term
+// either, so nothing in attacker knowledge offered it. See
+// equiv_sealed_bundle_holds.vp for the counterweight.
+
+attacker[active]
+
+principal Alice[
+	generates n
+	bundle = CONCAT(n, n)
+]
+
+Alice -> Bob: bundle
+
+principal Bob[
+	left, right = SPLIT(bundle)?
+	_ = HASH(left, right)
+]
+
+queries[
+	equivalence? left, right
+]

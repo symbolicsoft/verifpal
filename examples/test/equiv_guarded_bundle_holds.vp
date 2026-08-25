@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0 — equiv_forged_bundle_projections.vp with the wire guarded.
+// The bundle Bob projects is the bundle Alice packed, so its halves agree.
+//
+// The two models differ by one pair of brackets and by one bit of result
+// code, which is the cheapest available check that the divergence search is
+// still asking whether the attacker may touch the slot before asking what it
+// would put there.
+
+attacker[active]
+
+principal Alice[
+	generates n
+	bundle = CONCAT(n, n)
+]
+
+Alice -> Bob: [bundle]
+
+principal Bob[
+	left, right = SPLIT(bundle)?
+	_ = HASH(left, right)
+]
+
+queries[
+	equivalence? left, right
+]

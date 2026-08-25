@@ -286,6 +286,18 @@ mod tests {
 	}
 
 	#[test]
+	fn every_divergence_filler_is_derivable_with_no_attacker_knowledge() {
+		let attacker = make_attacker_state(vec![]);
+		for filler in crate::solve::diverge::fillers() {
+			assert!(
+				derivable(&filler, &empty_state(), &attacker),
+				"{filler} is offered as a divergence filler but the validator cannot build \
+				 it, so every proposal carrying it is discarded and the rule never fires"
+			);
+		}
+	}
+
+	#[test]
 	fn derivable_rejects_a_forgery_under_an_unheld_key() {
 		let sk = make_constant("der_sk");
 		let m = make_constant("der_msg");

@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1e1e1 — the same divergence at five fields, queried across
+// non-adjacent pairs.
+//
+// This is the model that holds the filler ladder to being injective rather
+// than merely plural. Two fillers alternated by position separate f1 from f2
+// and would report e1 for an adjacent pair, but f1 and f4 land on the same
+// parity and f2 and f5 do too, so both of the first two queries would go back
+// to e0 while a two-field model kept passing. Every free position must get a
+// value of its own. The third query is the three-constant path: equivalence
+// asks whether they ALL agree, so one field out of line is enough.
+
+attacker[active]
+
+principal Alice[
+	generates n
+	bundle = CONCAT(n, n, n, n, n)
+]
+
+Alice -> Bob: bundle
+
+principal Bob[
+	f1, f2, f3, f4, f5 = SPLIT(bundle)?
+	_ = HASH(f1, f2, f3, f4, f5)
+]
+
+queries[
+	equivalence? f1, f4
+	equivalence? f2, f5
+	equivalence? f1, f2, f3
+]

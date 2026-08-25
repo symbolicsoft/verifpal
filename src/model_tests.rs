@@ -1702,6 +1702,34 @@ fn test_equiv_shamir_all_pairs() {
 	run_model("equiv_shamir_all_pairs.vp", "e0e0e1");
 }
 #[test]
+fn test_equiv_forged_bundle_projections() {
+	run_model("equiv_forged_bundle_projections.vp", "e1");
+}
+#[test]
+fn test_equiv_forged_bundle_far_fields() {
+	run_model_sessions("equiv_forged_bundle_far_fields.vp", 1, "e1e1e1");
+}
+#[test]
+fn test_equiv_forged_bundle_far_fields_two_sessions() {
+	run_model_sessions("equiv_forged_bundle_far_fields.vp", 2, "e1e1e1");
+}
+#[test]
+fn test_equiv_forged_bundle_leaked_key() {
+	run_model("equiv_forged_bundle_leaked_key.vp", "c1e1");
+}
+#[test]
+fn test_equiv_sealed_bundle_holds() {
+	run_model("equiv_sealed_bundle_holds.vp", "c0e0");
+}
+#[test]
+fn test_equiv_guarded_bundle_holds() {
+	run_model("equiv_guarded_bundle_holds.vp", "e0");
+}
+#[test]
+fn test_unlink_forged_bundle_not_a_link() {
+	run_model("unlink_forged_bundle_not_a_link.vp", "u0e1");
+}
+#[test]
 fn test_equiv_three_constants() {
 	run_model("equiv_three_constants.vp", "e0e1e0");
 }

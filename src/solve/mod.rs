@@ -121,7 +121,8 @@ fn solve_principal(
 	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
-	for result in ctx.results_get() {
+	let results = ctx.results_get();
+	for result in &results {
 		if result.resolved || pass != Pass::Targeted {
 			continue;
 		}
@@ -174,6 +175,17 @@ fn solve_principal(
 				proposals.push(with_relay);
 			}
 		}
+	}
+
+	if results
+		.iter()
+		.any(|r| !r.resolved && r.query.kind == QueryKind::Equivalence)
+	{
+		let distinguished: Vec<Substitution> = proposals
+			.iter()
+			.filter_map(|proposal| diverge::distinguish(&sym, proposal))
+			.collect();
+		proposals.extend(distinguished);
 	}
 
 	let mut seen: Vec<Vec<(usize, u64)>> = Vec::new();

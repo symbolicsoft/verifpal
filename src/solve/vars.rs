@@ -54,6 +54,21 @@ pub(crate) fn contains_var(v: &Value) -> bool {
 	}
 }
 
+pub(crate) fn collect_free_vars(v: &Value, out: &mut Vec<ValueId>) {
+	match v {
+		Value::Constant(c) => {
+			if is_free_var_id(c.id) && !out.contains(&c.id) {
+				out.push(c.id);
+			}
+		}
+		Value::Primitive(p) => {
+			for a in &p.arguments {
+				collect_free_vars(a, out);
+			}
+		}
+	}
+}
+
 pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
 	match v {
 		Value::Constant(c) => {

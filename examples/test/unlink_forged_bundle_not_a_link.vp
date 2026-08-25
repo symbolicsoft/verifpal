@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0e1 — the dual hazard, in one model. The fields disagree
+// honestly, so the equivalence query fails on its own and the search is
+// distinguishing free positions throughout the run.
+//
+// While it does, the attacker may install a bundle whose two fields are the
+// SAME value, which would make `left` and `right` observably equal. That
+// equality is the attacker's own doing and links nothing: unlinkability must
+// stay u0. `find_link_witness` refuses an attacker-authored slot, and this is
+// the model that keeps that refusal load-bearing now that the search has a
+// reason to be filling both fields at once.
+
+attacker[active]
+
+principal Alice[
+	generates n
+	generates m
+	bundle = CONCAT(n, m)
+]
+
+Alice -> Bob: bundle
+
+principal Bob[
+	left, right = SPLIT(bundle)?
+	_ = HASH(left, right)
+]
+
+queries[
+	unlinkability? left, right
+	equivalence? left, right
+]

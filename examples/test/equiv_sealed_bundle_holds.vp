@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0e0 — equiv_forged_bundle_leaked_key.vp with the key kept. The
+// attacker may still replace the ciphertext with anything it likes, but
+// nothing it can build decrypts under a key it does not hold, so the fields
+// Bob projects are always Alice's own and always agree.
+//
+// This is the counterweight to the forged-bundle models: distinguishing the
+// free positions of a proposal must not become a way to conjure a bundle
+// under a key the attacker never learns. Every such proposal has to die in
+// the validator's own derivability check, and this model is what says so.
+
+attacker[active]
+
+principal Alice[
+	knows private wrapping_key
+	generates n
+	bundle = CONCAT(n, n)
+	sealed = ENC(wrapping_key, bundle)
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	knows private wrapping_key
+	left, right = SPLIT(DEC(wrapping_key, sealed))?
+	_ = HASH(left, right)
+]
+
+queries[
+	confidentiality? n
+	equivalence? left, right
+]

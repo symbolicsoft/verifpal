@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1e1 — the bundle is sealed, so pulling its fields apart means
+// building a whole ciphertext and not just a bundle. The key leaks, so the
+// attacker can, and the divergence has to survive being carried through a
+// construction the solver reached by inverting Bob's own DEC.
+//
+// Against equiv_sealed_bundle_holds.vp, which is this model with the `leaks`
+// line removed, this pins that the search distinguishes free positions
+// because the attacker can build the enclosing term, not because a SPLIT
+// happens to be reachable.
+
+attacker[active]
+
+principal Alice[
+	knows private wrapping_key
+	generates n
+	bundle = CONCAT(n, n)
+	sealed = ENC(wrapping_key, bundle)
+	leaks wrapping_key
+]
+
+Alice -> Bob: sealed
+
+principal Bob[
+	knows private wrapping_key
+	left, right = SPLIT(DEC(wrapping_key, sealed))?
+	_ = HASH(left, right)
+]
+
+queries[
+	confidentiality? n
+	equivalence? left, right
+]
