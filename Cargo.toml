@@ -1,6 +1,6 @@
 [package]
 name = "verifpal"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2024"
 rust-version = "1.98"
 license = "GPL-3.0-only"

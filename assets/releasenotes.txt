@@ -1,3 +1,9 @@
+Verifpal 1.2.3 fixes a completeness gap in Verifpal's active-attacker
+search for equivalence queries, reported by Mario Raso. In addition,
+this update used an AI-assisted review in order to identify areas where
+active-attacker search could be further hardened against potential
+future regressions. Finally, attack trace narration was further improved.
+
 Verifpal 1.2.2 adds an exciting new output format: HTML reports!
 Verifpal can now output highly informative, self-contained HTML reports
 that contain diagrams and other explanations of your analysis' results.
