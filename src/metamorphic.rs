@@ -38,36 +38,7 @@ impl Sweep {
 
 const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 0] = [];
 
-const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
-	("passive_dh_chain.vp", "promote"),
-	("dh_x3dh_signed_prekey.vp", "unguard"),
-	("phase_forward_secrecy.vp", "unguard"),
-	("session_dh_no_cross_feed.vp", "unguard"),
-	("session_dh_static_cross.vp", "unguard"),
-	("equivalence_halt_at_slot.vp", "leaks"),
-	("noise_xx_mutual.vp", "leaks"),
-	("phase_forward_secrecy.vp", "leaks"),
-	("session_ad_binding.vp", "leaks"),
-	("session_dh_no_cross_feed.vp", "leaks"),
-	("session_dh_static_cross.vp", "leaks"),
-	("session_hkdf_cross_feed.vp", "leaks"),
-	("session_mac_key_rotation.vp", "leaks"),
-	("session_psk_cross_feed.vp", "leaks"),
-	("station_to_station.vp", "leaks"),
-	("test2.vp", "leaks"),
-	("test4.vp", "leaks"),
-	("junglegym_hybrid_pq.vp", "weaken"),
-	("noise_xx_mutual.vp", "weaken"),
-	("phase_forward_secrecy.vp", "weaken"),
-	("session_dh_no_cross_feed.vp", "weaken"),
-	("session_dh_static_cross.vp", "weaken"),
-	("station_to_station.vp", "weaken"),
-	("subkey.vp", "weaken"),
-	("subkey_hash.vp", "weaken"),
-	("subkey_hkdf.vp", "weaken"),
-	("test2.vp", "weaken"),
-	("test4.vp", "weaken"),
-];
+const KNOWN_BAD_TRACES: [(&str, &str); 0] = [];
 
 enum Outcome {
 	Code(String),

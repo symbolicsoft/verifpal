@@ -1199,9 +1199,20 @@ impl DerivationRecord {
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using }
-			| DerivationRecord::Recomposed { of, using }
-			| DerivationRecord::Broken { of, using, .. } => {
+			| DerivationRecord::Recomposed { of, using } => {
 				let mut v = vec![of];
+				v.extend(using.iter());
+				v
+			}
+			DerivationRecord::Broken {
+				of,
+				using,
+				capability,
+			} => {
+				let mut v = Vec::new();
+				if *capability == Capability::Weak {
+					v.push(of);
+				}
 				v.extend(using.iter());
 				v
 			}

@@ -17,11 +17,13 @@ fn is_justified(
 	value: &Value,
 	produced: &[&Value],
 	installed: &[&Value],
+	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
 	if produced.iter().any(|v| v.equivalent(value, true))
 		|| installed.iter().any(|v| v.equivalent(value, true))
 		|| justified_without_a_step(attacker, value) == Some(true)
+		|| crate::theory::obtainable(value, ps, attacker)
 	{
 		return true;
 	}
@@ -29,12 +31,16 @@ fn is_justified(
 		Value::Primitive(p) => p
 			.arguments
 			.iter()
-			.all(|a| is_justified(a, produced, installed, attacker)),
+			.all(|a| is_justified(a, produced, installed, ps, attacker)),
 		Value::Constant(_) => false,
 	}
 }
 
-pub(crate) fn derivation_problems(steps: &[Step], attacker: &AttackerState) -> Vec<String> {
+pub(crate) fn derivation_problems(
+	steps: &[Step],
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Vec<String> {
 	let mut produced: Vec<&Value> = Vec::new();
 	let mut installed: Vec<&Value> = Vec::new();
 	let mut problems: Vec<String> = Vec::new();
@@ -59,7 +65,7 @@ pub(crate) fn derivation_problems(steps: &[Step], attacker: &AttackerState) -> V
 			continue;
 		};
 		for ingredient in ingredients {
-			if is_justified(ingredient, &produced, &installed, attacker) {
+			if is_justified(ingredient, &produced, &installed, ps, attacker) {
 				continue;
 			}
 			match justified_without_a_step(attacker, ingredient) {
@@ -310,13 +316,20 @@ pub(crate) fn step_problems(
 			},
 			DerivationRecord::Reconstructed { from } => match target {
 				Value::Primitive(p) => {
-					let swapped = crate::primitive::commutativity_swap(p);
-					let accounted = |f: &Value| {
-						p.arguments.iter().any(|a| a.equivalent(f, true))
-							|| swapped
-								.as_ref()
-								.is_some_and(|q| q.arguments.iter().any(|a| a.equivalent(f, true)))
-					};
+					let mut shapes: Vec<std::sync::Arc<Primitive>> = vec![p.clone()];
+					if let Some(q) = crate::primitive::commutativity_swap(p) {
+						shapes.push(std::sync::Arc::new(q));
+					}
+					let mut parts: Vec<Value> = Vec::new();
+					for shape in &shapes {
+						parts.extend(shape.arguments.iter().cloned());
+						if let (true, Value::Primitive(rewritten)) =
+							crate::theory::can_rewrite(shape)
+						{
+							parts.extend(rewritten.arguments.iter().cloned());
+						}
+					}
+					let accounted = |f: &Value| parts.iter().any(|a| a.equivalent(f, true));
 					let missing: Vec<String> = from
 						.iter()
 						.filter(|f| !accounted(f))
@@ -374,7 +387,7 @@ pub(crate) fn assert_trace_is_well_founded(t: &TraceUnderTest<'_>) {
 		target,
 		phase,
 	} = *t;
-	let mut problems = derivation_problems(steps, attacker);
+	let mut problems = derivation_problems(steps, ps, attacker);
 	problems.extend(step_problems(steps, km, ps, attacker, phase));
 	assert!(
 		problems.is_empty(),
@@ -505,7 +518,14 @@ mod tests {
 		let b = hashed(&a);
 		let steps = vec![derive(a.clone(), vec![]), derive(b, vec![a.clone()])];
 		let attacker = make_attacker_state(vec![a]);
-		assert!(derivation_problems(&steps, &attacker).is_empty());
+		assert!(
+			derivation_problems(
+				&steps,
+				&make_principal_state("TraceCheck", 0, vec![], vec![]),
+				&attacker
+			)
+			.is_empty()
+		);
 	}
 
 	#[test]
@@ -515,7 +535,11 @@ mod tests {
 		let out = hashed(&b);
 		let steps = vec![derive(out, vec![b])];
 		let attacker = make_attacker_state(vec![a]);
-		let problems = derivation_problems(&steps, &attacker);
+		let problems = derivation_problems(
+			&steps,
+			&make_principal_state("TraceCheck", 0, vec![], vec![]),
+			&attacker,
+		);
 		assert_eq!(problems.len(), 1, "{:?}", problems);
 		assert!(problems[0].contains("never held"), "{:?}", problems);
 	}
@@ -539,7 +563,14 @@ mod tests {
 			derive(out.clone(), vec![make_constant("tc_d")]),
 		];
 		let attacker = make_attacker_state(vec![]);
-		assert!(derivation_problems(&steps, &attacker).is_empty());
+		assert!(
+			derivation_problems(
+				&steps,
+				&make_principal_state("TraceCheck", 0, vec![], vec![]),
+				&attacker
+			)
+			.is_empty()
+		);
 		assert!(reaches(&steps, &out));
 	}
 }
