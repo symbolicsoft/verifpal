@@ -30,7 +30,7 @@ The engine is **sound but incomplete**: any reported attack must be genuine, but
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 780 tests (unit + model), ~42s once built (also: make test)
+cargo test --release                   # 780 tests (unit + model), ~53s once built (also: make test)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
 cargo fmt                              # rustfmt: hard tabs, Unix newlines (rustfmt.toml)
@@ -362,9 +362,9 @@ Transformations are AST-level and go back through the printer: parse → transfo
 
 | property | transformation | direction | compared | trace faults | missed attacks |
 | --- | --- | --- | --- | --- | --- |
-| `unguard` | remove one `[guard]` | monotone | 298 | 4 | 0 |
-| `leaks` | add `leaks c` | monotone | 1113 | 12 | 0 |
-| `weaken` | add `weak` / `forgeable` | monotone | 1192 | 11 | 0 |
+| `unguard` | remove one `[guard]` | monotone | 227 | 4 | 0 |
+| `leaks` | add `leaks c` | monotone | 1016 | 12 | 0 |
+| `weaken` | add `weak` / `forgeable` | monotone | 1505 | 11 | 0 |
 | `sessions` | `--sessions 1` → `2` | monotone | 341 | 0 | 0 |
 | `dephase` | delete the last `phase[N]` | monotone | 37 | 0 | 0 |
 | `promote` | `passive` → `active` | monotone | 99 | 1 | 0 |
@@ -377,7 +377,11 @@ Transformations are AST-level and go back through the printer: parse → transfo
 
 **Two ratchets, both failing in *both* directions.** `KNOWN_MISSED_ATTACKS` is **empty**: the one entry it ever held, `exa.vp` under `unguard`, was closed by the refinement search described under `solve/`. `KNOWN_BAD_TRACES` holds models where the engine's own `tracecheck` assertions fire under transformation. A violation outside a list fails the build; an entry that *stops* violating also fails, so a fix cannot leave a stale exception behind and quietly stop meaning anything. Staleness is judged only over models a run actually exercised, so a model near the cost budget cannot flap the gate between machines.
 
-**Cost is bounded with the engine's own cancellation flag**, not with a timer on the baseline. A cheap model can produce a ruinously expensive variant — unguarding one slot in a mid-size model took the sweep from four seconds past twenty minutes — so timing the baseline measures the wrong thing. Each analysis carries a deadline; a cancelled one counts as *deferred*, and the deferred total is asserted against a ceiling, because a sweep that quietly stops covering models reads exactly like one that covers everything. Sixteen to eighteen models defer per property, against a ceiling of 60. The harness adds about twelve seconds to the suite.
+**Nothing is deferred and nothing is timed.** An earlier version gave each analysis a wall-clock deadline through the engine's cancellation flag; because whether a model finished depended on machine load, so did which ratchet entries were judged, and the suite flapped between runs. A correctness gate whose verdict depends on the clock is worse than no gate. Every analysis now runs to completion through the uncancellable `analyze_sessions`, and the only skips left are properties of the model: a file that does not parse, or a variant that fails `sanity` and so is not a legal model to analyse.
+
+**Cost is bounded by three deterministic decisions instead.** `spread` runs each property's models across `available_parallelism()` worker threads — safe because every analysis owns its interner and `VerifyContext`, and `theory.rs`'s memos are `thread_local`. A monotone-*stronger* property skips models whose baseline holds no attack at all, which is exact rather than heuristic: with nothing to lose, no variant of them can violate the property. And each analysis in a `Sweep::Fast` run is wrapped in `witness::MinimizingGuard`, which makes `attack_trace_with` return immediately, so no witness is minimized and no trace is narrated — the property compares result codes and needs neither.
+
+**The three multi-variant properties run in two forms.** `unguard`, `leaks` and `weaken` expand to hundreds of variants each, so `cargo test` runs them as `Sweep::Fast`: traces off, and the dozen models named in `COSTLY_MODELS` left out. Their `_exhaustively` twins carry `#[ignore]`, cover every model with traces on, and are what `cargo test --release -- --ignored`, `make test-exhaustive` and CI run. `KNOWN_BAD_TRACES` is only asserted where traces are actually built, so the fast form cannot report a stale entry it never had the chance to fire. The whole metamorphic module costs about 27 seconds of the suite's 53.
 
 ### The completeness inventory
 

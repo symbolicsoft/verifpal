@@ -15,6 +15,10 @@ test:
 	@/bin/echo "[Verifpal] Running test battery..."
 	@cargo test --release
 
+test-exhaustive:
+	@/bin/echo "[Verifpal] Running exhaustive metamorphic sweeps..."
+	@cargo test --release -- --ignored
+
 wasm:
 	@/bin/echo "[Verifpal] Building Verifpal WASM..."
 	@wasm-pack build --target web --no-default-features --features wasm
@@ -27,4 +31,4 @@ clean:
 	@cargo clean
 	@$(RM) -r dist
 
-.PHONY: build lint test wasm clean assets examples HomebrewFormula scripts src target
+.PHONY: build lint test wasm clean assets examples HomebrewFormula scripts src target test-exhaustive

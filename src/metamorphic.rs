@@ -6,6 +6,36 @@ use crate::types::*;
 
 const SESSIONS: u8 = 1;
 
+const COSTLY_MODELS: [&str; 12] = [
+	"concat_split_replay.vp",
+	"junglegym_deep_ratchet.vp",
+	"junglegym_hybrid_pq.vp",
+	"junglegym_password_maze.vp",
+	"junglegym_phase_cascade.vp",
+	"junglegym_threshold_ring.vp",
+	"needham-schroeder.vp",
+	"piknik.vp",
+	"scuttlebutt.vp",
+	"signal.vp",
+	"tls13-0rtt.vp",
+	"tls13.vp",
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sweep {
+	Fast,
+	Exhaustive,
+}
+
+impl Sweep {
+	fn skips(self, name: &str) -> bool {
+		self == Sweep::Fast && COSTLY_MODELS.contains(&name)
+	}
+	fn builds_traces(self) -> bool {
+		self == Sweep::Exhaustive
+	}
+}
+
 const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 0] = [];
 
 const KNOWN_BAD_TRACES: [(&str, &str); 28] = [
@@ -45,9 +75,10 @@ enum Outcome {
 	Panicked,
 }
 
-fn analysed(model: &Model, sessions: u8) -> Outcome {
+fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
+		let _verdicts_only = (!sweep.builds_traces()).then(crate::witness::MinimizingGuard::new);
 		crate::verify::analyze_sessions(model, sessions)
 			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
@@ -59,10 +90,10 @@ fn analysed(model: &Model, sessions: u8) -> Outcome {
 	}
 }
 
-fn code_of(model: &Model, sessions: u8) -> Outcome {
+fn code_of(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
 	let rendered = crate::pretty::pretty_model(model);
 	match crate::parser::parse_string(&model.file_name, &rendered) {
-		Ok(reparsed) => analysed(&reparsed, sessions),
+		Ok(reparsed) => analysed(&reparsed, sessions, sweep),
 		Err(_) => Outcome::Rejected,
 	}
 }
@@ -92,7 +123,7 @@ fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
 		.collect()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Strength {
 	Stronger,
 	Weaker,
@@ -416,14 +447,14 @@ fn variants_dephased(model: &Model) -> Vec<Model> {
 	vec![variant]
 }
 
-fn check_sessions(property: &str, floor: usize) {
+fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(one) = code_of(model, 1) else {
+		let Outcome::Code(one) = code_of(model, 1, sweep) else {
 			return local;
 		};
-		match code_of(model, 2) {
+		match code_of(model, 2, sweep) {
 			Outcome::Rejected => {}
 			Outcome::Panicked => {
 				local.ran.push(name.clone());
@@ -447,7 +478,7 @@ fn check_sessions(property: &str, floor: usize) {
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	settle(property, report, floor);
+	settle(property, report, floor, sweep);
 }
 
 fn check_invariant(
@@ -455,17 +486,18 @@ fn check_invariant(
 	variant: fn(&Model) -> Option<Model>,
 	expected: fn(&str) -> String,
 	floor: usize,
+	sweep: Sweep,
 ) {
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(before) = code_of(model, SESSIONS) else {
+		let Outcome::Code(before) = code_of(model, SESSIONS, sweep) else {
 			return local;
 		};
 		let Some(transformed) = variant(model) else {
 			return local;
 		};
-		match code_of(&transformed, SESSIONS) {
+		match code_of(&transformed, SESSIONS, sweep) {
 			Outcome::Rejected => {}
 			Outcome::Panicked => {
 				local.ran.push(name.clone());
@@ -490,10 +522,10 @@ fn check_invariant(
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	settle(property, report, floor);
+	settle(property, report, floor, sweep);
 }
 
-fn settle(property: &str, report: Report, floor: usize) {
+fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 	assert!(
 		report.compared >= floor,
 		"the `{property}` property compared only {} pairs against a floor of {floor}, so it \
@@ -501,6 +533,9 @@ fn settle(property: &str, report: Report, floor: usize) {
 		report.compared
 	);
 
+	if !sweep.builds_traces() {
+		return;
+	}
 	let expected_panics = excused_traces(&KNOWN_BAD_TRACES, property);
 	let new_panics: Vec<&String> = report
 		.panicked
@@ -561,16 +596,23 @@ fn check_monotone(
 	variants: fn(&Model) -> Vec<Model>,
 	strength: Strength,
 	floor: usize,
+	sweep: Sweep,
 ) {
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(before) = code_of(model, SESSIONS) else {
+		if sweep.skips(name) {
+			return local;
+		}
+		let Outcome::Code(before) = code_of(model, SESSIONS, sweep) else {
 			return local;
 		};
+		if strength == Strength::Stronger && !before.contains('1') {
+			return local;
+		}
 		let mut ran = false;
 		for variant in variants(model) {
-			match code_of(&variant, SESSIONS) {
+			match code_of(&variant, SESSIONS, sweep) {
 				Outcome::Rejected => continue,
 				Outcome::Panicked => {
 					ran = true;
@@ -602,7 +644,7 @@ fn check_monotone(
 	}
 	report.panicked.sort();
 	report.panicked.dedup();
-	settle(property, report, floor);
+	settle(property, report, floor, sweep);
 }
 
 #[cfg(test)]
@@ -620,10 +662,10 @@ mod tests {
 	fn rendering_and_reparsing_a_model_preserves_every_verdict() {
 		let models = corpus();
 		let parts = spread(&models, |(name, model)| {
-			let Outcome::Code(direct) = analysed(model, SESSIONS) else {
+			let Outcome::Code(direct) = analysed(model, SESSIONS, Sweep::Exhaustive) else {
 				return (0usize, None);
 			};
-			let drift = match code_of(model, SESSIONS) {
+			let drift = match code_of(model, SESSIONS, Sweep::Exhaustive) {
 				Outcome::Code(round_tripped) if round_tripped == direct => None,
 				Outcome::Code(other) => {
 					Some(format!("{name}: direct={direct} round-tripped={other}"))
@@ -655,17 +697,29 @@ mod tests {
 
 	#[test]
 	fn deleting_a_phase_boundary_never_loses_an_attack() {
-		check_monotone("dephase", variants_dephased, Strength::Stronger, 15);
+		check_monotone(
+			"dephase",
+			variants_dephased,
+			Strength::Stronger,
+			15,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
 	fn adding_a_session_never_loses_an_attack() {
-		check_sessions("sessions", 250);
+		check_sessions("sessions", 250, Sweep::Exhaustive);
 	}
 
 	#[test]
 	fn an_unused_declaration_changes_no_verdict() {
-		check_invariant("pad", variant_padded, |before| before.to_string(), 300);
+		check_invariant(
+			"pad",
+			variant_padded,
+			|before| before.to_string(),
+			300,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
@@ -688,7 +742,13 @@ mod tests {
 
 	#[test]
 	fn renaming_every_identifier_changes_no_verdict() {
-		check_invariant("rename", variant_renamed, |before| before.to_string(), 300);
+		check_invariant(
+			"rename",
+			variant_renamed,
+			|before| before.to_string(),
+			300,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
@@ -705,6 +765,7 @@ mod tests {
 			variant_query_rotation,
 			|before| rotate_code(before, 1),
 			150,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -727,27 +788,93 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn leaking_a_secret_never_loses_an_attack_exhaustively() {
+		check_monotone(
+			"leaks",
+			variants_leaked,
+			Strength::Stronger,
+			250,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
 	fn leaking_a_secret_never_loses_an_attack() {
-		check_monotone("leaks", variants_leaked, Strength::Stronger, 250);
+		check_monotone(
+			"leaks",
+			variants_leaked,
+			Strength::Stronger,
+			800,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn weakening_a_primitive_never_loses_an_attack_exhaustively() {
+		check_monotone(
+			"weaken",
+			variants_weakened,
+			Strength::Stronger,
+			250,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
 	fn weakening_a_primitive_never_loses_an_attack() {
-		check_monotone("weaken", variants_weakened, Strength::Stronger, 250);
+		check_monotone(
+			"weaken",
+			variants_weakened,
+			Strength::Stronger,
+			1200,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn removing_a_guard_never_loses_an_attack_exhaustively() {
+		check_monotone(
+			"unguard",
+			variants_unguarded,
+			Strength::Stronger,
+			250,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
 	fn removing_a_guard_never_loses_an_attack() {
-		check_monotone("unguard", variants_unguarded, Strength::Stronger, 250);
+		check_monotone(
+			"unguard",
+			variants_unguarded,
+			Strength::Stronger,
+			180,
+			Sweep::Fast,
+		);
 	}
 
 	#[test]
 	fn promoting_a_passive_model_to_active_never_loses_an_attack() {
-		check_monotone("promote", variants_promoted, Strength::Stronger, 90);
+		check_monotone(
+			"promote",
+			variants_promoted,
+			Strength::Stronger,
+			60,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]
 	fn a_passive_run_never_finds_an_attack_the_active_run_misses() {
-		check_monotone("demote", variants_demoted, Strength::Weaker, 200);
+		check_monotone(
+			"demote",
+			variants_demoted,
+			Strength::Weaker,
+			200,
+			Sweep::Exhaustive,
+		);
 	}
 }

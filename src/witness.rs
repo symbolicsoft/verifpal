@@ -20,10 +20,10 @@ pub(crate) fn in_minimization() -> bool {
 	MINIMIZING.with(|f| f.get())
 }
 
-struct MinimizingGuard;
+pub(crate) struct MinimizingGuard;
 
 impl MinimizingGuard {
-	fn new() -> MinimizingGuard {
+	pub(crate) fn new() -> MinimizingGuard {
 		MINIMIZING.with(|f| f.set(true));
 		MinimizingGuard
 	}

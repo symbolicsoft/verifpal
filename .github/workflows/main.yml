@@ -66,6 +66,8 @@ jobs:
       run: cargo clippy --all-targets -- -D warnings
     - name: Run tests
       run: cargo test --release
+    - name: Run the exhaustive metamorphic sweeps
+      run: cargo test --release -- --ignored
 
   wasm:
     name: wasm build
