@@ -279,6 +279,73 @@ fn excused_traces<'a>(table: &'a [(&'a str, &'a str)], property: &str) -> Vec<&'
 		.collect()
 }
 
+fn rotate_code(code: &str, queries: usize) -> String {
+	let pairs: Vec<&str> = code
+		.as_bytes()
+		.chunks(2)
+		.filter_map(|c| std::str::from_utf8(c).ok())
+		.collect();
+	if pairs.is_empty() {
+		return code.to_string();
+	}
+	let k = queries % pairs.len();
+	pairs[k..]
+		.iter()
+		.chain(pairs[..k].iter())
+		.copied()
+		.collect()
+}
+
+fn variant_query_rotation(model: &Model) -> Option<Model> {
+	if model.queries.len() < 2 {
+		return None;
+	}
+	let mut rotated = model.clone();
+	rotated.queries.rotate_left(1);
+	Some(rotated)
+}
+
+fn check_invariant(
+	property: &str,
+	variant: fn(&Model) -> Option<Model>,
+	expected: fn(&str) -> String,
+	floor: usize,
+) {
+	let mut report = Report::default();
+	for (name, model) in corpus() {
+		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
+			report.deferred.push(name.clone());
+			continue;
+		};
+		let Some(transformed) = variant(&model) else {
+			continue;
+		};
+		match code_of(&transformed, SESSIONS) {
+			Outcome::Rejected => continue,
+			Outcome::Cancelled => report.deferred.push(name.clone()),
+			Outcome::Panicked => {
+				report.exercised.push(name.clone());
+				report.panicked.push(name.clone());
+			}
+			Outcome::Code(after) => {
+				report.exercised.push(name.clone());
+				report.compared += 1;
+				let want = expected(&before);
+				if after != want {
+					report.violations.push(format!(
+						"{name}: original={before} variant={after} expected={want}"
+					));
+				}
+			}
+		}
+	}
+	report.panicked.sort();
+	report.panicked.dedup();
+	report.deferred.sort();
+	report.deferred.dedup();
+	settle(property, report, floor);
+}
+
 fn settle(property: &str, report: Report, floor: usize) {
 	assert!(
 		report.deferred.len() <= DEFERRED_CEILING,
@@ -442,6 +509,23 @@ mod tests {
 			 metamorphic result below would be measuring the printer rather than the \
 			 engine:\n  {}",
 			drifted.join("\n  ")
+		);
+	}
+
+	#[test]
+	fn rotate_code_moves_whole_queries() {
+		assert_eq!(rotate_code("c1a0f1", 1), "a0f1c1");
+		assert_eq!(rotate_code("c1a0f1", 3), "c1a0f1");
+		assert_eq!(rotate_code("c1", 1), "c1");
+	}
+
+	#[test]
+	fn reordering_the_queries_block_changes_no_verdict() {
+		check_invariant(
+			"rotate",
+			variant_query_rotation,
+			|before| rotate_code(before, 1),
+			150,
 		);
 	}
 
