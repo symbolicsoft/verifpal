@@ -6,18 +6,43 @@ use crate::types::*;
 
 const SESSIONS: u8 = 1;
 
-fn code_of(model: &Model, sessions: u8) -> Option<String> {
-	let rendered = crate::pretty::pretty_model(model);
-	let reparsed = crate::parser::parse_string(&model.file_name, &rendered).ok()?;
-	let _quiet = InfoQuiet::new();
-	let ctx = crate::verify::analyze_sessions(&reparsed, sessions).ok()?;
-	Some(VerifyResult::results_code(&ctx.results_get()))
+const KNOWN_MISSED_ATTACKS: [(&str, &str, &str); 0] = [];
+
+const KNOWN_BAD_TRACES: [(&str, &str, &str); 1] = [(
+	"passive_dh_chain.vp",
+	"promote",
+	"confidentiality? secret_c reports an attack whose trace never produces \
+	 PUBKEY(nil), the value it claims the attacker learned. The sibling secret_b \
+	 trace narrates that construction and this one drops it. The model ships as \
+	 attacker[passive], so no active-attacker trace from it was ever checked.",
+)];
+
+enum Outcome {
+	Code(String),
+	Rejected,
+	Panicked,
 }
 
-fn code_direct(model: &Model, sessions: u8) -> Option<String> {
-	let _quiet = InfoQuiet::new();
-	let ctx = crate::verify::analyze_sessions(model, sessions).ok()?;
-	Some(VerifyResult::results_code(&ctx.results_get()))
+fn analysed(model: &Model, sessions: u8) -> Outcome {
+	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+		let _quiet = InfoQuiet::new();
+		crate::verify::analyze_sessions(model, sessions)
+			.ok()
+			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
+	}));
+	match attempt {
+		Ok(Some(code)) => Outcome::Code(code),
+		Ok(None) => Outcome::Rejected,
+		Err(_) => Outcome::Panicked,
+	}
+}
+
+fn code_of(model: &Model, sessions: u8) -> Outcome {
+	let rendered = crate::pretty::pretty_model(model);
+	match crate::parser::parse_string(&model.file_name, &rendered) {
+		Ok(reparsed) => analysed(&reparsed, sessions),
+		Err(_) => Outcome::Rejected,
+	}
 }
 
 fn corpus() -> Vec<(String, Model)> {
@@ -31,22 +56,186 @@ fn corpus() -> Vec<(String, Model)> {
 		.collect()
 }
 
+fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
+	if before.len() != after.len() {
+		return Vec::new();
+	}
+	before
+		.as_bytes()
+		.chunks(2)
+		.zip(after.as_bytes().chunks(2))
+		.enumerate()
+		.filter(|(_, (b, a))| b[1] == b'1' && a[1] == b'0')
+		.map(|(i, _)| i)
+		.collect()
+}
+
+#[derive(Clone, Copy)]
+enum Strength {
+	Stronger,
+	Weaker,
+}
+
+fn variants_promoted(model: &Model) -> Vec<Model> {
+	if model.attacker != AttackerKind::Passive {
+		return Vec::new();
+	}
+	let mut active = model.clone();
+	active.attacker = AttackerKind::Active;
+	vec![active]
+}
+
+fn variants_demoted(model: &Model) -> Vec<Model> {
+	if model.attacker != AttackerKind::Active {
+		return Vec::new();
+	}
+	let mut passive = model.clone();
+	passive.attacker = AttackerKind::Passive;
+	vec![passive]
+}
+
+#[derive(Default)]
+struct Report {
+	compared: usize,
+	violations: Vec<String>,
+	panicked: Vec<String>,
+}
+
+fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<&'a str> {
+	table
+		.iter()
+		.filter(|(_, p, _)| *p == property)
+		.map(|(m, _, _)| *m)
+		.collect()
+}
+
+fn settle(property: &str, report: Report, floor: usize) {
+	assert!(
+		report.compared >= floor,
+		"the `{property}` property compared only {} pairs against a floor of {floor}, so it \
+		 is passing vacuously rather than holding",
+		report.compared
+	);
+
+	let expected_panics = excused(&KNOWN_BAD_TRACES, property);
+	let new_panics: Vec<&String> = report
+		.panicked
+		.iter()
+		.filter(|m| !expected_panics.contains(&m.as_str()))
+		.collect();
+	assert!(
+		new_panics.is_empty(),
+		"the `{property}` property made the engine's own invariant checks fire on \
+		 {new_panics:?}. A transformed model is still a legal model, so an assertion \
+		 firing is an engine bug rather than a harness failure"
+	);
+	let stale_panics: Vec<&str> = expected_panics
+		.iter()
+		.filter(|m| !report.panicked.iter().any(|p| p == *m))
+		.copied()
+		.collect();
+	assert!(
+		stale_panics.is_empty(),
+		"KNOWN_BAD_TRACES lists {stale_panics:?} under `{property}`, but nothing fires there \
+		 now. If this was fixed, delete the entry; a stale exception makes the list stop \
+		 meaning anything"
+	);
+
+	let expected = excused(&KNOWN_MISSED_ATTACKS, property);
+	let unexpected: Vec<&String> = report
+		.violations
+		.iter()
+		.filter(|v| !expected.iter().any(|m| v.starts_with(m)))
+		.collect();
+	assert!(
+		unexpected.is_empty(),
+		"the `{property}` property found a missed attack that is not in \
+		 KNOWN_MISSED_ATTACKS. A transformation giving the attacker strictly more power \
+		 reported strictly fewer attacks:\n  {}",
+		unexpected
+			.iter()
+			.map(|s| s.as_str())
+			.collect::<Vec<_>>()
+			.join("\n  ")
+	);
+	let stale: Vec<&str> = expected
+		.iter()
+		.filter(|m| !report.violations.iter().any(|v| v.starts_with(*m)))
+		.copied()
+		.collect();
+	assert!(
+		stale.is_empty(),
+		"KNOWN_MISSED_ATTACKS lists {stale:?} under `{property}`, but the property now holds \
+		 for it. If this was fixed, delete the entry"
+	);
+}
+
+fn check_monotone(
+	property: &str,
+	variants: fn(&Model) -> Vec<Model>,
+	strength: Strength,
+	floor: usize,
+) {
+	let mut report = Report::default();
+	for (name, model) in corpus() {
+		let Outcome::Code(before) = code_of(&model, SESSIONS) else {
+			continue;
+		};
+		for variant in variants(&model) {
+			match code_of(&variant, SESSIONS) {
+				Outcome::Rejected => continue,
+				Outcome::Panicked => report.panicked.push(name.clone()),
+				Outcome::Code(after) => {
+					report.compared += 1;
+					let lost = match strength {
+						Strength::Stronger => lost_attacks(&before, &after),
+						Strength::Weaker => lost_attacks(&after, &before),
+					};
+					for q in lost {
+						report.violations.push(format!(
+							"{name}: before={before} after={after}, query {q} lost"
+						));
+					}
+				}
+			}
+		}
+	}
+	report.panicked.sort();
+	report.panicked.dedup();
+	settle(property, report, floor);
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn lost_attacks_finds_only_ones_that_became_zeros() {
+		assert_eq!(lost_attacks("c1a0", "c0a0"), vec![0]);
+		assert_eq!(lost_attacks("c1a0", "c1a1"), Vec::<usize>::new());
+		assert_eq!(lost_attacks("c1", "c1a0"), Vec::<usize>::new());
+	}
 
 	#[test]
 	fn rendering_and_reparsing_a_model_preserves_every_verdict() {
 		let mut drifted = Vec::new();
 		let mut compared = 0usize;
 		for (name, model) in corpus() {
-			let Some(direct) = code_direct(&model, SESSIONS) else {
+			let Outcome::Code(direct) = analysed(&model, SESSIONS) else {
 				continue;
 			};
 			compared += 1;
 			match code_of(&model, SESSIONS) {
-				Some(round_tripped) if round_tripped == direct => {}
-				other => drifted.push(format!("{name}: direct={direct} round-tripped={other:?}")),
+				Outcome::Code(round_tripped) if round_tripped == direct => {}
+				Outcome::Code(other) => {
+					drifted.push(format!("{name}: direct={direct} round-tripped={other}"))
+				}
+				Outcome::Rejected => drifted.push(format!(
+					"{name}: direct={direct} but the render did not parse"
+				)),
+				Outcome::Panicked => {
+					drifted.push(format!("{name}: direct={direct} but the render panicked"))
+				}
 			}
 		}
 		assert!(
@@ -61,5 +250,15 @@ mod tests {
 			 engine:\n  {}",
 			drifted.join("\n  ")
 		);
+	}
+
+	#[test]
+	fn promoting_a_passive_model_to_active_never_loses_an_attack() {
+		check_monotone("promote", variants_promoted, Strength::Stronger, 90);
+	}
+
+	#[test]
+	fn a_passive_run_never_finds_an_attack_the_active_run_misses() {
+		check_monotone("demote", variants_demoted, Strength::Weaker, 200);
 	}
 }
