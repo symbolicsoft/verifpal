@@ -369,6 +369,27 @@ Transformations are AST-level and go back through the printer: parse → transfo
 
 **Cost is bounded with the engine's own cancellation flag**, not with a timer on the baseline. A cheap model can produce a ruinously expensive variant — unguarding one slot in a mid-size model took the sweep from four seconds past twenty minutes — so timing the baseline measures the wrong thing. Each analysis carries a deadline; a cancelled one counts as *deferred*, and the deferred total is asserted against a ceiling, because a sweep that quietly stops covering models reads exactly like one that covers everything. Sixteen to eighteen models defer per property, against a ceiling of 60. The harness adds about ten seconds to the suite.
 
+### The completeness inventory
+
+Every site in the analysis path that **collapses** a set to one representative, **memoises** under a key, **gates** with a filter, **bounds** a space, or **orders** work. Each was classified by mutation: loosen it to accept everything and run the suite. Verdicts change and attacks appear → it suppresses real ones. Nothing changes → it is dead, redundant, or untested. Runtime or memory explodes → it is a genuine bound, whatever the comment says.
+
+| site | kind | loosened | reading |
+| --- | --- | --- | --- |
+| `symbolic::build` slot → variable | collapse | — | **leak.** `exa.vp`; see the option-set rule above |
+| `vars::ground_free` | collapse | — | **leak.** Raso; `diverge::distinguish` covers the equivalence half |
+| `slot_candidates` protocol-term basis | collapse | **stack overflow** | not a heuristic at all: a second finiteness guard beside `normalise_arguments`, and undocumented until now |
+| `solve_divergent` `in_a == in_b` skip | gate | no change | redundant — the fallback substitution already grounds those variables |
+| `validate::worthwhile` | gate | no change | **no model depends on it.** Described here as what stops false-attack #18, yet nothing in 355 models or 3894 metamorphic variants notices its removal. Either the protection moved or the regression is untested; write the model before trusting the comment |
+| `deduce::goal_key` kind tag | memo | no change | defensive against a primitive and a constant colliding on one hash, and **untested** — no model exercises the collision |
+| `rule_equivalize` halt guard | gate | 2 fail | soundness guard, pinned by `halted_principal_false_attack.vp` |
+| `unlink` attacker-authored refusal | gate | 6 fail | soundness guard, well covered |
+| `bind_from_shape` unbound refusal | gate | 4 fail, 3 of them metamorphic | search-shaping and load-bearing. The result-code corpus alone catches one of these four; the harness catches the rest |
+| `validate::replays_own_freshness` | gate | 1 fail | narration-shaping; the two-pass replication search already reorders around it |
+| `Pass::Targeted` before `Constructed` | order | 13 fail | load-bearing, and the ordering argument in this file is correct |
+| `deduce::forgeable_shapes` core exclusion | gate | not loosenable | `primitive_get` fails for core primitives, so no `SPLIT`, `CONCAT` or `ASSERT` shape is ever offered. `satisfy_split` and `concat_shapes` cover `SPLIT` separately; whether `ASSERT` needs the same is open |
+
+Two rows say *no model depends on it* about a guard this file describes as load-bearing. That is the audit's most useful output: a comment asserting a protection is not evidence the protection is still wired up, and a mutation that changes nothing is the cheapest way to find out.
+
 Two invariants still worth re-running by hand after an engine change, both currently clean across all 355 swept models: a one-session run's attacks must be a subset of a two-session run's, checked from two sessions to three across `examples/test/` as well. Session and phase-deletion monotonicity are the two properties the harness does not yet automate.
 
 ### Performance expectations
