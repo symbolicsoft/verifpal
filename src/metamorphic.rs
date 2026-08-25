@@ -305,6 +305,62 @@ fn variant_query_rotation(model: &Model) -> Option<Model> {
 	Some(rotated)
 }
 
+const RENAME_SUFFIX: &str = "qq";
+
+fn renamed_constant(constant: &Constant) -> Constant {
+	let mut out = constant.clone();
+	let name: &str = &constant.name;
+	if name == "nil" || name.starts_with("unnamed") || name.starts_with("attacker") {
+		return out;
+	}
+	out.name = std::sync::Arc::from(format!("{name}{RENAME_SUFFIX}").as_str());
+	out
+}
+
+fn rename_value(value: &Value) -> Value {
+	match value {
+		Value::Constant(c) => Value::Constant(renamed_constant(c)),
+		Value::Primitive(p) => {
+			let mut updated = (**p).clone();
+			updated.arguments = p.arguments.iter().map(rename_value).collect();
+			Value::Primitive(std::sync::Arc::new(updated))
+		}
+	}
+}
+
+fn rename_message(message: &mut Message) {
+	message.sender_name =
+		std::sync::Arc::from(format!("{}{}", message.sender_name, RENAME_SUFFIX).as_str());
+	message.recipient_name =
+		std::sync::Arc::from(format!("{}{}", message.recipient_name, RENAME_SUFFIX).as_str());
+	message.constants = message.constants.iter().map(renamed_constant).collect();
+}
+
+fn variant_renamed(model: &Model) -> Option<Model> {
+	let mut out = model.clone();
+	for block in &mut out.blocks {
+		match block {
+			Block::Principal(p) => {
+				p.name = format!("{}{}", p.name, RENAME_SUFFIX);
+				for e in &mut p.expressions {
+					e.constants = e.constants.iter().map(renamed_constant).collect();
+					e.assigned = e.assigned.as_ref().map(rename_value);
+				}
+			}
+			Block::Message(m) => rename_message(m),
+			Block::Phase(_) => {}
+		}
+	}
+	for q in &mut out.queries {
+		q.constants = q.constants.iter().map(renamed_constant).collect();
+		rename_message(&mut q.message);
+		for option in &mut q.options {
+			rename_message(&mut option.message);
+		}
+	}
+	Some(out)
+}
+
 fn check_invariant(
 	property: &str,
 	variant: fn(&Model) -> Option<Model>,
@@ -510,6 +566,29 @@ mod tests {
 			 engine:\n  {}",
 			drifted.join("\n  ")
 		);
+	}
+
+	#[test]
+	fn renaming_actually_rewrites_the_model() {
+		let mut rewritten = 0usize;
+		for (_, model) in corpus() {
+			let Some(renamed) = variant_renamed(&model) else {
+				continue;
+			};
+			if crate::pretty::pretty_model(&renamed) != crate::pretty::pretty_model(&model) {
+				rewritten += 1;
+			}
+		}
+		assert!(
+			rewritten > 300,
+			"only {rewritten} models changed under renaming, so the invariance property is \
+			 comparing models against identical copies"
+		);
+	}
+
+	#[test]
+	fn renaming_every_identifier_changes_no_verdict() {
+		check_invariant("rename", variant_renamed, |before| before.to_string(), 300);
 	}
 
 	#[test]
