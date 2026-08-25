@@ -1,0 +1,629 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+:root {
+	--ink: #0e161d;
+	--ink-2: #2b3a45;
+	--ink-3: #566975;
+	--ink-4: #8899a4;
+	--paper: #edf1f4;
+	--surface: #ffffff;
+	--surface-2: #f6f8fa;
+	--line: #d3dce3;
+	--line-soft: #e4eaef;
+	--olive: #6e7d2c;
+	--olive-deep: #4f5b1d;
+	--olive-tint: #e9eed7;
+	--olive-line: #c6d0a3;
+	--azure: #1a6ab3;
+	--azure-deep: #12507f;
+	--azure-tint: #e1ecf7;
+	--azure-line: #b5d1e9;
+	--breach: #b23a2b;
+	--breach-deep: #8c2b1e;
+	--breach-tint: #f9e8e5;
+	--breach-line: #e7c2ba;
+	--sienna: #96501f;
+	--sienna-tint: #fbefe2;
+	--sienna-line: #e3cbb0;
+	--mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--serif: 'Nimbus Roman', 'Times New Roman', Georgia, serif;
+	--sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--radius: 4px;
+	--radius-lg: 6px;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	background: var(--paper);
+	color: var(--ink);
+	font-family: var(--sans);
+	font-size: 15px;
+	line-height: 1.65;
+	margin: 0 auto;
+	max-width: 980px;
+	padding: 44px 28px 72px;
+	-webkit-font-smoothing: antialiased;
+}
+
+a {
+	color: var(--azure);
+	text-decoration: none;
+	text-underline-offset: 2px;
+}
+
+a:hover {
+	color: var(--azure-deep);
+	text-decoration: underline;
+}
+
+::selection {
+	background: var(--azure-tint);
+	color: var(--ink);
+}
+
+h1 {
+	font-family: var(--serif);
+	font-weight: normal;
+	font-size: 2.6rem;
+	letter-spacing: -0.025em;
+	line-height: 1.05;
+	margin: 0;
+}
+
+.eyebrow {
+	display: block;
+	font-family: var(--mono);
+	font-size: 0.68rem;
+	font-weight: 500;
+	letter-spacing: 0.15em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	margin: 0 0 8px;
+}
+
+header.page {
+	padding-bottom: 20px;
+	border-bottom: 1px solid var(--line);
+	margin-bottom: 36px;
+}
+
+header.page .meta {
+	font-family: var(--mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.02em;
+	color: var(--ink-3);
+	margin: 10px 0 0;
+}
+
+section.model {
+	margin: 0 0 44px;
+}
+
+.panel {
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+
+.panelHead {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	flex-wrap: wrap;
+	background: var(--surface-2);
+	border-bottom: 1px solid var(--line);
+	padding: 11px 20px;
+}
+
+.paneLabel {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-family: var(--mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+}
+
+.paneMark {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--azure);
+	flex-shrink: 0;
+}
+
+.panelHead .meta {
+	margin-left: auto;
+	font-family: var(--mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.05em;
+	color: var(--ink-3);
+}
+
+.code .pass {
+	color: var(--olive-deep);
+	font-weight: 700;
+}
+
+.code .fail {
+	color: var(--breach);
+	font-weight: 700;
+}
+
+.panelSection {
+	padding: 16px 20px;
+}
+
+.panelSection + .panelSection {
+	border-top: 1px solid var(--line);
+}
+
+.sectionRow {
+	display: flex;
+	align-items: baseline;
+	gap: 14px;
+}
+
+.sectionRow .eyebrow {
+	margin: 0;
+}
+
+.tally {
+	margin-left: auto;
+	font-family: var(--mono);
+	font-size: 0.68rem;
+	letter-spacing: 0.08em;
+}
+
+.tally.pass {
+	color: var(--olive-deep);
+}
+
+.tally.fail {
+	color: var(--breach);
+}
+
+.verdicts {
+	margin-top: 4px;
+}
+
+.verdict {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	gap: 0 10px;
+	padding: 12px 0;
+	font-family: var(--mono);
+}
+
+.verdict + .verdict {
+	border-top: 1px dashed var(--line);
+}
+
+.verdict .mark {
+	font-size: 0.9rem;
+	font-weight: 700;
+	text-align: center;
+	line-height: 1.4;
+}
+
+.verdict .query {
+	font-size: 0.8rem;
+	line-height: 1.4;
+	word-break: break-word;
+	color: var(--ink);
+}
+
+.verdict .query a {
+	color: inherit;
+}
+
+.verdict .loc {
+	margin-left: 10px;
+	color: var(--ink-4);
+	font-size: 0.85em;
+	letter-spacing: 0.04em;
+}
+
+.verdict .ruling {
+	grid-column: 2;
+	font-size: 0.7rem;
+	letter-spacing: 0.11em;
+	text-transform: uppercase;
+	margin-top: 5px;
+}
+
+.verdict .because {
+	grid-column: 2;
+	font-family: var(--sans);
+	font-size: 0.82rem;
+	line-height: 1.55;
+	color: var(--ink-2);
+	margin-top: 5px;
+	max-width: 64ch;
+}
+
+.verdict .precondition {
+	grid-column: 2;
+	font-family: var(--sans);
+	font-size: 0.8rem;
+	line-height: 1.55;
+	color: var(--sienna);
+	margin-top: 5px;
+	max-width: 64ch;
+}
+
+.verdictPass .mark,
+.verdictPass .ruling {
+	color: var(--olive-deep);
+}
+
+.verdictFail .mark,
+.verdictFail .ruling {
+	color: var(--breach);
+}
+
+.assumptions {
+	border: 1px solid var(--sienna-line);
+	background: var(--sienna-tint);
+	border-radius: var(--radius);
+	padding: 12px 16px;
+	margin: 14px 0 2px;
+	font-size: 0.85rem;
+	line-height: 1.6;
+	color: var(--sienna);
+}
+
+.assumptions ul {
+	margin: 6px 0 0;
+	padding-left: 18px;
+}
+
+.assumptions li {
+	margin: 3px 0;
+}
+
+.assumptions code {
+	font-family: var(--mono);
+	font-size: 0.92em;
+}
+
+.trace .eyebrow {
+	margin-bottom: 10px;
+}
+
+.trace .eyebrow .q {
+	color: var(--ink);
+	text-transform: none;
+	letter-spacing: 0;
+}
+
+.traceSteps {
+	margin-top: 4px;
+}
+
+.traceStep {
+	display: grid;
+	grid-template-columns: 3.2em minmax(0, 1fr);
+	font-family: var(--mono);
+	font-size: 0.74rem;
+	line-height: 1.7;
+	color: var(--ink-2);
+	padding: 2px 6px;
+	margin: 0 -6px;
+	border-radius: 3px;
+}
+
+.traceStep.isOn {
+	background: var(--azure-tint);
+}
+
+.traceVal {
+	display: block;
+	margin: 3px 0 3px 1.2em;
+	padding-left: 10px;
+	border-left: 2px solid var(--breach-line);
+}
+
+.tvName {
+	color: var(--ink);
+	font-weight: 500;
+}
+
+.tvArrow {
+	color: var(--breach);
+}
+
+.tvNew {
+	color: var(--breach-deep);
+}
+
+.tvWas {
+	display: block;
+	color: var(--ink-4);
+}
+
+.tvRelay {
+	color: var(--ink-4);
+	font-style: italic;
+}
+
+.traceStep .n {
+	color: var(--ink-4);
+}
+
+.traceStep .kind {
+	text-transform: uppercase;
+	font-size: 0.85em;
+	letter-spacing: 0.08em;
+	color: var(--ink-4);
+	margin-right: 8px;
+}
+
+.traceStep .kind.mutations,
+.traceStep .kind.replay,
+.traceStep .kind.bypass {
+	color: var(--breach);
+}
+
+.traceStep .kind.gate {
+	color: var(--sienna);
+}
+
+.traceStep .kind.resolves,
+.traceStep .kind.static,
+.traceStep .kind.received {
+	color: var(--azure-deep);
+}
+
+.errorBody {
+	margin: 0;
+	padding: 16px 20px;
+	font-family: var(--mono);
+	font-size: 0.74rem;
+	line-height: 1.7;
+	color: var(--breach-deep);
+	background: var(--breach-tint);
+	white-space: pre-wrap;
+	overflow-x: auto;
+}
+
+.source {
+	margin: 4px 0 0;
+	padding: 0;
+	font-family: var(--mono);
+	font-size: 0.72rem;
+	line-height: 1.75;
+	color: var(--ink-2);
+	overflow-x: auto;
+	tab-size: 4;
+}
+
+.source mark {
+	border-radius: 3px;
+	padding: 1px 3px;
+	color: inherit;
+	scroll-margin-top: 24px;
+}
+
+.source mark:target {
+	outline: 1px solid currentColor;
+	outline-offset: 1px;
+}
+
+.source mark.pass {
+	background: var(--olive-tint);
+	color: var(--olive-deep);
+}
+
+.source mark.fail {
+	background: var(--breach-tint);
+	color: var(--breach-deep);
+}
+
+.source .k {
+	color: var(--olive-deep);
+	font-weight: 500;
+}
+
+.source .p {
+	color: #3c5f9e;
+}
+
+.source .f {
+	color: #2f6b1f;
+}
+
+.source .q {
+	color: var(--azure-deep);
+}
+
+.source .a {
+	color: #9a6a1c;
+	font-weight: 500;
+}
+
+.source .c {
+	color: var(--ink-4);
+	font-style: italic;
+}
+
+.diagram {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	margin: 6px 0 0;
+}
+
+.diagram .actor {
+	font: 500 13px var(--mono);
+	fill: var(--ink);
+	text-anchor: middle;
+}
+
+.diagram .lifeline {
+	stroke: var(--line);
+}
+
+.diagram .wire {
+	stroke: var(--ink-2);
+	stroke-width: 1.2;
+}
+
+.diagram .arrowhead {
+	fill: var(--ink-2);
+}
+
+.diagram .msg {
+	font: 11px var(--mono);
+	fill: var(--ink-2);
+	text-anchor: middle;
+	paint-order: stroke;
+	stroke: var(--surface);
+	stroke-width: 4px;
+}
+
+.diagram .phase {
+	stroke: var(--line);
+	stroke-dasharray: 6 4;
+}
+
+.diagram .phaselabel {
+	font: 10px var(--mono);
+	fill: var(--ink-4);
+	letter-spacing: 0.08em;
+}
+
+.diagram .hopNum {
+	font: 10px var(--mono);
+	fill: var(--ink-4);
+	text-anchor: end;
+}
+
+.diagram .msgSep {
+	fill: var(--ink-3);
+}
+
+.diagram .msgVal.guarded {
+	fill: var(--olive-deep);
+}
+
+.diagram .msgVal.hit {
+	fill: var(--breach);
+}
+
+.diagram .leak {
+	font: italic 11px var(--mono);
+	fill: var(--sienna);
+	text-anchor: middle;
+	paint-order: stroke;
+	stroke: var(--surface);
+	stroke-width: 4px;
+}
+
+.diagram .actor.attacker {
+	fill: var(--breach);
+}
+
+.diagram .lifeline.attacker {
+	stroke: var(--breach-line);
+}
+
+.diagram .wireMuted {
+	stroke: var(--ink-4);
+	stroke-width: 1;
+	stroke-dasharray: 2 3;
+}
+
+.diagram .wireForged {
+	stroke: var(--breach);
+	stroke-width: 1.2;
+}
+
+.diagram .wireReplay {
+	stroke: var(--breach);
+	stroke-width: 1.2;
+	stroke-dasharray: 6 4;
+}
+
+.diagram .arrowheadB {
+	fill: var(--breach);
+}
+
+.diagram .msg.forged {
+	fill: var(--breach);
+}
+
+.diagram .gateMark {
+	fill: var(--surface);
+	stroke: var(--sienna);
+	stroke-width: 1.5;
+}
+
+.diagram .bypassMark {
+	fill: var(--surface);
+	stroke: var(--breach);
+	stroke-width: 1.5;
+}
+
+.diagram .nodeLabel {
+	font: 10px var(--mono);
+	fill: var(--sienna);
+	paint-order: stroke;
+	stroke: var(--surface);
+	stroke-width: 4px;
+}
+
+.diagram .nodeLabel.breach {
+	fill: var(--breach);
+}
+
+.diagram .runBox {
+	fill: var(--surface-2);
+	stroke: var(--line);
+}
+
+.diagram .runLabel {
+	font: italic 10px var(--mono);
+	fill: var(--ink-3);
+	text-anchor: middle;
+}
+
+.diagram g.isOn line {
+	stroke-width: 2.2;
+}
+
+.diagram g.isOn circle {
+	stroke-width: 2.6;
+}
+
+.diagram g.isOn .msg,
+.diagram g.isOn .nodeLabel,
+.diagram g.isOn .runLabel {
+	font-weight: 700;
+}
+
+@media print {
+	body {
+		background: #fff;
+		max-width: none;
+		padding: 0;
+	}
+
+	.panel {
+		border-color: #bbb;
+	}
+
+	.verdict,
+	.traceStep {
+		break-inside: avoid;
+	}
+}
