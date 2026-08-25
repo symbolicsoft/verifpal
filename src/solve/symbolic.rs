@@ -35,12 +35,21 @@ pub(crate) fn build(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> SymbolicState {
+	build_assuming_honest(controllable, ps, attacker, None)
+}
+
+pub(crate) fn build_assuming_honest(
+	controllable: &crate::reexec::Controllable,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	honest: Option<usize>,
+) -> SymbolicState {
 	let n = ps.values.len();
 	let mut var_terms: Vec<Option<Value>> = vec![None; n];
 	let mut var_slots = Vec::new();
 
 	for (idx, slot) in var_terms.iter_mut().enumerate() {
-		if !controllable.admits(ps, attacker, idx) {
+		if !controllable.admits(ps, attacker, idx) || honest == Some(idx) {
 			continue;
 		}
 		let name = &ps.meta[idx].constant.name;

@@ -1702,6 +1702,14 @@ fn test_equiv_shamir_all_pairs() {
 	run_model("equiv_shamir_all_pairs.vp", "e0e0e1");
 }
 #[test]
+fn test_relay_rewrap_oracle() {
+	run_model("relay_rewrap_oracle.vp", "c1");
+}
+#[test]
+fn test_relay_rewrap_no_oracle() {
+	run_model("relay_rewrap_no_oracle.vp", "c0");
+}
+#[test]
 fn test_equiv_forged_bundle_projections() {
 	run_model("equiv_forged_bundle_projections.vp", "e1");
 }

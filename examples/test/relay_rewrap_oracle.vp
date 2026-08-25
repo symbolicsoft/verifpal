@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — Client recovers a key by opening what Relay forwarded, then
+// uses that key to open whatever Server sent it, and hands the result back.
+// That is a decryption oracle, and the attacker drives it by replacing
+// sealed_doc and rewrap_request while leaving forwarded exactly as Relay sent
+// it.
+//
+// The attack needs `forwarded` to stay honest, and that is the whole point of
+// the model. `symbolic::build` turns every controllable slot into a variable,
+// so with `forwarded` unguarded Client's recovered = AEAD_DEC(relay_key,
+// $forwarded, label) stops reducing, the chain to sealed_doc is severed, and
+// the goal that drives the oracle is never generated. The attacker gains the
+// option of replacing forwarded and loses the ability to reason through it.
+// Reported c0 until the search learned to also build the abstraction in which
+// a slot holds its honest value.
+//
+// exa.vp is the same shape with `forwarded` guarded, where the attack was
+// always found. The pair is the point: guarding a wire must not be what makes
+// an attack reachable.
+
+attacker[active]
+
+principal Server[
+	knows private storage_key
+	knows private document
+	knows public label
+	wrapping = AEAD_ENC(storage_key, label, label)
+	sealed_doc = AEAD_ENC(wrapping, document, label)
+	rewrap_request = AEAD_ENC(AEAD_ENC(storage_key, sealed_doc, label), label, label)
+]
+
+Server -> Relay: sealed_doc
+
+principal Relay[
+	knows private storage_key
+	knows private relay_key
+	knows public label
+	forwarded = AEAD_ENC(relay_key, AEAD_ENC(storage_key, sealed_doc, label), label)
+]
+
+Relay -> Client: forwarded
+
+Server -> Client: rewrap_request
+
+principal Client[
+	knows private relay_key
+	knows public label
+	recovered = AEAD_DEC(relay_key, forwarded, label)?
+	opened = AEAD_DEC(recovered, rewrap_request, label)?
+]
+
+Client -> Server: [opened]
+
+queries[
+	confidentiality? document
+]
