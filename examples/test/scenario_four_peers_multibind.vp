@@ -1,0 +1,87 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 -- four peer scenarios, each binding THREE constants (peer key,
+// peer tag, peer salt), three of the four peers corrupt. This is the false-attack
+// guard for the scenario front-end at width: expansion runs 5 principals x 4
+// scenarios x 2 sessions = 40 principals and 8 value-id copies, and must still
+// not manufacture a break of the one honest run.
+//
+// c0 holds because the query names scenario 1's m, which Alice sealed under
+// HKDF(DH_KEX(gb, a), bob_salt, bob_tag) with both ga and gb guarded and neither
+// a nor b leaked. Mallory, Charlie and Dave each compromise only their own run's
+// m@2, m@3, m@4 -- values no query can name, since queries are not cloned per
+// scenario. Three corrupt peers giving the attacker three plaintexts is not a
+// break of the fourth.
+//
+// a1 is injectivity and nothing else, which is why the code is c0a0 at one
+// session and c0a1 at two: with no sibling run there is nothing to replay, and
+// the attacker cannot forge e because it never holds k. At two sessions Alice
+// sends e once and Bob accepts it twice. Binding peer_tag as associated data
+// separates the peers from each other; it does nothing about replay within one
+// peer, and the trace says so by replaying e rather than substituting it.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peer_tag, peer_salt
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	knows private b
+	knows public bob_tag, bob_salt
+	gb = PUBKEY(b)
+]
+
+principal Mallory[
+	knows private mk
+	knows public mallory_tag, mallory_salt
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+principal Charlie[
+	knows private c
+	knows public charlie_tag, charlie_salt
+	gc = PUBKEY(c)
+	leaks c
+]
+
+principal Dave[
+	knows private d
+	knows public dave_tag, dave_salt
+	gd = PUBKEY(d)
+	leaks d
+]
+
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+Charlie -> Alice: [gc]
+Dave -> Alice: [gd]
+
+principal Alice[
+	k = HKDF(DH_KEX(gpeer, a), peer_salt, peer_tag)
+	e = AEAD_ENC(k, m, peer_tag)
+]
+
+Alice -> Bob: [ga], e
+
+principal Bob[
+	kb = HKDF(DH_KEX(ga, b), bob_salt, bob_tag)
+	db = AEAD_DEC(kb, e, bob_tag)?
+]
+
+scenarios[
+	Alice[gpeer = gb, peer_tag = bob_tag, peer_salt = bob_salt]
+	Alice[gpeer = gm, peer_tag = mallory_tag, peer_salt = mallory_salt]
+	Alice[gpeer = gc, peer_tag = charlie_tag, peer_salt = charlie_salt]
+	Alice[gpeer = gd, peer_tag = dave_tag, peer_salt = dave_salt]
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 -- three peer scenarios with TWO honest peers and one corrupt,
+// each entry binding two constants. Most scenario models have exactly one honest
+// run, which leaves the honest/corrupt partition in VerifyContext::is_honest
+// tested only at its boundary; here two clones are honest and one is not.
+//
+// Bob's AEAD_DEC is deliberately unchecked. The wire is fixed at Alice -> Bob, so
+// in the Charlie run Bob is handed a ciphertext under a key he cannot derive; with
+// a `?` that is a checked primitive failing in an HONEST run, which the engine
+// reports as a model error rather than an attack. Dropping the `?` is what lets a
+// second honest peer exist at all in a fixed message graph.
+//
+// c0 holds for the same reason as the four-peer model: Mallory learns m@3 in her
+// own run, and the query names scenario 1's m, sealed to Bob under guarded keys.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peer_tag
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	knows private b
+	knows public bob_tag
+	gb = PUBKEY(b)
+]
+
+principal Charlie[
+	knows private c
+	knows public charlie_tag
+	gc = PUBKEY(c)
+]
+
+principal Mallory[
+	knows private mk
+	knows public mallory_tag
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Bob -> Alice: [gb]
+Charlie -> Alice: [gc]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	k = HKDF(DH_KEX(gpeer, a), peer_tag, nil)
+	e = AEAD_ENC(k, m, peer_tag)
+]
+
+Alice -> Bob: [ga], e
+
+principal Bob[
+	kb = HKDF(DH_KEX(ga, b), bob_tag, nil)
+	db = AEAD_DEC(kb, e, bob_tag)
+]
+
+scenarios[
+	Alice[gpeer = gb, peer_tag = bob_tag]
+	Alice[gpeer = gc, peer_tag = charlie_tag]
+	Alice[gpeer = gm, peer_tag = mallory_tag]
+]
+
+queries[
+	confidentiality? m
+]

@@ -1549,9 +1549,8 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 
 	if file_name.is_empty() {
 		return Err(
-			VerifpalError::parse(format!("`{}` does not name a file", file_path).into()).note(
-				"Verifpal reads a single model file, whose name ends in a `.vp` extension",
-			),
+			VerifpalError::parse(format!("`{}` does not name a file", file_path).into())
+				.note("Verifpal reads a single model file, whose name ends in a `.vp` extension"),
 		);
 	}
 	if file_name.len() > 64 {

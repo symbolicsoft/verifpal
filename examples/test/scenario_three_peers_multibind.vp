@@ -1,0 +1,107 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1 -- three peer scenarios, each binding TWO constants at once
+// (the peer's public key and the peer's public tag), with one honest peer and
+// two corrupt ones.
+//
+// c1 is Lowe's attack, and the point of the model is that binding the peer tag
+// into message 1 does not stop it. Alice's run with Mallory hands the attacker
+// CONCAT(ni@2, ga, mallory_tag); tags are public, so the attacker reseals it to
+// Bob as CONCAT(ni@2, ga, bob_tag) and both of Bob's ASSERTs pass -- the
+// identity really is Alice's and the tag really is Bob's. Bob answers with
+// CONCAT(ni_b, nr), which still carries no responder identity, so the relay back
+// into Alice@2 works exactly as in spore_ns_pk.vp. The fix Lowe actually
+// published is in message 2, not message 1, and this model is what says so.
+//
+// a1 is separate, holds at BOTH session counts, and is a different failure at
+// each -- which is why it is pinned at 1 and 2. Message 1 of NS-PK carries no
+// authenticator: it is PKE_ENC under Bob's public key over a nonce, Alice's
+// public identity and a public tag. At one session the attacker therefore does
+// not need Alice at all, and the witness is an outright substitution -- it builds
+// PKE_ENC(gb, CONCAT(nil, ga, bob_tag)) from values that are all public. At two
+// sessions the shorter witness is a replay of Alice's own m1 from the sibling
+// run, so the trace says "replays" and the summary names injectivity. Both are
+// genuine: the query fails because anyone can author message 1.
+//
+// Charlie is corrupt rather than honest on purpose. The message graph is fixed
+// -- Alice -> Bob carries m1 in every run -- so a second HONEST peer would make
+// Bob's checked SPLIT fail with no attacker present, which is a model error and
+// not a verdict. Peer scenarios vary who a principal believes it is talking to;
+// they do not re-address the wire.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peer_tag
+	ga = PUBKEY(a)
+	generates ni
+]
+
+principal Bob[
+	knows private b
+	knows public bob_tag
+	gb = PUBKEY(b)
+	generates nr
+]
+
+principal Charlie[
+	knows private c
+	knows public charlie_tag
+	gc = PUBKEY(c)
+	leaks c
+]
+
+principal Mallory[
+	knows private mk
+	knows public mallory_tag
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Charlie -> Alice: [gc]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	m1 = PKE_ENC(gpeer, CONCAT(ni, ga, peer_tag))
+]
+
+Alice -> Bob: m1
+
+principal Bob[
+	d1 = PKE_DEC(b, m1)
+	ni_b, id_b, tag_b = SPLIT(d1)?
+	_ = ASSERT(id_b, ga)?
+	_ = ASSERT(tag_b, bob_tag)?
+	m2 = PKE_ENC(id_b, CONCAT(ni_b, nr))
+]
+
+Bob -> Alice: m2
+
+principal Alice[
+	d2 = PKE_DEC(a, m2)
+	ni_a, nr_a = SPLIT(d2)?
+	_ = ASSERT(ni_a, ni)?
+	m3 = PKE_ENC(gpeer, nr_a)
+]
+
+Alice -> Bob: m3
+
+principal Bob[
+	d3 = PKE_DEC(b, m3)
+	_ = ASSERT(d3, nr)?
+]
+
+scenarios[
+	Alice[gpeer = gb, peer_tag = bob_tag]
+	Alice[gpeer = gm, peer_tag = mallory_tag]
+	Alice[gpeer = gc, peer_tag = charlie_tag]
+]
+
+queries[
+	confidentiality? nr
+	authentication? Alice -> Bob: m1
+]

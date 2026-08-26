@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 -- EVERY declared scenario is corrupt, which is the one case where
+// the two predicates reading compromised_constants disagree. is_honest stays
+// relaxed so the clones still run; claims_apply_to does NOT relativise against an
+// empty honest set, because a query nobody is allowed to answer would be reported
+// as vacuously holding. This model is what makes that non-vacuity observable: if
+// query evaluation ever started skipping corrupt runs unconditionally, the code
+// would flip to c0 and the model would claim a protocol with both peers' keys
+// leaked is confidential.
+//
+// The attack itself needs no substitution at all. Bob leaks b, so the attacker
+// observes ga off the wire, computes DH_KEX(gb, a) as DH_KEX(ga, b), derives k
+// and opens e. Both scenarios are corrupt because gb and gm are each closed over
+// a leaked private key, which is what compromised_constants infers.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peer_tag
+	ga = PUBKEY(a)
+	generates m
+]
+
+principal Bob[
+	knows private b
+	knows public bob_tag
+	gb = PUBKEY(b)
+	leaks b
+]
+
+principal Mallory[
+	knows private mk
+	knows public mallory_tag
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	k = HKDF(DH_KEX(gpeer, a), peer_tag, nil)
+	e = AEAD_ENC(k, m, peer_tag)
+]
+
+Alice -> Bob: [ga], e
+
+principal Bob[
+	kb = HKDF(DH_KEX(ga, b), bob_tag, nil)
+	db = AEAD_DEC(kb, e, bob_tag)?
+]
+
+scenarios[
+	Alice[gpeer = gb, peer_tag = bob_tag]
+	Alice[gpeer = gm, peer_tag = mallory_tag]
+]
+
+queries[
+	confidentiality? m
+]

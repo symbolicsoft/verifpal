@@ -68,9 +68,7 @@ pub(crate) fn base_name(name: &str) -> &str {
 }
 
 pub(crate) fn copy_base_name(name: &str) -> &str {
-	let end = name
-		.find(['#', '@'])
-		.unwrap_or(name.len());
+	let end = name.find(['#', '@']).unwrap_or(name.len());
 	&name[..end]
 }
 

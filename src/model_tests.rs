@@ -388,6 +388,30 @@ fn test_spore_ns_pk() {
 }
 
 #[test]
+fn test_scenario_three_peers_multibind() {
+	run_model("scenario_three_peers_multibind.vp", "c1a1");
+	run_model_sessions("scenario_three_peers_multibind.vp", 1, "c1a1");
+}
+
+#[test]
+fn test_scenario_four_peers_multibind() {
+	run_model("scenario_four_peers_multibind.vp", "c0a1");
+	run_model_sessions("scenario_four_peers_multibind.vp", 1, "c0a0");
+}
+
+#[test]
+fn test_scenario_multibind_two_honest() {
+	run_model("scenario_multibind_two_honest.vp", "c0");
+	run_model_sessions("scenario_multibind_two_honest.vp", 1, "c0");
+}
+
+#[test]
+fn test_scenario_all_peers_corrupt() {
+	run_model("scenario_all_peers_corrupt.vp", "c1");
+	run_model_sessions("scenario_all_peers_corrupt.vp", 1, "c1");
+}
+
+#[test]
 fn test_spore_nsl_pk() {
 	run_model("spore_nsl_pk.vp", "c0");
 	run_model_sessions("spore_nsl_pk.vp", 1, "c0");
