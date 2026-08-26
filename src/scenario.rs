@@ -6,11 +6,13 @@ use std::sync::Arc;
 
 use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
+use crate::util::{did_you_mean, quoted_list};
 use crate::value::{MAX_COPIES, copy_value_id};
 
 pub(crate) struct ScenarioExpansion {
 	pub(crate) model: Model,
 	pub(crate) honest: IdSet<PrincipalId>,
+	pub(crate) summaries: Vec<ScenarioSummary>,
 }
 
 pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpansion> {
@@ -19,8 +21,10 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		return Ok(ScenarioExpansion {
 			model: m.clone(),
 			honest: IdSet::default(),
+			summaries: Vec::new(),
 		});
 	}
+	sanity_scenarios(m)?;
 	let copies = count as u32 * sessions as u32;
 	if copies > MAX_COPIES + 1 {
 		return Err(VerifpalError::sanity(
@@ -104,7 +108,21 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		tail_comments: m.tail_comments.clone(),
 	};
 
-	let corrupt = count - honest_scenario_count(m, &compromised);
+	let summaries: Vec<ScenarioSummary> = m
+		.scenarios
+		.iter()
+		.map(|s| ScenarioSummary {
+			principal: Arc::clone(&s.principal_name),
+			bindings: s
+				.bindings
+				.iter()
+				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
+				.collect(),
+			honest: scenario_is_honest(s, &compromised),
+		})
+		.collect();
+
+	let corrupt = summaries.iter().filter(|s| !s.honest).count();
 	crate::info::info_message(
 		&format!(
 			"Analyzing {count} peer scenarios per principal, {corrupt} of them with a \
@@ -114,14 +132,11 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		false,
 	);
 
-	Ok(ScenarioExpansion { model, honest })
-}
-
-fn honest_scenario_count(m: &Model, compromised: &IdSet<ValueId>) -> usize {
-	m.scenarios
-		.iter()
-		.filter(|s| scenario_is_honest(s, compromised))
-		.count()
+	Ok(ScenarioExpansion {
+		model,
+		honest,
+		summaries,
+	})
 }
 
 fn scenario_is_honest(scenario: &Scenario, compromised: &IdSet<ValueId>) -> bool {
@@ -129,6 +144,149 @@ fn scenario_is_honest(scenario: &Scenario, compromised: &IdSet<ValueId>) -> bool
 		.bindings
 		.iter()
 		.any(|(_, value)| compromised.contains(&value.id))
+}
+
+fn sanity_scenarios(m: &Model) -> VResult<()> {
+	let principals = declared_principals(m);
+	let known = known_constants(m);
+	let declared = declared_constants(m);
+	for scenario in &m.scenarios {
+		let Some((id, _)) = principals
+			.iter()
+			.find(|(_, name)| name.as_str() == &*scenario.principal_name)
+		else {
+			let names: Vec<String> = principals.iter().map(|(_, n)| n.clone()).collect();
+			let mut e = VerifpalError::sanity(
+				format!(
+					"scenario names principal `{}`, which the model does not declare",
+					scenario.principal_name
+				)
+				.into(),
+			)
+			.note(
+				"a scenario binds constants inside a principal that exists, so a name no \
+				 principal carries would substitute nothing and silently analyze the model \
+				 as written",
+			);
+			match did_you_mean(&scenario.principal_name, names.iter().map(|n| n.as_str())) {
+				Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
+				None => e = e.help(format!("declared principals: {}", quoted_list(&names))),
+			}
+			return Err(e.or_span(scenario.span));
+		};
+		let mut bound: Vec<ValueId> = Vec::new();
+		for (target, value) in &scenario.bindings {
+			if !known.get(id).is_some_and(|set| set.contains(&target.id)) {
+				let names: Vec<String> = known
+					.get(id)
+					.map(|set| {
+						declared
+							.iter()
+							.filter(|(cid, _)| set.contains(cid))
+							.map(|(_, name)| name.clone())
+							.collect()
+					})
+					.unwrap_or_default();
+				let mut e = VerifpalError::sanity(
+					format!(
+						"scenario binds `{}`, which {} does not declare with `knows`",
+						target.name, scenario.principal_name
+					)
+					.into(),
+				)
+				.note(
+					"a scenario replaces a constant the principal is given, so the target \
+					 must be one that principal `knows`",
+				);
+				match did_you_mean(&target.name, names.iter().map(|n| n.as_str())) {
+					Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
+					None if !names.is_empty() => {
+						e = e.help(format!(
+							"{} knows {}",
+							scenario.principal_name,
+							quoted_list(&names)
+						));
+					}
+					None => {}
+				}
+				return Err(e.or_span(scenario.span));
+			}
+			if !declared.iter().any(|(cid, _)| *cid == value.id) {
+				let names: Vec<String> = declared.iter().map(|(_, name)| name.clone()).collect();
+				let mut e = VerifpalError::sanity(
+					format!(
+						"scenario binds `{}` to `{}`, which no principal declares",
+						target.name, value.name
+					)
+					.into(),
+				)
+				.note(
+					"a scenario substitutes one of the model's own constants, so the value \
+					 must be introduced by `knows`, `generates`, or an assignment",
+				);
+				if let Some(suggestion) =
+					did_you_mean(&value.name, names.iter().map(|n| n.as_str()))
+				{
+					e = e.help(format!("did you mean `{suggestion}`?"));
+				}
+				return Err(e.or_span(scenario.span));
+			}
+			if bound.contains(&target.id) {
+				return Err(VerifpalError::sanity(
+					format!(
+						"scenario binds `{}` twice; a constant takes one value per scenario",
+						target.name
+					)
+					.into(),
+				)
+				.or_span(scenario.span));
+			}
+			bound.push(target.id);
+		}
+	}
+	Ok(())
+}
+
+fn known_constants(m: &Model) -> IdMap<PrincipalId, IdSet<ValueId>> {
+	let mut out: IdMap<PrincipalId, IdSet<ValueId>> = IdMap::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		let entry = out.entry(p.id).or_default();
+		for expr in &p.expressions {
+			if expr.kind != Declaration::Knows {
+				continue;
+			}
+			for c in &expr.constants {
+				entry.insert(c.id);
+			}
+		}
+	}
+	out
+}
+
+fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
+	let mut out: Vec<(ValueId, String)> = Vec::new();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expr in &p.expressions {
+			if !matches!(
+				expr.kind,
+				Declaration::Knows | Declaration::Generates | Declaration::Assignment
+			) {
+				continue;
+			}
+			for c in &expr.constants {
+				if !out.iter().any(|(id, _)| *id == c.id) {
+					out.push((c.id, c.name.to_string()));
+				}
+			}
+		}
+	}
+	out
 }
 
 fn compromised_constants(m: &Model) -> IdSet<ValueId> {
@@ -364,10 +522,12 @@ fn binds_target(expr: &Expression, scenario: &Scenario, principal: PrincipalId) 
 	if scenario.principal != principal || expr.kind != Declaration::Knows {
 		return false;
 	}
-	expr.constants
-		.iter()
-		.all(|c| scenario.bindings.iter().any(|(t, _)| t.id == c.id))
-		&& !expr.constants.is_empty()
+	expr.constants.iter().all(|c| {
+		scenario
+			.bindings
+			.iter()
+			.any(|(t, v)| t.id == c.id && v.id != c.id)
+	}) && !expr.constants.is_empty()
 }
 
 fn clone_message(
@@ -449,6 +609,61 @@ mod tests {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert_eq!(e.honest.len(), 3);
+	}
+
+	#[test]
+	fn a_scenario_naming_a_principal_the_model_does_not_declare_is_an_error() {
+		let src = SRC.replace("Alice[scx_gpeer = scx_gm]", "Carol[scx_gpeer = scx_gm]");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let Err(e) = expand_scenarios(&m, 1) else {
+			panic!("must be rejected");
+		};
+		assert!(e.message.contains("does not declare"), "{}", e.message);
+	}
+
+	#[test]
+	fn a_scenario_binding_a_constant_the_principal_does_not_know_is_an_error() {
+		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_ni = scx_gb]");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let Err(e) = expand_scenarios(&m, 1) else {
+			panic!("must be rejected");
+		};
+		assert!(e.message.contains("`knows`"), "{}", e.message);
+	}
+
+	#[test]
+	fn a_scenario_binding_to_a_constant_no_principal_declares_is_an_error() {
+		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_gpeer = scx_absent]");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let Err(e) = expand_scenarios(&m, 1) else {
+			panic!("must be rejected");
+		};
+		assert!(e.message.contains("no principal declares"), "{}", e.message);
+	}
+
+	#[test]
+	fn a_scenario_set_with_no_honest_member_is_still_analysable() {
+		let src = SRC.replace("Alice[scx_gpeer = scx_gb]\n", "");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(e.honest.is_empty());
+		assert_eq!(e.summaries.len(), 1);
+		assert!(!e.summaries[0].honest);
+	}
+
+	#[test]
+	fn a_scenario_binding_a_constant_to_itself_keeps_its_declaration() {
+		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_gpeer = scx_gpeer]");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		let kept = e.model.blocks.iter().any(|b| match b {
+			Block::Principal(p) => p.expressions.iter().any(|expr| {
+				expr.kind == Declaration::Knows
+					&& expr.constants.iter().any(|c| &*c.name == "scx_gpeer")
+			}),
+			_ => false,
+		});
+		assert!(kept, "an identity binding must not drop the declaration");
 	}
 
 	#[test]

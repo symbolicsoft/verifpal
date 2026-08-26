@@ -772,6 +772,26 @@ pub struct Scenario {
 	pub trailing_comment: Option<Comment>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScenarioSummary {
+	pub principal: Arc<str>,
+	pub bindings: Vec<(Arc<str>, Arc<str>)>,
+	pub honest: bool,
+}
+
+impl std::fmt::Display for ScenarioSummary {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}[", self.principal)?;
+		for (i, (target, value)) in self.bindings.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{target} = {value}")?;
+		}
+		write!(f, "]")
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
@@ -866,19 +886,20 @@ impl Envelope {
 		self.truncations.is_empty()
 	}
 
-	pub fn qualifier(&self) -> String {
+	pub fn summary(&self) -> String {
 		if self.truncations.is_empty() {
 			return format!(
-				"  [search exhausted at {} session{}]",
+				"search exhausted at {} session{}",
 				self.sessions,
 				if self.sessions == 1 { "" } else { "s" }
 			);
 		}
 		let reasons: Vec<&str> = self.truncations.iter().map(|t| t.name()).collect();
-		format!(
-			"  [no attack found; search truncated: {}]",
-			reasons.join(", ")
-		)
+		format!("search truncated: {}", reasons.join(", "))
+	}
+
+	pub fn qualifier(&self) -> String {
+		format!("  [{}]", self.summary())
 	}
 }
 

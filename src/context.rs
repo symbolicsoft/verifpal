@@ -40,7 +40,8 @@ pub(crate) struct VerifyContext {
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
 	truncations: RwLock<Vec<Truncation>>,
 	sessions: u8,
-	honest: IdSet<PrincipalId>,
+	honest: Option<IdSet<PrincipalId>>,
+	scenarios: Vec<ScenarioSummary>,
 	#[cfg(test)]
 	witnesses: RwLock<Vec<Option<ResultWitness>>>,
 	#[cfg(test)]
@@ -143,7 +144,8 @@ impl VerifyContext {
 		states: &[PrincipalState],
 		variants: Vec<Vec<Query>>,
 		sessions: u8,
-		honest: IdSet<PrincipalId>,
+		honest: Option<IdSet<PrincipalId>>,
+		scenarios: Vec<ScenarioSummary>,
 	) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
@@ -168,6 +170,7 @@ impl VerifyContext {
 			truncations: RwLock::new(Vec::new()),
 			sessions,
 			honest,
+			scenarios,
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; unresolved as usize]),
 			#[cfg(test)]
@@ -232,9 +235,19 @@ impl VerifyContext {
 	/// otherwise only for the clones whose peer bindings all resolve to values
 	/// no leak reaches. A run whose peer is the attacker is still explored —
 	/// it is where the attacker learns things — but it is not a run whose
-	/// claims are the protocol's to keep.
+	/// claims are the protocol's to keep. A model all of whose scenarios are
+	/// corrupt has an empty honest set, which is not the same as declaring
+	/// none: `honest` is `None` in the second case and `Some(empty)` in the
+	/// first.
 	pub(crate) fn is_honest(&self, principal: PrincipalId) -> bool {
-		self.honest.is_empty() || self.honest.contains(&principal)
+		match &self.honest {
+			None => true,
+			Some(honest) => honest.contains(&principal),
+		}
+	}
+
+	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
+		&self.scenarios
 	}
 
 	pub(crate) fn truncations(&self) -> Vec<Truncation> {
@@ -484,6 +497,7 @@ impl VerifyContext {
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
 			sessions: self.sessions,
 			honest: self.honest.clone(),
+			scenarios: self.scenarios.clone(),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),
 			#[cfg(test)]
@@ -613,7 +627,7 @@ mod tests {
 			confidentiality? scr_k\n\
 			]\n";
 		let m = parse_string("scratch.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, IdSet::default());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		let scratch = ctx.scratch_for_query(1);
 
 		assert!(!scratch.query_is_resolved(1));
@@ -645,7 +659,7 @@ mod tests {
 			confidentiality? drv_m\n\
 			]\n";
 		let m = parse_string("drv.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, IdSet::default());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		let record = Arc::new(MutationRecord {
 			diffs: vec![],
 			principal_id: 0,
@@ -687,7 +701,7 @@ mod tests {
 			confidentiality? trc_m\n\
 			]\n";
 		let m = parse_string("trc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, IdSet::default());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		ctx.finalize_envelopes();
 		assert!(ctx.truncations().is_empty());
 		assert!(ctx.results_get()[0].envelope.exhausted());
@@ -706,7 +720,7 @@ mod tests {
 			confidentiality? tdc_m\n\
 			]\n";
 		let m = parse_string("tdc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, IdSet::default());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		ctx.note_depth_cut(1, 0);
 		ctx.finalize_envelopes();
 		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
@@ -725,7 +739,7 @@ mod tests {
 			confidentiality? fev_m\n\
 			]\n";
 		let m = parse_string("fev.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, IdSet::default());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		assert!(!ctx.all_resolved());
 		ctx.finalize_envelopes();
 		assert!(!ctx.all_resolved());

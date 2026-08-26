@@ -49,12 +49,12 @@ fn analyze_sessions_traced_cancellable(
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
-	let (m, honest) = if m.scenarios.is_empty() {
-		(m, IdSet::default())
+	let (m, honest, scenarios) = if m.scenarios.is_empty() {
+		(m, None, Vec::new())
 	} else {
 		let e = crate::scenario::expand_scenarios(m, sessions)?;
 		scenario_expanded = e.model;
-		(&scenario_expanded, e.honest)
+		(&scenario_expanded, Some(e.honest), e.summaries)
 	};
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
@@ -67,7 +67,7 @@ fn analyze_sessions_traced_cancellable(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest);
+	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
 	if sessions > 1 {
@@ -116,6 +116,7 @@ pub struct VerifyReport {
 	pub code: String,
 	pub elapsed: Option<std::time::Duration>,
 	pub assumptions: Vec<(Value, Capability, i32)>,
+	pub scenarios: Vec<ScenarioSummary>,
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
@@ -225,6 +226,7 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 		code,
 		elapsed,
 		assumptions: ctx.capability_assumptions(),
+		scenarios: ctx.scenarios().to_vec(),
 	})
 }
 
@@ -394,6 +396,34 @@ fn verify_end(
 		false,
 	);
 	crate::info::info_blank_line();
+
+	let scenarios = ctx.scenarios();
+	if !scenarios.is_empty() {
+		info_message(
+			&format!(
+				"Analysis performed over {} declared peer scenario{}:",
+				scenarios.len(),
+				if scenarios.len() == 1 { "" } else { "s" },
+			),
+			InfoLevel::Warning,
+			false,
+		);
+		for scenario in scenarios {
+			info_message(
+				&format!(
+					"{scenario} ({})",
+					if scenario.honest {
+						"honest peer"
+					} else {
+						"corrupt peer"
+					}
+				),
+				InfoLevel::Warning,
+				false,
+			);
+		}
+		crate::info::info_blank_line();
+	}
 
 	let assumptions = ctx.capability_assumption_terms();
 	if !assumptions.is_empty() {
