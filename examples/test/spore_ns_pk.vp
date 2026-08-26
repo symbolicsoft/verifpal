@@ -1,73 +1,78 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c1a1a1a1 — Needham-Schroeder public key (1978), the UNFIXED
-// version: message 2 carries CONCAT(ni, nr) with no responder identity.
-// Modelled after gui/Protocols/needham-schroeder.spdl from the Scyther
-// distribution, minus the key server (whose replayable messages break
-// synchronisation for reasons unrelated to the protocol).
+// Expected: c1 — Needham-Schroeder public key (1978), the UNFIXED version:
+// message 2 carries CONCAT(ni, nr) with no responder identity. This is
+// Lowe's 1995 attack, found rather than assumed.
 //
-// This is one half of a discrimination pair with spore_nsl_pk.vp, and the
-// pair exists to pin a LIMITATION rather than a result: both halves produce
-// the SAME code, so Verifpal cannot currently tell the broken protocol from
-// Lowe's fix. Lowe's 1995 attack needs an honest initiator running
-// legitimately with a corrupt-but-legitimate peer while a second run
-// proceeds with an honest one, and a model here describes one scenario with
-// fixed principals. --sessions does not help: every session replicates the
-// same scenario with the same peers.
+// The pair with spore_nsl_pk.vp is the point: that model is this one plus
+// Lowe's fix, and it holds where this one falls.
 //
-// Public keys are guarded because the real protocols assume authentic keys
-// from a certificate authority. Unguarded, both halves fail for a reason
-// that has nothing to do with Lowe's fix — Alice would be checking the
-// responder identity against a key the attacker also chose.
+// Peer instantiation is what makes the question askable at all. Lowe's
+// attack needs an honest initiator running legitimately with a
+// corrupt-but-legitimate peer while a concurrent run proceeds with an honest
+// one, so a model with one fixed cast cannot state it, and --sessions does
+// not help: every session replicates the same cast. The scenarios[] block at
+// the bottom is that peer axis.
 //
-// c0 ni  — Alice's nonce travels only under Bob's authentic key.
-// c1 nr  — the second face of the same gap. Nothing stops the attacker from
-//          running the protocol against Bob as a legitimate initiator, using
-//          PUBKEY(nil) as its own identity; Bob then encrypts nr to it. Bob
-//          has exactly one nr, so that counts as a confidentiality break.
-//          Scyther does not report this: it relativises claims to honest
-//          actors (prune_theorems.c) and Verifpal has no analogue.
-// a1 m1  — injective agreement. Alice sends m1 once; the attacker replays it
-//          into the sibling session and Bob accepts it twice. Nothing is
-//          forged, and that is the point: this is a replay, not a
-//          substitution. At one session it is a0, there being no sibling run
-//          to replay from.
-// a1 m2  — the attacker forces Bob's reply to bind ni against another
-//          session's nr and delivers it to Alice, who accepts it.
-// a1 m3  — a genuine forgery: the attacker knows nr (see c1), so it can build
-//          PKE_ENC(gb, nr) itself and Bob accepts it on its own merits. The
-//          witness printed for this one is weaker than the attack — it shows
-//          m3 replaced by the earlier m1, which Bob decrypts before rejecting
-//          at the ASSERT — but the verdict does not rest on that witness.
+// Alice runs the protocol twice over: once with Bob, once with Mallory, who
+// is a legitimate participant with a leaked private key. Verifpal finds:
+//
+//   1. the attacker takes ni@2 out of Alice's run with Mallory, reseals it
+//      under Bob's key WITH ALICE'S OWN IDENTITY, and sends it to Bob;
+//   2. Bob's identity check passes, because the identity really is Alice's;
+//   3. Bob replies CONCAT(ni@2, nr), which the attacker relays to Alice@2;
+//   4. Alice@2's nonce check passes, because ni@2 really is hers;
+//   5. Alice@2 seals nr to Mallory's key, and the attacker opens it with mk.
+//
+// Bob finishes believing he spoke to Alice, and the attacker holds Bob's nr.
+// Nothing was forged and no key was broken: every message is one an honest
+// principal genuinely produced, delivered to the wrong run.
+//
+// Modelling note. Bob's `ASSERT(id_b, ga)?` is not an extra assumption. It is
+// what "Bob's run with Alice as his peer" means operationally, and it is what
+// SPDL gets for free from pattern matching: `recv_3(I,R,{Ni,I}pk(R))` with I
+// instantiated to Alice only accepts messages carrying Alice's identity.
+// Verifpal's receive is an assignment rather than a pattern, so the check is
+// written out. Without it Bob has no peer at all and the query is not the one
+// Lowe's attack is about.
 
 attacker[active]
 
 principal Alice[
 	knows private a
-	generates ni
+	knows public gpeer
 	ga = PUBKEY(a)
+	generates ni
 ]
 
 principal Bob[
 	knows private b
-	generates nr
 	gb = PUBKEY(b)
+	generates nr
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
 ]
 
 Alice -> Bob: [ga]
 Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
 
 principal Alice[
-	m1 = PKE_ENC(gb, CONCAT(ni, ga))
+	m1 = PKE_ENC(gpeer, CONCAT(ni, ga))
 ]
 
 Alice -> Bob: m1
 
 principal Bob[
 	d1 = PKE_DEC(b, m1)
-	ni_b, ga_b = SPLIT(d1)?
-	m2 = PKE_ENC(ga_b, CONCAT(ni_b, nr))
+	ni_b, id_b = SPLIT(d1)?
+	_ = ASSERT(id_b, ga)?
+	m2 = PKE_ENC(id_b, CONCAT(ni_b, nr))
 ]
 
 Bob -> Alice: m2
@@ -76,7 +81,7 @@ principal Alice[
 	d2 = PKE_DEC(a, m2)
 	ni_a, nr_a = SPLIT(d2)?
 	_ = ASSERT(ni_a, ni)?
-	m3 = PKE_ENC(gb, nr_a)
+	m3 = PKE_ENC(gpeer, nr_a)
 ]
 
 Alice -> Bob: m3
@@ -86,10 +91,11 @@ principal Bob[
 	_ = ASSERT(d3, nr)?
 ]
 
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
 queries[
-	confidentiality? ni
 	confidentiality? nr
-	authentication? Alice -> Bob: m1
-	authentication? Bob -> Alice: m2
-	authentication? Alice -> Bob: m3
 ]

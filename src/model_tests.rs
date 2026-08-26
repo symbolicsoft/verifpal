@@ -10,9 +10,8 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 6] = [
 	("test5.vp", 3),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 5] = [
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 4] = [
 	("junglegym_hybrid_pq.vp", 4),
-	("needham-schroeder-pk.vp", 1),
 	("noise_xx_mutual.vp", 1),
 	("piknik.vp", 2),
 	("piknik.vp", 3),
@@ -384,44 +383,20 @@ fn a_cross_session_attack_saturates_only_after_it_appears() {
 
 #[test]
 fn test_spore_ns_pk() {
-	run_model("spore_ns_pk.vp", "c0c1a1a1a1");
-	run_model_sessions("spore_ns_pk.vp", 1, "c0c1a1a0a1");
+	run_model("spore_ns_pk.vp", "c1");
+	run_model_sessions("spore_ns_pk.vp", 1, "c1");
 }
 
 #[test]
 fn test_spore_nsl_pk() {
-	run_model("spore_nsl_pk.vp", "c0c1a1a1a1");
-	run_model_sessions("spore_nsl_pk.vp", 1, "c0c1a1a0a1");
-}
-
-#[test]
-fn test_spore_ns_pk_scenarios() {
-	run_model("spore_ns_pk_scenarios.vp", "c1");
-	run_model_sessions("spore_ns_pk_scenarios.vp", 1, "c1");
-}
-
-#[test]
-fn test_spore_nsl_pk_scenarios() {
-	run_model("spore_nsl_pk_scenarios.vp", "c0");
-	run_model_sessions("spore_nsl_pk_scenarios.vp", 1, "c0");
-}
-
-#[test]
-fn without_peer_instantiation_ns_and_nsl_are_indistinguishable() {
-	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
-	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
-	assert_eq!(
-		ns, nsl,
-		"the scenario-free pair is the baseline the scenarios pair is measured against"
-	);
+	run_model("spore_nsl_pk.vp", "c0");
+	run_model_sessions("spore_nsl_pk.vp", 1, "c0");
 }
 
 #[test]
 fn with_peer_instantiation_lowes_fix_changes_the_verdict() {
-	let (_, ns) =
-		crate::verify::verify("examples/test/spore_ns_pk_scenarios.vp").expect("analyses");
-	let (_, nsl) =
-		crate::verify::verify("examples/test/spore_nsl_pk_scenarios.vp").expect("analyses");
+	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
+	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
 	assert_ne!(ns, nsl, "peer instantiation exists to tell these two apart");
 	assert_eq!(ns, "c1");
 	assert_eq!(nsl, "c0");
@@ -1209,14 +1184,6 @@ fn test_lc_dp_3t() {
 	);
 }
 #[test]
-fn test_needham_schroeder_pk() {
-	run_model("needham-schroeder-pk.vp", "a1a1c1c1");
-}
-#[test]
-fn test_needham_schroeder_pk_withfix() {
-	run_model("needham-schroeder-pk-withfix.vp", "a1a1c1c0");
-}
-#[test]
 fn test_needham_schroeder_symmetric() {
 	run_model_at(
 		"examples/transport-layer/needham-schroeder.vp",
@@ -1541,8 +1508,7 @@ fn a_replayed_wire_value_is_stepped_as_a_replay_not_a_substitution() {
 }
 #[test]
 fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
-	let (results, _) =
-		crate::verify::verify("examples/test/needham-schroeder-pk-withfix.vp").expect("verify");
+	let (results, _) = crate::verify::verify("examples/test/key_ratchet.vp").expect("verify");
 	let auth = results
 		.iter()
 		.find(|r| r.resolved && r.query.message.constant().is_ok_and(|c| &*c.name == "e1"))

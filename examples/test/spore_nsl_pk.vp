@@ -1,61 +1,60 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c1a1a1a1 — Needham-Schroeder-Lowe: message 2 carries
-// CONCAT(ni, nr, gb), naming the responder, and Alice checks it. Modelled
-// after gui/Protocols/needham-schroeder-lowe.spdl from the Scyther
-// distribution, minus the key server.
+// Expected: c0 — Needham-Schroeder-Lowe with peer instantiation. This is
+// spore_ns_pk.vp plus Lowe's 1995 fix, and the fix works.
 //
-// This is the fixed protocol, and it produces exactly the same code as the
-// broken spore_ns_pk.vp. That identity is the point of the pair: Lowe's fix
-// closes an attack in which an honest initiator runs legitimately with a
-// corrupt-but-legitimate peer, and Verifpal cannot express two concurrent
-// runs with different peer bindings, so it cannot see what the fix fixes.
-// The extra ASSERT(gb_a, gb) below is therefore dead weight in this engine
-// today — it can only ever compare Bob's authentic key against itself.
+// Message 2 now carries the responder's identity, and the initiator checks
+// it against the peer she believes she is talking to. That single ASSERT
+// breaks step 4 of the attack the unfixed model exhibits: the attacker
+// relays Bob's reply to Alice@2, but the reply names Bob while Alice@2 is
+// running with Mallory, so she halts instead of sealing nr to Mallory's key.
+// The attacker never gets a ciphertext it can open, and nr stays secret.
 //
-// Scyther, by contrast, distinguishes the two: it instantiates roles over
-// agents with Eve untrusted by default, so it finds Lowe's attack on the
-// unfixed version and proves the fixed one for an unbounded number of runs.
-// That contrast is the whole reason this pair is in the corpus.
+// Verifpal reports c1 for the unfixed protocol and c0 for this one, which is
+// the discrimination Lowe's fix exists to make, and which needs the peer
+// axis that scenarios[] declares: with one fixed cast the two protocols are
+// indistinguishable at every session count.
 //
-// The individual verdicts have the same causes as in spore_ns_pk.vp:
-// c0 ni  — travels only under Bob's authentic key.
-// c1 nr  — the attacker runs the protocol against Bob as a legitimate
-//          initiator under its own PUBKEY(nil) identity, and Bob has one nr.
-//          No honest-peer relativisation, so it counts as a break.
-// a1 m1  — injective agreement: Alice sends m1 once, Bob accepts it twice
-//          across sessions. a0 at one session, there being no sibling run.
-// a1 m2  — the attacker binds ni against another session's nr.
-// a1 m3  — a genuine forgery, the attacker knowing nr from c1.
+// Modelling note. Bob's `ASSERT(id_b, ga)?` is what SPDL's pattern matching
+// does for free — see the note in spore_ns_pk.vp.
 
 attacker[active]
 
 principal Alice[
 	knows private a
-	generates ni
+	knows public gpeer
 	ga = PUBKEY(a)
+	generates ni
 ]
 
 principal Bob[
 	knows private b
-	generates nr
 	gb = PUBKEY(b)
+	generates nr
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
 ]
 
 Alice -> Bob: [ga]
 Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
 
 principal Alice[
-	m1 = PKE_ENC(gb, CONCAT(ni, ga))
+	m1 = PKE_ENC(gpeer, CONCAT(ni, ga))
 ]
 
 Alice -> Bob: m1
 
 principal Bob[
 	d1 = PKE_DEC(b, m1)
-	ni_b, ga_b = SPLIT(d1)?
-	m2 = PKE_ENC(ga_b, CONCAT(ni_b, nr, gb))
+	ni_b, id_b = SPLIT(d1)?
+	_ = ASSERT(id_b, ga)?
+	m2 = PKE_ENC(id_b, CONCAT(ni_b, nr, gb))
 ]
 
 Bob -> Alice: m2
@@ -64,8 +63,8 @@ principal Alice[
 	d2 = PKE_DEC(a, m2)
 	ni_a, nr_a, gb_a = SPLIT(d2)?
 	_ = ASSERT(ni_a, ni)?
-	_ = ASSERT(gb_a, gb)?
-	m3 = PKE_ENC(gb_a, nr_a)
+	_ = ASSERT(gb_a, gpeer)?
+	m3 = PKE_ENC(gpeer, nr_a)
 ]
 
 Alice -> Bob: m3
@@ -75,10 +74,11 @@ principal Bob[
 	_ = ASSERT(d3, nr)?
 ]
 
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
 queries[
-	confidentiality? ni
 	confidentiality? nr
-	authentication? Alice -> Bob: m1
-	authentication? Bob -> Alice: m2
-	authentication? Alice -> Bob: m3
 ]
