@@ -63,8 +63,9 @@ pub use update::{UpdateCheck, update_check_report, update_check_start};
 #[cfg(feature = "cli")]
 pub use util::{ColorChoice, set_color_choice};
 pub use verify::{
-	VerifyReport, verify, verify_auto_queries, verify_report, verify_report_with_source,
-	verify_report_with_source_opts, verify_with_sessions,
+	SATURATE_MAX, VerifyReport, saturation_sessions, verify, verify_auto_queries, verify_report,
+	verify_report_with_source, verify_report_with_source_opts, verify_saturating,
+	verify_with_sessions,
 };
 
 #[cfg(feature = "wasm")]

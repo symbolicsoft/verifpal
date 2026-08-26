@@ -359,6 +359,25 @@ fn auto_queries_asks_more_than_the_model_wrote() {
 	assert!(generated.len() > written.len());
 }
 
+#[test]
+fn a_model_saturates_when_its_verdict_stops_moving() {
+	let (_, code, k, regressed) =
+		crate::verify::verify_saturating("examples/test/hmac_ok.vp", 4).expect("analyses");
+	assert_eq!(code, "c0a1");
+	assert_eq!(k, 3);
+	assert!(!regressed);
+}
+
+#[test]
+fn a_cross_session_attack_saturates_only_after_it_appears() {
+	let (_, code, k, regressed) =
+		crate::verify::verify_saturating("examples/test/session_nonce_cross.vp", 4)
+			.expect("analyses");
+	assert_eq!(code, "a1");
+	assert_eq!(k, 3);
+	assert!(!regressed);
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }

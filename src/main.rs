@@ -3,9 +3,9 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
-	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
-	set_color_choice, set_verbosity, update_check_report, update_check_start,
-	verify_report_with_source_opts,
+	ColorChoice, Run, SATURATE_MAX, Verbosity, VerifyReport, diagram, html_report, info_banner,
+	pretty_print, saturation_sessions, set_color_choice, set_verbosity, update_check_report,
+	update_check_start, verify_report_with_source_opts,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -58,6 +58,8 @@ enum Commands {
 		fail_on_attack: bool,
 		#[arg(long, default_value_t = false)]
 		auto_queries: bool,
+		#[arg(long, default_value_t = false)]
+		saturate: bool,
 		#[arg(long, value_enum, default_value_t = FormatArg::Text)]
 		format: FormatArg,
 		#[arg(short, long, default_value_t = false, conflicts_with = "verbose")]
@@ -110,6 +112,7 @@ fn run_verify(
 	sessions: u8,
 	fail_on_attack: bool,
 	auto_queries: bool,
+	saturate: bool,
 	format: FormatArg,
 	quiet: bool,
 	verbose: bool,
@@ -138,7 +141,38 @@ fn run_verify(
 		if index > 0 && !structured && !result_code {
 			println!();
 		}
-		match verify_report_with_source_opts(model, sessions, auto_queries) {
+		let mut effective = sessions;
+		if saturate {
+			match saturation_sessions(model, SATURATE_MAX, auto_queries) {
+				Ok((point, regressed)) => {
+					effective = point;
+					if !structured && !result_code {
+						if regressed {
+							eprintln!(
+								"warning: an attack found at a lower session count \
+								 disappeared at a higher one; that is an engine bug, \
+								 not a protocol result"
+							);
+						}
+						println!(
+							"Verdicts stable from {} session{} onward.",
+							point,
+							if point == 1 { "" } else { "s" }
+						);
+					}
+				}
+				Err(e) => {
+					had_error = true;
+					if !structured {
+						eprintln!("{}", e);
+					}
+					outcomes.push((model.clone(), Err(e.to_string())));
+					sources.push(String::new());
+					continue;
+				}
+			}
+		}
+		match verify_report_with_source_opts(model, effective, auto_queries) {
 			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
@@ -235,6 +269,7 @@ fn main() {
 			sessions,
 			fail_on_attack,
 			auto_queries,
+			saturate,
 			format,
 			quiet,
 			verbose,
@@ -245,6 +280,7 @@ fn main() {
 			sessions,
 			fail_on_attack,
 			auto_queries,
+			saturate,
 			format,
 			quiet,
 			verbose,

@@ -137,6 +137,50 @@ pub fn verify_report_with_source_opts(
 	Ok((report, source))
 }
 
+pub const SATURATE_MAX: u8 = 4;
+
+pub fn verify_saturating(
+	file_path: &str,
+	max: u8,
+) -> VResult<(Vec<VerifyResult>, String, u8, bool)> {
+	let (point, regressed) = saturation_sessions(file_path, max, false)?;
+	if regressed {
+		info_message(
+			"an attack found at a lower session count disappeared at a higher one; \
+			 that is an engine bug, not a protocol result",
+			InfoLevel::Warning,
+			false,
+		);
+	}
+	let (results, code) = verify_with_sessions(file_path, point)?;
+	Ok((results, code, point, regressed))
+}
+
+pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<(u8, bool)> {
+	let _quiet = crate::info::InfoQuiet::new();
+	let mut previous: Option<String> = None;
+	let mut regressed = false;
+	for k in 1..=max {
+		let (_, code) = verify_report_with_source_opts(file_path, k, auto_queries)
+			.map(|(report, _)| (report.results, report.code))?;
+		if let Some(prior) = &previous {
+			regressed |= attack_disappeared(prior, &code);
+			if *prior == code {
+				return Ok((k, regressed));
+			}
+		}
+		previous = Some(code);
+	}
+	Ok((max, regressed))
+}
+
+fn attack_disappeared(previous: &str, current: &str) -> bool {
+	previous
+		.chars()
+		.zip(current.chars())
+		.any(|(a, b)| a == '1' && b == '0')
+}
+
 pub fn verify_auto_queries(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report_with_source_opts(file_path, sessions, true)
 		.map(|(report, _)| (report.results, report.code))
