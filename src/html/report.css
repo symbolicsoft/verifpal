@@ -297,11 +297,7 @@ section.model {
 	opacity: 0.85;
 }
 
-.peer.peerCorrupt::before {
-	content: "\2014\a0";
-}
-
-.peer.peerHonest::before {
+.peer::before {
 	content: "\2014\a0";
 }
 

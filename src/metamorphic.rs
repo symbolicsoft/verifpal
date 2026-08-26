@@ -409,14 +409,21 @@ fn identity_scenarios(model: &Model, copies: usize) -> Option<Model> {
 	if !model.scenarios.is_empty() {
 		return None;
 	}
+	let travels = |id: ValueId| {
+		model.blocks.iter().any(|b| match b {
+			Block::Message(msg) => msg.constants.iter().any(|c| c.id == id),
+			_ => false,
+		})
+	};
 	let (principal, name, constant) = model.blocks.iter().find_map(|b| {
 		let Block::Principal(p) = b else {
 			return None;
 		};
 		p.expressions
 			.iter()
-			.find(|e| e.kind == Declaration::Knows)
-			.and_then(|e| e.constants.first())
+			.filter(|e| e.kind == Declaration::Knows)
+			.flat_map(|e| e.constants.iter())
+			.find(|c| !travels(c.id))
 			.map(|c| {
 				(
 					p.id,

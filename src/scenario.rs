@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
-use crate::util::{did_you_mean, quoted_list};
+use crate::util::{base_name, did_you_mean, quoted_list};
 use crate::value::{MAX_COPIES, copy_value_id};
 
 pub(crate) struct ScenarioExpansion {
@@ -83,7 +83,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 	for k in 0..count {
 		if scenario_is_honest(&m.scenarios[k], &compromised) {
 			for (id, _) in &principals {
-				honest.insert(mapped_principal(*id, k, &pids).0);
+				honest.insert(mapped_principal(*id, k, &pids));
 			}
 		}
 	}
@@ -231,6 +231,26 @@ fn sanity_scenarios(m: &Model) -> VResult<()> {
 				}
 				return Err(e.or_span(scenario.span));
 			}
+			if let Some(sender) = message_carrying(m, target.id) {
+				return Err(VerifpalError::sanity(
+					format!(
+						"scenario binds `{}`, which {} sends over the wire",
+						target.name,
+						base_name(&sender)
+					)
+					.into(),
+				)
+				.note(
+					"a scenario replaces a constant inside one principal, so a recipient \
+					 would go on naming the constant the sender no longer has",
+				)
+				.help(format!(
+					"bind a constant `{}` keeps to itself, or send the peer's value \
+					 under a name the recipient also uses",
+					scenario.principal_name
+				))
+				.or_span(scenario.span));
+			}
 			if bound.contains(&target.id) {
 				return Err(VerifpalError::sanity(
 					format!(
@@ -245,6 +265,18 @@ fn sanity_scenarios(m: &Model) -> VResult<()> {
 		}
 	}
 	Ok(())
+}
+
+fn message_carrying(m: &Model, target: ValueId) -> Option<String> {
+	m.blocks.iter().find_map(|block| {
+		let Block::Message(msg) = block else {
+			return None;
+		};
+		msg.constants
+			.iter()
+			.any(|c| c.id == target)
+			.then(|| msg.sender_name.to_string())
+	})
 }
 
 fn known_constants(m: &Model) -> IdMap<PrincipalId, IdSet<ValueId>> {
@@ -289,7 +321,34 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 	out
 }
 
+fn secret_declarations(m: &Model) -> IdSet<ValueId> {
+	let mut out: IdSet<ValueId> = IdSet::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expr in &p.expressions {
+			let secret = match expr.kind {
+				Declaration::Generates => true,
+				Declaration::Knows => matches!(
+					expr.qualifier,
+					Some(Qualifier::Private) | Some(Qualifier::Password)
+				),
+				_ => false,
+			};
+			if !secret {
+				continue;
+			}
+			for c in &expr.constants {
+				out.insert(c.id);
+			}
+		}
+	}
+	out
+}
+
 fn compromised_constants(m: &Model) -> IdSet<ValueId> {
+	let secret = secret_declarations(m);
 	let mut out: IdSet<ValueId> = IdSet::default();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
@@ -298,7 +357,9 @@ fn compromised_constants(m: &Model) -> IdSet<ValueId> {
 		for expression in &p.expressions {
 			if expression.kind == Declaration::Leaks {
 				for c in &expression.constants {
-					out.insert(c.id);
+					if secret.contains(&c.id) {
+						out.insert(c.id);
+					}
 				}
 			}
 		}
@@ -377,6 +438,11 @@ fn highest_referenced_principal(m: &Model) -> PrincipalId {
 		highest = highest
 			.max(query.message.sender)
 			.max(query.message.recipient);
+		for option in &query.options {
+			highest = highest
+				.max(option.message.sender)
+				.max(option.message.recipient);
+		}
 	}
 	for scenario in &m.scenarios {
 		highest = highest.max(scenario.principal);
@@ -411,11 +477,8 @@ fn mapped_principal(
 	id: PrincipalId,
 	k: usize,
 	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-) -> (PrincipalId, String) {
-	pids.get(&(id, k))
-		.cloned()
-		.unwrap_or((id, String::new()))
-		.clone()
+) -> PrincipalId {
+	pids.get(&(id, k)).map(|&(id, _)| id).unwrap_or(id)
 }
 
 fn scenario_value_id(base: ValueId, k: usize, sessions: u8) -> ValueId {
@@ -453,7 +516,10 @@ fn bind(c: &Constant, scenario: &Scenario, principal: PrincipalId) -> Constant {
 	}
 	for (target, value) in &scenario.bindings {
 		if target.id == c.id {
-			return value.clone();
+			return Constant {
+				guard: c.guard,
+				..value.clone()
+			};
 		}
 	}
 	c.clone()
@@ -493,22 +559,28 @@ fn clone_principal(
 		expressions: p
 			.expressions
 			.iter()
-			.filter(|expr| !binds_target(expr, scenario, p.id))
-			.map(|expr| Expression {
-				span: expr.span,
-				kind: expr.kind,
-				qualifier: expr.qualifier,
-				constants: expr
+			.filter_map(|expr| {
+				let constants: Vec<Constant> = expr
 					.constants
 					.iter()
+					.filter(|c| !rebinds(expr, scenario, p.id, c))
 					.map(|c| map_constant(&bind(c, scenario, p.id), k, sessions, freshen))
-					.collect(),
-				assigned: expr
-					.assigned
-					.as_ref()
-					.map(|v| map_value(&bind_value(v, scenario, p.id), k, sessions, freshen)),
-				leading_comments: Vec::new(),
-				trailing_comment: None,
+					.collect();
+				if constants.is_empty() && !expr.constants.is_empty() {
+					return None;
+				}
+				Some(Expression {
+					span: expr.span,
+					kind: expr.kind,
+					qualifier: expr.qualifier,
+					constants,
+					assigned: expr
+						.assigned
+						.as_ref()
+						.map(|v| map_value(&bind_value(v, scenario, p.id), k, sessions, freshen)),
+					leading_comments: Vec::new(),
+					trailing_comment: None,
+				})
 			})
 			.collect(),
 		leading_comments: Vec::new(),
@@ -518,16 +590,13 @@ fn clone_principal(
 	}
 }
 
-fn binds_target(expr: &Expression, scenario: &Scenario, principal: PrincipalId) -> bool {
-	if scenario.principal != principal || expr.kind != Declaration::Knows {
-		return false;
-	}
-	expr.constants.iter().all(|c| {
-		scenario
+fn rebinds(expr: &Expression, scenario: &Scenario, principal: PrincipalId, c: &Constant) -> bool {
+	scenario.principal == principal
+		&& expr.kind == Declaration::Knows
+		&& scenario
 			.bindings
 			.iter()
 			.any(|(t, v)| t.id == c.id && v.id != c.id)
-	}) && !expr.constants.is_empty()
 }
 
 fn clone_message(
@@ -664,6 +733,97 @@ mod tests {
 			_ => false,
 		});
 		assert!(kept, "an identity binding must not drop the declaration");
+	}
+
+	#[test]
+	fn a_scenario_binding_a_constant_that_travels_is_an_error() {
+		let src = SRC.replace(
+			"Alice -> Bob: scx_m1\n",
+			"Alice -> Bob: scx_m1\nAlice -> Bob: scx_gpeer\n",
+		);
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let Err(e) = expand_scenarios(&m, 1) else {
+			panic!("must be rejected");
+		};
+		assert!(e.message.contains("over the wire"), "{}", e.message);
+	}
+
+	#[test]
+	fn a_knows_line_keeps_the_constants_the_scenario_does_not_bind() {
+		let src = SRC.replace(
+			"knows public scx_gpeer\n",
+			"knows public scx_gpeer, scx_tag\n",
+		);
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		let mut kept = 0;
+		let mut dropped = 0;
+		for block in &e.model.blocks {
+			let Block::Principal(p) = block else {
+				continue;
+			};
+			for expr in &p.expressions {
+				if expr.kind != Declaration::Knows {
+					continue;
+				}
+				for c in &expr.constants {
+					match &*c.name {
+						"scx_tag" => kept += 1,
+						"scx_gpeer" => dropped += 1,
+						_ => {}
+					}
+				}
+			}
+		}
+		assert_eq!(kept, 2, "the unbound constant must survive in both clones");
+		assert_eq!(dropped, 0, "the bound constant must not stay declared");
+	}
+
+	#[test]
+	fn leaking_a_public_key_does_not_make_a_scenario_corrupt() {
+		let src = SRC.replace("leaks scx_mk", "leaks scx_gm");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(
+			e.summaries.iter().all(|s| s.honest),
+			"only a leaked secret marks a peer corrupt: {:?}",
+			e.summaries
+		);
+	}
+
+	#[test]
+	fn a_leaked_private_key_still_makes_its_scenario_corrupt() {
+		let m = parse_string("scx.vp", SRC).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(e.summaries[0].honest);
+		assert!(!e.summaries[1].honest);
+	}
+
+	#[test]
+	fn every_session_clone_of_an_honest_scenario_stays_honest() {
+		let m = parse_string("scx.vp", SRC).expect("parses");
+		let e = expand_scenarios(&m, 2).expect("expands");
+		let expanded = crate::sessions::expand_sessions(&e.model, 2).expect("expands");
+		let mut honest = e.honest.clone();
+		for &(original, clone) in &expanded.principal_clones {
+			if honest.contains(&original) {
+				honest.insert(clone);
+			}
+		}
+		assert_eq!(honest.len(), 6);
+		let corrupt = expanded
+			.model
+			.blocks
+			.iter()
+			.filter(|b| match b {
+				Block::Principal(p) => !honest.contains(&p.id),
+				_ => false,
+			})
+			.count();
+		assert_eq!(
+			corrupt, 6,
+			"the corrupt scenario's clones must all stay corrupt"
+		);
 	}
 
 	#[test]

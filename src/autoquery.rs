@@ -26,7 +26,7 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 		}
 	}
 	for slot in &km.slots {
-		if slot.known_by.is_empty() || slot.constant.is_nil() {
+		if slot.sent_by.is_empty() || slot.constant.is_nil() {
 			continue;
 		}
 		if !km.constant_used_by_any(&slot.constant) {

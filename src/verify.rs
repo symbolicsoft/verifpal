@@ -49,7 +49,7 @@ fn analyze_sessions_traced_cancellable(
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
-	let (m, honest, scenarios) = if m.scenarios.is_empty() {
+	let (m, mut honest, scenarios) = if m.scenarios.is_empty() {
 		(m, None, Vec::new())
 	} else {
 		let e = crate::scenario::expand_scenarios(m, sessions)?;
@@ -59,6 +59,13 @@ fn analyze_sessions_traced_cancellable(
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions)?;
+		if let Some(honest) = honest.as_mut() {
+			for &(original, clone) in &e.principal_clones {
+				if honest.contains(&original) {
+					honest.insert(clone);
+				}
+			}
+		}
 		expanded = e.model;
 		(&expanded, e.query_variants, e.siblings)
 	} else {
@@ -148,12 +155,22 @@ pub fn verify_report_with_source_opts(
 
 pub const SATURATE_MAX: u8 = 4;
 
+pub struct Saturation {
+	pub sessions: u8,
+	pub stable_from: u8,
+	pub saturated: bool,
+	pub regressed: bool,
+	pub report: VerifyReport,
+	pub source: String,
+	pub output: Vec<String>,
+}
+
 pub fn verify_saturating(
 	file_path: &str,
 	max: u8,
 ) -> VResult<(Vec<VerifyResult>, String, u8, bool)> {
-	let (point, regressed) = saturation_sessions(file_path, max, false)?;
-	if regressed {
+	let saturation = saturation_sessions(file_path, max, false)?;
+	if saturation.regressed {
 		info_message(
 			"an attack found at a lower session count disappeared at a higher one; \
 			 that is an engine bug, not a protocol result",
@@ -161,26 +178,58 @@ pub fn verify_saturating(
 			false,
 		);
 	}
-	let (results, code) = verify_with_sessions(file_path, point)?;
-	Ok((results, code, point, regressed))
+	Ok((
+		saturation.report.results,
+		saturation.report.code,
+		saturation.sessions,
+		saturation.regressed,
+	))
 }
 
-pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<(u8, bool)> {
-	let _quiet = crate::info::InfoQuiet::new();
+/// Raises the session count until the result code stops moving, and hands back
+/// the analysis of the count it stopped at rather than the count alone: every
+/// run is captured instead of silenced (`info.rs::InfoCapture`), so the winning
+/// one is reported by replaying what it already printed rather than by
+/// analyzing it a second time.
+pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<Saturation> {
 	let mut previous: Option<String> = None;
 	let mut regressed = false;
+	let mut saturated_at: Option<u8> = None;
+	let mut last: Option<(u8, VerifyReport, String, Vec<String>)> = None;
 	for k in 1..=max {
-		let (_, code) = verify_report_with_source_opts(file_path, k, auto_queries)
-			.map(|(report, _)| (report.results, report.code))?;
+		let capture = crate::info::InfoCapture::new();
+		let analyzed = verify_report_with_source_opts(file_path, k, auto_queries);
+		drop(capture);
+		let output = crate::info::info_capture_take();
+		let (report, source) = analyzed?;
+		let code = report.code.clone();
+		last = Some((k, report, source, output));
 		if let Some(prior) = &previous {
 			regressed |= attack_disappeared(prior, &code);
 			if *prior == code {
-				return Ok((k, regressed));
+				saturated_at = Some(k);
+				break;
 			}
 		}
 		previous = Some(code);
 	}
-	Ok((max, regressed))
+	let Some((sessions, report, source, output)) = last else {
+		return Err(VerifpalError::internal(
+			"saturating analysis ran no rounds".into(),
+		));
+	};
+	Ok(Saturation {
+		sessions,
+		stable_from: match saturated_at {
+			Some(k) => k.saturating_sub(1).max(1),
+			None => sessions,
+		},
+		saturated: saturated_at.is_some(),
+		regressed,
+		report,
+		source,
+		output,
+	})
 }
 
 fn attack_disappeared(previous: &str, current: &str) -> bool {
@@ -308,13 +357,15 @@ pub(crate) fn generate_trace(
 
 	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
 
-	let failures = ps_resolved.perform_all_rewrites();
-
-	let failures: Vec<(Primitive, usize)> = failures
+	type Failures = Vec<(Primitive, usize)>;
+	let (failures, suppressed): (Failures, Failures) = ps_resolved
+		.perform_all_rewrites()
 		.into_iter()
-		.filter(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)))
-		.collect();
+		.partition(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)));
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
+	if !suppressed.is_empty() {
+		ps_resolved = crate::reexec::halt_at_failed_checks(ps_resolved, &suppressed);
+	}
 	for (index, sv) in ps_resolved.values.iter().enumerate() {
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
 			return Err(match km.slots.get(index) {
@@ -352,6 +403,9 @@ pub(crate) fn verify_passive(
 	for phase in 0..=km.max_phase {
 		attacker_seed_phase(ctx, km, seed, phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
+		if ctx.relativises() && !ctx.all_resolved() && !ctx.cancelled() {
+			verify_standard_run(ctx, km, principal_states)?;
+		}
 	}
 	Ok(())
 }

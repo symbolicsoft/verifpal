@@ -53,7 +53,7 @@ pub(crate) mod verify;
 pub(crate) mod witness;
 
 pub use html::html_report;
-pub use info::{Verbosity, info_banner, info_message, set_verbosity};
+pub use info::{Verbosity, info_banner, info_message, info_replay, set_verbosity};
 #[cfg(feature = "lsp")]
 pub use lsp::run as lsp_run;
 pub use pretty::{diagram, pretty_print};
@@ -64,8 +64,8 @@ pub use update::{UpdateCheck, update_check_report, update_check_start};
 #[cfg(feature = "cli")]
 pub use util::{ColorChoice, set_color_choice};
 pub use verify::{
-	SATURATE_MAX, VerifyReport, saturation_sessions, verify, verify_auto_queries, verify_report,
-	verify_report_with_source, verify_report_with_source_opts, verify_saturating,
+	SATURATE_MAX, Saturation, VerifyReport, saturation_sessions, verify, verify_auto_queries,
+	verify_report, verify_report_with_source, verify_report_with_source_opts, verify_saturating,
 	verify_with_sessions,
 };
 

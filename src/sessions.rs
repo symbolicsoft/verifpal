@@ -43,9 +43,9 @@ use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
 use crate::value::{copy_index_of, copy_value_id};
 
-/// Bands 0..=14 of the session-copy id range hold sessions 2..=16; band 15
-/// is the minimizer's (`value.rs::session_copy`). Raising this past 16 means
-/// finding it a new home first.
+/// Sessions are one axis of the expansion-copy id space `value.rs` bands, and
+/// scenarios are the other: [`crate::value::MAX_COPIES`] bounds their product,
+/// so raising this past 16 means checking that bound, not this one.
 pub(crate) const MAX_SESSIONS: u8 = 16;
 
 /// Sessions analyzed per principal when nothing says otherwise.
@@ -68,6 +68,7 @@ pub(crate) struct SessionExpansion {
 	pub(crate) model: Model,
 	pub(crate) query_variants: Vec<Vec<Query>>,
 	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	pub(crate) principal_clones: Vec<(PrincipalId, PrincipalId)>,
 }
 
 fn session_value_id(base: ValueId, s: u8) -> ValueId {
@@ -104,6 +105,10 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 
 	let freshen = freshened_constants(m);
 	let pids = clone_principal_ids(&principals, sessions, highest_referenced_principal(m))?;
+	let principal_clones: Vec<(PrincipalId, PrincipalId)> = pids
+		.iter()
+		.map(|(&(original, _), (clone, _))| (original, *clone))
+		.collect();
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * sessions as usize);
 	for block in &m.blocks {
@@ -187,6 +192,7 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		model,
 		query_variants,
 		siblings,
+		principal_clones,
 	})
 }
 

@@ -174,6 +174,19 @@ pub(crate) fn reexecute(
 	Ok(ps)
 }
 
+pub(crate) fn halt_at_failed_checks(
+	mut ps: PrincipalState,
+	failures: &[(Primitive, usize)],
+) -> PrincipalState {
+	let foreign = foreign_halts(&ps, failures);
+	if let Some((truncate_at, halted_at)) = truncation_point(&ps, failures) {
+		ps = drop_after_index(ps, truncate_at);
+		ps.halted_at = Some(halted_at);
+	}
+	ps.foreign_halts = foreign;
+	ps
+}
+
 fn foreign_halts(
 	ps: &PrincipalState,
 	failures: &[(Primitive, usize)],

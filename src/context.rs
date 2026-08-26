@@ -246,6 +246,25 @@ impl VerifyContext {
 		}
 	}
 
+	/// Which runs may record a verdict. Scyther prunes claims in runs whose
+	/// actor is untrusted; the analogue here is that a corrupt-peer run is
+	/// explored for what the attacker learns in it and its own claims are not
+	/// the protocol's to keep. A model whose every scenario is corrupt has
+	/// nothing to relativise against, so it evaluates everywhere rather than
+	/// reporting a vacuous hold for every query.
+	pub(crate) fn claims_apply_to(&self, principal: PrincipalId) -> bool {
+		match &self.honest {
+			None => true,
+			Some(honest) => honest.is_empty() || honest.contains(&principal),
+		}
+	}
+
+	pub(crate) fn relativises(&self) -> bool {
+		self.honest
+			.as_ref()
+			.is_some_and(|honest| !honest.is_empty())
+	}
+
 	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
 		&self.scenarios
 	}
@@ -472,7 +491,21 @@ impl VerifyContext {
 			.is_some_and(|r| r.resolved)
 	}
 
+	#[cfg(test)]
 	pub(crate) fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
+		self.scratch(query_index, self.honest.clone())
+	}
+
+	/// The minimizer's probe context, which does not relativise. Which runs may
+	/// *record* a verdict and which runs can *reproduce* one already recorded
+	/// are different questions: the witness for a cross-scenario attack lives
+	/// in the corrupt-peer run the attack goes through, and refusing to confirm
+	/// it there leaves the trace falling back to the unminimized witness.
+	pub(crate) fn scratch_for_witness(&self, query_index: usize) -> VerifyContext {
+		self.scratch(query_index, None)
+	}
+
+	fn scratch(&self, query_index: usize, honest: Option<IdSet<PrincipalId>>) -> VerifyContext {
 		let mut results = self.results_get();
 		for (i, r) in results.iter_mut().enumerate() {
 			if i == query_index {
@@ -496,7 +529,7 @@ impl VerifyContext {
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
 			sessions: self.sessions,
-			honest: self.honest.clone(),
+			honest,
 			scenarios: self.scenarios.clone(),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),
@@ -725,6 +758,44 @@ mod tests {
 		ctx.finalize_envelopes();
 		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
 		assert!(!ctx.results_get()[0].envelope.exhausted());
+	}
+
+	#[test]
+	fn only_an_honest_run_records_a_verdict_unless_every_scenario_is_corrupt() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private cat_m\n\
+			knows private cat_k\n\
+			cat_e = ENC(cat_k, cat_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? cat_m\n\
+			]\n";
+		let m = parse_string("cat.vp", src).expect("parse");
+
+		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		assert!(plain.claims_apply_to(1));
+		assert!(plain.claims_apply_to(9));
+		assert!(!plain.relativises());
+
+		let mut honest: IdSet<PrincipalId> = IdSet::default();
+		honest.insert(1);
+		let mixed = VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new());
+		assert!(mixed.claims_apply_to(1));
+		assert!(!mixed.claims_apply_to(2));
+		assert!(mixed.relativises());
+
+		let corrupt =
+			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdSet::default()), Vec::new());
+		assert!(
+			corrupt.claims_apply_to(2),
+			"a model with nothing honest to relativise against must not hold vacuously"
+		);
+		assert!(!corrupt.relativises());
+		assert!(
+			!corrupt.is_honest(2),
+			"the honest-run check stays relaxed there even so"
+		);
 	}
 
 	#[test]

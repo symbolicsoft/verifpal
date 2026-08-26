@@ -86,6 +86,9 @@ pub(crate) fn query_start(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 ) -> VResult<()> {
+	if !ctx.claims_apply_to(ps.id) {
+		return Ok(());
+	}
 	let attacker = ctx.attacker_snapshot();
 	match query.kind {
 		QueryKind::Confidentiality => {

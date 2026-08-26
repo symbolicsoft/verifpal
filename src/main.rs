@@ -3,9 +3,10 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
-	ColorChoice, InfoLevel, Run, SATURATE_MAX, Verbosity, VerifyReport, diagram, html_report,
-	info_banner, info_message, pretty_print, saturation_sessions, set_color_choice, set_verbosity,
-	update_check_report, update_check_start, verify_report_with_source_opts,
+	ColorChoice, InfoLevel, Run, SATURATE_MAX, Saturation, Verbosity, VerifyReport, diagram,
+	html_report, info_banner, info_message, info_replay, pretty_print, saturation_sessions,
+	set_color_choice, set_verbosity, update_check_report, update_check_start,
+	verify_report_with_source_opts,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -214,7 +215,7 @@ enum Commands {
 			             attacks.\n\n\
 			             This overrides --sessions. It costs the sum of every analysis it runs, \
 			             so it is much slower than a single run; the intermediate runs print \
-			             nothing.\n\n\
+			             nothing, and the reported one is not analyzed twice.\n\n\
 			             Giving the attacker another session can only give it more to work with, \
 			             so an attack found at a lower count must still be found at a higher \
 			             one. If one disappears, that is a bug in Verifpal and not a fact about \
@@ -303,8 +304,8 @@ enum Commands {
 		              against, so formatting a file does not lose the prose in it. A few positions \
 		              cannot hold a comment again unambiguously, and a comment there is \
 		              dropped: inside a primitive's argument list, inside the brackets \
-		              of an attacker or phase declaration, and inside the inner brackets of a \
-		              query option.\n\n\
+		              of an attacker or phase declaration, inside a scenario's binding \
+		              brackets, and inside the inner brackets of a query option.\n\n\
 		              Formatting only requires that the model parse. A model that parses but \
 		              fails validation is formatted all the same, since refusing would withhold \
 		              the formatter at exactly the moment the user is fixing the error.\n\n\
@@ -492,42 +493,25 @@ fn run_verify(
 		if index > 0 && !structured && !result_code {
 			println!();
 		}
-		let mut effective = sessions;
-		if saturate {
-			match saturation_sessions(model, SATURATE_MAX, auto_queries) {
-				Ok((point, regressed)) => {
-					effective = point;
-					if !structured && !result_code {
-						if regressed {
-							eprintln!(
-								"warning: an attack found at a lower session count \
-								 disappeared at a higher one; that is an engine bug, \
-								 not a protocol result"
-							);
-						}
-						info_message(
-							&format!(
-								"Verdicts stopped changing at {} session{}; analyzing there.",
-								point,
-								if point == 1 { "" } else { "s" }
-							),
-							InfoLevel::Info,
-							false,
+		let analyzed = if saturate {
+			saturation_sessions(model, SATURATE_MAX, auto_queries).map(|saturation| {
+				if !structured && !result_code {
+					if saturation.regressed {
+						eprintln!(
+							"warning: an attack found at a lower session count \
+							 disappeared at a higher one; that is an engine bug, \
+							 not a protocol result"
 						);
 					}
+					info_message(&saturation_line(&saturation), InfoLevel::Info, false);
 				}
-				Err(e) => {
-					had_error = true;
-					if !structured {
-						eprintln!("{}", e);
-					}
-					outcomes.push((model.clone(), Err(e.to_string())));
-					sources.push(String::new());
-					continue;
-				}
-			}
-		}
-		match verify_report_with_source_opts(model, effective, auto_queries) {
+				info_replay(&saturation.output);
+				(saturation.report, saturation.source)
+			})
+		} else {
+			verify_report_with_source_opts(model, sessions, auto_queries)
+		};
+		match analyzed {
 			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
@@ -578,6 +562,29 @@ fn run_verify(
 		return EXIT_ATTACK;
 	}
 	0
+}
+
+fn saturation_line(saturation: &Saturation) -> String {
+	if !saturation.saturated {
+		return format!(
+			"Verdicts were still changing at {} sessions, the highest --saturate tries; \
+			 analyzing there.",
+			saturation.sessions
+		);
+	}
+	if saturation.stable_from == saturation.sessions {
+		return format!(
+			"Verdicts were unchanged at {} session; analyzing there.",
+			saturation.sessions
+		);
+	}
+	format!(
+		"Verdicts were unchanged from {} session{} through {}; analyzing at {}.",
+		saturation.stable_from,
+		if saturation.stable_from == 1 { "" } else { "s" },
+		saturation.sessions,
+		saturation.sessions
+	)
 }
 
 fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
