@@ -6,6 +6,22 @@ use std::sync::Arc;
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
 use crate::types::{IdMap, Primitive, PrimitiveId, TraceSlot, Value};
 
+fn assumption_key(v: &Value) -> String {
+	let text = format!("{}", v);
+	let mut out = String::with_capacity(text.len());
+	let mut chars = text.chars().peekable();
+	while let Some(c) = chars.next() {
+		if c == '#' || c == '@' {
+			while chars.peek().is_some_and(|d| d.is_ascii_digit()) {
+				chars.next();
+			}
+			continue;
+		}
+		out.push(c);
+	}
+	out
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Capability {
 	Weak,
@@ -262,6 +278,8 @@ impl CapabilityIndex {
 			.flatten()
 			.map(|(v, _)| v.clone())
 			.collect();
+		out.sort_by_key(|v| (assumption_key(v), format!("{}", v).len(), v.hash_value()));
+		out.dedup_by_key(|v| assumption_key(v));
 		out.sort_by_key(|v| v.hash_value());
 		out
 	}

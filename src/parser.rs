@@ -583,6 +583,13 @@ impl<'a> Parser<'a> {
 			queries.push(query);
 			self.consume_trivia();
 		}
+		if queries.is_empty() {
+			return Err(VerifpalError::parse("`queries` block is empty".into())
+				.at(Span::new(queries_kw, queries_kw + "queries".len()))
+				.labelled("no queries here")
+				.note("a model must ask at least one question, or there is nothing to verify")
+				.help("add a query, for example `confidentiality? m`"));
+		}
 		let queries_tail_comments = self.take_leading();
 		let queries_closing_trailing = if self.peek() == Some(b']') {
 			self.advance();
@@ -1540,6 +1547,13 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 		.unwrap_or("")
 		.to_string();
 
+	if file_name.is_empty() {
+		return Err(
+			VerifpalError::parse(format!("`{}` does not name a file", file_path).into()).note(
+				"Verifpal reads a single model file, whose name ends in a `.vp` extension",
+			),
+		);
+	}
 	if file_name.len() > 64 {
 		return Err(VerifpalError::parse(
 			format!(

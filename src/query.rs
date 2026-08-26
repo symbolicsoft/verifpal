@@ -331,7 +331,7 @@ fn query_authentication_handle_pass(
 			c,
 			mutated_info.term_excluding(&resolved, &[&c.name]),
 			result.query.message.sender_name,
-			mutated_info.term(b),
+			mutated_info.term_excluding(b, &[]),
 			result.query.message.recipient_name,
 			result.query.message.sender_name,
 			result.query.message.recipient_name,
@@ -342,7 +342,7 @@ fn query_authentication_handle_pass(
 			mutated_info.term_excluding(&resolved, &[&c.name]),
 			sender_name,
 			result.query.message.sender_name,
-			mutated_info.term(b),
+			mutated_info.term_excluding(b, &[]),
 			result.query.message.recipient_name,
 		),
 	};
@@ -493,9 +493,10 @@ fn query_equivalence(
 		mutated_info.kinded(),
 		&format!(
 			"{} are not equivalent.",
-			values
+			query
+				.constants
 				.iter()
-				.map(|v| mutated_info.term(v))
+				.map(|c| c.name.to_string())
 				.collect::<Vec<_>>()
 				.join(", "),
 		),

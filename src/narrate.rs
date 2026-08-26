@@ -7,6 +7,7 @@ use crate::primitive::primitive_name;
 use crate::principal::ATTACKER_ID;
 use crate::theory::can_rewrite;
 use crate::types::*;
+use crate::util::copy_base_name;
 use crate::witness::Witness;
 
 pub(crate) struct NameTable {
@@ -41,7 +42,7 @@ impl NameTable {
 			entries: self
 				.entries
 				.iter()
-				.filter(|(_, n)| !names.contains(&&**n))
+				.filter(|(_, n)| !excluded(names, n))
 				.cloned()
 				.collect(),
 		}
@@ -54,7 +55,7 @@ impl NameTable {
 			.find(|(known, _)| known.equivalent(v, true))
 			.map(|(_, name)| name);
 		if let Some(name) = named
-			&& !exclude.contains(&&**name)
+			&& !excluded(exclude, name)
 		{
 			return name.to_string();
 		}
@@ -75,6 +76,13 @@ impl NameTable {
 			}
 		}
 	}
+}
+
+fn excluded(exclude: &[&str], name: &str) -> bool {
+	let base = copy_base_name(name);
+	exclude
+		.iter()
+		.any(|e| *e == name || copy_base_name(e) == base)
 }
 
 #[derive(Clone, Debug)]
@@ -198,6 +206,15 @@ fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
 		Value::Constant(c) => ids.contains(&c.id),
 		Value::Primitive(p) => p.arguments.iter().any(|a| mentions(a, ids)),
 	}
+}
+
+fn mutated_names(ps: &PrincipalState) -> Vec<Arc<str>> {
+	ps.values
+		.iter()
+		.enumerate()
+		.filter(|(_, sv)| reportable(sv))
+		.map(|(i, _)| Arc::clone(&ps.meta[i].constant.name))
+		.collect()
 }
 
 fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
@@ -348,7 +365,7 @@ fn wire_leg(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> (PrincipalId, 
 	(creator, ps.id)
 }
 
-pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
+pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable, shadowed: &[&str]) -> Vec<Step> {
 	let mut steps = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		let Value::Primitive(p) = &sv.pre_rewrite else {
@@ -363,9 +380,9 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable) -> Vec<Step> {
 		if !can_rewrite(p).0 {
 			continue;
 		}
-		let own = [&*ps.meta[i].constant.name];
-		let own = own.as_slice();
-		let primitive = table.compress_excluding(&sv.pre_rewrite, own);
+		let mut own: Vec<&str> = shadowed.to_vec();
+		own.push(&ps.meta[i].constant.name);
+		let primitive = table.compress_excluding(&sv.pre_rewrite, &own);
 		if steps
 			.iter()
 			.any(|s| matches!(s, Step::Gate { primitive: p, .. } if *p == primitive))
@@ -628,6 +645,7 @@ pub(crate) struct Narration {
 	pub trace: String,
 	pub steps: Vec<Step>,
 	table: NameTable,
+	shadowed: Vec<Arc<str>>,
 	state: Option<PrincipalState>,
 }
 
@@ -637,6 +655,7 @@ impl Narration {
 			trace: String::new(),
 			steps: Vec::new(),
 			table: NameTable::empty(),
+			shadowed: Vec::new(),
 			state: None,
 		}
 	}
@@ -652,7 +671,9 @@ impl Narration {
 	}
 
 	pub(crate) fn term_excluding(&self, v: &Value, exclude: &[&str]) -> String {
-		self.table.compress_excluding(v, exclude)
+		let mut names: Vec<&str> = self.shadowed.iter().map(|s| &**s).collect();
+		names.extend_from_slice(exclude);
+		self.table.compress_excluding(v, &names)
 	}
 
 	pub(crate) fn kinded(&self) -> Vec<crate::types::TraceStep> {
@@ -806,6 +827,9 @@ pub(crate) fn narrate_attack(
 	let shadowed = shadowed_names(km, &witness.ps);
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let pre_table = table.without(&shadowed_refs);
+	let installed = mutated_names(&witness.ps);
+	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
+	let post_table = table.without(&installed_refs);
 	let carried = carried_in(km, &witness.ps, ambient);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
@@ -821,13 +845,13 @@ pub(crate) fn narrate_attack(
 	}
 
 	steps.extend(mutation_steps(km, &witness.ps, &table));
-	steps.extend(gate_steps(&witness.ps, &table));
+	steps.extend(gate_steps(&witness.ps, &table, &installed_refs));
 
 	steps.extend(derivation_steps(
 		km,
 		&witness.attacker,
 		target,
-		&table,
+		&post_table,
 		witness.ps.id,
 		&carried,
 		&mut seen,
@@ -849,6 +873,7 @@ pub(crate) fn narrate_attack(
 		trace,
 		steps,
 		table,
+		shadowed: installed,
 		state: Some(witness.ps.clone()),
 	}
 }
@@ -953,7 +978,7 @@ fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> St
 		);
 		let originals: Vec<String> = replaced
 			.iter()
-			.filter(|i| !i.old_value.is_empty())
+			.filter(|i| !i.old_value.is_empty() && i.old_value.as_str() != &*i.name)
 			.map(|i| format!("{} was {}", i.name, i.old_value))
 			.collect();
 		if !originals.is_empty() {
@@ -1287,13 +1312,13 @@ mod tests {
 		let failing = gate_state("gs_b");
 		let table = NameTable::from_state(&failing);
 		assert!(
-			gate_steps(&failing, &table).is_empty(),
+			gate_steps(&failing, &table, &[]).is_empty(),
 			"a check that does not pass must not be narrated as passing"
 		);
 
 		let passing = gate_state("gs_a");
 		let table = NameTable::from_state(&passing);
-		assert_eq!(gate_steps(&passing, &table).len(), 1);
+		assert_eq!(gate_steps(&passing, &table, &[]).len(), 1);
 	}
 
 	#[test]

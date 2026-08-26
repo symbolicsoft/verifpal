@@ -67,6 +67,13 @@ pub(crate) fn base_name(name: &str) -> &str {
 	name.split('#').next().unwrap_or(name)
 }
 
+pub(crate) fn copy_base_name(name: &str) -> &str {
+	let end = name
+		.find(['#', '@'])
+		.unwrap_or(name.len());
+	&name[..end]
+}
+
 pub(crate) fn quoted_list(items: &[String]) -> String {
 	items
 		.iter()
