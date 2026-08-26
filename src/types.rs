@@ -763,11 +763,46 @@ impl From<&str> for Source {
 }
 
 #[derive(Clone, Debug)]
+pub struct Scenario {
+	pub span: Span,
+	pub principal: PrincipalId,
+	pub principal_name: Arc<str>,
+	pub bindings: Vec<(Constant, Constant)>,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScenarioSummary {
+	pub principal: Arc<str>,
+	pub bindings: Vec<(Arc<str>, Arc<str>)>,
+	pub honest: bool,
+}
+
+impl std::fmt::Display for ScenarioSummary {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}[", self.principal)?;
+		for (i, (target, value)) in self.bindings.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{target} = {value}")?;
+		}
+		write!(f, "]")
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
 	pub source: Source,
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
+	pub scenarios: Vec<Scenario>,
+	pub scenarios_leading_comments: Vec<Comment>,
+	pub scenarios_header_trailing: Option<Comment>,
+	pub scenarios_tail_comments: Vec<Comment>,
+	pub scenarios_closing_trailing: Option<Comment>,
 	pub queries: Vec<Query>,
 	pub pre_attacker_comments: Vec<Comment>,
 	pub attacker_trailing: Option<Comment>,
@@ -827,11 +862,53 @@ pub struct TraceValue {
 	pub guarded: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Truncation {
+	TermDepth,
+}
+
+impl Truncation {
+	pub fn name(self) -> &'static str {
+		match self {
+			Truncation::TermDepth => "term depth",
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Envelope {
+	pub sessions: u8,
+	pub truncations: Vec<Truncation>,
+}
+
+impl Envelope {
+	pub fn exhausted(&self) -> bool {
+		self.truncations.is_empty()
+	}
+
+	pub fn summary(&self) -> String {
+		if self.truncations.is_empty() {
+			return format!(
+				"search exhausted at {} session{}",
+				self.sessions,
+				if self.sessions == 1 { "" } else { "s" }
+			);
+		}
+		let reasons: Vec<&str> = self.truncations.iter().map(|t| t.name()).collect();
+		format!("search truncated: {}", reasons.join(", "))
+	}
+
+	pub fn qualifier(&self) -> String {
+		format!("  [{}]", self.summary())
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,
 	pub query_index: usize,
 	pub resolved: bool,
+	pub envelope: Envelope,
 	pub summary: String,
 	pub conclusion: String,
 	pub trace: Vec<String>,
@@ -850,6 +927,7 @@ impl VerifyResult {
 			query: query.clone(),
 			query_index,
 			resolved: false,
+			envelope: Envelope::default(),
 			summary: String::new(),
 			conclusion: String::new(),
 			trace: vec![],

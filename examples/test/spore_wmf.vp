@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1f0 — Wide-Mouth Frog, ported from the Scyther distribution's
+// gui/Protocols/wmf.spdl. Alice picks the session key herself and the server
+// only re-encrypts it for Bob. Timestamps have no symbolic equivalent, so
+// ta and ts stand in as generated values; nothing in the queries turns on
+// them, and the flaws below are not timestamp flaws.
+//
+// All three verdicts land on something Scyther's property language cannot
+// reach, which is why this model is in the corpus.
+//
+// c1 ma  — no forward secrecy. The phase[1] leak models a session key
+//          compromised after the fact; the attacker replays the phase-0
+//          recording and opens it. Scyther's `compromised` seeds the intruder's
+//          INITIAL knowledge (compiler.c) and it has no notion of phases, so a
+//          key that leaks later than the traffic it protects is inexpressible.
+// a1 m2  — injective agreement. The server issues m2 once and the attacker
+//          replays it into the sibling session, where Bob accepts it a second
+//          time. Nothing is forged and no secret is learned: run correspondence
+//          alone is broken. Scyther has no injective claim at all — every
+//          authentication claim it offers is non-injective, so its Nisynch on
+//          this role reports Ok.
+// f0 kab_b — the key Bob ends up with really is fresh, Alice generating it per
+//          run. The SPDL model records this concern as claim_R3(R, Empty,
+//          (Fresh, Kir)), and `Empty` is a SIGNAL claim: isClaimSignal() marks
+//          it as never verified, so Scyther prints no verdict for it. The
+//          concern was documented and never checked. Here it is checked, and
+//          it holds.
+
+attacker[active]
+
+principal Alice[
+	knows private k_as
+	knows public a_name, b_name
+	generates kab
+	generates ta
+	m1 = AEAD_ENC(k_as, CONCAT(ta, b_name, kab), nil)
+	generates ma
+]
+
+Alice -> Server: m1
+
+principal Server[
+	knows private k_as
+	knows private k_bs
+	knows public a_name
+	generates ts
+	d1 = AEAD_DEC(k_as, m1, nil)?
+	ta_s, b_s, kab_s = SPLIT(d1)
+	m2 = AEAD_ENC(k_bs, CONCAT(ts, a_name, kab_s), nil)
+]
+
+Server -> Bob: m2
+
+principal Bob[
+	knows private k_bs
+	d2 = AEAD_DEC(k_bs, m2, nil)?
+	ts_b, a_b, kab_b = SPLIT(d2)
+]
+
+principal Alice[
+	e = AEAD_ENC(kab, ma, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	dm = AEAD_DEC(kab_b, e, nil)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks kab
+]
+
+queries[
+	confidentiality? ma
+	authentication? Server -> Bob: m2
+	freshness? kab_b
+]

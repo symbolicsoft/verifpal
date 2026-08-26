@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1a1a1a1 — Needham-Schroeder-Lowe: message 2 carries
+// CONCAT(ni, nr, gb), naming the responder, and Alice checks it. Modelled
+// after gui/Protocols/needham-schroeder-lowe.spdl from the Scyther
+// distribution, minus the key server.
+//
+// This is the fixed protocol, and it produces exactly the same code as the
+// broken spore_ns_pk.vp. That identity is the point of the pair: Lowe's fix
+// closes an attack in which an honest initiator runs legitimately with a
+// corrupt-but-legitimate peer, and Verifpal cannot express two concurrent
+// runs with different peer bindings, so it cannot see what the fix fixes.
+// The extra ASSERT(gb_a, gb) below is therefore dead weight in this engine
+// today — it can only ever compare Bob's authentic key against itself.
+//
+// Scyther, by contrast, distinguishes the two: it instantiates roles over
+// agents with Eve untrusted by default, so it finds Lowe's attack on the
+// unfixed version and proves the fixed one for an unbounded number of runs.
+// That contrast is the whole reason this pair is in the corpus.
+//
+// The individual verdicts have the same causes as in spore_ns_pk.vp:
+// c0 ni  — travels only under Bob's authentic key.
+// c1 nr  — the attacker runs the protocol against Bob as a legitimate
+//          initiator under its own PUBKEY(nil) identity, and Bob has one nr.
+//          No honest-peer relativisation, so it counts as a break.
+// a1 m1  — injective agreement: Alice sends m1 once, Bob accepts it twice
+//          across sessions. a0 at one session, there being no sibling run.
+// a1 m2  — the attacker binds ni against another session's nr.
+// a1 m3  — a genuine forgery, the attacker knowing nr from c1.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	generates ni
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	knows private b
+	generates nr
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+
+principal Alice[
+	m1 = PKE_ENC(gb, CONCAT(ni, ga))
+]
+
+Alice -> Bob: m1
+
+principal Bob[
+	d1 = PKE_DEC(b, m1)
+	ni_b, ga_b = SPLIT(d1)?
+	m2 = PKE_ENC(ga_b, CONCAT(ni_b, nr, gb))
+]
+
+Bob -> Alice: m2
+
+principal Alice[
+	d2 = PKE_DEC(a, m2)
+	ni_a, nr_a, gb_a = SPLIT(d2)?
+	_ = ASSERT(ni_a, ni)?
+	_ = ASSERT(gb_a, gb)?
+	m3 = PKE_ENC(gb_a, nr_a)
+]
+
+Alice -> Bob: m3
+
+principal Bob[
+	d3 = PKE_DEC(b, m3)
+	_ = ASSERT(d3, nr)?
+]
+
+queries[
+	confidentiality? ni
+	confidentiality? nr
+	authentication? Alice -> Bob: m1
+	authentication? Bob -> Alice: m2
+	authentication? Alice -> Bob: m3
+]

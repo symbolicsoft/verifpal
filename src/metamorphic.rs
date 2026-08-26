@@ -405,6 +405,55 @@ fn variant_padded(model: &Model) -> Option<Model> {
 	Some(out)
 }
 
+fn identity_scenarios(model: &Model, copies: usize) -> Option<Model> {
+	if !model.scenarios.is_empty() {
+		return None;
+	}
+	let travels = |id: ValueId| {
+		model.blocks.iter().any(|b| match b {
+			Block::Message(msg) => msg.constants.iter().any(|c| c.id == id),
+			_ => false,
+		})
+	};
+	let (principal, name, constant) = model.blocks.iter().find_map(|b| {
+		let Block::Principal(p) = b else {
+			return None;
+		};
+		p.expressions
+			.iter()
+			.filter(|e| e.kind == Declaration::Knows)
+			.flat_map(|e| e.constants.iter())
+			.find(|c| !travels(c.id))
+			.map(|c| {
+				(
+					p.id,
+					std::sync::Arc::<str>::from(p.name.as_str()),
+					c.clone(),
+				)
+			})
+	})?;
+	let mut out = model.clone();
+	out.scenarios = (0..copies)
+		.map(|_| Scenario {
+			span: Span::default(),
+			principal,
+			principal_name: std::sync::Arc::clone(&name),
+			bindings: vec![(constant.clone(), constant.clone())],
+			leading_comments: Vec::new(),
+			trailing_comment: None,
+		})
+		.collect();
+	Some(out)
+}
+
+fn variant_identity_scenario(model: &Model) -> Option<Model> {
+	identity_scenarios(model, 1)
+}
+
+fn variants_duplicated_scenario(model: &Model) -> Vec<Model> {
+	identity_scenarios(model, 2).into_iter().collect()
+}
+
 fn variants_dephased(model: &Model) -> Vec<Model> {
 	let Some(last) = model
 		.blocks
@@ -727,6 +776,28 @@ mod tests {
 		assert_eq!(rotate_code("c1a0f1", 1), "a0f1c1");
 		assert_eq!(rotate_code("c1a0f1", 3), "c1a0f1");
 		assert_eq!(rotate_code("c1", 1), "c1");
+	}
+
+	#[test]
+	fn a_scenario_that_binds_a_constant_to_itself_changes_no_verdict() {
+		check_invariant(
+			"scenario",
+			variant_identity_scenario,
+			|before| before.to_string(),
+			300,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	fn a_second_copy_of_a_scenario_never_loses_an_attack() {
+		check_monotone(
+			"scenarios",
+			variants_duplicated_scenario,
+			Strength::Stronger,
+			240,
+			Sweep::Exhaustive,
+		);
 	}
 
 	#[test]

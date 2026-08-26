@@ -55,6 +55,7 @@ const RESERVED: &[&str] = &[
 	"kem_decap",
 	"g",
 	"queries",
+	"scenarios",
 ];
 
 fn check_reserved(s: &str) -> VResult<()> {
@@ -522,7 +523,9 @@ impl<'a> Parser<'a> {
 				break;
 			}
 
-			if starts_with_keyword(self.remaining(), "queries") {
+			if starts_with_keyword(self.remaining(), "queries")
+				|| starts_with_keyword(self.remaining(), "scenarios")
+			{
 				break;
 			}
 
@@ -539,6 +542,15 @@ impl<'a> Parser<'a> {
 			.note("a model describes principals computing values and sending them to each other")
 			.help("add a principal block, e.g. `principal Alice[ knows private m ]`"));
 		}
+
+		self.consume_trivia();
+		let (
+			scenarios,
+			scenarios_leading_comments,
+			scenarios_header_trailing,
+			scenarios_tail_comments,
+			scenarios_closing_trailing,
+		) = self.parse_scenarios()?;
 
 		self.consume_trivia();
 		let queries_leading_comments = self.take_leading();
@@ -599,6 +611,11 @@ impl<'a> Parser<'a> {
 			source: Source::default(),
 			attacker: attacker_type,
 			blocks,
+			scenarios,
+			scenarios_leading_comments,
+			scenarios_header_trailing,
+			scenarios_tail_comments,
+			scenarios_closing_trailing,
 			queries,
 			pre_attacker_comments,
 			attacker_trailing,
@@ -607,6 +624,115 @@ impl<'a> Parser<'a> {
 			queries_tail_comments,
 			queries_closing_trailing,
 			tail_comments,
+		})
+	}
+
+	#[allow(clippy::type_complexity)]
+	fn parse_scenarios(
+		&mut self,
+	) -> VResult<(
+		Vec<Scenario>,
+		Vec<Comment>,
+		Option<Comment>,
+		Vec<Comment>,
+		Option<Comment>,
+	)> {
+		if !starts_with_keyword(self.remaining(), "scenarios") {
+			return Ok((Vec::new(), Vec::new(), None, Vec::new(), None));
+		}
+		let leading = self.take_leading();
+		let keyword = self.pos;
+		self.expect("scenarios")?;
+		self.record_from(keyword, crate::tokens::TokenKind::Keyword);
+		self.skip_whitespace();
+		let open_bracket = self.pos;
+		self.expect_where("[", "after `scenarios`")?;
+		let header_trailing = self.try_take_trailing();
+		self.consume_trivia();
+		let mut scenarios = Vec::new();
+		loop {
+			self.consume_trivia();
+			if self.peek() == Some(b']') {
+				break;
+			}
+			if self.at_end() {
+				return Err(self.unclosed_hint(
+					VerifpalError::parse("the `scenarios` block is never closed".into())
+						.at(self.here()),
+					open_bracket,
+				));
+			}
+			let entry_leading = self.take_leading();
+			let mut scenario = self.parse_scenario()?;
+			scenario.leading_comments = entry_leading;
+			scenario.trailing_comment = self.try_take_trailing();
+			scenarios.push(scenario);
+			self.consume_trivia();
+		}
+		let tail_comments = self.take_leading();
+		let closing_trailing = if self.peek() == Some(b']') {
+			self.advance();
+			self.try_take_trailing()
+		} else {
+			None
+		};
+		Ok((
+			scenarios,
+			leading,
+			header_trailing,
+			tail_comments,
+			closing_trailing,
+		))
+	}
+
+	fn parse_scenario(&mut self) -> VResult<Scenario> {
+		let start = self.pos;
+		let name = self.parse_identifier()?;
+		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		let name = title_case(&name);
+		let (principal, principal_name) = self.principal_id(&name)?;
+		self.skip_whitespace();
+		self.expect_where("[", &format!("after `{}` in the `scenarios` block", name))?;
+		self.consume_trivia_nocapture();
+		let mut bindings = Vec::new();
+		loop {
+			self.consume_trivia_nocapture();
+			if self.peek() == Some(b']') {
+				self.advance();
+				break;
+			}
+			if self.at_end() {
+				return Err(VerifpalError::parse(
+					format!("`{}`'s scenario bindings are never closed", name).into(),
+				)
+				.at(self.here()));
+			}
+			let target = self.parse_constant()?;
+			self.consume_trivia_nocapture();
+			self.expect_where("=", "in a scenario binding")?;
+			self.consume_trivia_nocapture();
+			let value = self.parse_constant()?;
+			bindings.push((target, value));
+			self.consume_trivia_nocapture();
+			if self.peek() == Some(b',') {
+				self.advance();
+			}
+		}
+		if bindings.is_empty() {
+			return Err(VerifpalError::parse(
+				format!("`{}` names no bindings in this scenario", name).into(),
+			)
+			.at(Span::new(start, self.pos))
+			.note("a scenario binds at least one constant to the value that instance uses")
+			.help(format!("write it as `{}[gpeer = gb]`", name)));
+		}
+		Ok(Scenario {
+			span: Span::new(start, self.pos),
+			principal,
+			principal_name,
+			bindings,
+			leading_comments: Vec::new(),
+			trailing_comment: None,
 		})
 	}
 
@@ -1470,6 +1596,43 @@ pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_scenarios_block_binds_a_constant_per_principal_instance() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows public scn_gpeer\n\
+			knows private scn_a\n\
+			scn_e = ENC(scn_gpeer, scn_a)\n\
+			]\n\
+			scenarios[\n\
+			Alice[scn_gpeer = scn_gb]\n\
+			Alice[scn_gpeer = scn_gm]\n\
+			]\n\
+			queries[\n\
+			confidentiality? scn_a\n\
+			]\n";
+		let m = parse_string("scn.vp", src).expect("parses");
+		assert_eq!(m.scenarios.len(), 2);
+		assert_eq!(m.scenarios[0].bindings.len(), 1);
+		assert_eq!(&*m.scenarios[0].principal_name, "Alice");
+		assert_eq!(&*m.scenarios[0].bindings[0].0.name, "scn_gpeer");
+		assert_eq!(&*m.scenarios[0].bindings[0].1.name, "scn_gb");
+		assert_eq!(&*m.scenarios[1].bindings[0].1.name, "scn_gm");
+	}
+
+	#[test]
+	fn a_model_without_scenarios_has_none() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private nsc_a\n\
+			]\n\
+			queries[\n\
+			confidentiality? nsc_a\n\
+			]\n";
+		let m = parse_string("nsc.vp", src).expect("parses");
+		assert!(m.scenarios.is_empty());
+	}
 
 	fn first_assigned(m: &Model) -> String {
 		let Block::Principal(p) = &m.blocks[0] else {

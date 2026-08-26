@@ -15,7 +15,7 @@
 //!
 //! The freshening rule is derived from syntax the language already has:
 //! `generates` constants and assignment outputs are per-session (renamed
-//! `c#s`, rebanded per [`SESSION_COPY_BASE`]), while `knows
+//! `c#s`, rebanded per [`COPY_BASE`]), while `knows
 //! public|private|password` constants are shared — exactly the
 //! long-term/per-session split `new` vs free names encodes in other tools.
 //! Guards stay session-pinned: `[c]` in session s protects that session's
@@ -41,11 +41,11 @@ use std::sync::Arc;
 use crate::info::info_message;
 use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
-use crate::value::{SESSION_COPY_BASE, SESSION_STRIDE};
+use crate::value::{copy_index_of, copy_value_id};
 
-/// Bands 0..=14 of the session-copy id range hold sessions 2..=16; band 15
-/// is the minimizer's (`value.rs::session_copy`). Raising this past 16 means
-/// finding it a new home first.
+/// Sessions are one axis of the expansion-copy id space `value.rs` bands, and
+/// scenarios are the other: [`crate::value::MAX_COPIES`] bounds their product,
+/// so raising this past 16 means checking that bound, not this one.
 pub(crate) const MAX_SESSIONS: u8 = 16;
 
 /// Sessions analyzed per principal when nothing says otherwise.
@@ -68,10 +68,12 @@ pub(crate) struct SessionExpansion {
 	pub(crate) model: Model,
 	pub(crate) query_variants: Vec<Vec<Query>>,
 	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	pub(crate) principal_clones: Vec<(PrincipalId, PrincipalId)>,
 }
 
 fn session_value_id(base: ValueId, s: u8) -> ValueId {
-	SESSION_COPY_BASE + (s as ValueId - 2) * SESSION_STRIDE + base
+	let (scenario_copy, root) = copy_index_of(base);
+	copy_value_id(root, scenario_copy + s as u32 - 1)
 }
 
 pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansion> {
@@ -103,6 +105,10 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 
 	let freshen = freshened_constants(m);
 	let pids = clone_principal_ids(&principals, sessions, highest_referenced_principal(m))?;
+	let principal_clones: Vec<(PrincipalId, PrincipalId)> = pids
+		.iter()
+		.map(|(&(original, _), (clone, _))| (original, *clone))
+		.collect();
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * sessions as usize);
 	for block in &m.blocks {
@@ -153,6 +159,11 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		source: m.source.clone(),
 		attacker: m.attacker,
 		blocks,
+		scenarios: m.scenarios.clone(),
+		scenarios_leading_comments: m.scenarios_leading_comments.clone(),
+		scenarios_header_trailing: m.scenarios_header_trailing.clone(),
+		scenarios_tail_comments: m.scenarios_tail_comments.clone(),
+		scenarios_closing_trailing: m.scenarios_closing_trailing.clone(),
 		queries: m.queries.clone(),
 		pre_attacker_comments: m.pre_attacker_comments.clone(),
 		attacker_trailing: m.attacker_trailing.clone(),
@@ -181,6 +192,7 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		model,
 		query_variants,
 		siblings,
+		principal_clones,
 	})
 }
 
@@ -414,6 +426,7 @@ fn same_query(a: &Query, b: &Query) -> bool {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+	use crate::value::COPY_BASE;
 
 	const SRC: &str = "attacker[active]\n\
 		principal Alice[\n\
@@ -487,18 +500,12 @@ mod tests {
 					assert_eq!(&*cexpr.constants[0].name, "psk");
 				}
 				Declaration::Generates => {
-					assert_eq!(
-						cexpr.constants[0].id,
-						SESSION_COPY_BASE + expr.constants[0].id
-					);
+					assert_eq!(cexpr.constants[0].id, COPY_BASE + expr.constants[0].id);
 					assert_eq!(&*cexpr.constants[0].name, "na#2");
 					assert!(cexpr.constants[0].fresh || !expr.constants[0].fresh);
 				}
 				Declaration::Assignment => {
-					assert_eq!(
-						cexpr.constants[0].id,
-						SESSION_COPY_BASE + expr.constants[0].id
-					);
+					assert_eq!(cexpr.constants[0].id, COPY_BASE + expr.constants[0].id);
 					let Some(Value::Primitive(p)) = &cexpr.assigned else {
 						panic!("assignment lost its value");
 					};

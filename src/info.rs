@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::borrow::Cow;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::{LazyLock, Mutex};
 
 use crate::primitive::primitive_has_single_output;
@@ -23,6 +23,8 @@ pub enum Verbosity {
 }
 
 thread_local! {
+	static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
+	static CAPTURED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SHOWN: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SUPPRESSED: Cell<usize> = const { Cell::new(0) };
@@ -68,16 +70,59 @@ fn level_is_visible(level: InfoLevel) -> bool {
 }
 
 fn chrome_is_visible() -> bool {
-	verbosity() >= Verbosity::Normal
+	verbosity() >= Verbosity::Normal && !info_is_quiet()
 }
 
 pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
 }
 
+fn info_is_capturing() -> bool {
+	CAPTURE_DEPTH.with(|d| d.get() > 0)
+}
+
+fn emit(line: String) {
+	if info_is_capturing() {
+		CAPTURED.with(|c| c.borrow_mut().push(line));
+		return;
+	}
+	println!("{line}");
+}
+
+/// Buffers what would have been printed instead of printing it, so a caller
+/// that runs the same analysis at several parameters can show one of them
+/// without running it a second time (`verify.rs::saturation_sessions`).
+pub(crate) struct InfoCapture;
+
+impl InfoCapture {
+	pub(crate) fn new() -> InfoCapture {
+		CAPTURE_DEPTH.with(|d| d.set(d.get() + 1));
+		InfoCapture
+	}
+}
+
+impl Drop for InfoCapture {
+	fn drop(&mut self) {
+		CAPTURE_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+	}
+}
+
+pub(crate) fn info_capture_take() -> Vec<String> {
+	CAPTURED.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+pub fn info_replay(lines: &[String]) {
+	for line in lines {
+		println!("{line}");
+	}
+}
+
 #[cfg(feature = "cli")]
 fn status_enabled() -> bool {
-	!info_is_quiet() && verbosity() >= Verbosity::Normal && crate::util::stderr_is_terminal()
+	!cfg!(test)
+		&& !info_is_quiet()
+		&& verbosity() >= Verbosity::Normal
+		&& crate::util::stderr_is_terminal()
 }
 
 pub(crate) fn info_status_begin() {
@@ -159,7 +204,7 @@ pub(crate) fn info_blank_line() {
 		return;
 	}
 	info_status_erase();
-	println!();
+	emit(String::new());
 }
 
 pub(crate) fn info_reset_deductions() {
@@ -263,18 +308,18 @@ pub fn info_banner(version: &str) {
 	}
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		println!("{}", "\u{2500}".repeat(50).dimmed());
-		println!(
+		emit("\u{2500}".repeat(50).dimmed().to_string());
+		emit(format!(
 			"  {} {} {} {}",
 			"\u{25c6}".green(),
 			"Verifpal".green().bold(),
 			version.dimmed(),
 			"\u{00b7} https://verifpal.com".dimmed()
-		);
-		println!("{}", "\u{2500}".repeat(50).dimmed());
+		));
+		emit("\u{2500}".repeat(50).dimmed().to_string());
 		return;
 	}
-	println!("Verifpal {} - https://verifpal.com", version);
+	emit(format!("Verifpal {} - https://verifpal.com", version));
 }
 
 pub(crate) fn info_separator() {
@@ -287,10 +332,10 @@ pub(crate) fn info_separator() {
 	info_status_erase();
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		println!("{}", "\u{2500}".repeat(50).dimmed());
+		emit("\u{2500}".repeat(50).dimmed().to_string());
 		return;
 	}
-	println!("{}", "-".repeat(50));
+	emit("-".repeat(50));
 }
 
 fn level_columns(
@@ -354,7 +399,9 @@ pub fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
 	} else {
 		String::new()
 	};
-	println!("{indent}{plain_label} {plain_symbol} {msg}{suffix}");
+	emit(format!(
+		"{indent}{plain_label} {plain_symbol} {msg}{suffix}"
+	));
 }
 
 #[cfg(feature = "cli")]
@@ -373,7 +420,7 @@ fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 	} else {
 		String::new()
 	};
-	println!(
+	emit(format!(
 		"{}{} {} {}{}",
 		indent,
 		paint(label, label_bold),
@@ -384,7 +431,7 @@ fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 			msg.normal()
 		},
 		suffix
-	);
+	));
 }
 
 pub(crate) fn info_verify_result_summary(
@@ -554,6 +601,44 @@ mod tests {
 		assert_eq!(info_elapsed_text(Duration::from_millis(7)), "7ms");
 		assert_eq!(info_elapsed_text(Duration::from_millis(999)), "999ms");
 		assert_eq!(info_elapsed_text(Duration::from_millis(1400)), "1.40s");
+	}
+
+	#[test]
+	fn a_captured_message_is_buffered_rather_than_printed() {
+		use crate::info::{InfoCapture, Verbosity, info_capture_take, info_message, set_verbosity};
+		use crate::types::InfoLevel;
+		set_verbosity(Verbosity::Normal);
+		assert!(info_capture_take().is_empty());
+		{
+			let _capture = InfoCapture::new();
+			info_message("icb captured line", InfoLevel::Info, false);
+		}
+		let lines = info_capture_take();
+		assert_eq!(lines.len(), 1, "{lines:?}");
+		assert!(lines[0].contains("icb captured line"), "{}", lines[0]);
+		assert!(
+			info_capture_take().is_empty(),
+			"taking the buffer must drain it"
+		);
+	}
+
+	#[test]
+	fn capture_and_quiet_are_independent_guards() {
+		use crate::info::{
+			InfoCapture, InfoQuiet, Verbosity, info_capture_take, info_message, set_verbosity,
+		};
+		use crate::types::InfoLevel;
+		set_verbosity(Verbosity::Normal);
+		let _ = info_capture_take();
+		{
+			let _capture = InfoCapture::new();
+			let _quiet = InfoQuiet::new();
+			info_message("cqi silenced line", InfoLevel::Info, false);
+		}
+		assert!(
+			info_capture_take().is_empty(),
+			"a quiet guard inside a capture must still silence, not buffer"
+		);
 	}
 
 	#[test]

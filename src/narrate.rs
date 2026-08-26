@@ -1316,7 +1316,7 @@ mod tests {
 			]\n";
 		let m = parse_string("dw.vp", src).expect("parse");
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
-		let ctx = VerifyContext::new(&m, &states, Vec::new());
+		let ctx = VerifyContext::new(&m, &states, Vec::new(), 2, None, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
 		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");

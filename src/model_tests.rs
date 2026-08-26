@@ -153,8 +153,12 @@ fn stated_result_codes(source: &str) -> Vec<String> {
 	out
 }
 
-fn session_base(name: &str) -> String {
-	name.split('#').next().unwrap_or(name).trim().to_lowercase()
+fn expansion_base(name: &str) -> String {
+	name.split(['#', '@'])
+		.next()
+		.unwrap_or(name)
+		.trim()
+		.to_lowercase()
 }
 
 #[test]
@@ -241,9 +245,9 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 				let Some((_, recipient)) = route.split_once(" to ") else {
 					continue;
 				};
-				let recipient = session_base(recipient);
+				let recipient = expansion_base(recipient);
 				for name in names.split(',') {
-					let name = session_base(name);
+					let name = expansion_base(name);
 					let to_recipient: Vec<&(String, String, String, bool)> = legs
 						.iter()
 						.filter(|(_, r, n, _)| *r == recipient && *n == name)
@@ -333,6 +337,109 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		 equivalence violation the honest run already exhibits needs no attacker action, but a \
 		 new entry elsewhere is an attack the tool asserts and does not explain"
 	);
+}
+
+#[test]
+fn a_hold_carries_the_envelope_it_was_reached_under() {
+	let (results, _) = crate::verify::verify_with_sessions("examples/test/hmac_ok.vp", 2)
+		.expect("hmac_ok.vp analyses");
+	let hold = results.iter().find(|r| !r.resolved).expect("a hold");
+	assert!(hold.envelope.exhausted());
+	assert_eq!(hold.envelope.sessions, 2);
+	assert_eq!(
+		hold.envelope.qualifier(),
+		"  [search exhausted at 2 sessions]"
+	);
+}
+
+#[test]
+fn auto_queries_asks_more_than_the_model_wrote() {
+	let (written, written_code) =
+		crate::verify::verify_with_sessions("examples/test/hmac_ok.vp", 2).expect("analyses");
+	let (generated, generated_code) =
+		crate::verify::verify_auto_queries("examples/test/hmac_ok.vp", 2).expect("analyses");
+	assert_eq!(written_code, "c0a1");
+	assert_eq!(generated_code, "c0c0c0a0a0a1a1f1f1f0f0");
+	assert!(generated.len() > written.len());
+}
+
+#[test]
+fn a_model_saturates_when_its_verdict_stops_moving() {
+	let (_, code, k, regressed) =
+		crate::verify::verify_saturating("examples/test/hmac_ok.vp", 4).expect("analyses");
+	assert_eq!(code, "c0a1");
+	assert_eq!(k, 3);
+	assert!(!regressed);
+}
+
+#[test]
+fn a_cross_session_attack_saturates_only_after_it_appears() {
+	let (_, code, k, regressed) =
+		crate::verify::verify_saturating("examples/test/session_nonce_cross.vp", 4)
+			.expect("analyses");
+	assert_eq!(code, "a1");
+	assert_eq!(k, 3);
+	assert!(!regressed);
+}
+
+#[test]
+fn test_spore_ns_pk() {
+	run_model("spore_ns_pk.vp", "c0c1a1a1a1");
+	run_model_sessions("spore_ns_pk.vp", 1, "c0c1a1a0a1");
+}
+
+#[test]
+fn test_spore_nsl_pk() {
+	run_model("spore_nsl_pk.vp", "c0c1a1a1a1");
+	run_model_sessions("spore_nsl_pk.vp", 1, "c0c1a1a0a1");
+}
+
+#[test]
+fn test_spore_ns_pk_scenarios() {
+	run_model("spore_ns_pk_scenarios.vp", "c1");
+	run_model_sessions("spore_ns_pk_scenarios.vp", 1, "c1");
+}
+
+#[test]
+fn test_spore_nsl_pk_scenarios() {
+	run_model("spore_nsl_pk_scenarios.vp", "c0");
+	run_model_sessions("spore_nsl_pk_scenarios.vp", 1, "c0");
+}
+
+#[test]
+fn without_peer_instantiation_ns_and_nsl_are_indistinguishable() {
+	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
+	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
+	assert_eq!(
+		ns, nsl,
+		"the scenario-free pair is the baseline the scenarios pair is measured against"
+	);
+}
+
+#[test]
+fn with_peer_instantiation_lowes_fix_changes_the_verdict() {
+	let (_, ns) =
+		crate::verify::verify("examples/test/spore_ns_pk_scenarios.vp").expect("analyses");
+	let (_, nsl) =
+		crate::verify::verify("examples/test/spore_nsl_pk_scenarios.vp").expect("analyses");
+	assert_ne!(ns, nsl, "peer instantiation exists to tell these two apart");
+	assert_eq!(ns, "c1");
+	assert_eq!(nsl, "c0");
+}
+
+#[test]
+fn test_spore_otway_rees() {
+	run_model("spore_otway_rees.vp", "c0c1a1");
+}
+
+#[test]
+fn test_spore_wmf() {
+	run_model("spore_wmf.vp", "c1a1f0");
+}
+
+#[test]
+fn test_spore_yahalom() {
+	run_model("spore_yahalom.vp", "c0c0c1");
 }
 
 fn run_model(model: &str, expected: &str) {

@@ -38,6 +38,10 @@ pub(crate) struct VerifyContext {
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
+	truncations: RwLock<Vec<Truncation>>,
+	sessions: u8,
+	honest: Option<IdSet<PrincipalId>>,
+	scenarios: Vec<ScenarioSummary>,
 	#[cfg(test)]
 	witnesses: RwLock<Vec<Option<ResultWitness>>>,
 	#[cfg(test)]
@@ -135,7 +139,14 @@ fn attacker_state_absorb(
 }
 
 impl VerifyContext {
-	pub(crate) fn new(m: &Model, states: &[PrincipalState], variants: Vec<Vec<Query>>) -> Self {
+	pub(crate) fn new(
+		m: &Model,
+		states: &[PrincipalState],
+		variants: Vec<Vec<Query>>,
+		sessions: u8,
+		honest: Option<IdSet<PrincipalId>>,
+		scenarios: Vec<ScenarioSummary>,
+	) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
 			.iter()
@@ -156,6 +167,10 @@ impl VerifyContext {
 			states: states.to_vec(),
 			phase_knowledge: RwLock::new(vec![]),
 			depth_cuts: RwLock::new(IdSet::default()),
+			truncations: RwLock::new(Vec::new()),
+			sessions,
+			honest,
+			scenarios,
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; unresolved as usize]),
 			#[cfg(test)]
@@ -204,7 +219,68 @@ impl VerifyContext {
 	/// True the first time only: the depth bound turns away every term of that
 	/// shape at that slot, and saying so once is what the reader needs.
 	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
+		self.note_truncation(Truncation::TermDepth);
 		write_lock(&self.depth_cuts).insert((principal, slot))
+	}
+
+	pub(crate) fn note_truncation(&self, kind: Truncation) {
+		let mut state = write_lock(&self.truncations);
+		if !state.contains(&kind) {
+			state.push(kind);
+			state.sort();
+		}
+	}
+
+	/// True for every principal in a model that declares no scenarios, and
+	/// otherwise only for the clones whose peer bindings all resolve to values
+	/// no leak reaches. A run whose peer is the attacker is still explored —
+	/// it is where the attacker learns things — but it is not a run whose
+	/// claims are the protocol's to keep. A model all of whose scenarios are
+	/// corrupt has an empty honest set, which is not the same as declaring
+	/// none: `honest` is `None` in the second case and `Some(empty)` in the
+	/// first.
+	pub(crate) fn is_honest(&self, principal: PrincipalId) -> bool {
+		match &self.honest {
+			None => true,
+			Some(honest) => honest.contains(&principal),
+		}
+	}
+
+	/// Which runs may record a verdict. Scyther prunes claims in runs whose
+	/// actor is untrusted; the analogue here is that a corrupt-peer run is
+	/// explored for what the attacker learns in it and its own claims are not
+	/// the protocol's to keep. A model whose every scenario is corrupt has
+	/// nothing to relativise against, so it evaluates everywhere rather than
+	/// reporting a vacuous hold for every query.
+	pub(crate) fn claims_apply_to(&self, principal: PrincipalId) -> bool {
+		match &self.honest {
+			None => true,
+			Some(honest) => honest.is_empty() || honest.contains(&principal),
+		}
+	}
+
+	pub(crate) fn relativises(&self) -> bool {
+		self.honest
+			.as_ref()
+			.is_some_and(|honest| !honest.is_empty())
+	}
+
+	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
+		&self.scenarios
+	}
+
+	pub(crate) fn truncations(&self) -> Vec<Truncation> {
+		read_lock(&self.truncations).clone()
+	}
+
+	pub(crate) fn finalize_envelopes(&self) {
+		let envelope = Envelope {
+			sessions: self.sessions,
+			truncations: self.truncations(),
+		};
+		for vr in write_lock(&self.results).iter_mut() {
+			vr.envelope = envelope.clone();
+		}
 	}
 
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
@@ -415,7 +491,21 @@ impl VerifyContext {
 			.is_some_and(|r| r.resolved)
 	}
 
+	#[cfg(test)]
 	pub(crate) fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
+		self.scratch(query_index, self.honest.clone())
+	}
+
+	/// The minimizer's probe context, which does not relativise. Which runs may
+	/// *record* a verdict and which runs can *reproduce* one already recorded
+	/// are different questions: the witness for a cross-scenario attack lives
+	/// in the corrupt-peer run the attack goes through, and refusing to confirm
+	/// it there leaves the trace falling back to the unminimized witness.
+	pub(crate) fn scratch_for_witness(&self, query_index: usize) -> VerifyContext {
+		self.scratch(query_index, None)
+	}
+
+	fn scratch(&self, query_index: usize, honest: Option<IdSet<PrincipalId>>) -> VerifyContext {
 		let mut results = self.results_get();
 		for (i, r) in results.iter_mut().enumerate() {
 			if i == query_index {
@@ -437,6 +527,10 @@ impl VerifyContext {
 			states: self.states.clone(),
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
+			truncations: RwLock::new(read_lock(&self.truncations).clone()),
+			sessions: self.sessions,
+			honest,
+			scenarios: self.scenarios.clone(),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),
 			#[cfg(test)]
@@ -566,7 +660,7 @@ mod tests {
 			confidentiality? scr_k\n\
 			]\n";
 		let m = parse_string("scratch.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		let scratch = ctx.scratch_for_query(1);
 
 		assert!(!scratch.query_is_resolved(1));
@@ -598,7 +692,7 @@ mod tests {
 			confidentiality? drv_m\n\
 			]\n";
 		let m = parse_string("drv.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		let record = Arc::new(MutationRecord {
 			diffs: vec![],
 			principal_id: 0,
@@ -626,5 +720,101 @@ mod tests {
 			other => panic!("expected Decomposed, got {:?}", other),
 		}
 		assert_eq!(attacker.known.len(), attacker.derivations.len());
+	}
+
+	#[test]
+	fn a_context_with_no_truncation_reports_an_exhausted_search() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private trc_m\n\
+			knows private trc_k\n\
+			trc_e = ENC(trc_k, trc_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? trc_m\n\
+			]\n";
+		let m = parse_string("trc.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		ctx.finalize_envelopes();
+		assert!(ctx.truncations().is_empty());
+		assert!(ctx.results_get()[0].envelope.exhausted());
+		assert_eq!(ctx.results_get()[0].envelope.sessions, 2);
+	}
+
+	#[test]
+	fn a_depth_cut_truncates_the_search() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private tdc_m\n\
+			knows private tdc_k\n\
+			tdc_e = ENC(tdc_k, tdc_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? tdc_m\n\
+			]\n";
+		let m = parse_string("tdc.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		ctx.note_depth_cut(1, 0);
+		ctx.finalize_envelopes();
+		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
+		assert!(!ctx.results_get()[0].envelope.exhausted());
+	}
+
+	#[test]
+	fn only_an_honest_run_records_a_verdict_unless_every_scenario_is_corrupt() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private cat_m\n\
+			knows private cat_k\n\
+			cat_e = ENC(cat_k, cat_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? cat_m\n\
+			]\n";
+		let m = parse_string("cat.vp", src).expect("parse");
+
+		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		assert!(plain.claims_apply_to(1));
+		assert!(plain.claims_apply_to(9));
+		assert!(!plain.relativises());
+
+		let mut honest: IdSet<PrincipalId> = IdSet::default();
+		honest.insert(1);
+		let mixed = VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new());
+		assert!(mixed.claims_apply_to(1));
+		assert!(!mixed.claims_apply_to(2));
+		assert!(mixed.relativises());
+
+		let corrupt =
+			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdSet::default()), Vec::new());
+		assert!(
+			corrupt.claims_apply_to(2),
+			"a model with nothing honest to relativise against must not hold vacuously"
+		);
+		assert!(!corrupt.relativises());
+		assert!(
+			!corrupt.is_honest(2),
+			"the honest-run check stays relaxed there even so"
+		);
+	}
+
+	#[test]
+	fn finalizing_envelopes_never_resolves_a_query() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private fev_m\n\
+			knows private fev_k\n\
+			fev_e = ENC(fev_k, fev_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? fev_m\n\
+			]\n";
+		let m = parse_string("fev.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		assert!(!ctx.all_resolved());
+		ctx.finalize_envelopes();
+		assert!(!ctx.all_resolved());
+		assert!(!ctx.results_get()[0].resolved);
+		assert_eq!(ctx.results_get()[0].summary, "");
 	}
 }

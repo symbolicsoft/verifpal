@@ -48,6 +48,9 @@ pub(crate) fn verify_active(
 		} else {
 			search_rounds(ctx, km, principal_states, bound)?;
 		}
+		if ctx.relativises() && !ctx.all_resolved() && !ctx.cancelled() {
+			verify_standard_run(ctx, km, principal_states)?;
+		}
 		ctx.attacker_phase_archive(phase);
 	}
 	Ok(())

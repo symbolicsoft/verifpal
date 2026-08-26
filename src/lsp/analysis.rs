@@ -29,6 +29,7 @@ pub(crate) fn analyze(
 		results,
 		elapsed: Some(started.elapsed()),
 		assumptions: ctx.capability_assumptions(),
+		scenarios: ctx.scenarios().to_vec(),
 	};
 	Ok(Analysis::of(&report, text))
 }

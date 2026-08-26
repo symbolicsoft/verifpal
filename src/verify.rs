@@ -48,9 +48,24 @@ fn analyze_sessions_traced_cancellable(
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
+	let scenario_expanded;
+	let (m, mut honest, scenarios) = if m.scenarios.is_empty() {
+		(m, None, Vec::new())
+	} else {
+		let e = crate::scenario::expand_scenarios(m, sessions)?;
+		scenario_expanded = e.model;
+		(&scenario_expanded, Some(e.honest), e.summaries)
+	};
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions)?;
+		if let Some(honest) = honest.as_mut() {
+			for &(original, clone) in &e.principal_clones {
+				if honest.contains(&original) {
+					honest.insert(clone);
+				}
+			}
+		}
 		expanded = e.model;
 		(&expanded, e.query_variants, e.siblings)
 	} else {
@@ -59,7 +74,7 @@ fn analyze_sessions_traced_cancellable(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(m, &states, variants);
+	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
 	if sessions > 1 {
@@ -72,6 +87,7 @@ fn analyze_sessions_traced_cancellable(
 	if ctx.cancelled() {
 		return Err(VerifpalError::cancelled());
 	}
+	ctx.finalize_envelopes();
 	Ok((ctx, trace))
 }
 
@@ -107,6 +123,7 @@ pub struct VerifyReport {
 	pub code: String,
 	pub elapsed: Option<std::time::Duration>,
 	pub assumptions: Vec<(Value, Capability, i32)>,
+	pub scenarios: Vec<ScenarioSummary>,
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
@@ -118,10 +135,113 @@ pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
 }
 
 pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(VerifyReport, String)> {
-	let m = parse_file(file_path)?;
+	verify_report_with_source_opts(file_path, sessions, false)
+}
+
+pub fn verify_report_with_source_opts(
+	file_path: &str,
+	sessions: u8,
+	auto_queries: bool,
+) -> VResult<(VerifyReport, String)> {
+	let mut m = parse_file(file_path)?;
 	let source = m.source.to_string();
+	if auto_queries {
+		let (km, _) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+		m.queries = crate::autoquery::auto_queries(&m, &km);
+	}
 	let report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
 	Ok((report, source))
+}
+
+pub const SATURATE_MAX: u8 = 4;
+
+pub struct Saturation {
+	pub sessions: u8,
+	pub stable_from: u8,
+	pub saturated: bool,
+	pub regressed: bool,
+	pub report: VerifyReport,
+	pub source: String,
+	pub output: Vec<String>,
+}
+
+pub fn verify_saturating(
+	file_path: &str,
+	max: u8,
+) -> VResult<(Vec<VerifyResult>, String, u8, bool)> {
+	let saturation = saturation_sessions(file_path, max, false)?;
+	if saturation.regressed {
+		info_message(
+			"an attack found at a lower session count disappeared at a higher one; \
+			 that is an engine bug, not a protocol result",
+			InfoLevel::Warning,
+			false,
+		);
+	}
+	Ok((
+		saturation.report.results,
+		saturation.report.code,
+		saturation.sessions,
+		saturation.regressed,
+	))
+}
+
+/// Raises the session count until the result code stops moving, and hands back
+/// the analysis of the count it stopped at rather than the count alone: every
+/// run is captured instead of silenced (`info.rs::InfoCapture`), so the winning
+/// one is reported by replaying what it already printed rather than by
+/// analyzing it a second time.
+pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<Saturation> {
+	let mut previous: Option<String> = None;
+	let mut regressed = false;
+	let mut saturated_at: Option<u8> = None;
+	let mut last: Option<(u8, VerifyReport, String, Vec<String>)> = None;
+	for k in 1..=max {
+		let capture = crate::info::InfoCapture::new();
+		let analyzed = verify_report_with_source_opts(file_path, k, auto_queries);
+		drop(capture);
+		let output = crate::info::info_capture_take();
+		let (report, source) = analyzed?;
+		let code = report.code.clone();
+		last = Some((k, report, source, output));
+		if let Some(prior) = &previous {
+			regressed |= attack_disappeared(prior, &code);
+			if *prior == code {
+				saturated_at = Some(k);
+				break;
+			}
+		}
+		previous = Some(code);
+	}
+	let Some((sessions, report, source, output)) = last else {
+		return Err(VerifpalError::internal(
+			"saturating analysis ran no rounds".into(),
+		));
+	};
+	Ok(Saturation {
+		sessions,
+		stable_from: match saturated_at {
+			Some(k) => k.saturating_sub(1).max(1),
+			None => sessions,
+		},
+		saturated: saturated_at.is_some(),
+		regressed,
+		report,
+		source,
+		output,
+	})
+}
+
+fn attack_disappeared(previous: &str, current: &str) -> bool {
+	previous
+		.chars()
+		.zip(current.chars())
+		.any(|(a, b)| a == '1' && b == '0')
+}
+
+pub fn verify_auto_queries(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
+	verify_report_with_source_opts(file_path, sessions, true)
+		.map(|(report, _)| (report.results, report.code))
 }
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal
@@ -155,6 +275,7 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 		code,
 		elapsed,
 		assumptions: ctx.capability_assumptions(),
+		scenarios: ctx.scenarios().to_vec(),
 	})
 }
 
@@ -236,9 +357,15 @@ pub(crate) fn generate_trace(
 
 	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
 
-	let failures = ps_resolved.perform_all_rewrites();
-
+	type Failures = Vec<(Primitive, usize)>;
+	let (failures, suppressed): (Failures, Failures) = ps_resolved
+		.perform_all_rewrites()
+		.into_iter()
+		.partition(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)));
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
+	if !suppressed.is_empty() {
+		ps_resolved = crate::reexec::halt_at_failed_checks(ps_resolved, &suppressed);
+	}
 	for (index, sv) in ps_resolved.values.iter().enumerate() {
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
 			return Err(match km.slots.get(index) {
@@ -276,6 +403,9 @@ pub(crate) fn verify_passive(
 	for phase in 0..=km.max_phase {
 		attacker_seed_phase(ctx, km, seed, phase)?;
 		verify_standard_run(ctx, km, principal_states)?;
+		if ctx.relativises() && !ctx.all_resolved() && !ctx.cancelled() {
+			verify_standard_run(ctx, km, principal_states)?;
+		}
 	}
 	Ok(())
 }
@@ -321,6 +451,34 @@ fn verify_end(
 	);
 	crate::info::info_blank_line();
 
+	let scenarios = ctx.scenarios();
+	if !scenarios.is_empty() {
+		info_message(
+			&format!(
+				"Analysis performed over {} declared peer scenario{}:",
+				scenarios.len(),
+				if scenarios.len() == 1 { "" } else { "s" },
+			),
+			InfoLevel::Warning,
+			false,
+		);
+		for scenario in scenarios {
+			info_message(
+				&format!(
+					"{scenario} ({})",
+					if scenario.honest {
+						"honest peer"
+					} else {
+						"corrupt peer"
+					}
+				),
+				InfoLevel::Warning,
+				false,
+			);
+		}
+		crate::info::info_blank_line();
+	}
+
 	let assumptions = ctx.capability_assumption_terms();
 	if !assumptions.is_empty() {
 		info_message(
@@ -346,7 +504,11 @@ fn verify_end(
 				false,
 			);
 		} else {
-			info_message(&r.query.to_string(), InfoLevel::Pass, false);
+			info_message(
+				&format!("{}{}", r.query, r.envelope.qualifier()),
+				InfoLevel::Pass,
+				false,
+			);
 		}
 	}
 

@@ -73,7 +73,7 @@ pub(crate) fn minimize_witness(
 			.collect()
 	} else {
 		seed.iter()
-			.filter(|(slot, _)| slot.get() < ps.values.len())
+			.filter(|(slot, _)| slot.get() < km.slots.len())
 			.cloned()
 			.collect()
 	};
@@ -606,7 +606,7 @@ fn probe(
 	query_index: usize,
 	phase: i32,
 ) -> Option<Witness> {
-	let scratch = ctx.scratch_for_query(query_index);
+	let scratch = ctx.scratch_for_witness(query_index);
 	crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
 	for state in ctx.principal_states() {
 		let mut honest = state.clone_for_depth(true);
@@ -658,7 +658,7 @@ mod tests {
 			]\n";
 		let m = parse_string("mw.vp", src).expect("parse");
 		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
-		let ctx = VerifyContext::new(&m, &states, Vec::new());
+		let ctx = VerifyContext::new(&m, &states, Vec::new(), 2, None, Vec::new());
 		let mut pure = states[0].clone_for_depth(true);
 		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");

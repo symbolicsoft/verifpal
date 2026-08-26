@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1a1 — Otway-Rees (1987), ported from the Scyther
+// distribution's gui/Protocols/otwayrees.spdl. A trusted server sharing a
+// long-term key with each party mints a session key and returns it twice,
+// once under each party's key, each bound to that party's nonce.
+//
+// c0 kab      — the session key itself never reaches the attacker. It only
+//               ever travels under k_as or k_bs, neither of which leaks.
+// c1 secret_a — the classical TYPE FLAW, and the reason this model is worth
+//               having. The attacker replays message 1's ticket t1 as the
+//               message-4 ticket t3. Alice decrypts it successfully (it is a
+//               genuine ciphertext under k_as), splits it, and reads the
+//               first field as her nonce — which it is, so her ASSERT passes
+//               — and the second field as the session key. That field is
+//               m_id, the run identifier, which travels in the clear. Alice
+//               then encrypts to a "key" the whole network can read.
+//
+//               Scyther finds this only at --match=2, where all type flaws
+//               are permitted; at its default --match=0 it reports Secret_Kir
+//               as Ok. Verifpal has no type system at all, so a field is a
+//               bitstring and the attack is found at default settings. This
+//               is the one place where Verifpal's missing type discipline is
+//               an advantage rather than a gap: it matches what an
+//               implementation that does not check field types actually does.
+//
+// a1 t4       — cross-session key substitution. The attacker replays session
+//               1's ticket t2 into session 2, so the server mints session 2's
+//               key against session 1's nonce, and the resulting t4 is
+//               accepted by Bob's ASSERT in the wrong run.
+
+attacker[active]
+
+principal Alice[
+	knows private k_as
+	knows public a_name, b_name
+	generates na
+	generates m_id
+	t1 = AEAD_ENC(k_as, CONCAT(na, m_id, a_name, b_name), nil)
+]
+
+Alice -> Bob: m_id, t1
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, b_name
+	generates nb
+	t2 = AEAD_ENC(k_bs, CONCAT(nb, m_id, a_name, b_name), nil)
+]
+
+Bob -> Server: m_id, t1, t2
+
+principal Server[
+	knows private k_as
+	knows private k_bs
+	generates kab
+	d1 = AEAD_DEC(k_as, t1, nil)?
+	na_s, m1_s, a1_s, b1_s = SPLIT(d1)
+	d2 = AEAD_DEC(k_bs, t2, nil)?
+	nb_s, m2_s, a2_s, b2_s = SPLIT(d2)
+	t3 = AEAD_ENC(k_as, CONCAT(na_s, kab), nil)
+	t4 = AEAD_ENC(k_bs, CONCAT(nb_s, kab), nil)
+]
+
+Server -> Bob: t3, t4
+
+principal Bob[
+	d4 = AEAD_DEC(k_bs, t4, nil)?
+	nb_b, kab_b = SPLIT(d4)
+	_ = ASSERT(nb_b, nb)?
+]
+
+Bob -> Alice: t3
+
+principal Alice[
+	d3 = AEAD_DEC(k_as, t3, nil)?
+	na_a, kab_a = SPLIT(d3)
+	_ = ASSERT(na_a, na)?
+	generates secret_a
+	e = AEAD_ENC(kab_a, secret_a, nil)
+]
+
+Alice -> Bob: e
+
+queries[
+	confidentiality? kab
+	confidentiality? secret_a
+	authentication? Server -> Bob: t4
+]

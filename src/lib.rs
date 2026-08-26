@@ -7,6 +7,7 @@
 // this keeps it that way.
 #![forbid(unsafe_code)]
 
+pub(crate) mod autoquery;
 pub(crate) mod capability;
 pub(crate) mod construct;
 pub(crate) mod context;
@@ -32,6 +33,7 @@ pub(crate) mod report;
 pub(crate) mod resolution;
 pub(crate) mod rewrite;
 pub(crate) mod sanity;
+pub(crate) mod scenario;
 pub(crate) mod sessions;
 pub(crate) mod skeleton;
 pub(crate) mod solve;
@@ -51,7 +53,7 @@ pub(crate) mod verify;
 pub(crate) mod witness;
 
 pub use html::html_report;
-pub use info::{Verbosity, info_banner, info_message, set_verbosity};
+pub use info::{Verbosity, info_banner, info_message, info_replay, set_verbosity};
 #[cfg(feature = "lsp")]
 pub use lsp::run as lsp_run;
 pub use pretty::{diagram, pretty_print};
@@ -62,7 +64,9 @@ pub use update::{UpdateCheck, update_check_report, update_check_start};
 #[cfg(feature = "cli")]
 pub use util::{ColorChoice, set_color_choice};
 pub use verify::{
-	VerifyReport, verify, verify_report, verify_report_with_source, verify_with_sessions,
+	SATURATE_MAX, Saturation, VerifyReport, saturation_sessions, verify, verify_auto_queries,
+	verify_report, verify_report_with_source, verify_report_with_source_opts, verify_saturating,
+	verify_with_sessions,
 };
 
 #[cfg(feature = "wasm")]
@@ -86,6 +90,7 @@ struct WasmResult {
 	resolved: bool,
 	kind: String,
 	summary: String,
+	envelope: String,
 }
 
 #[cfg(feature = "wasm")]
@@ -121,6 +126,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 				resolved: r.resolved,
 				kind: r.query.kind.name().to_string(),
 				summary: r.summary.clone(),
+				envelope: r.envelope.summary(),
 			})
 			.collect(),
 		assumptions: ctx
