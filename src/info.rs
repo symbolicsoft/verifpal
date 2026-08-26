@@ -68,7 +68,7 @@ fn level_is_visible(level: InfoLevel) -> bool {
 }
 
 fn chrome_is_visible() -> bool {
-	verbosity() >= Verbosity::Normal
+	verbosity() >= Verbosity::Normal && !info_is_quiet()
 }
 
 pub(crate) fn info_is_quiet() -> bool {
