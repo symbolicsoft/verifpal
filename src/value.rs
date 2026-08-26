@@ -37,7 +37,7 @@ impl ValueNames {
 		if let Some(&id) = self.map.get(name) {
 			return Ok(id);
 		}
-		if self.counter >= SESSION_STRIDE {
+		if self.counter >= COPY_STRIDE {
 			return Err(VerifpalError::sanity(
 				"model declares too many distinct constants".into(),
 			));
@@ -49,37 +49,64 @@ impl ValueNames {
 	}
 }
 
-/// Base for the per-session copies of a principal's fresh constants.
+/// Base for the expansion copies of a principal's fresh constants.
 ///
-/// Two mechanisms mint constants that are not the model's, and both live in
-/// this range: `sessions.rs` clones every `generates` and assignment output
-/// per `--sessions` session, and the separated-freshness re-check of
-/// `witness.rs` asks what an attack looks like when two sessions of a role
-/// hold *different* nonces. Interned ids stop below one [`SESSION_STRIDE`],
-/// and the solver's variable ids start well above the whole range, so none of
-/// the id families can collide.
-pub(crate) const SESSION_COPY_BASE: ValueId = 0x4000_0000;
+/// Three mechanisms mint constants that are not the model's, and all live in
+/// this range: `scenario.rs` clones every principal once per declared
+/// scenario, `sessions.rs` clones each of those once per `--sessions`
+/// session, and the separated-freshness re-check of `witness.rs` asks what an
+/// attack looks like when two runs of a role hold *different* nonces.
+/// Interned ids stop below one [`COPY_STRIDE`], and the solver's variable ids
+/// start above the whole range, so none of the id families can collide.
+///
+/// Scenarios and sessions are two axes over one band space, not two band
+/// spaces. A *joint* copy index is what makes that safe: `base + band` is
+/// injective only while `base` is an interned id, so banding twice — once per
+/// axis — would alias scenario 2's session 2 onto scenario 1's session 3, and
+/// two distinct nonces sharing an id is a false attack waiting to happen.
+/// [`copy_value_id`] therefore takes one index over the whole
+/// scenario-by-session grid, and `every_expansion_copy_id_is_distinct_…` pins
+/// its injectivity.
+pub(crate) const COPY_BASE: ValueId = 0x0400_0000;
 
-/// Width of one session's id band inside the session-copy range. Bands 0..=14
-/// hold `--sessions` clones (sessions 2..=16, `sessions.rs`); band 15 holds
-/// the minimizer's hypothetical copies, so the two can never alias. Interned
-/// ids stop below one stride, which is what keeps `base + band` collision-free.
-pub(crate) const SESSION_STRIDE: ValueId = 0x0400_0000;
+/// Width of one copy's id band. Bands 0..=29 hold expansion copies
+/// ([`MAX_COPIES`] of them, indexed 1..=30 by [`copy_value_id`]); band 30
+/// holds the minimizer's hypothetical copies, so the two can never alias.
+/// Interned ids stop below one stride, which is what keeps `base + band`
+/// collision-free.
+pub(crate) const COPY_STRIDE: ValueId = 0x0400_0000;
 
-/// The copy of `c` that a *different* session of its generating principal
-/// would hold under replication: same flags, a marked name, and an identity in
-/// the top session band — above every `--sessions` clone, so a hypothetical
-/// copy of a clone can neither collide with a real session's constant nor
-/// overflow into the solver's variable ranges.
+/// Expansion copies available to `scenario.rs` and `sessions.rs` together,
+/// their product being one index into the band space. The ceiling is the
+/// minimizer's band: `COPY_BASE + 31 * COPY_STRIDE` is exactly
+/// `ATTACKER_VAR_BASE`, so 30 copies and one minimizer band fill the range
+/// without reaching the solver's.
+pub(crate) const MAX_COPIES: u32 = 30;
+
+const MINIMIZER_BAND: ValueId = 30;
+
+/// The id `base` takes in expansion copy `copy`, counting the model's own
+/// constants as copy 0 and leaving those untouched.
+pub(crate) fn copy_value_id(base: ValueId, copy: u32) -> ValueId {
+	debug_assert!((1..=MAX_COPIES).contains(&copy));
+	debug_assert!(base < COPY_STRIDE);
+	COPY_BASE + (copy as ValueId - 1) * COPY_STRIDE + base
+}
+
+/// The copy of `c` that a *different* run of its generating principal would
+/// hold under replication: same flags, a marked name, and an identity in the
+/// top band — above every expansion copy, so a hypothetical copy of a clone
+/// can neither collide with a real run's constant nor overflow into the
+/// solver's variable ranges.
 pub(crate) fn session_copy(c: &Constant) -> Value {
-	let base = if c.id >= SESSION_COPY_BASE {
-		(c.id - SESSION_COPY_BASE) % SESSION_STRIDE
+	let base = if c.id >= COPY_BASE {
+		(c.id - COPY_BASE) % COPY_STRIDE
 	} else {
 		c.id
 	};
 	Value::Constant(Constant {
 		name: Arc::from(format!("{}#other", c.name)),
-		id: SESSION_COPY_BASE + 15 * SESSION_STRIDE + base,
+		id: COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + base,
 		..c.clone()
 	})
 }
@@ -332,13 +359,42 @@ mod tests {
 
 	#[test]
 	fn session_bands_stay_below_the_solver_ranges() {
-		let worst = SESSION_COPY_BASE + 15 * SESSION_STRIDE + (SESSION_STRIDE - 1);
+		let worst = COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + (COPY_STRIDE - 1);
 		assert!(worst < crate::solve::vars::ATTACKER_VAR_BASE);
 	}
 
 	#[test]
+	fn every_expansion_copy_id_is_distinct_and_below_the_solver_ranges() {
+		let bases: [ValueId; 4] = [2, 3, 4096, COPY_STRIDE - 1];
+		let mut seen: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
+		for base in bases {
+			assert!(seen.insert(base), "interned base {base} repeated");
+		}
+		for copy in 1..=MAX_COPIES {
+			for base in bases {
+				let id = copy_value_id(base, copy);
+				assert!(seen.insert(id), "copy {copy} of {base} collides");
+				assert!(
+					id < crate::solve::vars::ATTACKER_VAR_BASE,
+					"copy {copy} of {base} reaches the solver ranges"
+				);
+			}
+		}
+		for base in bases {
+			let c = Constant {
+				name: Arc::from("cpy_x"),
+				id: base,
+				..Constant::default()
+			};
+			let id = session_copy(&c).as_constant().expect("constant").id;
+			assert!(seen.insert(id), "minimizer copy of {base} collides");
+			assert!(id < crate::solve::vars::ATTACKER_VAR_BASE);
+		}
+	}
+
+	#[test]
 	fn session_copy_of_a_session_clone_stays_out_of_solver_ranges() {
-		let clone_id = SESSION_COPY_BASE + 3 * SESSION_STRIDE + 42;
+		let clone_id = copy_value_id(42, 4);
 		let c = Constant {
 			name: Arc::from("scb_x#5"),
 			id: clone_id,
@@ -347,7 +403,7 @@ mod tests {
 		let copied = session_copy(&c);
 		let id = copied.as_constant().expect("constant").id;
 		assert!(id < crate::solve::vars::ATTACKER_VAR_BASE);
-		assert_eq!(id, SESSION_COPY_BASE + 15 * SESSION_STRIDE + 42);
+		assert_eq!(id, COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + 42);
 	}
 
 	#[test]
