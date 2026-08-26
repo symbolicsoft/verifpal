@@ -248,6 +248,11 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 		help: "Opens a new phase. Values sent in an earlier phase cannot be replaced using knowledge the attacker only obtains in a later one, which is what makes post-compromise properties expressible. Phases must increment by exactly one.",
 	},
 	Entry {
+		name: "scenarios",
+		eg: "scenarios[ Alice[gpeer = gb] Alice[gpeer = gm] ]",
+		help: "Runs the protocol once per declared peer configuration, cloning every principal and message and substituting the bindings in the named principal. A scenario whose bound values are reachable from a `leaks` declaration is a corrupt-peer run: it is analyzed, because it is where the attacker learns things, but its own checked primitives may fail without that being a model error. Scenarios multiply with sessions, and the block goes before `queries`.",
+	},
+	Entry {
 		name: "queries",
 		eg: "queries[ confidentiality? m ]",
 		help: "The block of security queries to check. It must exist, and nothing may follow it: a statement after the queries block is a hard error rather than something silently ignored.",

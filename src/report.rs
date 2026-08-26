@@ -32,7 +32,24 @@ pub struct Analysis {
 	pub attacks: usize,
 	pub elapsed_ms: u128,
 	pub assumptions: Vec<Assumption>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub scenarios: Vec<ScenarioReport>,
 	pub queries: Vec<QueryReport>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenarioReport {
+	pub principal: String,
+	pub bindings: Vec<Binding>,
+	pub honest: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Binding {
+	pub target: String,
+	pub value: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +66,7 @@ pub struct EnvelopeReport {
 	pub sessions: u8,
 	pub truncations: Vec<String>,
 	pub exhausted: bool,
+	pub summary: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,6 +171,22 @@ impl Analysis {
 					from_phase: *onset,
 				})
 				.collect(),
+			scenarios: report
+				.scenarios
+				.iter()
+				.map(|s| ScenarioReport {
+					principal: s.principal.to_string(),
+					bindings: s
+						.bindings
+						.iter()
+						.map(|(target, value)| Binding {
+							target: target.to_string(),
+							value: value.to_string(),
+						})
+						.collect(),
+					honest: s.honest,
+				})
+				.collect(),
 			queries: report
 				.results
 				.iter()
@@ -177,6 +211,7 @@ impl QueryReport {
 					.map(|t| t.name().to_string())
 					.collect(),
 				exhausted: r.envelope.exhausted(),
+				summary: r.envelope.summary(),
 			},
 			range: SourceRange::of(r.query.span, source),
 			summary: r.summary.clone(),
@@ -235,6 +270,7 @@ mod tests {
 					code: "c1".to_string(),
 					attacks: 1,
 					elapsed_ms: 3,
+					scenarios: Vec::new(),
 					assumptions: vec![Assumption {
 						term: "HASH(m)".to_string(),
 						capability: "weak".to_string(),
@@ -248,6 +284,7 @@ mod tests {
 							sessions: 2,
 							truncations: vec![],
 							exhausted: true,
+							summary: "search exhausted at 2 sessions".to_string(),
 						},
 						range: SourceRange {
 							start: 120,
@@ -290,7 +327,8 @@ mod tests {
 			r#""attacks":1,"elapsedMs":3,"assumptions":[{"term":"HASH(m)","#,
 			r#""capability":"weak","fromPhase":0}],"queries":[{"#,
 			r#""query":"confidentiality? m1","kind":"confidentiality","resolved":true,"#,
-			r#""envelope":{"sessions":2,"truncations":[],"exhausted":true},"#,
+			r#""envelope":{"sessions":2,"truncations":[],"exhausted":true,"#,
+			r#""summary":"search exhausted at 2 sessions"},"#,
 			r#""range":{"start":120,"end":141,"line":21,"column":2},"#,
 			r#""summary":"m1 is obtained by Attacker.","#,
 			r#""conclusion":"m1 is obtained by Attacker.","#,

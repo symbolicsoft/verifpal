@@ -22,6 +22,8 @@ const BECAUSE: &str = include_str!("tpl/because.html");
 const PRECONDITION: &str = include_str!("tpl/precondition.html");
 const ASSUMPTIONS: &str = include_str!("tpl/assumptions.html");
 const ASSUMPTION_ITEM: &str = include_str!("tpl/assumption_item.html");
+const SCENARIOS: &str = include_str!("tpl/scenarios.html");
+const SCENARIO_ITEM: &str = include_str!("tpl/scenario_item.html");
 const TRACE: &str = include_str!("tpl/trace.html");
 const TRACE_STEP: &str = include_str!("tpl/trace_step.html");
 const TRACE_STEP_WIRE: &str = include_str!("tpl/trace_step_wire.html");
@@ -192,6 +194,7 @@ fn verdicts_section(a: &Analysis, index: usize) -> String {
 			("tally", &tally),
 			("rows", rows.trim_end()),
 			("assumptions", &assumptions_callout(a)),
+			("scenarios", &scenarios_callout(a)),
 		],
 	)
 }
@@ -203,7 +206,7 @@ fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> Strin
 		(
 			"verdictPass",
 			"\u{2713}",
-			format!("Holds ({})", envelope_text(&q.envelope)),
+			format!("Holds ({})", q.envelope.summary),
 		)
 	};
 	let because = if q.resolved && !q.conclusion.is_empty() {
@@ -231,17 +234,6 @@ fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> Strin
 	)
 }
 
-fn envelope_text(e: &crate::report::EnvelopeReport) -> String {
-	if e.exhausted {
-		return format!(
-			"search exhausted at {} session{}",
-			e.sessions,
-			if e.sessions == 1 { "" } else { "s" }
-		);
-	}
-	format!("search truncated: {}", e.truncations.join(", "))
-}
-
 fn assumptions_callout(a: &Analysis) -> String {
 	if a.assumptions.is_empty() {
 		return String::new();
@@ -267,6 +259,52 @@ fn assumptions_callout(a: &Analysis) -> String {
 		&[
 			("count", &a.assumptions.len().to_string()),
 			("plural", if a.assumptions.len() == 1 { "" } else { "s" }),
+			("items", items.trim_end()),
+		],
+	)
+}
+
+fn scenarios_callout(a: &Analysis) -> String {
+	if a.scenarios.is_empty() {
+		return String::new();
+	}
+	let mut items = String::new();
+	for scenario in &a.scenarios {
+		let bindings: Vec<String> = scenario
+			.bindings
+			.iter()
+			.map(|b| format!("{} = {}", b.target, b.value))
+			.collect();
+		let rendered = format!("{}[{}]", scenario.principal, bindings.join(", "));
+		items.push_str(&fill(
+			asset(SCENARIO_ITEM),
+			&[
+				("scenario", &escape(&rendered)),
+				(
+					"peer_class",
+					if scenario.honest {
+						"peerHonest"
+					} else {
+						"peerCorrupt"
+					},
+				),
+				(
+					"peer",
+					if scenario.honest {
+						"honest peer"
+					} else {
+						"corrupt peer"
+					},
+				),
+			],
+		));
+		items.push('\n');
+	}
+	fill(
+		asset(SCENARIOS),
+		&[
+			("count", &a.scenarios.len().to_string()),
+			("plural", if a.scenarios.len() == 1 { "" } else { "s" }),
 			("items", items.trim_end()),
 		],
 	)
@@ -856,6 +894,7 @@ mod tests {
 			attacks: 0,
 			elapsed_ms: 1,
 			assumptions: vec![],
+			scenarios: vec![],
 			queries: vec![],
 		}
 	}
@@ -869,6 +908,7 @@ mod tests {
 				sessions: 2,
 				truncations: vec![],
 				exhausted: true,
+				summary: "search exhausted at 2 sessions".to_string(),
 			},
 			range: SourceRange {
 				start: 0,
