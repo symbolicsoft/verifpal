@@ -437,6 +437,11 @@ fn test_spore_wmf() {
 	run_model("spore_wmf.vp", "c1a1f0");
 }
 
+#[test]
+fn test_spore_yahalom() {
+	run_model("spore_yahalom.vp", "c0c0c1");
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }

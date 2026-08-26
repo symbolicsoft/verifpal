@@ -1,0 +1,83 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c1 — Yahalom, ported from the Scyther distribution's
+// gui/Protocols/yahalom.spdl. A trusted server mints a session key and hands
+// the initiator both her own copy and a ticket she forwards to the responder.
+//
+// This model is in the corpus as an AGREEMENT row rather than a disagreement:
+// both tools reach the same verdicts, by different routes.
+//
+// c0 kab      — the session key holds. Scyther agrees, reporting Secret_Kir
+//               as Ok for both the initiator and the responder role, though
+//               only as "no attack within bounds" rather than as a proof.
+// c0 secret_a — a message sealed under the session key inherits its security.
+// c1 na       — and so does Scyther, whose Secret_Ni fails here too. This one
+//               is a property of the SPDL file rather than of the protocol:
+//               message 1 sends the initiator's nonce in the clear, and the
+//               model then claims it secret. Both tools report the same thing
+//               because there is nothing subtle to report — it is a claim
+//               nobody should have written, preserved here because the point
+//               of a shared corpus is to port the models as they are.
+//
+// Modelling note. The SPDL file sends the agent names A and B alongside the
+// nonces. Verifpal rejects re-sending a constant a principal already holds,
+// public names included, so those fields are dropped: they carry no value the
+// recipient does not have, and the attacker's view is unchanged.
+
+attacker[active]
+
+principal Alice[
+	knows private k_as
+	knows public a_name
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, b_name
+	generates nb
+	t2 = AEAD_ENC(k_bs, CONCAT(a_name, na, nb), nil)
+]
+
+Bob -> Server: t2
+
+principal Server[
+	knows private k_as
+	knows private k_bs
+	knows public a_name, b_name
+	generates kab
+	d2 = AEAD_DEC(k_bs, t2, nil)?
+	a_s, na_s, nb_s = SPLIT(d2)
+	t3a = AEAD_ENC(k_as, CONCAT(b_name, kab, na_s, nb_s), nil)
+	t3b = AEAD_ENC(k_bs, CONCAT(a_name, kab), nil)
+]
+
+Server -> Alice: t3a, t3b
+
+principal Alice[
+	d3 = AEAD_DEC(k_as, t3a, nil)?
+	b_a, kab_a, na_a, nb_a = SPLIT(d3)
+	_ = ASSERT(na_a, na)?
+	t4 = AEAD_ENC(kab_a, nb_a, nil)
+	generates secret_a
+	e = AEAD_ENC(kab_a, secret_a, nil)
+]
+
+Alice -> Bob: t3b, t4, e
+
+principal Bob[
+	d4 = AEAD_DEC(k_bs, t3b, nil)?
+	a_b, kab_b = SPLIT(d4)
+	d5 = AEAD_DEC(kab_b, t4, nil)?
+	_ = ASSERT(d5, nb)?
+	dm = AEAD_DEC(kab_b, e, nil)?
+]
+
+queries[
+	confidentiality? kab
+	confidentiality? secret_a
+	confidentiality? na
+]
