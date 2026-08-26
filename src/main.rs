@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use verifpal::{
 	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
 	set_color_choice, set_verbosity, update_check_report, update_check_start,
-	verify_report_with_source,
+	verify_report_with_source_opts,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -56,6 +56,8 @@ enum Commands {
 		sessions: u8,
 		#[arg(long, default_value_t = false)]
 		fail_on_attack: bool,
+		#[arg(long, default_value_t = false)]
+		auto_queries: bool,
 		#[arg(long, value_enum, default_value_t = FormatArg::Text)]
 		format: FormatArg,
 		#[arg(short, long, default_value_t = false, conflicts_with = "verbose")]
@@ -107,6 +109,7 @@ fn run_verify(
 	result_code: bool,
 	sessions: u8,
 	fail_on_attack: bool,
+	auto_queries: bool,
 	format: FormatArg,
 	quiet: bool,
 	verbose: bool,
@@ -135,7 +138,7 @@ fn run_verify(
 		if index > 0 && !structured && !result_code {
 			println!();
 		}
-		match verify_report_with_source(model, sessions) {
+		match verify_report_with_source_opts(model, sessions, auto_queries) {
 			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
@@ -231,6 +234,7 @@ fn main() {
 			result_code,
 			sessions,
 			fail_on_attack,
+			auto_queries,
 			format,
 			quiet,
 			verbose,
@@ -240,6 +244,7 @@ fn main() {
 			result_code,
 			sessions,
 			fail_on_attack,
+			auto_queries,
 			format,
 			quiet,
 			verbose,

@@ -348,6 +348,17 @@ fn a_hold_carries_the_envelope_it_was_reached_under() {
 	);
 }
 
+#[test]
+fn auto_queries_asks_more_than_the_model_wrote() {
+	let (written, written_code) =
+		crate::verify::verify_with_sessions("examples/test/hmac_ok.vp", 2).expect("analyses");
+	let (generated, generated_code) =
+		crate::verify::verify_auto_queries("examples/test/hmac_ok.vp", 2).expect("analyses");
+	assert_eq!(written_code, "c0a1");
+	assert_eq!(generated_code, "c0c0c0a0a0a1a1f0f1f1f0f0");
+	assert!(generated.len() > written.len());
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }

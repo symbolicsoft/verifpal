@@ -119,10 +119,27 @@ pub fn verify_report(file_path: &str, sessions: u8) -> VResult<VerifyReport> {
 }
 
 pub fn verify_report_with_source(file_path: &str, sessions: u8) -> VResult<(VerifyReport, String)> {
-	let m = parse_file(file_path)?;
+	verify_report_with_source_opts(file_path, sessions, false)
+}
+
+pub fn verify_report_with_source_opts(
+	file_path: &str,
+	sessions: u8,
+	auto_queries: bool,
+) -> VResult<(VerifyReport, String)> {
+	let mut m = parse_file(file_path)?;
 	let source = m.source.to_string();
+	if auto_queries {
+		let (km, _) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+		m.queries = crate::autoquery::auto_queries(&m, &km);
+	}
 	let report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
 	Ok((report, source))
+}
+
+pub fn verify_auto_queries(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
+	verify_report_with_source_opts(file_path, sessions, true)
+		.map(|(report, _)| (report.results, report.code))
 }
 
 /// `verify`, analyzed as `sessions` interleaved sessions per principal

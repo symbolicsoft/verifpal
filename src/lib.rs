@@ -7,6 +7,7 @@
 // this keeps it that way.
 #![forbid(unsafe_code)]
 
+pub(crate) mod autoquery;
 pub(crate) mod capability;
 pub(crate) mod construct;
 pub(crate) mod context;
@@ -62,7 +63,8 @@ pub use update::{UpdateCheck, update_check_report, update_check_start};
 #[cfg(feature = "cli")]
 pub use util::{ColorChoice, set_color_choice};
 pub use verify::{
-	VerifyReport, verify, verify_report, verify_report_with_source, verify_with_sessions,
+	VerifyReport, verify, verify_auto_queries, verify_report, verify_report_with_source,
+	verify_report_with_source_opts, verify_with_sessions,
 };
 
 #[cfg(feature = "wasm")]
