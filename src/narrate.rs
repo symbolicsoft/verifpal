@@ -21,14 +21,23 @@ impl NameTable {
 
 	pub(crate) fn from_state(ps: &PrincipalState) -> NameTable {
 		let mut entries: Vec<(Value, Arc<str>)> = Vec::new();
+		let attacker_key = crate::primitive::attacker_public_key();
 		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
-			if matches!(&sv.value, Value::Constant(_)) {
+			if crate::util::is_anonymous_name(&sm.constant.name) {
 				continue;
 			}
-			if entries.iter().any(|(v, _)| v.equivalent(&sv.value, true)) {
-				continue;
+			for form in [&sv.value, &sv.pre_rewrite] {
+				if matches!(form, Value::Constant(_)) || form.equivalent(&attacker_key, true) {
+					continue;
+				}
+				if entries
+					.iter()
+					.any(|(v, n)| v.equivalent(form, true) && **n == *sm.constant.name)
+				{
+					continue;
+				}
+				entries.push((form.clone(), Arc::clone(&sm.constant.name)));
 			}
-			entries.push((sv.value.clone(), Arc::clone(&sm.constant.name)));
 		}
 		NameTable { entries }
 	}
@@ -37,43 +46,46 @@ impl NameTable {
 		self.compress_excluding(v, &[])
 	}
 
-	pub(crate) fn without(&self, names: &[&str]) -> NameTable {
-		NameTable {
-			entries: self
-				.entries
-				.iter()
-				.filter(|(_, n)| !excluded(names, n))
-				.cloned()
-				.collect(),
-		}
-	}
-
-	pub(crate) fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
-		let named = self
-			.entries
-			.iter()
-			.find(|(known, _)| known.equivalent(v, true))
-			.map(|(_, name)| name);
-		if let Some(name) = named
-			&& !excluded(exclude, name)
-		{
+	pub(crate) fn compress_outer_excluding(
+		&self,
+		v: &Value,
+		outer: &[&str],
+		inner: &[&str],
+	) -> String {
+		if let Some(name) = self.named_excluding(v, outer) {
 			return name.to_string();
 		}
 		match v {
 			Value::Constant(c) => c.to_string(),
-			Value::Primitive(p) => {
-				let args: Vec<String> = p
-					.arguments
-					.iter()
-					.map(|a| self.compress_excluding(a, exclude))
-					.collect();
-				format!(
-					"{}({}){}",
-					primitive_name(p.id),
-					args.join(", "),
-					if p.instance_check { "?" } else { "" }
-				)
-			}
+			Value::Primitive(p) => self.render(p, &mut |a| self.compress_excluding(a, inner)),
+		}
+	}
+
+	fn named_excluding(&self, v: &Value, exclude: &[&str]) -> Option<&Arc<str>> {
+		self.entries
+			.iter()
+			.filter(|(known, _)| known.equivalent(v, true))
+			.map(|(_, name)| name)
+			.find(|name| !excluded(exclude, name))
+	}
+
+	fn render(&self, p: &Primitive, show: &mut dyn FnMut(&Value) -> String) -> String {
+		let args: Vec<String> = p.arguments.iter().map(show).collect();
+		format!(
+			"{}({}){}",
+			primitive_name(p.id),
+			args.join(", "),
+			if p.instance_check { "?" } else { "" }
+		)
+	}
+
+	pub(crate) fn compress_excluding(&self, v: &Value, exclude: &[&str]) -> String {
+		if let Some(name) = self.named_excluding(v, exclude) {
+			return name.to_string();
+		}
+		match v {
+			Value::Constant(c) => c.to_string(),
+			Value::Primitive(p) => self.render(p, &mut |a| self.compress_excluding(a, exclude)),
 		}
 	}
 }
@@ -243,13 +255,26 @@ pub(crate) fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc
 		.collect()
 }
 
+fn oriented(
+	v: &Value,
+	table: &NameTable,
+	outer: &[&str],
+	inner: &[&str],
+	attacker: &AttackerState,
+) -> String {
+	table.compress_outer_excluding(&attacker_orientation(v, attacker), outer, inner)
+}
+
 pub(crate) fn mutation_steps(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	table: &NameTable,
+	attacker: &AttackerState,
 ) -> Vec<Step> {
 	let shadowed = shadowed_names(km, ps);
 	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
+	let installed = mutated_names(ps);
+	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
 	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
 	let mut bypasses: Vec<Step> = Vec::new();
 	let mut replays: Vec<Step> = Vec::new();
@@ -273,10 +298,10 @@ pub(crate) fn mutation_steps(
 				#[cfg(test)]
 				key_term: bypass_key.clone(),
 				check: declared
-					.map(|v| table.compress_excluding(v, mutated.as_slice()))
+					.map(|v| oriented(v, table, &mutated, &installed_refs, attacker))
 					.unwrap_or_else(|| sm.constant.name.to_string()),
 				key: bypass_key
-					.map(|k| table.compress_excluding(&k, mutated.as_slice()))
+					.map(|k| oriented(&k, table, &mutated, &installed_refs, attacker))
 					.unwrap_or_default(),
 			});
 			continue;
@@ -289,7 +314,7 @@ pub(crate) fn mutation_steps(
 				sender: Arc::from(km.principal_name(sender)),
 				recipient: Arc::from(km.principal_name(recipient)),
 				name: Arc::clone(&sm.constant.name),
-				value: table.compress_excluding(&sv.pre_rewrite, own),
+				value: oriented(&sv.pre_rewrite, table, own, &installed_refs, attacker),
 				sibling,
 				#[cfg(test)]
 				installed: sv.pre_rewrite.clone(),
@@ -300,11 +325,11 @@ pub(crate) fn mutation_steps(
 			#[cfg(test)]
 			installed: sv.pre_rewrite.clone(),
 			name: Arc::clone(&sm.constant.name),
-			new_value: table.compress_excluding(&sv.pre_rewrite, own),
+			new_value: oriented(&sv.pre_rewrite, table, own, &installed_refs, attacker),
 			old_value: km
 				.slots
 				.get(i)
-				.map(|slot| table.compress_excluding(&slot.initial_value, own))
+				.map(|slot| oriented(&slot.initial_value, table, own, &installed_refs, attacker))
 				.unwrap_or_default(),
 			guarded: sm.guard,
 		};
@@ -425,17 +450,22 @@ pub(crate) fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn derivation_steps(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	target: &Value,
 	table: &NameTable,
+	exclude: &[&str],
+	installed: &[&str],
 	home: PrincipalId,
 	carried: &[CarriedIn],
 	seen: &mut Vec<KnownIdx>,
 ) -> Vec<Step> {
 	let mut steps: Vec<Step> = Vec::new();
-	walk(km, attacker, target, table, home, carried, seen, &mut steps);
+	walk(
+		km, attacker, target, table, exclude, installed, home, carried, seen, &mut steps,
+	);
 	steps
 }
 
@@ -445,6 +475,8 @@ fn walk(
 	attacker: &AttackerState,
 	value: &Value,
 	table: &NameTable,
+	exclude: &[&str],
+	installed: &[&str],
 	home: PrincipalId,
 	carried: &[CarriedIn],
 	seen: &mut Vec<KnownIdx>,
@@ -453,7 +485,9 @@ fn walk(
 	let Some(idx) = attacker.knows(value) else {
 		if let Value::Primitive(p) = value {
 			for argument in p.arguments.iter() {
-				walk(km, attacker, argument, table, home, carried, seen, steps);
+				walk(
+					km, attacker, argument, table, exclude, installed, home, carried, seen, steps,
+				);
 			}
 		}
 		return;
@@ -467,10 +501,14 @@ fn walk(
 	};
 
 	for ingredient in derivation.ingredients() {
-		walk(km, attacker, ingredient, table, home, carried, seen, steps);
+		walk(
+			km, attacker, ingredient, table, exclude, installed, home, carried, seen, steps,
+		);
 	}
 
-	if let Some(text) = describe(km, derivation, value, table, carried) {
+	if let Some(text) = describe(
+		km, derivation, value, table, exclude, installed, carried, attacker,
+	) {
 		let session = attacker
 			.record(idx)
 			.and_then(|r| session_prefix(km, r, home));
@@ -512,20 +550,68 @@ fn lowercase_first(s: &str) -> String {
 	}
 }
 
+fn obtained_from_slot(km: &ProtocolTrace, slot: SlotIdx, v: &str) -> String {
+	match km.slots.get(slot.get()) {
+		Some(s) if !s.sent_by.is_empty() => format!("Attacker observes {} on the wire.", v),
+		Some(s) if s.constant.leaked => format!("Attacker holds {}: the model leaks it.", v),
+		Some(s) if s.constant.qualifier == Some(Qualifier::Public) => {
+			format!("Attacker knows {}: it is public.", v)
+		}
+		_ => format!(
+			"Attacker obtains {}: a value it already holds resolves to it here.",
+			v
+		),
+	}
+}
+
+fn attacker_orientation(v: &Value, attacker: &AttackerState) -> Value {
+	let Value::Primitive(p) = v else {
+		return v.clone();
+	};
+	let args: Vec<Value> = p
+		.arguments
+		.iter()
+		.map(|a| attacker_orientation(a, attacker))
+		.collect();
+	let here = p.with_arguments(args);
+	let Some(swapped) = crate::primitive::commutativity_swap(&here) else {
+		return Value::Primitive(Arc::new(here));
+	};
+	let holds = |q: &Primitive| q.arguments.iter().all(|a| attacker.knows(a).is_some());
+	if !holds(&here) && holds(&swapped) {
+		return Value::Primitive(Arc::new(swapped));
+	}
+	Value::Primitive(Arc::new(here))
+}
+
+fn join_oriented(values: &[Value], table: &NameTable, attacker: &AttackerState) -> String {
+	values
+		.iter()
+		.map(|v| table.compress(&attacker_orientation(v, attacker)))
+		.collect::<Vec<_>>()
+		.join(", ")
+}
+
+#[allow(clippy::too_many_arguments)]
 fn describe(
 	km: &ProtocolTrace,
 	derivation: &DerivationRecord,
 	value: &Value,
 	table: &NameTable,
+	exclude: &[&str],
+	installed: &[&str],
 	carried: &[CarriedIn],
+	attacker: &AttackerState,
 ) -> Option<String> {
-	let v = table.compress(value);
+	let show = |x: &Value| table.compress_excluding(&attacker_orientation(x, attacker), installed);
+	let v =
+		table.compress_outer_excluding(&attacker_orientation(value, attacker), exclude, installed);
 	Some(match derivation {
 		DerivationRecord::Initial | DerivationRecord::Injected => return None,
 		DerivationRecord::Leaked { .. } => {
 			format!("Attacker is handed {} by a leaks declaration.", v)
 		}
-		DerivationRecord::Obtained { .. }
+		DerivationRecord::Obtained { slot }
 			if let Some(c) = carried.iter().find(|c| c.value.equivalent(value, true)) =>
 		{
 			let via = c
@@ -541,7 +627,7 @@ fn describe(
 				(true, Some(name)) => {
 					format!("Attacker observes {name} on the wire, where it is {}.", v)
 				}
-				(true, None) => format!("Attacker holds {}.", v),
+				(true, None) => return None,
 				(false, Some(name)) => {
 					format!(
 						"Attacker replaced {via}, after which {name} resolved to {}.",
@@ -556,53 +642,41 @@ fn describe(
 				}
 			}
 		}
-		DerivationRecord::Obtained { slot } => match km.slots.get(slot.get()) {
-			Some(s) if !s.sent_by.is_empty() => {
-				format!("Attacker observes {} on the wire.", v)
-			}
-			Some(s) if s.constant.leaked => {
-				format!("Attacker holds {}: the model leaks it.", v)
-			}
-			Some(s) if s.constant.qualifier == Some(Qualifier::Public) => {
-				format!("Attacker knows {}: it is public.", v)
-			}
-			_ => format!(
-				"Attacker obtains {}: a value it already holds resolves to it here.",
-				v
-			),
-		},
+		DerivationRecord::Obtained { slot } => obtained_from_slot(km, *slot, &v),
 		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
-			format!("Attacker reads {} out of {}.", v, table.compress(of))
+			format!("Attacker reads {} out of {}.", v, show(of))
 		}
 		DerivationRecord::Decomposed { of, using } => format!(
 			"Attacker opens {} with {}, obtaining {}.",
-			table.compress(of),
-			join_terms(using, table),
+			show(of),
+			join_oriented(using, table, attacker),
 			v,
 		),
 		DerivationRecord::Reconstructed { from } if from.is_empty() => {
 			format!("Attacker constructs {}.", v)
 		}
 		DerivationRecord::Reconstructed { from } => {
-			format!(
-				"Attacker constructs {} from {}.",
-				v,
-				join_terms(from, table)
-			)
+			let parts = join_oriented(from, table, attacker);
+			match &attacker_orientation(value, attacker) {
+				Value::Primitive(p) if join_oriented(&p.arguments, table, attacker) == parts => {
+					format!("Attacker constructs {}.", v)
+				}
+				_ => format!("Attacker constructs {} from {}.", v, parts),
+			}
 		}
 		DerivationRecord::Recomposed { of, using } => format!(
 			"Attacker recomposes {} from enough shares of {} ({}).",
 			v,
-			table.compress(of),
-			join_terms(using, table),
+			show(of),
+			join_oriented(using, table, attacker),
 		),
 		DerivationRecord::PasswordExtracted { from } => format!(
 			"Attacker recovers the password {} used unhashed inside {}.",
 			v,
-			table.compress(from),
+			show(from),
 		),
 		DerivationRecord::ConcatFragment { of } => {
-			format!("Attacker splits {} and takes {}.", table.compress(of), v)
+			format!("Attacker splits {} and takes {}.", show(of), v)
 		}
 		DerivationRecord::Broken {
 			of,
@@ -672,6 +746,10 @@ impl Narration {
 
 	pub(crate) fn term(&self, v: &Value) -> String {
 		self.table.compress(v)
+	}
+
+	pub(crate) fn state(&self) -> Option<&PrincipalState> {
+		self.state.as_ref()
 	}
 
 	pub(crate) fn installed(&self, c: &Constant) -> Option<Value> {
@@ -836,10 +914,8 @@ pub(crate) fn narrate_attack(
 	let mut seen: Vec<KnownIdx> = Vec::new();
 	let shadowed = shadowed_names(km, &witness.ps);
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
-	let pre_table = table.without(&shadowed_refs);
 	let installed = mutated_names(&witness.ps);
 	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
-	let post_table = table.without(&installed_refs);
 	let carried = carried_in(km, &witness.ps, ambient);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
@@ -847,21 +923,25 @@ pub(crate) fn narrate_attack(
 			km,
 			&witness.attacker,
 			&sv.pre_rewrite,
-			&pre_table,
+			&table,
+			&shadowed_refs,
+			&installed_refs,
 			witness.ps.id,
 			&carried,
 			&mut seen,
 		));
 	}
 
-	steps.extend(mutation_steps(km, &witness.ps, &table));
+	steps.extend(mutation_steps(km, &witness.ps, &table, ambient));
 	steps.extend(gate_steps(&witness.ps, &table, &installed_refs));
 
 	steps.extend(derivation_steps(
 		km,
 		&witness.attacker,
 		target,
-		&post_table,
+		&table,
+		&installed_refs,
+		&installed_refs,
 		witness.ps.id,
 		&carried,
 		&mut seen,
@@ -897,6 +977,13 @@ fn render(steps: &[Step]) -> String {
 	out
 }
 
+fn bypass_site(slot: &str) -> String {
+	if crate::util::is_anonymous_name(slot) {
+		return String::new();
+	}
+	format!(" at {}", slot)
+}
+
 fn render_one(step: &Step) -> String {
 	match step {
 		Step::Mutations {
@@ -911,9 +998,12 @@ fn render_one(step: &Step) -> String {
 			key,
 			..
 		} if !key.is_empty() => format!(
-			"{}'s {} does not halt at {}: Attacker holds {}, so it can supply a value \
+			"{}'s {} does not halt{}: Attacker holds {}, so it can supply a value \
 				 this check accepts.",
-			principal, check, slot, key,
+			principal,
+			check,
+			bypass_site(slot),
+			key,
 		),
 		Step::Bypass {
 			principal,
@@ -921,9 +1011,11 @@ fn render_one(step: &Step) -> String {
 			check,
 			..
 		} => format!(
-			"{}'s {} does not halt at {}: Attacker holds the key it verifies \
+			"{}'s {} does not halt{}: Attacker holds the key it verifies \
 			 against, so it can supply a value this check accepts.",
-			principal, check, slot,
+			principal,
+			check,
+			bypass_site(slot),
 		),
 		Step::Replay {
 			sender,
@@ -1172,7 +1264,7 @@ mod tests {
 		crate::reexec::install(&mut mutated, slot, attacker_key, true);
 
 		let table = NameTable::from_state(&mutated);
-		let steps = mutation_steps(&km, &mutated, &table);
+		let steps = mutation_steps(&km, &mutated, &table, &AttackerState::new());
 		assert_eq!(steps.len(), 1, "one message mutated, one step");
 		match &steps[0] {
 			Step::Mutations { items, .. } => {
@@ -1230,7 +1322,7 @@ mod tests {
 		);
 
 		let table = NameTable::from_state(&mutated);
-		let steps = mutation_steps(&km, &mutated, &table);
+		let steps = mutation_steps(&km, &mutated, &table, &AttackerState::new());
 		assert_eq!(steps.len(), 1);
 		match &steps[0] {
 			Step::Mutations { sender, .. } => {
@@ -1273,7 +1365,7 @@ mod tests {
 		let ps = make_principal_state("Alice", 1, meta, values);
 
 		let table = NameTable::from_state(&ps);
-		let steps = mutation_steps(&make_trace(), &ps, &table);
+		let steps = mutation_steps(&make_trace(), &ps, &table, &AttackerState::new());
 		assert!(
 			!steps.iter().any(|s| matches!(s, Step::Mutations { .. })),
 			"the injected key never crossed a wire, so it is not a replacement \
@@ -1365,6 +1457,8 @@ mod tests {
 			&attacker,
 			&target,
 			&table,
+			&[],
+			&[],
 			pure.id,
 			&[],
 			&mut Vec::new(),
@@ -1401,8 +1495,18 @@ mod tests {
 		let unknown = make_constant("dw_absent");
 		let trace = make_trace();
 		assert!(
-			derivation_steps(&trace, &attacker, &unknown, &table, 0, &[], &mut Vec::new())
-				.is_empty()
+			derivation_steps(
+				&trace,
+				&attacker,
+				&unknown,
+				&table,
+				&[],
+				&[],
+				0,
+				&[],
+				&mut Vec::new()
+			)
+			.is_empty()
 		);
 	}
 }

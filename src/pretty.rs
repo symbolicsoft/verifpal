@@ -203,6 +203,21 @@ pub(crate) fn query_display(q: &Query) -> String {
 	}
 }
 
+pub(crate) fn query_line(q: &Query) -> String {
+	let mut out = query_display(q);
+	for option in &q.options {
+		match option.kind {
+			QueryOptionKind::Precondition => out.push_str(&format!(
+				"[precondition[{} -> {}: {}]]",
+				option.message.sender_name,
+				option.message.recipient_name,
+				pretty_constants(&option.message.constants),
+			)),
+		}
+	}
+	out
+}
+
 pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()

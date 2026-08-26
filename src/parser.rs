@@ -46,7 +46,7 @@ const RESERVED: &[&str] = &[
 	"shamir_join",
 	"concat",
 	"split",
-	"unnamed",
+	crate::util::ANONYMOUS_PREFIX,
 	"blind",
 	"unblind",
 	"pubkey",
@@ -62,7 +62,7 @@ fn check_reserved(s: &str) -> VResult<()> {
 	let lower = s.to_lowercase();
 	if RESERVED.contains(&lower.as_str())
 		|| lower.starts_with("attacker")
-		|| lower.starts_with("unnamed")
+		|| lower.starts_with(crate::util::ANONYMOUS_PREFIX)
 	{
 		return Err(VerifpalError::parse(
 			format!("`{}` is a reserved word and cannot name a constant", s).into(),
@@ -564,6 +564,7 @@ impl<'a> Parser<'a> {
 		}
 		self.record_from(queries_kw, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
+		let queries_bracket = self.pos;
 		self.expect("[")?;
 		let queries_header_trailing = self.try_take_trailing();
 		self.consume_trivia();
@@ -574,7 +575,15 @@ impl<'a> Parser<'a> {
 				break;
 			}
 			if self.at_end() {
-				break;
+				if queries.is_empty() {
+					break;
+				}
+				return Err(self.unclosed_hint(
+					VerifpalError::parse("the `queries` block is never closed".into())
+						.at(self.here())
+						.labelled(self.found_here()),
+					queries_bracket,
+				));
 			}
 			let leading = self.take_leading();
 			let mut query = self.parse_query()?;
@@ -1094,7 +1103,7 @@ impl<'a> Parser<'a> {
 		let actual_name: Arc<str> = if name == "_" {
 			let n = self.unnamed_counter;
 			self.unnamed_counter += 1;
-			Arc::from(format!("unnamed_{}", n))
+			Arc::from(format!("{}_{}", crate::util::ANONYMOUS_PREFIX, n))
 		} else {
 			Arc::from(name)
 		};

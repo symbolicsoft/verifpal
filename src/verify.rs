@@ -100,6 +100,12 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 		return;
 	}
 	for (slot, reach) in &governed {
+		let anonymous = crate::util::is_anonymous_name(slot);
+		let slot = if anonymous {
+			format!("`_{}`", &slot[crate::util::copy_base_name(slot).len()..])
+		} else {
+			slot.clone()
+		};
 		let message = match reach {
 			Reach::SameTerm(annotated) => format!(
 				"{slot} is written without an annotation, but is the same term as \
@@ -362,7 +368,17 @@ pub(crate) fn generate_trace(
 		.perform_all_rewrites()
 		.into_iter()
 		.partition(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)));
-	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
+	if let Err(e) = sanity_fail_on_failed_checked_primitive_rewrite(&failures) {
+		let span = failures
+			.iter()
+			.find(|(p, _)| p.instance_check)
+			.and_then(|(_, slot)| km.slots.get(*slot))
+			.map(|slot| slot.declared_span);
+		return Err(match span {
+			Some(span) => e.or_span(span),
+			None => e,
+		});
+	}
 	if !suppressed.is_empty() {
 		ps_resolved = crate::reexec::halt_at_failed_checks(ps_resolved, &suppressed);
 	}
@@ -499,13 +515,17 @@ fn verify_end(
 	for r in &results {
 		if r.resolved {
 			info_message(
-				&format!("{}{}", r.query, r.summary),
+				&format!("{}{}", crate::pretty::query_line(&r.query), r.summary),
 				InfoLevel::Result,
 				false,
 			);
 		} else {
 			info_message(
-				&format!("{}{}", r.query, r.envelope.qualifier()),
+				&format!(
+					"{}{}",
+					crate::pretty::query_line(&r.query),
+					r.envelope.qualifier()
+				),
 				InfoLevel::Pass,
 				false,
 			);

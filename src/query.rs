@@ -121,9 +121,8 @@ impl QueryVerdict {
 
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result, &QueryVerdict(())) {
-		crate::info::info_analysis_result(&result.query.to_string(), || {
-			format!("{}{}", result.query, result.summary)
-		});
+		let headline = crate::pretty::query_line(&result.query);
+		crate::info::info_analysis_result(&headline, || format!("{}{}", headline, result.summary));
 	}
 }
 
@@ -209,12 +208,17 @@ fn query_authentication(
 		}]
 	};
 	let mutated_info = attack_trace_with(ctx, km, ps, query_index, assigned, &seed, prelude);
+	let witnessed = mutated_info.state().and_then(|w| {
+		let used = query_find_constant_usage_indices(&c, km, w)?;
+		let &i = used.first()?;
+		Some(km.slots.get(i)?.initial_value.clone())
+	});
 	result = query_precondition(result, ps);
 	Ok(query_authentication_handle_pass(
 		ctx,
 		result,
 		&c,
-		before,
+		witnessed.as_ref().unwrap_or(before),
 		&mutated_info,
 		if sibling_replay {
 			AuthFailure::Replayed

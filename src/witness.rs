@@ -125,7 +125,7 @@ pub(crate) fn minimize_witness(
 			if keys.is_empty() {
 				return Vec::new();
 			}
-			let checks = checks_wanting_shapes(session, &keys);
+			let checks = checks_wanting_shapes(km, session, &keys);
 			let blank = shapes_the_checks_wanted(&checks, &mut |_| value_nil());
 			let mut carrying = Vec::new();
 			let mut hollow = Vec::new();
@@ -147,6 +147,95 @@ pub(crate) fn minimize_witness(
 			carrying
 		};
 
+	let forged_flight =
+		|session: &PrincipalState, base: Vec<(SlotIdx, Value)>| -> Vec<Vec<(SlotIdx, Value)>> {
+			let mut installs = controlled_installs(km, session, &ambient, base);
+			if installs.is_empty() {
+				return Vec::new();
+			}
+			let slots = forgeable_slots(km, session);
+			let bound = crate::reexec::TermBound::of(km);
+			let cost = |installs: &[(SlotIdx, Value)]| -> (usize, usize, usize) {
+				let installs = &controlled_installs(km, session, &ambient, installs.to_vec())[..];
+				match reexecute(session, installs, &ambient, km) {
+					Ok(state) => (
+						state
+							.values
+							.iter()
+							.filter(|sv| sv.bypassed.is_some())
+							.count(),
+						usize::from(state.halted_at.is_some()),
+						checks_wanting_shapes(km, session, installs).len(),
+					),
+					Err(_) => (usize::MAX, usize::MAX, usize::MAX),
+				}
+			};
+			let mut out: Vec<Vec<(SlotIdx, Value)>> = Vec::new();
+			let mut seen: Vec<Vec<(SlotIdx, Value)>> = vec![installs.clone()];
+			for _ in 0..slots.len() {
+				let mut advanced = false;
+				for i in &slots {
+					let here = cost(&installs);
+					if here == (0, 0, 0) {
+						break;
+					}
+					let checks = checks_wanting_shapes(km, session, &installs);
+					if checks.is_empty() {
+						break;
+					}
+					let mut shapes = payload_shapes(km, &ambient, &checks, *i);
+					shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| {
+						attacker_public_key()
+					}));
+					shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| value_nil()));
+					for (prim, _) in &checks {
+						for argument in prim.arguments.iter() {
+							if !shapes.iter().any(|s| s.equivalent(argument, true)) {
+								shapes.push(argument.clone());
+							}
+						}
+					}
+					let honest = km
+						.slots
+						.get(*i)
+						.map(|slot| crate::resolution::resolve_trace_term(&slot.initial_value, km));
+					for shape in shapes {
+						if !bound.admits(&shape) || !attacker_can_build(&shape, &ambient) {
+							continue;
+						}
+						if honest.as_ref().is_some_and(|h| h.equivalent(&shape, true)) {
+							continue;
+						}
+						let mut trial: Vec<(SlotIdx, Value)> = installs
+							.iter()
+							.filter(|(s, _)| s.get() != *i)
+							.cloned()
+							.collect();
+						trial.push((SlotIdx(*i), shape));
+						let trial = controlled_installs(km, session, &ambient, trial);
+						if !trial.iter().any(|(s, _)| s.get() == *i) {
+							continue;
+						}
+						if seen.iter().any(|s| same_installs(s, &trial)) {
+							continue;
+						}
+						if cost(&trial) <= here {
+							seen.push(trial.clone());
+							installs = trial;
+							advanced = true;
+							break;
+						}
+					}
+				}
+				if !advanced {
+					break;
+				}
+				out.push(installs.clone());
+			}
+			out.reverse();
+			out
+		};
+
 	let forged_alone = |session: &PrincipalState| -> Vec<Vec<(SlotIdx, Value)>> {
 		let mut carrying = Vec::new();
 		let mut hollow = Vec::new();
@@ -155,7 +244,7 @@ pub(crate) fn minimize_witness(
 			if controlled_installs(km, session, &ambient, blanked.clone()).is_empty() {
 				continue;
 			}
-			let checks = checks_wanting_shapes(session, &blanked);
+			let checks = checks_wanting_shapes(km, session, &blanked);
 			for shape in payload_shapes(km, &ambient, &checks, i) {
 				carrying.push(vec![(SlotIdx(i), shape)]);
 			}
@@ -219,7 +308,14 @@ pub(crate) fn minimize_witness(
 			if candidate.is_empty() {
 				continue;
 			}
-			let Some(witness) = probe(ctx, km, session, &candidate, query_index, phase) else {
+			if candidate
+				.iter()
+				.any(|(_, value)| !attacker_can_build(value, &ambient))
+			{
+				continue;
+			}
+			let outcome = probe(ctx, km, session, &candidate, query_index, phase);
+			let Some(witness) = outcome else {
 				continue;
 			};
 			if !needs_guard_bypass(&witness.ps) {
@@ -231,6 +327,33 @@ pub(crate) fn minimize_witness(
 			}
 		}
 	}
+	if chosen.is_none() {
+		'flight: for session in &sessions {
+			for base in [
+				mitm_for(session),
+				mutations.clone(),
+				recorded_as_gnil.clone(),
+			] {
+				for candidate in forged_flight(session, base) {
+					if candidate
+						.iter()
+						.any(|(_, value)| !attacker_can_build(value, &ambient))
+					{
+						continue;
+					}
+					let Some(witness) = probe(ctx, km, session, &candidate, query_index, phase)
+					else {
+						continue;
+					};
+					if !needs_guard_bypass(&witness.ps) {
+						chosen = Some((session.clone(), candidate));
+						break 'flight;
+					}
+				}
+			}
+		}
+	}
+
 	let explanatory = chosen.is_some();
 	let Some((base, mutations)) = chosen.or(fallback) else {
 		return unminimized(false);
@@ -254,6 +377,21 @@ pub(crate) fn minimize_witness(
 
 	match probe(ctx, km, &base, &keep, query_index, phase) {
 		Some(mut witness) => {
+			#[cfg(test)]
+			for (slot, value) in &keep {
+				assert!(
+					attacker_can_build(value, &ambient),
+					"WITNESS \u{2022} query {} is explained by installing {} into {}, a term the \
+					 attacker cannot build from what it knows. A trace naming a substitution \
+					 nothing derives is a trace a reader cannot follow.",
+					query_index,
+					value,
+					km.slots
+						.get(slot.get())
+						.map(|s| s.constant.name.to_string())
+						.unwrap_or_default(),
+				);
+			}
 			witness.out_of_order = out_of_order_harvest(ctx, km, &base, &keep, query_index, phase);
 			#[cfg(test)]
 			{
@@ -263,6 +401,14 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
+}
+
+fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
+	a.len() == b.len()
+		&& a.iter().all(|(slot, value)| {
+			b.iter()
+				.any(|(s, v)| s == slot && v.equivalent(value, true))
+		})
 }
 
 fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
@@ -281,25 +427,30 @@ fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
 		.collect()
 }
 
-type WantedCheck = (Primitive, &'static crate::primitive::PrimitiveSpec);
+type WantedCheck = (Primitive, Option<&'static crate::primitive::PrimitiveSpec>);
 
 fn checks_wanting_shapes(
+	km: &ProtocolTrace,
 	session: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
 ) -> Vec<WantedCheck> {
 	let mut staged = session.clone();
 	for (slot, value) in installs {
-		crate::reexec::install(&mut staged, slot.get(), value.clone(), true);
+		if slot.get() >= staged.values.len() {
+			continue;
+		}
+		let authored = crate::reexec::attacker_authored(value, slot.get(), km, &staged);
+		crate::reexec::install(&mut staged, slot.get(), value.clone(), authored);
 	}
-	if staged.resolve_all_values().is_err() {
+	if crate::reexec::slot_graph_is_cyclic(&staged) || staged.resolve_all_values().is_err() {
 		return Vec::new();
 	}
 	staged
 		.perform_all_rewrites()
 		.into_iter()
-		.filter_map(|(prim, _)| {
-			let spec = crate::primitive::primitive_get(prim.id).ok()?;
-			spec.rewrite.has_rule.then_some((prim, spec))
+		.filter_map(|(prim, _)| match crate::primitive::primitive_get(prim.id) {
+			Ok(spec) => spec.rewrite.has_rule.then_some((prim, Some(spec))),
+			Err(_) => crate::primitive::primitive_is_core(prim.id).then_some((prim, None)),
 		})
 		.collect()
 }
@@ -310,6 +461,9 @@ fn shapes_the_checks_wanted(
 ) -> Vec<Value> {
 	let mut shapes: Vec<Value> = Vec::new();
 	for (prim, spec) in checks {
+		let Some(spec) = spec else {
+			continue;
+		};
 		let mut at = 0usize;
 		let filler = || {
 			let position = at;
@@ -378,7 +532,7 @@ fn payload_shapes(
 /// A forged term is only an explanation if the attacker could have produced it.
 /// The minimizer never records a verdict, so this cannot cost an attack — but a
 /// witness naming a term nothing derives is a trace a reader cannot follow.
-fn attacker_can_build(shape: &Value, attacker: &AttackerState) -> bool {
+pub(crate) fn attacker_can_build(shape: &Value, attacker: &AttackerState) -> bool {
 	if attacker.knows(shape).is_some() {
 		return true;
 	}

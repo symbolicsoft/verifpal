@@ -126,13 +126,10 @@ fn core_rule_assert(p: &Primitive) -> (bool, Value) {
 
 fn core_rule_split(p: &Primitive) -> (bool, Value) {
 	match &p.arguments[0] {
-		Value::Primitive(pp) if pp.id == PRIM_CONCAT => (
-			true,
-			pp.arguments
-				.get(p.output)
-				.cloned()
-				.unwrap_or_else(value_nil),
-		),
+		Value::Primitive(pp) if pp.id == PRIM_CONCAT => match pp.arguments.get(p.output) {
+			Some(field) => (true, field.clone()),
+			None => (false, Value::Primitive(Arc::new(p.clone()))),
+		},
 		_ => (false, Value::Primitive(Arc::new(p.clone()))),
 	}
 }

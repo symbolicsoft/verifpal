@@ -600,11 +600,50 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 /// than written on purpose.
 pub(crate) const MAX_PRINCIPALS: usize = 128;
 
+fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
+	if p.id != PRIM_SPLIT {
+		return None;
+	}
+	let Some(Value::Primitive(inner)) = p.arguments.first() else {
+		return None;
+	};
+	if inner.id != PRIM_CONCAT || p.output < inner.arguments.len() {
+		return None;
+	}
+	let fields = inner.arguments.len();
+	let plural = if fields == 1 { "" } else { "s" };
+	Some(
+		VerifpalError::sanity(
+			format!(
+				"`SPLIT` takes field {} of a `CONCAT` that packs {} field{}",
+				p.output + 1,
+				fields,
+				plural
+			)
+			.into(),
+		)
+		.narrow(primitive_name(p.id))
+		.labelled("this projection has no field to take")
+		.note(format!(
+			"`{}` packs {} field{}, so only that many constants can be bound on \
+			 the left of the `=`; a field that was never packed is not an empty one",
+			inner, fields, plural
+		))
+		.help(format!(
+			"bind at most {} constant{} on the left, or pack more into the `CONCAT`",
+			fields, plural
+		)),
+	)
+}
+
 pub(crate) fn sanity_fail_on_failed_checked_primitive_rewrite(
 	failures: &[(Primitive, usize)],
 ) -> VResult<()> {
 	for (p, _) in failures {
 		if p.instance_check {
+			if let Some(error) = split_beyond_concat(p) {
+				return Err(error);
+			}
 			return Err(VerifpalError::sanity(
 				format!("`{}` cannot succeed as written", primitive_name(p.id)).into(),
 			)

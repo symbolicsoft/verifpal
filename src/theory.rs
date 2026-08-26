@@ -708,19 +708,25 @@ mod tests {
 		let a = make_constant("cr_a");
 		let b = make_constant("cr_b");
 		let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
-		for (output, expected) in [(0, a), (1, b), (2, value_nil())] {
-			let split = Primitive {
+		let split_at = |output: usize| {
+			Arc::new(Primitive {
 				id: PRIM_SPLIT,
 				arguments: vec![concat.clone()],
 				output,
 				instance_check: false,
 				capabilities: Capabilities::default(),
 				hash: HashCell::default(),
-			};
-			let (rewritten, value) = can_rewrite(&Arc::new(split));
+			})
+		};
+		for (output, expected) in [(0, a), (1, b)] {
+			let (rewritten, value) = can_rewrite(&split_at(output));
 			assert!(rewritten);
 			assert!(value.equivalent(&expected, true));
 		}
+		let beyond = split_at(2);
+		let (rewritten, value) = can_rewrite(&beyond);
+		assert!(!rewritten);
+		assert!(value.equivalent(&Value::Primitive(beyond), true));
 	}
 
 	#[test]

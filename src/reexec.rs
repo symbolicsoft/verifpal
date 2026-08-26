@@ -282,7 +282,7 @@ pub(crate) fn attacker_authored(
 	!ground_reduct.equivalent(&trace_reduct, true)
 }
 
-fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
+pub(crate) fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
 	let n = ps.values.len();
 	let mut edges: Vec<usize> = Vec::new();
 	let mut bounds: Vec<usize> = Vec::with_capacity(n + 1);

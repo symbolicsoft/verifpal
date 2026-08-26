@@ -72,6 +72,12 @@ pub(crate) fn copy_base_name(name: &str) -> &str {
 	&name[..end]
 }
 
+pub(crate) const ANONYMOUS_PREFIX: &str = "unnamed";
+
+pub(crate) fn is_anonymous_name(name: &str) -> bool {
+	copy_base_name(name).starts_with(ANONYMOUS_PREFIX)
+}
+
 pub(crate) fn quoted_list(items: &[String]) -> String {
 	items
 		.iter()
