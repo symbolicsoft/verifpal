@@ -90,6 +90,7 @@ struct WasmResult {
 	resolved: bool,
 	kind: String,
 	summary: String,
+	envelope: String,
 }
 
 #[cfg(feature = "wasm")]
@@ -125,6 +126,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 				resolved: r.resolved,
 				kind: r.query.kind.name().to_string(),
 				summary: r.summary.clone(),
+				envelope: r.envelope.summary(),
 			})
 			.collect(),
 		assumptions: ctx

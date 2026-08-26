@@ -6,14 +6,14 @@ use crate::types::*;
 pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 	let mut out = Vec::new();
 	for c in secret_constants(m) {
-		if km.index_of(&c).is_none() {
+		if km.index_of(&c).is_none() || c.is_nil() {
 			continue;
 		}
 		out.push(single_constant_query(QueryKind::Confidentiality, c));
 	}
 	for slot in &km.slots {
 		for &(recipient, sender) in &slot.known_by {
-			if sender == recipient {
+			if sender == recipient || slot.constant.is_nil() {
 				continue;
 			}
 			if !slot.known_by_principal(sender) || !slot.known_by_principal(recipient) {
@@ -26,7 +26,7 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 		}
 	}
 	for slot in &km.slots {
-		if slot.known_by.is_empty() {
+		if slot.known_by.is_empty() || slot.constant.is_nil() {
 			continue;
 		}
 		if !km.constant_used_by_any(&slot.constant) {

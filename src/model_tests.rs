@@ -359,7 +359,7 @@ fn auto_queries_asks_more_than_the_model_wrote() {
 	let (generated, generated_code) =
 		crate::verify::verify_auto_queries("examples/test/hmac_ok.vp", 2).expect("analyses");
 	assert_eq!(written_code, "c0a1");
-	assert_eq!(generated_code, "c0c0c0a0a0a1a1f0f1f1f0f0");
+	assert_eq!(generated_code, "c0c0c0a0a0a1a1f1f1f0f0");
 	assert!(generated.len() > written.len());
 }
 
