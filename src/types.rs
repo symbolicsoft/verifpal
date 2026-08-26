@@ -827,6 +827,7 @@ pub struct Model {
 #[derive(Clone, Debug)]
 pub(crate) struct ResultWitness {
 	pub installs: Vec<(SlotIdx, Value)>,
+	pub wide: bool,
 	pub narrated: Vec<SlotIdx>,
 	pub principal: PrincipalId,
 	pub phase: i32,

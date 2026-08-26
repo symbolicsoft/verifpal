@@ -41,6 +41,7 @@ fn attack_trace_with(
 		query_index,
 		ResultWitness {
 			installs: witness.installs.clone(),
+			wide: witness.wide,
 			narrated: crate::narrate::narrated_installs(&witness.ps),
 			principal: witness.ps.id,
 			phase: ambient.current_phase,

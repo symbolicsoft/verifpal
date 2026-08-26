@@ -7,10 +7,9 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 5] = [
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 4] = [
 	("junglegym_hybrid_pq.vp", 4),
 	("noise_xx_mutual.vp", 1),
-	("noise_xx_mutual.vp", 2),
 	("piknik.vp", 2),
 	("piknik.vp", 3),
 ];
