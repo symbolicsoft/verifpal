@@ -198,9 +198,13 @@ fn verdicts_section(a: &Analysis, index: usize) -> String {
 
 fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> String {
 	let (class, mark, ruling) = if q.resolved {
-		("verdictFail", "\u{00d7}", "Contradiction found")
+		("verdictFail", "\u{00d7}", "Contradiction found".to_string())
 	} else {
-		("verdictPass", "\u{2713}", "Holds")
+		(
+			"verdictPass",
+			"\u{2713}",
+			format!("Holds ({})", envelope_text(&q.envelope)),
+		)
 	};
 	let because = if q.resolved && !q.conclusion.is_empty() {
 		fill(asset(BECAUSE), &[("text", &escape(&q.conclusion))])
@@ -220,11 +224,22 @@ fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> Strin
 			("query_index", &query_index.to_string()),
 			("query", &escape(&q.query)),
 			("line", &q.range.line.to_string()),
-			("ruling", ruling),
+			("ruling", &ruling),
 			("because", &because),
 			("preconditions", &preconditions),
 		],
 	)
+}
+
+fn envelope_text(e: &crate::report::EnvelopeReport) -> String {
+	if e.exhausted {
+		return format!(
+			"search exhausted at {} session{}",
+			e.sessions,
+			if e.sessions == 1 { "" } else { "s" }
+		);
+	}
+	format!("search truncated: {}", e.truncations.join(", "))
 }
 
 fn assumptions_callout(a: &Analysis) -> String {
