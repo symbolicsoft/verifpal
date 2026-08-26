@@ -153,8 +153,12 @@ fn stated_result_codes(source: &str) -> Vec<String> {
 	out
 }
 
-fn session_base(name: &str) -> String {
-	name.split('#').next().unwrap_or(name).trim().to_lowercase()
+fn expansion_base(name: &str) -> String {
+	name.split(['#', '@'])
+		.next()
+		.unwrap_or(name)
+		.trim()
+		.to_lowercase()
 }
 
 #[test]
@@ -241,9 +245,9 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 				let Some((_, recipient)) = route.split_once(" to ") else {
 					continue;
 				};
-				let recipient = session_base(recipient);
+				let recipient = expansion_base(recipient);
 				for name in names.split(',') {
-					let name = session_base(name);
+					let name = expansion_base(name);
 					let to_recipient: Vec<&(String, String, String, bool)> = legs
 						.iter()
 						.filter(|(_, r, n, _)| *r == recipient && *n == name)
@@ -391,13 +395,36 @@ fn test_spore_nsl_pk() {
 }
 
 #[test]
-fn ns_and_nsl_are_not_yet_distinguished() {
+fn test_spore_ns_pk_scenarios() {
+	run_model("spore_ns_pk_scenarios.vp", "c1");
+	run_model_sessions("spore_ns_pk_scenarios.vp", 1, "c1");
+}
+
+#[test]
+fn test_spore_nsl_pk_scenarios() {
+	run_model("spore_nsl_pk_scenarios.vp", "c0");
+	run_model_sessions("spore_nsl_pk_scenarios.vp", 1, "c0");
+}
+
+#[test]
+fn without_peer_instantiation_ns_and_nsl_are_indistinguishable() {
 	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
 	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
 	assert_eq!(
 		ns, nsl,
-		"Phase E must flip this: Lowe's fix has to change the verdict"
+		"the scenario-free pair is the baseline the scenarios pair is measured against"
 	);
+}
+
+#[test]
+fn with_peer_instantiation_lowes_fix_changes_the_verdict() {
+	let (_, ns) =
+		crate::verify::verify("examples/test/spore_ns_pk_scenarios.vp").expect("analyses");
+	let (_, nsl) =
+		crate::verify::verify("examples/test/spore_nsl_pk_scenarios.vp").expect("analyses");
+	assert_ne!(ns, nsl, "peer instantiation exists to tell these two apart");
+	assert_eq!(ns, "c1");
+	assert_eq!(nsl, "c0");
 }
 
 #[test]
