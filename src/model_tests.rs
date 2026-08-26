@@ -400,6 +400,16 @@ fn ns_and_nsl_are_not_yet_distinguished() {
 	);
 }
 
+#[test]
+fn test_spore_otway_rees() {
+	run_model("spore_otway_rees.vp", "c0c1a1");
+}
+
+#[test]
+fn test_spore_wmf() {
+	run_model("spore_wmf.vp", "c1a1f0");
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }
