@@ -827,11 +827,37 @@ pub struct TraceValue {
 	pub guarded: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Truncation {
+	TermDepth,
+}
+
+impl Truncation {
+	pub fn name(self) -> &'static str {
+		match self {
+			Truncation::TermDepth => "term depth",
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Envelope {
+	pub sessions: u8,
+	pub truncations: Vec<Truncation>,
+}
+
+impl Envelope {
+	pub fn exhausted(&self) -> bool {
+		self.truncations.is_empty()
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,
 	pub query_index: usize,
 	pub resolved: bool,
+	pub envelope: Envelope,
 	pub summary: String,
 	pub conclusion: String,
 	pub trace: Vec<String>,
@@ -850,6 +876,7 @@ impl VerifyResult {
 			query: query.clone(),
 			query_index,
 			resolved: false,
+			envelope: Envelope::default(),
 			summary: String::new(),
 			conclusion: String::new(),
 			trace: vec![],

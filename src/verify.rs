@@ -59,7 +59,7 @@ fn analyze_sessions_traced_cancellable(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(m, &states, variants);
+	let mut ctx = VerifyContext::new(m, &states, variants, sessions);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
 	if sessions > 1 {
@@ -72,6 +72,7 @@ fn analyze_sessions_traced_cancellable(
 	if ctx.cancelled() {
 		return Err(VerifpalError::cancelled());
 	}
+	ctx.finalize_envelopes();
 	Ok((ctx, trace))
 }
 
