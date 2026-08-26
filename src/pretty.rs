@@ -284,6 +284,32 @@ pub(crate) fn pretty_model(m: &Model) -> String {
 		}
 	}
 
+	if !m.scenarios.is_empty() {
+		output.push_str(&render_leading(&m.scenarios_leading_comments, ""));
+		output.push_str("scenarios[");
+		output.push_str(&render_trailing(m.scenarios_header_trailing.as_ref()));
+		output.push('\n');
+		for scenario in &m.scenarios {
+			output.push_str(&render_leading(&scenario.leading_comments, "\t"));
+			let bindings = scenario
+				.bindings
+				.iter()
+				.map(|(target, value)| format!("{} = {}", target, value))
+				.collect::<Vec<_>>()
+				.join(", ");
+			output.push_str(&format!(
+				"\t{}[{}]{}\n",
+				scenario.principal_name,
+				bindings,
+				render_trailing(scenario.trailing_comment.as_ref())
+			));
+		}
+		output.push_str(&render_leading(&m.scenarios_tail_comments, "\t"));
+		output.push(']');
+		output.push_str(&render_trailing(m.scenarios_closing_trailing.as_ref()));
+		output.push_str("\n\n");
+	}
+
 	output.push_str(&render_leading(&m.queries_leading_comments, ""));
 	output.push_str("queries[");
 	output.push_str(&render_trailing(m.queries_header_trailing.as_ref()));
@@ -379,6 +405,16 @@ pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+
+	#[test]
+	fn a_scenarios_block_round_trips() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows public prs_gpeer\n\tknows private prs_a\n\tprs_e = ENC(prs_gpeer, prs_a)\n]\n\nscenarios[\n\tAlice[prs_gpeer = prs_gb]\n\tAlice[prs_gpeer = prs_gm]\n]\n\nqueries[\n\tconfidentiality? prs_a\n]\n";
+		let m = crate::parser::parse_string("prs.vp", src).expect("parse");
+		let once = pretty_model(&m);
+		assert_eq!(once, src);
+		let m2 = crate::parser::parse_string("prs.vp", &once).expect("reparse");
+		assert_eq!(pretty_model(&m2), once);
+	}
 
 	#[test]
 	fn pretty_round_trips_primitive_capabilities() {

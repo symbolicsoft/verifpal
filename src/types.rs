@@ -763,11 +763,26 @@ impl From<&str> for Source {
 }
 
 #[derive(Clone, Debug)]
+pub struct Scenario {
+	pub span: Span,
+	pub principal: PrincipalId,
+	pub principal_name: Arc<str>,
+	pub bindings: Vec<(Constant, Constant)>,
+	pub leading_comments: Vec<Comment>,
+	pub trailing_comment: Option<Comment>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Model {
 	pub file_name: String,
 	pub source: Source,
 	pub attacker: AttackerKind,
 	pub blocks: Vec<Block>,
+	pub scenarios: Vec<Scenario>,
+	pub scenarios_leading_comments: Vec<Comment>,
+	pub scenarios_header_trailing: Option<Comment>,
+	pub scenarios_tail_comments: Vec<Comment>,
+	pub scenarios_closing_trailing: Option<Comment>,
 	pub queries: Vec<Query>,
 	pub pre_attacker_comments: Vec<Comment>,
 	pub attacker_trailing: Option<Comment>,
