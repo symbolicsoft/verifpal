@@ -155,7 +155,7 @@ fn query_confidentiality(
 		&format!(
 			"{} ({}) is obtained by Attacker.",
 			subject,
-			mutated_info.term(&attacker.known[attacker_idx.get()]),
+			mutated_info.term_excluding(&attacker.known[attacker_idx.get()], &[&subject.name]),
 		),
 	);
 	result = query_precondition(result, ps);
@@ -398,7 +398,7 @@ fn query_freshness(
 		&format!(
 			"{} ({}) is used by {} in {} despite not being a fresh value.",
 			subject,
-			mutated_info.term(&resolved),
+			mutated_info.term_excluding(&resolved, &[&subject.name]),
 			ps.name,
 			mutated_info.term(&ps.values[indices[0]].pre_rewrite),
 		),
@@ -469,15 +469,20 @@ fn query_equivalence(
 	let empty = Value::Constant(Constant::default());
 	let prelude = |state: &PrincipalState| {
 		let table = crate::narrate::NameTable::from_state(state);
+		let shadowed = crate::narrate::shadowed_names(km, state);
+		let mut hidden: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 		query
 			.constants
 			.iter()
 			.filter_map(|c| {
 				let (shown, slot) = state.resolve_constant(c, false);
 				let _slot = slot?;
+				hidden.push(&c.name);
+				let rendered = table.compress_excluding(&shown, &hidden);
+				hidden.pop();
 				Some(crate::narrate::Step::Resolves {
 					name: std::sync::Arc::clone(&c.name),
-					value: table.compress_excluding(&shown, &[&c.name]),
+					value: rendered,
 					#[cfg(test)]
 					slot: SlotIdx(_slot),
 					#[cfg(test)]

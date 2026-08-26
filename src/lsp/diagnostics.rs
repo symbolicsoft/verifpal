@@ -11,16 +11,16 @@ use crate::types::VerifpalError;
 
 pub(crate) fn for_document(doc: &Document, uri: &Uri) -> Vec<Diagnostic> {
 	if let Err(e) = &doc.model {
-		return vec![of_error(e, &doc.line, uri)];
+		return vec![of_error(e, &doc.text, &doc.line, uri)];
 	}
 	match &doc.sanity {
-		Some(e) => vec![of_error(e, &doc.line, uri)],
+		Some(e) => vec![of_error(e, &doc.text, &doc.line, uri)],
 		None => Vec::new(),
 	}
 }
 
-pub(crate) fn of_error(e: &VerifpalError, line: &LineIndex, uri: &Uri) -> Diagnostic {
-	let range = match e.span {
+pub(crate) fn of_error(e: &VerifpalError, source: &str, line: &LineIndex, uri: &Uri) -> Diagnostic {
+	let range = match e.narrowed_span(source) {
 		Some(span) if span.end > span.start => line.range(span),
 		Some(span) => {
 			let start = line.position(span.start);

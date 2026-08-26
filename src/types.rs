@@ -258,6 +258,20 @@ impl VerifpalError {
 		self
 	}
 
+	pub fn narrowed_span(&self, source: &str) -> Option<Span> {
+		let span = self.span?;
+		let Some(extra) = self.extra.as_deref() else {
+			return Some(span);
+		};
+		Some(
+			extra
+				.narrow
+				.as_deref()
+				.and_then(|needle| narrow_span(span, source, needle, extra.narrow_index))
+				.unwrap_or(span),
+		)
+	}
+
 	pub fn render(&self, file_name: &str, source: &str) -> String {
 		let header = match self.kind {
 			ErrorKind::Internal => self.message.to_string(),
@@ -270,11 +284,7 @@ impl VerifpalError {
 			self.render_footnotes(&mut out, 1);
 			return out;
 		};
-		let span = extra
-			.narrow
-			.as_deref()
-			.and_then(|needle| narrow_span(span, source, needle, extra.narrow_index))
-			.unwrap_or(span);
+		let span = self.narrowed_span(source).unwrap_or(span);
 		let primary = anchored_placement(span, source);
 		let mut placements = vec![Placement {
 			message: extra.primary_label.as_deref().unwrap_or_default(),

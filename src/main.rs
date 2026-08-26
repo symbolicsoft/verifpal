@@ -495,14 +495,14 @@ fn run_verify(
 		}
 		let analyzed = if saturate {
 			saturation_sessions(model, SATURATE_MAX, auto_queries).map(|saturation| {
+				if saturation.regressed {
+					eprintln!(
+						"warning: an attack found at a lower session count \
+						 disappeared at a higher one; that is an engine bug, \
+						 not a protocol result"
+					);
+				}
 				if !structured && !result_code {
-					if saturation.regressed {
-						eprintln!(
-							"warning: an attack found at a lower session count \
-							 disappeared at a higher one; that is an engine bug, \
-							 not a protocol result"
-						);
-					}
 					info_message(&saturation_line(&saturation), InfoLevel::Info, false);
 				}
 				info_replay(&saturation.output);

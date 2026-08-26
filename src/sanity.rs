@@ -439,7 +439,10 @@ fn sanity_queries_check_known(m: &Message, c: &Constant, km: &ProtocolTrace) -> 
 		}
 	};
 	let sender_knows = km.slots[idx].known_by_principal(m.sender);
-	let recipient_knows = km.slots[idx].known_by_principal(m.recipient);
+	let received_by_recipient = km.slots[idx]
+		.known_by
+		.iter()
+		.any(|&(recipient, from)| recipient == m.recipient && from != m.recipient);
 	let used = km.constant_used_by(m.recipient, c);
 	if !sender_knows {
 		return Err(
@@ -453,14 +456,14 @@ fn sanity_queries_check_known(m: &Message, c: &Constant, km: &ProtocolTrace) -> 
 				.help("name the principal that actually produces this value as the sender"),
 		);
 	}
-	if !recipient_knows {
+	if !received_by_recipient {
 		return Err(VerifpalError::sanity(
 			format!("{} never receives `{}`", m.recipient_name, c).into(),
 		)
 		.narrow(c.name.to_string())
 		.note(format!(
 			"authentication asks whether {} can be fooled about who sent `{}`, \
-			 which only means something if `{}` reaches {}",
+			 which only means something if `{}` reaches {} over the network",
 			m.recipient_name, c, c, m.recipient_name
 		))
 		.help(format!(

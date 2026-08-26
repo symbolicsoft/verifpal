@@ -662,10 +662,16 @@ impl<'a> Parser<'a> {
 			if self.peek() == Some(b']') {
 				break;
 			}
-			if self.at_end() {
+			let rem = self.remaining();
+			if self.at_end()
+				|| starts_with_keyword(rem, "queries")
+				|| starts_with_keyword(rem, "principal")
+				|| starts_with_keyword(rem, "phase")
+			{
 				return Err(self.unclosed_hint(
 					VerifpalError::parse("the `scenarios` block is never closed".into())
-						.at(self.here()),
+						.at(self.here())
+						.labelled(self.found_here()),
 					open_bracket,
 				));
 			}

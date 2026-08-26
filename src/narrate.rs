@@ -217,7 +217,7 @@ fn mutated_names(ps: &PrincipalState) -> Vec<Arc<str>> {
 		.collect()
 }
 
-fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
+pub(crate) fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
 	let mut ids: IdSet<u32> = ps
 		.values
 		.iter()
@@ -382,7 +382,17 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable, shadowed: &[&st
 		}
 		let mut own: Vec<&str> = shadowed.to_vec();
 		own.push(&ps.meta[i].constant.name);
-		let primitive = table.compress_excluding(&sv.pre_rewrite, &own);
+		let args: Vec<String> = p
+			.arguments
+			.iter()
+			.map(|a| table.compress_excluding(a, &own))
+			.collect();
+		let primitive = format!(
+			"{}({}){}",
+			primitive_name(p.id),
+			args.join(", "),
+			if p.instance_check { "?" } else { "" }
+		);
 		if steps
 			.iter()
 			.any(|s| matches!(s, Step::Gate { primitive: p, .. } if *p == primitive))
