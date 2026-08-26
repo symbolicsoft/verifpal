@@ -45,10 +45,19 @@ pub struct Assumption {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EnvelopeReport {
+	pub sessions: u8,
+	pub truncations: Vec<String>,
+	pub exhausted: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryReport {
 	pub query: String,
 	pub kind: String,
 	pub resolved: bool,
+	pub envelope: EnvelopeReport,
 	pub range: SourceRange,
 	pub summary: String,
 	pub conclusion: String,
@@ -159,6 +168,16 @@ impl QueryReport {
 			query: crate::pretty::query_display(&r.query),
 			kind: r.query.kind.name().to_string(),
 			resolved: r.resolved,
+			envelope: EnvelopeReport {
+				sessions: r.envelope.sessions,
+				truncations: r
+					.envelope
+					.truncations
+					.iter()
+					.map(|t| t.name().to_string())
+					.collect(),
+				exhausted: r.envelope.exhausted(),
+			},
 			range: SourceRange::of(r.query.span, source),
 			summary: r.summary.clone(),
 			conclusion: r.conclusion.clone(),
@@ -225,6 +244,11 @@ mod tests {
 						query: "confidentiality? m1".to_string(),
 						kind: "confidentiality".to_string(),
 						resolved: true,
+						envelope: EnvelopeReport {
+							sessions: 2,
+							truncations: vec![],
+							exhausted: true,
+						},
 						range: SourceRange {
 							start: 120,
 							end: 141,
@@ -266,6 +290,7 @@ mod tests {
 			r#""attacks":1,"elapsedMs":3,"assumptions":[{"term":"HASH(m)","#,
 			r#""capability":"weak","fromPhase":0}],"queries":[{"#,
 			r#""query":"confidentiality? m1","kind":"confidentiality","resolved":true,"#,
+			r#""envelope":{"sessions":2,"truncations":[],"exhausted":true},"#,
 			r#""range":{"start":120,"end":141,"line":21,"column":2},"#,
 			r#""summary":"m1 is obtained by Attacker.","#,
 			r#""conclusion":"m1 is obtained by Attacker.","#,

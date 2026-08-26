@@ -347,7 +347,11 @@ fn verify_end(
 				false,
 			);
 		} else {
-			info_message(&r.query.to_string(), InfoLevel::Pass, false);
+			info_message(
+				&format!("{}{}", r.query, r.envelope.qualifier()),
+				InfoLevel::Pass,
+				false,
+			);
 		}
 	}
 

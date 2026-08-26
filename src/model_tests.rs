@@ -335,6 +335,19 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	);
 }
 
+#[test]
+fn a_hold_carries_the_envelope_it_was_reached_under() {
+	let (results, _) = crate::verify::verify_with_sessions("examples/test/hmac_ok.vp", 2)
+		.expect("hmac_ok.vp analyses");
+	let hold = results.iter().find(|r| !r.resolved).expect("a hold");
+	assert!(hold.envelope.exhausted());
+	assert_eq!(hold.envelope.sessions, 2);
+	assert_eq!(
+		hold.envelope.qualifier(),
+		"  [search exhausted at 2 sessions]"
+	);
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }

@@ -850,6 +850,21 @@ impl Envelope {
 	pub fn exhausted(&self) -> bool {
 		self.truncations.is_empty()
 	}
+
+	pub fn qualifier(&self) -> String {
+		if self.truncations.is_empty() {
+			return format!(
+				"  [search exhausted at {} session{}]",
+				self.sessions,
+				if self.sessions == 1 { "" } else { "s" }
+			);
+		}
+		let reasons: Vec<&str> = self.truncations.iter().map(|t| t.name()).collect();
+		format!(
+			"  [no attack found; search truncated: {}]",
+			reasons.join(", ")
+		)
+	}
 }
 
 #[derive(Clone, Debug)]

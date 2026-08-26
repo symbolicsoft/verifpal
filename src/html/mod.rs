@@ -850,6 +850,11 @@ mod tests {
 			query: text.to_string(),
 			kind: "confidentiality".to_string(),
 			resolved,
+			envelope: crate::report::EnvelopeReport {
+				sessions: 2,
+				truncations: vec![],
+				exhausted: true,
+			},
 			range: SourceRange {
 				start: 0,
 				end: 0,
