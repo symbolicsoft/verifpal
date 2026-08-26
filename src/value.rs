@@ -93,6 +93,19 @@ pub(crate) fn copy_value_id(base: ValueId, copy: u32) -> ValueId {
 	COPY_BASE + (copy as ValueId - 1) * COPY_STRIDE + base
 }
 
+/// The copy index `id` already carries, and the interned id underneath it.
+/// Copy 0 is the model's own constant, whose id is left untouched.
+pub(crate) fn copy_index_of(id: ValueId) -> (u32, ValueId) {
+	if id < COPY_BASE {
+		(0, id)
+	} else {
+		(
+			(id - COPY_BASE) / COPY_STRIDE + 1,
+			(id - COPY_BASE) % COPY_STRIDE,
+		)
+	}
+}
+
 /// The copy of `c` that a *different* run of its generating principal would
 /// hold under replication: same flags, a marked name, and an identity in the
 /// top band — above every expansion copy, so a hypothetical copy of a clone

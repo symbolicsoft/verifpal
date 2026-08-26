@@ -41,7 +41,7 @@ use std::sync::Arc;
 use crate::info::info_message;
 use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
-use crate::value::copy_value_id;
+use crate::value::{copy_index_of, copy_value_id};
 
 /// Bands 0..=14 of the session-copy id range hold sessions 2..=16; band 15
 /// is the minimizer's (`value.rs::session_copy`). Raising this past 16 means
@@ -71,7 +71,8 @@ pub(crate) struct SessionExpansion {
 }
 
 fn session_value_id(base: ValueId, s: u8) -> ValueId {
-	copy_value_id(base, s as u32 - 1)
+	let (scenario_copy, root) = copy_index_of(base);
+	copy_value_id(root, scenario_copy + s as u32 - 1)
 }
 
 pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansion> {

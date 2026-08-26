@@ -77,7 +77,10 @@ pub(crate) fn info_is_quiet() -> bool {
 
 #[cfg(feature = "cli")]
 fn status_enabled() -> bool {
-	!info_is_quiet() && verbosity() >= Verbosity::Normal && crate::util::stderr_is_terminal()
+	!cfg!(test)
+		&& !info_is_quiet()
+		&& verbosity() >= Verbosity::Normal
+		&& crate::util::stderr_is_terminal()
 }
 
 pub(crate) fn info_status_begin() {

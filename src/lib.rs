@@ -33,6 +33,7 @@ pub(crate) mod report;
 pub(crate) mod resolution;
 pub(crate) mod rewrite;
 pub(crate) mod sanity;
+pub(crate) mod scenario;
 pub(crate) mod sessions;
 pub(crate) mod skeleton;
 pub(crate) mod solve;

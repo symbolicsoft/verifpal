@@ -48,6 +48,14 @@ fn analyze_sessions_traced_cancellable(
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
+	let scenario_expanded;
+	let (m, honest) = if m.scenarios.is_empty() {
+		(m, IdSet::default())
+	} else {
+		let e = crate::scenario::expand_scenarios(m, sessions)?;
+		scenario_expanded = e.model;
+		(&scenario_expanded, e.honest)
+	};
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions)?;
@@ -59,7 +67,7 @@ fn analyze_sessions_traced_cancellable(
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(m, &states, variants, sessions);
+	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
 	if sessions > 1 {
@@ -300,6 +308,10 @@ pub(crate) fn generate_trace(
 
 	let failures = ps_resolved.perform_all_rewrites();
 
+	let failures: Vec<(Primitive, usize)> = failures
+		.into_iter()
+		.filter(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)))
+		.collect();
 	sanity_fail_on_failed_checked_primitive_rewrite(&failures)?;
 	for (index, sv) in ps_resolved.values.iter().enumerate() {
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
