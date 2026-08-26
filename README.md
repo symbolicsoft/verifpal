@@ -23,7 +23,7 @@ Verifpal has been used to verify security properties for Signal, Scuttlebutt, TL
 
 ## Scientific Paper
 
-[*Verifpal Seven Years Later: Can a Toy Become an Instrument?*](https://eprint.iacr.org/2026/1654) documents the semantics, the deduction rules, the search, the soundness theorem, the termination bound and the session model, along with what each of them does not cover.
+[*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654) documents the semantics, the deduction rules, the search, the soundness theorem, the termination bound and the session model, along with what each of them does not cover.
 
 ## Sound, but Incomplete
 
