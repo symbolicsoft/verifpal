@@ -378,6 +378,28 @@ fn a_cross_session_attack_saturates_only_after_it_appears() {
 	assert!(!regressed);
 }
 
+#[test]
+fn test_spore_ns_pk() {
+	run_model("spore_ns_pk.vp", "c0c1a1a1a1");
+	run_model_sessions("spore_ns_pk.vp", 1, "c0c1a1a0a1");
+}
+
+#[test]
+fn test_spore_nsl_pk() {
+	run_model("spore_nsl_pk.vp", "c0c1a1a1a1");
+	run_model_sessions("spore_nsl_pk.vp", 1, "c0c1a1a0a1");
+}
+
+#[test]
+fn ns_and_nsl_are_not_yet_distinguished() {
+	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
+	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
+	assert_eq!(
+		ns, nsl,
+		"Phase E must flip this: Lowe's fix has to change the verdict"
+	);
+}
+
 fn run_model(model: &str, expected: &str) {
 	run_model_at(&format!("examples/test/{}", model), model, expected);
 }
