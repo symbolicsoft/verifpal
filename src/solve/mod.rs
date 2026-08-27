@@ -200,6 +200,30 @@ fn solve_with(
 	ctx.note_search_reached_a_controllable_slot();
 
 	let deducer = Deducer::new(ps, attacker, sym);
+	let proposals = propose(ctx, km, ps, pass, attacker, sym, &deducer);
+	dispose(
+		ctx,
+		km,
+		ps,
+		pass,
+		bound,
+		attacker,
+		controllable,
+		sym,
+		proposals,
+	)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn propose(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	pass: Pass,
+	attacker: &AttackerState,
+	sym: &SymbolicState,
+	deducer: &Deducer,
+) -> Vec<Substitution> {
 	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
@@ -211,7 +235,7 @@ fn solve_with(
 		for query in std::iter::once(&result.query).chain(result.variants.iter()) {
 			#[cfg(test)]
 			ctx.goals_noted(result.query_index, 1);
-			proposals.extend(goals_for_query(query, km, ps, sym, &deducer, &empty));
+			proposals.extend(goals_for_query(query, km, ps, sym, deducer, &empty));
 		}
 	}
 
@@ -241,7 +265,7 @@ fn solve_with(
 			};
 			let honest = resolve_trace_constant(&meta.constant, km);
 			for candidate in
-				slot_candidates(attacker, sym, &deducer, &protocol, &honest, &blanket, slot)
+				slot_candidates(attacker, sym, deducer, &protocol, &honest, &blanket, slot)
 			{
 				let var_id = vars::attacker_var_id(slot);
 				let mut alone = Substitution::default();
@@ -270,6 +294,21 @@ fn solve_with(
 		proposals.extend(distinguished);
 	}
 
+	proposals
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispose(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	pass: Pass,
+	bound: &crate::reexec::TermBound,
+	attacker: &AttackerState,
+	controllable: &crate::reexec::Controllable,
+	sym: &SymbolicState,
+	proposals: Vec<Substitution>,
+) -> VResult<()> {
 	let mut seen: Vec<Vec<(usize, u64)>> = Vec::new();
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	let mut checked = 0usize;

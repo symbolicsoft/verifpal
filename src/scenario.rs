@@ -89,23 +89,13 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 	}
 
 	let model = Model {
-		file_name: m.file_name.clone(),
-		source: m.source.clone(),
-		attacker: m.attacker,
 		blocks,
 		scenarios: Vec::new(),
 		scenarios_leading_comments: Vec::new(),
 		scenarios_header_trailing: None,
 		scenarios_tail_comments: Vec::new(),
 		scenarios_closing_trailing: None,
-		queries: m.queries.clone(),
-		pre_attacker_comments: m.pre_attacker_comments.clone(),
-		attacker_trailing: m.attacker_trailing.clone(),
-		queries_leading_comments: m.queries_leading_comments.clone(),
-		queries_header_trailing: m.queries_header_trailing.clone(),
-		queries_tail_comments: m.queries_tail_comments.clone(),
-		queries_closing_trailing: m.queries_closing_trailing.clone(),
-		tail_comments: m.tail_comments.clone(),
+		..m.clone()
 	};
 
 	let summaries: Vec<ScenarioSummary> = m

@@ -155,23 +155,8 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 	}
 
 	let model = Model {
-		file_name: m.file_name.clone(),
-		source: m.source.clone(),
-		attacker: m.attacker,
 		blocks,
-		scenarios: m.scenarios.clone(),
-		scenarios_leading_comments: m.scenarios_leading_comments.clone(),
-		scenarios_header_trailing: m.scenarios_header_trailing.clone(),
-		scenarios_tail_comments: m.scenarios_tail_comments.clone(),
-		scenarios_closing_trailing: m.scenarios_closing_trailing.clone(),
-		queries: m.queries.clone(),
-		pre_attacker_comments: m.pre_attacker_comments.clone(),
-		attacker_trailing: m.attacker_trailing.clone(),
-		queries_leading_comments: m.queries_leading_comments.clone(),
-		queries_header_trailing: m.queries_header_trailing.clone(),
-		queries_tail_comments: m.queries_tail_comments.clone(),
-		queries_closing_trailing: m.queries_closing_trailing.clone(),
-		tail_comments: m.tail_comments.clone(),
+		..m.clone()
 	};
 
 	let naming = if sessions == 2 {

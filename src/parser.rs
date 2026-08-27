@@ -1798,6 +1798,21 @@ mod tests {
 	}
 
 	#[test]
+	fn every_primitive_name_is_reserved() {
+		let missing: Vec<&str> = crate::primitive::primitive_names()
+			.into_iter()
+			.filter(|name| !RESERVED.contains(&name.to_lowercase().as_str()))
+			.collect();
+		assert!(
+			missing.is_empty(),
+			"a primitive whose name is not reserved can be shadowed by a constant, \
+			 so the same identifier means one thing at a call site and another as a \
+			 value. Adding a primitive means adding its lowercase name to RESERVED: \
+			 {missing:?}"
+		);
+	}
+
+	#[test]
 	fn a_mistyped_constant_suggests_one_that_exists() {
 		let text = model_error(
 			"attacker[active]\nprincipal Alice[\n\tknows private mc_secret\n\tmc_x = HASH(mc_secret)\n]\nqueries[\n\tconfidentiality? mc_secrt\n]\n",
