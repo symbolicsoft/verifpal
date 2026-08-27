@@ -1748,6 +1748,67 @@ mod tests {
 		);
 	}
 
+	const VOID: [&str; 12] = [
+		"meta", "link", "br", "hr", "img", "input", "path", "line", "circle", "rect", "marker",
+		"use",
+	];
+
+	fn unbalanced(html: &str) -> Option<String> {
+		let mut stack: Vec<&str> = Vec::new();
+		let mut rest = html;
+		while let Some(at) = rest.find('<') {
+			rest = &rest[at + 1..];
+			let closing = rest.starts_with('/');
+			let body = if closing { &rest[1..] } else { rest };
+			if !body.starts_with(|c: char| c.is_ascii_alphabetic()) {
+				continue;
+			}
+			let end = body
+				.find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+				.unwrap_or(body.len());
+			let name = &body[..end];
+			let selfclosed = body[end..]
+				.split_once('>')
+				.is_some_and(|(head, _)| head.trim_end().ends_with('/'));
+			if VOID.contains(&name) || (!closing && selfclosed) {
+				continue;
+			}
+			if closing {
+				match stack.pop() {
+					Some(open) if open == name => {}
+					Some(open) => return Some(format!("</{name}> closes <{open}>")),
+					None => return Some(format!("stray </{name}>")),
+				}
+			} else {
+				stack.push(name);
+			}
+			if let ("style" | "script", Some(skip)) = (name, rest.find(&format!("</{name}>"))) {
+				rest = &rest[skip..];
+			}
+		}
+		stack.pop().map(|open| format!("<{open}> is never closed"))
+	}
+
+	#[test]
+	fn a_rendered_page_is_well_formed_and_the_check_can_tell() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![mutation(), derive("a"), derive("b"), gate()];
+		assert_eq!(unbalanced(&one(analysis("active", "c1", vec![q]))), None);
+		assert_eq!(
+			unbalanced("<div><p>x</div>"),
+			Some("</div> closes <p>".to_string())
+		);
+		assert_eq!(
+			unbalanced("<div>x"),
+			Some("<div> is never closed".to_string())
+		);
+		assert_eq!(
+			unbalanced("<div>x</div></p>"),
+			Some("stray </p>".to_string())
+		);
+		assert_eq!(unbalanced("<svg><path d=\"z\"/><g></g></svg>"), None);
+	}
+
 	fn corpus() -> Vec<String> {
 		let mut out: Vec<String> = std::fs::read_dir("examples/test")
 			.expect("examples/test")
@@ -1818,6 +1879,7 @@ mod tests {
 				html.matches("</button>").count(),
 				"{path} has an unbalanced trace row"
 			);
+			assert_eq!(unbalanced(&html), None, "{path} renders malformed markup");
 		}
 		let run = Run::of("0.0.0", &outcomes, &sources);
 		let html = html_report(&run);
