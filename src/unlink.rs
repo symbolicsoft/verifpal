@@ -198,7 +198,6 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 		current_phase: attacker.current_phase,
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
-		skeleton_hashes: attacker.skeleton_hashes.clone(),
 		mutation_records: Arc::new(mutation_records),
 		derivations: Arc::new(derivations),
 	}

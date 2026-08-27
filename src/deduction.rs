@@ -257,14 +257,6 @@ fn rule_recompose(
 	)
 }
 
-fn unsent_after_halt(ps: &PrincipalState, c: &Constant, halted_at: i32) -> bool {
-	ps.index
-		.get(&c.id)
-		.and_then(|&slot| ps.meta.get(slot))
-		.and_then(|sm| sm.sent_at)
-		.is_some_and(|sent_at| sent_at > halted_at)
-}
-
 fn rule_equivalize(
 	ctx: &VerifyContext,
 	value: &Value,
@@ -273,14 +265,11 @@ fn rule_equivalize(
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	if let Value::Constant(c) = value
-		&& let Some(halted_at) = ps.halted_at
+		&& ps
+			.index_of(c)
+			.is_some_and(|slot| ps.withheld_by_own_halt(slot))
 	{
-		let suppressed = ps.leaks.iter().any(|leak| {
-			leak.constant_id == c.id && leak.principal_id == ps.id && leak.declared_at > halted_at
-		});
-		if suppressed || unsent_after_halt(ps, c, halted_at) {
-			return false;
-		}
+		return false;
 	}
 	let resolved = if let Value::Constant(c) = value {
 		let (r, _) = ps.resolve_constant(c, true);

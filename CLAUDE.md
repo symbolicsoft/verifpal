@@ -32,7 +32,7 @@ A false attack is the worst possible regression. These models pin past ones:
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 828 tests (unit + model), ~1m once built (also: make test)
+cargo test --release                   # 827 tests (unit + model), ~1m once built (also: make test)
 cargo test --release -- --ignored      # the exhaustive metamorphic sweeps (also: make test-exhaustive)
 cargo test --release test_ok           # a single end-to-end model test
 cargo test --release model_tests::     # only the end-to-end model tests
@@ -217,7 +217,7 @@ Every `VerifyResult` carries an `Envelope { sessions, truncations }`, printed af
 - `Provenance` rides alongside: `creator`, `sender` (`ATTACKER_ID` = 0 when injected), `attacker_tainted`, `bypass_injected`. The last two are **deliberately separate**: taint decides which value a principal perceives, and a guard bypass must not change that (the principal genuinely computed with what it was handed), but the substitution must still be *reportable*, or the most important step of a MitM trace becomes invisible to the narrator.
 - `SlotMeta` is the immutable half of a slot: the `constant`, `guard`, `known`, `wire` (recipients this value travelled to), `mutatable_to` (recipients it reached *unguarded*), `known_by` as `(recipient, sender)` pairs, `declared_at`, `sent_at`, and the phases it appears in. `mutatable_to` is what `symbolic.rs::reaches` and `compute_visibility` consult to decide whether an attacker choice can influence a computation.
 - `PrincipalState::halted_at` records the `declared_at` of the earliest checked-primitive failure after mutation. `reexec.rs` sets it and truncates the state there; `deduction.rs::rule_equivalize` uses it to suppress `leaks` the principal never reached.
-- `AttackerState`: append-only `known` set + `known_map` hash index + `skeleton_hashes` (so `attacker_learn_skeletons` can skip a shape it already holds) + `mutation_records` and `derivations`, both parallel to `known`. A `MutationRecord` is the set of slot diffs (against the trace's initial values) that had to be in force for the attacker to hold that value, plus the principal and phase whose session that was. A `DerivationRecord` says *how* it was obtained: `Initial`, `Leaked`, `Obtained`, `Decomposed`, `Reconstructed`, `Recomposed`, `PasswordExtracted`, `ConcatFragment`, `Broken` (the capability rules), `Injected`. Attack narration walks this DAG, so **a rule that adds knowledge without recording an honest derivation produces an unexplainable trace.**
+- `AttackerState`: append-only `known` set + `known_map` hash index + `mutation_records` and `derivations`, both parallel to `known`. A `MutationRecord` is the set of slot diffs (against the trace's initial values) that had to be in force for the attacker to hold that value, plus the principal and phase whose session that was. A `DerivationRecord` says *how* it was obtained: `Initial`, `Leaked`, `Obtained`, `Decomposed`, `Reconstructed`, `Recomposed`, `PasswordExtracted`, `ConcatFragment`, `Broken` (the capability rules). Attack narration walks this DAG, so **a rule that adds knowledge without recording an honest derivation produces an unexplainable trace.**
 
 ### Provenance travels along derivation edges (context.rs)
 
@@ -239,7 +239,7 @@ Snapshotting the ambient state at absorption time instead would describe one att
 
 `verify_standard_run` is shared by both attacker kinds — the active search uses it as its passive baseline. For each principal, three phases:
 
-1. **Trace generation** (`generate_trace`) — `resolve_all_values` (inline constants per visibility rules), `compute_slot_diffs`, skeleton injection, `perform_all_rewrites`, then sanity checks (a failed *checked* primitive here is a model error, not an attack — unless its slot's creator is a corrupt-peer scenario clone, which halts instead; see "Peer scenarios").
+1. **Trace generation** (`generate_trace`) — `resolve_all_values` (inline constants per visibility rules), `perform_all_rewrites`, then sanity checks (a failed *checked* primitive here is a model error, not an attack — unless its slot's creator is a corrupt-peer scenario clone, which halts instead; see "Peer scenarios").
 2. **Knowledge closure** — `deduction.rs::compute_knowledge_closure`.
 3. **Query evaluation** — `query.rs::query_start` for each unresolved query.
 
@@ -313,7 +313,7 @@ Proposals are deduped by what they would actually **install** (`solve/mod.rs::in
 
 Variables the solver never bound are deliberately left free and `validate` skips those slots: the attacker has no reason to touch that wire value, and grounding it would fail an unrelated check and halt the principal before the attack could land.
 
-**Skeletons** (`skeleton.rs`) are no longer part of the search: they are a primitive's shape with secrets erased (constants→`nil`, public keys→`PUBKEY(nil)`), added to attacker knowledge during trace generation. Since `nil` and `PUBKEY(nil)` are values the attacker already holds, a skeleton is by construction something it can build, so this asserts nothing new.
+**Skeletons are gone.** `skeleton.rs` added each primitive's shape with secrets erased (constants→`nil`, public keys→`PUBKEY(nil)`) to attacker knowledge during trace generation. Since `nil` and `PUBKEY(nil)` are values the attacker already holds, a skeleton asserted nothing new — and removing it changed no verdict on any model in the tree. It did change ten attack *traces*, all for the better: a skeleton like `ENC(nil, nil)` sitting in attacker knowledge let the minimizer's `attacker_can_build` accept a degenerate witness before `payload_shapes` could offer the explanatory one, so `auth_with_signing.vp` reported "the attacker replaces the ciphertext with `ENC(nil, nil)`" where it now reports the attacker decrypting the real ciphertext and forging a signature over the real plaintext. Do not reintroduce a rule that hands the attacker a shape it did not derive: `witness.rs` ranks candidates by what they explain, and free-floating shapes outrank real ones.
 
 ### Re-execution (reexec.rs)
 

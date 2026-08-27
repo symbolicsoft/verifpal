@@ -450,7 +450,6 @@ pub(crate) fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	}
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) struct Narrator<'a> {
 	km: &'a ProtocolTrace,
 	attacker: &'a AttackerState,
@@ -632,7 +631,7 @@ impl Narrator<'_> {
 			installed,
 		);
 		Some(match derivation {
-			DerivationRecord::Initial | DerivationRecord::Injected => return None,
+			DerivationRecord::Initial => return None,
 			DerivationRecord::Leaked { .. } => {
 				format!("Attacker is handed {} by a leaks declaration.", v)
 			}

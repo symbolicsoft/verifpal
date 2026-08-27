@@ -9,10 +9,8 @@ use crate::info::info_message;
 use crate::parser::parse_file;
 use crate::query::query_start;
 use crate::sanity::*;
-use crate::skeleton::attacker_learn_skeletons;
 use crate::solve::verify_active;
 use crate::types::*;
-use crate::value::*;
 
 #[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
@@ -391,7 +389,7 @@ pub(crate) fn verify_standard_run(
 		crate::info::info_status_update(|| {
 			status_line(ctx, attacker.current_phase, &ps.name, "running")
 		});
-		let ps_resolved = generate_trace(ctx, km, ps, &attacker)?;
+		let ps_resolved = generate_trace(ctx, km, ps)?;
 
 		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved)?;
 
@@ -404,16 +402,9 @@ pub(crate) fn generate_trace(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	attacker: &AttackerState,
 ) -> VResult<PrincipalState> {
 	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values()?;
-
-	let record = compute_slot_diffs(&ps_resolved, km, attacker.current_phase);
-
-	if std::env::var_os("VERIFPAL_NO_SKELETONS").is_none() {
-		inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
-	}
 
 	let (failures, suppressed): (Failures, Failures) = ps_resolved
 		.perform_all_rewrites()
@@ -443,19 +434,6 @@ pub(crate) fn generate_trace(
 	}
 
 	Ok(ps_resolved)
-}
-
-fn inject_skeletons_for_state(
-	ctx: &VerifyContext,
-	ps: &PrincipalState,
-	record: &Arc<MutationRecord>,
-	attacker: &AttackerState,
-) {
-	for sv in &ps.values {
-		if let Value::Primitive(p) = &sv.value {
-			attacker_learn_skeletons(ctx, p, record, attacker);
-		}
-	}
 }
 
 pub(crate) fn verify_passive(

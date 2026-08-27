@@ -72,7 +72,6 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		derivations: Arc::new(known.iter().map(|_| DerivationRecord::Initial).collect()),
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
-		skeleton_hashes: Arc::new(IdSet::default()),
 	}
 }
 

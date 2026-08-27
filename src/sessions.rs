@@ -82,7 +82,7 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 			format!("session expansion supports 2 to {MAX_SESSIONS} sessions").into(),
 		));
 	}
-	let principals = declared_principals(m);
+	let principals = m.declared_principals();
 	let expanded_count = principals.len() * sessions as usize;
 	if expanded_count > MAX_PRINCIPALS {
 		return Err(VerifpalError::sanity(
@@ -103,8 +103,8 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		)));
 	}
 
-	let freshen = freshened_constants(m);
-	let pids = clone_principal_ids(&principals, sessions, highest_referenced_principal(m))?;
+	let freshen = m.freshened_constants();
+	let pids = clone_principal_ids(&principals, sessions, m.highest_referenced_principal())?;
 	let principal_clones: Vec<(PrincipalId, PrincipalId)> = pids
 		.iter()
 		.map(|(&(original, _), (clone, _))| (original, *clone))
@@ -194,62 +194,6 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 		siblings,
 		principal_clones,
 	})
-}
-
-/// Distinct principals in declaration order, by block appearance.
-fn declared_principals(m: &Model) -> Vec<(PrincipalId, String)> {
-	let mut out: Vec<(PrincipalId, String)> = Vec::new();
-	for block in &m.blocks {
-		if let Block::Principal(p) = block
-			&& !out.iter().any(|(id, _)| *id == p.id)
-		{
-			out.push((p.id, p.name.clone()));
-		}
-	}
-	out
-}
-
-/// Ids of every constant a principal block freshly produces — `generates`
-/// constants and assignment outputs. These are the per-session values;
-/// everything else (`knows`, and by extension whatever `leaks` or messages
-/// mention of it) is long-term and shared.
-fn freshened_constants(m: &Model) -> IdSet<ValueId> {
-	let mut out = IdSet::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expr in &p.expressions {
-			if matches!(expr.kind, Declaration::Generates | Declaration::Assignment) {
-				for c in &expr.constants {
-					out.insert(c.id);
-				}
-			}
-		}
-	}
-	out
-}
-
-fn highest_referenced_principal(m: &Model) -> PrincipalId {
-	let mut highest = 0;
-	for block in &m.blocks {
-		match block {
-			Block::Principal(p) => highest = highest.max(p.id),
-			Block::Message(msg) => highest = highest.max(msg.sender).max(msg.recipient),
-			Block::Phase(_) => {}
-		}
-	}
-	for query in &m.queries {
-		highest = highest
-			.max(query.message.sender)
-			.max(query.message.recipient);
-		for option in &query.options {
-			highest = highest
-				.max(option.message.sender)
-				.max(option.message.recipient);
-		}
-	}
-	highest
 }
 
 fn clone_principal_ids(

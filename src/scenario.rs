@@ -41,7 +41,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 			((MAX_COPIES + 1) / count as u32).max(1)
 		)));
 	}
-	let principals = declared_principals(m);
+	let principals = m.declared_principals();
 	let expanded = principals.len() * count;
 	if expanded > MAX_PRINCIPALS {
 		return Err(VerifpalError::sanity(
@@ -54,9 +54,9 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		));
 	}
 
-	let freshen = freshened_constants(m);
+	let freshen = m.freshened_constants();
 	let compromised = compromised_constants(m);
-	let pids = clone_principal_ids(&principals, count, highest_referenced_principal(m))?;
+	let pids = clone_principal_ids(&principals, count, m.highest_referenced_principal())?;
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * count);
 	for block in &m.blocks {
@@ -147,7 +147,7 @@ fn scenario_is_honest(scenario: &Scenario, compromised: &IdSet<ValueId>) -> bool
 }
 
 fn sanity_scenarios(m: &Model) -> VResult<()> {
-	let principals = declared_principals(m);
+	let principals = m.declared_principals();
 	let known = known_constants(m);
 	let declared = declared_constants(m);
 	for scenario in &m.scenarios {
@@ -394,60 +394,6 @@ fn mentions_any(v: &Value, ids: &IdSet<ValueId>) -> bool {
 		Value::Constant(c) => ids.contains(&c.id),
 		Value::Primitive(p) => p.arguments.iter().any(|a| mentions_any(a, ids)),
 	}
-}
-
-fn declared_principals(m: &Model) -> Vec<(PrincipalId, String)> {
-	let mut out: Vec<(PrincipalId, String)> = Vec::new();
-	for block in &m.blocks {
-		if let Block::Principal(p) = block
-			&& !out.iter().any(|(id, _)| *id == p.id)
-		{
-			out.push((p.id, p.name.clone()));
-		}
-	}
-	out
-}
-
-fn freshened_constants(m: &Model) -> IdSet<ValueId> {
-	let mut out = IdSet::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expr in &p.expressions {
-			if matches!(expr.kind, Declaration::Generates | Declaration::Assignment) {
-				for c in &expr.constants {
-					out.insert(c.id);
-				}
-			}
-		}
-	}
-	out
-}
-
-fn highest_referenced_principal(m: &Model) -> PrincipalId {
-	let mut highest = 0;
-	for block in &m.blocks {
-		match block {
-			Block::Principal(p) => highest = highest.max(p.id),
-			Block::Message(msg) => highest = highest.max(msg.sender).max(msg.recipient),
-			Block::Phase(_) => {}
-		}
-	}
-	for query in &m.queries {
-		highest = highest
-			.max(query.message.sender)
-			.max(query.message.recipient);
-		for option in &query.options {
-			highest = highest
-				.max(option.message.sender)
-				.max(option.message.recipient);
-		}
-	}
-	for scenario in &m.scenarios {
-		highest = highest.max(scenario.principal);
-	}
-	highest
 }
 
 fn clone_principal_ids(

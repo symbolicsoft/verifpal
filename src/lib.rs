@@ -35,7 +35,6 @@ pub(crate) mod rewrite;
 pub(crate) mod sanity;
 pub(crate) mod scenario;
 pub(crate) mod sessions;
-pub(crate) mod skeleton;
 pub(crate) mod solve;
 #[cfg(test)]
 mod testutil;

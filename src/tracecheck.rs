@@ -7,10 +7,7 @@ use crate::types::*;
 fn justified_without_a_step(attacker: &AttackerState, value: &Value) -> Option<bool> {
 	let idx = attacker.knows(value)?;
 	let derivation = attacker.derivation(idx)?;
-	Some(matches!(
-		derivation,
-		DerivationRecord::Initial | DerivationRecord::Injected
-	))
+	Some(matches!(derivation, DerivationRecord::Initial))
 }
 
 fn is_justified(
@@ -357,7 +354,7 @@ pub(crate) fn step_problems(
 				}
 				_ => problems.push(wrong("breaks something that is not a primitive")),
 			},
-			DerivationRecord::Initial | DerivationRecord::Injected => {}
+			DerivationRecord::Initial => {}
 		}
 	}
 	problems
@@ -470,8 +467,7 @@ pub(crate) fn assert_holds_survive_final_knowledge(
 		}
 		for state in ctx.principal_states() {
 			let scratch = ctx.scratch_for_query(result.query_index);
-			let ambient = scratch.attacker_snapshot();
-			let Ok(honest) = crate::verify::generate_trace(&scratch, km, state, &ambient) else {
+			let Ok(honest) = crate::verify::generate_trace(&scratch, km, state) else {
 				continue;
 			};
 			let _ = crate::deduction::compute_knowledge_closure(&scratch, km, &honest);

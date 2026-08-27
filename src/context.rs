@@ -25,7 +25,6 @@ fn analysis_count_reset() {
 	ANALYSIS_COUNT.with(|c| c.set(0));
 }
 
-use crate::skeleton::primitive_skeleton_hash_of;
 use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
@@ -132,9 +131,6 @@ fn attacker_state_absorb(
 		.entry(h)
 		.or_default()
 		.push(idx);
-	if let Value::Primitive(p) = value {
-		Arc::make_mut(&mut state.skeleton_hashes).insert(primitive_skeleton_hash_of(p));
-	}
 	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
 	Arc::make_mut(&mut state.derivations).push(derivation);
 }

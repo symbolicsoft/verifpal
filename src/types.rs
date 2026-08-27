@@ -823,6 +823,66 @@ pub struct Model {
 	pub tail_comments: Vec<Comment>,
 }
 
+impl Model {
+	pub fn declared_principals(&self) -> Vec<(PrincipalId, String)> {
+		let mut out: Vec<(PrincipalId, String)> = Vec::new();
+		for block in &self.blocks {
+			if let Block::Principal(p) = block
+				&& !out.iter().any(|(id, _)| *id == p.id)
+			{
+				out.push((p.id, p.name.clone()));
+			}
+		}
+		out
+	}
+
+	/// Ids of every constant a principal block freshly produces — `generates`
+	/// constants and assignment outputs. These are the per-copy values;
+	/// everything else (`knows`, and by extension whatever `leaks` or messages
+	/// mention of it) is long-term and shared across every expansion copy.
+	pub fn freshened_constants(&self) -> IdSet<ValueId> {
+		let mut out = IdSet::default();
+		for block in &self.blocks {
+			let Block::Principal(p) = block else {
+				continue;
+			};
+			for expr in &p.expressions {
+				if matches!(expr.kind, Declaration::Generates | Declaration::Assignment) {
+					for c in &expr.constants {
+						out.insert(c.id);
+					}
+				}
+			}
+		}
+		out
+	}
+
+	pub fn highest_referenced_principal(&self) -> PrincipalId {
+		let mut highest = 0;
+		for block in &self.blocks {
+			match block {
+				Block::Principal(p) => highest = highest.max(p.id),
+				Block::Message(msg) => highest = highest.max(msg.sender).max(msg.recipient),
+				Block::Phase(_) => {}
+			}
+		}
+		for query in &self.queries {
+			highest = highest
+				.max(query.message.sender)
+				.max(query.message.recipient);
+			for option in &query.options {
+				highest = highest
+					.max(option.message.sender)
+					.max(option.message.recipient);
+			}
+		}
+		for scenario in &self.scenarios {
+			highest = highest.max(scenario.principal);
+		}
+		highest
+	}
+}
+
 #[cfg(test)]
 #[derive(Clone, Debug)]
 pub(crate) struct ResultWitness {
@@ -1219,27 +1279,27 @@ impl PrincipalState {
 			.any(|&(principal, at)| principal == creator && i >= at)
 	}
 
+	pub fn withheld_by_own_halt(&self, i: usize) -> bool {
+		let (Some(halted_at), Some(sm)) = (self.halted_at, self.meta.get(i)) else {
+			return false;
+		};
+		sm.sent_at.is_some_and(|sent_at| sent_at > halted_at)
+			|| self.leaks.iter().any(|leak| {
+				leak.constant_id == sm.constant.id
+					&& leak.principal_id == self.id
+					&& leak.declared_at > halted_at
+			})
+	}
+
 	pub fn slot_disclosed(&self, i: usize) -> bool {
 		let Some(sm) = self.meta.get(i) else {
 			return false;
 		};
-		if self.slot_unreached(i) {
+		if self.slot_unreached(i) || self.withheld_by_own_halt(i) {
 			return false;
 		}
-		let Some(halted_at) = self.halted_at else {
-			return true;
-		};
-		if sm.declared_at >= halted_at {
-			return false;
-		}
-		if sm.sent_at.is_some_and(|sent_at| sent_at > halted_at) {
-			return false;
-		}
-		!self.leaks.iter().any(|leak| {
-			leak.constant_id == sm.constant.id
-				&& leak.principal_id == self.id
-				&& leak.declared_at > halted_at
-		})
+		self.halted_at
+			.is_none_or(|halted_at| sm.declared_at < halted_at)
 	}
 
 	pub fn should_use_original(&self, i: usize) -> bool {
@@ -1304,7 +1364,6 @@ pub enum DerivationRecord {
 		capability: Capability,
 		using: Vec<Value>,
 	},
-	Injected,
 }
 
 impl DerivationRecord {
@@ -1333,8 +1392,7 @@ impl DerivationRecord {
 			DerivationRecord::ConcatFragment { of } => vec![of],
 			DerivationRecord::Initial
 			| DerivationRecord::Leaked { .. }
-			| DerivationRecord::Obtained { .. }
-			| DerivationRecord::Injected => vec![],
+			| DerivationRecord::Obtained { .. } => vec![],
 		}
 	}
 
@@ -1353,7 +1411,6 @@ pub struct AttackerState {
 	pub current_phase: i32,
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
-	pub skeleton_hashes: Arc<IdSet<u64>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
 }
@@ -1364,7 +1421,6 @@ impl Default for AttackerState {
 			current_phase: 0,
 			known: Arc::new(vec![]),
 			known_map: Arc::new(IdMap::default()),
-			skeleton_hashes: Arc::new(IdSet::default()),
 			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
 		}
