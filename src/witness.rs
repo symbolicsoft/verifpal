@@ -328,19 +328,6 @@ pub(crate) fn minimize_witness(
 		carrying
 	};
 
-	let recorded_as_gnil: Installs = mutations
-		.iter()
-		.map(|(slot, value)| {
-			let replacement = match value {
-				Value::Primitive(p) if crate::primitive::primitive_is_key_derivation(p.id) => {
-					attacker_public_key()
-				}
-				other => other.clone(),
-			};
-			(*slot, replacement)
-		})
-		.collect();
-
 	let replayed_from = |session: &PrincipalState| -> Vec<Installs> {
 		let mut flights: Vec<Installs> = Vec::new();
 		let mut singles: Vec<Installs> = Vec::new();
@@ -373,11 +360,7 @@ pub(crate) fn minimize_witness(
 	};
 
 	let single_slot = |session: &PrincipalState| {
-		let mut families = vec![
-			mitm_for(session),
-			mutations.clone(),
-			recorded_as_gnil.clone(),
-		];
+		let mut families = vec![mitm_for(session), mutations.clone()];
 		families.extend(forged_from(session, mitm_for(session), false));
 		families.extend(forged_from(session, mutations.clone(), false));
 		families.extend(forged_alone(session));
@@ -385,14 +368,10 @@ pub(crate) fn minimize_witness(
 		families
 	};
 	let whole_flight = |session: &PrincipalState| {
-		[
-			mitm_for(session),
-			mutations.clone(),
-			recorded_as_gnil.clone(),
-		]
-		.into_iter()
-		.flat_map(|base| forged_flight(session, base, false))
-		.collect::<Vec<_>>()
+		[mitm_for(session), mutations.clone()]
+			.into_iter()
+			.flat_map(|base| forged_flight(session, base, false))
+			.collect::<Vec<_>>()
 	};
 	let across_sessions = |session: &PrincipalState| {
 		let mut families = vec![mutations.clone(), everywhere.clone()];
