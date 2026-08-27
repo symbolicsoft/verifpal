@@ -176,10 +176,9 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<usize>) {
 		&& spec.rewrite.has_rule
 		&& !crate::theory::can_rewrite(p).0
 		&& let Some(Value::Constant(c)) = p.arguments.get(spec.rewrite.from)
-		&& vars::is_attacker_var_id(c.id)
-		&& !vars::is_free_var_id(c.id)
+		&& vars::is_slot_var_id(c.id)
 	{
-		out.push((c.id - vars::ATTACKER_VAR_BASE) as usize);
+		out.push(vars::slot_of_var_id(c.id));
 	}
 	for a in &p.arguments {
 		collect_blocking_slots(a, out);

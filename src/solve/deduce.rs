@@ -16,20 +16,14 @@ use super::vars::{
 	Substitution, apply, as_var, bind, compose, contains_var, dedupe, same_substitution,
 };
 
-fn goal_key(v: &Value) -> u64 {
-	let tag: u64 = match v {
-		Value::Constant(_) => 0x0000_0000_0000_0001,
-		Value::Primitive(_) => 0x9E37_79B9_7F4A_7C15,
-	};
-	v.hash_value().wrapping_mul(31).wrapping_add(tag)
-}
+type GoalMemo = IdMap<u64, Vec<(Value, Vec<Substitution>)>>;
 
 pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	capabilities: Arc<CapabilityIndex>,
 	wire_terms: Vec<Value>,
-	memo: RefCell<IdMap<u64, Vec<Substitution>>>,
-	active: RefCell<Vec<u64>>,
+	memo: RefCell<GoalMemo>,
+	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
 	basis: IdSet<u64>,
 	fresh: Cell<u32>,
@@ -81,15 +75,25 @@ impl<'a> Deducer<'a> {
 
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		let g = apply(goal, s);
+		let key = g.hash_value();
 
-		let key = goal_key(&g);
-
-		if self.active.borrow().contains(&key) {
+		let cycling = self
+			.active
+			.borrow()
+			.iter()
+			.any(|(seen, goal)| *seen == key && goal.equivalent(&g, true));
+		if cycling {
 			self.cycles_cut.set(self.cycles_cut.get() + 1);
 			return;
 		}
-		if let Some(deltas) = self.memo.borrow().get(&key) {
-			for delta in deltas {
+		let cached = self.memo.borrow().get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(goal, _)| goal.equivalent(&g, true))
+				.map(|(_, deltas)| deltas.clone())
+		});
+		if let Some(deltas) = cached {
+			for delta in &deltas {
 				if let Some(merged) = compose(s, delta) {
 					out.push(merged);
 				}
@@ -98,7 +102,7 @@ impl<'a> Deducer<'a> {
 		}
 
 		let cycles_before = self.cycles_cut.get();
-		self.active.borrow_mut().push(key);
+		self.active.borrow_mut().push((key, g.clone()));
 		let mut local = Vec::new();
 		self.solve_rules(&g, s, &mut local);
 		self.active.borrow_mut().pop();
@@ -114,7 +118,11 @@ impl<'a> Deducer<'a> {
 						.collect()
 				})
 				.collect();
-			self.memo.borrow_mut().insert(key, deltas);
+			self.memo
+				.borrow_mut()
+				.entry(key)
+				.or_default()
+				.push((g, deltas));
 		}
 		out.extend(local);
 	}

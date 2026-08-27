@@ -653,6 +653,30 @@ mod tests {
 	}
 
 	#[test]
+	fn a_memo_installed_for_one_session_is_not_consulted_for_another() {
+		let k = make_constant("memo_k");
+		let m = make_constant("memo_m");
+		let sealed = make_primitive(PRIM_ENC, vec![k.clone(), m.clone()], 0);
+		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let index = StateIndex::of(&ps);
+
+		let poor = make_attacker_state(vec![]);
+		let rich = make_attacker_state(vec![k, m]);
+
+		let _scope = DeductionMemo::scoped(&ps, &poor, &index);
+		assert!(
+			!obtainable(&sealed, &ps, &poor),
+			"an attacker holding nothing cannot build it"
+		);
+		assert!(
+			obtainable(&sealed, &ps, &rich),
+			"the memo is installed for one attacker state, and answering a \
+			 different one out of it would let a cached `no` outlive the \
+			 knowledge that justified it"
+		);
+	}
+
+	#[test]
 	fn can_break_weak_reveals_every_in_range_argument() {
 		let m = make_constant("cbw_m");
 		let n = make_constant("cbw_n");

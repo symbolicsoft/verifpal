@@ -43,6 +43,7 @@ fn analyze_sessions_traced_cancellable(
 	sessions: u8,
 	cancel: Arc<AtomicBool>,
 ) -> VResult<(VerifyContext, ProtocolTrace)> {
+	let sessions = sessions.max(1);
 	crate::theory::rewrite_cache_reset();
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
@@ -634,6 +635,18 @@ mod tests {
 			v
 		};
 		assert_eq!(ids(&first), ids(&second));
+	}
+
+	#[test]
+	fn a_verdict_is_labelled_with_the_session_count_that_ran() {
+		let m = parse_string("zero.vp", &model("ddd")).expect("parse");
+		let ctx = super::analyze_sessions(&m, 0).expect("analyze");
+		assert_eq!(
+			ctx.results_get()[0].envelope.sessions,
+			1,
+			"a session count below one runs a single session, and the envelope has \
+			 to say what ran: `search exhausted at 0 sessions` describes no search"
+		);
 	}
 
 	#[test]

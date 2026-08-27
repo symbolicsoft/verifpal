@@ -1233,12 +1233,6 @@ impl SlotValues {
 		self.value = v;
 	}
 
-	pub fn override_all(&mut self, v: Value) {
-		self.original = v.clone();
-		self.pre_rewrite = v.clone();
-		self.value = v;
-	}
-
 	/// Install `v` as the key a defeated guard accepts, leaving `original`
 	/// holding what the protocol honestly computed.
 	pub fn override_all_bypassed(&mut self, v: Value) {
@@ -1559,18 +1553,6 @@ mod tests {
 		sv.set_value(v2.clone());
 		assert!(sv.value.equivalent(&v2, true));
 		assert!(sv.original.equivalent(&v1, true));
-	}
-
-	#[test]
-	fn slot_values_override_all() {
-		let v1 = make_constant("svo_v1");
-		let v2 = make_constant("svo_v2");
-		let mut sv = make_slot_values(&v1, 0);
-		sv.provenance.attacker_tainted = true;
-		sv.override_all(v2.clone());
-		assert!(sv.value.equivalent(&v2, true));
-		assert!(sv.pre_rewrite.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v2, true));
 	}
 
 	#[test]

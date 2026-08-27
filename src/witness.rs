@@ -13,25 +13,25 @@ use crate::value::value_nil;
 use crate::verify::verify_resolve_queries;
 
 thread_local! {
-	static MINIMIZING: Cell<bool> = const { Cell::new(false) };
+	static MINIMIZING: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(crate) fn in_minimization() -> bool {
-	MINIMIZING.with(|f| f.get())
+	MINIMIZING.with(|f| f.get() > 0)
 }
 
 pub(crate) struct MinimizingGuard;
 
 impl MinimizingGuard {
 	pub(crate) fn new() -> MinimizingGuard {
-		MINIMIZING.with(|f| f.set(true));
+		MINIMIZING.with(|f| f.set(f.get() + 1));
 		MinimizingGuard
 	}
 }
 
 impl Drop for MinimizingGuard {
 	fn drop(&mut self) {
-		MINIMIZING.with(|f| f.set(false));
+		MINIMIZING.with(|f| f.set(f.get().saturating_sub(1)));
 	}
 }
 
@@ -49,12 +49,40 @@ enum Scope {
 
 type Installs = Vec<(SlotIdx, Value)>;
 
-struct Rung<'f> {
-	families: &'f dyn Fn(&PrincipalState) -> Vec<Installs>,
+#[derive(Clone, Copy)]
+enum Family {
+	SingleSlot,
+	WholeFlight,
+	AcrossSessions,
+}
+
+struct Rung {
+	family: Family,
 	scope: Scope,
 	breadth: Breadth,
 	keeps_fallback: bool,
 }
+
+const LADDER: [Rung; 3] = [
+	Rung {
+		family: Family::SingleSlot,
+		scope: Scope::Own,
+		breadth: Breadth::Base,
+		keeps_fallback: true,
+	},
+	Rung {
+		family: Family::WholeFlight,
+		scope: Scope::Own,
+		breadth: Breadth::Base,
+		keeps_fallback: false,
+	},
+	Rung {
+		family: Family::AcrossSessions,
+		scope: Scope::Any,
+		breadth: Breadth::All,
+		keeps_fallback: true,
+	},
+];
 
 fn dedup_in_order<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
 	let mut out: Vec<T> = Vec::new();
@@ -75,6 +103,438 @@ pub(crate) struct Witness {
 	pub out_of_order: Vec<String>,
 	#[cfg(test)]
 	pub installs: Installs,
+}
+
+struct Minimizer<'a> {
+	ctx: &'a VerifyContext,
+	km: &'a ProtocolTrace,
+	query_index: usize,
+	phase: i32,
+	ambient: AttackerState,
+	sessions: Vec<PrincipalState>,
+	mutations: Installs,
+	everywhere: Installs,
+}
+
+impl<'a> Minimizer<'a> {
+	fn new(
+		ctx: &'a VerifyContext,
+		km: &'a ProtocolTrace,
+		ps: &PrincipalState,
+		query_index: usize,
+		mutations: Installs,
+	) -> Minimizer<'a> {
+		let ambient = ctx.attacker_snapshot();
+		let phase = ambient.current_phase;
+		let mut sessions: Vec<PrincipalState> = Vec::new();
+		for state in ctx.principal_states() {
+			let session = state.clone_for_depth(true);
+			if state.id == ps.id {
+				sessions.insert(0, session);
+			} else {
+				sessions.push(session);
+			}
+		}
+		if sessions.is_empty() {
+			sessions.push(ps.clone_for_depth(true));
+		}
+		let mut m = Minimizer {
+			ctx,
+			km,
+			query_index,
+			phase,
+			ambient,
+			sessions,
+			mutations,
+			everywhere: Vec::new(),
+		};
+		m.everywhere = m.mitm_everywhere();
+		m
+	}
+
+	fn mitm_for(&self, session: &PrincipalState) -> Installs {
+		session
+			.meta
+			.iter()
+			.enumerate()
+			.filter(|(i, sm)| {
+				sm.wire.contains(&session.id)
+					&& self.km.slots.get(*i).is_some_and(|slot| {
+						slot.creator != session.id
+							&& crate::primitive::value_is_key_derivation(&slot.initial_value)
+					})
+			})
+			.map(|(i, _)| (SlotIdx(i), attacker_public_key()))
+			.collect()
+	}
+
+	fn mitm_everywhere(&self) -> Installs {
+		let mut acc: Installs = Vec::new();
+		for item in self.sessions.iter().flat_map(|s| self.mitm_for(s)) {
+			if !acc.iter().any(|(slot, _)| *slot == item.0) {
+				acc.push(item);
+			}
+		}
+		acc
+	}
+
+	fn admitted(&self, session: &PrincipalState, candidate: Installs, wide: bool) -> Installs {
+		if wide {
+			controlled_by_any(self.km, &self.sessions, &self.ambient, candidate)
+		} else {
+			controlled_installs(self.km, session, &self.ambient, candidate)
+		}
+	}
+
+	fn reachable_slots(&self, session: &PrincipalState, wide: bool) -> Vec<usize> {
+		if wide {
+			dedup_in_order(
+				self.sessions
+					.iter()
+					.flat_map(|s| forgeable_slots(self.km, s)),
+			)
+		} else {
+			forgeable_slots(self.km, session)
+		}
+	}
+
+	fn forged_from(&self, session: &PrincipalState, base: Installs, wide: bool) -> Vec<Installs> {
+		let keys = self.admitted(session, base, wide);
+		if keys.is_empty() {
+			return Vec::new();
+		}
+		let mine = controlled_installs(self.km, session, &self.ambient, keys.clone());
+		let checks = checks_wanting_shapes(self.km, session, &mine);
+		let blank = shapes_the_checks_wanted(&checks, &mut |_| value_nil());
+		let mut carrying = Vec::new();
+		let mut hollow = Vec::new();
+		for i in self.reachable_slots(session, wide) {
+			let candidate = |shape: &Value| -> Installs {
+				let mut c: Installs = keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
+				c.push((SlotIdx(i), shape.clone()));
+				c
+			};
+			for shape in payload_shapes(self.km, &self.ambient, &checks, i) {
+				carrying.push(candidate(&shape));
+			}
+			for shape in &blank {
+				hollow.push(candidate(shape));
+			}
+		}
+		carrying.extend(hollow);
+		carrying
+	}
+
+	fn scenario_cost(
+		&self,
+		group: &[PrincipalState],
+		installs: &[(SlotIdx, Value)],
+	) -> (usize, usize, usize) {
+		let mut bypasses = 0usize;
+		let mut halts = 0usize;
+		let mut stuck = 0usize;
+		for session in group {
+			let mine = controlled_installs(self.km, session, &self.ambient, installs.to_vec());
+			if mine.is_empty() {
+				continue;
+			}
+			match reexecute(session, &mine, &self.ambient, self.km) {
+				Ok(state) => {
+					bypasses += state
+						.values
+						.iter()
+						.filter(|sv| sv.bypassed.is_some())
+						.count();
+					halts += usize::from(state.halted_at.is_some());
+					stuck += checks_wanting_shapes(self.km, session, &mine).len();
+				}
+				Err(_) => return (usize::MAX, usize::MAX, usize::MAX),
+			}
+		}
+		(bypasses, halts, stuck)
+	}
+
+	fn flight_shapes(
+		&self,
+		group: &[PrincipalState],
+		installs: &Installs,
+		at: usize,
+	) -> Vec<Value> {
+		let checks: Vec<WantedCheck> = group
+			.iter()
+			.flat_map(|s| {
+				let mine = controlled_installs(self.km, s, &self.ambient, installs.clone());
+				checks_wanting_shapes(self.km, s, &mine)
+			})
+			.collect();
+		if checks.is_empty() {
+			return Vec::new();
+		}
+		let mut shapes = payload_shapes(self.km, &self.ambient, &checks, at);
+		shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| {
+			attacker_public_key()
+		}));
+		shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| value_nil()));
+		for (prim, _) in &checks {
+			for argument in prim.arguments.iter() {
+				if !shapes.iter().any(|s| s.equivalent(argument, true)) {
+					shapes.push(argument.clone());
+				}
+			}
+		}
+		shapes
+	}
+
+	fn forged_flight(&self, session: &PrincipalState, base: Installs, wide: bool) -> Vec<Installs> {
+		let mut installs = self.admitted(session, base, wide);
+		if installs.is_empty() {
+			return Vec::new();
+		}
+		let slots = self.reachable_slots(session, wide);
+		let bound = crate::reexec::TermBound::of(self.km);
+		let group: &[PrincipalState] = if wide {
+			&self.sessions
+		} else {
+			std::slice::from_ref(session)
+		};
+		let mut out: Vec<Installs> = Vec::new();
+		let mut seen: Vec<Installs> = vec![installs.clone()];
+		for _ in 0..slots.len() {
+			let mut advanced = false;
+			for i in &slots {
+				let here = self.scenario_cost(group, &installs);
+				if here == (0, 0, 0) {
+					break;
+				}
+				let shapes = self.flight_shapes(group, &installs, *i);
+				if shapes.is_empty() {
+					break;
+				}
+				let honest = self.km.slots.get(*i).map(|slot| {
+					crate::resolution::resolve_trace_term(&slot.initial_value, self.km)
+				});
+				for shape in shapes {
+					if !bound.admits(&shape) || !attacker_can_build(&shape, &self.ambient) {
+						continue;
+					}
+					if honest.as_ref().is_some_and(|h| h.equivalent(&shape, true)) {
+						continue;
+					}
+					let mut trial: Installs = installs
+						.iter()
+						.filter(|(s, _)| s.get() != *i)
+						.cloned()
+						.collect();
+					trial.push((SlotIdx(*i), shape));
+					let trial = self.admitted(session, trial, wide);
+					if !trial.iter().any(|(s, _)| s.get() == *i) {
+						continue;
+					}
+					if seen.iter().any(|s| same_installs(s, &trial)) {
+						continue;
+					}
+					if self.scenario_cost(group, &trial) <= here {
+						seen.push(trial.clone());
+						installs = trial;
+						advanced = true;
+						break;
+					}
+				}
+			}
+			if !advanced {
+				break;
+			}
+			out.push(installs.clone());
+		}
+		out.reverse();
+		out
+	}
+
+	fn forged_alone(&self, session: &PrincipalState) -> Vec<Installs> {
+		let mut carrying = Vec::new();
+		let mut hollow = Vec::new();
+		for i in forgeable_slots(self.km, session) {
+			let blanked = vec![(SlotIdx(i), value_nil())];
+			if controlled_installs(self.km, session, &self.ambient, blanked.clone()).is_empty() {
+				continue;
+			}
+			let checks = checks_wanting_shapes(self.km, session, &blanked);
+			for shape in payload_shapes(self.km, &self.ambient, &checks, i) {
+				carrying.push(vec![(SlotIdx(i), shape)]);
+			}
+			for shape in shapes_the_checks_wanted(&checks, &mut |_| value_nil()) {
+				hollow.push(vec![(SlotIdx(i), shape)]);
+			}
+		}
+		carrying.extend(hollow);
+		carrying
+	}
+
+	fn replayed_from(&self, session: &PrincipalState) -> Vec<Installs> {
+		let mut flights: Vec<Installs> = Vec::new();
+		let mut singles: Vec<Installs> = Vec::new();
+		for (i, sm) in session.meta.iter().enumerate() {
+			if sm.wire.is_empty() {
+				continue;
+			}
+			let siblings = crate::query::session_sibling_values(&sm.constant, self.km);
+			for (n, sibling) in siblings.into_iter().enumerate() {
+				if flights.len() <= n {
+					flights.push(Vec::new());
+				}
+				flights[n].push((SlotIdx(i), sibling.clone()));
+				singles.push(vec![(SlotIdx(i), sibling)]);
+			}
+		}
+		let mut out: Vec<Installs> = flights.into_iter().filter(|f| f.len() > 1).collect();
+		out.extend(singles);
+		out
+	}
+
+	fn family(&self, family: Family, session: &PrincipalState) -> Vec<Installs> {
+		match family {
+			Family::SingleSlot => self.single_slot(session),
+			Family::WholeFlight => self.whole_flight(session),
+			Family::AcrossSessions => self.across_sessions(session),
+		}
+	}
+
+	fn single_slot(&self, session: &PrincipalState) -> Vec<Installs> {
+		let mut families = vec![self.mitm_for(session), self.mutations.clone()];
+		families.extend(self.forged_from(session, self.mitm_for(session), false));
+		families.extend(self.forged_from(session, self.mutations.clone(), false));
+		families.extend(self.forged_alone(session));
+		families.extend(self.replayed_from(session));
+		families
+	}
+
+	fn whole_flight(&self, session: &PrincipalState) -> Vec<Installs> {
+		[self.mitm_for(session), self.mutations.clone()]
+			.into_iter()
+			.flat_map(|base| self.forged_flight(session, base, false))
+			.collect()
+	}
+
+	fn across_sessions(&self, session: &PrincipalState) -> Vec<Installs> {
+		let mut families = vec![self.mutations.clone(), self.everywhere.clone()];
+		families.extend(self.forged_from(session, self.everywhere.clone(), true));
+		families.extend(self.forged_from(session, self.mutations.clone(), true));
+		families.extend(self.replayed_from(session));
+		for base in [self.everywhere.clone(), self.mutations.clone()] {
+			families.extend(self.forged_flight(session, base, false));
+		}
+		families
+	}
+
+	fn probe_at(
+		&self,
+		base: &PrincipalState,
+		installs: &[(SlotIdx, Value)],
+		breadth: Breadth,
+	) -> Option<Witness> {
+		probe_with(
+			self.ctx,
+			self.km,
+			base,
+			installs,
+			self.query_index,
+			self.phase,
+			breadth,
+		)
+	}
+
+	fn buildable(&self, candidate: &Installs) -> bool {
+		!candidate.is_empty()
+			&& candidate
+				.iter()
+				.all(|(_, value)| attacker_can_build(value, &self.ambient))
+	}
+
+	fn choose(&self) -> Option<(PrincipalState, Installs, Breadth, bool)> {
+		let mut chosen: Option<(PrincipalState, Installs)> = None;
+		let mut fallback: Option<(PrincipalState, Installs)> = None;
+		let mut breadth = Breadth::Base;
+		for rung in LADDER {
+			if chosen.is_some() {
+				break;
+			}
+			'rung: for session in &self.sessions {
+				for candidate in self.family(rung.family, session) {
+					let candidate = match rung.scope {
+						Scope::Own => {
+							controlled_installs(self.km, session, &self.ambient, candidate)
+						}
+						Scope::Any => {
+							controlled_by_any(self.km, &self.sessions, &self.ambient, candidate)
+						}
+					};
+					if !self.buildable(&candidate) {
+						continue;
+					}
+					let Some(witness) = self.probe_at(session, &candidate, rung.breadth) else {
+						continue;
+					};
+					breadth = rung.breadth;
+					if !needs_guard_bypass(&witness.ps) {
+						chosen = Some((session.clone(), candidate));
+						break 'rung;
+					}
+					if rung.keeps_fallback && fallback.is_none() {
+						fallback = Some((session.clone(), candidate));
+					}
+				}
+			}
+		}
+		let explanatory = chosen.is_some();
+		let (base, installs) = chosen.or(fallback)?;
+		Some((base, installs, breadth, explanatory))
+	}
+
+	fn drop_one(
+		&self,
+		base: &PrincipalState,
+		installs: &Installs,
+		breadth: Breadth,
+		explanatory: bool,
+	) -> Installs {
+		let mut keep = installs.clone();
+		for (slot, _) in installs {
+			let trial: Installs = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
+			if trial.len() == keep.len() {
+				continue;
+			}
+			let Some(witness) = self.probe_at(base, &trial, breadth) else {
+				continue;
+			};
+			if explanatory && needs_guard_bypass(&witness.ps) {
+				continue;
+			}
+			keep = trial;
+		}
+		keep
+	}
+}
+
+fn seeded_mutations(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	seed: &[(SlotIdx, Value)],
+) -> Installs {
+	let mut mutations: Installs = if seed.is_empty() {
+		ps.values
+			.iter()
+			.enumerate()
+			.filter(|(_, sv)| sv.provenance.attacker_tainted)
+			.map(|(i, sv)| (SlotIdx(i), sv.pre_rewrite.clone()))
+			.collect()
+	} else {
+		seed.iter()
+			.filter(|(slot, _)| slot.get() < km.slots.len())
+			.cloned()
+			.collect()
+	};
+	mutations.sort_by_key(|(slot, _)| *slot);
+	mutations
 }
 
 pub(crate) fn minimize_witness(
@@ -99,381 +559,26 @@ pub(crate) fn minimize_witness(
 		return unminimized(true);
 	}
 
-	let mut mutations: Installs = if seed.is_empty() {
-		ps.values
-			.iter()
-			.enumerate()
-			.filter(|(_, sv)| sv.provenance.attacker_tainted)
-			.map(|(i, sv)| (SlotIdx(i), sv.pre_rewrite.clone()))
-			.collect()
-	} else {
-		seed.iter()
-			.filter(|(slot, _)| slot.get() < km.slots.len())
-			.cloned()
-			.collect()
-	};
-	mutations.sort_by_key(|(slot, _)| *slot);
-
+	let mutations = seeded_mutations(km, ps, seed);
 	if mutations.is_empty() {
-		// A violation reached with no attacker substitution at all: the trace is
-		// a derivation over the honest run, and there is nothing to minimize.
 		return unminimized(true);
 	}
 
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
-	let ambient = ctx.attacker_snapshot();
-	let phase = ambient.current_phase;
+	let m = Minimizer::new(ctx, km, ps, query_index, mutations);
 
-	let mut sessions: Vec<PrincipalState> = Vec::new();
-	for state in ctx.principal_states() {
-		let session = state.clone_for_depth(true);
-		if state.id == ps.id {
-			sessions.insert(0, session);
-		} else {
-			sessions.push(session);
-		}
-	}
-	if sessions.is_empty() {
-		sessions.push(ps.clone_for_depth(true));
-	}
-
-	let mitm_for = |session: &PrincipalState| -> Installs {
-		session
-			.meta
-			.iter()
-			.enumerate()
-			.filter(|(i, sm)| {
-				sm.wire.contains(&session.id)
-					&& km.slots.get(*i).is_some_and(|slot| {
-						slot.creator != session.id
-							&& crate::primitive::value_is_key_derivation(&slot.initial_value)
-					})
-			})
-			.map(|(i, _)| (SlotIdx(i), attacker_public_key()))
-			.collect()
-	};
-
-	let forged_from = |session: &PrincipalState, base: Installs, wide: bool| -> Vec<Installs> {
-		let keys = if wide {
-			controlled_by_any(km, &sessions, &ambient, base)
-		} else {
-			controlled_installs(km, session, &ambient, base)
-		};
-		if keys.is_empty() {
-			return Vec::new();
-		}
-		let mine = controlled_installs(km, session, &ambient, keys.clone());
-		let checks = checks_wanting_shapes(km, session, &mine);
-		let blank = shapes_the_checks_wanted(&checks, &mut |_| value_nil());
-		let mut carrying = Vec::new();
-		let mut hollow = Vec::new();
-		let reachable: Vec<usize> = if wide {
-			dedup_in_order(sessions.iter().flat_map(|s| forgeable_slots(km, s)))
-		} else {
-			forgeable_slots(km, session)
-		};
-		for i in reachable {
-			let candidate = |shape: &Value| -> Installs {
-				let mut c: Installs = keys.iter().filter(|(s, _)| s.get() != i).cloned().collect();
-				c.push((SlotIdx(i), shape.clone()));
-				c
-			};
-			for shape in payload_shapes(km, &ambient, &checks, i) {
-				carrying.push(candidate(&shape));
-			}
-			for shape in &blank {
-				hollow.push(candidate(shape));
-			}
-		}
-		carrying.extend(hollow);
-		carrying
-	};
-
-	let scenario_cost =
-		|group: &[PrincipalState], installs: &[(SlotIdx, Value)]| -> (usize, usize, usize) {
-			let mut bypasses = 0usize;
-			let mut halts = 0usize;
-			let mut stuck = 0usize;
-			for session in group {
-				let mine = controlled_installs(km, session, &ambient, installs.to_vec());
-				if mine.is_empty() {
-					continue;
-				}
-				match reexecute(session, &mine, &ambient, km) {
-					Ok(state) => {
-						bypasses += state
-							.values
-							.iter()
-							.filter(|sv| sv.bypassed.is_some())
-							.count();
-						halts += usize::from(state.halted_at.is_some());
-						stuck += checks_wanting_shapes(km, session, &mine).len();
-					}
-					Err(_) => return (usize::MAX, usize::MAX, usize::MAX),
-				}
-			}
-			(bypasses, halts, stuck)
-		};
-
-	let forged_flight = |session: &PrincipalState, base: Installs, wide: bool| -> Vec<Installs> {
-		let admits = |candidate: Installs| -> Installs {
-			if wide {
-				controlled_by_any(km, &sessions, &ambient, candidate)
-			} else {
-				controlled_installs(km, session, &ambient, candidate)
-			}
-		};
-		let mut installs = admits(base);
-		if installs.is_empty() {
-			return Vec::new();
-		}
-		let slots: Vec<usize> = if wide {
-			dedup_in_order(sessions.iter().flat_map(|s| forgeable_slots(km, s)))
-		} else {
-			forgeable_slots(km, session)
-		};
-		let bound = crate::reexec::TermBound::of(km);
-		let one = std::slice::from_ref(session);
-		let group: &[PrincipalState] = if wide { &sessions } else { one };
-		let mut out: Vec<Installs> = Vec::new();
-		let mut seen: Vec<Installs> = vec![installs.clone()];
-		for _ in 0..slots.len() {
-			let mut advanced = false;
-			for i in &slots {
-				let here = scenario_cost(group, &installs);
-				if here == (0, 0, 0) {
-					break;
-				}
-				let checks: Vec<WantedCheck> = group
-					.iter()
-					.flat_map(|s| {
-						let mine = controlled_installs(km, s, &ambient, installs.clone());
-						checks_wanting_shapes(km, s, &mine)
-					})
-					.collect();
-				if checks.is_empty() {
-					break;
-				}
-				let mut shapes = payload_shapes(km, &ambient, &checks, *i);
-				shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| {
-					attacker_public_key()
-				}));
-				shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| value_nil()));
-				for (prim, _) in &checks {
-					for argument in prim.arguments.iter() {
-						if !shapes.iter().any(|s| s.equivalent(argument, true)) {
-							shapes.push(argument.clone());
-						}
-					}
-				}
-				let honest = km
-					.slots
-					.get(*i)
-					.map(|slot| crate::resolution::resolve_trace_term(&slot.initial_value, km));
-				for shape in shapes {
-					if !bound.admits(&shape) || !attacker_can_build(&shape, &ambient) {
-						continue;
-					}
-					if honest.as_ref().is_some_and(|h| h.equivalent(&shape, true)) {
-						continue;
-					}
-					let mut trial: Installs = installs
-						.iter()
-						.filter(|(s, _)| s.get() != *i)
-						.cloned()
-						.collect();
-					trial.push((SlotIdx(*i), shape));
-					let trial = admits(trial);
-					if !trial.iter().any(|(s, _)| s.get() == *i) {
-						continue;
-					}
-					if seen.iter().any(|s| same_installs(s, &trial)) {
-						continue;
-					}
-					if scenario_cost(group, &trial) <= here {
-						seen.push(trial.clone());
-						installs = trial;
-						advanced = true;
-						break;
-					}
-				}
-			}
-			if !advanced {
-				break;
-			}
-			out.push(installs.clone());
-		}
-		out.reverse();
-		out
-	};
-
-	let forged_alone = |session: &PrincipalState| -> Vec<Installs> {
-		let mut carrying = Vec::new();
-		let mut hollow = Vec::new();
-		for i in forgeable_slots(km, session) {
-			let blanked = vec![(SlotIdx(i), value_nil())];
-			if controlled_installs(km, session, &ambient, blanked.clone()).is_empty() {
-				continue;
-			}
-			let checks = checks_wanting_shapes(km, session, &blanked);
-			for shape in payload_shapes(km, &ambient, &checks, i) {
-				carrying.push(vec![(SlotIdx(i), shape)]);
-			}
-			for shape in shapes_the_checks_wanted(&checks, &mut |_| value_nil()) {
-				hollow.push(vec![(SlotIdx(i), shape)]);
-			}
-		}
-		carrying.extend(hollow);
-		carrying
-	};
-
-	let replayed_from = |session: &PrincipalState| -> Vec<Installs> {
-		let mut flights: Vec<Installs> = Vec::new();
-		let mut singles: Vec<Installs> = Vec::new();
-		for (i, sm) in session.meta.iter().enumerate() {
-			if sm.wire.is_empty() {
-				continue;
-			}
-			let siblings = crate::query::session_sibling_values(&sm.constant, km);
-			for (n, sibling) in siblings.into_iter().enumerate() {
-				if flights.len() <= n {
-					flights.push(Vec::new());
-				}
-				flights[n].push((SlotIdx(i), sibling.clone()));
-				singles.push(vec![(SlotIdx(i), sibling)]);
-			}
-		}
-		let mut out: Vec<Installs> = flights.into_iter().filter(|f| f.len() > 1).collect();
-		out.extend(singles);
-		out
-	};
-
-	let everywhere: Installs = {
-		let mut acc: Installs = Vec::new();
-		for item in sessions.iter().flat_map(&mitm_for) {
-			if !acc.iter().any(|(slot, _)| *slot == item.0) {
-				acc.push(item);
-			}
-		}
-		acc
-	};
-
-	let single_slot = |session: &PrincipalState| {
-		let mut families = vec![mitm_for(session), mutations.clone()];
-		families.extend(forged_from(session, mitm_for(session), false));
-		families.extend(forged_from(session, mutations.clone(), false));
-		families.extend(forged_alone(session));
-		families.extend(replayed_from(session));
-		families
-	};
-	let whole_flight = |session: &PrincipalState| {
-		[mitm_for(session), mutations.clone()]
-			.into_iter()
-			.flat_map(|base| forged_flight(session, base, false))
-			.collect::<Vec<_>>()
-	};
-	let across_sessions = |session: &PrincipalState| {
-		let mut families = vec![mutations.clone(), everywhere.clone()];
-		families.extend(forged_from(session, everywhere.clone(), true));
-		families.extend(forged_from(session, mutations.clone(), true));
-		families.extend(replayed_from(session));
-		for base in [everywhere.clone(), mutations.clone()] {
-			families.extend(forged_flight(session, base, false));
-		}
-		families
-	};
-
-	let ladder = [
-		Rung {
-			families: &single_slot,
-			scope: Scope::Own,
-			breadth: Breadth::Base,
-			keeps_fallback: true,
-		},
-		Rung {
-			families: &whole_flight,
-			scope: Scope::Own,
-			breadth: Breadth::Base,
-			keeps_fallback: false,
-		},
-		Rung {
-			families: &across_sessions,
-			scope: Scope::Any,
-			breadth: Breadth::All,
-			keeps_fallback: true,
-		},
-	];
-
-	let mut chosen: Option<(PrincipalState, Installs)> = None;
-	let mut fallback: Option<(PrincipalState, Installs)> = None;
-	let mut breadth = Breadth::Base;
-	for rung in ladder {
-		if chosen.is_some() {
-			break;
-		}
-		'rung: for session in &sessions {
-			for candidate in (rung.families)(session) {
-				let candidate = match rung.scope {
-					Scope::Own => controlled_installs(km, session, &ambient, candidate),
-					Scope::Any => controlled_by_any(km, &sessions, &ambient, candidate),
-				};
-				if candidate.is_empty()
-					|| candidate
-						.iter()
-						.any(|(_, value)| !attacker_can_build(value, &ambient))
-				{
-					continue;
-				}
-				let Some(witness) = probe_with(
-					ctx,
-					km,
-					session,
-					&candidate,
-					query_index,
-					phase,
-					rung.breadth,
-				) else {
-					continue;
-				};
-				breadth = rung.breadth;
-				if !needs_guard_bypass(&witness.ps) {
-					chosen = Some((session.clone(), candidate));
-					break 'rung;
-				}
-				if rung.keeps_fallback && fallback.is_none() {
-					fallback = Some((session.clone(), candidate));
-				}
-			}
-		}
-	}
-
-	let explanatory = chosen.is_some();
-	let Some((base, mutations)) = chosen.or(fallback) else {
+	let Some((base, candidate, breadth, explanatory)) = m.choose() else {
 		return unminimized(false);
 	};
+	let keep = m.drop_one(&base, &candidate, breadth, explanatory);
 
-	let mut keep: Installs = mutations.clone();
-	for (slot, _) in &mutations {
-		let trial: Installs = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
-		if trial.len() == keep.len() {
-			continue;
-		}
-		let Some(witness) = probe_with(ctx, km, &base, &trial, query_index, phase, breadth) else {
-			continue;
-		};
-		if explanatory && needs_guard_bypass(&witness.ps) {
-			continue;
-		}
-		keep = trial;
-	}
-
-	match probe_with(ctx, km, &base, &keep, query_index, phase, breadth) {
+	match m.probe_at(&base, &keep, breadth) {
 		Some(mut witness) => {
 			#[cfg(test)]
 			for (slot, value) in &keep {
 				assert!(
-					attacker_can_build(value, &ambient),
+					attacker_can_build(value, &m.ambient),
 					"WITNESS \u{2022} query {} is explained by installing {} into {}, a term the \
 					 attacker cannot build from what it knows. A trace naming a substitution \
 					 nothing derives is a trace a reader cannot follow.",
@@ -485,7 +590,8 @@ pub(crate) fn minimize_witness(
 						.unwrap_or_default(),
 				);
 			}
-			witness.out_of_order = out_of_order_harvest(ctx, km, &base, &keep, query_index, phase);
+			witness.out_of_order =
+				out_of_order_harvest(ctx, km, &base, &keep, query_index, m.phase);
 			#[cfg(test)]
 			{
 				witness.installs = keep;
@@ -982,6 +1088,24 @@ mod tests {
 	#[test]
 	fn minimize_witness_is_not_reentrant() {
 		use crate::witness::in_minimization;
+		assert!(!in_minimization());
+	}
+
+	#[test]
+	fn a_nested_guard_does_not_release_its_outer_one() {
+		use crate::witness::{MinimizingGuard, in_minimization};
+		assert!(!in_minimization());
+		let outer = MinimizingGuard::new();
+		{
+			let _inner = MinimizingGuard::new();
+			assert!(in_minimization());
+		}
+		assert!(
+			in_minimization(),
+			"an inner guard's drop must not un-suppress minimization while an \
+			 outer caller still expects witnesses to be skipped"
+		);
+		drop(outer);
 		assert!(!in_minimization());
 	}
 }

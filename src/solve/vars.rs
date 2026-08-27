@@ -28,8 +28,16 @@ pub(crate) fn attacker_var_id(slot: usize) -> ValueId {
 	ATTACKER_VAR_BASE + slot as ValueId
 }
 
-pub(crate) fn is_attacker_var_id(id: ValueId) -> bool {
+pub(crate) fn is_var_id(id: ValueId) -> bool {
 	id >= ATTACKER_VAR_BASE
+}
+
+pub(crate) fn is_slot_var_id(id: ValueId) -> bool {
+	(ATTACKER_VAR_BASE..FREE_VAR_BASE).contains(&id)
+}
+
+pub(crate) fn slot_of_var_id(id: ValueId) -> usize {
+	(id - ATTACKER_VAR_BASE) as usize
 }
 
 pub(crate) fn attacker_var(slot: usize, hint: &str) -> Value {
@@ -42,14 +50,14 @@ pub(crate) fn attacker_var(slot: usize, hint: &str) -> Value {
 
 pub(crate) fn as_var(v: &Value) -> Option<ValueId> {
 	match v {
-		Value::Constant(c) if is_attacker_var_id(c.id) => Some(c.id),
+		Value::Constant(c) if is_var_id(c.id) => Some(c.id),
 		_ => None,
 	}
 }
 
 pub(crate) fn contains_var(v: &Value) -> bool {
 	match v {
-		Value::Constant(c) => is_attacker_var_id(c.id),
+		Value::Constant(c) => is_var_id(c.id),
 		Value::Primitive(p) => p.arguments.iter().any(contains_var),
 	}
 }
@@ -72,7 +80,7 @@ pub(crate) fn collect_free_vars(v: &Value, out: &mut Vec<ValueId>) {
 pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
 	match v {
 		Value::Constant(c) => {
-			if is_attacker_var_id(c.id) && !out.contains(&c.id) {
+			if is_var_id(c.id) && !out.contains(&c.id) {
 				out.push(c.id);
 			}
 		}
@@ -119,7 +127,7 @@ fn occurs_in(id: ValueId, v: &Value, s: &Substitution, chasing: &mut Vec<ValueId
 			if c.id == id {
 				return true;
 			}
-			if !is_attacker_var_id(c.id) || chasing.contains(&c.id) {
+			if !is_var_id(c.id) || chasing.contains(&c.id) {
 				return false;
 			}
 			let Some(bound) = s.get(&c.id) else {
@@ -249,10 +257,25 @@ mod tests {
 	fn solver_var_ids_are_disjoint_from_interned_names() {
 		let interned = test_value_id("solver_disjoint_a");
 		assert!(interned < crate::solve::vars::ATTACKER_VAR_BASE);
-		assert!(crate::solve::vars::is_attacker_var_id(
+		assert!(crate::solve::vars::is_var_id(
 			crate::solve::vars::attacker_var_id(0)
 		));
-		assert!(!crate::solve::vars::is_attacker_var_id(interned));
+		assert!(!crate::solve::vars::is_var_id(interned));
+	}
+
+	#[test]
+	fn a_free_variable_is_a_variable_but_not_a_slot() {
+		let slot = crate::solve::vars::attacker_var_id(3);
+		let free = crate::solve::vars::FREE_VAR_BASE + 3;
+		assert!(is_var_id(slot) && is_var_id(free));
+		assert!(is_slot_var_id(slot));
+		assert!(
+			!is_slot_var_id(free),
+			"a free position is an attacker choice, not a wire slot: reading one as \
+			 a slot index would install into slot {} of a state that may not have it",
+			slot_of_var_id(free)
+		);
+		assert_eq!(slot_of_var_id(slot), 3);
 	}
 
 	#[test]
