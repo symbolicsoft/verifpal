@@ -409,6 +409,56 @@ fn test_scenario_all_peers_corrupt() {
 }
 
 #[test]
+fn test_scenario_post_halt_no_oracle() {
+	run_model("scenario_post_halt_no_oracle.vp", "c0");
+	run_model_sessions("scenario_post_halt_no_oracle.vp", 1, "c0");
+}
+
+#[test]
+fn test_scenario_post_halt_leak_no_oracle() {
+	run_model("scenario_post_halt_leak_no_oracle.vp", "c0");
+	run_model_sessions("scenario_post_halt_leak_no_oracle.vp", 1, "c0");
+}
+
+#[test]
+fn test_scenario_pre_halt_oracle() {
+	run_model("scenario_pre_halt_oracle.vp", "c1");
+	run_model_sessions("scenario_pre_halt_oracle.vp", 1, "c1");
+}
+
+#[test]
+fn test_scenario_honest_peer_only() {
+	run_model("scenario_honest_peer_only.vp", "c0");
+	run_model_sessions("scenario_honest_peer_only.vp", 1, "c0");
+}
+
+#[test]
+fn a_halted_corrupt_peer_publishes_nothing_it_never_reached() {
+	let (_, post) =
+		crate::verify::verify("examples/test/scenario_post_halt_no_oracle.vp").expect("analyses");
+	let (_, leaked) = crate::verify::verify("examples/test/scenario_post_halt_leak_no_oracle.vp")
+		.expect("analyses");
+	let (_, pre) =
+		crate::verify::verify("examples/test/scenario_pre_halt_oracle.vp").expect("analyses");
+	let (_, honest) =
+		crate::verify::verify("examples/test/scenario_honest_peer_only.vp").expect("analyses");
+	assert_eq!(honest, "c0");
+	assert_eq!(pre, "c1");
+	assert_eq!(
+		post, "c0",
+		"a corrupt-peer clone halted before it could seal or send `sealed@2`, so an 		 attack on `master` through that ciphertext is one no execution produces"
+	);
+	assert_eq!(
+		leaked, "c0",
+		"the same halt boundary has to hold for a `leaks` the clone never reached"
+	);
+	assert_ne!(
+		post, pre,
+		"suppressing the reachable ciphertext too would trade a false attack for a lost one"
+	);
+}
+
+#[test]
 fn test_spore_nsl_pk() {
 	run_model("spore_nsl_pk.vp", "c0");
 	run_model_sessions("spore_nsl_pk.vp", 1, "c0");

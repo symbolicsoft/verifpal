@@ -187,7 +187,7 @@ pub(crate) fn halt_at_failed_checks(
 	ps
 }
 
-fn foreign_halts(
+pub(crate) fn creator_halts(
 	ps: &PrincipalState,
 	failures: &[(Primitive, usize)],
 ) -> Vec<(PrincipalId, usize)> {
@@ -200,7 +200,7 @@ fn foreign_halts(
 			continue;
 		};
 		let creator = sv.provenance.creator;
-		if creator == ps.id || creator == ATTACKER_ID {
+		if creator == ATTACKER_ID {
 			continue;
 		}
 		match out.iter_mut().find(|(principal, _)| *principal == creator) {
@@ -209,6 +209,16 @@ fn foreign_halts(
 		}
 	}
 	out
+}
+
+fn foreign_halts(
+	ps: &PrincipalState,
+	failures: &[(Primitive, usize)],
+) -> Vec<(PrincipalId, usize)> {
+	creator_halts(ps, failures)
+		.into_iter()
+		.filter(|&(principal, _)| principal != ps.id)
+		.collect()
 }
 
 fn try_guard_bypass(

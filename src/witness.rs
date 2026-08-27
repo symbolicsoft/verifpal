@@ -928,6 +928,7 @@ fn probe_with(
 		if honest.resolve_all_values().is_err() {
 			continue;
 		}
+		let honest = crate::verify::halt_honest_run(ctx, km, honest);
 		if scratch.attacker_phase_update(km, &honest, phase).is_err() {
 			continue;
 		}

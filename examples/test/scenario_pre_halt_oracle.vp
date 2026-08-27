@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — scenario_post_halt_no_oracle.vp with the assignment and the
+// send moved in front of the checked primitive.
+//
+// Alice@2 now seals `master` to Mallory's key and sends it before her
+// signature check fails, so the ciphertext is genuinely on the wire and the
+// leaked `msk` genuinely opens it. Nothing about the halt is in question here:
+// everything the attacker uses happened before it.
+//
+// This is what stops the halt-aware seeding fix from being a blanket refusal
+// to look at corrupt-peer runs. Those runs are explored precisely for what the
+// attacker learns in them; only what lies past the halt is out of reach.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	sealed = PKE_ENC(peerpk, master)
+]
+
+Alice -> Bob: sealed
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

@@ -1219,6 +1219,29 @@ impl PrincipalState {
 			.any(|&(principal, at)| principal == creator && i >= at)
 	}
 
+	pub fn slot_disclosed(&self, i: usize) -> bool {
+		let Some(sm) = self.meta.get(i) else {
+			return false;
+		};
+		if self.slot_unreached(i) {
+			return false;
+		}
+		let Some(halted_at) = self.halted_at else {
+			return true;
+		};
+		if sm.declared_at >= halted_at {
+			return false;
+		}
+		if sm.sent_at.is_some_and(|sent_at| sent_at > halted_at) {
+			return false;
+		}
+		!self.leaks.iter().any(|leak| {
+			leak.constant_id == sm.constant.id
+				&& leak.principal_id == self.id
+				&& leak.declared_at > halted_at
+		})
+	}
+
 	pub fn should_use_original(&self, i: usize) -> bool {
 		!self.values[i].provenance.attacker_tainted
 			|| self.values[i].provenance.creator == self.id

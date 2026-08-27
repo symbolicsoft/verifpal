@@ -77,6 +77,7 @@ fn analyze_sessions_traced_cancellable(
 	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
+	ctx.record_honest_halts(honest_run_halts(&ctx, &trace, &states)?);
 	if sessions > 1 {
 		ctx.prefer_replication_valid_witnesses();
 	}
@@ -316,6 +317,55 @@ pub(crate) fn verify_resolve_queries(
 	Ok(())
 }
 
+type Failures = Vec<(Primitive, usize)>;
+
+fn failure_is_suppressible(ctx: &VerifyContext, km: &ProtocolTrace, slot: usize) -> bool {
+	km.slots
+		.get(slot)
+		.is_some_and(|s| !ctx.is_honest(s.creator))
+}
+
+pub(crate) fn honest_run_halts(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	principal_states: &[PrincipalState],
+) -> VResult<Vec<(PrincipalId, usize)>> {
+	if ctx.scenarios().is_empty() {
+		return Ok(Vec::new());
+	}
+	let Some(seed) = principal_states.first() else {
+		return Ok(Vec::new());
+	};
+	let mut pure = seed.clone_for_depth(true);
+	pure.resolve_all_values()?;
+	let suppressed: Failures = pure
+		.perform_all_rewrites()
+		.into_iter()
+		.filter(|(_, slot)| failure_is_suppressible(ctx, km, *slot))
+		.collect();
+	Ok(crate::reexec::creator_halts(&pure, &suppressed))
+}
+
+pub(crate) fn halt_honest_run(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: PrincipalState,
+) -> PrincipalState {
+	if ctx.scenarios().is_empty() {
+		return ps;
+	}
+	let suppressed: Failures = ps
+		.clone()
+		.perform_all_rewrites()
+		.into_iter()
+		.filter(|(_, slot)| failure_is_suppressible(ctx, km, *slot))
+		.collect();
+	if suppressed.is_empty() {
+		return ps;
+	}
+	crate::reexec::halt_at_failed_checks(ps, &suppressed)
+}
+
 pub(crate) fn attacker_seed_phase(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -361,13 +411,14 @@ pub(crate) fn generate_trace(
 
 	let record = compute_slot_diffs(&ps_resolved, km, attacker.current_phase);
 
-	inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
+	if std::env::var_os("VERIFPAL_NO_SKELETONS").is_none() {
+		inject_skeletons_for_state(ctx, &ps_resolved, &record, attacker);
+	}
 
-	type Failures = Vec<(Primitive, usize)>;
 	let (failures, suppressed): (Failures, Failures) = ps_resolved
 		.perform_all_rewrites()
 		.into_iter()
-		.partition(|(_, slot)| km.slots.get(*slot).is_none_or(|s| ctx.is_honest(s.creator)));
+		.partition(|(_, slot)| !failure_is_suppressible(ctx, km, *slot));
 	if let Err(e) = sanity_fail_on_failed_checked_primitive_rewrite(&failures) {
 		let span = failures
 			.iter()

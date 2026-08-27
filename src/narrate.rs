@@ -451,80 +451,98 @@ pub(crate) fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn derivation_steps(
-	km: &ProtocolTrace,
-	attacker: &AttackerState,
-	target: &Value,
-	table: &NameTable,
-	exclude: &[&str],
-	installed: &[&str],
+pub(crate) struct Narrator<'a> {
+	km: &'a ProtocolTrace,
+	attacker: &'a AttackerState,
+	table: &'a NameTable,
+	installed: &'a [&'a str],
 	home: PrincipalId,
-	carried: &[CarriedIn],
-	seen: &mut Vec<KnownIdx>,
-) -> Vec<Step> {
-	let mut steps: Vec<Step> = Vec::new();
-	walk(
-		km, attacker, target, table, exclude, installed, home, carried, seen, &mut steps,
-	);
-	steps
+	carried: &'a [CarriedIn],
 }
 
-#[allow(clippy::too_many_arguments)]
-fn walk(
-	km: &ProtocolTrace,
-	attacker: &AttackerState,
-	value: &Value,
-	table: &NameTable,
-	exclude: &[&str],
-	installed: &[&str],
-	home: PrincipalId,
-	carried: &[CarriedIn],
-	seen: &mut Vec<KnownIdx>,
-	steps: &mut Vec<Step>,
-) {
-	let Some(idx) = attacker.knows(value) else {
-		if let Value::Primitive(p) = value {
-			for argument in p.arguments.iter() {
-				walk(
-					km, attacker, argument, table, exclude, installed, home, carried, seen, steps,
-				);
-			}
+impl<'a> Narrator<'a> {
+	pub(crate) fn new(
+		km: &'a ProtocolTrace,
+		attacker: &'a AttackerState,
+		table: &'a NameTable,
+		installed: &'a [&'a str],
+		home: PrincipalId,
+		carried: &'a [CarriedIn],
+	) -> Narrator<'a> {
+		Narrator {
+			km,
+			attacker,
+			table,
+			installed,
+			home,
+			carried,
 		}
-		return;
-	};
-	if seen.contains(&idx) {
-		return;
-	}
-	seen.push(idx);
-	let Some(derivation) = attacker.derivation(idx) else {
-		return;
-	};
-
-	for ingredient in derivation.ingredients() {
-		walk(
-			km, attacker, ingredient, table, exclude, installed, home, carried, seen, steps,
-		);
 	}
 
-	if let Some(text) = describe(
-		km, derivation, value, table, exclude, installed, carried, attacker,
+	pub(crate) fn derivation_steps(
+		&self,
+		target: &Value,
+		exclude: &[&str],
+		seen: &mut Vec<KnownIdx>,
+	) -> Vec<Step> {
+		let mut steps: Vec<Step> = Vec::new();
+		self.walk(target, exclude, seen, &mut steps);
+		steps
+	}
+
+	fn walk(
+		&self,
+		value: &Value,
+		exclude: &[&str],
+		seen: &mut Vec<KnownIdx>,
+		steps: &mut Vec<Step>,
 	) {
-		let session = attacker
-			.record(idx)
-			.and_then(|r| session_prefix(km, r, home));
-		let text = match session {
-			Some(prefix) => format!("{}{}", prefix, lowercase_first(&text)),
-			None => text,
+		let Some(idx) = self.attacker.knows(value) else {
+			if let Value::Primitive(p) = value {
+				for argument in p.arguments.iter() {
+					self.walk(argument, exclude, seen, steps);
+				}
+			}
+			return;
 		};
-		steps.push(Step::Derive {
-			text,
-			#[cfg(test)]
-			target: value.clone(),
-			#[cfg(test)]
-			ingredients: derivation.ingredients().into_iter().cloned().collect(),
-			#[cfg(test)]
-			record: derivation.clone(),
-		});
+		if seen.contains(&idx) {
+			return;
+		}
+		seen.push(idx);
+		let here = self.attacker.derivation(idx);
+		let brought_in = self
+			.carried
+			.iter()
+			.find(|c| !c.via.is_empty() && c.value.equivalent(value, true))
+			.and_then(|c| c.record.as_ref())
+			.filter(|_| here.is_some_and(|d| !d.ingredients().is_empty()));
+		let Some(derivation) = brought_in.or(here) else {
+			return;
+		};
+
+		for ingredient in derivation.ingredients() {
+			self.walk(ingredient, exclude, seen, steps);
+		}
+
+		if let Some(text) = self.describe(derivation, value, exclude) {
+			let session = self
+				.attacker
+				.record(idx)
+				.and_then(|r| session_prefix(self.km, r, self.home));
+			let text = match session {
+				Some(prefix) => format!("{}{}", prefix, lowercase_first(&text)),
+				None => text,
+			};
+			steps.push(Step::Derive {
+				text,
+				#[cfg(test)]
+				target: value.clone(),
+				#[cfg(test)]
+				ingredients: derivation.ingredients().into_iter().cloned().collect(),
+				#[cfg(test)]
+				record: derivation.clone(),
+			});
+		}
 	}
 }
 
@@ -592,114 +610,124 @@ fn join_oriented(values: &[Value], table: &NameTable, attacker: &AttackerState) 
 		.join(", ")
 }
 
-#[allow(clippy::too_many_arguments)]
-fn describe(
-	km: &ProtocolTrace,
-	derivation: &DerivationRecord,
-	value: &Value,
-	table: &NameTable,
-	exclude: &[&str],
-	installed: &[&str],
-	carried: &[CarriedIn],
-	attacker: &AttackerState,
-) -> Option<String> {
-	let show = |x: &Value| table.compress_excluding(&attacker_orientation(x, attacker), installed);
-	let v =
-		table.compress_outer_excluding(&attacker_orientation(value, attacker), exclude, installed);
-	Some(match derivation {
-		DerivationRecord::Initial | DerivationRecord::Injected => return None,
-		DerivationRecord::Leaked { .. } => {
-			format!("Attacker is handed {} by a leaks declaration.", v)
-		}
-		DerivationRecord::Obtained { slot }
-			if let Some(c) = carried.iter().find(|c| c.value.equivalent(value, true)) =>
-		{
-			let via = c
-				.via
-				.iter()
-				.map(|(name, value)| format!("{name} with {}", table.compress(value)))
-				.collect::<Vec<_>>()
-				.join(", ");
-			match (via.is_empty(), c.origin.clone()) {
-				(true, Some(name)) if name == v => {
-					format!("Attacker observes {name} on the wire.")
-				}
-				(true, Some(name)) => {
-					format!("Attacker observes {name} on the wire, where it is {}.", v)
-				}
-				(true, None) => return None,
-				(false, Some(name)) => {
-					format!(
-						"Attacker replaced {via}, after which {name} resolved to {}.",
-						v
-					)
-				}
-				(false, None) => {
-					format!(
-						"Attacker replaced {via}, after which {} became available.",
-						v
-					)
+impl Narrator<'_> {
+	fn describe(
+		&self,
+		derivation: &DerivationRecord,
+		value: &Value,
+		exclude: &[&str],
+	) -> Option<String> {
+		let (km, table, attacker, carried, installed) = (
+			self.km,
+			self.table,
+			self.attacker,
+			self.carried,
+			self.installed,
+		);
+		let show =
+			|x: &Value| table.compress_excluding(&attacker_orientation(x, attacker), installed);
+		let v = table.compress_outer_excluding(
+			&attacker_orientation(value, attacker),
+			exclude,
+			installed,
+		);
+		Some(match derivation {
+			DerivationRecord::Initial | DerivationRecord::Injected => return None,
+			DerivationRecord::Leaked { .. } => {
+				format!("Attacker is handed {} by a leaks declaration.", v)
+			}
+			DerivationRecord::Obtained { slot }
+				if let Some(c) = carried.iter().find(|c| c.value.equivalent(value, true)) =>
+			{
+				let via = c
+					.via
+					.iter()
+					.map(|(name, value)| format!("{name} with {}", table.compress(value)))
+					.collect::<Vec<_>>()
+					.join(", ");
+				match (via.is_empty(), c.origin.clone()) {
+					(true, Some(name)) if name == v => {
+						format!("Attacker observes {name} on the wire.")
+					}
+					(true, Some(name)) => {
+						format!("Attacker observes {name} on the wire, where it is {}.", v)
+					}
+					(true, None) => return None,
+					(false, Some(name)) => {
+						format!(
+							"Attacker replaced {via}, after which {name} resolved to {}.",
+							v
+						)
+					}
+					(false, None) => {
+						format!(
+							"Attacker replaced {via}, after which {} became available.",
+							v
+						)
+					}
 				}
 			}
-		}
-		DerivationRecord::Obtained { slot } => obtained_from_slot(km, *slot, &v),
-		DerivationRecord::Decomposed { of, using } if using.is_empty() => {
-			format!("Attacker reads {} out of {}.", v, show(of))
-		}
-		DerivationRecord::Decomposed { of, using } => format!(
-			"Attacker opens {} with {}, obtaining {}.",
-			show(of),
-			join_oriented(using, table, attacker),
-			v,
-		),
-		DerivationRecord::Reconstructed { from } if from.is_empty() => {
-			format!("Attacker constructs {}.", v)
-		}
-		DerivationRecord::Reconstructed { from } => {
-			let parts = join_oriented(from, table, attacker);
-			match &attacker_orientation(value, attacker) {
-				Value::Primitive(p) if join_oriented(&p.arguments, table, attacker) == parts => {
-					format!("Attacker constructs {}.", v)
-				}
-				_ => format!("Attacker constructs {} from {}.", v, parts),
+			DerivationRecord::Obtained { slot } => obtained_from_slot(km, *slot, &v),
+			DerivationRecord::Decomposed { of, using } if using.is_empty() => {
+				format!("Attacker reads {} out of {}.", v, show(of))
 			}
-		}
-		DerivationRecord::Recomposed { of, using } => format!(
-			"Attacker recomposes {} from enough shares of {} ({}).",
-			v,
-			show(of),
-			join_oriented(using, table, attacker),
-		),
-		DerivationRecord::PasswordExtracted { from } => format!(
-			"Attacker recovers the password {} used unhashed inside {}.",
-			v,
-			show(from),
-		),
-		DerivationRecord::ConcatFragment { of } => {
-			format!("Attacker splits {} and takes {}.", show(of), v)
-		}
-		DerivationRecord::Broken {
-			of,
-			capability,
-			using,
-		} if using.is_empty() => format!(
-			"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
-			table.compress(of),
-			capability.name(),
-			v,
-		),
-		DerivationRecord::Broken {
-			of,
-			capability,
-			using,
-		} => format!(
-			"Attacker breaks {} under the declared `{}` assumption using {}, obtaining {}.",
-			table.compress(of),
-			capability.name(),
-			join_terms(using, table),
-			v,
-		),
-	})
+			DerivationRecord::Decomposed { of, using } => format!(
+				"Attacker opens {} with {}, obtaining {}.",
+				show(of),
+				join_oriented(using, table, attacker),
+				v,
+			),
+			DerivationRecord::Reconstructed { from } if from.is_empty() => {
+				format!("Attacker constructs {}.", v)
+			}
+			DerivationRecord::Reconstructed { from } => {
+				let parts = join_oriented(from, table, attacker);
+				match &attacker_orientation(value, attacker) {
+					Value::Primitive(p)
+						if join_oriented(&p.arguments, table, attacker) == parts =>
+					{
+						format!("Attacker constructs {}.", v)
+					}
+					_ => format!("Attacker constructs {} from {}.", v, parts),
+				}
+			}
+			DerivationRecord::Recomposed { of, using } => format!(
+				"Attacker recomposes {} from enough shares of {} ({}).",
+				v,
+				show(of),
+				join_oriented(using, table, attacker),
+			),
+			DerivationRecord::PasswordExtracted { from } => format!(
+				"Attacker recovers the password {} used unhashed inside {}.",
+				v,
+				show(from),
+			),
+			DerivationRecord::ConcatFragment { of } => {
+				format!("Attacker splits {} and takes {}.", show(of), v)
+			}
+			DerivationRecord::Broken {
+				of,
+				capability,
+				using,
+			} if using.is_empty() => format!(
+				"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
+				table.compress(of),
+				capability.name(),
+				v,
+			),
+			DerivationRecord::Broken {
+				of,
+				capability,
+				using,
+			} => format!(
+				"Attacker breaks {} under the declared `{}` assumption using {}, obtaining {}.",
+				table.compress(of),
+				capability.name(),
+				join_terms(using, table),
+				v,
+			),
+		})
+	}
 }
 
 fn join_terms(values: &[Value], table: &NameTable) -> String {
@@ -841,6 +869,7 @@ pub(crate) struct CarriedIn {
 	pub value: Value,
 	pub via: Vec<(String, Value)>,
 	pub origin: Option<String>,
+	pub record: Option<DerivationRecord>,
 }
 
 fn carried_in(km: &ProtocolTrace, ps: &PrincipalState, ambient: &AttackerState) -> Vec<CarriedIn> {
@@ -875,6 +904,11 @@ fn carried_in(km: &ProtocolTrace, ps: &PrincipalState, ambient: &AttackerState) 
 					})
 					.unwrap_or_default(),
 				origin,
+				record: ambient
+					.knows(&sv.pre_rewrite)
+					.and_then(|idx| ambient.derivation(idx))
+					.filter(|d| d.ingredients().is_empty())
+					.cloned(),
 			}
 		})
 		.collect()
@@ -917,35 +951,23 @@ pub(crate) fn narrate_attack(
 	let installed = mutated_names(&witness.ps);
 	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
 	let carried = carried_in(km, &witness.ps, ambient);
+	let narrator = Narrator::new(
+		km,
+		&witness.attacker,
+		&table,
+		&installed_refs,
+		witness.ps.id,
+		&carried,
+	);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
-		steps.extend(derivation_steps(
-			km,
-			&witness.attacker,
-			&sv.pre_rewrite,
-			&table,
-			&shadowed_refs,
-			&installed_refs,
-			witness.ps.id,
-			&carried,
-			&mut seen,
-		));
+		steps.extend(narrator.derivation_steps(&sv.pre_rewrite, &shadowed_refs, &mut seen));
 	}
 
 	steps.extend(mutation_steps(km, &witness.ps, &table, ambient));
 	steps.extend(gate_steps(&witness.ps, &table, &installed_refs));
 
-	steps.extend(derivation_steps(
-		km,
-		&witness.attacker,
-		target,
-		&table,
-		&installed_refs,
-		&installed_refs,
-		witness.ps.id,
-		&carried,
-		&mut seen,
-	));
+	steps.extend(narrator.derivation_steps(target, &installed_refs, &mut seen));
 
 	let mut steps = {
 		let mut all = prelude;
@@ -1426,7 +1448,7 @@ mod tests {
 	#[test]
 	fn derivation_steps_walk_ancestors_before_target() {
 		use crate::context::VerifyContext;
-		use crate::narrate::{NameTable, Step, derivation_steps};
+		use crate::narrate::{NameTable, Narrator, Step};
 		let src = "attacker[passive]\n\
 			principal Alice[\n\
 			knows private dw_m\n\
@@ -1452,14 +1474,8 @@ mod tests {
 		let attacker = ctx.attacker_snapshot();
 		let target = trace_constant(&km, "dw_m");
 		let table = NameTable::from_state(&pure);
-		let steps = derivation_steps(
-			&km,
-			&attacker,
+		let steps = Narrator::new(&km, &attacker, &table, &[], pure.id, &[]).derivation_steps(
 			&target,
-			&table,
-			&[],
-			&[],
-			pure.id,
 			&[],
 			&mut Vec::new(),
 		);
@@ -1488,25 +1504,16 @@ mod tests {
 
 	#[test]
 	fn derivation_steps_stay_silent_on_unknown_values() {
-		use crate::narrate::{NameTable, derivation_steps};
+		use crate::narrate::{NameTable, Narrator};
 		let ps = name_table_state();
 		let table = NameTable::from_state(&ps);
 		let attacker = make_attacker_state(vec![]);
 		let unknown = make_constant("dw_absent");
 		let trace = make_trace();
 		assert!(
-			derivation_steps(
-				&trace,
-				&attacker,
-				&unknown,
-				&table,
-				&[],
-				&[],
-				0,
-				&[],
-				&mut Vec::new()
-			)
-			.is_empty()
+			Narrator::new(&trace, &attacker, &table, &[], 0, &[])
+				.derivation_steps(&unknown, &[], &mut Vec::new())
+				.is_empty()
 		);
 	}
 }

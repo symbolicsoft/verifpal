@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — scenario_post_halt_no_oracle.vp with the corrupt peer
+// scenario removed.
+//
+// Mallory still leaks `msk` and Alice still receives `mpk`; she just never
+// runs with it as her peer. `master` is sealed to Bob, whose private key is
+// never leaked, so the query holds for a reason that has nothing to do with
+// halting. Without this the c0 of the two post-halt models would not be
+// evidence of anything: a model that cannot fail is not a control.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+]
+
+Alice -> Bob: sealed
+
+scenarios[
+	Alice[peerpk = bpk]
+]
+
+queries[
+	confidentiality? master
+]

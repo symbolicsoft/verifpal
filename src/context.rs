@@ -41,6 +41,7 @@ pub(crate) struct VerifyContext {
 	truncations: RwLock<Vec<Truncation>>,
 	sessions: u8,
 	honest: Option<IdSet<PrincipalId>>,
+	honest_halts: RwLock<Vec<(PrincipalId, usize)>>,
 	scenarios: Vec<ScenarioSummary>,
 	#[cfg(test)]
 	witnesses: RwLock<Vec<Option<ResultWitness>>>,
@@ -170,6 +171,7 @@ impl VerifyContext {
 			truncations: RwLock::new(Vec::new()),
 			sessions,
 			honest,
+			honest_halts: RwLock::new(Vec::new()),
 			scenarios,
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; unresolved as usize]),
@@ -244,6 +246,16 @@ impl VerifyContext {
 			None => true,
 			Some(honest) => honest.contains(&principal),
 		}
+	}
+
+	pub(crate) fn record_honest_halts(&self, halts: Vec<(PrincipalId, usize)>) {
+		*write_lock(&self.honest_halts) = halts;
+	}
+
+	pub(crate) fn honest_run_reached(&self, creator: PrincipalId, slot: usize) -> bool {
+		!read_lock(&self.honest_halts)
+			.iter()
+			.any(|&(principal, at)| principal == creator && slot >= at)
 	}
 
 	/// Which runs may record a verdict. Scyther prunes claims in runs whose
@@ -369,6 +381,42 @@ impl VerifyContext {
 			attacker_state_absorb(&mut state, &sv.value, &record, DerivationRecord::Initial);
 		}
 
+		drop(state);
+		self.absorb_wire_values(ps, &record, phase, |slot, sv| {
+			self.honest_run_reached(sv.provenance.creator, slot)
+		})
+	}
+
+	pub(crate) fn attacker_absorb_disclosed(
+		&self,
+		ps: &PrincipalState,
+		record: &Arc<MutationRecord>,
+		phase: i32,
+	) {
+		let halts = read_lock(&self.honest_halts).clone();
+		if halts.is_empty() {
+			return;
+		}
+		let _ = self.absorb_wire_values(ps, record, phase, |slot, sv| {
+			sv.provenance.creator == ps.id
+				&& halts
+					.iter()
+					.any(|&(principal, at)| principal == ps.id && slot >= at)
+				&& ps.slot_disclosed(slot)
+		});
+	}
+
+	/// Hand the attacker every wire or leaked value of `ps` that `admit` allows
+	/// and whose earliest phase has been reached, together with the derivation
+	/// that explains it.
+	fn absorb_wire_values(
+		&self,
+		ps: &PrincipalState,
+		record: &Arc<MutationRecord>,
+		phase: i32,
+		admit: impl Fn(usize, &SlotValues) -> bool,
+	) -> VResult<()> {
+		let mut state = write_lock(&self.attacker);
 		for (slot, (sm, sv)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
 			if sm.wire.is_empty() && !sm.constant.leaked {
 				continue;
@@ -378,6 +426,9 @@ impl VerifyContext {
 			}
 			let earliest = min_int_in_slice(&sm.phase)?;
 			if earliest > phase {
+				continue;
+			}
+			if !admit(slot, sv) {
 				continue;
 			}
 			let derivation = if sm.constant.leaked {
@@ -390,10 +441,9 @@ impl VerifyContext {
 				}
 			};
 			let constant_value = Value::Constant(sm.constant.clone());
-			attacker_state_absorb(&mut state, &constant_value, &record, derivation.clone());
-			attacker_state_absorb(&mut state, &sv.value, &record, derivation);
+			attacker_state_absorb(&mut state, &constant_value, record, derivation.clone());
+			attacker_state_absorb(&mut state, &sv.value, record, derivation);
 		}
-
 		Ok(())
 	}
 
@@ -530,6 +580,7 @@ impl VerifyContext {
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
 			sessions: self.sessions,
 			honest,
+			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),
 			scenarios: self.scenarios.clone(),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),

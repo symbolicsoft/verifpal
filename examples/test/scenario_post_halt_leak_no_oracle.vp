@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — the other half of scenario_post_halt_no_oracle.vp: a halted
+// corrupt clone does not reach its `leaks` either.
+//
+// `rule_equivalize` already refused to harvest a leak a halted principal never
+// reached, but phase seeding absorbed leaked slots straight off the pristine
+// state alongside wire slots, so the same false attack was reachable by
+// declaring `leaks sealed` instead of sending it. Both publishers have to
+// honour the same halt boundary or closing one just moves the hole.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+	leaks sealed
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

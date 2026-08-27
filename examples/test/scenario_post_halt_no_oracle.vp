@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — a corrupt-peer clone that halts on a checked primitive does
+// not put on the wire what it would have sent afterwards.
+//
+// Alice verifies her peer's signature and only then seals `master` to that
+// peer's key. In scenario 2 her peer key is Mallory's while the signature is
+// still Bob's, so SIGNVERIF(mpk, nil, SIGN(bsk, nil)) fails and Alice@2 halts
+// before `sealed@2` is either computed or sent. `sealed@2` is therefore
+// unreachable, and Mallory's leaked private key must not open it.
+//
+// Phase seeding used to publish it anyway: `attacker_seed_phase` resolves the
+// pristine principal state, which is never truncated, so every wire slot
+// reached the attacker whether or not its creator got that far. That made
+// `confidentiality? master` fail with a derivation through a ciphertext no
+// execution produces — a false attack, the one thing the engine may never do.
+//
+// scenario_pre_halt_oracle.vp is the counterweight: move the same assignment
+// and send in front of the check and the ciphertext really is reachable, so
+// the query really does fail. Suppressing both would be the opposite bug.
+
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+]
+
+Alice -> Bob: sealed
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]
