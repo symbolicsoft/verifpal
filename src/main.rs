@@ -689,8 +689,8 @@ fn main() {
 			println!("  - Jean-Philippe Aumasson (Dr.)");
 			println!("  - Laurent Grémy");
 			println!("  - Loup Vaillant David");
+			println!("  - Mario Raso");
 			println!("  - Michiel Leenars");
-			println!("  - \"Mike\" (pseudonym)");
 			println!("  - Mukesh Tiwari (Dr.)");
 			println!("  - Oleksandra \"Sasha\" Lapiha");
 			println!("  - Oskar Goldhahn");
