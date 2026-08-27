@@ -648,6 +648,13 @@ fn test_err_nested_check() {
 	);
 }
 #[test]
+fn test_err_used_before_declared() {
+	run_model_err(
+		"err_used_before_declared.vp",
+		"`fgb` is used before it is declared",
+	);
+}
+#[test]
 fn test_err_nested_output() {
 	run_model_err(
 		"err_nested_output.vp",

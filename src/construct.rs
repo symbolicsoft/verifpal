@@ -47,6 +47,7 @@ pub(crate) fn construct_protocol_trace(
 		leaks: Arc::new(Vec::new()),
 		session_siblings: IdMap::default(),
 	};
+	let declared = model_declarations(m);
 	let mut leaks: Vec<LeakEvent> = Vec::new();
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
@@ -73,6 +74,7 @@ pub(crate) fn construct_protocol_trace(
 			Block::Principal(principal) => {
 				declared_at = construct_trace_render_principal(
 					&mut trace,
+					&declared,
 					&mut leaks,
 					principal,
 					declared_at,
@@ -81,8 +83,14 @@ pub(crate) fn construct_protocol_trace(
 			}
 			Block::Message(message) => {
 				declared_at += 1;
-				construct_trace_render_message(&mut trace, message, current_phase, declared_at)
-					.map_err(|e| e.or_span(message.span))?;
+				construct_trace_render_message(
+					&mut trace,
+					&declared,
+					message,
+					current_phase,
+					declared_at,
+				)
+				.map_err(|e| e.or_span(message.span))?;
 			}
 			Block::Phase(phase) => {
 				current_phase = phase.number;
@@ -155,6 +163,7 @@ fn mentions_of_constant(
 
 fn construct_trace_render_principal(
 	trace: &mut ProtocolTrace,
+	declared: &Declarations,
 	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	mut declared_at: i32,
@@ -172,13 +181,14 @@ fn construct_trace_render_principal(
 					.map_err(located)?;
 			}
 			Declaration::Assignment => {
-				construct_trace_render_assignment(trace, principal, declared_at, expr)
+				construct_trace_render_assignment(trace, declared, principal, declared_at, expr)
 					.map_err(located)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
 				construct_trace_render_leaks(
 					trace,
+					declared,
 					leaks,
 					principal,
 					expr,
@@ -272,10 +282,53 @@ fn trace_declare(trace: &mut ProtocolTrace, slot: TraceSlot) -> usize {
 	slot_idx
 }
 
-fn trace_slot_of(trace: &ProtocolTrace, c: &Constant) -> VResult<usize> {
-	trace.index_of(c).ok_or_else(|| {
-		unknown_constant(&c.name, trace, "not declared by any principal".to_string())
-	})
+type Declarations = IdMap<ValueId, (String, Span)>;
+
+fn model_declarations(m: &Model) -> Declarations {
+	let mut out: Declarations = IdMap::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expr in &p.expressions {
+			if matches!(expr.kind, Declaration::Leaks) {
+				continue;
+			}
+			for c in &expr.constants {
+				out.entry(c.id)
+					.or_insert((base_name(&p.name).to_string(), expr.span));
+			}
+		}
+	}
+	out
+}
+
+fn trace_slot_of(trace: &ProtocolTrace, declared: &Declarations, c: &Constant) -> VResult<usize> {
+	if let Some(idx) = trace.index_of(c) {
+		return Ok(idx);
+	}
+	if let Some((principal, span)) = declared.get(&c.id) {
+		return Err(VerifpalError::sanity(
+			format!("`{}` is used before it is declared", c.name).into(),
+		)
+		.narrow(c.name.to_string())
+		.labelled("used here")
+		.label(*span, format!("{principal} declares it further down"))
+		.note(
+			"a model reads top to bottom, so a block can only name values that \
+			 already exist where it appears",
+		)
+		.help(format!(
+			"move {principal}'s block above this one, and have {principal} send \
+			 `{}` before it is used",
+			c.name
+		)));
+	}
+	Err(unknown_constant(
+		&c.name,
+		trace,
+		"not declared by any principal".to_string(),
+	))
 }
 
 fn construct_trace_render_generates(
@@ -328,6 +381,7 @@ fn construct_trace_render_generates(
 
 fn construct_trace_render_assignment(
 	trace: &mut ProtocolTrace,
+	declared: &Declarations,
 	principal: &Principal,
 	declared_at: i32,
 	expr: &Expression,
@@ -341,7 +395,7 @@ fn construct_trace_render_assignment(
 		sanity_primitive(p, &expr.constants)?;
 	}
 	for c in &constants {
-		let idx = trace_slot_of(trace, c)?;
+		let idx = trace_slot_of(trace, declared, c)?;
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
 			return Err(VerifpalError::sanity(
@@ -417,6 +471,7 @@ fn construct_trace_render_assignment(
 
 fn construct_trace_render_leaks(
 	trace: &mut ProtocolTrace,
+	declared: &Declarations,
 	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	expr: &Expression,
@@ -424,7 +479,7 @@ fn construct_trace_render_leaks(
 	declared_at: i32,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		let idx = trace_slot_of(trace, c)?;
+		let idx = trace_slot_of(trace, declared, c)?;
 		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
 			return Err(VerifpalError::sanity(
@@ -459,12 +514,13 @@ fn construct_trace_render_leaks(
 
 fn construct_trace_render_message(
 	trace: &mut ProtocolTrace,
+	declared: &Declarations,
 	message: &Message,
 	current_phase: i32,
 	declared_at: i32,
 ) -> VResult<()> {
 	for c in &message.constants {
-		let idx = trace_slot_of(trace, c)?;
+		let idx = trace_slot_of(trace, declared, c)?;
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {

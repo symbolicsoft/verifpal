@@ -258,6 +258,7 @@ pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<Verif
 }
 
 fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
+	let sessions = sessions.max(1);
 	crate::info::info_status_begin();
 	info_message(
 		&format!(
