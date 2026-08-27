@@ -242,7 +242,7 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 		))
 		.help("remove the `?`"));
 	}
-	sanity_check_primitive_argument_outputs(p)
+	sanity_check_primitive_arguments(p)
 }
 
 fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
@@ -664,35 +664,61 @@ pub(crate) fn sanity_fail_on_failed_checked_primitive_rewrite(
 	Ok(())
 }
 
-fn sanity_check_primitive_argument_outputs(p: &Primitive) -> VResult<()> {
+fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 	for arg in &p.arguments {
-		if let Value::Primitive(arg_prim) = arg {
-			let (output, _) = primitive_output_spec(arg_prim.id)?;
-			if !output.contains(&1) {
-				return Err(VerifpalError::sanity(
-					format!(
-						"`{}` produces more than one output, so it cannot be an \
-						 argument to `{}`",
-						primitive_name(arg_prim.id),
-						primitive_name(p.id)
-					)
-					.into(),
+		let Value::Primitive(arg_prim) = arg else {
+			continue;
+		};
+		let (output, _) = primitive_output_spec(arg_prim.id)?;
+		if !output.contains(&1) {
+			return Err(VerifpalError::sanity(
+				format!(
+					"`{}` produces more than one output, so it cannot be an \
+					 argument to `{}`",
+					primitive_name(arg_prim.id),
+					primitive_name(p.id)
 				)
-				.narrow(primitive_name(arg_prim.id))
-				.note(format!(
-					"`{}` has to be bound first, so that each of its outputs has a name",
-					primitive_name(arg_prim.id)
-				))
-				.help(format!(
-					"assign it on its own line, e.g. `{} = {}` and then pass those names",
-					(0..*output.first().unwrap_or(&1))
-						.map(|i| format!("out{}", i + 1))
-						.collect::<Vec<String>>()
-						.join(", "),
-					arg_prim
-				)));
-			}
+				.into(),
+			)
+			.narrow(primitive_name(arg_prim.id))
+			.note(format!(
+				"`{}` has to be bound first, so that each of its outputs has a name",
+				primitive_name(arg_prim.id)
+			))
+			.help(format!(
+				"assign it on its own line, e.g. `{} = {}` and then pass those names",
+				(0..*output.first().unwrap_or(&1))
+					.map(|i| format!("out{}", i + 1))
+					.collect::<Vec<String>>()
+					.join(", "),
+				arg_prim
+			)));
 		}
+		if arg_prim.instance_check {
+			return Err(VerifpalError::sanity(
+				format!(
+					"`{}` is checked with `?` inside another primitive",
+					primitive_name(arg_prim.id)
+				)
+				.into(),
+			)
+			.narrow(primitive_name(arg_prim.id))
+			.labelled("this check can never halt the principal")
+			.note(format!(
+				"`?` halts the principal at the declaration it heads, and only the \
+				 outermost primitive of an assignment heads one; here `{}` is an \
+				 argument to `{}`",
+				primitive_name(arg_prim.id),
+				primitive_name(p.id)
+			))
+			.help(format!(
+				"bind it on its own line first, e.g. `checked = {}`, and pass \
+				 `checked` to `{}`",
+				arg_prim,
+				primitive_name(p.id)
+			)));
+		}
+		sanity_check_primitive_arguments(arg_prim)?;
 	}
 	Ok(())
 }

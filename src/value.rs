@@ -267,8 +267,8 @@ impl PrincipalState {
 		for i in 0..len {
 			if let Value::Primitive(p) = &self.values[i].value {
 				let p_clone = p.clone();
-				let r = perform_primitive_rewrite(&p_clone, Some(i), self);
-				failures.extend(r.failed_rewrites.into_iter().map(|p| (p, i)));
+				let failed = perform_primitive_rewrite(&p_clone, Some(i), self);
+				failures.extend(failed.map(|p| (p, i)));
 			}
 		}
 		failures

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: `?` halts the principal at the declaration it heads, and only
+// the outermost primitive of an assignment heads one. Written on an argument it
+// has nothing to halt, and the engine used to honour it or ignore it depending
+// on whether the checked primitive's own arguments happened to be primitives —
+// two models identical up to that accident disagreed about whether the check
+// was performed at all. Rejecting it is the fix: a check that is not performed
+// must not read as one that was. See err_nested_output.vp for the same rule
+// applied to output counts.
+attacker[passive]
+
+principal Alice[
+	knows private m
+	generates k
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private kb
+	h = HASH(AEAD_DEC(kb, e, nil)?)
+]
+
+queries[
+	confidentiality? m
+]

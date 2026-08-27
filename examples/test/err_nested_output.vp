@@ -1,0 +1,20 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: a primitive with more than one output has to be bound before
+// its outputs have names, so it cannot stand where a single value is expected.
+// The rule was enforced only one level down, so `HASH(KEM_ENCAP(…))` was
+// rejected while `HASH(HASH(KEM_ENCAP(…)))` was silently read as the shared
+// secret. Every per-primitive check now walks the whole argument tree.
+attacker[passive]
+
+principal Alice[
+	knows private dk
+	generates r
+	ek = PUBKEY(dk)
+	h = HASH(HASH(KEM_ENCAP(ek, r)))
+]
+
+queries[
+	confidentiality? r
+]

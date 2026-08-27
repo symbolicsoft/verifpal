@@ -1448,12 +1448,6 @@ pub struct RecomposeResult {
 	pub used: Vec<Value>,
 }
 
-pub struct RewriteResult {
-	pub failed_rewrites: Vec<Primitive>,
-	pub rewritten: bool,
-	pub value: Value,
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;

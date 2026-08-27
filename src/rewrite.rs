@@ -9,7 +9,7 @@ use crate::types::*;
 
 #[derive(Clone)]
 struct Reduced {
-	failed: Vec<Primitive>,
+	failed: Option<Primitive>,
 	rewritten: bool,
 	value: Value,
 	rebuilt: Option<Value>,
@@ -29,21 +29,17 @@ pub(crate) fn perform_primitive_rewrite(
 	p: &Arc<Primitive>,
 	slot_index: Option<usize>,
 	ps: &mut PrincipalState,
-) -> RewriteResult {
+) -> Option<Primitive> {
 	let reduced = reduce_term(p);
 	if let Some(idx) = slot_index {
 		if let Some(rebuilt) = reduced.rebuilt {
 			ps.values[idx].set_value(rebuilt);
 		}
 		if reduced.rewritten {
-			ps.values[idx].set_value(reduced.value.clone());
+			ps.values[idx].set_value(reduced.value);
 		}
 	}
-	RewriteResult {
-		failed_rewrites: reduced.failed,
-		rewritten: reduced.rewritten,
-		value: reduced.value,
-	}
+	reduced.failed
 }
 
 fn reduce_term(p: &Arc<Primitive>) -> Reduced {
@@ -74,9 +70,9 @@ fn reduce_cache_get(key: u64, p: &Arc<Primitive>) -> Option<Reduced> {
 }
 
 fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {
-	let (failed, rewritten, value) = reduce_arguments(p);
+	let (rewritten, value) = reduce_arguments(p);
 	let mut reduced = Reduced {
-		failed,
+		failed: None,
 		rewritten,
 		value,
 		rebuilt: None,
@@ -93,15 +89,14 @@ fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {
 	};
 	let (rewritten_root, rewritten_value) = can_rewrite(&Arc::clone(root));
 	if !rewritten_root && let Some(p) = rewritten_value.as_primitive() {
-		reduced.failed.push(p.clone());
+		reduced.failed = Some(p.clone());
 	}
 	reduced.rewritten = reduced.rewritten || rewritten_root;
 	reduced.value = rewritten_value;
 	reduced
 }
 
-fn reduce_arguments(p: &Arc<Primitive>) -> (Vec<Primitive>, bool, Value) {
-	let mut failed: Vec<Primitive> = Vec::new();
+fn reduce_arguments(p: &Arc<Primitive>) -> (bool, Value) {
 	let mut rewritten = false;
 	let mut new_args: Option<Vec<Value>> = None;
 	for (i, a) in p.arguments.iter().enumerate() {
@@ -112,13 +107,11 @@ fn reduce_arguments(p: &Arc<Primitive>) -> (Vec<Primitive>, bool, Value) {
 		if r.rewritten {
 			rewritten = true;
 			new_args.get_or_insert_with(|| p.arguments.clone())[i] = r.value;
-		} else {
-			failed.extend(r.failed);
 		}
 	}
 	let value = match new_args {
 		Some(args) => Value::Primitive(Arc::new(p.with_arguments(args))),
 		None => Value::Primitive(Arc::clone(p)),
 	};
-	(failed, rewritten, value)
+	(rewritten, value)
 }

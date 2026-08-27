@@ -166,9 +166,8 @@ pub(crate) fn reexecute(
 
 	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
 		ps = bypassed;
-	} else if let Some((truncate_at, halted_at)) = truncation_point(&ps, &failures) {
-		ps = drop_after_index(ps, truncate_at);
-		ps.halted_at = Some(halted_at);
+	} else {
+		ps = halt_at(ps, &failures);
 	}
 	ps.foreign_halts = foreign;
 	Ok(ps)
@@ -179,10 +178,7 @@ pub(crate) fn halt_at_failed_checks(
 	failures: &[(Primitive, usize)],
 ) -> PrincipalState {
 	let foreign = foreign_halts(&ps, failures);
-	if let Some((truncate_at, halted_at)) = truncation_point(&ps, failures) {
-		ps = drop_after_index(ps, truncate_at);
-		ps.halted_at = Some(halted_at);
-	}
+	ps = halt_at(ps, failures);
 	ps.foreign_halts = foreign;
 	ps
 }
@@ -273,11 +269,7 @@ fn try_guard_bypass(
 
 	ps.resolve_all_values()?;
 	let remaining = ps.perform_all_rewrites();
-	if let Some((truncate_at, halted_at)) = truncation_point(&ps, &remaining) {
-		ps = drop_after_index(ps, truncate_at);
-		ps.halted_at = Some(halted_at);
-	}
-	Ok(Some(ps))
+	Ok(Some(halt_at(ps, &remaining)))
 }
 
 pub(crate) fn attacker_authored(
@@ -364,6 +356,14 @@ pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value, autho
 	}
 	sv.pre_rewrite = ground.clone();
 	sv.value = ground;
+}
+
+fn halt_at(mut ps: PrincipalState, failures: &[(Primitive, usize)]) -> PrincipalState {
+	if let Some((truncate_at, halted_at)) = truncation_point(&ps, failures) {
+		ps = drop_after_index(ps, truncate_at);
+		ps.halted_at = Some(halted_at);
+	}
+	ps
 }
 
 fn truncation_point(ps: &PrincipalState, failures: &[(Primitive, usize)]) -> Option<(usize, i32)> {

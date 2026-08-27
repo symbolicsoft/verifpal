@@ -498,6 +498,12 @@ fn run_model_at(path: &str, model: &str, expected: &str) {
 	assert_code(model, None, &results, &results_code, expected);
 }
 
+fn run_model_sessions_at(path: &str, model: &str, sessions: u8, expected: &str) {
+	let (results, results_code) = crate::verify::verify_with_sessions(path, sessions)
+		.unwrap_or_else(|e| panic!("ERROR \u{25cf} {} ({})", model, e));
+	assert_code(model, Some(sessions), &results, &results_code, expected);
+}
+
 fn run_model_sessions(model: &str, sessions: u8, expected: &str) {
 	let path = format!("examples/test/{}", model);
 	let (results, results_code) = crate::verify::verify_with_sessions(&path, sessions)
@@ -635,6 +641,20 @@ fn test_err_no_principals() {
 	run_model_err("err_no_principals.vp", "declares no principals");
 }
 #[test]
+fn test_err_nested_check() {
+	run_model_err(
+		"err_nested_check.vp",
+		"`AEAD_DEC` is checked with `?` inside another primitive",
+	);
+}
+#[test]
+fn test_err_nested_output() {
+	run_model_err(
+		"err_nested_output.vp",
+		"`KEM_ENCAP` produces more than one output",
+	);
+}
+#[test]
 fn test_cap_err_core_primitive() {
 	run_model_err("cap_err_core_primitive.vp", "no cryptographic guarantee");
 }
@@ -708,6 +728,76 @@ fn test_cap_noop_annotated() {
 #[test]
 fn test_pqxdh_weak() {
 	run_model_at("examples/messaging/pqxdh-weak.vp", "pqxdh-weak.vp", "c0a0");
+}
+
+#[test]
+fn test_pqxdh() {
+	run_model_at("examples/messaging/pqxdh.vp", "pqxdh.vp", "c0a0");
+}
+#[test]
+fn test_cen() {
+	run_model_at("examples/contact-tracing/cen.vp", "cen.vp", "c0c1c0");
+}
+#[test]
+fn test_firefox_sync() {
+	run_model_at(
+		"examples/transport-layer/firefox-sync.vp",
+		"firefox-sync.vp",
+		"c0a0",
+	);
+}
+#[test]
+fn test_hpke_base() {
+	run_model_at("examples/hpke/hpke_base.vp", "hpke_base.vp", "c0a1");
+}
+#[test]
+fn test_hpke_auth() {
+	run_model_at("examples/hpke/hpke_auth.vp", "hpke_auth.vp", "c0a1");
+	run_model_sessions_at("examples/hpke/hpke_auth.vp", "hpke_auth.vp", 1, "c0a0");
+}
+#[test]
+fn test_hpke_auth_kci() {
+	run_model_at("examples/hpke/hpke_auth_kci.vp", "hpke_auth_kci.vp", "c1a1");
+}
+#[test]
+fn test_hpke_auth_kci_signed() {
+	run_model_at(
+		"examples/hpke/hpke_auth_kci_signed.vp",
+		"hpke_auth_kci_signed.vp",
+		"c1a1",
+	);
+	run_model_sessions_at(
+		"examples/hpke/hpke_auth_kci_signed.vp",
+		"hpke_auth_kci_signed.vp",
+		1,
+		"c1a0",
+	);
+}
+#[test]
+fn test_hpke_psk_pq() {
+	run_model_at("examples/hpke/hpke_psk_pq.vp", "hpke_psk_pq.vp", "c1c0");
+}
+#[test]
+fn test_userbase() {
+	run_model_at("examples/messaging/userbase.vp", "userbase.vp", "c0c0a1a1");
+	run_model_sessions_at(
+		"examples/messaging/userbase.vp",
+		"userbase.vp",
+		1,
+		"c0c0a0a0",
+	);
+}
+#[test]
+fn test_signal() {
+	run_model_at("examples/messaging/signal.vp", "signal.vp", "c0a1c1a0c0a1");
+}
+#[test]
+fn test_scuttlebutt() {
+	run_model_at(
+		"examples/messaging/scuttlebutt.vp",
+		"scuttlebutt.vp",
+		"c1c0c1c0a1a1a1a1a1e1",
+	);
 }
 
 #[test]
