@@ -3,7 +3,8 @@
 
 use serde::Serialize;
 
-use crate::types::{Span, TraceValue, VerifyResult};
+use crate::tokens::Token;
+use crate::types::{Block, Constant, Declaration, Span, TraceValue, VerifyResult};
 use crate::verify::VerifyReport;
 
 #[derive(Debug, Serialize)]
@@ -21,12 +22,47 @@ pub struct ModelReport {
 	pub error: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub analysis: Option<Analysis>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub diagram: Vec<DiagramRow>,
+	#[serde(skip)]
+	pub source: String,
+	#[serde(skip)]
+	pub(crate) tokens: Vec<Token>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DiagramRow {
+	#[serde(rename_all = "camelCase")]
+	Message {
+		hop: usize,
+		phase: i32,
+		sender: String,
+		recipient: String,
+		values: Vec<DiagramValue>,
+	},
+	#[serde(rename_all = "camelCase")]
+	Phase { number: i32 },
+	#[serde(rename_all = "camelCase")]
+	Leak {
+		principal: String,
+		values: Vec<String>,
+	},
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramValue {
+	pub name: String,
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub guarded: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
 	pub model: String,
+	pub attacker: String,
 	pub sessions: u8,
 	pub code: String,
 	pub attacks: usize,
@@ -34,6 +70,10 @@ pub struct Analysis {
 	pub assumptions: Vec<Assumption>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub scenarios: Vec<ScenarioReport>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub notes: Vec<String>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub provenance: Vec<String>,
 	pub queries: Vec<QueryReport>,
 }
 
@@ -130,19 +170,15 @@ impl Run {
 			.enumerate()
 			.map(|(i, (path, outcome))| {
 				let source = sources.get(i).map(String::as_str).unwrap_or("");
-				match outcome {
-					Ok(report) => ModelReport {
-						file: path.clone(),
-						ok: true,
-						error: None,
-						analysis: Some(Analysis::of(report, source)),
-					},
-					Err(error) => ModelReport {
-						file: path.clone(),
-						ok: false,
-						error: Some(error.clone()),
-						analysis: None,
-					},
+				let (diagram, tokens) = describe(source);
+				ModelReport {
+					file: path.clone(),
+					ok: outcome.is_ok(),
+					error: outcome.as_ref().err().cloned(),
+					analysis: outcome.as_ref().ok().map(|r| Analysis::of(r, source)),
+					diagram,
+					source: source.to_string(),
+					tokens,
 				}
 			})
 			.collect();
@@ -158,6 +194,7 @@ impl Analysis {
 	pub(crate) fn of(report: &VerifyReport, source: &str) -> Analysis {
 		Analysis {
 			model: report.file_name.clone(),
+			attacker: report.attacker.to_string(),
 			sessions: report.sessions,
 			code: report.code.clone(),
 			attacks: report.results.iter().filter(|r| r.resolved).count(),
@@ -187,6 +224,8 @@ impl Analysis {
 					honest: s.honest,
 				})
 				.collect(),
+			notes: analysis_notes(report),
+			provenance: analysis_provenance(report),
 			queries: report
 				.results
 				.iter()
@@ -239,6 +278,151 @@ impl QueryReport {
 	}
 }
 
+fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
+	if source.is_empty() {
+		return (Vec::new(), Vec::new());
+	}
+	let (parsed, index) = crate::parser::parse_string_indexed("report.vp", source);
+	let mut tokens = index.tokens().to_vec();
+	tokens.sort_by_key(|t| t.span.start);
+	let Ok(model) = parsed else {
+		return (Vec::new(), tokens);
+	};
+	let mut rows: Vec<DiagramRow> = Vec::new();
+	let mut hop = 0usize;
+	let mut phase = 0i32;
+	let mut senders: Vec<&str> = Vec::new();
+	for block in &model.blocks {
+		if let Block::Message(msg) = block {
+			for name in [&msg.sender_name, &msg.recipient_name] {
+				if !senders.contains(&&**name) {
+					senders.push(name);
+				}
+			}
+		}
+	}
+	for block in &model.blocks {
+		match block {
+			Block::Message(msg) => {
+				hop += 1;
+				rows.push(DiagramRow::Message {
+					hop,
+					phase,
+					sender: msg.sender_name.to_string(),
+					recipient: msg.recipient_name.to_string(),
+					values: msg.constants.iter().map(diagram_value).collect(),
+				});
+			}
+			Block::Phase(p) => {
+				phase = p.number;
+				rows.push(DiagramRow::Phase { number: p.number });
+			}
+			Block::Principal(p) => {
+				if !senders.contains(&p.name.as_str()) {
+					continue;
+				}
+				for expr in &p.expressions {
+					if expr.kind != Declaration::Leaks {
+						continue;
+					}
+					rows.push(DiagramRow::Leak {
+						principal: p.name.clone(),
+						values: expr.constants.iter().map(|c| c.name.to_string()).collect(),
+					});
+				}
+			}
+		}
+	}
+	(rows, tokens)
+}
+
+fn diagram_value(c: &Constant) -> DiagramValue {
+	DiagramValue {
+		name: c.name.to_string(),
+		guarded: c.guard,
+	}
+}
+
+fn analysis_provenance(report: &VerifyReport) -> Vec<String> {
+	let mut out: Vec<String> = Vec::new();
+	if report.provenance.auto_queries {
+		out.push(
+			"The model's own queries block was replaced by the set --auto-queries derives \
+			 from the protocol; these are generated claims, not the author's."
+				.to_string(),
+		);
+	}
+	if let Some(s) = report.provenance.saturation {
+		if s.saturated {
+			out.push(format!(
+				"--saturate raised the session count until the verdicts stopped moving: they \
+				 were unchanged from {} to {} sessions.",
+				s.stable_from, report.sessions
+			));
+		} else {
+			out.push(format!(
+				"--saturate reached {} sessions, the highest it tries, with the verdicts still \
+				 changing; they may keep changing beyond it.",
+				s.ceiling
+			));
+		}
+		if s.regressed {
+			out.push(
+				"An attack found at a lower session count disappeared at a higher one. That is \
+				 an engine bug, not a protocol result."
+					.to_string(),
+			);
+		}
+	}
+	out
+}
+
+fn trace_text_contains(report: &VerifyReport, marker: char) -> bool {
+	report.results.iter().any(|r| {
+		r.steps.iter().any(|s| {
+			s.text.contains(marker)
+				|| s.values.iter().any(|v| {
+					v.name.contains(marker)
+						|| v.installed.as_deref().is_some_and(|t| t.contains(marker))
+						|| v.was.as_deref().is_some_and(|t| t.contains(marker))
+				})
+		})
+	})
+}
+
+fn analysis_notes(report: &VerifyReport) -> Vec<String> {
+	let mut notes: Vec<String> = Vec::new();
+	if report.sessions > 1 && trace_text_contains(report, '#') {
+		let span = if report.sessions == 2 {
+			"#2".to_string()
+		} else {
+			format!("#2 through #{}", report.sessions)
+		};
+		notes.push(format!(
+			"Per-session values and principals carry the suffix {span}."
+		));
+	}
+	if !report.scenarios.is_empty() && trace_text_contains(report, '@') {
+		notes.push("Per-scenario values and principals carry the suffix @2 onward.".to_string());
+	}
+	let mut reasons: Vec<&'static str> = Vec::new();
+	for r in &report.results {
+		for t in &r.envelope.truncations {
+			if !reasons.contains(&t.name()) {
+				reasons.push(t.name());
+			}
+		}
+	}
+	if !reasons.is_empty() {
+		notes.push(format!(
+			"Some searches stopped short of exhausting the space ({}); a query reported as \
+			 holding was not searched exhaustively.",
+			reasons.join(", ")
+		));
+	}
+	notes
+}
+
 impl SourceRange {
 	pub(crate) fn of(span: Span, source: &str) -> SourceRange {
 		let (line, column) = span.line_col(source);
@@ -264,13 +448,19 @@ mod tests {
 				file: "examples/simple.vp".to_string(),
 				ok: true,
 				error: None,
+				diagram: Vec::new(),
+				source: String::new(),
+				tokens: Vec::new(),
 				analysis: Some(Analysis {
 					model: "simple.vp".to_string(),
+					attacker: "active".to_string(),
 					sessions: 2,
 					code: "c1".to_string(),
 					attacks: 1,
 					elapsed_ms: 3,
 					scenarios: Vec::new(),
+					notes: Vec::new(),
+					provenance: Vec::new(),
 					assumptions: vec![Assumption {
 						term: "HASH(m)".to_string(),
 						capability: "weak".to_string(),
@@ -323,7 +513,7 @@ mod tests {
 		let json = serde_json::to_string(&run).expect("serializes");
 		let expected = concat!(
 			r#"{"version":"1.0.4","ok":true,"models":[{"file":"examples/simple.vp","#,
-			r#""ok":true,"analysis":{"model":"simple.vp","sessions":2,"code":"c1","#,
+			r#""ok":true,"analysis":{"model":"simple.vp","attacker":"active","sessions":2,"code":"c1","#,
 			r#""attacks":1,"elapsedMs":3,"assumptions":[{"term":"HASH(m)","#,
 			r#""capability":"weak","fromPhase":0}],"queries":[{"#,
 			r#""query":"confidentiality? m1","kind":"confidentiality","resolved":true,"#,
@@ -414,6 +604,71 @@ mod tests {
 	}
 
 	#[test]
+	fn an_analysis_explains_the_session_suffix_its_traces_use() {
+		let path = "examples/test/session_nonce_cross.vp";
+		let report = crate::verify::verify_report(path, 2).expect("verifies");
+		let source = std::fs::read_to_string(path).expect("reads");
+		let a = Analysis::of(&report, &source);
+		assert!(
+			a.notes.iter().any(|n| n.contains("#2")),
+			"notes were {:?}",
+			a.notes
+		);
+	}
+
+	#[test]
+	fn an_analysis_explains_the_scenario_suffix_its_traces_use() {
+		let path = "examples/test/spore_ns_pk.vp";
+		let report = crate::verify::verify_report(path, 2).expect("verifies");
+		let source = std::fs::read_to_string(path).expect("reads");
+		let a = Analysis::of(&report, &source);
+		assert!(
+			a.notes.iter().any(|n| n.contains("@2")),
+			"notes were {:?}",
+			a.notes
+		);
+	}
+
+	#[test]
+	fn an_analysis_whose_traces_never_use_a_suffix_explains_none() {
+		let path = "examples/test/spore_nsl_pk.vp";
+		let report = crate::verify::verify_report(path, 2).expect("verifies");
+		let source = std::fs::read_to_string(path).expect("reads");
+		let a = Analysis::of(&report, &source);
+		assert!(
+			!a.notes.iter().any(|n| n.contains("suffix")),
+			"nothing in this report carries a suffix, but it was explained anyway: {:?}",
+			a.notes
+		);
+	}
+
+	#[test]
+	fn an_analysis_that_uses_no_suffix_explains_nothing() {
+		let path = "examples/test/hmac_ok.vp";
+		let report = crate::verify::verify_report(path, 1).expect("verifies");
+		let source = std::fs::read_to_string(path).expect("reads");
+		let a = Analysis::of(&report, &source);
+		assert!(a.notes.is_empty(), "notes were {:?}", a.notes);
+	}
+
+	#[test]
+	fn an_analysis_reports_a_truncated_search_once_for_the_whole_run() {
+		let mut report =
+			crate::verify::verify_report("examples/test/hmac_ok.vp", 1).expect("verifies");
+		report.results[0]
+			.envelope
+			.truncations
+			.push(crate::types::Truncation::TermDepth);
+		let a = Analysis::of(&report, "");
+		let hits: Vec<&String> = a
+			.notes
+			.iter()
+			.filter(|n| n.contains("term depth"))
+			.collect();
+		assert_eq!(hits.len(), 1, "notes were {:?}", a.notes);
+	}
+
+	#[test]
 	fn a_failed_model_reports_its_error_and_no_analysis() {
 		let run = Run {
 			version: "1.0.4".to_string(),
@@ -423,6 +678,9 @@ mod tests {
 				ok: false,
 				error: Some("parse error: expected `]`".to_string()),
 				analysis: None,
+				diagram: Vec::new(),
+				source: String::new(),
+				tokens: Vec::new(),
 			}],
 		};
 		let json = serde_json::to_string(&run).expect("serializes");

@@ -550,7 +550,7 @@ fn run_verify(
 		}
 		FormatArg::Html => {
 			let run = Run::of(VERSION, &outcomes, &sources);
-			print!("{}", html_report(&run, &sources));
+			print!("{}", html_report(&run));
 		}
 	}
 	update_check_report(&update_check);

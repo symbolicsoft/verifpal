@@ -1,3 +1,7 @@
 <!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
      SPDX-License-Identifier: GPL-3.0-only -->
-<div class="traceStep" data-step="{{n}}"><span class="n">{{n}}</span><span class="line"><span class="kind {{kind}}">{{kind}}</span>{{text}}</span></div>
+{{#folded}}<details class="traceGroup" data-step="{{step}}"><summary><span class="n">{{step}}</span><span class="line"><span class="kind derive">derive</span>{{label}}</span></summary>
+{{#steps}}{{>trace_step}}{{/steps}}
+</details>
+{{/folded}}{{^folded}}<button type="button" class="traceStep" data-step="{{step}}" aria-pressed="false"><span class="n">{{step}}</span><span class="line"><span class="kind {{kind}}">{{kind}}</span>{{#wire}}Attacker intercepts the message from {{sender}} to {{recipient}} and delivers:{{/wire}}{{^wire}}{{text}}{{/wire}}{{#values}}{{>trace_value}}{{/values}}</span></button>
+{{/folded}}

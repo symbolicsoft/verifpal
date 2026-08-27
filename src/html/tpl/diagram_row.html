@@ -1,0 +1,8 @@
+<!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+     SPDX-License-Identifier: GPL-3.0-only -->
+{{#wire}}<g class="row"{{#stepped}} data-step="{{step}}"{{/stepped}}>{{#numbered}}<text x="{{numx}}" y="{{label_y}}" class="hopNum">{{num}}</text>{{/numbered}}{{#segments}}<line x1="{{x1}}" y1="{{y}}" x2="{{x2}}" y2="{{y}}" class="{{segclass}}" marker-end="url(#{{id}}-{{#breach}}b{{/breach}}{{^breach}}a{{/breach}})"/>{{/segments}}<text x="{{mid}}" y="{{label_y}}" class="msg {{lclass}}">{{#hopped}}<tspan class="msgHop">hop {{hop}} &middot; </tspan>{{/hopped}}{{#values}}{{^first}}<tspan class="msgSep">, </tspan>{{/first}}<tspan class="msgVal {{vclass}}"{{#tagged}} data-q="{{queries}}"{{/tagged}}>{{text}}</tspan>{{/values}}{{#replayed}}<tspan class="msgSep"> (replayed)</tspan>{{/replayed}}</text></g>
+{{/wire}}{{#phase}}<line x1="0" y1="{{y}}" x2="{{width}}" y2="{{y}}" class="phase"/><text x="2" y="{{label_y}}" class="phaselabel">PHASE {{number}}</text>
+{{/phase}}{{#leak}}<text x="{{x}}" y="{{y}}" class="leak">{{text}}</text>
+{{/leak}}{{#mark}}<g class="row"{{#stepped}} data-step="{{step}}"{{/stepped}}>{{#numbered}}<text x="{{numx}}" y="{{label_y}}" class="hopNum">{{num}}</text>{{/numbered}}<circle cx="{{x}}" cy="{{y}}" r="5" class="{{markclass}}"/><text x="{{tx}}" y="{{label_y}}" class="nodeLabel {{lclass}}">{{label}}</text></g>
+{{/mark}}{{#run}}<g class="row" data-step="{{step}}"><rect x="{{x}}" y="{{y}}" width="168" height="22" rx="3" class="runBox"/><text x="{{tx}}" y="{{ty}}" class="runLabel">{{label}}</text></g>
+{{/run}}

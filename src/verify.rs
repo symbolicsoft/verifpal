@@ -125,11 +125,27 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 pub struct VerifyReport {
 	pub file_name: String,
 	pub sessions: u8,
+	pub attacker: AttackerKind,
 	pub results: Vec<VerifyResult>,
 	pub code: String,
 	pub elapsed: Option<std::time::Duration>,
 	pub assumptions: Vec<(Value, Capability, i32)>,
 	pub scenarios: Vec<ScenarioSummary>,
+	pub provenance: Provenance,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Provenance {
+	pub auto_queries: bool,
+	pub saturation: Option<SaturationNote>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SaturationNote {
+	pub stable_from: u8,
+	pub saturated: bool,
+	pub regressed: bool,
+	pub ceiling: u8,
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
@@ -155,7 +171,8 @@ pub fn verify_report_with_source_opts(
 		let (km, _) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
 		m.queries = crate::autoquery::auto_queries(&m, &km);
 	}
-	let report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
+	let mut report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
+	report.provenance.auto_queries = auto_queries;
 	Ok((report, source))
 }
 
@@ -219,17 +236,24 @@ pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VRes
 		}
 		previous = Some(code);
 	}
-	let Some((sessions, report, source, output)) = last else {
+	let Some((sessions, mut report, source, output)) = last else {
 		return Err(VerifpalError::internal(
 			"saturating analysis ran no rounds".into(),
 		));
 	};
+	let stable_from = match saturated_at {
+		Some(k) => k.saturating_sub(1).max(1),
+		None => sessions,
+	};
+	report.provenance.saturation = Some(SaturationNote {
+		stable_from,
+		saturated: saturated_at.is_some(),
+		regressed,
+		ceiling: max,
+	});
 	Ok(Saturation {
 		sessions,
-		stable_from: match saturated_at {
-			Some(k) => k.saturating_sub(1).max(1),
-			None => sessions,
-		},
+		stable_from,
 		saturated: saturated_at.is_some(),
 		regressed,
 		report,
@@ -278,11 +302,13 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 	Ok(VerifyReport {
 		file_name: ctx.results_file_name().to_string(),
 		sessions,
+		attacker: m.attacker,
 		results,
 		code,
 		elapsed,
 		assumptions: ctx.capability_assumptions(),
 		scenarios: ctx.scenarios().to_vec(),
+		provenance: Provenance::default(),
 	})
 }
 

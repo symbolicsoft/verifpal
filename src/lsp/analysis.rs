@@ -25,11 +25,13 @@ pub(crate) fn analyze(
 	let report = crate::verify::VerifyReport {
 		file_name: name.to_string(),
 		sessions,
+		attacker: model.attacker,
 		code: crate::types::VerifyResult::results_code(&results),
 		results,
 		elapsed: Some(started.elapsed()),
 		assumptions: ctx.capability_assumptions(),
 		scenarios: ctx.scenarios().to_vec(),
+		provenance: crate::verify::Provenance::default(),
 	};
 	Ok(Analysis::of(&report, text))
 }

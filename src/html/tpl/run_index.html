@@ -1,0 +1,10 @@
+<!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+     SPDX-License-Identifier: GPL-3.0-only -->
+<nav class="runIndex" aria-label="Models in this run">
+<div class="sectionRow"><span class="eyebrow">Run summary</span><span class="tally {{tally_class}}">{{tally}}</span></div>
+<div class="runFilter"><label><input type="checkbox" id="onlyFailing"> Show only models with attacks</label></div>
+<ol class="runList">
+{{#rows}}<li class="runItem {{class}}" data-failing="{{failing}}"><a class="runFile" href="#m{{index}}">{{file}}</a><span class="runStatus">{{#failed}}<span class="fail">analysis failed</span>{{/failed}}{{^failed}}{{#code}}<span class="{{pclass}}">{{pair}}</span>{{/code}}{{/failed}}</span><span class="runMeta">{{meta}}</span></li>
+{{/rows}}
+</ol>
+</nav>

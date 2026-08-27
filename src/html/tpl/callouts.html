@@ -1,0 +1,14 @@
+<!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+     SPDX-License-Identifier: GPL-3.0-only -->
+{{#assumptions}}<div class="callout"><strong>Analysed under {{count}} declared weakening assumption{{plural}}:</strong><ul>
+{{#items}}<li><code>{{term}}</code>{{onset}}</li>
+{{/items}}</ul></div>{{/assumptions}}
+{{#scenarios}}<div class="callout"><strong>{{count}} peer scenario{{plural}} explored:</strong><ul>
+{{#items}}<li><code>{{scenario}}</code> <span class="peer {{peer_class}}">{{peer}}</span></li>
+{{/items}}</ul></div>{{/scenarios}}
+{{#provenance}}<div class="callout"><strong>How this analysis was produced:</strong><ul>
+{{#items}}<li>{{text}}</li>
+{{/items}}</ul></div>{{/provenance}}
+{{#notes}}<div class="callout notes"><strong>How to read this report:</strong><ul>
+{{#items}}<li>{{text}}</li>
+{{/items}}</ul></div>{{/notes}}

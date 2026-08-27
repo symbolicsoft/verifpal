@@ -31,4 +31,4 @@ clean:
 	@cargo clean
 	@$(RM) -r dist
 
-.PHONY: build lint test wasm clean assets examples HomebrewFormula scripts src target test-exhaustive
+.PHONY: build lint test test-exhaustive wasm clean assets examples HomebrewFormula scripts src target

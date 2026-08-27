@@ -1,80 +1,65 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashSet;
+mod diagram;
+mod template;
 
-use crate::report::{Analysis, ModelReport, QueryReport, Run};
+use std::collections::HashMap;
+
+use crate::report::{Analysis, DiagramRow, ModelReport, QueryReport, ReportStep, Run};
 use crate::tokens::{Token, TokenKind};
-use crate::types::{Block, Constant, Declaration, Message, Model};
-use crate::util::base_name;
+use crate::util::copy_base_name;
+use diagram::{ATTACKER, Lanes, Row, Value};
+use template::{Ctx, PAGE, render};
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");
-const PAGE: &str = include_str!("tpl/page.html");
-const MODEL: &str = include_str!("tpl/model.html");
-const META: &str = include_str!("tpl/meta.html");
-const META_FAILED: &str = include_str!("tpl/meta_failed.html");
-const CODE_PAIR: &str = include_str!("tpl/code_pair.html");
-const ERROR: &str = include_str!("tpl/error.html");
-const VERDICTS: &str = include_str!("tpl/verdicts.html");
-const VERDICT: &str = include_str!("tpl/verdict.html");
-const BECAUSE: &str = include_str!("tpl/because.html");
-const PRECONDITION: &str = include_str!("tpl/precondition.html");
-const ASSUMPTIONS: &str = include_str!("tpl/assumptions.html");
-const ASSUMPTION_ITEM: &str = include_str!("tpl/assumption_item.html");
-const SCENARIOS: &str = include_str!("tpl/scenarios.html");
-const SCENARIO_ITEM: &str = include_str!("tpl/scenario_item.html");
-const TRACE: &str = include_str!("tpl/trace.html");
-const TRACE_STEP: &str = include_str!("tpl/trace_step.html");
-const TRACE_STEP_WIRE: &str = include_str!("tpl/trace_step_wire.html");
-const TRACE_VALUE: &str = include_str!("tpl/trace_value.html");
-const TRACE_VALUE_WAS: &str = include_str!("tpl/trace_value_was.html");
-const TRACE_VALUE_RELAY: &str = include_str!("tpl/trace_value_relay.html");
-const SOURCE: &str = include_str!("tpl/source.html");
-const SOURCE_MARK: &str = include_str!("tpl/source_mark.html");
-const SOURCE_TOKEN: &str = include_str!("tpl/source_token.html");
-const DIAGRAM: &str = include_str!("tpl/diagram.html");
-const DIAGRAM_ACTOR: &str = include_str!("tpl/diagram_actor.html");
-const DIAGRAM_WIRE: &str = include_str!("tpl/diagram_wire.html");
-const DIAGRAM_LABEL_VALUE: &str = include_str!("tpl/diagram_label_value.html");
-const DIAGRAM_LABEL_SEP: &str = include_str!("tpl/diagram_label_sep.html");
-const DIAGRAM_LEAK: &str = include_str!("tpl/diagram_leak.html");
-const DIAGRAM_PHASE: &str = include_str!("tpl/diagram_phase.html");
-const ATTACK_DIAGRAM: &str = include_str!("tpl/attack_diagram.html");
-const ATTACK_ROW: &str = include_str!("tpl/attack_row.html");
-const ATTACK_SEG: &str = include_str!("tpl/attack_seg.html");
-const ATTACK_NODE: &str = include_str!("tpl/attack_node.html");
-const ATTACK_RUN: &str = include_str!("tpl/attack_run.html");
 
-const COL_WIDTH: usize = 220;
-const ROW_HEIGHT: usize = 42;
-const TOP: usize = 56;
-const NUM_X: usize = 22;
-const ATTACKER: &str = "Attacker";
+const DISCLAIMER: &str = "Verifpal is sound but incomplete. Every attack shown here is a genuine \
+	attack on the model as written; a query reported as holding means no attack was found within \
+	the search this run performed, which is never a proof that none exists.";
 
-pub fn html_report(run: &Run, sources: &[String]) -> String {
-	let mut body = String::new();
-	for (i, model) in run.models.iter().enumerate() {
-		let source = sources.get(i).map(String::as_str).unwrap_or("");
-		body.push_str(&model_section(model, source, i));
-		body.push('\n');
-	}
+pub fn html_report(run: &Run) -> String {
 	let subject = match run.models.as_slice() {
-		[only] => format!(" \u{00b7} {}", escape(short_name(only))),
+		[only] => format!(" \u{00b7} {}", short_name(only)),
 		_ => String::new(),
 	};
-	let mut out = fill(
-		asset(PAGE),
-		&[
-			("subject", &subject),
-			("style", asset(CSS)),
-			("script", asset(JS)),
-			("version", &escape(&run.version)),
-			("body", body.trim_end()),
-		],
-	);
+	let models = run
+		.models
+		.iter()
+		.enumerate()
+		.map(|(i, model)| model_ctx(model, i))
+		.collect();
+	let ctx = Ctx::new()
+		.text("subject", subject)
+		.raw("style", strip_header(CSS))
+		.raw("script", strip_header(JS))
+		.text("version", run.version.as_str())
+		.text("disclaimer", DISCLAIMER)
+		.list("index", run_index(run))
+		.list("models", models);
+	let mut out = render(&PAGE, &ctx);
 	out.push('\n');
 	out
+}
+
+fn strip_header(raw: &str) -> &str {
+	match raw.trim_start().strip_prefix("/*") {
+		Some(after) => after.split_once("*/").map(|(_, tail)| tail).unwrap_or(raw),
+		None => raw,
+	}
+	.trim_ascii()
+}
+
+fn article(word: &str) -> &'static str {
+	match word.chars().next() {
+		Some('a' | 'e' | 'i' | 'o' | 'u' | 'A' | 'E' | 'I' | 'O' | 'U') => "an",
+		_ => "a",
+	}
+}
+
+fn plural(n: usize) -> &'static str {
+	if n == 1 { "" } else { "s" }
 }
 
 fn short_name(model: &ModelReport) -> &str {
@@ -84,90 +69,155 @@ fn short_name(model: &ModelReport) -> &str {
 	}
 }
 
-fn model_section(model: &ModelReport, source: &str, index: usize) -> String {
-	let body = match (&model.analysis, &model.error) {
-		(Some(analysis), _) => analysis_section(analysis, source, index),
-		(None, Some(error)) => fill(asset(ERROR), &[("error", &escape(error))]),
-		(None, None) => String::new(),
-	};
-	fill(
-		asset(MODEL),
-		&[
-			("file", &escape(&model.file)),
-			("meta", &head_meta(model)),
-			("body", &body),
-		],
-	)
+fn attacked(model: &ModelReport) -> bool {
+	model.analysis.as_ref().is_none_or(|a| a.attacks > 0)
 }
 
-fn head_meta(model: &ModelReport) -> String {
-	let Some(a) = &model.analysis else {
-		return asset(META_FAILED).to_string();
-	};
-	fill(
-		asset(META),
-		&[
-			("sessions", &a.sessions.to_string()),
-			("plural", if a.sessions == 1 { "" } else { "s" }),
-			("elapsed", &a.elapsed_ms.to_string()),
-			("code", &code_spans(&a.code)),
-		],
-	)
-}
-
-fn code_spans(code: &str) -> String {
-	let mut out = String::new();
+fn code_pairs(code: &str) -> Vec<Ctx> {
+	let mut out = Vec::new();
 	let mut chars = code.chars();
 	while let (Some(kind), Some(digit)) = (chars.next(), chars.next()) {
-		out.push_str(&fill(
-			asset(CODE_PAIR),
-			&[
-				("class", if digit == '0' { "pass" } else { "fail" }),
-				("pair", &escape(&format!("{kind}{digit}"))),
-			],
+		out.push(
+			Ctx::new()
+				.text("pclass", if digit == '0' { "pass" } else { "fail" })
+				.text("pair", format!("{kind}{digit}")),
+		);
+	}
+	out
+}
+
+fn run_index(run: &Run) -> Vec<Ctx> {
+	if run.models.len() < 2 {
+		return Vec::new();
+	}
+	let total = run.models.len();
+	let analysed = run.models.iter().filter(|m| m.analysis.is_some()).count();
+	let broken = total - analysed;
+	let hit = run
+		.models
+		.iter()
+		.filter_map(|m| m.analysis.as_ref())
+		.filter(|a| a.attacks > 0)
+		.count();
+	let mut parts: Vec<String> = Vec::new();
+	if hit > 0 {
+		parts.push(format!("{hit} of {total} models have attacks."));
+	} else if analysed > 0 {
+		parts.push(format!(
+			"No attacks found in {analysed} model{}.",
+			plural(analysed)
 		));
 	}
-	out
-}
-
-fn analysis_section(a: &Analysis, source: &str, index: usize) -> String {
-	let attacked = attacked_names(a);
-	let mut out = String::new();
-	let mut tokens: Vec<Token> = Vec::new();
-	if !source.is_empty() {
-		let (parsed, index_tokens) = crate::parser::parse_string_indexed("report.vp", source);
-		tokens = index_tokens.tokens().to_vec();
-		tokens.sort_by_key(|t| t.span.start);
-		if let Ok(m) = &parsed {
-			out.push_str(&diagram_svg(m, &attacked, &format!("m{index}p")));
-		}
+	if broken > 0 {
+		parts.push(format!(
+			"{broken} model{} failed to analyse.",
+			plural(broken)
+		));
 	}
-	out.push_str(&verdicts_section(a, index));
-	for (ti, q) in a
-		.queries
+	let rows = run
+		.models
 		.iter()
-		.filter(|q| q.resolved && !q.steps.is_empty())
 		.enumerate()
-	{
-		out.push_str(&trace_section(q, &format!("m{index}t{ti}")));
-	}
-	if !source.is_empty() {
-		out.push_str(&source_pane(source, &a.queries, index, &tokens));
-	}
-	out
+		.map(|(i, model)| {
+			let meta = match &model.analysis {
+				Some(a) => format!(
+					"{} \u{00b7} {} session{} \u{00b7} {} ms",
+					a.attacker,
+					a.sessions,
+					plural(a.sessions as usize),
+					a.elapsed_ms
+				),
+				None => String::new(),
+			};
+			Ctx::new()
+				.text("class", if attacked(model) { "fail" } else { "pass" })
+				.num("index", i)
+				.text("file", model.file.as_str())
+				.text("failing", if attacked(model) { "yes" } else { "no" })
+				.flag("failed", model.analysis.is_none())
+				.list(
+					"code",
+					model
+						.analysis
+						.as_ref()
+						.map(|a| code_pairs(&a.code))
+						.unwrap_or_default(),
+				)
+				.text("meta", meta)
+		})
+		.collect();
+	vec![
+		Ctx::new()
+			.text(
+				"tally_class",
+				if hit > 0 || broken > 0 {
+					"fail"
+				} else {
+					"pass"
+				},
+			)
+			.text("tally", parts.join(" "))
+			.list("rows", rows),
+	]
 }
 
-fn attacked_names(a: &Analysis) -> HashSet<String> {
-	let mut out = HashSet::new();
-	for q in &a.queries {
+fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
+	let hits = model
+		.analysis
+		.as_ref()
+		.map(attacked_values)
+		.unwrap_or_default();
+	let mut ctx = Ctx::new()
+		.num("index", index)
+		.text("failing", if attacked(model) { "yes" } else { "no" })
+		.text("file", model.file.as_str())
+		.flag("analysed", model.analysis.is_some())
+		.list(
+			"error",
+			model
+				.error
+				.iter()
+				.map(|e| Ctx::new().text("text", e.as_str()))
+				.collect(),
+		)
+		.list("diagram", protocol_diagram(model, &hits, index));
+	let (pane, marked) = source_pane(model, index);
+	ctx = ctx.list("source", pane);
+	ctx = match &model.analysis {
+		Some(a) => ctx
+			.text("attacker", a.attacker.as_str())
+			.text("attacker_class", a.attacker.as_str())
+			.num("sessions", a.sessions)
+			.text("plural", plural(a.sessions as usize))
+			.num("elapsed", a.elapsed_ms)
+			.list("code", code_pairs(&a.code))
+			.list("verdicts", vec![verdicts_ctx(a, index, &marked)])
+			.list("traces", traces(a, model, index, &marked))
+			.list("scope", vec![scope_ctx(a)]),
+		None => ctx
+			.list("code", Vec::new())
+			.list("verdicts", Vec::new())
+			.list("traces", Vec::new())
+			.list("scope", Vec::new()),
+	};
+	ctx
+}
+
+fn attacked_values(a: &Analysis) -> HashMap<String, Vec<usize>> {
+	let mut out: HashMap<String, Vec<usize>> = HashMap::new();
+	for (qi, q) in a.queries.iter().enumerate() {
 		for s in &q.steps {
 			let replay = s.kind == "replay";
 			if !replay && s.kind != "mutations" {
 				continue;
 			}
 			for v in &s.values {
-				if replay || v.was != v.installed {
-					out.insert(base_name(&v.name).to_string());
+				if !replay && v.was == v.installed {
+					continue;
+				}
+				let queries = out.entry(copy_base_name(&v.name).to_string()).or_default();
+				if !queries.contains(&qi) {
+					queries.push(qi);
 				}
 			}
 		}
@@ -175,31 +225,31 @@ fn attacked_names(a: &Analysis) -> HashSet<String> {
 	out
 }
 
-fn verdicts_section(a: &Analysis, index: usize) -> String {
+fn has_trace(q: &QueryReport) -> bool {
+	q.resolved && !q.steps.is_empty()
+}
+
+fn verdicts_ctx(a: &Analysis, index: usize, marked: &[usize]) -> Ctx {
 	let total = a.queries.len();
-	let (tally_class, tally) = if a.attacks == 0 {
+	let (class, tally) = if a.attacks == 0 {
 		("pass", format!("All {total} queries pass."))
 	} else {
 		("fail", format!("{} of {total} queries failed.", a.attacks))
 	};
-	let mut rows = String::new();
-	for (qi, q) in a.queries.iter().enumerate() {
-		rows.push_str(&verdict_row(q, index, qi));
-		rows.push('\n');
-	}
-	fill(
-		asset(VERDICTS),
-		&[
-			("tally_class", tally_class),
-			("tally", &tally),
-			("rows", rows.trim_end()),
-			("assumptions", &assumptions_callout(a)),
-			("scenarios", &scenarios_callout(a)),
-		],
-	)
+	let rows = a
+		.queries
+		.iter()
+		.enumerate()
+		.map(|(qi, q)| verdict_ctx(q, index, qi, marked.contains(&qi)))
+		.collect();
+	Ctx::new()
+		.text("tally_class", class)
+		.text("tally", tally)
+		.list("rows", rows)
+		.list("callouts", callouts(a))
 }
 
-fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> String {
+fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: bool) -> Ctx {
 	let (class, mark, ruling) = if q.resolved {
 		("verdictFail", "\u{00d7}", "Contradiction found".to_string())
 	} else {
@@ -209,549 +259,529 @@ fn verdict_row(q: &QueryReport, model_index: usize, query_index: usize) -> Strin
 			format!("Holds ({})", q.envelope.summary),
 		)
 	};
-	let because = if q.resolved && !q.conclusion.is_empty() {
-		fill(asset(BECAUSE), &[("text", &escape(&q.conclusion))])
+	let target = if has_trace(q) {
+		format!("#trace-m{model_index}-q{query_index}")
+	} else if marked {
+		format!("#src-m{model_index}-q{query_index}")
 	} else {
 		String::new()
 	};
-	let mut preconditions = String::new();
-	for p in &q.preconditions {
-		preconditions.push_str(&fill(asset(PRECONDITION), &[("text", &escape(p))]));
-	}
-	fill(
-		asset(VERDICT),
-		&[
-			("class", class),
-			("mark", mark),
-			("model", &model_index.to_string()),
-			("query_index", &query_index.to_string()),
-			("query", &escape(&q.query)),
-			("line", &q.range.line.to_string()),
-			("ruling", &ruling),
-			("because", &because),
-			("preconditions", &preconditions),
-		],
-	)
+	let variants = if q.variants == 0 {
+		String::new()
+	} else {
+		format!("{} session variant{}", q.variants, plural(q.variants))
+	};
+	Ctx::new()
+		.text("class", class)
+		.num("model", model_index)
+		.num("query_index", query_index)
+		.text("mark", mark)
+		.text("kind", q.kind.as_str())
+		.text("target", target)
+		.text("query", q.query.as_str())
+		.num("line", q.range.line)
+		.text("variants", variants)
+		.flag("truncated", !q.envelope.truncations.is_empty())
+		.text("truncations", q.envelope.truncations.join(", "))
+		.text("ruling", ruling)
+		.text(
+			"because",
+			if q.resolved {
+				q.conclusion.clone()
+			} else {
+				String::new()
+			},
+		)
+		.list(
+			"preconditions",
+			q.preconditions
+				.iter()
+				.map(|p| Ctx::new().text("text", p.as_str()))
+				.collect(),
+		)
 }
 
-fn assumptions_callout(a: &Analysis) -> String {
-	if a.assumptions.is_empty() {
-		return String::new();
+fn counted(count: usize, items: Vec<Ctx>) -> Vec<Ctx> {
+	if items.is_empty() {
+		return Vec::new();
 	}
-	let mut items = String::new();
-	for assumption in &a.assumptions {
-		let onset = if assumption.from_phase > 0 {
-			format!(" (from phase {})", assumption.from_phase)
-		} else {
-			String::new()
-		};
-		items.push_str(&fill(
-			asset(ASSUMPTION_ITEM),
-			&[
-				("term", &escape(&assumption.term)),
-				("onset", &escape(&onset)),
-			],
-		));
-		items.push('\n');
-	}
-	fill(
-		asset(ASSUMPTIONS),
-		&[
-			("count", &a.assumptions.len().to_string()),
-			("plural", if a.assumptions.len() == 1 { "" } else { "s" }),
-			("items", items.trim_end()),
-		],
-	)
+	vec![
+		Ctx::new()
+			.num("count", count)
+			.text("plural", plural(count))
+			.list("items", items),
+	]
 }
 
-fn scenarios_callout(a: &Analysis) -> String {
-	if a.scenarios.is_empty() {
-		return String::new();
+fn listed(items: Vec<Ctx>) -> Vec<Ctx> {
+	if items.is_empty() {
+		return Vec::new();
 	}
-	let mut items = String::new();
-	for scenario in &a.scenarios {
-		let bindings: Vec<String> = scenario
-			.bindings
-			.iter()
-			.map(|b| format!("{} = {}", b.target, b.value))
-			.collect();
-		let rendered = format!("{}[{}]", scenario.principal, bindings.join(", "));
-		items.push_str(&fill(
-			asset(SCENARIO_ITEM),
-			&[
-				("scenario", &escape(&rendered)),
-				(
+	vec![Ctx::new().list("items", items)]
+}
+
+fn callouts(a: &Analysis) -> Vec<Ctx> {
+	let assumptions = a
+		.assumptions
+		.iter()
+		.map(|assumption| {
+			let onset = if assumption.from_phase > 0 {
+				format!(" (from phase {})", assumption.from_phase)
+			} else {
+				String::new()
+			};
+			Ctx::new()
+				.text("term", assumption.term.as_str())
+				.text("onset", onset)
+		})
+		.collect::<Vec<Ctx>>();
+	let scenarios = a
+		.scenarios
+		.iter()
+		.map(|scenario| {
+			let bindings: Vec<String> = scenario
+				.bindings
+				.iter()
+				.map(|b| format!("{} = {}", b.target, b.value))
+				.collect();
+			Ctx::new()
+				.text(
+					"scenario",
+					format!("{}[{}]", scenario.principal, bindings.join(", ")),
+				)
+				.text(
 					"peer_class",
 					if scenario.honest {
 						"peerHonest"
 					} else {
 						"peerCorrupt"
 					},
-				),
-				(
+				)
+				.text(
 					"peer",
 					if scenario.honest {
 						"honest peer"
 					} else {
 						"corrupt peer"
 					},
-				),
-			],
+				)
+		})
+		.collect::<Vec<Ctx>>();
+	let lines = |texts: &[String]| -> Vec<Ctx> {
+		texts
+			.iter()
+			.map(|t| Ctx::new().text("text", t.as_str()))
+			.collect()
+	};
+	let assumption_count = assumptions.len();
+	let scenario_count = scenarios.len();
+	if assumptions.is_empty()
+		&& scenarios.is_empty()
+		&& a.provenance.is_empty()
+		&& a.notes.is_empty()
+	{
+		return Vec::new();
+	}
+	vec![
+		Ctx::new()
+			.list("assumptions", counted(assumption_count, assumptions))
+			.list("scenarios", counted(scenario_count, scenarios))
+			.list("provenance", listed(lines(&a.provenance)))
+			.list("notes", listed(lines(&a.notes))),
+	]
+}
+
+fn scope_ctx(a: &Analysis) -> Ctx {
+	let reasons: Vec<&str> = {
+		let mut seen: Vec<&str> = Vec::new();
+		for q in &a.queries {
+			for t in &q.envelope.truncations {
+				if !seen.contains(&t.as_str()) {
+					seen.push(t);
+				}
+			}
+		}
+		seen
+	};
+	let mut text = format!(
+		"Every verdict above was reached against {} {} attacker, with each principal running {} \
+		 concurrent session{}, over exactly the model as written. An attack is a witness and \
+		 stands on its own. A query reported as holding says only that this search found no \
+		 attack at those parameters: the search space this engine defines was explored, which is \
+		 never the space of all attacks.",
+		article(&a.attacker),
+		a.attacker,
+		a.sessions,
+		plural(a.sessions as usize)
+	);
+	if !reasons.is_empty() {
+		text.push_str(&format!(
+			" Some searches in this run stopped short even of that ({}), so their holds cover \
+			 less still.",
+			reasons.join(", ")
 		));
-		items.push('\n');
 	}
-	fill(
-		asset(SCENARIOS),
-		&[
-			("count", &a.scenarios.len().to_string()),
-			("plural", if a.scenarios.len() == 1 { "" } else { "s" }),
-			("items", items.trim_end()),
-		],
-	)
+	Ctx::new().text("text", text)
 }
 
-fn trace_section(q: &QueryReport, svgid: &str) -> String {
-	let mut steps = String::new();
-	for (i, s) in q.steps.iter().enumerate() {
-		let n = (i + 1).to_string();
-		let structured = s.kind == "mutations"
-			&& !s.values.is_empty()
-			&& s.sender.is_some()
-			&& s.recipient.is_some();
-		let rendered = if structured {
-			fill(
-				asset(TRACE_STEP_WIRE),
-				&[
-					("n", &n),
-					("kind", &escape(&s.kind)),
-					("sender", &escape(s.sender.as_deref().unwrap_or(""))),
-					("recipient", &escape(s.recipient.as_deref().unwrap_or(""))),
-					("vals", &trace_values(q, i)),
-				],
-			)
-		} else {
-			fill(
-				asset(TRACE_STEP),
-				&[
-					("n", &n),
-					("kind", &escape(&s.kind)),
-					("text", &escape(&s.text)),
-				],
-			)
-		};
-		steps.push_str(&rendered);
-		steps.push('\n');
-	}
-	fill(
-		asset(TRACE),
-		&[
-			("query", &escape(&q.query)),
-			("diagram", &attack_svg(q, svgid)),
-			("steps", steps.trim_end()),
-		],
-	)
+enum Group<'a> {
+	One(usize, &'a ReportStep),
+	Run(usize, usize, Vec<(usize, &'a ReportStep)>),
 }
 
-fn trace_values(q: &QueryReport, step: usize) -> String {
-	let mut out = String::new();
-	for v in &q.steps[step].values {
-		let relayed = v.was.is_some() && v.was == v.installed;
-		if relayed {
-			out.push_str(&fill(
-				asset(TRACE_VALUE_RELAY),
-				&[("name", &escape(&v.name))],
-			));
+impl Group<'_> {
+	fn step(&self) -> String {
+		match self {
+			Group::One(n, _) => n.to_string(),
+			Group::Run(from, to, _) => {
+				if from == to {
+					from.to_string()
+				} else {
+					format!("{from}-{to}")
+				}
+			}
+		}
+	}
+}
+
+fn staged(q: &QueryReport) -> Vec<Group<'_>> {
+	const ACTED: [&str; 5] = ["mutations", "replay", "received", "gate", "bypass"];
+	let mut out: Vec<Group> = Vec::new();
+	for (i, step) in q.steps.iter().enumerate() {
+		let n = i + 1;
+		if ACTED.contains(&step.kind.as_str()) {
+			out.push(Group::One(n, step));
 			continue;
 		}
-		let was = match &v.was {
-			Some(w) => fill(asset(TRACE_VALUE_WAS), &[("was", &escape(w))]),
-			None => String::new(),
-		};
-		out.push_str(&fill(
-			asset(TRACE_VALUE),
-			&[
-				("name", &escape(&v.name)),
-				("installed", &escape(v.installed.as_deref().unwrap_or(""))),
-				("was", &was),
-			],
-		));
+		match out.last_mut() {
+			Some(Group::Run(_, to, held)) => {
+				*to = n;
+				held.push((n, step));
+			}
+			_ => out.push(Group::Run(n, n, vec![(n, step)])),
+		}
 	}
 	out
 }
 
-fn attack_svg(q: &QueryReport, svgid: &str) -> String {
-	let mut lanes: Vec<String> = Vec::new();
-	for s in &q.steps {
-		for name in [&s.sender, &s.recipient, &s.principal]
-			.into_iter()
-			.flatten()
-		{
-			if !lanes.iter().any(|l| l == name) {
-				lanes.push(name.clone());
-			}
-		}
-	}
-	if lanes.is_empty() {
-		return String::new();
-	}
-	lanes.insert(1.min(lanes.len()), ATTACKER.to_string());
-	let width = lanes.len() * COL_WIDTH;
-	let center =
-		|name: &str| lanes.iter().position(|l| l == name).unwrap_or(0) * COL_WIDTH + COL_WIDTH / 2;
-	let attacker_x = center(ATTACKER);
-	let arrow = format!("{svgid}-arrow");
-	let arrow_b = format!("{svgid}-arrowB");
+fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> Vec<Ctx> {
+	a.queries
+		.iter()
+		.enumerate()
+		.filter(|(_, q)| has_trace(q))
+		.map(|(qi, q)| {
+			let back = if marked.contains(&qi) {
+				format!("#src-m{index}-q{qi}")
+			} else {
+				format!("#verdict-m{index}-q{qi}")
+			};
+			Ctx::new()
+				.num("model", index)
+				.num("query_index", qi)
+				.text("back", back)
+				.text("query", q.query.as_str())
+				.list("diagram", attack_diagram(q, model, index, qi))
+				.list("steps", trace_steps(q))
+		})
+		.collect()
+}
 
-	let mut rows: Vec<String> = Vec::new();
-	let mut run: Option<(usize, usize)> = None;
-	let flush = |run: &mut Option<(usize, usize)>, rows: &mut Vec<String>| {
-		let Some((from, to)) = run.take() else {
-			return;
-		};
-		let y = TOP + rows.len() * ROW_HEIGHT;
-		let label = if from == to {
-			format!("computes (step {from})")
-		} else {
-			format!("computes (steps {from}\u{2013}{to})")
-		};
-		let n = if from == to {
-			from.to_string()
-		} else {
-			format!("{from}-{to}")
-		};
-		rows.push(fill(
-			asset(ATTACK_RUN),
-			&[
-				("n", &n),
-				("x", &(attacker_x.saturating_sub(80)).to_string()),
-				("y", &(y.saturating_sub(13)).to_string()),
-				("w", "160"),
-				("h", "22"),
-				("tx", &attacker_x.to_string()),
-				("ty", &(y + 2).to_string()),
-				("label", &label),
-			],
-		));
+fn trace_steps(q: &QueryReport) -> Vec<Ctx> {
+	staged(q)
+		.iter()
+		.map(|group| match group {
+			Group::One(n, step) => step_ctx(&n.to_string(), step),
+			Group::Run(_, _, held) if held.len() == 1 => step_ctx(&group.step(), held[0].1),
+			Group::Run(_, _, held) => Ctx::new()
+				.flag("folded", true)
+				.text("step", group.step())
+				.text("label", format!("{} derivation steps", held.len()))
+				.list(
+					"steps",
+					held.iter()
+						.map(|(n, step)| step_ctx(&n.to_string(), step))
+						.collect(),
+				),
+		})
+		.collect()
+}
+
+fn step_ctx(step: &str, s: &ReportStep) -> Ctx {
+	let wire = s.kind == "mutations"
+		&& !s.values.is_empty()
+		&& s.sender.is_some()
+		&& s.recipient.is_some();
+	Ctx::new()
+		.flag("folded", false)
+		.text("step", step)
+		.text("kind", s.kind.as_str())
+		.flag("wire", wire)
+		.text("sender", s.sender.clone().unwrap_or_default())
+		.text("recipient", s.recipient.clone().unwrap_or_default())
+		.text("text", if wire { String::new() } else { s.text.clone() })
+		.list("values", if wire { trace_values(s) } else { Vec::new() })
+}
+
+fn trace_values(s: &ReportStep) -> Vec<Ctx> {
+	s.values
+		.iter()
+		.map(|v| {
+			let name = if v.guarded {
+				format!("[{}]", v.name)
+			} else {
+				v.name.clone()
+			};
+			let relay = v.was.is_some() && v.was == v.installed;
+			let ctx = Ctx::new()
+				.flag("relay", relay)
+				.text("gclass", if v.guarded { " tvGuard" } else { "" })
+				.text("name", name);
+			if relay {
+				return ctx;
+			}
+			ctx.text("installed", v.installed.clone().unwrap_or_default())
+				.text("was", v.was.clone().unwrap_or_default())
+		})
+		.collect()
+}
+
+struct Hop<'a> {
+	hop: usize,
+	phase: i32,
+	sender: &'a str,
+	recipient: &'a str,
+	values: Vec<&'a str>,
+}
+
+fn hops(model: &ModelReport) -> Vec<Hop<'_>> {
+	model
+		.diagram
+		.iter()
+		.filter_map(|row| match row {
+			DiagramRow::Message {
+				hop,
+				phase,
+				sender,
+				recipient,
+				values,
+			} => Some(Hop {
+				hop: *hop,
+				phase: *phase,
+				sender,
+				recipient,
+				values: values.iter().map(|v| v.name.as_str()).collect(),
+			}),
+			_ => None,
+		})
+		.collect()
+}
+
+fn matches(hop: &Hop, sender: &str, recipient: &str, names: &[String]) -> bool {
+	if copy_base_name(sender) != hop.sender || copy_base_name(recipient) != hop.recipient {
+		return false;
+	}
+	names
+		.iter()
+		.any(|n| hop.values.contains(&copy_base_name(n)))
+}
+
+fn protocol_diagram(
+	model: &ModelReport,
+	hits: &HashMap<String, Vec<usize>>,
+	index: usize,
+) -> Vec<Ctx> {
+	let rows: Vec<Row> = model
+		.diagram
+		.iter()
+		.map(|row| match row {
+			DiagramRow::Message {
+				hop,
+				sender,
+				recipient,
+				values,
+				..
+			} => Row::Wire {
+				num: Some(*hop),
+				hop: None,
+				step: None,
+				from: sender.clone(),
+				to: recipient.clone(),
+				via: None,
+				forged: false,
+				replay: false,
+				values: values
+					.iter()
+					.map(|v| {
+						let queries = hits.get(copy_base_name(&v.name));
+						Value {
+							name: v.name.clone(),
+							guarded: v.guarded,
+							hit: queries.is_some(),
+							queries: queries.cloned().unwrap_or_default(),
+						}
+					})
+					.collect(),
+			},
+			DiagramRow::Phase { number } => Row::Phase { number: *number },
+			DiagramRow::Leak { principal, values } => Row::Leak {
+				principal: principal.clone(),
+				text: format!("{principal} leaks {}", values.join(", ")),
+			},
+		})
+		.collect();
+	let caption = if hits.is_empty() {
+		"Protocol sequence. Guarded values are written in brackets.".to_string()
+	} else {
+		"Protocol sequence. Guarded values are written in brackets; a dagger marks every value \
+		 some attack below substitutes or replays."
+			.to_string()
 	};
-	for (i, s) in q.steps.iter().enumerate() {
-		let n = i + 1;
-		let names: Vec<String> = s.values.iter().map(|v| v.name.clone()).collect();
-		let label = names.join(", ");
-		match (s.kind.as_str(), &s.sender, &s.recipient, &s.principal) {
-			("mutations", Some(sender), Some(recipient), _) => {
-				flush(&mut run, &mut rows);
-				let y = TOP + rows.len() * ROW_HEIGHT;
-				let forged = s.values.iter().any(|v| v.was != v.installed);
-				let (x1, x2) = (center(sender), center(recipient));
-				let mut content = fill(
-					asset(ATTACK_SEG),
-					&[
-						("x1", &x1.to_string()),
-						("x2", &attacker_x.to_string()),
-						("y", &y.to_string()),
-						("class", "wireMuted"),
-						("marker", &arrow),
-					],
-				);
-				content.push_str(&fill(
-					asset(ATTACK_SEG),
-					&[
-						("x1", &attacker_x.to_string()),
-						("x2", &x2.to_string()),
-						("y", &y.to_string()),
-						("class", if forged { "wireForged" } else { "wireMuted" }),
-						("marker", if forged { &arrow_b } else { &arrow }),
-					],
-				));
-				rows.push(fill(
-					asset(ATTACK_ROW),
-					&[
-						("n", &n.to_string()),
-						("numx", &NUM_X.to_string()),
-						("label_y", &(y - 7).to_string()),
-						("content", &content),
-						("mid", &((attacker_x + x2) / 2).to_string()),
-						("lclass", if forged { "forged" } else { "" }),
-						("label", &escape(&label)),
-					],
-				));
-			}
-			("replay", _, Some(recipient), _) => {
-				flush(&mut run, &mut rows);
-				let y = TOP + rows.len() * ROW_HEIGHT;
-				let x2 = center(recipient);
-				let content = fill(
-					asset(ATTACK_SEG),
-					&[
-						("x1", &attacker_x.to_string()),
-						("x2", &x2.to_string()),
-						("y", &y.to_string()),
-						("class", "wireReplay"),
-						("marker", &arrow_b),
-					],
-				);
-				rows.push(fill(
-					asset(ATTACK_ROW),
-					&[
-						("n", &n.to_string()),
-						("numx", &NUM_X.to_string()),
-						("label_y", &(y - 7).to_string()),
-						("content", &content),
-						("mid", &((attacker_x + x2) / 2).to_string()),
-						("lclass", "forged"),
-						("label", &escape(&format!("{label} (replayed)"))),
-					],
-				));
-			}
-			("received", Some(sender), Some(recipient), _) => {
-				flush(&mut run, &mut rows);
-				let y = TOP + rows.len() * ROW_HEIGHT;
-				let (x1, x2) = (center(sender), center(recipient));
-				let content = fill(
-					asset(ATTACK_SEG),
-					&[
-						("x1", &x1.to_string()),
-						("x2", &x2.to_string()),
-						("y", &y.to_string()),
-						("class", "wire"),
-						("marker", &arrow),
-					],
-				);
-				rows.push(fill(
-					asset(ATTACK_ROW),
-					&[
-						("n", &n.to_string()),
-						("numx", &NUM_X.to_string()),
-						("label_y", &(y - 7).to_string()),
-						("content", &content),
-						("mid", &((x1 + x2) / 2).to_string()),
-						("lclass", ""),
-						("label", &escape(&label)),
-					],
-				));
-			}
-			("gate", _, _, Some(principal)) | ("bypass", _, _, Some(principal)) => {
-				flush(&mut run, &mut rows);
-				let y = TOP + rows.len() * ROW_HEIGHT;
-				let x = center(principal);
-				let bypass = s.kind == "bypass";
-				rows.push(fill(
-					asset(ATTACK_NODE),
-					&[
-						("n", &n.to_string()),
-						("numx", &NUM_X.to_string()),
-						("label_y", &(y + 4).to_string()),
-						("x", &x.to_string()),
-						("y", &y.to_string()),
-						("class", if bypass { "bypassMark" } else { "gateMark" }),
-						("tx", &(x + 12).to_string()),
-						("lclass", if bypass { "breach" } else { "" }),
-						(
-							"label",
-							if bypass {
-								"check defeated"
-							} else {
-								"check passes"
+	let figure = diagram::Figure {
+		id: format!("m{index}p"),
+		caption,
+		described: true,
+	};
+	diagram::draw(figure, Lanes::of(&rows), &rows)
+		.into_iter()
+		.collect()
+}
+
+fn attack_diagram(
+	q: &QueryReport,
+	model: &ModelReport,
+	index: usize,
+	query_index: usize,
+) -> Vec<Ctx> {
+	let wires = hops(model);
+	let leaks: Vec<(&str, Vec<&str>)> = model
+		.diagram
+		.iter()
+		.filter_map(|row| match row {
+			DiagramRow::Leak { principal, values } => Some((
+				principal.as_str(),
+				values.iter().map(String::as_str).collect(),
+			)),
+			_ => None,
+		})
+		.collect();
+	let mut rows: Vec<Row> = Vec::new();
+	let mut cursor = 0usize;
+	let mut phase = 0i32;
+	let mut drawn: Vec<&str> = Vec::new();
+	for group in staged(q) {
+		let (n, step) = match &group {
+			Group::One(n, step) => (*n, *step),
+			Group::Run(_, _, held) => {
+				rows.push(Row::Run {
+					step: group.step(),
+					label: match held.len() {
+						1 => format!("computes (step {})", group.step()),
+						_ => format!("computes (steps {})", group.step().replace('-', "\u{2013}")),
+					},
+				});
+				for (_, held_step) in held {
+					for (principal, values) in &leaks {
+						if drawn.contains(principal) {
+							continue;
+						}
+						if !values.iter().any(|v| held_step.text.contains(v)) {
+							continue;
+						}
+						drawn.push(principal);
+						rows.insert(
+							rows.len() - 1,
+							Row::Leak {
+								principal: principal.to_string(),
+								text: format!("{principal} leaks {}", values.join(", ")),
 							},
-						),
-					],
-				));
-			}
-			_ => {
-				run = match run {
-					Some((from, _)) => Some((from, n)),
-					None => Some((n, n)),
-				};
-			}
-		}
-	}
-	flush(&mut run, &mut rows);
-	if rows.is_empty() {
-		return String::new();
-	}
-	let height = TOP + rows.len() * ROW_HEIGHT + 16;
-	let mut content = String::new();
-	for lane in &lanes {
-		let aclass = if lane == ATTACKER { " attacker" } else { "" };
-		content.push_str(&fill(
-			asset(DIAGRAM_ACTOR),
-			&[
-				("x", &center(lane).to_string()),
-				("bottom", &(height - 8).to_string()),
-				("name", &escape(lane)),
-				("aclass", aclass),
-			],
-		));
-		content.push('\n');
-	}
-	for row in rows {
-		content.push_str(&row);
-		content.push('\n');
-	}
-	fill(
-		asset(ATTACK_DIAGRAM),
-		&[
-			("svgid", svgid),
-			("width", &width.to_string()),
-			("height", &height.to_string()),
-			("content", content.trim_end()),
-		],
-	)
-}
-
-enum ProtoRow<'a> {
-	Wire(&'a Message),
-	Phase(i32),
-	Leak(String, String),
-}
-
-fn diagram_svg(m: &Model, attacked: &HashSet<String>, svgid: &str) -> String {
-	let mut principals: Vec<String> = Vec::new();
-	for block in &m.blocks {
-		if let Block::Message(msg) = block {
-			for name in [msg.sender_name.as_ref(), msg.recipient_name.as_ref()] {
-				if !principals.iter().any(|p| p == name) {
-					principals.push(name.to_string());
-				}
-			}
-		}
-	}
-	if principals.is_empty() {
-		return String::new();
-	}
-	let mut rows: Vec<ProtoRow> = Vec::new();
-	for block in &m.blocks {
-		match block {
-			Block::Message(msg) => rows.push(ProtoRow::Wire(msg)),
-			Block::Phase(phase) => rows.push(ProtoRow::Phase(phase.number)),
-			Block::Principal(p) => {
-				if !principals.iter().any(|name| name == &p.name) {
-					continue;
-				}
-				for expr in &p.expressions {
-					if expr.kind != Declaration::Leaks {
-						continue;
+						);
 					}
-					let names: Vec<&str> = expr.constants.iter().map(|c| c.name.as_ref()).collect();
-					rows.push(ProtoRow::Leak(
-						p.name.clone(),
-						format!("{} leaks {}", p.name, names.join(", ")),
-					));
 				}
+				continue;
+			}
+		};
+		let names: Vec<String> = step.values.iter().map(|v| v.name.clone()).collect();
+		let (sender, recipient) = (step.sender.as_deref(), step.recipient.as_deref());
+		let found = match (sender, recipient) {
+			(Some(sender), Some(recipient)) => wires
+				.iter()
+				.skip(cursor)
+				.chain(wires.iter().take(cursor))
+				.find(|hop| matches(hop, sender, recipient, &names)),
+			_ => None,
+		};
+		if let Some(hop) = found {
+			cursor = hop.hop;
+			if hop.phase != phase {
+				phase = hop.phase;
+				rows.push(Row::Phase { number: phase });
 			}
 		}
+		let hop = found.map(|found| found.hop);
+		match step.kind.as_str() {
+			"mutations" | "replay" | "received" => {
+				let Some(recipient) = recipient else { continue };
+				let forged = step.values.iter().any(|v| v.was != v.installed);
+				let replay = step.kind == "replay";
+				let relayed = step.kind != "received";
+				rows.push(Row::Wire {
+					num: Some(n),
+					hop,
+					step: Some(n.to_string()),
+					from: sender.unwrap_or(ATTACKER).to_string(),
+					to: recipient.to_string(),
+					via: relayed.then(|| ATTACKER.to_string()),
+					forged: forged || replay,
+					replay,
+					values: step
+						.values
+						.iter()
+						.map(|v| Value {
+							name: v.name.clone(),
+							guarded: v.guarded,
+							hit: false,
+							queries: Vec::new(),
+						})
+						.collect(),
+				});
+			}
+			"gate" | "bypass" => {
+				let Some(principal) = step.principal.as_deref() else {
+					continue;
+				};
+				rows.push(Row::Mark {
+					num: Some(n),
+					step: Some(n.to_string()),
+					principal: principal.to_string(),
+					bypass: step.kind == "bypass",
+				});
+			}
+			_ => {}
+		}
 	}
-	let width = principals.len() * COL_WIDTH;
-	let height = TOP + rows.len() * ROW_HEIGHT + 16;
-	let center = |name: &str| {
-		principals.iter().position(|p| p == name).unwrap_or(0) * COL_WIDTH + COL_WIDTH / 2
+	let mut lanes = Lanes::of(&rows);
+	if lanes.is_empty() {
+		return Vec::new();
+	}
+	lanes.insert(1, ATTACKER);
+	let figure = diagram::Figure {
+		id: format!("m{index}t{query_index}"),
+		caption: String::new(),
+		described: false,
 	};
-	let arrow = format!("{svgid}-arrow");
-	let mut content = String::new();
-	for p in &principals {
-		content.push_str(&fill(
-			asset(DIAGRAM_ACTOR),
-			&[
-				("x", &center(p).to_string()),
-				("bottom", &(height - 8).to_string()),
-				("name", &escape(p)),
-				("aclass", ""),
-			],
-		));
-		content.push('\n');
-	}
-	let mut y = TOP;
-	let mut hop = 0usize;
-	for row in rows {
-		match row {
-			ProtoRow::Wire(msg) => {
-				hop += 1;
-				let x1 = center(&msg.sender_name);
-				let x2 = center(&msg.recipient_name);
-				content.push_str(&fill(
-					asset(DIAGRAM_WIRE),
-					&[
-						("num", &hop.to_string()),
-						("numx", &NUM_X.to_string()),
-						("x1", &x1.to_string()),
-						("x2", &x2.to_string()),
-						("y", &y.to_string()),
-						("mid", &((x1 + x2) / 2).to_string()),
-						("label_y", &(y - 7).to_string()),
-						("marker", &arrow),
-						("label", &wire_label(&msg.constants, attacked)),
-					],
-				));
-			}
-			ProtoRow::Phase(number) => {
-				content.push_str(&fill(
-					asset(DIAGRAM_PHASE),
-					&[
-						("y", &y.to_string()),
-						("width", &width.to_string()),
-						("label_y", &(y - 7).to_string()),
-						("number", &number.to_string()),
-					],
-				));
-			}
-			ProtoRow::Leak(principal, text) => {
-				content.push_str(&fill(
-					asset(DIAGRAM_LEAK),
-					&[
-						("x", &center(&principal).to_string()),
-						("y", &(y - 2).to_string()),
-						("text", &escape(&text)),
-					],
-				));
-			}
-		}
-		content.push('\n');
-		y += ROW_HEIGHT;
-	}
-	fill(
-		asset(DIAGRAM),
-		&[
-			("svgid", svgid),
-			("width", &width.to_string()),
-			("height", &height.to_string()),
-			("content", content.trim_end()),
-		],
-	)
+	diagram::draw(figure, lanes, &rows).into_iter().collect()
 }
 
-fn wire_label(constants: &[Constant], attacked: &HashSet<String>) -> String {
-	let mut out = String::new();
-	for (i, c) in constants.iter().enumerate() {
-		if i > 0 {
-			out.push_str(asset(DIAGRAM_LABEL_SEP));
-		}
-		let hit = attacked.contains(base_name(&c.name));
-		let vclass = if hit {
-			" hit"
-		} else if c.guard {
-			" guarded"
-		} else {
-			""
-		};
-		let text = if c.guard {
-			format!("[{}]", c.name)
-		} else {
-			c.name.to_string()
-		};
-		out.push_str(&fill(
-			asset(DIAGRAM_LABEL_VALUE),
-			&[("vclass", vclass), ("text", &escape(&text))],
-		));
+fn source_pane(model: &ModelReport, index: usize) -> (Vec<Ctx>, Vec<usize>) {
+	if model.source.is_empty() {
+		return (Vec::new(), Vec::new());
 	}
-	out
-}
-
-fn source_pane(
-	source: &str,
-	queries: &[QueryReport],
-	model_index: usize,
-	tokens: &[Token],
-) -> String {
+	let source = &model.source;
+	let queries = model
+		.analysis
+		.as_ref()
+		.map(|a| a.queries.as_slice())
+		.unwrap_or(&[]);
 	let mut marks: Vec<(usize, usize, bool, usize)> = queries
 		.iter()
 		.enumerate()
@@ -764,30 +794,37 @@ fn source_pane(
 		.map(|(i, q)| (q.range.start, q.range.end, q.resolved, i))
 		.collect();
 	marks.sort_by_key(|&(start, ..)| start);
-	let mut body = String::new();
+	let mut chunks: Vec<Ctx> = Vec::new();
+	let mut marked: Vec<usize> = Vec::new();
 	let mut at = 0usize;
 	for (start, end, resolved, i) in marks {
 		if start < at {
 			continue;
 		}
-		body.push_str(&highlight(source, at, start, tokens));
-		body.push_str(&fill(
-			asset(SOURCE_MARK),
-			&[
-				("model", &model_index.to_string()),
-				("query_index", &i.to_string()),
-				("class", if resolved { "fail" } else { "pass" }),
-				("text", &escape(&source[start..end])),
-			],
-		));
+		marked.push(i);
+		highlight(source, at, start, &model.tokens, &mut chunks);
+		chunks.push(
+			chunk("mark")
+				.num("model", index)
+				.num("query_index", i)
+				.text("class", if resolved { "fail" } else { "pass" })
+				.text("text", &source[start..end]),
+		);
 		at = end;
 	}
-	body.push_str(&highlight(source, at, source.len(), tokens));
-	fill(asset(SOURCE), &[("body", &body)])
+	highlight(source, at, source.len(), &model.tokens, &mut chunks);
+	(vec![Ctx::new().list("chunks", chunks)], marked)
 }
 
-fn highlight(source: &str, from: usize, to: usize, tokens: &[Token]) -> String {
-	let mut out = String::new();
+fn chunk(kind: &'static str) -> Ctx {
+	let mut ctx = Ctx::new();
+	for name in ["mark", "token", "plain"] {
+		ctx = ctx.flag(name, name == kind);
+	}
+	ctx
+}
+
+fn highlight(source: &str, from: usize, to: usize, tokens: &[Token], out: &mut Vec<Ctx>) {
 	let mut at = from;
 	for t in tokens {
 		if t.span.start < at
@@ -801,18 +838,19 @@ fn highlight(source: &str, from: usize, to: usize, tokens: &[Token]) -> String {
 		let Some(class) = token_class(t.kind) else {
 			continue;
 		};
-		out.push_str(&escape(&source[at..t.span.start]));
-		out.push_str(&fill(
-			asset(SOURCE_TOKEN),
-			&[
-				("class", class),
-				("text", &escape(&source[t.span.start..t.span.end])),
-			],
-		));
+		if at < t.span.start {
+			out.push(chunk("plain").text("text", &source[at..t.span.start]));
+		}
+		out.push(
+			chunk("token")
+				.text("class", class)
+				.text("text", &source[t.span.start..t.span.end]),
+		);
 		at = t.span.end;
 	}
-	out.push_str(&escape(&source[at..to]));
-	out
+	if at < to {
+		out.push(chunk("plain").text("text", &source[at..to]));
+	}
 }
 
 fn token_class(kind: TokenKind) -> Option<&'static str> {
@@ -832,102 +870,57 @@ fn token_class(kind: TokenKind) -> Option<&'static str> {
 	}
 }
 
-fn fill(template: &str, values: &[(&str, &str)]) -> String {
-	let mut out = String::with_capacity(template.len());
-	let mut rest = template;
-	while let Some(start) = rest.find("{{") {
-		out.push_str(&rest[..start]);
-		let after = &rest[start + 2..];
-		let Some(end) = after.find("}}") else {
-			out.push_str(&rest[start..]);
-			return out;
-		};
-		let key = &after[..end];
-		match values.iter().find(|(k, _)| *k == key) {
-			Some((_, value)) => out.push_str(value),
-			None => out.push_str(&rest[start..start + end + 4]),
-		}
-		rest = &after[end + 2..];
-	}
-	out.push_str(rest);
-	out
-}
-
-fn asset(raw: &str) -> &str {
-	let trimmed = raw.trim_start();
-	let body = if let Some(after) = trimmed.strip_prefix("<!--") {
-		after.split_once("-->").map(|(_, tail)| tail)
-	} else if let Some(after) = trimmed.strip_prefix("/*") {
-		after.split_once("*/").map(|(_, tail)| tail)
-	} else {
-		None
-	};
-	body.unwrap_or(raw).trim_ascii()
-}
-
-fn escape(s: &str) -> String {
-	let mut out = String::with_capacity(s.len());
-	for c in s.chars() {
-		match c {
-			'&' => out.push_str("&amp;"),
-			'<' => out.push_str("&lt;"),
-			'>' => out.push_str("&gt;"),
-			'"' => out.push_str("&quot;"),
-			'\'' => out.push_str("&#39;"),
-			_ => out.push(c),
-		}
-	}
-	out
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::report::{Assumption, ReportStep, SourceRange};
+	use crate::report::{
+		Assumption, Binding, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
+	};
 	use crate::types::TraceValue;
 
-	fn empty_analysis() -> Analysis {
-		Analysis {
-			model: "t.vp".to_string(),
+	fn envelope(truncations: Vec<String>) -> EnvelopeReport {
+		let exhausted = truncations.is_empty();
+		EnvelopeReport {
 			sessions: 2,
-			code: "c0".to_string(),
-			attacks: 0,
-			elapsed_ms: 1,
-			assumptions: vec![],
-			scenarios: vec![],
-			queries: vec![],
+			truncations,
+			exhausted,
+			summary: if exhausted {
+				"search exhausted at 2 sessions".to_string()
+			} else {
+				"search truncated: term depth".to_string()
+			},
 		}
 	}
 
-	fn query(resolved: bool, text: &str, conclusion: &str) -> QueryReport {
+	fn query(kind: &str, text: &str, resolved: bool) -> QueryReport {
 		QueryReport {
 			query: text.to_string(),
-			kind: "confidentiality".to_string(),
+			kind: kind.to_string(),
 			resolved,
-			envelope: crate::report::EnvelopeReport {
-				sessions: 2,
-				truncations: vec![],
-				exhausted: true,
-				summary: "search exhausted at 2 sessions".to_string(),
-			},
+			envelope: envelope(vec![]),
 			range: SourceRange {
 				start: 0,
 				end: 0,
 				line: 9,
 				column: 2,
 			},
-			summary: conclusion.to_string(),
-			conclusion: conclusion.to_string(),
-			steps: vec![ReportStep::new(
-				"derive".to_string(),
-				"Attacker constructs PUBKEY(nil) from nil.".to_string(),
-			)],
+			summary: String::new(),
+			conclusion: if resolved {
+				"m1 is obtained by Attacker.".to_string()
+			} else {
+				String::new()
+			},
+			steps: vec![],
 			preconditions: vec![],
 			variants: 0,
 		}
 	}
 
-	fn mutation_step() -> ReportStep {
+	fn derive(text: &str) -> ReportStep {
+		ReportStep::new("derive".to_string(), text.to_string())
+	}
+
+	fn mutation() -> ReportStep {
 		ReportStep {
 			kind: "mutations".to_string(),
 			text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
@@ -943,7 +936,7 @@ mod tests {
 		}
 	}
 
-	fn gate_step() -> ReportStep {
+	fn gate() -> ReportStep {
 		ReportStep {
 			kind: "gate".to_string(),
 			text: "Bob's AEAD_DEC(k, e, ad)? passes.".to_string(),
@@ -954,307 +947,897 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn html_escapes_every_special_character() {
-		assert_eq!(escape("a<b>&\"'z"), "a&lt;b&gt;&amp;&quot;&#39;z");
-		assert_eq!(escape("plain"), "plain");
+	fn analysis(attacker: &str, code: &str, queries: Vec<QueryReport>) -> Analysis {
+		Analysis {
+			model: "t.vp".to_string(),
+			attacker: attacker.to_string(),
+			sessions: 2,
+			code: code.to_string(),
+			attacks: queries.iter().filter(|q| q.resolved).count(),
+			elapsed_ms: 3,
+			assumptions: vec![],
+			scenarios: vec![],
+			notes: vec![],
+			provenance: vec![],
+			queries,
+		}
+	}
+
+	fn wire(hop: usize, sender: &str, recipient: &str, values: &[(&str, bool)]) -> DiagramRow {
+		DiagramRow::Message {
+			hop,
+			phase: 0,
+			sender: sender.to_string(),
+			recipient: recipient.to_string(),
+			values: values
+				.iter()
+				.map(|(name, guarded)| DiagramValue {
+					name: name.to_string(),
+					guarded: *guarded,
+				})
+				.collect(),
+		}
+	}
+
+	fn model(analysis: Option<Analysis>) -> ModelReport {
+		ModelReport {
+			file: "examples/t.vp".to_string(),
+			ok: analysis.is_some(),
+			error: None,
+			analysis,
+			diagram: vec![wire(1, "Alice", "Bob", &[("ga", false)])],
+			source: String::new(),
+			tokens: vec![],
+		}
+	}
+
+	fn page(models: Vec<ModelReport>) -> String {
+		html_report(&Run {
+			version: "1.0.0".to_string(),
+			ok: models.iter().all(|m| m.ok),
+			models,
+		})
+	}
+
+	fn one(analysis: Analysis) -> String {
+		page(vec![model(Some(analysis))])
+	}
+
+	fn ids(html: &str) -> Vec<String> {
+		let mut out = Vec::new();
+		for part in html.split("id=\"").skip(1) {
+			if let Some((id, _)) = part.split_once('"') {
+				out.push(id.to_string());
+			}
+		}
+		out
+	}
+
+	fn anchors(html: &str) -> Vec<String> {
+		let mut out = Vec::new();
+		for part in html.split("href=\"#").skip(1) {
+			if let Some((id, _)) = part.split_once('"') {
+				out.push(id.to_string());
+			}
+		}
+		out
 	}
 
 	#[test]
-	fn assets_strip_their_license_header() {
-		assert!(asset(PAGE).starts_with("<!doctype html>"));
-		assert!(asset(CSS).starts_with(":root"));
-		assert!(asset(JS).starts_with("(function"));
-		assert!(!asset(VERDICT).contains("SPDX"));
+	fn the_report_names_the_attacker_the_verdicts_were_reached_against() {
+		let html = one(analysis(
+			"passive",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(html.contains("passive attacker"));
+		assert!(html.contains("attackerKind passive"));
+		let active = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(active.contains("active attacker"));
 	}
 
 	#[test]
-	fn fill_replaces_only_template_placeholders() {
-		let filled = fill(
-			asset(SOURCE),
-			&[("body", "literal {{body}} and {{style}} stay put")],
-		);
-		assert!(filled.contains("literal {{body}} and {{style}} stay put"));
+	fn every_analysed_model_states_the_scope_of_its_own_result() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(html.contains("Scope of this result"));
+		assert!(html.contains("against an active attacker"));
+		assert!(html.contains("2 concurrent sessions"));
+		for overclaim in ["proved", "proven", "verified correct", "guaranteed"] {
+			assert!(!html.contains(overclaim), "the report claims {overclaim}");
+		}
 	}
 
 	#[test]
-	fn a_page_is_a_complete_standalone_document() {
-		let run = Run {
-			version: "1.2.1".to_string(),
-			ok: true,
-			models: vec![ModelReport {
-				file: "t.vp".to_string(),
-				ok: true,
-				error: None,
-				analysis: Some(empty_analysis()),
-			}],
-		};
-		let html = html_report(&run, &[String::new()]);
+	fn a_passive_run_says_so_in_its_scope_note_rather_than_reading_as_active() {
+		let html = one(analysis(
+			"passive",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(html.contains("against a passive attacker"));
+	}
+
+	#[test]
+	fn the_page_always_carries_the_soundness_disclaimer() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(html.contains("sound but incomplete"));
+		assert!(html.contains("never a proof that none exists"));
+	}
+
+	#[test]
+	fn a_hold_reached_under_a_truncated_search_says_so_on_its_own_row() {
+		let mut q = query("confidentiality", "c? m", false);
+		q.envelope = envelope(vec!["term depth".to_string()]);
+		let html = one(analysis("active", "c0", vec![q]));
+		assert!(html.contains("search truncated: term depth"));
+		assert!(html.contains("class=\"cut\""));
+		assert!(html.contains("stopped short even of that (term depth)"));
+	}
+
+	#[test]
+	fn an_exhausted_hold_carries_no_truncation_badge() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(!html.contains("class=\"cut\""));
+		assert!(html.contains("Holds (search exhausted at 2 sessions)"));
+	}
+
+	#[test]
+	fn a_wide_diagram_scrolls_instead_of_shrinking_below_legibility() {
+		let css = strip_header(CSS);
+		assert!(css.contains(".scroll {"));
+		assert!(css.contains("overflow-x: auto"));
+		let block = css.split(".diagram {").nth(1).unwrap_or("");
+		let block = block.split('}').next().unwrap_or("");
 		assert!(
-			html.starts_with("<!doctype html>"),
-			"{}",
-			&html[..40.min(html.len())]
+			!block.contains("max-width"),
+			"the diagram must scroll, not scale down"
 		);
-		assert!(html.contains("<style>"));
-		assert!(html.contains("t.vp"));
-		assert!(html.contains("Verifpal 1.2.1"));
-		assert!(html.ends_with("</html>\n"));
-		assert_eq!(
-			html.matches("<script>").count(),
-			1,
-			"exactly one inline script"
-		);
-		assert!(!html.contains("<link"), "no external resources");
-		assert!(!html.contains("src="), "no external loads");
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(html.contains("<div class=\"scroll\">"));
 	}
 
 	#[test]
-	fn a_failed_model_renders_its_error_escaped() {
-		let run = Run {
-			version: "1.2.1".to_string(),
-			ok: false,
-			models: vec![ModelReport {
-				file: "broken.vp".to_string(),
-				ok: false,
-				error: Some("parse error: expected `]` near <knows>".to_string()),
-				analysis: None,
+	fn columns_are_sized_to_the_widest_thing_they_have_to_hold() {
+		let narrow = vec![Row::Wire {
+			num: Some(1),
+			hop: None,
+			step: None,
+			from: "A".to_string(),
+			to: "B".to_string(),
+			via: None,
+			forged: false,
+			replay: false,
+			values: vec![Value {
+				name: "x".to_string(),
+				guarded: false,
+				hit: false,
+				queries: vec![],
 			}],
-		};
-		let html = html_report(&run, &[String::new()]);
-		assert!(html.contains("parse error: expected `]` near &lt;knows&gt;"));
-		assert!(!html.contains("near <knows>"));
-		assert!(html.contains("analysis failed"));
-	}
-
-	#[test]
-	fn verdicts_carry_ruling_conclusion_steps_and_location() {
-		let mut a = empty_analysis();
-		a.queries = vec![
-			query(true, "confidentiality? m", "m is obtained by Attacker."),
-			query(false, "confidentiality? k", ""),
-		];
-		a.attacks = 1;
-		a.code = "c1c0".to_string();
-		let html = analysis_section(&a, "", 0);
-		assert!(html.contains("Contradiction found"));
-		assert!(html.contains("Holds"));
-		assert!(html.contains("m is obtained by Attacker."));
-		assert!(html.contains("Attacker constructs PUBKEY(nil) from nil."));
-		assert!(html.contains("1 of 2 queries failed."));
-		assert!(html.contains("line 9"));
-		assert!(html.contains("verdictFail"));
-		assert!(html.contains("verdictPass"));
-	}
-
-	#[test]
-	fn a_holding_query_gets_no_attack_trace() {
-		let mut a = empty_analysis();
-		a.queries = vec![query(false, "confidentiality? k", "")];
-		let html = analysis_section(&a, "", 0);
-		assert!(!html.contains("Attack trace"));
-		assert!(html.contains("All 1 queries pass."));
-	}
-
-	#[test]
-	fn attack_step_text_is_escaped() {
-		let mut a = empty_analysis();
-		let mut q = query(true, "confidentiality? m", "<script>alert(1)</script>");
-		q.steps[0].text = "<img onerror=x>".to_string();
-		a.queries = vec![q];
-		a.attacks = 1;
-		let html = analysis_section(&a, "", 0);
-		assert!(!html.contains("<script>alert"));
-		assert!(!html.contains("<img onerror"));
-		assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-	}
-
-	#[test]
-	fn declared_assumptions_render_as_a_callout() {
-		let mut a = empty_analysis();
-		a.assumptions = vec![Assumption {
-			term: "HASH[weak](m)".to_string(),
-			capability: "weak".to_string(),
-			from_phase: 2,
 		}];
-		let html = analysis_section(&a, "", 0);
-		assert!(html.contains("weakening assumption"));
-		assert!(html.contains("HASH[weak](m)"));
-		assert!(html.contains("(from phase 2)"));
+		let wide = vec![Row::Wire {
+			num: Some(1),
+			hop: None,
+			step: None,
+			from: "A".to_string(),
+			to: "B".to_string(),
+			via: None,
+			forged: false,
+			replay: false,
+			values: vec![Value {
+				name: "a_very_long_constant_name_indeed_much_longer".to_string(),
+				guarded: false,
+				hit: false,
+				queries: vec![],
+			}],
+		}];
+		let of = |rows: &Vec<Row>| {
+			let ctx = diagram::draw(
+				diagram::Figure {
+					id: "d".to_string(),
+					caption: String::new(),
+					described: false,
+				},
+				Lanes::of(rows),
+				rows,
+			)
+			.unwrap();
+			let html = template::render(&template::DIAGRAM, &ctx);
+			html.split("width=\"")
+				.nth(1)
+				.and_then(|s| s.split('"').next())
+				.and_then(|s| s.parse::<usize>().ok())
+				.unwrap()
+		};
+		assert!(
+			of(&wide) > of(&narrow),
+			"a long label must widen its column"
+		);
 	}
 
 	#[test]
-	fn the_result_code_is_split_into_verdict_pairs() {
-		let spans = code_spans("c1a0");
-		assert!(spans.contains(">c1</span>"));
-		assert!(spans.contains(">a0</span>"));
-		assert!(spans.contains("class=\"fail\">c1"));
-		assert!(spans.contains("class=\"pass\">a0"));
+	fn a_protocol_diagram_is_described_to_a_screen_reader_and_an_attack_diagram_defers() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![
+			derive("Attacker constructs PUBKEY(nil)."),
+			mutation(),
+			gate(),
+		];
+		let html = one(analysis("active", "c1", vec![q]));
+		assert!(html.contains("role=\"img\" aria-labelledby=\"m0p-title\""));
+		assert!(html.contains("<ol class=\"offscreen\">"));
+		assert!(
+			html.contains("aria-hidden=\"true\" focusable=\"false\""),
+			"the attack diagram repeats the step list and must not be announced twice"
+		);
 	}
 
 	#[test]
-	fn a_mutation_step_renders_structured_value_rows() {
-		let mut q = query(true, "authentication? Alice -> Bob: ga", "");
-		q.steps = vec![mutation_step()];
-		let html = trace_section(&q, "m0t0");
-		assert!(html.contains("Attacker intercepts the message from Alice to Bob"));
-		assert!(html.contains("class=\"tvName\">ga</span>"));
-		assert!(html.contains("class=\"tvNew\">PUBKEY(nil)</span>"));
-		assert!(html.contains("honest value: PUBKEY(a)"));
+	fn trace_rows_are_real_buttons_with_a_reported_pinned_state() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![mutation(), gate()];
+		let html = one(analysis("active", "c1", vec![q]));
+		assert!(html.contains("<button type=\"button\" class=\"traceStep\""));
+		assert!(html.contains("aria-pressed=\"false\""));
+		assert!(!html.contains("tabindex=\"0\""));
+	}
+
+	#[test]
+	fn a_run_of_derivations_folds_into_one_group_the_diagram_agrees_with() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![
+			mutation(),
+			derive("one"),
+			derive("two"),
+			derive("three"),
+			gate(),
+		];
+		let html = one(analysis("active", "c1", vec![q]));
+		assert!(html.contains("<details class=\"traceGroup\" data-step=\"2-4\">"));
+		assert!(html.contains("3 derivation steps"));
+		assert!(html.contains("computes (steps 2\u{2013}4)"));
+	}
+
+	#[test]
+	fn a_lone_derivation_is_not_folded_but_still_correlates() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![derive("only"), mutation()];
+		let html = one(analysis("active", "c1", vec![q]));
+		assert!(!html.contains("<details class=\"traceGroup\""));
+		assert!(html.contains("computes (step 1)"));
 		assert!(html.contains("data-step=\"1\""));
 	}
 
 	#[test]
-	fn an_attack_diagram_draws_the_attacker_lane_and_numbered_rows() {
-		let mut q = query(true, "authentication? Alice -> Bob: ga", "");
-		q.steps = vec![
-			ReportStep::new(
-				"derive".to_string(),
-				"Attacker constructs PUBKEY(nil) from nil.".to_string(),
-			),
-			mutation_step(),
-			gate_step(),
+	fn an_attack_wire_names_the_protocol_hop_it_corresponds_to() {
+		let mut q = query("authentication", "a? A -> B: ga", true);
+		q.steps = vec![mutation()];
+		let mut m = model(Some(analysis("active", "a1", vec![q])));
+		m.diagram = vec![
+			wire(1, "Alice", "Bob", &[("gx", false)]),
+			wire(2, "Alice", "Bob", &[("ga", false)]),
 		];
-		let html = trace_section(&q, "m0t0");
-		assert!(html.contains("diagram attack"));
-		assert!(html.contains(">Attacker</text>"));
-		assert!(html.contains("computes (step 1)"));
-		assert!(html.contains("class=\"wireForged\""));
-		assert!(html.contains("class=\"gateMark\""));
-		assert!(html.contains("data-step=\"2\""));
-		assert!(html.contains("data-step=\"3\""));
+		let html = page(vec![m]);
+		assert!(
+			html.contains("hop 2 &middot; "),
+			"the trace must point back at the message it forges"
+		);
 	}
 
 	#[test]
-	fn a_trace_with_no_wire_story_gets_no_diagram() {
-		let q = query(true, "freshness? x", "");
-		let html = trace_section(&q, "m0t0");
+	fn an_attack_diagram_marks_the_phase_its_traffic_belongs_to() {
+		let mut q = query("authentication", "a? A -> B: ga", true);
+		q.steps = vec![mutation()];
+		let mut m = model(Some(analysis("active", "a1", vec![q])));
+		m.diagram = vec![
+			DiagramRow::Phase { number: 1 },
+			DiagramRow::Message {
+				hop: 1,
+				phase: 1,
+				sender: "Alice".to_string(),
+				recipient: "Bob".to_string(),
+				values: vec![DiagramValue {
+					name: "ga".to_string(),
+					guarded: false,
+				}],
+			},
+		];
+		let html = page(vec![m]);
+		assert_eq!(
+			html.matches("PHASE 1").count(),
+			2,
+			"the phase belongs in the attack diagram as well as the protocol one"
+		);
+	}
+
+	#[test]
+	fn an_attack_diagram_shows_a_leak_the_attacker_actually_used() {
+		let mut q = query("confidentiality", "c? m", true);
+		q.steps = vec![derive("Attacker learns sk, leaked by Bob."), mutation()];
+		let mut m = model(Some(analysis("active", "c1", vec![q])));
+		m.diagram = vec![
+			wire(1, "Alice", "Bob", &[("ga", false)]),
+			DiagramRow::Leak {
+				principal: "Bob".to_string(),
+				values: vec!["sk".to_string()],
+			},
+		];
+		let html = page(vec![m]);
+		let attack = html
+			.split("class=\"panelSection trace\"")
+			.nth(1)
+			.unwrap_or("");
+		assert!(
+			attack.contains("Bob leaks sk"),
+			"a leak the trace leans on belongs in the attack diagram"
+		);
+	}
+
+	#[test]
+	fn a_generated_or_saturated_run_says_where_its_shape_came_from() {
+		let mut a = analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		);
+		a.provenance = vec!["--saturate stopped at 2 sessions.".to_string()];
+		let html = one(a);
+		assert!(html.contains("How this analysis was produced"));
+		assert!(html.contains("--saturate stopped at 2 sessions."));
+	}
+
+	#[test]
+	fn a_run_with_nothing_to_disclose_carries_no_callouts_at_all() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(!html.contains("class=\"callout"));
+	}
+
+	#[test]
+	fn declared_assumptions_and_scenarios_render_as_callouts() {
+		let mut a = analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		);
+		a.assumptions = vec![Assumption {
+			term: "HASH(m)".to_string(),
+			capability: "weak".to_string(),
+			from_phase: 2,
+		}];
+		a.scenarios = vec![ScenarioReport {
+			principal: "Alice".to_string(),
+			bindings: vec![Binding {
+				target: "gpeer".to_string(),
+				value: "gm".to_string(),
+			}],
+			honest: false,
+		}];
+		let html = one(a);
+		assert!(html.contains("<code>HASH(m)</code> (from phase 2)"));
+		assert!(html.contains("<code>Alice[gpeer = gm]</code>"));
+		assert!(html.contains("corrupt peer"));
+	}
+
+	#[test]
+	fn a_failed_model_renders_its_error_escaped_and_claims_no_verdicts() {
+		let mut m = model(None);
+		m.error = Some("bad <script>alert(1)</script>".to_string());
+		m.diagram = vec![];
+		let html = page(vec![m]);
+		assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+		assert!(!html.contains("<script>alert"));
+		assert!(html.contains("not analysed"));
+		assert!(!html.contains("Scope of this result"));
+	}
+
+	#[test]
+	fn every_string_that_reaches_the_page_is_escaped_by_its_type() {
+		let mut q = query("confidentiality", "confidentiality? <b>m</b>", true);
+		q.conclusion = "\"quoted\" & <angled>".to_string();
+		q.steps = vec![derive("<img src=x>")];
+		let html = one(analysis("active", "c1", vec![q]));
+		assert!(html.contains("confidentiality? &lt;b&gt;m&lt;/b&gt;"));
+		assert!(html.contains("&quot;quoted&quot; &amp; &lt;angled&gt;"));
+		assert!(html.contains("&lt;img src=x&gt;"));
+		assert!(!html.contains("<img"));
+	}
+
+	#[test]
+	fn the_verdict_table_says_what_each_query_asked_and_where_it_lives() {
+		let html = one(analysis(
+			"active",
+			"c1a0",
+			vec![
+				query("confidentiality", "confidentiality? m1", true),
+				query("authentication", "authentication? A -> B: e", false),
+			],
+		));
+		assert!(html.contains("<span class=\"qkind\">confidentiality</span>"));
+		assert!(html.contains("<span class=\"qkind\">authentication</span>"));
+		assert!(html.contains("line 9"));
+		assert!(html.contains("Contradiction found"));
+		assert!(html.contains("1 of 2 queries failed."));
+	}
+
+	#[test]
+	fn the_result_code_is_split_into_verdict_pairs() {
+		let html = one(analysis(
+			"active",
+			"c1a0",
+			vec![
+				query("confidentiality", "c? m", true),
+				query("authentication", "a? A -> B: e", false),
+			],
+		));
+		assert!(html.contains("<span class=\"fail\">c1</span>"));
+		assert!(html.contains("<span class=\"pass\">a0</span>"));
+	}
+
+	#[test]
+	fn a_mutation_step_renders_structured_value_rows_and_a_relay_says_so() {
+		let mut relay = mutation();
+		relay.values.push(TraceValue {
+			name: "gb".to_string(),
+			installed: Some("PUBKEY(b)".to_string()),
+			was: Some("PUBKEY(b)".to_string()),
+			guarded: true,
+		});
+		let mut q = query("authentication", "a? A -> B: ga", true);
+		q.steps = vec![relay];
+		let html = one(analysis("active", "a1", vec![q]));
+		assert!(html.contains("<span class=\"tvNew\">PUBKEY(nil)</span>"));
+		assert!(html.contains("honest value: PUBKEY(a)"));
+		assert!(html.contains("relayed unchanged"));
+		assert!(html.contains("[gb]"));
+		assert!(html.contains("tvGuard"));
+	}
+
+	#[test]
+	fn a_diagram_tags_attacked_values_with_the_queries_that_reached_them() {
+		let mut q = query("authentication", "a? A -> B: ga", true);
+		q.steps = vec![mutation()];
+		let html = one(analysis("active", "a1", vec![q]));
+		assert!(html.contains("data-q=\"0\""));
+		assert!(html.contains("msgVal hit"));
+		assert!(
+			html.contains("ga\u{2020}"),
+			"an attacked value must be marked by more than colour"
+		);
+		assert!(html.contains("a dagger marks"));
+	}
+
+	#[test]
+	fn a_guarded_value_is_bracketed_in_the_diagram() {
+		let mut m = model(Some(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		)));
+		m.diagram = vec![wire(1, "Alice", "Bob", &[("ga", true)])];
+		let html = page(vec![m]);
+		assert!(html.contains(">[ga]</tspan>"));
+		assert!(html.contains("msgVal guarded"));
+	}
+
+	#[test]
+	fn a_model_with_no_messages_gets_no_diagram() {
+		let mut m = model(Some(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		)));
+		m.diagram = vec![];
+		let html = page(vec![m]);
 		assert!(!html.contains("<svg"));
 	}
 
 	#[test]
-	fn source_pane_marks_query_spans_with_verdict_classes() {
-		let source = "queries[\n\tconfidentiality? m\n]\n";
-		let start = source.find("confidentiality").expect("query");
-		let end = start + "confidentiality? m".len();
-		let mut q = query(true, "confidentiality? m", "");
-		q.range = SourceRange {
-			start,
-			end,
-			line: 2,
+	fn a_multi_model_run_gets_an_index_that_can_be_filtered() {
+		let clean = analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		);
+		let broken = analysis("active", "c1", vec![query("confidentiality", "c? m", true)]);
+		let html = page(vec![model(Some(clean)), model(Some(broken))]);
+		assert!(html.contains("class=\"runIndex\""));
+		assert!(html.contains("1 of 2 models have attacks."));
+		assert!(html.contains("id=\"onlyFailing\""));
+		assert!(html.contains("data-failing=\"no\""));
+		assert!(html.contains("data-failing=\"yes\""));
+	}
+
+	#[test]
+	fn a_single_model_run_gets_no_index() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert!(!html.contains("class=\"runIndex\""));
+	}
+
+	#[test]
+	fn the_page_is_self_contained() {
+		let html = one(analysis(
+			"active",
+			"c0",
+			vec![query("confidentiality", "c? m", false)],
+		));
+		assert_eq!(html.matches("<style>").count(), 1);
+		assert_eq!(html.matches("<script>").count(), 1);
+		assert!(!html.contains("<link"));
+		assert!(!html.contains(" src="));
+		assert!(!html.contains("@import"));
+		assert!(!html.contains("url(http"));
+		for scheme in ["http://", "https://"] {
+			let fetched: Vec<&str> = html
+				.match_indices(scheme)
+				.map(|(i, _)| &html[i.saturating_sub(20)..i])
+				.filter(|before| !before.ends_with("xmlns=\""))
+				.collect();
+			assert!(
+				fetched.is_empty(),
+				"the page reaches for {scheme}{fetched:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn the_stylesheet_carries_a_print_rendering() {
+		let css = strip_header(CSS);
+		assert!(css.contains("@media print"));
+		assert!(css.contains("@page"));
+		assert!(css.contains("break-inside: avoid"));
+		assert!(css.contains("break-before: page"));
+	}
+
+	#[test]
+	fn the_report_follows_the_readers_color_scheme() {
+		let css = strip_header(CSS);
+		assert!(css.contains("prefers-color-scheme: dark"));
+		for token in [
+			"--ink:",
+			"--ink-2:",
+			"--ink-3:",
+			"--ink-4:",
+			"--paper:",
+			"--surface:",
+			"--surface-2:",
+			"--line:",
+			"--line-soft:",
+			"--olive:",
+			"--olive-deep:",
+			"--olive-tint:",
+			"--olive-line:",
+			"--azure:",
+			"--azure-deep:",
+			"--azure-tint:",
+			"--azure-line:",
+			"--breach:",
+			"--breach-deep:",
+			"--breach-tint:",
+			"--breach-line:",
+			"--sienna:",
+			"--sienna-tint:",
+			"--sienna-line:",
+		] {
+			assert!(
+				css.matches(token).count() >= 2,
+				"{token} has no dark counterpart"
+			);
+		}
+	}
+
+	#[test]
+	fn no_markup_is_written_in_rust() {
+		for (name, source) in [
+			("html/mod.rs", include_str!("mod.rs")),
+			("html/diagram.rs", include_str!("diagram.rs")),
+		] {
+			let body = source.split("#[cfg(test)]").next().unwrap_or(source);
+			for needle in ["\"<", "</", "/>", "<span", "<div", "class=\"", "&amp;"] {
+				assert!(
+					!body.contains(needle),
+					"{name} builds markup ({needle}); markup belongs in src/html/tpl/"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn the_html_layer_never_reaches_for_the_parser() {
+		let source = include_str!("mod.rs");
+		let body = source.split("#[cfg(test)]").next().unwrap_or(source);
+		assert!(
+			!body.contains("crate::parser"),
+			"the model is parsed once, in report.rs; the renderer reads the report"
+		);
+	}
+
+	#[test]
+	fn every_anchor_on_the_page_points_at_something_that_exists() {
+		let mut resolved = query("confidentiality", "c? m", true);
+		resolved.steps = vec![mutation()];
+		let holding = query("authentication", "a? A -> B: e", false);
+		let html = page(vec![
+			model(Some(analysis("active", "c1a0", vec![resolved, holding]))),
+			model(Some(analysis(
+				"active",
+				"c0",
+				vec![query("confidentiality", "c? m", false)],
+			))),
+		]);
+		let present = ids(&html);
+		for anchor in anchors(&html) {
+			assert!(
+				present.contains(&anchor),
+				"#{anchor} is linked but never defined"
+			);
+		}
+	}
+
+	#[test]
+	fn no_element_id_is_used_twice_on_one_page() {
+		let mut resolved = query("confidentiality", "c? m", true);
+		resolved.steps = vec![mutation(), gate()];
+		let html = page(vec![
+			model(Some(analysis("active", "c1", vec![resolved]))),
+			model(Some(analysis(
+				"active",
+				"c0",
+				vec![query("confidentiality", "c? m", false)],
+			))),
+		]);
+		let mut seen = ids(&html);
+		seen.sort();
+		let count = seen.len();
+		seen.dedup();
+		assert_eq!(count, seen.len(), "duplicate id on the page");
+	}
+
+	const GOLDEN_SOURCE: &str = "attacker[active]\n\nprincipal Alice[\n\tgenerates a\n\tga = PUBKEY(a)\n]\n\nAlice -> Bob: ga\n\nprincipal Bob[\n\tknows private m\n\tleaks m\n]\n\nqueries[\n\tconfidentiality? m\n]\n";
+
+	fn golden_run() -> Run {
+		let (_, index) = crate::parser::parse_string_indexed("golden.vp", GOLDEN_SOURCE);
+		let mut tokens = index.tokens().to_vec();
+		tokens.sort_by_key(|t| t.span.start);
+
+		let mut broken = query("confidentiality", "confidentiality? m", true);
+		broken.conclusion = "m is obtained by Attacker.".to_string();
+		broken.range = SourceRange {
+			start: GOLDEN_SOURCE.find("confidentiality? m").unwrap(),
+			end: GOLDEN_SOURCE.find("confidentiality? m").unwrap() + 18,
+			line: 15,
 			column: 2,
 		};
-		let html = source_pane(source, &[q], 0, &[]);
-		assert!(html.contains("<mark id=\"src-m0-q0\" class=\"fail\">confidentiality? m</mark>"));
-		assert!(html.contains("queries["));
-	}
+		broken.variants = 1;
+		broken.preconditions = vec!["Bob sends ack to Alice despite the query failing".to_string()];
+		broken.steps = vec![
+			derive("Attacker constructs PUBKEY(nil)."),
+			derive("Attacker observes ga on the wire."),
+			mutation(),
+			gate(),
+			ReportStep {
+				kind: "bypass".to_string(),
+				text: "Alice's SIGNVERIF check is defeated, accepting PUBKEY(nil).".to_string(),
+				sender: None,
+				recipient: None,
+				principal: Some("Alice".to_string()),
+				values: vec![],
+			},
+			ReportStep {
+				kind: "replay".to_string(),
+				text: "Attacker replays e1 from another session.".to_string(),
+				sender: Some("Bob".to_string()),
+				recipient: Some("Alice".to_string()),
+				principal: None,
+				values: vec![TraceValue {
+					name: "e1".to_string(),
+					installed: Some("AEAD_ENC(k, m, ad)".to_string()),
+					was: None,
+					guarded: false,
+				}],
+			},
+		];
 
-	#[test]
-	fn source_pane_survives_bad_ranges() {
-		let source = "short\n";
-		let mut q = query(false, "confidentiality? m", "");
-		q.range = SourceRange {
-			start: 100,
-			end: 200,
-			line: 1,
-			column: 1,
+		let mut holds = query("authentication", "authentication? Alice -> Bob: ga", false);
+		holds.envelope = envelope(vec!["term depth".to_string()]);
+		holds.range = SourceRange {
+			start: 0,
+			end: 0,
+			line: 16,
+			column: 2,
 		};
-		let html = source_pane(source, &[q], 0, &[]);
-		assert!(html.contains("short"));
-		assert!(!html.contains("<mark"));
+
+		let mut a = analysis("active", "c1a0", vec![broken, holds]);
+		a.assumptions = vec![Assumption {
+			term: "HASH(m)".to_string(),
+			capability: "weak".to_string(),
+			from_phase: 2,
+		}];
+		a.scenarios = vec![
+			ScenarioReport {
+				principal: "Alice".to_string(),
+				bindings: vec![Binding {
+					target: "gpeer".to_string(),
+					value: "gb".to_string(),
+				}],
+				honest: true,
+			},
+			ScenarioReport {
+				principal: "Alice".to_string(),
+				bindings: vec![Binding {
+					target: "gpeer".to_string(),
+					value: "gm".to_string(),
+				}],
+				honest: false,
+			},
+		];
+		a.notes = vec!["Per-session values carry the suffix #2.".to_string()];
+		a.provenance = vec!["--saturate stopped at 2 sessions.".to_string()];
+
+		let full = ModelReport {
+			file: "examples/golden.vp".to_string(),
+			ok: true,
+			error: None,
+			analysis: Some(a),
+			diagram: vec![
+				wire(1, "Alice", "Bob", &[("ga", false), ("e1", true)]),
+				DiagramRow::Phase { number: 1 },
+				wire(2, "Bob", "Alice", &[("gb", false)]),
+				DiagramRow::Leak {
+					principal: "Bob".to_string(),
+					values: vec!["m".to_string()],
+				},
+			],
+			source: GOLDEN_SOURCE.to_string(),
+			tokens,
+		};
+		let failed = ModelReport {
+			file: "examples/broken.vp".to_string(),
+			ok: false,
+			error: Some("golden.vp:3:1: syntax error: expected `]`".to_string()),
+			analysis: None,
+			diagram: vec![],
+			source: String::new(),
+			tokens: vec![],
+		};
+		Run {
+			version: "0.0.0".to_string(),
+			ok: false,
+			models: vec![full, failed],
+		}
 	}
 
 	#[test]
-	fn source_pane_escapes_the_model_text() {
-		let html = source_pane("knows private a<b\n", &[], 0, &[]);
-		assert!(html.contains("a&lt;b"));
-	}
-
-	#[test]
-	fn the_source_pane_is_highlighted_by_the_engines_own_lexer() {
-		let src = "// a comment\nattacker[active]\n\nprincipal Alice[\n\tknows private hlt_m\n\thlt_h = HASH(hlt_m)\n]\n\nAlice -> Bob: hlt_h\n\nprincipal Bob[\n\t_ = HASH(hlt_h)\n]\n\nqueries[\n\tconfidentiality? hlt_m\n]\n";
-		let (parsed, index_tokens) = crate::parser::parse_string_indexed("report.vp", src);
-		assert!(parsed.is_ok());
-		let mut tokens = index_tokens.tokens().to_vec();
-		tokens.sort_by_key(|t| t.span.start);
-		let html = source_pane(src, &[], 0, &tokens);
-		assert!(html.contains("class=\"c\">"), "comments are highlighted");
-		assert!(
-			html.contains("class=\"f\">HASH"),
-			"primitives are highlighted"
-		);
-		assert!(
-			html.contains("class=\"p\">Alice"),
-			"principals are highlighted"
-		);
-		assert!(
-			html.contains("class=\"q\">confidentiality"),
-			"queries are highlighted"
-		);
-		assert!(
-			html.contains("class=\"k\">knows"),
-			"keywords are highlighted"
+	fn the_rendered_page_matches_its_golden_file() {
+		let rendered = html_report(&golden_run());
+		let golden = include_str!("../../examples/test/golden_html/report.html");
+		if std::env::var("VERIFPAL_BLESS_HTML").is_ok() {
+			std::fs::write("examples/test/golden_html/report.html", &rendered).expect("bless");
+			return;
+		}
+		assert_eq!(
+			rendered, golden,
+			"the rendered page drifted from examples/test/golden_html/report.html; \
+			 re-bless with VERIFPAL_BLESS_HTML=1 once the diff is understood"
 		);
 	}
 
-	#[test]
-	fn a_diagram_draws_numbered_hops_guards_hits_and_leaks() {
-		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private hdg_m\n\tknows private hdg_s\n\thdg_h = HASH(hdg_m)\n]\n\nAlice -> Bob: [hdg_h], hdg_m\n\nphase[1]\n\nprincipal Alice[\n\tleaks hdg_s\n]\n\nprincipal Bob[\n\t_ = HASH(hdg_h)\n]\n\nqueries[\n\tconfidentiality? hdg_m\n]\n";
-		let m = crate::parser::parse_string("report.vp", src).expect("parses");
-		let mut attacked = HashSet::new();
-		attacked.insert("hdg_m".to_string());
-		let svg = diagram_svg(&m, &attacked, "m0p");
-		assert!(svg.contains("<svg"));
-		assert!(svg.contains(">Alice</text>"));
-		assert!(svg.contains(">Bob</text>"));
-		assert!(svg.contains("class=\"hopNum\">1</text>"));
-		assert!(svg.contains("class=\"msgVal guarded\">[hdg_h]</tspan>"));
-		assert!(svg.contains("class=\"msgVal hit\">hdg_m</tspan>"));
-		assert!(svg.contains("Alice leaks hdg_s"));
-		assert!(svg.contains("phase[1]"));
+	fn corpus() -> Vec<String> {
+		let mut out: Vec<String> = std::fs::read_dir("examples/test")
+			.expect("examples/test")
+			.filter_map(|e| e.ok())
+			.map(|e| e.path())
+			.filter(|p| p.extension().is_some_and(|x| x == "vp"))
+			.map(|p| p.to_string_lossy().into_owned())
+			.collect();
+		out.sort();
+		out
 	}
 
 	#[test]
-	fn a_model_without_messages_gets_no_diagram() {
-		let src = "attacker[passive]\n\nprincipal Alice[\n\tknows private hdn_m\n\t_ = HASH(hdn_m)\n]\n\nqueries[\n\tconfidentiality? hdn_m\n]\n";
-		let m = crate::parser::parse_string("report.vp", src).expect("parses");
-		assert!(diagram_svg(&m, &HashSet::new(), "m0p").is_empty());
-	}
-
-	#[test]
-	fn an_end_to_end_report_carries_diagram_marks_and_verdicts() {
-		let (report, source) =
-			crate::verify::verify_report_with_source("examples/test/hmac_ok.vp", 2)
-				.expect("verifies");
-		let path = "examples/test/hmac_ok.vp".to_string();
-		let run = Run::of(
-			"1.2.1",
-			&[(path, Ok(report))],
-			std::slice::from_ref(&source),
+	fn every_model_in_the_corpus_renders_a_sound_page() {
+		let paths = corpus();
+		assert!(paths.len() > 300, "corpus looks wrong: {}", paths.len());
+		let mut outcomes = Vec::new();
+		let mut sources = Vec::new();
+		for path in &paths {
+			let analysed = crate::verify::verify_report_with_source(path, 1);
+			match analysed {
+				Ok((report, source)) => {
+					outcomes.push((path.clone(), Ok(report)));
+					sources.push(source);
+				}
+				Err(e) => {
+					outcomes.push((path.clone(), Err(e.to_string())));
+					sources.push(std::fs::read_to_string(path).unwrap_or_default());
+				}
+			}
+		}
+		for (i, path) in paths.iter().enumerate() {
+			let run = Run::of(
+				"0.0.0",
+				std::slice::from_ref(&outcomes[i]),
+				std::slice::from_ref(&sources[i]),
+			);
+			let html = html_report(&run);
+			assert!(!html.contains("{{"), "{path} left a placeholder unfilled");
+			assert_eq!(html.matches("<style>").count(), 1, "{path}");
+			assert_eq!(html.matches("<script>").count(), 1, "{path}");
+			assert!(!html.contains("<link"), "{path}");
+			assert!(!html.contains(" src="), "{path}");
+			let present = ids(&html);
+			for anchor in anchors(&html) {
+				assert!(
+					present.contains(&anchor),
+					"{path} links a dangling #{anchor}"
+				);
+			}
+			let mut seen = present.clone();
+			seen.sort();
+			let count = seen.len();
+			seen.dedup();
+			assert_eq!(count, seen.len(), "{path} repeats an element id");
+			assert_eq!(
+				html.matches("<svg").count(),
+				html.matches("</svg>").count(),
+				"{path} has an unbalanced diagram"
+			);
+			assert_eq!(
+				html.matches("<details").count(),
+				html.matches("</details>").count(),
+				"{path} has an unbalanced fold"
+			);
+			assert_eq!(
+				html.matches("<button").count(),
+				html.matches("</button>").count(),
+				"{path} has an unbalanced trace row"
+			);
+		}
+		let run = Run::of("0.0.0", &outcomes, &sources);
+		let html = html_report(&run);
+		assert!(!html.contains("{{"));
+		assert!(html.contains("class=\"runIndex\""));
+		let present = ids(&html);
+		for anchor in anchors(&html) {
+			assert!(
+				present.contains(&anchor),
+				"the whole-run page dangles #{anchor}"
+			);
+		}
+		let mut seen = present;
+		seen.sort();
+		let count = seen.len();
+		seen.dedup();
+		assert_eq!(
+			count,
+			seen.len(),
+			"the whole-run page repeats an element id"
 		);
-		let html = html_report(&run, std::slice::from_ref(&source));
-		assert!(html.contains("<svg"));
-		assert!(html.contains("confidentiality?"));
-		assert!(html.contains("<mark id=\"src-m0-q0\""));
-		assert!(html.contains("verdictPass"));
-	}
-
-	#[test]
-	fn an_attack_report_narrates_and_draws_the_trace() {
-		let (report, source) =
-			crate::verify::verify_report_with_source("examples/simple.vp", 2).expect("verifies");
-		let path = "examples/simple.vp".to_string();
-		let run = Run::of(
-			"1.2.1",
-			&[(path, Ok(report))],
-			std::slice::from_ref(&source),
-		);
-		let html = html_report(&run, std::slice::from_ref(&source));
-		assert!(html.contains("verdictFail"));
-		assert!(html.contains("Contradiction found"));
-		assert!(html.contains("Attack trace"));
-		assert!(html.contains("class=\"traceStep\" data-step="));
-		assert!(html.contains("diagram attack"));
-		assert!(html.contains(">Attacker</text>"));
-		assert!(html.contains("class=\"msgVal hit\""));
 	}
 }

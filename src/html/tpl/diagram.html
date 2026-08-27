@@ -1,8 +1,12 @@
 <!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
      SPDX-License-Identifier: GPL-3.0-only -->
-<div class="panelSection">
-<span class="eyebrow">Protocol</span>
-<svg class="diagram" width="{{width}}" height="{{height}}" viewBox="0 0 {{width}} {{height}}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="protocol sequence diagram"><defs><marker id="{{svgid}}-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker></defs>
-{{content}}
-</svg>
-</div>
+<figure class="figure">
+<div class="scroll">
+<svg class="diagram" width="{{width}}" height="{{height}}" viewBox="0 0 {{width}} {{height}}" xmlns="http://www.w3.org/2000/svg"{{#described}} role="img" aria-labelledby="{{id}}-title"{{/described}}{{^described}} aria-hidden="true" focusable="false"{{/described}}>
+{{#described}}<title id="{{id}}-title">{{caption}}</title>{{/described}}<defs><marker id="{{id}}-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="{{id}}-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker></defs>
+{{#actors}}<text x="{{x}}" y="22" class="actor{{aclass}}">{{name}}</text><line x1="{{x}}" y1="34" x2="{{x}}" y2="{{bottom}}" class="lifeline{{aclass}}"/>
+{{/actors}}{{#rows}}{{>diagram_row}}{{/rows}}</svg>
+</div>{{#described}}
+<ol class="offscreen">{{#alt}}<li>{{text}}</li>{{/alt}}</ol>{{/described}}{{#captioned}}
+<figcaption class="figNote">{{caption}}</figcaption>{{/captioned}}
+</figure>

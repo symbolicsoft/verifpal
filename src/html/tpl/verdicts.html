@@ -3,8 +3,7 @@
 <div class="panelSection">
 <div class="sectionRow"><span class="eyebrow">Verdicts</span><span class="tally {{tally_class}}">{{tally}}</span></div>
 <div class="verdicts">
-{{rows}}
+{{#rows}}{{>verdict}}{{/rows}}
 </div>
-{{assumptions}}
-{{scenarios}}
+{{#callouts}}{{>callouts}}{{/callouts}}
 </div>

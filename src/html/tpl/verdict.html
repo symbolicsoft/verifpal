@@ -1,8 +1,9 @@
 <!-- SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
      SPDX-License-Identifier: GPL-3.0-only -->
-<div class="verdict {{class}}">
+<div class="verdict {{class}}" id="verdict-m{{model}}-q{{query_index}}" data-query="{{query_index}}">
 <span class="mark" aria-hidden="true">{{mark}}</span>
-<span class="query"><a href="#src-m{{model}}-q{{query_index}}">{{query}}</a><span class="loc">line {{line}}</span></span>
+<span class="query"><span class="qkind">{{kind}}</span>{{#target}}<a href="{{target}}">{{query}}</a>{{/target}}{{^target}}<span class="qtext">{{query}}</span>{{/target}}<span class="loc">line {{line}}</span>{{#variants}}<span class="loc">{{variants}}</span>{{/variants}}{{#truncated}}<span class="cut">search truncated: {{truncations}}</span>{{/truncated}}</span>
 <span class="ruling">{{ruling}}</span>
-{{because}}{{preconditions}}
+{{#because}}<span class="because">{{because}}</span>{{/because}}
+{{#preconditions}}<span class="precondition">{{text}}</span>{{/preconditions}}
 </div>
