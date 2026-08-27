@@ -8,6 +8,7 @@ build/macos/verifpal
 build/macos/verifpal_applesilicon
 build/freebsd/verifpal
 dist
+pkg
 
 # macOS
 .DS_Store
