@@ -8,42 +8,37 @@ mod spec;
 use self::spec::{build_core_specs, build_primitive_specs};
 use crate::types::*;
 
-#[allow(unused_imports)]
 pub(crate) use self::spec::*;
 
 pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
 pub(crate) type CoreRuleFn = fn(&Primitive) -> (bool, Value);
 pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct DecomposeRule {
-	pub has_rule: bool,
 	pub given: Vec<usize>,
 	pub reveal: usize,
 	pub reveal_output: Option<usize>,
-	pub filter: Option<FilterFn>,
+	pub filter: FilterFn,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct RecomposeRule {
-	pub has_rule: bool,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct RewriteRule {
-	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub from: usize,
-	pub to: Option<RewriteToFn>,
+	pub to: RewriteToFn,
 	pub matching: Vec<(usize, Vec<usize>)>,
-	pub filter: Option<FilterFn>,
+	pub filter: FilterFn,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct RebuildRule {
-	pub has_rule: bool,
 	pub id: PrimitiveId,
 	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
@@ -55,7 +50,6 @@ pub(crate) struct PrimitiveCoreSpec {
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
 	pub output: Vec<i32>,
-	pub has_rule: bool,
 	pub core_rule: Option<CoreRuleFn>,
 	pub definition_check: bool,
 	pub reveals_args: bool,
@@ -84,10 +78,10 @@ pub(crate) struct PrimitiveSpec {
 	pub id: PrimitiveId,
 	pub arity: Vec<i32>,
 	pub output: Vec<i32>,
-	pub decompose: DecomposeRule,
-	pub recompose: RecomposeRule,
-	pub rewrite: RewriteRule,
-	pub rebuild: RebuildRule,
+	pub decompose: Option<DecomposeRule>,
+	pub recompose: Option<RecomposeRule>,
+	pub rewrite: Option<RewriteRule>,
+	pub rebuild: Option<RebuildRule>,
 	pub definition_check: bool,
 	pub password_hashing: Vec<usize>,
 	pub bypass_key: Option<BypassKeyKind>,
@@ -154,7 +148,7 @@ impl PrimitiveDefinition for PrimitiveCoreSpec {
 		self.definition_check
 	}
 	fn has_rewrite_rule(&self) -> bool {
-		self.has_rule
+		self.core_rule.is_some()
 	}
 	fn arg_names(&self) -> &[&'static str] {
 		&self.arg_names
@@ -175,7 +169,7 @@ impl PrimitiveDefinition for PrimitiveSpec {
 		self.definition_check
 	}
 	fn has_rewrite_rule(&self) -> bool {
-		self.rewrite.has_rule
+		self.rewrite.is_some()
 	}
 	fn arg_names(&self) -> &[&'static str] {
 		&self.arg_names
@@ -208,7 +202,7 @@ pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> 
 
 pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
 	prim_specs()
-		.filter(|s| s.definition_check && s.rewrite.has_rule && s.rewrite.id == id)
+		.filter(|s| s.definition_check && s.rewrite.as_ref().is_some_and(|r| r.id == id))
 		.min_by_key(|s| s.id)
 }
 
@@ -612,30 +606,30 @@ mod tests {
 				);
 			};
 
-			if spec.decompose.has_rule {
-				must("decompose.reveal", spec.decompose.reveal);
-				for &i in &spec.decompose.given {
+			if let Some(rule) = &spec.decompose {
+				must("decompose.reveal", rule.reveal);
+				for &i in &rule.given {
 					may("decompose.given", i);
 				}
-				if let Some(i) = spec.decompose.reveal_output {
+				if let Some(i) = rule.reveal_output {
 					out("decompose.reveal_output", i);
 				}
 			}
 
-			if spec.recompose.has_rule {
-				must("recompose.reveal", spec.recompose.reveal);
-				for set in &spec.recompose.given {
+			if let Some(rule) = &spec.recompose {
+				must("recompose.reveal", rule.reveal);
+				for set in &rule.given {
 					for &i in set {
 						out("recompose.given", i);
 					}
 				}
 			}
 
-			if spec.rewrite.has_rule {
-				must("rewrite.from", spec.rewrite.from);
-				let inner = primitive_get(spec.rewrite.id)
+			if let Some(rule) = &spec.rewrite {
+				must("rewrite.from", rule.from);
+				let inner = primitive_get(rule.id)
 					.unwrap_or_else(|_| panic!("{name}.rewrite.id is not a primitive"));
-				for (outer, inners) in &spec.rewrite.matching {
+				for (outer, inners) in &rule.matching {
 					may("rewrite.matching", *outer);
 					for &i in inners {
 						assert!(
@@ -649,18 +643,18 @@ mod tests {
 				}
 			}
 
-			if spec.rebuild.has_rule {
-				let inner = primitive_get(spec.rebuild.id)
+			if let Some(rule) = &spec.rebuild {
+				let inner = primitive_get(rule.id)
 					.unwrap_or_else(|_| panic!("{name}.rebuild.id is not a primitive"));
 				assert!(
-					spec.rebuild.reveal < narrowest(&inner.arity),
+					rule.reveal < narrowest(&inner.arity),
 					"{name}.rebuild.reveal is argument {} of {}, which may have as few \
 					 as {} arguments, and the engine indexes it directly",
-					spec.rebuild.reveal,
+					rule.reveal,
 					inner.name,
 					narrowest(&inner.arity)
 				);
-				for set in &spec.rebuild.given {
+				for set in &rule.given {
 					for &i in set {
 						may("rebuild.given", i);
 					}

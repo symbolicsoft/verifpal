@@ -626,7 +626,7 @@ fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
 		.collect()
 }
 
-type WantedCheck = (Primitive, Option<&'static crate::primitive::PrimitiveSpec>);
+type WantedCheck = (Primitive, Option<&'static crate::primitive::RewriteRule>);
 
 fn checks_wanting_shapes(
 	km: &ProtocolTrace,
@@ -648,7 +648,7 @@ fn checks_wanting_shapes(
 		.perform_all_rewrites()
 		.into_iter()
 		.filter_map(|(prim, _)| match crate::primitive::primitive_get(prim.id) {
-			Ok(spec) => spec.rewrite.has_rule.then_some((prim, Some(spec))),
+			Ok(spec) => spec.rewrite.as_ref().map(|rule| (prim, Some(rule))),
 			Err(_) => crate::primitive::primitive_is_core(prim.id).then_some((prim, None)),
 		})
 		.collect()
@@ -659,8 +659,8 @@ fn shapes_the_checks_wanted(
 	fill: &mut dyn FnMut(usize) -> Value,
 ) -> Vec<Value> {
 	let mut shapes: Vec<Value> = Vec::new();
-	for (prim, spec) in checks {
-		let Some(spec) = spec else {
+	for (prim, rule) in checks {
+		let Some(rule) = rule else {
 			continue;
 		};
 		let mut at = 0usize;
@@ -669,7 +669,7 @@ fn shapes_the_checks_wanted(
 			at += 1;
 			fill(position)
 		};
-		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, spec, filler) {
+		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, rule, filler) {
 			if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
 				shapes.push(shape);
 			}

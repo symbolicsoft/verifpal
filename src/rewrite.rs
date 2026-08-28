@@ -27,17 +27,15 @@ pub(crate) fn reduce_cache_reset() {
 
 pub(crate) fn perform_primitive_rewrite(
 	p: &Arc<Primitive>,
-	slot_index: Option<usize>,
+	slot_index: usize,
 	ps: &mut PrincipalState,
 ) -> Option<Primitive> {
 	let reduced = reduce_term(p);
-	if let Some(idx) = slot_index {
-		if let Some(rebuilt) = reduced.rebuilt {
-			ps.values[idx].set_value(rebuilt);
-		}
-		if reduced.rewritten {
-			ps.values[idx].set_value(reduced.value);
-		}
+	if let Some(rebuilt) = reduced.rebuilt {
+		ps.values[slot_index].set_value(rebuilt);
+	}
+	if reduced.rewritten {
+		ps.values[slot_index].set_value(reduced.value);
 	}
 	reduced.failed
 }

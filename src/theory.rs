@@ -231,20 +231,14 @@ pub(crate) fn can_decompose(
 	if primitive_is_core(p.id) {
 		return None;
 	}
-	let Ok(prim) = primitive_get(p.id) else {
-		return None;
-	};
-	if !prim.decompose.has_rule {
-		return None;
-	}
-	let filter_fn = prim.decompose.filter?;
+	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
 	let mut has = Vec::new();
-	for (filter_i, &idx) in prim.decompose.given.iter().enumerate() {
+	for (filter_i, &idx) in rule.given.iter().enumerate() {
 		if idx >= p.arguments.len() {
 			continue;
 		}
 		let a = &p.arguments[idx];
-		let (filtered, valid) = filter_fn(p, a, filter_i);
+		let (filtered, valid) = (rule.filter)(p, a, filter_i);
 		if !valid {
 			continue;
 		}
@@ -252,10 +246,10 @@ pub(crate) fn can_decompose(
 			has.push(filtered);
 		}
 	}
-	if has.len() >= prim.decompose.given.len() {
-		let revealed = match prim.decompose.reveal_output {
+	if has.len() >= rule.given.len() {
+		let revealed = match rule.reveal_output {
 			Some(output) => Value::Primitive(Arc::new(p.with_output(output))),
-			None => p.arguments[prim.decompose.reveal].clone(),
+			None => p.arguments[rule.reveal].clone(),
 		};
 		Some(DecomposeResult {
 			revealed,
@@ -326,7 +320,7 @@ fn obtainable_by_output_projection(
 	let Ok(spec) = primitive_get(p.id) else {
 		return false;
 	};
-	if spec.decompose.reveal_output != Some(p.output) {
+	if spec.decompose.as_ref().and_then(|rule| rule.reveal_output) != Some(p.output) {
 		return false;
 	}
 	let Some(&outputs) = spec.output.iter().max() else {
@@ -346,13 +340,8 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	if primitive_is_core(p.id) {
 		return None;
 	}
-	let Ok(prim) = primitive_get(p.id) else {
-		return None;
-	};
-	if !prim.recompose.has_rule {
-		return None;
-	}
-	for given_set in &prim.recompose.given {
+	let rule = primitive_get(p.id).ok()?.recompose.as_ref()?;
+	for given_set in &rule.given {
 		let mut candidates = Vec::new();
 		for &output_idx in given_set {
 			let probe = p.with_output(output_idx);
@@ -372,7 +361,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 					continue;
 				}
 				return Some(RecomposeResult {
-					revealed: p.arguments[prim.recompose.reveal].clone(),
+					revealed: p.arguments[rule.reveal].clone(),
 					used: candidates,
 				});
 			}
@@ -467,9 +456,7 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 			Ok(s) => s,
 			Err(_) => return (false, wrap()),
 		};
-		if prim.has_rule
-			&& let Some(rule) = prim.core_rule
-		{
+		if let Some(rule) = prim.core_rule {
 			return rule(pc);
 		}
 		return (!prim.definition_check, wrap());
@@ -478,65 +465,44 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		Ok(s) => s,
 		Err(_) => return (false, wrap()),
 	};
-	if !prim.rewrite.has_rule {
+	let Some(rule) = &prim.rewrite else {
 		return (true, wrap());
-	}
-	let from = &pc.arguments[prim.rewrite.from];
+	};
+	let from = &pc.arguments[rule.from];
 	if let Value::Primitive(from_p) = from {
-		if from_p.id != prim.rewrite.id {
+		if from_p.id != rule.id {
 			return (!prim.definition_check, wrap());
 		}
 		if !can_rewrite_primitive(pc) {
 			return (!prim.definition_check, wrap());
 		}
-		if let Some(to_fn) = prim.rewrite.to {
-			let rewrite = to_fn(from_p);
-			return (true, rewrite);
-		}
+		return (true, (rule.to)(from_p));
 	}
 	(!prim.definition_check, wrap())
 }
 
 fn can_rewrite_primitive(p: &Primitive) -> bool {
-	let Ok(prim) = primitive_get(p.id) else {
+	let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
 		return false;
 	};
-	let from = &p.arguments[prim.rewrite.from];
-	let Value::Primitive(from_p) = from else {
+	let Value::Primitive(from_p) = &p.arguments[rule.from] else {
 		return false;
 	};
-	let Some(filter_fn) = prim.rewrite.filter else {
-		return false;
-	};
-	for &(a_idx, ref m_vec) in &prim.rewrite.matching {
-		let mut valid = false;
-		for &mm in m_vec {
-			if a_idx >= p.arguments.len() || mm >= from_p.arguments.len() {
-				continue;
-			}
-			let mut ax = [p.arguments[a_idx].clone(), from_p.arguments[mm].clone()];
-			let (filtered, fvalid) = filter_fn(p, &ax[0], mm);
-			if !fvalid {
-				continue;
-			}
-			ax[0] = filtered;
-			for item in &mut ax {
-				let replacement = match &*item {
-					Value::Primitive(inner_p) => {
-						let (r, v) = can_rewrite(inner_p);
-						if r { Some(v) } else { None }
-					}
-					_ => None,
-				};
-				if let Some(new_val) = replacement {
-					*item = new_val;
-				}
-			}
-			valid = ax[0].equivalent(&ax[1], true);
-			if valid {
-				break;
-			}
+	let reduced = |v: &Value| match v {
+		Value::Primitive(inner_p) => {
+			let (rewritten, replacement) = can_rewrite(inner_p);
+			if rewritten { replacement } else { v.clone() }
 		}
+		_ => v.clone(),
+	};
+	for &(a_idx, ref m_vec) in &rule.matching {
+		let valid = m_vec.iter().any(|&mm| {
+			if a_idx >= p.arguments.len() || mm >= from_p.arguments.len() {
+				return false;
+			}
+			let (filtered, fvalid) = (rule.filter)(p, &p.arguments[a_idx], mm);
+			fvalid && reduced(&filtered).equivalent(&reduced(&from_p.arguments[mm]), true)
+		});
 		if !valid {
 			return false;
 		}
@@ -548,18 +514,15 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
-	let prim = primitive_get(p.id).ok()?;
-	if !prim.rebuild.has_rule {
-		return None;
-	}
-	for given_set in &prim.rebuild.given {
+	let rule = primitive_get(p.id).ok()?.rebuild.as_ref()?;
+	for given_set in &rule.given {
 		let mut has = Vec::new();
 		for &arg_idx in given_set {
 			if arg_idx >= p.arguments.len() {
 				continue;
 			}
 			if let Value::Primitive(arg_p) = &p.arguments[arg_idx]
-				&& arg_p.id == prim.rebuild.id
+				&& arg_p.id == rule.id
 			{
 				has.push(&p.arguments[arg_idx]);
 			}
@@ -578,7 +541,7 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 			continue;
 		}
 		if let Value::Primitive(h0) = has[0] {
-			return Some(h0.arguments[prim.rebuild.reveal].clone());
+			return Some(h0.arguments[rule.reveal].clone());
 		}
 	}
 	None

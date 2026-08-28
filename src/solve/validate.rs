@@ -231,7 +231,7 @@ fn contains_failed_check(v: &Value) -> bool {
 	match v {
 		Value::Primitive(p) => {
 			if p.instance_check
-				&& primitive_get(p.id).is_ok_and(|spec| spec.rewrite.has_rule)
+				&& primitive_get(p.id).is_ok_and(|spec| spec.rewrite.is_some())
 				&& !can_rewrite(p).0
 			{
 				return true;

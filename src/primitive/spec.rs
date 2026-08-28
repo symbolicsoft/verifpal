@@ -52,17 +52,7 @@ fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bo
 	}
 }
 
-fn filter_kem_decap_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
-	match i {
-		0 => match super::key_derivation_of(x.clone()) {
-			Some(k) => (k, true),
-			None => (x.clone(), false),
-		},
-		_ => (x.clone(), false),
-	}
-}
-
-fn filter_pke_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
+fn filter_derived_key_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		0 => match super::key_derivation_of(x.clone()) {
 			Some(k) => (k, true),
@@ -161,7 +151,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "ASSERT",
 			arity: vec![2],
 			output: vec![1],
-			has_rule: true,
 			core_rule: Some(core_rule_assert),
 			definition_check: true,
 			reveals_args: false,
@@ -172,7 +161,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "CONCAT",
 			arity: vec![2, 3, 4, 5],
 			output: vec![1],
-			has_rule: false,
 			core_rule: None,
 			definition_check: false,
 			reveals_args: true,
@@ -183,7 +171,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "SPLIT",
 			arity: vec![1],
 			output: vec![1, 2, 3, 4, 5],
-			has_rule: true,
 			core_rule: Some(core_rule_split),
 			definition_check: true,
 			reveals_args: false,
@@ -227,13 +214,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "AEAD_ENC",
 			arity: vec![3],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
+				filter: filter_identity,
+			}),
 			weak_reveals: vec![1],
 			forgeable_secret: Some(0),
 			..PrimitiveSpec::default()
@@ -244,21 +230,19 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "AEAD_DEC",
 			arity: vec![3],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
-			rewrite: RewriteRule {
-				has_rule: true,
+				filter: filter_identity,
+			}),
+			rewrite: Some(RewriteRule {
 				id: PRIM_AEAD_ENC,
 				from: 1,
-				to: Some(rewrite_to_arg1),
+				to: rewrite_to_arg1,
 				matching: vec![(0, vec![0]), (2, vec![2])],
-				filter: Some(filter_aead_dec_rewrite),
-			},
+				filter: filter_aead_dec_rewrite,
+			}),
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			identifying_positions: vec![0],
@@ -270,13 +254,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "ENC",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
+				filter: filter_identity,
+			}),
 			weak_reveals: vec![1],
 			malleable_vary: vec![1],
 			..PrimitiveSpec::default()
@@ -287,21 +270,19 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "DEC",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
-			rewrite: RewriteRule {
-				has_rule: true,
+				filter: filter_identity,
+			}),
+			rewrite: Some(RewriteRule {
 				id: PRIM_ENC,
 				from: 1,
-				to: Some(rewrite_to_arg1),
+				to: rewrite_to_arg1,
 				matching: vec![(0, vec![0])],
-				filter: Some(filter_dec_rewrite),
-			},
+				filter: filter_dec_rewrite,
+			}),
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
@@ -357,14 +338,13 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SIGNVERIF",
 			arity: vec![3],
 			output: vec![1],
-			rewrite: RewriteRule {
-				has_rule: true,
+			rewrite: Some(RewriteRule {
 				id: PRIM_SIGN,
 				from: 2,
-				to: Some(rewrite_to_nil),
+				to: rewrite_to_nil,
 				matching: vec![(0, vec![0]), (1, vec![1])],
-				filter: Some(filter_extract_dh_exponent),
-			},
+				filter: filter_extract_dh_exponent,
+			}),
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Derived {
 				arg: 0,
@@ -379,13 +359,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "PKE_ENC",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_extract_dh_exponent),
-			},
+				filter: filter_extract_dh_exponent,
+			}),
 			weak_reveals: vec![1],
 			..PrimitiveSpec::default()
 		},
@@ -395,21 +374,19 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "PKE_DEC",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
-			rewrite: RewriteRule {
-				has_rule: true,
+				filter: filter_identity,
+			}),
+			rewrite: Some(RewriteRule {
 				id: PRIM_PKE_ENC,
 				from: 1,
-				to: Some(rewrite_to_arg1),
+				to: rewrite_to_arg1,
 				matching: vec![(0, vec![0])],
-				filter: Some(filter_pke_dec_rewrite),
-			},
+				filter: filter_derived_key_rewrite,
+			}),
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
@@ -419,11 +396,10 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SHAMIR_SPLIT",
 			arity: vec![1],
 			output: vec![3],
-			recompose: RecomposeRule {
-				has_rule: true,
+			recompose: Some(RecomposeRule {
 				given: vec![vec![0, 1], vec![0, 2], vec![1, 2]],
 				reveal: 0,
-			},
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -432,12 +408,11 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SHAMIR_JOIN",
 			arity: vec![2],
 			output: vec![1],
-			rebuild: RebuildRule {
-				has_rule: true,
+			rebuild: Some(RebuildRule {
 				id: PRIM_SHAMIR_SPLIT,
 				given: vec![vec![0, 1], vec![1, 0]],
 				reveal: 0,
-			},
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -461,19 +436,18 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "RINGSIGNVERIF",
 			arity: vec![5],
 			output: vec![1],
-			rewrite: RewriteRule {
-				has_rule: true,
+			rewrite: Some(RewriteRule {
 				id: PRIM_RINGSIGN,
 				from: 4,
-				to: Some(rewrite_to_nil),
+				to: rewrite_to_nil,
 				matching: vec![
 					(0, vec![0, 1, 2]),
 					(1, vec![0, 1, 2]),
 					(2, vec![0, 1, 2]),
 					(3, vec![3]),
 				],
-				filter: Some(filter_ringsignverif_rewrite),
-			},
+				filter: filter_ringsignverif_rewrite,
+			}),
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Derived {
 				arg: 0,
@@ -488,13 +462,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "BLIND",
 			arity: vec![2],
 			output: vec![1],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 1,
 				reveal_output: None,
-				filter: Some(filter_identity),
-			},
+				filter: filter_identity,
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -503,14 +476,13 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "UNBLIND",
 			arity: vec![3],
 			output: vec![1],
-			rewrite: RewriteRule {
-				has_rule: true,
+			rewrite: Some(RewriteRule {
 				id: PRIM_SIGN,
 				from: 2,
-				to: Some(rewrite_to_unblind),
+				to: rewrite_to_unblind,
 				matching: vec![(0, vec![1])],
-				filter: Some(filter_unblind_rewrite),
-			},
+				filter: filter_unblind_rewrite,
+			}),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -519,13 +491,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "KEM_ENCAP",
 			arity: vec![2],
 			output: vec![2],
-			decompose: DecomposeRule {
-				has_rule: true,
+			decompose: Some(DecomposeRule {
 				given: vec![0],
 				reveal: 0,
 				reveal_output: Some(0),
-				filter: Some(filter_extract_dh_exponent),
-			},
+				filter: filter_extract_dh_exponent,
+			}),
 			argument_restrictions: vec![
 				(0, vec![PRIM_DH_KEX, PRIM_KEM_ENCAP, PRIM_KEM_DECAP]),
 				(1, vec![PRIM_PUBKEY, PRIM_DH_KEX]),
@@ -539,14 +510,13 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "KEM_DECAP",
 			arity: vec![2],
 			output: vec![1],
-			rewrite: RewriteRule {
-				has_rule: true,
+			rewrite: Some(RewriteRule {
 				id: PRIM_KEM_ENCAP,
 				from: 1,
-				to: Some(rewrite_to_kem_secret),
+				to: rewrite_to_kem_secret,
 				matching: vec![(0, vec![0])],
-				filter: Some(filter_kem_decap_rewrite),
-			},
+				filter: filter_derived_key_rewrite,
+			}),
 			definition_check: true,
 			bypass_key: Some(BypassKeyKind::Direct(0)),
 			argument_restrictions: vec![(0, vec![PRIM_PUBKEY, PRIM_DH_KEX])],

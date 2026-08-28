@@ -156,11 +156,9 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 	Ok(())
 }
 
-#[allow(clippy::only_used_in_recursion)]
 pub(crate) fn sanity_assignment_constants(
 	right: &Value,
 	existing: &[Constant],
-	km: &ProtocolTrace,
 ) -> VResult<Vec<Constant>> {
 	let mut constants: Vec<Constant> = existing.to_vec();
 	match right {
@@ -195,7 +193,7 @@ pub(crate) fn sanity_assignment_constants(
 				.note(format!("its signature is `{}`", primitive_signature(p.id))));
 			}
 			for arg in &p.arguments {
-				constants = sanity_assignment_constants(arg, &constants, km)?;
+				constants = sanity_assignment_constants(arg, &constants)?;
 			}
 		}
 	}

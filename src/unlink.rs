@@ -68,6 +68,7 @@ fn witness_identifying_check(
 	let identifying = *check.identifying_positions.first()?;
 	let (_, targets) = check
 		.rewrite
+		.as_ref()?
 		.matching
 		.iter()
 		.find(|(position, _)| *position == identifying)?;

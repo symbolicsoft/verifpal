@@ -133,17 +133,17 @@ impl<'a> Deducer<'a> {
 		super::vars::free_var(n)
 	}
 
-	fn rewrite_shapes(&self, outer: &Primitive, spec: &PrimitiveSpec) -> Vec<Value> {
-		build_rewrite_shapes_with(outer, spec, || self.fresh_var())
+	fn rewrite_shapes(&self, outer: &Primitive, rule: &RewriteRule) -> Vec<Value> {
+		build_rewrite_shapes_with(outer, rule, || self.fresh_var())
 	}
 
 	fn rewrite_shape_yielding(
 		&self,
 		outer: &Primitive,
-		spec: &PrimitiveSpec,
+		rule: &RewriteRule,
 		fill: &Value,
 	) -> Option<Value> {
-		build_rewrite_shapes_with(outer, spec, || fill.clone())
+		build_rewrite_shapes_with(outer, rule, || fill.clone())
 			.into_iter()
 			.next()
 	}
@@ -322,27 +322,22 @@ impl<'a> Deducer<'a> {
 		let Value::Primitive(p) = term else {
 			return;
 		};
-		let Ok(spec) = primitive_get(p.id) else {
+		let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
 			return;
 		};
-		if !spec.rewrite.has_rule {
+		let Some(Value::Primitive(inner)) = p.arguments.get(rule.from) else {
+			return;
+		};
+		if inner.id != rule.id {
 			return;
 		}
-		let Some(Value::Primitive(inner)) = p.arguments.get(spec.rewrite.from) else {
-			return;
-		};
-		if inner.id != spec.rewrite.id {
-			return;
-		}
-		let (Some(to_fn), Some(filter)) = (spec.rewrite.to, spec.rewrite.filter) else {
-			return;
-		};
+		let (to_fn, filter) = (rule.to, rule.filter);
 
 		let Some(mut current) = match_value(&to_fn(inner), goal, s) else {
 			return;
 		};
 
-		for (outer_idx, inner_idxs) in &spec.rewrite.matching {
+		for (outer_idx, inner_idxs) in &rule.matching {
 			let Some(outer_arg) = p.arguments.get(*outer_idx) else {
 				return;
 			};
@@ -381,13 +376,10 @@ impl<'a> Deducer<'a> {
 		let Value::Primitive(p) = term else {
 			return;
 		};
-		let Ok(spec) = primitive_get(p.id) else {
+		let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
 			return;
 		};
-		if !spec.rewrite.has_rule {
-			return;
-		}
-		let Some(from) = p.arguments.get(spec.rewrite.from) else {
+		let Some(from) = p.arguments.get(rule.from) else {
 			return;
 		};
 		let Some(var_id) = as_var(from) else {
@@ -396,7 +388,7 @@ impl<'a> Deducer<'a> {
 		if !self.basis.contains(&goal.hash_value()) {
 			return;
 		}
-		let Some(shape) = self.rewrite_shape_yielding(p, spec, goal) else {
+		let Some(shape) = self.rewrite_shape_yielding(p, rule, goal) else {
 			return;
 		};
 		self.bind_from_shape(&shape, var_id, s, out);
@@ -448,10 +440,10 @@ impl<'a> Deducer<'a> {
 		if self.capabilities.in_force(p, cap, phase) {
 			return true;
 		}
-		if !contains_var(&Value::Primitive(Arc::new(p.clone()))) {
+		let pattern = Value::Primitive(Arc::new(p.clone()));
+		if !contains_var(&pattern) {
 			return false;
 		}
-		let pattern = Value::Primitive(Arc::new(p.clone()));
 		let empty = Substitution::default();
 		self.capabilities.annotated_terms().any(|(term, caps)| {
 			caps.in_force(cap, phase)
@@ -468,25 +460,20 @@ impl<'a> Deducer<'a> {
 			if primitive_is_core(p.id) {
 				continue;
 			}
-			let Ok(spec) = primitive_get(p.id) else {
+			let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.decompose.as_ref()) else {
 				continue;
 			};
-			if !spec.decompose.has_rule {
-				continue;
-			}
-			let Some(reveal) = p.arguments.get(spec.decompose.reveal) else {
+			let Some(reveal) = p.arguments.get(rule.reveal) else {
 				continue;
 			};
 			let Some(aligned) = match_value(reveal, goal, s) else {
 				continue;
 			};
-			let Some(filter_fn) = spec.decompose.filter else {
-				continue;
-			};
+			let filter_fn = rule.filter;
 
 			let mut frontier = vec![aligned];
 			let mut viable = true;
-			for (filter_i, &arg_idx) in spec.decompose.given.iter().enumerate() {
+			for (filter_i, &arg_idx) in rule.given.iter().enumerate() {
 				let Some(arg) = p.arguments.get(arg_idx) else {
 					viable = false;
 					break;
@@ -523,12 +510,11 @@ impl<'a> Deducer<'a> {
 	fn collect_forgeable(&self, v: &Value, var_id: ValueId, out: &mut Vec<Value>) {
 		match v {
 			Value::Primitive(p) => {
-				if let Ok(spec) = primitive_get(p.id)
-					&& spec.rewrite.has_rule
-					&& let Some(from) = p.arguments.get(spec.rewrite.from)
+				if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())
+					&& let Some(from) = p.arguments.get(rule.from)
 					&& as_var(from) == Some(var_id)
 				{
-					for shape in self.rewrite_shapes(p, spec) {
+					for shape in self.rewrite_shapes(p, rule) {
 						if !out
 							.iter()
 							.any(|existing: &Value| existing.equivalent(&shape, true))
@@ -629,10 +615,9 @@ impl<'a> Deducer<'a> {
 			return dedupe(out);
 		};
 
-		if let Ok(spec) = primitive_get(p.id)
-			&& spec.rewrite.has_rule
-			&& let Some(from) = p.arguments.get(spec.rewrite.from)
-			&& let Some(shape) = self.rewrite_shape_yielding(p, spec, target)
+		if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())
+			&& let Some(from) = p.arguments.get(rule.from)
+			&& let Some(shape) = self.rewrite_shape_yielding(p, rule, target)
 		{
 			out.extend(self.invert(from, &shape, s));
 		}
@@ -693,21 +678,18 @@ impl<'a> Deducer<'a> {
 			return dedupe(out);
 		}
 
-		let Ok(spec) = primitive_get(p.id) else {
+		let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
 			return Vec::new();
 		};
-		if !spec.rewrite.has_rule {
-			return Vec::new();
-		}
-		let Some(from) = p.arguments.get(spec.rewrite.from) else {
+		let Some(from) = p.arguments.get(rule.from) else {
 			return Vec::new();
 		};
-		let shapes = self.rewrite_shapes(p, spec);
+		let shapes = self.rewrite_shapes(p, rule);
 		if shapes.is_empty() {
 			if !may_shape {
 				return Vec::new();
 			}
-			return self.satisfy_check_by_shaping(p, spec, base);
+			return self.satisfy_check_by_shaping(p, rule, base);
 		}
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
@@ -727,14 +709,12 @@ impl<'a> Deducer<'a> {
 	fn satisfy_check_by_shaping(
 		&self,
 		p: &Primitive,
-		spec: &PrimitiveSpec,
+		rule: &RewriteRule,
 		base: &Substitution,
 	) -> Vec<Substitution> {
-		let Some(filter) = spec.rewrite.filter else {
-			return Vec::new();
-		};
+		let filter = rule.filter;
 		let mut out = Vec::new();
-		for (outer_idx, inner_idxs) in &spec.rewrite.matching {
+		for (outer_idx, inner_idxs) in &rule.matching {
 			let Some(outer_arg) = p.arguments.get(*outer_idx) else {
 				continue;
 			};
@@ -859,23 +839,21 @@ fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
 
 pub(crate) fn build_rewrite_shapes_with(
 	outer: &Primitive,
-	spec: &PrimitiveSpec,
+	rule: &RewriteRule,
 	mut fill: impl FnMut() -> Value,
 ) -> Vec<Value> {
-	let Ok(inner_spec) = primitive_get(spec.rewrite.id) else {
+	let Ok(inner_spec) = primitive_get(rule.id) else {
 		return Vec::new();
 	};
 	let Some(&arity) = inner_spec.arity.first() else {
 		return Vec::new();
 	};
 	let arity = arity as usize;
-	let Some(filter) = spec.rewrite.filter else {
-		return Vec::new();
-	};
+	let filter = rule.filter;
 
 	let mut partials: Vec<(Vec<Value>, Vec<usize>)> =
 		vec![((0..arity).map(|_| fill()).collect(), Vec::new())];
-	for (outer_idx, inner_idxs) in &spec.rewrite.matching {
+	for (outer_idx, inner_idxs) in &rule.matching {
 		let Some(outer_arg) = outer.arguments.get(*outer_idx) else {
 			return Vec::new();
 		};
@@ -905,7 +883,7 @@ pub(crate) fn build_rewrite_shapes_with(
 	partials
 		.into_iter()
 		.map(|(arguments, _)| arguments)
-		.map(|arguments| Value::primitive(spec.rewrite.id, arguments, 0))
+		.map(|arguments| Value::primitive(rule.id, arguments, 0))
 		.collect()
 }
 

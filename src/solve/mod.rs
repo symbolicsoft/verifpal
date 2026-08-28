@@ -172,10 +172,11 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<usize>) {
 	let Value::Primitive(p) = v else {
 		return;
 	};
-	if let Ok(spec) = crate::primitive::primitive_get(p.id)
-		&& spec.rewrite.has_rule
+	if let Some(rule) = crate::primitive::primitive_get(p.id)
+		.ok()
+		.and_then(|s| s.rewrite.as_ref())
 		&& !crate::theory::can_rewrite(p).0
-		&& let Some(Value::Constant(c)) = p.arguments.get(spec.rewrite.from)
+		&& let Some(Value::Constant(c)) = p.arguments.get(rule.from)
 		&& vars::is_slot_var_id(c.id)
 	{
 		out.push(vars::slot_of_var_id(c.id));

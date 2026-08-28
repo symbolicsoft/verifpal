@@ -390,7 +390,7 @@ fn construct_trace_render_assignment(
 		VerifpalError::sanity("assignment has nothing on the right of the `=`".into())
 			.help("write the value being computed, e.g. `x = HASH(m)`")
 	})?;
-	let constants = sanity_assignment_constants(assigned, &[], trace)?;
+	let constants = sanity_assignment_constants(assigned, &[])?;
 	if let Value::Primitive(p) = assigned {
 		sanity_primitive(p, &expr.constants)?;
 	}

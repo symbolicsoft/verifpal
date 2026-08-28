@@ -267,7 +267,7 @@ impl PrincipalState {
 		for i in 0..len {
 			if let Value::Primitive(p) = &self.values[i].value {
 				let p_clone = p.clone();
-				let failed = perform_primitive_rewrite(&p_clone, Some(i), self);
+				let failed = perform_primitive_rewrite(&p_clone, i, self);
 				failures.extend(failed.map(|p| (p, i)));
 			}
 		}
@@ -343,9 +343,6 @@ impl AttackerState {
 	}
 	pub fn record(&self, idx: KnownIdx) -> Option<&Arc<MutationRecord>> {
 		self.mutation_records.get(idx.get())
-	}
-	pub fn value(&self, idx: KnownIdx) -> Option<&Value> {
-		self.known.get(idx.get())
 	}
 	pub fn knows(&self, v: &Value) -> Option<KnownIdx> {
 		self.knows_hashed(v, v.hash_value())
