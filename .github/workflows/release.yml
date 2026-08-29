@@ -18,6 +18,8 @@ jobs:
   release:
     name: release
     runs-on: ubuntu-latest
+    env:
+      ZIG_VERSION: "0.16.0"
     steps:
       - name: Checkout the tag with its full history
         uses: actions/checkout@v4
@@ -31,7 +33,12 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install zig
-        uses: mlugg/setup-zig@v1
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/zigvenv"
+          "${RUNNER_TEMP}/zigvenv/bin/pip" install --quiet "ziglang==${ZIG_VERSION}"
+          zigdir=$("${RUNNER_TEMP}/zigvenv/bin/python" -c 'import ziglang, os; print(os.path.dirname(ziglang.__file__))')
+          echo "${zigdir}" >> "$GITHUB_PATH"
+          "${zigdir}/zig" version
 
       - name: Install syft
         uses: anchore/sbom-action/download-syft@v0
