@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: GPL-3.0-only
+
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

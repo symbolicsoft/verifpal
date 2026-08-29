@@ -19,6 +19,20 @@ test-exhaustive:
 	@/bin/echo "[Verifpal] Running exhaustive metamorphic sweeps..."
 	@cargo test --release -- --ignored --test-threads=1
 
+dist-assets:
+	@/bin/echo "[Verifpal] Generating shell completions and manual pages..."
+	@cargo build --quiet
+	@$(RM) -r target/dist-assets
+	@mkdir -p target/dist-assets/completions target/dist-assets/man
+	@./target/debug/verifpal completion bash > target/dist-assets/completions/verifpal.bash
+	@./target/debug/verifpal completion zsh  > target/dist-assets/completions/_verifpal
+	@./target/debug/verifpal completion fish > target/dist-assets/completions/verifpal.fish
+	@./target/debug/verifpal man --output target/dist-assets/man
+
+release-dry:
+	@/bin/echo "[Verifpal] Rehearsing a release without touching git or the network..."
+	@./scripts/release.sh --dry-run
+
 wasm:
 	@/bin/echo "[Verifpal] Building Verifpal WASM..."
 	@wasm-pack build --target web --no-default-features --features wasm
@@ -31,4 +45,4 @@ clean:
 	@cargo clean
 	@$(RM) -r dist
 
-.PHONY: build lint test test-exhaustive wasm clean assets examples HomebrewFormula scripts src target
+.PHONY: build lint test test-exhaustive dist-assets release-dry wasm clean assets examples HomebrewFormula scripts src target

@@ -1,14 +1,23 @@
 project_name: verifpal
 version: 2
 
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
 before:
   hooks:
-    - rustup default stable
+    - rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-freebsd
     - cargo install --locked cargo-zigbuild
+    - make dist-assets
 
 builds:
-  - builder: rust
+  - id: verifpal
+    builder: rust
     binary: verifpal
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - --release
+      - --locked
     targets:
       - x86_64-pc-windows-gnu
       - x86_64-unknown-linux-gnu
@@ -18,30 +27,182 @@ builds:
       - x86_64-unknown-freebsd
 
 archives:
-  - formats:
+  - id: verifpal
+    ids:
+      - verifpal
+    formats:
       - zip
+    wrap_in_directory: false
     files:
-      - LICENSE
-      - examples/*
-      - README.md
-    wrap_in_directory: true
+      - src: LICENSE
+        info: &file_info
+          mtime: "{{ .CommitDate }}"
+          mode: 0644
+      - src: README.md
+        info: *file_info
+      - src: examples/*
+        info: *file_info
+      - src: target/dist-assets/completions/*
+        dst: completions
+        strip_parent: true
+        info: *file_info
+      - src: target/dist-assets/man/*.1
+        dst: man
+        strip_parent: true
+        info: *file_info
+
+checksum:
+  algorithm: sha256
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+sboms:
+  - id: archives
+    artifacts: archive
+
+nfpms:
+  - id: verifpal
+    ids:
+      - verifpal
+    package_name: verifpal
+    vendor: Symbolic Software
+    homepage: "https://verifpal.com"
+    maintainer: Nadim Kobeissi <nadim@symbolic.software>
+    description: "Cryptographic protocol analysis for real-world cryptographic protocols."
+    license: GPL-3.0-only
+    section: utils
+    priority: optional
+    mtime: "{{ .CommitDate }}"
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    archlinux:
+      packager: Nadim Kobeissi <nadim@symbolic.software>
+    contents:
+      - src: target/dist-assets/completions/verifpal.bash
+        dst: /usr/share/bash-completion/completions/verifpal
+      - src: target/dist-assets/completions/_verifpal
+        dst: /usr/share/zsh/site-functions/_verifpal
+      - src: target/dist-assets/completions/verifpal.fish
+        dst: /usr/share/fish/vendor_completions.d/verifpal.fish
+      - src: target/dist-assets/man/*.1
+        dst: /usr/share/man/man1/
+      - src: LICENSE
+        dst: /usr/share/doc/verifpal/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/verifpal/README.md
+      - src: examples
+        dst: /usr/share/doc/verifpal/examples
+        type: tree
+
+homebrew_casks:
+  - name: verifpal
+    ids:
+      - verifpal
+    directory: Casks
+    repository:
+      owner: symbolicsoft
+      name: verifpal
+      branch: master
+    commit_author:
+      name: Symbolic Software
+      email: drone@symbolic.software
+    commit_msg_template: "Homebrew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: "https://verifpal.com"
+    description: "Cryptographic protocol analysis for real-world cryptographic protocols."
+    license: GPL-3.0-only
+    skip_upload: auto
+    binaries:
+      - verifpal
+    manpages:
+      - man/*.1
+    completions:
+      bash: completions/verifpal.bash
+      zsh: completions/_verifpal
+      fish: completions/verifpal.fish
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/verifpal"]
+          end
+
+scoops:
+  - name: verifpal
+    ids:
+      - verifpal
+    repository:
+      owner: symbolicsoft
+      name: verifpal
+      branch: master
+    commit_author:
+      name: Symbolic Software
+      email: drone@symbolic.software
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: "https://verifpal.com"
+    description: "Cryptographic protocol analysis for real-world cryptographic protocols."
+    license: "https://www.gnu.org/licenses/gpl-3.0.en.html"
+    skip_upload: auto
+
+winget:
+  - name: verifpal
+    ids:
+      - verifpal
+    package_identifier: SymbolicSoftware.Verifpal
+    publisher: Symbolic Software
+    publisher_url: "https://symbolic.software"
+    publisher_support_url: "https://github.com/symbolicsoft/verifpal/issues"
+    homepage: "https://verifpal.com"
+    license: GPL-3.0-only
+    license_url: "https://www.gnu.org/licenses/gpl-3.0.en.html"
+    copyright: "Copyright 2019-2026 Nadim Kobeissi"
+    short_description: "Cryptographic protocol analysis for real-world cryptographic protocols."
+    description: |
+      Verifpal is a symbolic formal verification tool for cryptographic protocols. You
+      describe a protocol in the Verifpal language, state security queries about it, and
+      Verifpal searches for an attack that breaks them, printing the trace of any attack
+      it finds.
+    release_notes: "{{ .Changelog }}"
+    release_notes_url: "https://github.com/symbolicsoft/verifpal/releases/tag/{{ .Tag }}"
+    tags:
+      - cryptography
+      - security
+      - formal-verification
+      - protocol
+    skip_upload: '{{ if index .Env "VERIFPAL_PUBLISH_WINGET" }}false{{ else }}true{{ end }}'
+    repository:
+      owner: symbolicsoft
+      name: winget-pkgs
+      branch: "verifpal-{{ .Version }}"
+      token: '{{ index .Env "WINGET_TOKEN" }}'
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
 
 changelog:
   disable: false
+  use: github
   sort: asc
+  filters:
+    exclude:
+      - "^Scoop update for "
+      - "^Homebrew cask update for "
+      - "^Update Homebrew formula for "
+      - '^(\[ci\] )?Verifpal [0-9]+\.[0-9]+\.[0-9]+$'
+      - "(?i)^merge branch"
+      - "(?i)^merge pull request"
 
 release:
   github:
     owner: symbolicsoft
     name: verifpal
-
-scoops:
-  - repository:
-      owner: symbolicsoft
-      name: verifpal
-    commit_author:
-      name: drone
-      email: drone@symbolic.software
-    homepage: "https://verifpal.com"
-    description: "Cryptographic protocol analysis for students and engineers."
-    license: "https://www.gnu.org/licenses/gpl-3.0.en.html"
+  prerelease: auto
+  make_latest: true
+  replace_existing_artifacts: true
+  header: |
+    {{ .TagBody }}
