@@ -150,6 +150,7 @@ winget:
     ids:
       - verifpal
     package_identifier: SymbolicSoftware.Verifpal
+    package_name: Verifpal
     publisher: Symbolic Software
     publisher_url: "https://symbolic.software"
     publisher_support_url: "https://github.com/symbolicsoft/verifpal/issues"
