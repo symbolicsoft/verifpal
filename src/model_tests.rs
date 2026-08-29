@@ -813,7 +813,7 @@ fn test_junglegym_hybrid_pq() {
 }
 #[test]
 fn test_junglegym_threshold_ring() {
-	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a0u0u0u1f0f1e1e1");
+	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a0u0u1u1f0f1e1e1");
 }
 #[test]
 fn test_junglegym_password_maze() {
@@ -1287,6 +1287,16 @@ fn test_unlink_nonfresh_secret() {
 fn test_unlink_signature_links() {
 	run_model("unlink_signature_links.vp", "u1");
 }
+#[test]
+fn test_unlink_carried_in_ciphertext() {
+	run_model("unlink_carried_in_ciphertext.vp", "u1u0");
+}
+
+#[test]
+fn test_unlink_signature_recognized() {
+	run_model("unlink_signature_recognized.vp", "c1c0u1u0");
+}
+
 #[test]
 fn test_unlink_ringsign() {
 	run_model("unlink_ringsign.vp", "u0");
@@ -1992,7 +2002,7 @@ fn test_flawed_anonymous_chat() {
 }
 #[test]
 fn test_flawed_blind_factor_public() {
-	run_model("flawed_blind_factor_public.vp", "c1c1u0");
+	run_model("flawed_blind_factor_public.vp", "c1c1u1");
 }
 #[test]
 fn test_flawed_debug_logging() {

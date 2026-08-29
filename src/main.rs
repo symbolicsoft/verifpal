@@ -1,7 +1,8 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use verifpal::{
 	ColorChoice, InfoLevel, Run, SATURATE_MAX, Saturation, Verbosity, VerifyReport, diagram,
 	html_report, info_banner, info_message, info_replay, pretty_print, saturation_sessions,
@@ -10,6 +11,8 @@ use verifpal::{
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const MAN_MANUAL: &str = "Verifpal Manual";
 
 const EXIT_ERROR: i32 = 1;
 const EXIT_ATTACK: i32 = 2;
@@ -442,6 +445,90 @@ enum Commands {
 		)]
 		stdio: bool,
 	},
+	#[command(
+		arg_required_else_help = true,
+		about = "Print a shell completion script to stdout",
+		long_about = "Print a completion script for the given shell to stdout.\n\n\
+		              The script is generated from the same command definition the CLI itself \
+		              uses, so it always describes the subcommands and flags of the binary that \
+		              printed it.\n\n\
+		              Installing Verifpal from Homebrew, or from one of the Linux packages, \
+		              already places these scripts where the shell looks for them. Source the \
+		              output by hand only when running a binary you downloaded yourself, for \
+		              example:\n\n  \
+		              verifpal completion zsh > \"${fpath[1]}/_verifpal\"\n  \
+		              verifpal completion bash > /etc/bash_completion.d/verifpal\n  \
+		              verifpal completion fish > ~/.config/fish/completions/verifpal.fish"
+	)]
+	Completion {
+		#[arg(
+			value_name = "SHELL",
+			help = "Shell to generate a completion script for",
+			long_help = "The shell whose completion syntax to emit. Verifpal supports every \
+			             shell clap can generate for: bash, elvish, fish, powershell and zsh."
+		)]
+		shell: Shell,
+	},
+	#[command(
+		hide = true,
+		about = "Print the roff source of the verifpal(1) manual page to stdout"
+	)]
+	Man {
+		#[arg(
+			long,
+			value_name = "DIR",
+			help = "Write one page per command into DIR instead of printing to stdout"
+		)]
+		output: Option<String>,
+	},
+}
+
+fn man_write(path: &std::path::Path, page: clap_mangen::Man) -> std::io::Result<()> {
+	let mut rendered = Vec::new();
+	page.render(&mut rendered)?;
+	std::fs::write(path, rendered)
+}
+
+fn run_man(output: Option<String>) -> i32 {
+	let command = Cli::command();
+	let Some(output) = output else {
+		return match clap_mangen::Man::new(command).render(&mut std::io::stdout()) {
+			Ok(()) => 0,
+			Err(e) => {
+				eprintln!("{}", e);
+				EXIT_ERROR
+			}
+		};
+	};
+	let directory = std::path::PathBuf::from(output);
+	if let Err(e) = std::fs::create_dir_all(&directory) {
+		eprintln!("{}", e);
+		return EXIT_ERROR;
+	}
+	let mut pages = vec![(
+		directory.join("verifpal.1"),
+		clap_mangen::Man::new(command.clone()).manual(MAN_MANUAL),
+	)];
+	for subcommand in command.get_subcommands() {
+		if subcommand.is_hide_set() || subcommand.get_name() == "help" {
+			continue;
+		}
+		let name = format!("verifpal-{}", subcommand.get_name());
+		let path = directory.join(format!("{}.1", name));
+		let page = clap_mangen::Man::new(subcommand.clone())
+			.title(name)
+			.section("1")
+			.manual(MAN_MANUAL)
+			.source(format!("verifpal {}", VERSION));
+		pages.push((path, page));
+	}
+	for (path, page) in pages {
+		if let Err(e) = man_write(&path, page) {
+			eprintln!("{}", e);
+			return EXIT_ERROR;
+		}
+	}
+	0
 }
 
 fn verify_verbosity(structured: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
@@ -700,6 +787,12 @@ fn main() {
 			update_check_report(&update_check);
 			0
 		}
+		Commands::Completion { shell } => {
+			let mut command = Cli::command();
+			clap_complete::generate(shell, &mut command, "verifpal", &mut std::io::stdout());
+			0
+		}
+		Commands::Man { output } => run_man(output),
 	};
 	if status != 0 {
 		std::process::exit(status);

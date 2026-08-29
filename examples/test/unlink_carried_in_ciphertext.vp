@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0 — a value can reach the attacker without ever travelling
+// under its own name. Both pairs are signatures that are only ever bundled and
+// sealed, and only the sealing key differs.
+//
+// The archived pair travels inside `archive`, which the attacker opens because
+// `archive_key` is public: it holds `open1` and `open2` and one SIGNVERIF
+// under `ga` identifies both as the same signer. Observability has to be about
+// what the attacker ends up holding out of the transcript, not about which
+// constant names appear on a wire, or a protocol hides a linkage simply by
+// putting it in an envelope.
+//
+// The vaulted pair is the counterweight and it is the half that keeps the rule
+// sound. `held1` and `held2` sit inside `vault`, which travels just as
+// `archive` does, but `vault_key` is private so the attacker never holds
+// either signature. Being carried by something observable is not enough; the
+// attacker has to actually come out of it holding the value. unlink_never_sent
+// pins the other half — a value the attacker can only recompute, and that is
+// carried by nothing, is not observed at all.
+
+attacker[passive]
+
+principal Alice[
+	knows public doc1, doc2, doc3, doc4
+	knows public archive_key
+	knows private vault_key
+	generates sk
+	ga = PUBKEY(sk)
+	open1 = SIGN(sk, doc1)
+	open2 = SIGN(sk, doc2)
+	held1 = SIGN(sk, doc3)
+	held2 = SIGN(sk, doc4)
+	archive = ENC(archive_key, CONCAT(open1, open2))
+	vault = ENC(vault_key, CONCAT(held1, held2))
+]
+
+Alice -> Bob: [ga], archive, vault
+
+principal Bob[
+	knows public archive_key, doc1
+	seen = DEC(archive_key, archive)
+	a1, a2 = SPLIT(seen)
+	_ = SIGNVERIF(ga, doc1, a1)?
+]
+
+queries[
+	unlinkability? open1, open2
+	unlinkability? held1, held2
+]

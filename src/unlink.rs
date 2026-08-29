@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{BypassKeyKind, primitive_check_undoing};
+use crate::primitive::{BypassKeyKind, PrimitiveSpec, primitive_check_undoing};
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 
@@ -11,6 +11,7 @@ pub(crate) enum LinkWitnessKind {
 	SharedSecret,
 	IdentifyingCheck(PrimitiveId),
 	ObservedEquality,
+	RecognizedSecret(PrimitiveId),
 }
 
 pub(crate) struct LinkWitness {
@@ -24,7 +25,7 @@ pub(crate) fn find_link_witness(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<LinkWitness> {
-	if !is_observable(a, ps) || !is_observable(b, ps) {
+	if !is_observable(a, ps, attacker) || !is_observable(b, ps, attacker) {
 		return None;
 	}
 	if attacker_authored_slot(a, ps) || attacker_authored_slot(b, ps) {
@@ -35,6 +36,7 @@ pub(crate) fn find_link_witness(
 	witness_observed_equality(&av, &bv, ps, attacker)
 		.or_else(|| witness_identifying_check(&av, &bv, ps, attacker))
 		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
+		.or_else(|| witness_recognized_secret(&av, &bv, ps, attacker))
 }
 
 impl LinkWitness {
@@ -48,6 +50,10 @@ impl LinkWitness {
 			LinkWitnessKind::ObservedEquality => {
 				format!("because both are the same value ({term})")
 			}
+			LinkWitnessKind::RecognizedSecret(id) => format!(
+				"via {term}, which {} confirms",
+				crate::primitive::primitive_name(id)
+			),
 		}
 	}
 }
@@ -119,6 +125,128 @@ fn witness_shared_secret(
 	None
 }
 
+fn witness_recognized_secret(
+	av: &Value,
+	bv: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<LinkWitness> {
+	let a_recognized = recognized_secrets(av, ps, attacker);
+	let b_recognized = recognized_secrets(bv, ps, attacker);
+	if a_recognized.is_empty() && b_recognized.is_empty() {
+		return None;
+	}
+	let a_tied = tied_values(av, &a_recognized, ps, attacker);
+	let b_tied = tied_values(bv, &b_recognized, ps, attacker);
+	for (w, id) in a_recognized.iter().chain(b_recognized.iter()) {
+		if !depends_on_secret(w, ps) {
+			continue;
+		}
+		if w.equivalent(av, true) || w.equivalent(bv, true) {
+			continue;
+		}
+		if a_tied.iter().any(|x| x.equivalent(w, true))
+			&& b_tied.iter().any(|x| x.equivalent(w, true))
+		{
+			return Some(LinkWitness {
+				kind: LinkWitnessKind::RecognizedSecret(*id),
+				value: w.clone(),
+			});
+		}
+	}
+	None
+}
+
+fn tied_values(
+	v: &Value,
+	recognized: &[(Value, PrimitiveId)],
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Vec<Value> {
+	let mut out = origin_leaves(v, ps, attacker).unwrap_or_default();
+	for (w, _) in recognized {
+		push_leaf(&mut out, w);
+	}
+	out
+}
+
+fn recognized_secrets(
+	v: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Vec<(Value, PrimitiveId)> {
+	let Value::Primitive(p) = v else {
+		return Vec::new();
+	};
+	if attacker.knows(v).is_none() {
+		return Vec::new();
+	}
+	let Some(check) = primitive_check_undoing(p.id) else {
+		return Vec::new();
+	};
+	let Some(rewrite) = check.rewrite.as_ref() else {
+		return Vec::new();
+	};
+	let runnable = rewrite
+		.matching
+		.iter()
+		.all(|(position, targets)| check_input_held(check, *position, targets, p, ps, attacker));
+	if !runnable {
+		return Vec::new();
+	}
+	let mut out: Vec<Value> = Vec::new();
+	for (_, targets) in &rewrite.matching {
+		for t in targets {
+			let Some(arg) = p.arguments.get(*t) else {
+				continue;
+			};
+			if is_key_derivation(check, arg) {
+				continue;
+			}
+			if !crate::theory::obtainable(arg, ps, attacker) {
+				continue;
+			}
+			push_leaf(&mut out, arg);
+		}
+	}
+	out.into_iter().map(|w| (w, check.id)).collect()
+}
+
+fn check_input_held(
+	check: &PrimitiveSpec,
+	position: usize,
+	targets: &[usize],
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	targets.iter().any(|t| {
+		let Some(arg) = p.arguments.get(*t) else {
+			return false;
+		};
+		if crate::theory::obtainable(arg, ps, attacker) {
+			return true;
+		}
+		match check.bypass_key {
+			Some(BypassKeyKind::Derived {
+				arg: key,
+				constructor,
+			}) if key == position => {
+				let derived = Value::primitive(constructor, vec![arg.clone()], 0);
+				crate::theory::obtainable(&derived, ps, attacker)
+			}
+			_ => false,
+		}
+	})
+}
+
+fn is_key_derivation(check: &PrimitiveSpec, v: &Value) -> bool {
+	let Some(BypassKeyKind::Derived { constructor, .. }) = check.bypass_key else {
+		return false;
+	};
+	matches!(v, Value::Primitive(p) if p.id == constructor)
+}
+
 fn witness_observed_equality(
 	av: &Value,
 	bv: &Value,
@@ -153,12 +281,40 @@ fn attacker_authored_slot(c: &Constant, ps: &PrincipalState) -> bool {
 	})
 }
 
-pub(crate) fn is_observable(c: &Constant, ps: &PrincipalState) -> bool {
+pub(crate) fn is_observable(c: &Constant, ps: &PrincipalState, attacker: &AttackerState) -> bool {
 	if c.leaked {
 		return true;
 	}
-	ps.index_of(c)
+	if ps
+		.index_of(c)
 		.is_some_and(|i| !ps.meta[i].wire.is_empty() || ps.meta[i].constant.leaked)
+	{
+		return true;
+	}
+	carried_observably(c, ps, attacker)
+}
+
+fn carried_observably(c: &Constant, ps: &PrincipalState, attacker: &AttackerState) -> bool {
+	let Some(i) = ps.index_of(c) else {
+		return false;
+	};
+	let (target, _) = ps.resolve_constant(c, true);
+	if attacker.knows(&target).is_none() {
+		return false;
+	}
+	let h = target.hash_value();
+	for (j, meta) in ps.meta.iter().enumerate() {
+		if j == i || (meta.wire.is_empty() && !meta.constant.leaked) {
+			continue;
+		}
+		let (carrier, _) = ps.resolve_constant(&meta.constant, true);
+		let mut hashes = IdSet::default();
+		crate::hashing::collect_subterm_hashes(&carrier, &mut hashes);
+		if hashes.contains(&h) {
+			return true;
+		}
+	}
+	false
 }
 
 fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
@@ -406,11 +562,12 @@ mod tests {
 		let Value::Constant(c) = &travelled else {
 			unreachable!()
 		};
-		assert!(is_observable(c, &ps));
+		let attacker = make_attacker_state(vec![travelled.clone()]);
+		assert!(is_observable(c, &ps, &attacker));
 
 		let Value::Constant(absent) = make_constant("ul_absent") else {
 			unreachable!()
 		};
-		assert!(!is_observable(&absent, &ps));
+		assert!(!is_observable(&absent, &ps, &attacker));
 	}
 }

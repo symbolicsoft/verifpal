@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c1c0c0a1a1a0u0u0u1f0f1e1e1
+// Expected: c1c0c0a1a1a0u0u1u1f0f1e1e1
 //
 // Five-principal escrow: a Shamir-split key, ring signatures that must stay
 // anonymous, and blind signatures that must stay unlinkable.
@@ -9,8 +9,18 @@
 // key over different tags stay UNLINKABLE — that is the emptiness of
 // identifying_positions for RINGSIGNVERIF doing its job, and it is the one
 // primitive whose whole purpose would be defeated by a false attack here. Two
-// blind signatures likewise stay unlinkable. Two Shamir shares of one secret
-// are correctly LINKED, by common secret origin through escrow.
+// Shamir shares of one secret are correctly LINKED, by common secret origin
+// through escrow.
+//
+// The two blind signatures are LINKED, and it is worth being exact about by
+// what. Blinding did its job — the signer never saw doc1 or doc2 — but sig1
+// and sig2 are bundled into vault under the escrow key, escrow is already c1,
+// so the attacker opens the bundle and holds both, and both verify under
+// anchor_pk, which names one signer. Neither signature ever travels under its
+// own name; they reach the attacker inside something that does, and an
+// envelope the attacker can open is not a hiding place.
+// unlink_carried_in_ciphertext.vp isolates that rule against a sealed
+// counterweight.
 //
 // UNBLIND's second argument is the original message, not the blinded value:
 // the rewrite filter reconstructs BLIND(arg0, arg1). examples/test/

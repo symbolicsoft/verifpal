@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c1u0 — a blind signature scheme whose blinding factor is derived
+// Expected: c1c1u1 — a blind signature scheme whose blinding factor is derived
 // from the request identifier the client also publishes. The factor is not
 // secret, so the blinding is not blinding: the signer recovers the message it
 // was not supposed to see, and any observer links the blinded request to the
@@ -12,15 +12,14 @@
 // the factor was simply derived from something already public — which is
 // harder to notice and exactly as fatal.
 //
-// The unlinkability verdict is the interesting one, and it HOLDS even though
-// the scheme is thoroughly broken. That is not a bug and it is worth pinning.
-// The link-witness procedure looks for a common secret origin by withholding
-// each value from the attacker and asking what it would need to rebuild it;
-// withhold the blinded term and the only route to the message disappears with
-// it, so no shared ancestor is found. The decision procedure is sound for
-// attacks and incomplete, u0 means "no witness was exhibited" rather than "the
-// values are unlinkable", and this is the cheapest model in the tree that
-// makes the difference visible.
+// The unlinkability verdict is the one worth reading. The shared-origin
+// witness cannot reach `final_sig` at all: it descends only through terms the
+// attacker can recompute, and not being recomputable without `sk` is the whole
+// point of a signature. The link is recognition rather than reconstruction —
+// the attacker builds `factor`, opens `blinded` for `message`, and
+// SIGNVERIF(gsk, message, final_sig) succeeds where a signature over any other
+// request would fail. unlink_signature_recognized.vp isolates that rule
+// against a sealed counterweight.
 
 attacker[passive]
 

@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0u1u0 — a signature is the one term the attacker can recognize
+// without being able to recompute it, and that is enough to link. Both pairs
+// are the same construction and only the encryption key differs.
+//
+// The open pair: `group_key` is public, so the attacker decrypts `tag_open`
+// and holds `serial_open`. It also holds `ga` and `receipt_open`, so it runs
+// SIGNVERIF(ga, serial_open, receipt_open) and it succeeds. Had `receipt_open`
+// been issued over any other serial the check would have failed, so the two
+// values are linked through a secret the attacker holds — exactly what the
+// shared-origin witness reports, except that it can never reach a signature by
+// reconstruction, since not being recomputable is what a signature is for.
+//
+// The sealed pair is the counterweight: `vault_key` is private, the attacker
+// never learns `serial_sealed`, and the same check is unavailable to it. A
+// rule that read the linkage off the signature's shape rather than off a check
+// the attacker can actually run would flip this one too.
+
+attacker[passive]
+
+principal Alice[
+	knows private serial_open, serial_sealed
+	knows public group_key
+	knows private vault_key
+	generates sk
+	ga = PUBKEY(sk)
+	tag_open = ENC(group_key, serial_open)
+	tag_sealed = ENC(vault_key, serial_sealed)
+	receipt_open = SIGN(sk, serial_open)
+	receipt_sealed = SIGN(sk, serial_sealed)
+]
+
+Alice -> Verifier: [ga], tag_open, tag_sealed, receipt_open, receipt_sealed
+
+principal Verifier[
+	knows public group_key
+	seen = DEC(group_key, tag_open)
+	_ = SIGNVERIF(ga, seen, receipt_open)?
+]
+
+queries[
+	confidentiality? serial_open
+	confidentiality? serial_sealed
+	unlinkability? tag_open, receipt_open
+	unlinkability? tag_sealed, receipt_sealed
+]
