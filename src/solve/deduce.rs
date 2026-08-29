@@ -10,7 +10,7 @@ use crate::primitive::*;
 use crate::types::*;
 use crate::value::value_nil;
 
-use super::matching::match_value;
+use super::matching::{match_value, unify};
 use super::symbolic::SymbolicState;
 use super::vars::{
 	Substitution, apply, as_var, bind, compose, contains_var, dedupe, same_substitution,
@@ -141,11 +141,19 @@ impl<'a> Deducer<'a> {
 		&self,
 		outer: &Primitive,
 		rule: &RewriteRule,
-		fill: &Value,
+		target: &Value,
 	) -> Option<Value> {
-		build_rewrite_shapes_with(outer, rule, || fill.clone())
-			.into_iter()
-			.next()
+		let empty = Substitution::default();
+		for shape in self.rewrite_shapes(outer, rule) {
+			let Value::Primitive(inner) = &shape else {
+				continue;
+			};
+			let Some(bound) = unify(&(rule.to)(inner), target, &empty) else {
+				continue;
+			};
+			return Some(apply(&shape, &bound));
+		}
+		None
 	}
 
 	fn concat_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
@@ -897,4 +905,105 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 		}
 	}
 	dedupe(out)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+
+	fn unblind_over(k: &Value, m: &Value, sig: &Value) -> Primitive {
+		Primitive {
+			id: PRIM_UNBLIND,
+			arguments: vec![k.clone(), m.clone(), sig.clone()],
+			output: 0,
+			instance_check: false,
+			capabilities: Capabilities::default(),
+			hash: HashCell::default(),
+		}
+	}
+
+	#[test]
+	fn inverting_a_rewrite_solves_for_the_target_rather_than_nesting_it() {
+		let k = make_constant("inv_k");
+		let m = make_constant("inv_m");
+		let sk = make_constant("inv_sk");
+		let sig = make_constant("inv_sig");
+		let outer = unblind_over(&k, &m, &sig);
+		let target = Value::primitive(PRIM_SIGN, vec![sk.clone(), m.clone()], 0);
+
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let attacker = make_attacker_state(vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let rule = primitive_get(PRIM_UNBLIND)
+			.expect("UNBLIND is a primitive")
+			.rewrite
+			.as_ref()
+			.expect("UNBLIND declares a rewrite rule");
+
+		let shape = deducer
+			.rewrite_shape_yielding(&outer, rule, &target)
+			.expect("UNBLIND can be inverted against a signature over its own message");
+
+		let expected = Value::primitive(
+			PRIM_SIGN,
+			vec![sk, Value::primitive(PRIM_BLIND, vec![k, m], 0)],
+			0,
+		);
+		assert!(
+			shape.equivalent(&expected, true),
+			"inverting a rewrite must solve `to(shape) = target` for the positions the \
+			 rule leaves free, not drop the whole target into one of them. UNBLIND pins \
+			 only SIGN's message, so filling SIGN's *key* with the target builds \
+			 SIGN(SIGN(..), ..) and every later inversion nests that again — the search \
+			 then enumerates signature chains as deep as the term bound allows. \
+			 Expected {expected}, got {shape}"
+		);
+
+		let Value::Primitive(inner) = &shape else {
+			panic!("a rewrite shape is a primitive");
+		};
+		assert!(
+			(rule.to)(inner).equivalent(&target, true),
+			"the shape must actually yield the target it was built for"
+		);
+	}
+
+	#[test]
+	fn inverting_a_rewrite_refuses_a_target_the_rule_cannot_produce() {
+		let k = make_constant("inr_k");
+		let m = make_constant("inr_m");
+		let other = make_constant("inr_other");
+		let sig = make_constant("inr_sig");
+		let outer = unblind_over(&k, &m, &sig);
+		let target = Value::primitive(PRIM_SIGN, vec![make_constant("inr_sk"), other], 0);
+
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let attacker = make_attacker_state(vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let rule = primitive_get(PRIM_UNBLIND)
+			.expect("UNBLIND is a primitive")
+			.rewrite
+			.as_ref()
+			.expect("UNBLIND declares a rewrite rule");
+
+		assert!(
+			deducer
+				.rewrite_shape_yielding(&outer, rule, &target)
+				.is_none(),
+			"unblinding with blinding factor `inr_k` over message `inr_m` can only yield a \
+			 signature over `inr_m`; offering a shape for a signature over something else \
+			 proposes a term the rewrite does not produce"
+		);
+	}
 }

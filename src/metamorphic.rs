@@ -236,6 +236,14 @@ impl Report {
 	}
 }
 
+fn worker_cap() -> usize {
+	std::env::var("VERIFPAL_METAMORPHIC_WORKERS")
+		.ok()
+		.and_then(|v| v.parse::<usize>().ok())
+		.filter(|&n| n > 0)
+		.unwrap_or(4)
+}
+
 fn spread<T, R>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R>
 where
 	T: Sync,
@@ -249,7 +257,8 @@ where
 	let workers = std::thread::available_parallelism()
 		.map(|p| p.get())
 		.unwrap_or(1)
-		.min(items.len());
+		.min(items.len())
+		.min(worker_cap());
 	let next = AtomicUsize::new(0);
 	let work = &work;
 	let next = &next;

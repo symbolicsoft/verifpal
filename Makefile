@@ -17,7 +17,7 @@ test:
 
 test-exhaustive:
 	@/bin/echo "[Verifpal] Running exhaustive metamorphic sweeps..."
-	@cargo test --release -- --ignored
+	@cargo test --release -- --ignored --test-threads=1
 
 wasm:
 	@/bin/echo "[Verifpal] Building Verifpal WASM..."

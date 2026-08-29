@@ -67,7 +67,7 @@ jobs:
     - name: Run tests
       run: cargo test --release
     - name: Run the exhaustive metamorphic sweeps
-      run: cargo test --release -- --ignored
+      run: cargo test --release -- --ignored --test-threads=1
 
   wasm:
     name: wasm build
