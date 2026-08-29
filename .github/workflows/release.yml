@@ -87,7 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          VERIFPAL_PUBLISH_WINGET: ${{ vars.VERIFPAL_PUBLISH_WINGET }}
+          VERIFPAL_PUBLISH_WINGET: ${{ vars.VERIFPAL_PUBLISH_WINGET || secrets.VERIFPAL_PUBLISH_WINGET }}
 
       - name: Verify the generated package manifests describe this release
         if: env.VERIFPAL_PRERELEASE == '0'
