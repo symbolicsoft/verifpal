@@ -17,7 +17,7 @@ permissions:
 jobs:
   release:
     name: release
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     env:
       ZIG_VERSION: "0.16.0"
     steps:
