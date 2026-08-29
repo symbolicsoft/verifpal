@@ -175,7 +175,7 @@ winget:
       owner: symbolicsoft
       name: winget-pkgs
       branch: "verifpal-{{ .Version }}"
-      token: '{{ index .Env "WINGET_TOKEN" }}'
+      token: "{{ .Env.WINGET_TOKEN }}"
       pull_request:
         enabled: true
         draft: false
