@@ -1,15 +1,15 @@
 {
-    "version": "1.3.5",
+    "version": "1.3.6",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.3.5/verifpal_1.3.5_windows_amd64.zip",
+            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.3.6/verifpal_1.3.6_windows_amd64.zip",
             "bin": [
-                "verifpal_1.3.5_windows_amd64/verifpal.exe"
+                "verifpal.exe"
             ],
-            "hash": "00a22a43e5889d66e85f67c13fe17da6118196d4ce50fa699a63b029c5a31280"
+            "hash": "d532db631e167a0ecd9aa43fb3771ba6d1fc6ac33d495968ef289c18360e381e"
         }
     },
     "homepage": "https://verifpal.com",
     "license": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-    "description": "Cryptographic protocol analysis for real-world protocols."
+    "description": "Cryptographic protocol analysis for real-world cryptographic protocols."
 }
