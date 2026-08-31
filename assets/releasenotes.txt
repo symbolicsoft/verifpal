@@ -1,12 +1,18 @@
-Verifpal 1.3.6
+Verifpal 1.3.7
 
-Changes since v1.3.5:
+Changes since v1.3.6:
 
-- Find missed unlinkability attacks
-- Improved and expanded Goreleaser configuration
-- Update Homebrew formula for 1.3.5
-- Scoop update for verifpal version v1.3.5
+- Performance optimizations
+- Better attacker term reconstruction
+- Add package name
+- goreleaser: winget token must use the canonical .Env form
+- Scoop update for verifpal version v1.3.6
+- Homebrew cask update for verifpal version v1.3.6
+- Load VERIFPAL_PUBLISH_WINGET from secrets
+- release: build on macOS, since darwin targets need the Apple SDK
+- release: install zig from PyPI instead of a mirror-backed action
 
-All major changes between Verifpal 1.0.0 and 1.3.6 are covered
+All major changes between Verifpal 1.0.0 and 1.3.x are covered
 in the following blog post:
+
 https://symbolic.software/blog/2026-08-26-verifpal-1-3/
