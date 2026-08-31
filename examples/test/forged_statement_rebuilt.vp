@@ -1,0 +1,89 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — a forgery that must PRESERVE one field while replacing its
+// sibling inside the same CONCAT. Reduced from wc_sessionAuthenticate
+// (WalletConnect v2 One-Click Auth).
+//
+// A verifier asks a signer for a statement over a nonce the verifier chose,
+// then talks under a DH key. The signed statement names no key, no channel and
+// no session — only the nonce — so a signature obtained in one exchange is
+// valid in any other exchange carrying the same nonce.
+//
+//   1. req := CONCAT(c_tag, PUBKEY(nil), nonce). Swap the key, KEEP the nonce.
+//      The signer signs over that nonce and seals under HKDF(DH_KEX(gm, y)).
+//   2. Read gy, compute that key, harvest sig. This is the second c1.
+//   3. Re-seal toward the verifier: gy := PUBKEY(nil) and
+//      env := AEAD_ENC(HKDF(DH_KEX(gx, nil)), CONCAT(gs, sig), c_ad).
+//   4. The verifier rebuilds CONCAT(c_stmt, gs, nonce) from ITS OWN nonce —
+//      exactly what was signed, because the nonce was threaded through
+//      untouched — SIGNVERIF passes, and it seals secret under a key the
+//      attacker holds. That is the first c1.
+//
+// Reported c0c1 before `preserved_free`: the harvest was found and the
+// completion was not. The search could offer the attacker's own key at a
+// position the protocol fills with a key derivation (`keyed_free`), and `nil`
+// everywhere else, so it proposed CONCAT(c_tag, PUBKEY(nil), nil) — nonce
+// zeroed, statement no longer matching — and CONCAT(c_stmt, PUBKEY(nil), nonce)
+// — nonce kept but the signer's ASSERT halting on the tag. Never all three
+// together. `witness.rs::payload_shapes` already filled a free position with
+// the honest value the attacker holds, but only when narrating an attack
+// already found; `preserved_free` gives the search the same option.
+//
+// forged_statement_on_wire.vp is the counterweight: re-sealing, chaining and
+// bundling were each reachable before this, so the c1c1 here must not be
+// credited to them. witness_statement_rebuilt.vp executes the attack by hand.
+attacker[active]
+
+principal Signer[
+	knows private ssk
+	knows public c_ad
+	knows public c_tag
+	knows public c_stmt
+	generates y
+	gs = PUBKEY(ssk)
+	gy = PUBKEY(y)
+]
+
+Signer -> Verifier: [gs]
+
+principal Verifier[
+	knows public c_ad
+	knows public c_tag
+	knows public c_stmt
+	generates x
+	generates nonce
+	generates secret
+	gx = PUBKEY(x)
+	req = CONCAT(c_tag, gx, nonce)
+]
+
+Verifier -> Signer: req
+
+principal Signer[
+	tag_s, gx_s, nonce_s = SPLIT(req)?
+	_ = ASSERT(tag_s, c_tag)?
+	stmt = CONCAT(c_stmt, gs, nonce_s)
+	sig = SIGN(ssk, stmt)
+	k = HKDF(nil, DH_KEX(gx_s, y), nil)
+	env = AEAD_ENC(k, CONCAT(gs, sig), c_ad)
+]
+
+Signer -> Verifier: gy, env
+
+principal Verifier[
+	kv = HKDF(nil, DH_KEX(gy, x), nil)
+	d = AEAD_DEC(kv, env, c_ad)?
+	iss_v, sig_v = SPLIT(d)?
+	_ = ASSERT(iss_v, gs)?
+	stmt_v = CONCAT(c_stmt, iss_v, nonce)
+	_ = SIGNVERIF(iss_v, stmt_v, sig_v)?
+	out = AEAD_ENC(kv, secret, c_ad)
+]
+
+Verifier -> Signer: out
+
+queries[
+	confidentiality? secret
+	confidentiality? sig
+]

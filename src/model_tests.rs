@@ -2498,3 +2498,39 @@ fn the_json_report_carries_query_ranges_and_step_kinds() {
 		"old capitalised keys are gone: {json}"
 	);
 }
+#[test]
+fn test_forged_key_swap_bare() {
+	run_model("forged_key_swap_bare.vp", "c1");
+}
+#[test]
+fn test_forged_key_swap_bare_one_session() {
+	run_model_sessions("forged_key_swap_bare.vp", 1, "c1");
+}
+#[test]
+fn test_forged_key_swap_bundled() {
+	run_model("forged_key_swap_bundled.vp", "c1c0");
+}
+#[test]
+fn test_forged_key_swap_bundled_one_session() {
+	run_model_sessions("forged_key_swap_bundled.vp", 1, "c1c0");
+}
+#[test]
+fn test_witness_key_swap_bundled() {
+	run_model("witness_key_swap_bundled.vp", "e0");
+}
+#[test]
+fn test_forged_statement_rebuilt() {
+	run_model("forged_statement_rebuilt.vp", "c1c1");
+}
+#[test]
+fn test_forged_statement_rebuilt_one_session() {
+	run_model_sessions("forged_statement_rebuilt.vp", 1, "c1c1");
+}
+#[test]
+fn test_witness_statement_rebuilt() {
+	run_model("witness_statement_rebuilt.vp", "e0");
+}
+#[test]
+fn test_forged_statement_on_wire() {
+	run_model("forged_statement_on_wire.vp", "c1c1");
+}

@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — the control for forged_key_swap_bundled.vp, and the shallowest
+// statement of the attack both models carry.
+//
+// Alice leaks k, so the attacker can forge any ciphertext under it. Knowing the
+// ciphertext is not the attack: to learn s it must re-seal a MODIFIED plaintext,
+// putting a public key of its own where Alice put ga, so that Bob's key
+// agreement lands on a secret the attacker can recompute from gb.
+//
+//   req := AEAD_ENC(k, PUBKEY(nil), c_ad)
+//   s = DH_KEX(PUBKEY(nil), b) == DH_KEX(gb, nil), which the attacker builds.
+//
+// Here the substituted public key is the whole plaintext, so it arrives as a
+// whole-slot candidate: slot_candidates offers each forgeable shape filled with
+// nil and with the attacker's own key, and the second filler is this attack.
+// forged_key_swap_bundled.vp is the same attack one composition deeper, where
+// that whole-slot family can no longer reach it.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c_ad
+	generates a
+	ga = PUBKEY(a)
+	req = AEAD_ENC(k, ga, c_ad)
+	leaks k
+]
+
+Alice -> Bob: req
+
+principal Bob[
+	knows private k
+	knows public c_ad
+	generates b
+	gb = PUBKEY(b)
+	gx_b = AEAD_DEC(k, req, c_ad)?
+	s = DH_KEX(gx_b, b)
+	tok = AEAD_ENC(s, c_ad, c_ad)
+]
+
+Bob -> Alice: gb, tok
+
+principal Alice[
+	_ = HASH(gb)
+	_ = HASH(tok)
+]
+
+queries[
+	confidentiality? s
+]

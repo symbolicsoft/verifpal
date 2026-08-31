@@ -298,6 +298,18 @@ mod tests {
 	}
 
 	#[test]
+	fn the_attacker_key_filler_is_derivable_with_no_attacker_knowledge() {
+		let attacker = make_attacker_state(vec![]);
+		let key = crate::primitive::attacker_public_key();
+		assert!(
+			derivable(&key, &empty_state(), &attacker),
+			"{key} is offered at every free position the protocol itself fills with a key \
+			 derivation, but the validator cannot build it, so every proposal carrying it \
+			 is discarded and the rule never fires"
+		);
+	}
+
+	#[test]
 	fn derivable_rejects_a_forgery_under_an_unheld_key() {
 		let sk = make_constant("der_sk");
 		let m = make_constant("der_msg");

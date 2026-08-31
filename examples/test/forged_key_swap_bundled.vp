@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — forged_key_swap_bare.vp with one CONCAT layer added, and the
+// regression that layer used to cause.
+//
+// The attack is unchanged: Alice leaks k, so the attacker re-seals a modified
+// plaintext putting its own public key where Alice put ga, and Bob's agreement
+// lands on DH_KEX(PUBKEY(nil), b) == DH_KEX(gb, nil).
+//
+//   req := AEAD_ENC(k, CONCAT(c_tag, PUBKEY(nil)), c_ad)
+//
+// What changed is where the attacker's key has to sit. In the bare model it is
+// the whole plaintext, so slot_candidates reaches it by filling a forgeable
+// shape with the attacker's own key. Here it is one position inside a CONCAT
+// that Bob SPLITs and ASSERTs, so the shape comes from satisfy_split instead:
+// the solver builds AEAD_ENC(k, CONCAT($tag, $key), c_ad), binds $tag to c_tag
+// from the ASSERT constraint, and leaves $key free because nothing constrains
+// it. Every materialisation site grounds a free position through
+// vars::ground_free, i.e. to nil, so the proposal installed CONCAT(c_tag, nil)
+// and the attack was reported as PASS [search exhausted] — a missed attack
+// wearing an exhausted-search label. A free position facing a slot the protocol
+// itself fills with a key derivation must also be offered the attacker's own
+// key. Reported c0c0 before that.
+//
+// nonce is the control: it is generated and never sent or used, so nothing
+// reaches the attacker and c0 is correct. It is here so that a change making
+// everything fail cannot be mistaken for this attack being found.
+//
+// witness_key_swap_bundled.vp executes the same substitution by hand and
+// confirms the recovered secret really is Bob's.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c_ad
+	knows public c_tag
+	generates a
+	generates nonce
+	ga = PUBKEY(a)
+	req = AEAD_ENC(k, CONCAT(c_tag, ga), c_ad)
+	leaks k
+]
+
+Alice -> Bob: req
+
+principal Bob[
+	knows private k
+	knows public c_ad
+	knows public c_tag
+	generates b
+	gb = PUBKEY(b)
+	d_b = AEAD_DEC(k, req, c_ad)?
+	tag_b, gx_b = SPLIT(d_b)?
+	_ = ASSERT(tag_b, c_tag)?
+	s = DH_KEX(gx_b, b)
+	tok = AEAD_ENC(s, c_ad, c_ad)
+]
+
+Bob -> Alice: gb, tok
+
+principal Alice[
+	_ = HASH(gb)
+	_ = HASH(tok)
+]
+
+queries[
+	confidentiality? s
+	confidentiality? nonce
+]

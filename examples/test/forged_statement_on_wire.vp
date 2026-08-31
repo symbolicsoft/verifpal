@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — the counterweight for forged_statement_rebuilt.vp, and the
+// reason its verdict cannot be credited to the wrong mechanism.
+//
+// Same shape, one difference: the verifier checks the signature over a message
+// that ARRIVED ON THE WIRE (msg) rather than one it reconstructs from a value
+// it generated itself. So the attacker never has to preserve a field while
+// replacing its sibling — it harvests sig from the requester's leg and re-seals
+// it into the verifier's, with the payload bundled in a CONCAT beside a public
+// value.
+//
+// This was already c1c1 before `preserved_free` existed. Re-sealing, chaining
+// and bundling were each reachable; what was missing was only the preserved
+// field. If this model ever regresses, the fault is in those older families and
+// not in the one forged_statement_rebuilt.vp pins.
+attacker[active]
+
+principal Signer[
+	knows private ssk
+	knows public c_ad
+	generates msg
+	generates y
+	gs = PUBKEY(ssk)
+	sig = SIGN(ssk, msg)
+	gy = PUBKEY(y)
+]
+
+Signer -> Verifier: [gs], msg
+
+principal Requester[
+	knows public c_ad
+	generates q
+	gq = PUBKEY(q)
+]
+
+Requester -> Signer: gq
+
+principal Signer[
+	k1 = HKDF(nil, DH_KEX(gq, y), nil)
+	env1 = AEAD_ENC(k1, sig, c_ad)
+]
+
+Signer -> Requester: gy, env1
+
+principal Requester[
+	k1r = HKDF(nil, DH_KEX(gy, q), nil)
+	sig_r = AEAD_DEC(k1r, env1, c_ad)?
+]
+
+principal Verifier[
+	knows public c_ad
+	generates x
+	generates secret
+	gx = PUBKEY(x)
+]
+
+Verifier -> Signer: gx
+
+principal Signer[
+	k2 = HKDF(nil, DH_KEX(gx, y), nil)
+	env2 = AEAD_ENC(k2, CONCAT(gs, sig), c_ad)
+]
+
+Signer -> Verifier: gy, env2
+
+principal Verifier[
+	k2v = HKDF(nil, DH_KEX(gy, x), nil)
+	d2 = AEAD_DEC(k2v, env2, c_ad)?
+	iss_v, sig_v = SPLIT(d2)?
+	_ = ASSERT(iss_v, gs)?
+	_ = SIGNVERIF(iss_v, msg, sig_v)?
+	out = AEAD_ENC(k2v, secret, c_ad)
+]
+
+Verifier -> Requester: out
+
+queries[
+	confidentiality? secret
+	confidentiality? sig
+]

@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0 — the ground truth behind the bundled forgery, established
+// without asking the search to find anything.
+//
+// Mallory holds the leaked key by declaration and performs the substitution as
+// an honest principal: it seals CONCAT(c_tag, gm) under k with its own public
+// key in the field Alice would have filled with ga. Bob accepts, agrees on
+// s = DH_KEX(gm, b), and Mallory afterwards recomputes s_m = DH_KEX(gb, m).
+//
+// e0 says the two resolve to the same value, so the secret Bob believes he
+// shares with Alice is one Mallory holds. The model also loads without a sanity
+// error, which means AEAD_DEC(s_m, tok, c_ad)? succeeds in the honest run — an
+// independent confirmation of the same thing, since a failed checked primitive
+// in an honest run is a model error rather than an attack.
+//
+attacker[active]
+
+principal Mallory[
+	knows private k
+	knows private m
+	knows public c_ad
+	knows public c_tag
+	gm = PUBKEY(m)
+	req = AEAD_ENC(k, CONCAT(c_tag, gm), c_ad)
+]
+
+Mallory -> Bob: req
+
+principal Bob[
+	knows private k
+	knows public c_ad
+	knows public c_tag
+	generates b
+	gb = PUBKEY(b)
+	d_b = AEAD_DEC(k, req, c_ad)?
+	tag_b, gx_b = SPLIT(d_b)?
+	_ = ASSERT(tag_b, c_tag)?
+	s = DH_KEX(gx_b, b)
+	tok = AEAD_ENC(s, c_ad, c_ad)
+]
+
+Bob -> Mallory: [gb], tok
+
+principal Mallory[
+	s_m = DH_KEX(gb, m)
+	_ = AEAD_DEC(s_m, tok, c_ad)?
+]
+
+queries[
+	equivalence? s, s_m
+]
