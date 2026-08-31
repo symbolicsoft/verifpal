@@ -1,12 +1,14 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::html::template::Ctx;
-
-pub(crate) const ATTACKER: &str = "Attacker";
+use crate::msc::{ATTACKER, Lanes, Row, Step, Value};
+use crate::template::Ctx;
 
 const COL_MIN: usize = 200;
 const COL_MAX: usize = 460;
+// The report's content column, so a diagram with few lanes spreads to fill it
+// rather than huddling against the left margin.
+const COL_TARGET: usize = 910;
 const ROW_HEIGHT: usize = 42;
 const TOP: usize = 56;
 const NUM_X: usize = 22;
@@ -15,90 +17,175 @@ const ACTOR_PAD: usize = 30;
 const LABEL_PX: f32 = 11.0;
 const ACTOR_PX: f32 = 13.0;
 const ADVANCE: f32 = 0.6;
+const BOX_PX: f32 = 11.0;
+const BOX_PAD: usize = 9;
+const BOX_LINE: usize = 16;
+const BOX_INSET: usize = 12;
 
-pub(crate) struct Value {
-	pub name: String,
-	pub guarded: bool,
-	pub hit: bool,
-	pub queries: Vec<usize>,
-}
-
-impl Value {
-	fn label(&self) -> String {
-		let mut out = if self.guarded {
-			format!("[{}]", self.name)
-		} else {
-			self.name.clone()
-		};
-		if self.hit {
-			out.push('\u{2020}');
-		}
-		out
+fn value_label(value: &Value) -> String {
+	let mut out = if value.guarded {
+		format!("[{}]", value.name)
+	} else {
+		value.name.clone()
+	};
+	if value.hit {
+		out.push('\u{2020}');
 	}
+	out
 }
 
-pub(crate) enum Row {
-	Wire {
-		num: Option<usize>,
-		hop: Option<usize>,
-		step: Option<String>,
-		from: String,
-		to: String,
-		via: Option<String>,
-		forged: bool,
-		replay: bool,
-		values: Vec<Value>,
-	},
-	Phase {
-		number: i32,
-	},
-	Leak {
-		principal: String,
-		text: String,
-	},
-	Mark {
-		num: Option<usize>,
-		step: Option<String>,
-		principal: String,
-		bypass: bool,
-	},
-	Run {
-		step: String,
-		label: String,
-	},
+#[derive(Clone)]
+pub(crate) struct Part {
+	pub text: String,
+	pub class: &'static str,
 }
 
-impl Row {
-	fn lanes(&self) -> Vec<&str> {
-		match self {
-			Row::Wire { from, to, via, .. } => match via {
-				Some(via) => vec![from, via, to],
-				None => vec![from, to],
-			},
-			Row::Leak { principal, .. } | Row::Mark { principal, .. } => vec![principal],
-			Row::Phase { .. } | Row::Run { .. } => Vec::new(),
-		}
-	}
-
-	fn label(&self) -> String {
-		match self {
-			Row::Wire { values, replay, .. } => {
-				let joined = values
-					.iter()
-					.map(Value::label)
-					.collect::<Vec<String>>()
-					.join(", ");
-				if *replay {
-					format!("{joined} (replayed)")
-				} else {
-					joined
-				}
+fn box_lines(row: &Row) -> Vec<Vec<Part>> {
+	match row {
+		Row::Activity {
+			generates,
+			computes,
+			..
+		} => {
+			let mut lines: Vec<Vec<Part>> = Vec::new();
+			if !generates.is_empty() {
+				lines.push(vec![
+					Part {
+						text: "generates ".to_string(),
+						class: "actKey",
+					},
+					Part {
+						text: generates.join(", "),
+						class: "actFresh",
+					},
+				]);
 			}
-			Row::Phase { number } => format!("phase {number}"),
-			Row::Leak { text, .. } => text.clone(),
-			Row::Mark { bypass, .. } => mark_label(*bypass).to_string(),
-			Row::Run { label, .. } => label.clone(),
+			for step in computes {
+				let mut parts = Vec::new();
+				if !step.names.is_empty() {
+					parts.push(Part {
+						text: step.names.clone(),
+						class: "actName",
+					});
+				}
+				let shown = step.expression.as_ref().or(step.primitive.as_ref());
+				if let Some(shown) = shown {
+					if !step.names.is_empty() {
+						parts.push(Part {
+							text: " \u{2190} ".to_string(),
+							class: "actArrow",
+						});
+					}
+					parts.push(Part {
+						text: shown.clone(),
+						class: if step.checked { "actCheck" } else { "actPrim" },
+					});
+				}
+				lines.push(parts);
+			}
+			reflow(lines)
 		}
+		Row::Leak { text, .. } => vec![vec![Part {
+			text: text.clone(),
+			class: "leakText",
+		}]],
+		_ => Vec::new(),
+	}
+}
+
+fn line_text(parts: &[Part]) -> String {
+	parts.iter().map(|p| p.text.as_str()).collect()
+}
+
+// SVG text does not reflow, so a line wider than the box is broken here. Only
+// the trailing term is split, and only at its argument commas, so a
+// continuation always begins at something the reader can parse.
+const BOX_COLS: usize = 52;
+
+fn reflow(lines: Vec<Vec<Part>>) -> Vec<Vec<Part>> {
+	let mut out: Vec<Vec<Part>> = Vec::new();
+	for parts in lines {
+		if line_text(&parts).chars().count() <= BOX_COLS || parts.len() < 2 {
+			out.push(parts);
+			continue;
+		}
+		let (head, tail) = parts.split_at(parts.len() - 1);
+		let class = tail[0].class;
+		let lead: usize = head.iter().map(|p| p.text.chars().count()).sum();
+		let mut room = BOX_COLS.saturating_sub(lead).max(12);
+		let mut current: Vec<Part> = head.to_vec();
+		let mut held = String::new();
+		for (i, chunk) in tail[0].text.split_inclusive(", ").enumerate() {
+			if i > 0 && held.chars().count() + chunk.chars().count() > room {
+				current.push(Part {
+					text: std::mem::take(&mut held),
+					class,
+				});
+				out.push(std::mem::take(&mut current));
+				current.push(Part {
+					text: "    ".to_string(),
+					class: "actArrow",
+				});
+				room = BOX_COLS.saturating_sub(4);
+			}
+			held.push_str(chunk);
+		}
+		if !held.is_empty() {
+			current.push(Part { text: held, class });
+		}
+		if !current.is_empty() {
+			out.push(current);
+		}
+	}
+	out
+}
+
+fn box_width(row: &Row) -> usize {
+	box_lines(row)
+		.iter()
+		.map(|parts| width_of(&line_text(parts), BOX_PX) + BOX_PAD * 2)
+		.max()
+		.unwrap_or(0)
+}
+
+// One width for every box in the diagram, so they line up into a column
+// instead of stepping in and out with their content.
+fn uniform_box_width(rows: &[Row]) -> usize {
+	rows.iter().map(box_width).max().unwrap_or(0)
+}
+
+fn row_height(row: &Row) -> usize {
+	match row {
+		Row::Activity { .. } | Row::Leak { .. } => {
+			(box_lines(row).len() * BOX_LINE + BOX_PAD * 2 + 18).max(ROW_HEIGHT)
+		}
+		_ => ROW_HEIGHT,
+	}
+}
+
+fn row_label(row: &Row) -> String {
+	match row {
+		Row::Wire { values, replay, .. } => {
+			let joined = values
+				.iter()
+				.map(value_label)
+				.collect::<Vec<String>>()
+				.join(", ");
+			if *replay {
+				format!("{joined} (replayed)")
+			} else {
+				joined
+			}
+		}
+		Row::Phase { number } => format!("phase {number}"),
+		Row::Leak { text, .. } => text.clone(),
+		Row::Activity { .. } => box_lines(row)
+			.iter()
+			.map(|parts| line_text(parts))
+			.max_by_key(String::len)
+			.unwrap_or_default(),
+		Row::Mark { bypass, .. } => mark_label(*bypass).to_string(),
+		Row::Run { label, .. } => label.clone(),
 	}
 }
 
@@ -114,97 +201,75 @@ fn width_of(text: &str, size: f32) -> usize {
 	(text.chars().count() as f32 * size * ADVANCE).ceil() as usize
 }
 
-#[derive(Default)]
-pub(crate) struct Lanes {
-	names: Vec<String>,
+pub(crate) struct Columns {
+	lanes: Lanes,
 	column: usize,
+	boxw: usize,
 }
 
-impl Lanes {
-	pub(crate) fn of(rows: &[Row]) -> Lanes {
-		let mut lanes = Lanes {
-			names: Vec::new(),
+impl Columns {
+	fn of(lanes: Lanes, rows: &[Row]) -> Columns {
+		let mut columns = Columns {
+			lanes,
 			column: COL_MIN,
+			boxw: uniform_box_width(rows),
 		};
-		for row in rows {
-			for name in row.lanes() {
-				lanes.add(name);
-			}
-		}
-		lanes
+		columns.measure(rows);
+		columns
 	}
 
-	pub(crate) fn add(&mut self, name: &str) {
-		if !self.names.iter().any(|n| n == name) {
-			self.names.push(name.to_string());
-		}
+	fn names(&self) -> &[String] {
+		self.lanes.names()
 	}
 
-	pub(crate) fn insert(&mut self, at: usize, name: &str) {
-		if self.names.iter().any(|n| n == name) {
-			return;
-		}
-		self.names
-			.insert(at.min(self.names.len()), name.to_string());
+	fn contains(&self, name: &str) -> bool {
+		self.lanes.contains(name)
 	}
 
-	pub(crate) fn is_empty(&self) -> bool {
-		self.names.is_empty()
+	fn center(&self, name: &str) -> usize {
+		self.lanes.index(name) * self.column + self.column / 2
 	}
 
-	pub(crate) fn contains(&self, name: &str) -> bool {
-		self.names.iter().any(|n| n == name)
-	}
-
-	fn index(&self, name: &str) -> usize {
-		self.names.iter().position(|n| n == name).unwrap_or(0)
-	}
-
-	pub(crate) fn center(&self, name: &str) -> usize {
-		self.index(name) * self.column + self.column / 2
-	}
-
-	pub(crate) fn width(&self) -> usize {
-		self.names.len() * self.column
+	fn width(&self) -> usize {
+		self.lanes.len() * self.column
 	}
 
 	fn measure(&mut self, rows: &[Row]) {
 		let mut column = COL_MIN;
-		for name in &self.names {
+		for name in self.lanes.names() {
 			column = column.max(width_of(name, ACTOR_PX) + ACTOR_PAD);
 		}
 		for row in rows {
-			let text = row.label();
+			let text = row_label(row);
 			if text.is_empty() {
 				continue;
 			}
-			let needed = width_of(&text, LABEL_PX) + LABEL_PAD;
+			let needed = match row {
+				Row::Activity { .. } | Row::Leak { .. } => self.boxw + BOX_INSET,
+				_ => width_of(&text, LABEL_PX) + LABEL_PAD,
+			};
 			let span = match row {
 				Row::Wire { from, to, via, .. } => {
-					let start = self.index(via.as_deref().unwrap_or(from));
-					let end = self.index(to);
+					let start = self.lanes.index(via.as_deref().unwrap_or(from));
+					let end = self.lanes.index(to);
 					start.abs_diff(end).max(1)
 				}
 				Row::Run { .. } => 2,
-				_ => self.names.len().max(1),
+				Row::Activity { .. } | Row::Leak { .. } | Row::Mark { .. } => 1,
+				_ => self.lanes.len().max(1),
 			};
 			column = column.max(needed.div_ceil(span));
 		}
-		self.column = column.min(COL_MAX);
+		// A box is capped by nothing: it must fit, or it would overlap its
+		// neighbour. A wide one widens the diagram, which then scrolls.
+		let spread = (COL_TARGET / self.lanes.len().max(1)).min(COL_MAX);
+		self.column = column.min(COL_MAX).max(spread);
 	}
-}
-
-fn row_y(index: usize) -> usize {
-	TOP + index * ROW_HEIGHT
-}
-
-fn height_of(rows: usize) -> usize {
-	TOP + rows * ROW_HEIGHT + 16
 }
 
 fn base(kind: &'static str) -> Ctx {
 	let mut ctx = Ctx::new();
-	for name in ["wire", "phase", "leak", "mark", "run"] {
+	for name in ["wire", "phase", "leak", "activity", "mark", "run"] {
 		ctx = ctx.flag(name, name == kind);
 	}
 	ctx
@@ -220,7 +285,7 @@ fn value_ctx(index: usize, value: &Value) -> Ctx {
 	};
 	Ctx::new()
 		.flag("first", index == 0)
-		.text("text", value.label())
+		.text("text", value_label(value))
 		.text("vclass", class)
 		.flag("tagged", !value.queries.is_empty())
 		.text(
@@ -234,7 +299,7 @@ fn value_ctx(index: usize, value: &Value) -> Ctx {
 		)
 }
 
-fn wire_ctx(lanes: &Lanes, y: usize, row: &Row) -> Ctx {
+fn wire_ctx(lanes: &Columns, y: usize, row: &Row) -> Ctx {
 	let Row::Wire {
 		num,
 		hop,
@@ -311,7 +376,41 @@ fn wire_ctx(lanes: &Lanes, y: usize, row: &Row) -> Ctx {
 		)
 }
 
-fn row_ctx(lanes: &Lanes, y: usize, row: &Row) -> Ctx {
+fn box_ctx(lanes: &Columns, y: usize, row: &Row, principal: &str, kind: &'static str) -> Ctx {
+	let lines = box_lines(row);
+	let width = lanes.boxw;
+	let height = lines.len() * BOX_LINE + BOX_PAD * 2;
+	let center = lanes.center(principal);
+	let x = center.saturating_sub(width / 2);
+	let drawn = lines
+		.iter()
+		.enumerate()
+		.map(|(i, parts)| {
+			Ctx::new()
+				.num("tx", x + BOX_PAD)
+				.num("ly", y + BOX_PAD + i * BOX_LINE + 11)
+				.list(
+					"parts",
+					parts
+						.iter()
+						.map(|part| {
+							Ctx::new()
+								.text("pclass", part.class)
+								.text("text", part.text.as_str())
+						})
+						.collect(),
+				)
+		})
+		.collect();
+	base(kind)
+		.num("x", x)
+		.num("y", y)
+		.num("w", width)
+		.num("h", height)
+		.list("lines", drawn)
+}
+
+fn row_ctx(lanes: &Columns, y: usize, row: &Row) -> Ctx {
 	match row {
 		Row::Wire { .. } => wire_ctx(lanes, y, row),
 		Row::Phase { number } => base("phase")
@@ -319,10 +418,8 @@ fn row_ctx(lanes: &Lanes, y: usize, row: &Row) -> Ctx {
 			.num("label_y", y.saturating_sub(7))
 			.num("width", lanes.width())
 			.num("number", *number),
-		Row::Leak { principal, text } => base("leak")
-			.num("x", lanes.center(principal))
-			.num("y", y.saturating_sub(2))
-			.text("text", text),
+		Row::Leak { principal, .. } => box_ctx(lanes, y, row, principal, "leak"),
+		Row::Activity { principal, .. } => box_ctx(lanes, y, row, principal, "activity"),
 		Row::Mark {
 			num,
 			step,
@@ -367,14 +464,20 @@ pub(crate) struct Figure {
 	pub described: bool,
 }
 
-pub(crate) fn draw(figure: Figure, mut lanes: Lanes, rows: &[Row]) -> Option<Ctx> {
+pub(crate) fn draw(figure: Figure, lanes: Lanes, rows: &[Row]) -> Option<Ctx> {
 	if lanes.is_empty() || rows.is_empty() {
 		return None;
 	}
-	lanes.measure(rows);
-	let height = height_of(rows.len());
+	let lanes = Columns::of(lanes, rows);
+	let mut tops: Vec<usize> = Vec::with_capacity(rows.len());
+	let mut cursor = TOP;
+	for row in rows {
+		tops.push(cursor);
+		cursor += row_height(row);
+	}
+	let height = cursor + 16;
 	let actors = lanes
-		.names
+		.names()
 		.iter()
 		.map(|name| {
 			Ctx::new()
@@ -387,7 +490,7 @@ pub(crate) fn draw(figure: Figure, mut lanes: Lanes, rows: &[Row]) -> Option<Ctx
 	let drawn = rows
 		.iter()
 		.enumerate()
-		.map(|(i, row)| row_ctx(&lanes, row_y(i), row))
+		.map(|(i, row)| row_ctx(&lanes, tops[i], row))
 		.collect();
 	let alt = rows
 		.iter()
@@ -427,10 +530,29 @@ fn alt_text(row: &Row) -> String {
 				(Some(_), _, _) => format!("{from} to {to}, relayed through the attacker"),
 				(None, _, _) => format!("{from} to {to}"),
 			};
-			format!("{lead}{body}: {}", row.label())
+			format!("{lead}{body}: {}", row_label(row))
 		}
 		Row::Phase { number } => format!("Phase {number} begins."),
 		Row::Leak { text, .. } => text.clone(),
+		Row::Activity {
+			principal,
+			generates,
+			computes,
+		} => {
+			let mut out = principal.clone();
+			if !generates.is_empty() {
+				out.push_str(&format!(" generates {}", generates.join(", ")));
+				if !computes.is_empty() {
+					out.push(',');
+				}
+			}
+			if !computes.is_empty() {
+				let steps: Vec<String> = computes.iter().map(Step::label).collect();
+				out.push_str(&format!(" computes {}", steps.join(", ")));
+			}
+			out.push('.');
+			out
+		}
 		Row::Mark {
 			num,
 			principal,

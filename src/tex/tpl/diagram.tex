@@ -1,0 +1,16 @@
+% SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+% SPDX-License-Identifier: GPL-3.0-only
+%% --- BEGIN verifpal figure: <<figid>> ---
+%% Self-contained: needs only the verifpal preamble block.
+<<#float>>\begin{figure}[htbp]
+\centering
+<</float>><<^float>>\begin{center}
+<</float>>\begin{vpdiagram}{<<lanes>>}
+<<#actors>><<>actor>><</actors>><<#rows>><<>diagram_row>><</rows>>\end{vpdiagram}
+<<#float>>\caption{<<caption>>}
+\label{fig:<<figid>>}
+\end{figure}
+<</float>><<^float>>\captionof{figure}{<<caption>>}
+\label{fig:<<figid>>}
+\end{center}
+<</float>>%% --- END verifpal figure: <<figid>> ---

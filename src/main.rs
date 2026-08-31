@@ -6,7 +6,7 @@ use clap_complete::Shell;
 use verifpal::{
 	ColorChoice, InfoLevel, Run, SATURATE_MAX, Saturation, Verbosity, VerifyReport, diagram,
 	html_report, info_banner, info_message, info_replay, pretty_print, saturation_sessions,
-	set_color_choice, set_verbosity, update_check_report, update_check_start,
+	set_color_choice, set_verbosity, tex_report, update_check_report, update_check_start,
 	verify_report_with_source_opts,
 };
 
@@ -41,6 +41,7 @@ const EXIT_ATTACK: i32 = 2;
 	                   verifpal verify protocol.vp\n  \
 	                   verifpal verify protocol.vp --sessions 3 --fail-on-attack\n  \
 	                   verifpal verify protocol.vp --format html > report.html\n  \
+                   verifpal verify protocol.vp --format tex > report.tex\n  \
 	                   verifpal pretty protocol.vp --write\n  \
 	                   verifpal diagram protocol.vp\n\n\
 	                   Run 'verifpal help <COMMAND>' for the full documentation of a \
@@ -74,6 +75,8 @@ enum FormatArg {
 	Text,
 	Json,
 	Html,
+	#[value(alias = "latex")]
+	Tex,
 }
 
 #[derive(Subcommand)]
@@ -229,7 +232,7 @@ enum Commands {
 			long,
 			value_enum,
 			default_value_t = FormatArg::Text,
-			help = "Report as text, JSON or a self-contained HTML page",
+			help = "Report as text, JSON, a self-contained HTML page or a LaTeX document",
 			long_help = "Choose how the analysis is reported.\n\n\
 			             'text', the default, is the human-readable report printed as the \
 			             analysis proceeds: the banner, the progress of the search, and each \
@@ -244,7 +247,16 @@ enum Commands {
 			             you can open or email as it is. The page has a sequence diagram of \
 			             the protocol, the model source syntax-highlighted, and a diagram of \
 			             each attack beside its trace.\n\n\
-			             Both structured formats suppress the ordinary progress output and \
+			             'tex' prints one LaTeX document to stdout, ready to compile with \
+			             tectonic exactly as it stands. It carries a message-sequence chart of \
+			             the protocol, a table of every query and its verdict, a keyed diagram \
+			             and numbered trace for each attack, and the model source as an \
+			             appendix listing. Terms are typeset as mathematics rather than as \
+			             tool output, and every figure is delimited by BEGIN/END comment \
+			             markers and built only from the \\vp macros defined in the one \
+			             preamble block, so a single figure can be lifted into a paper by \
+			             copying that block once. 'latex' is accepted as an alias.\n\n\
+			             All three structured formats suppress the ordinary progress output and \
 			             disable color, neither of which belongs in the middle of a document. A \
 			             model that fails is reported inside the document rather than on stderr, \
 			             so nothing is lost by redirecting stdout alone."
@@ -638,6 +650,10 @@ fn run_verify(
 		FormatArg::Html => {
 			let run = Run::of(VERSION, &outcomes, &sources);
 			print!("{}", html_report(&run));
+		}
+		FormatArg::Tex => {
+			let run = Run::of(VERSION, &outcomes, &sources);
+			print!("{}", tex_report(&run));
 		}
 	}
 	update_check_report(&update_check);

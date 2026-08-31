@@ -15,6 +15,10 @@ test:
 	@/bin/echo "[Verifpal] Running test battery..."
 	@cargo test --release
 
+test-tex:
+	@/bin/echo "[Verifpal] Compiling generated LaTeX reports with tectonic..."
+	@VERIFPAL_TECTONIC=1 cargo test --release tex:: -- --test-threads=1
+
 test-exhaustive:
 	@/bin/echo "[Verifpal] Running exhaustive metamorphic sweeps..."
 	@cargo test --release -- --ignored --test-threads=1
@@ -45,4 +49,4 @@ clean:
 	@cargo clean
 	@$(RM) -r dist
 
-.PHONY: build lint test test-exhaustive dist-assets release-dry wasm clean assets examples HomebrewFormula scripts src target
+.PHONY: build lint test test-tex test-exhaustive dist-assets release-dry wasm clean assets examples HomebrewFormula scripts src target

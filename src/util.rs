@@ -166,3 +166,14 @@ pub(crate) fn stderr_is_terminal() -> bool {
 	}
 	std::io::stderr().is_terminal()
 }
+
+pub(crate) fn article(word: &str) -> &'static str {
+	match word.chars().next() {
+		Some('a' | 'e' | 'i' | 'o' | 'u' | 'A' | 'E' | 'I' | 'O' | 'U') => "an",
+		_ => "a",
+	}
+}
+
+pub(crate) fn plural(n: usize) -> &'static str {
+	if n == 1 { "" } else { "s" }
+}

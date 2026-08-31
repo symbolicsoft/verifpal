@@ -7,6 +7,10 @@ use crate::tokens::Token;
 use crate::types::{Block, Constant, Declaration, Span, TraceValue, VerifyResult};
 use crate::verify::VerifyReport;
 
+pub(crate) const DISCLAIMER: &str = "Verifpal is sound but incomplete. Every attack shown here is a genuine attack on the model \
+	 as written; a query reported as holding means no attack was found within the search this \
+	 run performed, which is never a proof that none exists.";
+
 #[derive(Debug, Serialize)]
 pub struct Run {
 	pub version: String,
@@ -48,6 +52,25 @@ pub enum DiagramRow {
 		principal: String,
 		values: Vec<String>,
 	},
+	#[serde(rename_all = "camelCase")]
+	Activity {
+		principal: String,
+		phase: i32,
+		generates: Vec<String>,
+		computes: Vec<Computation>,
+	},
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Computation {
+	pub names: Vec<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub primitive: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub expression: Option<String>,
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub checked: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -321,19 +344,82 @@ fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
 				if !senders.contains(&p.name.as_str()) {
 					continue;
 				}
+				let mut generates: Vec<String> = Vec::new();
+				let mut computes: Vec<Computation> = Vec::new();
 				for expr in &p.expressions {
-					if expr.kind != Declaration::Leaks {
-						continue;
+					match expr.kind {
+						Declaration::Knows => {}
+						Declaration::Generates => {
+							generates.extend(expr.constants.iter().map(|c| c.name.to_string()))
+						}
+						Declaration::Assignment => {
+							if let Some(step) = computation(expr) {
+								computes.push(step);
+							}
+						}
+						Declaration::Leaks => {
+							flush_activity(
+								&mut rows,
+								&p.name,
+								phase,
+								&mut generates,
+								&mut computes,
+							);
+							rows.push(DiagramRow::Leak {
+								principal: p.name.clone(),
+								values: expr.constants.iter().map(|c| c.name.to_string()).collect(),
+							});
+						}
 					}
-					rows.push(DiagramRow::Leak {
-						principal: p.name.clone(),
-						values: expr.constants.iter().map(|c| c.name.to_string()).collect(),
-					});
 				}
+				flush_activity(&mut rows, &p.name, phase, &mut generates, &mut computes);
 			}
 		}
 	}
 	(rows, tokens)
+}
+
+fn flush_activity(
+	rows: &mut Vec<DiagramRow>,
+	principal: &str,
+	phase: i32,
+	generates: &mut Vec<String>,
+	computes: &mut Vec<Computation>,
+) {
+	if generates.is_empty() && computes.is_empty() {
+		return;
+	}
+	rows.push(DiagramRow::Activity {
+		principal: principal.to_string(),
+		phase,
+		generates: std::mem::take(generates),
+		computes: std::mem::take(computes),
+	});
+}
+
+fn computation(expr: &crate::types::Expression) -> Option<Computation> {
+	let names: Vec<String> = expr
+		.constants
+		.iter()
+		.filter(|c| !c.name.starts_with("unnamed"))
+		.map(|c| c.name.to_string())
+		.collect();
+	let (primitive, checked) = match &expr.assigned {
+		Some(crate::types::Value::Primitive(p)) => (
+			Some(crate::primitive::primitive_name(p.id).to_string()),
+			p.instance_check,
+		),
+		_ => (None, false),
+	};
+	if names.is_empty() && !checked {
+		return None;
+	}
+	Some(Computation {
+		names,
+		primitive,
+		expression: expr.assigned.as_ref().map(|v| v.to_string()),
+		checked,
+	})
 }
 
 fn diagram_value(c: &Constant) -> DiagramValue {

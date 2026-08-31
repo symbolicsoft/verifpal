@@ -834,6 +834,65 @@ section.model[hidden] {
 	stroke-width: 4px;
 }
 
+.scroll > .diagram {
+	display: block;
+	margin: 0 auto;
+}
+
+.diagram .noteRect {
+	fill: var(--surface);
+	stroke: var(--line);
+	stroke-width: 1px;
+}
+
+.diagram .actRect {
+	fill: var(--surface-2);
+}
+
+.diagram .leakRect {
+	fill: var(--surface-2);
+	stroke: var(--sienna-line);
+}
+
+.diagram .noteLine {
+	font: 11px var(--mono);
+	dominant-baseline: alphabetic;
+}
+
+.diagram .actKey {
+	fill: var(--ink-4);
+}
+
+.diagram .actFresh {
+	fill: var(--ink-2);
+}
+
+.diagram .actName {
+	fill: var(--ink-2);
+}
+
+.diagram .actArrow {
+	fill: var(--ink-4);
+}
+
+.diagram .actPrim {
+	fill: var(--ink-2);
+	font-weight: 600;
+}
+
+.diagram .actCheck {
+	fill: var(--breach);
+	font-weight: 600;
+}
+
+.diagram .leakText {
+	fill: var(--sienna);
+	font-style: italic;
+}
+
+
+
+
 .diagram .actor.attacker {
 	fill: var(--breach);
 }
@@ -1014,14 +1073,14 @@ section.model[hidden] {
 
 <div class="panelSection"><span class="eyebrow">Protocol</span><figure class="figure">
 <div class="scroll">
-<svg class="diagram" width="400" height="240" viewBox="0 0 400 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="m0p-title">
+<svg class="diagram" width="910" height="250" viewBox="0 0 910 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="m0p-title">
 <title id="m0p-title">Protocol sequence. Guarded values are written in brackets; a dagger marks every value some attack below substitutes or replays.</title><defs><marker id="m0p-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0p-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker></defs>
-<text x="100" y="22" class="actor">Alice</text><line x1="100" y1="34" x2="100" y2="232" class="lifeline"/>
-<text x="300" y="22" class="actor">Bob</text><line x1="300" y1="34" x2="300" y2="232" class="lifeline"/>
-<g class="row"><text x="22" y="49" class="hopNum">1</text><line x1="100" y1="56" x2="300" y2="56" class="wire" marker-end="url(#m0p-a)"/><text x="200" y="49" class="msg "><tspan class="msgVal hit" data-q="0">ga†</tspan><tspan class="msgSep">, </tspan><tspan class="msgVal hit" data-q="0">[e1]†</tspan></text></g>
-<line x1="0" y1="98" x2="400" y2="98" class="phase"/><text x="2" y="91" class="phaselabel">PHASE 1</text>
-<g class="row"><text x="22" y="133" class="hopNum">2</text><line x1="300" y1="140" x2="100" y2="140" class="wire" marker-end="url(#m0p-a)"/><text x="200" y="133" class="msg "><tspan class="msgVal ">gb</tspan></text></g>
-<text x="300" y="180" class="leak">Bob leaks m</text>
+<text x="227" y="22" class="actor">Alice</text><line x1="227" y1="34" x2="227" y2="242" class="lifeline"/>
+<text x="682" y="22" class="actor">Bob</text><line x1="682" y1="34" x2="682" y2="242" class="lifeline"/>
+<g class="row"><text x="22" y="49" class="hopNum">1</text><line x1="227" y1="56" x2="682" y2="56" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="49" class="msg "><tspan class="msgVal hit" data-q="0">ga†</tspan><tspan class="msgSep">, </tspan><tspan class="msgVal hit" data-q="0">[e1]†</tspan></text></g>
+<line x1="0" y1="98" x2="910" y2="98" class="phase"/><text x="2" y="91" class="phaselabel">PHASE 1</text>
+<g class="row"><text x="22" y="133" class="hopNum">2</text><line x1="682" y1="140" x2="227" y2="140" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="133" class="msg "><tspan class="msgVal ">gb</tspan></text></g>
+<g class="row"><rect x="637" y="182" width="91" height="34" rx="4" class="noteRect leakRect"/><text x="646" y="202" class="noteLine"><tspan class="leakText">Bob leaks m</tspan></text></g>
 </svg>
 </div>
 <ol class="offscreen"><li>Hop 1: Alice to Bob: ga†, [e1]†</li><li>Phase 1 begins.</li><li>Hop 2: Bob to Alice: gb</li><li>Bob leaks m</li></ol>
@@ -1062,16 +1121,16 @@ section.model[hidden] {
 <span class="eyebrow">Attack trace &middot; <a class="q" href="#src-m0-q0">confidentiality? m</a></span>
 <figure class="figure">
 <div class="scroll">
-<svg class="diagram" width="600" height="282" viewBox="0 0 600 282" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<svg class="diagram" width="909" height="282" viewBox="0 0 909 282" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
 <defs><marker id="m0t0-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0t0-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker></defs>
-<text x="100" y="22" class="actor">Alice</text><line x1="100" y1="34" x2="100" y2="274" class="lifeline"/>
-<text x="300" y="22" class="actor attacker">Attacker</text><line x1="300" y1="34" x2="300" y2="274" class="lifeline attacker"/>
-<text x="500" y="22" class="actor">Bob</text><line x1="500" y1="34" x2="500" y2="274" class="lifeline"/>
-<g class="row" data-step="1-2"><rect x="216" y="43" width="168" height="22" rx="3" class="runBox"/><text x="300" y="58" class="runLabel">computes (steps 1–2)</text></g>
-<g class="row" data-step="3"><text x="22" y="91" class="hopNum">3</text><line x1="100" y1="98" x2="300" y2="98" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="300" y1="98" x2="500" y2="98" class="wireForged" marker-end="url(#m0t0-b)"/><text x="400" y="91" class="msg forged"><tspan class="msgHop">hop 1 &middot; </tspan><tspan class="msgVal ">ga</tspan></text></g>
-<g class="row" data-step="4"><text x="22" y="144" class="hopNum">4</text><circle cx="500" cy="140" r="5" class="gateMark"/><text x="512" y="144" class="nodeLabel ">check passes</text></g>
-<g class="row" data-step="5"><text x="22" y="186" class="hopNum">5</text><circle cx="100" cy="182" r="5" class="bypassMark"/><text x="112" y="186" class="nodeLabel breach">check defeated</text></g>
-<g class="row" data-step="6"><text x="22" y="217" class="hopNum">6</text><line x1="500" y1="224" x2="300" y2="224" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="300" y1="224" x2="100" y2="224" class="wireReplay" marker-end="url(#m0t0-b)"/><text x="200" y="217" class="msg forged"><tspan class="msgVal ">e1</tspan><tspan class="msgSep"> (replayed)</tspan></text></g>
+<text x="151" y="22" class="actor">Alice</text><line x1="151" y1="34" x2="151" y2="274" class="lifeline"/>
+<text x="454" y="22" class="actor attacker">Attacker</text><line x1="454" y1="34" x2="454" y2="274" class="lifeline attacker"/>
+<text x="757" y="22" class="actor">Bob</text><line x1="757" y1="34" x2="757" y2="274" class="lifeline"/>
+<g class="row" data-step="1-2"><rect x="370" y="43" width="168" height="22" rx="3" class="runBox"/><text x="454" y="58" class="runLabel">computes (steps 1–2)</text></g>
+<g class="row" data-step="3"><text x="22" y="91" class="hopNum">3</text><line x1="151" y1="98" x2="454" y2="98" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="454" y1="98" x2="757" y2="98" class="wireForged" marker-end="url(#m0t0-b)"/><text x="605" y="91" class="msg forged"><tspan class="msgHop">hop 1 &middot; </tspan><tspan class="msgVal ">ga</tspan></text></g>
+<g class="row" data-step="4"><text x="22" y="144" class="hopNum">4</text><circle cx="757" cy="140" r="5" class="gateMark"/><text x="769" y="144" class="nodeLabel ">check passes</text></g>
+<g class="row" data-step="5"><text x="22" y="186" class="hopNum">5</text><circle cx="151" cy="182" r="5" class="bypassMark"/><text x="163" y="186" class="nodeLabel breach">check defeated</text></g>
+<g class="row" data-step="6"><text x="22" y="217" class="hopNum">6</text><line x1="757" y1="224" x2="454" y2="224" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="454" y1="224" x2="151" y2="224" class="wireReplay" marker-end="url(#m0t0-b)"/><text x="302" y="217" class="msg forged"><tspan class="msgVal ">e1</tspan><tspan class="msgSep"> (replayed)</tspan></text></g>
 </svg>
 </div>
 </figure>

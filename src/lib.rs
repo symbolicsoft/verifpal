@@ -22,6 +22,7 @@ pub(crate) mod lsp;
 mod metamorphic;
 #[cfg(test)]
 mod model_tests;
+pub(crate) mod msc;
 pub(crate) mod narrate;
 pub(crate) mod parser;
 pub(crate) mod pretty;
@@ -36,8 +37,10 @@ pub(crate) mod sanity;
 pub(crate) mod scenario;
 pub(crate) mod sessions;
 pub(crate) mod solve;
+pub(crate) mod template;
 #[cfg(test)]
 mod testutil;
+pub(crate) mod tex;
 pub(crate) mod theory;
 pub(crate) mod tokens;
 #[cfg(test)]
@@ -57,6 +60,7 @@ pub use info::{Verbosity, info_banner, info_message, info_replay, set_verbosity}
 pub use lsp::run as lsp_run;
 pub use pretty::{diagram, pretty_print};
 pub use report::Run;
+pub use tex::tex_report;
 pub use types::*;
 #[cfg(feature = "cli")]
 pub use update::{UpdateCheck, update_check_report, update_check_start};

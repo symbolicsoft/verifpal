@@ -830,6 +830,65 @@ section.model[hidden] {
 	stroke-width: 4px;
 }
 
+.scroll > .diagram {
+	display: block;
+	margin: 0 auto;
+}
+
+.diagram .noteRect {
+	fill: var(--surface);
+	stroke: var(--line);
+	stroke-width: 1px;
+}
+
+.diagram .actRect {
+	fill: var(--surface-2);
+}
+
+.diagram .leakRect {
+	fill: var(--surface-2);
+	stroke: var(--sienna-line);
+}
+
+.diagram .noteLine {
+	font: 11px var(--mono);
+	dominant-baseline: alphabetic;
+}
+
+.diagram .actKey {
+	fill: var(--ink-4);
+}
+
+.diagram .actFresh {
+	fill: var(--ink-2);
+}
+
+.diagram .actName {
+	fill: var(--ink-2);
+}
+
+.diagram .actArrow {
+	fill: var(--ink-4);
+}
+
+.diagram .actPrim {
+	fill: var(--ink-2);
+	font-weight: 600;
+}
+
+.diagram .actCheck {
+	fill: var(--breach);
+	font-weight: 600;
+}
+
+.diagram .leakText {
+	fill: var(--sienna);
+	font-style: italic;
+}
+
+
+
+
 .diagram .actor.attacker {
 	fill: var(--breach);
 }

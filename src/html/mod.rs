@@ -2,22 +2,42 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 mod diagram;
-mod template;
 
 use std::collections::HashMap;
 
-use crate::report::{Analysis, DiagramRow, ModelReport, QueryReport, ReportStep, Run};
+use crate::msc::{self, Group, Lanes, staged};
+use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, ReportStep, Run};
+use crate::template::{Ctx, Dialect, escape_html, render, templates};
 use crate::tokens::{Token, TokenKind};
-use crate::util::copy_base_name;
-use diagram::{ATTACKER, Lanes, Row, Value};
-use template::{Ctx, PAGE, render};
+use crate::util::{article, copy_base_name, plural};
+
+static HTML: Dialect = Dialect {
+	open: "{{",
+	close: "}}",
+	escape: escape_html,
+	partial,
+};
+
+templates! { HTML,
+	PAGE "page" = "tpl/page.html",
+	RUN_INDEX "run_index" = "tpl/run_index.html",
+	MODEL "model" = "tpl/model.html",
+	ERROR "error" = "tpl/error.html",
+	SCOPE "scope" = "tpl/scope.html",
+	VERDICTS "verdicts" = "tpl/verdicts.html",
+	VERDICT "verdict" = "tpl/verdict.html",
+	CALLOUTS "callouts" = "tpl/callouts.html",
+	TRACE "trace" = "tpl/trace.html",
+	TRACE_STEP "trace_step" = "tpl/trace_step.html",
+	TRACE_VALUE "trace_value" = "tpl/trace_value.html",
+	SOURCE "source" = "tpl/source.html",
+	SOURCE_CHUNK "source_chunk" = "tpl/source_chunk.html",
+	DIAGRAM "diagram" = "tpl/diagram.html",
+	DIAGRAM_ROW "diagram_row" = "tpl/diagram_row.html",
+}
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");
-
-const DISCLAIMER: &str = "Verifpal is sound but incomplete. Every attack shown here is a genuine \
-	attack on the model as written; a query reported as holding means no attack was found within \
-	the search this run performed, which is never a proof that none exists.";
 
 pub fn html_report(run: &Run) -> String {
 	let subject = match run.models.as_slice() {
@@ -49,17 +69,6 @@ fn strip_header(raw: &str) -> &str {
 		None => raw,
 	}
 	.trim_ascii()
-}
-
-fn article(word: &str) -> &'static str {
-	match word.chars().next() {
-		Some('a' | 'e' | 'i' | 'o' | 'u' | 'A' | 'E' | 'I' | 'O' | 'U') => "an",
-		_ => "a",
-	}
-}
-
-fn plural(n: usize) -> &'static str {
-	if n == 1 { "" } else { "s" }
 }
 
 fn short_name(model: &ModelReport) -> &str {
@@ -424,46 +433,6 @@ fn scope_ctx(a: &Analysis) -> Ctx {
 	Ctx::new().text("text", text)
 }
 
-enum Group<'a> {
-	One(usize, &'a ReportStep),
-	Run(usize, usize, Vec<(usize, &'a ReportStep)>),
-}
-
-impl Group<'_> {
-	fn step(&self) -> String {
-		match self {
-			Group::One(n, _) => n.to_string(),
-			Group::Run(from, to, _) => {
-				if from == to {
-					from.to_string()
-				} else {
-					format!("{from}-{to}")
-				}
-			}
-		}
-	}
-}
-
-fn staged(q: &QueryReport) -> Vec<Group<'_>> {
-	const ACTED: [&str; 5] = ["mutations", "replay", "received", "gate", "bypass"];
-	let mut out: Vec<Group> = Vec::new();
-	for (i, step) in q.steps.iter().enumerate() {
-		let n = i + 1;
-		if ACTED.contains(&step.kind.as_str()) {
-			out.push(Group::One(n, step));
-			continue;
-		}
-		match out.last_mut() {
-			Some(Group::Run(_, to, held)) => {
-				*to = n;
-				held.push((n, step));
-			}
-			_ => out.push(Group::Run(n, n, vec![(n, step)])),
-		}
-	}
-	out
-}
-
 fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> Vec<Ctx> {
 	a.queries
 		.iter()
@@ -545,90 +514,12 @@ fn trace_values(s: &ReportStep) -> Vec<Ctx> {
 		.collect()
 }
 
-struct Hop<'a> {
-	hop: usize,
-	phase: i32,
-	sender: &'a str,
-	recipient: &'a str,
-	values: Vec<&'a str>,
-}
-
-fn hops(model: &ModelReport) -> Vec<Hop<'_>> {
-	model
-		.diagram
-		.iter()
-		.filter_map(|row| match row {
-			DiagramRow::Message {
-				hop,
-				phase,
-				sender,
-				recipient,
-				values,
-			} => Some(Hop {
-				hop: *hop,
-				phase: *phase,
-				sender,
-				recipient,
-				values: values.iter().map(|v| v.name.as_str()).collect(),
-			}),
-			_ => None,
-		})
-		.collect()
-}
-
-fn matches(hop: &Hop, sender: &str, recipient: &str, names: &[String]) -> bool {
-	if copy_base_name(sender) != hop.sender || copy_base_name(recipient) != hop.recipient {
-		return false;
-	}
-	names
-		.iter()
-		.any(|n| hop.values.contains(&copy_base_name(n)))
-}
-
 fn protocol_diagram(
 	model: &ModelReport,
 	hits: &HashMap<String, Vec<usize>>,
 	index: usize,
 ) -> Vec<Ctx> {
-	let rows: Vec<Row> = model
-		.diagram
-		.iter()
-		.map(|row| match row {
-			DiagramRow::Message {
-				hop,
-				sender,
-				recipient,
-				values,
-				..
-			} => Row::Wire {
-				num: Some(*hop),
-				hop: None,
-				step: None,
-				from: sender.clone(),
-				to: recipient.clone(),
-				via: None,
-				forged: false,
-				replay: false,
-				values: values
-					.iter()
-					.map(|v| {
-						let queries = hits.get(copy_base_name(&v.name));
-						Value {
-							name: v.name.clone(),
-							guarded: v.guarded,
-							hit: queries.is_some(),
-							queries: queries.cloned().unwrap_or_default(),
-						}
-					})
-					.collect(),
-			},
-			DiagramRow::Phase { number } => Row::Phase { number: *number },
-			DiagramRow::Leak { principal, values } => Row::Leak {
-				principal: principal.clone(),
-				text: format!("{principal} leaks {}", values.join(", ")),
-			},
-		})
-		.collect();
+	let rows = msc::protocol_rows(model, hits);
 	let caption = if hits.is_empty() {
 		"Protocol sequence. Guarded values are written in brackets.".to_string()
 	} else {
@@ -652,118 +543,10 @@ fn attack_diagram(
 	index: usize,
 	query_index: usize,
 ) -> Vec<Ctx> {
-	let wires = hops(model);
-	let leaks: Vec<(&str, Vec<&str>)> = model
-		.diagram
-		.iter()
-		.filter_map(|row| match row {
-			DiagramRow::Leak { principal, values } => Some((
-				principal.as_str(),
-				values.iter().map(String::as_str).collect(),
-			)),
-			_ => None,
-		})
-		.collect();
-	let mut rows: Vec<Row> = Vec::new();
-	let mut cursor = 0usize;
-	let mut phase = 0i32;
-	let mut drawn: Vec<&str> = Vec::new();
-	for group in staged(q) {
-		let (n, step) = match &group {
-			Group::One(n, step) => (*n, *step),
-			Group::Run(_, _, held) => {
-				rows.push(Row::Run {
-					step: group.step(),
-					label: match held.len() {
-						1 => format!("computes (step {})", group.step()),
-						_ => format!("computes (steps {})", group.step().replace('-', "\u{2013}")),
-					},
-				});
-				for (_, held_step) in held {
-					for (principal, values) in &leaks {
-						if drawn.contains(principal) {
-							continue;
-						}
-						if !values.iter().any(|v| held_step.text.contains(v)) {
-							continue;
-						}
-						drawn.push(principal);
-						rows.insert(
-							rows.len() - 1,
-							Row::Leak {
-								principal: principal.to_string(),
-								text: format!("{principal} leaks {}", values.join(", ")),
-							},
-						);
-					}
-				}
-				continue;
-			}
-		};
-		let names: Vec<String> = step.values.iter().map(|v| v.name.clone()).collect();
-		let (sender, recipient) = (step.sender.as_deref(), step.recipient.as_deref());
-		let found = match (sender, recipient) {
-			(Some(sender), Some(recipient)) => wires
-				.iter()
-				.skip(cursor)
-				.chain(wires.iter().take(cursor))
-				.find(|hop| matches(hop, sender, recipient, &names)),
-			_ => None,
-		};
-		if let Some(hop) = found {
-			cursor = hop.hop;
-			if hop.phase != phase {
-				phase = hop.phase;
-				rows.push(Row::Phase { number: phase });
-			}
-		}
-		let hop = found.map(|found| found.hop);
-		match step.kind.as_str() {
-			"mutations" | "replay" | "received" => {
-				let Some(recipient) = recipient else { continue };
-				let forged = step.values.iter().any(|v| v.was != v.installed);
-				let replay = step.kind == "replay";
-				let relayed = step.kind != "received";
-				rows.push(Row::Wire {
-					num: Some(n),
-					hop,
-					step: Some(n.to_string()),
-					from: sender.unwrap_or(ATTACKER).to_string(),
-					to: recipient.to_string(),
-					via: relayed.then(|| ATTACKER.to_string()),
-					forged: forged || replay,
-					replay,
-					values: step
-						.values
-						.iter()
-						.map(|v| Value {
-							name: v.name.clone(),
-							guarded: v.guarded,
-							hit: false,
-							queries: Vec::new(),
-						})
-						.collect(),
-				});
-			}
-			"gate" | "bypass" => {
-				let Some(principal) = step.principal.as_deref() else {
-					continue;
-				};
-				rows.push(Row::Mark {
-					num: Some(n),
-					step: Some(n.to_string()),
-					principal: principal.to_string(),
-					bypass: step.kind == "bypass",
-				});
-			}
-			_ => {}
-		}
-	}
-	let mut lanes = Lanes::of(&rows);
+	let (rows, lanes) = msc::attack_rows(q, model);
 	if lanes.is_empty() {
 		return Vec::new();
 	}
-	lanes.insert(1, ATTACKER);
 	let figure = diagram::Figure {
 		id: format!("m{index}t{query_index}"),
 		caption: String::new(),
@@ -873,6 +656,8 @@ fn token_class(kind: TokenKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::msc::{Row, Value};
+	use crate::report::DiagramRow;
 	use crate::report::{
 		Assumption, Binding, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
 	};
@@ -1131,6 +916,7 @@ mod tests {
 				name: "x".to_string(),
 				guarded: false,
 				hit: false,
+				changed: false,
 				queries: vec![],
 			}],
 		}];
@@ -1147,9 +933,33 @@ mod tests {
 				name: "a_very_long_constant_name_indeed_much_longer".to_string(),
 				guarded: false,
 				hit: false,
+				changed: false,
 				queries: vec![],
 			}],
 		}];
+		// Four lanes, so the width floor a sparse diagram gets is well below
+		// what the long label needs and the label is what decides the column.
+		let filler = || Row::Wire {
+			num: Some(2),
+			hop: None,
+			step: None,
+			from: "C".to_string(),
+			to: "D".to_string(),
+			via: None,
+			forged: false,
+			replay: false,
+			values: vec![Value {
+				name: "y".to_string(),
+				guarded: false,
+				hit: false,
+				changed: false,
+				queries: vec![],
+			}],
+		};
+		let mut narrow = narrow;
+		let mut wide = wide;
+		narrow.push(filler());
+		wide.push(filler());
 		let of = |rows: &Vec<Row>| {
 			let ctx = diagram::draw(
 				diagram::Figure {
@@ -1161,7 +971,7 @@ mod tests {
 				rows,
 			)
 			.unwrap();
-			let html = template::render(&template::DIAGRAM, &ctx);
+			let html = render(&DIAGRAM, &ctx);
 			html.split("width=\"")
 				.nth(1)
 				.and_then(|s| s.split('"').next())
@@ -1549,6 +1359,30 @@ mod tests {
 				css.matches(token).count() >= 2,
 				"{token} has no dark counterpart"
 			);
+		}
+	}
+
+	#[test]
+	fn every_shipped_template_parses_to_something() {
+		for template in every_template() {
+			assert!(
+				!template.is_empty(),
+				"{} parsed to nothing",
+				template.name()
+			);
+		}
+	}
+
+	#[test]
+	fn every_partial_reference_names_a_template_that_exists() {
+		for template in every_template() {
+			for name in template.partials() {
+				assert!(
+					partial(name).is_some(),
+					"{} includes unknown partial '{name}'",
+					template.name()
+				);
+			}
 		}
 	}
 
