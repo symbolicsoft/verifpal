@@ -22,7 +22,7 @@ jobs:
       ZIG_VERSION: "0.16.0"
     steps:
       - name: Checkout the tag with its full history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -44,7 +44,7 @@ jobs:
         uses: anchore/sbom-action/download-syft@v0
 
       - name: Cache cargo registry and build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -80,7 +80,7 @@ jobs:
         run: make test-exhaustive
 
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
