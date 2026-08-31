@@ -12,9 +12,7 @@ use crate::value::value_nil;
 
 use super::matching::{match_value, unify};
 use super::symbolic::SymbolicState;
-use super::vars::{
-	Substitution, apply, as_var, bind, compose, contains_var, dedupe, same_substitution,
-};
+use super::vars::{Substitution, apply, as_var, bind, compose, contains_var, dedupe};
 
 type GoalMemo = IdMap<u64, Vec<(Value, Vec<Substitution>)>>;
 
@@ -548,6 +546,7 @@ impl<'a> Deducer<'a> {
 		for term in &sym.terms {
 			collect_checked(term, &mut checked);
 		}
+		let checked = widest_checked_projections(checked);
 		let mut splits: Vec<Primitive> = Vec::new();
 		for term in &sym.terms {
 			collect_stuck_splits(term, &mut splits);
@@ -572,6 +571,8 @@ impl<'a> Deducer<'a> {
 		}
 		out.extend(combined);
 		out = dedupe(out);
+		let mut seen = super::vars::SeenSubstitutions::default();
+		seen.absorb(&out);
 		let mut frontier = out.clone();
 
 		let check_vars: Vec<Vec<ValueId>> = checked
@@ -603,11 +604,12 @@ impl<'a> Deducer<'a> {
 				}
 			}
 			discovered = dedupe(discovered);
-			discovered.retain(|s| !out.iter().any(|seen| same_substitution(seen, s)));
+			discovered.retain(|s| !seen.contains(&out, s));
 			if discovered.is_empty() {
 				break;
 			}
 			out.extend(discovered.clone());
+			seen.absorb(&out);
 			frontier = discovered;
 		}
 		dedupe(out)
@@ -796,6 +798,22 @@ fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 		}
 		Value::Constant(_) => {}
 	}
+}
+
+fn widest_checked_projections(checked: Vec<Primitive>) -> Vec<Primitive> {
+	let splits: Vec<Primitive> = checked
+		.iter()
+		.filter(|p| p.id == PRIM_SPLIT)
+		.cloned()
+		.collect();
+	if splits.is_empty() {
+		return checked;
+	}
+	let widest = widest_projections(&splits);
+	checked
+		.into_iter()
+		.filter(|p| p.id != PRIM_SPLIT || widest.iter().any(|q| equivalent_primitives(q, p, true)))
+		.collect()
 }
 
 fn widest_projections(splits: &[Primitive]) -> Vec<Primitive> {

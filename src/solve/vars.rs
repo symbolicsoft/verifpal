@@ -221,6 +221,34 @@ fn substitution_hash(s: &Substitution) -> u64 {
 	acc
 }
 
+#[derive(Default)]
+pub(crate) struct SeenSubstitutions {
+	index: IdMap<u64, Vec<usize>>,
+	absorbed: usize,
+}
+
+impl SeenSubstitutions {
+	pub(crate) fn absorb(&mut self, items: &[Substitution]) {
+		for (i, candidate) in items.iter().enumerate().skip(self.absorbed) {
+			self.index
+				.entry(substitution_hash(candidate))
+				.or_default()
+				.push(i);
+		}
+		self.absorbed = items.len();
+	}
+
+	pub(crate) fn contains(&self, items: &[Substitution], candidate: &Substitution) -> bool {
+		self.index
+			.get(&substitution_hash(candidate))
+			.is_some_and(|bucket| {
+				bucket
+					.iter()
+					.any(|&i| same_substitution(&items[i], candidate))
+			})
+	}
+}
+
 pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 	let mut out: Vec<Substitution> = Vec::with_capacity(candidates.len());
 	let mut seen: IdMap<u64, Vec<usize>> = IdMap::default();
