@@ -556,15 +556,6 @@ fn verify_verbosity(structured: bool, result_code: bool, quiet: bool, verbose: b
 	Verbosity::Normal
 }
 
-fn verify_output_options(result_code: bool, format: FormatArg) -> Result<(), &'static str> {
-	if result_code && format != FormatArg::Text {
-		return Err(
-			"--result-code cannot be combined with --format json, html or tex; use --format text or omit --result-code",
-		);
-	}
-	Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run_verify(
 	models: Vec<String>,
@@ -578,10 +569,6 @@ fn run_verify(
 	verbose: bool,
 	color: ColorArg,
 ) -> i32 {
-	if let Err(e) = verify_output_options(result_code, format) {
-		eprintln!("{}", e);
-		return EXIT_ERROR;
-	}
 	let structured = format != FormatArg::Text;
 	set_color_choice(if structured {
 		ColorChoice::Never
@@ -844,15 +831,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn result_codes_are_restricted_to_text_output() {
-		assert!(verify_output_options(true, FormatArg::Text).is_ok());
-		assert!(verify_output_options(false, FormatArg::Json).is_ok());
-		for format in [FormatArg::Json, FormatArg::Html, FormatArg::Tex] {
-			assert!(verify_output_options(true, format).is_err());
-		}
-	}
 
 	#[test]
 	fn pretty_change_is_reported_only_after_a_successful_write() {

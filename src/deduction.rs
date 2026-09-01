@@ -124,23 +124,27 @@ fn rule_decompose(
 	let Some(result) = can_decompose(prim, ps, attacker) else {
 		return false;
 	};
-	learn(
-		ctx,
-		&result.revealed,
-		record,
-		DerivationRecord::Decomposed {
-			of: value.clone(),
-			using: result.used.clone(),
-		},
-		|| {
-			format!(
-				"{} obtained by decomposing {} with {}.",
-				info_output_text(&result.revealed),
-				value,
-				pretty_values(&result.used),
-			)
-		},
-	)
+	let mut learned = false;
+	for revealed in &result.revealed {
+		learned |= learn(
+			ctx,
+			revealed,
+			record,
+			DerivationRecord::Decomposed {
+				of: value.clone(),
+				using: result.used.clone(),
+			},
+			|| {
+				format!(
+					"{} obtained by decomposing {} with {}.",
+					info_output_text(revealed),
+					value,
+					pretty_values(&result.used),
+				)
+			},
+		);
+	}
+	learned
 }
 
 fn rule_break_weak(

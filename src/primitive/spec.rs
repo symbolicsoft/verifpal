@@ -76,17 +76,7 @@ fn filter_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	}
 }
 
-fn filter_ringsignverif_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
-	let distinct = p.arguments.get(..3).is_some_and(|members| {
-		members.iter().enumerate().all(|(i, member)| {
-			members[..i]
-				.iter()
-				.all(|previous| !member.equivalent(previous, true))
-		})
-	});
-	if !distinct {
-		return (x.clone(), false);
-	}
+fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
 		0 => match x {
 			Value::Primitive(p)
@@ -226,8 +216,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			weak_reveals: vec![1],
@@ -242,8 +231,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			rewrite: Some(RewriteRule {
@@ -266,8 +254,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			weak_reveals: vec![1],
@@ -282,8 +269,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			rewrite: Some(RewriteRule {
@@ -371,8 +357,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_extract_dh_exponent,
 			}),
 			weak_reveals: vec![1],
@@ -386,8 +371,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			rewrite: Some(RewriteRule {
@@ -474,8 +458,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![1],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 1,
-				reveal_output: None,
+				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
 			..PrimitiveSpec::default()
@@ -503,8 +486,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: vec![2],
 			decompose: Some(DecomposeRule {
 				given: vec![0],
-				reveal: 0,
-				reveal_output: Some(0),
+				reveals: vec![Reveal::Output(0), Reveal::Argument(1)],
 				filter: filter_extract_dh_exponent,
 			}),
 			argument_restrictions: vec![

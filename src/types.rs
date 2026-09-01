@@ -1514,7 +1514,7 @@ impl AttackerState {
 }
 
 pub struct DecomposeResult {
-	pub revealed: Value,
+	pub revealed: Vec<Value>,
 	pub used: Vec<Value>,
 }
 

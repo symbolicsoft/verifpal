@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1
+//
+// ML-KEM decapsulation recovers the encapsulation randomness, not just the
+// shared secret: FIPS 203's Decaps decrypts the ciphertext back to the
+// encapsulated message and re-derives the coins from it, because the
+// Fujisaki-Okamoto re-encryption check cannot run without them. So whoever
+// holds the decapsulation key learns r as well as ss.
+//
+// Bob leaks dkb, so the attacker decapsulates ct. Both queries fail: ss by
+// the shared-secret reveal, r by the randomness reveal. Before the second
+// reveal existed this model was c1c0, and r was secret against an attacker
+// that had already decapsulated it.
+//
+// kem_decap_randomness_sealed.vp is the counterweight: without dkb neither
+// falls, so this is not a blanket disclosure of the randomness.
+
+attacker[passive]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+	leaks dkb
+]
+
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows public ctx
+	generates r
+	ss, ct = KEM_ENCAP(ekb, r)
+	e = AEAD_ENC(ss, ctx, ctx)
+]
+
+Alice -> Bob: ct, e
+
+queries[
+	confidentiality? ss
+	confidentiality? r
+]

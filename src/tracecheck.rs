@@ -302,7 +302,7 @@ pub(crate) fn step_problems(
 			DerivationRecord::Decomposed { of, .. } => match of {
 				Value::Primitive(p) => {
 					let yields = crate::theory::can_decompose(p, ps, attacker)
-						.is_some_and(|r| r.revealed.equivalent(target, true));
+						.is_some_and(|r| r.revealed.iter().any(|v| v.equivalent(target, true)));
 					if !yields {
 						problems.push(wrong(
 							"opens a term that does not yield what the step claims",

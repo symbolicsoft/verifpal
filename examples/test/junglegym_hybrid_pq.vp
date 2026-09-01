@@ -1,17 +1,32 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c1c1c0a0a1f0f1e1e1
+// Expected: c1c1c1a1a1f0f1e1e1
 //
 // A hybrid classical+post-quantum handshake: X25519-shaped DH_KEX alongside a
 // KEM, both folded into one HKDF, then a signed transcript, a MAC key
 // confirmation, an AEAD payload and a MAC receipt, over three phases.
 //
 // The ephemeral public keys travel UNGUARDED, so an active attacker MitMs the
-// handshake in phase 0 and most secrecy queries fall to that alone. What still
-// holds is the part that matters: bob_sig stays authentic because Bob's
-// long-term key is guarded and never leaks, and kem_seed stays secret because
-// it never leaves Bob. PUBKEY[weak from phase 3] additionally hands the
+// handshake in phase 0 and every secrecy query falls to that alone. kem_seed
+// goes with them: the attacker substitutes its own encapsulation key, Bob
+// encapsulates to a key the attacker holds, and decapsulating recovers the
+// encapsulation randomness as well as the shared secret, the way ML-KEM's
+// re-encryption check does. PUBKEY[weak from phase 3] additionally hands the
 // attacker Alice's ephemeral private key once phase 3 arrives.
+//
+// bob_sig fails without anything being forged. Bob's long-term key is guarded
+// and never leaks, so the attacker cannot sign. Instead it feeds Alice's
+// ephemeral to Bob's SECOND run, which encapsulates to her key and signs her
+// transcript, then relays that run's bob_ephpk, kem_ct and bob_sig back to
+// her. Every check passes, yet the signature was computed in another session
+// on attacker-chosen input and is no session's honest bob_sig, so agreement
+// is not injective. session_nonce_cross.vp is this shape without a KEM.
+//
+// Reaching it needs the cross-session ciphertext KEM_ENCAP(alice_ephpk,
+// kem_seed#2), which exists only once Bob's second run has been fed Alice's
+// key, and which the attacker builds from the kem_seed it recovered above.
+// That is the same reveal the third query rests on, so this model would go
+// back to c1c1c0a0a1f0f1e1e1 if KEM decapsulation stopped yielding r.
 //
 // Note the KEM output order: `ss, ct = KEM_ENCAP(pk, r)` -- shared secret
 // first. Getting it backwards makes KEM_DECAP reduce to the wrong output and

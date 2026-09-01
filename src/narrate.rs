@@ -755,16 +755,18 @@ impl Step {
 pub(crate) struct Narration {
 	pub trace: String,
 	pub steps: Vec<Step>,
+	pub target: Value,
 	table: NameTable,
 	shadowed: Vec<Arc<str>>,
 	state: Option<PrincipalState>,
 }
 
 impl Narration {
-	pub(crate) fn none() -> Narration {
+	pub(crate) fn none(target: Value) -> Narration {
 		Narration {
 			trace: String::new(),
 			steps: Vec::new(),
+			target,
 			table: NameTable::empty(),
 			shadowed: Vec::new(),
 			state: None,
@@ -983,6 +985,7 @@ pub(crate) fn narrate_attack(
 	Narration {
 		trace,
 		steps,
+		target: target.clone(),
 		table,
 		shadowed: installed,
 		state: Some(witness.ps.clone()),

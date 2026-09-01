@@ -14,11 +14,16 @@ pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
 pub(crate) type CoreRuleFn = fn(&Primitive) -> (bool, Value);
 pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
 
+#[derive(Clone, Copy)]
+pub(crate) enum Reveal {
+	Argument(usize),
+	Output(usize),
+}
+
 #[derive(Clone)]
 pub(crate) struct DecomposeRule {
 	pub given: Vec<usize>,
-	pub reveal: usize,
-	pub reveal_output: Option<usize>,
+	pub reveals: Vec<Reveal>,
 	pub filter: FilterFn,
 }
 
@@ -607,12 +612,14 @@ mod tests {
 			};
 
 			if let Some(rule) = &spec.decompose {
-				must("decompose.reveal", rule.reveal);
+				for reveal in &rule.reveals {
+					match *reveal {
+						Reveal::Argument(i) => must("decompose.reveal", i),
+						Reveal::Output(i) => out("decompose.reveal_output", i),
+					}
+				}
 				for &i in &rule.given {
 					may("decompose.given", i);
-				}
-				if let Some(i) = rule.reveal_output {
-					out("decompose.reveal_output", i);
 				}
 			}
 

@@ -469,38 +469,44 @@ impl<'a> Deducer<'a> {
 			let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.decompose.as_ref()) else {
 				continue;
 			};
-			let Some(reveal) = p.arguments.get(rule.reveal) else {
-				continue;
-			};
-			let Some(aligned) = match_value(reveal, goal, s) else {
-				continue;
-			};
-			let filter_fn = rule.filter;
-
-			let mut frontier = vec![aligned];
-			let mut viable = true;
-			for (filter_i, &arg_idx) in rule.given.iter().enumerate() {
-				let Some(arg) = p.arguments.get(arg_idx) else {
-					viable = false;
-					break;
+			for reveal in &rule.reveals {
+				let revealed = match *reveal {
+					Reveal::Argument(index) => match p.arguments.get(index) {
+						Some(argument) => argument.clone(),
+						None => continue,
+					},
+					Reveal::Output(output) => Value::Primitive(Arc::new(p.with_output(output))),
 				};
-				let (filtered, valid) = filter_fn(p, arg, filter_i);
-				if !valid {
-					viable = false;
-					break;
+				let Some(aligned) = match_value(&revealed, goal, s) else {
+					continue;
+				};
+				let filter_fn = rule.filter;
+
+				let mut frontier = vec![aligned];
+				let mut viable = true;
+				for (filter_i, &arg_idx) in rule.given.iter().enumerate() {
+					let Some(arg) = p.arguments.get(arg_idx) else {
+						viable = false;
+						break;
+					};
+					let (filtered, valid) = filter_fn(p, arg, filter_i);
+					if !valid {
+						viable = false;
+						break;
+					}
+					let mut next = Vec::new();
+					for candidate in &frontier {
+						self.solve_into(&filtered, candidate, &mut next);
+					}
+					if next.is_empty() {
+						viable = false;
+						break;
+					}
+					frontier = dedupe(next);
 				}
-				let mut next = Vec::new();
-				for candidate in &frontier {
-					self.solve_into(&filtered, candidate, &mut next);
+				if viable {
+					out.extend(frontier);
 				}
-				if next.is_empty() {
-					viable = false;
-					break;
-				}
-				frontier = dedupe(next);
-			}
-			if viable {
-				out.extend(frontier);
 			}
 		}
 	}

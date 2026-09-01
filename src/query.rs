@@ -15,7 +15,7 @@ fn attack_trace(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	query_index: usize,
-	target: &Value,
+	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
 ) -> Narration {
 	attack_trace_with(ctx, km, ps, query_index, target, seed, |_| Vec::new())
@@ -27,12 +27,12 @@ fn attack_trace_with(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	query_index: usize,
-	target: &Value,
+	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
 	prelude: impl Fn(&PrincipalState) -> Vec<crate::narrate::Step>,
 ) -> Narration {
 	if in_minimization() {
-		return Narration::none();
+		return Narration::none(target(ps));
 	}
 	let ambient = ctx.attacker_snapshot();
 	let witness = minimize_witness(ctx, km, ps, query_index, seed);
@@ -49,7 +49,8 @@ fn attack_trace_with(
 			out_of_order: witness.out_of_order.clone(),
 		},
 	);
-	let narration = narrate_attack(km, &witness, target, &ambient, prelude(&witness.ps));
+	let target = target(&witness.ps);
+	let narration = narrate_attack(km, &witness, &target, &ambient, prelude(&witness.ps));
 	#[cfg(test)]
 	crate::tracecheck::assert_trace_is_well_founded(&crate::tracecheck::TraceUnderTest {
 		file_name: ctx.results_file_name(),
@@ -59,7 +60,7 @@ fn attack_trace_with(
 		km,
 		ps: &witness.ps,
 		attacker: &witness.attacker,
-		target,
+		target: &target,
 		phase: ambient.current_phase,
 	});
 	narration
@@ -150,7 +151,20 @@ fn query_confidentiality(
 		None => return Ok(result),
 	};
 	let seed = recorded_mutations(attacker, attacker_idx);
-	let mutated_info = attack_trace(ctx, km, ps, query_index, resolved_value, &seed);
+	let mutated_info = attack_trace(
+		ctx,
+		km,
+		ps,
+		query_index,
+		|state| {
+			state
+				.index_of(subject)
+				.filter(|&i| !state.slot_unreached(i))
+				.map(|i| state.values[i].value.clone())
+				.unwrap_or_else(|| resolved_value.clone())
+		},
+		&seed,
+	);
 	result.resolved = true;
 	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(
@@ -159,7 +173,7 @@ fn query_confidentiality(
 		&format!(
 			"{} ({}) is obtained by Attacker.",
 			subject,
-			mutated_info.term_excluding(&attacker.known[attacker_idx.get()], &[&subject.name]),
+			mutated_info.term_excluding(&mutated_info.target, &[&subject.name]),
 		),
 	);
 	emit_query_result(ctx, &result);
@@ -211,7 +225,15 @@ fn query_authentication(
 			slot: SlotIdx(_idx),
 		}]
 	};
-	let mutated_info = attack_trace_with(ctx, km, ps, query_index, assigned, &seed, prelude);
+	let mutated_info = attack_trace_with(
+		ctx,
+		km,
+		ps,
+		query_index,
+		|_| assigned.clone(),
+		&seed,
+		prelude,
+	);
 	let witnessed = mutated_info.state().and_then(|w| {
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;
@@ -407,7 +429,8 @@ fn query_freshness(
 			terms: leaves.iter().map(|c| Value::Constant(c.clone())).collect(),
 		}]
 	};
-	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &resolved, &[], prelude);
+	let mutated_info =
+		attack_trace_with(ctx, km, ps, query_index, |_| resolved.clone(), &[], prelude);
 	result.resolved = true;
 	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(
@@ -439,7 +462,8 @@ fn query_unlinkability(
 			let Some(witness) = crate::unlink::find_link_witness(a, b, km, ps, attacker) else {
 				continue;
 			};
-			let mutated_info = attack_trace(ctx, km, ps, query_index, &witness.value, &[]);
+			let mutated_info =
+				attack_trace(ctx, km, ps, query_index, |_| witness.value.clone(), &[]);
 			let clause = witness.describe(&mutated_info.term(&witness.value));
 			result.resolved = true;
 			result = query_precondition(result, km, ps, attacker.current_phase);
@@ -511,7 +535,7 @@ fn query_equivalence(
 			})
 			.collect()
 	};
-	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &empty, &[], prelude);
+	let mutated_info = attack_trace_with(ctx, km, ps, query_index, |_| empty.clone(), &[], prelude);
 	result.resolved = true;
 	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(

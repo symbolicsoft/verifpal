@@ -820,7 +820,7 @@ fn test_scuttlebutt() {
 
 #[test]
 fn test_junglegym_hybrid_pq() {
-	run_model("junglegym_hybrid_pq.vp", "c1c1c0a0a1f0f1e1e1");
+	run_model("junglegym_hybrid_pq.vp", "c1c1c1a1a1f0f1e1e1");
 }
 #[test]
 fn test_junglegym_threshold_ring() {
@@ -1600,6 +1600,14 @@ fn test_piknik_signature_not_forgeable() {
 		"piknik.vp",
 		"c0a0a1a1f0",
 	);
+}
+#[test]
+fn test_kem_decap_reveals_randomness() {
+	run_model("kem_decap_reveals_randomness.vp", "c1c1");
+}
+#[test]
+fn test_kem_decap_randomness_sealed() {
+	run_model("kem_decap_randomness_sealed.vp", "c0c0");
 }
 #[test]
 fn test_kem_roundtrip() {

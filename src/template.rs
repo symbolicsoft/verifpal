@@ -80,7 +80,9 @@ impl Template {
 	) -> Template {
 		let mut at = 0usize;
 		let (nodes, closing) = parse_block(name, strip_header(raw), &mut at, dialect);
-		if let Some(closing) = closing {
+		if cfg!(test)
+			&& let Some(closing) = closing
+		{
 			panic!("template '{name}' closes section '{closing}' without opening it");
 		}
 		Template {
@@ -164,7 +166,12 @@ fn parse_block(
 		}
 		let after = &rest[start + open.len()..];
 		let Some(end) = after.find(close) else {
-			panic!("template '{name}' has an unclosed '{open}' tag");
+			if cfg!(test) {
+				panic!("template '{name}' has an unclosed '{open}' tag");
+			}
+			nodes.push(Node::Lit(&rest[start..]));
+			*at = src.len();
+			break;
 		};
 		let tag = after[..end].trim();
 		*at += start + end + open.len() + close.len();
@@ -173,12 +180,14 @@ fn parse_block(
 				let inverted = tag.starts_with('^');
 				let key = tag[1..].trim();
 				let (body, closing) = parse_block(name, src, at, dialect);
-				match closing {
-					Some(closing) if closing == key => {}
-					Some(closing) => {
-						panic!("template '{name}' opens section '{key}' but closes '{closing}'")
+				if cfg!(test) {
+					match closing {
+						Some(closing) if closing == key => {}
+						Some(closing) => {
+							panic!("template '{name}' opens section '{key}' but closes '{closing}'")
+						}
+						None => panic!("template '{name}' never closes section '{key}'"),
 					}
-					None => panic!("template '{name}' never closes section '{key}'"),
 				}
 				nodes.push(Node::Section {
 					key,

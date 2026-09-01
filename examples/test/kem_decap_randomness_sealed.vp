@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0
+//
+// The counterweight to kem_decap_reveals_randomness.vp, identical but for
+// the leak. The encapsulation randomness is revealed to whoever holds the
+// decapsulation key, and to nobody else: dkb stays secret here, so the
+// attacker holds ct without being able to decapsulate it, and both the
+// shared secret and the randomness hold.
+//
+// Without this model the randomness reveal could be a blanket disclosure
+// and the corpus would not notice.
+
+attacker[passive]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+
+]
+
+Bob -> Alice: [ekb]
+
+principal Alice[
+	knows public ctx
+	generates r
+	ss, ct = KEM_ENCAP(ekb, r)
+	e = AEAD_ENC(ss, ctx, ctx)
+]
+
+Alice -> Bob: ct, e
+
+queries[
+	confidentiality? ss
+	confidentiality? r
+]

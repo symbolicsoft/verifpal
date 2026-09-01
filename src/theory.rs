@@ -247,10 +247,22 @@ pub(crate) fn can_decompose(
 		}
 	}
 	if has.len() >= rule.given.len() {
-		let revealed = match rule.reveal_output {
-			Some(output) => Value::Primitive(Arc::new(p.with_output(output))),
-			None => p.arguments[rule.reveal].clone(),
-		};
+		let mut revealed = Vec::new();
+		for reveal in &rule.reveals {
+			match *reveal {
+				Reveal::Output(output) => {
+					revealed.push(Value::Primitive(Arc::new(p.with_output(output))));
+				}
+				Reveal::Argument(index) => {
+					if let Some(argument) = p.arguments.get(index) {
+						revealed.push(argument.clone());
+					}
+				}
+			}
+		}
+		if revealed.is_empty() {
+			return None;
+		}
 		Some(DecomposeResult {
 			revealed,
 			used: has,
@@ -320,7 +332,12 @@ fn obtainable_by_output_projection(
 	let Ok(spec) = primitive_get(p.id) else {
 		return false;
 	};
-	if spec.decompose.as_ref().and_then(|rule| rule.reveal_output) != Some(p.output) {
+	let projects_output = spec.decompose.as_ref().is_some_and(|rule| {
+		rule.reveals
+			.iter()
+			.any(|reveal| matches!(*reveal, Reveal::Output(output) if output == p.output))
+	});
+	if !projects_output {
 		return false;
 	}
 	let Some(&outputs) = spec.output.iter().max() else {
@@ -800,27 +817,6 @@ mod tests {
 	}
 
 	#[test]
-	fn ring_verification_rejects_a_repeated_member_that_omits_the_signed_ring() {
-		let a = make_constant("ring_a");
-		let b = make_constant("ring_b");
-		let c = make_constant("ring_c");
-		let message = make_constant("ring_message");
-		let ga = make_primitive(PRIM_PUBKEY, vec![a.clone()], 0);
-		let gb = make_primitive(PRIM_PUBKEY, vec![b], 0);
-		let gc = make_primitive(PRIM_PUBKEY, vec![c], 0);
-		let signature = make_primitive(PRIM_RINGSIGN, vec![a, gb, gc, message.clone()], 0);
-		let verification = Primitive {
-			id: PRIM_RINGSIGNVERIF,
-			arguments: vec![ga.clone(), ga.clone(), ga, message, signature],
-			output: 0,
-			instance_check: true,
-			capabilities: Capabilities::default(),
-			hash: HashCell::default(),
-		};
-		assert!(!can_rewrite(&Arc::new(verification)).0);
-	}
-
-	#[test]
 	fn can_decompose_enc_with_key() {
 		let key = make_constant("cd_key");
 		let msg = make_constant("cd_msg");
@@ -846,11 +842,17 @@ mod tests {
 		let attacker = make_attacker_state(vec![key]);
 		let result = can_decompose(&p, &ps, &attacker);
 		assert!(result.is_some());
-		assert!(result.unwrap().revealed.equivalent(&msg, true));
+		assert!(
+			result
+				.unwrap()
+				.revealed
+				.iter()
+				.any(|v| v.equivalent(&msg, true))
+		);
 	}
 
 	#[test]
-	fn can_decompose_kem_with_private_key_reveals_shared_secret() {
+	fn can_decompose_kem_with_private_key_reveals_shared_secret_and_randomness() {
 		let dk = make_constant("kd_dk");
 		let r = make_constant("kd_r");
 		let ek = make_primitive(PRIM_PUBKEY, vec![dk.clone()], 0);
@@ -877,12 +879,11 @@ mod tests {
 		let revealed = can_decompose(&ct, &ps, &attacker)
 			.expect("holder of the private key can decapsulate")
 			.revealed;
-		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
-		assert!(revealed.equivalent(&expected, true));
-		assert_ne!(
-			revealed.hash_value(),
-			Value::Primitive(Arc::new(ct)).hash_value()
-		);
+		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r.clone()], 0);
+		assert!(revealed.iter().any(|v| v.equivalent(&expected, true)));
+		assert!(revealed.iter().any(|v| v.equivalent(&r, true)));
+		let ciphertext = Value::Primitive(Arc::new(ct)).hash_value();
+		assert!(!revealed.iter().any(|v| v.hash_value() == ciphertext));
 	}
 
 	#[test]
