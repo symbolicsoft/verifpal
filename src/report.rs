@@ -28,7 +28,6 @@ pub struct ModelReport {
 	pub analysis: Option<Analysis>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub diagram: Vec<DiagramRow>,
-	#[serde(skip)]
 	pub source: String,
 	#[serde(skip)]
 	pub(crate) tokens: Vec<Token>,
@@ -613,7 +612,7 @@ mod tests {
 			r#"{"kind":"mutations","text":"Attacker replaces ga with PUBKEY(nil).","#,
 			r#""sender":"Alice","recipient":"Bob","values":[{"name":"ga","#,
 			r#""installed":"PUBKEY(nil)","was":"PUBKEY(a)"}]}],"#,
-			r#""preconditions":[],"variants":2}]}}]}"#,
+			r#""preconditions":[],"variants":2}]},"source":""}]}"#,
 		);
 		assert_eq!(json, expected);
 	}
@@ -765,7 +764,7 @@ mod tests {
 				error: Some("parse error: expected `]`".to_string()),
 				analysis: None,
 				diagram: Vec::new(),
-				source: String::new(),
+				source: "attacker[active]".to_string(),
 				tokens: Vec::new(),
 			}],
 		};
@@ -774,7 +773,7 @@ mod tests {
 			json,
 			concat!(
 				r#"{"version":"1.0.4","ok":false,"models":[{"file":"broken.vp","#,
-				r#""ok":false,"error":"parse error: expected `]`"}]}"#,
+				r#""ok":false,"error":"parse error: expected `]`","source":"attacker[active]"}]}"#,
 			)
 		);
 	}

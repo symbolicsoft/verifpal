@@ -560,7 +560,12 @@ fn construct_trace_render_message(
 		trace.slots[idx]
 			.known_by
 			.push((message.recipient, message.sender));
-		trace.slots[idx].sent_by.push((message.sender, declared_at));
+		trace.slots[idx].sent_by.push((
+			message.sender,
+			message.recipient,
+			declared_at,
+			current_phase,
+		));
 		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
@@ -607,8 +612,8 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				sent_at: slot
 					.sent_by
 					.iter()
-					.filter(|&&(sender, _)| sender == principal_id)
-					.map(|&(_, at)| at)
+					.filter(|&&(sender, _, _, _)| sender == principal_id)
+					.map(|&(_, _, at, _)| at)
 					.min(),
 				declared_at: slot.declared_at,
 				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),

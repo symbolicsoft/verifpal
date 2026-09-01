@@ -334,6 +334,7 @@ impl Server {
 				if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(note.params) {
 					let uri = p.text_document.uri.as_str().to_string();
 					if let Some(change) = p.content_changes.into_iter().next_back() {
+						self.runner.cancel(&uri);
 						self.docs.change(&uri, p.text_document.version, change.text);
 						self.dirty.insert(uri);
 					}
@@ -341,7 +342,19 @@ impl Server {
 			}
 			"textDocument/didClose" => {
 				if let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(note.params) {
-					self.docs.close(p.text_document.uri.as_str());
+					let parsed = p.text_document.uri;
+					let uri = parsed.as_str();
+					self.runner.cancel(uri);
+					self.dirty.remove(uri);
+					self.docs.close(uri);
+					self.notify(
+						"textDocument/publishDiagnostics",
+						lsp_types::PublishDiagnosticsParams {
+							uri: parsed,
+							diagnostics: Vec::new(),
+							version: None,
+						},
+					);
 				}
 			}
 			_ => {}
@@ -703,6 +716,37 @@ mod tests {
 		let params = await_notification(&client, "textDocument/publishDiagnostics");
 		assert_eq!(params["diagnostics"].as_array().expect("array").len(), 0);
 		stop(client, handle);
+	}
+
+	#[test]
+	fn closing_a_document_discards_its_pending_diagnostics() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		server.on_notification(Notification::new(
+			"textDocument/didOpen".to_string(),
+			serde_json::json!({
+				"textDocument": {
+					"uri": "file:///closed.vp",
+					"languageId": "verifpal",
+					"version": 1,
+					"text": VALID,
+				}
+			}),
+		));
+		assert!(server.docs.get("file:///closed.vp").is_some());
+		assert!(server.dirty.contains("file:///closed.vp"));
+		server.on_notification(Notification::new(
+			"textDocument/didClose".to_string(),
+			serde_json::json!({"textDocument": {"uri": "file:///closed.vp"}}),
+		));
+		assert!(server.docs.get("file:///closed.vp").is_none());
+		assert!(!server.dirty.contains("file:///closed.vp"));
+		let Message::Notification(cleared) = receiver.recv().expect("diagnostics are cleared")
+		else {
+			panic!("expected a notification");
+		};
+		assert_eq!(cleared.method, "textDocument/publishDiagnostics");
+		assert_eq!(cleared.params["diagnostics"], serde_json::json!([]));
 	}
 
 	#[test]

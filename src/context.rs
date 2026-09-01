@@ -248,10 +248,20 @@ impl VerifyContext {
 		*write_lock(&self.honest_halts) = halts;
 	}
 
-	pub(crate) fn honest_run_reached(&self, creator: PrincipalId, slot: usize) -> bool {
-		!read_lock(&self.honest_halts)
-			.iter()
-			.any(|&(principal, at)| principal == creator && slot >= at)
+	pub(crate) fn honest_run_disclosure(
+		&self,
+		km: &ProtocolTrace,
+		slot: usize,
+		phase: i32,
+	) -> Option<Disclosure> {
+		let halts = read_lock(&self.honest_halts);
+		km.disclosure(slot, phase, |principal, declared_at| {
+			halts
+				.iter()
+				.find(|&&(halted, _)| halted == principal)
+				.and_then(|&(_, at)| km.slots.get(at))
+				.is_none_or(|meta| declared_at <= meta.declared_at)
+		})
 	}
 
 	/// Which runs may record a verdict. Scyther prunes claims in runs whose
@@ -378,13 +388,14 @@ impl VerifyContext {
 		}
 
 		drop(state);
-		self.absorb_wire_values(ps, &record, phase, |slot, sv| {
-			self.honest_run_reached(sv.provenance.creator, slot)
+		self.absorb_wire_values(ps, &record, phase, |slot, _| {
+			self.honest_run_disclosure(km, slot, phase)
 		})
 	}
 
 	pub(crate) fn attacker_absorb_disclosed(
 		&self,
+		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		record: &Arc<MutationRecord>,
 		phase: i32,
@@ -394,11 +405,16 @@ impl VerifyContext {
 			return;
 		}
 		let _ = self.absorb_wire_values(ps, record, phase, |slot, sv| {
-			sv.provenance.creator == ps.id
-				&& halts
+			if sv.provenance.creator != ps.id
+				|| !halts
 					.iter()
 					.any(|&(principal, at)| principal == ps.id && slot >= at)
-				&& ps.slot_disclosed(slot)
+			{
+				return None;
+			}
+			km.disclosure(slot, phase, |principal, declared_at| {
+				ps.event_reached(km, principal, declared_at)
+			})
 		});
 	}
 
@@ -410,7 +426,7 @@ impl VerifyContext {
 		ps: &PrincipalState,
 		record: &Arc<MutationRecord>,
 		phase: i32,
-		admit: impl Fn(usize, &SlotValues) -> bool,
+		admit: impl Fn(usize, &SlotValues) -> Option<Disclosure>,
 	) -> VResult<()> {
 		let mut state = write_lock(&self.attacker);
 		for (slot, (sm, sv)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
@@ -424,17 +440,16 @@ impl VerifyContext {
 			if earliest > phase {
 				continue;
 			}
-			if !admit(slot, sv) {
+			let Some(disclosure) = admit(slot, sv) else {
 				continue;
-			}
-			let derivation = if sm.constant.leaked {
-				DerivationRecord::Leaked {
+			};
+			let derivation = match disclosure {
+				Disclosure::Message => DerivationRecord::Obtained {
 					slot: SlotIdx(slot),
-				}
-			} else {
-				DerivationRecord::Obtained {
+				},
+				Disclosure::Leak => DerivationRecord::Leaked {
 					slot: SlotIdx(slot),
-				}
+				},
 			};
 			let constant_value = Value::Constant(sm.constant.clone());
 			attacker_state_absorb(&mut state, &constant_value, record, derivation.clone());
@@ -767,6 +782,30 @@ mod tests {
 			other => panic!("expected Decomposed, got {:?}", other),
 		}
 		assert_eq!(attacker.known.len(), attacker.derivations.len());
+	}
+
+	#[test]
+	fn a_later_leak_does_not_explain_an_earlier_wire_observation() {
+		let src = "attacker[passive]\nprincipal Alice[\nknows private cl_m\n]\nprincipal Bob[\n_ = HASH(nil)\n]\nAlice -> Bob: cl_m\nphase[1]\nprincipal Alice[\nleaks cl_m\n]\nqueries[\nconfidentiality? cl_m\n]\n";
+		let m = parse_string("leak-origin.vp", src).expect("parses");
+		let (km, states) = crate::sanity::sanity(&m).expect("passes sanity");
+		let ctx = VerifyContext::new(&m, &states, Vec::new(), 1, None, Vec::new());
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values().expect("resolves");
+		ctx.attacker_phase_update(&km, &pure, 0)
+			.expect("seeds phase zero");
+		let constant = km
+			.slots
+			.iter()
+			.find(|slot| slot.constant.name.as_ref() == "cl_m")
+			.map(|slot| Value::Constant(slot.constant.clone()))
+			.expect("cl_m exists");
+		let attacker = ctx.attacker_snapshot();
+		let index = attacker.knows(&constant).expect("attacker observes cl_m");
+		assert!(matches!(
+			attacker.derivation(index),
+			Some(DerivationRecord::Obtained { .. })
+		));
 	}
 
 	#[test]

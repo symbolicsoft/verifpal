@@ -13,7 +13,6 @@ const TAGS_URL: &str = "https://api.github.com/repos/symbolicsoft/verifpal/tags"
 const TAGS_ACCEPT: &str = "application/vnd.github+json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_LIMIT: u64 = 256 * 1024;
-const NAME_KEY: &str = "\"name\"";
 
 pub struct UpdateCheck {
 	receiver: Receiver<String>,
@@ -80,7 +79,7 @@ fn update_newer_version(body: &str, current: &str) -> Option<String> {
 	let current_components = update_parse_version(current)?;
 	let mut newest: Option<(Vec<u64>, String)> = None;
 	for name in update_tag_names(body) {
-		let Some(components) = update_parse_version(name) else {
+		let Some(components) = update_parse_version(&name) else {
 			continue;
 		};
 		if !update_version_is_newer(&components, &current_components) {
@@ -91,7 +90,7 @@ fn update_newer_version(body: &str, current: &str) -> Option<String> {
 			None => true,
 		};
 		if supersedes {
-			newest = Some((components, update_version_display(name).to_string()));
+			newest = Some((components, update_version_display(&name).to_string()));
 		}
 	}
 	newest.map(|(_, name)| name)
@@ -125,26 +124,13 @@ fn update_version_is_newer(candidate: &[u64], current: &[u64]) -> bool {
 	false
 }
 
-fn update_tag_names(body: &str) -> Vec<&str> {
-	let mut names = Vec::new();
-	let mut rest = body;
-	while let Some(key) = rest.find(NAME_KEY) {
-		rest = &rest[key + NAME_KEY.len()..];
-		let Some(colon) = rest.find(':') else {
-			break;
-		};
-		let after = rest[colon + 1..].trim_start();
-		let Some(opened) = after.strip_prefix('"') else {
-			rest = &rest[colon + 1..];
-			continue;
-		};
-		let Some(closed) = opened.find('"') else {
-			break;
-		};
-		names.push(&opened[..closed]);
-		rest = &opened[closed + 1..];
-	}
-	names
+fn update_tag_names(body: &str) -> Vec<String> {
+	let Ok(serde_json::Value::Array(tags)) = serde_json::from_str(body) else {
+		return Vec::new();
+	};
+	tags.into_iter()
+		.filter_map(|tag| tag.get("name")?.as_str().map(str::to_string))
+		.collect()
 }
 
 #[cfg(test)]
@@ -206,7 +192,15 @@ mod tests {
 		assert!(update_tag_names("not json at all").is_empty());
 		assert!(update_tag_names("{\"name\"").is_empty());
 		assert!(update_tag_names("{\"name\":").is_empty());
-		assert!(update_tag_names("{\"name\": 7, \"name\": \"v2.0.0\"}") == vec!["v2.0.0"]);
+		assert!(update_tag_names("{\"name\": \"v2.0.0\"}").is_empty());
+		assert_eq!(
+			update_tag_names("[{\"name\": 7}, {\"name\": \"v2.0.0\"}]"),
+			vec!["v2.0.0"]
+		);
+		assert_eq!(
+			update_tag_names(r#"[{"commit":{"name":"v9.0.0"},"name":"v1.0.0"}]"#),
+			vec!["v1.0.0"]
+		);
 	}
 
 	#[test]

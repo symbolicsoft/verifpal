@@ -72,21 +72,28 @@ impl TokenIndex {
 	}
 
 	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
-	pub(crate) fn references(&self, name: &str) -> Vec<Span> {
-		let needle = name.to_lowercase();
+	pub(crate) fn references(&self, token: &Token) -> Vec<Span> {
 		self.tokens
 			.iter()
-			.filter(|t| {
-				matches!(t.kind, TokenKind::ConstantName | TokenKind::PrincipalName)
-					&& t.text.to_lowercase() == needle
-			})
+			.filter(|t| t.kind == token.kind && t.text.eq_ignore_ascii_case(token.text.as_ref()))
 			.map(|t| t.span)
 			.collect()
 	}
 
 	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
-	pub(crate) fn declaration_of(&self, name: &str) -> Option<Span> {
-		self.references(name).first().copied()
+	pub(crate) fn declaration_of(&self, token: &Token) -> Option<Span> {
+		if token.kind == TokenKind::PrincipalName {
+			return self.tokens.windows(2).find_map(|pair| {
+				let keyword = &pair[0];
+				let candidate = &pair[1];
+				(keyword.kind == TokenKind::Keyword
+					&& keyword.text.eq_ignore_ascii_case("principal")
+					&& candidate.kind == token.kind
+					&& candidate.text.eq_ignore_ascii_case(token.text.as_ref()))
+				.then_some(candidate.span)
+			});
+		}
+		self.references(token).first().copied()
 	}
 
 	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
@@ -94,11 +101,10 @@ impl TokenIndex {
 		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
 			return None;
 		}
-		let needle = token.text.to_lowercase();
 		let slot = trace
 			.slots
 			.iter()
-			.find(|slot| slot.constant.name.to_lowercase() == needle)?;
+			.find(|slot| slot.constant.name.eq_ignore_ascii_case(token.text.as_ref()))?;
 		Some(Symbol {
 			name: Arc::clone(&slot.constant.name),
 			creator: Some(Arc::from(trace.principal_name(slot.creator))),
@@ -174,34 +180,59 @@ mod tests {
 	#[test]
 	fn a_constants_declaration_is_where_it_was_assigned() {
 		let (_, index) = resolve_fixture();
-		let declaration = index.declaration_of("tr_ga").expect("tr_ga is declared");
 		let at = RESOLVE_SRC
 			.find("tr_ga = PUBKEY")
 			.expect("the assignment is in the source");
+		let token = index.at(at).expect("tr_ga is indexed");
+		let declaration = index.declaration_of(token).expect("tr_ga is declared");
 		assert_eq!(declaration.start, at);
 	}
 
 	#[test]
 	fn a_knowns_declaration_is_the_knows_line() {
 		let (_, index) = resolve_fixture();
-		let declaration = index.declaration_of("tr_a").expect("tr_a is declared");
 		let at = RESOLVE_SRC
 			.find("tr_a\n")
 			.expect("the knows line is in the source");
+		let token = index.at(at).expect("tr_a is indexed");
+		let declaration = index.declaration_of(token).expect("tr_a is declared");
 		assert_eq!(declaration.start, at);
+	}
+
+	#[test]
+	fn a_principals_declaration_is_its_block_not_its_first_reference() {
+		let (_, index) = resolve_fixture();
+		let reference = RESOLVE_SRC.find("Bob: tr_ga").expect("Bob is a recipient");
+		let token = index.at(reference).expect("Bob is indexed");
+		let declaration = index.declaration_of(token).expect("Bob is declared");
+		let expected = RESOLVE_SRC
+			.find("Bob[\n")
+			.expect("Bob's declaration is in the source");
+		assert_eq!(declaration.start, expected);
 	}
 
 	#[test]
 	fn references_finds_every_occurrence_including_the_declaration() {
 		let (_, index) = resolve_fixture();
-		assert_eq!(index.references("tr_ga").len(), 3);
-		assert_eq!(index.references("tr_a").len(), 3);
+		let tr_ga = index
+			.at(RESOLVE_SRC.find("tr_ga").expect("tr_ga is present"))
+			.expect("tr_ga is indexed");
+		let tr_a = index
+			.at(RESOLVE_SRC.find("tr_a").expect("tr_a is present"))
+			.expect("tr_a is indexed");
+		assert_eq!(index.references(tr_ga).len(), 3);
+		assert_eq!(index.references(tr_a).len(), 3);
 	}
 
 	#[test]
 	fn references_is_case_insensitive_because_the_language_is() {
 		let (_, index) = resolve_fixture();
-		assert_eq!(index.references("TR_GA").len(), 3);
+		let mut token = index
+			.at(RESOLVE_SRC.find("tr_ga").expect("tr_ga is present"))
+			.expect("tr_ga is indexed")
+			.clone();
+		token.text = Arc::from("TR_GA");
+		assert_eq!(index.references(&token).len(), 3);
 	}
 
 	#[test]

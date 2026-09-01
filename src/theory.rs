@@ -800,6 +800,27 @@ mod tests {
 	}
 
 	#[test]
+	fn ring_verification_rejects_a_repeated_member_that_omits_the_signed_ring() {
+		let a = make_constant("ring_a");
+		let b = make_constant("ring_b");
+		let c = make_constant("ring_c");
+		let message = make_constant("ring_message");
+		let ga = make_primitive(PRIM_PUBKEY, vec![a.clone()], 0);
+		let gb = make_primitive(PRIM_PUBKEY, vec![b], 0);
+		let gc = make_primitive(PRIM_PUBKEY, vec![c], 0);
+		let signature = make_primitive(PRIM_RINGSIGN, vec![a, gb, gc, message.clone()], 0);
+		let verification = Primitive {
+			id: PRIM_RINGSIGNVERIF,
+			arguments: vec![ga.clone(), ga.clone(), ga, message, signature],
+			output: 0,
+			instance_check: true,
+			capabilities: Capabilities::default(),
+			hash: HashCell::default(),
+		};
+		assert!(!can_rewrite(&Arc::new(verification)).0);
+	}
+
+	#[test]
 	fn can_decompose_enc_with_key() {
 		let key = make_constant("cd_key");
 		let msg = make_constant("cd_msg");

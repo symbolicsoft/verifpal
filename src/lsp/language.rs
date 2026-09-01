@@ -58,11 +58,13 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 		if token.kind == TokenKind::PrimitiveName {
 			modifiers |= 1 << 1;
 		}
-		if matches!(token.kind, TokenKind::ConstantName)
-			&& doc
-				.tokens
-				.declaration_of(&token.text)
-				.is_some_and(|d| d.start == token.span.start)
+		if matches!(
+			token.kind,
+			TokenKind::ConstantName | TokenKind::PrincipalName
+		) && doc
+			.tokens
+			.declaration_of(token)
+			.is_some_and(|d| d.start == token.span.start)
 		{
 			modifiers |= 1 << 0;
 		}
@@ -200,7 +202,7 @@ pub(crate) fn definition(doc: &Document, position: Position, uri: &Uri) -> Optio
 	) {
 		return None;
 	}
-	let span = doc.tokens.declaration_of(&token.text)?;
+	let span = doc.tokens.declaration_of(token)?;
 	Some(Location {
 		uri: uri.clone(),
 		range: doc.line.range(span),
@@ -218,7 +220,7 @@ pub(crate) fn references(doc: &Document, position: Position, uri: &Uri) -> Vec<L
 		return Vec::new();
 	}
 	doc.tokens
-		.references(&token.text)
+		.references(token)
 		.into_iter()
 		.map(|span| Location {
 			uri: uri.clone(),
@@ -237,9 +239,9 @@ pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHigh
 	) {
 		return Vec::new();
 	}
-	let declaration = doc.tokens.declaration_of(&token.text);
+	let declaration = doc.tokens.declaration_of(token);
 	doc.tokens
-		.references(&token.text)
+		.references(token)
 		.into_iter()
 		.map(|span| DocumentHighlight {
 			range: doc.line.range(span),
@@ -254,15 +256,12 @@ pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHigh
 
 pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Option<Vec<TextEdit>> {
 	let token = token_at(doc, position)?;
-	if !matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	) {
+	if !renameable(token) || !valid_rename(doc, token, new_name) {
 		return None;
 	}
 	Some(
 		doc.tokens
-			.references(&token.text)
+			.references(token)
 			.into_iter()
 			.map(|span| TextEdit {
 				range: doc.line.range(span),
@@ -270,6 +269,46 @@ pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Opti
 			})
 			.collect(),
 	)
+}
+
+fn renameable(token: &Token) -> bool {
+	matches!(
+		token.kind,
+		TokenKind::ConstantName | TokenKind::PrincipalName
+	) && !(token.kind == TokenKind::ConstantName && token.text.eq_ignore_ascii_case("nil"))
+}
+
+fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
+	if new_name.is_empty()
+		|| !new_name
+			.bytes()
+			.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+	{
+		return false;
+	}
+	match token.kind {
+		TokenKind::ConstantName => {
+			if new_name == "_"
+				|| new_name.eq_ignore_ascii_case("nil")
+				|| crate::parser::check_reserved(new_name).is_err()
+			{
+				return false;
+			}
+		}
+		TokenKind::PrincipalName => {
+			if new_name.eq_ignore_ascii_case(crate::principal::ATTACKER_NAME)
+				|| matches!(new_name, "phase" | "principal" | "queries" | "scenarios")
+			{
+				return false;
+			}
+		}
+		_ => return false,
+	}
+	!doc.tokens.tokens().iter().any(|other| {
+		other.kind == token.kind
+			&& !other.text.eq_ignore_ascii_case(token.text.as_ref())
+			&& other.text.eq_ignore_ascii_case(new_name)
+	})
 }
 
 pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
@@ -680,11 +719,7 @@ fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
 
 pub(crate) fn prepare_rename(doc: &Document, position: Position) -> Option<Range> {
 	let token = token_at(doc, position)?;
-	matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	)
-	.then(|| doc.line.range(token.span))
+	renameable(token).then(|| doc.line.range(token.span))
 }
 
 #[cfg(test)]
@@ -767,6 +802,15 @@ queries[\n\
 	}
 
 	#[test]
+	fn principal_definition_jumps_past_an_earlier_reference_to_its_block() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let loc = definition(d, at("Bob: lg_ga"), &uri()).expect("a definition");
+		let want = d.line.position(SRC.find("Bob[\n").expect("in the source"));
+		assert_eq!(loc.range.start, want);
+	}
+
+	#[test]
 	fn references_finds_all_three_occurrences() {
 		let docs = doc();
 		let d = docs.get("file:///l.vp").expect("open");
@@ -798,6 +842,80 @@ queries[\n\
 		let d = docs.get("file:///l.vp").expect("open");
 		assert!(rename(d, at("PUBKEY"), "nope").is_none());
 		assert!(prepare_rename(d, at("PUBKEY")).is_none());
+	}
+
+	#[test]
+	fn rename_refuses_names_that_would_break_or_merge_the_model() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let constant = at("lg_ga = PUBKEY");
+		for name in [
+			"",
+			"two words",
+			"é",
+			"_",
+			"HASH",
+			"nil",
+			"attacker_value",
+			"unnamed_value",
+			"lg_a",
+		] {
+			assert!(rename(d, constant, name).is_none(), "accepted {name:?}");
+		}
+		let principal = at("Alice[");
+		for name in [
+			"",
+			"two words",
+			"é",
+			"Attacker",
+			"Bob",
+			"phase",
+			"principal",
+			"queries",
+			"scenarios",
+		] {
+			assert!(rename(d, principal, name).is_none(), "accepted {name:?}");
+		}
+	}
+
+	#[test]
+	fn a_principal_and_constant_with_the_same_spelling_are_distinct_symbols() {
+		let source = "attacker[passive]\nprincipal Alice[\n\tknows private alice\n]\nAlice -> Bob: alice\nprincipal Bob[\n\t_ = HASH(alice)\n]\nqueries[\n\tconfidentiality? alice\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///overlap.vp".to_string(),
+			"overlap.vp".to_string(),
+			1,
+			source.to_string(),
+		);
+		let d = docs.get("file:///overlap.vp").expect("open");
+		let principal_at = d
+			.line
+			.position(source.find("Alice").expect("principal is present"));
+		let constant_offset = source.find("alice").expect("constant is present");
+		let constant_at = d.line.position(constant_offset);
+		let principal_edits = rename(d, principal_at, "Carol").expect("principal edits");
+		let constant_edits = rename(d, constant_at, "value").expect("constant edits");
+		assert_eq!(principal_edits.len(), 2);
+		assert_eq!(constant_edits.len(), 4);
+		let location = definition(d, constant_at, &uri()).expect("constant definition");
+		assert_eq!(location.range.start, d.line.position(constant_offset));
+	}
+
+	#[test]
+	fn the_builtin_nil_value_cannot_be_renamed() {
+		let source = "attacker[passive]\nprincipal Alice[\n\t_ = HASH(nil)\n]\nqueries[\n\tconfidentiality? nil\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///nil.vp".to_string(),
+			"nil.vp".to_string(),
+			1,
+			source.to_string(),
+		);
+		let d = docs.get("file:///nil.vp").expect("open");
+		let position = d.line.position(source.find("nil").expect("nil is present"));
+		assert!(prepare_rename(d, position).is_none());
+		assert!(rename(d, position, "replacement").is_none());
 	}
 
 	#[test]

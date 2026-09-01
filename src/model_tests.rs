@@ -459,6 +459,17 @@ fn a_halted_corrupt_peer_publishes_nothing_it_never_reached() {
 }
 
 #[test]
+fn a_value_computed_before_a_halt_but_sent_after_it_is_not_published() {
+	let source = "attacker[passive]\nprincipal Bob[\nknows private ph_bsk\nph_bpk = PUBKEY(ph_bsk)\nph_sig = SIGN(ph_bsk, nil)\n]\nprincipal Mallory[\nknows private ph_msk\nph_mpk = PUBKEY(ph_msk)\nleaks ph_msk\n]\nprincipal Alice[\nknows public ph_peerpk\nknows private ph_master\n]\nBob -> Alice: [ph_bpk], [ph_sig]\nMallory -> Alice: [ph_mpk]\nprincipal Alice[\nph_sealed = PKE_ENC(ph_peerpk, ph_master)\n_ = SIGNVERIF(ph_peerpk, nil, ph_sig)?\n]\nAlice -> Bob: ph_sealed\nscenarios[\nAlice[ph_peerpk = ph_bpk]\nAlice[ph_peerpk = ph_mpk]\n]\nqueries[\nconfidentiality? ph_master\n]\n";
+	let model = crate::parser::parse_string("precomputed-halt.vp", source).expect("parses");
+	let result = crate::verify::analyze_sessions(&model, 1)
+		.expect("analyzes")
+		.results_get()
+		.remove(0);
+	assert!(!result.resolved);
+}
+
+#[test]
 fn test_spore_nsl_pk() {
 	run_model("spore_nsl_pk.vp", "c0");
 	run_model_sessions("spore_nsl_pk.vp", 1, "c0");

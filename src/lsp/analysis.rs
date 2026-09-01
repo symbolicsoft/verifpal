@@ -2,14 +2,21 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use lsp_server::{Message, Notification};
 use lsp_types::PositionEncodingKind;
 
 use crate::report::Analysis;
 use crate::types::VResult;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LiveState {
+	Running,
+	Cancelled,
+	Finished,
+}
 
 pub(crate) fn analyze(
 	name: &str,
@@ -38,12 +45,43 @@ pub(crate) fn analyze(
 
 struct Live {
 	cancel: Arc<AtomicBool>,
-	finished: AtomicBool,
+	state: Mutex<LiveState>,
 }
 
 impl Live {
+	fn state(&self) -> MutexGuard<'_, LiveState> {
+		self.state.lock().unwrap_or_else(|e| e.into_inner())
+	}
+
 	fn is_running(&self) -> bool {
-		!self.finished.load(Ordering::Relaxed)
+		*self.state() == LiveState::Running
+	}
+
+	fn cancel(&self) -> bool {
+		let mut state = self.state();
+		if *state != LiveState::Running {
+			return false;
+		}
+		*state = LiveState::Cancelled;
+		self.cancel.store(true, Ordering::Release);
+		true
+	}
+
+	fn complete(&self, publish: impl FnOnce()) -> bool {
+		let mut state = self.state();
+		if *state != LiveState::Running {
+			return false;
+		}
+		publish();
+		*state = LiveState::Finished;
+		true
+	}
+
+	fn finish(&self) {
+		let mut state = self.state();
+		if *state == LiveState::Running {
+			*state = LiveState::Finished;
+		}
 	}
 }
 
@@ -64,16 +102,12 @@ impl Runner {
 		let Some(live) = self.running.remove(uri) else {
 			return false;
 		};
-		if !live.is_running() {
-			return false;
-		}
-		live.cancel.store(true, Ordering::Relaxed);
-		true
+		live.cancel()
 	}
 
 	pub(crate) fn cancel_all(&mut self) {
 		for (_, live) in self.running.drain() {
-			live.cancel.store(true, Ordering::Relaxed);
+			live.cancel();
 		}
 	}
 
@@ -93,12 +127,12 @@ impl Runner {
 		let cancel = Arc::new(AtomicBool::new(false));
 		let live = Arc::new(Live {
 			cancel: Arc::clone(&cancel),
-			finished: AtomicBool::new(false),
+			state: Mutex::new(LiveState::Running),
 		});
 		self.running.insert(uri.clone(), Arc::clone(&live));
 		let sender = self.sender.clone();
 		std::thread::spawn(move || {
-			let _done = Finished(live);
+			let _done = Finished(Arc::clone(&live));
 			crate::info::set_verbosity(crate::info::Verbosity::Silent);
 			progress(
 				&sender,
@@ -110,46 +144,69 @@ impl Runner {
 				}),
 			);
 			let outcome = analyze(&name, &text, sessions, &cancel);
+			let report = analysis_report(uri.clone(), version, outcome);
 			progress(&sender, &token, serde_json::json!({"kind": "end"}));
-			if let Ok(analysis) = &outcome
-				&& let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(&uri)
-			{
-				let line = crate::lsp::line::LineIndex::new(&text, &encoding);
+			let completed = live.complete(|| {
+				if let Some(analysis) = &report.analysis
+					&& let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(&uri)
+				{
+					let line = crate::lsp::line::LineIndex::new(&text, &encoding);
+					let _ = sender.send(Message::Notification(Notification::new(
+						"textDocument/publishDiagnostics".to_string(),
+						lsp_types::PublishDiagnosticsParams {
+							uri: parsed,
+							diagnostics: crate::lsp::diagnostics::of_verdicts(analysis, &line),
+							version: Some(version),
+						},
+					)));
+				}
 				let _ = sender.send(Message::Notification(Notification::new(
-					"textDocument/publishDiagnostics".to_string(),
-					lsp_types::PublishDiagnosticsParams {
-						uri: parsed,
-						diagnostics: crate::lsp::diagnostics::of_verdicts(analysis, &line),
-						version: Some(version),
-					},
+					"verifpal/analysisReport".to_string(),
+					report,
 				)));
-			}
-			let report = match outcome {
-				Ok(analysis) => crate::lsp::proto::AnalysisReport {
-					uri,
-					version,
-					ok: true,
-					cancelled: false,
-					error: None,
-					analysis: Some(analysis),
-				},
-				Err(e) => {
-					let cancelled = e.kind == crate::types::ErrorKind::Cancelled;
+			});
+			if !completed {
+				let _ = sender.send(Message::Notification(Notification::new(
+					"verifpal/analysisReport".to_string(),
 					crate::lsp::proto::AnalysisReport {
 						uri,
 						version,
 						ok: false,
-						cancelled,
-						error: (!cancelled).then(|| e.to_string()),
+						cancelled: true,
+						error: None,
 						analysis: None,
-					}
-				}
-			};
-			let _ = sender.send(Message::Notification(Notification::new(
-				"verifpal/analysisReport".to_string(),
-				report,
-			)));
+					},
+				)));
+			}
 		});
+	}
+}
+
+fn analysis_report(
+	uri: String,
+	version: i32,
+	outcome: VResult<Analysis>,
+) -> crate::lsp::proto::AnalysisReport {
+	match outcome {
+		Ok(analysis) => crate::lsp::proto::AnalysisReport {
+			uri,
+			version,
+			ok: true,
+			cancelled: false,
+			error: None,
+			analysis: Some(analysis),
+		},
+		Err(e) => {
+			let cancelled = e.kind == crate::types::ErrorKind::Cancelled;
+			crate::lsp::proto::AnalysisReport {
+				uri,
+				version,
+				ok: false,
+				cancelled,
+				error: (!cancelled).then(|| e.to_string()),
+				analysis: None,
+			}
+		}
 	}
 }
 
@@ -157,7 +214,7 @@ struct Finished(Arc<Live>);
 
 impl Drop for Finished {
 	fn drop(&mut self) {
-		self.0.finished.store(true, Ordering::Relaxed);
+		self.0.finish();
 	}
 }
 
@@ -267,5 +324,30 @@ mod tests {
 		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
 		assert!(!runner.cancel("file:///never-started.vp"));
+	}
+
+	#[test]
+	fn cancellation_and_completion_cannot_both_claim_an_analysis() {
+		let cancel = Arc::new(AtomicBool::new(false));
+		let cancelled = Live {
+			cancel: Arc::clone(&cancel),
+			state: Mutex::new(LiveState::Running),
+		};
+		assert!(cancelled.cancel());
+		assert!(cancel.load(Ordering::Acquire));
+		let mut published = false;
+		assert!(!cancelled.complete(|| published = true));
+		assert!(!published);
+
+		let cancel = Arc::new(AtomicBool::new(false));
+		let completed = Live {
+			cancel: Arc::clone(&cancel),
+			state: Mutex::new(LiveState::Running),
+		};
+		let mut published = false;
+		assert!(completed.complete(|| published = true));
+		assert!(published);
+		assert!(!completed.cancel());
+		assert!(!cancel.load(Ordering::Acquire));
 	}
 }

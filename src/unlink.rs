@@ -22,10 +22,11 @@ pub(crate) struct LinkWitness {
 pub(crate) fn find_link_witness(
 	a: &Constant,
 	b: &Constant,
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<LinkWitness> {
-	if !is_observable(a, ps, attacker) || !is_observable(b, ps, attacker) {
+	if !is_observable(a, km, ps, attacker) || !is_observable(b, km, ps, attacker) {
 		return None;
 	}
 	if attacker_authored_slot(a, ps) || attacker_authored_slot(b, ps) {
@@ -281,20 +282,43 @@ fn attacker_authored_slot(c: &Constant, ps: &PrincipalState) -> bool {
 	})
 }
 
-pub(crate) fn is_observable(c: &Constant, ps: &PrincipalState, attacker: &AttackerState) -> bool {
-	if c.leaked {
-		return true;
-	}
-	if ps
-		.index_of(c)
-		.is_some_and(|i| !ps.meta[i].wire.is_empty() || ps.meta[i].constant.leaked)
+fn disclosed(slot: usize, km: &ProtocolTrace, ps: &PrincipalState, phase: i32) -> bool {
+	ps.values.get(slot).is_some()
+		&& !ps.slot_unreached(slot)
+		&& km
+			.disclosure(slot, phase, |principal, declared_at| {
+				ps.event_reached(km, principal, declared_at)
+			})
+			.is_some()
+}
+
+pub(crate) fn is_observable(
+	c: &Constant,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	let Some(i) = ps.index_of(c) else {
+		return false;
+	};
+	let Some(value) = ps.values.get(i).map(|sv| &sv.value) else {
+		return false;
+	};
+	if attacker.knows(value).is_some()
+		&& (disclosed(i, km, ps, attacker.current_phase)
+			|| ps.meta[i].constant.qualifier == Some(Qualifier::Public))
 	{
 		return true;
 	}
-	carried_observably(c, ps, attacker)
+	carried_observably(c, km, ps, attacker)
 }
 
-fn carried_observably(c: &Constant, ps: &PrincipalState, attacker: &AttackerState) -> bool {
+fn carried_observably(
+	c: &Constant,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
 	let Some(i) = ps.index_of(c) else {
 		return false;
 	};
@@ -303,8 +327,11 @@ fn carried_observably(c: &Constant, ps: &PrincipalState, attacker: &AttackerStat
 		return false;
 	}
 	let target_hash = target.hash_value();
-	for (j, meta) in ps.meta.iter().enumerate() {
-		if j == i || (meta.wire.is_empty() && !meta.constant.leaked) {
+	for (j, (meta, values)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
+		if j == i
+			|| !disclosed(j, km, ps, attacker.current_phase)
+			|| attacker.knows(&values.value).is_none()
+		{
 			continue;
 		}
 		let (carrier, _) = ps.resolve_constant(&meta.constant, true);
@@ -580,6 +607,55 @@ mod tests {
 			unreachable!()
 		};
 		assert!(!is_observable(&absent, &ps, &attacker));
+	}
+
+	#[test]
+	fn a_message_withheld_by_halt_is_not_observable() {
+		let travelled = make_constant("ul_halted_wire");
+		let Value::Constant(c) = &travelled else {
+			unreachable!()
+		};
+		let mut meta = make_slot_meta(c, false);
+		meta.sent_at = Some(5);
+		meta.declared_at = 1;
+		let mut ps = make_principal_state(
+			"Tester",
+			1,
+			vec![meta],
+			vec![make_slot_values(&travelled, 1)],
+		);
+		ps.halted_at = Some(3);
+		let attacker = make_attacker_state(vec![travelled.clone()]);
+
+		assert!(!is_observable(c, &ps, &attacker));
+	}
+
+	#[test]
+	fn a_carrier_withheld_by_halt_does_not_expose_its_contents() {
+		let target = make_constant("ul_halted_target");
+		let carrier_name = make_constant("ul_halted_carrier");
+		let Value::Constant(target_constant) = &target else {
+			unreachable!()
+		};
+		let Value::Constant(carrier_constant) = &carrier_name else {
+			unreachable!()
+		};
+		let carrier = make_primitive(PRIM_HASH, vec![target.clone()], 0);
+		let mut target_meta = make_slot_meta(target_constant, true);
+		target_meta.declared_at = 1;
+		let mut carrier_meta = make_slot_meta(carrier_constant, false);
+		carrier_meta.sent_at = Some(5);
+		carrier_meta.declared_at = 2;
+		let mut ps = make_principal_state(
+			"Tester",
+			1,
+			vec![target_meta, carrier_meta],
+			vec![make_slot_values(&target, 1), make_slot_values(&carrier, 1)],
+		);
+		ps.halted_at = Some(3);
+		let attacker = make_attacker_state(vec![target.clone()]);
+
+		assert!(!is_observable(target_constant, &ps, &attacker));
 	}
 
 	#[test]

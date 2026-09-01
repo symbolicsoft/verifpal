@@ -643,7 +643,11 @@ fn run_verify(
 					eprintln!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
-				sources.push(String::new());
+				sources.push(if structured {
+					std::fs::read_to_string(model).unwrap_or_default()
+				} else {
+					String::new()
+				});
 			}
 		}
 	}
@@ -719,14 +723,13 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 			print!("{}", output);
 			continue;
 		}
-		let current = std::fs::read_to_string(model).unwrap_or_default();
-		if current == output {
-			continue;
-		}
-		changed.push(model.clone());
-		if write && let Err(e) = std::fs::write(model, &output) {
-			eprintln!("{}: {}", model, e);
-			status = EXIT_ERROR;
+		match pretty_file_changed(model, &output, write) {
+			Ok(true) => changed.push(model.clone()),
+			Ok(false) => {}
+			Err(e) => {
+				eprintln!("{}: {}", model, e);
+				status = EXIT_ERROR;
+			}
 		}
 	}
 	for model in &changed {
@@ -736,6 +739,16 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 		return EXIT_ERROR;
 	}
 	status
+}
+
+fn pretty_file_changed(model: &str, output: &str, write: bool) -> std::io::Result<bool> {
+	if std::fs::read_to_string(model)? == output {
+		return Ok(false);
+	}
+	if write {
+		std::fs::write(model, output)?;
+	}
+	Ok(true)
 }
 
 fn main() {
@@ -839,5 +852,28 @@ mod tests {
 		for format in [FormatArg::Json, FormatArg::Html, FormatArg::Tex] {
 			assert!(verify_output_options(true, format).is_err());
 		}
+	}
+
+	#[test]
+	fn pretty_change_is_reported_only_after_a_successful_write() {
+		let path = std::env::temp_dir().join(format!(
+			"verifpal-pretty-{}-{}.vp",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.expect("time follows the epoch")
+				.as_nanos()
+		));
+		std::fs::write(&path, "before").expect("creates fixture");
+		let path = path.to_string_lossy();
+		assert!(!pretty_file_changed(&path, "before", true).expect("reads fixture"));
+		assert!(pretty_file_changed(&path, "after", true).expect("writes fixture"));
+		assert_eq!(
+			std::fs::read_to_string(path.as_ref()).expect("reads result"),
+			"after"
+		);
+		std::fs::remove_file(path.as_ref()).expect("removes fixture");
+		let missing = format!("{path}.missing/model.vp");
+		assert!(pretty_file_changed(&missing, "output", true).is_err());
 	}
 }

@@ -76,7 +76,17 @@ fn filter_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	}
 }
 
-fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
+fn filter_ringsignverif_rewrite(p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
+	let distinct = p.arguments.get(..3).is_some_and(|members| {
+		members.iter().enumerate().all(|(i, member)| {
+			members[..i]
+				.iter()
+				.all(|previous| !member.equivalent(previous, true))
+		})
+	});
+	if !distinct {
+		return (x.clone(), false);
+	}
 	match i {
 		0 => match x {
 			Value::Primitive(p)

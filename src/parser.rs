@@ -58,7 +58,7 @@ const RESERVED: &[&str] = &[
 	"scenarios",
 ];
 
-fn check_reserved(s: &str) -> VResult<()> {
+pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 	let lower = s.to_lowercase();
 	if RESERVED.contains(&lower.as_str())
 		|| lower.starts_with("attacker")

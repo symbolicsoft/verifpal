@@ -48,7 +48,7 @@ pub(crate) fn compute_knowledge_closure(
 ) -> VResult<()> {
 	let phase = ctx.attacker_snapshot().current_phase;
 	let record = compute_slot_diffs(ps, km, phase);
-	ctx.attacker_absorb_disclosed(ps, &record, phase);
+	ctx.attacker_absorb_disclosed(km, ps, &record, phase);
 	let index = crate::theory::StateIndex::of(ps);
 
 	loop {

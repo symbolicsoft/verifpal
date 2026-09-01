@@ -1152,7 +1152,7 @@ pub struct TraceSlot {
 	pub initial_value: Value,
 	pub creator: PrincipalId,
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
-	pub sent_by: Vec<(PrincipalId, i32)>,
+	pub sent_by: Vec<(PrincipalId, PrincipalId, i32, i32)>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
 }
@@ -1161,6 +1161,12 @@ impl TraceSlot {
 	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
 		self.creator == pid || self.known_by.iter().any(|&(recipient, _)| recipient == pid)
 	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Disclosure {
+	Message,
+	Leak,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1176,6 +1182,52 @@ pub struct ProtocolTrace {
 	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
 	/// session. Read by the authentication replay carve-out in `query.rs`.
 	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+}
+
+impl ProtocolTrace {
+	pub(crate) fn disclosure(
+		&self,
+		slot: usize,
+		phase: i32,
+		reached: impl Fn(PrincipalId, i32) -> bool,
+	) -> Option<Disclosure> {
+		let trace_slot = self.slots.get(slot)?;
+		let initially_holds = |principal: PrincipalId| {
+			principal == trace_slot.creator
+				|| trace_slot
+					.known_by
+					.iter()
+					.any(|&(recipient, sender)| recipient == principal && sender == principal)
+		};
+		let message = trace_slot
+			.sent_by
+			.iter()
+			.filter(|&&(sender, _, at, event_phase)| {
+				event_phase <= phase && initially_holds(sender) && reached(sender, at)
+			})
+			.map(|&(_, _, at, _)| (at, Disclosure::Message))
+			.min_by_key(|(at, _)| *at);
+		let leak = self
+			.leaks
+			.iter()
+			.filter(|leak| {
+				leak.constant_id == trace_slot.constant.id
+					&& leak.phase <= phase
+					&& initially_holds(leak.principal_id)
+					&& reached(leak.principal_id, leak.declared_at)
+			})
+			.map(|leak| (leak.declared_at, Disclosure::Leak))
+			.min_by_key(|(at, _)| *at);
+		match (message, leak) {
+			(Some(message), Some(leak)) => Some(if message.0 <= leak.0 {
+				message.1
+			} else {
+				leak.1
+			}),
+			(Some((_, disclosure)), None) | (None, Some((_, disclosure))) => Some(disclosure),
+			(None, None) => None,
+		}
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -1263,6 +1315,24 @@ pub struct PrincipalState {
 }
 
 impl PrincipalState {
+	pub fn event_reached(
+		&self,
+		km: &ProtocolTrace,
+		principal: PrincipalId,
+		declared_at: i32,
+	) -> bool {
+		if principal == self.id {
+			return self
+				.halted_at
+				.is_none_or(|halted_at| declared_at <= halted_at);
+		}
+		self.foreign_halts
+			.iter()
+			.find(|&&(halted, _)| halted == principal)
+			.and_then(|&(_, at)| km.slots.get(at))
+			.is_none_or(|meta| declared_at <= meta.declared_at)
+	}
+
 	pub fn slot_unreached(&self, i: usize) -> bool {
 		let Some(sv) = self.values.get(i) else {
 			return false;
@@ -1277,12 +1347,18 @@ impl PrincipalState {
 		let (Some(halted_at), Some(sm)) = (self.halted_at, self.meta.get(i)) else {
 			return false;
 		};
-		sm.sent_at.is_some_and(|sent_at| sent_at > halted_at)
-			|| self.leaks.iter().any(|leak| {
-				leak.constant_id == sm.constant.id
-					&& leak.principal_id == self.id
-					&& leak.declared_at > halted_at
-			})
+		let sent = sm.sent_at.is_some();
+		let sent_before_halt = sm.sent_at.is_some_and(|sent_at| sent_at <= halted_at);
+		let leaked = self
+			.leaks
+			.iter()
+			.any(|leak| leak.constant_id == sm.constant.id && leak.principal_id == self.id);
+		let leaked_before_halt = self.leaks.iter().any(|leak| {
+			leak.constant_id == sm.constant.id
+				&& leak.principal_id == self.id
+				&& leak.declared_at <= halted_at
+		});
+		(sent || leaked) && !sent_before_halt && !leaked_before_halt
 	}
 
 	pub fn slot_disclosed(&self, i: usize) -> bool {
@@ -1597,7 +1673,7 @@ mod tests {
 			initial_value: value_nil(),
 			creator: 0,
 			known_by: vec![(1, 0)],
-			sent_by: vec![(0, 1)],
+			sent_by: vec![(0, 1, 1, 0)],
 			declared_at: 0,
 			phases: vec![0],
 		};

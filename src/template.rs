@@ -79,7 +79,10 @@ impl Template {
 		dialect: &'static Dialect,
 	) -> Template {
 		let mut at = 0usize;
-		let nodes = parse_block(strip_header(raw), &mut at, dialect);
+		let (nodes, closing) = parse_block(name, strip_header(raw), &mut at, dialect);
+		if let Some(closing) = closing {
+			panic!("template '{name}' closes section '{closing}' without opening it");
+		}
 		Template {
 			name,
 			nodes,
@@ -141,7 +144,12 @@ fn strip_header(raw: &'static str) -> &'static str {
 	rest.trim_ascii()
 }
 
-fn parse_block(src: &'static str, at: &mut usize, dialect: &'static Dialect) -> Vec<Node> {
+fn parse_block(
+	name: &'static str,
+	src: &'static str,
+	at: &mut usize,
+	dialect: &'static Dialect,
+) -> (Vec<Node>, Option<&'static str>) {
 	let (open, close) = (dialect.open, dialect.close);
 	let mut nodes: Vec<Node> = Vec::new();
 	while *at < src.len() {
@@ -156,9 +164,7 @@ fn parse_block(src: &'static str, at: &mut usize, dialect: &'static Dialect) -> 
 		}
 		let after = &rest[start + open.len()..];
 		let Some(end) = after.find(close) else {
-			nodes.push(Node::Lit(&rest[start..]));
-			*at = src.len();
-			break;
+			panic!("template '{name}' has an unclosed '{open}' tag");
 		};
 		let tag = after[..end].trim();
 		*at += start + end + open.len() + close.len();
@@ -166,19 +172,26 @@ fn parse_block(src: &'static str, at: &mut usize, dialect: &'static Dialect) -> 
 			Some(b'#') | Some(b'^') => {
 				let inverted = tag.starts_with('^');
 				let key = tag[1..].trim();
-				let body = parse_block(src, at, dialect);
+				let (body, closing) = parse_block(name, src, at, dialect);
+				match closing {
+					Some(closing) if closing == key => {}
+					Some(closing) => {
+						panic!("template '{name}' opens section '{key}' but closes '{closing}'")
+					}
+					None => panic!("template '{name}' never closes section '{key}'"),
+				}
 				nodes.push(Node::Section {
 					key,
 					inverted,
 					body,
 				});
 			}
-			Some(b'/') => return nodes,
+			Some(b'/') => return (nodes, Some(tag[1..].trim())),
 			Some(b'>') => nodes.push(Node::Partial(tag[1..].trim())),
 			_ => nodes.push(Node::Var(tag)),
 		}
 	}
-	nodes
+	(nodes, None)
 }
 
 pub(crate) fn render(template: &Template, ctx: &Ctx) -> String {
@@ -479,6 +492,30 @@ mod tests {
 	fn a_dialect_reads_its_own_delimiters_and_ignores_the_other_ones() {
 		let tpl = Template::parse("t", "<<n>> {{n}}", &ALT);
 		assert_eq!(render(&tpl, &Ctx::new().num("n", 3)), "3 {{n}}");
+	}
+
+	#[test]
+	#[should_panic(expected = "opens section 'rows' but closes 'items'")]
+	fn mismatched_section_names_are_rejected() {
+		Template::parse("t", "{{#rows}}x{{/items}}", &HTML);
+	}
+
+	#[test]
+	#[should_panic(expected = "never closes section 'rows'")]
+	fn unclosed_sections_are_rejected() {
+		Template::parse("t", "{{#rows}}x", &HTML);
+	}
+
+	#[test]
+	#[should_panic(expected = "closes section 'rows' without opening it")]
+	fn unmatched_closing_sections_are_rejected() {
+		Template::parse("t", "{{/rows}}", &HTML);
+	}
+
+	#[test]
+	#[should_panic(expected = "has an unclosed '{{' tag")]
+	fn unclosed_tags_are_rejected() {
+		Template::parse("t", "before {{value", &HTML);
 	}
 
 	#[test]
