@@ -560,12 +560,13 @@ fn construct_trace_render_message(
 		trace.slots[idx]
 			.known_by
 			.push((message.recipient, message.sender));
-		trace.slots[idx].sent_by.push((
-			message.sender,
-			message.recipient,
+		trace.slots[idx].sent_by.push(SendEvent {
+			sender: message.sender,
+			recipient: message.recipient,
 			declared_at,
-			current_phase,
-		));
+			phase: current_phase,
+			guarded: c.guard,
+		});
 		append_unique(&mut trace.slots[idx].phases, current_phase);
 	}
 	Ok(())
@@ -605,6 +606,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 			index_map.insert(c.id, meta_vec.len());
 			meta_vec.push(SlotMeta {
 				constant: c.clone(),
+				creator: slot.creator,
 				guard: travel.is_some_and(|t| t.guard),
 				known: knows,
 				wire: travel.map(|t| t.wire.clone()).unwrap_or_default(),
@@ -612,8 +614,8 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				sent_at: slot
 					.sent_by
 					.iter()
-					.filter(|&&(sender, _, _, _)| sender == principal_id)
-					.map(|&(_, _, at, _)| at)
+					.filter(|event| event.sender == principal_id)
+					.map(|event| event.declared_at)
 					.min(),
 				declared_at: slot.declared_at,
 				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),

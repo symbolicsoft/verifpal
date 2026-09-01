@@ -78,10 +78,13 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 pub(crate) fn make_principal_state(
 	name: &str,
 	id: PrincipalId,
-	meta: Vec<SlotMeta>,
+	mut meta: Vec<SlotMeta>,
 	values: Vec<SlotValues>,
 ) -> PrincipalState {
 	let mut index = IdMap::default();
+	for (m, v) in meta.iter_mut().zip(values.iter()) {
+		m.creator = v.provenance.creator;
+	}
 	for (i, m) in meta.iter().enumerate() {
 		index.insert(m.constant.id, i);
 	}
@@ -101,6 +104,7 @@ pub(crate) fn make_principal_state(
 pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 	SlotMeta {
 		constant: c.clone(),
+		creator: 0,
 		guard: false,
 		known: true,
 		wire: if creator_is_self { vec![] } else { vec![0] },

@@ -152,7 +152,7 @@ fn query_confidentiality(
 	let seed = recorded_mutations(attacker, attacker_idx);
 	let mutated_info = attack_trace(ctx, km, ps, query_index, resolved_value, &seed);
 	result.resolved = true;
-	result = query_precondition(result, km, ps);
+	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(
 		&mutated_info.trace,
 		mutated_info.kinded(),
@@ -217,7 +217,7 @@ fn query_authentication(
 		let &i = used.first()?;
 		Some(km.slots.get(i)?.initial_value.clone())
 	});
-	result = query_precondition(result, km, ps);
+	result = query_precondition(result, km, ps, attacker.current_phase);
 	Ok(query_authentication_handle_pass(
 		ctx,
 		result,
@@ -287,9 +287,6 @@ fn query_authentication_get_pass_indices(
 		Some(i) => i,
 		None => return Ok((vec![], 0, empty_c, false)),
 	};
-	if ps.slot_unreached(idx) {
-		return Ok((vec![], 0, empty_c, false));
-	}
 	let c = km.slots[idx].constant.clone();
 	let sender = ps.values[idx].provenance.sender;
 	let mut sibling_replay = false;
@@ -371,7 +368,7 @@ fn query_freshness(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	_attacker: &AttackerState,
+	attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let subject = query.subject()?;
@@ -412,7 +409,7 @@ fn query_freshness(
 	};
 	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &resolved, &[], prelude);
 	result.resolved = true;
-	result = query_precondition(result, km, ps);
+	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(
 		&mutated_info.trace,
 		mutated_info.kinded(),
@@ -445,7 +442,7 @@ fn query_unlinkability(
 			let mutated_info = attack_trace(ctx, km, ps, query_index, &witness.value, &[]);
 			let clause = witness.describe(&mutated_info.term(&witness.value));
 			result.resolved = true;
-			result = query_precondition(result, km, ps);
+			result = query_precondition(result, km, ps, attacker.current_phase);
 			result.set_summary(
 				&mutated_info.trace,
 				mutated_info.kinded(),
@@ -471,7 +468,7 @@ fn query_equivalence(
 	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	_attacker: &AttackerState,
+	attacker: &AttackerState,
 ) -> VResult<VerifyResult> {
 	let mut result = VerifyResult::new(query, query_index);
 	let mut values: Vec<Value> = Vec::with_capacity(query.constants.len());
@@ -516,7 +513,7 @@ fn query_equivalence(
 	};
 	let mutated_info = attack_trace_with(ctx, km, ps, query_index, &empty, &[], prelude);
 	result.resolved = true;
-	result = query_precondition(result, km, ps);
+	result = query_precondition(result, km, ps, attacker.current_phase);
 	result.set_summary(
 		&mutated_info.trace,
 		mutated_info.kinded(),
@@ -538,6 +535,7 @@ fn query_precondition(
 	mut result: VerifyResult,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	phase: i32,
 ) -> VerifyResult {
 	if !result.resolved {
 		return result;
@@ -560,11 +558,14 @@ fn query_precondition(
 			}
 		};
 		let sent = km.slots.get(idx).is_some_and(|slot| {
-			slot.sent_by.iter().any(|&(sender, recipient, at, _)| {
-				if sender != option.message.sender || recipient != option.message.recipient {
+			slot.sent_by.iter().any(|event| {
+				if event.phase > phase
+					|| event.sender != option.message.sender
+					|| event.recipient != option.message.recipient
+				{
 					return false;
 				}
-				ps.event_reached(km, sender, at)
+				ps.event_reached(km, event.sender, event.declared_at)
 			})
 		});
 		if !sent {
@@ -599,6 +600,47 @@ mod behavior_tests {
 	}
 
 	#[test]
+	fn a_future_send_does_not_satisfy_an_earlier_precondition() {
+		let source = "attacker[passive]\nprincipal Alice[\nknows private qt_secret\ngenerates qt_ack\nleaks qt_secret\n]\nphase[1]\nAlice -> Bob: qt_ack\nprincipal Bob[\n_ = HASH(qt_ack)\n]\nqueries[\nconfidentiality? qt_secret[\nprecondition[Alice -> Bob: qt_ack]\n]\n]\n";
+		let model = crate::parser::parse_string("future-precondition.vp", source).expect("parses");
+		let (trace, states) = crate::sanity::sanity(&model).expect("passes sanity");
+		let state = states
+			.iter()
+			.find(|state| state.name == "Alice")
+			.expect("Alice exists");
+		let mut early = VerifyResult::new(&model.queries[0], 0);
+		early.resolved = true;
+		let early = query_precondition(early, &trace, state, 0);
+		assert!(!early.options[0].resolved);
+		let mut late = VerifyResult::new(&model.queries[0], 0);
+		late.resolved = true;
+		let late = query_precondition(late, &trace, state, 1);
+		assert!(late.options[0].resolved);
+	}
+
+	#[test]
+	fn a_foreign_sender_halt_does_not_hide_an_accepted_substitution() {
+		let source = "attacker[active]\nprincipal Alice[\ngenerates qh_m\n]\nAlice -> Bob: qh_m\nprincipal Bob[\nqh_use = HASH(qh_m)\n]\nqueries[\nauthentication? Alice -> Bob: qh_m\n]\n";
+		let model = crate::parser::parse_string("foreign-auth-halt.vp", source).expect("parses");
+		let (trace, mut states) = crate::sanity::sanity(&model).expect("passes sanity");
+		let state = states
+			.iter_mut()
+			.find(|state| state.name == "Bob")
+			.expect("Bob exists");
+		let subject = model.queries[0].message.constant().expect("subject exists");
+		let slot = state.index_of(subject).expect("subject slot exists");
+		state.values[slot].value = value_nil();
+		state.values[slot].provenance.sender = ATTACKER_ID;
+		state.foreign_halts = vec![(model.queries[0].message.sender, slot)];
+		assert!(state.slot_unreached(slot));
+		let (indices, sender, _, _) =
+			query_authentication_get_pass_indices(&model.queries[0], &trace, state)
+				.expect("evaluates");
+		assert!(!indices.is_empty());
+		assert_eq!(sender, ATTACKER_ID);
+	}
+
+	#[test]
 	fn a_precondition_does_not_claim_a_message_sent_after_the_sender_halted() {
 		let source = "attacker[active]\nprincipal Alice[\ngenerates qh_secret, qh_ack\n]\nAlice -> Bob: qh_ack\nprincipal Bob[\n_ = HASH(qh_ack)\n]\nqueries[\nconfidentiality? qh_secret[\nprecondition[Alice -> Bob: qh_ack]\n]\n]\n";
 		let model = crate::parser::parse_string("halt.vp", source).expect("parses");
@@ -616,7 +658,7 @@ mod behavior_tests {
 		state.halted_at = Some(sent_at - 1);
 		let mut result = VerifyResult::new(&model.queries[0], 0);
 		result.resolved = true;
-		let result = query_precondition(result, &trace, state);
+		let result = query_precondition(result, &trace, state, 0);
 		assert!(!result.options[0].resolved);
 	}
 
@@ -637,15 +679,13 @@ mod behavior_tests {
 		let second_send = trace.slots[ack]
 			.sent_by
 			.iter()
-			.find(|&&(_, recipient, _, _)| {
-				recipient == model.queries[0].options[0].message.recipient
-			})
-			.map(|&(_, _, at, _)| at)
+			.find(|event| event.recipient == model.queries[0].options[0].message.recipient)
+			.map(|event| event.declared_at)
 			.expect("second send exists");
 		state.halted_at = Some(second_send - 1);
 		let mut result = VerifyResult::new(&model.queries[0], 0);
 		result.resolved = true;
-		let result = query_precondition(result, &trace, state);
+		let result = query_precondition(result, &trace, state, 0);
 		assert!(!result.options[0].resolved);
 	}
 

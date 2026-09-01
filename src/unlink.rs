@@ -466,6 +466,43 @@ mod tests {
 		make_principal_state("Tester", 1, meta, slots)
 	}
 
+	fn private_constant(name: &str) -> Value {
+		let Value::Constant(mut constant) = make_constant(name) else {
+			unreachable!()
+		};
+		constant.qualifier = Some(Qualifier::Private);
+		Value::Constant(constant)
+	}
+
+	fn trace_from(ps: &PrincipalState) -> ProtocolTrace {
+		let mut trace = ProtocolTrace::default();
+		for (i, (meta, values)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
+			trace.index.insert(meta.constant.id, i);
+			trace.slots.push(TraceSlot {
+				constant: meta.constant.clone(),
+				declared_span: Span::default(),
+				initial_value: values.value.clone(),
+				creator: values.provenance.creator,
+				known_by: meta.known_by.clone(),
+				sent_by: if meta.wire.is_empty() {
+					Vec::new()
+				} else {
+					vec![SendEvent {
+						sender: values.provenance.creator,
+						recipient: ps.id,
+						declared_at: meta.sent_at.unwrap_or(meta.declared_at),
+						phase: meta.phase.first().copied().unwrap_or(0),
+						guarded: meta.guard,
+					}]
+				},
+				declared_at: meta.declared_at,
+				phases: meta.phase.clone(),
+			});
+		}
+		trace.leaks = ps.leaks.clone();
+		trace
+	}
+
 	#[test]
 	fn secret_dependence() {
 		let pub_c = make_constant("ul_pub");
@@ -601,17 +638,18 @@ mod tests {
 			unreachable!()
 		};
 		let attacker = make_attacker_state(vec![travelled.clone()]);
-		assert!(is_observable(c, &ps, &attacker));
+		let km = trace_from(&ps);
+		assert!(is_observable(c, &km, &ps, &attacker));
 
 		let Value::Constant(absent) = make_constant("ul_absent") else {
 			unreachable!()
 		};
-		assert!(!is_observable(&absent, &ps, &attacker));
+		assert!(!is_observable(&absent, &km, &ps, &attacker));
 	}
 
 	#[test]
 	fn a_message_withheld_by_halt_is_not_observable() {
-		let travelled = make_constant("ul_halted_wire");
+		let travelled = private_constant("ul_halted_wire");
 		let Value::Constant(c) = &travelled else {
 			unreachable!()
 		};
@@ -626,13 +664,35 @@ mod tests {
 		);
 		ps.halted_at = Some(3);
 		let attacker = make_attacker_state(vec![travelled.clone()]);
+		let km = trace_from(&ps);
 
-		assert!(!is_observable(c, &ps, &attacker));
+		assert!(!is_observable(c, &km, &ps, &attacker));
+	}
+
+	#[test]
+	fn a_future_message_is_not_observable_in_an_earlier_phase() {
+		let travelled = private_constant("ul_future_wire");
+		let Value::Constant(c) = &travelled else {
+			unreachable!()
+		};
+		let mut meta = make_slot_meta(c, false);
+		meta.phase = vec![1];
+		let ps = make_principal_state(
+			"Tester",
+			1,
+			vec![meta],
+			vec![make_slot_values(&travelled, 1)],
+		);
+		let mut attacker = make_attacker_state(vec![travelled.clone()]);
+		let km = trace_from(&ps);
+		assert!(!is_observable(c, &km, &ps, &attacker));
+		attacker.current_phase = 1;
+		assert!(is_observable(c, &km, &ps, &attacker));
 	}
 
 	#[test]
 	fn a_carrier_withheld_by_halt_does_not_expose_its_contents() {
-		let target = make_constant("ul_halted_target");
+		let target = private_constant("ul_halted_target");
 		let carrier_name = make_constant("ul_halted_carrier");
 		let Value::Constant(target_constant) = &target else {
 			unreachable!()
@@ -654,8 +714,9 @@ mod tests {
 		);
 		ps.halted_at = Some(3);
 		let attacker = make_attacker_state(vec![target.clone()]);
+		let km = trace_from(&ps);
 
-		assert!(!is_observable(target_constant, &ps, &attacker));
+		assert!(!is_observable(target_constant, &km, &ps, &attacker));
 	}
 
 	#[test]
@@ -709,6 +770,7 @@ mod tests {
 			vec![make_slot_values(&target, 1), make_slot_values(&carrier, 1)],
 		);
 		let attacker = make_attacker_state(vec![target]);
-		assert!(!carried_observably(target_constant, &ps, &attacker));
+		let km = trace_from(&ps);
+		assert!(!carried_observably(target_constant, &km, &ps, &attacker));
 	}
 }

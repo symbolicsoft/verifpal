@@ -1022,7 +1022,7 @@ fn probe_with(
 				if mine.is_empty() {
 					continue;
 				}
-				let governing = governing_attacker(&scratch, &mine, &session, &seeded);
+				let governing = governing_attacker(&scratch, km, &mine, &seeded);
 				if let Ok(other) = reexecute(&session, &mine, &governing, km) {
 					let _ = compute_knowledge_closure(&scratch, km, &other);
 				}
@@ -1036,7 +1036,7 @@ fn probe_with(
 	}
 
 	let ambient = scratch.attacker_snapshot();
-	let governing = governing_attacker(&scratch, installs, base, &ambient);
+	let governing = governing_attacker(&scratch, km, installs, &ambient);
 	let ps = reexecute(base, installs, &governing, km).ok()?;
 	let _ = compute_knowledge_closure(&scratch, km, &ps);
 	let _ = verify_resolve_queries(&scratch, km, &ps);

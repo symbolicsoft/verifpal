@@ -8,7 +8,6 @@ use crate::primitive::{attacker_public_key, primitive_extract_bypass_key};
 use crate::principal::ATTACKER_ID;
 use crate::theory::{obtainable, reduce_once};
 use crate::types::*;
-use crate::util::min_int_in_slice;
 use crate::value::{resolve_trace_constant, resolve_trace_term};
 
 pub(crate) struct Controllable {
@@ -105,7 +104,10 @@ pub(crate) fn attacker_controllable(
 	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
 		return false;
 	}
-	if !meta.phase.iter().any(|&p| p <= attacker.current_phase) {
+	if !km
+		.mutation_phase(idx)
+		.is_some_and(|phase| phase <= attacker.current_phase)
+	{
 		return false;
 	}
 	if !km.constant_used_by(ps.id, &meta.constant) {
@@ -116,14 +118,13 @@ pub(crate) fn attacker_controllable(
 
 pub(crate) fn governing_attacker(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	installs: &[(SlotIdx, Value)],
-	ps: &PrincipalState,
 	ambient: &AttackerState,
 ) -> AttackerState {
 	let earliest = installs
 		.iter()
-		.filter_map(|(slot, _)| ps.meta.get(slot.get()))
-		.filter_map(|meta| min_int_in_slice(&meta.phase).ok())
+		.filter_map(|(slot, _)| km.mutation_phase(slot.get()))
 		.min();
 	match earliest {
 		Some(phase) if phase < ambient.current_phase => {
@@ -425,6 +426,27 @@ mod tests {
 		let alice = states.iter().find(|s| s.name == "Alice").expect("Alice");
 		let c = slot_named(alice, "ctl_c");
 		assert!(super::attacker_controllable(c, &km, alice, &attacker));
+	}
+
+	#[test]
+	fn a_relay_is_controllable_only_when_its_own_delivery_phase_is_reached() {
+		use crate::parser::parse_string;
+		let src = "attacker[active]\nprincipal Alice[\nknows private rp_m\n]\nAlice -> Bob: [rp_m]\nphase[1]\nprincipal Bob[\n_ = HASH(rp_m)\n]\nBob -> Charlie: rp_m\nprincipal Charlie[\n_ = HASH(rp_m)\n]\nqueries[\nauthentication? Bob -> Charlie: rp_m\n]\n";
+		let m = parse_string("relay-phase.vp", src).expect("parse");
+		let (km, states) = crate::sanity::sanity(&m).expect("sanity");
+		let charlie = states
+			.iter()
+			.find(|state| state.name == "Charlie")
+			.expect("Charlie");
+		let slot = charlie
+			.meta
+			.iter()
+			.position(|meta| meta.constant.name.as_ref() == "rp_m")
+			.expect("rp_m");
+		let mut attacker = make_attacker_state(Vec::new());
+		assert!(!super::attacker_controllable(slot, &km, charlie, &attacker));
+		attacker.current_phase = 1;
+		assert!(super::attacker_controllable(slot, &km, charlie, &attacker));
 	}
 
 	#[test]

@@ -8,7 +8,6 @@ use crate::primitive::primitive_get;
 use crate::reexec::attacker_authored;
 use crate::theory::can_rewrite;
 use crate::types::*;
-use crate::util::min_int_in_slice;
 use crate::verify::verify_resolve_queries;
 
 use super::symbolic::SymbolicState;
@@ -54,7 +53,7 @@ pub(crate) fn validate(
 		if contains_failed_check(&ground) {
 			return Ok(false);
 		}
-		if !attacker_can_derive(ctx, slot, &ground, &ps, attacker) {
+		if !attacker_can_derive(ctx, km, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
 		if ctx.replication_only() && replays_own_freshness(km, &ground, &ps, attacker) {
@@ -71,7 +70,7 @@ pub(crate) fn validate(
 		return Ok(false);
 	}
 
-	let governing = crate::reexec::governing_attacker(ctx, &installs, &ps, attacker);
+	let governing = crate::reexec::governing_attacker(ctx, km, &installs, attacker);
 	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, &governing, km) else {
 		return Ok(false);
 	};
@@ -137,15 +136,13 @@ fn note_depth_cut(
 
 fn attacker_can_derive(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	slot: usize,
 	ground: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
-	let earliest = ps
-		.meta
-		.get(slot)
-		.and_then(|meta| min_int_in_slice(&meta.phase).ok());
+	let earliest = km.mutation_phase(slot);
 	match earliest {
 		Some(earliest) if earliest < attacker.current_phase => {
 			match ctx.attacker_knowledge_at(earliest) {

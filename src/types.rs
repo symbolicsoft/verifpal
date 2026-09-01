@@ -1152,9 +1152,18 @@ pub struct TraceSlot {
 	pub initial_value: Value,
 	pub creator: PrincipalId,
 	pub known_by: Vec<(PrincipalId, PrincipalId)>,
-	pub sent_by: Vec<(PrincipalId, PrincipalId, i32, i32)>,
+	pub sent_by: Vec<SendEvent>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SendEvent {
+	pub sender: PrincipalId,
+	pub recipient: PrincipalId,
+	pub declared_at: i32,
+	pub phase: i32,
+	pub guarded: bool,
 }
 
 impl TraceSlot {
@@ -1202,10 +1211,12 @@ impl ProtocolTrace {
 		let message = trace_slot
 			.sent_by
 			.iter()
-			.filter(|&&(sender, _, at, event_phase)| {
-				event_phase <= phase && initially_holds(sender) && reached(sender, at)
+			.filter(|event| {
+				event.phase <= phase
+					&& initially_holds(event.sender)
+					&& reached(event.sender, event.declared_at)
 			})
-			.map(|&(_, _, at, _)| (at, Disclosure::Message))
+			.map(|event| (event.declared_at, Disclosure::Message))
 			.min_by_key(|(at, _)| *at);
 		let leak = self
 			.leaks
@@ -1228,6 +1239,16 @@ impl ProtocolTrace {
 			(None, None) => None,
 		}
 	}
+
+	pub(crate) fn mutation_phase(&self, slot: usize) -> Option<i32> {
+		let trace_slot = self.slots.get(slot)?;
+		trace_slot
+			.sent_by
+			.iter()
+			.filter(|event| !event.guarded)
+			.map(|event| event.phase)
+			.min()
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -1241,6 +1262,7 @@ pub struct LeakEvent {
 #[derive(Clone, Debug)]
 pub struct SlotMeta {
 	pub constant: Constant,
+	pub creator: PrincipalId,
 	pub guard: bool,
 	pub known: bool,
 	pub wire: Vec<PrincipalId>,
@@ -1334,13 +1356,12 @@ impl PrincipalState {
 	}
 
 	pub fn slot_unreached(&self, i: usize) -> bool {
-		let Some(sv) = self.values.get(i) else {
+		let Some(meta) = self.meta.get(i) else {
 			return false;
 		};
-		let creator = sv.provenance.creator;
 		self.foreign_halts
 			.iter()
-			.any(|&(principal, at)| principal == creator && i >= at)
+			.any(|&(principal, at)| principal == meta.creator && i >= at)
 	}
 
 	pub fn withheld_by_own_halt(&self, i: usize) -> bool {
@@ -1359,17 +1380,6 @@ impl PrincipalState {
 				&& leak.declared_at <= halted_at
 		});
 		(sent || leaked) && !sent_before_halt && !leaked_before_halt
-	}
-
-	pub fn slot_disclosed(&self, i: usize) -> bool {
-		let Some(sm) = self.meta.get(i) else {
-			return false;
-		};
-		if self.slot_unreached(i) || self.withheld_by_own_halt(i) {
-			return false;
-		}
-		self.halted_at
-			.is_none_or(|halted_at| sm.declared_at < halted_at)
 	}
 
 	pub fn should_use_original(&self, i: usize) -> bool {
@@ -1592,6 +1602,49 @@ mod tests {
 	}
 
 	#[test]
+	fn an_install_does_not_make_a_foreign_post_halt_slot_reachable() {
+		let before = make_constant("ps_halt_before");
+		let halt = make_constant("ps_halt_check");
+		let after = make_constant("ps_halt_after");
+		let values = vec![
+			make_slot_values(&before, 2),
+			make_slot_values(&halt, 2),
+			make_slot_values(&after, 2),
+		];
+		let mut ps = make_principal_state(
+			"Alice",
+			1,
+			vec![
+				make_slot_meta(before.as_constant().expect("constant"), false),
+				make_slot_meta(halt.as_constant().expect("constant"), false),
+				make_slot_meta(after.as_constant().expect("constant"), false),
+			],
+			values,
+		);
+		ps.values[2].provenance.creator = crate::principal::ATTACKER_ID;
+		ps.foreign_halts = vec![(2, 1)];
+		assert!(ps.slot_unreached(2));
+	}
+
+	#[test]
+	fn one_reached_disclosure_is_not_erased_by_a_later_withheld_one() {
+		let value = make_constant("ps_disclosed_once");
+		let constant = value.as_constant().expect("constant");
+		let mut meta = make_slot_meta(constant, true);
+		meta.sent_at = Some(1);
+		let mut ps =
+			make_principal_state("Alice", 1, vec![meta], vec![make_slot_values(&value, 1)]);
+		ps.halted_at = Some(3);
+		ps.leaks = Arc::new(vec![LeakEvent {
+			constant_id: constant.id,
+			principal_id: 1,
+			declared_at: 5,
+			phase: 0,
+		}]);
+		assert!(!ps.withheld_by_own_halt(0));
+	}
+
+	#[test]
 	fn primitive_with_arguments() {
 		let a = make_constant("pwa_a");
 		let b = make_constant("pwa_b");
@@ -1673,7 +1726,13 @@ mod tests {
 			initial_value: value_nil(),
 			creator: 0,
 			known_by: vec![(1, 0)],
-			sent_by: vec![(0, 1, 1, 0)],
+			sent_by: vec![SendEvent {
+				sender: 0,
+				recipient: 1,
+				declared_at: 1,
+				phase: 0,
+				guarded: false,
+			}],
 			declared_at: 0,
 			phases: vec![0],
 		};
