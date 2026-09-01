@@ -1,16 +1,12 @@
-Verifpal 1.3.7
+Verifpal 1.3.8
 
-Changes since v1.3.6:
+Changes since v1.3.7:
 
-- Performance optimizations
-- Better attacker term reconstruction
-- Add package name
-- goreleaser: winget token must use the canonical .Env form
-- Scoop update for verifpal version v1.3.6
-- Homebrew cask update for verifpal version v1.3.6
-- Load VERIFPAL_PUBLISH_WINGET from secrets
-- release: build on macOS, since darwin targets need the Apple SDK
-- release: install zig from PyPI instead of a mirror-backed action
+- Feature: --format latex
+- Update Cargo.toml and Cargo.lock
+- Update GitHub CI workflows
+- Scoop update for verifpal version v1.3.7
+- Homebrew cask update for verifpal version v1.3.7
 
 All major changes between Verifpal 1.0.0 and 1.3.x are covered
 in the following blog post:
