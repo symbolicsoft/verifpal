@@ -1,12 +1,10 @@
-Verifpal 1.3.8
+Verifpal 1.3.9
 
-Changes since v1.3.7:
+Changes since v1.3.8:
 
-- Feature: --format latex
-- Update Cargo.toml and Cargo.lock
-- Update GitHub CI workflows
-- Scoop update for verifpal version v1.3.7
-- Homebrew cask update for verifpal version v1.3.7
+- Bug fixes and additional tests
+- KEM_ENCAP's Decompose rule should also reveal r, not just ss
+- Add a few small tests all over the place
 
 All major changes between Verifpal 1.0.0 and 1.3.x are covered
 in the following blog post:
