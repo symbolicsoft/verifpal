@@ -2614,3 +2614,27 @@ fn test_witness_statement_rebuilt() {
 fn test_forged_statement_on_wire() {
 	run_model("forged_statement_on_wire.vp", "c1c1");
 }
+#[test]
+fn test_relay_halt_before_forward() {
+	run_model("relay_halt_before_forward.vp", "a0");
+}
+#[test]
+fn test_relay_halt_before_forward_one_session() {
+	run_model_sessions("relay_halt_before_forward.vp", 1, "a0");
+}
+#[test]
+fn test_relay_forward_before_check() {
+	run_model("relay_forward_before_check.vp", "a1");
+}
+#[test]
+fn test_relay_forward_before_check_one_session() {
+	run_model_sessions("relay_forward_before_check.vp", 1, "a1");
+}
+#[test]
+fn test_relay_halt_before_forward_leaked() {
+	run_model("relay_halt_before_forward_leaked.vp", "a1");
+}
+#[test]
+fn test_relay_halt_before_forward_leaked_one_session() {
+	run_model_sessions("relay_halt_before_forward_leaked.vp", 1, "a1");
+}

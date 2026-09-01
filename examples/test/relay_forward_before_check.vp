@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — the same shape as `relay_halt_before_forward`, with Bob
+// forwarding m to Carol *before* he verifies the signature over it. The
+// attacker substitutes m on the way to Bob; Bob's check fails afterwards, but
+// by then the substituted m is already on its guarded way to Carol, who uses
+// it. The halt comes too late to protect Carol, so the attack is genuine, and
+// it is what keeps the refusal in the sibling model from becoming a blanket
+// one: what matters is whether the forwarder reaches its send, not whether it
+// halts at all.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+
+principal Bob[
+	_ = HASH(m)
+]
+
+Bob -> Carol: [m]
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+principal Carol[
+	h = HASH(m)
+]
+
+queries[
+	authentication? Bob -> Carol: m
+]

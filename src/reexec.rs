@@ -143,6 +143,7 @@ pub(crate) fn reexecute(
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
+	let relayed = relayed_installs(&ps, installs);
 	let authored: Vec<bool> = installs
 		.iter()
 		.map(|(slot, ground)| {
@@ -165,6 +166,12 @@ pub(crate) fn reexecute(
 	ps.resolve_all_values()?;
 	let failures = ps.perform_all_rewrites();
 
+	if !relays_are_forwarded(&ps, km, &relayed, &failures, attacker) {
+		return Err(VerifpalError::resolution(
+			"a guarded value's forwarder halts before forwarding it".into(),
+		));
+	}
+
 	let foreign = foreign_halts(&ps, &failures);
 
 	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
@@ -174,6 +181,46 @@ pub(crate) fn reexecute(
 	}
 	ps.foreign_halts = foreign;
 	Ok(ps)
+}
+
+fn relayed_installs(
+	ps: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+) -> Vec<(usize, PrincipalId)> {
+	installs
+		.iter()
+		.filter_map(|(slot, _)| {
+			let i = slot.get();
+			let meta = ps.meta.get(i)?;
+			let sender = ps.values.get(i)?.provenance.sender;
+			(meta.guard && sender != ps.id && sender != ATTACKER_ID).then_some((i, sender))
+		})
+		.collect()
+}
+
+fn relays_are_forwarded(
+	ps: &PrincipalState,
+	km: &ProtocolTrace,
+	relayed: &[(usize, PrincipalId)],
+	failures: &[(Primitive, usize)],
+	attacker: &AttackerState,
+) -> bool {
+	relayed.iter().all(|&(slot, sender)| {
+		let send = km.slots.get(slot).and_then(|s| {
+			s.sent_by
+				.iter()
+				.find(|event| event.sender == sender && event.recipient == ps.id)
+		});
+		let Some(send) = send else {
+			return true;
+		};
+		failures.iter().all(|(prim, idx)| {
+			!prim.instance_check
+				|| ps.values[*idx].provenance.creator != sender
+				|| ps.meta[*idx].declared_at >= send.declared_at
+				|| bypass_is_constructible(prim, ps, attacker)
+		})
+	})
 }
 
 pub(crate) fn halt_at_failed_checks(

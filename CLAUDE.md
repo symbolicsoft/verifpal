@@ -8,7 +8,7 @@ Verifpal is a symbolic formal verification tool for cryptographic protocols. Use
 
 The engine is **sound but incomplete**: any reported attack must be genuine, but the search may miss attacks. Soundness is structural rather than argued — the solver in `src/solve/` only ever *proposes* substitutions, and `validate.rs` re-executes each one concretely before any result can be recorded, so a solver bug costs a missed attack and never a false one. That is Theorem 4 of the paper, which reduces soundness to six facts about this code; `query.rs::tcb_tests` pins all six by reading the source, so breaking one fails the build (see "The soundness tests").
 
-A false attack is the worst possible regression. These models pin past ones:
+False attack and missed attacks are the worst possible regressions. These models pin past false attacks:
 
 | model | code | what it pins |
 | --- | --- | --- |

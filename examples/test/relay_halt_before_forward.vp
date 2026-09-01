@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 — Carol receives m guarded from Bob, and Bob received it
+// unguarded from Alice, so the only substitution the guard admits is one made
+// on the way to Bob. But Bob verifies Alice's signature over m before he
+// forwards it, and the attacker holds neither sk nor a forgery, so a
+// substituted m halts Bob at the check and never reaches Carol at all.
+//
+// This pins a false attack: the engine used to license the guarded slot on the
+// strength of `mutatable_to` alone and then re-execute Carol's state with the
+// substituted m installed, without asking whether the forwarder ever got as
+// far as forwarding. A guarded install stands for an upstream substitution, so
+// the forwarder's send must be reached under it; `relay_forward_before_check`
+// is the counterweight where it is.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Bob -> Carol: [m]
+
+principal Carol[
+	h = HASH(m)
+]
+
+queries[
+	authentication? Bob -> Carol: m
+]
