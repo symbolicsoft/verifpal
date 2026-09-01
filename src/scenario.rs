@@ -11,8 +11,9 @@ use crate::value::{MAX_COPIES, copy_value_id};
 
 pub(crate) struct ScenarioExpansion {
 	pub(crate) model: Model,
-	pub(crate) honest: IdSet<PrincipalId>,
+	pub(crate) honest: IdMap<PrincipalId, i32>,
 	pub(crate) summaries: Vec<ScenarioSummary>,
+	pub(crate) query_variants: Vec<Vec<Query>>,
 }
 
 pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpansion> {
@@ -20,8 +21,9 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 	if count == 0 {
 		return Ok(ScenarioExpansion {
 			model: m.clone(),
-			honest: IdSet::default(),
+			honest: IdMap::default(),
 			summaries: Vec::new(),
+			query_variants: Vec::new(),
 		});
 	}
 	sanity_scenarios(m)?;
@@ -56,6 +58,11 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 
 	let freshen = m.freshened_constants();
 	let compromised = compromised_constants(m);
+	let declared = honest_first(&m.scenarios, &compromised);
+	let m = &Model {
+		scenarios: declared,
+		..m.clone()
+	};
 	let pids = clone_principal_ids(&principals, count, m.highest_referenced_principal())?;
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * count);
@@ -79,13 +86,30 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		}
 	}
 
-	let mut honest: IdSet<PrincipalId> = IdSet::default();
+	let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 	for k in 0..count {
-		if scenario_is_honest(&m.scenarios[k], &compromised) {
-			for (id, _) in &principals {
-				honest.insert(mapped_principal(*id, k, &pids));
+		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised);
+		if corrupt_from <= 0 {
+			continue;
+		}
+		for (id, _) in &principals {
+			honest.insert(mapped_principal(*id, k, &pids), corrupt_from);
+		}
+	}
+
+	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
+	for query in &m.queries {
+		let mut variants = Vec::new();
+		for k in 1..count {
+			if scenario_corrupt_from(&m.scenarios[k], &compromised) <= 0 {
+				continue;
+			}
+			let variant = clone_query(query, k, sessions, &freshen, &pids);
+			if !same_query(query, &variant) {
+				variants.push(variant);
 			}
 		}
+		query_variants.push(variants);
 	}
 
 	let model = Model {
@@ -108,7 +132,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 				.iter()
 				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
 				.collect(),
-			honest: scenario_is_honest(s, &compromised),
+			honest: scenario_corrupt_from(s, &compromised) > 0,
 		})
 		.collect();
 
@@ -126,14 +150,44 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		model,
 		honest,
 		summaries,
+		query_variants,
 	})
 }
 
-fn scenario_is_honest(scenario: &Scenario, compromised: &IdSet<ValueId>) -> bool {
-	!scenario
+/// Each declared scenario, keyed by the bindings that identify it, mapped to
+/// the phase from which its run is corrupt.
+#[cfg(test)]
+pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
+	let compromised = compromised_constants(m);
+	m.scenarios
+		.iter()
+		.map(|s| {
+			let bindings: Vec<String> = s
+				.bindings
+				.iter()
+				.map(|(target, value)| format!("{} = {}", target.name, value.name))
+				.collect();
+			(
+				format!("{}[{}]", s.principal_name, bindings.join(", ")),
+				scenario_corrupt_from(s, &compromised),
+			)
+		})
+		.collect()
+}
+
+fn honest_first(scenarios: &[Scenario], compromised: &IdMap<ValueId, i32>) -> Vec<Scenario> {
+	let mut out: Vec<Scenario> = scenarios.to_vec();
+	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised)));
+	out
+}
+
+fn scenario_corrupt_from(scenario: &Scenario, compromised: &IdMap<ValueId, i32>) -> i32 {
+	scenario
 		.bindings
 		.iter()
-		.any(|(_, value)| compromised.contains(&value.id))
+		.filter_map(|(_, value)| compromised.get(&value.id).copied())
+		.min()
+		.unwrap_or(i32::MAX)
 }
 
 fn sanity_scenarios(m: &Model) -> VResult<()> {
@@ -337,25 +391,32 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 	out
 }
 
-fn compromised_constants(m: &Model) -> IdSet<ValueId> {
+fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
-	let mut out: IdSet<ValueId> = IdSet::default();
+	let mut out: IdMap<ValueId, i32> = IdMap::default();
+	let mut phase = 0i32;
 	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expression in &p.expressions {
-			if expression.kind == Declaration::Leaks {
-				for c in &expression.constants {
-					if secret.contains(&c.id) {
-						out.insert(c.id);
+		match block {
+			Block::Phase(p) => phase = p.number,
+			Block::Principal(p) => {
+				for expression in &p.expressions {
+					if expression.kind != Declaration::Leaks {
+						continue;
+					}
+					for c in &expression.constants {
+						if !secret.contains(&c.id) {
+							continue;
+						}
+						let at = out.entry(c.id).or_insert(phase);
+						*at = (*at).min(phase);
 					}
 				}
 			}
+			Block::Message(_) => {}
 		}
 	}
 	loop {
-		let before = out.len();
+		let mut changed = false;
 		for block in &m.blocks {
 			let Block::Principal(p) = block else {
 				continue;
@@ -364,25 +425,35 @@ fn compromised_constants(m: &Model) -> IdSet<ValueId> {
 				let Some(value) = &expression.assigned else {
 					continue;
 				};
-				if !mentions_any(value, &out) {
+				let Some(from) = earliest_mentioned(value, &out) else {
 					continue;
-				}
+				};
 				for c in &expression.constants {
-					out.insert(c.id);
+					match out.get(&c.id) {
+						Some(&at) if at <= from => {}
+						_ => {
+							out.insert(c.id, from);
+							changed = true;
+						}
+					}
 				}
 			}
 		}
-		if out.len() == before {
+		if !changed {
 			break;
 		}
 	}
 	out
 }
 
-fn mentions_any(v: &Value, ids: &IdSet<ValueId>) -> bool {
+fn earliest_mentioned(v: &Value, ids: &IdMap<ValueId, i32>) -> Option<i32> {
 	match v {
-		Value::Constant(c) => ids.contains(&c.id),
-		Value::Primitive(p) => p.arguments.iter().any(|a| mentions_any(a, ids)),
+		Value::Constant(c) => ids.get(&c.id).copied(),
+		Value::Primitive(p) => p
+			.arguments
+			.iter()
+			.filter_map(|a| earliest_mentioned(a, ids))
+			.min(),
 	}
 }
 
@@ -533,6 +604,61 @@ fn rebinds(expr: &Expression, scenario: &Scenario, principal: PrincipalId, c: &C
 			.bindings
 			.iter()
 			.any(|(t, v)| t.id == c.id && v.id != c.id)
+}
+
+fn clone_query(
+	q: &Query,
+	k: usize,
+	sessions: u8,
+	freshen: &IdSet<ValueId>,
+	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
+) -> Query {
+	Query {
+		span: q.span,
+		kind: q.kind,
+		constants: q
+			.constants
+			.iter()
+			.map(|c| map_constant(c, k, sessions, freshen))
+			.collect(),
+		message: clone_message(&q.message, k, sessions, freshen, pids),
+		options: q
+			.options
+			.iter()
+			.map(|o| QueryOption {
+				kind: o.kind,
+				message: clone_message(&o.message, k, sessions, freshen, pids),
+				leading_comments: Vec::new(),
+				trailing_comment: None,
+			})
+			.collect(),
+		leading_comments: Vec::new(),
+		trailing_comment: None,
+	}
+}
+
+fn same_message(a: &Message, b: &Message) -> bool {
+	a.sender == b.sender
+		&& a.recipient == b.recipient
+		&& a.constants.len() == b.constants.len()
+		&& a.constants
+			.iter()
+			.zip(&b.constants)
+			.all(|(x, y)| x.id == y.id)
+}
+
+fn same_query(a: &Query, b: &Query) -> bool {
+	a.constants.len() == b.constants.len()
+		&& a.constants
+			.iter()
+			.zip(&b.constants)
+			.all(|(x, y)| x.id == y.id)
+		&& same_message(&a.message, &b.message)
+		&& a.options.len() == b.options.len()
+		&& a.options
+			.iter()
+			.zip(&b.options)
+			.all(|(x, y)| same_message(&x.message, &y.message))
 }
 
 fn clone_message(
@@ -736,14 +862,84 @@ mod tests {
 	}
 
 	#[test]
+	fn a_peer_compromised_later_is_honest_until_then() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private pcl_a\n\
+			knows public pcl_gpeer\n\
+			generates pcl_m\n\
+			pcl_e = PKE_ENC(pcl_gpeer, pcl_m)\n\
+			]\n\
+			principal Bob[\n\
+			knows private pcl_b\n\
+			pcl_gb = PUBKEY(pcl_b)\n\
+			]\n\
+			principal Mallory[\n\
+			knows private pcl_mk\n\
+			pcl_gm = PUBKEY(pcl_mk)\n\
+			leaks pcl_mk\n\
+			]\n\
+			Alice -> Bob: pcl_e\n\
+			principal Bob[\n\
+			_ = HASH(pcl_e)\n\
+			]\n\
+			phase[1]\n\
+			principal Bob[\n\
+			leaks pcl_b\n\
+			]\n\
+			scenarios[\n\
+			Alice[pcl_gpeer = pcl_gb]\n\
+			Alice[pcl_gpeer = pcl_gm]\n\
+			]\n\
+			queries[\n\
+			confidentiality? pcl_m\n\
+			]\n";
+		let m = parse_string("pcl.vp", src).expect("parses");
+		let compromised = compromised_constants(&m);
+		let corrupt_from = |i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised);
+
+		assert_eq!(
+			corrupt_from(1),
+			0,
+			"Mallory's key is leaked at phase 0, so a run with her as peer is corrupt \
+			 from the start"
+		);
+		assert_eq!(
+			corrupt_from(0),
+			1,
+			"Bob's key is leaked at phase 1, so a run with him as peer is honest at \
+			 phase 0 and only stops being so at phase 1. Reading the leak without its \
+			 phase marked that run corrupt from the start and dropped every claim it \
+			 could have answered"
+		);
+
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(
+			e.honest.values().any(|&at| at == 1),
+			"the honest set records when a run stops being honest, not just whether"
+		);
+		assert!(
+			e.summaries[0].honest && !e.summaries[1].honest,
+			"the block is normalised honest-first, so the run the written query names \
+			 is one that is honest at phase 0 whenever the model declares any"
+		);
+		assert!(
+			e.query_variants[0].is_empty(),
+			"the only other scenario is corrupt from phase 0, so it gets no instance \
+			 of the query: its claims are not the protocol's to keep"
+		);
+	}
+
+	#[test]
 	fn every_session_clone_of_an_honest_scenario_stays_honest() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 2).expect("expands");
-		let expanded = crate::sessions::expand_sessions(&e.model, 2).expect("expands");
+		let expanded =
+			crate::sessions::expand_sessions(&e.model, 2, &e.query_variants).expect("expands");
 		let mut honest = e.honest.clone();
 		for &(original, clone) in &expanded.principal_clones {
-			if honest.contains(&original) {
-				honest.insert(clone);
+			if let Some(&corrupt_from) = honest.get(&original) {
+				honest.insert(clone, corrupt_from);
 			}
 		}
 		assert_eq!(honest.len(), 6);
@@ -752,7 +948,7 @@ mod tests {
 			.blocks
 			.iter()
 			.filter(|b| match b {
-				Block::Principal(p) => !honest.contains(&p.id),
+				Block::Principal(p) => !honest.contains_key(&p.id),
 				_ => false,
 			})
 			.count();
@@ -766,7 +962,8 @@ mod tests {
 	fn scenario_and_session_copies_never_share_an_id() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 2).expect("expands");
-		let expanded = crate::sessions::expand_sessions(&e.model, 2).expect("expands");
+		let expanded =
+			crate::sessions::expand_sessions(&e.model, 2, &e.query_variants).expect("expands");
 		let mut seen: IdSet<ValueId> = IdSet::default();
 		for block in &expanded.model.blocks {
 			let Block::Principal(p) = block else {

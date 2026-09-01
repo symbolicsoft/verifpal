@@ -2,24 +2,32 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // Expected: u1u0 — the identifying-check witness, run through KEM_DECAP, and
-// the surprise it carries: the check needs only the PUBLIC key. KEM_DECAP
-// declares identifying_positions [0], and the attacker discharges it with the
-// encapsulation key it watched go past on the wire, so any two ciphertexts
-// addressed to one recipient are linkable to anyone who has ever seen that
-// recipient's public key.
+// what it is really about: the key the two ciphertexts agree on, not the mere
+// fact that a check exists. Bob's decapsulation key is leaked, so the attacker
+// can actually run KEM_DECAP; the first pair is addressed to Bob twice and
+// links, the second is split across Bob and Carol and does not, because the
+// attacker has no key that opens both.
 //
 // Nothing about the encapsulations is shared — each uses its own generated
 // randomness, so the pair has no common ancestor for origin_leaves to find.
-// What they share is a recipient, and a KEM ciphertext does not hide who it is
-// for. The second pair is the same construction split across two recipients,
-// and it must stay unlinkable: the witness is about the key the ciphertexts
-// agree on, not about the fact that a check can be run at all.
+// What the first pair shares is a recipient whose key the attacker holds.
+//
+// The leak is load-bearing and was not always here. This model used to say the
+// check "needs only the PUBLIC key", and reported u1 with dk_one secret. That
+// was the engine reading the identifier off the *producing* primitive — the
+// encapsulation key at KEM_ENCAP's argument 0 — instead of off the position
+// the *checking* primitive needs, which for KEM_DECAP is the private key. The
+// two coincide for AEAD and differ by a PUBKEY the rule peels for signatures,
+// so the KEM pair was the one that came out inverted: the engine claimed to
+// have decapsulated both ciphertexts in the same run in which it reported the
+// plaintexts confidential.
 
 attacker[passive]
 
 principal Bob[
 	knows private dk_one
 	ek_one = PUBKEY(dk_one)
+	leaks dk_one
 ]
 
 principal Carol[

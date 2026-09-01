@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — and the report has to show why.
+//
+// Ledger never sends or receives anything; all it does is leak the key that
+// breaks the protocol. The diagram builder used to draw only principals that
+// appear on some message, so Ledger and its `leaks` were absent from the
+// sequence diagram in every format, and the report showed a protocol with no
+// leak beside a broken confidentiality query. A principal that leaks now earns
+// its lane whether or not it ever speaks.
+attacker[passive]
+
+principal Ledger[
+	knows private k
+	leaks k
+]
+
+principal Alice[
+	knows private k
+	knows private m
+	e = ENC(k, m)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = DEC(k, e)
+]
+
+queries[
+	confidentiality? m
+]

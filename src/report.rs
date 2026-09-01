@@ -316,12 +316,21 @@ fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
 	let mut phase = 0i32;
 	let mut senders: Vec<&str> = Vec::new();
 	for block in &model.blocks {
-		if let Block::Message(msg) = block {
-			for name in [&msg.sender_name, &msg.recipient_name] {
-				if !senders.contains(&&**name) {
-					senders.push(name);
+		match block {
+			Block::Message(msg) => {
+				for name in [&msg.sender_name, &msg.recipient_name] {
+					if !senders.contains(&&**name) {
+						senders.push(name);
+					}
 				}
 			}
+			Block::Principal(p)
+				if p.expressions.iter().any(|e| e.kind == Declaration::Leaks)
+					&& !senders.contains(&p.name.as_str()) =>
+			{
+				senders.push(&p.name);
+			}
+			_ => {}
 		}
 	}
 	for block in &model.blocks {

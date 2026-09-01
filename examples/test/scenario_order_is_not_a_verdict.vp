@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 — and the point is that its twin produces the same code.
+//
+// scenario_order_is_not_a_verdict_swapped.vp is this model with the two
+// entries of the scenarios[] block exchanged and nothing else changed. A
+// scenarios[] block is a set of alternative peer instantiations, so the two
+// must agree; they used to differ in both queries, in opposite directions.
+//
+// The authentication query could only ever be evaluated against scenario 1's
+// recipient, because queries were not cloned per scenario. When scenario 1 was
+// the corrupt run, claims_apply_to dropped it and the query became
+// unfalsifiable: a0 where the attacker can plainly forge `e` under a public
+// key it holds. Queries now get one honest instance per scenario, and the
+// scenarios themselves are normalised honest-first, so the run the written
+// query names is an honest one whenever the model declares any.
+//
+// c0 is the other half: `m` is Alice's secret sealed to her peer's key. In the
+// honest run that peer is Bob and the attacker cannot open it. The break in
+// the Mallory run is real but it is not the protocol's to answer for, which is
+// what relativisation means -- so no variant is minted for a corrupt scenario.
+attacker[active]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Mallory -> Alice: [gm]
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows public gpeer
+	generates m
+	e = PKE_ENC(gpeer, m)
+]
+
+Alice -> Charlie: e
+
+principal Charlie[
+	knows private ck
+	d = HASH(e, ck)
+]
+
+Charlie -> Bob: d
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Charlie: e
+]

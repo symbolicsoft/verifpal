@@ -48,27 +48,32 @@ fn analyze_sessions_traced_cancellable(
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
-	let (m, mut honest, scenarios) = if m.scenarios.is_empty() {
-		(m, None, Vec::new())
+	let (m, mut honest, scenarios, scenario_variants) = if m.scenarios.is_empty() {
+		(m, None, Vec::new(), Vec::new())
 	} else {
 		let e = crate::scenario::expand_scenarios(m, sessions)?;
 		scenario_expanded = e.model;
-		(&scenario_expanded, Some(e.honest), e.summaries)
+		(
+			&scenario_expanded,
+			Some(e.honest),
+			e.summaries,
+			e.query_variants,
+		)
 	};
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
-		let e = crate::sessions::expand_sessions(m, sessions)?;
+		let e = crate::sessions::expand_sessions(m, sessions, &scenario_variants)?;
 		if let Some(honest) = honest.as_mut() {
 			for &(original, clone) in &e.principal_clones {
-				if honest.contains(&original) {
-					honest.insert(clone);
+				if let Some(&corrupt_from) = honest.get(&original) {
+					honest.insert(clone, corrupt_from);
 				}
 			}
 		}
 		expanded = e.model;
 		(&expanded, e.query_variants, e.siblings)
 	} else {
-		(m, Vec::new(), IdMap::default())
+		(m, scenario_variants, IdMap::default())
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;

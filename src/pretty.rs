@@ -16,9 +16,6 @@ impl fmt::Display for Constant {
 		if self.guard {
 			return write!(f, "[{}]", self.name);
 		}
-		if &*self.name == "g" {
-			return write!(f, "G");
-		}
 		write!(f, "{}", self.name)
 	}
 }

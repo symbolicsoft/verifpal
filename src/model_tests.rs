@@ -7,12 +7,8 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 4] = [
-	("junglegym_hybrid_pq.vp", 4),
-	("noise_xx_mutual.vp", 1),
-	("piknik.vp", 2),
-	("piknik.vp", 3),
-];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 2] =
+	[("junglegym_hybrid_pq.vp", 4), ("noise_xx_mutual.vp", 1)];
 
 const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 1] = [("later_value_fed_back.vp", 0)];
 
@@ -1050,6 +1046,71 @@ fn test_pinned_cert_flight_one_session() {
 #[test]
 fn test_aead_replay_not_forgery() {
 	run_model("aead_replay_not_forgery.vp", "a1c0");
+}
+#[test]
+fn test_ringsign_ring_collapse() {
+	run_model("ringsign_ring_collapse.vp", "a0");
+}
+#[test]
+fn test_unlink_kem_needs_the_private_key() {
+	run_model("unlink_kem_needs_the_private_key.vp", "u0c0");
+}
+#[test]
+fn test_unlink_kem_leaked_private_key() {
+	run_model("unlink_kem_leaked_private_key.vp", "u1c1");
+}
+#[test]
+fn test_public_constant_is_never_confidential() {
+	run_model("public_constant_is_never_confidential.vp", "c1c1");
+}
+#[test]
+fn test_bypass_needs_the_whole_check() {
+	run_model("bypass_needs_the_whole_check.vp", "a0");
+}
+#[test]
+fn test_bypass_needs_the_whole_check_ad_leaked() {
+	run_model("bypass_needs_the_whole_check_ad_leaked.vp", "a1");
+}
+#[test]
+fn test_bypass_needs_the_signed_message() {
+	run_model("bypass_needs_the_signed_message.vp", "a0");
+}
+#[test]
+fn test_scenario_order_is_not_a_verdict() {
+	run_model("scenario_order_is_not_a_verdict.vp", "c0a1");
+}
+#[test]
+fn test_scenario_order_is_not_a_verdict_swapped() {
+	run_model("scenario_order_is_not_a_verdict_swapped.vp", "c0a1");
+}
+#[test]
+fn test_bypass_needs_the_signed_message_public() {
+	run_model("bypass_needs_the_signed_message_public.vp", "a1");
+}
+#[test]
+fn test_scenario_peer_compromised_later() {
+	run_model("scenario_peer_compromised_later.vp", "c1");
+}
+#[test]
+fn test_scenario_peer_compromised_throughout() {
+	run_model("scenario_peer_compromised_throughout.vp", "c0");
+}
+#[test]
+fn test_equivalence_names_the_projection() {
+	run_model("equivalence_names_the_projection.vp", "e1");
+}
+#[test]
+fn test_leaks_without_a_message_is_visible() {
+	run_model("leaks_without_a_message_is_visible.vp", "c1");
+}
+#[test]
+fn test_cap_forgeable_names_its_assumption() {
+	run_model("cap_forgeable_names_its_assumption.vp", "a1");
+}
+#[test]
+fn test_cap_forgeable_names_its_assumption_absent() {
+	run_model_sessions("cap_forgeable_names_its_assumption_absent.vp", 1, "a0");
+	run_model("cap_forgeable_names_its_assumption_absent.vp", "a1");
 }
 #[test]
 fn test_deep_nesting_reconstruct() {

@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0c0 — the identifying-check witness names the input the check
+// actually needs, and KEM_DECAP needs the recipient's private key.
+//
+// Alice and Carol each encapsulate to Bob. The attacker observes gb on the
+// wire but never learns b, so it cannot run KEM_DECAP over either ciphertext
+// and cannot tell that both went to the same recipient. The c0 on m1 is the
+// counterweight from inside the same run: the engine already agrees the
+// attacker cannot decapsulate, so a u1 here would have contradicted it.
+//
+// Verifpal used to report u1, because the identifier was read off the
+// *producing* primitive's matched argument -- KEM_ENCAP's argument 0, which
+// is the public key -- rather than off the position the *checking* primitive
+// needs. For SIGN/SIGNVERIF those differ by a PUBKEY the rule peels, and for
+// AEAD they coincide, which is why only the KEM pair was wrong.
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: gb
+Bob -> Carol: gb
+
+principal Alice[
+	generates r1
+	ss1, ct1 = KEM_ENCAP(gb, r1)
+	knows private m1
+	e1 = AEAD_ENC(ss1, m1, nil)
+]
+
+principal Carol[
+	generates r2
+	ss2, ct2 = KEM_ENCAP(gb, r2)
+	knows private m2
+	e2 = AEAD_ENC(ss2, m2, nil)
+]
+
+Alice -> Bob: ct1, e1
+Carol -> Bob: ct2, e2
+
+principal Bob[
+	k1 = KEM_DECAP(b, ct1)?
+	k2 = KEM_DECAP(b, ct2)?
+	d1 = AEAD_DEC(k1, e1, nil)?
+	d2 = AEAD_DEC(k2, e2, nil)?
+]
+
+queries[
+	unlinkability? ct1, ct2
+	confidentiality? m1
+]

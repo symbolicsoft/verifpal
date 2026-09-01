@@ -50,6 +50,7 @@ fn golden_run() -> Run {
 	};
 	broken.steps = vec![
 		step("derive", "Attacker constructs PUBKEY(nil) from nil."),
+		step("derive", "Attacker is handed b by a leaks declaration."),
 		step("derive", "Attacker obtains ga on the wire."),
 		ReportStep {
 			kind: "mutations".to_string(),
@@ -310,6 +311,62 @@ fn a_whole_run_renders_one_document_with_a_summary_table() {
 	assert!(tex.contains("\\label{tab:summary}"), "no summary table");
 	assert_eq!(tex.matches("\\begin{document}").count(), 1);
 	assert!(braces_balance(&tex));
+}
+
+#[test]
+fn the_source_appendix_cannot_be_closed_from_inside_a_model() {
+	let terminator = super::listing_terminator();
+	let hostile = format!(
+		"attacker[passive]\n// {terminator}\n// \\typeout{{pwned}}\n// begin again\n\
+		 principal Alice[\n\tknows private m\n\th = HASH(m)\n]\n\
+		Alice -> Bob: h\nprincipal Bob[\n\t_ = HASH(h)\n]\n\
+		queries[\n\tconfidentiality? m\n]\n"
+	);
+	let safe = super::listing_safe(&hostile);
+	assert!(
+		!safe.contains(&terminator),
+		"a model carrying the listing terminator must not be able to close the \
+		 listing it is set in, or the rest of its source becomes live LaTeX:\n{safe}"
+	);
+	assert!(
+		safe.contains("knows private m"),
+		"only the offending line is withheld; the rest of the source stays verbatim"
+	);
+	assert!(
+		safe.lines().count() == hostile.lines().count(),
+		"withholding replaces a line rather than dropping it"
+	);
+}
+
+#[test]
+fn a_split_or_spaced_terminator_is_still_caught() {
+	let terminator = super::listing_terminator();
+	for line in [
+		format!("// {terminator}"),
+		format!("//\t{terminator}"),
+		["// \\", "end ", "{ ", super::LISTING, " }"].concat(),
+	] {
+		let safe = super::listing_safe(&line);
+		assert!(
+			!safe
+				.chars()
+				.filter(|c| !c.is_whitespace())
+				.collect::<String>()
+				.contains(&terminator),
+			"`{line}` still closes the listing"
+		);
+	}
+}
+
+#[test]
+fn the_source_template_sets_the_environment_the_guard_watches() {
+	let template = std::fs::read_to_string("src/tex/tpl/source.tex").expect("reads");
+	assert!(
+		template.contains(&super::listing_terminator()),
+		"the source appendix is set in an environment other than `{}`, so the \
+		 guard that keeps a model from closing it is watching the wrong name",
+		super::LISTING
+	);
 }
 
 #[test]

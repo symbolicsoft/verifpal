@@ -94,12 +94,17 @@ fn title_case(s: &str) -> String {
 }
 
 fn starts_with_keyword(s: &str, keyword: &str) -> bool {
-	if !s.starts_with(keyword) {
+	if !starts_with_ignoring_case(s, keyword) {
 		return false;
 	}
 	s.as_bytes()
 		.get(keyword.len())
 		.is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'_')
+}
+
+fn starts_with_ignoring_case(s: &str, keyword: &str) -> bool {
+	let (bytes, kw) = (s.as_bytes(), keyword.as_bytes());
+	bytes.len() >= kw.len() && bytes[..kw.len()].eq_ignore_ascii_case(kw)
 }
 
 struct Parser<'a> {
@@ -442,6 +447,32 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	fn matches_keyword(&self, keyword: &str) -> bool {
+		let kw = keyword.as_bytes();
+		self.pos + kw.len() <= self.input.len()
+			&& self.input[self.pos..self.pos + kw.len()].eq_ignore_ascii_case(kw)
+	}
+
+	fn expect_keyword(&mut self, keyword: &str) -> VResult<()> {
+		if self.matches_keyword(keyword) {
+			self.pos += keyword.len();
+			return Ok(());
+		}
+		Err(
+			VerifpalError::parse(format!("expected `{}`", keyword).into())
+				.at(self.here())
+				.labelled(self.found_here()),
+		)
+	}
+
+	fn try_expect_keyword(&mut self, keyword: &str) -> bool {
+		if self.matches_keyword(keyword) {
+			self.pos += keyword.len();
+			return true;
+		}
+		false
+	}
+
 	fn try_expect(&mut self, s: &str) -> bool {
 		let bytes = s.as_bytes();
 		if self.pos + bytes.len() <= self.input.len()
@@ -483,7 +514,7 @@ impl<'a> Parser<'a> {
 		let pre_attacker_comments = self.take_leading();
 
 		let attacker_kw = self.pos;
-		if !self.try_expect("attacker") {
+		if !self.try_expect_keyword("attacker") {
 			return Err(VerifpalError::parse(
 				"model does not open with an `attacker` block".into(),
 			)
@@ -553,9 +584,35 @@ impl<'a> Parser<'a> {
 		) = self.parse_scenarios()?;
 
 		self.consume_trivia();
+		if starts_with_keyword(self.remaining(), "scenarios") {
+			return Err(VerifpalError::parse(
+				"a model declares at most one `scenarios` block".into(),
+			)
+			.at(self.here())
+			.labelled("a second `scenarios` block")
+			.note(
+				"one block lists every peer instantiation to analyze, and each entry is \
+				 a whole-model configuration; a second block would silently replace the \
+				 first rather than add to it",
+			)
+			.help("move these entries into the block above"));
+		}
 		let queries_leading_comments = self.take_leading();
 		let queries_kw = self.pos;
-		if !self.try_expect("queries") {
+		if !self.try_expect_keyword("queries") {
+			if !scenarios.is_empty() {
+				return Err(VerifpalError::parse(
+					"the `scenarios` block must come directly before `queries`".into(),
+				)
+				.at(self.here())
+				.labelled(self.found_here())
+				.note(
+					"a scenario names constants the model has already declared, and \
+					 `queries` closes the model, so the only place the block can go is \
+					 between the two",
+				)
+				.help("move this above the `scenarios` block"));
+			}
 			return Err(VerifpalError::parse("model has no `queries` block".into())
 				.at(self.here())
 				.labelled(self.found_here())
@@ -610,17 +667,20 @@ impl<'a> Parser<'a> {
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
 		if !self.at_end() {
-			return Err(
-				VerifpalError::parse("content appears after the `queries` block".into())
-					.at(self.here())
-					.labelled(self.found_here())
-					.note(
-						"`queries` closes the model, so anything after it would never be \
+			let trailing = if starts_with_keyword(self.remaining(), "scenarios") {
+				"the `scenarios` block must come directly before `queries`"
+			} else {
+				"content appears after the `queries` block"
+			};
+			return Err(VerifpalError::parse(trailing.into())
+				.at(self.here())
+				.labelled(self.found_here())
+				.note(
+					"`queries` closes the model, so anything after it would never be \
 				 analyzed; this is rejected rather than ignored, because a principal \
 				 written down here would silently not be checked",
-					)
-					.help("move this above the `queries` block"),
-			);
+				)
+				.help("move this above the `queries` block"));
 		}
 		Ok(Model {
 			file_name: String::new(),
@@ -658,7 +718,7 @@ impl<'a> Parser<'a> {
 		}
 		let leading = self.take_leading();
 		let keyword = self.pos;
-		self.expect("scenarios")?;
+		self.expect_keyword("scenarios")?;
 		self.record_from(keyword, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let open_bracket = self.pos;
@@ -779,7 +839,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_principal(&mut self) -> VResult<Block> {
 		let start = self.pos;
-		self.expect("principal")?;
+		self.expect_keyword("principal")?;
 		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let name = self.parse_identifier()?;
@@ -952,7 +1012,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_knows(&mut self) -> VResult<Expression> {
 		let start = self.pos;
-		self.expect("knows")?;
+		self.expect_keyword("knows")?;
 		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let qualifier_str = self.parse_identifier()?;
@@ -989,7 +1049,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_simple_expression(&mut self, keyword: &str, kind: Declaration) -> VResult<Expression> {
 		let start = self.pos;
-		self.expect(keyword)?;
+		self.expect_keyword(keyword)?;
 		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
@@ -1299,7 +1359,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_phase(&mut self) -> VResult<Block> {
 		let block_start = self.pos;
-		self.expect("phase")?;
+		self.expect_keyword("phase")?;
 		self.record_from(block_start, crate::tokens::TokenKind::Keyword);
 		self.consume_trivia_nocapture();
 		self.expect("[")?;
@@ -1333,15 +1393,15 @@ impl<'a> Parser<'a> {
 	fn parse_query(&mut self) -> VResult<Query> {
 		self.consume_trivia();
 		let rem = self.remaining();
-		if rem.starts_with("confidentiality?") {
+		if starts_with_ignoring_case(rem, "confidentiality?") {
 			self.parse_query_single_constant("confidentiality?", QueryKind::Confidentiality)
-		} else if rem.starts_with("authentication?") {
+		} else if starts_with_ignoring_case(rem, "authentication?") {
 			self.parse_query_authentication()
-		} else if rem.starts_with("freshness?") {
+		} else if starts_with_ignoring_case(rem, "freshness?") {
 			self.parse_query_single_constant("freshness?", QueryKind::Freshness)
-		} else if rem.starts_with("unlinkability?") {
+		} else if starts_with_ignoring_case(rem, "unlinkability?") {
 			self.parse_query_multi_constant("unlinkability?", QueryKind::Unlinkability)
-		} else if rem.starts_with("equivalence?") {
+		} else if starts_with_ignoring_case(rem, "equivalence?") {
 			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
 		} else {
 			{
@@ -1378,7 +1438,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_query_single_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
 		let start = self.pos;
-		self.expect(keyword)?;
+		self.expect_keyword(keyword)?;
 		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let constant = self.parse_constant()?;
@@ -1397,7 +1457,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_query_authentication(&mut self) -> VResult<Query> {
 		let start = self.pos;
-		self.expect("authentication?")?;
+		self.expect_keyword("authentication?")?;
 		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let sender_name = title_case(&self.parse_identifier()?);
@@ -1437,7 +1497,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_query_multi_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
 		let start = self.pos;
-		self.expect(keyword)?;
+		self.expect_keyword(keyword)?;
 		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let constants = self.parse_query_constant_list()?;
@@ -1468,6 +1528,7 @@ impl<'a> Parser<'a> {
 				|| starts_with_keyword(rem, "unlinkability")
 				|| starts_with_keyword(rem, "equivalence")
 				|| rem.starts_with("//")
+				|| rem.starts_with("/*")
 			{
 				break;
 			}
@@ -1800,6 +1861,136 @@ mod tests {
 			text.contains("its signature is `AEAD_ENC(key, plaintext, ad)`"),
 			"{text}"
 		);
+	}
+
+	fn scenario_model(tail: &str) -> String {
+		format!(
+			"attacker[active]\n\
+			 principal Bob[\n\
+			 knows private sb_b\n\
+			 sb_gb = PUBKEY(sb_b)\n\
+			 ]\n\
+			 Bob -> Alice: [sb_gb]\n\
+			 principal Alice[\n\
+			 knows public sb_gpeer\n\
+			 knows private sb_m\n\
+			 sb_e = PKE_ENC(sb_gpeer, sb_m)\n\
+			 ]\n\
+			 Alice -> Bob: sb_e\n\
+			 principal Bob[\n\
+			 _ = HASH(sb_e)\n\
+			 ]\n{tail}"
+		)
+	}
+
+	#[test]
+	fn a_model_declares_at_most_one_scenarios_block() {
+		let src = scenario_model(
+			"scenarios[\nAlice[sb_gpeer = sb_gb]\n]\n\
+			 scenarios[\nAlice[sb_gpeer = sb_gb]\n]\n\
+			 queries[\nconfidentiality? sb_m\n]\n",
+		);
+		let error = parse_string("sb.vp", &src).expect_err("two blocks are refused");
+		assert!(
+			error.message.contains("at most one `scenarios` block"),
+			"got: {}",
+			error.message
+		);
+	}
+
+	#[test]
+	fn a_scenarios_block_comes_directly_before_queries() {
+		for tail in [
+			// Something between the block and `queries`.
+			"scenarios[\nAlice[sb_gpeer = sb_gb]\n]\n\
+			 principal Bob[\n_ = HASH(sb_gb)\n]\n\
+			 queries[\nconfidentiality? sb_m\n]\n",
+			// The block after `queries`, which closes the model.
+			"queries[\nconfidentiality? sb_m\n]\n\
+			 scenarios[\nAlice[sb_gpeer = sb_gb]\n]\n",
+		] {
+			let error = parse_string("sb.vp", &scenario_model(tail)).expect_err("misplaced block");
+			assert!(
+				error
+					.message
+					.contains("must come directly before `queries`"),
+				"got: {}",
+				error.message
+			);
+		}
+	}
+
+	#[test]
+	fn one_scenarios_block_directly_before_queries_is_accepted() {
+		let src = scenario_model(
+			"scenarios[\nAlice[sb_gpeer = sb_gb]\n]\n\
+			 queries[\nconfidentiality? sb_m\n]\n",
+		);
+		let m = parse_string("sb.vp", &src).expect("the one legal placement");
+		assert_eq!(m.scenarios.len(), 1);
+	}
+
+	#[test]
+	fn a_block_comment_may_follow_a_multi_constant_query() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private bc_k1\n\
+			knows private bc_k2\n\
+			_ = HASH(bc_k1, bc_k2)\n\
+			]\n\
+			queries[\n\
+			equivalence? bc_k1, bc_k2\n\
+			/* between two queries */\n\
+			freshness? bc_k1\n\
+			]\n";
+		let m = parse_string("bc.vp", src).expect("a block comment ends a query's constant list");
+		assert_eq!(m.queries.len(), 2);
+	}
+
+	#[test]
+	fn every_keyword_is_recognised_whatever_its_case() {
+		let src = "ATTACKER[passive]\n\
+			PRINCIPAL Alice[\n\
+			KNOWS private ci_m\n\
+			GENERATES ci_n\n\
+			ci_h = HASH(ci_m, ci_n)\n\
+			LEAKS ci_m\n\
+			]\n\
+			Alice -> Bob: ci_h\n\
+			PRINCIPAL Bob[\n\
+			_ = HASH(ci_h)\n\
+			]\n\
+			PHASE[1]\n\
+			PRINCIPAL Bob[\n\
+			_ = HASH(nil)\n\
+			]\n\
+			QUERIES[\n\
+			CONFIDENTIALITY? ci_m\n\
+			FRESHNESS? ci_n\n\
+			AUTHENTICATION? Alice -> Bob: ci_h\n\
+			]\n";
+		let m = parse_string("ci.vp", src)
+			.expect("identifiers are case-insensitive, and so are the keywords around them");
+		assert_eq!(m.queries.len(), 3);
+		assert_eq!(m.attacker, AttackerKind::Passive);
+		assert!(
+			m.blocks
+				.iter()
+				.any(|b| matches!(b, Block::Phase(p) if p.number == 1)),
+			"`PHASE[1]` declares a phase"
+		);
+		let declarations: Vec<Declaration> = m
+			.blocks
+			.iter()
+			.filter_map(|b| match b {
+				Block::Principal(p) => Some(p.expressions.iter().map(|e| e.kind)),
+				_ => None,
+			})
+			.flatten()
+			.collect();
+		assert!(declarations.contains(&Declaration::Knows));
+		assert!(declarations.contains(&Declaration::Generates));
+		assert!(declarations.contains(&Declaration::Leaks));
 	}
 
 	#[test]

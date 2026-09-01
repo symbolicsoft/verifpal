@@ -65,7 +65,7 @@ pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) 
 		.iter()
 		.map(|q| {
 			let mut message = if q.conclusion.is_empty() {
-				q.query.clone()
+				format!("{} — {}", q.query, q.envelope.summary)
 			} else {
 				q.conclusion.clone()
 			};

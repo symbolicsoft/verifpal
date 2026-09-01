@@ -17,6 +17,7 @@ pub(crate) enum Term {
 		name: String,
 		capabilities: Vec<String>,
 		checked: bool,
+		projection: Option<String>,
 		arguments: Vec<Term>,
 	},
 }
@@ -127,11 +128,13 @@ fn parse_term(scan: &mut Scan) -> Option<Term> {
 			scan.skip_spaces();
 		}
 	}
+	let projection = scan.eat(b'|').then(|| scan.word()).flatten();
 	let checked = scan.eat(b'?');
 	Some(Term::App {
 		name,
 		capabilities,
 		checked,
+		projection,
 		arguments,
 	})
 }
@@ -162,7 +165,7 @@ fn parse_capabilities(scan: &mut Scan) -> Option<Vec<String>> {
 }
 
 fn constant(name: String, scan: &mut Scan) -> Term {
-	let mut base = name;
+	let base = name;
 	let mut session = None;
 	let mut scenario = None;
 	loop {
@@ -177,9 +180,6 @@ fn constant(name: String, scan: &mut Scan) -> Term {
 			}
 			_ => break,
 		}
-	}
-	if base == "G" {
-		base = "G".to_string();
 	}
 	Term::Const {
 		name: base,
@@ -220,6 +220,7 @@ pub(crate) fn render(term: &Term) -> String {
 			name,
 			capabilities,
 			checked,
+			projection,
 			arguments,
 		} => {
 			let head = match name.split_once('_') {
@@ -246,7 +247,11 @@ pub(crate) fn render(term: &Term) -> String {
 				.map(render)
 				.collect::<Vec<String>>()
 				.join(",\\vpsep ");
-			format!("{head}{caps}{check}({args})")
+			let projected = match projection {
+				Some(at) => format!("\\vpprojection{{{}}}", escaped_tex(at)),
+				None => String::new(),
+			};
+			format!("{head}{caps}{check}({args}){projected}")
 		}
 	}
 }
@@ -474,6 +479,7 @@ mod tests {
 				name,
 				capabilities,
 				checked,
+				projection,
 				arguments,
 			} => {
 				let caps = if capabilities.is_empty() {
@@ -486,7 +492,14 @@ mod tests {
 					.map(back)
 					.collect::<Vec<String>>()
 					.join(", ");
-				format!("{name}{caps}({args}){}", if *checked { "?" } else { "" })
+				let at = match projection {
+					Some(at) => format!("|{at}"),
+					None => String::new(),
+				};
+				format!(
+					"{name}{caps}({args}){at}{}",
+					if *checked { "?" } else { "" }
+				)
 			}
 		}
 	}

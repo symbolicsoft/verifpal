@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — the counterweight to bypass_needs_the_whole_check.vp.
+//
+// The same protocol with the associated data leaked as well. The attacker can
+// now build AEAD_ENC(k, ., ad) for a plaintext of its choosing, so the check
+// really is defeatable and Bob really does accept a value Alice never sent.
+// Without this model, the fix that made the first one a0 could equally have
+// been "never bypass an AEAD check".
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private ad
+	leaks k
+	leaks ad
+	knows private plain
+	c = AEAD_ENC(k, plain, ad)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	knows private ad
+	m = AEAD_DEC(k, c, ad)?
+	generates s
+	out = HASH(s, m)
+]
+
+Bob -> Alice: out
+
+queries[
+	authentication? Alice -> Bob: c
+]

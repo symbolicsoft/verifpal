@@ -667,7 +667,37 @@ fn source_ctx(model: &ModelReport, index: usize) -> Ctx {
 		.text("nameplain", short_name(model))
 		.text("slug", slug(model, index))
 		.flag("empty", model.source.trim().is_empty())
-		.raw("source", model.source.trim_end())
+		.raw("source", listing_safe(model.source.trim_end()))
+}
+
+pub(crate) const LISTING: &str = "lstlisting";
+
+const WITHHELD: &str = "// [line withheld: it would have closed this listing]";
+
+pub(crate) fn listing_terminator() -> String {
+	["\\", "end{", LISTING, "}"].concat()
+}
+
+fn closes_listing(line: &str, terminator: &str) -> bool {
+	line.chars()
+		.filter(|c| !c.is_whitespace())
+		.collect::<String>()
+		.contains(terminator)
+}
+
+fn listing_safe(source: &str) -> String {
+	let terminator = listing_terminator();
+	source
+		.lines()
+		.map(|line| {
+			if closes_listing(line, &terminator) {
+				WITHHELD
+			} else {
+				line
+			}
+		})
+		.collect::<Vec<&str>>()
+		.join("\n")
 }
 
 #[cfg(test)]

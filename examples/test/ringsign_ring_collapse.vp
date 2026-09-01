@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 — a ring signature binds the whole ring, not just one member.
+//
+// Alice signs over the ring {ga, gb, gc}. Beta's and Gamma's keys reach Bob
+// unguarded, so the attacker may replace them; Alice's key and the signature
+// are guarded, so it may not touch those. Replacing gb with ga leaves Bob
+// verifying against the degenerate ring {ga, ga, gc}, which is not the ring
+// the signature was made over: real verification fails and Bob halts.
+//
+// Verifpal used to accept it, because each verifier ring position was matched
+// independently against *some* position of the signature's ring, so a ring
+// that collapsed onto one member still found a witness for every position.
+// The matching is a bijection now, and the counterweight is the honest run:
+// this model's own RINGSIGNVERIF passes as written, so the fix cannot have
+// been "reject everything".
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+	knows public msg
+]
+
+principal Beta[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Gamma[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Beta -> Alice: [gb]
+Gamma -> Alice: [gc]
+
+principal Alice[
+	sig = RINGSIGN(a, gb, gc, msg)
+]
+
+Alice -> Bob: [ga], [sig]
+Beta -> Bob: gb
+Gamma -> Bob: gc
+
+principal Bob[
+	knows public msg
+	_ = RINGSIGNVERIF(ga, gb, gc, msg, sig)?
+	generates s
+	ok = HASH(s, gb)
+]
+
+Bob -> Alice: ok
+
+queries[
+	authentication? Beta -> Bob: gb
+]

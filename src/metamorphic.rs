@@ -80,10 +80,33 @@ fn corpus() -> Vec<(String, Model)> {
 		.collect()
 }
 
+/// Do `model` and `variant` relativise against the same set of runs?
+///
+/// A monotone property compares two analyses of one question. Compromising the
+/// peer of a scenario the original already declared does not merely hand the
+/// attacker more: it moves that run from one whose claims are the protocol's to
+/// keep to one whose are not, so the two analyses answer different questions and
+/// their codes are not comparable. Only a scenario present in *both* is checked,
+/// so adding an all-honest one — which is what the `scenario` and `scenarios`
+/// properties do — still compares. Skipping such a pair is the same kind of skip
+/// as a variant that fails sanity: a property of the models, not a verdict about
+/// the engine.
+fn asks_the_same_question(model: &Model, variant: &Model) -> bool {
+	let before = crate::scenario::honesty_profile(model);
+	let after = crate::scenario::honesty_profile(variant);
+	before
+		.iter()
+		.all(|(scenario, corrupt_from)| after.get(scenario) == Some(corrupt_from))
+}
+
 fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
-	if before.len() != after.len() {
-		return Vec::new();
-	}
+	assert_eq!(
+		before.len(),
+		after.len(),
+		"a transformation changed the number of queries, so the two result codes \
+		 ({before} and {after}) cannot be compared query by query. Reporting no \
+		 violation here would turn the property into a silent skip"
+	);
 	before
 		.as_bytes()
 		.chunks(2)
@@ -195,7 +218,7 @@ fn annotations(value: &Value, cap: Capability) -> Vec<Value> {
 
 fn variants_weakened(model: &Model) -> Vec<Model> {
 	let mut out = Vec::new();
-	for cap in [Capability::Weak, Capability::Forgeable] {
+	for cap in Capability::ALL {
 		for (bi, block) in model.blocks.iter().enumerate() {
 			let Block::Principal(principal) = block else {
 				continue;
@@ -526,6 +549,9 @@ fn check_invariant(
 		let Some(transformed) = variant(model) else {
 			return local;
 		};
+		if !asks_the_same_question(model, &transformed) {
+			return local;
+		}
 		match code_of(&transformed, SESSIONS, sweep) {
 			Outcome::Rejected => {}
 			Outcome::Panicked => {
@@ -641,6 +667,9 @@ fn check_monotone(
 		}
 		let mut ran = false;
 		for variant in variants(model) {
+			if !asks_the_same_question(model, &variant) {
+				continue;
+			}
 			match code_of(&variant, SESSIONS, sweep) {
 				Outcome::Rejected => continue,
 				Outcome::Panicked => {
@@ -684,7 +713,12 @@ mod tests {
 	fn lost_attacks_finds_only_ones_that_became_zeros() {
 		assert_eq!(lost_attacks("c1a0", "c0a0"), vec![0]);
 		assert_eq!(lost_attacks("c1a0", "c1a1"), Vec::<usize>::new());
-		assert_eq!(lost_attacks("c1", "c1a0"), Vec::<usize>::new());
+	}
+
+	#[test]
+	#[should_panic(expected = "changed the number of queries")]
+	fn comparing_codes_of_different_lengths_is_refused_rather_than_skipped() {
+		lost_attacks("c1", "c1a0");
 	}
 
 	#[test]

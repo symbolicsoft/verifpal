@@ -72,9 +72,10 @@ impl NameTable {
 	fn render(&self, p: &Primitive, show: &mut dyn FnMut(&Value) -> String) -> String {
 		let args: Vec<String> = p.arguments.iter().map(show).collect();
 		format!(
-			"{}({}){}",
+			"{}({}){}{}",
 			primitive_name(p.id),
 			args.join(", "),
+			projection(p),
 			if p.instance_check { "?" } else { "" }
 		)
 	}
@@ -88,6 +89,13 @@ impl NameTable {
 			Value::Primitive(p) => self.render(p, &mut |a| self.compress_excluding(a, exclude)),
 		}
 	}
+}
+
+pub(crate) fn projection(p: &Primitive) -> String {
+	if crate::primitive::primitive_has_single_output(p.id) {
+		return String::new();
+	}
+	format!("|{}", p.output + 1)
 }
 
 fn excluded(exclude: &[&str], name: &str) -> bool {
@@ -483,9 +491,10 @@ impl<'a> Narrator<'a> {
 		target: &Value,
 		exclude: &[&str],
 		seen: &mut Vec<KnownIdx>,
+		root: bool,
 	) -> Vec<Step> {
 		let mut steps: Vec<Step> = Vec::new();
-		self.walk(target, exclude, seen, &mut steps);
+		self.walk(target, exclude, seen, &mut steps, root);
 		steps
 	}
 
@@ -495,11 +504,12 @@ impl<'a> Narrator<'a> {
 		exclude: &[&str],
 		seen: &mut Vec<KnownIdx>,
 		steps: &mut Vec<Step>,
+		root: bool,
 	) {
 		let Some(idx) = self.attacker.knows(value) else {
 			if let Value::Primitive(p) = value {
 				for argument in p.arguments.iter() {
-					self.walk(argument, exclude, seen, steps);
+					self.walk(argument, exclude, seen, steps, false);
 				}
 			}
 			return;
@@ -514,13 +524,18 @@ impl<'a> Narrator<'a> {
 			.iter()
 			.find(|c| !c.via.is_empty() && c.value.equivalent(value, true))
 			.and_then(|c| c.record.as_ref())
-			.filter(|_| here.is_some_and(|d| !d.ingredients().is_empty()));
+			.filter(|_| here.is_some_and(|d| !d.ingredients().is_empty()))
+			.filter(|_| !matches!(here, Some(DerivationRecord::Broken { .. })));
 		let Some(derivation) = brought_in.or(here) else {
 			return;
 		};
 
+		if matches!(derivation, DerivationRecord::Initial) && !root {
+			return;
+		}
+
 		for ingredient in derivation.ingredients() {
-			self.walk(ingredient, exclude, seen, steps);
+			self.walk(ingredient, exclude, seen, steps, false);
 		}
 
 		if let Some(text) = self.describe(derivation, value, exclude) {
@@ -631,7 +646,7 @@ impl Narrator<'_> {
 			installed,
 		);
 		Some(match derivation {
-			DerivationRecord::Initial => return None,
+			DerivationRecord::Initial => format!("Attacker knows {}: it is public.", v),
 			DerivationRecord::Leaked { .. } => {
 				format!("Attacker is handed {} by a leaks declaration.", v)
 			}
@@ -962,13 +977,13 @@ pub(crate) fn narrate_attack(
 	);
 	let mut steps: Vec<Step> = Vec::new();
 	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
-		steps.extend(narrator.derivation_steps(&sv.pre_rewrite, &shadowed_refs, &mut seen));
+		steps.extend(narrator.derivation_steps(&sv.pre_rewrite, &shadowed_refs, &mut seen, false));
 	}
 
 	steps.extend(mutation_steps(km, &witness.ps, &table, ambient));
 	steps.extend(gate_steps(&witness.ps, &table, &installed_refs));
 
-	steps.extend(narrator.derivation_steps(target, &installed_refs, &mut seen));
+	steps.extend(narrator.derivation_steps(target, &installed_refs, &mut seen, true));
 
 	let mut steps = {
 		let mut all = prelude;
@@ -1480,6 +1495,7 @@ mod tests {
 			&target,
 			&[],
 			&mut Vec::new(),
+			true,
 		);
 
 		assert!(!steps.is_empty(), "the attacker learned dw_m somehow");
@@ -1514,7 +1530,7 @@ mod tests {
 		let trace = make_trace();
 		assert!(
 			Narrator::new(&trace, &attacker, &table, &[], 0, &[])
-				.derivation_steps(&unknown, &[], &mut Vec::new())
+				.derivation_steps(&unknown, &[], &mut Vec::new(), true)
 				.is_empty()
 		);
 	}

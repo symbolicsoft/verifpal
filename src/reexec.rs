@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::primitive::{attacker_public_key, primitive_extract_bypass_key};
+use crate::primitive::{
+	BypassKeyKind, attacker_public_key, primitive_extract_bypass_key, primitive_get,
+};
 use crate::principal::ATTACKER_ID;
 use crate::theory::{obtainable, reduce_once};
 use crate::types::*;
@@ -218,6 +220,40 @@ fn foreign_halts(
 		.collect()
 }
 
+fn keyed_position(prim: &Primitive) -> Option<usize> {
+	match primitive_get(prim.id).ok()?.bypass_key? {
+		BypassKeyKind::Direct(at) => Some(at),
+		BypassKeyKind::Derived { arg, .. } => Some(arg),
+	}
+}
+
+fn bypass_is_constructible(
+	prim: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	let Some(key) = primitive_extract_bypass_key(prim) else {
+		return false;
+	};
+	if !obtainable(&key, ps, attacker) {
+		return false;
+	}
+	let Ok(spec) = primitive_get(prim.id) else {
+		return false;
+	};
+	let Some(rule) = spec.rewrite.as_ref() else {
+		return false;
+	};
+	let keyed = keyed_position(prim);
+	rule.matching.iter().all(|(outer, _)| {
+		Some(*outer) == keyed
+			|| prim
+				.arguments
+				.get(*outer)
+				.is_some_and(|a| obtainable(a, ps, attacker))
+	})
+}
+
 fn try_guard_bypass(
 	ps_pre: &PrincipalState,
 	ps_resolved: &PrincipalState,
@@ -229,8 +265,7 @@ fn try_guard_bypass(
 		.filter(|(prim, idx)| {
 			prim.instance_check
 				&& ps_resolved.values[*idx].provenance.creator == ps_resolved.id
-				&& primitive_extract_bypass_key(prim)
-					.is_some_and(|key| obtainable(&key, ps_resolved, attacker))
+				&& bypass_is_constructible(prim, ps_resolved, attacker)
 		})
 		.map(|(_, idx)| *idx)
 		.collect();
@@ -257,8 +292,7 @@ fn try_guard_bypass(
 			{
 				continue;
 			}
-			if primitive_extract_bypass_key(prim).is_some_and(|key| obtainable(&key, &ps, attacker))
-			{
+			if bypass_is_constructible(prim, &ps, attacker) {
 				ps.values[*idx].override_all_bypassed(attacker_public_key());
 				injected = true;
 			}

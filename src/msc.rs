@@ -290,6 +290,15 @@ fn matches(hop: &Hop, sender: &str, recipient: &str, names: &[String]) -> bool {
 		.any(|n| hop.values.contains(&copy_base_name(n)))
 }
 
+fn names_value(text: &str, value: &str) -> bool {
+	let boundary = |c: char| !c.is_alphanumeric() && c != '_' && c != '#' && c != '@';
+	text.match_indices(value).any(|(at, _)| {
+		let before = text[..at].chars().next_back().is_none_or(boundary);
+		let after = text[at + value.len()..].chars().next().is_none_or(boundary);
+		before && after
+	})
+}
+
 pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, Lanes) {
 	let wires = hops(model);
 	let leaks: Vec<(&str, Vec<&str>)> = model
@@ -323,7 +332,7 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 						if drawn.contains(principal) {
 							continue;
 						}
-						if !values.iter().any(|v| held_step.text.contains(v)) {
+						if !values.iter().any(|v| names_value(&held_step.text, v)) {
 							continue;
 						}
 						drawn.push(principal);

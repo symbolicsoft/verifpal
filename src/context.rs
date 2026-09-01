@@ -39,7 +39,7 @@ pub(crate) struct VerifyContext {
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
 	truncations: RwLock<Vec<Truncation>>,
 	sessions: u8,
-	honest: Option<IdSet<PrincipalId>>,
+	honest: Option<IdMap<PrincipalId, i32>>,
 	honest_halts: RwLock<Vec<(PrincipalId, usize)>>,
 	scenarios: Vec<ScenarioSummary>,
 	#[cfg(test)]
@@ -117,7 +117,11 @@ fn attacker_state_absorb(
 		let candidate = derivation_provenance(state, record, &derivation);
 		let explains = |r: &MutationRecord| r.diffs.iter().any(|d| d.tainted);
 		let stale = state.record(existing).is_some_and(|r| !explains(r));
-		if stale && explains(&candidate) {
+		let names_assumption = |d: &DerivationRecord| matches!(d, DerivationRecord::Broken { .. });
+		let unnamed = state
+			.derivation(existing)
+			.is_some_and(|d| !names_assumption(d));
+		if (stale && explains(&candidate)) || (names_assumption(&derivation) && unnamed) {
 			Arc::make_mut(&mut state.mutation_records)[existing.get()] = candidate;
 			Arc::make_mut(&mut state.derivations)[existing.get()] = derivation;
 		}
@@ -141,7 +145,7 @@ impl VerifyContext {
 		states: &[PrincipalState],
 		variants: Vec<Vec<Query>>,
 		sessions: u8,
-		honest: Option<IdSet<PrincipalId>>,
+		honest: Option<IdMap<PrincipalId, i32>>,
 		scenarios: Vec<ScenarioSummary>,
 	) -> Self {
 		let results: Vec<VerifyResult> = m
@@ -238,9 +242,22 @@ impl VerifyContext {
 	/// none: `honest` is `None` in the second case and `Some(empty)` in the
 	/// first.
 	pub(crate) fn is_honest(&self, principal: PrincipalId) -> bool {
+		self.is_honest_at(principal, read_lock(&self.attacker).current_phase)
+	}
+
+	fn is_honest_at(&self, principal: PrincipalId, phase: i32) -> bool {
 		match &self.honest {
 			None => true,
-			Some(honest) => honest.contains(&principal),
+			Some(honest) => honest
+				.get(&principal)
+				.is_some_and(|&corrupt_from| phase < corrupt_from),
+		}
+	}
+
+	fn nothing_is_honest_at(&self, phase: i32) -> bool {
+		match &self.honest {
+			None => false,
+			Some(honest) => honest.values().all(|&corrupt_from| phase >= corrupt_from),
 		}
 	}
 
@@ -271,16 +288,13 @@ impl VerifyContext {
 	/// nothing to relativise against, so it evaluates everywhere rather than
 	/// reporting a vacuous hold for every query.
 	pub(crate) fn claims_apply_to(&self, principal: PrincipalId) -> bool {
-		match &self.honest {
-			None => true,
-			Some(honest) => honest.is_empty() || honest.contains(&principal),
-		}
+		let phase = read_lock(&self.attacker).current_phase;
+		self.nothing_is_honest_at(phase) || self.is_honest_at(principal, phase)
 	}
 
 	pub(crate) fn relativises(&self) -> bool {
-		self.honest
-			.as_ref()
-			.is_some_and(|honest| !honest.is_empty())
+		let phase = read_lock(&self.attacker).current_phase;
+		self.honest.is_some() && !self.nothing_is_honest_at(phase)
 	}
 
 	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
@@ -379,9 +393,6 @@ impl VerifyContext {
 			if let Ok(earliest) = min_int_in_slice(&sm.phase)
 				&& earliest > phase
 			{
-				continue;
-			}
-			if !km.constant_used_by_any(&sm.constant) {
 				continue;
 			}
 			attacker_state_absorb(&mut state, &sv.value, &record, DerivationRecord::Initial);
@@ -566,7 +577,11 @@ impl VerifyContext {
 		self.scratch(query_index, None)
 	}
 
-	fn scratch(&self, query_index: usize, honest: Option<IdSet<PrincipalId>>) -> VerifyContext {
+	fn scratch(
+		&self,
+		query_index: usize,
+		honest: Option<IdMap<PrincipalId, i32>>,
+	) -> VerifyContext {
 		let mut results = self.results_get();
 		for (i, r) in results.iter_mut().enumerate() {
 			if i == query_index {
@@ -864,15 +879,15 @@ mod tests {
 		assert!(plain.claims_apply_to(9));
 		assert!(!plain.relativises());
 
-		let mut honest: IdSet<PrincipalId> = IdSet::default();
-		honest.insert(1);
+		let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
+		honest.insert(1, i32::MAX);
 		let mixed = VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new());
 		assert!(mixed.claims_apply_to(1));
 		assert!(!mixed.claims_apply_to(2));
 		assert!(mixed.relativises());
 
 		let corrupt =
-			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdSet::default()), Vec::new());
+			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdMap::default()), Vec::new());
 		assert!(
 			corrupt.claims_apply_to(2),
 			"a model with nothing honest to relativise against must not hold vacuously"

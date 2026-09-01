@@ -494,7 +494,14 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 	}
 
 	let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
-	if trimmed.trim_end().ends_with("knows") {
+	let head = trimmed.trim_end();
+	let after_knows = head.strip_suffix("knows").is_some_and(|before| {
+		before
+			.chars()
+			.next_back()
+			.is_none_or(|c| !c.is_alphanumeric() && c != '_')
+	});
+	if after_knows {
 		return ["public", "private", "password"]
 			.iter()
 			.map(|q| item(q, CompletionItemKind::KEYWORD, docs::keyword(q)))

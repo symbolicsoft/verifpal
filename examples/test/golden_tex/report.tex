@@ -38,6 +38,7 @@
 \newcommand{\vpconst}[1]{\mathit{#1}}
 \newcommand{\vpsession}[2]{#1^{\##2}}
 \newcommand{\vpscenario}[2]{#1^{@#2}}
+\newcommand{\vpprojection}[1]{_{#1}}
 \newcommand{\vpguard}[1]{[#1]}
 \newcommand{\vpcaps}[1]{^{[\mathrm{#1}]}}
 \newcommand{\vpchecked}{^{?}}
@@ -306,11 +307,11 @@ Query & Verdict & Scope of the verdict & Line \\
 \vplane{1}{Alice}
 \vplaneadv{2}{Attacker}
 \vpleak{0}{1}{Bob leaks b}
-\vprun{2}{vpnumwide}{1--2}{computes}
-\vphopforged{1}{2}{0}{vpforged}{vpnumadv}{3}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}},\, \vpterm{\vpconst{e}}}
-\vpmark{0}{vpnote}{vpnumadv}{4}{check passes}
-\vpmark{1}{vpnoteadv}{vpnumadv}{5}{check defeated}
-\vprun{2}{vpnumwide}{6--7}{computes}
+\vprun{2}{vpnumwide}{1--3}{computes}
+\vphopforged{1}{2}{0}{vpforged}{vpnumadv}{4}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}},\, \vpterm{\vpconst{e}}}
+\vpmark{0}{vpnote}{vpnumadv}{5}{check passes}
+\vpmark{1}{vpnoteadv}{vpnumadv}{6}{check defeated}
+\vprun{2}{vpnumwide}{7--8}{computes}
 \end{vpdiagram}
 \captionof{figure}{How the attacker breaks \textnormal{\textsf{confidentiality?}~\vpterm{\vpconst{m}}}. Substituted values carry a dagger.}
 \label{fig:golden-vp-0-attack-0}
@@ -320,6 +321,7 @@ Query & Verdict & Scope of the verdict & Line \\
 
 \begin{vptrace}
 \item \vpactor{Attacker} constructs \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})} from nil.
+\item \vpactor{Attacker} is handed \vpterm{\vpconst{b}} by a leaks declaration.
 \item \vpactor{Attacker} obtains \vpterm{\vpconst{ga}} on the wire.
 \item \vpactor{Attacker} replaces \vpterm{\vpconst{ga}} with \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})}.\vpon{Alice}{Bob}
 \item \vpactor{Bob}'s \vpterm{\vpprim{AEAD}{DEC}\vpchecked{}(\vpconst{k},\vpsep \vpconst{e},\vpsep \vpconst{ad})} check passes on an attacker-controlled key.

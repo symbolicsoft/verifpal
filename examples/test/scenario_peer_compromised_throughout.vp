@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — the control for scenario_peer_compromised_later.vp.
+//
+// The same model with Bob's key leaked from phase 0 rather than phase 1. His
+// run is now corrupt at every phase, so it is minted no query instance and its
+// break is not the protocol's to answer for. Carol's run, the one the written
+// query names, keeps its guarded key and holds.
+//
+// Without this control, the c1 of the other model could equally have been "any
+// scenario whose peer key ever leaks now reports its own break".
+
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	leaks b
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Carol -> Alice: [gc]
+Bob -> Alice: gb
+Mallory -> Alice: [gm]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates m
+	k = DH_KEX(gpeer, a)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Dave: ga, e
+
+principal Dave[
+	knows private dk
+	d = HASH(e, dk)
+]
+
+Dave -> Bob: d
+
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? m
+]

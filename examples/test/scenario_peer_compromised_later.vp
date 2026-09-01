@@ -1,0 +1,76 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — a peer whose key leaks in a later phase is an honest peer
+// until then, and its run's claims are the protocol's to keep until then.
+//
+// Three peers. Carol's key reaches Alice guarded and never leaks. Bob's key
+// reaches Alice UNGUARDED, so at phase 0 the attacker substitutes its own,
+// Alice derives a key the attacker owns, and `m` in that run is readable. Bob's
+// key only leaks at phase 1, which has nothing to do with that attack.
+//
+// The corrupt-peer inference used to read `leaks` without its phase, so Bob's
+// run counted as corrupt from phase 0 and every claim it could have answered
+// was dropped: c0, a missed attack. The inference now records WHEN a run stops
+// being honest rather than only whether, so Bob's run is minted a query
+// instance of its own and answers at the phase where he is still honest.
+//
+// scenario_peer_compromised_throughout.vp is the control: the same model with
+// Bob's key leaked from phase 0 instead. His run is then corrupt at every
+// phase, is minted no instance, and the model holds at c0 -- so this c1 is
+// about the phase, not about the unguarded key.
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Carol -> Alice: [gc]
+Bob -> Alice: gb
+Mallory -> Alice: [gm]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates m
+	k = DH_KEX(gpeer, a)
+	e = AEAD_ENC(k, m, nil)
+]
+
+Alice -> Dave: ga, e
+
+principal Dave[
+	knows private dk
+	d = HASH(e, dk)
+]
+
+Dave -> Bob: d
+
+phase[1]
+
+principal Bob[
+	leaks b
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? m
+]

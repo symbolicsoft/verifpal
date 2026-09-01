@@ -171,7 +171,7 @@ pub(crate) fn compute_slot_diffs(
 		.zip(trace.slots.iter())
 		.enumerate()
 		.filter_map(|(i, ((sv, sm), slot))| {
-			if sv.pre_rewrite.equivalent(&slot.initial_value, false) {
+			if sv.pre_rewrite.equivalent(&slot.initial_value, true) {
 				None
 			} else {
 				Some(SlotDiff {

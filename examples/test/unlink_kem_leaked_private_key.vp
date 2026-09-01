@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1c1 — the counterweight to unlink_kem_needs_the_private_key.vp.
+//
+// The same protocol with Bob's decapsulation key leaked. The attacker can now
+// run KEM_DECAP over both ciphertexts, so the two encapsulations really are
+// linkable, and the plaintexts really are readable. Without this model the fix
+// that made the first one u0 could equally have been "never link a KEM".
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	leaks b
+]
+
+Bob -> Alice: gb
+Bob -> Carol: gb
+
+principal Alice[
+	generates r1
+	ss1, ct1 = KEM_ENCAP(gb, r1)
+	knows private m1
+	e1 = AEAD_ENC(ss1, m1, nil)
+]
+
+principal Carol[
+	generates r2
+	ss2, ct2 = KEM_ENCAP(gb, r2)
+	knows private m2
+	e2 = AEAD_ENC(ss2, m2, nil)
+]
+
+Alice -> Bob: ct1, e1
+Carol -> Bob: ct2, e2
+
+principal Bob[
+	k1 = KEM_DECAP(b, ct1)?
+	k2 = KEM_DECAP(b, ct2)?
+	d1 = AEAD_DEC(k1, e1, nil)?
+	d2 = AEAD_DEC(k2, e2, nil)?
+]
+
+queries[
+	unlinkability? ct1, ct2
+	confidentiality? m1
+]

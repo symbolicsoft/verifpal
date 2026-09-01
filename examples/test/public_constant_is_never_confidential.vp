@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — `knows public` means the attacker knows it, whether or not
+// the protocol goes on to compute with it.
+//
+// `used` is passed to a primitive and `spare` is not. Both are public, so both
+// are the attacker's from phase 0. Seeding used to skip a public constant no
+// principal mentioned inside a term, which made `confidentiality? spare` pass:
+// a value declared public and reported confidential in the same breath.
+attacker[passive]
+
+principal Alice[
+	knows public used
+	knows public spare
+	knows private m
+	e = HASH(m, used)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	_ = HASH(e)
+]
+
+queries[
+	confidentiality? used
+	confidentiality? spare
+]

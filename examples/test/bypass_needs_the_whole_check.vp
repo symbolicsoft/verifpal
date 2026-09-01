@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 — holding the key is not enough to defeat an AEAD check.
+//
+// `k` is leaked, so the attacker holds the decryption key. `ad` is a secret
+// Alice and Bob share and never send, so the attacker cannot produce any
+// AEAD_ENC(k, ., ad): the tag is bound to the associated data. Bob halts on
+// every substitution of `c`, and there is no attack.
+//
+// The guard bypass used to fire on the key alone, and reported a1 with the
+// trace saying "Attacker holds k, so it can supply a value this check
+// accepts" -- which the engine's own derivability judgement would have
+// refused. It now also requires every other position the rewrite rule pins,
+// which for AEAD_DEC is the associated data.
+//
+// bypass_needs_the_whole_check_ad_leaked.vp is the counterweight: leak `ad`
+// too and the forgery really is constructible, so the a1 comes back.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private ad
+	leaks k
+	knows private plain
+	c = AEAD_ENC(k, plain, ad)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	knows private ad
+	m = AEAD_DEC(k, c, ad)?
+	generates s
+	out = HASH(s, m)
+]
+
+Bob -> Alice: out
+
+queries[
+	authentication? Alice -> Bob: c
+]

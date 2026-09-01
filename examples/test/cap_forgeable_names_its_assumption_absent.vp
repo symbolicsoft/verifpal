@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at --sessions 1, a1 at 2 — the control for
+// cap_forgeable_names_its_assumption.vp.
+//
+// The same model with the annotation removed. At one session there is no
+// sibling run to replay from, so the only route to Bob is the forgery the
+// assumption licenses, and without it the query holds. That a0 is what makes
+// the annotated model's a1 attributable to `forgeable` and not to something
+// else. At two sessions the pair is replayable out of the other session, which
+// is a different attack needing no assumption at all.
+attacker[active]
+
+principal Alice[
+	knows private kk
+	knows public junk
+	generates m
+	tag = MAC(kk, m)
+]
+
+Alice -> Bob: m, tag
+
+principal Bob[
+	knows private kk
+	_ = ASSERT(tag, MAC(kk, m))?
+	generates s
+	ack = HASH(s, m)
+]
+
+Bob -> Alice: ack
+
+queries[
+	authentication? Alice -> Bob: tag
+]

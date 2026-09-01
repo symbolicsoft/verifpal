@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1 — two different outputs of one HKDF are not equivalent, and the
+// trace has to be able to say why.
+//
+// A multi-output primitive used to print without its output index, so this
+// model's trace read "k1 resolves to HKDF(salt, ikm, info). k2 resolves to
+// HKDF(salt, ikm, info). k1, k2 are not equivalent." -- two identical strings
+// and then a claim that they differ. Trace rendering now carries the
+// projection, so the two sides read |1 and |2 and the verdict follows from
+// what the reader is shown. The verdict itself was always right; the trace
+// was the part that could not be believed.
+attacker[passive]
+
+principal Alice[
+	knows private ikm
+	knows public salt
+	knows public info
+	k1, k2 = HKDF(salt, ikm, info)
+	_ = HASH(k1, k2)
+]
+
+queries[
+	equivalence? k1, k2
+]

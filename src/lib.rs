@@ -83,7 +83,15 @@ struct WasmVerify {
 	results: Vec<WasmResult>,
 	code: String,
 	assumptions: Vec<WasmAssumption>,
+	scenarios: Vec<WasmScenario>,
 	messages: Vec<String>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(serde::Serialize)]
+struct WasmScenario {
+	summary: String,
+	honest: bool,
 }
 
 #[cfg(feature = "wasm")]
@@ -141,6 +149,14 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 				from_phase: *onset,
 			})
 			.collect(),
+		scenarios: ctx
+			.scenarios()
+			.iter()
+			.map(|s| WasmScenario {
+				summary: s.to_string(),
+				honest: s.honest,
+			})
+			.collect(),
 		messages: info::wasm_messages_drain(),
 	})
 }
@@ -155,10 +171,11 @@ pub fn wasm_verify(input: &str) -> String {
 		results: vec![],
 		code: String::new(),
 		assumptions: vec![],
+		scenarios: vec![],
 		messages: info::wasm_messages_drain(),
 	});
 	serde_json::to_string(&payload).unwrap_or_else(|_| {
-		r#"{"ok":false,"error":"could not serialize the result","results":[],"code":"","assumptions":[],"messages":[]}"#
+		r#"{"ok":false,"error":"could not serialize the result","results":[],"code":"","assumptions":[],"scenarios":[],"messages":[]}"#
 			.to_string()
 	})
 }

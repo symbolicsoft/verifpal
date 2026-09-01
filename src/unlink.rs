@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{BypassKeyKind, PrimitiveSpec, primitive_check_undoing};
+use crate::primitive::{PrimitiveSpec, primitive_check_undoing};
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 
@@ -86,12 +86,13 @@ fn witness_identifying_check(
 	if !ap.arguments[key_arg].equivalent(&bp.arguments[key_arg], true) {
 		return None;
 	}
-	let identifier = match check.bypass_key {
-		Some(BypassKeyKind::Derived { constructor, .. }) => {
-			Value::primitive(constructor, vec![ap.arguments[key_arg].clone()], 0)
-		}
-		_ => ap.arguments[key_arg].clone(),
-	};
+	let identifier = check_input(
+		check,
+		check.rewrite.as_ref()?,
+		identifying,
+		key_arg,
+		&ap.arguments[key_arg],
+	)?;
 	if !crate::theory::obtainable(&identifier, ps, attacker) {
 		return None;
 	}
@@ -188,10 +189,9 @@ fn recognized_secrets(
 	let Some(rewrite) = check.rewrite.as_ref() else {
 		return Vec::new();
 	};
-	let runnable = rewrite
-		.matching
-		.iter()
-		.all(|(position, targets)| check_input_held(check, *position, targets, p, ps, attacker));
+	let runnable = rewrite.matching.iter().all(|(position, targets)| {
+		check_input_held(check, rewrite, *position, targets, p, ps, attacker)
+	});
 	if !runnable {
 		return Vec::new();
 	}
@@ -201,7 +201,7 @@ fn recognized_secrets(
 			let Some(arg) = p.arguments.get(*t) else {
 				continue;
 			};
-			if is_key_derivation(check, arg) {
+			if is_key_derivation(arg) {
 				continue;
 			}
 			if !crate::theory::obtainable(arg, ps, attacker) {
@@ -213,8 +213,50 @@ fn recognized_secrets(
 	out.into_iter().map(|w| (w, check.id)).collect()
 }
 
+fn peeled_key_derivation(v: &Value) -> Option<Value> {
+	match v {
+		Value::Primitive(p)
+			if crate::primitive::primitive_is_key_derivation(p.id) && p.arguments.len() == 1 =>
+		{
+			Some(p.arguments[0].clone())
+		}
+		_ => None,
+	}
+}
+
+fn check_input(
+	check: &PrimitiveSpec,
+	rule: &crate::primitive::RewriteRule,
+	position: usize,
+	target: usize,
+	produced: &Value,
+) -> Option<Value> {
+	let arity = *check.arity.last()? as usize;
+	for candidate in [
+		Some(produced.clone()),
+		crate::primitive::key_derivation_of(produced.clone()),
+		peeled_key_derivation(produced),
+	]
+	.into_iter()
+	.flatten()
+	{
+		let mut arguments = vec![produced.clone(); arity];
+		if position >= arguments.len() {
+			return None;
+		}
+		arguments[position] = candidate.clone();
+		let probe = Primitive::new(check.id, arguments, 0);
+		let (filtered, valid) = (rule.filter)(&probe, &candidate, target);
+		if valid && filtered.equivalent(produced, true) {
+			return Some(candidate);
+		}
+	}
+	None
+}
+
 fn check_input_held(
 	check: &PrimitiveSpec,
+	rule: &crate::primitive::RewriteRule,
 	position: usize,
 	targets: &[usize],
 	p: &Primitive,
@@ -225,27 +267,13 @@ fn check_input_held(
 		let Some(arg) = p.arguments.get(*t) else {
 			return false;
 		};
-		if crate::theory::obtainable(arg, ps, attacker) {
-			return true;
-		}
-		match check.bypass_key {
-			Some(BypassKeyKind::Derived {
-				arg: key,
-				constructor,
-			}) if key == position => {
-				let derived = Value::primitive(constructor, vec![arg.clone()], 0);
-				crate::theory::obtainable(&derived, ps, attacker)
-			}
-			_ => false,
-		}
+		check_input(check, rule, position, *t, arg)
+			.is_some_and(|needed| crate::theory::obtainable(&needed, ps, attacker))
 	})
 }
 
-fn is_key_derivation(check: &PrimitiveSpec, v: &Value) -> bool {
-	let Some(BypassKeyKind::Derived { constructor, .. }) = check.bypass_key else {
-		return false;
-	};
-	matches!(v, Value::Primitive(p) if p.id == constructor)
+fn is_key_derivation(v: &Value) -> bool {
+	crate::primitive::value_is_key_derivation(v)
 }
 
 fn witness_observed_equality(

@@ -235,13 +235,16 @@ pub(crate) fn step_problems(
 						"claims a leaks declaration for a value the model never leaks",
 					));
 				}
-				let reached = ps.leaks.iter().any(|l| {
+				let yet = km.leaks.iter().any(|l| {
 					km.slots
 						.get(slot.get())
 						.is_some_and(|s| s.constant.id == l.constant_id)
+						&& l.phase <= phase
 				});
-				if leaked && !reached {
-					problems.push(wrong("claims a leaks declaration this run never reached"));
+				if leaked && !yet {
+					problems.push(wrong(
+						"claims a leaks declaration the run has not reached at this phase",
+					));
 				}
 			}
 			DerivationRecord::Obtained { slot } => {
@@ -345,7 +348,13 @@ pub(crate) fn step_problems(
 			},
 			DerivationRecord::Broken { of, capability, .. } => match of {
 				Value::Primitive(p) => {
-					if !ps.capabilities.in_force(p, *capability, phase) {
+					let declared = ps.capabilities.in_force(p, *capability, phase)
+						|| (*capability == Capability::Forgeable
+							&& ps
+								.capabilities
+								.forgeable_secret_position(p, phase)
+								.is_some());
+					if !declared {
 						problems.push(wrong(
 							"invokes a weakening assumption the model does not declare, or does \
 							 not declare yet at this phase",

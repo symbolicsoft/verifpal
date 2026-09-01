@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — an attack that exists only because of a declared assumption
+// has to name that assumption in its trace.
+//
+// Bob asserts `tag` against a MAC he recomputes. `kk` never leaks, so without
+// the annotation there is no attack at all: cap_forgeable_names_its_assumption
+// _absent.vp is that model and holds. With `forgeable`, the attacker produces
+// MAC(kk, nil) without the key, replaces both `m` and `tag`, and Bob accepts.
+//
+// The trace used to explain this as "Attacker replaced m with nil, after which
+// tag resolved to MAC(kk, nil)" -- reading the forged tag off the wire as if
+// Alice had sent it, and never mentioning the assumption the whole attack
+// rests on. Two things were wrong: the deduction rule consulted a narrower
+// capability lookup than the validator did, so the forging step was never
+// recorded as one; and absorption kept whichever explanation arrived first.
+//
+// It also used to print "Attacker constructs ASSERT(...)", because ASSERT was
+// the one core primitive reconstruction did not refuse. ASSERT denotes a check,
+// not a value: there is nothing there for an attacker to hold.
+attacker[active]
+
+principal Alice[
+	knows private kk
+	knows public junk
+	generates m
+	tag = MAC[forgeable](kk, m)
+]
+
+Alice -> Bob: m, tag
+
+principal Bob[
+	knows private kk
+	_ = ASSERT(tag, MAC(kk, m))?
+	generates s
+	ack = HASH(s, m)
+]
+
+Bob -> Alice: ack
+
+queries[
+	authentication? Alice -> Bob: tag
+]

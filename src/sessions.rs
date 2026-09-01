@@ -76,7 +76,11 @@ fn session_value_id(base: ValueId, s: u8) -> ValueId {
 	copy_value_id(root, scenario_copy + s as u32 - 1)
 }
 
-pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansion> {
+pub(crate) fn expand_sessions(
+	m: &Model,
+	sessions: u8,
+	seeded: &[Vec<Query>],
+) -> VResult<SessionExpansion> {
 	if !(2..=MAX_SESSIONS).contains(&sessions) {
 		return Err(VerifpalError::sanity(
 			format!("session expansion supports 2 to {MAX_SESSIONS} sessions").into(),
@@ -130,12 +134,16 @@ pub(crate) fn expand_sessions(m: &Model, sessions: u8) -> VResult<SessionExpansi
 	}
 
 	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
-	for query in &m.queries {
-		let mut variants = Vec::new();
-		for s in 2..=sessions {
-			let variant = clone_query(query, s, &freshen, &pids);
-			if !same_query(query, &variant) {
-				variants.push(variant);
+	for (i, query) in m.queries.iter().enumerate() {
+		let scenarios: &[Query] = seeded.get(i).map(Vec::as_slice).unwrap_or(&[]);
+		let mut variants: Vec<Query> = scenarios.to_vec();
+		for seed in std::iter::once(query).chain(scenarios.iter()) {
+			for s in 2..=sessions {
+				let variant = clone_query(seed, s, &freshen, &pids);
+				if !same_query(seed, &variant) && !variants.iter().any(|v| same_query(v, &variant))
+				{
+					variants.push(variant);
+				}
 			}
 		}
 		query_variants.push(variants);
@@ -376,7 +384,7 @@ mod tests {
 
 	fn expanded() -> SessionExpansion {
 		let m = parse_string("sessions.vp", SRC).expect("parse");
-		expand_sessions(&m, 2).expect("expand")
+		expand_sessions(&m, 2, &[]).expect("expand")
 	}
 
 	fn principal<'e>(e: &'e SessionExpansion, name: &str) -> &'e Principal {
@@ -528,7 +536,7 @@ mod tests {
 		}
 		src += "queries[\nconfidentiality? cap_s0\n]\n";
 		let m = parse_string("cap.vp", &src).expect("parse");
-		let err = expand_sessions(&m, 2).expect_err("65 * 2 > 128");
+		let err = expand_sessions(&m, 2, &[]).expect_err("65 * 2 > 128");
 		assert!(format!("{err}").contains("--sessions"));
 	}
 }

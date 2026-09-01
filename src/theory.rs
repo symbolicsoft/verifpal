@@ -233,12 +233,12 @@ pub(crate) fn can_decompose(
 	}
 	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
 	let mut has = Vec::new();
-	for (filter_i, &idx) in rule.given.iter().enumerate() {
+	for &idx in rule.given.iter() {
 		if idx >= p.arguments.len() {
 			continue;
 		}
 		let a = &p.arguments[idx];
-		let (filtered, valid) = (rule.filter)(p, a, filter_i);
+		let (filtered, valid) = (rule.filter)(p, a, idx);
 		if !valid {
 			continue;
 		}
@@ -407,18 +407,18 @@ fn can_reconstruct_primitive_directly(
 	if !rewritten {
 		return None;
 	}
+	if primitive_is_core(p.id)
+		&& primitive_core_get(p.id).is_ok_and(|s| s.definition_check)
+		&& rewrite_value.equivalent(&Value::Primitive(Arc::clone(p)), true)
+	{
+		return None;
+	}
 	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
 	let forgeable_secret = ps
 		.capabilities
-		.in_force(
-			rewritten_prim,
-			Capability::Forgeable,
-			attacker.current_phase,
-		)
-		.then(|| primitive_get(rewritten_prim.id).ok()?.forgeable_secret)
-		.flatten();
+		.forgeable_secret_position(rewritten_prim, attacker.current_phase);
 	let mut has = Vec::new();
 	let mut skipped = 0usize;
 	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
@@ -498,6 +498,16 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 	(!prim.definition_check, wrap())
 }
 
+fn reduced_once(v: &Value) -> Value {
+	match v {
+		Value::Primitive(inner_p) => {
+			let (rewritten, replacement) = can_rewrite(inner_p);
+			if rewritten { replacement } else { v.clone() }
+		}
+		_ => v.clone(),
+	}
+}
+
 fn can_rewrite_primitive(p: &Primitive) -> bool {
 	let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
 		return false;
@@ -505,26 +515,39 @@ fn can_rewrite_primitive(p: &Primitive) -> bool {
 	let Value::Primitive(from_p) = &p.arguments[rule.from] else {
 		return false;
 	};
-	let reduced = |v: &Value| match v {
-		Value::Primitive(inner_p) => {
-			let (rewritten, replacement) = can_rewrite(inner_p);
-			if rewritten { replacement } else { v.clone() }
-		}
-		_ => v.clone(),
+	matching_is_injective(p, from_p, rule, 0, &mut Vec::new())
+}
+
+fn matching_is_injective(
+	p: &Primitive,
+	from_p: &Primitive,
+	rule: &RewriteRule,
+	at: usize,
+	claimed: &mut Vec<usize>,
+) -> bool {
+	let Some((a_idx, m_vec)) = rule.matching.get(at) else {
+		return true;
 	};
-	for &(a_idx, ref m_vec) in &rule.matching {
-		let valid = m_vec.iter().any(|&mm| {
-			if a_idx >= p.arguments.len() || mm >= from_p.arguments.len() {
-				return false;
-			}
-			let (filtered, fvalid) = (rule.filter)(p, &p.arguments[a_idx], mm);
-			fvalid && reduced(&filtered).equivalent(&reduced(&from_p.arguments[mm]), true)
-		});
-		if !valid {
-			return false;
-		}
+	if *a_idx >= p.arguments.len() {
+		return false;
 	}
-	true
+	for &mm in m_vec {
+		if mm >= from_p.arguments.len() || claimed.contains(&mm) {
+			continue;
+		}
+		let (filtered, fvalid) = (rule.filter)(p, &p.arguments[*a_idx], mm);
+		if !fvalid
+			|| !reduced_once(&filtered).equivalent(&reduced_once(&from_p.arguments[mm]), true)
+		{
+			continue;
+		}
+		claimed.push(mm);
+		if matching_is_injective(p, from_p, rule, at + 1, claimed) {
+			return true;
+		}
+		claimed.pop();
+	}
+	false
 }
 
 pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
@@ -783,6 +806,60 @@ mod tests {
 		);
 		let attacker = make_attacker_state(vec![b]);
 		assert!(can_reconstruct_primitive(&Arc::new(proj), &ps, &attacker).is_some());
+	}
+
+	fn ring(members: [&Value; 3], message: &Value, signature: &Value) -> Arc<Primitive> {
+		Arc::new(Primitive {
+			id: PRIM_RINGSIGNVERIF,
+			arguments: vec![
+				members[0].clone(),
+				members[1].clone(),
+				members[2].clone(),
+				message.clone(),
+				signature.clone(),
+			],
+			output: 0,
+			instance_check: true,
+			capabilities: Capabilities::default(),
+			hash: HashCell::default(),
+		})
+	}
+
+	#[test]
+	fn a_ring_signature_verifies_only_against_the_ring_it_was_made_over() {
+		let (a, b, c) = (
+			make_constant("rsv_a"),
+			make_constant("rsv_b"),
+			make_constant("rsv_c"),
+		);
+		let m = make_constant("rsv_m");
+		let ga = make_primitive(PRIM_PUBKEY, vec![a.clone()], 0);
+		let gb = make_primitive(PRIM_PUBKEY, vec![b], 0);
+		let gc = make_primitive(PRIM_PUBKEY, vec![c], 0);
+		let sig = make_primitive(PRIM_RINGSIGN, vec![a, gb.clone(), gc.clone(), m.clone()], 0);
+
+		assert!(
+			can_rewrite(&ring([&ga, &gb, &gc], &m, &sig)).0,
+			"the ring it was made over verifies"
+		);
+		assert!(
+			can_rewrite(&ring([&gb, &ga, &gc], &m, &sig)).0,
+			"a ring names a set, so its order does not matter"
+		);
+		assert!(
+			!can_rewrite(&ring([&ga, &ga, &ga], &m, &sig)).0,
+			"a ring signature binds the whole ring, so a verifier whose ring collapsed \
+			 onto one member must not accept it: each verifier position has to claim a \
+			 distinct position of the signature's own ring"
+		);
+		assert!(
+			!can_rewrite(&ring([&ga, &gb, &gb], &m, &sig)).0,
+			"nor one whose ring repeats a member the signature names once"
+		);
+		assert!(
+			!can_rewrite(&ring([&ga, &gb, &ga], &m, &sig)).0,
+			"nor one that drops a member in favour of a duplicate"
+		);
 	}
 
 	#[test]
