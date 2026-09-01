@@ -1554,25 +1554,19 @@ impl<'a> Parser<'a> {
 	}
 }
 
-pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
-	let path = std::path::Path::new(file_path);
-	let file_name = path
-		.file_name()
-		.and_then(|n| n.to_str())
-		.unwrap_or("")
-		.to_string();
-
+fn validate_file_name(file_path: &str, file_name: &str) -> VResult<()> {
 	if file_name.is_empty() {
 		return Err(
 			VerifpalError::parse(format!("`{}` does not name a file", file_path).into())
 				.note("Verifpal reads a single model file, whose name ends in a `.vp` extension"),
 		);
 	}
-	if file_name.len() > 64 {
+	let length = file_name.chars().count();
+	if length > 64 {
 		return Err(VerifpalError::parse(
 			format!(
 				"model file name is {} characters long, and must be 64 or less",
-				file_name.len()
+				length
 			)
 			.into(),
 		)
@@ -1585,6 +1579,17 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 		.note("Verifpal models are named with a `.vp` extension")
 		.help(format!("rename it to `{}.vp`", file_name)));
 	}
+	Ok(())
+}
+
+pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
+	let path = std::path::Path::new(file_path);
+	let file_name = path
+		.file_name()
+		.and_then(|n| n.to_str())
+		.unwrap_or("")
+		.to_string();
+	validate_file_name(file_path, &file_name)?;
 
 	let content = std::fs::read_to_string(file_path)
 		.map_err(|e| VerifpalError::parse(format!("cannot read `{}`: {}", file_path, e).into()))?;
@@ -2244,5 +2249,15 @@ mod tests {
 	fn bare_generator_is_rejected() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private crk_a\n\tcrk_x = HASH(G)\n]\n\nqueries[\n\tconfidentiality? crk_a\n]\n";
 		assert!(parse_string("old.vp", src).is_err());
+	}
+
+	#[test]
+	fn file_name_limit_counts_characters_instead_of_bytes() {
+		let accepted = format!("{}.vp", "é".repeat(61));
+		let rejected = format!("{}.vp", "é".repeat(62));
+		assert_eq!(accepted.chars().count(), 64);
+		assert!(accepted.len() > 64);
+		assert!(validate_file_name(&accepted, &accepted).is_ok());
+		assert!(validate_file_name(&rejected, &rejected).is_err());
 	}
 }

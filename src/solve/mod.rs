@@ -322,7 +322,7 @@ fn dispose(
 	sym: &SymbolicState,
 	proposals: Vec<Substitution>,
 ) -> VResult<()> {
-	let mut seen: Vec<Vec<(usize, u64)>> = Vec::new();
+	let mut seen: Vec<Vec<(usize, Value)>> = Vec::new();
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	let mut checked = 0usize;
 	for proposal in dedupe(proposals) {
@@ -332,7 +332,10 @@ fn dispose(
 		let signature = install_signature(sym, &proposal);
 		let key = signature_hash(&signature);
 		let bucket = buckets.entry(key).or_default();
-		if bucket.iter().any(|&i| seen[i] == signature) {
+		if bucket
+			.iter()
+			.any(|&i| same_install_signature(&seen[i], &signature))
+		{
 			continue;
 		}
 		bucket.push(seen.len());
@@ -443,7 +446,7 @@ fn fill_free_positions(
 	}
 }
 
-fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize, u64)> {
+fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize, Value)> {
 	let mut out = Vec::new();
 	for &slot in &sym.var_slots {
 		let Some(term) = &sym.var_terms[slot] else {
@@ -456,18 +459,28 @@ fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize
 		if vars::contains_var(&ground) {
 			continue;
 		}
-		out.push((slot, ground.hash_value()));
+		out.push((slot, ground));
 	}
 	out
 }
 
-fn signature_hash(signature: &[(usize, u64)]) -> u64 {
+fn same_install_signature(left: &[(usize, Value)], right: &[(usize, Value)]) -> bool {
+	left.len() == right.len()
+		&& left
+			.iter()
+			.zip(right)
+			.all(|((left_slot, left_value), (right_slot, right_value))| {
+				left_slot == right_slot && left_value.equivalent(right_value, true)
+			})
+}
+
+fn signature_hash(signature: &[(usize, Value)]) -> u64 {
 	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
-	for (slot, hash) in signature {
+	for (slot, value) in signature {
 		acc = acc
 			.rotate_left(13)
 			.wrapping_add((*slot as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
-			^ hash;
+			^ value.hash_value();
 	}
 	acc
 }
@@ -728,7 +741,7 @@ fn slot_term(c: Option<&Constant>, ps: &PrincipalState, sym: &SymbolicState) -> 
 mod tests {
 	use super::*;
 	use crate::primitive::{
-		PRIM_CONCAT, PRIM_PUBKEY, attacker_public_key, value_is_key_derivation,
+		PRIM_CONCAT, PRIM_HASH, PRIM_PUBKEY, attacker_public_key, value_is_key_derivation,
 	};
 	use crate::testutil::{make_attacker_state, make_constant};
 	use crate::value::value_nil;
@@ -848,6 +861,32 @@ mod tests {
 	fn a_proposal_shaped_unlike_the_honest_term_is_declined() {
 		let honest = Value::primitive(PRIM_PUBKEY, vec![make_constant("kfp_c")], 0);
 		assert!(keyed_positions(&bundle(free_var(0)), &honest).is_empty());
+	}
+
+	#[test]
+	fn colliding_terms_have_distinct_install_signatures() {
+		fn constant(name: &str, id: ValueId) -> Value {
+			Value::Constant(Constant {
+				name: std::sync::Arc::from(name),
+				id,
+				..Default::default()
+			})
+		}
+
+		let left = Value::primitive(
+			PRIM_HASH,
+			vec![constant("sig_a", 10), constant("sig_b", 100)],
+			0,
+		);
+		let right = Value::primitive(
+			PRIM_HASH,
+			vec![constant("sig_c", 11), constant("sig_d", 69)],
+			0,
+		);
+		let left = vec![(7, left)];
+		let right = vec![(7, right)];
+		assert_eq!(signature_hash(&left), signature_hash(&right));
+		assert!(!same_install_signature(&left, &right));
 	}
 
 	fn free_var_id(n: u32) -> ValueId {

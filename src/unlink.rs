@@ -302,19 +302,30 @@ fn carried_observably(c: &Constant, ps: &PrincipalState, attacker: &AttackerStat
 	if attacker.knows(&target).is_none() {
 		return false;
 	}
-	let h = target.hash_value();
+	let target_hash = target.hash_value();
 	for (j, meta) in ps.meta.iter().enumerate() {
 		if j == i || (meta.wire.is_empty() && !meta.constant.leaked) {
 			continue;
 		}
 		let (carrier, _) = ps.resolve_constant(&meta.constant, true);
-		let mut hashes = IdSet::default();
-		crate::hashing::collect_subterm_hashes(&carrier, &mut hashes);
-		if hashes.contains(&h) {
+		if contains_equivalent_subterm(&carrier, &target, target_hash) {
 			return true;
 		}
 	}
 	false
+}
+
+fn contains_equivalent_subterm(value: &Value, target: &Value, target_hash: u64) -> bool {
+	if value.hash_value() == target_hash && value.equivalent(target, true) {
+		return true;
+	}
+	match value {
+		Value::Constant(_) => false,
+		Value::Primitive(p) => p
+			.arguments
+			.iter()
+			.any(|arg| contains_equivalent_subterm(arg, target, target_hash)),
+	}
 }
 
 fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
@@ -569,5 +580,59 @@ mod tests {
 			unreachable!()
 		};
 		assert!(!is_observable(&absent, &ps, &attacker));
+	}
+
+	#[test]
+	fn a_term_hash_collision_does_not_make_a_value_observable() {
+		fn constant(name: &str, id: ValueId) -> Value {
+			Value::Constant(Constant {
+				name: Arc::from(name),
+				id,
+				guard: false,
+				fresh: false,
+				leaked: false,
+				declaration: Some(Declaration::Knows),
+				qualifier: Some(Qualifier::Public),
+			})
+		}
+
+		let target_name = constant("ul_collision_target", 1000);
+		let carrier_name = constant("ul_collision_carrier", 1001);
+		let target = make_primitive(
+			PRIM_HASH,
+			vec![
+				constant("ul_collision_a", 10),
+				constant("ul_collision_b", 100),
+			],
+			0,
+		);
+		let carrier = make_primitive(
+			PRIM_HASH,
+			vec![
+				constant("ul_collision_c", 11),
+				constant("ul_collision_d", 69),
+			],
+			0,
+		);
+		assert_eq!(target.hash_value(), carrier.hash_value());
+		assert!(!target.equivalent(&carrier, true));
+
+		let Value::Constant(target_constant) = &target_name else {
+			unreachable!()
+		};
+		let Value::Constant(carrier_constant) = &carrier_name else {
+			unreachable!()
+		};
+		let ps = make_principal_state(
+			"Tester",
+			1,
+			vec![
+				make_slot_meta(target_constant, true),
+				make_slot_meta(carrier_constant, false),
+			],
+			vec![make_slot_values(&target, 1), make_slot_values(&carrier, 1)],
+		);
+		let attacker = make_attacker_state(vec![target]);
+		assert!(!carried_observably(target_constant, &ps, &attacker));
 	}
 }

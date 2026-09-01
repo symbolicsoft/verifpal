@@ -495,6 +495,17 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 	let mut seen_names: Vec<(PrincipalId, String, Span)> = vec![];
 	for block in &m.blocks {
 		if let Block::Principal(p) = block {
+			if p.id == crate::principal::ATTACKER_ID
+				|| p.name.eq_ignore_ascii_case(crate::principal::ATTACKER_NAME)
+			{
+				return Err(VerifpalError::sanity(
+					format!("`{}` cannot be declared as a principal", p.name).into(),
+				)
+				.at(p.span)
+				.narrow(p.name.clone())
+				.labelled("this name belongs to the protocol attacker")
+				.help("choose a role name other than `Attacker`"));
+			}
 			seen_names.push((p.id, p.name.clone(), p.span));
 			append_unique(&mut principals, p.id);
 			append_unique(&mut declared_names, p.name.clone());
@@ -850,5 +861,13 @@ mod tests {
 		let x = make_constant("aru_x");
 		let ok = make_primitive(PRIM_HASH, vec![make_primitive(PRIM_HASH, vec![x], 0)], 0);
 		assert!(sanity_check_argument_restrictions(&ok).is_ok());
+	}
+
+	#[test]
+	fn attacker_cannot_be_declared_as_a_protocol_principal() {
+		let src = "attacker[active]\nprincipal Attacker[\n\tknows private sap_secret\n]\nqueries[\n\tconfidentiality? sap_secret\n]\n";
+		let model = crate::parser::parse_string("attacker.vp", src).expect("parses");
+		let error = sanity(&model).expect_err("the attacker identity is reserved");
+		assert!(error.message.contains("cannot be declared as a principal"));
 	}
 }
