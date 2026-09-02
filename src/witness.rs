@@ -100,6 +100,7 @@ pub(crate) struct Witness {
 	pub wide: bool,
 	pub attacker: AttackerState,
 	pub reproduced: bool,
+	pub grounded: bool,
 	pub out_of_order: Vec<String>,
 	#[cfg(test)]
 	pub installs: Installs,
@@ -473,12 +474,11 @@ impl<'a> Minimizer<'a> {
 			)
 	}
 
-	fn choose(&self) -> Option<(PrincipalState, Installs, Breadth, bool)> {
-		let mut chosen: Option<(PrincipalState, Installs)> = None;
-		let mut fallback: Option<(PrincipalState, Installs)> = None;
-		let mut breadth = Breadth::Base;
+	fn choose(&self) -> Option<(PrincipalState, Installs, Breadth, bool, bool)> {
+		let mut chosen: Option<(PrincipalState, Installs, Breadth, bool)> = None;
+		let mut fallback: Option<(PrincipalState, Installs, Breadth)> = None;
 		for rung in LADDER {
-			if chosen.is_some() {
+			if chosen.as_ref().is_some_and(|(_, _, _, grounded)| *grounded) {
 				break;
 			}
 			'rung: for session in &self.sessions {
@@ -491,26 +491,50 @@ impl<'a> Minimizer<'a> {
 							controlled_by_any(self.km, &self.sessions, &self.ambient, candidate)
 						}
 					};
+					if std::env::var("VP_DBG_N").is_ok() && self.query_index == 1 {
+						let si = candidate.iter().find(|(s, _)| {
+							self.km.slots.get(s.get()).is_some_and(|t| &*t.constant.name == "static_i")
+						});
+						if let Some((_, v)) = si
+							&& format!("{v}") != "nil"
+						{
+							eprintln!("[n] P{} offers static_i={} buildable={}", session.id, v,
+								self.buildable(session, &candidate));
+						}
+					}
 					if !self.buildable(session, &candidate) {
 						continue;
 					}
 					let Some(witness) = self.probe_at(session, &candidate, rung.breadth) else {
 						continue;
 					};
-					breadth = rung.breadth;
 					if !needs_guard_bypass(&witness.ps) {
-						chosen = Some((session.clone(), candidate));
-						break 'rung;
+						let better = chosen.is_none()
+							|| (witness.grounded
+								&& !chosen.as_ref().is_some_and(|(_, _, _, was)| *was));
+						if better {
+							chosen =
+								Some((session.clone(), candidate, rung.breadth, witness.grounded));
+						}
+						if witness.grounded {
+							break 'rung;
+						}
+						continue;
 					}
 					if rung.keeps_fallback && fallback.is_none() {
-						fallback = Some((session.clone(), candidate));
+						fallback = Some((session.clone(), candidate, rung.breadth));
 					}
 				}
 			}
 		}
 		let explanatory = chosen.is_some();
-		let (base, installs) = chosen.or(fallback)?;
-		Some((base, installs, breadth, explanatory))
+		match chosen {
+			Some((base, installs, breadth, grounded)) => {
+				Some((base, installs, breadth, explanatory, grounded))
+			}
+			None => fallback
+				.map(|(base, installs, breadth)| (base, installs, breadth, explanatory, false)),
+		}
 	}
 
 	fn drop_one(
@@ -519,6 +543,7 @@ impl<'a> Minimizer<'a> {
 		installs: &Installs,
 		breadth: Breadth,
 		explanatory: bool,
+		grounded: bool,
 	) -> Installs {
 		let mut keep = installs.clone();
 		for (slot, _) in installs {
@@ -532,6 +557,9 @@ impl<'a> Minimizer<'a> {
 			if explanatory && needs_guard_bypass(&witness.ps) {
 				continue;
 			}
+			if grounded && !witness.grounded {
+				continue;
+			}
 			keep = trial;
 		}
 		keep
@@ -542,6 +570,7 @@ fn seeded_mutations(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	seed: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
 ) -> Installs {
 	let mut mutations: Installs = if seed.is_empty() {
 		ps.values
@@ -556,8 +585,71 @@ fn seeded_mutations(
 			.cloned()
 			.collect()
 	};
+	close_over_history(km, attacker, &mut mutations);
 	mutations.sort_by_key(|(slot, _)| *slot);
 	mutations
+}
+
+fn close_over_history(km: &ProtocolTrace, attacker: &AttackerState, mutations: &mut Installs) {
+	let mut seen: Vec<KnownIdx> = Vec::new();
+	let mut generation: Vec<KnownIdx> = Vec::new();
+	for (_, value) in mutations.iter() {
+		enqueue_history(attacker, value, &mut seen, &mut generation);
+	}
+	let mut next: Vec<KnownIdx> = Vec::new();
+	while !generation.is_empty() {
+		for idx in generation.drain(..) {
+			let Some(record) = attacker.record(idx) else {
+				continue;
+			};
+			for diff in record.diffs.iter().filter(|diff| diff.tainted) {
+				if diff.index.get() >= km.slots.len() {
+					continue;
+				}
+				if !mutations.iter().any(|(slot, _)| *slot == diff.index) {
+					mutations.push((diff.index, diff.value.clone()));
+				}
+				enqueue_history(attacker, &diff.value, &mut seen, &mut next);
+			}
+		}
+		std::mem::swap(&mut generation, &mut next);
+	}
+}
+
+fn enqueue_history(
+	attacker: &AttackerState,
+	value: &Value,
+	seen: &mut Vec<KnownIdx>,
+	next: &mut Vec<KnownIdx>,
+) {
+	if let Some(idx) = attacker.knows(value)
+		&& !seen.contains(&idx)
+		&& !costs_nothing(attacker, idx, &mut Vec::new())
+	{
+		seen.push(idx);
+		next.push(idx);
+	}
+	if let Value::Primitive(p) = value {
+		for argument in p.arguments.iter() {
+			enqueue_history(attacker, argument, seen, next);
+		}
+	}
+}
+
+fn costs_nothing(attacker: &AttackerState, idx: KnownIdx, walked: &mut Vec<KnownIdx>) -> bool {
+	if walked.contains(&idx) {
+		return true;
+	}
+	walked.push(idx);
+	match attacker.derivation(idx) {
+		Some(DerivationRecord::Initial) => true,
+		Some(DerivationRecord::Leaked { .. } | DerivationRecord::Obtained { .. }) | None => false,
+		Some(other) => other.ingredients().iter().all(|ingredient| {
+			attacker
+				.knows(ingredient)
+				.is_some_and(|found| costs_nothing(attacker, found, walked))
+		}),
+	}
 }
 
 pub(crate) fn minimize_witness(
@@ -573,6 +665,7 @@ pub(crate) fn minimize_witness(
 		wide: false,
 		attacker: ctx.attacker_snapshot(),
 		reproduced,
+		grounded: reproduced,
 		out_of_order: Vec::new(),
 		#[cfg(test)]
 		installs: Vec::new(),
@@ -582,7 +675,7 @@ pub(crate) fn minimize_witness(
 		return unminimized(true);
 	}
 
-	let mutations = seeded_mutations(km, ps, seed);
+	let mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot());
 	if mutations.is_empty() {
 		return unminimized(true);
 	}
@@ -591,10 +684,10 @@ pub(crate) fn minimize_witness(
 	let _quiet = InfoQuiet::new();
 	let m = Minimizer::new(ctx, km, ps, query_index, mutations);
 
-	let Some((base, candidate, breadth, explanatory)) = m.choose() else {
+	let Some((base, candidate, breadth, explanatory, grounded)) = m.choose() else {
 		return unminimized(false);
 	};
-	let keep = m.drop_one(&base, &candidate, breadth, explanatory);
+	let keep = m.drop_one(&base, &candidate, breadth, explanatory, grounded);
 
 	match m.probe_at(&base, &keep, breadth) {
 		Some(mut witness) => {
@@ -749,11 +842,25 @@ fn payload_shapes(
 		}
 	};
 	let shapes = shapes_the_checks_wanted(checks, &mut fill);
-	if !meaningful {
+	let mut keyed_any = false;
+	let mut keyed = |position: usize| -> Value {
+		match carried.arguments.get(position) {
+			Some(argument) if crate::primitive::value_is_key_derivation(argument) => {
+				keyed_any = true;
+				crate::primitive::attacker_public_key()
+			}
+			Some(argument) if usable(argument) => argument.clone(),
+			_ => value_nil(),
+		}
+	};
+	let swapped = shapes_the_checks_wanted(checks, &mut keyed);
+	let mut out = shapes;
+	if keyed_any {
+		out.extend(swapped);
+	} else if !meaningful {
 		return Vec::new();
 	}
-	shapes
-		.into_iter()
+	out.into_iter()
 		.filter(|shape| attacker_can_build(shape, attacker))
 		.collect()
 }
@@ -1066,11 +1173,61 @@ fn probe_with(
 		if honest.resolve_all_values().is_err() {
 			continue;
 		}
+		let _ = honest.perform_all_rewrites();
 		let honest = crate::verify::halt_honest_run(ctx, km, honest);
 		if scratch.attacker_phase_update(km, &honest, phase).is_err() {
 			continue;
 		}
 		let _ = compute_knowledge_closure(&scratch, km, &honest);
+	}
+
+	let mut ordered: Vec<&(SlotIdx, Value)> = installs.iter().collect();
+	ordered.sort_by_key(|(slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
+	let mut grounded = true;
+	for reached in 1..=ordered.len() {
+		let (slot, value) = ordered[reached - 1];
+		let known = scratch.attacker_snapshot();
+		if !crate::solve::validate::attacker_can_derive(
+			&scratch,
+			km,
+			slot.get(),
+			value,
+			base,
+			&known,
+		) {
+			grounded = false;
+			break;
+		}
+		if reached == ordered.len() {
+			break;
+		}
+		let earlier: Installs = ordered[..reached]
+			.iter()
+			.map(|&pair| pair.clone())
+			.collect();
+		let seeded = scratch.attacker_snapshot();
+		let governing = governing_attacker(&scratch, km, &earlier, &seeded);
+		if let Ok(partial) = reexecute(base, &earlier, &governing, km) {
+			let _ = compute_knowledge_closure(&scratch, km, &partial);
+		}
+		if breadth != Breadth::All {
+			continue;
+		}
+		for state in ctx.principal_states() {
+			if state.id == base.id {
+				continue;
+			}
+			let session = state.clone_for_depth(true);
+			let seeded = scratch.attacker_snapshot();
+			let mine = controlled_installs(km, &session, &seeded, earlier.clone());
+			if mine.is_empty() {
+				continue;
+			}
+			let governing = governing_attacker(&scratch, km, &mine, &seeded);
+			if let Ok(other) = reexecute(&session, &mine, &governing, km) {
+				let _ = compute_knowledge_closure(&scratch, km, &other);
+			}
+		}
 	}
 
 	if breadth == Breadth::All {
@@ -1117,6 +1274,7 @@ fn probe_with(
 		attacker: scratch.attacker_snapshot(),
 		// A probe returns only when the re-executed state resolved the query.
 		reproduced: true,
+		grounded,
 		// Decided by the caller, which knows whether this probe is the witness
 		// or the out-of-order re-check of it.
 		out_of_order: Vec::new(),

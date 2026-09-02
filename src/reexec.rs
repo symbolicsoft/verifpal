@@ -327,13 +327,13 @@ impl Coherence {
 		at: usize,
 		authored: &[usize],
 	) -> bool {
-		let Some(Some(forwarded)) = self.forwarded.get(at) else {
-			return true;
-		};
 		if authored.contains(&at) {
 			return true;
 		}
 		let Some(from) = attacker.record(KnownIdx(held)).map(|r| r.principal_id) else {
+			return true;
+		};
+		let Some(Some(forwarded)) = self.forwarded.get(at) else {
 			return true;
 		};
 		if !km
@@ -763,6 +763,122 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 mod tests {
 	use crate::testutil::*;
 	use crate::types::{PrincipalState, SlotIdx};
+
+	fn coherence_fixture(
+		delivered: &crate::types::Value,
+	) -> (crate::types::ProtocolTrace, PrincipalState) {
+		use crate::types::*;
+		let c = make_constant("coh_e");
+		let constant = c.as_constant().expect("constant").clone();
+		let trace = ProtocolTrace {
+			principals: vec!["Alice".to_string(), "Bob".to_string()],
+			principal_ids: vec![1, 2],
+			slots: vec![TraceSlot {
+				declared_span: Span::default(),
+				constant: constant.clone(),
+				initial_value: delivered.clone(),
+				creator: 1,
+				known_by: vec![(2, 1)],
+				sent_by: vec![SendEvent {
+					sender: 1,
+					recipient: 2,
+					declared_at: 1,
+					phase: 0,
+					guarded: false,
+				}],
+				declared_at: 0,
+				phases: vec![0],
+			}],
+			index: {
+				let mut m = IdMap::default();
+				m.insert(constant.id, 0);
+				m
+			},
+			max_phase: 0,
+			used_by: IdMap::default(),
+			leaks: std::sync::Arc::new(Vec::new()),
+			session_siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
+		};
+		let ps = make_principal_state(
+			"Bob",
+			2,
+			vec![make_slot_meta(&constant, false)],
+			vec![make_slot_values(delivered, 1)],
+		);
+		(trace, ps)
+	}
+
+	fn coherence_attacker(
+		held: &crate::types::Value,
+		from: crate::types::PrincipalId,
+	) -> crate::types::AttackerState {
+		use crate::types::*;
+		let mut map: IdMap<u64, Vec<usize>> = IdMap::default();
+		map.entry(held.hash_value()).or_default().push(0);
+		AttackerState {
+			current_phase: 0,
+			known: std::sync::Arc::new(vec![held.clone()]),
+			known_map: std::sync::Arc::new(map),
+			mutation_records: std::sync::Arc::new(vec![std::sync::Arc::new(MutationRecord {
+				diffs: vec![],
+				principal_id: from,
+				phase: 0,
+			})]),
+			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
+		}
+	}
+
+	#[test]
+	fn a_term_read_out_of_a_different_execution_of_the_sender_is_refused() {
+		let honest = make_constant("coh_honest");
+		let other = make_constant("coh_other");
+		let (km, ps) = coherence_fixture(&honest);
+		let history = super::Coherence::of(&km, &ps);
+		let attacker = coherence_attacker(&other, 1);
+		let restricted = history
+			.compatible(&km, &ps, &[], &attacker)
+			.expect("the incompatible term is dropped");
+		assert!(
+			restricted.knows(&other).is_none(),
+			"a term obtained at a slot in the sender's own run, where that run produced \
+			 something other than what this principal is being handed, belongs to an \
+			 execution this one excludes"
+		);
+	}
+
+	#[test]
+	fn the_same_term_is_kept_where_the_attacker_authors_what_is_delivered() {
+		let honest = make_constant("coh_honest_b");
+		let other = make_constant("coh_other_b");
+		let forged = make_constant("coh_forged_b");
+		let (km, ps) = coherence_fixture(&honest);
+		let history = super::Coherence::of(&km, &ps);
+		let attacker = coherence_attacker(&other, 1);
+		let delivered = [(0usize, forged, true)];
+		assert!(
+			history
+				.compatible(&km, &ps, &delivered, &attacker)
+				.is_none(),
+			"authoring what the recipient is handed claims nothing about what the sender \
+			 produced, so the sender's other execution is not contradicted"
+		);
+	}
+
+	#[test]
+	fn a_term_read_while_walking_a_third_principal_is_kept() {
+		let honest = make_constant("coh_honest_c");
+		let other = make_constant("coh_other_c");
+		let (km, ps) = coherence_fixture(&honest);
+		let history = super::Coherence::of(&km, &ps);
+		let attacker = coherence_attacker(&other, 3);
+		assert!(
+			history.compatible(&km, &ps, &[], &attacker).is_none(),
+			"a read performed while walking some other recipient says what that one was \
+			 handed, and the attacker may hand two recipients different values"
+		);
+	}
 
 	#[test]
 	fn a_foreign_halt_never_names_the_state_it_is_recorded_on() {

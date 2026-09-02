@@ -7,11 +7,9 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 3] = [
-	("junglegym_hybrid_pq.vp", 0),
-	("junglegym_hybrid_pq.vp", 4),
-	("noise_xx_mutual.vp", 1),
-];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 1] = [("junglegym_hybrid_pq.vp", 0)];
+
+const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 
 const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
@@ -161,6 +159,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut bypass: Vec<(String, usize)> = Vec::new();
 	let mut unminimized: Vec<(String, usize)> = Vec::new();
 	let mut harvested: Vec<(String, usize)> = Vec::new();
+	let mut unordered: Vec<(String, usize)> = Vec::new();
 	let mut traceless: Vec<(String, usize)> = Vec::new();
 	let mut incoherent: Vec<String> = Vec::new();
 	let mut header_problems: Vec<String> = Vec::new();
@@ -219,6 +218,9 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			}
 			if summary.contains("itself only computes later in the same run") {
 				harvested.push(key.clone());
+			}
+			if summary.contains("not a causally ordered execution") {
+				unordered.push(key.clone());
 			}
 			for line in summary.lines() {
 				let line = line.trim();
@@ -317,6 +319,14 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		"the set of attacks whose witness could not be minimized has moved. These traces list \
 		 the substitutions the search recorded without confirming any subset reproduces the \
 		 violation, so a new entry is a trace that got less trustworthy"
+	);
+	assert_eq!(
+		sorted(unordered),
+		pinned(&TRACE_IS_NOT_CAUSALLY_ORDERED),
+		"the set of attacks whose witness is not a causally ordered execution has moved. Every \
+		 install in a witness should be derivable from what the attacker holds before it is \
+		 made, so a new entry is a certificate whose steps cannot be read in the order they \
+		 are printed"
 	);
 	assert_eq!(
 		sorted(harvested),
@@ -1791,6 +1801,60 @@ fn a_replayed_value_is_narrated_as_a_replay_and_not_as_a_forgery() {
 		"the reader needs to be told which agreement property failed, or the \
 		 verdict reads as a forgery. Narrated: {}",
 		auth.summary
+	);
+}
+#[test]
+fn the_lowe_witness_replays_through_bob_before_it_learns_the_nonce() {
+	let (results, _) =
+		crate::verify::verify_with_sessions("examples/test/spore_ns_pk.vp", 1).expect("verify");
+	let nr = results
+		.iter()
+		.find(|r| r.resolved && r.query.subject().is_ok_and(|c| &*c.name == "nr"))
+		.expect("the confidentiality query on nr fails");
+	let trace = nr.summary.as_str();
+	assert!(
+		!trace.contains("not a causally ordered execution"),
+		"Lowe's attack has a causally ordered witness: reseal Alice@2's request to Bob, \
+		 relay Bob's reply to Alice@2, then open m3@2. Narrated: {trace}"
+	);
+	let replays_to_bob = trace
+		.lines()
+		.position(|line| line.contains("replaces m1 ") && line.contains(" to Bob"));
+	let learns_nr = trace.lines().position(|line| line.contains("obtaining nr"));
+	let (Some(replays_to_bob), Some(learns_nr)) = (replays_to_bob, learns_nr) else {
+		panic!(
+			"the witness must both reseal Alice@2's request to Bob and open m3@2 for nr. \
+			 Narrated: {trace}"
+		);
+	};
+	assert!(
+		replays_to_bob < learns_nr,
+		"the attacker learns nr by opening m3@2, which Alice@2 only sends because the \
+		 resealed request reached Bob. A trace printing the two the other way round \
+		 explains the attack with a value it has not yet obtained. Narrated: {trace}"
+	);
+}
+#[test]
+fn a_signing_oracle_witness_names_the_query_that_invoked_it() {
+	let (results, _) =
+		crate::verify::verify("examples/test/blind_signing_oracle.vp").expect("verify");
+	let open = results
+		.iter()
+		.find(|r| {
+			r.resolved
+				&& r.query
+					.message
+					.constant()
+					.is_ok_and(|c| &*c.name == "note_open")
+		})
+		.expect("the note_open authentication query fails");
+	assert!(
+		open.summary.contains("blinded_open"),
+		"the attacker holds SIGN(sk_open, nil) only because it blinded the oracle with nil \
+		 first, and the delivered note_open is nil, whose own record explains nothing. A \
+		 witness that omits the blinding step cannot be read in the order it is printed. \
+		 Narrated: {}",
+		open.summary
 	);
 }
 #[test]

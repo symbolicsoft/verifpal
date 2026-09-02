@@ -656,7 +656,12 @@ impl Narrator<'_> {
 				let via = c
 					.via
 					.iter()
-					.map(|(name, value)| format!("{name} with {}", table.compress(value)))
+					.map(|(name, value)| {
+						format!(
+							"{name} with {}",
+							table.compress_excluding(value, &[name.as_str()])
+						)
+					})
 					.collect::<Vec<_>>()
 					.join(", ");
 				match (via.is_empty(), c.origin.clone()) {
@@ -934,6 +939,11 @@ const NOT_MINIMIZED: &str = "\n            Note: these are the substitutions \
 the search recorded; no subset of them was confirmed to reproduce the \
 violation on its own, so this trace is not a minimized witness.";
 
+const NOT_ORDERED: &str = "\n            Note: this trace reproduces the \
+violation, but at least one substitution in it could not be derived from what \
+the attacker holds before making it, so the steps are not a causally ordered \
+execution.";
+
 fn out_of_order_note(who: &str, values: &[String]) -> String {
 	format!(
 		"\n            Note: this trace feeds {who} a value {who} itself only \
@@ -996,6 +1006,8 @@ pub(crate) fn narrate_attack(
 		trace.push_str(NOT_MINIMIZED);
 	} else if !witness.out_of_order.is_empty() {
 		trace.push_str(&out_of_order_note(&witness.ps.name, &witness.out_of_order));
+	} else if !witness.grounded && !steps.is_empty() {
+		trace.push_str(NOT_ORDERED);
 	}
 	Narration {
 		trace,

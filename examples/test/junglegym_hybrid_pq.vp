@@ -32,12 +32,35 @@
 // first. KEM_DECAP's rewrite rule pins the projection it consumes, so putting
 // a shared secret where a ciphertext belongs is refused rather than reduced.
 //
-// The payload query has no minimized witness, and that is the honest answer
-// rather than a gap. Reaching it needs kem_seed, which exists only in a run
-// where alice_ephpk was replaced, while sealed exists only in a run where it
-// was not; no single install into one session produces both. Before the
-// projection was pinned, the minimizer confirmed `kem_ct := kem_ss` instead,
-// which reproduced only because a shared secret decapsulated to itself.
+// The payload query has no minimized witness, and that is NOT the honest
+// answer: it is the minimizer correctly failing to reproduce a break the
+// engine should not have reported at this phase. The c1 itself is right, but
+// only by the phase-3 route: PUBKEY[weak from phase 3] hands over alice_eph,
+// which decapsulates the honest kem_ct and opens the honest sealed with no
+// substitution at all. Delete the weak annotation and payload is still
+// reported c1, and that one is false. Reaching kem_ss without alice_eph needs
+// kem_seed, which exists only in a run where Bob received PUBKEY(nil) as
+// alice_ephpk -- and in that run Bob's transcript carries PUBKEY(nil) while
+// Alice's carries her real key, so her SIGNVERIF fails and she never computes
+// sealed. bob_ltpk is guarded and bob_ltk never leaks, so no forgery closes
+// that gap. The engine combines the two anyway: it decomposes kem_seed out of
+// KEM_ENCAP(PUBKEY(nil), kem_seed) in the substituted run, then reconstructs
+// the honest KEM_ENCAP(PUBKEY(alice_eph), kem_seed) from it in the run where
+// alice_ephpk was never touched.
+//
+// That is the incompatible-histories shape of incompatible_histories.vp,
+// reached through compute_knowledge_closure rather than through an install,
+// so reexec.rs::Coherence does not see it. Coherence compares a slot against
+// what the walked state holds there; here the contradiction is between two
+// runs of Bob, and a PrincipalState has one value per slot, so "what Bob
+// received in the other run" is not represented anywhere Alice's walk can
+// consult. Closing it needs per-recipient delivery values in the state model.
+// Until then this model is the reproducer: `sed s/PUBKEY\[weak from phase
+// 3\]/PUBKEY/` and payload should be c0.
+//
+// Before the projection was pinned, the minimizer confirmed `kem_ct := kem_ss`
+// instead, which reproduced only because a shared secret decapsulated to
+// itself.
 
 attacker[active]
 
