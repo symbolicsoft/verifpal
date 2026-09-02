@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Expected: a0 at one session and at two.
+//
+// A matching run of the same agent is not an attack, whatever its session
+// index. Alice sends an authenticated challenge; the attacker routes it to
+// Bob#2 rather than Bob, and routes Bob#2's answer back to Alice. Bob#2 is
+// another run of the same Bob, with the same peer binding, and it computes
+// MAC(k, CONCAT(na, nb#2)) itself: the attacker never learns k, forges
+// nothing, and no Bob send is accepted twice. Alice's acceptance has exactly
+// one matching Bob run, so injective agreement holds and the query must pass
+// at both session counts.
+//
+// The counterweight is session_replay_breaks_injectivity.vp, where the value
+// delivered is a sibling run's own honest output, which its own partner also
+// accepts: one send, two acceptances, a1.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates na
+	t1 = MAC(k, na)
+]
+
+Alice -> Bob: na, t1
+
+principal Bob[
+	knows private k
+	_ = ASSERT(t1, MAC(k, na))?
+	generates nb
+	m2 = MAC(k, CONCAT(na, nb))
+]
+
+Bob -> Alice: nb, m2
+
+principal Alice[
+	_ = ASSERT(m2, MAC(k, CONCAT(na, nb)))?
+]
+
+queries[
+	authentication? Bob -> Alice: m2
+]

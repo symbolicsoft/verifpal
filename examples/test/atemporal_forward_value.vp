@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Expected: a0 at one session and at two.
+//
+// A value the attacker can only hold because the very receive it is attacking
+// already succeeded is not available at that receive. Alice signs an early
+// challenge and a late one over the same guarded nonce; Bob checks the early
+// signature, and only then does he send ok, and only then does Alice compute
+// the late pair. Splicing late into early makes every one of Bob's checks
+// pass, and it is still impossible: the cycle is Bob accepts late as early ->
+// Bob sends ok -> Alice computes late.
+//
+// No sibling run supplies it either. na is guarded, so the attacker cannot
+// put session 1's nonce into session 2's ASSERT, and Alice's signature over
+// na fails a run expecting na#2. Bob checks the nonce before the signature
+// for that reason: reversed, a sibling run's flight verifies before Bob halts
+// on the nonce, which is a genuine injectivity failure of a different kind
+// and would make this model pin two things at once.
+//
+// exa2.vp and kem_direction_reflection.vp are the counterweights: there the
+// reflected value is on the wire before the receive it is fed into, so it is
+// causally available and the attack is real.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public first, second
+	ga = PUBKEY(a)
+	generates na
+	early_msg = CONCAT(na, first)
+	early = SIGN(a, early_msg)
+]
+
+Alice -> Bob: [ga], [na], early_msg, early
+
+principal Bob[
+	generates ok
+	x, label = SPLIT(early_msg)?
+	_ = ASSERT(x, na)?
+	_ = SIGNVERIF(ga, early_msg, early)?
+]
+
+Bob -> Alice: [ok]
+
+principal Alice[
+	late_msg = CONCAT(na, second)
+	late = SIGN(a, late_msg)
+]
+
+Alice -> Bob: late_msg, late
+
+queries[
+	authentication? Alice -> Bob: early
+]
