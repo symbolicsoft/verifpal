@@ -69,9 +69,161 @@ impl TermBound {
 	}
 }
 
+type Restriction = (*const Vec<bool>, usize, Option<Arc<AttackerState>>);
+
+pub(crate) struct CausalOrder {
+	principal: PrincipalId,
+	blocked: Vec<Option<Arc<Vec<bool>>>>,
+	restricted: std::cell::RefCell<Vec<Restriction>>,
+}
+
+impl CausalOrder {
+	pub(crate) fn of(km: &ProtocolTrace, principal: PrincipalId) -> CausalOrder {
+		let mut cache: Vec<(i32, Arc<Vec<bool>>)> = Vec::new();
+		let mut blocked = vec![None; km.slots.len()];
+		for (slot, entry) in blocked.iter_mut().enumerate() {
+			let Some(at) = km.slots[slot]
+				.sent_by
+				.iter()
+				.filter(|event| event.recipient == principal)
+				.map(|event| event.declared_at)
+				.min()
+			else {
+				continue;
+			};
+			let set = match cache.iter().find(|&&(when, _)| when == at) {
+				Some((_, set)) => Arc::clone(set),
+				None => {
+					let set = Arc::new(unreachable_before(km, principal, at));
+					cache.push((at, Arc::clone(&set)));
+					set
+				}
+			};
+			if set.iter().any(|&blocked| blocked) {
+				*entry = Some(set);
+			}
+		}
+		CausalOrder {
+			principal,
+			blocked,
+			restricted: std::cell::RefCell::new(Vec::new()),
+		}
+	}
+
+	pub(crate) fn available(
+		&self,
+		ps: &PrincipalState,
+		slot: usize,
+		attacker: &AttackerState,
+	) -> Option<Arc<AttackerState>> {
+		if self.principal != ps.id {
+			return None;
+		}
+		let blocked = self.blocked.get(slot)?.as_ref()?;
+		let key = Arc::as_ptr(blocked);
+		let size = attacker.known.len();
+		if let Some((_, _, hit)) = self
+			.restricted
+			.borrow()
+			.iter()
+			.find(|&&(seen, len, _)| seen == key && len == size)
+		{
+			return hit.clone();
+		}
+		let built = self.restrict(blocked, attacker);
+		self.restricted
+			.borrow_mut()
+			.push((key, size, built.clone()));
+		built
+	}
+
+	fn restrict(&self, blocked: &[bool], attacker: &AttackerState) -> Option<Arc<AttackerState>> {
+		let n = attacker.known.len();
+		let mut reachable = vec![false; n];
+		for i in 0..n {
+			reachable[i] = match &attacker.derivations[i] {
+				DerivationRecord::Initial => true,
+				DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot } => {
+					!blocked.get(slot.0).copied().unwrap_or(false)
+				}
+				other => other.ingredients().iter().all(|v| {
+					attacker
+						.knows(v)
+						.map(|found| found.0 >= i || reachable[found.0])
+						.unwrap_or(true)
+				}),
+			};
+		}
+		if reachable.iter().all(|&keep| keep) {
+			return None;
+		}
+		let known: Vec<Value> = attacker
+			.known
+			.iter()
+			.zip(reachable.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(v, _)| v.clone())
+			.collect();
+		let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
+		for (i, v) in known.iter().enumerate() {
+			known_map.entry(v.hash_value()).or_default().push(i);
+		}
+		Some(Arc::new(AttackerState {
+			current_phase: attacker.current_phase,
+			mutation_records: Arc::new(Vec::new()),
+			derivations: Arc::new(Vec::new()),
+			known: Arc::new(known),
+			known_map: Arc::new(known_map),
+		}))
+	}
+}
+
+fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
+	let mut after: IdMap<PrincipalId, i32> = IdMap::default();
+	after.insert(principal, at);
+	loop {
+		let mut changed = false;
+		for slot in &km.slots {
+			for event in &slot.sent_by {
+				let Some(&reached) = after.get(&event.sender) else {
+					continue;
+				};
+				if event.declared_at < reached {
+					continue;
+				}
+				match after.get(&event.recipient) {
+					Some(&known) if known <= event.declared_at => {}
+					_ => {
+						after.insert(event.recipient, event.declared_at);
+						changed = true;
+					}
+				}
+			}
+		}
+		if !changed {
+			return after;
+		}
+	}
+}
+
+fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Vec<bool> {
+	let after = influenced_from(km, principal, at);
+	km.slots
+		.iter()
+		.map(|slot| {
+			after
+				.get(&slot.creator)
+				.is_some_and(|&reached| slot.declared_at >= reached)
+				&& !slot.constant.is_nil()
+				&& slot.constant.qualifier != Some(Qualifier::Public)
+		})
+		.collect()
+}
+
 pub(crate) struct Guards<'a> {
 	pub(crate) controllable: &'a Controllable,
 	pub(crate) bound: &'a TermBound,
+	pub(crate) order: &'a CausalOrder,
 }
 
 fn term_depth(v: &Value) -> usize {

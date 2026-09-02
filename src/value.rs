@@ -531,6 +531,8 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -570,6 +572,8 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -611,6 +615,8 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

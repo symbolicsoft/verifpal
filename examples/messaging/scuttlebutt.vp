@@ -29,13 +29,19 @@
 //     secretBox2Alice) and checks it against nothing he knew beforehand,
 //     so nothing stops a member attacker from completing the handshake in
 //     the client role — after which Bob's reply is addressed to it.
-//   authentication? (all five)     FAIL — same root cause, compounded by
+//   authentication? (four of five) FAIL — same root cause, compounded by
 //     the boxes being AEADs under hash-derived keys with no signature over
 //     the later ones: a member attacker can get Bob to accept boxes it
 //     authored, and several traces splice in material recorded from the
-//     other concurrent session. (Some of these witnesses, as the tool
-//     itself notes, reproduce only because parallel sessions share the
-//     model's ephemerals; the m2 story above does not need that crutch.)
+//     other concurrent session. (Some of these witnesses reproduce only
+//     because parallel sessions share the model's ephemerals; the m2 story
+//     above does not need that crutch.)
+//   authentication? Bob -> Alice: secretBox1Bob  HOLDS — the exception, and
+//     it is the server-authentication half working. Alice derives her master
+//     secret through Bob's guarded long-term key, so the only ciphertext that
+//     opens under it is one Bob made; the only other such box is
+//     secretBoxM2Bob, which Bob sends two messages later and only after Alice
+//     has already accepted this one, so it is not causally available here.
 //
 // The honest reading: Secret Handshake authenticates the SERVER to the
 // client and hides identities from OUTSIDERS; a client identity is

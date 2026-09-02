@@ -1,17 +1,29 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
 
-// Symmetric challenge-response where Bob binds his MAC to both nonces.
-// With one session per role (the default), the only term that passes
-// Alice's ASSERT is Bob's honest m1: forging MAC(k, CONCAT(na, x)) needs k,
-// and the one oracle available — Bob himself — returns the honest m1 for
-// the honest na, which is a replay, not an authentication attack: a0.
-// With --sessions 2, the attacker uses session 2's Bob as an oracle: it
-// feeds him session 1's na, harvests m1#2 = MAC(k, CONCAT(na, nb#2)), and
-// presents that together with nb#2 to session 1's Alice. Her ASSERT passes,
-// yet the MAC was computed in another session on attacker-chosen input and
-// is no session's honest m1, so authentication fails: a1
-// (run_model_sessions in model_tests.rs pins both codes).
+// Expected: a0 at one session and at two.
+//
+// Symmetric challenge-response where Bob binds his MAC to both nonces. With
+// one session per role the only term that passes Alice's ASSERT is Bob's
+// honest m1: forging MAC(k, CONCAT(na, x)) needs k, and the one oracle
+// available — Bob himself — returns the honest m1 for the honest na, which
+// is a replay and not an authentication attack.
+//
+// With --sessions 2 the attacker can route Alice's na to session 2's Bob and
+// bring his answer back, so Alice accepts MAC(k, CONCAT(na, nb#2)). That is
+// still not an attack. Bob#2 is another run of the same Bob under the same
+// peer binding; it computed the MAC itself from the challenge Alice actually
+// sent; the attacker never learns k, forges nothing, and no Bob send is
+// accepted twice. Alice's run has exactly one matching Bob run, which is what
+// injective agreement asks for — the expansion's static pairing of session 1
+// with session 1 is an analyzer artifact, not a protocol requirement.
+//
+// session_replay_breaks_injectivity.vp is the counterweight: there the value
+// delivered is a sibling run's own honest output, which that run's own partner
+// also accepts, so one send has two acceptances and the query fails.
+// session_peer_run_matches.vp is the same shape as this one with an
+// authenticated first flight, so the matching run has a check to satisfy
+// before it will answer at all.
 
 attacker[active]
 

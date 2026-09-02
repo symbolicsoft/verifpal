@@ -700,7 +700,7 @@ mod tests {
 
 	#[test]
 	fn an_analysis_explains_the_session_suffix_its_traces_use() {
-		let path = "examples/test/session_nonce_cross.vp";
+		let path = "examples/test/session_replay_breaks_injectivity.vp";
 		let report = crate::verify::verify_report(path, 2).expect("verifies");
 		let source = std::fs::read_to_string(path).expect("reads");
 		let a = Analysis::of(&report, &source);
@@ -726,7 +726,7 @@ mod tests {
 
 	#[test]
 	fn an_analysis_whose_traces_never_use_a_suffix_explains_none() {
-		let path = "examples/test/spore_nsl_pk.vp";
+		let path = "examples/test/relay_rewrap_oracle.vp";
 		let report = crate::verify::verify_report(path, 2).expect("verifies");
 		let source = std::fs::read_to_string(path).expect("reads");
 		let a = Analysis::of(&report, &source);

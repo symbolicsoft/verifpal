@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c1c1c1a1a1f0f1e1e1
+// Expected: c1c1c1a0a1f0f1e1e1
 //
 // A hybrid classical+post-quantum handshake: X25519-shaped DH_KEX alongside a
 // KEM, both folded into one HKDF, then a signed transcript, a MAC key
@@ -14,19 +14,19 @@
 // re-encryption check does. PUBKEY[weak from phase 3] additionally hands the
 // attacker Alice's ephemeral private key once phase 3 arrives.
 //
-// bob_sig fails without anything being forged. Bob's long-term key is guarded
-// and never leaks, so the attacker cannot sign. Instead it feeds Alice's
-// ephemeral to Bob's SECOND run, which encapsulates to her key and signs her
-// transcript, then relays that run's bob_ephpk, kem_ct and bob_sig back to
-// her. Every check passes, yet the signature was computed in another session
-// on attacker-chosen input and is no session's honest bob_sig, so agreement
-// is not injective. session_nonce_cross.vp is this shape without a KEM.
+// bob_sig nevertheless holds, and that is the interesting half. The attacker
+// can feed Alice's ephemeral to Bob's SECOND run, which encapsulates to her
+// key and signs her transcript, and relay that run's bob_ephpk, kem_ct and
+// bob_sig back to her. Every check passes — but Bob's long-term key is guarded
+// and never leaks, so nothing was signed that Bob did not sign, and Bob#2 is
+// another run of the same Bob under the same peer binding, answering the
+// ephemeral Alice actually sent. Alice's acceptance has that run as its unique
+// match, so agreement is injective and the query passes.
+// session_nonce_cross.vp is this shape without a KEM.
 //
-// Reaching it needs the cross-session ciphertext KEM_ENCAP(alice_ephpk,
-// kem_seed#2), which exists only once Bob's second run has been fed Alice's
-// key, and which the attacker builds from the kem_seed it recovered above.
-// That is the same reveal the third query rests on, so this model would go
-// back to c1c1c0a0a1f0f1e1e1 if KEM decapsulation stopped yielding r.
+// The secrecy queries are where the MitM lands, and the third of them rests on
+// KEM decapsulation yielding the encapsulation randomness: this model would go
+// back to c1c1c0a0a1f0f1e1e1 if it stopped doing so.
 //
 // Note the KEM output order: `ss, ct = KEM_ENCAP(pk, r)` -- shared secret
 // first. KEM_DECAP's rewrite rule pins the projection it consumes, so putting

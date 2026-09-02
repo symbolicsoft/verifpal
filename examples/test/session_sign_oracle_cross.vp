@@ -1,23 +1,24 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// Expected: a0 at one session, a1 at two.
+// Expected: a0 at one session and at two.
 //
-// The oracle attack of session_nonce_cross.vp, carried out through SIGNVERIF
-// instead of ASSERT. Bob signs the concatenation of the challenge he received
-// and a nonce of his own, and Alice verifies it. With one Bob the only
-// signature that satisfies her check is the one he honestly produced for her,
-// and reproducing it is a replay rather than a forgery.
+// session_nonce_cross.vp carried out through SIGNVERIF instead of ASSERT. Bob
+// signs the concatenation of the challenge he received and a nonce of his own,
+// and Alice verifies it. With one Bob the only signature that satisfies her
+// check is the one he honestly produced for her, and reproducing it is a
+// replay rather than a forgery.
 //
-// With two Bobs the attacker has a signing oracle that is not itself
-// dishonest: it feeds session 1's challenge to session 2's Bob, collects a
-// signature over CONCAT(na, nb#2), and presents it to session 1's Alice
-// together with nb#2. Her SIGNVERIF passes on a signature no Bob ever made for
-// her, over a nonce she never saw chosen.
+// With two Bobs the attacker can feed session 1's challenge to session 2's
+// Bob and bring the resulting signature over CONCAT(na, nb#2) back to session
+// 1's Alice. sk never leaves Bob, so nothing is forged: Bob#2 is another run
+// of the same Bob under the same peer binding, it signed the challenge Alice
+// actually sent, and Alice accepts it once. Her acceptance has that run as its
+// unique match, so the query holds at both session counts.
 //
-// The two code paths matter. ASSERT compares two terms the recipient built,
-// while SIGNVERIF runs a rewrite rule with its own matching and filter, and
-// the session-sibling carve-out has to reach the second one too — declining
-// this as a replay would lose a genuine attack.
+// The two code paths are why this model exists beside session_nonce_cross.vp.
+// ASSERT compares two terms the recipient built, while SIGNVERIF runs a
+// rewrite rule with its own matching and filter, and the matching-run rule has
+// to reach the second one too.
 
 attacker[active]
 

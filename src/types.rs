@@ -1218,9 +1218,30 @@ pub struct ProtocolTrace {
 	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
 	/// session. Read by the authentication replay carve-out in `query.rs`.
 	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	/// Expansion clones that are runs of the same agent under the same peer
+	/// binding, each mapped to the canonical id of that group. Session clones
+	/// always qualify; a scenario clone qualifies only where the scenario left
+	/// that principal's own bindings alone, since a rebound peer is a
+	/// different configuration and not an interchangeable run.
+	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
+	/// Expansion clones mapped to the id of the principal the model declares,
+	/// so the runs of one agent can be recognised across every copy of it.
+	pub actors: IdMap<PrincipalId, PrincipalId>,
 }
 
 impl ProtocolTrace {
+	pub(crate) fn interchangeable_with(&self, a: PrincipalId, b: PrincipalId) -> bool {
+		Self::grouped(&self.interchangeable, a, b)
+	}
+
+	pub(crate) fn same_actor(&self, a: PrincipalId, b: PrincipalId) -> bool {
+		Self::grouped(&self.actors, a, b)
+	}
+
+	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {
+		a == b || map.get(&a).copied().unwrap_or(a) == map.get(&b).copied().unwrap_or(b)
+	}
+
 	pub(crate) fn disclosure(
 		&self,
 		slot: usize,

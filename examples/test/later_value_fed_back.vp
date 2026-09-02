@@ -1,29 +1,31 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1 — and the trace must carry the out-of-order note.
+// Expected: a0.
 //
 // Within a phase the attacker's knowledge is atemporal: attacker_phase_update
-// seeds every wire value the phase reaches before any principal runs. That is
+// seeds every wire value the phase reaches before any principal runs, which is
 // what lets an attack route one session's traffic into another regardless of
-// block order, and it is load-bearing. This model pins its one bad consequence.
+// block order. Causal availability is enforced separately, at the install
+// (`reexec.rs::CausalOrder`), and this model is why.
 //
 // Bob keys w's envelope on a nonce he generates, so a ciphertext under
-// HASH(k, n) is the only thing his AEAD_DEC will open. The single ciphertext
-// with that shape is v — which Bob himself produces two blocks later, and only
-// if the very check being attacked did not halt him first. The engine hands it
-// to the attacker anyway, w becomes attacker-authored and successfully used,
-// and the authentication query fails.
+// HASH(k, n) is the only thing his AEAD_DEC will open. The only values of that
+// shape come from v — which Bob himself produces two blocks later, and only if
+// the very check being attacked did not halt him first. Feeding one back is a
+// cycle, so the install is refused and the query holds.
+//
+// Note the value installed is not v's honest value but AEAD_ENC(ka, nil, nil),
+// harvested from v under a mutation of u. That is why the rule follows the
+// derivation rather than comparing against pristine trace values: the attacker
+// knows the term only through v's slot, and v's slot is downstream of the
+// receive being attacked.
 //
 // No other run supplies it either: v is built from Bob's own generated n, so a
 // concurrent Bob's v is under HASH(k, n#2) and does not open this one. That is
-// the second half of what the note checks, and it is what separates this model
-// from exa2.vp and kem_direction_reflection.vp, where the reflected value is on
-// the wire before it is replayed and the attack is real.
-//
-// The verdict stands as a statement about this engine's semantics. What must
-// not regress is the note, which is what tells the reader that the witness rests
-// on an ordering no run permits.
+// what separates this model from exa2.vp and kem_direction_reflection.vp,
+// where the reflected value is on the wire before it is replayed and the
+// attack is real.
 attacker[active]
 
 principal Alice[

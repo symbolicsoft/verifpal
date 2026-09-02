@@ -56,6 +56,11 @@ pub(crate) fn validate(
 		if !attacker_can_derive(ctx, km, slot, &ground, &ps, attacker) {
 			return Ok(false);
 		}
+		if let Some(available) = guards.order.available(&ps, slot, attacker)
+			&& !derivable(&ground, &ps, &available)
+		{
+			return Ok(false);
+		}
 		if ctx.replication_only() && replays_own_freshness(km, &ground, &ps, attacker) {
 			ctx.note_replication_rejection();
 			return Ok(false);

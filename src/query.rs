@@ -193,7 +193,7 @@ fn query_authentication(
 		return Ok(result);
 	}
 	let (indices, sender, c, sibling_replay) =
-		query_authentication_get_pass_indices(query, km, ps)?;
+		query_authentication_get_pass_indices(ctx, query, km, ps, attacker)?;
 	if query.message.sender == sender {
 		return Ok(result);
 	}
@@ -299,9 +299,11 @@ fn query_find_constant_usage_indices(
 }
 
 fn query_authentication_get_pass_indices(
+	ctx: &VerifyContext,
 	query: &Query,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	attacker: &AttackerState,
 ) -> VResult<(Vec<usize>, PrincipalId, Constant, bool)> {
 	let empty_c = Constant::default();
 	let (_, idx) = ps.resolve_constant(query.message.constant()?, true);
@@ -318,6 +320,17 @@ fn query_authentication_get_pass_indices(
 			return Ok((vec![], sender, c, false));
 		}
 		sibling_replay = session_sibling_replay(&c, &ps.values[idx].value, km);
+		if !sibling_replay
+			&& crate::agreement::emitted_by_matching_run(
+				ctx,
+				km,
+				ps,
+				idx,
+				query.message.sender,
+				attacker,
+			) {
+			return Ok((vec![], query.message.sender, c, false));
+		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
 	Ok((indices, sender, c, sibling_replay))
@@ -657,9 +670,16 @@ mod behavior_tests {
 		state.values[slot].provenance.sender = ATTACKER_ID;
 		state.foreign_halts = vec![(model.queries[0].message.sender, slot)];
 		assert!(state.slot_unreached(slot));
-		let (indices, sender, _, _) =
-			query_authentication_get_pass_indices(&model.queries[0], &trace, state)
-				.expect("evaluates");
+		let ctx = crate::context::VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
+		let attacker = crate::testutil::make_attacker_state(vec![]);
+		let (indices, sender, _, _) = query_authentication_get_pass_indices(
+			&ctx,
+			&model.queries[0],
+			&trace,
+			state,
+			&attacker,
+		)
+		.expect("evaluates");
 		assert!(!indices.is_empty());
 		assert_eq!(sender, ATTACKER_ID);
 	}

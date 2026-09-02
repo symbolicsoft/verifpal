@@ -14,6 +14,8 @@ pub(crate) struct ScenarioExpansion {
 	pub(crate) honest: IdMap<PrincipalId, i32>,
 	pub(crate) summaries: Vec<ScenarioSummary>,
 	pub(crate) query_variants: Vec<Vec<Query>>,
+	pub(crate) interchangeable: Vec<(PrincipalId, PrincipalId)>,
+	pub(crate) actors: Vec<(PrincipalId, PrincipalId)>,
 }
 
 pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpansion> {
@@ -24,6 +26,8 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 			honest: IdMap::default(),
 			summaries: Vec::new(),
 			query_variants: Vec::new(),
+			interchangeable: Vec::new(),
+			actors: Vec::new(),
 		});
 	}
 	sanity_scenarios(m)?;
@@ -151,7 +155,49 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		honest,
 		summaries,
 		query_variants,
+		interchangeable: interchangeable_clones(m, &principals, count, &pids),
+		actors: principals
+			.iter()
+			.flat_map(|&(id, _)| (0..count).map(move |k| (id, k)))
+			.map(|(id, k)| (mapped_principal(id, k, &pids), id))
+			.collect(),
 	})
+}
+
+fn peer_binding_key(m: &Model, k: usize, principal: PrincipalId) -> Vec<(ValueId, ValueId)> {
+	let scenario = &m.scenarios[k];
+	if scenario.principal != principal {
+		return Vec::new();
+	}
+	let mut out: Vec<(ValueId, ValueId)> = scenario
+		.bindings
+		.iter()
+		.filter(|(target, value)| target.id != value.id)
+		.map(|(target, value)| (target.id, value.id))
+		.collect();
+	out.sort_unstable();
+	out
+}
+
+fn interchangeable_clones(
+	m: &Model,
+	principals: &[(PrincipalId, String)],
+	count: usize,
+	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
+) -> Vec<(PrincipalId, PrincipalId)> {
+	let mut out = Vec::new();
+	for &(id, _) in principals {
+		let keys: Vec<Vec<(ValueId, ValueId)>> =
+			(0..count).map(|k| peer_binding_key(m, k, id)).collect();
+		for k in 0..count {
+			let canonical = keys.iter().position(|key| *key == keys[k]).unwrap_or(k);
+			out.push((
+				mapped_principal(id, k, pids),
+				mapped_principal(id, canonical, pids),
+			));
+		}
+	}
+	out
 }
 
 /// Each declared scenario, keyed by the bindings that identify it, mapped to

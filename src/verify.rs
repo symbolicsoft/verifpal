@@ -48,18 +48,28 @@ fn analyze_sessions_traced_cancellable(
 	crate::rewrite::reduce_cache_reset();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
-	let (m, mut honest, scenarios, scenario_variants) = if m.scenarios.is_empty() {
-		(m, None, Vec::new(), Vec::new())
-	} else {
-		let e = crate::scenario::expand_scenarios(m, sessions)?;
-		scenario_expanded = e.model;
-		(
-			&scenario_expanded,
-			Some(e.honest),
-			e.summaries,
-			e.query_variants,
-		)
-	};
+	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors) =
+		if m.scenarios.is_empty() {
+			(
+				m,
+				None,
+				Vec::new(),
+				Vec::new(),
+				IdMap::default(),
+				IdMap::default(),
+			)
+		} else {
+			let e = crate::scenario::expand_scenarios(m, sessions)?;
+			scenario_expanded = e.model;
+			(
+				&scenario_expanded,
+				Some(e.honest),
+				e.summaries,
+				e.query_variants,
+				e.interchangeable.into_iter().collect(),
+				e.actors.into_iter().collect(),
+			)
+		};
 	let expanded;
 	let (m, variants, siblings) = if sessions > 1 {
 		let e = crate::sessions::expand_sessions(m, sessions, &scenario_variants)?;
@@ -70,6 +80,14 @@ fn analyze_sessions_traced_cancellable(
 				}
 			}
 		}
+		for &(original, clone) in &e.principal_clones {
+			let canonical = interchangeable.get(&original).copied().unwrap_or(original);
+			interchangeable.insert(clone, canonical);
+			interchangeable.entry(original).or_insert(canonical);
+			let actor = actors.get(&original).copied().unwrap_or(original);
+			actors.insert(clone, actor);
+			actors.entry(original).or_insert(actor);
+		}
 		expanded = e.model;
 		(&expanded, e.query_variants, e.siblings)
 	} else {
@@ -77,6 +95,8 @@ fn analyze_sessions_traced_cancellable(
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
+	trace.interchangeable = interchangeable;
+	trace.actors = actors;
 	capability_reach_notice(&trace, &states);
 	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);

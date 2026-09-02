@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1 — Needham-Schroeder public key (1978), the UNFIXED version:
+// Expected: c1a1a0 — Needham-Schroeder public key (1978), the UNFIXED version:
 // message 2 carries CONCAT(ni, nr) with no responder identity. This is
 // Lowe's 1995 attack, found rather than assumed.
 //
@@ -36,6 +36,17 @@
 // Verifpal's receive is an assignment rather than a pattern, so the check is
 // written out. Without it Bob has no peer at all and the query is not the one
 // Lowe's attack is about.
+//
+// The two authentication queries are the peer axis read the other way round.
+// m1 fails in both models, and legitimately: Mallory opens Alice@2's request
+// with the private key she leaked and reseals it under Bob's, so Bob accepts a
+// ciphertext no Alice run produced. Alice@2 is a run of Alice with a different
+// peer binding, so it is not a run Bob's acceptance may be matched against,
+// and widening the matching-run rule to every clone of a principal would lose
+// exactly this attack. m2 holds in both: the attacker can route Alice's
+// request into Bob's other scenario copy and bring that copy's reply back, but
+// that copy is a run of the same Bob under the same peer binding — the
+// scenario rebinds Alice, not Bob — and Alice accepts its reply once.
 
 attacker[active]
 
@@ -98,4 +109,6 @@ scenarios[
 
 queries[
 	confidentiality? nr
+	authentication? Alice -> Bob: m1
+	authentication? Bob -> Alice: m2
 ]

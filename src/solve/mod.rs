@@ -139,12 +139,23 @@ fn solve_principal(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
+	let order = crate::reexec::CausalOrder::of(km, ps.id);
 	let sym = symbolic::build(&controllable, ps, &attacker);
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
 	if search == Search::Direct || pass != Pass::Targeted {
-		return solve_with(ctx, km, ps, pass, bound, &attacker, &controllable, &sym);
+		return solve_with(
+			ctx,
+			km,
+			ps,
+			pass,
+			bound,
+			&attacker,
+			&controllable,
+			&order,
+			&sym,
+		);
 	}
 	for honest in slots_blocking_reduction(&sym) {
 		if ctx.all_resolved() || ctx.cancelled() {
@@ -152,7 +163,17 @@ fn solve_principal(
 		}
 		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, Some(honest));
 		if !refined.var_slots.is_empty() {
-			solve_with(ctx, km, ps, pass, bound, &attacker, &controllable, &refined)?;
+			solve_with(
+				ctx,
+				km,
+				ps,
+				pass,
+				bound,
+				&attacker,
+				&controllable,
+				&order,
+				&refined,
+			)?;
 		}
 	}
 	Ok(())
@@ -195,6 +216,7 @@ fn solve_with(
 	bound: &crate::reexec::TermBound,
 	attacker: &AttackerState,
 	controllable: &crate::reexec::Controllable,
+	order: &crate::reexec::CausalOrder,
 	sym: &SymbolicState,
 ) -> VResult<()> {
 	#[cfg(test)]
@@ -210,6 +232,7 @@ fn solve_with(
 		bound,
 		attacker,
 		controllable,
+		order,
 		sym,
 		proposals,
 	)
@@ -319,6 +342,7 @@ fn dispose(
 	bound: &crate::reexec::TermBound,
 	attacker: &AttackerState,
 	controllable: &crate::reexec::Controllable,
+	order: &crate::reexec::CausalOrder,
 	sym: &SymbolicState,
 	proposals: Vec<Substitution>,
 ) -> VResult<()> {
@@ -343,6 +367,7 @@ fn dispose(
 		let guards = crate::reexec::Guards {
 			controllable,
 			bound,
+			order,
 		};
 		checked += 1;
 		crate::info::info_status_update(|| {

@@ -13,7 +13,7 @@ const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 3] = [
 	("noise_xx_mutual.vp", 1),
 ];
 
-const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 1] = [("later_value_fed_back.vp", 0)];
+const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
@@ -370,7 +370,7 @@ fn a_model_saturates_when_its_verdict_stops_moving() {
 #[test]
 fn a_cross_session_attack_saturates_only_after_it_appears() {
 	let (_, code, k, regressed) =
-		crate::verify::verify_saturating("examples/test/session_nonce_cross.vp", 4)
+		crate::verify::verify_saturating("examples/test/session_replay_breaks_injectivity.vp", 4)
 			.expect("analyses");
 	assert_eq!(code, "a1");
 	assert_eq!(k, 3);
@@ -379,8 +379,8 @@ fn a_cross_session_attack_saturates_only_after_it_appears() {
 
 #[test]
 fn test_spore_ns_pk() {
-	run_model("spore_ns_pk.vp", "c1");
-	run_model_sessions("spore_ns_pk.vp", 1, "c1");
+	run_model("spore_ns_pk.vp", "c1a1a0");
+	run_model_sessions("spore_ns_pk.vp", 1, "c1a1a0");
 }
 
 #[test]
@@ -470,8 +470,8 @@ fn a_value_computed_before_a_halt_but_sent_after_it_is_not_published() {
 
 #[test]
 fn test_spore_nsl_pk() {
-	run_model("spore_nsl_pk.vp", "c0");
-	run_model_sessions("spore_nsl_pk.vp", 1, "c0");
+	run_model("spore_nsl_pk.vp", "c0a1a0");
+	run_model_sessions("spore_nsl_pk.vp", 1, "c0a1a0");
 }
 
 #[test]
@@ -479,8 +479,8 @@ fn with_peer_instantiation_lowes_fix_changes_the_verdict() {
 	let (_, ns) = crate::verify::verify("examples/test/spore_ns_pk.vp").expect("analyses");
 	let (_, nsl) = crate::verify::verify("examples/test/spore_nsl_pk.vp").expect("analyses");
 	assert_ne!(ns, nsl, "peer instantiation exists to tell these two apart");
-	assert_eq!(ns, "c1");
-	assert_eq!(nsl, "c0");
+	assert_eq!(ns, "c1a1a0");
+	assert_eq!(nsl, "c0a1a0");
 }
 
 #[test]
@@ -824,13 +824,13 @@ fn test_scuttlebutt() {
 	run_model_at(
 		"examples/messaging/scuttlebutt.vp",
 		"scuttlebutt.vp",
-		"c1c0c1c0a1a1a1a1a1e1",
+		"c1c0c1c0a1a1a0a1a1e1",
 	);
 }
 
 #[test]
 fn test_junglegym_hybrid_pq() {
-	run_model("junglegym_hybrid_pq.vp", "c1c1c1a1a1f0f1e1e1");
+	run_model("junglegym_hybrid_pq.vp", "c1c1c1a0a1f0f1e1e1");
 }
 #[test]
 fn test_junglegym_threshold_ring() {
@@ -879,7 +879,20 @@ fn test_session_nonce_cross_one_session() {
 }
 #[test]
 fn test_session_nonce_cross_two_sessions() {
-	run_model_sessions("session_nonce_cross.vp", 2, "a1");
+	run_model_sessions("session_nonce_cross.vp", 2, "a0");
+}
+#[test]
+fn test_atemporal_forward_value() {
+	run_model_sessions("atemporal_forward_value.vp", 1, "a0");
+	run_model_sessions("atemporal_forward_value.vp", 2, "a0");
+}
+#[test]
+fn test_session_peer_run_matches_one_session() {
+	run_model_sessions("session_peer_run_matches.vp", 1, "a0");
+}
+#[test]
+fn test_session_peer_run_matches_two_sessions() {
+	run_model_sessions("session_peer_run_matches.vp", 2, "a0");
 }
 #[test]
 fn test_session_replay_breaks_injectivity_one_session() {
@@ -1240,7 +1253,7 @@ fn test_halted_principal_false_attack() {
 }
 #[test]
 fn test_later_value_fed_back() {
-	run_model("later_value_fed_back.vp", "a1");
+	run_model("later_value_fed_back.vp", "a0");
 }
 #[test]
 fn test_dh_nested_rejected() {
@@ -2499,7 +2512,7 @@ fn test_session_sign_oracle_cross_one_session() {
 }
 #[test]
 fn test_session_sign_oracle_cross_two_sessions() {
-	run_model_sessions("session_sign_oracle_cross.vp", 2, "a1");
+	run_model_sessions("session_sign_oracle_cross.vp", 2, "a0");
 }
 #[test]
 fn test_session_three_party_relay_one_session() {

@@ -63,6 +63,8 @@ pub(crate) fn construct_protocol_trace(
 		used_by: IdMap::default(),
 		leaks: Arc::new(Vec::new()),
 		session_siblings: IdMap::default(),
+		interchangeable: IdMap::default(),
+		actors: IdMap::default(),
 	};
 	let declared = model_declarations(m);
 	let mut leaks: Vec<LeakEvent> = Vec::new();

@@ -7,6 +7,7 @@
 // this keeps it that way.
 #![forbid(unsafe_code)]
 
+pub(crate) mod agreement;
 pub(crate) mod autoquery;
 pub(crate) mod capability;
 pub(crate) mod construct;
