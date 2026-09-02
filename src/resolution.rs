@@ -34,24 +34,38 @@ fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace) -> Option<Value
 		.map(|mapped| Value::Primitive(Arc::new(mapped)))
 }
 
-pub(crate) fn trace_mentions(value: &Value, trace: &ProtocolTrace, target: ValueId) -> bool {
+pub(crate) fn state_mentions(
+	value: &Value,
+	trace: &ProtocolTrace,
+	ps: &PrincipalState,
+	owner: PrincipalId,
+	target: ValueId,
+) -> bool {
 	match value {
 		Value::Constant(c) => {
 			if c.id == target {
-				return true;
+				return match ps.index_of(c) {
+					Some(idx) => owner == ps.id || ps.meta[idx].mutatable_to.contains(&owner),
+					None => false,
+				};
 			}
 			let Some(idx) = trace.index_of(c) else {
 				return false;
 			};
-			match &trace.slots[idx].initial_value {
-				Value::Constant(rc) => rc.id == target,
-				resolved => trace_mentions(resolved, trace, target),
+			let inner = &trace.slots[idx].initial_value;
+			if !matches!(inner, Value::Primitive(_)) {
+				return false;
 			}
+			let next = ps
+				.index_of(c)
+				.map(|i| ps.values[i].provenance.creator)
+				.unwrap_or(trace.slots[idx].creator);
+			state_mentions(inner, trace, ps, next, target)
 		}
 		Value::Primitive(p) => p
 			.arguments
 			.iter()
-			.any(|arg| trace_mentions(arg, trace, target)),
+			.any(|arg| state_mentions(arg, trace, ps, owner, target)),
 	}
 }
 
@@ -142,6 +156,32 @@ fn resolve_ps_primitive(
 		resolve_ps_values(arg, root_value, root_index, ps, use_orig, memo)
 	})?;
 	Ok(mapped.map(|mapped| Value::Primitive(Arc::new(mapped))))
+}
+
+pub(crate) fn principal_uses_constant(
+	trace: &ProtocolTrace,
+	states: &[PrincipalState],
+	principal_id: PrincipalId,
+	c: &Constant,
+) -> bool {
+	let Some(ps) = states.iter().find(|state| state.id == principal_id) else {
+		return false;
+	};
+	trace.slots.iter().any(|slot| {
+		slot.creator == principal_id
+			&& matches!(&slot.initial_value, Value::Primitive(_))
+			&& state_mentions(&slot.initial_value, trace, ps, ps.id, c.id)
+	})
+}
+
+pub(crate) fn constant_used_by_any_principal(
+	trace: &ProtocolTrace,
+	states: &[PrincipalState],
+	c: &Constant,
+) -> bool {
+	states
+		.iter()
+		.any(|ps| principal_uses_constant(trace, states, ps.id, c))
 }
 
 pub(crate) fn constant_used_by_principal(

@@ -11,7 +11,7 @@ use crate::rewrite::perform_primitive_rewrite;
 use crate::types::*;
 
 pub(crate) use crate::resolution::{
-	ResolveMemo, resolve_ps_values, resolve_trace_constant, resolve_trace_term, trace_mentions,
+	ResolveMemo, resolve_ps_values, resolve_trace_constant, resolve_trace_term,
 	value_constant_contains_fresh_values,
 };
 

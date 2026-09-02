@@ -3,7 +3,7 @@
 
 use crate::types::*;
 
-pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
+pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> Vec<Query> {
 	let mut out = Vec::new();
 	for c in secret_constants(m) {
 		if km.index_of(&c).is_none() || c.is_nil() {
@@ -19,7 +19,7 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 			if !slot.known_by_principal(sender) || !slot.known_by_principal(recipient) {
 				continue;
 			}
-			if !km.constant_used_by(recipient, &slot.constant) {
+			if !crate::resolution::principal_uses_constant(km, states, recipient, &slot.constant) {
 				continue;
 			}
 			out.push(authentication_query(km, sender, recipient, &slot.constant));
@@ -29,7 +29,7 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 		if slot.sent_by.is_empty() || slot.constant.is_nil() {
 			continue;
 		}
-		if !km.constant_used_by_any(&slot.constant) {
+		if !crate::resolution::constant_used_by_any_principal(km, states, &slot.constant) {
 			continue;
 		}
 		out.push(single_constant_query(
@@ -110,16 +110,16 @@ fn authentication_query(
 mod tests {
 	use super::*;
 
-	fn model_and_trace(path: &str) -> (Model, ProtocolTrace) {
+	fn model_and_trace(path: &str) -> (Model, ProtocolTrace, Vec<PrincipalState>) {
 		let m = crate::parser::parse_file(path).expect("parses");
-		let (km, _) = crate::sanity::sanity(&m).expect("sane");
-		(m, km)
+		let (km, ps) = crate::sanity::sanity(&m).expect("sane");
+		(m, km, ps)
 	}
 
 	#[test]
 	fn every_secret_constant_gets_a_confidentiality_query() {
-		let (m, km) = model_and_trace("examples/test/hmac_ok.vp");
-		let queries = auto_queries(&m, &km);
+		let (m, km, ps) = model_and_trace("examples/test/hmac_ok.vp");
+		let queries = auto_queries(&m, &km, &ps);
 		assert!(
 			queries.iter().any(|q| q.kind == QueryKind::Confidentiality),
 			"expected at least one confidentiality query"
@@ -138,10 +138,10 @@ mod tests {
 			let Ok(mut m) = crate::parser::parse_file(&display) else {
 				continue;
 			};
-			let Ok((km, _)) = crate::sanity::sanity(&m) else {
+			let Ok((km, ps)) = crate::sanity::sanity(&m) else {
 				continue;
 			};
-			m.queries = auto_queries(&m, &km);
+			m.queries = auto_queries(&m, &km, &ps);
 			crate::sanity::sanity(&m).unwrap_or_else(|e| {
 				panic!("generated queries must pass sanity for {display}: {e}")
 			});
@@ -152,9 +152,9 @@ mod tests {
 
 	#[test]
 	fn an_auto_query_set_asks_more_than_the_model_wrote() {
-		let (m, km) = model_and_trace("examples/test/hmac_ok.vp");
+		let (m, km, ps) = model_and_trace("examples/test/hmac_ok.vp");
 		let written = m.queries.len();
-		let generated = auto_queries(&m, &km).len();
+		let generated = auto_queries(&m, &km, &ps).len();
 		assert!(
 			generated > written,
 			"auto queries ({generated}) should exceed the {written} written by hand"

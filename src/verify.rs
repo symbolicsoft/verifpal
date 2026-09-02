@@ -173,8 +173,8 @@ pub fn verify_report_with_source_opts(
 	let mut m = parse_file(file_path)?;
 	let source = m.source.to_string();
 	if auto_queries {
-		let (km, _) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-		m.queries = crate::autoquery::auto_queries(&m, &km);
+		let (km, ps) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+		m.queries = crate::autoquery::auto_queries(&m, &km, &ps);
 	}
 	let mut report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
 	report.provenance.auto_queries = auto_queries;

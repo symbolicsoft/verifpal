@@ -273,7 +273,7 @@ fn query_find_constant_usage_indices(
 		if !matches!(&slot.initial_value, Value::Primitive(_)) {
 			continue;
 		}
-		if !trace_mentions(&slot.initial_value, km, c.id) {
+		if !crate::resolution::state_mentions(&slot.initial_value, km, ps, ps.id, c.id) {
 			continue;
 		}
 		let (_, slot_idx) = ps.resolve_constant(&slot.constant, true);

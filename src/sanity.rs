@@ -54,8 +54,8 @@ pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)>
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
 	sanity_capabilities(m, &km)?;
-	sanity_queries(m, &km)?;
 	let ps = construct_principal_states(m, &km);
+	sanity_queries(m, &km, &ps)?;
 	Ok((km, ps))
 }
 
@@ -239,12 +239,12 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 	sanity_check_primitive_arguments(p)
 }
 
-fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
+fn sanity_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> VResult<()> {
 	for query in &m.queries {
 		let located = |e: VerifpalError| e.or_span(query.span);
 		match query.kind {
 			QueryKind::Authentication => {
-				sanity_queries_authentication(query, km).map_err(located)?
+				sanity_queries_authentication(query, km, states).map_err(located)?
 			}
 			QueryKind::Confidentiality | QueryKind::Freshness => {
 				sanity_queries_single_constant(query, km).map_err(located)?
@@ -253,7 +253,7 @@ fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 				sanity_queries_multi_constant(query, km, query.kind.name()).map_err(located)?
 			}
 		}
-		sanity_query_options(query, km).map_err(located)?;
+		sanity_query_options(query, km, states).map_err(located)?;
 	}
 	Ok(())
 }
@@ -281,7 +281,11 @@ pub(crate) fn unknown_constant(name: &str, km: &ProtocolTrace, context: String) 
 		.suggest(did_you_mean(name, trace_constant_names(km)))
 }
 
-fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<()> {
+fn sanity_queries_authentication(
+	query: &Query,
+	km: &ProtocolTrace,
+	states: &[PrincipalState],
+) -> VResult<()> {
 	if query.message.constants.is_empty() {
 		return Err(
 			VerifpalError::sanity("authentication query names no constant".into())
@@ -315,7 +319,7 @@ fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<(
 		)));
 	}
 	sanity_queries_check_message_principals(&query.message)?;
-	sanity_queries_check_known(&query.message, c, km)
+	sanity_queries_check_known(&query.message, c, km, states)
 }
 
 fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
@@ -375,7 +379,11 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 	Ok(())
 }
 
-fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
+fn sanity_query_options(
+	query: &Query,
+	km: &ProtocolTrace,
+	states: &[PrincipalState],
+) -> VResult<()> {
 	for option in &query.options {
 		match option.kind {
 			QueryOptionKind::Precondition => {
@@ -394,7 +402,7 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 				}
 				let c = option.message.constant()?;
 				sanity_queries_check_message_principals(&option.message)?;
-				sanity_queries_check_known(&option.message, c, km)?;
+				sanity_queries_check_known(&option.message, c, km, states)?;
 			}
 		}
 	}
@@ -421,7 +429,12 @@ fn sanity_queries_check_message_principals(message: &Message) -> VResult<()> {
 	Ok(())
 }
 
-fn sanity_queries_check_known(m: &Message, c: &Constant, km: &ProtocolTrace) -> VResult<()> {
+fn sanity_queries_check_known(
+	m: &Message,
+	c: &Constant,
+	km: &ProtocolTrace,
+	states: &[PrincipalState],
+) -> VResult<()> {
 	let idx = match km.index_of(c) {
 		Some(idx) => idx,
 		None => {
@@ -437,7 +450,7 @@ fn sanity_queries_check_known(m: &Message, c: &Constant, km: &ProtocolTrace) -> 
 		.known_by
 		.iter()
 		.any(|&(recipient, from)| recipient == m.recipient && from != m.recipient);
-	let used = km.constant_used_by(m.recipient, c);
+	let used = crate::resolution::principal_uses_constant(km, states, m.recipient, c);
 	if !sender_knows {
 		return Err(
 			VerifpalError::sanity(format!("{} never knows `{}`", m.sender_name, c).into())
