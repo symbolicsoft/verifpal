@@ -314,7 +314,7 @@ impl<'a> Minimizer<'a> {
 					crate::resolution::resolve_trace_term(&slot.initial_value, self.km)
 				});
 				for shape in shapes {
-					if !bound.admits(&shape) || !attacker_can_build(&shape, &self.ambient) {
+					if !self.validator_admits(session, &bound, *i, &shape) {
 						continue;
 					}
 					if honest.as_ref().is_some_and(|h| h.equivalent(&shape, true)) {
@@ -443,11 +443,34 @@ impl<'a> Minimizer<'a> {
 		)
 	}
 
-	fn buildable(&self, candidate: &Installs) -> bool {
-		!candidate.is_empty()
-			&& candidate
-				.iter()
-				.all(|(_, value)| attacker_can_build(value, &self.ambient))
+	fn buildable(&self, session: &PrincipalState, candidate: &Installs) -> bool {
+		if candidate.is_empty() {
+			return false;
+		}
+		let bound = crate::reexec::TermBound::of(self.km);
+		candidate
+			.iter()
+			.all(|(slot, value)| self.validator_admits(session, &bound, slot.get(), value))
+	}
+
+	fn validator_admits(
+		&self,
+		session: &PrincipalState,
+		bound: &crate::reexec::TermBound,
+		slot: usize,
+		value: &Value,
+	) -> bool {
+		crate::primitive::admissible(value)
+			&& bound.admits(value)
+			&& !crate::solve::validate::contains_failed_check(value)
+			&& crate::solve::validate::attacker_can_derive(
+				self.ctx,
+				self.km,
+				slot,
+				value,
+				session,
+				&self.ambient,
+			)
 	}
 
 	fn choose(&self) -> Option<(PrincipalState, Installs, Breadth, bool)> {
@@ -468,7 +491,7 @@ impl<'a> Minimizer<'a> {
 							controlled_by_any(self.km, &self.sessions, &self.ambient, candidate)
 						}
 					};
-					if !self.buildable(&candidate) {
+					if !self.buildable(session, &candidate) {
 						continue;
 					}
 					let Some(witness) = self.probe_at(session, &candidate, rung.breadth) else {
@@ -578,7 +601,14 @@ pub(crate) fn minimize_witness(
 			#[cfg(test)]
 			for (slot, value) in &keep {
 				assert!(
-					attacker_can_build(value, &m.ambient),
+					crate::solve::validate::attacker_can_derive(
+						ctx,
+						km,
+						slot.get(),
+						value,
+						&base,
+						&m.ambient
+					),
 					"WITNESS \u{2022} query {} is explained by installing {} into {}, a term the \
 					 attacker cannot build from what it knows. A trace naming a substitution \
 					 nothing derives is a trace a reader cannot follow.",
@@ -930,6 +960,40 @@ pub(crate) fn assert_reported_attacks_replay(
 			listing.join("\n"),
 			caveat,
 		);
+		let bound = crate::reexec::TermBound::of(km);
+		let ambient = ctx.attacker_snapshot();
+		let unjustified: Vec<String> = witness
+			.installs
+			.iter()
+			.filter(|(slot, value)| {
+				!(crate::primitive::admissible(value)
+					&& bound.admits(value)
+					&& !crate::solve::validate::contains_failed_check(value)
+					&& crate::solve::validate::attacker_can_derive(
+						ctx,
+						km,
+						slot.get(),
+						value,
+						&base,
+						&ambient,
+					))
+			})
+			.map(|(slot, value)| format!("{} := {}", name_of(slot), value))
+			.collect();
+		assert!(
+			unjustified.is_empty(),
+			"WITNESS \u{2022} {} query {} ({}) prints a trace that installs {} term(s) \
+			 the validator would have rejected: {}. The verdict is validated, so every \
+			 step the reader is shown has to be one the attacker could actually take.\n\n{}{}\n",
+			file_name,
+			result.query_index,
+			result.query,
+			unjustified.len(),
+			unjustified.join(", "),
+			listing.join("\n"),
+			caveat,
+		);
+
 		let missing: Vec<String> = witness
 			.installs
 			.iter()

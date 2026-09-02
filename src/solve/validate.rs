@@ -178,7 +178,7 @@ fn note_depth_cut(
 	);
 }
 
-fn attacker_can_derive(
+pub(crate) fn attacker_can_derive(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	slot: usize,
@@ -268,7 +268,7 @@ fn forgeable_secret_position(
 		.forgeable_secret_position(p, snapshot.current_phase)
 }
 
-fn contains_failed_check(v: &Value) -> bool {
+pub(crate) fn contains_failed_check(v: &Value) -> bool {
 	match v {
 		Value::Primitive(p) => {
 			if p.instance_check
