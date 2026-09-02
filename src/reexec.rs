@@ -141,12 +141,12 @@ impl CausalOrder {
 		let n = attacker.known.len();
 		let mut reachable = vec![false; n];
 		for i in 0..n {
-			reachable[i] = match &attacker.derivations[i] {
-				DerivationRecord::Initial => true,
-				DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot } => {
+			reachable[i] = match attacker.derivation(KnownIdx(i)) {
+				None | Some(DerivationRecord::Initial) => true,
+				Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
 					!blocked.get(slot.0).copied().unwrap_or(false)
 				}
-				other => other.ingredients().iter().all(|v| {
+				Some(other) => other.ingredients().iter().all(|v| {
 					attacker
 						.knows(v)
 						.map(|found| found.0 >= i || reachable[found.0])
@@ -154,28 +154,46 @@ impl CausalOrder {
 				}),
 			};
 		}
-		if reachable.iter().all(|&keep| keep) {
-			return None;
-		}
-		let known: Vec<Value> = attacker
-			.known
-			.iter()
-			.zip(reachable.iter())
-			.filter(|&(_, &keep)| keep)
-			.map(|(v, _)| v.clone())
-			.collect();
-		let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
-		for (i, v) in known.iter().enumerate() {
-			known_map.entry(v.hash_value()).or_default().push(i);
-		}
-		Some(Arc::new(AttackerState {
-			current_phase: attacker.current_phase,
-			mutation_records: Arc::new(Vec::new()),
-			derivations: Arc::new(Vec::new()),
-			known: Arc::new(known),
-			known_map: Arc::new(known_map),
-		}))
+		retain_known(attacker, &reachable)
 	}
+}
+
+fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerState>> {
+	if keep.iter().all(|&keep| keep) {
+		return None;
+	}
+	let known: Vec<Value> = attacker
+		.known
+		.iter()
+		.zip(keep.iter())
+		.filter(|&(_, &keep)| keep)
+		.map(|(v, _)| v.clone())
+		.collect();
+	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
+	for (i, v) in known.iter().enumerate() {
+		known_map.entry(v.hash_value()).or_default().push(i);
+	}
+	let mutation_records = attacker
+		.mutation_records
+		.iter()
+		.zip(keep.iter())
+		.filter(|&(_, &keep)| keep)
+		.map(|(r, _)| Arc::clone(r))
+		.collect();
+	let derivations = attacker
+		.derivations
+		.iter()
+		.zip(keep.iter())
+		.filter(|&(_, &keep)| keep)
+		.map(|(d, _)| d.clone())
+		.collect();
+	Some(Arc::new(AttackerState {
+		current_phase: attacker.current_phase,
+		mutation_records: Arc::new(mutation_records),
+		derivations: Arc::new(derivations),
+		known: Arc::new(known),
+		known_map: Arc::new(known_map),
+	}))
 }
 
 fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
@@ -220,10 +238,134 @@ fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Ve
 		.collect()
 }
 
+type Delivery = (usize, Value, bool);
+type Agreement = (
+	Vec<usize>,
+	*const Vec<Value>,
+	usize,
+	Option<Arc<AttackerState>>,
+);
+
+pub(crate) struct Coherence {
+	principal: PrincipalId,
+	forwarded: Vec<Option<Value>>,
+	agreed: std::cell::RefCell<IdMap<u64, Vec<Agreement>>>,
+}
+
+impl Coherence {
+	pub(crate) fn of(km: &ProtocolTrace, ps: &PrincipalState) -> Coherence {
+		let forwarded = km
+			.slots
+			.iter()
+			.map(|slot| {
+				(slot.creator != ps.id && slot.sent_by.iter().any(|event| event.recipient == ps.id))
+					.then(|| reduce_once(&resolve_trace_constant(&slot.constant, km)))
+			})
+			.collect();
+		Coherence {
+			principal: ps.id,
+			forwarded,
+			agreed: std::cell::RefCell::new(IdMap::default()),
+		}
+	}
+
+	pub(crate) fn compatible(
+		&self,
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
+		delivered: &[Delivery],
+		attacker: &AttackerState,
+	) -> Option<Arc<AttackerState>> {
+		if self.principal != ps.id {
+			return None;
+		}
+		let authored: Vec<usize> = delivered
+			.iter()
+			.filter(|(_, _, authored)| *authored)
+			.map(|(slot, _, _)| *slot)
+			.collect();
+		let known = Arc::as_ptr(&attacker.known);
+		let size = attacker.known.len();
+		let key = authored_hash(&authored, known, size);
+		if let Some(bucket) = self.agreed.borrow().get(&key)
+			&& let Some((_, _, _, hit)) = bucket
+				.iter()
+				.find(|(seen, at, len, _)| *at == known && *len == size && *seen == authored)
+		{
+			return hit.clone();
+		}
+		let mut keep = vec![true; size];
+		for i in 0..size {
+			keep[i] = match attacker.derivation(KnownIdx(i)) {
+				None | Some(DerivationRecord::Initial) => true,
+				Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
+					self.forwards(km, attacker, i, slot.get(), &authored)
+				}
+				Some(other) => other.ingredients().iter().all(|v| {
+					attacker
+						.knows(v)
+						.map(|found| found.0 >= i || keep[found.0])
+						.unwrap_or(true)
+				}),
+			};
+		}
+		let built = retain_known(attacker, &keep);
+		self.agreed.borrow_mut().entry(key).or_default().push((
+			authored,
+			known,
+			size,
+			built.clone(),
+		));
+		built
+	}
+
+	fn forwards(
+		&self,
+		km: &ProtocolTrace,
+		attacker: &AttackerState,
+		held: usize,
+		at: usize,
+		authored: &[usize],
+	) -> bool {
+		let Some(Some(forwarded)) = self.forwarded.get(at) else {
+			return true;
+		};
+		if authored.contains(&at) {
+			return true;
+		}
+		let Some(from) = attacker.record(KnownIdx(held)).map(|r| r.principal_id) else {
+			return true;
+		};
+		if !km
+			.slots
+			.get(at)
+			.is_some_and(|slot| from == slot.creator || from == self.principal)
+		{
+			return true;
+		}
+		reduce_once(&attacker.known[held]).equivalent(forwarded, true)
+	}
+}
+
+fn authored_hash(authored: &[usize], known: *const Vec<Value>, size: usize) -> u64 {
+	let mut hash = 0xcbf2_9ce4_8422_2325u64;
+	let mut mix = |word: u64| {
+		hash ^= word;
+		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+	};
+	mix(known as u64);
+	mix(size as u64);
+	for slot in authored {
+		mix(*slot as u64);
+	}
+	hash
+}
+
 pub(crate) struct Guards<'a> {
 	pub(crate) controllable: &'a Controllable,
 	pub(crate) bound: &'a TermBound,
 	pub(crate) order: &'a CausalOrder,
+	pub(crate) history: &'a Coherence,
 }
 
 fn term_depth(v: &Value) -> usize {

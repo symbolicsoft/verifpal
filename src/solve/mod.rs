@@ -140,6 +140,7 @@ fn solve_principal(
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
 	let order = crate::reexec::CausalOrder::of(km, ps.id);
+	let history = crate::reexec::Coherence::of(km, ps);
 	let sym = symbolic::build(&controllable, ps, &attacker);
 	if sym.var_slots.is_empty() {
 		return Ok(());
@@ -154,6 +155,7 @@ fn solve_principal(
 			&attacker,
 			&controllable,
 			&order,
+			&history,
 			&sym,
 		);
 	}
@@ -172,6 +174,7 @@ fn solve_principal(
 				&attacker,
 				&controllable,
 				&order,
+				&history,
 				&refined,
 			)?;
 		}
@@ -217,6 +220,7 @@ fn solve_with(
 	attacker: &AttackerState,
 	controllable: &crate::reexec::Controllable,
 	order: &crate::reexec::CausalOrder,
+	history: &crate::reexec::Coherence,
 	sym: &SymbolicState,
 ) -> VResult<()> {
 	#[cfg(test)]
@@ -233,6 +237,7 @@ fn solve_with(
 		attacker,
 		controllable,
 		order,
+		history,
 		sym,
 		proposals,
 	)
@@ -343,6 +348,7 @@ fn dispose(
 	attacker: &AttackerState,
 	controllable: &crate::reexec::Controllable,
 	order: &crate::reexec::CausalOrder,
+	history: &crate::reexec::Coherence,
 	sym: &SymbolicState,
 	proposals: Vec<Substitution>,
 ) -> VResult<()> {
@@ -368,6 +374,7 @@ fn dispose(
 			controllable,
 			bound,
 			order,
+			history,
 		};
 		checked += 1;
 		crate::info::info_status_update(|| {

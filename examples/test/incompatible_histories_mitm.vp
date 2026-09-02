@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Expected: c1a1 at one session and at two.
+//
+// The counterweight to incompatible_histories.vp: the same protocol with ga
+// unguarded, where one history carries the whole attack and the engine must
+// still find it.
+//
+// The attacker delivers PUBKEY(nil) to Alice as gb and PUBKEY(nil) to Bob as
+// ga. Both are deliveries to different principals over different wires, so
+// they are one execution, not two. Alice's ka is DH_KEX(PUBKEY(nil), a),
+// which the attacker recomputes as DH_KEX(ga, nil), so it opens e for na and
+// c for msg; Bob's kb is DH_KEX(PUBKEY(nil), b), which it recomputes as
+// DH_KEX(gb, nil), so it authors everything Bob receives from that point.
+//
+// The coherence rule must not touch this. It refuses knowledge read out of a
+// run in which the slot's creator produced something other than what the
+// re-executed principal is being handed; here the attacker authors both e and
+// c, claiming nothing about what Alice produced, so nothing is contradicted.
+// Guarding ga is exactly what removes the second half and leaves the a0.
+
+attacker[active]
+
+principal Alice[
+	knows private msg
+	generates a
+	generates na
+	ga = PUBKEY(a)
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+Alice -> Bob: ga
+Bob -> Alice: gb
+
+principal Alice[
+	ka = DH_KEX(gb, a)
+	e = ENC(ka, na)
+	c = AEAD_ENC(na, msg, nil)
+]
+
+Alice -> Bob: e, c
+
+principal Bob[
+	kb = DH_KEX(ga, b)
+	n = DEC(kb, e)
+	p = AEAD_DEC(n, c, nil)?
+	h = HASH(p)
+]
+
+queries[
+	confidentiality? msg
+	authentication? Alice -> Bob: c
+]

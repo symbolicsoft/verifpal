@@ -26,6 +26,7 @@ pub(crate) fn validate(
 	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
 	let mut worthwhile = false;
 
+	let mut chosen: Vec<(usize, Value, bool)> = Vec::new();
 	for &slot in &sym.var_slots {
 		let Some(var_term) = &sym.var_terms[slot] else {
 			continue;
@@ -40,6 +41,14 @@ pub(crate) fn validate(
 		if slot >= ps.values.len() {
 			continue;
 		}
+		let authored = attacker_authored(&ground, slot, km, &ps);
+		chosen.push((slot, ground, authored));
+	}
+	let coherent = guards.history.compatible(km, &ps, &chosen, attacker);
+	let attacker = coherent.as_deref().unwrap_or(attacker);
+
+	for (slot, ground, authored) in &chosen {
+		let (slot, ground) = (*slot, ground.clone());
 		if !guards.controllable.admits(&ps, attacker, slot) {
 			return Ok(false);
 		}
@@ -65,7 +74,7 @@ pub(crate) fn validate(
 			ctx.note_replication_rejection();
 			return Ok(false);
 		}
-		if attacker_authored(&ground, slot, km, &ps) {
+		if *authored {
 			worthwhile = true;
 		}
 		installs.push((SlotIdx(slot), ground));
@@ -76,11 +85,13 @@ pub(crate) fn validate(
 	}
 
 	let governing = crate::reexec::governing_attacker(ctx, km, &installs, attacker);
-	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, &governing, km) else {
+	let restricted = guards.history.compatible(km, &ps, &chosen, &governing);
+	let governing = restricted.as_deref().unwrap_or(&governing);
+	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, governing, km) else {
 		return Ok(false);
 	};
 
-	note_malleable_reshapes(ctx, km, &ps, &installs, &governing);
+	note_malleable_reshapes(ctx, km, &ps, &installs, governing);
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)

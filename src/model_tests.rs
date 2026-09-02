@@ -882,6 +882,16 @@ fn test_session_nonce_cross_two_sessions() {
 	run_model_sessions("session_nonce_cross.vp", 2, "a0");
 }
 #[test]
+fn test_incompatible_histories() {
+	run_model_sessions("incompatible_histories.vp", 1, "a0");
+	run_model_sessions("incompatible_histories.vp", 2, "a0");
+}
+#[test]
+fn test_incompatible_histories_mitm() {
+	run_model_sessions("incompatible_histories_mitm.vp", 1, "c1a1");
+	run_model_sessions("incompatible_histories_mitm.vp", 2, "c1a1");
+}
+#[test]
 fn test_atemporal_forward_value() {
 	run_model_sessions("atemporal_forward_value.vp", 1, "a0");
 	run_model_sessions("atemporal_forward_value.vp", 2, "a0");
