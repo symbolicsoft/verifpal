@@ -357,7 +357,7 @@ const RENAME_SUFFIX: &str = "qq";
 fn renamed_constant(constant: &Constant) -> Constant {
 	let mut out = constant.clone();
 	let name: &str = &constant.name;
-	if name == "nil" || name.starts_with("unnamed") || name.starts_with("attacker") {
+	if name == "nil" || crate::parser::check_reserved(name).is_err() {
 		return out;
 	}
 	out.name = std::sync::Arc::from(format!("{name}{RENAME_SUFFIX}").as_str());

@@ -210,7 +210,6 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		format!("{slug}-protocol"),
 		protocol_caption(&hits),
 		true,
-		&names,
 	);
 	ctx.flag("ok", true)
 		.raw("intro", intro(a))
@@ -275,7 +274,6 @@ fn diagram_ctx(
 	figid: String,
 	caption: String,
 	floats: bool,
-	names: &Names,
 ) -> Option<Ctx> {
 	if lanes.is_empty() || rows.is_empty() {
 		return None;
@@ -291,7 +289,7 @@ fn diagram_ctx(
 				.flag("adversary", name == ATTACKER)
 		})
 		.collect();
-	let drawn = rows.iter().map(|row| row_ctx(&lanes, row, names)).collect();
+	let drawn = rows.iter().map(|row| row_ctx(&lanes, row)).collect();
 	Some(
 		Ctx::new()
 			.text("figid", figid)
@@ -357,7 +355,7 @@ fn base(kind: &'static str) -> Ctx {
 	ctx
 }
 
-fn row_ctx(lanes: &Lanes, row: &Row, _names: &Names) -> Ctx {
+fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 	let chars = box_chars(lanes.len());
 	match row {
 		Row::Wire {
@@ -551,7 +549,6 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 					query_tex(&q.query, names)
 				),
 				false,
-				names,
 			);
 			Ctx::new()
 				.raw("query", query_tex(&q.query, names))

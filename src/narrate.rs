@@ -1160,6 +1160,34 @@ mod tests {
 	use crate::testutil::*;
 
 	#[test]
+	fn a_reshaped_ciphertext_names_the_assumption_that_built_it() {
+		let (results, _) = crate::verify::verify("examples/test/cap_malleable_enc.vp")
+			.expect("the model analyzes");
+		let attacked = results
+			.iter()
+			.find(|r| r.resolved)
+			.expect("the malleability assumption breaks the query");
+		assert!(
+			attacked
+				.trace
+				.iter()
+				.any(|line| line.contains("under the declared `malleable` assumption")),
+			"a reshaped ciphertext exists only because of the assumption, so the trace has \
+			 to say so:\n{}",
+			attacked.trace.join("\n")
+		);
+		assert!(
+			!attacked
+				.trace
+				.iter()
+				.any(|line| line.contains("observes") && line.contains("CONCAT(nil")),
+			"the reshaped ciphertext was never on the wire; crediting it to the wire \
+			 describes an attack the model does not contain:\n{}",
+			attacked.trace.join("\n")
+		);
+	}
+
+	#[test]
 	fn every_narrated_step_carries_its_kind() {
 		let src = "attacker[active]\n\
 			principal Alice[\n\

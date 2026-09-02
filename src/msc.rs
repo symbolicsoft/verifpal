@@ -414,3 +414,114 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 	}
 	(rows, lanes)
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn step(names: &str, primitive: Option<&str>, expression: Option<&str>, checked: bool) -> Step {
+		Step {
+			names: names.to_string(),
+			primitive: primitive.map(str::to_string),
+			expression: expression.map(str::to_string),
+			checked,
+		}
+	}
+
+	#[test]
+	fn a_step_label_marks_a_check_only_where_the_expression_does_not() {
+		assert_eq!(
+			step("k", None, Some("DH_KEX(ga, b)"), false).label(),
+			"k \u{2190} DH_KEX(ga, b)"
+		);
+		assert_eq!(
+			step("k", None, Some("AEAD_DEC(k, e, ad)?"), true).label(),
+			"k \u{2190} AEAD_DEC(k, e, ad)?",
+			"the printed expression already carries its own check mark"
+		);
+		assert_eq!(
+			step("k", Some("AEAD_DEC"), None, true).label(),
+			"k \u{2190} AEAD_DEC?",
+			"a bare primitive name needs one added"
+		);
+		assert_eq!(step("k", None, None, false).label(), "k");
+		assert_eq!(step("", Some("ASSERT"), None, true).label(), "ASSERT?");
+	}
+
+	#[test]
+	fn lanes_keep_first_appearance_order_and_insert_only_once() {
+		let mut lanes = Lanes::default();
+		assert!(lanes.is_empty());
+		for name in ["Alice", "Bob", "Alice"] {
+			lanes.add(name);
+		}
+		assert_eq!(lanes.names(), ["Alice".to_string(), "Bob".to_string()]);
+		lanes.insert(1, ATTACKER);
+		lanes.insert(1, ATTACKER);
+		assert_eq!(lanes.len(), 3);
+		assert_eq!(lanes.index(ATTACKER), 1);
+		assert!(lanes.contains("Bob"));
+		assert_eq!(
+			lanes.index("nobody"),
+			0,
+			"an unknown lane falls back to the first rather than panicking"
+		);
+		lanes.insert(99, "Charlie");
+		assert_eq!(lanes.index("Charlie"), 3, "an out-of-range insert clamps");
+	}
+
+	#[test]
+	fn a_wire_row_names_the_relay_lane_between_its_two_ends() {
+		let row = Row::Wire {
+			num: Some(1),
+			hop: None,
+			step: None,
+			from: "Alice".to_string(),
+			to: "Bob".to_string(),
+			via: Some(ATTACKER.to_string()),
+			forged: true,
+			replay: false,
+			values: vec![],
+		};
+		assert_eq!(row.lanes(), vec!["Alice", ATTACKER, "Bob"]);
+		let phase = Row::Phase { number: 1 };
+		assert!(phase.lanes().is_empty(), "a phase spans the whole diagram");
+	}
+
+	#[test]
+	fn consecutive_derivations_group_and_an_action_breaks_the_run() {
+		let q = QueryReport {
+			query: "confidentiality? m".to_string(),
+			kind: "confidentiality".to_string(),
+			resolved: true,
+			envelope: crate::report::EnvelopeReport {
+				sessions: 1,
+				truncations: vec![],
+				exhausted: true,
+				summary: String::new(),
+			},
+			range: crate::report::SourceRange {
+				start: 0,
+				end: 0,
+				line: 1,
+				column: 1,
+			},
+			summary: String::new(),
+			conclusion: String::new(),
+			steps: vec![
+				ReportStep::new("derive".to_string(), "one".to_string()),
+				ReportStep::new("derive".to_string(), "two".to_string()),
+				ReportStep::new("mutations".to_string(), "swap".to_string()),
+				ReportStep::new("derive".to_string(), "three".to_string()),
+			],
+			preconditions: vec![],
+			variants: 0,
+		};
+		let groups = staged(&q);
+		assert_eq!(groups.len(), 3);
+		assert_eq!(groups[0].step(), "1-2");
+		assert_eq!(groups[1].step(), "3");
+		assert_eq!(groups[2].step(), "4");
+		assert!(matches!(groups[1], Group::One(3, _)));
+	}
+}

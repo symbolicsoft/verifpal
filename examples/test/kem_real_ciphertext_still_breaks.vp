@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1
+//
+// The counterweight to kem_secret_is_not_a_ciphertext.vp, and what keeps that
+// model's c0 from being a blanket refusal. The shape is identical, but Charlie
+// leaks its encapsulation's ciphertext alongside its shared secret, so the
+// attacker holds a term KEM_DECAP genuinely undoes. Substituting it makes Alice
+// derive a key the attacker knows, and the query fails as it should: pinning
+// the projection the rule consumes refuses a shared secret at the ciphertext
+// position without refusing a ciphertext there.
+
+attacker[active]
+
+principal Alice[
+	knows private kcr_sk
+	generates kcr_m
+]
+
+principal Bob[
+	knows private kcr_sk
+	kcr_pk = PUBKEY(kcr_sk)
+	generates kcr_r1
+	kcr_ss1, kcr_ct1 = KEM_ENCAP(kcr_pk, kcr_r1)
+]
+
+principal Charlie[
+	knows private kcr_sk
+	kcr_pk2 = PUBKEY(kcr_sk)
+	generates kcr_r2
+	kcr_ss2, kcr_ct2 = KEM_ENCAP(kcr_pk2, kcr_r2)
+	leaks kcr_ss2, kcr_ct2
+]
+
+Bob -> Alice: kcr_ct1
+
+principal Alice[
+	kcr_k = KEM_DECAP(kcr_sk, kcr_ct1)?
+	kcr_e = AEAD_ENC(kcr_k, kcr_m, nil)
+]
+
+Alice -> Bob: kcr_e
+
+principal Bob[
+	_ = AEAD_DEC(kcr_ss1, kcr_e, nil)?
+]
+
+queries[
+	confidentiality? kcr_m
+]

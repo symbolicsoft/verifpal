@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: `nil` is the language's own empty value. Every model carries
+// it, no model declares it, and the trace slot standing for it has no source
+// location. Declaring it collides with that slot, and the collision used to be
+// reported by pointing at the slot's default span -- the first byte of the file
+// -- as the place `nil` "is known publicly", marking a line the user never
+// wrote. The rule is named instead.
+
+attacker[passive]
+
+principal Alice[
+	knows private enr_m
+	knows private nil
+	enr_h = HASH(enr_m)
+]
+
+Alice -> Bob: enr_h
+
+principal Bob[
+	_ = HASH(enr_h)
+]
+
+queries[
+	confidentiality? enr_m
+]

@@ -410,7 +410,7 @@ fn computation(expr: &crate::types::Expression) -> Option<Computation> {
 	let names: Vec<String> = expr
 		.constants
 		.iter()
-		.filter(|c| !c.name.starts_with("unnamed"))
+		.filter(|c| !crate::util::is_anonymous_name(&c.name))
 		.map(|c| c.name.to_string())
 		.collect();
 	let (primitive, checked) = match &expr.assigned {

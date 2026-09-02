@@ -32,6 +32,23 @@ fn holders_of(trace: &ProtocolTrace, idx: usize) -> String {
 	quoted_list(&names)
 }
 
+fn builtin_nil_error(c: &Constant, verb: &str) -> Option<VerifpalError> {
+	if !c.is_nil() {
+		return None;
+	}
+	Some(
+		VerifpalError::sanity(format!("`nil` is built in and cannot be {verb}").into())
+			.narrow(c.name.to_string())
+			.labelled("`nil` already names the empty value")
+			.note(
+				"every model carries `nil`, the value a primitive takes where the protocol \
+				 has nothing to put; it is public and known to every principal from the \
+				 start, so a declaration of it could only contradict that",
+			)
+			.help("pick a different name"),
+	)
+}
+
 pub(crate) fn construct_protocol_trace(
 	m: &Model,
 	principals: &[String],
@@ -215,6 +232,9 @@ fn construct_trace_render_knows(
 				|| existing.qualifier != expr.qualifier
 				|| existing.fresh
 			{
+				if let Some(e) = builtin_nil_error(c, "declared") {
+					return Err(e);
+				}
 				let was = declared_as(existing);
 				let now = declared_as(&Constant {
 					declaration: Some(Declaration::Knows),
@@ -339,6 +359,9 @@ fn construct_trace_render_generates(
 ) -> VResult<()> {
 	for c in &expr.constants {
 		if let Some(idx) = trace.index_of(c) {
+			if let Some(e) = builtin_nil_error(c, "generated") {
+				return Err(e);
+			}
 			return Err(
 				VerifpalError::sanity(format!("`{}` already exists", c).into())
 					.narrow(c.name.to_string())
@@ -421,6 +444,9 @@ fn construct_trace_render_assignment(
 	}
 	for (output_idx, c) in expr.constants.iter().enumerate() {
 		if let Some(idx) = trace.index_of(c) {
+			if let Some(e) = builtin_nil_error(c, "assigned") {
+				return Err(e);
+			}
 			return Err(
 				VerifpalError::sanity(format!("`{}` is assigned twice", c).into())
 					.narrow(c.name.to_string())
@@ -519,6 +545,21 @@ fn construct_trace_render_message(
 	current_phase: i32,
 	declared_at: i32,
 ) -> VResult<()> {
+	if message.sender == message.recipient {
+		return Err(VerifpalError::sanity(
+			format!(
+				"{} both sends and receives this message",
+				message.sender_name
+			)
+			.into(),
+		)
+		.note("a message travels between two different principals")
+		.help(format!(
+			"name the other principal as the recipient, e.g. `{} -> Bob: {}`",
+			message.sender_name,
+			crate::pretty::pretty_constants(&message.constants)
+		)));
+	}
 	for c in &message.constants {
 		let idx = trace_slot_of(trace, declared, c)?;
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
@@ -541,6 +582,9 @@ fn construct_trace_render_message(
 			)));
 		}
 		if recipient_knows {
+			if let Some(e) = builtin_nil_error(c, "sent") {
+				return Err(e);
+			}
 			return Err(VerifpalError::sanity(
 				format!("{} already knows `{}`", message.recipient_name, c).into(),
 			)
@@ -735,5 +779,143 @@ impl PrincipalState {
 			},
 			capabilities: self.capabilities.clone(),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::types::*;
+
+	const SRC: &str = "attacker[active]\n\
+		principal Alice[\n\
+		knows public cst_ctx\n\
+		knows private cst_a\n\
+		cst_ga = PUBKEY(cst_a)\n\
+		generates cst_n\n\
+		]\n\
+		Alice -> Bob: cst_ga, [cst_n]\n\
+		principal Bob[\n\
+		knows private cst_b\n\
+		cst_k = DH_KEX(cst_ga, cst_b)\n\
+		_ = HASH(cst_k, cst_n, cst_ctx)\n\
+		]\n\
+		queries[\n\
+		confidentiality? cst_a\n\
+		]\n";
+
+	fn fixture() -> (ProtocolTrace, Vec<PrincipalState>) {
+		let m = crate::parser::parse_string("cst.vp", SRC).expect("parses");
+		crate::sanity::sanity(&m).expect("passes sanity")
+	}
+
+	fn slot(km: &ProtocolTrace, name: &str) -> usize {
+		km.slots
+			.iter()
+			.position(|s| &*s.constant.name == name)
+			.unwrap_or_else(|| panic!("no slot named {name}"))
+	}
+
+	#[test]
+	fn every_trace_opens_with_the_built_in_nil_every_principal_holds() {
+		let (km, _) = fixture();
+		let nil = &km.slots[0];
+		assert!(nil.constant.is_nil());
+		assert_eq!(nil.constant.qualifier, Some(Qualifier::Public));
+		for &pid in &km.principal_ids {
+			assert!(
+				nil.known_by_principal(pid),
+				"nil is the value a primitive takes where there is nothing to put, so \
+				 every principal has to hold it without declaring it"
+			);
+		}
+	}
+
+	#[test]
+	fn a_public_constant_is_known_to_every_principal_from_its_declaration() {
+		let (km, _) = fixture();
+		let ctx = &km.slots[slot(&km, "cst_ctx")];
+		for &pid in &km.principal_ids {
+			assert!(ctx.known_by_principal(pid));
+		}
+		let private = &km.slots[slot(&km, "cst_a")];
+		assert!(private.known_by_principal(private.creator));
+		assert_eq!(
+			private.known_by.len(),
+			0,
+			"a private constant reaches nobody until it is sent"
+		);
+	}
+
+	#[test]
+	fn only_an_unguarded_delivery_makes_a_slot_mutatable_to_its_recipient() {
+		let (_, states) = fixture();
+		let bob = states.iter().find(|s| s.name == "Bob").expect("Bob");
+		let at = |name: &str| {
+			bob.meta
+				.iter()
+				.position(|m| &*m.constant.name == name)
+				.unwrap_or_else(|| panic!("no slot named {name}"))
+		};
+		let ga = &bob.meta[at("cst_ga")];
+		assert!(ga.wire.contains(&bob.id));
+		assert!(
+			ga.mutatable_to.contains(&bob.id),
+			"cst_ga travels unguarded, so the attacker can replace it on the way"
+		);
+		let n = &bob.meta[at("cst_n")];
+		assert!(n.guard, "cst_n is written in guard brackets");
+		assert!(
+			!n.mutatable_to.contains(&bob.id),
+			"a guarded delivery is not a substitution the attacker may make"
+		);
+	}
+
+	#[test]
+	fn purification_restores_the_honest_value_even_where_a_guard_was_defeated() {
+		let (_, states) = fixture();
+		let mut ps = states
+			.iter()
+			.find(|s| s.name == "Bob")
+			.expect("Bob")
+			.clone();
+		let at = |ps: &PrincipalState, name: &str| {
+			ps.meta
+				.iter()
+				.position(|m| &*m.constant.name == name)
+				.unwrap_or_else(|| panic!("no slot named {name}"))
+		};
+		let (ga, k) = (at(&ps, "cst_ga"), at(&ps, "cst_k"));
+		let honest = ps.values[ga].value.clone();
+		let honest_k = ps.values[k].value.clone();
+		let forged = crate::value::value_nil();
+
+		ps.values[ga].provenance.attacker_tainted = true;
+		ps.values[ga].provenance.creator = crate::principal::ATTACKER_ID;
+		ps.values[ga].set_value(forged.clone());
+		ps.values[k].override_all_bypassed(crate::primitive::attacker_public_key());
+		ps.halted_at = Some(3);
+		ps.foreign_halts = vec![(1, 2)];
+
+		let kept = ps.clone_for_depth(false);
+		assert!(kept.values[ga].value.equivalent(&forged, true));
+		assert!(kept.values[k].bypassed.is_some());
+		assert_eq!(kept.halted_at, Some(3));
+		assert_eq!(kept.foreign_halts.len(), 1);
+
+		let pure = ps.clone_for_depth(true);
+		assert!(
+			pure.values[ga].value.equivalent(&honest, true),
+			"a tainted slot purifies back to what the protocol computed"
+		);
+		assert!(
+			pure.values[k].bypassed.is_none()
+				&& !pure.values[k].provenance.bypass_injected
+				&& pure.values[k].value.equivalent(&honest_k, true),
+			"a bypassed slot purifies like any other, which is why the key a defeated \
+			 guard accepted lives beside `original` rather than inside it"
+		);
+		assert!(!pure.values[ga].provenance.attacker_tainted);
+		assert_eq!(pure.halted_at, None);
+		assert!(pure.foreign_halts.is_empty());
 	}
 }

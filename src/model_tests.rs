@@ -7,8 +7,11 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 2] =
-	[("junglegym_hybrid_pq.vp", 4), ("noise_xx_mutual.vp", 1)];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 3] = [
+	("junglegym_hybrid_pq.vp", 0),
+	("junglegym_hybrid_pq.vp", 4),
+	("noise_xx_mutual.vp", 1),
+];
 
 const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 1] = [("later_value_fed_back.vp", 0)];
 
@@ -642,6 +645,17 @@ fn test_cap_err_aead_malleable() {
 		"cap_err_aead_malleable.vp",
 		"did you mean `AEAD_ENC[forgeable]`",
 	);
+}
+#[test]
+fn test_err_nil_redeclared() {
+	run_model_err(
+		"err_nil_redeclared.vp",
+		"`nil` is built in and cannot be declared",
+	);
+}
+#[test]
+fn test_err_nil_sent() {
+	run_model_err("err_nil_sent.vp", "`nil` is built in and cannot be sent");
 }
 #[test]
 fn test_err_no_principals() {
@@ -1661,6 +1675,18 @@ fn test_piknik_signature_not_forgeable() {
 		"piknik.vp",
 		"c0a0a1a1f0",
 	);
+}
+#[test]
+fn test_kem_secret_is_not_a_ciphertext() {
+	run_model("kem_secret_is_not_a_ciphertext.vp", "c0");
+}
+#[test]
+fn test_kem_real_ciphertext_still_breaks() {
+	run_model("kem_real_ciphertext_still_breaks.vp", "c1");
+}
+#[test]
+fn test_kem_secret_does_not_reveal_randomness() {
+	run_model("kem_secret_does_not_reveal_randomness.vp", "c0");
 }
 #[test]
 fn test_kem_decap_reveals_randomness() {

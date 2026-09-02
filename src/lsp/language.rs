@@ -297,7 +297,9 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 		}
 		TokenKind::PrincipalName => {
 			if new_name.eq_ignore_ascii_case(crate::principal::ATTACKER_NAME)
-				|| matches!(new_name, "phase" | "principal" | "queries" | "scenarios")
+				|| ["phase", "principal", "queries", "scenarios"]
+					.iter()
+					.any(|word| new_name.eq_ignore_ascii_case(word))
 			{
 				return false;
 			}
@@ -880,6 +882,11 @@ queries[\n\
 			"principal",
 			"queries",
 			"scenarios",
+			"Phase",
+			"Principal",
+			"Queries",
+			"Scenarios",
+			"ATTACKER",
 		] {
 			assert!(rename(d, principal, name).is_none(), "accepted {name:?}");
 		}

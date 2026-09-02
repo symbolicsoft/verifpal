@@ -469,6 +469,34 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 mod tests {
 	use crate::testutil::*;
 	use crate::types::{PrincipalState, SlotIdx};
+
+	#[test]
+	fn a_foreign_halt_never_names_the_state_it_is_recorded_on() {
+		use crate::types::{Capabilities, HashCell, Primitive};
+		let own = make_constant("fh_own");
+		let mut ps = make_principal_state(
+			"Alice",
+			1,
+			vec![make_slot_meta(own.as_constant().expect("constant"), true)],
+			vec![make_slot_values(&own, 1)],
+		);
+		ps.values[0].provenance.creator = 1;
+		let failing = Primitive {
+			id: crate::primitive::PRIM_ASSERT,
+			arguments: vec![own.clone(), own],
+			output: 0,
+			instance_check: true,
+			capabilities: Capabilities::default(),
+			hash: HashCell::default(),
+		};
+		let halts = super::creator_halts(&ps, &[(failing.clone(), 0)]);
+		assert_eq!(halts, vec![(1, 0)], "the creator's own halt is recorded");
+		assert!(
+			super::foreign_halts(&ps, &[(failing, 0)]).is_empty(),
+			"`foreign_halts` filters the state's own principal out, which is what \
+			 makes `slot_unreached` false for every slot the state itself created"
+		);
+	}
 	#[test]
 	fn a_generated_key_is_not_attacker_controllable() {
 		use crate::parser::parse_string;

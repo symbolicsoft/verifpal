@@ -29,9 +29,15 @@
 // back to c1c1c0a0a1f0f1e1e1 if KEM decapsulation stopped yielding r.
 //
 // Note the KEM output order: `ss, ct = KEM_ENCAP(pk, r)` -- shared secret
-// first. Getting it backwards makes KEM_DECAP reduce to the wrong output and
-// produces a checked-primitive failure whose two sides PRINT IDENTICALLY,
-// because Display does not show the output index.
+// first. KEM_DECAP's rewrite rule pins the projection it consumes, so putting
+// a shared secret where a ciphertext belongs is refused rather than reduced.
+//
+// The payload query has no minimized witness, and that is the honest answer
+// rather than a gap. Reaching it needs kem_seed, which exists only in a run
+// where alice_ephpk was replaced, while sealed exists only in a run where it
+// was not; no single install into one session produces both. Before the
+// projection was pinned, the minimizer confirmed `kem_ct := kem_ss` instead,
+// which reproduced only because a shared secret decapsulated to itself.
 
 attacker[active]
 

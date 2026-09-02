@@ -232,6 +232,9 @@ pub(crate) fn can_decompose(
 		return None;
 	}
 	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	if rule.output.is_some_and(|output| p.output != output) {
+		return None;
+	}
 	let mut has = Vec::new();
 	for &idx in rule.given.iter() {
 		if idx >= p.arguments.len() {
@@ -490,6 +493,12 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		if from_p.id != rule.id {
 			return (!prim.definition_check, wrap());
 		}
+		if rule
+			.from_output
+			.is_some_and(|output| from_p.output != output)
+		{
+			return (!prim.definition_check, wrap());
+		}
 		if !can_rewrite_primitive(pc) {
 			return (!prim.definition_check, wrap());
 		}
@@ -570,12 +579,13 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 		if has.len() < given_set.len() {
 			continue;
 		}
-		let all_ok = has[1..].iter().all(|has_p| {
-			if let (Value::Primitive(h0), Value::Primitive(hp)) = (has[0], has_p) {
-				equivalent_primitives(h0, hp, false) && h0.output != hp.output
-			} else {
-				false
-			}
+		let all_ok = has.iter().enumerate().all(|(i, a)| {
+			has[i + 1..].iter().all(|b| match (a, b) {
+				(Value::Primitive(x), Value::Primitive(y)) => {
+					equivalent_primitives(x, y, false) && x.output != y.output
+				}
+				_ => false,
+			})
 		});
 		if !all_ok {
 			continue;

@@ -130,7 +130,7 @@ impl fmt::Display for Expression {
 					.constants
 					.iter()
 					.map(|c| {
-						if c.name.starts_with("unnamed") {
+						if crate::util::is_anonymous_name(&c.name) {
 							"_".to_string()
 						} else {
 							c.to_string()

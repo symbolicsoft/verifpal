@@ -140,8 +140,7 @@ pub(crate) fn expand_sessions(
 		for seed in std::iter::once(query).chain(scenarios.iter()) {
 			for s in 2..=sessions {
 				let variant = clone_query(seed, s, &freshen, &pids);
-				if !same_query(seed, &variant) && !variants.iter().any(|v| same_query(v, &variant))
-				{
+				if !seed.same_shape(&variant) && !variants.iter().any(|v| v.same_shape(&variant)) {
 					variants.push(variant);
 				}
 			}
@@ -333,30 +332,6 @@ fn clone_query(
 		leading_comments: Vec::new(),
 		trailing_comment: None,
 	}
-}
-
-fn same_message(a: &Message, b: &Message) -> bool {
-	a.sender == b.sender
-		&& a.recipient == b.recipient
-		&& a.constants.len() == b.constants.len()
-		&& a.constants
-			.iter()
-			.zip(&b.constants)
-			.all(|(x, y)| x.id == y.id)
-}
-
-fn same_query(a: &Query, b: &Query) -> bool {
-	a.constants.len() == b.constants.len()
-		&& a.constants
-			.iter()
-			.zip(&b.constants)
-			.all(|(x, y)| x.id == y.id)
-		&& same_message(&a.message, &b.message)
-		&& a.options.len() == b.options.len()
-		&& a.options
-			.iter()
-			.zip(&b.options)
-			.all(|(x, y)| same_message(&x.message, &y.message))
 }
 
 #[cfg(test)]

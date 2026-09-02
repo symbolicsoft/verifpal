@@ -23,6 +23,7 @@ pub(crate) enum Reveal {
 #[derive(Clone)]
 pub(crate) struct DecomposeRule {
 	pub given: Vec<usize>,
+	pub output: Option<usize>,
 	pub reveals: Vec<Reveal>,
 	pub filter: FilterFn,
 }
@@ -37,6 +38,7 @@ pub(crate) struct RecomposeRule {
 pub(crate) struct RewriteRule {
 	pub id: PrimitiveId,
 	pub from: usize,
+	pub from_output: Option<usize>,
 	pub to: RewriteToFn,
 	pub matching: Vec<(usize, Vec<usize>)>,
 	pub filter: FilterFn,
@@ -612,6 +614,13 @@ mod tests {
 			};
 
 			if let Some(rule) = &spec.decompose {
+				if let Some(output) = rule.output {
+					assert!(
+						output < outputs,
+						"{name}.decompose.output is output {output}, but {name} has \
+						 {outputs} outputs"
+					);
+				}
 				for reveal in &rule.reveals {
 					match *reveal {
 						Reveal::Argument(i) => must("decompose.reveal", i),
@@ -636,6 +645,15 @@ mod tests {
 				must("rewrite.from", rule.from);
 				let inner = primitive_get(rule.id)
 					.unwrap_or_else(|_| panic!("{name}.rewrite.id is not a primitive"));
+				if let Some(output) = rule.from_output {
+					assert!(
+						output < widest(&inner.output),
+						"{name}.rewrite.from_output is output {output} of {}, which has \
+						 {} outputs",
+						inner.name,
+						widest(&inner.output)
+					);
+				}
 				for (outer, inners) in &rule.matching {
 					may("rewrite.matching", *outer);
 					for &i in inners {

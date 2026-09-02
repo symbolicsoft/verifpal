@@ -169,3 +169,101 @@ pub(crate) fn value_constant_contains_fresh_values(
 			.is_some_and(|i| ps.meta[i].constant.fresh)
 	}))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+
+	fn two_slot_state(mutatable_to: Vec<PrincipalId>, root_creator: PrincipalId) -> PrincipalState {
+		let wire = make_constant("cv_wire");
+		let term_name = make_constant("cv_term");
+		let mutated = make_constant("cv_mutated");
+		let (wire_c, term_c) = (
+			wire.as_constant().expect("constant").clone(),
+			term_name.as_constant().expect("constant").clone(),
+		);
+
+		let mut wire_meta = make_slot_meta(&wire_c, false);
+		wire_meta.wire = vec![1];
+		wire_meta.known = true;
+		wire_meta.mutatable_to = mutatable_to;
+		let term_meta = make_slot_meta(&term_c, true);
+
+		let mut wire_values = make_slot_values(&mutated, 2);
+		wire_values.original = wire.clone();
+		wire_values.provenance.attacker_tainted = true;
+		let term_values = make_slot_values(
+			&make_primitive(crate::primitive::PRIM_HASH, vec![wire], 0),
+			root_creator,
+		);
+
+		make_principal_state(
+			"Bob",
+			1,
+			vec![wire_meta, term_meta],
+			vec![wire_values, term_values],
+		)
+	}
+
+	fn visibility(ps: &PrincipalState, slot: usize, root: usize, forced: bool) -> bool {
+		let root_value = ps.values[root].value.clone();
+		compute_visibility(slot, root, &root_value, ps, forced)
+	}
+
+	#[test]
+	fn the_root_slot_takes_the_visibility_it_was_asked_for() {
+		let ps = two_slot_state(vec![], 1);
+		assert!(visibility(&ps, 1, 1, true));
+		assert_eq!(visibility(&ps, 1, 1, false), ps.should_use_original(1));
+	}
+
+	#[test]
+	fn a_term_of_this_principals_own_sees_the_mutation_it_was_handed() {
+		let ps = two_slot_state(vec![2], 1);
+		assert!(
+			!visibility(&ps, 0, 1, false),
+			"Bob computed this term himself out of a wire value the attacker replaced, \
+			 so he computes with what he was handed"
+		);
+	}
+
+	#[test]
+	fn a_term_of_another_principals_keeps_its_own_value_unless_the_attacker_reached_it() {
+		let unreachable = two_slot_state(vec![], 2);
+		assert!(
+			visibility(&unreachable, 0, 1, false),
+			"the root belongs to another principal and no unguarded delivery carried \
+			 this value to it, so its resolution is the honest one"
+		);
+		let reachable = two_slot_state(vec![2], 2);
+		assert!(
+			!visibility(&reachable, 0, 1, false),
+			"the same value reached that principal unguarded, so the attacker's choice \
+			 does appear inside what it computed"
+		);
+	}
+
+	#[test]
+	fn an_inherited_original_view_still_asks_whether_the_attacker_reached_the_slot() {
+		let unreachable = two_slot_state(vec![], 1);
+		assert!(visibility(&unreachable, 0, 1, true));
+		let reachable = two_slot_state(vec![1], 1);
+		assert!(
+			!visibility(&reachable, 0, 1, true),
+			"an outer original view does not survive into a slot the attacker could \
+			 replace on its way to the term's creator"
+		);
+	}
+
+	#[test]
+	fn a_constant_rooted_term_is_never_forced_by_its_root() {
+		let mut ps = two_slot_state(vec![2], 2);
+		ps.values[1] = make_slot_values(&make_constant("cv_plain"), 2);
+		assert_eq!(
+			visibility(&ps, 0, 1, false),
+			ps.should_use_original(0),
+			"only a primitive root can impose another principal's view"
+		);
+	}
+}

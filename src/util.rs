@@ -177,3 +177,106 @@ pub(crate) fn article(word: &str) -> &'static str {
 pub(crate) fn plural(n: usize) -> &'static str {
 	if n == 1 { "" } else { "s" }
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn append_unique_keeps_the_first_of_each() {
+		let mut v = vec![1, 2];
+		assert!(append_unique(&mut v, 3));
+		assert!(!append_unique(&mut v, 2));
+		assert_eq!(v, vec![1, 2, 3]);
+	}
+
+	#[test]
+	fn edit_distance_counts_single_character_edits() {
+		assert_eq!(edit_distance("", ""), 0);
+		assert_eq!(edit_distance("abc", ""), 3);
+		assert_eq!(edit_distance("", "abc"), 3);
+		assert_eq!(edit_distance("abc", "abc"), 0);
+		assert_eq!(edit_distance("abc", "abd"), 1);
+		assert_eq!(edit_distance("abc", "ac"), 1);
+		assert_eq!(edit_distance("abc", "abcd"), 1);
+		assert_eq!(edit_distance("kitten", "sitting"), 3);
+		assert_eq!(edit_distance("\u{e9}t\u{e9}", "ete"), 2);
+	}
+
+	#[test]
+	fn did_you_mean_suggests_only_within_a_third_of_the_longer_name() {
+		assert_eq!(
+			did_you_mean("AEAD_ENCC", ["AEAD_ENC"]),
+			Some("AEAD_ENC".into())
+		);
+		assert_eq!(did_you_mean("hasq", ["HASH"]), Some("HASH".into()));
+		assert_eq!(
+			did_you_mean("hsah", ["HASH"]),
+			None,
+			"a four-letter name allows one edit, and a transposition costs two"
+		);
+		assert_eq!(did_you_mean("zzz", ["HASH"]), None);
+		assert_eq!(
+			did_you_mean("HASH", ["HASH"]),
+			None,
+			"an exact match is not a suggestion"
+		);
+		assert_eq!(
+			did_you_mean("x", [""]),
+			None,
+			"an empty candidate is skipped"
+		);
+		assert_eq!(
+			did_you_mean("enk", ["ENC", "DEC"]),
+			Some("ENC".into()),
+			"the nearest candidate wins"
+		);
+	}
+
+	#[test]
+	fn a_copy_suffix_is_stripped_by_the_name_helpers() {
+		assert_eq!(base_name("alice#2"), "alice");
+		assert_eq!(base_name("alice"), "alice");
+		assert_eq!(
+			base_name("alice@3"),
+			"alice@3",
+			"base_name strips only the session suffix"
+		);
+		assert_eq!(copy_base_name("alice#2"), "alice");
+		assert_eq!(copy_base_name("alice@3"), "alice");
+		assert_eq!(copy_base_name("alice"), "alice");
+	}
+
+	#[test]
+	fn an_anonymous_name_is_recognised_through_its_copy_suffix() {
+		assert!(is_anonymous_name("unnamed_0"));
+		assert!(is_anonymous_name("unnamed_0#2"));
+		assert!(is_anonymous_name("unnamed_0@3"));
+		assert!(
+			is_anonymous_name("unnamedish"),
+			"the prefix is what `check_reserved` refuses, so anything carrying it counts"
+		);
+		assert!(!is_anonymous_name("named_0"));
+		assert!(!is_anonymous_name(""));
+	}
+
+	#[test]
+	fn min_int_in_slice_refuses_an_empty_slice_rather_than_guessing() {
+		assert_eq!(min_int_in_slice(&[3, 1, 2]).expect("a minimum"), 1);
+		assert_eq!(min_int_in_slice(&[-1, 0]).expect("a minimum"), -1);
+		assert!(min_int_in_slice(&[]).is_err());
+	}
+
+	#[test]
+	fn quoted_list_and_the_prose_helpers() {
+		assert_eq!(quoted_list(&[]), "");
+		assert_eq!(quoted_list(&["a".to_string()]), "`a`");
+		assert_eq!(quoted_list(&["a".to_string(), "b".to_string()]), "`a`, `b`");
+		assert_eq!(article("active"), "an");
+		assert_eq!(article("passive"), "a");
+		assert_eq!(article(""), "a");
+		assert_eq!(plural(1), "");
+		assert_eq!(plural(0), "s");
+		assert_eq!(plural(2), "s");
+	}
+}

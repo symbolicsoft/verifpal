@@ -105,7 +105,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 				continue;
 			}
 			let variant = clone_query(query, k, sessions, &freshen, &pids);
-			if !same_query(query, &variant) {
+			if !query.same_shape(&variant) {
 				variants.push(variant);
 			}
 		}
@@ -635,30 +635,6 @@ fn clone_query(
 		leading_comments: Vec::new(),
 		trailing_comment: None,
 	}
-}
-
-fn same_message(a: &Message, b: &Message) -> bool {
-	a.sender == b.sender
-		&& a.recipient == b.recipient
-		&& a.constants.len() == b.constants.len()
-		&& a.constants
-			.iter()
-			.zip(&b.constants)
-			.all(|(x, y)| x.id == y.id)
-}
-
-fn same_query(a: &Query, b: &Query) -> bool {
-	a.constants.len() == b.constants.len()
-		&& a.constants
-			.iter()
-			.zip(&b.constants)
-			.all(|(x, y)| x.id == y.id)
-		&& same_message(&a.message, &b.message)
-		&& a.options.len() == b.options.len()
-		&& a.options
-			.iter()
-			.zip(&b.options)
-			.all(|(x, y)| same_message(&x.message, &y.message))
 }
 
 fn clone_message(

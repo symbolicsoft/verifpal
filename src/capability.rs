@@ -244,13 +244,15 @@ impl CapabilityIndex {
 		if self.buckets.is_empty() {
 			return Capabilities::default();
 		}
-		let probe = Value::Primitive(Arc::new(p.clone()));
-		let hash = probe.hash_value();
+		let hash = crate::hashing::primitive_hash(p);
 		let Some(bucket) = self.buckets.get(&hash) else {
 			return Capabilities::default();
 		};
 		for (existing, caps) in bucket {
-			if existing.equivalent(&probe, true) {
+			if existing
+				.as_primitive()
+				.is_some_and(|q| crate::equivalence::equivalent_primitives(q, p, true))
+			{
 				return *caps;
 			}
 		}

@@ -75,9 +75,53 @@ pub(crate) fn validate(
 		return Ok(false);
 	};
 
+	note_malleable_reshapes(ctx, km, &ps, &installs, &governing);
 	let _ = compute_knowledge_closure(ctx, km, &ps);
 	let _ = verify_resolve_queries(ctx, km, &ps);
 	Ok(true)
+}
+
+pub(crate) fn note_malleable_reshapes(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	snapshot: &AttackerState,
+) {
+	if ps.capabilities.is_empty() {
+		return;
+	}
+	let mut record = None;
+	for (_, ground) in installs {
+		let Value::Primitive(p) = ground else {
+			continue;
+		};
+		if snapshot.knows(ground).is_some() || crate::theory::obtainable(ground, ps, snapshot) {
+			continue;
+		}
+		let Some((held, vary)) = malleable_positions(p, ps, snapshot) else {
+			continue;
+		};
+		let using: Vec<Value> = vary
+			.iter()
+			.filter_map(|&i| p.arguments.get(i).cloned())
+			.collect();
+		if !using.iter().all(|a| derivable(a, ps, snapshot)) {
+			continue;
+		}
+		let diffs = record
+			.get_or_insert_with(|| crate::value::compute_slot_diffs(ps, km, snapshot.current_phase))
+			.clone();
+		ctx.attacker_put_with(
+			ground,
+			&diffs,
+			DerivationRecord::Broken {
+				of: held,
+				capability: Capability::Malleable,
+				using,
+			},
+		);
+	}
 }
 
 fn replays_own_freshness(
@@ -164,7 +208,7 @@ fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 			if crate::theory::obtainable(v, ps, snapshot) {
 				return true;
 			}
-			if let Some(vary) = malleable_positions(p, ps, snapshot) {
+			if let Some((_, vary)) = malleable_positions(p, ps, snapshot) {
 				return p
 					.arguments
 					.iter()
@@ -184,7 +228,7 @@ fn malleable_positions(
 	p: &Primitive,
 	ps: &PrincipalState,
 	snapshot: &AttackerState,
-) -> Option<Vec<usize>> {
+) -> Option<(Value, Vec<usize>)> {
 	let spec = primitive_get(p.id).ok()?;
 	if spec.malleable_vary.is_empty() {
 		return None;
@@ -209,7 +253,7 @@ fn malleable_positions(
 			.enumerate()
 			.all(|(i, (a, b))| spec.malleable_vary.contains(&i) || a.equivalent(b, true));
 		if anchored {
-			return Some(spec.malleable_vary.clone());
+			return Some((known.clone(), spec.malleable_vary.clone()));
 		}
 	}
 	None

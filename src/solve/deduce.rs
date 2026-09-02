@@ -484,12 +484,12 @@ impl<'a> Deducer<'a> {
 
 				let mut frontier = vec![aligned];
 				let mut viable = true;
-				for (filter_i, &arg_idx) in rule.given.iter().enumerate() {
+				for &arg_idx in rule.given.iter() {
 					let Some(arg) = p.arguments.get(arg_idx) else {
 						viable = false;
 						break;
 					};
-					let (filtered, valid) = filter_fn(p, arg, filter_i);
+					let (filtered, valid) = filter_fn(p, arg, arg_idx);
 					if !valid {
 						viable = false;
 						break;
@@ -653,7 +653,10 @@ impl<'a> Deducer<'a> {
 		let Some(inner) = p.arguments.first() else {
 			return Vec::new();
 		};
-		let arguments: Vec<Value> = (0..=p.output).map(|_| self.fresh_var()).collect();
+		let Some(width) = concat_width(p.output) else {
+			return Vec::new();
+		};
+		let arguments: Vec<Value> = (0..width).map(|_| self.fresh_var()).collect();
 		let candidate = Value::primitive(PRIM_CONCAT, arguments, 0);
 		let mut out = Vec::new();
 		for bound in self.invert(inner, &candidate, base) {
@@ -787,6 +790,16 @@ impl<'a> Deducer<'a> {
 	}
 }
 
+fn concat_width(output: usize) -> Option<usize> {
+	primitive_def(PRIM_CONCAT)
+		.ok()?
+		.arity()
+		.iter()
+		.map(|&a| a.max(0) as usize)
+		.filter(|&a| a > output)
+		.min()
+}
+
 fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 	match v {
 		Value::Primitive(p) => {
@@ -912,10 +925,11 @@ pub(crate) fn build_rewrite_shapes_with(
 		partials = next;
 	}
 
+	let output = rule.from_output.unwrap_or(0);
 	partials
 		.into_iter()
 		.map(|(arguments, _)| arguments)
-		.map(|arguments| Value::primitive(rule.id, arguments, 0))
+		.map(|arguments| Value::primitive(rule.id, arguments, output))
 		.collect()
 }
 

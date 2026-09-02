@@ -49,10 +49,6 @@ fn restriction_note(outer: PrimitiveId, inner: PrimitiveId, position: usize) -> 
 	)
 }
 
-fn plural(n: usize) -> &'static str {
-	if n == 1 { "" } else { "s" }
-}
-
 pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;

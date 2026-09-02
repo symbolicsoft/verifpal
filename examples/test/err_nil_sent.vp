@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: the counterpart of err_nil_redeclared.vp on the wire. Sending
+// `nil` tells the recipient nothing it did not already hold, and the refusal
+// must name that rule rather than cite the built-in slot's absent location.
+
+attacker[passive]
+
+principal Alice[
+	knows private ens_m
+	ens_h = HASH(ens_m)
+]
+
+Alice -> Bob: ens_h, nil
+
+principal Bob[
+	_ = HASH(ens_h)
+]
+
+queries[
+	confidentiality? ens_m
+]

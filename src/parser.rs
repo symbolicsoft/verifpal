@@ -565,6 +565,7 @@ impl<'a> Parser<'a> {
 			self.consume_trivia();
 		}
 
+		self.check_unterminated_block()?;
 		if blocks.is_empty() {
 			return Err(VerifpalError::parse(
 				"model declares no principals and no messages".into(),
@@ -2036,6 +2037,30 @@ mod tests {
 		);
 		assert!(text.contains("this `(` is never closed"), "{text}");
 		assert!(text.contains("add the missing `)`"), "{text}");
+	}
+
+	#[test]
+	fn an_unterminated_block_comment_is_named_rather_than_its_consequence() {
+		let text = model_error(
+			"attacker[active]\n/* never closed\nprincipal Alice[\n\tknows private ub_m\n]\n",
+		);
+		assert!(text.contains("unterminated block comment"), "{text}");
+		assert!(text.contains("this `/*` is never closed"), "{text}");
+	}
+
+	#[test]
+	fn a_message_a_principal_sends_to_itself_names_that_rule() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private sm_m\n]\nAlice -> Alice: sm_m\nqueries[\n\tconfidentiality? sm_m\n]\n",
+		);
+		assert!(
+			text.contains("Alice both sends and receives this message"),
+			"{text}"
+		);
+		assert!(
+			text.contains("a message travels between two different principals"),
+			"{text}"
+		);
 	}
 
 	#[test]

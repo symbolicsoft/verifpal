@@ -1103,6 +1103,22 @@ pub struct Query {
 }
 
 impl Query {
+	pub(crate) fn same_shape(&self, other: &Query) -> bool {
+		self.constants.len() == other.constants.len()
+			&& self
+				.constants
+				.iter()
+				.zip(&other.constants)
+				.all(|(x, y)| x.id == y.id)
+			&& self.message.same_shape(&other.message)
+			&& self.options.len() == other.options.len()
+			&& self
+				.options
+				.iter()
+				.zip(&other.options)
+				.all(|(x, y)| x.message.same_shape(&y.message))
+	}
+
 	pub fn subject(&self) -> VResult<&Constant> {
 		self.constants.first().ok_or_else(|| {
 			VerifpalError::internal(
@@ -1113,6 +1129,17 @@ impl Query {
 }
 
 impl Message {
+	pub(crate) fn same_shape(&self, other: &Message) -> bool {
+		self.sender == other.sender
+			&& self.recipient == other.recipient
+			&& self.constants.len() == other.constants.len()
+			&& self
+				.constants
+				.iter()
+				.zip(&other.constants)
+				.all(|(x, y)| x.id == y.id)
+	}
+
 	pub fn constant(&self) -> VResult<&Constant> {
 		self.constants
 			.first()

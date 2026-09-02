@@ -1038,6 +1038,7 @@ fn probe_with(
 	let ambient = scratch.attacker_snapshot();
 	let governing = governing_attacker(&scratch, km, installs, &ambient);
 	let ps = reexecute(base, installs, &governing, km).ok()?;
+	crate::solve::validate::note_malleable_reshapes(&scratch, km, &ps, installs, &governing);
 	let _ = compute_knowledge_closure(&scratch, km, &ps);
 	let _ = verify_resolve_queries(&scratch, km, &ps);
 	if !scratch.query_is_resolved(query_index) {
