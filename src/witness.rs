@@ -491,17 +491,6 @@ impl<'a> Minimizer<'a> {
 							controlled_by_any(self.km, &self.sessions, &self.ambient, candidate)
 						}
 					};
-					if std::env::var("VP_DBG_N").is_ok() && self.query_index == 1 {
-						let si = candidate.iter().find(|(s, _)| {
-							self.km.slots.get(s.get()).is_some_and(|t| &*t.constant.name == "static_i")
-						});
-						if let Some((_, v)) = si
-							&& format!("{v}") != "nil"
-						{
-							eprintln!("[n] P{} offers static_i={} buildable={}", session.id, v,
-								self.buildable(session, &candidate));
-						}
-					}
 					if !self.buildable(session, &candidate) {
 						continue;
 					}
