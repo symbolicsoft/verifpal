@@ -1,0 +1,62 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// The counterweight to history_incompatible_knowledge.vp, and the reason the
+// coherence check re-executes rather than refusing on sight. The same shape:
+// Alice seals her nonce to a third principal and separately gives Bob a
+// ciphertext he authenticates it with. Here, though, the sealing key is one
+// Charlie holds and leaks, so the attacker reads hco_na out of Alice's honest
+// run with no substitution anywhere.
+//
+// Nothing the attacker did to learn hco_na disturbs what Bob is handed, so the
+// execution the knowledge came from is the execution Bob runs, and the forged
+// hco_c is a genuine attack. A guard that dropped knowledge merely because it
+// was read off a message addressed to somebody else would lose this.
+
+attacker[active]
+
+principal Charlie[
+	knows private hco_ck
+	knows public hco_label
+	leaks hco_ck
+]
+
+principal Alice[
+	knows private hco_msg
+	knows private hco_ck
+	knows public hco_label
+	generates hco_a
+	generates hco_na
+	hco_ga = PUBKEY(hco_a)
+]
+
+principal Bob[
+	generates hco_b
+	hco_gb = PUBKEY(hco_b)
+]
+
+Alice -> Bob: [hco_ga]
+Bob -> Alice: [hco_gb]
+
+principal Alice[
+	hco_ka = DH_KEX(hco_gb, hco_a)
+	hco_leak = AEAD_ENC(hco_ck, hco_na, hco_label)
+	hco_e = ENC(hco_ka, hco_na)
+	hco_c = AEAD_ENC(hco_na, hco_msg, nil)
+]
+
+Alice -> Charlie: hco_leak
+Alice -> Bob: hco_e, hco_c
+
+principal Bob[
+	hco_kb = DH_KEX(hco_ga, hco_b)
+	hco_n = DEC(hco_kb, hco_e)
+	hco_p = AEAD_DEC(hco_n, hco_c, nil)?
+	hco_h = HASH(hco_p)
+]
+
+queries[
+	authentication? Alice -> Bob: hco_c
+]

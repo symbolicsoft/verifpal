@@ -396,6 +396,344 @@ fn a_cross_session_attack_saturates_only_after_it_appears() {
 }
 
 #[test]
+fn test_injective_routed_emission_twice() {
+	run_model("injective_routed_emission_twice.vp", "a1");
+	run_model_sessions("injective_routed_emission_twice.vp", 1, "a0");
+}
+
+#[test]
+fn a_matching_run_emission_accepted_twice_is_still_a_duplicate() {
+	let report = crate::verify::verify_report("examples/test/injective_routed_emission_twice.vp", 2)
+		.expect("analyses");
+	assert!(report.results[0].resolved);
+	assert_eq!(
+		report.results[0].subtype,
+		Some(crate::types::Subtype::DuplicateAcceptance),
+		"the matching-run exemption excuses a routed emission as a forgery, and the \
+		 duplicate test compares only against honest sibling emissions; whatever routing \
+		 lets a second run accept the emission also lets it accept the sibling's honest \
+		 one, so the duplicate is still seen and still named as one the recipient could \
+		 have told apart"
+	);
+}
+
+#[test]
+fn test_injective_recipient_nonce_unchecked() {
+	run_model("injective_recipient_nonce_unchecked.vp", "a1");
+	run_model_sessions("injective_recipient_nonce_unchecked.vp", 1, "a0");
+}
+
+#[test]
+fn a_duplicate_acceptance_says_whether_the_recipient_could_have_told() {
+	let checked = crate::verify::verify_report(
+		"examples/test/injective_recipient_nonce_unchecked.vp",
+		2,
+	)
+	.expect("analyses");
+	assert!(checked.results[0].resolved);
+	assert_eq!(
+		checked.results[0].subtype,
+		Some(crate::types::Subtype::DuplicateAcceptance),
+		"the sealed answer carries Bob's own challenge, so Bob is a recipient that could \
+		 have told two acceptances apart and did not; that is a duplicate the protocol \
+		 is answerable for"
+	);
+
+	let first_flight =
+		crate::verify::verify_report("examples/test/session_replay_breaks_injectivity.vp", 2)
+			.expect("analyses");
+	assert!(first_flight.results[0].resolved);
+	assert_eq!(
+		first_flight.results[0].subtype,
+		Some(crate::types::Subtype::ReplayableFirstFlight),
+		"a first flight the recipient contributed nothing to can be taken twice by any \
+		 run of it, so the duplicate is reported as the weaker finding it is"
+	);
+
+	let zero_rtt = crate::verify::verify_report("examples/transport-layer/tls13-0rtt.vp", 2)
+		.expect("analyses");
+	let early = zero_rtt
+		.results
+		.iter()
+		.find(|r| r.resolved && r.query.kind == crate::types::QueryKind::Authentication)
+		.expect("the 0-RTT replay is still reported");
+	assert_eq!(
+		early.subtype,
+		Some(crate::types::Subtype::ReplayableFirstFlight),
+		"RFC 9846 section 2.3 names non-replay as a property 0-RTT does not have. That \
+		 replay is exactly a first flight with no recipient-generated context, which is \
+		 why the distinction is a label on the verdict and not a reason to withhold it: \
+		 silencing context-free duplicates was measured to silence this one too"
+	);
+
+	let single = crate::verify::verify_report(
+		"examples/test/injective_recipient_nonce_unchecked.vp",
+		1,
+	)
+	.expect("analyses");
+	assert!(
+		!single.results[0].resolved,
+		"at one session the matching-run exemption holds: Alice honestly sealed what \
+		 the attacker fed her, and Bob accepted that once"
+	);
+}
+
+#[test]
+fn test_halted_use_is_not_acceptance() {
+	run_model("halted_use_is_not_acceptance.vp", "a0");
+	run_model_sessions("halted_use_is_not_acceptance.vp", 1, "a0");
+}
+
+#[test]
+fn test_history_incompatible_knowledge() {
+	run_model("history_incompatible_knowledge.vp", "a0");
+	run_model_sessions("history_incompatible_knowledge.vp", 1, "a0");
+}
+
+#[test]
+fn test_history_compatible_oracle() {
+	run_model("history_compatible_oracle.vp", "a1");
+	run_model_sessions("history_compatible_oracle.vp", 1, "a1");
+}
+
+#[test]
+fn knowledge_from_one_execution_is_not_spent_against_another() {
+	let (_, incompatible) =
+		crate::verify::verify_with_sessions("examples/test/history_incompatible_knowledge.vp", 1)
+			.expect("analyses");
+	let (_, compatible) =
+		crate::verify::verify_with_sessions("examples/test/history_compatible_oracle.vp", 1)
+			.expect("analyses");
+	assert_eq!(
+		incompatible, "a0",
+		"the substitution that lets the attacker read the sealed nonce also changes the \
+		 ciphertext Bob decrypts to recover it, so no single execution both reveals the \
+		 nonce and leaves Bob able to use it. The revealing message goes to a third \
+		 principal, so noticing this means re-running Alice under the recorded \
+		 substitution rather than comparing the slots Bob himself receives"
+	);
+	assert_eq!(
+		compatible, "a1",
+		"here the sealing key is simply leaked, so nothing the attacker did to learn the \
+		 nonce disturbs what Bob is handed and the forgery is real. Dropping knowledge \
+		 because it came off a message addressed elsewhere would lose it"
+	);
+}
+
+#[test]
+fn test_forward_transitive_relay() {
+	run_model("forward_transitive_relay.vp", "f1");
+	run_model_sessions("forward_transitive_relay.vp", 1, "f1");
+}
+
+#[test]
+fn test_forward_relay_all_guarded() {
+	run_model("forward_relay_all_guarded.vp", "f0");
+	run_model_sessions("forward_relay_all_guarded.vp", 1, "f0");
+}
+
+#[test]
+fn test_forward_computed_under_guard() {
+	run_model("forward_computed_under_guard.vp", "f1");
+	run_model_sessions("forward_computed_under_guard.vp", 1, "f1");
+}
+
+#[test]
+fn test_forward_computed_guarded_input() {
+	run_model("forward_computed_guarded_input.vp", "f0");
+	run_model_sessions("forward_computed_guarded_input.vp", 1, "f0");
+}
+
+#[test]
+fn test_forward_halted_sender_emits_nothing() {
+	run_model("forward_halted_sender_emits_nothing.vp", "f0");
+	run_model_sessions("forward_halted_sender_emits_nothing.vp", 1, "f0");
+}
+
+#[test]
+fn test_forward_emission_is_not_a_forgery() {
+	run_model("forward_emission_is_not_a_forgery.vp", "a0f1");
+	run_model_sessions("forward_emission_is_not_a_forgery.vp", 1, "a0f1");
+}
+
+#[test]
+fn a_guard_does_not_protect_a_sender_that_computed_on_attacker_input() {
+	let (_, relayed) =
+		crate::verify::verify_with_sessions("examples/test/forward_transitive_relay.vp", 1)
+			.expect("analyses");
+	let (_, closed) =
+		crate::verify::verify_with_sessions("examples/test/forward_relay_all_guarded.vp", 1)
+			.expect("analyses");
+	assert_eq!(
+		relayed, "f1",
+		"one unguarded leg decides the value two guarded relays later, so the guard on \
+		 Dave's own incoming leg protects nothing; the substitution has to be followed \
+		 through every forwarder rather than one hop"
+	);
+	assert_eq!(
+		closed, "f0",
+		"with no unguarded leg anywhere there is no substitution to follow, and reporting \
+		 one would be a value no execution produces"
+	);
+
+	let (_, computed) =
+		crate::verify::verify_with_sessions("examples/test/forward_computed_under_guard.vp", 1)
+			.expect("analyses");
+	let (_, guarded_input) =
+		crate::verify::verify_with_sessions("examples/test/forward_computed_guarded_input.vp", 1)
+			.expect("analyses");
+	let (_, halted) = crate::verify::verify_with_sessions(
+		"examples/test/forward_halted_sender_emits_nothing.vp",
+		1,
+	)
+	.expect("analyses");
+	assert_eq!(
+		computed, "f1",
+		"the tag cannot be synthesised without the key and its leg is guarded, so the \
+		 only route is Alice's own run emitting it under attacker-chosen input and that \
+		 emission being delivered"
+	);
+	assert_eq!(
+		guarded_input, "f0",
+		"guard the input too and the sender has no reason to compute anything else, so a \
+		 forwarded emission must carry no attack"
+	);
+	assert_eq!(
+		halted, "f0",
+		"a run that halts before its send emitted nothing, so there is nothing to carry"
+	);
+}
+
+#[test]
+fn test_conf_attacker_supplied_value() {
+	run_model("conf_attacker_supplied_value.vp", "c1c0");
+	run_model_sessions("conf_attacker_supplied_value.vp", 1, "c1c0");
+}
+
+#[test]
+fn test_conf_forced_key_is_a_real_disclosure() {
+	run_model("conf_forced_key_is_a_real_disclosure.vp", "c1");
+	run_model_sessions("conf_forced_key_is_a_real_disclosure.vp", 1, "c1");
+}
+
+#[test]
+fn a_confidentiality_break_says_whether_the_value_was_the_attackers_own() {
+	let supplied = crate::verify::verify_report("examples/test/conf_attacker_supplied_value.vp", 1)
+		.expect("analyses");
+	assert_eq!(
+		supplied.results[0].subtype,
+		Some(crate::types::Subtype::AttackerSuppliedValue),
+		"the attacker learns nil because it put nil there; the honest value was never \
+		 shown to leak, and a report that reads the same as a real disclosure is the \
+		 thing under test"
+	);
+	assert!(supplied.results[0].resolved);
+	assert!(!supplied.results[1].resolved);
+	assert!(
+		supplied.results[0]
+			.conclusion
+			.contains("is not shown to be disclosed")
+	);
+
+	let forced =
+		crate::verify::verify_report("examples/test/conf_forced_key_is_a_real_disclosure.vp", 1)
+			.expect("analyses");
+	assert!(forced.results[0].resolved);
+	assert_eq!(
+		forced.results[0].subtype, None,
+		"a session key the attacker forced still carries Bob's own generated exponent, so \
+		 it is a genuine disclosure and must not be qualified away"
+	);
+
+	let none_flagged = swept_models().into_iter().all(|(_, path)| {
+		crate::verify::verify_report(&path, 1)
+			.map(|report| {
+				report
+					.results
+					.iter()
+					.all(|r| r.subtype.is_none() || path.contains("conf_attacker_supplied_value"))
+			})
+			.unwrap_or(true)
+	});
+	assert!(
+		none_flagged,
+		"every other confidentiality break in the corpus reaches a value that carries \
+		 something generated or held privately, so the qualifier must stay off them"
+	);
+}
+
+#[test]
+fn test_matching_run_routing() {
+	run_model("matching_run_routing.vp", "a1");
+	run_model_sessions("matching_run_routing.vp", 1, "a0");
+}
+
+#[test]
+fn test_matching_run_two_inputs() {
+	run_model("matching_run_two_inputs.vp", "a1");
+	run_model_sessions("matching_run_two_inputs.vp", 1, "a0");
+}
+
+#[test]
+fn test_matching_run_nested_term() {
+	run_model("matching_run_nested_term.vp", "a1");
+	run_model_sessions("matching_run_nested_term.vp", 1, "a0");
+}
+
+#[test]
+fn test_matching_run_forged_not_emitted() {
+	run_model("matching_run_forged_not_emitted.vp", "a1");
+	run_model_sessions("matching_run_forged_not_emitted.vp", 1, "a1");
+}
+
+#[test]
+fn test_matching_run_constructed_not_emitted() {
+	run_model("matching_run_constructed_not_emitted.vp", "a1");
+	run_model_sessions("matching_run_constructed_not_emitted.vp", 1, "a1");
+}
+
+#[test]
+fn test_matching_run_halts_before_send() {
+	run_model("matching_run_halts_before_send.vp", "a1");
+	run_model_sessions("matching_run_halts_before_send.vp", 1, "a1");
+}
+
+#[test]
+fn a_matching_run_of_the_sender_is_not_an_authentication_failure() {
+	let (_, routed) =
+		crate::verify::verify_with_sessions("examples/test/matching_run_routing.vp", 1)
+			.expect("analyses");
+	let (_, forged) =
+		crate::verify::verify_with_sessions("examples/test/matching_run_forged_not_emitted.vp", 1)
+			.expect("analyses");
+	assert_eq!(
+		routed, "a0",
+		"driving both deliveries of the nonce makes Alice honestly compute and send the \
+		 very tag Bob accepts, so one send answers one acceptance and injective agreement \
+		 holds; reporting it conflates rerouting with authoring"
+	);
+	assert_eq!(
+		forged, "a1",
+		"guarding Alice's nonce leaves no substitution that drives her into emitting the \
+		 forged tag, so the exemption must not excuse a value the leaked key manufactured"
+	);
+}
+
+#[test]
+fn saturation_never_stops_before_it_has_looked_above_the_default() {
+	let stable = crate::verify::saturation_sessions("examples/test/aead_leak.vp", 4, false)
+		.expect("analyses");
+	assert!(stable.saturated);
+	assert_eq!(
+		stable.sessions, 3,
+		"a model reading alike at one and two sessions must still be probed at three: an \
+		 attack needing three concurrent runs is invisible below that, and a ladder that \
+		 began at one session would have called this saturated at two and stopped"
+	);
+	assert_eq!(stable.stable_from, 2);
+}
+
+#[test]
 fn test_spore_ns_pk() {
 	run_model("spore_ns_pk.vp", "c1a1a0");
 	run_model_sessions("spore_ns_pk.vp", 1, "c1a1a0");

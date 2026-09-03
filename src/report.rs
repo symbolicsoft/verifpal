@@ -142,6 +142,8 @@ pub struct QueryReport {
 	pub range: SourceRange,
 	pub summary: String,
 	pub conclusion: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub subtype: Option<String>,
 	pub steps: Vec<ReportStep>,
 	pub preconditions: Vec<String>,
 	pub variants: usize,
@@ -278,6 +280,7 @@ impl QueryReport {
 			range: SourceRange::of(r.query.span, source),
 			summary: r.summary.clone(),
 			conclusion: r.conclusion.clone(),
+			subtype: r.subtype.map(|s| s.name().to_string()),
 			steps: r
 				.steps
 				.iter()
@@ -574,6 +577,7 @@ mod tests {
 						},
 						summary: "m1 is obtained by Attacker.".to_string(),
 						conclusion: "m1 is obtained by Attacker.".to_string(),
+						subtype: None,
 						steps: vec![
 							ReportStep::new(
 								"derive".to_string(),

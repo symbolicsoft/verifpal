@@ -695,6 +695,7 @@ mod tests {
 			} else {
 				String::new()
 			},
+			subtype: None,
 			steps: vec![],
 			preconditions: vec![],
 			variants: 0,

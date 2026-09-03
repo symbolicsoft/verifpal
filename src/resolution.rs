@@ -109,10 +109,31 @@ pub(crate) fn resolve_ps_values(
 	let Value::Constant(c) = value else {
 		return resolve_ps_primitive(value, root_value, root_index, ps, use_original, memo);
 	};
-	let Some(slot_idx) = ps.index_of(c) else {
+	let Some(start) = ps.index_of(c) else {
 		return Err(VerifpalError::resolution("invalid index".into()));
 	};
-	let use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
+	let mut slot_idx = start;
+	let mut use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
+	let mut hops = 0usize;
+	loop {
+		let held = if use_orig {
+			ps.values[slot_idx].perceived()
+		} else {
+			&ps.values[slot_idx].value
+		};
+		let Value::Constant(alias) = held else {
+			break;
+		};
+		let Some(next) = ps.index_of(alias) else {
+			break;
+		};
+		if next == slot_idx || hops >= ps.values.len() {
+			break;
+		}
+		slot_idx = next;
+		use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
+		hops += 1;
+	}
 	let rerooted = slot_idx != root_index;
 	if rerooted && let Some(hit) = &memo[slot_idx][usize::from(use_orig)] {
 		return Ok(Some(hit.clone()));
@@ -293,6 +314,74 @@ mod tests {
 			!visibility(&reachable, 0, 1, true),
 			"an outer original view does not survive into a slot the attacker could \
 			 replace on its way to the term's creator"
+		);
+	}
+
+	#[test]
+	fn a_substituted_slot_resolves_through_the_name_it_was_given() {
+		let alias = make_constant("rc_alias");
+		let target = make_constant("rc_target");
+		let carrier = make_constant("rc_carrier");
+		let (alias_c, target_c, carrier_c) = (
+			alias.as_constant().expect("constant").clone(),
+			target.as_constant().expect("constant").clone(),
+			carrier.as_constant().expect("constant").clone(),
+		);
+		let inner = make_primitive(crate::primitive::PRIM_HASH, vec![make_constant("rc_seed")], 0);
+		let seed_c = make_constant("rc_seed");
+
+		let mut alias_meta = make_slot_meta(&alias_c, false);
+		alias_meta.wire = vec![1];
+		let mut target_meta = make_slot_meta(&target_c, false);
+		target_meta.wire = vec![1];
+		let carrier_meta = make_slot_meta(&carrier_c, true);
+		let seed_meta = make_slot_meta(seed_c.as_constant().expect("constant"), true);
+
+		let mut alias_values = make_slot_values(&target, 2);
+		alias_values.provenance.attacker_tainted = true;
+		let mut target_values = make_slot_values(&inner, 2);
+		target_values.provenance.attacker_tainted = true;
+		let carrier_values = make_slot_values(
+			&make_primitive(crate::primitive::PRIM_HASH, vec![alias.clone()], 0),
+			1,
+		);
+		let seed_values = make_slot_values(&seed_c, 1);
+
+		let mut ps = make_principal_state(
+			"Bob",
+			1,
+			vec![alias_meta, target_meta, carrier_meta, seed_meta],
+			vec![alias_values, target_values, carrier_values, seed_values],
+		);
+		ps.resolve_all_values().expect("resolves");
+
+		let (resolved, _) = ps.resolve_constant(&alias_c, false);
+		assert!(
+			resolved.equivalent(&inner, true),
+			"a slot the attacker filled with another slot's name must resolve to what that \
+			 name holds. Stopping at the name leaves the recipient's own check comparing a \
+			 label while the term handed to it carries a value, and two different values \
+			 then compare equal, which is a contradiction nothing executes. Got {resolved}"
+		);
+	}
+
+	#[test]
+	fn a_slot_that_names_itself_terminates_the_walk() {
+		let received = make_constant("rc_self");
+		let received_c = received.as_constant().expect("constant").clone();
+		let mut meta = make_slot_meta(&received_c, false);
+		meta.wire = vec![1];
+		let ps = make_principal_state(
+			"Bob",
+			1,
+			vec![meta],
+			vec![make_slot_values(&received, 2)],
+		);
+		let (resolved, _) = ps.resolve_constant(&received_c, false);
+		assert!(
+			resolved.equivalent(&received, true),
+			"a received constant's slot holds the constant itself, so the walk has to stop \
+			 there rather than chase its own name forever"
 		);
 	}
 

@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: f1 at one session and at two.
+//
+// Carol's nonce reaches Alice unguarded and Bob guarded. The attacker hands
+// Alice nil, so Alice authenticates MAC(k, nil) and sends it to Bob over a
+// guarded leg. Bob hashes a tag whose structure now contains nothing generated.
+//
+// The attacker cannot synthesise this tag: it never learns k, and the leg
+// carrying the tag is guarded, so no substitution places it. The only route is
+// for Alice's own replayed run to emit it and for that emission to be
+// delivered, which is what carrying an execution forward expresses and what
+// per-principal replay against accumulated knowledge cannot.
+
+attacker[active]
+
+principal Alice[
+	knows private fcg_k
+]
+
+principal Bob[
+	knows private fcg_k
+]
+
+principal Carol[
+	generates fcg_n
+]
+
+Carol -> Alice: fcg_n
+Carol -> Bob: [fcg_n]
+
+principal Alice[
+	fcg_tag = MAC(fcg_k, fcg_n)
+]
+
+Alice -> Bob: [fcg_tag]
+
+principal Bob[
+	fcg_h = HASH(fcg_tag)
+]
+
+queries[
+	freshness? fcg_tag
+]

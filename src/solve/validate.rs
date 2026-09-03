@@ -44,7 +44,7 @@ pub(crate) fn validate(
 		let authored = attacker_authored(&ground, slot, km, &ps);
 		chosen.push((slot, ground, authored));
 	}
-	let coherent = guards.history.compatible(km, &ps, &chosen, attacker);
+	let coherent = guards.history.compatible(ctx, km, &ps, &chosen, attacker);
 	let attacker = coherent.as_deref().unwrap_or(attacker);
 
 	for (slot, ground, authored) in &chosen {
@@ -55,7 +55,7 @@ pub(crate) fn validate(
 		if !crate::primitive::admissible(&ground) {
 			return Ok(false);
 		}
-		if !guards.bound.admits(&ground) {
+		if !guards.bound.admits_at(ps.id, slot, &ground) {
 			note_depth_cut(ctx, slot, &ground, &ps, guards.bound);
 			return Ok(false);
 		}
@@ -85,15 +85,22 @@ pub(crate) fn validate(
 	}
 
 	let governing = crate::reexec::governing_attacker(ctx, km, &installs, attacker);
-	let restricted = guards.history.compatible(km, &ps, &chosen, &governing);
+	let restricted = guards.history.compatible(ctx, km, &ps, &chosen, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
-	let Ok(ps) = crate::reexec::reexecute(&ps, &installs, governing, km) else {
+	let Ok(executed) = crate::reexec::execute_forward(ctx, km, &ps, &installs, governing) else {
 		return Ok(false);
 	};
 
-	note_malleable_reshapes(ctx, km, &ps, &installs, governing);
-	let _ = compute_knowledge_closure(ctx, km, &ps);
-	let _ = verify_resolve_queries(ctx, km, &ps);
+	for (i, state) in executed.iter().enumerate() {
+		if i == 0 {
+			note_malleable_reshapes(ctx, km, state, &installs, governing);
+		}
+		let _ = compute_knowledge_closure(ctx, km, state);
+	}
+	ctx.note_execution(ps.id, &installs);
+	for state in &executed {
+		let _ = verify_resolve_queries(ctx, km, state);
+	}
 	Ok(true)
 }
 

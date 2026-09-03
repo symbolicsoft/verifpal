@@ -1,0 +1,47 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// The counterweight to matching_run_routing.vp. Alice's copy of the nonce is
+// guarded, so no substitution drives her into emitting anything but
+// MAC(k, n), while Mallory leaks the shared key, so the attacker can forge
+// MAC(k, nil) and hand it to Bob under a nonce it also replaced. Bob accepts a
+// value no run of Alice ever produced, which is exactly the forgery the
+// matching-run exemption must not excuse.
+
+attacker[active]
+
+principal Alice[
+	knows private mrf_k
+]
+
+principal Carol[
+	generates mrf_n
+]
+
+principal Bob[
+	knows private mrf_k
+]
+
+principal Mallory[
+	knows private mrf_k
+	leaks mrf_k
+]
+
+Carol -> Alice: [mrf_n]
+Carol -> Bob: mrf_n
+
+principal Alice[
+	mrf_t = MAC(mrf_k, mrf_n)
+]
+
+Alice -> Bob: mrf_t
+
+principal Bob[
+	_ = ASSERT(mrf_t, MAC(mrf_k, mrf_n))?
+]
+
+queries[
+	authentication? Alice -> Bob: mrf_t
+]

@@ -47,25 +47,114 @@ impl Controllable {
 
 pub(crate) struct TermBound {
 	max_depth: usize,
+	protocol: IdSet<u64>,
+	ids: Vec<ValueId>,
+	creators: Vec<PrincipalId>,
+	consumes: Vec<Option<ValueId>>,
+	peel: std::cell::RefCell<IdMap<(PrincipalId, usize), usize>>,
 }
 
 impl TermBound {
 	pub(crate) fn of(km: &ProtocolTrace) -> TermBound {
-		let max_depth = km
-			.slots
-			.iter()
-			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
-			.max()
-			.unwrap_or(0);
-		TermBound { max_depth }
+		let mut protocol: IdSet<u64> = IdSet::default();
+		let mut max_depth = 0usize;
+		for slot in &km.slots {
+			let resolved = resolve_trace_constant(&slot.constant, km);
+			max_depth = max_depth.max(term_depth(&resolved));
+			crate::hashing::collect_subterm_hashes(&resolved, &mut protocol);
+		}
+		TermBound {
+			max_depth,
+			protocol,
+			ids: km.slots.iter().map(|slot| slot.constant.id).collect(),
+			creators: km.slots.iter().map(|slot| slot.creator).collect(),
+			consumes: km
+				.slots
+				.iter()
+				.map(|slot| unwrapped_by(&slot.initial_value))
+				.collect(),
+			peel: std::cell::RefCell::new(IdMap::default()),
+		}
 	}
 
-	pub(crate) fn admits(&self, v: &Value) -> bool {
-		term_depth(v) <= self.max_depth
+	pub(crate) fn admits_at(&self, principal: PrincipalId, slot: usize, v: &Value) -> bool {
+		let depth = term_depth(v);
+		if depth <= self.max_depth {
+			return true;
+		}
+		if std::env::var("VP_NO_PEEL").is_ok() {
+			return false;
+		}
+		depth <= self.max_depth + self.peel_depth(principal, slot)
+			&& self.depth_over_protocol(v) <= self.max_depth
 	}
 
 	pub(crate) fn depth(&self) -> usize {
 		self.max_depth
+	}
+
+	fn depth_over_protocol(&self, v: &Value) -> usize {
+		match v {
+			Value::Constant(_) => 0,
+			Value::Primitive(p) => {
+				if self.protocol.contains(&v.hash_value()) {
+					return 0;
+				}
+				1 + p
+					.arguments
+					.iter()
+					.map(|a| self.depth_over_protocol(a))
+					.max()
+					.unwrap_or(0)
+			}
+		}
+	}
+
+	fn peel_depth(&self, principal: PrincipalId, slot: usize) -> usize {
+		if let Some(&hit) = self.peel.borrow().get(&(principal, slot)) {
+			return hit;
+		}
+		let mut visiting: Vec<usize> = Vec::new();
+		let depth = self.peel_from(principal, slot, &mut visiting);
+		self.peel.borrow_mut().insert((principal, slot), depth);
+		depth
+	}
+
+	fn peel_from(&self, principal: PrincipalId, slot: usize, visiting: &mut Vec<usize>) -> usize {
+		let Some(&id) = self.ids.get(slot) else {
+			return 0;
+		};
+		if visiting.contains(&slot) {
+			return 0;
+		}
+		visiting.push(slot);
+		let deepest = (0..self.ids.len())
+			.filter(|&t| self.creators[t] == principal && self.consumes[t] == Some(id))
+			.map(|t| 1 + self.peel_from(principal, t, visiting))
+			.max()
+			.unwrap_or(0);
+		visiting.pop();
+		deepest
+	}
+}
+
+/// The constant a term strips a layer from, where it strips one: the argument
+/// a rewrite rule inspects, or the one field `SPLIT` opens.
+fn unwrapped_by(v: &Value) -> Option<ValueId> {
+	let Value::Primitive(p) = v else {
+		return None;
+	};
+	let at = match primitive_get(p.id)
+		.ok()
+		.and_then(|spec| spec.rewrite.as_ref())
+	{
+		Some(rule) => rule.from,
+		None if p.id == crate::primitive::PRIM_SPLIT => 0,
+		None => return None,
+	};
+	match p.arguments.get(at) {
+		Some(Value::Constant(c)) => Some(c.id),
+		_ => None,
 	}
 }
 
@@ -187,10 +276,18 @@ fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerS
 		.filter(|&(_, &keep)| keep)
 		.map(|(d, _)| d.clone())
 		.collect();
+	let alternates = attacker
+		.alternates
+		.iter()
+		.zip(keep.iter())
+		.filter(|&(_, &keep)| keep)
+		.map(|(d, _)| d.clone())
+		.collect();
 	Some(Arc::new(AttackerState {
 		current_phase: attacker.current_phase,
 		mutation_records: Arc::new(mutation_records),
 		derivations: Arc::new(derivations),
+		alternates: Arc::new(alternates),
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 	}))
@@ -250,6 +347,7 @@ pub(crate) struct Coherence {
 	principal: PrincipalId,
 	forwarded: Vec<Option<Value>>,
 	agreed: std::cell::RefCell<IdMap<u64, Vec<Agreement>>>,
+	histories: std::cell::RefCell<Vec<(usize, Vec<usize>, bool)>>,
 }
 
 impl Coherence {
@@ -266,11 +364,13 @@ impl Coherence {
 			principal: ps.id,
 			forwarded,
 			agreed: std::cell::RefCell::new(IdMap::default()),
+			histories: std::cell::RefCell::new(Vec::new()),
 		}
 	}
 
 	pub(crate) fn compatible(
 		&self,
+		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		delivered: &[Delivery],
@@ -300,6 +400,9 @@ impl Coherence {
 				None | Some(DerivationRecord::Initial) => true,
 				Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
 					self.forwards(km, attacker, i, slot.get(), &authored)
+						&& attacker.record(KnownIdx(i)).is_some_and(|record| {
+							self.execution_agrees(ctx, km, attacker, record, &authored)
+						})
 				}
 				Some(other) => other.ingredients().iter().all(|v| {
 					attacker
@@ -317,6 +420,94 @@ impl Coherence {
 			built.clone(),
 		));
 		built
+	}
+
+	fn execution_agrees(
+		&self,
+		ctx: &VerifyContext,
+		km: &ProtocolTrace,
+		attacker: &AttackerState,
+		record: &Arc<MutationRecord>,
+		authored: &[usize],
+	) -> bool {
+		let diffs: Vec<(SlotIdx, Value)> = record
+			.diffs
+			.iter()
+			.filter(|diff| diff.tainted)
+			.map(|diff| (diff.index, diff.value.clone()))
+			.collect();
+		if diffs.is_empty() {
+			return true;
+		}
+		let key = Arc::as_ptr(record) as usize;
+		if let Some(&(_, _, hit)) = self
+			.histories
+			.borrow()
+			.iter()
+			.find(|(seen, seen_authored, _)| *seen == key && seen_authored == authored)
+		{
+			return hit;
+		}
+		let agrees = self.replays_agree(ctx, km, attacker, &diffs, authored);
+		self.histories
+			.borrow_mut()
+			.push((key, authored.to_vec(), agrees));
+		agrees
+	}
+
+	fn replays_agree(
+		&self,
+		ctx: &VerifyContext,
+		km: &ProtocolTrace,
+		attacker: &AttackerState,
+		diffs: &[(SlotIdx, Value)],
+		authored: &[usize],
+	) -> bool {
+		for origin in ctx.principal_states() {
+			if origin.id == self.principal {
+				continue;
+			}
+			let watched: Vec<usize> = (0..origin.values.len())
+				.filter(|&at| {
+					self.forwarded.get(at).is_some_and(Option::is_some)
+						&& !authored.contains(&at)
+						&& km
+							.slots
+							.get(at)
+							.is_some_and(|slot| slot.creator == origin.id)
+				})
+				.collect();
+			if watched.is_empty() {
+				continue;
+			}
+			let installs: Vec<(SlotIdx, Value)> = diffs
+				.iter()
+				.filter(|(slot, _)| {
+					origin.meta.get(slot.get()).is_some_and(|meta| {
+						meta.creator != origin.id && meta.wire.contains(&origin.id)
+					})
+				})
+				.cloned()
+				.collect();
+			if installs.is_empty() {
+				continue;
+			}
+			let Ok(out) = reexecute(&origin.clone_for_depth(true), &installs, attacker, km) else {
+				continue;
+			};
+			for at in watched {
+				let Some(Some(honest)) = self.forwarded.get(at) else {
+					continue;
+				};
+				if at >= out.values.len()
+					|| out.slot_unreached(at)
+					|| !reduce_once(&out.values[at].value).equivalent(honest, true)
+				{
+					return false;
+				}
+			}
+		}
+		true
 	}
 
 	fn forwards(
@@ -406,7 +597,7 @@ pub(crate) fn attacker_controllable(
 	{
 		return false;
 	}
-	if !km.constant_used_by(ps.id, &meta.constant) {
+	if !km.constant_used_by(ps.id, &meta.constant) && meta.sent_at.is_none() {
 		return false;
 	}
 	true
@@ -474,6 +665,136 @@ pub(crate) fn reexecute(
 		ps = halt_at(ps, &failures);
 	}
 	ps.foreign_halts = foreign;
+	Ok(ps)
+}
+
+pub(crate) fn execute_forward(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
+) -> VResult<Vec<PrincipalState>> {
+	let first = reexecute(base, installs, attacker, km)?;
+	let mut out = vec![first];
+	let others = ctx.principal_states().len();
+	let mut applied: Vec<(PrincipalId, Vec<(SlotIdx, Value)>)> = Vec::new();
+	for _ in 0..others {
+		let mut changed = false;
+		for pristine in ctx.principal_states() {
+			if pristine.id == base.id {
+				continue;
+			}
+			let forwarded = forwarded_installs(km, &out, pristine, attacker);
+			if forwarded.is_empty() {
+				continue;
+			}
+			if applied
+				.iter()
+				.any(|(id, seen)| *id == pristine.id && same_installs(seen, &forwarded))
+			{
+				continue;
+			}
+			let Ok(state) =
+				reexecute_forwarded(&pristine.clone_for_depth(true), &forwarded, attacker)
+			else {
+				continue;
+			};
+			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
+				Some((_, seen)) => *seen = forwarded,
+				None => applied.push((pristine.id, forwarded)),
+			}
+			match out.iter_mut().find(|s| s.id == pristine.id) {
+				Some(entry) => *entry = state,
+				None => out.push(state),
+			}
+			changed = true;
+		}
+		if !changed {
+			break;
+		}
+	}
+	Ok(out)
+}
+
+fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b.iter())
+			.all(|((sa, va), (sb, vb))| sa == sb && va.equivalent(vb, true))
+}
+
+fn forwarded_installs(
+	km: &ProtocolTrace,
+	executed: &[PrincipalState],
+	target: &PrincipalState,
+	attacker: &AttackerState,
+) -> Vec<(SlotIdx, Value)> {
+	let mut out: Vec<(SlotIdx, Value)> = Vec::new();
+	for source in executed {
+		if source.id == target.id {
+			continue;
+		}
+		for at in 0..target.values.len() {
+			if out.iter().any(|(slot, _)| slot.get() == at) {
+				continue;
+			}
+			let Some(slot) = km.slots.get(at) else {
+				continue;
+			};
+			let sent = slot.sent_by.iter().any(|event| {
+				event.sender == source.id
+					&& event.recipient == target.id
+					&& event.phase <= attacker.current_phase
+					&& source.event_reached(km, source.id, event.declared_at)
+			});
+			if !sent || at >= source.values.len() || source.slot_unreached(at) {
+				continue;
+			}
+			let emitted = &source.values[at].value;
+			if emitted.equivalent(&target.values[at].value, true) {
+				continue;
+			}
+			out.push((SlotIdx(at), emitted.clone()));
+		}
+	}
+	out
+}
+
+fn install_forwarded(ps: &mut PrincipalState, slot: usize, value: Value) {
+	let sv = &mut ps.values[slot];
+	sv.pre_rewrite = value.clone();
+	sv.value = value;
+	sv.provenance.attacker_tainted = true;
+}
+
+fn reexecute_forwarded(
+	ps_base: &PrincipalState,
+	forwarded: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
+) -> VResult<PrincipalState> {
+	let mut ps = ps_base.clone();
+	for (slot, value) in forwarded {
+		if slot.get() < ps.values.len() {
+			install_forwarded(&mut ps, slot.get(), value.clone());
+		}
+	}
+	if slot_graph_is_cyclic(&ps) {
+		return Err(VerifpalError::resolution(
+			"a forwarded value would define a slot in terms of itself".into(),
+		));
+	}
+	let ps_pre = ps.clone();
+	ps.resolve_all_values()?;
+	let failures = ps.perform_all_rewrites();
+	let foreign = foreign_halts(&ps, &failures);
+	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
+		ps = bypassed;
+	} else {
+		ps = halt_at(ps, &failures);
+	}
+	ps.foreign_halts = foreign;
+	ps.forwarded = true;
 	Ok(ps)
 }
 
@@ -810,6 +1131,12 @@ mod tests {
 		(trace, ps)
 	}
 
+	fn coherence_context() -> crate::context::VerifyContext {
+		let src = "attacker[active]\nprincipal Alice[\nknows private coh_ctx_m\n]\nqueries[\nconfidentiality? coh_ctx_m\n]\n";
+		let m = crate::parser::parse_string("coh.vp", src).expect("parse");
+		crate::context::VerifyContext::new(&m, &[], Vec::new(), 1, None, Vec::new())
+	}
+
 	fn coherence_attacker(
 		held: &crate::types::Value,
 		from: crate::types::PrincipalId,
@@ -827,6 +1154,7 @@ mod tests {
 				phase: 0,
 			})]),
 			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
+			alternates: std::sync::Arc::new(vec![Vec::new()]),
 		}
 	}
 
@@ -838,7 +1166,7 @@ mod tests {
 		let history = super::Coherence::of(&km, &ps);
 		let attacker = coherence_attacker(&other, 1);
 		let restricted = history
-			.compatible(&km, &ps, &[], &attacker)
+			.compatible(&coherence_context(), &km, &ps, &[], &attacker)
 			.expect("the incompatible term is dropped");
 		assert!(
 			restricted.knows(&other).is_none(),
@@ -859,7 +1187,7 @@ mod tests {
 		let delivered = [(0usize, forged, true)];
 		assert!(
 			history
-				.compatible(&km, &ps, &delivered, &attacker)
+				.compatible(&coherence_context(), &km, &ps, &delivered, &attacker)
 				.is_none(),
 			"authoring what the recipient is handed claims nothing about what the sender \
 			 produced, so the sender's other execution is not contradicted"
@@ -874,7 +1202,9 @@ mod tests {
 		let history = super::Coherence::of(&km, &ps);
 		let attacker = coherence_attacker(&other, 3);
 		assert!(
-			history.compatible(&km, &ps, &[], &attacker).is_none(),
+			history
+				.compatible(&coherence_context(), &km, &ps, &[], &attacker)
+				.is_none(),
 			"a read performed while walking some other recipient says what that one was \
 			 handed, and the attacker may hand two recipients different values"
 		);

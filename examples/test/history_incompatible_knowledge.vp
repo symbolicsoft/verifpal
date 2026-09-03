@@ -1,0 +1,63 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and at two.
+//
+// Knowledge derived under one execution of a principal may not be spent
+// against another. Alice learns nothing on her own; the attacker learns hik_na
+// only by replacing hik_gb with its own public value, which makes hik_ka a key
+// it holds and hik_leak readable. But that same substitution changes hik_e,
+// which is the ciphertext Bob decrypts to recover the nonce. In the execution
+// where the attacker can read hik_leak, Bob cannot recover hik_n; in the
+// execution where Bob can, the attacker never learns hik_na.
+//
+// The report the engine used to give took hik_na from the first execution and
+// Bob's pristine hik_e from the second. Tamarin proves the correspondence holds
+// with one run per role. The guard that catches it has to re-run Alice under
+// the substitution the knowledge was recorded against and notice that her
+// hik_e comes out different from the one Bob holds; comparing only the slots
+// Bob himself receives misses it, because the revealing message went to
+// Charlie.
+
+attacker[active]
+
+principal Alice[
+	knows private hik_msg
+	knows public hik_label
+	generates hik_a
+	generates hik_na
+	hik_ga = PUBKEY(hik_a)
+]
+
+principal Bob[
+	generates hik_b
+	hik_gb = PUBKEY(hik_b)
+]
+
+principal Charlie[
+	knows public hik_label
+]
+
+Alice -> Bob: [hik_ga]
+Bob -> Alice: hik_gb
+
+principal Alice[
+	hik_ka = DH_KEX(hik_gb, hik_a)
+	hik_leak = AEAD_ENC(hik_ka, hik_na, hik_label)
+	hik_e = ENC(hik_ka, hik_na)
+	hik_c = AEAD_ENC(hik_na, hik_msg, nil)
+]
+
+Alice -> Charlie: hik_leak
+Alice -> Bob: hik_e, hik_c
+
+principal Bob[
+	hik_kb = DH_KEX(hik_ga, hik_b)
+	hik_n = DEC(hik_kb, hik_e)
+	hik_p = AEAD_DEC(hik_n, hik_c, nil)?
+	hik_h = HASH(hik_p)
+]
+
+queries[
+	authentication? Alice -> Bob: hik_c
+]

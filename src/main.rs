@@ -211,9 +211,13 @@ enum Commands {
 			help = "Raise the session count until the verdicts stop changing",
 			long_help = "Find the session count at which the model's verdicts stabilize, and \
 			             report the analysis from there.\n\n\
-			             Verifpal analyzes the model at one session, then at two, and so on up \
-			             to four, stopping at the first count whose result code is identical to \
-			             the previous count's. That count is the one whose analysis is reported, \
+			             Verifpal analyzes the model at the default two sessions, then at three, \
+			             and so on up to four, stopping at the first count whose result code is \
+			             identical to the previous count's. The ladder starts at the default \
+			             rather than at one session because an attack needing three concurrent \
+			             runs leaves one and two sessions reading alike, and a ladder that began \
+			             there would stop before it ever reached the count that finds it. That \
+			             count is the one whose analysis is reported, \
 			             and a line saying that the verdicts stopped changing there is printed \
 			             before it. Since an attack requiring k concurrent runs first appears at \
 			             k sessions and persists above it, a code that stopped changing is \

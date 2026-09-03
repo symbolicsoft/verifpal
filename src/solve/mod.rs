@@ -324,6 +324,15 @@ fn propose(
 		.collect();
 	proposals.extend(keyed);
 
+	if std::env::var("VP_NO_ALIGNED").is_err() {
+		let protocol = protocol_terms(km, ps);
+		let aligned: Vec<Substitution> = proposals
+			.iter()
+			.flat_map(|proposal| aligned_held_free(km, ps, sym, proposal, attacker, &protocol))
+			.collect();
+		proposals.extend(aligned);
+	}
+
 	if results
 		.iter()
 		.any(|r| !r.resolved && r.query.kind == QueryKind::Equivalence)
@@ -423,6 +432,56 @@ fn preserved_free(
 			&& attacker.knows(honest).is_some();
 		held.then(|| honest.clone())
 	})
+}
+
+/// Where the protocol put a ciphertext, offer every ciphertext the attacker
+/// holds under the same key.
+///
+/// `preserved_free` fills a free position with the honest occupant, and only
+/// where the attacker holds that occupant. An oracle attack puts something else
+/// there: a message the attacker already has, under the key the recipient will
+/// use, so that what the recipient decrypts and hands back is one layer of a
+/// term it was never meant to open. The occupant fixes the head and the key,
+/// and every held term agreeing on both is a candidate. The family is finite,
+/// one proposal per held term, and each one still goes through the validator.
+fn aligned_held_free(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	attacker: &AttackerState,
+	protocol: &IdSet<u64>,
+) -> Vec<Substitution> {
+	let mut out = Vec::new();
+	for held in attacker.known.iter() {
+		let Value::Primitive(h) = held else {
+			continue;
+		};
+		if crate::primitive::primitive_is_core(h.id)
+			|| h.arguments.len() < 2
+			|| !protocol.contains(&held.hash_value())
+		{
+			continue;
+		}
+		let filler = |honest: &Value| -> Option<Value> {
+			let Value::Primitive(p) = honest else {
+				return None;
+			};
+			let aligned = p.id == h.id
+				&& p.output == h.output
+				&& p.arguments.len() == h.arguments.len()
+				&& p.arguments
+					.first()
+					.zip(h.arguments.first())
+					.is_some_and(|(a, b)| a.equivalent(b, true))
+				&& !held.equivalent(honest, true);
+			aligned.then(|| held.clone())
+		};
+		if let Some(filled) = fill_aligned(km, ps, sym, proposal, &filler) {
+			out.push(filled);
+		}
+	}
+	out
 }
 
 fn fill_aligned(

@@ -1,0 +1,57 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// Alice seals Bob's challenge together with a salt Carol supplies, and Bob
+// checks that the salt inside is the one Carol sent him, but never that the
+// challenge inside is his own. Every leg but the sealed answer is unguarded.
+//
+// At one session the answer cannot be forged under the shared key and Alice
+// only ever seals what she was handed, so the query holds. At two, the
+// attacker can hand both Bob runs the same salt and then hand Bob's first run
+// the answer Alice made for his second: the salt check passes, the challenge
+// is nobody's business, and one send is accepted twice.
+//
+// The report this pins asked whether a matching-run emission that two runs
+// accept could slip past both the origin test, which excuses it, and the
+// duplicate test, which compares only against honest sibling emissions. It
+// cannot: whatever routing lets a second run accept the emission also lets it
+// accept the sibling's honest one, which the duplicate test sees. The value
+// carries the accepting run's own challenge, so this is a recipient that could
+// have told the two apart, and the finding is a duplicate acceptance.
+
+attacker[active]
+
+principal Bob[
+	knows private ire_k
+	generates ire_nb
+]
+
+principal Carol[
+	generates ire_salt
+]
+
+principal Alice[
+	knows private ire_k
+]
+
+Bob -> Alice: ire_nb
+Carol -> Alice: ire_salt
+Carol -> Bob: ire_salt
+
+principal Alice[
+	ire_resp = AEAD_ENC(ire_k, CONCAT(ire_nb, ire_salt), nil)
+]
+
+Alice -> Bob: ire_resp
+
+principal Bob[
+	ire_got = AEAD_DEC(ire_k, ire_resp, nil)?
+	ire_seen, ire_s = SPLIT(ire_got)?
+	_ = ASSERT(ire_s, ire_salt)?
+]
+
+queries[
+	authentication? Alice -> Bob: ire_resp
+]

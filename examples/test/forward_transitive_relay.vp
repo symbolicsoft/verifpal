@@ -1,0 +1,35 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: f1 at one session and at two.
+//
+// A guard says the attacker did not alter a message in transit. It does not
+// say the sender held an honest value to begin with. Alice's fresh value goes
+// to Bob unguarded, and Bob and Carol then forward it over two guarded legs to
+// Dave, who hashes it. Replacing it on the one unguarded leg therefore decides
+// what Dave uses, two relays later, without any guard being defeated.
+//
+// This needs both halves of forward execution: the substitution lands on Bob,
+// whose own block uses nothing, and its consequence has to be carried to Carol
+// and then to Dave before the query can see it.
+
+attacker[active]
+
+principal Alice[
+	generates ftr_x
+]
+
+principal Bob[]
+principal Carol[]
+
+Alice -> Bob: ftr_x
+Bob -> Carol: [ftr_x]
+Carol -> Dave: [ftr_x]
+
+principal Dave[
+	ftr_y = HASH(ftr_x)
+]
+
+queries[
+	freshness? ftr_x
+]

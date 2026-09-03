@@ -972,6 +972,31 @@ impl Envelope {
 	}
 }
 
+/// What kind of contradiction a resolved query reports, where the bare verdict
+/// would run two different findings together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subtype {
+	AttackerSuppliedValue,
+	DuplicateAcceptance,
+	ReplayableFirstFlight,
+}
+
+impl Subtype {
+	pub fn name(self) -> &'static str {
+		match self {
+			Subtype::AttackerSuppliedValue => "attacker-supplied value",
+			Subtype::DuplicateAcceptance => "duplicate acceptance",
+			Subtype::ReplayableFirstFlight => {
+				"duplicate acceptance: no recipient-generated context"
+			}
+		}
+	}
+
+	pub fn qualifier(self) -> String {
+		format!("  [{}]", self.name())
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct VerifyResult {
 	pub query: Query,
@@ -980,6 +1005,7 @@ pub struct VerifyResult {
 	pub envelope: Envelope,
 	pub summary: String,
 	pub conclusion: String,
+	pub subtype: Option<Subtype>,
 	pub trace: Vec<String>,
 	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
@@ -999,6 +1025,7 @@ impl VerifyResult {
 			envelope: Envelope::default(),
 			summary: String::new(),
 			conclusion: String::new(),
+			subtype: None,
 			trace: vec![],
 			steps: vec![],
 			options: vec![],
@@ -1379,6 +1406,7 @@ pub struct PrincipalState {
 	pub halted_at: Option<i32>,
 	pub foreign_halts: Vec<(PrincipalId, usize)>,
 	pub capabilities: Arc<CapabilityIndex>,
+	pub forwarded: bool,
 }
 
 impl PrincipalState {
@@ -1398,6 +1426,17 @@ impl PrincipalState {
 			.find(|&&(halted, _)| halted == principal)
 			.and_then(|&(_, at)| km.slots.get(at))
 			.is_none_or(|meta| declared_at <= meta.declared_at)
+	}
+
+	pub fn answers_for(&self, constants: &[Constant]) -> bool {
+		if !self.forwarded {
+			return true;
+		}
+		constants.iter().all(|c| {
+			self.index_of(c)
+				.and_then(|i| self.meta.get(i))
+				.is_some_and(|meta| meta.known)
+		})
 	}
 
 	pub fn slot_unreached(&self, i: usize) -> bool {
@@ -1489,6 +1528,39 @@ pub enum DerivationRecord {
 }
 
 impl DerivationRecord {
+	pub fn same_route(&self, other: &DerivationRecord) -> bool {
+		let same_terms = |a: &[&Value], b: &[&Value]| {
+			a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equivalent(y, true))
+		};
+		match (self, other) {
+			(DerivationRecord::Initial, DerivationRecord::Initial) => true,
+			(DerivationRecord::Leaked { slot: a }, DerivationRecord::Leaked { slot: b }) => a == b,
+			(DerivationRecord::Obtained { slot: a }, DerivationRecord::Obtained { slot: b }) => {
+				a == b
+			}
+			(
+				DerivationRecord::Broken {
+					of: a,
+					capability: ca,
+					..
+				},
+				DerivationRecord::Broken {
+					of: b,
+					capability: cb,
+					..
+				},
+			) => ca == cb && a.equivalent(b, true),
+			(
+				DerivationRecord::ConcatFragment { of: a },
+				DerivationRecord::ConcatFragment { of: b },
+			) => a.equivalent(b, true),
+			_ => {
+				std::mem::discriminant(self) == std::mem::discriminant(other)
+					&& same_terms(&self.ingredients(), &other.ingredients())
+			}
+		}
+	}
+
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using }
@@ -1534,6 +1606,20 @@ pub struct AttackerState {
 	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
+	/// Further routes to the same term, beyond the one kept in `derivations`.
+	///
+	/// A term is often derivable more than one way, and the history filter
+	/// decides availability by following a route. Keeping only the first one
+	/// recorded makes that filter answer about whichever route happened to be
+	/// found first, so the alternatives are retained and the filter asks whether
+	/// *some* of them survives.
+	///
+	/// Each alternative carries its own record, and that is what makes admitting
+	/// one sound. A route is discovered inside some execution, and it is only a
+	/// route at all in executions like that one; a bare list of derivations
+	/// would let a route found in one hypothetical be spent in another that
+	/// excludes it, which is the same fault the history filter exists to catch.
+	pub alternates: Arc<Vec<Vec<(DerivationRecord, Arc<MutationRecord>)>>>,
 }
 
 impl Default for AttackerState {
@@ -1544,6 +1630,7 @@ impl Default for AttackerState {
 			known_map: Arc::new(IdMap::default()),
 			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
+			alternates: Arc::new(vec![]),
 		}
 	}
 }

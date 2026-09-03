@@ -1,0 +1,31 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: f0 at one session and at two.
+//
+// The counterweight to forward_transitive_relay.vp. Guard the first leg too
+// and no leg carrying the value is open, so nothing the attacker can do
+// decides what Dave hashes and the value he uses is Alice's fresh one.
+// Carrying a sender's execution forward must not become a way to reach a
+// value no unguarded delivery ever exposed.
+
+attacker[active]
+
+principal Alice[
+	generates fra_x
+]
+
+principal Bob[]
+principal Carol[]
+
+Alice -> Bob: [fra_x]
+Bob -> Carol: [fra_x]
+Carol -> Dave: [fra_x]
+
+principal Dave[
+	fra_y = HASH(fra_x)
+]
+
+queries[
+	freshness? fra_x
+]

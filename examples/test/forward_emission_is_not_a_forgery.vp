@@ -1,0 +1,46 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0f1 at one session and at two.
+//
+// The same shape as forward_computed_under_guard.vp with an authentication
+// query added over the forwarded tag. Alice really did compute and send that
+// tag in this execution, so the value Bob accepts came from Alice and origin
+// authentication holds. Only freshness is broken, and only because the tag
+// wraps a value the attacker chose.
+//
+// This is the pin that keeps forwarding from being read as an attacker action:
+// a delivered emission keeps its sender, and marking it as attacker-authored
+// would turn every carried consequence into a false authentication failure.
+
+attacker[active]
+
+principal Alice[
+	knows private fen_k
+]
+
+principal Bob[
+	knows private fen_k
+]
+
+principal Carol[
+	generates fen_n
+]
+
+Carol -> Alice: fen_n
+Carol -> Bob: [fen_n]
+
+principal Alice[
+	fen_tag = MAC(fen_k, fen_n)
+]
+
+Alice -> Bob: [fen_tag]
+
+principal Bob[
+	fen_h = HASH(fen_tag)
+]
+
+queries[
+	authentication? Alice -> Bob: fen_tag
+	freshness? fen_tag
+]

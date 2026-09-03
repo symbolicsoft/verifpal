@@ -462,7 +462,7 @@ impl<'a> Minimizer<'a> {
 		value: &Value,
 	) -> bool {
 		crate::primitive::admissible(value)
-			&& bound.admits(value)
+			&& bound.admits_at(session.id, slot, value)
 			&& !crate::solve::validate::contains_failed_check(value)
 			&& crate::solve::validate::attacker_can_derive(
 				self.ctx,
@@ -664,13 +664,17 @@ pub(crate) fn minimize_witness(
 		return unminimized(true);
 	}
 
-	let mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot());
+	let _guard = MinimizingGuard::new();
+	let _quiet = InfoQuiet::new();
+
+	let mut mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot());
+	if mutations.is_empty() {
+		mutations = driving_substitution(ctx, km, ps, query_index);
+	}
 	if mutations.is_empty() {
 		return unminimized(true);
 	}
 
-	let _guard = MinimizingGuard::new();
-	let _quiet = InfoQuiet::new();
 	let m = Minimizer::new(ctx, km, ps, query_index, mutations);
 
 	let Some((base, candidate, breadth, explanatory, grounded)) = m.choose() else {
@@ -711,6 +715,33 @@ pub(crate) fn minimize_witness(
 			witness
 		}
 		None => unminimized(false),
+	}
+}
+
+fn driving_substitution(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	query_index: usize,
+) -> Installs {
+	if !ps.forwarded {
+		return Vec::new();
+	}
+	let phase = ctx.attacker_snapshot().current_phase;
+	let Some(honest) = ctx
+		.principal_states()
+		.iter()
+		.find(|state| state.id == ps.id)
+		.map(|state| state.clone_for_depth(true))
+	else {
+		return Vec::new();
+	};
+	if probe(ctx, km, &honest, &[], query_index, phase).is_some() {
+		return Vec::new();
+	}
+	match ctx.execution_origin() {
+		Some((_, installs)) => installs,
+		None => Vec::new(),
 	}
 }
 
@@ -934,14 +965,6 @@ fn out_of_order_harvest(
 	harvested
 }
 
-/// Was `v` lifted straight out of `target`'s own state, from a slot `target`
-/// only reaches at or after the one being overwritten? A value the principal
-/// published earlier is available to the attacker in the same run, so
-/// reflecting it back is an ordinary attack; a value it only computes later is
-/// one the run cannot supply in time, and only the atemporal within-phase
-/// knowledge model admits it. Terms the attacker built itself are excluded the
-/// way `solve::validate::replays_own_freshness` excludes them: their shape says
-/// nothing about which run they came from.
 fn harvested_late(
 	km: &ProtocolTrace,
 	ambient: &AttackerState,
@@ -1063,7 +1086,7 @@ pub(crate) fn assert_reported_attacks_replay(
 			.iter()
 			.filter(|(slot, value)| {
 				!(crate::primitive::admissible(value)
-					&& bound.admits(value)
+					&& bound.admits_at(base.id, slot.get(), value)
 					&& !crate::solve::validate::contains_failed_check(value)
 					&& crate::solve::validate::attacker_can_derive(
 						ctx,
@@ -1247,10 +1270,15 @@ fn probe_with(
 
 	let ambient = scratch.attacker_snapshot();
 	let governing = governing_attacker(&scratch, km, installs, &ambient);
-	let ps = reexecute(base, installs, &governing, km).ok()?;
+	let executed = crate::reexec::execute_forward(&scratch, km, base, installs, &governing).ok()?;
+	let ps = executed.first()?.clone();
 	crate::solve::validate::note_malleable_reshapes(&scratch, km, &ps, installs, &governing);
-	let _ = compute_knowledge_closure(&scratch, km, &ps);
-	let _ = verify_resolve_queries(&scratch, km, &ps);
+	for state in &executed {
+		let _ = compute_knowledge_closure(&scratch, km, state);
+	}
+	for state in &executed {
+		let _ = verify_resolve_queries(&scratch, km, state);
+	}
 	if !scratch.query_is_resolved(query_index) {
 		return None;
 	}

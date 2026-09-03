@@ -84,6 +84,18 @@ pub(crate) fn derivation_problems(
 	problems
 }
 
+/// A value the attacker holds before it does anything: `nil`, or a public
+/// constant seeded at the start of the phase. Nothing derives it, so a trace
+/// that does not produce it is complete rather than broken.
+fn needs_no_step(attacker: &AttackerState, target: &Value) -> bool {
+	match target {
+		Value::Constant(c) => {
+			c.is_nil() || justified_without_a_step(attacker, target) == Some(true)
+		}
+		Value::Primitive(_) => false,
+	}
+}
+
 pub(crate) fn reaches(steps: &[Step], target: &Value) -> bool {
 	let direct = steps.iter().any(|step| match step {
 		Step::Derive { target: t, .. } => t.equivalent(target, true),
@@ -390,7 +402,7 @@ pub(crate) fn assert_trace_is_well_founded(t: &TraceUnderTest<'_>) {
 	);
 	if query.kind == QueryKind::Confidentiality {
 		assert!(
-			steps.is_empty() || reaches(steps, target),
+			steps.is_empty() || reaches(steps, target) || needs_no_step(attacker, target),
 			"TRACE • {} query {} ({}) prints {} step(s), none of which produces {} — the value \
 			 the attacker is claimed to have learned. A trace that never reaches its own target \
 			 explains something else.\n",

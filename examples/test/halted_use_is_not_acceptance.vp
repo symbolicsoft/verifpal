@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and at two.
+//
+// Replacing hua_m makes Bob hash it before he checks it, so by the time his tag
+// check fails he has already computed on the attacker's value. The question this
+// model settles is whether that first hash counts as Bob having accepted hua_m.
+//
+// It does not. Bob went on to reject the message, and a recipient that halts is
+// not credited with accepting a value it merely computed on the way to failing.
+// The engine enforces that by abandoning the whole usage scan once the halted
+// state is missing a slot that mentions the constant, which is why hua_later has
+// to be there: it is the use Bob never reaches.
+//
+// The rule is strict on purpose, and it was measured the other way. Counting a
+// reached use beside an unreached one turns four verdicts the corpus pins into
+// false attacks: the replay in concat_split_replay.vp, the third query of both
+// spore_ns_pk.vp and spore_nsl_pk.vp, which is exactly where Lowe's fix is
+// supposed to show, and the unbuildable substitution in piknik.vp. Whoever
+// relaxes this owes those four an answer first.
+
+attacker[active]
+
+principal Alice[
+	knows private hua_k
+	generates hua_m
+	hua_tag = MAC(hua_k, hua_m)
+]
+
+principal Bob[
+	knows private hua_k
+]
+
+Alice -> Bob: hua_m, [hua_tag]
+
+principal Bob[
+	hua_use = HASH(hua_m)
+	_ = ASSERT(hua_tag, MAC(hua_k, hua_m))?
+	hua_later = HASH(hua_m)
+]
+
+queries[
+	authentication? Alice -> Bob: hua_m
+]

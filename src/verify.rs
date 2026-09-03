@@ -244,7 +244,8 @@ pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VRes
 	let mut regressed = false;
 	let mut saturated_at: Option<u8> = None;
 	let mut last: Option<(u8, VerifyReport, String, Vec<String>)> = None;
-	for k in 1..=max {
+	let first = crate::sessions::DEFAULT_SESSIONS.min(max).max(1);
+	for k in first..=max {
 		let capture = crate::info::InfoCapture::new();
 		let analyzed = verify_report_with_source_opts(file_path, k, auto_queries);
 		drop(capture);
@@ -267,7 +268,7 @@ pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VRes
 		));
 	};
 	let stable_from = match saturated_at {
-		Some(k) => k.saturating_sub(1).max(1),
+		Some(k) => k.saturating_sub(1).max(first),
 		None => sessions,
 	};
 	report.provenance.saturation = Some(SaturationNote {
@@ -597,7 +598,12 @@ fn verify_end(
 	for r in &results {
 		if r.resolved {
 			info_message(
-				&format!("{}{}", crate::pretty::query_line(&r.query), r.summary),
+				&format!(
+					"{}{}{}",
+					crate::pretty::query_line(&r.query),
+					r.subtype.map(Subtype::qualifier).unwrap_or_default(),
+					r.summary
+				),
 				InfoLevel::Result,
 				false,
 			);

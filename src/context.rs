@@ -37,7 +37,7 @@ pub(crate) struct VerifyContext {
 	states: Vec<PrincipalState>,
 	phase_knowledge: RwLock<Vec<AttackerState>>,
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
-	truncations: RwLock<Vec<Truncation>>,
+	truncations: RwLock<Vec<(Truncation, Vec<usize>)>>,
 	sessions: u8,
 	honest: Option<IdMap<PrincipalId, i32>>,
 	honest_halts: RwLock<Vec<(PrincipalId, usize)>>,
@@ -48,6 +48,8 @@ pub(crate) struct VerifyContext {
 	query_goals: RwLock<Vec<usize>>,
 	#[cfg(test)]
 	searched: AtomicBool,
+	execution: RwLock<Option<(PrincipalId, Vec<(SlotIdx, Value)>)>>,
+	origin_only: RwLock<IdSet<usize>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -107,6 +109,30 @@ fn derivation_provenance(
 	})
 }
 
+/// Record a further route to a term already held, without disturbing the one
+/// narration uses. Knowledge does not change; what changes is that a filter
+/// deciding availability by following a route now has every route to follow.
+fn attacker_state_note_route(
+	state: &mut AttackerState,
+	value: &Value,
+	record: &Arc<MutationRecord>,
+	derivation: DerivationRecord,
+) {
+	let Some(existing) = state.knows(value) else {
+		return;
+	};
+	if state
+		.routes(existing)
+		.any(|(route, _)| route.same_route(&derivation))
+	{
+		return;
+	}
+	let candidate = derivation_provenance(state, record, &derivation);
+	if let Some(entry) = Arc::make_mut(&mut state.alternates).get_mut(existing.get()) {
+		entry.push((derivation, candidate));
+	}
+}
+
 fn attacker_state_absorb(
 	state: &mut AttackerState,
 	value: &Value,
@@ -121,9 +147,30 @@ fn attacker_state_absorb(
 		let unnamed = state
 			.derivation(existing)
 			.is_some_and(|d| !names_assumption(d));
+		let known_route = state
+			.routes(existing)
+			.any(|(route, _)| route.same_route(&derivation));
 		if (stale && explains(&candidate)) || (names_assumption(&derivation) && unnamed) {
+			let displaced = state
+				.derivation(existing)
+				.cloned()
+				.zip(state.record(existing).cloned());
 			Arc::make_mut(&mut state.mutation_records)[existing.get()] = candidate;
 			Arc::make_mut(&mut state.derivations)[existing.get()] = derivation;
+			if let Some((displaced, prior)) = displaced {
+				let alternates = Arc::make_mut(&mut state.alternates);
+				if let Some(entry) = alternates.get_mut(existing.get())
+					&& !entry.iter().any(|(route, _)| route.same_route(&displaced))
+				{
+					entry.push((displaced, prior));
+				}
+			}
+		} else if !known_route {
+			let candidate = derivation_provenance(state, record, &derivation);
+			let alternates = Arc::make_mut(&mut state.alternates);
+			if let Some(entry) = alternates.get_mut(existing.get()) {
+				entry.push((derivation, candidate));
+			}
 		}
 		return;
 	}
@@ -137,6 +184,7 @@ fn attacker_state_absorb(
 		.push(idx);
 	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
 	Arc::make_mut(&mut state.derivations).push(derivation);
+	Arc::make_mut(&mut state.alternates).push(Vec::new());
 }
 
 impl VerifyContext {
@@ -161,6 +209,7 @@ impl VerifyContext {
 		let unresolved = results.len() as i32;
 		analysis_count_reset();
 		VerifyContext {
+			origin_only: RwLock::new(IdSet::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
@@ -169,6 +218,7 @@ impl VerifyContext {
 			phase_knowledge: RwLock::new(vec![]),
 			depth_cuts: RwLock::new(IdSet::default()),
 			truncations: RwLock::new(Vec::new()),
+			execution: RwLock::new(None),
 			sessions,
 			honest,
 			honest_halts: RwLock::new(Vec::new()),
@@ -226,11 +276,24 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
+		let outstanding: Vec<usize> = read_lock(&self.results)
+			.iter()
+			.filter(|result| !result.resolved)
+			.map(|result| result.query_index)
+			.collect();
 		let mut state = write_lock(&self.truncations);
-		if !state.contains(&kind) {
-			state.push(kind);
-			state.sort();
+		match state.iter_mut().find(|(seen, _)| *seen == kind) {
+			Some((_, reached)) => {
+				for index in outstanding {
+					if !reached.contains(&index) {
+						reached.push(index);
+					}
+				}
+				reached.sort_unstable();
+			}
+			None => state.push((kind, outstanding)),
 		}
+		state.sort_by_key(|(kind, _)| *kind);
 	}
 
 	/// True for every principal in a model that declares no scenarios, and
@@ -281,12 +344,6 @@ impl VerifyContext {
 		})
 	}
 
-	/// Which runs may record a verdict. Scyther prunes claims in runs whose
-	/// actor is untrusted; the analogue here is that a corrupt-peer run is
-	/// explored for what the attacker learns in it and its own claims are not
-	/// the protocol's to keep. A model whose every scenario is corrupt has
-	/// nothing to relativise against, so it evaluates everywhere rather than
-	/// reporting a vacuous hold for every query.
 	pub(crate) fn claims_apply_to(&self, principal: PrincipalId) -> bool {
 		let phase = read_lock(&self.attacker).current_phase;
 		self.nothing_is_honest_at(phase) || self.is_honest_at(principal, phase)
@@ -301,18 +358,45 @@ impl VerifyContext {
 		&self.scenarios
 	}
 
+	#[cfg(test)]
 	pub(crate) fn truncations(&self) -> Vec<Truncation> {
-		read_lock(&self.truncations).clone()
+		read_lock(&self.truncations)
+			.iter()
+			.map(|(kind, _)| *kind)
+			.collect()
+	}
+
+	fn truncations_for(&self, query_index: usize) -> Vec<Truncation> {
+		read_lock(&self.truncations)
+			.iter()
+			.filter(|(_, reached)| reached.contains(&query_index))
+			.map(|(kind, _)| *kind)
+			.collect()
 	}
 
 	pub(crate) fn finalize_envelopes(&self) {
-		let envelope = Envelope {
-			sessions: self.sessions,
-			truncations: self.truncations(),
-		};
-		for vr in write_lock(&self.results).iter_mut() {
-			vr.envelope = envelope.clone();
+		let scoped: Vec<(usize, Vec<Truncation>)> = read_lock(&self.results)
+			.iter()
+			.map(|vr| (vr.query_index, self.truncations_for(vr.query_index)))
+			.collect();
+		for (vr, (_, truncations)) in write_lock(&self.results).iter_mut().zip(scoped) {
+			vr.envelope = Envelope {
+				sessions: self.sessions,
+				truncations,
+			};
 		}
+	}
+
+	pub(crate) fn note_origin_only(&self, query_index: usize) -> bool {
+		write_lock(&self.origin_only).insert(query_index)
+	}
+
+	pub(crate) fn note_execution(&self, principal: PrincipalId, installs: &[(SlotIdx, Value)]) {
+		*write_lock(&self.execution) = Some((principal, installs.to_vec()));
+	}
+
+	pub(crate) fn execution_origin(&self) -> Option<(PrincipalId, Vec<(SlotIdx, Value)>)> {
+		read_lock(&self.execution).clone()
 	}
 
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
@@ -370,6 +454,7 @@ impl VerifyContext {
 	) -> bool {
 		let mut state = write_lock(&self.attacker);
 		if state.knows(known).is_some() {
+			attacker_state_note_route(&mut state, known, record, derivation);
 			return false;
 		}
 		attacker_state_absorb(&mut state, known, record, derivation);
@@ -536,6 +621,7 @@ impl VerifyContext {
 			vr.resolved = result.resolved;
 			vr.summary = result.summary.clone();
 			vr.conclusion = result.conclusion.clone();
+			vr.subtype = result.subtype;
 			vr.trace = result.trace.clone();
 			vr.steps = result.steps.clone();
 			vr.options = result.options.clone();
@@ -604,6 +690,8 @@ impl VerifyContext {
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
+			execution: RwLock::new(None),
+			origin_only: RwLock::new(IdSet::default()),
 			sessions: self.sessions,
 			honest,
 			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),
@@ -824,6 +912,66 @@ mod tests {
 	}
 
 	#[test]
+	fn a_term_reachable_two_ways_keeps_both_routes() {
+		use crate::testutil::make_constant;
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private alt_m\n\
+			knows private alt_k\n\
+			alt_e = ENC(alt_k, alt_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? alt_m\n\
+			]\n";
+		let m = parse_string("alt.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 1, None, Vec::new());
+		let value = make_constant("alt_value");
+		let record = std::sync::Arc::new(MutationRecord {
+			diffs: vec![],
+			principal_id: 1,
+			phase: 0,
+		});
+		ctx.attacker_put_with(
+			&value,
+			&record,
+			DerivationRecord::Obtained { slot: SlotIdx(7) },
+		);
+		ctx.attacker_put_with(
+			&value,
+			&record,
+			DerivationRecord::Obtained { slot: SlotIdx(2) },
+		);
+		ctx.attacker_put_with(
+			&value,
+			&record,
+			DerivationRecord::Obtained { slot: SlotIdx(7) },
+		);
+		let attacker = ctx.attacker_snapshot();
+		let idx = attacker.knows(&value).expect("the term is known");
+		let slots: Vec<usize> = attacker
+			.routes(idx)
+			.filter_map(|(route, _)| match route {
+				DerivationRecord::Obtained { slot } => Some(slot.get()),
+				_ => None,
+			})
+			.collect();
+		assert_eq!(
+			slots,
+			vec![7, 2],
+			"a term the attacker can reach at two slots records both, each with the \
+			 execution it was found in. The repeat must not be stored twice.\n\n\
+			 The filters still follow the first route only, and deliberately. A route is \
+			 discovered inside some execution and is a route at all only in executions \
+			 like it, so admitting one found elsewhere needs a proof that it is available \
+			 here too. Letting any recorded route stand in for that was measured and \
+			 returns three false attacks the corpus pins shut: incompatible_histories.vp, \
+			 history_incompatible_knowledge.vp and atemporal_forward_value.vp all report \
+			 an attack again. Whoever narrows this must produce that proof, not widen \
+			 what counts as a route"
+		);
+	}
+
+	#[test]
 	fn a_context_with_no_truncation_reports_an_exhausted_search() {
 		let src = "attacker[active]\n\
 			principal Alice[\n\
@@ -859,6 +1007,41 @@ mod tests {
 		ctx.finalize_envelopes();
 		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
 		assert!(!ctx.results_get()[0].envelope.exhausted());
+	}
+
+	#[test]
+	fn a_depth_cut_qualifies_only_the_queries_it_could_still_have_answered() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			knows private tdq_m\n\
+			knows private tdq_n\n\
+			knows private tdq_k\n\
+			tdq_e = ENC(tdq_k, tdq_m)\n\
+			tdq_f = ENC(tdq_k, tdq_n)\n\
+			leaks tdq_m\n\
+			]\n\
+			queries[\n\
+			confidentiality? tdq_m\n\
+			confidentiality? tdq_n\n\
+			]\n";
+		let m = parse_string("tdq.vp", src).expect("parse");
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let mut resolved = crate::types::VerifyResult::new(&m.queries[0], 0);
+		resolved.resolved = true;
+		assert!(ctx.results_put(&resolved, &crate::query::QueryVerdict::for_test()));
+		ctx.note_depth_cut(1, 0);
+		ctx.finalize_envelopes();
+		let results = ctx.results_get();
+		assert!(
+			results[0].envelope.exhausted(),
+			"the first query was already answered when the search turned a term away, so \
+			 that refusal cost it nothing and its verdict must not be qualified by it"
+		);
+		assert!(
+			!results[1].envelope.exhausted(),
+			"the second query was still open, so the term the search declined is a term it \
+			 never got to try against this query and the hold has to say so"
+		);
 	}
 
 	#[test]

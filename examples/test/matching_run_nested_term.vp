@@ -1,0 +1,40 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// The matching run's output nests a hash inside the tag, so confirming it
+// compares reduced terms rather than the delivered shape. Alice still emits
+// exactly what Bob accepts under the same driving substitution, so injective
+// agreement holds at one session.
+
+attacker[active]
+
+principal Alice[
+	knows private mrn_k
+]
+
+principal Carol[
+	generates mrn_n
+]
+
+principal Bob[
+	knows private mrn_k
+]
+
+Carol -> Alice: mrn_n
+Carol -> Bob: mrn_n
+
+principal Alice[
+	mrn_t = MAC(mrn_k, HASH(mrn_n))
+]
+
+Alice -> Bob: mrn_t
+
+principal Bob[
+	_ = ASSERT(mrn_t, MAC(mrn_k, HASH(mrn_n)))?
+]
+
+queries[
+	authentication? Alice -> Bob: mrn_t
+]

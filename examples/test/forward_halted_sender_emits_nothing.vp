@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: f0 at one session and at two.
+//
+// Alice checks the nonce against a guarded digest of it before tagging it, so
+// the substitution that would make her emit MAC(k, nil) halts her at that
+// check and she never reaches the send. A run that halts before its send
+// emitted nothing, so there is nothing to carry forward and Bob's tag stays
+// the MAC over Carol's fresh nonce.
+
+attacker[active]
+
+principal Alice[
+	knows private fhs_k
+]
+
+principal Bob[
+	knows private fhs_k
+]
+
+principal Carol[
+	generates fhs_n
+	fhs_hn = HASH(fhs_n)
+]
+
+Carol -> Alice: fhs_n, [fhs_hn]
+Carol -> Bob: [fhs_n]
+
+principal Alice[
+	_ = ASSERT(fhs_hn, HASH(fhs_n))?
+	fhs_tag = MAC(fhs_k, fhs_n)
+]
+
+Alice -> Bob: [fhs_tag]
+
+principal Bob[
+	fhs_h = HASH(fhs_tag)
+]
+
+queries[
+	freshness? fhs_tag
+]

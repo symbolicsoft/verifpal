@@ -91,6 +91,9 @@ pub(crate) fn query_start(
 	if !ctx.claims_apply_to(ps.id) {
 		return Ok(());
 	}
+	if !ps.answers_for(&query.constants) || !ps.answers_for(&query.message.constants) {
+		return Ok(());
+	}
 	let attacker = ctx.attacker_snapshot();
 	match query.kind {
 		QueryKind::Confidentiality => {
@@ -124,7 +127,10 @@ impl QueryVerdict {
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result, &QueryVerdict(())) {
 		let headline = crate::pretty::query_line(&result.query);
-		crate::info::info_analysis_result(&headline, || format!("{}{}", headline, result.summary));
+		let qualifier = result.subtype.map(Subtype::qualifier).unwrap_or_default();
+		crate::info::info_analysis_result(&headline, || {
+			format!("{}{}{}", headline, qualifier, result.summary)
+		});
 	}
 }
 
@@ -170,17 +176,66 @@ fn query_confidentiality(
 	);
 	result.resolved = true;
 	result.options = options;
-	result.set_summary(
-		&mutated_info.trace,
-		mutated_info.kinded(),
-		&format!(
+	result.subtype = attacker_supplied(&mutated_info.target, km, ps, slot_idx);
+	let conclusion = match result.subtype {
+		Some(_) => format!(
+			"{} ({}) is obtained by Attacker, but that is the value the attacker put \
+			 there: it carries nothing {} generated or holds privately, so the honest \
+			 {} is not shown to be disclosed.",
+			subject,
+			mutated_info.term_excluding(&mutated_info.target, &[&subject.name]),
+			ps.name,
+			subject,
+		),
+		None => format!(
 			"{} ({}) is obtained by Attacker.",
 			subject,
 			mutated_info.term_excluding(&mutated_info.target, &[&subject.name]),
 		),
-	);
+	};
+	result.set_summary(&mutated_info.trace, mutated_info.kinded(), &conclusion);
 	emit_query_result(ctx, &result);
 	Ok(result)
+}
+
+fn attacker_supplied(
+	target: &Value,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	slot: usize,
+) -> Option<Subtype> {
+	let honest = km
+		.slots
+		.get(slot)
+		.map(|s| reduce_once(&resolve_trace_constant(&s.constant, km)))?;
+	if reduce_once(target).equivalent(&honest, true) {
+		return None;
+	}
+	let mut seen = Vec::new();
+	(!carries_a_secret(target, ps, &mut seen)).then_some(Subtype::AttackerSuppliedValue)
+}
+
+fn carries_a_secret(v: &Value, ps: &PrincipalState, seen: &mut Vec<ValueId>) -> bool {
+	match v {
+		Value::Constant(c) => {
+			let declared = ps.index_of(c).map(|i| &ps.meta[i].constant).unwrap_or(c);
+			if declared.fresh || declared.qualifier == Some(Qualifier::Private) {
+				return true;
+			}
+			if seen.contains(&c.id) {
+				return false;
+			}
+			seen.push(c.id);
+			match ps.index_of(c) {
+				Some(i) => match &ps.values[i].value {
+					Value::Constant(inner) if inner.id == c.id => false,
+					inner => carries_a_secret(&inner.clone(), ps, seen),
+				},
+				None => false,
+			}
+		}
+		Value::Primitive(p) => p.arguments.iter().any(|a| carries_a_secret(a, ps, seen)),
+	}
 }
 
 fn query_authentication(
@@ -196,7 +251,7 @@ fn query_authentication(
 		return Ok(result);
 	}
 	let (indices, sender, c, sibling_replay) =
-		query_authentication_get_pass_indices(ctx, query, km, ps, attacker)?;
+		query_authentication_get_pass_indices(ctx, query, query_index, km, ps, attacker)?;
 	if query.message.sender == sender {
 		return Ok(result);
 	}
@@ -245,6 +300,13 @@ fn query_authentication(
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;
 		Some(km.slots.get(i)?.initial_value.clone())
+	});
+	result.subtype = sibling_replay.then(|| {
+		if recipient_contributed(&c, km, ps) {
+			Subtype::DuplicateAcceptance
+		} else {
+			Subtype::ReplayableFirstFlight
+		}
 	});
 	Ok(query_authentication_handle_pass(
 		ctx,
@@ -307,6 +369,7 @@ fn query_find_constant_usage_indices(
 fn query_authentication_get_pass_indices(
 	ctx: &VerifyContext,
 	query: &Query,
+	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -326,6 +389,9 @@ fn query_authentication_get_pass_indices(
 			return Ok((vec![], sender, c, false));
 		}
 		sibling_replay = session_sibling_replay(&c, &ps.values[idx].value, km);
+		if sibling_replay && !recipient_contributed(&c, km, ps) {
+			note_origin_only(ctx, query, query_index);
+		}
 		if !sibling_replay
 			&& crate::agreement::emitted_by_matching_run(
 				ctx,
@@ -340,6 +406,42 @@ fn query_authentication_get_pass_indices(
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
 	Ok((indices, sender, c, sibling_replay))
+}
+
+fn recipient_contributed(c: &Constant, km: &ProtocolTrace, ps: &PrincipalState) -> bool {
+	let resolved = crate::value::resolve_trace_constant(c, km);
+	let mut constants = Vec::new();
+	resolved.collect_constants(&mut constants);
+	constants.iter().any(|inner| {
+		km.index_of(inner).is_some_and(|i| {
+			let slot = &km.slots[i];
+			slot.constant.fresh && km.same_actor(slot.creator, ps.id)
+		})
+	})
+}
+
+fn note_origin_only(ctx: &VerifyContext, query: &Query, query_index: usize) {
+	if !ctx.note_origin_only(query_index) {
+		return;
+	}
+	crate::info::info_message(
+		&format!(
+			"{} reports a duplicate that {} cannot rule out on its own: it contributes \
+			 nothing to {} before accepting it, so any run of it takes the same message \
+			 twice. Read it as a replay-protection question about this flight rather \
+			 than as a forgery.",
+			crate::pretty::query_display(query),
+			query.message.recipient_name,
+			query
+				.message
+				.constants
+				.first()
+				.map(|c| c.name.to_string())
+				.unwrap_or_default(),
+		),
+		InfoLevel::Info,
+		false,
+	);
 }
 
 pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
@@ -674,6 +776,7 @@ mod behavior_tests {
 		let (indices, sender, _, _) = query_authentication_get_pass_indices(
 			&ctx,
 			&model.queries[0],
+			0,
 			&trace,
 			state,
 			&attacker,
@@ -1019,7 +1122,7 @@ mod tcb_tests {
 		let controllable = once("controllable.admits(");
 		let derivable = once("attacker_can_derive(");
 		let install = once("installs.push(");
-		let execute = once("reexecute(");
+		let execute = once("execute_forward(");
 
 		assert!(
 			controllable < derivable && controllable < install,
@@ -1055,6 +1158,62 @@ mod tcb_tests {
 				 execute the rest of a substitution whose remainder was never justified"
 			);
 		}
+	}
+
+	#[test]
+	fn a_forwarded_value_is_only_ever_what_its_sender_sent() {
+		let reexec_rs = engine_source("reexec.rs");
+
+		let chooses = fn_body(&reexec_rs, "forwarded_installs");
+		assert!(
+			!chooses.is_empty(),
+			"reexec.rs must define `forwarded_installs`: carrying a run forward is the \
+			 second way a value enters a state, and it needs its own gate"
+		);
+		for needle in [
+			"event.sender == source.id",
+			"event.recipient == target.id",
+			"event.phase <= attacker.current_phase",
+			"source.event_reached(",
+			"source.slot_unreached(at)",
+		] {
+			assert!(
+				!body_hits(&chooses, needle).is_empty(),
+				"a forwarded value is justified by the sender having sent it, not by the \
+				 attacker being able to build it, so every part of that claim has to be \
+				 checked: `{needle}` is missing from `forwarded_installs`. Without it the \
+				 forwarding rule becomes a way to place a value on a leg the model does \
+				 not have, or one the sender never reached"
+			);
+		}
+
+		let installs = fn_body(&reexec_rs, "install_forwarded");
+		assert!(
+			!installs.is_empty(),
+			"reexec.rs must define `install_forwarded`"
+		);
+		for forbidden in ["provenance.sender", "provenance.creator"] {
+			assert!(
+				body_hits(&installs, forbidden).is_empty(),
+				"an honest principal really did send this value, so `install_forwarded` \
+				 must leave `{forbidden}` alone. Attributing a forwarded emission to the \
+				 attacker would turn every carried consequence into an authentication \
+				 failure against a sender that did exactly what the protocol says"
+			);
+		}
+		assert!(
+			!body_hits(&installs, "attacker_tainted = true").is_empty(),
+			"a forwarded slot is still a precondition of whatever is learned downstream \
+			 of it: it took the attacker's substitution upstream to put that value there. \
+			 A record that did not say so would let the knowledge be spent in an \
+			 execution where that substitution never happened"
+		);
+		assert!(
+			body_hits(&installs, "sv.original").is_empty(),
+			"`original` keeps what the protocol honestly computed, which is what makes \
+			 purification total; overwriting it would leave a forwarded state impossible \
+			 to return to its honest form"
+		);
 	}
 
 	#[test]

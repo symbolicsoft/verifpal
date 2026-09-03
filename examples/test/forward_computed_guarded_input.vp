@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: f0 at one session and at two.
+//
+// The counterweight to forward_computed_under_guard.vp. Guard Carol's delivery
+// to Alice as well and no attacker input reaches the computation, so the tag
+// Alice emits is a MAC over a fresh nonce however many times her run is
+// replayed. Forwarding an emission must deliver what the sender computed, not
+// license a value the sender never had reason to compute.
+
+attacker[active]
+
+principal Alice[
+	knows private fci_k
+]
+
+principal Bob[
+	knows private fci_k
+]
+
+principal Carol[
+	generates fci_n
+]
+
+Carol -> Alice: [fci_n]
+Carol -> Bob: [fci_n]
+
+principal Alice[
+	fci_tag = MAC(fci_k, fci_n)
+]
+
+Alice -> Bob: [fci_tag]
+
+principal Bob[
+	fci_h = HASH(fci_tag)
+]
+
+queries[
+	freshness? fci_tag
+]

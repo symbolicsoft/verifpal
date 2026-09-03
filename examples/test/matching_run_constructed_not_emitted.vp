@@ -1,0 +1,27 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// Alice's tag is a hash of a value she generates herself, so no wire input
+// drives what she emits. The attacker builds HASH(nil) out of nothing and
+// installs it, and Bob uses it. The delivered value was constructed rather
+// than read off any execution of Alice, so no matching run stands behind it
+// and the exemption must not fire.
+
+attacker[active]
+
+principal Alice[
+	generates mrc_n
+	mrc_t = HASH(mrc_n)
+]
+
+Alice -> Bob: mrc_t
+
+principal Bob[
+	mrc_use = HASH(mrc_t)
+]
+
+queries[
+	authentication? Alice -> Bob: mrc_t
+]

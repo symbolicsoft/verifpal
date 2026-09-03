@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// Carol's nonce reaches Alice and Bob unguarded, so feeding nil to both makes
+// Alice honestly compute and send MAC(k, nil), which Bob accepts. There is one
+// Alice send and one Bob acceptance of that very value: nothing is forged and
+// nothing is accepted twice, so injective agreement holds and the query must
+// pass. The value Bob takes is the output of a matching run of the declared
+// sender, which is what `agreement.rs` re-executes Alice to confirm.
+//
+// At two sessions a pristine sibling message can instead be accepted twice, so
+// the injective predicate legitimately gives a1 there.
+
+attacker[active]
+
+principal Alice[
+	knows private mrr_k
+]
+
+principal Carol[
+	generates mrr_n
+]
+
+principal Bob[
+	knows private mrr_k
+]
+
+Carol -> Alice: mrr_n
+Carol -> Bob: mrr_n
+
+principal Alice[
+	mrr_t = MAC(mrr_k, mrr_n)
+]
+
+Alice -> Bob: mrr_t
+
+principal Bob[
+	_ = ASSERT(mrr_t, MAC(mrr_k, mrr_n))?
+]
+
+queries[
+	authentication? Alice -> Bob: mrr_t
+]

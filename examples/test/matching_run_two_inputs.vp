@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// matching_run_routing.vp with the emitted value depending on two attacker
+// driven inputs at once, so the re-execution that confirms the matching run
+// has to install both before it reaches the send. One install short and Alice
+// computes something else, and the exemption would be refused for a genuine
+// matching run.
+
+attacker[active]
+
+principal Alice[
+	knows private mrt_k
+]
+
+principal Carol[
+	generates mrt_n
+	generates mrt_m
+]
+
+principal Bob[
+	knows private mrt_k
+]
+
+Carol -> Alice: mrt_n, mrt_m
+Carol -> Bob: mrt_n, mrt_m
+
+principal Alice[
+	mrt_t = MAC(mrt_k, CONCAT(mrt_n, mrt_m))
+]
+
+Alice -> Bob: mrt_t
+
+principal Bob[
+	_ = ASSERT(mrt_t, MAC(mrt_k, CONCAT(mrt_n, mrt_m)))?
+]
+
+queries[
+	authentication? Alice -> Bob: mrt_t
+]

@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// The counterweight to conf_attacker_supplied_value.vp. Unauthenticated
+// Diffie-Hellman: the attacker substitutes its own public value, so Bob's
+// session key becomes DH_KEX(PUBKEY(nil), cfk_b). That key is a value the
+// attacker forced, and it is also a genuine disclosure, because cfk_b is Bob's
+// own generated exponent and the key it yields is the one Bob goes on to
+// encrypt under.
+//
+// So this must NOT carry the `attacker-supplied value` qualifier. The
+// distinction being drawn is whether anything generated or held privately
+// survives inside the disclosed term, read through the state rather than off
+// the names in it.
+
+attacker[active]
+
+principal Alice[
+	generates cfk_a
+	cfk_ga = PUBKEY(cfk_a)
+]
+
+principal Bob[
+	generates cfk_b
+	cfk_gb = PUBKEY(cfk_b)
+]
+
+Alice -> Bob: cfk_ga
+
+principal Bob[
+	knows private cfk_note
+	cfk_s = DH_KEX(cfk_ga, cfk_b)
+	cfk_e = AEAD_ENC(cfk_s, cfk_note, nil)
+]
+
+Bob -> Alice: cfk_gb, cfk_e
+
+queries[
+	confidentiality? cfk_s
+]

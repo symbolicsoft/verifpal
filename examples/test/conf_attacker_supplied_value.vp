@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c0 at one session and at two.
+//
+// A confidentiality query follows the runtime value of a local result, which is
+// the intended predicate: a session key the attacker forced really is
+// disclosed. Here, though, replacing the ciphertext with an encryption of nil
+// does not reveal the honest plaintext at all. It only makes Bob's local `cas_d`
+// equal public nil, and the attacker then "learns" the value it supplied.
+//
+// The verdict stands, because Bob really does end up computing on a value the
+// attacker chose. What the report must add is the distinction: the conclusion
+// says the honest cas_d is not shown to be disclosed, and the headline carries
+// the `attacker-supplied value` qualifier. cas_m, the thing actually worth
+// protecting, holds.
+
+attacker[active]
+
+principal Bob[
+	knows private cas_b
+	cas_gb = PUBKEY(cas_b)
+]
+
+Bob -> Alice: [cas_gb]
+
+principal Alice[
+	generates cas_m
+	cas_c = PKE_ENC(cas_gb, cas_m)
+]
+
+Alice -> Bob: cas_c
+
+principal Bob[
+	cas_d = PKE_DEC(cas_b, cas_c)
+]
+
+queries[
+	confidentiality? cas_d
+	confidentiality? cas_m
+]

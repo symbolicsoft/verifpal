@@ -1,0 +1,46 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// The counterweight to the origin-only gate. Bob sends a challenge and Alice
+// seals it back under the shared key. Bob checks that the answer decrypts, but
+// never compares what came out with the challenge he sent, so Alice's single
+// answer to one of Bob's runs is accepted by both of them.
+//
+// The answer carries irn_nb, which Bob generated, so this is a recipient that
+// did contribute context and could have told the two acceptances apart had it
+// compared the two. That is when injective agreement is a question about the
+// protocol rather than about replication, and the duplicate must still be
+// reported, with the `duplicate acceptance` subtype rather than as an origin
+// failure. At one session there is no sibling run to copy from and the sealed
+// answer cannot be forged, so the query holds there.
+
+attacker[active]
+
+principal Bob[
+	knows private irn_k
+	knows public irn_label
+	generates irn_nb
+]
+
+principal Alice[
+	knows private irn_k
+	knows public irn_label
+]
+
+Bob -> Alice: irn_nb
+
+principal Alice[
+	irn_resp = AEAD_ENC(irn_k, irn_nb, irn_label)
+]
+
+Alice -> Bob: irn_resp
+
+principal Bob[
+	irn_got = AEAD_DEC(irn_k, irn_resp, irn_label)?
+]
+
+queries[
+	authentication? Alice -> Bob: irn_resp
+]

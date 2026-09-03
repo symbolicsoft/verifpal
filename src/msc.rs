@@ -508,6 +508,7 @@ mod tests {
 			},
 			summary: String::new(),
 			conclusion: String::new(),
+			subtype: None,
 			steps: vec![
 				ReportStep::new("derive".to_string(), "one".to_string()),
 				ReportStep::new("derive".to_string(), "two".to_string()),

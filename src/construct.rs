@@ -689,6 +689,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 			halted_at: None,
 			foreign_halts: Vec::new(),
 			capabilities: capabilities.clone(),
+			forwarded: false,
 		});
 	}
 	states
@@ -779,6 +780,7 @@ impl PrincipalState {
 				self.foreign_halts.clone()
 			},
 			capabilities: self.capabilities.clone(),
+			forwarded: if purify { false } else { self.forwarded },
 		}
 	}
 }

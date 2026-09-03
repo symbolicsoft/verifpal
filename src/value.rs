@@ -341,6 +341,27 @@ impl AttackerState {
 	pub fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
 		self.derivations.get(idx.get())
 	}
+
+	/// Every route on file to this term, each with the record of the execution
+	/// it was found in: the one narration uses, then the alternatives. A filter
+	/// that decides availability has to consider all of them, or it answers
+	/// about whichever was recorded first.
+	pub fn routes(
+		&self,
+		idx: KnownIdx,
+	) -> impl Iterator<Item = (&DerivationRecord, Option<&Arc<MutationRecord>>)> {
+		self.derivations
+			.get(idx.get())
+			.map(|primary| (primary, self.mutation_records.get(idx.get())))
+			.into_iter()
+			.chain(
+				self.alternates
+					.get(idx.get())
+					.into_iter()
+					.flatten()
+					.map(|(route, record)| (route, Some(record))),
+			)
+	}
 	pub fn record(&self, idx: KnownIdx) -> Option<&Arc<MutationRecord>> {
 		self.mutation_records.get(idx.get())
 	}
