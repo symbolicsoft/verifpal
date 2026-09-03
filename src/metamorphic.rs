@@ -79,17 +79,6 @@ fn corpus() -> Vec<(String, Model)> {
 		.collect()
 }
 
-/// Do `model` and `variant` relativise against the same set of runs?
-///
-/// A monotone property compares two analyses of one question. Compromising the
-/// peer of a scenario the original already declared does not merely hand the
-/// attacker more: it moves that run from one whose claims are the protocol's to
-/// keep to one whose are not, so the two analyses answer different questions and
-/// their codes are not comparable. Only a scenario present in *both* is checked,
-/// so adding an all-honest one — which is what the `scenario` and `scenarios`
-/// properties do — still compares. Skipping such a pair is the same kind of skip
-/// as a variant that fails sanity: a property of the models, not a verdict about
-/// the engine.
 fn asks_the_same_question(model: &Model, variant: &Model) -> bool {
 	let before = crate::scenario::honesty_profile(model);
 	let after = crate::scenario::honesty_profile(variant);

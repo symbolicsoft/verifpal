@@ -96,7 +96,6 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 	data
 }
 
-/// The byte ranges of `span`, one per line it touches, without the newlines.
 fn line_segments(text: &str, span: Span) -> Vec<(usize, usize)> {
 	let end = span.end.min(text.len());
 	let start = span.start.min(end);
@@ -386,8 +385,6 @@ pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 	ranges
 }
 
-/// The offset just past the `]` that closes the block whose `[` follows
-/// `from`, skipping brackets inside comments.
 fn block_close(text: &str, from: usize) -> Option<usize> {
 	let bytes = text.as_bytes();
 	let mut i = from;
@@ -616,8 +613,6 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 	out
 }
 
-/// Every distinct constant in the model, and every principal if asked for.
-/// `nil` is left out: it is offered as a keyword.
 fn names(doc: &Document, principals: bool) -> Vec<CompletionItem> {
 	let mut out = Vec::new();
 	let mut seen: Vec<&str> = Vec::new();
@@ -721,8 +716,6 @@ fn enclosing_call(before: &str) -> Option<(String, usize)> {
 	None
 }
 
-/// The primitive name before an opening parenthesis, looking past a
-/// capability bracket such as `[weak from phase 1]`.
 fn callee(head: &str) -> Option<String> {
 	let mut head = head.trim_end();
 	if let Some(inner) = head.strip_suffix(']') {
@@ -785,8 +778,6 @@ pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
 	hints
 }
 
-/// `value1`, `value2`, …: the names a variadic primitive gives its arguments
-/// say nothing, so they are not worth a hint.
 fn is_placeholder_name(name: &str) -> bool {
 	name.strip_prefix("value")
 		.is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))

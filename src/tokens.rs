@@ -124,9 +124,6 @@ impl TokenIndex {
 	}
 
 	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
-	/// The token under `offset`. The end is inclusive: an editor puts the caret
-	/// right after a word when the user double-clicks it or finishes typing it,
-	/// and that caret still means this word.
 	pub(crate) fn at(&self, offset: usize) -> Option<&Token> {
 		let i = self
 			.tokens

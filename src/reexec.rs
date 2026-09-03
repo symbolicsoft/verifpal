@@ -56,12 +56,18 @@ pub(crate) struct TermBound {
 
 impl TermBound {
 	pub(crate) fn of(km: &ProtocolTrace) -> TermBound {
+		let max_depth = km
+			.slots
+			.iter()
+			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
+			.max()
+			.unwrap_or(0);
 		let mut protocol: IdSet<u64> = IdSet::default();
-		let mut max_depth = 0usize;
 		for slot in &km.slots {
-			let resolved = resolve_trace_constant(&slot.constant, km);
-			max_depth = max_depth.max(term_depth(&resolved));
-			crate::hashing::collect_subterm_hashes(&resolved, &mut protocol);
+			crate::hashing::collect_subterm_hashes(
+				&resolve_trace_constant(&slot.constant, km),
+				&mut protocol,
+			);
 		}
 		TermBound {
 			max_depth,
@@ -81,9 +87,6 @@ impl TermBound {
 		let depth = term_depth(v);
 		if depth <= self.max_depth {
 			return true;
-		}
-		if std::env::var("VP_NO_PEEL").is_ok() {
-			return false;
 		}
 		depth <= self.max_depth + self.peel_depth(principal, slot)
 			&& self.depth_over_protocol(v) <= self.max_depth
@@ -138,8 +141,6 @@ impl TermBound {
 	}
 }
 
-/// The constant a term strips a layer from, where it strips one: the argument
-/// a rewrite rule inspects, or the one field `SPLIT` opens.
 fn unwrapped_by(v: &Value) -> Option<ValueId> {
 	let Value::Primitive(p) = v else {
 		return None;

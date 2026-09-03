@@ -86,13 +86,8 @@ impl Live {
 	}
 }
 
-/// The verdict diagnostics of the last completed analysis of each document,
-/// keyed by URI and stamped with the version they were computed for. The
-/// worker fills it and the main loop reads it, so that a diagnostics publish
-/// from either side carries both the parse errors and the verdicts.
 type Verdicts = Arc<Mutex<HashMap<String, (i32, Vec<lsp_types::Diagnostic>)>>>;
 
-/// One analysis, as the main loop hands it to a worker thread.
 pub(crate) struct Job {
 	pub uri: String,
 	pub name: String,
@@ -101,10 +96,7 @@ pub(crate) struct Job {
 	pub sessions: u8,
 	pub token: String,
 	pub encoding: PositionEncodingKind,
-	/// Whether the client was asked to create a progress token for `token`,
-	/// so that `$/progress` may be sent for it.
 	pub progress: bool,
-	/// Whether queries that hold are reported as diagnostics too.
 	pub passing: bool,
 }
 
@@ -123,7 +115,6 @@ impl Runner {
 		}
 	}
 
-	/// Cancels the run that answered with `token`, if it is still running.
 	pub(crate) fn cancel_token(&mut self, token: &str) -> bool {
 		let uri = self
 			.running
@@ -133,7 +124,6 @@ impl Runner {
 		uri.is_some_and(|uri| self.cancel(&uri))
 	}
 
-	/// The verdicts last computed for `uri`, if they were computed for `version`.
 	pub(crate) fn verdicts(&self, uri: &str, version: i32) -> Option<Vec<lsp_types::Diagnostic>> {
 		let store = self.verdicts.lock().unwrap_or_else(|e| e.into_inner());
 		store
@@ -142,7 +132,6 @@ impl Runner {
 			.map(|(_, d)| d.clone())
 	}
 
-	/// Drops the stored verdicts for `uri`: its text changed or it was closed.
 	pub(crate) fn forget(&mut self, uri: &str) {
 		self.verdicts
 			.lock()

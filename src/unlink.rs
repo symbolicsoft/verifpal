@@ -399,7 +399,8 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 	let mut known: Vec<Value> = Vec::with_capacity(size);
 	let mut mutation_records: Vec<Arc<MutationRecord>> = Vec::with_capacity(size);
 	let mut derivations: Vec<DerivationRecord> = Vec::with_capacity(size);
-	let mut alternates: Vec<Vec<(DerivationRecord, Arc<MutationRecord>)>> = Vec::with_capacity(size);
+	let mut alternates: Vec<Vec<(DerivationRecord, Arc<MutationRecord>)>> =
+		Vec::with_capacity(size);
 	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
 	for (i, k) in attacker.known.iter().enumerate() {
 		if k.hash_value() == h && k.equivalent(v, true) {

@@ -116,7 +116,6 @@ struct Parser<'a> {
 	principals: PrincipalNames,
 	unnamed_counter: usize,
 	last_ident: Span,
-	/// Where the value on the right of the last `=` ended, before any trailing whitespace.
 	value_end: usize,
 }
 
@@ -179,9 +178,6 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Skips whitespace and comments. Every comment is kept, wherever it sits:
-	/// one inside a bracket or an argument list is attached to the statement
-	/// being parsed, so the formatter never drops it.
 	fn consume_trivia(&mut self) {
 		loop {
 			self.skip_whitespace();
@@ -239,8 +235,6 @@ impl<'a> Parser<'a> {
 		std::mem::take(&mut self.pending_leading)
 	}
 
-	/// The current position, backed up over any trailing spaces and tabs, so
-	/// that a span ends at its last character rather than at the next token.
 	fn trimmed_pos(&self) -> usize {
 		let mut p = self.pos;
 		while p > 0 && matches!(self.input[p - 1], b' ' | b'\t') {

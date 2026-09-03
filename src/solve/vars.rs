@@ -92,13 +92,6 @@ pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
 	}
 }
 
-/// Apply `s` throughout `v`, chasing a bound variable into its own binding.
-///
-/// That chase needs no bound because [`bind`] and `matching::unify_bind` both
-/// refuse a binding whose variable occurs in what it is bound to, so the chain
-/// of variables walked here is a DAG over finitely many variables. Descent into
-/// arguments is structural. Break the occurs check and this is where it shows:
-/// the chase never returns.
 pub(crate) fn apply(v: &Value, s: &Substitution) -> Value {
 	if s.is_empty() || !contains_var(v) {
 		return v.clone();

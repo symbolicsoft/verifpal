@@ -324,14 +324,12 @@ fn propose(
 		.collect();
 	proposals.extend(keyed);
 
-	if std::env::var("VP_NO_ALIGNED").is_err() {
-		let protocol = protocol_terms(km, ps);
-		let aligned: Vec<Substitution> = proposals
-			.iter()
-			.flat_map(|proposal| aligned_held_free(km, ps, sym, proposal, attacker, &protocol))
-			.collect();
-		proposals.extend(aligned);
-	}
+	let protocol = protocol_terms(km, ps);
+	let aligned: Vec<Substitution> = proposals
+		.iter()
+		.flat_map(|proposal| aligned_held_free(km, ps, sym, proposal, attacker, &protocol))
+		.collect();
+	proposals.extend(aligned);
 
 	if results
 		.iter()
@@ -434,16 +432,6 @@ fn preserved_free(
 	})
 }
 
-/// Where the protocol put a ciphertext, offer every ciphertext the attacker
-/// holds under the same key.
-///
-/// `preserved_free` fills a free position with the honest occupant, and only
-/// where the attacker holds that occupant. An oracle attack puts something else
-/// there: a message the attacker already has, under the key the recipient will
-/// use, so that what the recipient decrypts and hands back is one layer of a
-/// term it was never meant to open. The occupant fixes the head and the key,
-/// and every held term agreeing on both is a candidate. The family is finite,
-/// one proposal per held term, and each one still goes through the validator.
 fn aligned_held_free(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,

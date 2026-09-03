@@ -59,8 +59,6 @@ pub(crate) fn of_error(e: &VerifpalError, source: &str, line: &LineIndex, uri: &
 	}
 }
 
-/// The verdicts to show: every failed query, and the ones that hold only
-/// when the client asked for them.
 pub(crate) fn shown(verdicts: &[Diagnostic], passing: bool) -> Vec<Diagnostic> {
 	verdicts
 		.iter()

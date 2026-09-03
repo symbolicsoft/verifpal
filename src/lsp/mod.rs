@@ -139,17 +139,11 @@ fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 	}
 }
 
-/// The client settings the server acts on, as `workspace/didChangeConfiguration`
-/// delivers them under `settings.verifpal`. Everything is on until told otherwise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Settings {
-	/// Publish parse and sanity diagnostics as the text changes, rather than on save.
 	pub validate_on_type: bool,
-	/// Report the queries that hold as informational diagnostics too.
 	pub passing: bool,
-	/// Name primitive arguments inline.
 	pub inlay_hints: bool,
-	/// Offer the analysis action above the queries block.
 	pub code_lens: bool,
 }
 
@@ -165,7 +159,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-	/// What `params` carries, keeping the current value of anything it leaves out.
 	fn updated(self, params: &serde_json::Value) -> Settings {
 		let section = &params["settings"]["verifpal"];
 		let flag = |keys: &[&str], current: bool| {
@@ -193,7 +186,6 @@ pub(crate) struct Server {
 	next_request_id: i32,
 	encoding: PositionEncodingKind,
 	settings: Settings,
-	/// Whether the client handles `window/workDoneProgress/create`.
 	progress_supported: bool,
 }
 
@@ -687,8 +679,6 @@ impl Server {
 		let _ = self.sender.send(Message::Response(response));
 	}
 
-	/// Sends a request to the client. Its response is not waited for: the
-	/// main loop drops responses, and nothing here depends on one.
 	fn request(&mut self, method: &str, params: impl serde::Serialize) {
 		self.next_request_id += 1;
 		let _ = self.sender.send(Message::Request(Request::new(

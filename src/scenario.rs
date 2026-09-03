@@ -200,8 +200,6 @@ fn interchangeable_clones(
 	out
 }
 
-/// Each declared scenario, keyed by the bindings that identify it, mapped to
-/// the phase from which its run is corrupt.
 #[cfg(test)]
 pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
 	let compromised = compromised_constants(m);

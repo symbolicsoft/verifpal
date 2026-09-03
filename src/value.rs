@@ -49,52 +49,20 @@ impl ValueNames {
 	}
 }
 
-/// Base for the expansion copies of a principal's fresh constants.
-///
-/// Three mechanisms mint constants that are not the model's, and all live in
-/// this range: `scenario.rs` clones every principal once per declared
-/// scenario, `sessions.rs` clones each of those once per `--sessions`
-/// session, and the separated-freshness re-check of `witness.rs` asks what an
-/// attack looks like when two runs of a role hold *different* nonces.
-/// Interned ids stop below one [`COPY_STRIDE`], and the solver's variable ids
-/// start above the whole range, so none of the id families can collide.
-///
-/// Scenarios and sessions are two axes over one band space, not two band
-/// spaces. A *joint* copy index is what makes that safe: `base + band` is
-/// injective only while `base` is an interned id, so banding twice — once per
-/// axis — would alias scenario 2's session 2 onto scenario 1's session 3, and
-/// two distinct nonces sharing an id is a false attack waiting to happen.
-/// [`copy_value_id`] therefore takes one index over the whole
-/// scenario-by-session grid, and `every_expansion_copy_id_is_distinct_…` pins
-/// its injectivity.
 pub(crate) const COPY_BASE: ValueId = 0x0400_0000;
 
-/// Width of one copy's id band. Bands 0..=29 hold expansion copies
-/// ([`MAX_COPIES`] of them, indexed 1..=30 by [`copy_value_id`]); band 30
-/// holds the minimizer's hypothetical copies, so the two can never alias.
-/// Interned ids stop below one stride, which is what keeps `base + band`
-/// collision-free.
 pub(crate) const COPY_STRIDE: ValueId = 0x0400_0000;
 
-/// Expansion copies available to `scenario.rs` and `sessions.rs` together,
-/// their product being one index into the band space. The ceiling is the
-/// minimizer's band: `COPY_BASE + 31 * COPY_STRIDE` is exactly
-/// `ATTACKER_VAR_BASE`, so 30 copies and one minimizer band fill the range
-/// without reaching the solver's.
 pub(crate) const MAX_COPIES: u32 = 30;
 
 const MINIMIZER_BAND: ValueId = 30;
 
-/// The id `base` takes in expansion copy `copy`, counting the model's own
-/// constants as copy 0 and leaving those untouched.
 pub(crate) fn copy_value_id(base: ValueId, copy: u32) -> ValueId {
 	debug_assert!((1..=MAX_COPIES).contains(&copy));
 	debug_assert!(base < COPY_STRIDE);
 	COPY_BASE + (copy as ValueId - 1) * COPY_STRIDE + base
 }
 
-/// The copy index `id` already carries, and the interned id underneath it.
-/// Copy 0 is the model's own constant, whose id is left untouched.
 pub(crate) fn copy_index_of(id: ValueId) -> (u32, ValueId) {
 	if id < COPY_BASE {
 		(0, id)
@@ -106,11 +74,6 @@ pub(crate) fn copy_index_of(id: ValueId) -> (u32, ValueId) {
 	}
 }
 
-/// The copy of `c` that a *different* run of its generating principal would
-/// hold under replication: same flags, a marked name, and an identity in the
-/// top band — above every expansion copy, so a hypothetical copy of a clone
-/// can neither collide with a real run's constant nor overflow into the
-/// solver's variable ranges.
 pub(crate) fn session_copy(c: &Constant) -> Value {
 	let base = if c.id >= COPY_BASE {
 		(c.id - COPY_BASE) % COPY_STRIDE
@@ -342,10 +305,6 @@ impl AttackerState {
 		self.derivations.get(idx.get())
 	}
 
-	/// Every route on file to this term, each with the record of the execution
-	/// it was found in: the one narration uses, then the alternatives. A filter
-	/// that decides availability has to consider all of them, or it answers
-	/// about whichever was recorded first.
 	pub fn routes(
 		&self,
 		idx: KnownIdx,

@@ -114,7 +114,6 @@ impl Capabilities {
 	}
 }
 
-/// The term in `p`'s declared secret position, if the primitive declares one.
 fn forgeable_secret_of(p: &Primitive) -> Option<&Value> {
 	let position = primitive_get(p.id).ok()?.forgeable_secret?;
 	p.arguments.get(position)

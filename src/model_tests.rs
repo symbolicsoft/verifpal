@@ -396,6 +396,36 @@ fn a_cross_session_attack_saturates_only_after_it_appears() {
 }
 
 #[test]
+fn test_pitoy_depth() {
+	run_model("pitoy_depth.vp", "c1");
+	run_model_sessions("pitoy_depth.vp", 1, "c0");
+}
+
+#[test]
+fn an_oracle_can_be_handed_a_whole_earlier_message_to_open() {
+	let (results, code) = crate::verify::verify("examples/test/pitoy_depth.vp").expect("analyses");
+	assert_eq!(
+		code, "c1",
+		"the injected message nests the initiator's whole message two layers deeper \
+		 than the protocol builds; the responder strips those layers itself, so a bound \
+		 that reads the protocol's depth flat puts the attack out of reach"
+	);
+	let summary = &results[0].summary;
+	assert!(
+		summary.contains("m1 on the wire") && summary.contains("obtaining n"),
+		"the trace has to show the held message being nested and the nonce coming \
+		 out: {summary}"
+	);
+	let (_, single) =
+		crate::verify::verify_with_sessions("examples/test/pitoy_depth.vp", 1).expect("analyses");
+	assert_eq!(
+		single, "c0",
+		"one responder run peels one layer and returns the inner ciphertext under the \
+		 attacker's key; a second run is what opens it, as it is for ProVerif"
+	);
+}
+
+#[test]
 fn test_injective_routed_emission_twice() {
 	run_model("injective_routed_emission_twice.vp", "a1");
 	run_model_sessions("injective_routed_emission_twice.vp", 1, "a0");
@@ -403,8 +433,9 @@ fn test_injective_routed_emission_twice() {
 
 #[test]
 fn a_matching_run_emission_accepted_twice_is_still_a_duplicate() {
-	let report = crate::verify::verify_report("examples/test/injective_routed_emission_twice.vp", 2)
-		.expect("analyses");
+	let report =
+		crate::verify::verify_report("examples/test/injective_routed_emission_twice.vp", 2)
+			.expect("analyses");
 	assert!(report.results[0].resolved);
 	assert_eq!(
 		report.results[0].subtype,
@@ -425,11 +456,9 @@ fn test_injective_recipient_nonce_unchecked() {
 
 #[test]
 fn a_duplicate_acceptance_says_whether_the_recipient_could_have_told() {
-	let checked = crate::verify::verify_report(
-		"examples/test/injective_recipient_nonce_unchecked.vp",
-		2,
-	)
-	.expect("analyses");
+	let checked =
+		crate::verify::verify_report("examples/test/injective_recipient_nonce_unchecked.vp", 2)
+			.expect("analyses");
 	assert!(checked.results[0].resolved);
 	assert_eq!(
 		checked.results[0].subtype,
@@ -466,11 +495,9 @@ fn a_duplicate_acceptance_says_whether_the_recipient_could_have_told() {
 		 silencing context-free duplicates was measured to silence this one too"
 	);
 
-	let single = crate::verify::verify_report(
-		"examples/test/injective_recipient_nonce_unchecked.vp",
-		1,
-	)
-	.expect("analyses");
+	let single =
+		crate::verify::verify_report("examples/test/injective_recipient_nonce_unchecked.vp", 1)
+			.expect("analyses");
 	assert!(
 		!single.results[0].resolved,
 		"at one session the matching-run exemption holds: Alice honestly sealed what \

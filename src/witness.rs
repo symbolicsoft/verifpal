@@ -821,16 +821,6 @@ fn shapes_the_checks_wanted(
 	shapes
 }
 
-/// The forgeries for slot `i` that carry what the protocol itself put there.
-///
-/// `build_rewrite_shapes_with` fixes the positions the recipient's rewrite rule
-/// matches on — the key, the associated data — and leaves the rest to a filler.
-/// Filling those with `nil` always type-checks and always resolves an
-/// authentication query, which is exactly why it explains nothing: "Bob accepted
-/// an empty record" is a weaker claim than "Bob accepted the real file, resealed
-/// under a key the attacker owns", and both resolve the same `a1`. So whenever
-/// the attacker holds the honest term's own argument for a free position, offer
-/// that first and let `nil` be the fallback it was meant to be.
 fn payload_shapes(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
@@ -885,9 +875,6 @@ fn payload_shapes(
 		.collect()
 }
 
-/// A forged term is only an explanation if the attacker could have produced it.
-/// The minimizer never records a verdict, so this cannot cost an attack — but a
-/// witness naming a term nothing derives is a trace a reader cannot follow.
 pub(crate) fn attacker_can_build(shape: &Value, attacker: &AttackerState) -> bool {
 	if attacker.knows(shape).is_some() {
 		return true;
@@ -984,8 +971,6 @@ fn harvested_late(
 	}
 }
 
-/// `v` with every constant that `ps` itself generates replaced by the copy a
-/// different session of `ps` would hold, recording which ones those were.
 fn rename_own_fresh(v: &Value, ps: &PrincipalState, seen: &mut Vec<String>) -> Value {
 	match v {
 		Value::Constant(c) => {

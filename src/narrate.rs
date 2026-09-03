@@ -220,7 +220,6 @@ pub(crate) fn narrated_installs(ps: &PrincipalState) -> Vec<SlotIdx> {
 		.collect()
 }
 
-/// Does `v` mention any constant in `ids`?
 fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
 	match v {
 		Value::Constant(c) => ids.contains(&c.id),
@@ -560,9 +559,6 @@ impl<'a> Narrator<'a> {
 	}
 }
 
-/// Where a derivation happened, when that is not the run being narrated. The
-/// record names a principal, which under session expansion is a session too;
-/// it does not order the two, so nothing here may call the other one earlier.
 fn session_prefix(km: &ProtocolTrace, r: &MutationRecord, home: PrincipalId) -> Option<String> {
 	if r.principal_id == home {
 		return None;

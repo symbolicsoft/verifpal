@@ -84,9 +84,6 @@ pub(crate) fn derivation_problems(
 	problems
 }
 
-/// A value the attacker holds before it does anything: `nil`, or a public
-/// constant seeded at the start of the phase. Nothing derives it, so a trace
-/// that does not produce it is complete rather than broken.
 fn needs_no_step(attacker: &AttackerState, target: &Value) -> bool {
 	match target {
 		Value::Constant(c) => {

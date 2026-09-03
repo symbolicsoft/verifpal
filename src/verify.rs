@@ -234,11 +234,6 @@ pub fn verify_saturating(
 	))
 }
 
-/// Raises the session count until the result code stops moving, and hands back
-/// the analysis of the count it stopped at rather than the count alone: every
-/// run is captured instead of silenced (`info.rs::InfoCapture`), so the winning
-/// one is reported by replaying what it already printed rather than by
-/// analyzing it a second time.
 pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<Saturation> {
 	let mut previous: Option<String> = None;
 	let mut regressed = false;
@@ -300,9 +295,6 @@ pub fn verify_auto_queries(file_path: &str, sessions: u8) -> VResult<(Vec<Verify
 		.map(|(report, _)| (report.results, report.code))
 }
 
-/// `verify`, analyzed as `sessions` interleaved sessions per principal
-/// (`sessions.rs`). Every entry point shares one default, so the CLI, the
-/// LSP and the wasm build cannot disagree about what a model means.
 pub fn verify_with_sessions(file_path: &str, sessions: u8) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report(file_path, sessions).map(|report| (report.results, report.code))
 }

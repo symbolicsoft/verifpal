@@ -846,7 +846,6 @@ mod tcb_tests {
 	use std::fs;
 	use std::path::{Path, PathBuf};
 
-	/// Whole files declared `#[cfg(test)] mod ...` in lib.rs: no shipping code.
 	const TEST_ONLY: [&str; 2] = ["model_tests.rs", "testutil.rs"];
 
 	fn engine_sources() -> Vec<PathBuf> {
@@ -872,7 +871,6 @@ mod tcb_tests {
 		out
 	}
 
-	/// The lines of `path` that ship, with `#[cfg(test)]` modules removed.
 	fn shipping_lines(path: &Path) -> Vec<(usize, String)> {
 		let text = fs::read_to_string(path).expect("read source");
 		let lines: Vec<&str> = text.lines().collect();
@@ -969,7 +967,6 @@ mod tcb_tests {
 			.collect()
 	}
 
-	/// The files containing shipping call sites of `name`, with a count each.
 	fn call_site_files(name: &str) -> Vec<(String, usize)> {
 		let mut counts: Vec<(String, usize)> = Vec::new();
 		for site in call_sites(name) {
@@ -986,7 +983,6 @@ mod tcb_tests {
 		counts
 	}
 
-	/// Every shipping call site of `name`, excluding its definition and `use`.
 	fn call_sites(name: &str) -> Vec<String> {
 		let needle = format!("{name}(");
 		let mut sites = Vec::new();

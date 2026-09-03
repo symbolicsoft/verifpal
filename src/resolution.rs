@@ -327,7 +327,11 @@ mod tests {
 			target.as_constant().expect("constant").clone(),
 			carrier.as_constant().expect("constant").clone(),
 		);
-		let inner = make_primitive(crate::primitive::PRIM_HASH, vec![make_constant("rc_seed")], 0);
+		let inner = make_primitive(
+			crate::primitive::PRIM_HASH,
+			vec![make_constant("rc_seed")],
+			0,
+		);
 		let seed_c = make_constant("rc_seed");
 
 		let mut alias_meta = make_slot_meta(&alias_c, false);
@@ -371,12 +375,7 @@ mod tests {
 		let received_c = received.as_constant().expect("constant").clone();
 		let mut meta = make_slot_meta(&received_c, false);
 		meta.wire = vec![1];
-		let ps = make_principal_state(
-			"Bob",
-			1,
-			vec![meta],
-			vec![make_slot_values(&received, 2)],
-		);
+		let ps = make_principal_state("Bob", 1, vec![meta], vec![make_slot_values(&received, 2)]);
 		let (resolved, _) = ps.resolve_constant(&received_c, false);
 		assert!(
 			resolved.equivalent(&received, true),

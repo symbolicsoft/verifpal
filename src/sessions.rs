@@ -43,24 +43,8 @@ use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
 use crate::value::{copy_index_of, copy_value_id};
 
-/// Sessions are one axis of the expansion-copy id space `value.rs` bands, and
-/// scenarios are the other: [`crate::value::MAX_COPIES`] bounds their product,
-/// so raising this past 16 means checking that bound, not this one.
 pub(crate) const MAX_SESSIONS: u8 = 16;
 
-/// Sessions analyzed per principal when nothing says otherwise.
-///
-/// Two, not one: concurrency is what deployment looks like, and a single
-/// session cannot express an attack that needs two of a role's fresh values
-/// to coexist at all — the tool would not be *failing* to find those attacks
-/// so much as unable to state them. Two is where that class starts, and it
-/// is enough for the ones that show up in practice (nonce swaps, oracle
-/// interleavings, reflections between role instances). It costs roughly 4x;
-/// `--sessions 1` buys that back where a model is large enough to care, and
-/// higher counts are available for deeper coverage.
-///
-/// This is still a bound, not a proof: passing at k sessions means no attack
-/// was found within k, never that none exists.
 pub(crate) const DEFAULT_SESSIONS: u8 = 2;
 
 #[derive(Debug)]

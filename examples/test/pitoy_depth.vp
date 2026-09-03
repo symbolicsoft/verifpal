@@ -1,0 +1,77 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session, c1 at two.
+//
+// Arapinis and Duflot's Pi_Toy. An honest initiator's message is nested
+// whole inside the shape the responder unwraps, with the attacker's key where
+// the peer's belongs, so the responder peels a layer off a term it was never
+// meant to open and returns the initiator's inner ciphertext under the
+// attacker's key. A second responder run peels the last layer and hands over
+// the nonce. The injected message is two layers deeper than anything the
+// protocol itself builds, and it is built by nesting a message the protocol
+// produced, not by inventing structure.
+//
+// Two things had to give for the search to reach it. The depth bound is per
+// slot, the protocol's depth plus the layers the recipient strips from that
+// slot, with the extra room spendable only on the protocol's own subterms, so
+// the space of invented structure is exactly as bounded as before. And where a
+// forged shape leaves a ciphertext position free, every held protocol
+// ciphertext under the same key is offered there, which is the oracle's input.
+// One responder run is not enough, as it is not for ProVerif either.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+	generates n
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Mallory[
+	knows private m
+	gm = PUBKEY(m)
+	generates x
+	leaks m
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Bob -> Mallory: [gb]
+Mallory -> Bob: [gm]
+
+principal Alice[
+	inner_a = PKE_ENC(gb, n)
+	pair_a = CONCAT(inner_a, ga)
+	m1 = PKE_ENC(gb, pair_a)
+]
+
+Alice -> Bob: m1
+
+principal Mallory[
+	inner_in = PKE_ENC(gb, x)
+	pair_in = CONCAT(inner_in, gm)
+	m_in = PKE_ENC(gb, pair_in)
+]
+
+Mallory -> Bob: m_in
+
+principal Bob[
+	outer_b = PKE_DEC(b, m_in)
+	inner_b, peer_b = SPLIT(outer_b)?
+	x_b = PKE_DEC(b, inner_b)
+	inner_r = PKE_ENC(peer_b, x_b)
+	pair_r = CONCAT(inner_r, gb)
+	m2 = PKE_ENC(peer_b, pair_r)
+]
+
+Bob -> Mallory: m2
+
+queries[
+	confidentiality? n
+]

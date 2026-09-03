@@ -89,9 +89,6 @@ fn emit(line: String) {
 	println!("{line}");
 }
 
-/// Buffers what would have been printed instead of printing it, so a caller
-/// that runs the same analysis at several parameters can show one of them
-/// without running it a second time (`verify.rs::saturation_sessions`).
 pub(crate) struct InfoCapture;
 
 impl InfoCapture {

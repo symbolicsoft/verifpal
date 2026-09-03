@@ -834,10 +834,6 @@ impl Model {
 		out
 	}
 
-	/// Ids of every constant a principal block freshly produces — `generates`
-	/// constants and assignment outputs. These are the per-copy values;
-	/// everything else (`knows`, and by extension whatever `leaks` or messages
-	/// mention of it) is long-term and shared across every expansion copy.
 	pub fn freshened_constants(&self) -> IdSet<ValueId> {
 		let mut out = IdSet::default();
 		for block in &self.blocks {
@@ -972,8 +968,6 @@ impl Envelope {
 	}
 }
 
-/// What kind of contradiction a resolved query reports, where the bare verdict
-/// would run two different findings together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Subtype {
 	AttackerSuppliedValue,
@@ -1009,10 +1003,6 @@ pub struct VerifyResult {
 	pub trace: Vec<String>,
 	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
-	/// Per-session instantiations of `query` under `--sessions`, evaluated
-	/// under the same `query_index`: an attack on any session resolves the
-	/// query the user wrote. Empty at one session. `results_put` leaves this
-	/// and `query` untouched, so display always shows the user's own query.
 	pub variants: Vec<Query>,
 }
 
@@ -1238,18 +1228,8 @@ pub struct ProtocolTrace {
 	pub max_phase: i32,
 	pub used_by: IdMap<ValueId, IdSet<PrincipalId>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
-	/// Session-sibling groups under `--sessions`: every cloned constant (and
-	/// its base) maps to the full `[base, base#2, ..]` id group. Empty at one
-	/// session. Read by the authentication replay carve-out in `query.rs`.
 	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
-	/// Expansion clones that are runs of the same agent under the same peer
-	/// binding, each mapped to the canonical id of that group. Session clones
-	/// always qualify; a scenario clone qualifies only where the scenario left
-	/// that principal's own bindings alone, since a rebound peer is a
-	/// different configuration and not an interchangeable run.
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
-	/// Expansion clones mapped to the id of the principal the model declares,
-	/// so the runs of one agent can be recognised across every copy of it.
 	pub actors: IdMap<PrincipalId, PrincipalId>,
 }
 
@@ -1358,15 +1338,6 @@ pub struct SlotValues {
 	pub value: Value,
 	pub pre_rewrite: Value,
 	pub original: Value,
-	/// The key a defeated guard was made to accept, when one was.
-	///
-	/// A guard bypass has to be visible to the principal — that is the whole
-	/// point of it, since the principal really did check against the key it was
-	/// handed. It used to be written into `original`, which gave that field two
-	/// meanings and left a bypassed slot impossible to purify: the field
-	/// purification restores from no longer held what the protocol honestly
-	/// computed. Keeping it here costs one `Option` per slot and lets `original`
-	/// mean exactly what the semantics say it means.
 	pub bypassed: Option<Value>,
 	pub provenance: Provenance,
 }
@@ -1379,8 +1350,6 @@ impl SlotValues {
 		self.value = v;
 	}
 
-	/// Install `v` as the key a defeated guard accepts, leaving `original`
-	/// holding what the protocol honestly computed.
 	pub fn override_all_bypassed(&mut self, v: Value) {
 		self.pre_rewrite = v.clone();
 		self.value = v.clone();
@@ -1388,8 +1357,6 @@ impl SlotValues {
 		self.provenance.bypass_injected = true;
 	}
 
-	/// What the principal perceives at this slot: the bypassed key where a guard
-	/// was defeated, and otherwise what it honestly computed.
 	pub fn perceived(&self) -> &Value {
 		self.bypassed.as_ref().unwrap_or(&self.original)
 	}
@@ -1599,6 +1566,8 @@ impl DerivationRecord {
 	}
 }
 
+pub type Route = (DerivationRecord, Arc<MutationRecord>);
+
 #[derive(Clone, Debug)]
 pub struct AttackerState {
 	pub current_phase: i32,
@@ -1606,20 +1575,7 @@ pub struct AttackerState {
 	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
-	/// Further routes to the same term, beyond the one kept in `derivations`.
-	///
-	/// A term is often derivable more than one way, and the history filter
-	/// decides availability by following a route. Keeping only the first one
-	/// recorded makes that filter answer about whichever route happened to be
-	/// found first, so the alternatives are retained and the filter asks whether
-	/// *some* of them survives.
-	///
-	/// Each alternative carries its own record, and that is what makes admitting
-	/// one sound. A route is discovered inside some execution, and it is only a
-	/// route at all in executions like that one; a bare list of derivations
-	/// would let a route found in one hypothetical be spent in another that
-	/// excludes it, which is the same fault the history filter exists to catch.
-	pub alternates: Arc<Vec<Vec<(DerivationRecord, Arc<MutationRecord>)>>>,
+	pub alternates: Arc<Vec<Vec<Route>>>,
 }
 
 impl Default for AttackerState {

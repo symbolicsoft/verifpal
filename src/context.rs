@@ -29,6 +29,8 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
 
+type Execution = (PrincipalId, Vec<(SlotIdx, Value)>);
+
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
 	results: RwLock<Vec<VerifyResult>>,
@@ -48,7 +50,7 @@ pub(crate) struct VerifyContext {
 	query_goals: RwLock<Vec<usize>>,
 	#[cfg(test)]
 	searched: AtomicBool,
-	execution: RwLock<Option<(PrincipalId, Vec<(SlotIdx, Value)>)>>,
+	execution: RwLock<Option<Execution>>,
 	origin_only: RwLock<IdSet<usize>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
@@ -109,9 +111,6 @@ fn derivation_provenance(
 	})
 }
 
-/// Record a further route to a term already held, without disturbing the one
-/// narration uses. Knowledge does not change; what changes is that a filter
-/// deciding availability by following a route now has every route to follow.
 fn attacker_state_note_route(
 	state: &mut AttackerState,
 	value: &Value,
@@ -268,8 +267,6 @@ impl VerifyContext {
 		self.replication_rejected.load(Ordering::SeqCst)
 	}
 
-	/// True the first time only: the depth bound turns away every term of that
-	/// shape at that slot, and saying so once is what the reader needs.
 	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
 		self.note_truncation(Truncation::TermDepth);
 		write_lock(&self.depth_cuts).insert((principal, slot))
@@ -296,14 +293,6 @@ impl VerifyContext {
 		state.sort_by_key(|(kind, _)| *kind);
 	}
 
-	/// True for every principal in a model that declares no scenarios, and
-	/// otherwise only for the clones whose peer bindings all resolve to values
-	/// no leak reaches. A run whose peer is the attacker is still explored —
-	/// it is where the attacker learns things — but it is not a run whose
-	/// claims are the protocol's to keep. A model all of whose scenarios are
-	/// corrupt has an empty honest set, which is not the same as declaring
-	/// none: `honest` is `None` in the second case and `Some(empty)` in the
-	/// first.
 	pub(crate) fn is_honest(&self, principal: PrincipalId) -> bool {
 		self.is_honest_at(principal, read_lock(&self.attacker).current_phase)
 	}
@@ -395,7 +384,7 @@ impl VerifyContext {
 		*write_lock(&self.execution) = Some((principal, installs.to_vec()));
 	}
 
-	pub(crate) fn execution_origin(&self) -> Option<(PrincipalId, Vec<(SlotIdx, Value)>)> {
+	pub(crate) fn execution_origin(&self) -> Option<Execution> {
 		read_lock(&self.execution).clone()
 	}
 
@@ -514,9 +503,6 @@ impl VerifyContext {
 		});
 	}
 
-	/// Hand the attacker every wire or leaked value of `ps` that `admit` allows
-	/// and whose earliest phase has been reached, together with the derivation
-	/// that explains it.
 	fn absorb_wire_values(
 		&self,
 		ps: &PrincipalState,
@@ -606,9 +592,6 @@ impl VerifyContext {
 		&self.file_name
 	}
 
-	/// Record a verdict. The token is unforgeable outside `query.rs`, which is
-	/// fact (i) of the soundness theorem expressed as a type rather than as a
-	/// test over the source.
 	pub(crate) fn results_put(
 		&self,
 		result: &VerifyResult,
@@ -654,11 +637,6 @@ impl VerifyContext {
 		self.scratch(query_index, self.honest.clone())
 	}
 
-	/// The minimizer's probe context, which does not relativise. Which runs may
-	/// *record* a verdict and which runs can *reproduce* one already recorded
-	/// are different questions: the witness for a cross-scenario attack lives
-	/// in the corrupt-peer run the attack goes through, and refusing to confirm
-	/// it there leaves the trace falling back to the unminimized witness.
 	pub(crate) fn scratch_for_witness(&self, query_index: usize) -> VerifyContext {
 		self.scratch(query_index, None)
 	}
