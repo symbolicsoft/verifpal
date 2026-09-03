@@ -49,6 +49,8 @@ make release-dry                       # rehearse a release without touching git
 
 CI (`.github/workflows/main.yml`) runs clippy, `cargo test --release` and the exhaustive sweeps on Ubuntu and macOS, plus a wasm clippy job for `wasm32-unknown-unknown`. A single warning fails the build. **CI only runs when the commit title contains `[ci]`** (or on manual dispatch), so a green tree means nothing until you tag a commit. Formatting is not gated in CI; `make lint` checks it locally, so keep the tree formatted.
 
+**Releases do not run in CI.** `.github/workflows/main.yml` is the only workflow; `scripts/release.sh` is the whole release, running the test battery, the version bump, the tag push, goreleaser and the crates.io publish on the operator's machine. It needs `GITHUB_TOKEN` exported and `goreleaser`, `syft`, `zig` and `gsed` on PATH, and goreleaser's before-hook pins `cargo-zigbuild` to 0.23.3 — 0.23.4 mis-parses the `-Wl,-exported_symbols_list <path>` pair rustc emits for a macOS `cdylib` and fails the Apple targets.
+
 ```sh
 cargo run --release -- verify examples/simple.vp             # full analysis
 cargo run --release -- verify path/to/model.vp --result-code # appends the compact result code

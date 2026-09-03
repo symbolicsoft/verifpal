@@ -5,26 +5,24 @@ set -euo pipefail
 
 # Verifpal release driver.
 #
-#   scripts/release.sh [--dry-run] [--local] [VERSION]
+#   scripts/release.sh [--dry-run] [VERSION]
 #
-# By default this script is a *gate and a tagger*: it proves the tree is
-# releasable, bumps the version, and pushes the tag. Pushing the tag is what
-# starts .github/workflows/release.yml, which runs goreleaser and publishes.
-# --local runs the publish here instead, for when CI is not an option.
+# This is the whole release. It proves the tree is releasable, bumps the
+# version, tags and pushes, then runs goreleaser here to publish the GitHub
+# release, the package manifests and the crate. Nothing is handed off to CI.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 DRY_RUN=0
-LOCAL_PUBLISH=0
 VERSION=""
 
 for arg in "$@"; do
 	case "${arg}" in
 		--dry-run) DRY_RUN=1 ;;
-		--local) LOCAL_PUBLISH=1 ;;
+		--local) echo "[Verifpal] --local is the only mode now; ignoring it." >&2 ;;
 		-h|--help)
-			sed -n '6,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+			sed -n '6,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		-*)
@@ -48,7 +46,7 @@ run() {
 
 # ---------------------------------------------------------------- preflight
 
-for tool in git cargo goreleaser make curl; do
+for tool in git cargo goreleaser make curl zig syft; do
 	command -v "${tool}" >/dev/null 2>&1 || die "${tool} is not on PATH."
 done
 
@@ -61,8 +59,16 @@ fi
 
 [[ -f Cargo.toml && -f .goreleaser.yml ]] || die "run this from the Verifpal repository."
 
-if [[ "${DRY_RUN}" -eq 0 && "${LOCAL_PUBLISH}" -eq 1 && -z "${GITHUB_TOKEN:-}" ]]; then
-	die "GITHUB_TOKEN is unset, and --local publishes with goreleaser from here. Export a token, or drop --local and let CI publish."
+if [[ "${DRY_RUN}" -eq 0 && -z "${GITHUB_TOKEN:-}" ]]; then
+	die "GITHUB_TOKEN is unset. goreleaser publishes the release, the Homebrew cask and the Scoop manifest from here and needs it."
+fi
+
+# The winget block templates its token, so the variable has to resolve even on
+# the runs where the upload is skipped.
+if [[ -n "${VERIFPAL_PUBLISH_WINGET:-}" ]]; then
+	[[ -n "${WINGET_TOKEN:-}" ]] || die "VERIFPAL_PUBLISH_WINGET is set, so the winget PR will be opened, but WINGET_TOKEN is unset."
+else
+	export WINGET_TOKEN="${WINGET_TOKEN:-}"
 fi
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -160,12 +166,6 @@ say "validating the goreleaser configuration."
 goreleaser check
 goreleaser healthcheck || say "warning: healthcheck reported missing tools (see above)."
 
-SNAPSHOT_SKIP="announce,publish,validate"
-if ! command -v syft >/dev/null 2>&1; then
-	say "warning: syft is not installed, so the rehearsal will not build SBOMs."
-	SNAPSHOT_SKIP="${SNAPSHOT_SKIP},sbom"
-fi
-
 # ------------------------------------------------------------- version bump
 
 say "bumping Cargo.toml and Cargo.lock."
@@ -249,6 +249,10 @@ verify_generated_manifests() {
 }
 
 publish_crate() {
+	if [[ "${DRY_RUN}" -eq 1 ]]; then
+		say "(dry run) would publish ${VERSION} to crates.io."
+		return 0
+	fi
 	local published
 	published="$(curl -sS -H 'User-Agent: verifpal-release' \
 		"https://crates.io/api/v1/crates/verifpal/${VERSION}" 2>/dev/null || true)"
@@ -260,17 +264,11 @@ publish_crate() {
 	run cargo publish --locked
 }
 
-if [[ "${LOCAL_PUBLISH}" -eq 1 ]]; then
-	say "running goreleaser locally."
-	run goreleaser release --clean
-	RELEASE_PUBLISHED=1
-	verify_generated_manifests
-	publish_crate
-else
-	say "the release itself now runs in CI; watch it with:"
-	say "  gh run watch \$(gh run list --workflow=release.yml --limit=1 --json databaseId --jq '.[0].databaseId')"
-	say "when it finishes, 'git pull --rebase' brings the regenerated manifests down."
-fi
+say "publishing with goreleaser; this cross-builds every target and uploads."
+run goreleaser release --clean
+RELEASE_PUBLISHED=1
+verify_generated_manifests
+publish_crate
 
 trap - EXIT
 if [[ "${DRY_RUN}" -eq 1 ]]; then
