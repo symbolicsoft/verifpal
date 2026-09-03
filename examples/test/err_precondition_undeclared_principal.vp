@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: a principal named only inside a precondition is still a
+// principal the model must declare. Dave appears nowhere else, and the error
+// is the same one an undeclared principal in a query or message receives.
+
+attacker[active]
+
+principal Bob[
+	knows private psk
+	generates m
+	e = ENC(psk, m)
+]
+
+Bob -> Alice: e
+
+principal Alice[
+	knows private psk
+	m2 = DEC(psk, e)
+]
+
+Alice -> Carol: m2
+
+principal Carol[
+	_ = HASH(m2)
+]
+
+queries[
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Dave: m2]
+	]
+]

@@ -44,9 +44,11 @@ Alice -> Bob: ga
 principal Bob[
 	knows public c0
 	generates m1, b
-	gb = PUBKEY(b) // Bob derives the shared secret from whatever "ga" he received —
+	gb = PUBKEY(b)
+	// Bob derives the shared secret from whatever "ga" he received —
 	// which, under attack, is the attacker's public key, not Alice's.
-	gab = DH_KEX(ga, b) // AEAD_ENC(key, plaintext, associated data): m1 is only as
+	gab = DH_KEX(ga, b)
+	// AEAD_ENC(key, plaintext, associated data): m1 is only as
 	// confidential as gab is secret.
 	e1 = AEAD_ENC(gab, m1, c0)
 ]
@@ -54,7 +56,8 @@ principal Bob[
 Bob -> Alice: gb, e1
 
 principal Alice[
-	gba = DH_KEX(gb, a) // The trailing `?` makes this a *checked* primitive: if decryption
+	gba = DH_KEX(gb, a)
+	// The trailing `?` makes this a *checked* primitive: if decryption
 	// fails (wrong key, forged ciphertext), Alice halts and executes
 	// nothing further. A check constrains the attacker — but here the
 	// attacker can satisfy it by encrypting under a key it shares with

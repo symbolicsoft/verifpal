@@ -468,9 +468,6 @@ fn info_verify_result_summary_plain(
 		output.push_str(&format!("\n{}{}", indent, summary));
 	}
 	for o in option_results {
-		if !o.resolved {
-			continue;
-		}
 		output.push_str(&format!("\n{}! {}", indent, o.summary));
 	}
 	output
@@ -518,9 +515,6 @@ fn info_verify_result_summary_color(
 		output.push_str(&format!("\n{}{}", indent, summary.on_red().white().bold()));
 	}
 	for o in option_results {
-		if !o.resolved {
-			continue;
-		}
 		output.push_str(&format!(
 			"\n{}{} {}",
 			indent,

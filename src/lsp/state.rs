@@ -54,6 +54,10 @@ impl Documents {
 		self.open.get(uri)
 	}
 
+	pub(crate) fn uris(&self) -> Vec<String> {
+		self.open.keys().cloned().collect()
+	}
+
 	fn build(&self, name: String, version: i32, text: String) -> Document {
 		let line = LineIndex::new(&text, &self.encoding);
 		let (model, tokens) = crate::parser::parse_string_indexed(&name, &text);
@@ -61,7 +65,20 @@ impl Documents {
 		let mut sanity = None;
 		if let Ok(m) = &model {
 			match crate::sanity::sanity(m) {
-				Ok((t, _)) => trace = Some(t),
+				Ok((t, _)) => {
+					trace = Some(t);
+					// A scenario binding is only checked once the scenarios are
+					// expanded, which is what `verify` does before its own sanity
+					// pass. The live check has to agree with the analysis, or an
+					// error surfaces only when the analysis is run.
+					if !m.scenarios.is_empty()
+						&& let Err(e) =
+							crate::scenario::expand_scenarios(m, crate::sessions::DEFAULT_SESSIONS)
+								.and_then(|e| crate::sanity::sanity(&e.model))
+					{
+						sanity = Some(e.located(&m.file_name, &m.source));
+					}
+				}
 				Err(e) => sanity = Some(e.located(&m.file_name, &m.source)),
 			}
 		}
@@ -194,6 +211,50 @@ mod tests {
 		assert!(doc.model.is_ok(), "it parses");
 		assert!(doc.trace.is_none(), "but it does not pass sanity");
 		assert!(doc.sanity.is_some(), "and the sanity error is kept");
+	}
+
+	#[test]
+	fn a_scenario_binding_the_principal_never_receives_fails_sanity_live() {
+		let broken = "attacker[active]\n\
+			principal Bob[\n\
+			knows private sb_b\n\
+			sb_gb = PUBKEY(sb_b)\n\
+			]\n\
+			principal Alice[\n\
+			knows public sb_gpeer\n\
+			generates sb_m\n\
+			sb_e = PKE_ENC(sb_gpeer, sb_m)\n\
+			]\n\
+			Alice -> Bob: sb_e\n\
+			principal Bob[\n\
+			_ = PKE_DEC(sb_b, sb_e)\n\
+			]\n\
+			scenarios[\n\
+			Alice[sb_gpeer = sb_gb]\n\
+			]\n\
+			queries[\n\
+			confidentiality? sb_m\n\
+			]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///sb.vp".to_string(),
+			"sb.vp".to_string(),
+			1,
+			broken.to_string(),
+		);
+		let doc = docs.get("file:///sb.vp").expect("open");
+		assert!(doc.model.is_ok(), "it parses");
+		assert!(
+			doc.sanity.is_some(),
+			"the analysis would reject this binding, so the live check must too"
+		);
+		let fine = broken.replace(
+			"principal Alice[\n",
+			"Bob -> Alice: [sb_gb]\nprincipal Alice[\n",
+		);
+		docs.change("file:///sb.vp", 2, fine);
+		let doc = docs.get("file:///sb.vp").expect("open");
+		assert!(doc.sanity.is_none(), "{:?}", doc.sanity);
 	}
 
 	#[test]

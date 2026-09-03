@@ -1,0 +1,73 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c1c0
+//
+// The precondition's sender need not be the principal the query is about,
+// and what counts is whether that sender reaches the send in the execution
+// that violates the query. Substituting gs gives the client an attacker-known
+// key and halts it at the signature check, so the plain query fails. The
+// server's later send of resp is not reached either: the client never sends
+// req, the server's decryption of it fails, and the server halts, so the
+// query gated on resp holds. The server's earlier send of gs precedes every
+// check and is always reached, so gating on it changes nothing. Gating on the
+// client's own send of req is the accepted-key case and holds.
+
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+Server -> Client: [server_pk]
+
+principal Client[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Client -> Server: [gc]
+
+principal Server[
+	generates s
+	gs = PUBKEY(s)
+	sig = SIGN(server_sk, gs)
+	k_server = DH_KEX(gc, s)
+]
+
+Server -> Client: gs, sig
+
+principal Client[
+	k_client = DH_KEX(gs, c)
+	_ = SIGNVERIF(server_pk, gs, sig)?
+	generates request
+	req = AEAD_ENC(k_client, request, nil)
+]
+
+Client -> Server: req
+
+principal Server[
+	_ = AEAD_DEC(k_server, req, nil)?
+	generates response
+	resp = AEAD_ENC(k_server, response, nil)
+]
+
+Server -> Client: resp
+
+principal Client[
+	_ = AEAD_DEC(k_client, resp, nil)?
+]
+
+queries[
+	confidentiality? k_client
+	confidentiality? k_client[
+		precondition[Server -> Client: resp]
+	]
+	confidentiality? k_client[
+		precondition[Server -> Client: gs]
+	]
+	confidentiality? k_client[
+		precondition[Client -> Server: req]
+	]
+]

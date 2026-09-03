@@ -124,13 +124,16 @@ impl TokenIndex {
 	}
 
 	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	/// The token under `offset`. The end is inclusive: an editor puts the caret
+	/// right after a word when the user double-clicks it or finishes typing it,
+	/// and that caret still means this word.
 	pub(crate) fn at(&self, offset: usize) -> Option<&Token> {
 		let i = self
 			.tokens
 			.partition_point(|t| t.span.start <= offset)
 			.checked_sub(1)?;
 		let token = &self.tokens[i];
-		(offset < token.span.end).then_some(token)
+		(offset <= token.span.end).then_some(token)
 	}
 }
 
@@ -155,6 +158,51 @@ mod tests {
 		let (model, index) = crate::parser::parse_string_indexed("tk.vp", src);
 		model.expect("parses");
 		index
+	}
+
+	#[test]
+	fn a_caret_just_past_a_word_still_finds_it() {
+		let index = index_of(SRC);
+		let start = SRC.find("tk_ga = PUBKEY").expect("in the source");
+		let end = start + "tk_ga".len();
+		let token = index.at(end).expect("the word before the caret");
+		assert_eq!(&*token.text, "tk_ga");
+		assert_eq!(token.span.start, start);
+		// One further on is the `=`, and a token under the caret beats one behind it.
+		assert_eq!(&*index.at(end + 1).expect("the `=`").text, "=");
+	}
+
+	#[test]
+	fn a_precondition_records_its_keyword_and_principals() {
+		let src = "attacker[active]\n\
+			principal Alice[\n\
+			\tknows private tp_m\n\
+			\ttp_h = HASH(tp_m)\n\
+			]\n\
+			Alice -> Bob: tp_h\n\
+			principal Bob[\n\
+			\t_ = HASH(tp_h)\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? tp_m[\n\
+			\t\tprecondition[Alice -> Bob: tp_h]\n\
+			\t]\n\
+			]\n";
+		let index = index_of(src);
+		let inside = src.find("precondition[").expect("the option");
+		let keyword = index.at(inside).expect("a token on the option name");
+		assert_eq!(keyword.kind, TokenKind::Keyword);
+		assert_eq!(&*keyword.text, "precondition");
+		let sender = index
+			.at(src[inside..].find("Alice").expect("the sender") + inside)
+			.expect("a token on the sender");
+		assert_eq!(sender.kind, TokenKind::PrincipalName);
+		let bobs = index
+			.tokens()
+			.iter()
+			.filter(|t| t.kind == TokenKind::PrincipalName && &*t.text == "Bob")
+			.count();
+		assert_eq!(bobs, 3, "the message, the block and the precondition");
 	}
 
 	const RESOLVE_SRC: &str = "attacker[passive]\n\
@@ -338,8 +386,12 @@ mod tests {
 	#[test]
 	fn at_returns_nothing_between_tokens() {
 		let index = index_of(SRC);
+		// The space after `->` still counts as the arrow's end; the indentation
+		// of the next line is two past the end of `Alice` and belongs to nothing.
 		let arrow = SRC.find("->").expect("the arrow is in the source");
-		assert!(index.at(arrow + 2).is_none());
+		assert_eq!(index.at(arrow + 2).map(|t| t.kind), Some(TokenKind::Arrow));
+		let indent = SRC.find("\tknows").expect("an indented line");
+		assert!(index.at(indent).is_none());
 	}
 
 	#[test]

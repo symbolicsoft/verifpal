@@ -45,7 +45,7 @@ fn golden_run() -> Run {
 		summary: "m is obtained by Attacker.".to_string(),
 		conclusion: "m is obtained by Attacker, so confidentiality? m does not hold.".to_string(),
 		steps: vec![],
-		preconditions: vec!["Bob sends ack to Alice despite the query failing".to_string()],
+		preconditions: vec!["Bob still sends ack to Alice, so the failure counts.".to_string()],
 		variants: 1,
 	};
 	broken.steps = vec![

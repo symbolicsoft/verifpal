@@ -1155,7 +1155,6 @@ pub struct QueryOption {
 
 #[derive(Clone, Debug)]
 pub struct QueryOptionResult {
-	pub resolved: bool,
 	pub summary: String,
 }
 

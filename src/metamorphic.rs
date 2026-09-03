@@ -498,6 +498,37 @@ fn variants_dephased(model: &Model) -> Vec<Model> {
 	vec![variant]
 }
 
+fn variants_restricted(model: &Model) -> Vec<Model> {
+	let Some(message) = model.blocks.iter().rev().find_map(|b| match b {
+		Block::Message(m) => Some(m),
+		_ => None,
+	}) else {
+		return Vec::new();
+	};
+	let Some(constant) = message.constants.first() else {
+		return Vec::new();
+	};
+	let mut variant = model.clone();
+	for query in &mut variant.queries {
+		query.options.push(QueryOption {
+			kind: QueryOptionKind::Precondition,
+			message: Message {
+				span: Span::default(),
+				sender: message.sender,
+				sender_name: message.sender_name.clone(),
+				recipient: message.recipient,
+				recipient_name: message.recipient_name.clone(),
+				constants: vec![constant.clone()],
+				leading_comments: Vec::new(),
+				trailing_comment: None,
+			},
+			leading_comments: Vec::new(),
+			trailing_comment: None,
+		});
+	}
+	vec![variant]
+}
+
 fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
@@ -962,6 +993,17 @@ mod tests {
 			variants_demoted,
 			Strength::Weaker,
 			200,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	fn restricting_a_query_to_executions_with_a_send_never_adds_an_attack() {
+		check_monotone(
+			"restrict",
+			variants_restricted,
+			Strength::Weaker,
+			250,
 			Sweep::Exhaustive,
 		);
 	}

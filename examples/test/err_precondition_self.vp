@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: a precondition names a message, and a message travels between
+// two different principals. The error is the one a self-addressed message or
+// query receives, reported at the option.
+
+attacker[active]
+
+principal Bob[
+	knows private psk
+	generates m
+	e = ENC(psk, m)
+]
+
+Bob -> Alice: e
+
+principal Alice[
+	knows private psk
+	m2 = DEC(psk, e)
+]
+
+Alice -> Carol: m2
+
+principal Carol[
+	_ = HASH(m2)
+]
+
+queries[
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Alice: m2]
+	]
+]

@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error: a precondition names a message the model sends, and the
+// query is then evaluated only in executions where that message goes out.
+// Alice receives e but never sends it to Carol, so there is no such event
+// to condition on and the model is rejected at the option, not at the query.
+
+attacker[active]
+
+principal Bob[
+	knows private psk
+	generates m
+	e = ENC(psk, m)
+]
+
+Bob -> Alice: e
+
+principal Alice[
+	knows private psk
+	m2 = DEC(psk, e)
+]
+
+Alice -> Carol: m2
+
+principal Carol[
+	_ = HASH(m2)
+]
+
+queries[
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Carol: e]
+	]
+]

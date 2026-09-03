@@ -85,14 +85,18 @@ impl fmt::Display for Query {
 		if !self.options.is_empty() {
 			write!(f, "[")?;
 			for option in &self.options {
+				for comment in &option.leading_comments {
+					write!(f, "\n\t\t{}", render_comment(comment, "\t\t"))?;
+				}
 				match option.kind {
 					QueryOptionKind::Precondition => {
 						write!(
 							f,
-							"\n\t\tprecondition[{} -> {}: {}]",
+							"\n\t\tprecondition[{} -> {}: {}]{}",
 							option.message.sender_name,
 							option.message.recipient_name,
 							pretty_constants(&option.message.constants),
+							render_trailing(option.trailing_comment.as_ref()),
 						)?;
 					}
 				}
@@ -202,16 +206,24 @@ pub(crate) fn query_display(q: &Query) -> String {
 
 pub(crate) fn query_line(q: &Query) -> String {
 	let mut out = query_display(q);
-	for option in &q.options {
+	if q.options.is_empty() {
+		return out;
+	}
+	out.push('[');
+	for (i, option) in q.options.iter().enumerate() {
+		if i > 0 {
+			out.push(' ');
+		}
 		match option.kind {
 			QueryOptionKind::Precondition => out.push_str(&format!(
-				"[precondition[{} -> {}: {}]]",
+				"precondition[{} -> {}: {}]",
 				option.message.sender_name,
 				option.message.recipient_name,
 				pretty_constants(&option.message.constants),
 			)),
 		}
 	}
+	out.push(']');
 	out
 }
 
@@ -417,6 +429,25 @@ pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+
+	#[test]
+	fn comments_inside_brackets_and_arguments_survive_formatting() {
+		let src = "attacker[/* mode */ active]\n\nprincipal Alice[\n\tknows private pc_m\n\tpc_x = HASH(/* inner */ pc_m)\n\tpc_y = HASH[weak /* cap */](pc_x)\n]\n\nAlice -> Bob: pc_y\n\nprincipal Bob[\n\t_ = HASH(pc_y)\n]\n\nphase[/* p */ 1]\n\nprincipal Alice[\n\tknows private pc_z\n]\n\nqueries[\n\tconfidentiality? pc_m[\n\t\t// note inside options\n\t\tprecondition[Alice -> Bob: pc_y] // trailing on option\n\t]\n]\n";
+		let m = parse_string("pc.vp", src).expect("parse");
+		let once = pretty_model(&m);
+		for text in [
+			"/* mode */",
+			"/* inner */",
+			"/* cap */",
+			"/* p */",
+			"// note inside options",
+			"// trailing on option",
+		] {
+			assert!(once.contains(text), "{text} was dropped:\n{once}");
+		}
+		let m2 = parse_string("pc.vp", &once).expect("reparse");
+		assert_eq!(pretty_model(&m2), once, "formatting is not stable");
+	}
 
 	#[test]
 	fn a_scenarios_block_round_trips() {

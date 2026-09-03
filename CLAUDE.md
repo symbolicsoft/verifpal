@@ -26,6 +26,7 @@ False attacks and missed attacks are the worst possible regressions. These model
 | `kem_secret_is_not_a_ciphertext.vp` | `c0` | a shared secret is not a ciphertext: `KEM_DECAP`'s rewrite undoes only the ciphertext projection. `kem_real_ciphertext_still_breaks.vp` (`c1`) is the counterweight |
 | `incompatible_histories.vp` | `a0` | knowledge derived under one execution of a principal may not be spent against another: delivering `PUBKEY(nil)` as `gb` opens `e` for `na` but changes `e` so Bob cannot decrypt it; the honest `gb` gives the attacker nothing. `incompatible_histories_mitm.vp` (`c1a1`) is the counterweight: unguard `ga` and the two halves land on *different* principals, a genuine man-in-the-middle |
 | `concat_bomb_equiv.vp` | `e0…f0` at `1`, `e1…f0` at `2` | halting Bob is not a divergence, but feeding him another session's bundle under the same long-term key is one |
+| `precondition_halt_before_send.vp` | `a1a0` at `2`, `a0a0` at `1` | a violation outside a query's precondition is not an attack on that query: the replayed `e` is accepted, but Alice halts at her second check before sending `m2`, and the gated query is restricted to executions that reach that send. `precondition_accepted_key.vp` (`c1c0c0`) is the confidentiality shape, a session key derived before the signature check that then fails |
 
 "Known to the attacker" is not "forgeable by the attacker" — `aead_replay_not_forgery.vp` and `piknik.vp` hold that down. `piknik.vp` is reached through `run_model_at`, which takes a full path; `run_model` prefixes `examples/test/`.
 
@@ -35,7 +36,7 @@ False attacks and missed attacks are the worst possible regressions. These model
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 1011 tests (unit + model), ~1m once built (also: make test)
+cargo test --release                   # 1053 tests (unit + model), ~1m once built (also: make test)
 cargo test --release -- --ignored      # the exhaustive metamorphic sweeps (also: make test-exhaustive)
 make test-tex                          # compile every generated LaTeX report with tectonic
 cargo test --release test_ok           # a single end-to-end model test
@@ -116,7 +117,8 @@ queries[
     unlinkability? a, b             // ≥2 distinct constants
     equivalence? k1, k2             // ≥2 distinct constants
     // queries take an optional option block, e.g.:
-    // confidentiality? m[ precondition[ Bob -> Alice: ack ] ]
+    // confidentiality? k[ precondition[ Client -> Server: req ] ]
+    // which restricts the query to executions in which that message is sent
 ]
 ```
 
@@ -129,7 +131,7 @@ Constraints enforced by the parser and `sanity.rs`:
 - A model file's name must end in `.vp` and be ≤64 characters (`parser.rs::parse_file`).
 - Constants cannot shadow reserved words: everything in `parser.rs::RESERVED`, plus any name starting with `attacker` or `unnamed`. **Adding a primitive means adding its lowercase name to `RESERVED` too**; `queries` and `scenarios` are in there for the same reason.
 - A constant cannot be assigned twice, generated twice, `knows`n two different ways, sent by someone who does not know it, or received by someone who already knows it. `leaks` requires the leaker to know the value.
-- Authentication and `precondition` queries are validated at load time: the sender must know the constant, the recipient must receive it and actually *use* it inside a primitive; otherwise a sanity error, not a failing query.
+- Authentication queries are validated at load time: the sender must know the constant, the recipient must receive it and actually *use* it inside a primitive; otherwise a sanity error, not a failing query. A `precondition[P -> T: d]` option must name a message the model sends (`sanity_precondition` looks for a send event with that sender and recipient on `d`'s slot); receipt and use are not required, because the event is the send. Its errors carry the option's own span, and an undeclared principal inside one gets the same error as one in a query or message.
 - Capability parameters are validated by `sanity_capabilities`: a capability the primitive does not declare, or a `from phase N` the model never reaches, is a hard error, since an assumption that silently does nothing reads as a check that was performed.
 
 Primitives (arity → outputs), all 24: ASSERT(2), CONCAT(2–5), SPLIT(1→1–5), HASH(1–5), HKDF(3→1–5), AEAD_ENC/AEAD_DEC(3), ENC/DEC(2), MAC(2), PUBKEY(1), DH_KEX(2), SIGN(2), SIGNVERIF(3), PKE_ENC/PKE_DEC(2), SHAMIR_SPLIT(1→3), SHAMIR_JOIN(2), RINGSIGN(4), RINGSIGNVERIF(5), BLIND(2), UNBLIND(3), KEM_ENCAP(2→2), KEM_DECAP(2). Only primitives with a `definition_check` — ASSERT, SPLIT, AEAD_DEC, SIGNVERIF, RINGSIGNVERIF, KEM_DECAP — may take `?`. ASSERT, CONCAT and SPLIT are *core*: they live in `CORE_SPECS`, reduce through hand-written Rust rather than a declarative rewrite rule, and several theory functions bail out on them (`primitive_is_core`). Everything else is data.
@@ -274,7 +276,7 @@ A monotone fixed point over three rule groups, each pass running all three over 
 
   `recognized_secrets` exists because `origin_leaves` stops at any term the attacker can *test* but not *recompute* — `SIGN` and `RINGSIGN` under an unheld key. If the attacker holds the term and can supply every input the undoing check's `matching` pins (`check_input_held`), each pinned argument it independently obtains is confirmed to sit inside that term. The candidate must `depends_on_secret` and must not be a `bypass_key` constructor application, or `RINGSIGNVERIF`'s ring members would link every ring signature (`unlink_ringsign.vp`). `unlink_signature_recognized.vp` pins the rule; `flawed_blind_factor_public.vp` is what the shared-origin witness could never reach. `identifying_positions` is empty for `RINGSIGNVERIF` on purpose (`unlink_ringsign.vp` versus `unlink_signature_links.vp`, structurally identical with opposite verdicts).
 - **equivalence** — the queried constants do not all resolve to equivalent values, using the *mutated* value. It first requires that this state *hold* every queried value: `reexec::drop_after_index` truncates a halted principal, `resolve_constant` answers a missing slot with the bare constant, and comparing that placeholder is a divergence nobody computed. This is why `concat_bomb_equiv.vp` and `triple_dh.vp` hold; in the latter, unguarding `gb_ident` makes the real MitM available and the query fails again.
-- The `precondition[A -> B: c]` option annotates a failing query with "A sends c to B despite the query failing".
+- **precondition** — `Q[precondition[P -> T: d]]` restricts `Q` to the executions in which P reaches the send of `d` to T, so the property must hold whenever P goes on to send `d`. `preconditions_reached` runs in every evaluator after the violation is detected and before `attack_trace`, and an unreached send returns with no verdict recorded, so the probe re-checks it through the same evaluator and a minimized witness satisfies it by construction. The event is a `sent_by` entry with that sender and recipient, in a phase at or before the current one, that `event_reached` confirms the sender did not halt before; receipt and authenticity of `d` are other queries. Adding an option can only remove violations, which the `restrict` metamorphic property pins over the corpus. The `!` line under a trace, `report.rs`'s `preconditions` and the HTML and TeX renderings all render the conjunct, never an annotation: a query whose precondition is not reached did not fail, so nothing prints. It was an annotation on a failing query until 1.4.1, and the manual's own definition was the one implemented here. The `precondition_*.vp` models cover every query kind (`precondition_freshness_halt.vp` `f1f0`, `precondition_equivalence_accepted.vp` `e1e0` at one session and a genuine `e1e1` at two, where replaying the other session's share-only signature completes the client on a key the server lacks, `precondition_unlink_halt.vp` `u1u0`), a third party's halt against its own earlier send (`precondition_foreign_halt.vp` `c1c0c1c0`), one constant sent to two recipients around a halt (`precondition_two_recipients.vp` `a1a1a0`), several options on one query (`precondition_many.vp` `c1c1c0`), a send in a later phase (`precondition_later_phase.vp`) and scenario expansion (`precondition_scenarios_ns_pk.vp`). The seven `err_precondition_*.vp` models pin the parse and sanity rejections, and `a_gated_query_reports_every_precondition_exactly_when_it_fails` sweeps every model carrying one. Knowledge is global, so a link witness rebuilt from secrets learned in a halting execution still counts against the honest one; `precondition_unlink_halt.vp` derives its key from a DH share the attacker cannot recompute for exactly that reason.
 
 When a query resolves, `attack_trace` minimizes the state (`witness.rs`) and narrates it (`narrate.rs`), seeding the minimizer with the mutations recorded against the *value* rather than whatever state answered.
 
@@ -412,7 +414,7 @@ All output is plain text: there is no progress UI, no `tui.rs`, `narrative.rs` o
 
 ### Checking *why* a verdict happened, not just that it did
 
-A result code says nothing about the attack behind a `1`, so a battery of test-only checks sits underneath it (the recording is `#[cfg(test)]`). The sweep runs `examples/test/` (389 models) plus the seven in `SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST`; sanity-error models are skipped. Re-measure the counts below after touching the corpus.
+A result code says nothing about the attack behind a `1`, so a battery of test-only checks sits underneath it (the recording is `#[cfg(test)]`). The sweep runs `examples/test/` (406 models) plus the seven in `SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST`; sanity-error models are skipped. Re-measure the counts below after touching the corpus.
 
 - **Witness replay.** Every `verify` under `cargo test` ends in `witness::assert_reported_attacks_replay`: for each resolved query it re-executes the reporting principal's pristine session with exactly the substitutions the minimizer kept, and fails if the query no longer resolves. A witness with *no* substitutions must resolve the query with nothing installed. It also fails when the printed trace names *fewer* slots than the witness needed. The only exceptions are the unminimized fallbacks pinned by `TRACE_IS_NOT_A_MINIMIZED_WITNESS`.
 - **Narration shape.** `attack_traces_keep_their_shape_and_name_only_wires_that_exist` pins five exact sets: `TRACE_USES_A_GUARD_BYPASS` (3 entries), `TRACE_IS_NOT_A_MINIMIZED_WITNESS` (1, `junglegym_hybrid_pq.vp`), `TRACE_IS_NOT_CAUSALLY_ORDERED`, `TRACE_FEEDS_BACK_A_LATER_VALUE` and `ATTACK_IS_REPORTED_WITHOUT_A_TRACE` (all empty). A new entry means an attack got a worse explanation; a missing one means an explanation improved and the pin should move. `cloudbackup.vp` is swept from outside `examples/test/` for exactly this.
@@ -424,7 +426,7 @@ A result code says nothing about the attack behind a `1`, so a battery of test-o
 - **Holds were searched** (`assert_holds_were_searched`): in an active model offering any controllable slot, every hold must have had `goals_for_query` called for it. Zero goals is fine; zero attempts is an untested claim. Freshness is exempt.
 - **Holds are not stale** (`assert_holds_survive_final_knowledge`): every hold is re-evaluated at the end of the run against each principal's fresh trace with everything the attacker knew by then.
 - **Both session counts.** The sweep verifies every model at one session and at the default; the narration-shape sets are measured at the default only.
-- **Wire coherence and header intent.** The sweep rejects any step claiming the attacker replaced a value on a message the model does not have, or on a message every copy guards without a bypass. It also reads each model's `// Expected:` line and requires the stated code to match. 250 of the 377 analysing models state a code; the ceiling on the rest (`undocumented <= 127`) is a ratchet, and the sweep prints all three counts under `--nocapture`.
+- **Wire coherence and header intent.** The sweep rejects any step claiming the attacker replaced a value on a message the model does not have, or on a message every copy guards without a bypass. It also reads each model's `// Expected:` line and requires the stated code to match. 261 of the 387 analysing models state a code; the ceiling on the rest (`undocumented <= 126`) is a ratchet, and the sweep prints all three counts under `--nocapture`.
 
 ### The metamorphic harness (`src/metamorphic.rs`)
 
@@ -444,8 +446,9 @@ The checks above cannot see a *missed* attack. The harness transforms each swept
 | `pad` | prepend an unused `knows private` | invariant | 377 |
 | `scenario` | add `scenarios[ P[c = c] ]` | invariant | 339 |
 | `scenarios` | add a second copy of that scenario | monotone | 239 |
+| `restrict` | add `precondition[…]` naming the last message to every query | monotone | 310 |
 
-`dephase` deletes the *last* boundary so nothing needs renumbering; merging a phase into its predecessor hands the attacker later-phase values sooner, so it gains and never loses. `rename` and `pad` probe the interner and the reserved id bands. `scenario` is the no-op case for the scenario front-end; `scenarios` is `sessions` monotonicity over the other axis. Both pick a `knows` constant that does not travel.
+`dephase` deletes the *last* boundary so nothing needs renumbering; merging a phase into its predecessor hands the attacker later-phase values sooner, so it gains and never loses. `rename` and `pad` probe the interner and the reserved id bands. `scenario` is the no-op case for the scenario front-end; `scenarios` is `sessions` monotonicity over the other axis. Both pick a `knows` constant that does not travel. `restrict` is the precondition option's monotonicity: the variant asks the weaker question, so it is compared the way `demote` is, and a `1` appearing only in the variant is an attack the unrestricted search missed.
 
 **Two ratchets, failing in *both* directions, both currently empty.** `KNOWN_MISSED_ATTACKS` once held `exa.vp` under `unguard`; `KNOWN_BAD_TRACES` once held 28 entries that turned out to be four bugs. A violation outside a list fails; an entry that *stops* violating fails too. Staleness is judged only over models a run exercised.
 

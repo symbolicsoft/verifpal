@@ -61,34 +61,59 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 		if matches!(
 			token.kind,
 			TokenKind::ConstantName | TokenKind::PrincipalName
-		) && doc
-			.tokens
-			.declaration_of(token)
-			.is_some_and(|d| d.start == token.span.start)
+		) && !is_nil(&token.text)
+			&& doc
+				.tokens
+				.declaration_of(token)
+				.is_some_and(|d| d.start == token.span.start)
 		{
 			modifiers |= 1 << 0;
 		}
-		let start = doc.line.position(token.span.start);
-		let end = doc.line.position(token.span.end);
-		if start.line != end.line {
-			continue;
+		// A semantic token cannot span lines, so a block comment that does is
+		// emitted one line at a time.
+		for (from, to) in line_segments(&doc.text, token.span) {
+			let start = doc.line.position(from);
+			let end = doc.line.position(to);
+			if start.line != end.line {
+				continue;
+			}
+			let delta_line = start.line - previous.line;
+			let delta_start = if delta_line == 0 {
+				start.character - previous.character
+			} else {
+				start.character
+			};
+			data.extend_from_slice(&[
+				delta_line,
+				delta_start,
+				end.character.saturating_sub(start.character),
+				ty,
+				modifiers,
+			]);
+			previous = start;
 		}
-		let delta_line = start.line - previous.line;
-		let delta_start = if delta_line == 0 {
-			start.character - previous.character
-		} else {
-			start.character
-		};
-		data.extend_from_slice(&[
-			delta_line,
-			delta_start,
-			end.character.saturating_sub(start.character),
-			ty,
-			modifiers,
-		]);
-		previous = start;
 	}
 	data
+}
+
+/// The byte ranges of `span`, one per line it touches, without the newlines.
+fn line_segments(text: &str, span: Span) -> Vec<(usize, usize)> {
+	let end = span.end.min(text.len());
+	let start = span.start.min(end);
+	let mut segments = Vec::new();
+	let mut from = start;
+	for (i, byte) in text.as_bytes()[start..end].iter().enumerate() {
+		if *byte == b'\n' {
+			segments.push((from, start + i));
+			from = start + i + 1;
+		}
+	}
+	segments.push((from, end.max(from)));
+	segments
+}
+
+fn is_nil(text: &str) -> bool {
+	text.eq_ignore_ascii_case("nil")
 }
 
 pub(crate) fn token_at(doc: &Document, position: Position) -> Option<&Token> {
@@ -144,7 +169,21 @@ pub(crate) fn hover(doc: &Document, position: Position) -> Option<lsp_types::Hov
 	let token = token_at(doc, position)?;
 	let range = doc.line.range(token.span);
 	let value = match token.kind {
+		TokenKind::ConstantName if is_nil(&token.text) => {
+			let entry = docs::keyword("nil")?;
+			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
+		}
 		TokenKind::ConstantName | TokenKind::Anonymous => constant_hover(doc, token)?,
+		TokenKind::Capability => {
+			// `phase` inside `[weak from phase 1]` is part of the onset, not a phase block.
+			let word = if token.text.eq_ignore_ascii_case("phase") {
+				"from"
+			} else {
+				&token.text
+			};
+			let entry = docs::capability(word)?;
+			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
+		}
 		TokenKind::PrimitiveName => {
 			let entry = docs::primitive(&token.text)?;
 			let mut out = format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help);
@@ -336,16 +375,49 @@ pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 				Some(FoldingRangeKind::Comment),
 			);
 		}
-		if token.kind == TokenKind::Keyword && token.text.eq_ignore_ascii_case("queries") {
-			push_fold(
-				&mut ranges,
-				doc,
-				Span::new(token.span.start, doc.text.trim_end().len()),
-				None,
-			);
+		if token.kind == TokenKind::Keyword
+			&& (token.text.eq_ignore_ascii_case("queries")
+				|| token.text.eq_ignore_ascii_case("scenarios"))
+			&& let Some(close) = block_close(&doc.text, token.span.end)
+		{
+			push_fold(&mut ranges, doc, Span::new(token.span.start, close), None);
 		}
 	}
 	ranges
+}
+
+/// The offset just past the `]` that closes the block whose `[` follows
+/// `from`, skipping brackets inside comments.
+fn block_close(text: &str, from: usize) -> Option<usize> {
+	let bytes = text.as_bytes();
+	let mut i = from;
+	let mut depth = 0usize;
+	while i < bytes.len() {
+		match bytes[i] {
+			b'/' if bytes.get(i + 1) == Some(&b'/') => {
+				while i < bytes.len() && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'/' if bytes.get(i + 1) == Some(&b'*') => {
+				i += 2;
+				while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+					i += 1;
+				}
+				i += 2;
+			}
+			b'[' => depth += 1,
+			b']' => {
+				depth = depth.checked_sub(1)?;
+				if depth == 0 {
+					return Some(i + 1);
+				}
+			}
+			_ => {}
+		}
+		i += 1;
+	}
+	None
 }
 
 fn push_fold(
@@ -502,12 +574,12 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 
 	let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
 	let head = trimmed.trim_end();
-	let after_knows = head.strip_suffix("knows").is_some_and(|before| {
-		before
+	let after_knows = head.len() >= "knows".len()
+		&& head[head.len() - "knows".len()..].eq_ignore_ascii_case("knows")
+		&& head[..head.len() - "knows".len()]
 			.chars()
 			.next_back()
-			.is_none_or(|c| !c.is_alphanumeric() && c != '_')
-	});
+			.is_none_or(|c| !c.is_alphanumeric() && c != '_');
 	if after_knows {
 		return ["public", "private"]
 			.iter()
@@ -516,6 +588,12 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 	}
 
 	if in_queries_block(doc, offset) {
+		// Once the line names its query kind, what follows are the constants
+		// the query is about and, for `authentication?`, the principals.
+		let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
+		if line.contains('?') || line.trim_start().starts_with("precondition") {
+			return names(doc, true);
+		}
 		return docs::QUERIES
 			.iter()
 			.filter(|e| e.name != "precondition")
@@ -534,12 +612,26 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 	for e in docs::KEYWORDS {
 		out.push(item(e.name, CompletionItemKind::KEYWORD, Some(e)));
 	}
+	out.extend(names(doc, false));
+	out
+}
+
+/// Every distinct constant in the model, and every principal if asked for.
+/// `nil` is left out: it is offered as a keyword.
+fn names(doc: &Document, principals: bool) -> Vec<CompletionItem> {
+	let mut out = Vec::new();
 	let mut seen: Vec<&str> = Vec::new();
 	for token in doc.tokens.tokens() {
-		if token.kind == TokenKind::ConstantName && !seen.contains(&&*token.text) {
-			seen.push(&token.text);
-			out.push(item(&token.text, CompletionItemKind::VARIABLE, None));
+		let kind = match token.kind {
+			TokenKind::ConstantName if !is_nil(&token.text) => CompletionItemKind::VARIABLE,
+			TokenKind::PrincipalName if principals => CompletionItemKind::CLASS,
+			_ => continue,
+		};
+		if seen.contains(&&*token.text) {
+			continue;
 		}
+		seen.push(&token.text);
+		out.push(item(&token.text, kind, None));
 	}
 	out
 }
@@ -618,26 +710,30 @@ fn enclosing_call(before: &str) -> Option<(String, usize)> {
 			b')' => depth += 1,
 			b'(' => {
 				if depth == 0 {
-					let head = before[..i].trim_end();
-					let name: String = head
-						.chars()
-						.rev()
-						.take_while(|c| c.is_alphanumeric() || *c == '_')
-						.collect();
-					let name: String = name.chars().rev().collect();
-					if name.is_empty() {
-						return None;
-					}
-					return Some((name, commas));
+					return Some((callee(&before[..i])?, commas));
 				}
 				depth -= 1;
 			}
 			b',' if depth == 0 => commas += 1,
-			b'\n' if depth == 0 => return None,
 			_ => {}
 		}
 	}
 	None
+}
+
+/// The primitive name before an opening parenthesis, looking past a
+/// capability bracket such as `[weak from phase 1]`.
+fn callee(head: &str) -> Option<String> {
+	let mut head = head.trim_end();
+	if let Some(inner) = head.strip_suffix(']') {
+		head = inner[..inner.rfind('[')?].trim_end();
+	}
+	let name: String = head
+		.chars()
+		.rev()
+		.take_while(|c| c.is_alphanumeric() || *c == '_')
+		.collect();
+	(!name.is_empty()).then(|| name.chars().rev().collect())
 }
 
 pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
@@ -664,6 +760,9 @@ pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
 			let Some(name) = def.arg_names().get(i) else {
 				break;
 			};
+			if is_placeholder_name(name) {
+				continue;
+			}
 			let written: String = doc.text[at..]
 				.chars()
 				.take_while(|c| c.is_alphanumeric() || *c == '_')
@@ -684,6 +783,13 @@ pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
 		}
 	}
 	hints
+}
+
+/// `value1`, `value2`, …: the names a variadic primitive gives its arguments
+/// say nothing, so they are not worth a hint.
+fn is_placeholder_name(name: &str) -> bool {
+	name.strip_prefix("value")
+		.is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
@@ -979,6 +1085,176 @@ queries[\n\
 		let items = completions(d, at("confidentiality? lg_a"));
 		assert!(items.iter().any(|i| i.label == "equivalence"), "{items:?}");
 		assert!(!items.iter().any(|i| i.label == "PUBKEY"), "{items:?}");
+	}
+
+	#[test]
+	fn completion_offers_constants_and_principals_after_a_query_kind() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let items = completions(d, at("lg_a\n]"));
+		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+		assert!(labels.contains(&"lg_a"), "{labels:?}");
+		assert!(labels.contains(&"lg_ga"), "{labels:?}");
+		assert!(labels.contains(&"Bob"), "{labels:?}");
+		assert!(!labels.contains(&"equivalence"), "{labels:?}");
+	}
+
+	#[test]
+	fn completion_offers_qualifiers_after_knows_in_any_case() {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		let src = "attacker[passive]\nprincipal Alice[\n\tKNOWS ";
+		docs.open(
+			"file:///ku.vp".to_string(),
+			"ku.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///ku.vp").expect("open");
+		let labels: Vec<String> = completions(d, d.line.position(src.len()))
+			.into_iter()
+			.map(|i| i.label)
+			.collect();
+		assert_eq!(labels, vec!["public", "private"]);
+	}
+
+	#[test]
+	fn nil_is_documented_as_a_keyword_and_offered_once() {
+		let source = "attacker[passive]\nprincipal Alice[\n\tknows private nl_k\n\t_ = AEAD_ENC(nl_k, nl_k, nil)\n]\nqueries[\n\tconfidentiality? nl_k\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///nl.vp".to_string(),
+			"nl.vp".to_string(),
+			1,
+			source.to_string(),
+		);
+		let d = docs.get("file:///nl.vp").expect("open");
+		let h = hover(d, d.line.position(source.find("nil)").expect("nil"))).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		assert!(m.value.contains("The empty value"), "{}", m.value);
+		let offered = completions(d, d.line.position(source.find("knows").expect("knows")))
+			.into_iter()
+			.filter(|i| i.label == "nil")
+			.count();
+		assert_eq!(offered, 1);
+	}
+
+	#[test]
+	fn hovering_a_precondition_explains_the_option_and_names_its_principals() {
+		let source = "attacker[passive]\nprincipal Alice[\n\tknows private pr_m\n\tpr_h = HASH(pr_m)\n]\nAlice -> Bob: pr_h\nprincipal Bob[\n\t_ = HASH(pr_h)\n]\nqueries[\n\tconfidentiality? pr_m[\n\t\tprecondition[Alice -> Bob: pr_h]\n\t]\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///pr.vp".to_string(),
+			"pr.vp".to_string(),
+			1,
+			source.to_string(),
+		);
+		let d = docs.get("file:///pr.vp").expect("open");
+		let option = source.find("precondition[").expect("the option");
+		let h = hover(d, d.line.position(option)).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		assert!(m.value.contains("attached to any query"), "{}", m.value);
+		// The principals inside the option are references like any other, so
+		// a rename reaches them.
+		let bob = source[option..].find("Bob").expect("the recipient") + option;
+		let edits = rename(d, d.line.position(bob), "Carol").expect("edits");
+		assert_eq!(edits.len(), 3, "{edits:?}");
+	}
+
+	#[test]
+	fn hovering_phase_inside_a_capability_bracket_explains_the_onset() {
+		let source = "attacker[passive]\nprincipal Alice[\n\tknows private cp_a\n\tcp_ga = PUBKEY[weak from phase 1](cp_a)\n]\nqueries[\n\tconfidentiality? cp_a\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///cp.vp".to_string(),
+			"cp.vp".to_string(),
+			1,
+			source.to_string(),
+		);
+		let d = docs.get("file:///cp.vp").expect("open");
+		let at = d.line.position(source.find("phase 1").expect("the onset"));
+		let h = hover(d, at).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		let from = docs::capability("from").expect("documented");
+		assert!(m.value.contains(from.help), "{}", m.value);
+	}
+
+	#[test]
+	fn signature_help_looks_past_a_capability_bracket_and_a_line_break() {
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		let src = "attacker[passive]\nprincipal Alice[\n\tknows private sb_k\n\tsb_e = AEAD_ENC[forgeable from phase 1](sb_k,\n\t\t";
+		docs.open(
+			"file:///sb.vp".to_string(),
+			"sb.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///sb.vp").expect("open");
+		let help = signature_help(d, d.line.position(src.len())).expect("help");
+		assert_eq!(help.signatures[0].label, "AEAD_ENC(key, plaintext, ad)");
+		assert_eq!(help.active_parameter, Some(1));
+	}
+
+	#[test]
+	fn folding_covers_scenarios_and_stops_at_the_closing_bracket() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows public fs_gpeer\n\tknows private fs_a\n\tfs_e = ENC(fs_gpeer, fs_a)\n]\nscenarios[\n\tAlice[fs_gpeer = fs_gb]\n]\nqueries[\n\tconfidentiality? fs_a // see [1]\n]\n// tail\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///fs.vp".to_string(),
+			"fs.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///fs.vp").expect("open");
+		let folds = folding_ranges(d);
+		assert!(
+			folds.iter().any(|f| f.start_line == 6 && f.end_line == 8),
+			"no scenarios fold: {folds:?}"
+		);
+		assert!(
+			folds.iter().any(|f| f.start_line == 9 && f.end_line == 11),
+			"the queries fold must end at its bracket: {folds:?}"
+		);
+	}
+
+	#[test]
+	fn a_block_comment_spanning_lines_gets_a_token_per_line() {
+		let src = "attacker[passive]\n/* one\n   two */\nprincipal Alice[\n\tknows private bc_a\n]\nqueries[\n\tconfidentiality? bc_a\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///bc.vp".to_string(),
+			"bc.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///bc.vp").expect("open");
+		let comment = TOKEN_TYPES
+			.iter()
+			.position(|t| *t == "comment")
+			.expect("comment") as u32;
+		let data = semantic_tokens(d);
+		let comments = data.chunks(5).filter(|c| c[3] == comment).count();
+		assert_eq!(comments, 2, "{data:?}");
+	}
+
+	#[test]
+	fn inlay_hints_skip_placeholder_argument_names() {
+		let src = "attacker[passive]\nprincipal Alice[\n\tknows private ih_a\n\t_ = HASH(ih_a, ih_a)\n]\nqueries[\n\tconfidentiality? ih_a\n]\n";
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///ih.vp".to_string(),
+			"ih.vp".to_string(),
+			1,
+			src.to_string(),
+		);
+		let d = docs.get("file:///ih.vp").expect("open");
+		let whole = Range::new(Position::new(0, 0), d.line.end());
+		assert!(inlay_hints(d, whole).is_empty());
 	}
 
 	#[test]

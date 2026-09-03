@@ -46,6 +46,7 @@ pub(crate) fn analyze(
 struct Live {
 	cancel: Arc<AtomicBool>,
 	state: Mutex<LiveState>,
+	token: String,
 }
 
 impl Live {
@@ -85,9 +86,32 @@ impl Live {
 	}
 }
 
+/// The verdict diagnostics of the last completed analysis of each document,
+/// keyed by URI and stamped with the version they were computed for. The
+/// worker fills it and the main loop reads it, so that a diagnostics publish
+/// from either side carries both the parse errors and the verdicts.
+type Verdicts = Arc<Mutex<HashMap<String, (i32, Vec<lsp_types::Diagnostic>)>>>;
+
+/// One analysis, as the main loop hands it to a worker thread.
+pub(crate) struct Job {
+	pub uri: String,
+	pub name: String,
+	pub text: String,
+	pub version: i32,
+	pub sessions: u8,
+	pub token: String,
+	pub encoding: PositionEncodingKind,
+	/// Whether the client was asked to create a progress token for `token`,
+	/// so that `$/progress` may be sent for it.
+	pub progress: bool,
+	/// Whether queries that hold are reported as diagnostics too.
+	pub passing: bool,
+}
+
 pub(crate) struct Runner {
 	sender: crossbeam_channel::Sender<Message>,
 	running: HashMap<String, Arc<Live>>,
+	verdicts: Verdicts,
 }
 
 impl Runner {
@@ -95,7 +119,35 @@ impl Runner {
 		Runner {
 			sender,
 			running: HashMap::new(),
+			verdicts: Arc::default(),
 		}
+	}
+
+	/// Cancels the run that answered with `token`, if it is still running.
+	pub(crate) fn cancel_token(&mut self, token: &str) -> bool {
+		let uri = self
+			.running
+			.iter()
+			.find(|(_, live)| live.token == token)
+			.map(|(uri, _)| uri.clone());
+		uri.is_some_and(|uri| self.cancel(&uri))
+	}
+
+	/// The verdicts last computed for `uri`, if they were computed for `version`.
+	pub(crate) fn verdicts(&self, uri: &str, version: i32) -> Option<Vec<lsp_types::Diagnostic>> {
+		let store = self.verdicts.lock().unwrap_or_else(|e| e.into_inner());
+		store
+			.get(uri)
+			.filter(|(v, _)| *v == version)
+			.map(|(_, d)| d.clone())
+	}
+
+	/// Drops the stored verdicts for `uri`: its text changed or it was closed.
+	pub(crate) fn forget(&mut self, uri: &str) {
+		self.verdicts
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.remove(uri);
 	}
 
 	pub(crate) fn cancel(&mut self, uri: &str) -> bool {
@@ -111,52 +163,54 @@ impl Runner {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn start(
-		&mut self,
-		uri: String,
-		name: String,
-		text: String,
-		version: i32,
-		sessions: u8,
-		token: String,
-		encoding: PositionEncodingKind,
-	) {
-		self.cancel(&uri);
+	pub(crate) fn start(&mut self, job: Job) {
+		self.cancel(&job.uri);
 		self.running.retain(|_, live| live.is_running());
 		let cancel = Arc::new(AtomicBool::new(false));
 		let live = Arc::new(Live {
 			cancel: Arc::clone(&cancel),
 			state: Mutex::new(LiveState::Running),
+			token: job.token.clone(),
 		});
-		self.running.insert(uri.clone(), Arc::clone(&live));
+		self.running.insert(job.uri.clone(), Arc::clone(&live));
 		let sender = self.sender.clone();
+		let verdicts = Arc::clone(&self.verdicts);
 		std::thread::spawn(move || {
 			let _done = Finished(Arc::clone(&live));
 			crate::info::set_verbosity(crate::info::Verbosity::Silent);
-			progress(
-				&sender,
-				&token,
-				serde_json::json!({
-					"kind": "begin",
-					"title": format!("Analyzing {name}"),
-					"cancellable": true,
-				}),
-			);
-			let outcome = analyze(&name, &text, sessions, &cancel);
-			let report = analysis_report(uri.clone(), version, outcome);
-			progress(&sender, &token, serde_json::json!({"kind": "end"}));
+			if job.progress {
+				progress(
+					&sender,
+					&job.token,
+					serde_json::json!({
+						"kind": "begin",
+						"title": format!("Analyzing {}", job.name),
+						"cancellable": true,
+					}),
+				);
+			}
+			let outcome = analyze(&job.name, &job.text, job.sessions, &cancel);
+			let report = analysis_report(job.uri.clone(), job.version, job.token.clone(), outcome);
+			if job.progress {
+				progress(&sender, &job.token, serde_json::json!({"kind": "end"}));
+			}
 			let completed = live.complete(|| {
 				if let Some(analysis) = &report.analysis
-					&& let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(&uri)
+					&& let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(&job.uri)
 				{
-					let line = crate::lsp::line::LineIndex::new(&text, &encoding);
+					let line = crate::lsp::line::LineIndex::new(&job.text, &job.encoding);
+					let all = crate::lsp::diagnostics::of_verdicts(analysis, &line);
+					let shown = crate::lsp::diagnostics::shown(&all, job.passing);
+					verdicts
+						.lock()
+						.unwrap_or_else(|e| e.into_inner())
+						.insert(job.uri.clone(), (job.version, all));
 					let _ = sender.send(Message::Notification(Notification::new(
 						"textDocument/publishDiagnostics".to_string(),
 						lsp_types::PublishDiagnosticsParams {
 							uri: parsed,
-							diagnostics: crate::lsp::diagnostics::of_verdicts(analysis, &line),
-							version: Some(version),
+							diagnostics: shown,
+							version: Some(job.version),
 						},
 					)));
 				}
@@ -169,8 +223,9 @@ impl Runner {
 				let _ = sender.send(Message::Notification(Notification::new(
 					"verifpal/analysisReport".to_string(),
 					crate::lsp::proto::AnalysisReport {
-						uri,
-						version,
+						uri: job.uri,
+						version: job.version,
+						token: job.token,
 						ok: false,
 						cancelled: true,
 						error: None,
@@ -185,12 +240,14 @@ impl Runner {
 fn analysis_report(
 	uri: String,
 	version: i32,
+	token: String,
 	outcome: VResult<Analysis>,
 ) -> crate::lsp::proto::AnalysisReport {
 	match outcome {
 		Ok(analysis) => crate::lsp::proto::AnalysisReport {
 			uri,
 			version,
+			token,
 			ok: true,
 			cancelled: false,
 			error: None,
@@ -201,6 +258,7 @@ fn analysis_report(
 			crate::lsp::proto::AnalysisReport {
 				uri,
 				version,
+				token,
 				ok: false,
 				cancelled,
 				error: (!cancelled).then(|| e.to_string()),
@@ -247,6 +305,73 @@ mod tests {
 		confidentiality? an_m\n\
 		]\n";
 
+	fn job(uri: &str, token: &str) -> Job {
+		Job {
+			uri: uri.to_string(),
+			name: "an.vp".to_string(),
+			text: ATTACKED.to_string(),
+			version: 1,
+			sessions: 1,
+			token: token.to_string(),
+			encoding: PositionEncodingKind::UTF8,
+			progress: false,
+			passing: true,
+		}
+	}
+
+	fn await_report(receiver: &crossbeam_channel::Receiver<Message>) -> serde_json::Value {
+		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+		while std::time::Instant::now() < deadline {
+			let Ok(Message::Notification(note)) =
+				receiver.recv_timeout(std::time::Duration::from_secs(30))
+			else {
+				break;
+			};
+			if note.method == "verifpal/analysisReport" {
+				return note.params;
+			}
+		}
+		panic!("no report arrived");
+	}
+
+	#[test]
+	fn a_run_is_cancellable_by_its_token_exactly_once() {
+		let (sender, _receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		// Registered by hand, so the run cannot finish before it is cancelled.
+		runner.running.insert(
+			"file:///ct.vp".to_string(),
+			Arc::new(Live {
+				cancel: Arc::new(AtomicBool::new(false)),
+				state: Mutex::new(LiveState::Running),
+				token: "ct1".to_string(),
+			}),
+		);
+		assert!(!runner.cancel_token("other"));
+		assert!(runner.cancel_token("ct1"));
+		assert!(!runner.cancel_token("ct1"), "a run is cancelled once");
+	}
+
+	#[test]
+	fn verdicts_are_kept_for_the_analyzed_version_and_forgotten_on_change() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		let uri = "file:///vd.vp";
+		runner.start(job(uri, "v1"));
+		let report = await_report(&receiver);
+		assert_eq!(report["token"], "v1", "{report}");
+		let stored = runner
+			.verdicts(uri, 1)
+			.expect("verdicts for the analyzed version");
+		assert_eq!(stored.len(), 1);
+		assert!(
+			runner.verdicts(uri, 2).is_none(),
+			"another version's text has no verdicts"
+		);
+		runner.forget(uri);
+		assert!(runner.verdicts(uri, 1).is_none());
+	}
+
 	#[test]
 	fn an_analysis_produces_a_report_with_a_resolved_query() {
 		let quiet = Arc::new(AtomicBool::new(false));
@@ -274,15 +399,7 @@ mod tests {
 		let (sender, receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
 		let uri = "file:///an.vp".to_string();
-		runner.start(
-			uri.clone(),
-			"an.vp".to_string(),
-			ATTACKED.to_string(),
-			1,
-			1,
-			"t1".to_string(),
-			PositionEncodingKind::UTF8,
-		);
+		runner.start(job(&uri, "t1"));
 
 		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
 		let mut reported = false;
@@ -330,6 +447,7 @@ mod tests {
 	fn cancellation_and_completion_cannot_both_claim_an_analysis() {
 		let cancel = Arc::new(AtomicBool::new(false));
 		let cancelled = Live {
+			token: String::new(),
 			cancel: Arc::clone(&cancel),
 			state: Mutex::new(LiveState::Running),
 		};
@@ -341,6 +459,7 @@ mod tests {
 
 		let cancel = Arc::new(AtomicBool::new(false));
 		let completed = Live {
+			token: String::new(),
 			cancel: Arc::clone(&cancel),
 			state: Mutex::new(LiveState::Running),
 		};

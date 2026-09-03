@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1a0
+//
+// Needham-Schroeder public key with a corrupt-peer scenario, as in
+// spore_ns_pk.vp, with the origin queries gated on the recipient's next
+// send. Option messages are cloned through scenario and session expansion
+// like any other message, so the gated queries must answer as the plain
+// ones do here. Under Lowe's attack Bob accepts a re-encryption of Alice's
+// first message and goes on to send m2, so the query gated on that send
+// fails with the plain one. Alice's m2 is never misattributed, so the query
+// gated on her sending m3 holds as its plain form does in spore_ns_pk.vp.
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates ni
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates nr
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	m1 = PKE_ENC(gpeer, CONCAT(ni, ga))
+]
+
+Alice -> Bob: m1
+
+principal Bob[
+	d1 = PKE_DEC(b, m1)
+	ni_b, id_b = SPLIT(d1)?
+	_ = ASSERT(id_b, ga)?
+	m2 = PKE_ENC(id_b, CONCAT(ni_b, nr))
+]
+
+Bob -> Alice: m2
+
+principal Alice[
+	d2 = PKE_DEC(a, m2)
+	ni_a, nr_a = SPLIT(d2)?
+	_ = ASSERT(ni_a, ni)?
+	m3 = PKE_ENC(gpeer, nr_a)
+]
+
+Alice -> Bob: m3
+
+principal Bob[
+	d3 = PKE_DEC(b, m3)
+	_ = ASSERT(d3, nr)?
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: m1
+	authentication? Alice -> Bob: m1[
+		precondition[Bob -> Alice: m2]
+	]
+	authentication? Bob -> Alice: m2[
+		precondition[Alice -> Bob: m3]
+	]
+]

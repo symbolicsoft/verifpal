@@ -301,8 +301,8 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		header_problems.join("\n  ")
 	);
 	assert!(
-		undocumented <= 127,
-		"{} swept models state no expected result code in their header, up from 127. A new \
+		undocumented <= 126,
+		"{} swept models state no expected result code in their header, up from 126. A new \
 		 model must say what it expects and why, so that its verdict can be checked against \
 		 an intent rather than against itself",
 		undocumented
@@ -1301,6 +1301,142 @@ fn test_signature() {
 #[test]
 fn test_precondition() {
 	run_model("precondition.vp", "a1");
+	run_model_sessions("precondition.vp", 1, "a1");
+}
+#[test]
+fn test_precondition_halt_before_send() {
+	run_model("precondition_halt_before_send.vp", "a1a0");
+	run_model_sessions("precondition_halt_before_send.vp", 1, "a0a0");
+}
+#[test]
+fn test_precondition_accepted_key() {
+	run_model("precondition_accepted_key.vp", "c1c0c0");
+	run_model_sessions("precondition_accepted_key.vp", 1, "c1c0c0");
+}
+#[test]
+fn test_precondition_freshness_halt() {
+	run_model("precondition_freshness_halt.vp", "f1f0");
+	run_model_sessions("precondition_freshness_halt.vp", 1, "f1f0");
+}
+#[test]
+fn test_precondition_equivalence_accepted() {
+	run_model("precondition_equivalence_accepted.vp", "e1e1");
+	run_model_sessions("precondition_equivalence_accepted.vp", 1, "e1e0");
+}
+#[test]
+fn test_precondition_unlink_halt() {
+	run_model("precondition_unlink_halt.vp", "u1u0");
+	run_model_sessions("precondition_unlink_halt.vp", 1, "u1u0");
+}
+#[test]
+fn test_precondition_foreign_halt() {
+	run_model("precondition_foreign_halt.vp", "c1c0c1c0");
+	run_model_sessions("precondition_foreign_halt.vp", 1, "c1c0c1c0");
+}
+#[test]
+fn test_precondition_two_recipients() {
+	run_model("precondition_two_recipients.vp", "a1a1a0");
+	run_model_sessions("precondition_two_recipients.vp", 1, "a0a0a0");
+}
+#[test]
+fn test_precondition_many() {
+	run_model("precondition_many.vp", "c1c1c0");
+	run_model_sessions("precondition_many.vp", 1, "c1c1c0");
+}
+#[test]
+fn test_precondition_later_phase() {
+	run_model("precondition_later_phase.vp", "c1c1");
+	run_model_sessions("precondition_later_phase.vp", 1, "c1c1");
+}
+#[test]
+fn test_precondition_scenarios_ns_pk() {
+	run_model("precondition_scenarios_ns_pk.vp", "a1a1a0");
+	run_model_sessions("precondition_scenarios_ns_pk.vp", 1, "a1a1a0");
+}
+#[test]
+fn test_err_precondition_self() {
+	run_model_err(
+		"err_precondition_self.vp",
+		"Alice both sends and receives this message",
+	);
+}
+#[test]
+fn test_err_precondition_unknown_constant() {
+	run_model_err(
+		"err_precondition_unknown_constant.vp",
+		"unknown constant `nosuch`",
+	);
+}
+#[test]
+fn test_err_precondition_wrong_sender() {
+	run_model_err(
+		"err_precondition_wrong_sender.vp",
+		"Bob never sends `m2` to Carol",
+	);
+}
+#[test]
+fn test_err_precondition_unknown_option() {
+	run_model_err(
+		"err_precondition_unknown_option.vp",
+		"unknown query option `postcondition`",
+	);
+}
+#[test]
+fn test_err_precondition_two_constants() {
+	run_model_err("err_precondition_two_constants.vp", "expected `]`");
+}
+#[test]
+fn a_gated_query_reports_every_precondition_exactly_when_it_fails() {
+	let mut checked = 0;
+	for (name, path) in swept_models() {
+		let source = std::fs::read_to_string(&path).expect("read model");
+		if !source.contains("precondition[") {
+			continue;
+		}
+		let Ok((results, _)) = crate::verify::verify_with_sessions(&path, 2) else {
+			continue;
+		};
+		for result in results {
+			if result.resolved {
+				assert_eq!(
+					result.options.len(),
+					result.query.options.len(),
+					"{name}: a contradicted query reports each precondition it was restricted by"
+				);
+				for option in &result.options {
+					assert!(
+						option.summary.contains("still sends"),
+						"{name}: unexpected precondition line {:?}",
+						option.summary
+					);
+				}
+			} else {
+				assert!(
+					result.options.is_empty(),
+					"{name}: a query that holds has no precondition to report"
+				);
+			}
+			checked += 1;
+		}
+	}
+	assert!(
+		checked >= 30,
+		"only {checked} queries in models carrying a precondition were checked"
+	);
+}
+#[test]
+fn test_err_precondition_never_sent() {
+	run_model_err(
+		"err_precondition_never_sent.vp",
+		"Alice never sends `e` to Carol",
+	);
+}
+#[test]
+fn test_err_precondition_undeclared_principal() {
+	run_model_err(
+		"err_precondition_undeclared_principal.vp",
+		"`Dave` is never declared as a principal",
+	);
 }
 #[test]
 fn test_e_collection_key() {

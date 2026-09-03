@@ -290,12 +290,7 @@ impl QueryReport {
 					values: s.values.clone(),
 				})
 				.collect(),
-			preconditions: r
-				.options
-				.iter()
-				.filter(|o| o.resolved)
-				.map(|o| o.summary.clone())
-				.collect(),
+			preconditions: r.options.iter().map(|o| o.summary.clone()).collect(),
 			variants: r.variants.len(),
 		}
 	}

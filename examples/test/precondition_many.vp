@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0
+//
+// A query may carry several preconditions, and every one of them must be
+// reached for a violation to count. The client's first send, gc, precedes
+// every check and is reached in every execution, so gating on it alone
+// leaves the discarded-key violation in place. Adding the send of req, which
+// the client only reaches after its signature check passes, restricts the
+// query to executions in which that check succeeded, and the key is then a
+// two-party secret.
+
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+Server -> Client: [server_pk]
+
+principal Client[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Client -> Server: gc
+
+principal Server[
+	generates s
+	gs = PUBKEY(s)
+	sig = SIGN(server_sk, gs)
+	k_server = DH_KEX(gc, s)
+]
+
+Server -> Client: gs, sig
+
+principal Client[
+	k_client = DH_KEX(gs, c)
+	_ = SIGNVERIF(server_pk, gs, sig)?
+	generates request
+	req = AEAD_ENC(k_client, request, nil)
+]
+
+Client -> Server: req
+
+principal Server[
+	_ = AEAD_DEC(k_server, req, nil)?
+]
+
+queries[
+	confidentiality? k_client
+	confidentiality? k_client[
+		precondition[Client -> Server: gc]
+	]
+	confidentiality? k_client[
+		precondition[Client -> Server: gc]
+		precondition[Client -> Server: req]
+	]
+]

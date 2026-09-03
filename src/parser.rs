@@ -116,6 +116,8 @@ struct Parser<'a> {
 	principals: PrincipalNames,
 	unnamed_counter: usize,
 	last_ident: Span,
+	/// Where the value on the right of the last `=` ended, before any trailing whitespace.
+	value_end: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -126,6 +128,7 @@ impl<'a> Parser<'a> {
 			tokens: None,
 			pos: 0,
 			last_ident: Span::default(),
+			value_end: 0,
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
 			values: ValueNames::new(),
@@ -176,15 +179,10 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Skips whitespace and comments. Every comment is kept, wherever it sits:
+	/// one inside a bracket or an argument list is attached to the statement
+	/// being parsed, so the formatter never drops it.
 	fn consume_trivia(&mut self) {
-		self.consume_trivia_inner(true);
-	}
-
-	fn consume_trivia_nocapture(&mut self) {
-		self.consume_trivia_inner(false);
-	}
-
-	fn consume_trivia_inner(&mut self, capture: bool) {
 		loop {
 			self.skip_whitespace();
 			let two = if self.pos + 1 < self.input.len() {
@@ -199,15 +197,13 @@ impl<'a> Parser<'a> {
 					self.pos += 1;
 				}
 				self.record_from(at, crate::tokens::TokenKind::Comment);
-				if capture {
-					let text = std::str::from_utf8(&self.input[start..self.pos])
-						.unwrap_or("")
-						.to_string();
-					self.pending_leading.push(Comment {
-						text,
-						style: CommentStyle::Line,
-					});
-				}
+				let text = std::str::from_utf8(&self.input[start..self.pos])
+					.unwrap_or("")
+					.to_string();
+				self.pending_leading.push(Comment {
+					text,
+					style: CommentStyle::Line,
+				});
 			} else if two == (b'/', b'*') {
 				let open = self.pos;
 				self.pos += 2;
@@ -222,15 +218,13 @@ impl<'a> Parser<'a> {
 						let end = self.pos;
 						self.pos += 2;
 						self.record(Span::new(open, self.pos), crate::tokens::TokenKind::Comment);
-						if capture {
-							let text = std::str::from_utf8(&self.input[start..end])
-								.unwrap_or("")
-								.to_string();
-							self.pending_leading.push(Comment {
-								text,
-								style: CommentStyle::Block,
-							});
-						}
+						let text = std::str::from_utf8(&self.input[start..end])
+							.unwrap_or("")
+							.to_string();
+						self.pending_leading.push(Comment {
+							text,
+							style: CommentStyle::Block,
+						});
 						break;
 					}
 					self.pos += 1;
@@ -243,6 +237,16 @@ impl<'a> Parser<'a> {
 
 	fn take_leading(&mut self) -> Vec<Comment> {
 		std::mem::take(&mut self.pending_leading)
+	}
+
+	/// The current position, backed up over any trailing spaces and tabs, so
+	/// that a span ends at its last character rather than at the next token.
+	fn trimmed_pos(&self) -> usize {
+		let mut p = self.pos;
+		while p > 0 && matches!(self.input[p - 1], b' ' | b'\t') {
+			p -= 1;
+		}
+		p
 	}
 
 	fn snapshot(&self) -> (usize, usize, usize) {
@@ -509,7 +513,7 @@ impl<'a> Parser<'a> {
 	fn parse_model(&mut self) -> VResult<Model> {
 		self.consume_trivia();
 		self.check_unterminated_block()?;
-		let pre_attacker_comments = self.take_leading();
+		let mut pre_attacker_comments = self.take_leading();
 
 		let attacker_kw = self.pos;
 		if !self.try_expect_keyword("attacker") {
@@ -522,9 +526,9 @@ impl<'a> Parser<'a> {
 			.help("add `attacker[active]` or `attacker[passive]` as the first line"));
 		}
 		self.record_from(attacker_kw, crate::tokens::TokenKind::Keyword);
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		self.expect("[")?;
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let attacker_str = self.parse_identifier()?;
 		self.record(self.last_ident, crate::tokens::TokenKind::AttackerMode);
 		let attacker_type = match attacker_str.as_str() {
@@ -540,8 +544,9 @@ impl<'a> Parser<'a> {
 				.suggest(did_you_mean(&attacker_str, ["active", "passive"])));
 			}
 		};
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		self.expect("]")?;
+		pre_attacker_comments.extend(self.take_leading());
 		let attacker_trailing = self.try_take_trailing();
 		self.consume_trivia();
 
@@ -641,8 +646,9 @@ impl<'a> Parser<'a> {
 					queries_bracket,
 				));
 			}
-			let leading = self.take_leading();
+			let mut leading = self.take_leading();
 			let mut query = self.parse_query()?;
+			leading.extend(self.take_leading());
 			query.leading_comments = leading;
 			query.trailing_comment = self.try_take_trailing();
 			queries.push(query);
@@ -743,8 +749,9 @@ impl<'a> Parser<'a> {
 					open_bracket,
 				));
 			}
-			let entry_leading = self.take_leading();
+			let mut entry_leading = self.take_leading();
 			let mut scenario = self.parse_scenario()?;
+			entry_leading.extend(self.take_leading());
 			scenario.leading_comments = entry_leading;
 			scenario.trailing_comment = self.try_take_trailing();
 			scenarios.push(scenario);
@@ -774,10 +781,10 @@ impl<'a> Parser<'a> {
 		let (principal, principal_name) = self.principal_id(&name)?;
 		self.skip_whitespace();
 		self.expect_where("[", &format!("after `{}` in the `scenarios` block", name))?;
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let mut bindings = Vec::new();
 		loop {
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				self.advance();
 				break;
@@ -789,12 +796,12 @@ impl<'a> Parser<'a> {
 				.at(self.here()));
 			}
 			let target = self.parse_constant()?;
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			self.expect_where("=", "in a scenario binding")?;
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			let value = self.parse_constant()?;
 			bindings.push((target, value));
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			if self.peek() == Some(b',') {
 				self.advance();
 			}
@@ -828,10 +835,17 @@ impl<'a> Parser<'a> {
 		} else {
 			self.parse_message_block()?
 		};
+		// A block may already hold comments found inside its own brackets; the
+		// ones that preceded it come first.
+		let prepend = |own: &mut Vec<Comment>| {
+			let mut all = leading;
+			all.append(own);
+			*own = all;
+		};
 		match &mut block {
-			Block::Principal(p) => p.leading_comments = leading,
-			Block::Message(m) => m.leading_comments = leading,
-			Block::Phase(p) => p.leading_comments = leading,
+			Block::Principal(p) => prepend(&mut p.leading_comments),
+			Block::Message(m) => prepend(&mut m.leading_comments),
+			Block::Phase(p) => prepend(&mut p.leading_comments),
 		}
 		Ok(block)
 	}
@@ -867,19 +881,21 @@ impl<'a> Parser<'a> {
 				.parse_expression()
 				.map_err(|e| self.unclosed_hint(e, open_bracket))?;
 			expr.leading_comments = leading;
+			expr.leading_comments.extend(self.take_leading());
 			expr.trailing_comment = self.try_take_trailing();
 			expressions.push(expr);
 			self.consume_trivia();
 		}
 		let tail_comments = self.take_leading();
 		self.expect("]")?;
+		let end = self.pos;
 		let closing_trailing = self.try_take_trailing();
 		self.consume_trivia();
 		let id = self.principals.intern(&name)?;
 		Ok(Block::Principal(Principal {
 			name,
 			id,
-			span: Span::new(start, self.pos),
+			span: Span::new(start, end),
 			expressions,
 			leading_comments: Vec::new(),
 			header_trailing,
@@ -918,12 +934,13 @@ impl<'a> Parser<'a> {
 			.map_err(|e| e.note("a message is written `Sender -> Recipient: constant, ...`"))?;
 		self.skip_whitespace();
 		let constants = self.parse_message_constants()?;
+		let end = self.trimmed_pos();
 		let trailing = self.try_take_trailing();
 		self.consume_trivia();
 		let (sender, sender_name) = self.principal_id(&sender_name)?;
 		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
 		Ok(Block::Message(Message {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, end),
 			sender,
 			sender_name,
 			recipient,
@@ -1032,7 +1049,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, self.trimmed_pos()),
 			kind: Declaration::Knows,
 			qualifier: Some(qualifier),
 			constants,
@@ -1049,7 +1066,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let constants = self.parse_constants()?;
 		Ok(Expression {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, self.trimmed_pos()),
 			kind,
 			qualifier: None,
 			constants,
@@ -1082,7 +1099,7 @@ impl<'a> Parser<'a> {
 			.help(format!("compute something, e.g. `= HASH({})`", c)));
 		}
 		Ok(Expression {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, self.value_end),
 			kind: Declaration::Assignment,
 			qualifier: None,
 			constants,
@@ -1175,7 +1192,9 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_constant_value(&mut self) -> VResult<Value> {
-		Ok(Value::Constant(self.parse_constant()?))
+		let constant = self.parse_constant()?;
+		self.value_end = self.pos;
+		Ok(Value::Constant(constant))
 	}
 
 	fn parse_value(&mut self) -> VResult<Value> {
@@ -1210,7 +1229,7 @@ impl<'a> Parser<'a> {
 			return Ok(0);
 		}
 		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let kw = self.parse_identifier()?;
 		if !kw.eq_ignore_ascii_case("phase") {
 			return Err(VerifpalError::parse("expected `phase` after `from`".into())
@@ -1220,7 +1239,7 @@ impl<'a> Parser<'a> {
 				.help("write it as `from phase 1`"));
 		}
 		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let start = self.pos;
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
@@ -1248,7 +1267,7 @@ impl<'a> Parser<'a> {
 		self.expect("[")?;
 		let mut caps = Capabilities::default();
 		loop {
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			let word = self.parse_identifier()?;
 			let word_span = self.last_ident;
 			let cap = Capability::from_name(&word).ok_or_else(|| {
@@ -1272,17 +1291,17 @@ impl<'a> Parser<'a> {
 				.help("remove the duplicate"));
 			}
 			self.record(word_span, crate::tokens::TokenKind::Capability);
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			let onset = self.parse_capability_onset()?;
 			caps.set(cap, onset);
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			if self.peek() == Some(b',') {
 				self.advance();
 				continue;
 			}
 			break;
 		}
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		self.expect("]")?;
 		Ok(caps)
 	}
@@ -1305,7 +1324,7 @@ impl<'a> Parser<'a> {
 		self.skip_whitespace();
 		let open_paren = self.pos;
 		self.expect_where("(", &format!("after `{}`", prim_name))?;
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let mut arguments = Vec::new();
 		while self.peek() != Some(b')') {
 			if self.at_end() {
@@ -1320,10 +1339,10 @@ impl<'a> Parser<'a> {
 				.parse_value()
 				.map_err(|e| self.unclosed_hint(e, open_paren))?;
 			arguments.push(arg);
-			self.consume_trivia_nocapture();
+			self.consume_trivia();
 			if self.peek() == Some(b',') {
 				self.advance();
-				self.consume_trivia_nocapture();
+				self.consume_trivia();
 			}
 		}
 		self.expect(")")?;
@@ -1332,7 +1351,10 @@ impl<'a> Parser<'a> {
 		if check {
 			self.record_from(check_at, crate::tokens::TokenKind::Check);
 		}
-		self.skip_whitespace();
+		self.value_end = self.pos;
+		// Stay on this line: crossing the newline here would let a comment on
+		// the next line be taken as this expression's trailing comment.
+		self.skip_inline_whitespace();
 		if self.peek() == Some(b',') {
 			self.advance();
 		}
@@ -1356,9 +1378,9 @@ impl<'a> Parser<'a> {
 		let block_start = self.pos;
 		self.expect_keyword("phase")?;
 		self.record_from(block_start, crate::tokens::TokenKind::Keyword);
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		self.expect("[")?;
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		let start = self.pos;
 		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
 			self.pos += 1;
@@ -1372,15 +1394,16 @@ impl<'a> Parser<'a> {
 				.labelled(self.found_here())
 				.note("a phase is written `phase[1]`, `phase[2]`, and so on")
 		})?;
-		self.consume_trivia_nocapture();
+		self.consume_trivia();
 		self.expect("]")?;
 		let block_end = self.pos;
+		let inner_comments = self.take_leading();
 		let trailing = self.try_take_trailing();
 		self.consume_trivia();
 		Ok(Block::Phase(Phase {
 			span: Span::new(block_start, block_end),
 			number,
-			leading_comments: Vec::new(),
+			leading_comments: inner_comments,
 			trailing_comment: trailing,
 		}))
 	}
@@ -1440,7 +1463,7 @@ impl<'a> Parser<'a> {
 		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, self.trimmed_pos()),
 			kind,
 			constants: vec![constant],
 			message: Message::default(),
@@ -1470,12 +1493,13 @@ impl<'a> Parser<'a> {
 		let (sender, sender_name) = self.principal_id(&sender_name)?;
 		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
 		let options = self.try_parse_query_options()?;
+		let end = self.trimmed_pos();
 		Ok(Query {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, end),
 			kind: QueryKind::Authentication,
 			constants: vec![],
 			message: Message {
-				span: Span::new(start, self.pos),
+				span: Span::new(start, end),
 				sender,
 				sender_name,
 				recipient,
@@ -1499,7 +1523,7 @@ impl<'a> Parser<'a> {
 		self.skip_inline_whitespace();
 		let options = self.try_parse_query_options()?;
 		Ok(Query {
-			span: Span::new(start, self.pos),
+			span: Span::new(start, self.trimmed_pos()),
 			kind,
 			constants,
 			message: Message::default(),
@@ -1512,12 +1536,17 @@ impl<'a> Parser<'a> {
 	fn parse_query_constant_list(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
+			// Look past the whitespace without keeping it: the query's span
+			// must end at its last constant, not at whatever follows.
+			let before = self.pos;
 			self.skip_whitespace();
-			if self.at_end() || self.peek() == Some(b']') || self.peek() == Some(b'[') {
+			if self.peek() == Some(b'[') {
 				break;
 			}
 			let rem = self.remaining();
-			if starts_with_keyword(rem, "confidentiality")
+			if self.at_end()
+				|| self.peek() == Some(b']')
+				|| starts_with_keyword(rem, "confidentiality")
 				|| starts_with_keyword(rem, "authentication")
 				|| starts_with_keyword(rem, "freshness")
 				|| starts_with_keyword(rem, "unlinkability")
@@ -1525,10 +1554,11 @@ impl<'a> Parser<'a> {
 				|| rem.starts_with("//")
 				|| rem.starts_with("/*")
 			{
+				self.pos = before;
 				break;
 			}
 			constants.push(self.parse_constant()?);
-			self.skip_whitespace();
+			self.skip_inline_whitespace();
 			if self.peek() == Some(b',') {
 				self.advance();
 			}
@@ -1555,14 +1585,17 @@ impl<'a> Parser<'a> {
 			let option_start = self.pos;
 			let leading = self.take_leading();
 			let option_name = self.parse_identifier()?;
+			self.record(self.last_ident, crate::tokens::TokenKind::Keyword);
 			self.skip_whitespace();
 			self.expect("[")?;
 			self.skip_whitespace();
 			let sender_name = title_case(&self.parse_identifier()?);
+			self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 			self.skip_whitespace();
 			self.expect_arrow("a precondition is written `precondition[ Bob -> Alice: ack ]`")?;
 			self.skip_whitespace();
 			let recipient_name = title_case(&self.parse_identifier()?);
+			self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
 			self.skip_whitespace();
 			self.expect(":")?;
 			self.skip_whitespace();
@@ -1605,7 +1638,6 @@ impl<'a> Parser<'a> {
 		if self.peek() == Some(b']') {
 			self.advance();
 		}
-		self.skip_whitespace();
 		Ok(options)
 	}
 }
@@ -1685,6 +1717,29 @@ pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn spans_end_at_their_last_character() {
+		let src = "attacker[passive]\n\nprincipal Alice[\n\tknows private sp_a\n\tsp_ga = PUBKEY(sp_a)\n]\n\nAlice -> Bob: sp_ga\n\nprincipal Bob[\n\tknows private sp_b\n\t_ = HASH(sp_ga)\n]\n\nqueries[\n\tconfidentiality? sp_a\n\tequivalence? sp_a, sp_b\n\tconfidentiality? sp_b[\n\t\tprecondition[Alice -> Bob: sp_ga]\n\t]\n]\n";
+		let m = parse_string("sp.vp", src).expect("parses");
+		let text = |span: Span| &src[span.start..span.end];
+		let Block::Principal(alice) = &m.blocks[0] else {
+			panic!("Alice comes first");
+		};
+		assert!(text(alice.span).ends_with(']'), "{:?}", text(alice.span));
+		assert_eq!(text(alice.expressions[0].span), "knows private sp_a");
+		assert_eq!(text(alice.expressions[1].span), "sp_ga = PUBKEY(sp_a)");
+		let Block::Message(message) = &m.blocks[1] else {
+			panic!("then the message");
+		};
+		assert_eq!(text(message.span), "Alice -> Bob: sp_ga");
+		assert_eq!(text(m.queries[0].span), "confidentiality? sp_a");
+		assert_eq!(text(m.queries[1].span), "equivalence? sp_a, sp_b");
+		assert_eq!(
+			text(m.queries[2].span),
+			"confidentiality? sp_b[\n\t\tprecondition[Alice -> Bob: sp_ga]\n\t]"
+		);
+	}
 
 	#[test]
 	fn a_scenarios_block_binds_a_constant_per_principal_instance() {
@@ -2428,14 +2483,15 @@ mod tests {
 	}
 
 	#[test]
-	fn comment_dropped_in_primitive_args() {
+	fn comment_in_primitive_args_is_kept_on_the_expression() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n\tx = ENC(/* secret */ a, a)\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		let serialized = format!("{:?}", m);
-		assert!(
-			!serialized.contains("secret"),
-			"dropped comment must not appear in AST"
-		);
+		let Block::Principal(alice) = &m.blocks[0] else {
+			panic!("Alice's block");
+		};
+		let comments = &alice.expressions[1].leading_comments;
+		assert_eq!(comments.len(), 1, "{comments:?}");
+		assert_eq!(comments[0].text.trim(), "secret");
 	}
 
 	#[test]

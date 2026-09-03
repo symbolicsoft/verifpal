@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1
+//
+// A passive attacker learns m at phase 0 from the leaked key. The
+// precondition names a message Bob only sends in phase 1, so the gated query
+// cannot be contradicted while phase 0 is analyzed: the send has not
+// happened. Attacker knowledge carries forward, so at phase 1 the send is
+// reached and m is still known, and the gated query fails there. A
+// precondition in a later phase delays a verdict; it never loses one.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	generates m
+	e = ENC(k, m)
+	leaks k
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = DEC(k, e)
+]
+
+phase[1]
+
+principal Bob[
+	ack = HASH(d)
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	_ = HASH(ack)
+]
+
+queries[
+	confidentiality? m
+	confidentiality? m[
+		precondition[Bob -> Alice: ack]
+	]
+]

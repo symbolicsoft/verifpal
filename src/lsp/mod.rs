@@ -11,14 +11,15 @@ pub(crate) mod state;
 
 use std::error::Error;
 
-use lsp_server::{Connection, Message, Notification, Request, Response};
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{
 	CodeActionParams, CodeLensParams, CompletionParams, DidChangeTextDocumentParams,
-	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-	DocumentHighlightParams, DocumentSymbolParams, ExecuteCommandParams, FoldingRangeParams,
-	GotoDefinitionParams, InitializeParams, InlayHintParams, OneOf, PositionEncodingKind,
-	ReferenceParams, RenameParams, SemanticTokensParams, ServerCapabilities, SignatureHelpParams,
-	TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
+	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+	DocumentFormattingParams, DocumentHighlightParams, DocumentSymbolParams, ExecuteCommandParams,
+	FoldingRangeParams, GotoDefinitionParams, InitializeParams, InlayHintParams, OneOf,
+	PositionEncodingKind, ReferenceParams, RenameParams, SemanticTokensParams, ServerCapabilities,
+	SignatureHelpParams, TextDocumentPositionParams, TextDocumentSyncCapability,
+	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
 };
 
 type Fallible = Result<(), Box<dyn Error + Sync + Send>>;
@@ -49,6 +50,12 @@ pub(crate) fn serve(connection: &Connection) -> Fallible {
 		}),
 	)?;
 	let mut server = Server::new(connection.sender.clone(), encoding);
+	server.progress_supported = params
+		.capabilities
+		.window
+		.as_ref()
+		.and_then(|w| w.work_done_progress)
+		.unwrap_or(false);
 	server.main_loop(connection)
 }
 
@@ -67,7 +74,15 @@ fn negotiate_encoding(params: &InitializeParams) -> PositionEncodingKind {
 fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 	ServerCapabilities {
 		position_encoding: Some(encoding.clone()),
-		text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+		text_document_sync: Some(TextDocumentSyncCapability::Options(
+			TextDocumentSyncOptions {
+				open_close: Some(true),
+				change: Some(TextDocumentSyncKind::FULL),
+				// A save is when diagnostics are published once `verifpal.validateOnType` is off.
+				save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+				..Default::default()
+			},
+		)),
 		document_formatting_provider: Some(OneOf::Left(true)),
 		hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
 		definition_provider: Some(OneOf::Left(true)),
@@ -124,13 +139,62 @@ fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 	}
 }
 
+/// The client settings the server acts on, as `workspace/didChangeConfiguration`
+/// delivers them under `settings.verifpal`. Everything is on until told otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Settings {
+	/// Publish parse and sanity diagnostics as the text changes, rather than on save.
+	pub validate_on_type: bool,
+	/// Report the queries that hold as informational diagnostics too.
+	pub passing: bool,
+	/// Name primitive arguments inline.
+	pub inlay_hints: bool,
+	/// Offer the analysis action above the queries block.
+	pub code_lens: bool,
+}
+
+impl Default for Settings {
+	fn default() -> Settings {
+		Settings {
+			validate_on_type: true,
+			passing: true,
+			inlay_hints: true,
+			code_lens: true,
+		}
+	}
+}
+
+impl Settings {
+	/// What `params` carries, keeping the current value of anything it leaves out.
+	fn updated(self, params: &serde_json::Value) -> Settings {
+		let section = &params["settings"]["verifpal"];
+		let flag = |keys: &[&str], current: bool| {
+			let mut value = section;
+			for key in keys {
+				value = &value[*key];
+			}
+			value.as_bool().unwrap_or(current)
+		};
+		Settings {
+			validate_on_type: flag(&["validateOnType"], self.validate_on_type),
+			passing: flag(&["diagnostics", "passing"], self.passing),
+			inlay_hints: flag(&["inlayHints", "argumentNames"], self.inlay_hints),
+			code_lens: flag(&["codeLens"], self.code_lens),
+		}
+	}
+}
+
 pub(crate) struct Server {
 	sender: crossbeam_channel::Sender<Message>,
 	docs: crate::lsp::state::Documents,
 	dirty: std::collections::HashSet<String>,
 	runner: crate::lsp::analysis::Runner,
 	next_token: u64,
+	next_request_id: i32,
 	encoding: PositionEncodingKind,
+	settings: Settings,
+	/// Whether the client handles `window/workDoneProgress/create`.
+	progress_supported: bool,
 }
 
 impl Server {
@@ -141,7 +205,10 @@ impl Server {
 			dirty: std::collections::HashSet::new(),
 			runner: crate::lsp::analysis::Runner::new(sender),
 			next_token: 0,
+			next_request_id: 0,
 			encoding,
+			settings: Settings::default(),
+			progress_supported: false,
 		}
 	}
 
@@ -258,6 +325,9 @@ impl Server {
 				})
 			}
 			"textDocument/inlayHint" => self.answer::<InlayHintParams, _>(req, |s, p| {
+				if !s.settings.inlay_hints {
+					return Vec::new();
+				}
 				s.with_doc(p.text_document.uri.as_str(), |doc| {
 					crate::lsp::language::inlay_hints(doc, p.range)
 				})
@@ -335,7 +405,18 @@ impl Server {
 					let uri = p.text_document.uri.as_str().to_string();
 					if let Some(change) = p.content_changes.into_iter().next_back() {
 						self.runner.cancel(&uri);
+						self.runner.forget(&uri);
 						self.docs.change(&uri, p.text_document.version, change.text);
+						if self.settings.validate_on_type {
+							self.dirty.insert(uri);
+						}
+					}
+				}
+			}
+			"textDocument/didSave" => {
+				if let Ok(p) = serde_json::from_value::<DidSaveTextDocumentParams>(note.params) {
+					let uri = p.text_document.uri.as_str().to_string();
+					if !self.settings.validate_on_type && self.docs.get(&uri).is_some() {
 						self.dirty.insert(uri);
 					}
 				}
@@ -345,6 +426,7 @@ impl Server {
 					let parsed = p.text_document.uri;
 					let uri = parsed.as_str();
 					self.runner.cancel(uri);
+					self.runner.forget(uri);
 					self.dirty.remove(uri);
 					self.docs.close(uri);
 					self.notify(
@@ -357,7 +439,31 @@ impl Server {
 					);
 				}
 			}
+			"workspace/didChangeConfiguration" => self.apply_settings(&note.params),
+			"window/workDoneProgress/cancel" => {
+				if let Some(token) = note.params["token"].as_str() {
+					self.runner.cancel_token(token);
+				}
+			}
 			_ => {}
+		}
+	}
+
+	fn apply_settings(&mut self, params: &serde_json::Value) {
+		let next = self.settings.updated(params);
+		if next == self.settings {
+			return;
+		}
+		let previous = std::mem::replace(&mut self.settings, next);
+		if previous.passing != next.passing {
+			// Republish, so the verdicts that hold appear or disappear.
+			self.dirty.extend(self.docs.uris());
+		}
+		if previous.inlay_hints != next.inlay_hints {
+			self.request("workspace/inlayHint/refresh", serde_json::Value::Null);
+		}
+		if previous.code_lens != next.code_lens {
+			self.request("workspace/codeLens/refresh", serde_json::Value::Null);
 		}
 	}
 
@@ -377,7 +483,16 @@ impl Server {
 		let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(uri) else {
 			return;
 		};
-		let diagnostics = crate::lsp::diagnostics::for_document(doc, &parsed);
+		let mut diagnostics = crate::lsp::diagnostics::for_document(doc, &parsed);
+		// A publish replaces everything the client shows for the document, so
+		// the verdicts of an analysis of this same text ride along; otherwise
+		// the debounce tick would wipe them.
+		if let Some(verdicts) = self.runner.verdicts(uri, doc.version) {
+			diagnostics.extend(crate::lsp::diagnostics::shown(
+				&verdicts,
+				self.settings.passing,
+			));
+		}
 		self.notify(
 			"textDocument/publishDiagnostics",
 			lsp_types::PublishDiagnosticsParams {
@@ -413,6 +528,9 @@ impl Server {
 	}
 
 	fn code_lenses(&self, uri: &str) -> Vec<lsp_types::CodeLens> {
+		if !self.settings.code_lens {
+			return Vec::new();
+		}
 		let Some(doc) = self.docs.get(uri) else {
 			return Vec::new();
 		};
@@ -474,10 +592,7 @@ impl Server {
 		match params.command.as_str() {
 			"verifpal.analyze" => match serde_json::from_value::<proto::AnalyzeArgs>(first) {
 				Ok(args) => self.analyze(args),
-				Err(_) => serde_json::json!(proto::Accepted {
-					accepted: false,
-					token: String::new()
-				}),
+				Err(e) => declined(format!("malformed arguments: {e}")),
 			},
 			"verifpal.cancelAnalysis" => match serde_json::from_value::<proto::UriArg>(first) {
 				Ok(args) => serde_json::json!(proto::Cancelled {
@@ -495,29 +610,40 @@ impl Server {
 
 	fn analyze(&mut self, args: proto::AnalyzeArgs) -> serde_json::Value {
 		let Some(doc) = self.docs.get(&args.uri) else {
-			return serde_json::json!(proto::Accepted {
-				accepted: false,
-				token: String::new()
-			});
+			return declined(format!("{} is not an open document", args.uri));
 		};
 		self.next_token += 1;
 		let token = format!("verifpal-analysis-{}", self.next_token);
 		let sessions = args
 			.sessions
-			.unwrap_or(crate::sessions::DEFAULT_SESSIONS)
-			.clamp(1, crate::sessions::MAX_SESSIONS);
-		self.runner.start(
-			args.uri.clone(),
-			doc.name.clone(),
-			doc.text.clone(),
-			doc.version,
+			.map_or(crate::sessions::DEFAULT_SESSIONS, |s| {
+				s.round()
+					.clamp(1.0, f64::from(crate::sessions::MAX_SESSIONS)) as u8
+			});
+		let job = crate::lsp::analysis::Job {
+			uri: args.uri.clone(),
+			name: doc.name.clone(),
+			text: doc.text.clone(),
+			version: doc.version,
 			sessions,
-			token.clone(),
-			self.encoding.clone(),
-		);
+			token: token.clone(),
+			encoding: self.encoding.clone(),
+			progress: self.progress_supported,
+			passing: self.settings.passing,
+		};
+		if self.progress_supported {
+			// The client discards `$/progress` for a token it was not asked to
+			// create, so the request goes out before the worker can report.
+			self.request(
+				"window/workDoneProgress/create",
+				serde_json::json!({"token": token}),
+			);
+		}
+		self.runner.start(job);
 		serde_json::json!(proto::Accepted {
 			accepted: true,
-			token
+			token,
+			reason: None,
 		})
 	}
 
@@ -542,7 +668,12 @@ impl Server {
 		let Ok(model) = &doc.model else {
 			return Vec::new();
 		};
-		let text = crate::pretty::pretty_model(model);
+		let mut text = crate::pretty::pretty_model(model).replace("\r\n", "\n");
+		if doc.text.contains("\r\n") {
+			// Keep the document's line endings, or a formatted CRLF file would
+			// be rewritten whole on every save.
+			text = text.replace('\n', "\r\n");
+		}
 		if text == doc.text {
 			return Vec::new();
 		}
@@ -556,6 +687,17 @@ impl Server {
 		let _ = self.sender.send(Message::Response(response));
 	}
 
+	/// Sends a request to the client. Its response is not waited for: the
+	/// main loop drops responses, and nothing here depends on one.
+	fn request(&mut self, method: &str, params: impl serde::Serialize) {
+		self.next_request_id += 1;
+		let _ = self.sender.send(Message::Request(Request::new(
+			RequestId::from(self.next_request_id),
+			method.to_string(),
+			params,
+		)));
+	}
+
 	fn notify(&self, method: &str, params: impl serde::Serialize) {
 		let _ = self.sender.send(Message::Notification(Notification::new(
 			method.to_string(),
@@ -564,10 +706,17 @@ impl Server {
 	}
 }
 
+fn declined(reason: String) -> serde_json::Value {
+	serde_json::json!(proto::Accepted {
+		accepted: false,
+		token: String::new(),
+		reason: Some(reason),
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use lsp_server::RequestId;
 	use lsp_types::{ClientCapabilities, GeneralClientCapabilities};
 
 	pub(crate) fn start(
@@ -894,6 +1043,296 @@ mod tests {
 				.contains("Alice")
 		);
 		stop(client, handle);
+	}
+
+	fn open_here(server: &mut Server, uri: &str, text: &str) {
+		server.on_notification(Notification::new(
+			"textDocument/didOpen".to_string(),
+			serde_json::json!({
+				"textDocument": {
+					"uri": uri,
+					"languageId": "verifpal",
+					"version": 1,
+					"text": text,
+				}
+			}),
+		));
+	}
+
+	fn analyze_params(argument: serde_json::Value) -> ExecuteCommandParams {
+		ExecuteCommandParams {
+			command: "verifpal.analyze".to_string(),
+			arguments: vec![argument],
+			work_done_progress_params: Default::default(),
+		}
+	}
+
+	fn await_report_here(receiver: &crossbeam_channel::Receiver<Message>) -> serde_json::Value {
+		loop {
+			match receiver
+				.recv_timeout(std::time::Duration::from_secs(60))
+				.expect("the worker reports")
+			{
+				Message::Notification(n) if n.method == "verifpal/analysisReport" => {
+					return n.params;
+				}
+				_ => continue,
+			}
+		}
+	}
+
+	#[test]
+	fn a_tick_after_an_analysis_keeps_its_verdicts() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		open_here(&mut server, "file:///tick.vp", VALID);
+		let accepted = server.command(&analyze_params(
+			serde_json::json!({"uri": "file:///tick.vp", "sessions": 1}),
+		));
+		assert_eq!(accepted["accepted"], true, "{accepted}");
+		let report = await_report_here(&receiver);
+		assert_eq!(report["token"], accepted["token"], "{report}");
+		// The debounce tick fires for the same version afterwards; the publish
+		// it sends replaces the client's list, so the verdict must be in it.
+		server.on_tick();
+		let Message::Notification(published) = receiver.recv().expect("the tick publishes") else {
+			panic!("expected a notification");
+		};
+		assert_eq!(published.method, "textDocument/publishDiagnostics");
+		let diagnostics = published.params["diagnostics"].as_array().expect("array");
+		assert_eq!(diagnostics.len(), 1, "{}", published.params);
+		assert_eq!(diagnostics[0]["code"], "confidentiality");
+	}
+
+	#[test]
+	fn settings_turn_features_off_and_ask_the_client_to_refresh() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		open_here(&mut server, "file:///cfg.vp", VALID);
+		assert_eq!(server.code_lenses("file:///cfg.vp").len(), 1);
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {
+				"codeLens": false,
+				"inlayHints": {"argumentNames": false},
+				"diagnostics": {"passing": false},
+				"validateOnType": false,
+			}}}),
+		));
+		assert_eq!(
+			server.settings,
+			Settings {
+				validate_on_type: false,
+				passing: false,
+				inlay_hints: false,
+				code_lens: false,
+			}
+		);
+		assert!(server.code_lenses("file:///cfg.vp").is_empty());
+		server.on_request(Request::new(
+			RequestId::from(7),
+			"textDocument/inlayHint".to_string(),
+			serde_json::json!({
+				"textDocument": {"uri": "file:///cfg.vp"},
+				"range": {"start": {"line": 0, "character": 0}, "end": {"line": 30, "character": 0}},
+			}),
+		));
+		let mut refreshes = Vec::new();
+		let mut hints = None;
+		for message in receiver.try_iter() {
+			match message {
+				Message::Request(r) => refreshes.push(r.method),
+				Message::Response(r) if r.id == RequestId::from(7) => {
+					hints = r.response_result.ok();
+				}
+				_ => {}
+			}
+		}
+		assert_eq!(hints, Some(serde_json::json!([])));
+		assert!(
+			refreshes.contains(&"workspace/inlayHint/refresh".to_string()),
+			"{refreshes:?}"
+		);
+		assert!(
+			refreshes.contains(&"workspace/codeLens/refresh".to_string()),
+			"{refreshes:?}"
+		);
+		// A notification that says nothing about a setting leaves it alone.
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {"codeLens": true}}}),
+		));
+		assert!(server.settings.code_lens);
+		assert!(!server.settings.inlay_hints);
+	}
+
+	#[test]
+	fn with_validation_on_save_only_a_change_waits_for_the_save() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		open_here(&mut server, "file:///save.vp", VALID);
+		server.on_tick();
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {"validateOnType": false}}}),
+		));
+		let _ = receiver.try_iter().count();
+		server.on_notification(Notification::new(
+			"textDocument/didChange".to_string(),
+			serde_json::json!({
+				"textDocument": {"uri": "file:///save.vp", "version": 2},
+				"contentChanges": [{"text": "attacker[active]\nprincipal Alice[\n"}],
+			}),
+		));
+		server.on_tick();
+		assert!(
+			receiver.try_recv().is_err(),
+			"nothing is published while the user types"
+		);
+		server.on_notification(Notification::new(
+			"textDocument/didSave".to_string(),
+			serde_json::json!({"textDocument": {"uri": "file:///save.vp"}}),
+		));
+		server.on_tick();
+		let Message::Notification(published) = receiver.recv().expect("the save publishes") else {
+			panic!("expected a notification");
+		};
+		assert_eq!(published.method, "textDocument/publishDiagnostics");
+		assert_eq!(published.params["version"], 2);
+		assert_eq!(
+			published.params["diagnostics"]
+				.as_array()
+				.expect("array")
+				.len(),
+			1
+		);
+	}
+
+	#[test]
+	fn a_decline_says_why_and_a_fractional_session_count_is_rounded() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		let declined = server.command(&analyze_params(
+			serde_json::json!({"uri": "file:///nope.vp"}),
+		));
+		assert_eq!(declined["accepted"], false);
+		assert!(
+			declined["reason"]
+				.as_str()
+				.is_some_and(|r| r.contains("not an open document")),
+			"{declined}"
+		);
+		let malformed = server.command(&analyze_params(serde_json::json!({"sessions": 1})));
+		assert!(
+			malformed["reason"]
+				.as_str()
+				.is_some_and(|r| r.contains("malformed")),
+			"{malformed}"
+		);
+		open_here(&mut server, "file:///frac.vp", VALID);
+		let accepted = server.command(&analyze_params(
+			serde_json::json!({"uri": "file:///frac.vp", "sessions": 1.4}),
+		));
+		assert_eq!(accepted["accepted"], true, "{accepted}");
+		let report = await_report_here(&receiver);
+		assert_eq!(report["sessions"], 1, "{report}");
+	}
+
+	#[test]
+	fn formatting_keeps_crlf_line_endings_and_leaves_a_formatted_file_alone() {
+		let (sender, _receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		let model = crate::parser::parse_string("crlf.vp", VALID).expect("parses");
+		let canonical = crate::pretty::pretty_model(&model).replace('\n', "\r\n");
+		open_here(&mut server, "file:///crlf.vp", &canonical);
+		assert!(server.format("file:///crlf.vp").is_empty());
+		open_here(&mut server, "file:///ugly.vp", &VALID.replace('\n', "\r\n"));
+		let edits = server.format("file:///ugly.vp");
+		assert_eq!(edits.len(), 1);
+		assert!(edits[0].new_text.contains("\r\n"));
+		assert!(!edits[0].new_text.contains("\r\r"));
+		assert!(
+			!edits[0].new_text.contains("\n\n\n"),
+			"{}",
+			edits[0].new_text
+		);
+	}
+
+	fn analyze_and_collect(caps: ClientCapabilities) -> Vec<String> {
+		let (client, handle, _) = start(caps);
+		open(&client, "file:///prog.vp", VALID);
+		client
+			.sender
+			.send(Message::Request(Request::new(
+				RequestId::from(1),
+				"workspace/executeCommand".to_string(),
+				serde_json::json!({
+					"command": "verifpal.analyze",
+					"arguments": [{"uri": "file:///prog.vp", "sessions": 1}],
+				}),
+			)))
+			.expect("sends the request");
+		let mut order = Vec::new();
+		loop {
+			match client
+				.receiver
+				.recv_timeout(std::time::Duration::from_secs(60))
+				.expect("messages keep coming until the report")
+			{
+				Message::Request(r) => {
+					order.push(r.method.clone());
+					// Answer as a client would, so nothing waits on us.
+					client
+						.sender
+						.send(Message::Response(Response::new_ok(
+							r.id,
+							serde_json::Value::Null,
+						)))
+						.expect("responds");
+				}
+				Message::Notification(n) => {
+					let done = n.method == "verifpal/analysisReport";
+					order.push(n.method);
+					if done {
+						break;
+					}
+				}
+				Message::Response(_) => order.push("response".to_string()),
+			}
+		}
+		stop(client, handle);
+		order
+	}
+
+	#[test]
+	fn a_progress_token_is_created_before_it_is_reported() {
+		let caps = ClientCapabilities {
+			window: Some(lsp_types::WindowClientCapabilities {
+				work_done_progress: Some(true),
+				..Default::default()
+			}),
+			..Default::default()
+		};
+		let order = analyze_and_collect(caps);
+		let create = order
+			.iter()
+			.position(|m| m == "window/workDoneProgress/create")
+			.expect("the token is created");
+		let begin = order
+			.iter()
+			.position(|m| m == "$/progress")
+			.expect("progress is reported");
+		assert!(create < begin, "{order:?}");
+	}
+
+	#[test]
+	fn a_client_without_progress_support_hears_no_progress() {
+		let order = analyze_and_collect(ClientCapabilities::default());
+		assert!(!order.iter().any(|m| m == "$/progress"), "{order:?}");
+		assert!(
+			!order.iter().any(|m| m == "window/workDoneProgress/create"),
+			"{order:?}"
+		);
 	}
 
 	#[test]

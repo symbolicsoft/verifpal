@@ -253,7 +253,7 @@ fn sanity_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> V
 				sanity_queries_multi_constant(query, km, query.kind.name()).map_err(located)?
 			}
 		}
-		sanity_query_options(query, km, states).map_err(located)?;
+		sanity_query_options(query, km).map_err(located)?;
 	}
 	Ok(())
 }
@@ -379,32 +379,61 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 	Ok(())
 }
 
-fn sanity_query_options(
-	query: &Query,
-	km: &ProtocolTrace,
-	states: &[PrincipalState],
-) -> VResult<()> {
+fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 	for option in &query.options {
+		let located = |e: VerifpalError| e.or_span(option.message.span);
 		match option.kind {
 			QueryOptionKind::Precondition => {
-				if option.message.constants.len() != 1 {
-					return Err(VerifpalError::sanity(
-						format!(
-							"precondition names {} constants, but describes one message",
-							option.message.constants.len()
-						)
-						.into(),
-					)
-					.note(
-						"a precondition annotates a failing query with one message that still went out",
-					)
-					.help("write it as `precondition[ Bob -> Alice: ack ]`"));
-				}
-				let c = option.message.constant()?;
-				sanity_queries_check_message_principals(&option.message)?;
-				sanity_queries_check_known(&option.message, c, km, states)?;
+				sanity_precondition(&option.message, km).map_err(located)?;
 			}
 		}
+	}
+	Ok(())
+}
+
+fn sanity_precondition(m: &Message, km: &ProtocolTrace) -> VResult<()> {
+	if m.constants.len() != 1 {
+		return Err(VerifpalError::sanity(
+			format!(
+				"precondition names {} constants, but describes one message",
+				m.constants.len()
+			)
+			.into(),
+		)
+		.note("a precondition restricts the query to executions in which one message is sent")
+		.help("write it as `precondition[ Bob -> Alice: ack ]`"));
+	}
+	let c = m.constant()?;
+	sanity_queries_check_message_principals(m)?;
+	let Some(idx) = km.index_of(c) else {
+		return Err(unknown_constant(
+			&c.name,
+			km,
+			"not declared by any principal".to_string(),
+		));
+	};
+	let sent = km.slots[idx]
+		.sent_by
+		.iter()
+		.any(|event| event.sender == m.sender && event.recipient == m.recipient);
+	if !sent {
+		return Err(VerifpalError::sanity(
+			format!(
+				"{} never sends `{}` to {}",
+				m.sender_name, c, m.recipient_name
+			)
+			.into(),
+		)
+		.narrow(c.name.to_string())
+		.note(format!(
+			"a precondition names a message the model sends, so that the query is \
+			 evaluated only in executions where `{}` goes out from {} to {}",
+			c, m.sender_name, m.recipient_name
+		))
+		.help(format!(
+			"add `{} -> {}: {}` to the model, or name a message it already sends",
+			m.sender_name, m.recipient_name, c
+		)));
 	}
 	Ok(())
 }
@@ -543,6 +572,20 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 			));
 			append_unique(&mut principals, query.message.sender);
 			append_unique(&mut principals, query.message.recipient);
+		}
+		for option in &query.options {
+			seen_names.push((
+				option.message.sender,
+				option.message.sender_name.to_string(),
+				option.message.span,
+			));
+			seen_names.push((
+				option.message.recipient,
+				option.message.recipient_name.to_string(),
+				option.message.span,
+			));
+			append_unique(&mut principals, option.message.sender);
+			append_unique(&mut principals, option.message.recipient);
 		}
 	}
 	for &p in &principals {

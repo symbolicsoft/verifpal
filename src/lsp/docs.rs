@@ -181,8 +181,8 @@ pub(crate) const QUERIES: &[Entry] = &[
 	},
 	Entry {
 		name: "precondition",
-		eg: "confidentiality? m[ precondition[ Bob -> Alice: ack ] ]",
-		help: "An option that may be attached to any query. When the query fails, the result is additionally annotated to note that the message described in the precondition is sent despite the query failing. The sender must know the constant, the recipient must receive it, and the recipient must actually use it inside a primitive, or the model is rejected.",
+		eg: "confidentiality? k[ precondition[ Alice -> Bob: done ] ]",
+		help: "An option that may be attached to any query. It restricts the query to the executions in which the named message is sent: the query is contradicted only where its own condition fails and the sender still reaches that send, so the property must hold whenever the sender goes on to send the value. The event is the send itself, not its receipt or its authentication. The model must contain the message, or it is rejected.",
 	},
 ];
 

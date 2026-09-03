@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1f0
+//
+// The attacker replaces the nonce n with a value of its own before Bob
+// hashes it, so Bob successfully uses a value containing nothing fresh and
+// the plain freshness query fails. The same substitution fails Bob's MAC
+// check on the next line, so he halts before sending done to Alice. The
+// gated query is restricted to executions in which that send happens, and
+// in every one of them the MAC verified and n is Alice's fresh nonce.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates n
+	t = MAC(k, n)
+]
+
+Alice -> Bob: n, t
+
+principal Bob[
+	knows private k
+	h = HASH(n)
+	_ = ASSERT(MAC(k, n), t)?
+	done = HASH(k)
+]
+
+Bob -> Alice: done
+
+principal Alice[
+	_ = HASH(done)
+]
+
+queries[
+	freshness? n
+	freshness? n[
+		precondition[Bob -> Alice: done]
+	]
+]

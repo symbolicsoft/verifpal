@@ -1469,7 +1469,8 @@ mod tests {
 			column: 2,
 		};
 		broken.variants = 1;
-		broken.preconditions = vec!["Bob sends ack to Alice despite the query failing".to_string()];
+		broken.preconditions =
+			vec!["Bob still sends ack to Alice, so the failure counts.".to_string()];
 		broken.steps = vec![
 			derive("Attacker constructs PUBKEY(nil)."),
 			derive("Attacker observes ga on the wire."),

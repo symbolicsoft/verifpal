@@ -9,8 +9,10 @@ use crate::report::Analysis;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AnalyzeArgs {
 	pub uri: String,
+	/// A number rather than a `u8`: a client may send `2.0` or `2.5`, and a
+	/// count it cannot honour exactly is rounded and clamped, not refused.
 	#[serde(default)]
-	pub sessions: Option<u8>,
+	pub sessions: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +25,8 @@ pub(crate) struct UriArg {
 pub(crate) struct Accepted {
 	pub accepted: bool,
 	pub token: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,6 +47,9 @@ pub(crate) struct DiagramResult {
 pub(crate) struct AnalysisReport {
 	pub uri: String,
 	pub version: i32,
+	/// The token the `verifpal.analyze` command answered with, so a client can
+	/// tell a superseded run's report from the current one's.
+	pub token: String,
 	pub ok: bool,
 	pub cancelled: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]

@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u0
+//
+// Alice encrypts two messages under a key she derives from Bob's share and
+// sends them before checking Bob's signature over that share. Substituting
+// the attacker's share for gb makes the key one the attacker can compute, so
+// it opens both ciphertexts under one key and links them, and the plain
+// query fails. The same substitution fails Alice's signature check, so she
+// halts before sending ack. Restricted to executions in which ack is sent,
+// the share was Bob's, the key is a two-party secret the attacker can
+// neither compute nor rebuild the honest ciphertexts from, and nothing
+// links them.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	knows private sk
+	gb = PUBKEY(b)
+	pk = PUBKEY(sk)
+	sig = SIGN(sk, gb)
+]
+
+Bob -> Alice: [pk]
+Bob -> Alice: gb, sig
+
+principal Alice[
+	generates a, m1, m2
+	ga = PUBKEY(a)
+	k = DH_KEX(gb, a)
+	c1 = AEAD_ENC(k, m1, nil)
+	c2 = AEAD_ENC(k, m2, nil)
+]
+
+Alice -> Bob: [ga], c1, c2
+
+principal Alice[
+	_ = SIGNVERIF(pk, gb, sig)?
+	generates ack
+]
+
+Alice -> Bob: ack
+
+principal Bob[
+	kb = DH_KEX(ga, b)
+	d1 = AEAD_DEC(kb, c1, nil)?
+	d2 = AEAD_DEC(kb, c2, nil)?
+	_ = HASH(ack)
+]
+
+queries[
+	unlinkability? c1, c2
+	unlinkability? c1, c2[
+		precondition[Alice -> Bob: ack]
+	]
+]

@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1e1
+//
+// Key agreement on completion. The client's share is guarded, so the
+// attacker can only replace the server's share gs. With its own share the
+// client derives a key the server does not hold and the plain query fails,
+// but the client's signature check fails too and it halts before sending
+// req, so at one session the gated query holds: every execution that reaches
+// the send agreed on the key. At two sessions the gated query fails
+// genuinely. The signature covers gs alone, so the attacker replays the
+// other session's gs and sig to the client, whose check passes; the client
+// completes and sends req under DH_KEX(gs#2, c) while the server holds
+// DH_KEX(gc, s). Signing the share without the transcript is the flaw, and
+// the gated query reports it while ignoring the discarded key.
+
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+Server -> Client: [server_pk]
+
+principal Client[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Client -> Server: [gc]
+
+principal Server[
+	generates s
+	gs = PUBKEY(s)
+	sig = SIGN(server_sk, gs)
+	k_server = DH_KEX(gc, s)
+]
+
+Server -> Client: gs, sig
+
+principal Client[
+	k_client = DH_KEX(gs, c)
+	_ = SIGNVERIF(server_pk, gs, sig)?
+	generates request
+	req = AEAD_ENC(k_client, request, nil)
+]
+
+Client -> Server: req
+
+principal Server[
+	_ = AEAD_DEC(k_server, req, nil)?
+]
+
+queries[
+	equivalence? k_client, k_server
+	equivalence? k_client, k_server[
+		precondition[Client -> Server: req]
+	]
+]

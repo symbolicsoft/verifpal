@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a1a0
+//
+// Alice forwards m2 twice, to Carol before her second check and to Dave
+// after it. A precondition names one message, sender and recipient
+// included, so the two gated queries ask different questions. Replaying e
+// and h from Bob's other session passes Alice's MAC check, so e is accepted
+// twice and the plain query fails; Alice then sends m2 to Carol, so the
+// query gated on that send fails too. The replayed ciphertext decrypts to
+// m#2, the check against the guarded n fails, and Alice halts before the
+// send to Dave, so the query gated on that one holds. At one session nothing
+// can be replayed and all three hold.
+
+attacker[active]
+
+principal Bob[
+	knows private psk
+	generates m
+	e = ENC(psk, m)
+	h = MAC(psk, e)
+	n = HASH(m)
+]
+
+Bob -> Alice: e, h, [n]
+
+principal Alice[
+	knows private psk
+	_ = ASSERT(MAC(psk, e), h)?
+	m2 = DEC(psk, e)
+]
+
+Alice -> Carol: [m2]
+
+principal Alice[
+	_ = ASSERT(n, HASH(m2))?
+]
+
+Alice -> Dave: [m2]
+
+principal Carol[
+	_ = HASH(m2)
+]
+
+principal Dave[
+	_ = HASH(m2)
+]
+
+queries[
+	authentication? Bob -> Alice: e
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Carol: m2]
+	]
+	authentication? Bob -> Alice: e[
+		precondition[Alice -> Dave: m2]
+	]
+]
