@@ -420,10 +420,7 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 		for expr in &p.expressions {
 			let secret = match expr.kind {
 				Declaration::Generates => true,
-				Declaration::Knows => matches!(
-					expr.qualifier,
-					Some(Qualifier::Private) | Some(Qualifier::Password)
-				),
+				Declaration::Knows => matches!(expr.qualifier, Some(Qualifier::Private)),
 				_ => false,
 			};
 			if !secret {

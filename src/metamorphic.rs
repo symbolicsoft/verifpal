@@ -6,11 +6,10 @@ use crate::types::*;
 
 const SESSIONS: u8 = 1;
 
-const COSTLY_MODELS: [&str; 12] = [
+const COSTLY_MODELS: [&str; 11] = [
 	"concat_split_replay.vp",
 	"junglegym_deep_ratchet.vp",
 	"junglegym_hybrid_pq.vp",
-	"junglegym_password_maze.vp",
 	"junglegym_phase_cascade.vp",
 	"junglegym_threshold_ring.vp",
 	"needham-schroeder.vp",
@@ -581,6 +580,10 @@ fn check_invariant(
 }
 
 fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
+	eprintln!(
+		"the `{property}` property compared {} pairs",
+		report.compared
+	);
 	assert!(
 		report.compared >= floor,
 		"the `{property}` property compared only {} pairs against a floor of {floor}, so it \
@@ -838,7 +841,7 @@ mod tests {
 			"scenarios",
 			variants_duplicated_scenario,
 			Strength::Stronger,
-			240,
+			200,
 			Sweep::Exhaustive,
 		);
 	}

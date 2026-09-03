@@ -39,11 +39,6 @@ pub(crate) const PRIMITIVES: &[Entry] = &[
 		help: "Hash-based key derivation function inspired by the Krawczyk HKDF scheme. Essentially, HKDF is used to extract more than one key out a single secret value. salt and info help contextualize derived keys. Takes exactly three arguments and produces between one and five outputs.",
 	},
 	Entry {
-		name: "PW_HASH",
-		eg: "PW_HASH(a...): x",
-		help: "Password hashing function, similar in practice to, for example, Scrypt or Argon2. Hashes passwords and produces output that is suitable for use as a private key, secret key or other sensitive key material. Takes between one and five arguments. Useful in conjunction with values declared using `knows password a`.",
-	},
-	Entry {
 		name: "ENC",
 		eg: "ENC(key, plaintext): ciphertext",
 		help: "Symmetric encryption, similar for example to AES-CBC or to ChaCha20. Unauthenticated, which is why it is the one primitive that accepts `malleable`.",
@@ -139,7 +134,7 @@ pub(crate) const CAPABILITIES: &[Entry] = &[
 	Entry {
 		name: "weak",
 		eg: "AEAD_ENC[weak](key, plaintext, ad)",
-		help: "Declared weakening assumption: this primitive loses confidentiality, so holding the term is enough to recover what it protects. Declared for HASH and PW_HASH (a preimage, recovering every argument), AEAD_ENC, ENC and PKE_ENC (the plaintext), KEM_ENCAP (the shared secret), and PUBKEY (the private key, which is the discrete logarithm problem falling and makes every DH_KEX built on that key computable). Append `from phase N` to delay it.",
+		help: "Declared weakening assumption: this primitive loses confidentiality, so holding the term is enough to recover what it protects. Declared for HASH (a preimage, recovering every argument), AEAD_ENC, ENC and PKE_ENC (the plaintext), KEM_ENCAP (the shared secret), and PUBKEY (the private key, which is the discrete logarithm problem falling and makes every DH_KEX built on that key computable). Append `from phase N` to delay it.",
 	},
 	Entry {
 		name: "forgeable",
@@ -215,7 +210,7 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 	Entry {
 		name: "knows",
 		eg: "knows private a",
-		help: "Declares a value the principal holds before the protocol begins. Qualify it with `public`, `private` or `password`.",
+		help: "Declares a value the principal holds before the protocol begins. Qualify it with `public` or `private`.",
 	},
 	Entry {
 		name: "generates",
@@ -236,11 +231,6 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 		name: "private",
 		eg: "knows private m",
 		help: "The value is known only to the principals that declare it.",
-	},
-	Entry {
-		name: "password",
-		eg: "knows password pw",
-		help: "A low-entropy private value. The attacker may brute-force it unless it is passed through PW_HASH before use.",
 	},
 	Entry {
 		name: "phase",

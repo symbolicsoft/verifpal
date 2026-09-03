@@ -1,11 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 — the collection key descends from a private value through
+// HKDF over a public uid and never travels in the clear, so it stays
+// confidential. The PKE ciphertext carrying it is unguarded and Bob decrypts
+// it unchecked, so the attacker replaces it with its own encryption under
+// Bob's public key and Bob accepts a key Alice never sent.
 
 attacker[active]
 
 principal Alice[
-	knows password a_pass
-	derived = PW_HASH(a_pass)
+	knows private a_pass
+	derived = HASH(a_pass)
 	generates a
 	ga = PUBKEY(a)
 	generates collection_uid

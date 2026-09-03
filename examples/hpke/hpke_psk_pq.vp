@@ -31,16 +31,10 @@
 // once the KEM is broken, HKDF(ss2, psk, ks_context2) is the only step the
 // attacker cannot recompute, and §9.5's requirement that the PSK carry at
 // least 32 bytes of entropy is what makes that assumption legitimate.
-// Verifpal does not check that requirement here, and it is worth knowing
-// exactly why. Declare the PSK as `knows password` rather than `knows
-// private` and this model still reports c1c0: offline guessing in Verifpal
-// means recomputing the whole enclosing term, and psk sits under key2, which
-// sits beside the unknown pt_psk inside AEAD_ENC, so there is nothing to
-// check a guess against. Make pt_psk public and the same model reports c1c1
-// — the password falls the instant a known sibling appears. A real attacker
-// would verify the guess through AEAD authentication instead, which is
-// outside this abstraction. So read the c0 as conditional on §9.5 being
-// honoured, not as evidence that it has been.
+// Verifpal does not check that requirement here: a `knows private` value is
+// unguessable by definition, and the language has no way to declare a
+// low-entropy secret. So read the c0 as conditional on §9.5 being honoured,
+// not as evidence that it has been.
 attacker[active]
 
 principal Recipient[

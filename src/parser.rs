@@ -19,7 +19,6 @@ const RESERVED: &[&str] = &[
 	"phase",
 	"public",
 	"private",
-	"password",
 	"confidentiality",
 	"authentication",
 	"freshness",
@@ -29,7 +28,6 @@ const RESERVED: &[&str] = &[
 	"ringsign",
 	"ringsignverif",
 	"primitive",
-	"pw_hash",
 	"hash",
 	"hkdf",
 	"aead_enc",
@@ -1020,18 +1018,14 @@ impl<'a> Parser<'a> {
 		let qualifier = match qualifier_str.as_str() {
 			"private" => Qualifier::Private,
 			"public" => Qualifier::Public,
-			"password" => Qualifier::Password,
 			_ => {
 				return Err(VerifpalError::parse(
 					format!("unknown qualifier `{}`", qualifier_str).into(),
 				)
 				.at(self.last_ident)
 				.narrow(qualifier_str.clone())
-				.note("`knows` takes one of `private`, `public` or `password`")
-				.suggest(did_you_mean(
-					&qualifier_str,
-					["private", "public", "password"],
-				)));
+				.note("`knows` takes one of `private` or `public`")
+				.suggest(did_you_mean(&qualifier_str, ["private", "public"])));
 			}
 		};
 		self.record(self.last_ident, crate::tokens::TokenKind::Qualifier);

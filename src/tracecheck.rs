@@ -273,23 +273,6 @@ pub(crate) fn step_problems(
 				}
 				_ => problems.push(wrong("splits something that is not a CONCAT")),
 			},
-			DerivationRecord::PasswordExtracted { from } => {
-				let mut obtainable = Vec::new();
-				crate::theory::find_obtainable_passwords(
-					from,
-					false,
-					true,
-					attacker,
-					ps,
-					&mut obtainable,
-				);
-				if !obtainable.iter().any(|v| v.equivalent(target, true)) {
-					problems.push(wrong(
-						"recovers a password the offline-guessing rule does not make obtainable \
-						 from the term it names",
-					));
-				}
-			}
 			DerivationRecord::Recomposed { of, .. } => match of {
 				Value::Primitive(p) => {
 					if !crate::theory::can_recompose(p, attacker)

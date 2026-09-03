@@ -716,11 +716,6 @@ impl Narrator<'_> {
 				show(of),
 				join_oriented(using, table, attacker),
 			),
-			DerivationRecord::PasswordExtracted { from } => format!(
-				"Attacker recovers the password {} used unhashed inside {}.",
-				v,
-				show(from),
-			),
 			DerivationRecord::ConcatFragment { of } => {
 				format!("Attacker splits {} and takes {}.", show(of), v)
 			}

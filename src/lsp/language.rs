@@ -155,6 +155,11 @@ pub(crate) fn hover(doc: &Document, position: Position) -> Option<lsp_types::Hov
 			out
 		}
 		TokenKind::PrincipalName => format!("**{}**\n\nA principal in this model.", token.text),
+		TokenKind::QueryKind => {
+			// The token spans the whole `confidentiality?`; the table is keyed without the `?`.
+			let entry = docs::query(token.text.trim_end_matches('?'))?;
+			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
+		}
 		_ => {
 			let entry = docs::any(&token.text)?;
 			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
@@ -504,7 +509,7 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 			.is_none_or(|c| !c.is_alphanumeric() && c != '_')
 	});
 	if after_knows {
-		return ["public", "private", "password"]
+		return ["public", "private"]
 			.iter()
 			.map(|q| item(q, CompletionItemKind::KEYWORD, docs::keyword(q)))
 			.collect();
@@ -798,6 +803,18 @@ queries[\n\
 	}
 
 	#[test]
+	fn hovering_a_query_kind_shows_what_it_checks() {
+		let docs = doc();
+		let d = docs.get("file:///l.vp").expect("open");
+		let h = hover(d, at("confidentiality?")).expect("a hover");
+		let lsp_types::HoverContents::Markup(m) = h.contents else {
+			panic!("expected markup");
+		};
+		assert!(m.value.contains("confidentiality? a"), "{}", m.value);
+		assert!(m.value.contains("obtained by the attacker"), "{}", m.value);
+	}
+
+	#[test]
 	fn definition_jumps_to_the_assignment() {
 		let docs = doc();
 		let d = docs.get("file:///l.vp").expect("open");
@@ -977,7 +994,7 @@ queries[\n\
 		let d = docs.get("file:///k.vp").expect("open");
 		let items = completions(d, d.line.position(src.len()));
 		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-		assert_eq!(labels, vec!["public", "private", "password"]);
+		assert_eq!(labels, vec!["public", "private"]);
 	}
 
 	#[test]

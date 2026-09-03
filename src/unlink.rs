@@ -384,12 +384,12 @@ fn contains_equivalent_subterm(value: &Value, target: &Value, target_hash: u64) 
 }
 
 fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
-	if c.fresh || matches!(c.qualifier, Some(Qualifier::Private | Qualifier::Password)) {
+	if c.fresh || matches!(c.qualifier, Some(Qualifier::Private)) {
 		return true;
 	}
 	ps.index_of(c).is_some_and(|i| {
 		let m = &ps.meta[i].constant;
-		m.fresh || matches!(m.qualifier, Some(Qualifier::Private | Qualifier::Password))
+		m.fresh || matches!(m.qualifier, Some(Qualifier::Private))
 	})
 }
 
@@ -534,7 +534,7 @@ mod tests {
 	#[test]
 	fn secret_dependence() {
 		let pub_c = make_constant("ul_pub");
-		let secret = make_password("ul_pw");
+		let secret = make_private("ul_pw");
 		let ps = state_from(&[pub_c.clone(), secret.clone()]);
 		assert!(!depends_on_secret(&pub_c, &ps));
 		assert!(depends_on_secret(&secret, &ps));
@@ -547,7 +547,7 @@ mod tests {
 
 	#[test]
 	fn origin_leaves_excludes_the_value_itself() {
-		let seed = make_password("ul_seed");
+		let seed = make_private("ul_seed");
 		let label = make_constant("ul_label");
 		let tok = make_primitive(PRIM_HASH, vec![seed.clone(), label.clone()], 0);
 		let ps = state_from(&[seed.clone(), label.clone()]);
@@ -563,7 +563,7 @@ mod tests {
 
 	#[test]
 	fn withholding_a_value_keeps_knowledge_and_its_explanation_in_step() {
-		let seed = make_password("ulw_seed");
+		let seed = make_private("ulw_seed");
 		let label = make_constant("ulw_label");
 		let tok = make_primitive(PRIM_HASH, vec![seed.clone(), label.clone()], 0);
 		let attacker = make_attacker_state(vec![tok.clone(), seed.clone(), label.clone()]);
@@ -586,7 +586,7 @@ mod tests {
 
 	#[test]
 	fn signatures_link_but_ring_signatures_do_not() {
-		let sk = make_password("w2_sk");
+		let sk = make_private("w2_sk");
 		let gb = make_constant("w2_gb");
 		let gc = make_constant("w2_gc");
 		let m1 = make_constant("w2_m1");
@@ -621,7 +621,7 @@ mod tests {
 
 	#[test]
 	fn shared_secret_links_across_different_applications() {
-		let seed = make_password("w1_seed");
+		let seed = make_private("w1_seed");
 		let c1 = make_constant("w1_c1");
 		let c2 = make_constant("w1_c2");
 		let tok1 = make_primitive(PRIM_HASH, vec![seed.clone(), c1.clone()], 0);
@@ -644,7 +644,7 @@ mod tests {
 
 	#[test]
 	fn observed_equality_needs_a_secret() {
-		let k = make_password("w3_k");
+		let k = make_private("w3_k");
 		let n = make_constant("w3_n");
 		let tok = make_primitive(PRIM_MAC, vec![k.clone(), n.clone()], 0);
 		let ps = state_from(&[k, n]);

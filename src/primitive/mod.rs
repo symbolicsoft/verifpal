@@ -90,7 +90,6 @@ pub(crate) struct PrimitiveSpec {
 	pub rewrite: Option<RewriteRule>,
 	pub rebuild: Option<RebuildRule>,
 	pub definition_check: bool,
-	pub password_hashing: Vec<usize>,
 	pub bypass_key: Option<BypassKeyKind>,
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
@@ -724,9 +723,6 @@ mod tests {
 			}
 			for &i in &spec.identifying_positions {
 				may("identifying_positions", i);
-			}
-			for &i in &spec.password_hashing {
-				may("password_hashing", i);
 			}
 			for (position, banned) in &spec.argument_restrictions {
 				may("argument_restrictions", *position);

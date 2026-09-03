@@ -49,10 +49,7 @@ fn secret_constants(m: &Model) -> Vec<Constant> {
 		for expression in &p.expressions {
 			let secret = match expression.kind {
 				Declaration::Generates => true,
-				Declaration::Knows => matches!(
-					expression.qualifier,
-					Some(Qualifier::Private) | Some(Qualifier::Password)
-				),
+				Declaration::Knows => matches!(expression.qualifier, Some(Qualifier::Private)),
 				_ => false,
 			};
 			if !secret {

@@ -15,7 +15,6 @@ fn declared_as(c: &Constant) -> String {
 		(Some(Declaration::Leaks), _) => "leaked".to_string(),
 		(Some(Declaration::Knows), Some(Qualifier::Public)) => "known publicly".to_string(),
 		(Some(Declaration::Knows), Some(Qualifier::Private)) => "known privately".to_string(),
-		(Some(Declaration::Knows), Some(Qualifier::Password)) => "known as a password".to_string(),
 		_ => "declared".to_string(),
 	}
 }

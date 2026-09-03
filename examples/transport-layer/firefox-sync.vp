@@ -23,11 +23,10 @@
 // storage server authenticate users whose data it cannot read.
 //
 // Modeling note: `pass` is declared `knows private`, i.e. an unguessable
-// secret. Declaring it `knows password` instead would model a guessable,
-// brute-forceable value, and confidentiality would then rightly fail —
-// anything derived from a password without PW_HASH is treated as crackable
-// offline. The real protocol PBKDF2-stretches the password; `knows private`
-// models the assumption that the stretching succeeded.
+// secret. Verifpal has no notion of a low-entropy value, so a brute-forceable
+// password is outside what the model can say. The real protocol
+// PBKDF2-stretches the password; `knows private` models the assumption that
+// the stretching succeeded.
 
 attacker[active]
 

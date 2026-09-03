@@ -1,13 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 — the phone accepts the wrapped private key only through a
+// checked AEAD_DEC under a key derived from the private password, which the
+// attacker never holds, so the only blob that passes is the one Alice stored.
 
 attacker[active]
 
 principal Alice[
     knows public const_e
     knows public alice_username
-    knows password alice_password
-    alice_master_decryption, alice_master_auth = HKDF(alice_username, PW_HASH(alice_password), const_e)
+    knows private alice_password
+    alice_master_decryption, alice_master_auth = HKDF(alice_username, HASH(alice_password), const_e)
     knows private alice_private_key
     e_alice_private_key = AEAD_ENC(alice_master_decryption, alice_private_key, alice_username)
     alice_public_key = PUBKEY(alice_private_key)
@@ -25,8 +29,8 @@ Alice -> Server: e_e_a
 principal AlicePhone[
     knows public const_e
     knows public alice_username
-    knows password alice_password
-    alicephone_master_decryption, alicephone_master_auth = HKDF(alice_username, PW_HASH(alice_password), const_e)
+    knows private alice_password
+    alicephone_master_decryption, alicephone_master_auth = HKDF(alice_username, HASH(alice_password), const_e)
 ]
 
 AlicePhone -> Server: alicephone_master_auth

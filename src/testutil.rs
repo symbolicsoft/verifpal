@@ -40,7 +40,7 @@ pub(crate) fn make_constant(name: &str) -> Value {
 	})
 }
 
-pub(crate) fn make_password(name: &str) -> Value {
+pub(crate) fn make_private(name: &str) -> Value {
 	Value::Constant(Constant {
 		name: Arc::from(name),
 		id: test_value_id(name),
@@ -48,7 +48,7 @@ pub(crate) fn make_password(name: &str) -> Value {
 		fresh: false,
 		leaked: false,
 		declaration: Some(Declaration::Knows),
-		qualifier: Some(Qualifier::Password),
+		qualifier: Some(Qualifier::Private),
 	})
 }
 

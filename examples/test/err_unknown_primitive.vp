@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Parse error: a primitive name the registry does not know is rejected at the
+// call site with the nearest known name suggested. Verifpal once had PW_HASH,
+// a slow hash that blocked offline guessing of a `password` constant; a model
+// written for it must be refused here rather than read as some other hash.
+attacker[passive]
+
+principal Alice[
+	knows private pw
+	knows public salt
+	h = PW_HASH(pw, salt)
+]
+
+Alice -> Bob: h
+
+principal Bob[
+	_ = HASH(h)
+]
+
+queries[
+	confidentiality? pw
+]

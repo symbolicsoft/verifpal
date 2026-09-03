@@ -4,26 +4,23 @@
 // The end-to-end encryption scheme of Userbase, a database service for web
 // apps in which the server stores only ciphertext. Two users each run a
 // key hierarchy rooted in a memorable password, and each adds a second
-// device that reconstructs everything from that password alone. All four
-// queries hold (c0c0a0a0): the stored items stay confidential from server
-// and network alike, and a device accepts only genuinely-stored items.
+// device that reconstructs everything from that password alone. The stored
+// items stay confidential from server and network alike, and at one session
+// a device accepts only genuinely-stored items (c0c0a0a0). At two sessions
+// the authentication queries fail (c0c0a1a1): the same user runs the
+// hierarchy twice under one password, and a new device handed the OTHER
+// run's stored blobs and salts unwraps and accepts them, a cross-session
+// replay.
 //
-// The model is the canonical demonstration of Verifpal's password
-// machinery:
-//
-//   `knows password passA` declares a GUESSABLE value. Unlike a `private`
-//   value, anything derived from a password with ordinary primitives is
-//   treated as crackable by offline guessing — the attacker holds the
-//   derivation output, tries candidate passwords, and checks. The ONE
-//   primitive that blocks this is PW_HASH, which models slow, salted
-//   password hashing (scrypt, Argon2). Everything in this file therefore
-//   descends from PW_HASH(HASH(pass, salt)); replace that PW_HASH with a
-//   plain HASH and confidentiality collapses.
+// The password is declared `knows private`, an unguessable secret. Verifpal
+// has no notion of a low-entropy value, so the model assumes the real
+// scheme's slow password hashing (scrypt) has done its job; everything below
+// descends from HASH(pass, salt) on that assumption.
 //
 // The hierarchy, top to bottom:
 //
-//   password ──PW_HASH──► passwordHkdfKey ──┬─► passwordToken   (server sees)
-//                                           └─► passwordBasedEncryptionKey
+//   password ──HASH──► passwordHkdfKey ──┬─► passwordToken   (server sees)
+//                                        └─► passwordBasedEncryptionKey
 //   seed (random) ──HKDF──► masterKey ──┬─► encryptionKey  (wraps dbKey)
 //                                       ├─► dhPrivateKey
 //                                       └─► hmacKey
@@ -46,17 +43,15 @@ principal UserB[]
 principal UserB_OtherDevice[]
 
 principal UserA[
-	// The guessable root — see the header.
-	knows password passA
+	// The password — see the header.
+	knows private passA
 	// The TRUE cryptographic root: a random seed. The password's only
 	// job is to wrap and unwrap it.
 	generates seedA
 	generates passwordSaltA
 	generates passwordTokenSaltA
 	generates passwordBasedEncryptionKeySaltA
-	// PW_HASH is the guessing barrier: below this line, values may be
-	// derived from the password and still resist offline attack.
-	passwordHashA = PW_HASH(HASH(passA, passwordSaltA))
+	passwordHashA = HASH(passA, passwordSaltA)
 	passwordHkdfKeyA = HKDF(passwordHashA, nil, nil)
 	// Two siblings with opposite destinies: the token is SENT to the
 	// server as a login credential; the encryption key never leaves.
@@ -87,12 +82,12 @@ principal UserA[
 UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, passwordEncryptedSeedA
 
 principal UserB[
-	knows password passB
+	knows private passB
 	generates seedB
 	generates passwordSaltB
 	generates passwordTokenSaltB
 	generates passwordBasedEncryptionKeySaltB
-	passwordHashB = PW_HASH(HASH(passB, passwordSaltB))
+	passwordHashB = HASH(passB, passwordSaltB)
 	passwordHkdfKeyB = HKDF(passwordHashB, nil, nil)
 	passwordTokenB = HKDF(passwordHkdfKeyB, passwordTokenSaltB, nil)
 	passwordBasedEncryptionKeyB = HKDF(passwordHkdfKeyB, passwordBasedEncryptionKeySaltB, nil)
@@ -154,8 +149,8 @@ Server -> UserB_OtherDevice: encryptedItemB, encryptedDbKeyB, passwordEncryptedS
 // AEAD_DEC, so a substituted blob halts the device instead of being
 // accepted — that chain of checks is why the authentication queries hold.
 principal UserA_OtherDevice[
-	knows password passA
-	passwordHashA_ = PW_HASH(HASH(passA, passwordSaltA))
+	knows private passA
+	passwordHashA_ = HASH(passA, passwordSaltA)
 	passwordHkdfKeyA_ = HKDF(passwordHashA_, nil, nil)
 	passwordTokenA_ = HKDF(passwordHkdfKeyA_, passwordTokenSaltA, nil)
 	passwordBasedEncryptionKeyA_ = HKDF(passwordHkdfKeyA_, passwordBasedEncryptionKeySaltA, nil)
@@ -167,8 +162,8 @@ principal UserA_OtherDevice[
 ]
 
 principal UserB_OtherDevice[
-	knows password passB
-	passwordHashB_ = PW_HASH(HASH(passB, passwordSaltB))
+	knows private passB
+	passwordHashB_ = HASH(passB, passwordSaltB)
 	passwordHkdfKeyB_ = HKDF(passwordHashB_, nil, nil)
 	passwordTokenB_ = HKDF(passwordHkdfKeyB_, passwordTokenSaltB, nil)
 	passwordBasedEncryptionKeyB_ = HKDF(passwordHkdfKeyB_, passwordBasedEncryptionKeySaltB, nil)

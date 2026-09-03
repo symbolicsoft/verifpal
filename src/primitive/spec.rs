@@ -10,7 +10,6 @@ use crate::value::value_nil;
 pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
 pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
 pub(crate) const PRIM_SPLIT: PrimitiveId = 3;
-pub(crate) const PRIM_PWHASH: PrimitiveId = 4;
 pub(crate) const PRIM_HASH: PrimitiveId = 5;
 pub(crate) const PRIM_HKDF: PrimitiveId = 6;
 pub(crate) const PRIM_AEAD_ENC: PrimitiveId = 7;
@@ -181,16 +180,6 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 
 pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 	vec![
-		PrimitiveSpec {
-			id: PRIM_PWHASH,
-			arg_names: vec!["value1", "value2", "value3", "value4", "value5"],
-			name: "PW_HASH",
-			arity: vec![1, 2, 3, 4, 5],
-			output: vec![1],
-			password_hashing: vec![0, 1, 2, 3, 4],
-			weak_reveals: vec![0, 1, 2, 3, 4],
-			..PrimitiveSpec::default()
-		},
 		PrimitiveSpec {
 			id: PRIM_HASH,
 			arg_names: vec!["value1", "value2", "value3", "value4", "value5"],

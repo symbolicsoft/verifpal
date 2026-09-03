@@ -27,14 +27,12 @@ impl ObtainableMemo {
 }
 
 pub(crate) struct StateIndex {
-	has_passwords: bool,
 	slots_by_hash: IdMap<u64, Vec<usize>>,
 }
 
 impl StateIndex {
 	pub(crate) fn of(ps: &PrincipalState) -> Arc<Self> {
 		Arc::new(StateIndex {
-			has_passwords: scan_for_passwords(ps),
 			slots_by_hash: index_slots_by_hash(ps),
 		})
 	}
@@ -78,27 +76,6 @@ fn index_slots_by_hash(ps: &PrincipalState) -> IdMap<u64, Vec<usize>> {
 		index.entry(sv.value.hash_value()).or_default().push(i);
 	}
 	index
-}
-
-pub(crate) fn state_declares_passwords(ps: &PrincipalState) -> bool {
-	MEMO.with(|m| {
-		if let Some(memo) = m.borrow().as_ref()
-			&& memo.is_for_state(ps)
-		{
-			return Some(memo.index.has_passwords);
-		}
-		None
-	})
-	.unwrap_or_else(|| scan_for_passwords(ps))
-}
-
-fn scan_for_passwords(ps: &PrincipalState) -> bool {
-	ps.meta
-		.iter()
-		.any(|m| m.constant.qualifier == Some(Qualifier::Password))
-		|| ps.values.iter().any(
-			|sv| matches!(&sv.value, Value::Constant(c) if c.qualifier == Some(Qualifier::Password)),
-		)
 }
 
 pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
@@ -597,56 +574,6 @@ pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	None
 }
 
-pub(crate) fn find_obtainable_passwords(
-	a: &Value,
-	protected: bool,
-	can_verify: bool,
-	attacker: &AttackerState,
-	ps: &PrincipalState,
-	out: &mut Vec<Value>,
-) {
-	if protected || !can_verify {
-		return;
-	}
-	match a {
-		Value::Constant(c) => {
-			let (resolved, _) = ps.resolve_constant(c, true);
-			if matches!(&resolved, Value::Constant(rc) if rc.qualifier == Some(Qualifier::Password))
-			{
-				out.push(resolved);
-			}
-		}
-		Value::Primitive(p) => {
-			let arity = p.arguments.len();
-			let known_count = p
-				.arguments
-				.iter()
-				.filter(|arg| attacker.knows(arg).is_some())
-				.count();
-			if known_count + 1 < arity {
-				return;
-			}
-			let hashing: &[usize] = if primitive_is_core(p.id) {
-				&[]
-			} else {
-				primitive_get(p.id).map_or(&[][..], |prim| prim.password_hashing.as_slice())
-			};
-			for (i, arg) in p.arguments.iter().enumerate() {
-				let siblings_known = known_count == arity
-					|| (known_count + 1 == arity && attacker.knows(arg).is_none());
-				find_obtainable_passwords(
-					arg,
-					hashing.contains(&i),
-					siblings_known,
-					attacker,
-					ps,
-					out,
-				);
-			}
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1065,53 +992,5 @@ mod tests {
 		);
 		let attacker = make_attacker_state(vec![]);
 		assert!(can_decompose(&p, &ps, &attacker).is_none());
-	}
-
-	#[test]
-	fn find_obtainable_passwords_direct() {
-		let pw = make_password("fop_pw");
-		let pw_c = pw.as_constant().unwrap().clone();
-		let meta = vec![make_slot_meta(&pw_c, true)];
-		let values = vec![make_slot_values(&pw, 0)];
-		let ps = make_principal_state("Test", 0, meta, values);
-		let attacker = make_attacker_state(vec![]);
-		let mut out = Vec::new();
-		find_obtainable_passwords(&pw, false, true, &attacker, &ps, &mut out);
-		assert_eq!(out.len(), 1);
-	}
-
-	#[test]
-	fn find_obtainable_passwords_known_sibling() {
-		let pw = make_password("fop2_pw");
-		let msg = make_constant("fop2_msg");
-		let pw_c = pw.as_constant().unwrap().clone();
-		let msg_c = msg.as_constant().unwrap().clone();
-		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), msg.clone()], 0);
-		let meta = vec![make_slot_meta(&pw_c, true), make_slot_meta(&msg_c, false)];
-		let values = vec![make_slot_values(&pw, 0), make_slot_values(&msg, 0)];
-		let ps = make_principal_state("Test", 0, meta, values);
-		let attacker = make_attacker_state(vec![msg]);
-		let mut out = Vec::new();
-		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
-		assert_eq!(out.len(), 1);
-	}
-
-	#[test]
-	fn find_obtainable_passwords_unknown_sibling() {
-		let pw = make_password("fop3_pw");
-		let secret = make_constant("fop3_secret");
-		let pw_c = pw.as_constant().unwrap().clone();
-		let secret_c = secret.as_constant().unwrap().clone();
-		let enc = make_primitive(PRIM_ENC, vec![pw.clone(), secret.clone()], 0);
-		let meta = vec![
-			make_slot_meta(&pw_c, true),
-			make_slot_meta(&secret_c, false),
-		];
-		let values = vec![make_slot_values(&pw, 0), make_slot_values(&secret, 0)];
-		let ps = make_principal_state("Test", 0, meta, values);
-		let attacker = make_attacker_state(vec![]);
-		let mut out = Vec::new();
-		find_obtainable_passwords(&enc, false, true, &attacker, &ps, &mut out);
-		assert_eq!(out.len(), 0);
 	}
 }

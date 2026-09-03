@@ -163,6 +163,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut traceless: Vec<(String, usize)> = Vec::new();
 	let mut incoherent: Vec<String> = Vec::new();
 	let mut header_problems: Vec<String> = Vec::new();
+	let mut documented = 0usize;
 	let mut undocumented = 0usize;
 
 	for (model, path) in swept_models() {
@@ -176,6 +177,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		if stated.is_empty() {
 			undocumented += 1;
 		} else {
+			documented += 1;
 			let code = crate::types::VerifyResult::results_code(&results);
 			let mut produced = vec![code.clone()];
 			if source.contains("session")
@@ -285,6 +287,12 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		v
 	};
 
+	eprintln!(
+		"{} swept models analysed: {} state a result code, {} do not",
+		documented + undocumented,
+		documented,
+		undocumented
+	);
 	assert!(
 		header_problems.is_empty(),
 		"a model's header states a result the model does not produce. The header is where the \
@@ -293,8 +301,8 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		header_problems.join("\n  ")
 	);
 	assert!(
-		undocumented <= 141,
-		"{} swept models state no expected result code in their header, up from 141. A new \
+		undocumented <= 127,
+		"{} swept models state no expected result code in their header, up from 127. A new \
 		 model must say what it expects and why, so that its verdict can be checked against \
 		 an intent rather than against itself",
 		undocumented
@@ -650,6 +658,14 @@ fn test_cap_err_hash_forgeable() {
 	run_model_err("cap_err_hash_forgeable.vp", "has no secret argument");
 }
 #[test]
+fn test_err_unknown_qualifier() {
+	run_model_err("err_unknown_qualifier.vp", "unknown qualifier `password`");
+}
+#[test]
+fn test_err_unknown_primitive() {
+	run_model_err("err_unknown_primitive.vp", "unknown primitive `PW_HASH`");
+}
+#[test]
 fn test_cap_err_aead_malleable() {
 	run_model_err(
 		"cap_err_aead_malleable.vp",
@@ -847,10 +863,6 @@ fn test_junglegym_threshold_ring() {
 	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a0u0u1u1f0f1e1e1");
 }
 #[test]
-fn test_junglegym_password_maze() {
-	run_model("junglegym_password_maze.vp", "c0c1c0c0c1a0a0a0f0f1e1e1u0");
-}
-#[test]
 fn test_junglegym_phase_cascade() {
 	run_model(
 		"junglegym_phase_cascade.vp",
@@ -1005,14 +1017,6 @@ fn test_session_kem_cross_decap_one_session() {
 #[test]
 fn test_session_kem_cross_decap() {
 	run_model("session_kem_cross_decap.vp", "c0e1");
-}
-#[test]
-fn test_session_password_no_leverage_one_session() {
-	run_model_sessions("session_password_no_leverage.vp", 1, "c0c0");
-}
-#[test]
-fn test_session_password_no_leverage() {
-	run_model("session_password_no_leverage.vp", "c0c0");
 }
 #[test]
 fn test_session_unguarded_mitm_one_session() {
@@ -1190,14 +1194,6 @@ fn test_pke_unchecked_assert() {
 #[test]
 fn test_assert_junglegym() {
 	run_model("assert_junglegym.vp", "c0");
-}
-#[test]
-fn test_pw_hash() {
-	run_model("pw_hash.vp", "c0c0c0c0c0c0");
-}
-#[test]
-fn test_pw_hash2() {
-	run_model("pw_hash2.vp", "c0");
 }
 #[test]
 fn test_shamir() {
@@ -1549,10 +1545,6 @@ fn test_mwe() {
 	run_model("mwe.vp", "c0");
 }
 #[test]
-fn test_password() {
-	run_model("password.vp", "c1c1c1c1");
-}
-#[test]
 fn test_dh_equiv() {
 	run_model("dh_equiv.vp", "c1c1c1e0");
 }
@@ -1680,26 +1672,6 @@ fn test_many_principals() {
 #[test]
 fn test_psk_with_dh() {
 	run_model("psk_with_dh.vp", "c0c0a1a1");
-}
-#[test]
-fn test_concat_password() {
-	run_model("concat_password.vp", "c0c0c0");
-}
-#[test]
-fn test_password_aead() {
-	run_model("password_aead.vp", "c0");
-}
-#[test]
-fn test_password_underspec() {
-	run_model("password_underspec.vp", "c0c1c0c0c0c1c0c1c0c0c1c0");
-}
-#[test]
-fn test_password_dh_unknown_base() {
-	run_model("password_dh_unknown_base.vp", "c0");
-}
-#[test]
-fn test_password_dh_known_base() {
-	run_model("password_dh_known_base.vp", "c1");
 }
 #[test]
 fn test_piknik_signature_not_forgeable() {
@@ -2234,10 +2206,6 @@ fn test_flawed_nested_weak_layers() {
 	run_model("flawed_nested_weak_layers.vp", "c1c1c1c1");
 }
 #[test]
-fn test_flawed_password_login() {
-	run_model("flawed_password_login.vp", "c1c1a1");
-}
-#[test]
 fn test_flawed_pseudonym_reuse() {
 	run_model("flawed_pseudonym_reuse.vp", "u1u1u1");
 }
@@ -2386,26 +2354,6 @@ fn test_otp_counter_freshness() {
 	run_model("otp_counter_freshness.vp", "f1f0c0");
 }
 #[test]
-fn test_password_deep_siblings() {
-	run_model("password_deep_siblings.vp", "c1c0");
-}
-#[test]
-fn test_password_kem_transcript() {
-	run_model("password_kem_transcript.vp", "c1c0a1a1");
-}
-#[test]
-fn test_password_mac_chain() {
-	run_model("password_mac_chain.vp", "c0c1a0a1");
-}
-#[test]
-fn test_password_pake_transcript() {
-	run_model("password_pake_transcript.vp", "c1c0a1a0");
-}
-#[test]
-fn test_password_sibling_leaked_later() {
-	run_model("password_sibling_leaked_later.vp", "c0c1");
-}
-#[test]
 fn test_phase_ad_reuse() {
 	run_model("phase_ad_reuse.vp", "a1a0");
 }
@@ -2463,22 +2411,6 @@ fn test_pubkey_of_pubkey_rejected() {
 		"pubkey_of_pubkey_rejected.vp",
 		"`PUBKEY` cannot take `PUBKEY` as its first argument",
 	);
-}
-#[test]
-fn test_pw_hash_five_args() {
-	run_model("pw_hash_five_args.vp", "c0c1");
-}
-#[test]
-fn test_pw_hash_public_salt() {
-	run_model("pw_hash_public_salt.vp", "c0c1c0c1");
-}
-#[test]
-fn test_pw_hash_weak_cap() {
-	run_model("pw_hash_weak_cap.vp", "c1c0c1c0");
-}
-#[test]
-fn test_pw_hash_weak_from_phase() {
-	run_model("pw_hash_weak_from_phase.vp", "c0c1");
 }
 #[test]
 fn test_receipt_chain_broken_link() {
@@ -2629,10 +2561,6 @@ fn test_split_stuck_halts() {
 	run_model("split_stuck_halts.vp", "a0a1");
 }
 #[test]
-fn test_srp_naive_verifier() {
-	run_model("srp_naive_verifier.vp", "c1c1a1a0");
-}
-#[test]
 fn test_station_to_station() {
 	run_model("station_to_station.vp", "c0c0a0a0e1");
 }
@@ -2655,10 +2583,6 @@ fn test_unlink_kem_decap_identifying() {
 #[test]
 fn test_unlink_pke_recipient() {
 	run_model("unlink_pke_recipient.vp", "u1u0");
-}
-#[test]
-fn test_unlink_pw_hash_records() {
-	run_model("unlink_pw_hash_records.vp", "u1u0");
 }
 #[test]
 fn test_unlink_shamir_origin() {

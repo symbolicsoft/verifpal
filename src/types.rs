@@ -518,7 +518,6 @@ pub type PrimitiveId = u8;
 pub enum Qualifier {
 	Public,
 	Private,
-	Password,
 }
 
 impl fmt::Display for Qualifier {
@@ -526,7 +525,6 @@ impl fmt::Display for Qualifier {
 		match self {
 			Qualifier::Public => f.write_str("public"),
 			Qualifier::Private => f.write_str("private"),
-			Qualifier::Password => f.write_str("password"),
 		}
 	}
 }
@@ -1481,9 +1479,6 @@ pub enum DerivationRecord {
 		of: Value,
 		using: Vec<Value>,
 	},
-	PasswordExtracted {
-		from: Value,
-	},
 	ConcatFragment {
 		of: Value,
 	},
@@ -1516,7 +1511,6 @@ impl DerivationRecord {
 				v
 			}
 			DerivationRecord::Reconstructed { from } => from.iter().collect(),
-			DerivationRecord::PasswordExtracted { from } => vec![from],
 			DerivationRecord::ConcatFragment { of } => vec![of],
 			DerivationRecord::Initial
 			| DerivationRecord::Leaked { .. }

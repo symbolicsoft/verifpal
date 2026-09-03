@@ -190,7 +190,7 @@ enum Commands {
 			             queries in its place.\n\n\
 			             Verifpal derives a confidentiality query for every secret the protocol \
 			             uses, meaning everything a principal generates and everything it knows \
-			             privately or as a password; an authentication query for every sender \
+			             privately; an authentication query for every sender \
 			             and recipient pair where the recipient both receives a value and goes \
 			             on to use it inside a primitive; and a freshness query for every value \
 			             that travels over the wire and is used. The model's own queries block \

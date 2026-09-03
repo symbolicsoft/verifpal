@@ -1,19 +1,23 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 — each client's public key reaches the server unguarded, so
+// the attacker substitutes its own and the server seals that client's score
+// under a key it shares with the attacker rather than the client.
 
 attacker[active]
 
 principal Alice[
     knows private Alice_pass
     knows public Alice_id
-    Alice_priv = PW_HASH(Alice_pass)
+    Alice_priv = HASH(Alice_pass)
     Alice_pub = PUBKEY(Alice_priv)
 ]
 
 principal Bob[
     knows private Bob_pass
     knows public Bob_id
-    Bob_priv = PW_HASH(Bob_pass)
+    Bob_priv = HASH(Bob_pass)
     Bob_pub = PUBKEY(Bob_priv)
 ]
 

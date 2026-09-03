@@ -16,7 +16,7 @@
 //! The freshening rule is derived from syntax the language already has:
 //! `generates` constants and assignment outputs are per-session (renamed
 //! `c#s`, rebanded per [`COPY_BASE`]), while `knows
-//! public|private|password` constants are shared — exactly the
+//! public|private` constants are shared — exactly the
 //! long-term/per-session split `new` vs free names encodes in other tools.
 //! Guards stay session-pinned: `[c]` in session s protects that session's
 //! delivery only, the conservative reading under attack-soundness.

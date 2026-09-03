@@ -7,9 +7,7 @@ use crate::context::VerifyContext;
 use crate::info::{info_deduction, info_output_text};
 use crate::pretty::pretty_values;
 use crate::primitive::primitive_core_reveals_args;
-use crate::theory::{
-	can_decompose, can_recompose, can_reconstruct_primitive, find_obtainable_passwords,
-};
+use crate::theory::{can_decompose, can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 
@@ -37,7 +35,7 @@ static DEDUCTION_RULES: &[RuleGroup] = &[
 	},
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
-		rules: &[rule_equivalize, rule_password_extract, rule_concat_extract],
+		rules: &[rule_equivalize, rule_concat_extract],
 	},
 ];
 
@@ -298,39 +296,6 @@ fn rule_equivalize(
 				format!(
 					"{} obtained by equivalizing with the current resolution of {}.",
 					info_output_text(&sv.value),
-					value,
-				)
-			},
-		);
-	}
-	found
-}
-
-fn rule_password_extract(
-	ctx: &VerifyContext,
-	value: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	record: &Arc<MutationRecord>,
-) -> bool {
-	if !crate::theory::state_declares_passwords(ps) {
-		return false;
-	}
-	let mut passwords = Vec::new();
-	find_obtainable_passwords(value, false, true, attacker, ps, &mut passwords);
-	let mut found = false;
-	for password in &passwords {
-		found |= learn(
-			ctx,
-			password,
-			record,
-			DerivationRecord::PasswordExtracted {
-				from: value.clone(),
-			},
-			|| {
-				format!(
-					"{} obtained as a password unsafely used within {}.",
-					info_output_text(password),
 					value,
 				)
 			},
