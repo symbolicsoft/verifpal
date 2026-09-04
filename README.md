@@ -49,7 +49,7 @@ brew tap verifpal.com/source https://github.com/symbolicsoft/verifpal
 brew install verifpal
 ```
 
-Both give you automatic updates. Otherwise, grab a [release](https://github.com/symbolicsoft/verifpal/releases) for Windows, Linux, macOS or FreeBSD, or build from source.
+Both give you automatic updates. Otherwise, grab a [release](https://github.com/symbolicsoft/verifpal/releases) for Windows, Linux or macOS, or build from source.
 
 ### Building from Source
 
