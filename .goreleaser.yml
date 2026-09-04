@@ -14,6 +14,7 @@ builds:
   - id: verifpal
     builder: rust
     tool: cross
+    command: build
     binary: verifpal
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
