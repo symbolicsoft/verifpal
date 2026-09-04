@@ -1,283 +1,245 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// TLS 1.3 (RFC 9846, which obsoletes RFC 8446), one round trip,
-// server-authenticated only — the way a browser actually talks to a
-// website: the server proves its identity with a certificate signature,
-// the client proves nothing. The model follows the RFC closely: the
-// HKDF-based key schedule of §7.1 (early secret → handshake secret →
-// main secret, with "derived" steps between, and every Derive-Secret
-// separated by its own label string), the running transcript hash of
-// §4.1 folded into every derivation, an encrypted server flight carrying
-// EncryptedExtensions + Certificate + CertificateVerify + Finished,
-// Finished MACs keyed by the dedicated finished keys of §4.5.3, and
-// separate handshake-traffic and application-traffic secrets for each
-// direction.
-//
-// Expected: c0c1c1c1c1c1a0a1a1a0f0f0
-//
-// The verdict looks alarming and is in fact exactly the TLS security
-// story. Read the failures with care:
-//
-//   Everything the SERVER sends is protected:
-//     authentication? Server -> Client: serverFlight   HOLDS
-//     authentication? Server -> Client: appData2       HOLDS
-//     confidentiality? appMsg1                          HOLDS
-//     freshness? sApTraffic / cApTraffic                HOLD
-//   Verifpal's authentication query is injective agreement, so those two
-//   holds rule out replay as well as forgery, and one mechanism earns both.
-//   Every record here is sealed under a key descending from
-//   dhe = DH_KEX(gce, se), which mixes the client's key share with the
-//   server's. A flight captured from a concurrent handshake decrypts under
-//   that handshake's keys and nowhere else, so redelivering it here halts
-//   the client at AEAD_DEC rather than being accepted a second time. The
-//   freshness queries say the same thing from the other side: the traffic
-//   secrets descend from `se`, drawn anew per handshake, so no two runs
-//   share them. That is RFC 9846 §F.1's "uniqueness of the session keys".
-//   Note that --sessions 1 leaves the replay half of the claim untested. A
-//   second run has to exist before injective agreement can be broken at all.
-//   The client's data (appMsg1) stays confidential even though phase 1
-//   leaks the server's signature key: the session keys came from ephemeral
-//   Diffie-Hellman, so a later key compromise opens nothing recorded
-//   earlier — forward secrecy. And the CertificateVerify signature covers
-//   the transcript hash, which includes the client's own gce, so a client
-//   that completes its checked SIGNVERIF knows it shares keys with the
-//   genuine server: no man-in-the-middle can pass that gate.
-//
-//   Everything that depends on WHO THE CLIENT IS fails, because in this
-//   ceremony the client is nobody:
-//     authentication? Client -> Server: clientFinishedEnc   FAILS
-//     authentication? Client -> Server: appData1            FAILS
-//   The server will run the whole handshake with an attacker playing the
-//   client role (replacing gce with a key of its own choosing) — there is
-//   no client certificate to stop it.
-//     confidentiality? sHsTraffic/cHsTraffic/sApTraffic/cApTraffic  FAIL
-//     confidentiality? appMsg2                                       FAILS
-//   These are the SERVER's session secrets, and "the client" in some
-//   session may simply BE the attacker, in which case the server shares
-//   those secrets — and appMsg2, which it encrypts under them — with the
-//   attacker by design. A TLS session key is secret from third parties,
-//   not from your peer; when the peer is unauthenticated, a query about
-//   the server-side key fails. Add client certificates and these pass.
-//
-// This split — per-direction, per-role guarantees rather than one global
-// verdict — is the most important reading skill for real-world models.
+// PLACEHOLDER HEADER
 
 attacker[active]
 
+principal CA[
+	knows private caKey
+	caPk = PUBKEY(caKey)
+]
+
 principal Server[
-	// The server's long-term certificate signing key.
 	knows private sigKey
+	knows public serverName
 	gSigKey = PUBKEY(sigKey)
 ]
 
-// The certificate public key reaches the client guarded ([…]): this stands
-// in for the web PKI. The attacker may know it but not replace it.
-Server -> Client: [gSigKey]
+principal Client[
+	knows private clientSigKey
+	knows private clientId
+	clientPk = PUBKEY(clientSigKey)
+]
+
+principal Mallory[
+	knows private mkey
+	knows public mallName
+	gmSigKey = PUBKEY(mkey)
+	leaks mkey
+]
+
+Server -> CA: [gSigKey]
+Client -> CA: [clientPk]
+Mallory -> CA: [gmSigKey]
+
+principal CA[
+	knows public serverName, mallName
+	knows private clientId
+	serverCertSig = SIGN(caKey, CONCAT(serverName, gSigKey))
+	clientCertSig = SIGN(caKey, CONCAT(clientId, clientPk))
+	mallCertSig = SIGN(caKey, CONCAT(mallName, gmSigKey))
+]
+
+CA -> Server: [caPk], [serverCertSig]
+CA -> Client: [caPk], [clientCertSig]
+CA -> Mallory: [mallCertSig]
+
+principal Server[
+	serverCert = CONCAT(serverName, gSigKey, serverCertSig)
+]
+
+principal Mallory[
+	mallCert = CONCAT(mallName, gmSigKey, mallCertSig)
+]
+
+Server -> Client: [serverCert]
+Mallory -> Client: [mallCert]
 
 principal Client[
-	// ClientHello: a fresh ephemeral key share — RFC 9846 forbids reusing
-	// key shares between connections, hence `generates`. Unguarded on the
-	// wire: anyone can open a TLS connection, including the attacker.
-	generates ce
+	knows public peerCert
+	knows public hdr, updateNotRequested
+	knows public labelDerived, labelFinished
+	knows public labelSHsTraffic, labelCHsTraffic
+	knows public labelSApTraffic, labelCApTraffic
+	knows public labelExpMaster, labelResMaster
+	knows public labelResumption, labelTrafficUpd
+	knows public ctxServerCV, ctxClientCV
+	generates cr, ce
 	gce = PUBKEY(ce)
 ]
 
-Client -> Server: gce
+Client -> Server: cr, gce
 
 principal Server[
-	// Stand-in for the (empty) EncryptedExtensions message.
-	knows public noExtensions
-	// The §7.1 Derive-Secret labels ("derived", "finished",
-	// "s hs traffic", …). Every derivation carries its own public label
-	// string; this domain separation is what keeps the two directions'
-	// keys, the "derived" steps and the finished keys distinct even
-	// where they share the same secret.
+	knows public hdr, updateNotRequested
+	knows public noExtensions, certReqCtx
 	knows public labelDerived, labelFinished
 	knows public labelSHsTraffic, labelCHsTraffic
 	knows public labelSApTraffic, labelCApTraffic
-
-	// ServerHello: the server's ephemeral share.
-	generates se
+	knows public labelExpMaster, labelResMaster
+	knows public labelResumption, labelTrafficUpd
+	knows public ctxServerCV, ctxClientCV
+	generates sr, se
 	gse = PUBKEY(se)
-
 	dhe = DH_KEX(gce, se)
-
-	// The §7.1 key schedule. HKDF here stands in for both RFC functions:
-	// HKDF-Extract(salt, ikm) is HKDF(salt, ikm, nil), and
-	// Derive-Secret(secret, label, messages) is HKDF(secret, label,
-	// transcriptHash). With no PSK, the early secret is
-	// HKDF-Extract(0, 0) — a public value; secrecy enters only with dhe.
 	earlySecret = HKDF(nil, nil, nil)
 	derivedES = HKDF(earlySecret, labelDerived, nil)
 	handshakeSecret = HKDF(derivedES, dhe, nil)
-
-	// Transcript hash after ClientHello + ServerHello. Folding it into
-	// every derivation binds the keys to these exact key shares.
-	transcriptCH_SH = HASH(gce, gse)
-
-	// Handshake traffic secrets, one per direction.
-	sHsTraffic = HKDF(handshakeSecret, labelSHsTraffic, transcriptCH_SH)
-	cHsTraffic = HKDF(handshakeSecret, labelCHsTraffic, transcriptCH_SH)
-
+	transcriptSH = HASH(cr, gce, sr, gse)
+	sHsTraffic = HKDF(handshakeSecret, labelSHsTraffic, transcriptSH)
+	cHsTraffic = HKDF(handshakeSecret, labelCHsTraffic, transcriptSH)
 	derivedHS = HKDF(handshakeSecret, labelDerived, nil)
-	// The main secret — RFC 9846's name for what RFC 8446 called the
-	// master secret: HKDF-Extract with the derived secret as salt and a
-	// zero IKM.
 	mainSecret = HKDF(derivedHS, nil, nil)
-
-	// The transcript is a running hash (§4.1): each point extends the
-	// previous one with the messages since. This one reaches through
-	// EncryptedExtensions + Certificate.
-	transcriptCert = HASH(transcriptCH_SH, noExtensions, gSigKey)
-
-	// CertificateVerify (§4.5.2): the signature that authenticates the
-	// server. It covers the transcript INCLUDING gce, so it cannot be
-	// cut out of this session and replayed into another. At two sessions
-	// that last clause is checked rather than asserted: the injective
-	// authentication query on serverFlight is what fails if it stops being
-	// true. (The RFC also prepends a pad and context string before signing,
-	// for cross-protocol domain separation, elided here.)
-	certVerify = SIGN(sigKey, transcriptCert)
-
-	// Server Finished (§4.5.3): a MAC over the transcript through
-	// CertificateVerify, keyed by a dedicated finished key expanded from
-	// the handshake-traffic secret — not by the traffic secret itself.
+	transcriptCert = HASH(transcriptSH, noExtensions, certReqCtx, serverCert)
+	serverCV = SIGN(sigKey, CONCAT(ctxServerCV, transcriptCert))
 	sFinishedKey = HKDF(sHsTraffic, labelFinished, nil)
-	transcriptCV = HASH(transcriptCert, certVerify)
+	transcriptCV = HASH(transcriptCert, serverCV)
 	serverFinished = MAC(sFinishedKey, transcriptCV)
-
-	// The encrypted server flight: EncryptedExtensions, certificate,
-	// signature and Finished, sealed under the server handshake-traffic
-	// secret (standing in for the record keys §7.3 expands from it).
-	// The AEAD's additional data is the public record header (§5.2),
-	// nil here — it is the KEY that binds these bytes to the transcript.
-	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, gSigKey, certVerify, serverFinished), nil)
-
-	// Application-traffic secrets, derived once the transcript reaches
-	// through server Finished.
+	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(noExtensions, certReqCtx, serverCert, serverCV, serverFinished), hdr)
 	transcriptSFin = HASH(transcriptCV, serverFinished)
 	sApTraffic = HKDF(mainSecret, labelSApTraffic, transcriptSFin)
 	cApTraffic = HKDF(mainSecret, labelCApTraffic, transcriptSFin)
+	exporterSecret = HKDF(mainSecret, labelExpMaster, transcriptSFin)
 ]
 
-Server -> Client: gse, serverFlight
+Server -> Client: sr, gse, serverFlight
 
 principal Client[
-	knows public labelDerived, labelFinished
-	knows public labelSHsTraffic, labelCHsTraffic
-	knows public labelSApTraffic, labelCApTraffic
-
-	// The client mirrors the key schedule from its own view of the wire.
 	dhe_c = DH_KEX(gse, ce)
-
 	earlySecret_c = HKDF(nil, nil, nil)
 	derivedES_c = HKDF(earlySecret_c, labelDerived, nil)
 	handshakeSecret_c = HKDF(derivedES_c, dhe_c, nil)
-	transcriptCH_SH_c = HASH(gce, gse)
-	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptCH_SH_c)
-	cHsTraffic_c = HKDF(handshakeSecret_c, labelCHsTraffic, transcriptCH_SH_c)
+	transcriptSH_c = HASH(cr, gce, sr, gse)
+	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptSH_c)
+	cHsTraffic_c = HKDF(handshakeSecret_c, labelCHsTraffic, transcriptSH_c)
 	derivedHS_c = HKDF(handshakeSecret_c, labelDerived, nil)
 	mainSecret_c = HKDF(derivedHS_c, nil, nil)
-
-	// Three checked gates in a row — decrypt the flight, verify the
-	// certificate signature, verify Finished. Any failure halts the
-	// client. This chain is why the client's session cannot be MitM'd.
-	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, nil)?
-
-	ee_c, serverPubKey, certVerify_c, serverFinished_c = SPLIT(serverFlightDec)
-
-	// The client extends its running transcript with what it actually
-	// RECEIVED in the flight (§4.1) — but the signature is checked
-	// against gSigKey, the PKI-pinned key from the guarded message, not
-	// against whatever key was in the flight.
-	transcriptCert_c = HASH(transcriptCH_SH_c, ee_c, serverPubKey)
-	sigValid = SIGNVERIF(gSigKey, transcriptCert_c, certVerify_c)?
-
+	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, hdr)?
+	ee_c, certReqCtx_c, serverCert_c, serverCV_c, serverFinished_c = SPLIT(serverFlightDec)?
+	certName_c, certKey_c, certSig_c = SPLIT(serverCert_c)?
+	_ = SIGNVERIF(caPk, CONCAT(certName_c, certKey_c), certSig_c)?
+	expName, _, _ = SPLIT(peerCert)
+	_ = ASSERT(certName_c, expName)?
+	transcriptCert_c = HASH(transcriptSH_c, ee_c, certReqCtx_c, serverCert_c)
+	_ = SIGNVERIF(certKey_c, CONCAT(ctxServerCV, transcriptCert_c), serverCV_c)?
 	sFinishedKey_c = HKDF(sHsTraffic_c, labelFinished, nil)
-	transcriptCV_c = HASH(transcriptCert_c, certVerify_c)
-	expectedFinished = MAC(sFinishedKey_c, transcriptCV_c)
-	finishedValid = ASSERT(serverFinished_c, expectedFinished)?
-
+	transcriptCV_c = HASH(transcriptCert_c, serverCV_c)
+	expectedSF = MAC(sFinishedKey_c, transcriptCV_c)
+	_ = ASSERT(serverFinished_c, expectedSF)?
 	transcriptSFin_c = HASH(transcriptCV_c, serverFinished_c)
-
-	// Client Finished: a MAC, not a signature — it proves key possession,
-	// not identity. This is precisely why client-to-server authentication
-	// fails: any key holder can produce it, and the attacker playing the
-	// client role holds the keys of its own session.
-	cFinishedKey = HKDF(cHsTraffic_c, labelFinished, nil)
-	clientFinished = MAC(cFinishedKey, transcriptSFin_c)
-
-	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, nil)
-
 	sApTraffic_c = HKDF(mainSecret_c, labelSApTraffic, transcriptSFin_c)
 	cApTraffic_c = HKDF(mainSecret_c, labelCApTraffic, transcriptSFin_c)
-]
-
-Client -> Server: clientFinishedEnc
-
-principal Server[
-	clientFinishedDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, nil)?
-
-	// The server expects the client's Finished under the client-side
-	// finished key, over the transcript through server Finished (§4.5).
-	cFinishedKey_s = HKDF(cHsTraffic, labelFinished, nil)
-	expectedCF = MAC(cFinishedKey_s, transcriptSFin)
-	cfValid = ASSERT(clientFinishedDec, expectedCF)?
-]
-
-// Application data, one message in each direction, under the
-// per-direction application-traffic secrets.
-principal Client[
+	exporterSecret_c = HKDF(mainSecret_c, labelExpMaster, transcriptSFin_c)
+	clientCert = CONCAT(certReqCtx_c, clientId, clientPk, clientCertSig)
+	transcriptCCert = HASH(transcriptSFin_c, clientCert)
+	clientCV = SIGN(clientSigKey, CONCAT(ctxClientCV, transcriptCCert))
+	transcriptCCV = HASH(transcriptCCert, clientCV)
+	cFinishedKey_c = HKDF(cHsTraffic_c, labelFinished, nil)
+	clientFinished = MAC(cFinishedKey_c, transcriptCCV)
+	clientFlight = AEAD_ENC(cHsTraffic_c, CONCAT(clientCert, clientCV, clientFinished), hdr)
+	transcriptCFin_c = HASH(transcriptCCV, clientFinished)
+	resumptionSecret_c = HKDF(mainSecret_c, labelResMaster, transcriptCFin_c)
 	generates appMsg1
-	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, nil)
+	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, hdr)
 ]
 
-Client -> Server: appData1
+Client -> Server: clientFlight, appData1
 
 principal Server[
-	appMsg1_dec = AEAD_DEC(cApTraffic, appData1, nil)?
-]
-
-principal Server[
+	clientFlightDec = AEAD_DEC(cHsTraffic, clientFlight, hdr)?
+	clientCert_s, clientCV_s, clientFinished_s = SPLIT(clientFlightDec)?
+	ctx_s, clientId_s, clientPk_s, clientCertSig_s = SPLIT(clientCert_s)?
+	_ = ASSERT(ctx_s, certReqCtx)?
+	_ = SIGNVERIF(caPk, CONCAT(clientId_s, clientPk_s), clientCertSig_s)?
+	transcriptCCert_s = HASH(transcriptSFin, clientCert_s)
+	_ = SIGNVERIF(clientPk_s, CONCAT(ctxClientCV, transcriptCCert_s), clientCV_s)?
+	transcriptCCV_s = HASH(transcriptCCert_s, clientCV_s)
+	cFinishedKey_s = HKDF(cHsTraffic, labelFinished, nil)
+	expectedCF = MAC(cFinishedKey_s, transcriptCCV_s)
+	_ = ASSERT(clientFinished_s, expectedCF)?
+	transcriptCFin = HASH(transcriptCCV_s, clientFinished_s)
+	resumptionSecret = HKDF(mainSecret, labelResMaster, transcriptCFin)
+	appMsg1_s = AEAD_DEC(cApTraffic, appData1, hdr)?
+	generates ticketNonce1, ticketNonce2
+	resPsk1 = HKDF(resumptionSecret, labelResumption, ticketNonce1)
+	resPsk2 = HKDF(resumptionSecret, labelResumption, ticketNonce2)
+	nst1 = AEAD_ENC(sApTraffic, ticketNonce1, hdr)
+	nst2 = AEAD_ENC(sApTraffic, ticketNonce2, hdr)
 	generates appMsg2
-	appData2 = AEAD_ENC(sApTraffic, appMsg2, nil)
+	appData2 = AEAD_ENC(sApTraffic, appMsg2, hdr)
+	keyUpdate = AEAD_ENC(sApTraffic, updateNotRequested, hdr)
+	sApTraffic1 = HKDF(sApTraffic, labelTrafficUpd, nil)
+	generates appMsg3
+	appData3 = AEAD_ENC(sApTraffic1, appMsg3, hdr)
 ]
 
-Server -> Client: appData2
+Server -> Client: nst1, nst2, appData2, keyUpdate, appData3
 
 principal Client[
-	appMsg2_dec = AEAD_DEC(sApTraffic_c, appData2, nil)?
+	ticketNonce1_c = AEAD_DEC(sApTraffic_c, nst1, hdr)?
+	ticketNonce2_c = AEAD_DEC(sApTraffic_c, nst2, hdr)?
+	resPsk1_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce1_c)
+	resPsk2_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce2_c)
+	appMsg2_c = AEAD_DEC(sApTraffic_c, appData2, hdr)?
+	keyUpdate_c = AEAD_DEC(sApTraffic_c, keyUpdate, hdr)?
+	_ = ASSERT(keyUpdate_c, updateNotRequested)?
+	sApTraffic1_c = HKDF(sApTraffic_c, labelTrafficUpd, nil)
+	appMsg3_c = AEAD_DEC(sApTraffic1_c, appData3, hdr)?
 ]
 
 phase[1]
 
 principal Server[
-	// The server's certificate key is compromised AFTER the session.
-	// appMsg1's confidentiality surviving this is the forward-secrecy
-	// guarantee of ephemeral Diffie-Hellman.
 	leaks sigKey
 ]
 
+principal Client[
+	leaks clientSigKey
+]
+
+phase[2]
+
+principal Server[
+	leaks sApTraffic1, resPsk1
+]
+
+scenarios[
+	Client[peerCert = serverCert]
+	Client[peerCert = mallCert]
+]
+
 queries[
+	confidentiality? sHsTraffic
+	confidentiality? sHsTraffic[
+		precondition[Server -> Client: appData2]
+	]
+	confidentiality? cHsTraffic_c[
+		precondition[Client -> Server: clientFlight]
+	]
+	confidentiality? sApTraffic[
+		precondition[Server -> Client: appData2]
+	]
+	confidentiality? cApTraffic_c[
+		precondition[Client -> Server: clientFlight]
+	]
+	confidentiality? exporterSecret[
+		precondition[Server -> Client: appData2]
+	]
+	equivalence? sApTraffic, sApTraffic_c[
+		precondition[Server -> Client: appData2]
+		precondition[Client -> Server: clientFlight]
+	]
 	confidentiality? appMsg1
 	confidentiality? appMsg2
-
-	confidentiality? sHsTraffic
-	confidentiality? cHsTraffic
-
-	confidentiality? sApTraffic
-	confidentiality? cApTraffic
-
+	confidentiality? appMsg3
+	confidentiality? resPsk2
+	confidentiality? clientId
 	authentication? Server -> Client: serverFlight
-
-	authentication? Client -> Server: clientFinishedEnc
-
+	authentication? Client -> Server: clientFlight
 	authentication? Client -> Server: appData1
 	authentication? Server -> Client: appData2
-
-	// RFC 9846 §F.1, "uniqueness of the session keys": both traffic
-	// secrets descend from the server's per-handshake `se`.
+	authentication? Server -> Client: appData3
 	freshness? sApTraffic
-	freshness? cApTraffic
+	freshness? cApTraffic_c
 ]
