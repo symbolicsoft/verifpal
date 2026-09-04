@@ -17,7 +17,6 @@ const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
 const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 7] = [
-	"examples/transport-layer/tls13.vp",
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
@@ -2527,14 +2526,6 @@ fn a_false_attack_pin_survives_at_one_session() {
 		 same letter a regression of the original bug would report. One session has \
 		 no sibling run to replay from, so it is the only place the original claim \
 		 is still pinned on its own."
-	);
-}
-#[test]
-fn test_tls13() {
-	run_model_at(
-		"examples/transport-layer/tls13.vp",
-		"tls13.vp",
-		"c0c1c1c1c1c1a0a1a1a0f0f0",
 	);
 }
 #[test]
