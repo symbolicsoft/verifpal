@@ -1,0 +1,94 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0c1c1 at one session and at two.
+//
+// history_closure_incompatible.vp with Alice computing sealed and receipt
+// before her signature and confirmation checks and sending them after. The
+// seed is learned only where Bob was handed the attacker's ephemeral key, and
+// in that execution Alice's SIGNVERIF fails before the send, so sealed never
+// reaches the wire. A halted run is truncated at the failing check and still
+// holds every slot declared before it, so the closure gate has to ask whether
+// the emission was reached rather than whether the slot exists: reading the
+// slot as reached let the pinned false attack back in through nothing more
+// than a change of declaration order. The leaks in phases 1 and 2 are what
+// make root and kem_seed genuine, as in the model this one is derived from.
+
+attacker[active]
+
+principal Alice[
+	knows private alice_ltk
+	knows public ctx
+	alice_ltpk = PUBKEY(alice_ltk)
+	generates alice_eph
+	alice_ephpk = PUBKEY(alice_eph)
+]
+
+principal Bob[
+	knows private bob_ltk
+	knows public ctx
+	bob_ltpk = PUBKEY(bob_ltk)
+	generates bob_eph
+	bob_ephpk = PUBKEY(bob_eph)
+	generates kem_seed
+]
+
+Alice -> Bob: [alice_ltpk], alice_ephpk
+Bob -> Alice: [bob_ltpk], bob_ephpk
+
+principal Bob[
+	kem_ss, kem_ct = KEM_ENCAP(alice_ephpk, kem_seed)
+	dh_ss = DH_KEX(alice_ephpk, bob_eph)
+	transcript = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root, chain, auth_key = HKDF(CONCAT(dh_ss, kem_ss), transcript, ctx)
+	bob_sig = SIGN(bob_ltk, HASH(transcript, root))
+	confirm = MAC(auth_key, transcript)
+]
+
+Bob -> Alice: kem_ct, bob_sig, confirm
+
+principal Alice[
+	kem_ss_a = KEM_DECAP(alice_eph, kem_ct)
+	dh_ss_a = DH_KEX(bob_ephpk, alice_eph)
+	transcript_a = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root_a, chain_a, auth_key_a = HKDF(CONCAT(dh_ss_a, kem_ss_a), transcript_a, ctx)
+	generates payload
+	sealed = AEAD_ENC(root_a, payload, transcript_a)
+	receipt = MAC(chain_a, sealed)
+	_ = SIGNVERIF(bob_ltpk, HASH(transcript_a, root_a), bob_sig)?
+	_ = ASSERT(confirm, MAC(auth_key_a, transcript_a))?
+]
+
+Alice -> Bob: sealed, receipt
+
+principal Bob[
+	_ = ASSERT(receipt, MAC(chain, sealed))?
+	payload_b = AEAD_DEC(root, sealed, transcript)?
+	ack = HASH(payload_b, chain)
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	_ = ASSERT(ack, HASH(payload, chain_a))?
+]
+
+phase[1]
+
+principal Bob[
+	leaks bob_eph
+]
+
+phase[2]
+
+principal Alice[
+	leaks alice_ltk
+]
+
+phase[3]
+
+queries[
+	confidentiality? payload
+	confidentiality? root
+	confidentiality? kem_seed
+]

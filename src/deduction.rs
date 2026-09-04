@@ -114,6 +114,7 @@ fn learn(
 	message: impl FnOnce() -> String,
 ) -> bool {
 	if attacker.knows(value).is_none()
+		&& !ctx.attacker_knows(value)
 		&& !combination_coheres(ctx, km, ps, attacker, record, &derivation)
 	{
 		return false;
@@ -181,29 +182,65 @@ fn combination_coheres(
 	let Walk {
 		reads, mut union, ..
 	} = walk;
-	if union.is_empty() {
-		return true;
-	}
 	for read in &reads {
 		if !merge_into(&read.needs, &mut union) {
 			return false;
 		}
 	}
-	union.sort_by_key(|(slot, _)| *slot);
-	let signature = crate::context::diffs_signature(&union);
-	if reads.iter().all(|read| read.signature == signature) {
+	if union.is_empty() {
 		return true;
 	}
-	let replayed = ctx.replayed(km, &union, attacker);
-	reads
-		.iter()
-		.filter(|read| read.signature != signature)
-		.all(|read| {
-			let Some(state) = replayed.iter().find(|state| state.id == read.reader) else {
-				return true;
-			};
-			read.slot < state.values.len() && !state.slot_unreached(read.slot)
-		})
+	union.sort_by_key(|(state, slot, _)| (*state, *slot));
+	let signature = needs_signature(&union);
+	let differs = |read: &Read| read.signature != signature || !same_needs(&read.needs, &union);
+	if !reads.iter().any(differs) {
+		return true;
+	}
+	let Some(replayed) = ctx.replayed(km, &seeds_of(&union), attacker) else {
+		return false;
+	};
+	reads.iter().filter(|read| differs(read)).all(|read| {
+		let Some(state) = replayed.iter().find(|state| state.id == read.reader) else {
+			return true;
+		};
+		read.slot < state.values.len()
+			&& !state.slot_unreached(read.slot)
+			&& !state.withheld_by_own_halt(read.slot)
+	})
+}
+
+type Need = (PrincipalId, SlotIdx, Value);
+
+fn needs_signature(needs: &[Need]) -> u64 {
+	let mut hash = 0xcbf2_9ce4_8422_2325u64;
+	let mut mix = |word: u64| {
+		hash ^= word;
+		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+	};
+	for (state, slot, value) in needs {
+		mix(u64::from(*state));
+		mix(slot.get() as u64);
+		mix(value.hash_value());
+	}
+	hash
+}
+
+fn same_needs(a: &[Need], b: &[Need]) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b.iter())
+			.all(|((sa, ia, va), (sb, ib, vb))| sa == sb && ia == ib && va.equivalent(vb, true))
+}
+
+fn seeds_of(union: &[Need]) -> crate::reexec::Seeds {
+	let mut seeds: crate::reexec::Seeds = Vec::new();
+	for (state, slot, value) in union {
+		match seeds.iter_mut().find(|(principal, _)| principal == state) {
+			Some((_, mine)) => mine.push((*slot, value.clone())),
+			None => seeds.push((*state, vec![(*slot, value.clone())])),
+		}
+	}
+	seeds
 }
 
 type ConeCache = IdMap<(PrincipalId, usize), Arc<Vec<usize>>>;
@@ -247,12 +284,12 @@ fn any_taint(attacker: &AttackerState) -> bool {
 	})
 }
 
-fn tainted(record: &MutationRecord) -> Vec<(SlotIdx, Value)> {
+fn tainted(record: &MutationRecord) -> Vec<Need> {
 	record
 		.diffs
 		.iter()
 		.filter(|diff| diff.tainted)
-		.map(|diff| (diff.index, diff.value.clone()))
+		.map(|diff| (diff.state, diff.index, diff.value.clone()))
 		.collect()
 }
 
@@ -261,30 +298,46 @@ fn tainted(record: &MutationRecord) -> Vec<(SlotIdx, Value)> {
 struct Read {
 	slot: usize,
 	reader: PrincipalId,
-	needs: Vec<(SlotIdx, Value)>,
+	needs: Vec<Need>,
 	signature: u64,
 }
 
-/// Merge a substitution into the union, reporting a contradiction: two reads
-/// that need different values at one slot cannot both have happened,
-/// whatever a replay would show.
-fn merge_absorb(needs: &[(SlotIdx, Value)], union: &mut Vec<(SlotIdx, Value)>) {
-	for (slot, value) in needs {
-		if !union.iter().any(|(held, _)| held == slot) {
-			union.push((*slot, value.clone()));
+fn merge_absorb(needs: &[Need], union: &mut Vec<Need>) {
+	for (state, slot, value) in needs {
+		if !union
+			.iter()
+			.any(|(held_state, held, _)| held_state == state && held == slot)
+		{
+			union.push((*state, *slot, value.clone()));
 		}
 	}
 }
 
-fn merge_into(needs: &[(SlotIdx, Value)], union: &mut Vec<(SlotIdx, Value)>) -> bool {
+/// Merge a substitution into the union, reporting a contradiction: two reads
+/// that need different values at one slot of one principal cannot both have
+/// happened, whatever a replay would show.
+fn merge_into(needs: &[Need], union: &mut Vec<Need>) -> bool {
 	let mut coherent = true;
-	for (slot, value) in needs {
-		match union.iter().find(|(held, _)| held == slot) {
-			Some((_, held)) => coherent &= held.equivalent(value, true),
-			None => union.push((*slot, value.clone())),
+	for (state, slot, value) in needs {
+		match union
+			.iter()
+			.find(|(held_state, held, _)| held_state == state && held == slot)
+		{
+			Some((_, _, held)) => coherent &= held.equivalent(value, true),
+			None => union.push((*state, *slot, value.clone())),
 		}
 	}
 	coherent
+}
+
+/// The accumulators the read walk fills: which known terms it has already
+/// visited, the per-term precondition memo, the reads it found, and the union
+/// of every record it passed through.
+struct Walk {
+	seen: Vec<usize>,
+	memo: IdMap<usize, Vec<Need>>,
+	reads: Vec<Read>,
+	union: Vec<Need>,
 }
 
 /// The reads an ingredient rests on, whether or not the attacker holds it as
@@ -298,16 +351,6 @@ fn merge_into(needs: &[(SlotIdx, Value)], union: &mut Vec<(SlotIdx, Value)>) -> 
 /// the cascade itself which arguments it rebuilt from, and follows those; it
 /// does not guess at routes, since a route the cascade did not take would
 /// refuse combinations that are sound.
-/// The accumulators the read walk fills: which known terms it has already
-/// visited, the per-term precondition memo, the reads it found, and the union
-/// of every record it passed through.
-struct Walk {
-	seen: Vec<usize>,
-	memo: IdMap<usize, Vec<(SlotIdx, Value)>>,
-	reads: Vec<Read>,
-	union: Vec<(SlotIdx, Value)>,
-}
-
 fn collect_reads(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -353,10 +396,6 @@ fn collect_reads(
 
 /// The reads a known term bottoms out in.
 fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, walk: &mut Walk) {
-	if let Some(record) = attacker.record(idx) {
-		let taints = tainted(record);
-		merge_absorb(&taints, &mut walk.union);
-	}
 	if walk.seen.contains(&idx.get()) {
 		return;
 	}
@@ -382,7 +421,7 @@ fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, w
 			walk.reads.push(Read {
 				slot: slot.get(),
 				reader,
-				signature: crate::context::diffs_signature(&needs),
+				signature: needs_signature(&needs),
 				needs,
 			});
 		}
@@ -407,10 +446,10 @@ fn read_preconditions(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	idx: KnownIdx,
-	memo: &mut IdMap<usize, Vec<(SlotIdx, Value)>>,
+	memo: &mut IdMap<usize, Vec<Need>>,
 	active: &mut Vec<usize>,
 	cut: &mut bool,
-) -> Vec<(SlotIdx, Value)> {
+) -> Vec<Need> {
 	if let Some(hit) = memo.get(&idx.get()) {
 		return hit.clone();
 	}
@@ -419,7 +458,7 @@ fn read_preconditions(
 		return Vec::new();
 	}
 	active.push(idx.get());
-	let mut out: Vec<(SlotIdx, Value)> = Vec::new();
+	let mut out: Vec<Need> = Vec::new();
 	let (slot, record) = match (attacker.derivation(idx), attacker.record(idx)) {
 		(
 			Some(DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot }),
@@ -432,13 +471,12 @@ fn read_preconditions(
 					for need in
 						read_preconditions(km, attacker, inner, memo, active, &mut inner_cut)
 					{
-						if !out.iter().any(|(held, _)| *held == need.0) {
-							out.push(need);
-						}
+						merge_absorb(&[need], &mut out);
 					}
 					*cut |= inner_cut;
 				}
 			}
+			out.sort_by_key(|(state, slot, _)| (*state, *slot));
 			active.pop();
 			if !*cut {
 				memo.insert(idx.get(), out.clone());
@@ -459,20 +497,16 @@ fn read_preconditions(
 		else {
 			continue;
 		};
-		if !out.iter().any(|(held, _)| held.get() == at) {
-			out.push((diff.index, diff.value.clone()));
-		}
+		merge_absorb(&[(reader, diff.index, diff.value.clone())], &mut out);
 		if let Some(inner) = attacker.knows(&diff.value) {
 			let mut inner_cut = false;
 			for need in read_preconditions(km, attacker, inner, memo, active, &mut inner_cut) {
-				if !out.iter().any(|(held, _)| *held == need.0) {
-					out.push(need);
-				}
+				merge_absorb(&[need], &mut out);
 			}
 			*cut |= inner_cut;
 		}
 	}
-	out.sort_by_key(|(slot, _)| *slot);
+	out.sort_by_key(|(state, slot, _)| (*state, *slot));
 	active.pop();
 	if !*cut {
 		memo.insert(idx.get(), out.clone());
@@ -502,11 +536,11 @@ fn reach_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Arc<Ve
 
 fn reach_cone_uncached(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Vec<usize> {
 	let mut out = own_cone(km, principal, slot);
-	let Some(declared_at) = km.slots.get(slot).map(|s| s.declared_at) else {
+	let Some(emitted_at) = km.slots.get(slot).map(|s| emitted_at(km, s, principal)) else {
 		return out;
 	};
 	for (at, trace_slot) in km.slots.iter().enumerate() {
-		if trace_slot.creator != principal || trace_slot.declared_at >= declared_at {
+		if trace_slot.creator != principal || trace_slot.declared_at >= emitted_at {
 			continue;
 		}
 		let checked = matches!(&trace_slot.initial_value, Value::Primitive(p) if p.instance_check);
@@ -520,6 +554,26 @@ fn reach_cone_uncached(km: &ProtocolTrace, principal: PrincipalId, slot: usize) 
 		}
 	}
 	out
+}
+
+fn emitted_at(km: &ProtocolTrace, slot: &TraceSlot, principal: PrincipalId) -> i32 {
+	let sent = slot
+		.sent_by
+		.iter()
+		.filter(|event| event.sender == principal)
+		.map(|event| event.declared_at)
+		.min();
+	let leaked = km
+		.leaks
+		.iter()
+		.filter(|leak| leak.principal_id == principal && leak.constant_id == slot.constant.id)
+		.map(|leak| leak.declared_at)
+		.min();
+	match (sent, leaked) {
+		(Some(a), Some(b)) => a.min(b),
+		(Some(a), None) | (None, Some(a)) => a,
+		(None, None) => slot.declared_at,
+	}
 }
 
 /// The slots a slot's value is built from within one principal's own

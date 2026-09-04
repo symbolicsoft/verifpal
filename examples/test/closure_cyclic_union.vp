@@ -1,0 +1,39 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c1c0 at one session and at two.
+//
+// z1 needs Bob handed s := HASH(n) and z2 needs Bob handed n := HASH(s), each a
+// genuine attack on its own. z needs both tags from one run of Bob, and no
+// execution has them: the union of the two installs defines each slot in terms
+// of the other, so the replay of that execution cannot run at all. A replay
+// that cannot run is not an execution in which every read was reached, and the
+// gate has to refuse the combination rather than admit it because there was
+// no state to check against.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates n
+	generates s
+	z1 = HASH(MAC(k, HASH(n)))
+	z2 = HASH(MAC(k, HASH(s)))
+	z = HASH(MAC(k, HASH(n)), MAC(k, HASH(s)))
+]
+
+Alice -> Bob: n, s
+
+principal Bob[
+	knows private k
+	m1 = MAC(k, s)
+	m2 = MAC(k, n)
+]
+
+Bob -> Alice: m1, m2
+
+queries[
+	confidentiality? z1
+	confidentiality? z2
+	confidentiality? z
+]

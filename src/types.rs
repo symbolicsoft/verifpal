@@ -1455,6 +1455,7 @@ pub struct SlotDiff {
 	pub constant: Constant,
 	pub value: Value,
 	pub tainted: bool,
+	pub state: PrincipalId,
 }
 
 #[derive(Clone, Debug)]

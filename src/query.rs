@@ -229,7 +229,7 @@ fn carries_a_secret(v: &Value, ps: &PrincipalState, seen: &mut Vec<ValueId>) -> 
 			match ps.index_of(c) {
 				Some(i) => match &ps.values[i].value {
 					Value::Constant(inner) if inner.id == c.id => false,
-					inner => carries_a_secret(&inner.clone(), ps, seen),
+					inner => carries_a_secret(inner, ps, seen),
 				},
 				None => false,
 			}

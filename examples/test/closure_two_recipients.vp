@@ -1,0 +1,50 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// One constant, m, travels to two recipients. Handing Bob t1 and Carol t2 in
+// the same execution makes them answer HASH(kb, t1) and HASH(kc, t2), which is
+// exactly the key Alice sealed secret under. The closure gate combines the two
+// reads, so it must key each read's precondition by the principal that was
+// handed the value: keyed by slot alone, Bob's t1 and Carol's t2 read as a
+// contradiction and the genuine attack is refused. Carol's answer is also first
+// learned out of Bob's state, which re-resolves Carol's slot with Bob's own
+// input, so the precondition has to be recorded against the slot's creator
+// rather than against the state it happened to be read from.
+
+attacker[active]
+
+principal Alice[
+	knows private kb
+	knows private kc
+	knows public t1
+	knows public t2
+	generates secret
+	generates m
+	key = HASH(HASH(kb, t1), HASH(kc, t2))
+	z = ENC(key, secret)
+	leaks z
+]
+
+Alice -> Bob: m
+
+Alice -> Carol: m
+
+principal Bob[
+	knows private kb
+	o1 = HASH(kb, m)
+]
+
+Bob -> Alice: o1
+
+principal Carol[
+	knows private kc
+	o2 = HASH(kc, m)
+]
+
+Carol -> Alice: o2
+
+queries[
+	confidentiality? secret
+]

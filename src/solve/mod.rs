@@ -312,23 +312,20 @@ fn propose(
 		}
 	}
 
+	let honest = honest_slot_terms(km, ps, sym);
 	let keyed: Vec<Substitution> = proposals
 		.iter()
 		.flat_map(|proposal| {
 			[
-				keyed_free(km, ps, sym, proposal),
-				preserved_free(km, ps, sym, proposal, attacker),
+				keyed_free(&honest, sym, proposal),
+				preserved_free(&honest, sym, proposal, attacker),
 			]
 		})
 		.flatten()
 		.collect();
 	proposals.extend(keyed);
 
-	let honest = honest_slot_terms(km, ps, sym);
-	let aligned: Vec<Substitution> = proposals
-		.iter()
-		.flat_map(|proposal| aligned_held_free(&honest, sym, proposal, attacker, &protocol))
-		.collect();
+	let aligned = aligned_held_free(&honest, sym, &proposals, attacker, &protocol);
 	proposals.extend(aligned);
 
 	if results
@@ -404,25 +401,23 @@ fn dispose(
 }
 
 fn keyed_free(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	honest: &[Value],
 	sym: &SymbolicState,
 	proposal: &Substitution,
 ) -> Option<Substitution> {
-	fill_aligned(km, ps, sym, proposal, &|honest| {
+	fill_aligned_with(honest, sym, proposal, &|honest| {
 		crate::primitive::value_is_key_derivation(honest)
 			.then(crate::primitive::attacker_public_key)
 	})
 }
 
 fn preserved_free(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	honest: &[Value],
 	sym: &SymbolicState,
 	proposal: &Substitution,
 	attacker: &AttackerState,
 ) -> Option<Substitution> {
-	fill_aligned(km, ps, sym, proposal, &|honest| {
+	fill_aligned_with(honest, sym, proposal, &|honest| {
 		if crate::primitive::value_is_key_derivation(honest) {
 			return Some(crate::primitive::attacker_public_key());
 		}
@@ -432,15 +427,22 @@ fn preserved_free(
 	})
 }
 
+type HeldShape = (PrimitiveId, usize, usize, u64);
+
+fn held_shape(p: &Primitive) -> Option<HeldShape> {
+	let first = p.arguments.first()?;
+	Some((p.id, p.output, p.arguments.len(), first.hash_value()))
+}
+
 fn aligned_held_free(
 	honest: &[Value],
 	sym: &SymbolicState,
-	proposal: &Substitution,
+	proposals: &[Substitution],
 	attacker: &AttackerState,
 	protocol: &IdSet<u64>,
 ) -> Vec<Substitution> {
-	let mut out = Vec::new();
-	for held in attacker.known.iter() {
+	let mut index: IdMap<HeldShape, Vec<usize>> = IdMap::default();
+	for (i, held) in attacker.known.iter().enumerate() {
 		let Value::Primitive(h) = held else {
 			continue;
 		};
@@ -450,38 +452,103 @@ fn aligned_held_free(
 		{
 			continue;
 		}
-		let filler = |honest: &Value| -> Option<Value> {
-			let Value::Primitive(p) = honest else {
-				return None;
-			};
-			let aligned = p.id == h.id
-				&& p.output == h.output
-				&& p.arguments.len() == h.arguments.len()
-				&& p.arguments
-					.first()
-					.zip(h.arguments.first())
-					.is_some_and(|(a, b)| a.equivalent(b, true))
-				&& !held.equivalent(honest, true);
-			aligned.then(|| held.clone())
+		if let Some(shape) = held_shape(h) {
+			index.entry(shape).or_default().push(i);
+		}
+	}
+	if index.is_empty() {
+		return Vec::new();
+	}
+	let aligned = |occupant: &Value, held: &Value| -> bool {
+		let (Value::Primitive(p), Value::Primitive(h)) = (occupant, held) else {
+			return false;
 		};
-		if let Some(filled) = fill_aligned_with(honest, sym, proposal, &filler) {
+		p.id == h.id
+			&& p.output == h.output
+			&& p.arguments.len() == h.arguments.len()
+			&& p.arguments
+				.first()
+				.zip(h.arguments.first())
+				.is_some_and(|(a, b)| a.equivalent(b, true))
+			&& !held.equivalent(occupant, true)
+	};
+	let mut out = Vec::new();
+	for proposal in proposals {
+		let positions = free_positions(honest, sym, proposal);
+		let mut candidates: Vec<usize> = Vec::new();
+		for (_, occupant) in &positions {
+			let Value::Primitive(p) = occupant else {
+				continue;
+			};
+			if let Some(bucket) = held_shape(p).and_then(|shape| index.get(&shape)) {
+				candidates.extend(bucket);
+			}
+		}
+		candidates.sort_unstable();
+		candidates.dedup();
+		for i in candidates {
+			let held = &attacker.known[i];
+			if !positions
+				.iter()
+				.any(|(_, occupant)| aligned(occupant, held))
+			{
+				continue;
+			}
+			let mut filled = proposal.clone();
+			for (var, occupant) in &positions {
+				if !filled.contains_key(var) && aligned(occupant, held) {
+					filled.insert(*var, held.clone());
+				}
+			}
 			out.push(filled);
 		}
 	}
 	out
 }
 
-fn fill_aligned(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
+fn free_positions<'a>(
+	honest: &'a [Value],
 	sym: &SymbolicState,
 	proposal: &Substitution,
-	filler: &dyn Fn(&Value) -> Option<Value>,
-) -> Option<Substitution> {
-	fill_aligned_with(&honest_slot_terms(km, ps, sym), sym, proposal, filler)
+) -> Vec<(ValueId, &'a Value)> {
+	let mut out = Vec::new();
+	for (at, &slot) in sym.var_slots.iter().enumerate() {
+		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
+			continue;
+		}
+		let Some(term) = sym.var_terms.get(slot).and_then(Option::as_ref) else {
+			continue;
+		};
+		let Some(honest) = honest.get(at) else {
+			continue;
+		};
+		collect_free_positions(&vars::apply(term, proposal), honest, proposal, &mut out);
+	}
+	out
 }
 
-/// The honest term behind each variable slot, resolved once. `fill_aligned` is
+fn collect_free_positions<'a>(
+	proposed: &Value,
+	honest: &'a Value,
+	proposal: &Substitution,
+	out: &mut Vec<(ValueId, &'a Value)>,
+) {
+	match (proposed, honest) {
+		(Value::Constant(c), _) => {
+			if vars::is_free_var_id(c.id) && !proposal.contains_key(&c.id) {
+				out.push((c.id, honest));
+			}
+		}
+		(Value::Primitive(p), Value::Primitive(h)) if p.id == h.id => {
+			for (a, b) in p.arguments.iter().zip(h.arguments.iter()) {
+				collect_free_positions(a, b, proposal, out);
+			}
+		}
+		_ => {}
+	}
+}
+
+/// The honest term behind each variable slot, resolved once. `fill_aligned_with` is
 /// called for every proposal and, for the aligned family, for every held term
 /// besides, so resolving the whole trace inside that loop is the difference
 /// between a constant factor and a multiplicative one.

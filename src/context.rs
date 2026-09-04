@@ -30,7 +30,13 @@ use crate::util::*;
 use crate::value::compute_slot_diffs;
 
 type Execution = (PrincipalId, Vec<(SlotIdx, Value)>);
-type Replay = (u64, i32, usize, Arc<Vec<PrincipalState>>);
+type Replay = (
+	u64,
+	crate::reexec::Seeds,
+	i32,
+	usize,
+	Option<Arc<Vec<PrincipalState>>>,
+);
 
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
@@ -60,17 +66,30 @@ pub(crate) struct VerifyContext {
 	cancel: Arc<AtomicBool>,
 }
 
-pub(crate) fn diffs_signature(diffs: &[(SlotIdx, Value)]) -> u64 {
+fn seeds_signature(seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)]) -> u64 {
 	let mut hash = 0xcbf2_9ce4_8422_2325u64;
 	let mut mix = |word: u64| {
 		hash ^= word;
 		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
 	};
-	for (slot, value) in diffs {
-		mix(slot.get() as u64);
-		mix(value.hash_value());
+	for (principal, diffs) in seeds {
+		mix(u64::from(*principal));
+		for (slot, value) in diffs {
+			mix(slot.get() as u64);
+			mix(value.hash_value());
+		}
 	}
 	hash
+}
+
+fn same_seeds(
+	a: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
+	b: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
+) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b.iter())
+			.all(|((pa, da), (pb, db))| pa == pb && crate::reexec::same_installs(da, db))
 }
 
 fn derivation_provenance(
@@ -113,7 +132,10 @@ fn derivation_provenance(
 			adopted = true;
 		}
 		for diff in &inherited.diffs {
-			if !diffs.iter().any(|d| d.index == diff.index) {
+			if !diffs
+				.iter()
+				.any(|d| d.index == diff.index && d.state == diff.state)
+			{
 				diffs.push(diff.clone());
 			}
 		}
@@ -132,6 +154,9 @@ fn attacker_state_note_route(
 	record: &Arc<MutationRecord>,
 	derivation: DerivationRecord,
 ) {
+	if !derivation.reads_from_state() {
+		return;
+	}
 	let Some(existing) = state.knows(value) else {
 		return;
 	};
@@ -161,9 +186,10 @@ fn attacker_state_absorb(
 		let unnamed = state
 			.derivation(existing)
 			.is_some_and(|d| !names_assumption(d));
-		let known_route = state
-			.routes(existing)
-			.any(|(route, _)| route.same_route(&derivation));
+		let known_route = !derivation.reads_from_state()
+			|| state
+				.routes(existing)
+				.any(|(route, _)| route.same_route(&derivation));
 		if (stale && explains(&candidate)) || (names_assumption(&derivation) && unnamed) {
 			let displaced = state
 				.derivation(existing)
@@ -180,7 +206,6 @@ fn attacker_state_absorb(
 				}
 			}
 		} else if !known_route {
-			let candidate = derivation_provenance(state, record, &derivation);
 			let alternates = Arc::make_mut(&mut state.alternates);
 			if let Some(entry) = alternates.get_mut(existing.get()) {
 				entry.push((derivation, candidate));
@@ -409,20 +434,22 @@ impl VerifyContext {
 	pub(crate) fn replayed(
 		&self,
 		km: &ProtocolTrace,
-		diffs: &[(SlotIdx, Value)],
+		seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
 		attacker: &AttackerState,
-	) -> Arc<Vec<PrincipalState>> {
-		let key = diffs_signature(diffs);
+	) -> Option<Arc<Vec<PrincipalState>>> {
+		let key = seeds_signature(seeds);
 		let phase = attacker.current_phase;
 		let known = attacker.known.len();
-		if let Some((_, _, _, hit)) = read_lock(&self.replays)
-			.iter()
-			.find(|(seen, at, held, _)| *seen == key && *at == phase && *held == known)
-		{
-			return Arc::clone(hit);
+		if let Some((_, _, _, _, hit)) =
+			read_lock(&self.replays)
+				.iter()
+				.find(|(seen, of, at, held, _)| {
+					*seen == key && *at == phase && *held == known && same_seeds(of, seeds)
+				}) {
+			return hit.clone();
 		}
-		let built = Arc::new(crate::reexec::replay_diffs(self, km, diffs, attacker));
-		write_lock(&self.replays).push((key, phase, known, Arc::clone(&built)));
+		let built = crate::reexec::replay_diffs(self, km, seeds, attacker).map(Arc::new);
+		write_lock(&self.replays).push((key, seeds.to_vec(), phase, known, built.clone()));
 		built
 	}
 
@@ -475,6 +502,10 @@ impl VerifyContext {
 
 	pub(crate) fn attacker_snapshot(&self) -> AttackerState {
 		read_lock(&self.attacker).clone()
+	}
+
+	pub(crate) fn attacker_knows(&self, value: &Value) -> bool {
+		read_lock(&self.attacker).knows(value).is_some()
 	}
 
 	pub(crate) fn attacker_known_count(&self) -> usize {

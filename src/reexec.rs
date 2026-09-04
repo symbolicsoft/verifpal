@@ -180,7 +180,11 @@ fn unwrapped_by(v: &Value) -> Option<ValueId> {
 	}
 }
 
-type Restriction = (*const Vec<bool>, usize, Option<Arc<AttackerState>>);
+type Restriction = (
+	*const Vec<bool>,
+	Arc<Vec<Value>>,
+	Option<Arc<AttackerState>>,
+);
 
 pub(crate) struct CausalOrder {
 	principal: PrincipalId,
@@ -232,19 +236,18 @@ impl CausalOrder {
 		}
 		let blocked = self.blocked.get(slot)?.as_ref()?;
 		let key = Arc::as_ptr(blocked);
-		let size = attacker.known.len();
 		if let Some((_, _, hit)) = self
 			.restricted
 			.borrow()
 			.iter()
-			.find(|&&(seen, len, _)| seen == key && len == size)
+			.find(|(seen, known, _)| *seen == key && Arc::ptr_eq(known, &attacker.known))
 		{
 			return hit.clone();
 		}
 		let built = self.restrict(blocked, attacker);
 		self.restricted
 			.borrow_mut()
-			.push((key, size, built.clone()));
+			.push((key, Arc::clone(&attacker.known), built.clone()));
 		built
 	}
 
@@ -358,12 +361,7 @@ fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Ve
 }
 
 type Delivery = (usize, Value, bool);
-type Agreement = (
-	Vec<usize>,
-	*const Vec<Value>,
-	usize,
-	Option<Arc<AttackerState>>,
-);
+type Agreement = (Vec<usize>, Arc<Vec<Value>>, Option<Arc<AttackerState>>);
 
 type Agreed = (Arc<MutationRecord>, Vec<usize>, bool);
 
@@ -408,13 +406,12 @@ impl Coherence {
 			.filter(|(_, _, authored)| *authored)
 			.map(|(slot, _, _)| *slot)
 			.collect();
-		let known = Arc::as_ptr(&attacker.known);
 		let size = attacker.known.len();
-		let key = authored_hash(&authored, known, size);
+		let key = authored_hash(&authored, Arc::as_ptr(&attacker.known), size);
 		if let Some(bucket) = self.agreed.borrow().get(&key)
-			&& let Some((_, _, _, hit)) = bucket
+			&& let Some((_, _, hit)) = bucket
 				.iter()
-				.find(|(seen, at, len, _)| *at == known && *len == size && *seen == authored)
+				.find(|(seen, known, _)| Arc::ptr_eq(known, &attacker.known) && *seen == authored)
 		{
 			return hit.clone();
 		}
@@ -439,8 +436,7 @@ impl Coherence {
 		let built = retain_known(attacker, &keep);
 		self.agreed.borrow_mut().entry(key).or_default().push((
 			authored,
-			known,
-			size,
+			Arc::clone(&attacker.known),
 			built.clone(),
 		));
 		built
@@ -454,11 +450,11 @@ impl Coherence {
 		record: &Arc<MutationRecord>,
 		authored: &[usize],
 	) -> bool {
-		let diffs: Vec<(SlotIdx, Value)> = record
+		let diffs: Vec<(PrincipalId, SlotIdx, Value)> = record
 			.diffs
 			.iter()
 			.filter(|diff| diff.tainted)
-			.map(|diff| (diff.index, diff.value.clone()))
+			.map(|diff| (diff.state, diff.index, diff.value.clone()))
 			.collect();
 		if diffs.is_empty() {
 			return true;
@@ -483,7 +479,7 @@ impl Coherence {
 		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		attacker: &AttackerState,
-		diffs: &[(SlotIdx, Value)],
+		diffs: &[(PrincipalId, SlotIdx, Value)],
 		authored: &[usize],
 	) -> bool {
 		for origin in ctx.principal_states() {
@@ -505,12 +501,13 @@ impl Coherence {
 			}
 			let installs: Vec<(SlotIdx, Value)> = diffs
 				.iter()
-				.filter(|(slot, _)| {
-					origin.meta.get(slot.get()).is_some_and(|meta| {
-						meta.creator != origin.id && meta.wire.contains(&origin.id)
-					})
+				.filter(|(state, slot, _)| {
+					*state == origin.id
+						&& origin.meta.get(slot.get()).is_some_and(|meta| {
+							meta.creator != origin.id && meta.wire.contains(&origin.id)
+						})
 				})
-				.cloned()
+				.map(|(_, slot, value)| (*slot, value.clone()))
 				.collect();
 			if installs.is_empty() {
 				continue;
@@ -650,6 +647,16 @@ pub(crate) fn reexecute(
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
+	reexecute_with(ps_base, installs, &[], attacker, km)
+}
+
+fn reexecute_with(
+	ps_base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	forwarded: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
+	km: &ProtocolTrace,
+) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
 	let relayed = relayed_installs(&ps, installs);
 	let authored: Vec<bool> = installs
@@ -661,6 +668,11 @@ pub(crate) fn reexecute(
 	for ((slot, ground), authored) in installs.iter().zip(authored) {
 		if slot.get() < ps.values.len() {
 			install(&mut ps, slot.get(), ground.clone(), authored);
+		}
+	}
+	for (slot, value) in forwarded {
+		if slot.get() < ps.values.len() {
+			install_forwarded(&mut ps, slot.get(), value.clone());
 		}
 	}
 
@@ -688,6 +700,7 @@ pub(crate) fn reexecute(
 		ps = halt_at(ps, &failures);
 	}
 	ps.foreign_halts = foreign;
+	ps.forwarded = !forwarded.is_empty();
 	Ok(ps)
 }
 
@@ -700,15 +713,36 @@ pub(crate) fn execute_forward(
 ) -> VResult<Vec<PrincipalState>> {
 	let first = reexecute(base, installs, attacker, km)?;
 	let mut out = vec![first];
-	let others = ctx.principal_states().len();
+	forward_to_fixpoint(ctx, km, &mut out, &[], Some(base.id), attacker);
+	Ok(out)
+}
+
+pub(crate) type Seeds = Vec<(PrincipalId, Vec<(SlotIdx, Value)>)>;
+
+fn forward_to_fixpoint(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	out: &mut Vec<PrincipalState>,
+	seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
+	skip: Option<PrincipalId>,
+	attacker: &AttackerState,
+) {
 	let mut applied: Vec<(PrincipalId, Vec<(SlotIdx, Value)>)> = Vec::new();
-	for _ in 0..others {
+	for _ in 0..ctx.principal_states().len() {
 		let mut changed = false;
 		for pristine in ctx.principal_states() {
-			if pristine.id == base.id {
+			if skip == Some(pristine.id) {
 				continue;
 			}
-			let forwarded = forwarded_installs(km, &out, pristine, attacker);
+			let seed: &[(SlotIdx, Value)] = seeds
+				.iter()
+				.find(|(principal, _)| *principal == pristine.id)
+				.map(|(_, mine)| mine.as_slice())
+				.unwrap_or(&[]);
+			let forwarded: Vec<(SlotIdx, Value)> = forwarded_installs(km, out, pristine, attacker)
+				.into_iter()
+				.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
+				.collect();
 			if forwarded.is_empty() {
 				continue;
 			}
@@ -718,17 +752,21 @@ pub(crate) fn execute_forward(
 			{
 				continue;
 			}
-			let Ok(state) =
-				reexecute_forwarded(&pristine.clone_for_depth(true), &forwarded, attacker)
-			else {
+			let Ok(state) = reexecute_with(
+				&pristine.clone_for_depth(true),
+				seed,
+				&forwarded,
+				attacker,
+				km,
+			) else {
 				continue;
 			};
 			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
 				Some((_, seen)) => *seen = forwarded,
 				None => applied.push((pristine.id, forwarded)),
 			}
-			match out.iter_mut().find(|s| s.id == pristine.id) {
-				Some(entry) => *entry = state,
+			match out.iter_mut().find(|held| held.id == pristine.id) {
+				Some(held) => *held = state,
 				None => out.push(state),
 			}
 			changed = true;
@@ -737,7 +775,6 @@ pub(crate) fn execute_forward(
 			break;
 		}
 	}
-	Ok(out)
 }
 
 /// Replay a recorded substitution as the one execution it describes.
@@ -756,85 +793,40 @@ pub(crate) fn execute_forward(
 pub(crate) fn replay_diffs(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
-	diffs: &[(SlotIdx, Value)],
+	seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
 	attacker: &AttackerState,
-) -> Vec<PrincipalState> {
-	let seeds: Vec<(&PrincipalState, Vec<(SlotIdx, Value)>)> = ctx
-		.principal_states()
-		.iter()
-		.filter_map(|principal| {
-			let mine: Vec<(SlotIdx, Value)> = diffs
-				.iter()
-				.filter(|(slot, _)| {
-					principal.meta.get(slot.get()).is_some_and(|meta| {
-						meta.creator != principal.id && meta.wire.contains(&principal.id)
-					})
-				})
-				.cloned()
-				.collect();
-			(!mine.is_empty()).then_some((principal, mine))
-		})
-		.collect();
-	if seeds.is_empty() {
-		return Vec::new();
-	}
+) -> Option<Vec<PrincipalState>> {
 	let mut out: Vec<PrincipalState> = Vec::new();
-	for (principal, mine) in &seeds {
-		if let Ok(state) = reexecute(&principal.clone_for_depth(true), mine, attacker, km) {
-			out.push(state);
+	let mut installed: Seeds = Vec::new();
+	for (principal, mine) in seeds {
+		let pristine = ctx
+			.principal_states()
+			.iter()
+			.find(|state| state.id == *principal)?;
+		let mine: Vec<(SlotIdx, Value)> = mine
+			.iter()
+			.filter(|(slot, _)| {
+				pristine.meta.get(slot.get()).is_some_and(|meta| {
+					meta.creator != pristine.id && meta.wire.contains(&pristine.id)
+				})
+			})
+			.cloned()
+			.collect();
+		if mine.is_empty() {
+			continue;
 		}
+		let state = reexecute(&pristine.clone_for_depth(true), &mine, attacker, km).ok()?;
+		out.push(state);
+		installed.push((*principal, mine));
 	}
-	let mut applied: Vec<(PrincipalId, Vec<(SlotIdx, Value)>)> = Vec::new();
-	for _ in 0..ctx.principal_states().len() {
-		let mut changed = false;
-		for pristine in ctx.principal_states() {
-			let seed: &[(SlotIdx, Value)] = seeds
-				.iter()
-				.find(|(principal, _)| principal.id == pristine.id)
-				.map(|(_, mine)| mine.as_slice())
-				.unwrap_or(&[]);
-			let forwarded: Vec<(SlotIdx, Value)> = forwarded_installs(km, &out, pristine, attacker)
-				.into_iter()
-				.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
-				.collect();
-			if forwarded.is_empty() {
-				continue;
-			}
-			if applied
-				.iter()
-				.any(|(id, seen)| *id == pristine.id && same_installs(seen, &forwarded))
-			{
-				continue;
-			}
-			let base = pristine.clone_for_depth(true);
-			let ran = if seed.is_empty() {
-				reexecute_forwarded(&base, &forwarded, attacker)
-			} else {
-				let mut all = seed.to_vec();
-				all.extend(forwarded.iter().cloned());
-				reexecute(&base, &all, attacker, km)
-			};
-			let Ok(state) = ran else {
-				continue;
-			};
-			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
-				Some((_, seen)) => *seen = forwarded,
-				None => applied.push((pristine.id, forwarded)),
-			}
-			match out.iter_mut().find(|held| held.id == pristine.id) {
-				Some(held) => *held = state,
-				None => out.push(state),
-			}
-			changed = true;
-		}
-		if !changed {
-			break;
-		}
+	if out.is_empty() {
+		return Some(out);
 	}
-	out
+	forward_to_fixpoint(ctx, km, &mut out, &installed, None, attacker);
+	Some(out)
 }
 
-fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
+pub(crate) fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
 	a.len() == b.len()
 		&& a.iter()
 			.zip(b.iter())
@@ -869,7 +861,7 @@ fn forwarded_installs(
 				continue;
 			}
 			let emitted = &source.values[at].value;
-			if emitted.equivalent(&target.values[at].value, true) {
+			if !attacker_authored(emitted, at, km, target) {
 				continue;
 			}
 			out.push((SlotIdx(at), emitted.clone()));
@@ -883,36 +875,6 @@ fn install_forwarded(ps: &mut PrincipalState, slot: usize, value: Value) {
 	sv.pre_rewrite = value.clone();
 	sv.value = value;
 	sv.provenance.attacker_tainted = true;
-}
-
-fn reexecute_forwarded(
-	ps_base: &PrincipalState,
-	forwarded: &[(SlotIdx, Value)],
-	attacker: &AttackerState,
-) -> VResult<PrincipalState> {
-	let mut ps = ps_base.clone();
-	for (slot, value) in forwarded {
-		if slot.get() < ps.values.len() {
-			install_forwarded(&mut ps, slot.get(), value.clone());
-		}
-	}
-	if slot_graph_is_cyclic(&ps) {
-		return Err(VerifpalError::resolution(
-			"a forwarded value would define a slot in terms of itself".into(),
-		));
-	}
-	let ps_pre = ps.clone();
-	ps.resolve_all_values()?;
-	let failures = ps.perform_all_rewrites();
-	let foreign = foreign_halts(&ps, &failures);
-	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
-		ps = bypassed;
-	} else {
-		ps = halt_at(ps, &failures);
-	}
-	ps.foreign_halts = foreign;
-	ps.forwarded = true;
-	Ok(ps)
 }
 
 fn relayed_installs(

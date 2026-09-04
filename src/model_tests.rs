@@ -8,7 +8,7 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 4] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 1] = [("closure_two_recipients.vp", 0)];
 
 const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 
@@ -563,6 +563,30 @@ fn test_history_incompatible_knowledge() {
 fn test_history_compatible_oracle() {
 	run_model("history_compatible_oracle.vp", "a1");
 	run_model_sessions("history_compatible_oracle.vp", 1, "a1");
+}
+
+#[test]
+fn test_closure_two_recipients() {
+	run_model("closure_two_recipients.vp", "c1");
+	run_model_sessions("closure_two_recipients.vp", 1, "c1");
+}
+
+#[test]
+fn test_closure_halted_send() {
+	run_model("closure_halted_send.vp", "c0c1c1");
+	run_model_sessions("closure_halted_send.vp", 1, "c0c1c1");
+}
+
+#[test]
+fn test_closure_cyclic_union() {
+	run_model("closure_cyclic_union.vp", "c1c1c0");
+	run_model_sessions("closure_cyclic_union.vp", 1, "c1c1c0");
+}
+
+#[test]
+fn test_matching_run_leaked_generated_key() {
+	run_model("matching_run_leaked_generated_key.vp", "a1");
+	run_model_sessions("matching_run_leaked_generated_key.vp", 1, "a1");
 }
 
 #[test]

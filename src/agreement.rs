@@ -173,7 +173,7 @@ fn forgeable_without_sender(
 			None | Some(DerivationRecord::Initial) => true,
 			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
 				!km.slots.get(slot.get()).is_some_and(|read| {
-					read.constant.declaration != Some(Declaration::Knows)
+					read.constant.declaration == Some(Declaration::Assignment)
 						&& km.interchangeable_with(read.creator, sender)
 				})
 			}
@@ -185,10 +185,12 @@ fn forgeable_without_sender(
 			}),
 		};
 	}
+	if let Some(held) = attacker.knows(target) {
+		keep[held.get()] = false;
+	}
 	let without_sender = crate::reexec::retain_known(attacker, &keep);
 	let view = without_sender.as_deref().unwrap_or(attacker);
-	let view = crate::unlink::attacker_without(view, target);
-	crate::solve::validate::derivable(target, ps, &view)
+	crate::solve::validate::derivable(target, ps, view)
 }
 
 fn corresponds(
