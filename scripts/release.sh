@@ -5,24 +5,30 @@ set -euo pipefail
 
 # Verifpal release driver.
 #
-#   scripts/release.sh [--dry-run] [VERSION]
+#   scripts/release.sh [--dry-run] [--skip-tests] [VERSION]
 #
 # This is the whole release. It proves the tree is releasable, bumps the
 # version, tags and pushes, then runs goreleaser here to publish the GitHub
 # release, the package manifests and the crate. Nothing is handed off to CI.
+#
+# --skip-tests goes straight to the release, skipping lint, the unit tests and
+# the exhaustive sweeps. The gate is the only thing proving the tree is
+# releasable, so use it only when that battery has just been run by hand.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 DRY_RUN=0
+SKIP_TESTS=0
 VERSION=""
 
 for arg in "$@"; do
 	case "${arg}" in
 		--dry-run) DRY_RUN=1 ;;
+		--skip-tests) SKIP_TESTS=1 ;;
 		--local) echo "[Verifpal] --local is the only mode now; ignoring it." >&2 ;;
 		-h|--help)
-			sed -n '6,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+			sed -n '6,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		-*)
@@ -118,10 +124,14 @@ say "releasing ${CURRENT_VERSION} -> ${VERSION}."
 
 # --------------------------------------------------------------- test gate
 
-say "running the full test battery before anything is written."
-make lint
-make test
-make test-exhaustive
+if [[ "${SKIP_TESTS}" -eq 1 ]]; then
+	say "warning: --skip-tests given; the tree is being released untested."
+else
+	say "running the full test battery before anything is written."
+	make lint
+	make test
+	make test-exhaustive
+fi
 
 # ------------------------------------------------------------ release notes
 
