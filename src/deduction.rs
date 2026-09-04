@@ -7,7 +7,9 @@ use crate::context::VerifyContext;
 use crate::info::{info_deduction, info_output_text};
 use crate::pretty::pretty_values;
 use crate::primitive::primitive_core_reveals_args;
-use crate::theory::{can_decompose, can_recompose, can_reconstruct_primitive};
+use crate::theory::{
+	can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite, obtainable,
+};
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 
@@ -95,6 +97,8 @@ fn try_deduction_step(
 					for rule in group.rules {
 						progress |= rule(ctx, km, &sv.value, ps, attacker, record);
 					}
+					progress |=
+						rule_rewrite_forward(ctx, km, &sv.pre_rewrite, ps, attacker, record);
 				}
 			}
 		}
@@ -168,8 +172,8 @@ fn combination_coheres(
 		return true;
 	}
 	let mut walk = Walk {
-		seen: Vec::new(),
-		memo: IdMap::default(),
+		seen: IdSet::default(),
+		memo: take_needs_memo(attacker),
 		reads: Vec::new(),
 		union: Vec::new(),
 	};
@@ -180,8 +184,12 @@ fn combination_coheres(
 		collect_reads(km, ps, attacker, ingredient, &mut walk);
 	}
 	let Walk {
-		reads, mut union, ..
+		reads,
+		mut union,
+		memo,
+		..
 	} = walk;
+	keep_needs_memo(attacker, memo);
 	for read in &reads {
 		if !merge_into(&read.needs, &mut union) {
 			return false;
@@ -246,9 +254,25 @@ fn seeds_of(union: &[Need]) -> crate::reexec::Seeds {
 type ConeCache = IdMap<(PrincipalId, usize), Arc<Vec<usize>>>;
 type TaintFlag = (Arc<Vec<Arc<MutationRecord>>>, bool);
 
+type NeedsMemo = (Arc<Vec<Arc<MutationRecord>>>, IdMap<usize, Vec<Need>>);
+
 thread_local! {
 	static ANY_TAINT: std::cell::RefCell<Option<TaintFlag>> = const { std::cell::RefCell::new(None) };
 	static CONES: std::cell::RefCell<ConeCache> = std::cell::RefCell::new(IdMap::default());
+	static NEEDS: std::cell::RefCell<Option<NeedsMemo>> = const { std::cell::RefCell::new(None) };
+}
+
+fn take_needs_memo(attacker: &AttackerState) -> IdMap<usize, Vec<Need>> {
+	NEEDS.with(|cell| match cell.borrow_mut().take() {
+		Some((seen, memo)) if Arc::ptr_eq(&seen, &attacker.mutation_records) => memo,
+		_ => IdMap::default(),
+	})
+}
+
+fn keep_needs_memo(attacker: &AttackerState, memo: IdMap<usize, Vec<Need>>) {
+	NEEDS.with(|cell| {
+		*cell.borrow_mut() = Some((Arc::clone(&attacker.mutation_records), memo));
+	});
 }
 
 /// Discard the per-trace cone cache. Cones are a function of the protocol
@@ -286,9 +310,7 @@ fn any_taint(attacker: &AttackerState) -> bool {
 
 fn tainted(record: &MutationRecord) -> Vec<Need> {
 	record
-		.diffs
-		.iter()
-		.filter(|diff| diff.tainted)
+		.tainted()
 		.map(|diff| (diff.state, diff.index, diff.value.clone()))
 		.collect()
 }
@@ -334,7 +356,7 @@ fn merge_into(needs: &[Need], union: &mut Vec<Need>) -> bool {
 /// visited, the per-term precondition memo, the reads it found, and the union
 /// of every record it passed through.
 struct Walk {
-	seen: Vec<usize>,
+	seen: IdSet<usize>,
 	memo: IdMap<usize, Vec<Need>>,
 	reads: Vec<Read>,
 	union: Vec<Need>,
@@ -396,10 +418,9 @@ fn collect_reads(
 
 /// The reads a known term bottoms out in.
 fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, walk: &mut Walk) {
-	if walk.seen.contains(&idx.get()) {
+	if !walk.seen.insert(idx.get()) {
 		return;
 	}
-	walk.seen.push(idx.get());
 	let Some(derivation) = attacker.derivation(idx) else {
 		return;
 	};
@@ -739,6 +760,47 @@ fn rule_reconstruct(
 		);
 	}
 	found
+}
+
+fn rule_rewrite_forward(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	pre_rewrite: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	record: &Arc<MutationRecord>,
+) -> bool {
+	let Value::Primitive(p) = pre_rewrite else {
+		return false;
+	};
+	let (reduces, reduced) = can_rewrite(p);
+	if !reduces || reduced.equivalent(pre_rewrite, true) {
+		return false;
+	}
+	if !p.arguments.iter().all(|arg| obtainable(arg, ps, attacker)) {
+		return false;
+	}
+	let using = p.arguments.clone();
+	learn(
+		ctx,
+		km,
+		ps,
+		attacker,
+		&reduced,
+		record,
+		DerivationRecord::Rewritten {
+			of: pre_rewrite.clone(),
+			using: using.clone(),
+		},
+		|| {
+			format!(
+				"{} obtained by applying {} to {}.",
+				info_output_text(&reduced),
+				crate::primitive::primitive_name(p.id),
+				pretty_values(&using),
+			)
+		},
+	)
 }
 
 fn rule_recompose(

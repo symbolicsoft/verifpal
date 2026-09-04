@@ -49,4 +49,4 @@ clean:
 	@cargo clean
 	@$(RM) -r dist
 
-.PHONY: build lint test test-tex test-exhaustive dist-assets release-dry wasm clean assets examples HomebrewFormula scripts src target
+.PHONY: build lint test test-tex test-exhaustive dist-assets release-dry wasm clean assets examples Casks scripts src target

@@ -62,7 +62,10 @@ impl Span {
 
 	pub fn line_col(&self, source: &str) -> (usize, usize) {
 		let (line, start, _) = self.line_bounds(source);
-		let col = source[start..self.start.min(source.len())].chars().count() + 1;
+		let col = source
+			.get(start..self.start.min(source.len()))
+			.map_or(0, |line| line.chars().count())
+			+ 1;
 		(line, col)
 	}
 
@@ -1001,6 +1004,7 @@ pub struct VerifyResult {
 	pub conclusion: String,
 	pub subtype: Option<Subtype>,
 	pub trace: Vec<String>,
+	pub notes: Vec<String>,
 	pub steps: Vec<TraceStep>,
 	pub options: Vec<QueryOptionResult>,
 	pub variants: Vec<Query>,
@@ -1017,6 +1021,7 @@ impl VerifyResult {
 			conclusion: String::new(),
 			subtype: None,
 			trace: vec![],
+			notes: vec![],
 			steps: vec![],
 			options: vec![],
 			variants: vec![],
@@ -1024,11 +1029,15 @@ impl VerifyResult {
 	}
 
 	pub fn set_summary(&mut self, mutated_info: &str, steps: Vec<TraceStep>, conclusion: &str) {
-		self.trace = mutated_info
+		let (notes, trace): (Vec<&str>, Vec<&str>) = mutated_info
 			.lines()
 			.map(str::trim)
 			.filter(|line| !line.is_empty())
-			.map(str::to_string)
+			.partition(|line| line.starts_with("Note: "));
+		self.trace = trace.into_iter().map(str::to_string).collect();
+		self.notes = notes
+			.into_iter()
+			.map(|line| line.trim_start_matches("Note: ").to_string())
 			.collect();
 		self.steps = steps;
 		self.conclusion = conclusion.to_string();
@@ -1229,6 +1238,7 @@ pub struct ProtocolTrace {
 	pub used_by: IdMap<ValueId, IdSet<PrincipalId>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	pub copy_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub actors: IdMap<PrincipalId, PrincipalId>,
 }
@@ -1465,6 +1475,12 @@ pub struct MutationRecord {
 	pub phase: i32,
 }
 
+impl MutationRecord {
+	pub fn tainted(&self) -> impl Iterator<Item = &SlotDiff> {
+		self.diffs.iter().filter(|diff| diff.tainted)
+	}
+}
+
 #[derive(Clone, Debug)]
 pub enum DerivationRecord {
 	Initial,
@@ -1487,6 +1503,10 @@ pub enum DerivationRecord {
 	},
 	ConcatFragment {
 		of: Value,
+	},
+	Rewritten {
+		of: Value,
+		using: Vec<Value>,
 	},
 	Broken {
 		of: Value,
@@ -1537,6 +1557,7 @@ impl DerivationRecord {
 				v.extend(using.iter());
 				v
 			}
+			DerivationRecord::Rewritten { using, .. } => using.iter().collect(),
 			DerivationRecord::Broken {
 				of,
 				using,
@@ -1563,6 +1584,7 @@ impl DerivationRecord {
 			DerivationRecord::Leaked { .. }
 				| DerivationRecord::Obtained { .. }
 				| DerivationRecord::Reconstructed { .. }
+				| DerivationRecord::Rewritten { .. }
 		)
 	}
 }

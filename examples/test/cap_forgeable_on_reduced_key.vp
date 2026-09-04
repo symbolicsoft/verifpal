@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// t is MAC[forgeable] under a key that is a SPLIT projection of a CONCAT, so
+// the key the state holds is k1 while the annotated call names the projection.
+// A forgeable tag is constructible without its key; with the capability index
+// keyed on the unreduced call the assumption never applied to the tag Bob
+// checks, and at one session the forgery went unreported. The two-session
+// verdict was already a1 through a replay, which is why the single-session
+// code is the one this model pins.
+
+attacker[active]
+
+principal Alice[
+	knows private k1
+	knows private k2
+	k, kk = SPLIT(CONCAT(k1, k2))
+	generates n
+	t = MAC[forgeable](k, n)
+]
+
+Alice -> Bob: n, t
+
+principal Bob[
+	knows private k1
+	knows private k2
+	kb, kkb = SPLIT(CONCAT(k1, k2))
+	_ = ASSERT(t, MAC(kb, n))?
+	h = HASH(n)
+]
+
+queries[
+	authentication? Alice -> Bob: n
+]

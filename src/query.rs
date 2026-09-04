@@ -72,9 +72,7 @@ fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(
 		.get(attacker_idx.get())
 		.map(|record| {
 			record
-				.diffs
-				.iter()
-				.filter(|d| d.tainted)
+				.tainted()
 				.map(|d| (d.index, d.value.clone()))
 				.collect()
 		})
@@ -287,15 +285,8 @@ fn query_authentication(
 			slot: SlotIdx(_idx),
 		}]
 	};
-	let mutated_info = attack_trace_with(
-		ctx,
-		km,
-		ps,
-		query_index,
-		|_| assigned.clone(),
-		&seed,
-		prelude,
-	);
+	let mutated_info =
+		attack_trace_with(ctx, km, ps, query_index, |_| before.clone(), &seed, prelude);
 	let witnessed = mutated_info.state().and_then(|w| {
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;
@@ -389,9 +380,6 @@ fn query_authentication_get_pass_indices(
 			return Ok((vec![], sender, c, false));
 		}
 		sibling_replay = session_sibling_replay(&c, &ps.values[idx].value, km);
-		if sibling_replay && !recipient_contributed(&c, km, ps) {
-			note_origin_only(ctx, query, query_index);
-		}
 		if !sibling_replay
 			&& crate::agreement::emitted_by_matching_run(
 				ctx,
@@ -402,6 +390,12 @@ fn query_authentication_get_pass_indices(
 				attacker,
 			) {
 			return Ok((vec![], query.message.sender, c, false));
+		}
+		if !sibling_replay {
+			sibling_replay = copy_sibling_replay(&c, &ps.values[idx].value, km);
+		}
+		if sibling_replay && !recipient_contributed(&c, km, ps) {
+			note_origin_only(ctx, query, query_index);
 		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
@@ -444,8 +438,12 @@ fn note_origin_only(ctx: &VerifyContext, query: &Query, query_index: usize) {
 	);
 }
 
-pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
-	let Some(group) = km.session_siblings.get(&c.id) else {
+fn sibling_values_in(
+	groups: &IdMap<ValueId, std::sync::Arc<Vec<ValueId>>>,
+	c: &Constant,
+	km: &ProtocolTrace,
+) -> Vec<Value> {
+	let Some(group) = groups.get(&c.id) else {
 		return Vec::new();
 	};
 	group
@@ -458,11 +456,27 @@ pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Va
 		.collect()
 }
 
-pub(crate) fn session_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
+fn replays_one_of(siblings: &[Value], used: &Value) -> bool {
 	let used_reduct = reduce_once(used);
-	session_sibling_values(c, km)
+	siblings
 		.iter()
 		.any(|v| reduce_once(v).equivalent(&used_reduct, true))
+}
+
+pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
+	sibling_values_in(&km.session_siblings, c, km)
+}
+
+pub(crate) fn copy_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
+	sibling_values_in(&km.copy_siblings, c, km)
+}
+
+pub(crate) fn session_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
+	replays_one_of(&session_sibling_values(c, km), used)
+}
+
+pub(crate) fn copy_sibling_replay(c: &Constant, used: &Value, km: &ProtocolTrace) -> bool {
+	replays_one_of(&copy_sibling_values(c, km), used)
 }
 
 fn query_authentication_handle_pass(

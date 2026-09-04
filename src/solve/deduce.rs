@@ -28,10 +28,24 @@ pub(crate) struct Deducer<'a> {
 }
 
 impl<'a> Deducer<'a> {
+	#[cfg(test)]
 	pub(crate) fn new(
 		ps: &PrincipalState,
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
+	) -> Self {
+		let mut known = IdSet::default();
+		for held in attacker.known.iter() {
+			collect_subterm_hashes(held, &mut known);
+		}
+		Self::with_basis(ps, attacker, sym, known)
+	}
+
+	pub(crate) fn with_basis(
+		ps: &PrincipalState,
+		attacker: &'a AttackerState,
+		sym: &'a SymbolicState,
+		mut basis: IdSet<u64>,
 	) -> Self {
 		let mut wire_terms = Vec::new();
 		for (idx, meta) in ps.meta.iter().enumerate() {
@@ -45,12 +59,8 @@ impl<'a> Deducer<'a> {
 				wire_terms.push(term.clone());
 			}
 		}
-		let mut basis = IdSet::default();
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
-		}
-		for known in attacker.known.iter() {
-			collect_subterm_hashes(known, &mut basis);
 		}
 
 		Deducer {

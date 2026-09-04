@@ -50,7 +50,7 @@ pub enum DiagramRow {
 	#[serde(rename_all = "camelCase")]
 	Leak {
 		principal: String,
-		values: Vec<String>,
+		values: Vec<DiagramValue>,
 	},
 	#[serde(rename_all = "camelCase")]
 	Activity {
@@ -146,7 +146,46 @@ pub struct QueryReport {
 	pub subtype: Option<String>,
 	pub steps: Vec<ReportStep>,
 	pub preconditions: Vec<String>,
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	pub notes: Vec<String>,
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub generated: bool,
 	pub variants: usize,
+}
+
+pub(crate) fn short_name(model: &ModelReport) -> &str {
+	match &model.analysis {
+		Some(a) => &a.model,
+		None => model.file.rsplit('/').next().unwrap_or(&model.file),
+	}
+}
+
+pub(crate) fn has_trace(q: &QueryReport) -> bool {
+	q.resolved && !q.steps.is_empty()
+}
+
+pub(crate) fn attacked_values(a: &Analysis) -> std::collections::HashMap<String, Vec<usize>> {
+	let mut out: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+	for (qi, q) in a.queries.iter().enumerate() {
+		for s in &q.steps {
+			let replay = s.kind == "replay";
+			if !replay && s.kind != "mutations" {
+				continue;
+			}
+			for v in &s.values {
+				if !replay && v.was == v.installed {
+					continue;
+				}
+				let queries = out
+					.entry(crate::util::copy_base_name(&v.name).to_string())
+					.or_default();
+				if !queries.contains(&qi) {
+					queries.push(qi);
+				}
+			}
+		}
+	}
+	out
 }
 
 #[derive(Debug, Serialize)]
@@ -263,7 +302,7 @@ impl Analysis {
 impl QueryReport {
 	pub(crate) fn of(r: &VerifyResult, source: &str) -> QueryReport {
 		QueryReport {
-			query: crate::pretty::query_display(&r.query),
+			query: crate::pretty::query_line(&r.query),
 			kind: r.query.kind.name().to_string(),
 			resolved: r.resolved,
 			envelope: EnvelopeReport {
@@ -294,6 +333,8 @@ impl QueryReport {
 				})
 				.collect(),
 			preconditions: r.options.iter().map(|o| o.summary.clone()).collect(),
+			notes: r.notes.clone(),
+			generated: r.query.span == Span::default(),
 			variants: r.variants.len(),
 		}
 	}
@@ -374,7 +415,14 @@ fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
 							);
 							rows.push(DiagramRow::Leak {
 								principal: p.name.clone(),
-								values: expr.constants.iter().map(|c| c.name.to_string()).collect(),
+								values: expr
+									.constants
+									.iter()
+									.map(|c| DiagramValue {
+										name: c.name.to_string(),
+										guarded: false,
+									})
+									.collect(),
 							});
 						}
 					}
@@ -598,6 +646,8 @@ mod tests {
 							},
 						],
 						preconditions: vec![],
+						notes: vec![],
+						generated: false,
 						variants: 2,
 					}],
 				}),

@@ -97,7 +97,6 @@ pub(crate) fn validate(
 		}
 		let _ = compute_knowledge_closure(ctx, km, state);
 	}
-	ctx.note_execution(ps.id, &installs);
 	for state in &executed {
 		let _ = verify_resolve_queries(ctx, km, state);
 	}

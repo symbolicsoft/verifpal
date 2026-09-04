@@ -313,8 +313,11 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 	Some(p.with_arguments(arguments))
 }
 
+static KEY_DERIVATION: std::sync::LazyLock<Option<PrimitiveId>> =
+	std::sync::LazyLock::new(|| prim_specs().find(|s| s.key_derivation).map(|s| s.id));
+
 pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
-	let id = prim_specs().find(|s| s.key_derivation).map(|s| s.id)?;
+	let id = (*KEY_DERIVATION)?;
 	Some(Value::primitive(id, vec![inner], 0))
 }
 
@@ -573,6 +576,19 @@ mod tests {
 		assert!(admissible(&shared));
 		assert!(admissible(&ga));
 		assert!(admissible(&a));
+	}
+
+	#[test]
+	fn a_bypass_key_is_declared_only_on_a_primitive_that_can_be_checked() {
+		for spec in super::spec::build_primitive_specs() {
+			assert!(
+				spec.bypass_key.is_none() || spec.definition_check,
+				"{} declares a bypass key but cannot take `?`: try_guard_bypass runs only on a \
+				 failed check, so the entry can never fire and reads as a capability that is \
+				 not there",
+				spec.name
+			);
+		}
 	}
 
 	#[test]

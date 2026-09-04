@@ -269,7 +269,7 @@
 \begin{vpdiagram}{2}
 \vplane{0}{Alice}
 \vplane{1}{Bob}
-\vphop{0}{-1}{1}{vpplain}{vpnum}{1}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}},\, \vpdagger{\vpterm{\vpconst{e}}}}
+\vphop{0}{-1}{1}{vpplain}{vpnum}{1}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}},\, \vpterm{\vpconst{e}}}
 \vpphase{1}
 \vpleak{1}{1}{Bob leaks b}
 \end{vpdiagram}
@@ -333,6 +333,7 @@ Query & Verdict & Scope of the verdict & Line \\
 
 
 \noindent \vpactor{Bob} still sends ack to \vpactor{Alice}, so the failure counts.
+
 
 
 \subsection{Scope and assumptions}

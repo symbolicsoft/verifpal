@@ -29,7 +29,6 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
 
-type Execution = (PrincipalId, Vec<(SlotIdx, Value)>);
 type Replay = (
 	u64,
 	crate::reexec::Seeds,
@@ -57,9 +56,9 @@ pub(crate) struct VerifyContext {
 	query_goals: RwLock<Vec<usize>>,
 	#[cfg(test)]
 	searched: AtomicBool,
-	execution: RwLock<Option<Execution>>,
 	origin_only: RwLock<IdSet<usize>>,
 	replays: RwLock<Vec<Replay>>,
+	basis: RwLock<(i32, usize, IdSet<u64>)>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -249,6 +248,7 @@ impl VerifyContext {
 		analysis_count_reset();
 		VerifyContext {
 			replays: RwLock::new(Vec::new()),
+			basis: RwLock::new((-1, 0, IdSet::default())),
 			origin_only: RwLock::new(IdSet::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
@@ -258,7 +258,6 @@ impl VerifyContext {
 			phase_knowledge: RwLock::new(vec![]),
 			depth_cuts: RwLock::new(IdSet::default()),
 			truncations: RwLock::new(Vec::new()),
-			execution: RwLock::new(None),
 			sessions,
 			honest,
 			honest_halts: RwLock::new(Vec::new()),
@@ -453,12 +452,19 @@ impl VerifyContext {
 		built
 	}
 
-	pub(crate) fn note_execution(&self, principal: PrincipalId, installs: &[(SlotIdx, Value)]) {
-		*write_lock(&self.execution) = Some((principal, installs.to_vec()));
-	}
-
-	pub(crate) fn execution_origin(&self) -> Option<Execution> {
-		read_lock(&self.execution).clone()
+	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> IdSet<u64> {
+		let mut basis = write_lock(&self.basis);
+		let (phase, covered, set) = &mut *basis;
+		if *phase != attacker.current_phase || *covered > attacker.known.len() {
+			*phase = attacker.current_phase;
+			*covered = 0;
+			set.clear();
+		}
+		for known in &attacker.known[*covered..] {
+			crate::hashing::collect_subterm_hashes(known, set);
+		}
+		*covered = attacker.known.len();
+		set.clone()
 	}
 
 	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
@@ -683,6 +689,7 @@ impl VerifyContext {
 			vr.conclusion = result.conclusion.clone();
 			vr.subtype = result.subtype;
 			vr.trace = result.trace.clone();
+			vr.notes = result.notes.clone();
 			vr.steps = result.steps.clone();
 			vr.options = result.options.clone();
 			if result.resolved {
@@ -745,9 +752,9 @@ impl VerifyContext {
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
-			execution: RwLock::new(None),
 			origin_only: RwLock::new(IdSet::default()),
 			replays: RwLock::new(Vec::new()),
+			basis: RwLock::new((-1, 0, IdSet::default())),
 			sessions: self.sessions,
 			honest,
 			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),

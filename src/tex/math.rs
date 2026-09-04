@@ -307,7 +307,7 @@ impl Names {
 				DiagramRow::Leak { principal, values } => {
 					names.principal(principal);
 					for value in values {
-						names.constant(value);
+						names.constant(&value.name);
 					}
 				}
 				DiagramRow::Activity {

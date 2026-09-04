@@ -1,0 +1,33 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c1 at one session and at two.
+//
+// e is AEAD_ENC[weak] over a plaintext that is a SPLIT projection of a
+// CONCAT, which the state rewrites to m before the attacker ever sees e. The
+// capability index used to hold the annotated call as written, with the
+// unrewritten projection inside it, while the closure looks up the rewritten
+// value the wire carries; the bucket missed and the declared assumption never
+// fired, so both queries held. The index now holds the reduced spelling too.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows private n
+	x, y = SPLIT(CONCAT(m, n))
+	e = AEAD_ENC[weak](k, x, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, e, nil)?
+]
+
+queries[
+	confidentiality? m
+	confidentiality? x
+]

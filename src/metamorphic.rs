@@ -393,6 +393,15 @@ fn variant_renamed(model: &Model) -> Option<Model> {
 			rename_message(&mut option.message);
 		}
 	}
+	for scenario in &mut out.scenarios {
+		scenario.principal_name =
+			std::sync::Arc::from(format!("{}{}", scenario.principal_name, RENAME_SUFFIX).as_str());
+		scenario.bindings = scenario
+			.bindings
+			.iter()
+			.map(|(target, value)| (renamed_constant(target), renamed_constant(value)))
+			.collect();
+	}
 	Some(out)
 }
 
@@ -611,33 +620,9 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 		report.compared
 	);
 
-	if !sweep.builds_traces() {
-		return;
+	if sweep.builds_traces() {
+		settle_traces(property, &report);
 	}
-	let expected_panics = excused_traces(&KNOWN_BAD_TRACES, property);
-	let new_panics: Vec<&String> = report
-		.panicked
-		.iter()
-		.filter(|m| !expected_panics.contains(&m.as_str()))
-		.collect();
-	assert!(
-		new_panics.is_empty(),
-		"the `{property}` property made the engine's own invariant checks fire on \
-		 {new_panics:?}. A transformed model is still a legal model, so an assertion \
-		 firing is an engine bug rather than a harness failure"
-	);
-	let stale_panics: Vec<&str> = expected_panics
-		.iter()
-		.filter(|m| report.ran.iter().any(|e| e == *m))
-		.filter(|m| !report.panicked.iter().any(|p| p == *m))
-		.copied()
-		.collect();
-	assert!(
-		stale_panics.is_empty(),
-		"KNOWN_BAD_TRACES lists {stale_panics:?} under `{property}`, but nothing fires there \
-		 now. If this was fixed, delete the entry; a stale exception makes the list stop \
-		 meaning anything"
-	);
 
 	let expected = excused(&KNOWN_MISSED_ATTACKS, property);
 	let unexpected: Vec<&String> = report
@@ -666,6 +651,33 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 		stale.is_empty(),
 		"KNOWN_MISSED_ATTACKS lists {stale:?} under `{property}`, but the property now holds \
 		 for it. If this was fixed, delete the entry"
+	);
+}
+
+fn settle_traces(property: &str, report: &Report) {
+	let expected_panics = excused_traces(&KNOWN_BAD_TRACES, property);
+	let new_panics: Vec<&String> = report
+		.panicked
+		.iter()
+		.filter(|m| !expected_panics.contains(&m.as_str()))
+		.collect();
+	assert!(
+		new_panics.is_empty(),
+		"the `{property}` property made the engine's own invariant checks fire on \
+		 {new_panics:?}. A transformed model is still a legal model, so an assertion \
+		 firing is an engine bug rather than a harness failure"
+	);
+	let stale_panics: Vec<&str> = expected_panics
+		.iter()
+		.filter(|m| report.ran.iter().any(|e| e == *m))
+		.filter(|m| !report.panicked.iter().any(|p| p == *m))
+		.copied()
+		.collect();
+	assert!(
+		stale_panics.is_empty(),
+		"KNOWN_BAD_TRACES lists {stale_panics:?} under `{property}`, but nothing fires there \
+		 now. If this was fixed, delete the entry; a stale exception makes the list stop \
+		 meaning anything"
 	);
 }
 

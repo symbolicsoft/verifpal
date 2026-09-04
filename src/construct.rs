@@ -31,7 +31,7 @@ fn holders_of(trace: &ProtocolTrace, idx: usize) -> String {
 	quoted_list(&names)
 }
 
-fn builtin_nil_error(c: &Constant, verb: &str) -> Option<VerifpalError> {
+pub(crate) fn builtin_nil_error(c: &Constant, verb: &str) -> Option<VerifpalError> {
 	if !c.is_nil() {
 		return None;
 	}
@@ -62,6 +62,7 @@ pub(crate) fn construct_protocol_trace(
 		used_by: IdMap::default(),
 		leaks: Arc::new(Vec::new()),
 		session_siblings: IdMap::default(),
+		copy_siblings: IdMap::default(),
 		interchangeable: IdMap::default(),
 		actors: IdMap::default(),
 	};
@@ -257,6 +258,29 @@ fn construct_trace_render_knows(
 					 knows it too",
 				)
 				.help("use the same declaration in both places"));
+			}
+			if trace.slots[idx]
+				.known_by
+				.iter()
+				.any(|&(holder, sender)| holder == principal.id && sender != principal.id)
+			{
+				return Err(VerifpalError::sanity(
+					format!("{} already knows `{}`", principal.name, c).into(),
+				)
+				.narrow(c.name.to_string())
+				.labelled(format!(
+					"{} received it before this declaration",
+					principal.name
+				))
+				.label(
+					trace.slots[idx].declared_span,
+					format!("`{}` is first declared here", c),
+				)
+				.note(
+					"a principal holds a constant one way: a value it was sent cannot also be \
+					 something it knew from the start",
+				)
+				.help("remove the declaration, or the message that delivers it"));
 			}
 			trace.slots[idx].known_by.push((principal.id, principal.id));
 			continue;
@@ -621,10 +645,9 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 	let mut capability_index = CapabilityIndex::default();
 	for slot in &trace.slots {
 		capability_index.insert(&slot.initial_value);
-		capability_index.insert(&crate::resolution::resolve_trace_term(
-			&slot.initial_value,
-			trace,
-		));
+		let resolved = crate::resolution::resolve_trace_term(&slot.initial_value, trace);
+		capability_index.insert(&crate::theory::reduce_once(&resolved));
+		capability_index.insert(&resolved);
 	}
 	let capabilities = Arc::new(capability_index);
 	let mut states = Vec::new();

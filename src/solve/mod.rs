@@ -226,7 +226,7 @@ fn solve_with(
 	#[cfg(test)]
 	ctx.note_search_reached_a_controllable_slot();
 
-	let deducer = Deducer::new(ps, attacker, sym);
+	let deducer = Deducer::with_basis(ps, attacker, sym, ctx.known_subterms(attacker));
 	let proposals = propose(ctx, km, ps, pass, attacker, sym, &deducer);
 	dispose(
 		ctx,

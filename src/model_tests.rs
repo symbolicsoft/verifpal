@@ -456,6 +456,33 @@ fn test_injective_recipient_nonce_unchecked() {
 }
 
 #[test]
+fn test_scenario_replay_is_a_replay() {
+	run_model("scenario_replay_is_a_replay.vp", "a1");
+	run_model_sessions("scenario_replay_is_a_replay.vp", 1, "a1");
+}
+
+#[test]
+fn a_cross_scenario_replay_is_named_a_replay_not_a_forgery() {
+	let report = crate::verify::verify_report("examples/test/scenario_replay_is_a_replay.vp", 1)
+		.expect("analyses");
+	let auth = &report.results[0];
+	assert!(auth.resolved);
+	assert_eq!(
+		auth.subtype,
+		Some(crate::types::Subtype::ReplayableFirstFlight),
+		"Alice signed m@2 herself in the other scenario's run, so delivering it to the \
+		 honest Bob is a duplicate acceptance of a first flight, not a forgery; sibling \
+		 groups built over the session axis alone left it labelled as one"
+	);
+	assert!(
+		auth.summary.contains("Attacker replays m"),
+		"the trace must say the flight was replayed, not replaced: a step that shows \
+		 Alice signing a value must not be followed by a conclusion calling it forged:\n{}",
+		auth.summary
+	);
+}
+
+#[test]
 fn a_duplicate_acceptance_says_whether_the_recipient_could_have_told() {
 	let checked =
 		crate::verify::verify_report("examples/test/injective_recipient_nonce_unchecked.vp", 2)
@@ -563,6 +590,35 @@ fn test_history_incompatible_knowledge() {
 fn test_history_compatible_oracle() {
 	run_model("history_compatible_oracle.vp", "a1");
 	run_model_sessions("history_compatible_oracle.vp", 1, "a1");
+}
+
+#[test]
+fn every_model_in_the_corpus_is_wired_to_a_test() {
+	let source =
+		std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/model_tests.rs"))
+			.expect("read model_tests.rs");
+	let mut unwired: Vec<String> = Vec::new();
+	for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/test"))
+		.expect("list examples/test")
+	{
+		let name = entry
+			.expect("entry")
+			.file_name()
+			.to_string_lossy()
+			.to_string();
+		if !name.ends_with(".vp") {
+			continue;
+		}
+		if !source.contains(&format!("\"{name}\"")) {
+			unwired.push(name);
+		}
+	}
+	unwired.sort();
+	assert!(
+		unwired.is_empty(),
+		"every model in examples/test/ is pinned by a run_model or run_model_err test, so \
+		 that its verdict cannot drift unnoticed; these are not: {unwired:?}"
+	);
 }
 
 #[test]
@@ -741,10 +797,10 @@ fn a_confidentiality_break_says_whether_the_value_was_the_attackers_own() {
 	let none_flagged = swept_models().into_iter().all(|(_, path)| {
 		crate::verify::verify_report(&path, 1)
 			.map(|report| {
-				report
-					.results
-					.iter()
-					.all(|r| r.subtype.is_none() || path.contains("conf_attacker_supplied_value"))
+				report.results.iter().all(|r| {
+					r.subtype != Some(crate::types::Subtype::AttackerSuppliedValue)
+						|| path.contains("conf_attacker_supplied_value")
+				})
 			})
 			.unwrap_or(true)
 	});
@@ -1197,6 +1253,16 @@ fn test_cap_forgeable_sign() {
 #[test]
 fn test_cap_forgeable_aead() {
 	run_model("cap_forgeable_aead.vp", "c0a1");
+}
+#[test]
+fn test_cap_weak_on_reduced_argument() {
+	run_model("cap_weak_on_reduced_argument.vp", "c1c1");
+	run_model_sessions("cap_weak_on_reduced_argument.vp", 1, "c1c1");
+}
+#[test]
+fn test_cap_forgeable_on_reduced_key() {
+	run_model("cap_forgeable_on_reduced_key.vp", "a1");
+	run_model_sessions("cap_forgeable_on_reduced_key.vp", 1, "a1");
 }
 
 #[test]
@@ -2207,6 +2273,14 @@ fn test_shamir_reconstruction() {
 #[test]
 fn test_blind_signature() {
 	run_model("blind_signature.vp", "c0c0a1");
+}
+#[test]
+fn test_blind_signature_forgeable_with_factor() {
+	run_model("blind_signature_forgeable_with_factor.vp", "c1");
+}
+#[test]
+fn test_blind_signature_safe_without_factor() {
+	run_model("blind_signature_safe_without_factor.vp", "c0");
 }
 #[test]
 fn test_relay_not_forgery() {

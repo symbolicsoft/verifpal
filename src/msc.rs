@@ -234,7 +234,14 @@ pub(crate) fn protocol_rows(model: &ModelReport, hits: &HashMap<String, Vec<usiz
 			DiagramRow::Phase { number } => Row::Phase { number: *number },
 			DiagramRow::Leak { principal, values } => Row::Leak {
 				principal: principal.clone(),
-				text: format!("{principal} leaks {}", values.join(", ")),
+				text: format!(
+					"{principal} leaks {}",
+					values
+						.iter()
+						.map(|v| v.name.as_str())
+						.collect::<Vec<_>>()
+						.join(", ")
+				),
 			},
 			DiagramRow::Activity {
 				principal,
@@ -307,7 +314,7 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 		.filter_map(|row| match row {
 			DiagramRow::Leak { principal, values } => Some((
 				principal.as_str(),
-				values.iter().map(String::as_str).collect(),
+				values.iter().map(|v| v.name.as_str()).collect(),
 			)),
 			_ => None,
 		})
@@ -516,6 +523,8 @@ mod tests {
 				ReportStep::new("derive".to_string(), "three".to_string()),
 			],
 			preconditions: vec![],
+			notes: vec![],
+			generated: false,
 			variants: 0,
 		};
 		let groups = staged(&q);

@@ -274,7 +274,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![0])],
 				filter: filter_dec_rewrite,
 			}),
-			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -380,7 +379,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				matching: vec![(0, vec![0])],
 				filter: filter_derived_key_rewrite,
 			}),
-			bypass_key: Some(BypassKeyKind::Direct(0)),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {

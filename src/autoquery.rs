@@ -42,6 +42,11 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalSta
 
 fn secret_constants(m: &Model) -> Vec<Constant> {
 	let mut out: Vec<Constant> = Vec::new();
+	let rebound: Vec<ValueId> = m
+		.scenarios
+		.iter()
+		.flat_map(|scenario| scenario.bindings.iter().map(|(target, _)| target.id))
+		.collect();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
 			continue;
@@ -56,7 +61,7 @@ fn secret_constants(m: &Model) -> Vec<Constant> {
 				continue;
 			}
 			for c in &expression.constants {
-				if !out.iter().any(|prior| prior.id == c.id) {
+				if !rebound.contains(&c.id) && !out.iter().any(|prior| prior.id == c.id) {
 					out.push(c.clone());
 				}
 			}

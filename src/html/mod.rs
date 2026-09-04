@@ -9,7 +9,7 @@ use crate::msc::{self, Group, Lanes, staged};
 use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, ReportStep, Run};
 use crate::template::{Ctx, Dialect, escape_html, render, templates};
 use crate::tokens::{Token, TokenKind};
-use crate::util::{article, copy_base_name, plural};
+use crate::util::{article, plural};
 
 static HTML: Dialect = Dialect {
 	open: "{{",
@@ -41,7 +41,7 @@ const JS: &str = include_str!("report.js");
 
 pub fn html_report(run: &Run) -> String {
 	let subject = match run.models.as_slice() {
-		[only] => format!(" \u{00b7} {}", short_name(only)),
+		[only] => format!(" \u{00b7} {}", crate::report::short_name(only)),
 		_ => String::new(),
 	};
 	let models = run
@@ -69,13 +69,6 @@ fn strip_header(raw: &str) -> &str {
 		None => raw,
 	}
 	.trim_ascii()
-}
-
-fn short_name(model: &ModelReport) -> &str {
-	match &model.analysis {
-		Some(a) => &a.model,
-		None => model.file.rsplit('/').next().unwrap_or(&model.file),
-	}
 }
 
 fn attacked(model: &ModelReport) -> bool {
@@ -174,7 +167,7 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 	let hits = model
 		.analysis
 		.as_ref()
-		.map(attacked_values)
+		.map(crate::report::attacked_values)
 		.unwrap_or_default();
 	let mut ctx = Ctx::new()
 		.num("index", index)
@@ -212,32 +205,6 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 	ctx
 }
 
-fn attacked_values(a: &Analysis) -> HashMap<String, Vec<usize>> {
-	let mut out: HashMap<String, Vec<usize>> = HashMap::new();
-	for (qi, q) in a.queries.iter().enumerate() {
-		for s in &q.steps {
-			let replay = s.kind == "replay";
-			if !replay && s.kind != "mutations" {
-				continue;
-			}
-			for v in &s.values {
-				if !replay && v.was == v.installed {
-					continue;
-				}
-				let queries = out.entry(copy_base_name(&v.name).to_string()).or_default();
-				if !queries.contains(&qi) {
-					queries.push(qi);
-				}
-			}
-		}
-	}
-	out
-}
-
-fn has_trace(q: &QueryReport) -> bool {
-	q.resolved && !q.steps.is_empty()
-}
-
 fn verdicts_ctx(a: &Analysis, index: usize, marked: &[usize]) -> Ctx {
 	let total = a.queries.len();
 	let (class, tally) = if a.attacks == 0 {
@@ -260,7 +227,11 @@ fn verdicts_ctx(a: &Analysis, index: usize, marked: &[usize]) -> Ctx {
 
 fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: bool) -> Ctx {
 	let (class, mark, ruling) = if q.resolved {
-		("verdictFail", "\u{00d7}", "Contradiction found".to_string())
+		let ruling = match &q.subtype {
+			Some(subtype) => format!("Contradiction found ({subtype})"),
+			None => "Contradiction found".to_string(),
+		};
+		("verdictFail", "\u{00d7}", ruling)
 	} else {
 		(
 			"verdictPass",
@@ -268,7 +239,7 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 			format!("Holds ({})", q.envelope.summary),
 		)
 	};
-	let target = if has_trace(q) {
+	let target = if crate::report::has_trace(q) {
 		format!("#trace-m{model_index}-q{query_index}")
 	} else if marked {
 		format!("#src-m{model_index}-q{query_index}")
@@ -288,7 +259,14 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 		.text("kind", q.kind.as_str())
 		.text("target", target)
 		.text("query", q.query.as_str())
-		.num("line", q.range.line)
+		.text(
+			"loc",
+			if q.generated {
+				"generated".to_string()
+			} else {
+				format!("line {}", q.range.line)
+			},
+		)
 		.text("variants", variants)
 		.flag("truncated", !q.envelope.truncations.is_empty())
 		.text("truncations", q.envelope.truncations.join(", "))
@@ -437,7 +415,7 @@ fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> 
 	a.queries
 		.iter()
 		.enumerate()
-		.filter(|(_, q)| has_trace(q))
+		.filter(|(_, q)| crate::report::has_trace(q))
 		.map(|(qi, q)| {
 			let back = if marked.contains(&qi) {
 				format!("#src-m{index}-q{qi}")
@@ -451,6 +429,13 @@ fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> 
 				.text("query", q.query.as_str())
 				.list("diagram", attack_diagram(q, model, index, qi))
 				.list("steps", trace_steps(q))
+				.list(
+					"notes",
+					q.notes
+						.iter()
+						.map(|text| Ctx::new().text("text", text.as_str()))
+						.collect(),
+				)
 		})
 		.collect()
 }
@@ -698,6 +683,8 @@ mod tests {
 			subtype: None,
 			steps: vec![],
 			preconditions: vec![],
+			notes: vec![],
+			generated: false,
 			variants: 0,
 		}
 	}
@@ -1089,7 +1076,10 @@ mod tests {
 			wire(1, "Alice", "Bob", &[("ga", false)]),
 			DiagramRow::Leak {
 				principal: "Bob".to_string(),
-				values: vec!["sk".to_string()],
+				values: vec![crate::report::DiagramValue {
+					name: "sk".to_string(),
+					guarded: false,
+				}],
 			},
 		];
 		let html = page(vec![m]);
@@ -1547,7 +1537,10 @@ mod tests {
 				wire(2, "Bob", "Alice", &[("gb", false)]),
 				DiagramRow::Leak {
 					principal: "Bob".to_string(),
-					values: vec!["m".to_string()],
+					values: vec![crate::report::DiagramValue {
+						name: "m".to_string(),
+						guarded: false,
+					}],
 				},
 			],
 			source: GOLDEN_SOURCE.to_string(),

@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 — the counterweight to blind_signature_forgeable_with_factor.vp.
+//
+// The same protocol, but Alice does not leak the blinding factor r. Unblinding
+// needs r, and the attacker cannot obtain it (it is generated, never sent, never
+// leaked), so it cannot build UNBLIND(r, m, bsig) and sig = SIGN(sk, m) stays
+// confidential. This is what keeps the forward-rewrite closure rule honest: it
+// fires only when every argument of the reducible term is obtainable, so a
+// blinding factor the attacker never learns blocks it.
+
+attacker[passive]
+
+principal Signer[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+
+Signer -> Alice: pk
+
+principal Alice[
+	knows public m
+	generates r
+	blinded = BLIND(r, m)
+]
+
+Alice -> Signer: blinded
+
+principal Signer[
+	bsig = SIGN(sk, blinded)
+]
+
+Signer -> Alice: bsig
+
+principal Alice[
+	sig = UNBLIND(r, m, bsig)
+	_ = HASH(sig)
+]
+
+queries[
+	confidentiality? sig
+]

@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 — a passive attacker that holds the blinding factor can unblind.
+//
+// A blind signature is UNBLIND(r, m, SIGN(sk, BLIND(r, m))) = SIGN(sk, m). The
+// signer only ever sees BLIND(r, m), so it never learns m. But the unblinding
+// is a public operation: anyone holding the factor r, the message m and the
+// blind signature bsig can compute SIGN(sk, m) themselves, forging the signer's
+// signature on m without sk.
+//
+// Here Alice leaks r, so the attacker holds r (leaked), m (public), blinded and
+// bsig (both on the wire). It can therefore build UNBLIND(r, m, bsig), which
+// reduces to sig = SIGN(sk, m), so sig is not confidential. The knowledge
+// closure could not reach this before: it rebuilds a term only from its own
+// arguments and never applied a rewrite rule forward over held values, so
+// UNBLIND — the one rewrite whose reduct is neither an argument nor otherwise
+// obtainable — was unreachable for a passive attacker. blind_signature_safe_
+// without_factor.vp is the counterweight: withhold r and the forgery is gone.
+
+attacker[passive]
+
+principal Signer[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+
+Signer -> Alice: pk
+
+principal Alice[
+	knows public m
+	generates r
+	blinded = BLIND(r, m)
+	leaks r
+]
+
+Alice -> Signer: blinded
+
+principal Signer[
+	bsig = SIGN(sk, blinded)
+]
+
+Signer -> Alice: bsig
+
+principal Alice[
+	sig = UNBLIND(r, m, bsig)
+	_ = HASH(sig)
+]
+
+queries[
+	confidentiality? sig
+]

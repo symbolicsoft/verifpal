@@ -47,6 +47,8 @@ fn golden_run() -> Run {
 		subtype: None,
 		steps: vec![],
 		preconditions: vec!["Bob still sends ack to Alice, so the failure counts.".to_string()],
+		notes: vec![],
+		generated: false,
 		variants: 1,
 	};
 	broken.steps = vec![
@@ -116,6 +118,8 @@ fn golden_run() -> Run {
 		subtype: None,
 		steps: vec![],
 		preconditions: vec![],
+		notes: vec![],
+		generated: false,
 		variants: 1,
 	};
 	let analysis = Analysis {
@@ -172,7 +176,10 @@ fn golden_run() -> Run {
 				DiagramRow::Phase { number: 1 },
 				DiagramRow::Leak {
 					principal: "Bob".to_string(),
-					values: vec!["b".to_string()],
+					values: vec![crate::report::DiagramValue {
+						name: "b".to_string(),
+						guarded: false,
+					}],
 				},
 			],
 			source: GOLDEN_SOURCE.to_string(),

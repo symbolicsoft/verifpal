@@ -117,7 +117,11 @@ struct Parser<'a> {
 	unnamed_counter: usize,
 	last_ident: Span,
 	value_end: usize,
+	depth: usize,
+	anonymous_ok: bool,
 }
+
+const MAX_NESTING: usize = 64;
 
 impl<'a> Parser<'a> {
 	fn new(input: &'a str) -> Self {
@@ -128,6 +132,8 @@ impl<'a> Parser<'a> {
 			pos: 0,
 			last_ident: Span::default(),
 			value_end: 0,
+			depth: 0,
+			anonymous_ok: false,
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
 			values: ValueNames::new(),
@@ -139,6 +145,23 @@ impl<'a> Parser<'a> {
 	fn principal_id(&mut self, name: &str) -> VResult<(PrincipalId, Arc<str>)> {
 		let id = self.principals.intern(name)?;
 		Ok((id, self.principals.name_of(id)))
+	}
+
+	fn record_principal_name(&mut self) -> VResult<()> {
+		let span = self.last_ident;
+		let name = std::str::from_utf8(&self.input[span.start..span.end]).unwrap_or("");
+		let lower = name.to_lowercase();
+		if lower != "attacker" && RESERVED.contains(&lower.as_str()) {
+			return Err(VerifpalError::parse(
+				format!("`{}` is a reserved word and cannot name a principal", name).into(),
+			)
+			.at(span)
+			.narrow(name.to_string())
+			.note("the language keywords are reserved so that a model cannot shadow them")
+			.help("pick a different name"));
+		}
+		self.record(span, crate::tokens::TokenKind::PrincipalName);
+		Ok(())
 	}
 
 	fn remaining(&self) -> &str {
@@ -192,9 +215,15 @@ impl<'a> Parser<'a> {
 				while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
 					self.pos += 1;
 				}
-				self.record_from(at, crate::tokens::TokenKind::Comment);
+				let end = if self.pos > at && self.input[self.pos - 1] == b'\r' {
+					self.pos - 1
+				} else {
+					self.pos
+				};
+				self.record(Span::new(at, end), crate::tokens::TokenKind::Comment);
 				let text = std::str::from_utf8(&self.input[start..self.pos])
 					.unwrap_or("")
+					.trim_end_matches('\r')
 					.to_string();
 				self.pending_leading.push(Comment {
 					text,
@@ -216,7 +245,7 @@ impl<'a> Parser<'a> {
 						self.record(Span::new(open, self.pos), crate::tokens::TokenKind::Comment);
 						let text = std::str::from_utf8(&self.input[start..end])
 							.unwrap_or("")
-							.to_string();
+							.replace("\r\n", "\n");
 						self.pending_leading.push(Comment {
 							text,
 							style: CommentStyle::Block,
@@ -505,6 +534,9 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_model(&mut self) -> VResult<Model> {
+		if self.input.starts_with(&[0xEF, 0xBB, 0xBF]) {
+			self.pos = 3;
+		}
 		self.consume_trivia();
 		self.check_unterminated_block()?;
 		let mut pre_attacker_comments = self.take_leading();
@@ -770,7 +802,7 @@ impl<'a> Parser<'a> {
 	fn parse_scenario(&mut self) -> VResult<Scenario> {
 		let start = self.pos;
 		let name = self.parse_identifier()?;
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		let name = title_case(&name);
 		let (principal, principal_name) = self.principal_id(&name)?;
 		self.skip_whitespace();
@@ -850,7 +882,7 @@ impl<'a> Parser<'a> {
 		self.record_from(start, crate::tokens::TokenKind::Keyword);
 		self.skip_whitespace();
 		let name = self.parse_identifier()?;
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		let name = title_case(&name);
 		self.skip_whitespace();
 		let open_bracket = self.pos;
@@ -915,13 +947,13 @@ impl<'a> Parser<'a> {
 	fn parse_message_block(&mut self) -> VResult<Block> {
 		let start = self.pos;
 		let sender_name = self.parse_identifier()?;
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		let sender_name = title_case(&sender_name);
 		self.skip_whitespace();
 		self.expect_arrow("a message is written `Sender -> Recipient: constant, ...`")?;
 		self.skip_whitespace();
 		let recipient_name = self.parse_identifier()?;
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		let recipient_name = title_case(&recipient_name);
 		self.skip_whitespace();
 		self.expect_where(":", "after the recipient's name")
@@ -1072,7 +1104,10 @@ impl<'a> Parser<'a> {
 
 	fn parse_assignment(&mut self) -> VResult<Expression> {
 		let start = self.pos;
-		let constants = self.parse_constants()?;
+		self.anonymous_ok = true;
+		let constants = self.parse_constants();
+		self.anonymous_ok = false;
+		let constants = constants?;
 		self.skip_whitespace();
 		let assign_at = self.pos;
 		self.expect("=")?;
@@ -1158,6 +1193,14 @@ impl<'a> Parser<'a> {
 	fn parse_constant(&mut self) -> VResult<Constant> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name).map_err(|e| e.at(self.last_ident))?;
+		if name == "_" && !self.anonymous_ok {
+			return Err(VerifpalError::parse(
+				"`_` can only name the output of an assignment".into(),
+			)
+			.at(self.last_ident)
+			.note("an anonymous constant is a value the model computes and never uses again, so it has no place in a declaration, a message or a query")
+			.help("give the constant a name"));
+		}
 		self.record(
 			self.last_ident,
 			if name == "_" {
@@ -1301,6 +1344,21 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
+		if self.depth >= MAX_NESTING {
+			return Err(VerifpalError::parse(
+				format!("primitives nest deeper than {MAX_NESTING} levels").into(),
+			)
+			.at(self.here())
+			.note("a protocol computes nothing this deep, so a term this deep is almost certainly generated by mistake")
+			.help("name an intermediate value and build on it instead"));
+		}
+		self.depth += 1;
+		let parsed = self.parse_primitive_nested();
+		self.depth -= 1;
+		parsed
+	}
+
+	fn parse_primitive_nested(&mut self) -> VResult<Value> {
 		let name_start = self.pos;
 		let name = self.parse_identifier()?;
 		let name_end = self.pos;
@@ -1473,12 +1531,12 @@ impl<'a> Parser<'a> {
 		self.record_from(start, crate::tokens::TokenKind::QueryKind);
 		self.skip_whitespace();
 		let sender_name = title_case(&self.parse_identifier()?);
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		self.skip_whitespace();
 		self.expect_arrow("an authentication query is written `authentication? Alice -> Bob: m`")?;
 		self.skip_whitespace();
 		let recipient_name = title_case(&self.parse_identifier()?);
-		self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
+		self.record_principal_name()?;
 		self.skip_whitespace();
 		self.expect(":")?;
 		self.skip_whitespace();
@@ -1577,25 +1635,26 @@ impl<'a> Parser<'a> {
 				break;
 			}
 			let option_start = self.pos;
-			let leading = self.take_leading();
+			let mut leading = self.take_leading();
 			let option_name = self.parse_identifier()?;
 			self.record(self.last_ident, crate::tokens::TokenKind::Keyword);
-			self.skip_whitespace();
+			self.consume_trivia();
 			self.expect("[")?;
-			self.skip_whitespace();
+			self.consume_trivia();
 			let sender_name = title_case(&self.parse_identifier()?);
-			self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
-			self.skip_whitespace();
+			self.record_principal_name()?;
+			self.consume_trivia();
 			self.expect_arrow("a precondition is written `precondition[ Bob -> Alice: ack ]`")?;
-			self.skip_whitespace();
+			self.consume_trivia();
 			let recipient_name = title_case(&self.parse_identifier()?);
-			self.record(self.last_ident, crate::tokens::TokenKind::PrincipalName);
-			self.skip_whitespace();
+			self.record_principal_name()?;
+			self.consume_trivia();
 			self.expect(":")?;
-			self.skip_whitespace();
+			self.consume_trivia();
 			let constant = self.parse_constant()?;
-			self.skip_whitespace();
+			self.consume_trivia();
 			self.expect("]")?;
+			leading.extend(self.take_leading());
 			let trailing = self.try_take_trailing();
 			self.consume_trivia();
 
@@ -2519,5 +2578,22 @@ mod tests {
 		assert!(accepted.len() > 64);
 		assert!(validate_file_name(&accepted, &accepted).is_ok());
 		assert!(validate_file_name(&rejected, &rejected).is_err());
+	}
+
+	#[test]
+	fn a_line_comment_token_stops_before_a_carriage_return() {
+		let src = "// note\r\nattacker[active]\r\nprincipal Alice[\r\n\tknows public pc_crlf\r\n]\r\n\
+		           queries[\r\n\tconfidentiality? pc_crlf\r\n]\r\n";
+		let (model, index) = parse_string_indexed("crlf.vp", src);
+		model.expect("parses");
+		let token = index.at(0).expect("the comment token");
+		assert_eq!(&src[token.span.start..token.span.end], "// note");
+	}
+
+	#[test]
+	fn a_leading_byte_order_mark_is_skipped() {
+		let src = "\u{FEFF}attacker[active]\nprincipal Alice[\n\tknows public pc_bom\n]\n\
+		           queries[\n\tconfidentiality? pc_bom\n]\n";
+		parse_string("bom.vp", src).expect("a BOM is not part of the model");
 	}
 }

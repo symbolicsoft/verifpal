@@ -25,11 +25,55 @@ fn is_justified(
 		return true;
 	}
 	match value {
-		Value::Primitive(p) => p
-			.arguments
-			.iter()
-			.all(|a| is_justified(a, produced, installed, ps, attacker)),
+		Value::Primitive(p) => {
+			let from_arguments = |q: &Primitive| {
+				q.arguments
+					.iter()
+					.all(|a| is_justified(a, produced, installed, ps, attacker))
+			};
+			from_arguments(p)
+				|| crate::primitive::commutativity_swap(p).is_some_and(|twin| from_arguments(&twin))
+		}
 		Value::Constant(_) => false,
+	}
+}
+
+struct Grown {
+	keep: Vec<bool>,
+	state: AttackerState,
+}
+
+impl Grown {
+	fn initial(attacker: &AttackerState) -> Grown {
+		let keep: Vec<bool> = (0..attacker.known.len())
+			.map(|i| {
+				matches!(
+					attacker.derivation(KnownIdx(i)),
+					None | Some(DerivationRecord::Initial)
+				)
+			})
+			.collect();
+		let mut grown = Grown {
+			keep,
+			state: attacker.clone(),
+		};
+		grown.rebuild(attacker);
+		grown
+	}
+
+	fn rebuild(&mut self, attacker: &AttackerState) {
+		self.state = crate::reexec::retain_known(attacker, &self.keep)
+			.map(|kept| (*kept).clone())
+			.unwrap_or_else(|| attacker.clone());
+	}
+
+	fn add(&mut self, attacker: &AttackerState, value: &Value) {
+		if let Some(idx) = attacker.knows(value)
+			&& !self.keep[idx.get()]
+		{
+			self.keep[idx.get()] = true;
+			self.rebuild(attacker);
+		}
 	}
 }
 
@@ -41,6 +85,7 @@ pub(crate) fn derivation_problems(
 	let mut produced: Vec<&Value> = Vec::new();
 	let mut installed: Vec<&Value> = Vec::new();
 	let mut problems: Vec<String> = Vec::new();
+	let mut grown = Grown::initial(attacker);
 
 	for step in steps {
 		let Step::Derive {
@@ -54,15 +99,19 @@ pub(crate) fn derivation_problems(
 				Step::Mutations { items, .. } => {
 					for item in items {
 						installed.push(&item.installed);
+						grown.add(attacker, &item.installed);
 					}
 				}
-				Step::Replay { installed: v, .. } => installed.push(v),
+				Step::Replay { installed: v, .. } => {
+					installed.push(v);
+					grown.add(attacker, v);
+				}
 				_ => {}
 			}
 			continue;
 		};
 		for ingredient in ingredients {
-			if is_justified(ingredient, &produced, &installed, ps, attacker) {
+			if is_justified(ingredient, &produced, &installed, ps, &grown.state) {
 				continue;
 			}
 			match justified_without_a_step(attacker, ingredient) {
@@ -80,6 +129,7 @@ pub(crate) fn derivation_problems(
 			}
 		}
 		produced.push(target);
+		grown.add(attacker, target);
 	}
 	problems
 }
@@ -293,6 +343,16 @@ pub(crate) fn step_problems(
 					}
 				}
 				_ => problems.push(wrong("recomposes something that is not a primitive")),
+			},
+			DerivationRecord::Rewritten { of, .. } => match of {
+				Value::Primitive(p) => {
+					if !crate::theory::can_rewrite(p).1.equivalent(target, true) {
+						problems.push(wrong(
+							"rewrites a term that does not reduce to what the step claims",
+						));
+					}
+				}
+				_ => problems.push(wrong("rewrites something that is not a primitive")),
 			},
 			DerivationRecord::Decomposed { of, .. } => match of {
 				Value::Primitive(p) => {

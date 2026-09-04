@@ -111,7 +111,7 @@ pub(crate) const PRIMITIVES: &[Entry] = &[
 	Entry {
 		name: "BLIND",
 		eg: "BLIND(k, m): b",
-		help: "Message blinding primitive, useful for the implementation of blind signatures. Here, the sender uses the secret \\\"blinding factor\\\" `k` in order to blind message `m`, which can then be sent to the signer, who will be able to produce a signature on `m` without knowing `m`. Used in conjunction with UNBLIND -- see UNBLIND's documentation for more information.",
+		help: "Message blinding primitive, useful for the implementation of blind signatures. Here, the sender uses the secret blinding factor `k` in order to blind message `m`, which can then be sent to the signer, who will be able to produce a signature on `m` without knowing `m`. Used in conjunction with UNBLIND -- see UNBLIND's documentation for more information.",
 	},
 	Entry {
 		name: "UNBLIND",
@@ -172,7 +172,7 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "unlinkability",
 		eg: "unlinkability? a, b, c",
-		help: "Checks whether all given values satisfy freshness. If they do, checks whether the attacker can determine them as being the output of the same primitive or as otherwise having a common source. If any of these checks fail, the query fails. Takes at least two distinct constants.",
+		help: "Checks whether the attacker can link two of the given values: by observing them equal, by a check such as a decryption or a signature verification that succeeds over both under one participant's key, by a secret they share as their origin, or by a secret it can confirm sits inside both. If any pair links, the query fails. Takes at least two distinct constants.",
 	},
 	Entry {
 		name: "equivalence",

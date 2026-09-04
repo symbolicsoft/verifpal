@@ -451,9 +451,7 @@ impl Coherence {
 		authored: &[usize],
 	) -> bool {
 		let diffs: Vec<(PrincipalId, SlotIdx, Value)> = record
-			.diffs
-			.iter()
-			.filter(|diff| diff.tainted)
+			.tainted()
 			.map(|diff| (diff.state, diff.index, diff.value.clone()))
 			.collect();
 		if diffs.is_empty() {
@@ -1065,11 +1063,18 @@ pub(crate) fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
 	let mut edges: Vec<usize> = Vec::new();
 	let mut bounds: Vec<usize> = Vec::with_capacity(n + 1);
 	bounds.push(0);
-	for sv in &ps.values {
+	for (own, sv) in ps.values.iter().enumerate() {
 		let from = edges.len();
 		for v in [&sv.value, sv.perceived()] {
-			if matches!(v, Value::Primitive(_)) {
-				collect_slot_references(v, ps, &mut edges, from);
+			match v {
+				Value::Primitive(_) => collect_slot_references(v, ps, &mut edges, from),
+				Value::Constant(c) => {
+					if let Some(alias) = ps.index_of(c)
+						&& alias != own && !edges[from..].contains(&alias)
+					{
+						edges.push(alias);
+					}
+				}
 			}
 		}
 		bounds.push(edges.len());
@@ -1198,6 +1203,7 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: std::sync::Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
 		};

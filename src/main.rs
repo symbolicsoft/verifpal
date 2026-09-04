@@ -17,6 +17,21 @@ const MAN_MANUAL: &str = "Verifpal Manual";
 const EXIT_ERROR: i32 = 1;
 const EXIT_ATTACK: i32 = 2;
 
+macro_rules! out {
+	($($arg:tt)*) => {{
+		use std::io::Write as _;
+		let _ = writeln!(std::io::stdout().lock(), $($arg)*);
+	}};
+}
+
+macro_rules! outp {
+	($($arg:tt)*) => {{
+		use std::io::Write as _;
+		let _ = write!(std::io::stdout().lock(), $($arg)*);
+		let _ = std::io::stdout().flush();
+	}};
+}
+
 #[derive(Parser)]
 #[command(
 	name = "verifpal",
@@ -322,7 +337,7 @@ enum Commands {
 		              Comments are preserved and travel with the construct they were written \
 		              against, so formatting a file does not lose the prose in it. A few positions \
 		              cannot hold a comment again unambiguously, and a comment there is \
-		              dropped: inside a primitive's argument list, inside the brackets \
+		              moved to the line above the statement that contains it: inside a primitive's argument list, inside the brackets \
 		              of an attacker or phase declaration, inside a scenario's binding \
 		              brackets, and inside the inner brackets of a query option.\n\n\
 		              Formatting only requires that the model parse. A model that parses but \
@@ -574,6 +589,13 @@ fn run_verify(
 	color: ColorArg,
 ) -> i32 {
 	let structured = format != FormatArg::Text;
+	if structured && result_code {
+		eprintln!(
+			"error: --result-code writes to standard output, so it cannot be combined with a \
+			 structured --format; the code is in the document's results instead"
+		);
+		return EXIT_ERROR;
+	}
 	set_color_choice(if structured {
 		ColorChoice::Never
 	} else {
@@ -594,7 +616,7 @@ fn run_verify(
 
 	for (index, model) in models.iter().enumerate() {
 		if index > 0 && !structured && !result_code {
-			println!();
+			out!();
 		}
 		let analyzed = if saturate {
 			saturation_sessions(model, SATURATE_MAX, auto_queries).map(|saturation| {
@@ -619,9 +641,9 @@ fn run_verify(
 				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
 					if single {
-						println!("{}", report.code);
+						out!("{}", report.code);
 					} else {
-						println!("{} {}", model, report.code);
+						out!("{} {}", model, report.code);
 					}
 				}
 				outcomes.push((model.clone(), Ok(report)));
@@ -648,7 +670,7 @@ fn run_verify(
 		FormatArg::Json => {
 			let run = Run::of(VERSION, &outcomes, &sources);
 			match serde_json::to_string(&run) {
-				Ok(text) => println!("{}", text),
+				Ok(text) => out!("{}", text),
 				Err(e) => {
 					eprintln!("could not serialize the report: {}", e);
 					return EXIT_ERROR;
@@ -657,11 +679,11 @@ fn run_verify(
 		}
 		FormatArg::Html => {
 			let run = Run::of(VERSION, &outcomes, &sources);
-			print!("{}", html_report(&run));
+			outp!("{}", html_report(&run));
 		}
 		FormatArg::Tex => {
 			let run = Run::of(VERSION, &outcomes, &sources);
-			print!("{}", tex_report(&run));
+			outp!("{}", tex_report(&run));
 		}
 	}
 	update_check_report(&update_check);
@@ -711,7 +733,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 			}
 		};
 		if !write && !check {
-			print!("{}", output);
+			outp!("{}", output);
 			continue;
 		}
 		match pretty_file_changed(model, &output, write) {
@@ -724,7 +746,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 		}
 	}
 	for model in &changed {
-		println!("{}", model);
+		out!("{}", model);
 	}
 	if check && !changed.is_empty() {
 		return EXIT_ERROR;
@@ -784,7 +806,7 @@ fn main() {
 			set_color_choice(color.into());
 			match diagram(&model) {
 				Ok(output) => {
-					print!("{}", output);
+					outp!("{}", output);
 					0
 				}
 				Err(e) => {
@@ -796,27 +818,27 @@ fn main() {
 		Commands::About => {
 			let update_check = update_check_start(VERSION);
 			info_banner(VERSION);
-			println!("Verifpal is authored by Nadim Kobeissi.");
-			println!("The following individuals have contributed");
-			println!("meaningful suggestions, bug reports, ideas");
-			println!("or discussion to the Verifpal project:");
-			println!();
-			println!("  - Angèle Bossuat");
-			println!("  - Bruno Blanchet (Prof. Dr.)");
-			println!("  - Fabian Drinck");
-			println!("  - Friedrich Wiemer");
-			println!("  - Georgio Nicolas");
-			println!("  - Jean-Philippe Aumasson (Dr.)");
-			println!("  - Laurent Grémy");
-			println!("  - Loup Vaillant David");
-			println!("  - Mario Raso");
-			println!("  - Michiel Leenars");
-			println!("  - Mukesh Tiwari (Dr.)");
-			println!("  - Oleksandra \"Sasha\" Lapiha");
-			println!("  - Oskar Goldhahn");
-			println!("  - Renaud Lifchitz");
-			println!("  - Sebastian R. Verschoor");
-			println!("  - Tom Roeder");
+			out!("Verifpal is authored by Nadim Kobeissi.");
+			out!("The following individuals have contributed");
+			out!("meaningful suggestions, bug reports, ideas");
+			out!("or discussion to the Verifpal project:");
+			out!();
+			out!("  - Angèle Bossuat");
+			out!("  - Bruno Blanchet (Prof. Dr.)");
+			out!("  - Fabian Drinck");
+			out!("  - Friedrich Wiemer");
+			out!("  - Georgio Nicolas");
+			out!("  - Jean-Philippe Aumasson (Dr.)");
+			out!("  - Laurent Grémy");
+			out!("  - Loup Vaillant David");
+			out!("  - Mario Raso");
+			out!("  - Michiel Leenars");
+			out!("  - Mukesh Tiwari (Dr.)");
+			out!("  - Oleksandra \"Sasha\" Lapiha");
+			out!("  - Oskar Goldhahn");
+			out!("  - Renaud Lifchitz");
+			out!("  - Sebastian R. Verschoor");
+			out!("  - Tom Roeder");
 			update_check_report(&update_check);
 			0
 		}

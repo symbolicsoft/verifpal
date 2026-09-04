@@ -96,6 +96,7 @@ fn analyze_sessions_traced_cancellable(
 	};
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
+	trace.copy_siblings = copy_sibling_groups(&trace.slots);
 	trace.interchangeable = interchangeable;
 	trace.actors = actors;
 	capability_reach_notice(&trace, &states);
@@ -420,6 +421,7 @@ pub(crate) fn attacker_seed_phase(
 	ctx.attacker_init();
 	let mut pure = ps.clone_for_depth(true);
 	pure.resolve_all_values()?;
+	let _ = pure.perform_all_rewrites();
 	ctx.attacker_phase_update(km, &pure, phase)
 }
 
@@ -649,6 +651,29 @@ fn verify_end(
 fn chrono_time_string() -> String {
 	use chrono::Local;
 	Local::now().format("%I:%M:%S %p").to_string()
+}
+
+fn copy_sibling_groups(slots: &[TraceSlot]) -> IdMap<ValueId, Arc<Vec<ValueId>>> {
+	let mut by_base: IdMap<ValueId, Vec<ValueId>> = IdMap::default();
+	for slot in slots {
+		let id = slot.constant.id;
+		let (_, base) = crate::value::copy_index_of(id);
+		let members = by_base.entry(base).or_default();
+		if !members.contains(&id) {
+			members.push(id);
+		}
+	}
+	let mut out: IdMap<ValueId, Arc<Vec<ValueId>>> = IdMap::default();
+	for members in by_base.into_values() {
+		if members.len() < 2 {
+			continue;
+		}
+		let group = Arc::new(members);
+		for &member in group.iter() {
+			out.insert(member, Arc::clone(&group));
+		}
+	}
+	out
 }
 
 #[cfg(test)]

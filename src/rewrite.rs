@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::theory::{can_rebuild, can_rewrite, structurally_identical_primitive};
+use crate::theory::{can_rewrite, structurally_identical_primitive};
 use crate::types::*;
 
 #[derive(Clone)]
@@ -12,7 +12,6 @@ struct Reduced {
 	failed: Option<Primitive>,
 	rewritten: bool,
 	value: Value,
-	rebuilt: Option<Value>,
 }
 
 type ReduceCache = IdMap<u64, Vec<(Arc<Primitive>, Reduced)>>;
@@ -31,9 +30,6 @@ pub(crate) fn perform_primitive_rewrite(
 	ps: &mut PrincipalState,
 ) -> Option<Primitive> {
 	let reduced = reduce_term(p);
-	if let Some(rebuilt) = reduced.rebuilt {
-		ps.values[slot_index].set_value(rebuilt);
-	}
 	if reduced.rewritten {
 		ps.values[slot_index].set_value(reduced.value);
 	}
@@ -73,15 +69,7 @@ fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {
 		failed: None,
 		rewritten,
 		value,
-		rebuilt: None,
 	};
-	let Some(rewrite_p) = reduced.value.as_primitive() else {
-		return reduced;
-	};
-	if let Some(rebuild) = can_rebuild(rewrite_p) {
-		reduced.rebuilt = Some(rebuild.clone());
-		reduced.value = rebuild;
-	}
 	let Value::Primitive(root) = &reduced.value else {
 		return reduced;
 	};

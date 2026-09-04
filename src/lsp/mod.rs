@@ -56,6 +56,15 @@ pub(crate) fn serve(connection: &Connection) -> Fallible {
 		.as_ref()
 		.and_then(|w| w.work_done_progress)
 		.unwrap_or(false);
+	let workspace = params.capabilities.workspace.as_ref();
+	server.inlay_refresh = workspace
+		.and_then(|w| w.inlay_hint.as_ref())
+		.and_then(|i| i.refresh_support)
+		.unwrap_or(false);
+	server.code_lens_refresh = workspace
+		.and_then(|w| w.code_lens.as_ref())
+		.and_then(|c| c.refresh_support)
+		.unwrap_or(false);
 	server.main_loop(connection)
 }
 
@@ -187,6 +196,10 @@ pub(crate) struct Server {
 	encoding: PositionEncodingKind,
 	settings: Settings,
 	progress_supported: bool,
+	inlay_refresh: bool,
+	code_lens_refresh: bool,
+	dirty_since: Option<std::time::Instant>,
+	shut_down: bool,
 }
 
 impl Server {
@@ -201,6 +214,10 @@ impl Server {
 			encoding,
 			settings: Settings::default(),
 			progress_supported: false,
+			inlay_refresh: false,
+			code_lens_refresh: false,
+			dirty_since: None,
+			shut_down: false,
 		}
 	}
 
@@ -208,20 +225,55 @@ impl Server {
 		loop {
 			match connection.receiver.recv_timeout(TICK) {
 				Ok(Message::Request(req)) => {
-					if connection.handle_shutdown(&req)? {
+					if req.method == "shutdown" {
 						self.runner.cancel_all();
-						return Ok(());
+						self.shut_down = true;
+						self.respond(Response::new_ok(req.id, serde_json::Value::Null));
+					} else if self.shut_down {
+						self.respond(Response::new_err(
+							req.id,
+							lsp_server::ErrorCode::InvalidRequest as i32,
+							"the server has been shut down and accepts only `exit`".to_string(),
+						));
+					} else {
+						self.on_request(req);
 					}
-					self.on_request(req);
 				}
-				Ok(Message::Notification(note)) => self.on_notification(note),
+				Ok(Message::Notification(note)) => {
+					if note.method == "exit" {
+						self.runner.cancel_all();
+						return if self.shut_down {
+							Ok(())
+						} else {
+							Err("`exit` received before `shutdown`".into())
+						};
+					}
+					if !self.shut_down {
+						self.on_notification(note);
+					}
+				}
 				Ok(Message::Response(_)) => {}
 				Err(e) if e.is_disconnected() => {
 					self.runner.cancel_all();
 					return Ok(());
 				}
-				Err(_) => self.on_tick(),
+				Err(_) => {}
 			}
+			self.tick_if_due();
+		}
+	}
+
+	fn mark_dirty(&mut self, uri: String) {
+		self.dirty.insert(uri);
+		self.dirty_since.get_or_insert_with(std::time::Instant::now);
+	}
+
+	fn tick_if_due(&mut self) {
+		if self
+			.dirty_since
+			.is_some_and(|since| since.elapsed() >= TICK)
+		{
+			self.on_tick();
 		}
 	}
 
@@ -389,7 +441,7 @@ impl Server {
 						p.text_document.version,
 						p.text_document.text,
 					);
-					self.dirty.insert(uri);
+					self.mark_dirty(uri);
 				}
 			}
 			"textDocument/didChange" => {
@@ -400,7 +452,7 @@ impl Server {
 						self.runner.forget(&uri);
 						self.docs.change(&uri, p.text_document.version, change.text);
 						if self.settings.validate_on_type {
-							self.dirty.insert(uri);
+							self.mark_dirty(uri);
 						}
 					}
 				}
@@ -409,7 +461,7 @@ impl Server {
 				if let Ok(p) = serde_json::from_value::<DidSaveTextDocumentParams>(note.params) {
 					let uri = p.text_document.uri.as_str().to_string();
 					if !self.settings.validate_on_type && self.docs.get(&uri).is_some() {
-						self.dirty.insert(uri);
+						self.mark_dirty(uri);
 					}
 				}
 			}
@@ -449,17 +501,20 @@ impl Server {
 		let previous = std::mem::replace(&mut self.settings, next);
 		if previous.passing != next.passing {
 			// Republish, so the verdicts that hold appear or disappear.
-			self.dirty.extend(self.docs.uris());
+			for uri in self.docs.uris() {
+				self.mark_dirty(uri);
+			}
 		}
-		if previous.inlay_hints != next.inlay_hints {
+		if previous.inlay_hints != next.inlay_hints && self.inlay_refresh {
 			self.request("workspace/inlayHint/refresh", serde_json::Value::Null);
 		}
-		if previous.code_lens != next.code_lens {
+		if previous.code_lens != next.code_lens && self.code_lens_refresh {
 			self.request("workspace/codeLens/refresh", serde_json::Value::Null);
 		}
 	}
 
 	fn on_tick(&mut self) {
+		self.dirty_since = None;
 		if self.dirty.is_empty() {
 			return;
 		}
@@ -550,12 +605,20 @@ impl Server {
 		let Some(doc) = self.docs.get(uri) else {
 			return Vec::new();
 		};
+		let wanted = params.context.only.as_ref().is_none_or(|only| {
+			only.iter().any(|kind| {
+				kind.as_str().is_empty()
+					|| lsp_types::CodeActionKind::QUICKFIX
+						.as_str()
+						.starts_with(kind.as_str())
+			})
+		});
 		let needs_queries = params
 			.context
 			.diagnostics
 			.iter()
 			.any(|d| d.message.contains("no `queries` block"));
-		if !needs_queries {
+		if !wanted || !needs_queries {
 			return Vec::new();
 		}
 		let end = doc.line.end();
@@ -1095,9 +1158,37 @@ mod tests {
 	}
 
 	#[test]
+	fn a_refresh_is_not_requested_from_a_client_that_did_not_offer_it() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		open_here(&mut server, "file:///norefresh.vp", VALID);
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {
+				"codeLens": false,
+				"inlayHints": {"argumentNames": false},
+			}}}),
+		));
+		let requests: Vec<String> = receiver
+			.try_iter()
+			.filter_map(|message| match message {
+				Message::Request(r) => Some(r.method),
+				_ => None,
+			})
+			.collect();
+		assert!(
+			requests.is_empty(),
+			"a client that advertised neither refreshSupport must not be sent a refresh \
+			 request it will answer with MethodNotFound: {requests:?}"
+		);
+	}
+
+	#[test]
 	fn settings_turn_features_off_and_ask_the_client_to_refresh() {
 		let (sender, receiver) = crossbeam_channel::unbounded();
 		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		server.inlay_refresh = true;
+		server.code_lens_refresh = true;
 		open_here(&mut server, "file:///cfg.vp", VALID);
 		assert_eq!(server.code_lenses("file:///cfg.vp").len(), 1);
 		server.on_notification(Notification::new(

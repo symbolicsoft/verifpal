@@ -1,0 +1,63 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two, reported as a replay.
+//
+// Alice signs a fresh m and sends it to Bob, who verifies the signature and
+// then seals m for whichever peer his scenario binds. The second scenario
+// binds Bob's peer to Mallory, whose key is leaked, so that run of Bob is a
+// corrupt-peer run and its clones of Alice are the same configuration as the
+// honest one (the scenario rebinds only Bob). The attacker takes the flight
+// Alice@2 sent to Bob@2 -- m@2 and SIGN(ska, m@2) -- and delivers it to the
+// honest Bob, whose signature check passes. Nothing is forged: Alice signed
+// m@2 herself, in the other run. Bob accepts a message Alice sent once and
+// meant for a different run of Bob, so injective agreement fails, and that is
+// a replay. It is not excused by the matching-run exemption, because the
+// emitting run's recipient is the corrupt-peer configuration of Bob.
+//
+// The verdict was already a1. What this model pins is the classification: the
+// sibling groups used to recognise a replay were built only over the session
+// axis, so a scenario copy was never a sibling and the trace said m@2 was
+// "sent by Attacker and not by Alice", one step after showing Alice signing
+// it. The copy-axis groups are consulted only after the matching-run
+// exemption has declined, so they can relabel an a1 as a replay but can never
+// turn an exempted a0 into an attack; adding an identity scenario stays the
+// no-op the `scenario` metamorphic property says it is.
+
+attacker[active]
+
+principal Alice[
+	knows private ska
+	pka = PUBKEY(ska)
+	generates m
+	sig = SIGN(ska, m)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Bob[
+	knows public peer
+]
+
+Mallory -> Bob: [mpk]
+
+Alice -> Bob: [pka], m, sig
+
+principal Bob[
+	_ = SIGNVERIF(pka, m, sig)?
+	sealed = PKE_ENC(peer, m)
+	_ = HASH(m)
+]
+
+scenarios[
+	Bob[peer = pka]
+	Bob[peer = mpk]
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

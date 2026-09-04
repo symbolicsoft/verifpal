@@ -235,7 +235,7 @@ pub(crate) fn can_decompose(
 				}
 				Reveal::Argument(index) => {
 					if let Some(argument) = p.arguments.get(index) {
-						revealed.push(argument.clone());
+						revealed.push(reduce_once(argument));
 					}
 				}
 			}
@@ -270,7 +270,7 @@ pub(crate) fn can_break_weak(
 	let mut revealed = Vec::new();
 	for &idx in &spec.weak_reveals {
 		if let Some(a) = p.arguments.get(idx) {
-			revealed.push(a.clone());
+			revealed.push(reduce_once(a));
 		}
 	}
 	if let Some(output) = spec.weak_reveals_output {
@@ -447,6 +447,9 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		})
 		.map(Arc::new);
 	let pc: &Arc<Primitive> = reduced.as_ref().unwrap_or(p);
+	if let Some(rebuilt) = can_rebuild(pc) {
+		return (true, reduced_once(&rebuilt));
+	}
 	let wrap = || Value::Primitive(Arc::clone(pc));
 	if primitive_is_core(pc.id) {
 		let prim = match primitive_core_get(pc.id) {

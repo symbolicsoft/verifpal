@@ -164,7 +164,8 @@ impl Runner {
 		self.running.insert(job.uri.clone(), Arc::clone(&live));
 		let sender = self.sender.clone();
 		let verdicts = Arc::clone(&self.verdicts);
-		std::thread::spawn(move || {
+		let worker = std::thread::Builder::new().stack_size(ANALYSIS_STACK);
+		let spawned = worker.spawn(move || {
 			let _done = Finished(Arc::clone(&live));
 			crate::info::set_verbosity(crate::info::Verbosity::Silent);
 			if job.progress {
@@ -223,8 +224,11 @@ impl Runner {
 				)));
 			}
 		});
+		spawned.expect("spawn the analysis worker");
 	}
 }
+
+const ANALYSIS_STACK: usize = 256 << 20;
 
 fn analysis_report(
 	uri: String,

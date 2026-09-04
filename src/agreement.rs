@@ -35,11 +35,19 @@ pub(crate) fn emitted_by_matching_run(
 	}
 	let bound = TermBound::of(km);
 	let driving = driving_installs(attacker, &target);
+	let mut controllables: Vec<(PrincipalId, Controllable)> = Vec::new();
 	candidates.into_iter().any(|j| {
 		let Some(origin) = origin_of(ctx, km, j) else {
 			return false;
 		};
-		let controllable = Controllable::of(km, origin, attacker);
+		if !controllables.iter().any(|(id, _)| *id == origin.id) {
+			controllables.push((origin.id, Controllable::of(km, origin, attacker)));
+		}
+		let controllable = controllables
+			.iter()
+			.find(|(id, _)| *id == origin.id)
+			.map(|(_, controllable)| controllable)
+			.expect("just inserted");
 		if controllable.admits(origin, attacker, j) {
 			return false;
 		}
@@ -47,7 +55,7 @@ pub(crate) fn emitted_by_matching_run(
 			ctx,
 			km,
 			origin,
-			controllable: &controllable,
+			controllable,
 			attacker,
 			bound: &bound,
 			j,
@@ -129,9 +137,7 @@ fn driving_installs(
 	};
 	let record = attacker.record(idx)?;
 	let diffs: Vec<(usize, Value)> = record
-		.diffs
-		.iter()
-		.filter(|diff| diff.tainted)
+		.tainted()
 		.map(|diff| (diff.index.get(), diff.value.clone()))
 		.collect();
 	(!diffs.is_empty()).then_some((slot.get(), diffs))

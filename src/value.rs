@@ -512,6 +512,7 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
 		};
@@ -553,6 +554,7 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
 		};
@@ -596,6 +598,7 @@ mod tests {
 			used_by: IdMap::default(),
 			leaks: Arc::new(Vec::new()),
 			session_siblings: IdMap::default(),
+			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
 		};

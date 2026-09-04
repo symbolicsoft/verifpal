@@ -171,7 +171,7 @@ goreleaser healthcheck || say "warning: healthcheck reported missing tools (see 
 say "bumping Cargo.toml and Cargo.lock."
 if [[ "${DRY_RUN}" -eq 0 ]]; then
 	${SED} -i -e "s/^version = \"[0-9.]*\"/version = \"${VERSION}\"/" Cargo.toml
-	cargo generate-lockfile
+	cargo update --workspace
 	grep -q "^version = \"${VERSION}\"$" Cargo.toml || die "Cargo.toml version bump did not take."
 fi
 

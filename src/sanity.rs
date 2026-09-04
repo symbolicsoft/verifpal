@@ -260,6 +260,9 @@ fn sanity_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> V
 
 fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 	let subject = query.subject()?;
+	if let Some(e) = crate::construct::builtin_nil_error(subject, "queried") {
+		return Err(e);
+	}
 	if km.index_of(subject).is_none() {
 		return Err(unknown_constant(
 			&subject.name,
@@ -380,12 +383,31 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 }
 
 fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
-	for option in &query.options {
+	for (i, option) in query.options.iter().enumerate() {
 		let located = |e: VerifpalError| e.or_span(option.message.span);
 		match option.kind {
 			QueryOptionKind::Precondition => {
 				sanity_precondition(&option.message, km).map_err(located)?;
 			}
+		}
+		let repeated = query.options[..i].iter().any(|earlier| {
+			earlier.kind == option.kind
+				&& earlier.message.sender == option.message.sender
+				&& earlier.message.recipient == option.message.recipient
+				&& earlier.message.constants.len() == option.message.constants.len()
+				&& earlier
+					.message
+					.constants
+					.iter()
+					.zip(option.message.constants.iter())
+					.all(|(a, b)| a.id == b.id)
+		});
+		if repeated {
+			return Err(located(
+				VerifpalError::sanity("this query option is given twice".into())
+					.note("an option restricts the query once; repeating it changes nothing")
+					.help("remove the duplicate"),
+			));
 		}
 	}
 	Ok(())

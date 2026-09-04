@@ -86,7 +86,8 @@ fn emit(line: String) {
 		CAPTURED.with(|c| c.borrow_mut().push(line));
 		return;
 	}
-	println!("{line}");
+	use std::io::Write as _;
+	let _ = writeln!(std::io::stdout().lock(), "{line}");
 }
 
 pub(crate) struct InfoCapture;
@@ -109,8 +110,10 @@ pub(crate) fn info_capture_take() -> Vec<String> {
 }
 
 pub fn info_replay(lines: &[String]) {
+	use std::io::Write as _;
+	let mut out = std::io::stdout().lock();
 	for line in lines {
-		println!("{line}");
+		let _ = writeln!(out, "{line}");
 	}
 }
 
@@ -490,17 +493,7 @@ fn info_verify_result_summary_color(
 			if trimmed.is_empty() {
 				continue;
 			}
-			if trimmed.starts_with("In another session:") {
-				output.push_str(&format!("\n{}{}", indent, "\u{2502}".dimmed()));
-				output.push_str(&format!(
-					"\n{}{} {}",
-					indent,
-					"\u{2502}".dimmed(),
-					trimmed.italic().dimmed()
-				));
-			} else {
-				output.push_str(&format!("\n{}{} {}", indent, "\u{2502}".dimmed(), trimmed));
-			}
+			output.push_str(&format!("\n{}{} {}", indent, "\u{2502}".dimmed(), trimmed));
 		}
 		output.push_str(&format!(
 			"\n{}{} {}",

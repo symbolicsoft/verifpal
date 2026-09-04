@@ -65,16 +65,9 @@ pub fn tex_report(run: &Run) -> String {
 	out
 }
 
-fn short_name(model: &ModelReport) -> &str {
-	match &model.analysis {
-		Some(a) => &a.model,
-		None => model.file.rsplit('/').next().unwrap_or(&model.file),
-	}
-}
-
 fn slug(model: &ModelReport, index: usize) -> String {
 	let mut out = String::new();
-	for c in short_name(model).chars() {
+	for c in crate::report::short_name(model).chars() {
 		if c.is_ascii_alphanumeric() {
 			out.push(c.to_ascii_lowercase());
 		} else if !out.ends_with('-') {
@@ -86,7 +79,7 @@ fn slug(model: &ModelReport, index: usize) -> String {
 
 fn title(run: &Run) -> String {
 	match run.models.as_slice() {
-		[only] => format!("Verifpal analysis of {}", short_name(only)),
+		[only] => format!("Verifpal analysis of {}", crate::report::short_name(only)),
 		models => format!("Verifpal analysis of {} models", models.len()),
 	}
 }
@@ -110,7 +103,7 @@ fn abstract_of(run: &Run) -> String {
 		[only] => {
 			out.push_str(&format!(
 				"This report describes the analysis of the Verifpal model {} ",
-				math_name(short_name(only))
+				math_name(crate::report::short_name(only))
 			));
 			match &only.analysis {
 				Some(a) => out.push_str(&format!(
@@ -171,7 +164,7 @@ fn index(run: &Run) -> Vec<Ctx> {
 				None => ("--".to_string(), "--".to_string(), "--".to_string()),
 			};
 			Ctx::new()
-				.raw("file", math_name(short_name(model)))
+				.raw("file", math_name(crate::report::short_name(model)))
 				.text("attacker", attacker)
 				.text("sessions", sessions)
 				.text("code", code)
@@ -188,8 +181,8 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		None => Vec::new(),
 	};
 	let ctx = Ctx::new()
-		.raw("name", math_name(short_name(model)))
-		.text("nameplain", short_name(model))
+		.raw("name", math_name(crate::report::short_name(model)))
+		.text("nameplain", crate::report::short_name(model))
 		.text("slug", slug.clone())
 		.list("failed", failed);
 	let Some(a) = &model.analysis else {
@@ -202,7 +195,7 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 			.list("traces", Vec::new())
 			.list("scope", Vec::new());
 	};
-	let hits = attacked_values(a);
+	let hits = crate::report::attacked_values(a);
 	let rows = msc::protocol_rows(model, &hits);
 	let protocol = diagram_ctx(
 		&rows,
@@ -244,26 +237,6 @@ fn intro(a: &Analysis) -> String {
 	for sentence in &a.provenance {
 		out.push(' ');
 		out.push_str(&escaped_tex(sentence));
-	}
-	out
-}
-
-fn attacked_values(a: &Analysis) -> std::collections::HashMap<String, Vec<usize>> {
-	let mut out: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
-	for (qi, q) in a.queries.iter().enumerate() {
-		if !q.resolved {
-			continue;
-		}
-		for step in &q.steps {
-			for value in &step.values {
-				let queries = out
-					.entry(crate::util::copy_base_name(&value.name).to_string())
-					.or_default();
-				if !queries.contains(&qi) {
-					queries.push(qi);
-				}
-			}
-		}
 	}
 	out
 }
@@ -509,7 +482,7 @@ fn verdicts_ctx(a: &Analysis, slug: &str, names: &Names) -> Ctx {
 				.raw("query", query_tex(&q.query, names))
 				.flag("resolved", q.resolved)
 				.text("envelope", envelope_text(q))
-				.num("line", q.range.line)
+				.text("loc", query_location(q))
 		})
 		.collect();
 	Ctx::new()
@@ -523,13 +496,20 @@ fn verdicts_ctx(a: &Analysis, slug: &str, names: &Names) -> Ctx {
 
 fn envelope_text(q: &QueryReport) -> String {
 	if q.resolved {
-		return "a witness, shown below".to_string();
+		return match &q.subtype {
+			Some(subtype) => format!("a witness, shown below ({subtype})"),
+			None => "a witness, shown below".to_string(),
+		};
 	}
 	q.envelope.summary.clone()
 }
 
-fn has_trace(q: &QueryReport) -> bool {
-	q.resolved && !q.steps.is_empty()
+fn query_location(q: &QueryReport) -> String {
+	if q.generated {
+		"generated".to_string()
+	} else {
+		q.range.line.to_string()
+	}
 }
 
 fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<Ctx> {
@@ -555,11 +535,18 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 				.text("queryplain", q.query.as_str())
 				.raw("lead", sentence(&q.conclusion, names))
 				.list("diagram", diagram.into_iter().collect())
-				.flag("stepped", has_trace(q))
+				.flag("stepped", crate::report::has_trace(q))
 				.list("steps", steps(q, names))
 				.list(
 					"preconditions",
 					q.preconditions
+						.iter()
+						.map(|text| Ctx::new().raw("text", sentence(text, names)))
+						.collect(),
+				)
+				.list(
+					"notes",
+					q.notes
 						.iter()
 						.map(|text| Ctx::new().raw("text", sentence(text, names)))
 						.collect(),
@@ -660,8 +647,8 @@ fn callouts(a: &Analysis, names: &Names) -> Vec<Ctx> {
 
 fn source_ctx(model: &ModelReport, index: usize) -> Ctx {
 	Ctx::new()
-		.raw("name", math_name(short_name(model)))
-		.text("nameplain", short_name(model))
+		.raw("name", math_name(crate::report::short_name(model)))
+		.text("nameplain", crate::report::short_name(model))
 		.text("slug", slug(model, index))
 		.flag("empty", model.source.trim().is_empty())
 		.raw("source", listing_safe(model.source.trim_end()))

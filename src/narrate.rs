@@ -20,23 +20,29 @@ impl NameTable {
 	}
 
 	pub(crate) fn from_state(ps: &PrincipalState) -> NameTable {
+		Self::from_states(std::iter::once(ps))
+	}
+
+	pub(crate) fn from_states<'a>(states: impl Iterator<Item = &'a PrincipalState>) -> NameTable {
 		let mut entries: Vec<(Value, Arc<str>)> = Vec::new();
 		let attacker_key = crate::primitive::attacker_public_key();
-		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
-			if crate::util::is_anonymous_name(&sm.constant.name) {
-				continue;
-			}
-			for form in [&sv.value, &sv.pre_rewrite] {
-				if matches!(form, Value::Constant(_)) || form.equivalent(&attacker_key, true) {
+		for ps in states {
+			for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
+				if crate::util::is_anonymous_name(&sm.constant.name) {
 					continue;
 				}
-				if entries
-					.iter()
-					.any(|(v, n)| v.equivalent(form, true) && **n == *sm.constant.name)
-				{
-					continue;
+				for form in [&sv.value, &sv.pre_rewrite] {
+					if matches!(form, Value::Constant(_)) || form.equivalent(&attacker_key, true) {
+						continue;
+					}
+					if entries
+						.iter()
+						.any(|(v, n)| v.equivalent(form, true) && **n == *sm.constant.name)
+					{
+						continue;
+					}
+					entries.push((form.clone(), Arc::clone(&sm.constant.name)));
 				}
-				entries.push((form.clone(), Arc::clone(&sm.constant.name)));
 			}
 		}
 		NameTable { entries }
@@ -272,19 +278,42 @@ fn oriented(
 	table.compress_outer_excluding(&attacker_orientation(v, attacker), outer, inner)
 }
 
+pub(crate) struct MutationSteps {
+	pub(crate) messages: Vec<(i32, Vec<usize>, Step)>,
+	pub(crate) replays: Vec<(usize, Step)>,
+	pub(crate) bypasses: Vec<Step>,
+}
+
+type MessageGroup = (PrincipalId, PrincipalId, i32, Vec<usize>, Vec<MutationItem>);
+
+#[cfg(test)]
 pub(crate) fn mutation_steps(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	table: &NameTable,
 	attacker: &AttackerState,
 ) -> Vec<Step> {
+	let grouped = mutation_groups(km, ps, table, attacker);
+	grouped
+		.messages
+		.into_iter()
+		.map(|(_, _, step)| step)
+		.chain(grouped.replays.into_iter().map(|(_, step)| step))
+		.chain(grouped.bypasses)
+		.collect()
+}
+
+pub(crate) fn mutation_groups(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	table: &NameTable,
+	attacker: &AttackerState,
+) -> MutationSteps {
 	let shadowed = shadowed_names(km, ps);
 	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
-	let installed = mutated_names(ps);
-	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
-	let mut groups: Vec<(PrincipalId, PrincipalId, i32, Vec<MutationItem>)> = Vec::new();
+	let mut groups: Vec<MessageGroup> = Vec::new();
 	let mut bypasses: Vec<Step> = Vec::new();
-	let mut replays: Vec<Step> = Vec::new();
+	let mut replays: Vec<(usize, Step)> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		if !reportable(sv) {
 			continue;
@@ -305,72 +334,109 @@ pub(crate) fn mutation_steps(
 				#[cfg(test)]
 				key_term: bypass_key.clone(),
 				check: declared
-					.map(|v| oriented(v, table, &mutated, &installed_refs, attacker))
+					.map(|v| oriented(v, table, &mutated, &mutated, attacker))
 					.unwrap_or_else(|| sm.constant.name.to_string()),
 				key: bypass_key
-					.map(|k| oriented(&k, table, &mutated, &installed_refs, attacker))
+					.map(|k| oriented(&k, table, &mutated, &mutated, attacker))
 					.unwrap_or_default(),
 			});
 			continue;
 		}
 		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
-		let sibling = crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
+		let sibling = crate::query::copy_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
 		if replayed(sv) || sibling {
-			replays.push(Step::Replay {
-				sender: Arc::from(km.principal_name(sender)),
-				recipient: Arc::from(km.principal_name(recipient)),
-				name: Arc::clone(&sm.constant.name),
-				value: oriented(&sv.pre_rewrite, table, own, &installed_refs, attacker),
-				sibling,
-				#[cfg(test)]
-				installed: sv.pre_rewrite.clone(),
-			});
+			replays.push((
+				i,
+				Step::Replay {
+					sender: Arc::from(km.principal_name(sender)),
+					recipient: Arc::from(km.principal_name(recipient)),
+					name: Arc::clone(&sm.constant.name),
+					value: oriented(&sv.pre_rewrite, table, own, own, attacker),
+					sibling,
+					#[cfg(test)]
+					installed: sv.pre_rewrite.clone(),
+				},
+			));
 			continue;
 		}
 		let item = MutationItem {
 			#[cfg(test)]
 			installed: sv.pre_rewrite.clone(),
 			name: Arc::clone(&sm.constant.name),
-			new_value: oriented(&sv.pre_rewrite, table, own, &installed_refs, attacker),
+			new_value: oriented(&sv.pre_rewrite, table, own, own, attacker),
 			old_value: km
 				.slots
 				.get(i)
-				.map(|slot| oriented(&slot.initial_value, table, own, &installed_refs, attacker))
+				.map(|slot| oriented(&slot.initial_value, table, own, own, attacker))
 				.unwrap_or_default(),
 			guarded: sm.guard,
 		};
+		let leg_at = km
+			.slots
+			.get(i)
+			.and_then(|slot| {
+				slot.sent_by
+					.iter()
+					.find(|event| event.sender == sender && event.recipient == recipient)
+			})
+			.map_or(sm.declared_at, |event| event.declared_at);
 		match groups
 			.iter_mut()
-			.find(|(s, r, d, _)| *s == sender && *r == recipient && *d == sm.declared_at)
+			.find(|(s, r, d, _, _)| *s == sender && *r == recipient && *d == leg_at)
 		{
-			Some((_, _, _, items)) => items.push(item),
-			None => groups.push((sender, recipient, sm.declared_at, vec![item])),
+			Some((_, _, _, slots, items)) => {
+				slots.push(i);
+				items.push(item);
+			}
+			None => groups.push((sender, recipient, leg_at, vec![i], vec![item])),
 		}
 	}
-	groups
-		.into_iter()
-		.map(|(sender, recipient, _, items)| Step::Mutations {
-			sender: Arc::from(km.principal_name(sender)),
-			recipient: Arc::from(km.principal_name(recipient)),
-			items,
-		})
-		.chain(replays)
-		.chain(bypasses)
-		.collect()
+	groups.sort_by_key(|(_, _, leg_at, _, _)| *leg_at);
+	MutationSteps {
+		messages: groups
+			.into_iter()
+			.map(|(sender, recipient, leg_at, slots, items)| {
+				(
+					leg_at,
+					slots,
+					Step::Mutations {
+						sender: Arc::from(km.principal_name(sender)),
+						recipient: Arc::from(km.principal_name(recipient)),
+						items,
+					},
+				)
+			})
+			.collect(),
+		replays,
+		bypasses,
+	}
 }
 
 fn deep_resolve(ps: &PrincipalState, v: &Value) -> Value {
+	deep_resolve_from(ps, v, &mut Vec::new())
+}
+
+fn deep_resolve_from(ps: &PrincipalState, v: &Value, chased: &mut Vec<ValueId>) -> Value {
 	match v {
 		Value::Constant(c) => {
 			let (resolved, _) = ps.resolve_constant(c, false);
 			match &resolved {
-				Value::Constant(r) if r.id == c.id => resolved,
-				other => deep_resolve(ps, other),
+				Value::Constant(r) if r.id == c.id || chased.contains(&r.id) => resolved,
+				other => {
+					chased.push(c.id);
+					let out = deep_resolve_from(ps, other, chased);
+					chased.pop();
+					out
+				}
 			}
 		}
 		Value::Primitive(p) => {
-			let arguments = p.arguments.iter().map(|a| deep_resolve(ps, a)).collect();
+			let arguments = p
+				.arguments
+				.iter()
+				.map(|a| deep_resolve_from(ps, a, chased))
+				.collect();
 			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
 		}
 	}
@@ -510,6 +576,11 @@ impl<'a> Narrator<'a> {
 				for argument in p.arguments.iter() {
 					self.walk(argument, exclude, seen, steps, false);
 				}
+				if let Some(twin) = crate::primitive::commutativity_swap(p) {
+					for argument in twin.arguments.iter() {
+						self.walk(argument, exclude, seen, steps, false);
+					}
+				}
 			}
 			return;
 		};
@@ -612,10 +683,15 @@ fn attacker_orientation(v: &Value, attacker: &AttackerState) -> Value {
 	Value::Primitive(Arc::new(here))
 }
 
-fn join_oriented(values: &[Value], table: &NameTable, attacker: &AttackerState) -> String {
+fn join_oriented(
+	values: &[Value],
+	table: &NameTable,
+	attacker: &AttackerState,
+	exclude: &[&str],
+) -> String {
 	values
 		.iter()
-		.map(|v| table.compress(&attacker_orientation(v, attacker)))
+		.map(|v| table.compress_excluding(&attacker_orientation(v, attacker), exclude))
 		.collect::<Vec<_>>()
 		.join(", ")
 }
@@ -689,17 +765,17 @@ impl Narrator<'_> {
 			DerivationRecord::Decomposed { of, using } => format!(
 				"Attacker opens {} with {}, obtaining {}.",
 				show(of),
-				join_oriented(using, table, attacker),
+				join_oriented(using, table, attacker, installed),
 				v,
 			),
 			DerivationRecord::Reconstructed { from } if from.is_empty() => {
 				format!("Attacker constructs {}.", v)
 			}
 			DerivationRecord::Reconstructed { from } => {
-				let parts = join_oriented(from, table, attacker);
+				let parts = join_oriented(from, table, attacker, installed);
 				match &attacker_orientation(value, attacker) {
 					Value::Primitive(p)
-						if join_oriented(&p.arguments, table, attacker) == parts =>
+						if join_oriented(&p.arguments, table, attacker, installed) == parts =>
 					{
 						format!("Attacker constructs {}.", v)
 					}
@@ -710,11 +786,20 @@ impl Narrator<'_> {
 				"Attacker recomposes {} from enough shares of {} ({}).",
 				v,
 				show(of),
-				join_oriented(using, table, attacker),
+				join_oriented(using, table, attacker, installed),
 			),
 			DerivationRecord::ConcatFragment { of } => {
 				format!("Attacker splits {} and takes {}.", show(of), v)
 			}
+			DerivationRecord::Rewritten { of, using } => match of {
+				Value::Primitive(p) => format!(
+					"Attacker applies {} to {}, obtaining {}.",
+					crate::primitive::primitive_name(p.id),
+					join_oriented(using, table, attacker, installed),
+					v,
+				),
+				_ => format!("Attacker obtains {}.", v),
+			},
 			DerivationRecord::Broken {
 				of,
 				capability,
@@ -884,13 +969,23 @@ pub(crate) struct CarriedIn {
 	pub record: Option<DerivationRecord>,
 }
 
-fn carried_in(km: &ProtocolTrace, ps: &PrincipalState, ambient: &AttackerState) -> Vec<CarriedIn> {
+fn carried_in(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	witnessed: &AttackerState,
+	fallback: &AttackerState,
+) -> Vec<CarriedIn> {
 	ps.values
 		.iter()
 		.filter(|sv| {
 			sv.provenance.attacker_tainted && sv.provenance.sender == crate::principal::ATTACKER_ID
 		})
 		.map(|sv| {
+			let ambient = if witnessed.knows(&sv.pre_rewrite).is_some() {
+				witnessed
+			} else {
+				fallback
+			};
 			let record = ambient
 				.knows(&sv.pre_rewrite)
 				.and_then(|idx| ambient.record(idx));
@@ -910,7 +1005,14 @@ fn carried_in(km: &ProtocolTrace, ps: &PrincipalState, ambient: &AttackerState) 
 					.map(|r| {
 						r.diffs
 							.iter()
-							.filter(|d| d.tainted && !d.value.equivalent(&sv.pre_rewrite, true))
+							.filter(|d| {
+								d.tainted
+									&& !d.value.equivalent(&sv.pre_rewrite, true)
+									&& km
+										.slots
+										.get(d.index.get())
+										.is_some_and(|slot| slot.creator != d.state)
+							})
 							.map(|d| (d.constant.name.to_string(), d.value.clone()))
 							.collect()
 					})
@@ -961,30 +1063,69 @@ pub(crate) fn narrate_attack(
 	ambient: &AttackerState,
 	prelude: Vec<Step>,
 ) -> Narration {
-	let table = NameTable::from_state(&witness.ps);
+	let states: Vec<&PrincipalState> = vec![&witness.ps];
+	let table = NameTable::from_states(states.iter().copied());
 	let mut seen: Vec<KnownIdx> = Vec::new();
-	let shadowed = shadowed_names(km, &witness.ps);
+	let mut shadowed: Vec<Arc<str>> = Vec::new();
+	for state in &states {
+		for name in shadowed_names(km, state) {
+			if !shadowed.contains(&name) {
+				shadowed.push(name);
+			}
+		}
+	}
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let installed = mutated_names(&witness.ps);
-	let installed_refs: Vec<&str> = installed.iter().map(|s| &**s).collect();
-	let carried = carried_in(km, &witness.ps, ambient);
+	let carried = carried_in(km, &witness.ps, &witness.attacker, ambient);
 	let narrator = Narrator::new(
 		km,
 		&witness.attacker,
 		&table,
-		&installed_refs,
+		&shadowed_refs,
 		witness.ps.id,
 		&carried,
 	);
 	let mut steps: Vec<Step> = Vec::new();
-	for sv in witness.ps.values.iter().filter(|sv| reportable(sv)) {
-		steps.extend(narrator.derivation_steps(&sv.pre_rewrite, &shadowed_refs, &mut seen, false));
+	let mut messages: Vec<(i32, usize, Vec<usize>, Step)> = Vec::new();
+	let mut replays: Vec<(usize, usize, Step)> = Vec::new();
+	let mut bypasses: Vec<Step> = Vec::new();
+	for (at, state) in states.iter().enumerate() {
+		let grouped = mutation_groups(km, state, &table, ambient);
+		messages.extend(
+			grouped
+				.messages
+				.into_iter()
+				.map(|(leg, slots, step)| (leg, at, slots, step)),
+		);
+		replays.extend(
+			grouped
+				.replays
+				.into_iter()
+				.map(|(slot, step)| (at, slot, step)),
+		);
+		bypasses.extend(grouped.bypasses);
+	}
+	messages.sort_by_key(|(leg, _, _, _)| *leg);
+	for (_, at, slots, step) in messages {
+		for &slot in &slots {
+			let value = &states[at].values[slot].pre_rewrite;
+			steps.extend(narrator.derivation_steps(value, &shadowed_refs, &mut seen, false));
+		}
+		steps.push(step);
+	}
+	for (at, slot, step) in replays {
+		let value = &states[at].values[slot].pre_rewrite;
+		steps.extend(narrator.derivation_steps(value, &shadowed_refs, &mut seen, false));
+		steps.push(step);
+	}
+	steps.extend(bypasses);
+	for state in &states {
+		let own = mutated_names(state);
+		let own_refs: Vec<&str> = own.iter().map(|s| &**s).collect();
+		steps.extend(gate_steps(state, &table, &own_refs));
 	}
 
-	steps.extend(mutation_steps(km, &witness.ps, &table, ambient));
-	steps.extend(gate_steps(&witness.ps, &table, &installed_refs));
-
-	steps.extend(narrator.derivation_steps(target, &installed_refs, &mut seen, true));
+	steps.extend(narrator.derivation_steps(target, &shadowed_refs, &mut seen, true));
 
 	let mut steps = {
 		let mut all = prelude;
