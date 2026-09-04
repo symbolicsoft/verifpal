@@ -7,12 +7,13 @@ metadata:
 before:
   hooks:
     - rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu x86_64-unknown-freebsd
-    - cargo install --locked cargo-zigbuild@0.23.3
+    - cargo install --locked cross
     - make dist-assets
 
 builds:
   - id: verifpal
     builder: rust
+    tool: cross
     binary: verifpal
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
