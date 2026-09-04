@@ -6,8 +6,8 @@ metadata:
 
 before:
   hooks:
-    - rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-freebsd
-    - cargo install --locked cargo-zigbuild
+    - rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu x86_64-unknown-freebsd
+    - cargo install --locked cargo-zigbuild@0.23.3
     - make dist-assets
 
 builds:
