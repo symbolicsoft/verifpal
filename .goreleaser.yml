@@ -6,7 +6,7 @@ metadata:
 
 before:
   hooks:
-    - rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu x86_64-unknown-freebsd
+    - rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnu
     - cargo install cross --git https://github.com/cross-rs/cross
     - make dist-assets
 
@@ -25,7 +25,6 @@ builds:
       - x86_64-unknown-linux-gnu
       - aarch64-unknown-linux-gnu
       - x86_64-pc-windows-gnu
-      - x86_64-unknown-freebsd
 
 archives:
   - id: verifpal

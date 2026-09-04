@@ -47,6 +47,6 @@ wasm:
 clean:
 	@/bin/echo "[Verifpal] Cleaning up..."
 	@cargo clean
-	@$(RM) -r pkg
+	@$(RM) -r dist pkg
 
 .PHONY: build lint test test-tex test-exhaustive dist-assets release-dry wasm clean assets examples Casks scripts src target
