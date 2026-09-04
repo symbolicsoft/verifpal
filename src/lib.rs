@@ -101,6 +101,8 @@ struct WasmResult {
 	query: String,
 	resolved: bool,
 	kind: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	subtype: Option<String>,
 	summary: String,
 	envelope: String,
 }
@@ -137,6 +139,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 				query: r.query.to_string(),
 				resolved: r.resolved,
 				kind: r.query.kind.name().to_string(),
+				subtype: r.subtype.map(|s| s.name().to_string()),
 				summary: r.summary.clone(),
 				envelope: r.envelope.summary(),
 			})
@@ -199,4 +202,18 @@ pub fn wasm_pretty(input: &str) -> String {
 		};
 	serde_json::to_string(&payload)
 		.unwrap_or_else(|_| r#"{"ok":false,"error":"could not serialize","output":""}"#.to_string())
+}
+
+#[cfg(all(test, feature = "wasm"))]
+mod tests {
+	#[test]
+	fn a_wasm_result_carries_the_verdict_qualifier() {
+		let source = std::fs::read_to_string("examples/test/conf_attacker_supplied_value.vp")
+			.expect("the model is in the corpus");
+		let payload: serde_json::Value =
+			serde_json::from_str(&super::wasm_verify(&source)).expect("valid JSON");
+		assert_eq!(payload["ok"], true);
+		assert_eq!(payload["results"][0]["subtype"], "attacker-supplied value");
+		assert!(payload["results"][1].get("subtype").is_none());
+	}
 }
