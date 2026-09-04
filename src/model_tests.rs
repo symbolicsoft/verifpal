@@ -16,7 +16,7 @@ const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 7] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 6] = [
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
