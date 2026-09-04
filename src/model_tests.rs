@@ -1,13 +1,14 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 4] = [
+	("history_closure_incompatible.vp", 4),
 	("junglegym_hybrid_pq.vp", 4),
 	("noise_xx_mutual.vp", 1),
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 1] = [("junglegym_hybrid_pq.vp", 0)];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
 
 const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 
@@ -512,6 +513,47 @@ fn test_halted_use_is_not_acceptance() {
 }
 
 #[test]
+fn test_history_closure_incompatible() {
+	run_model("history_closure_incompatible.vp", "c0c1c1a0a1f0f1e1e1");
+	run_model_sessions("history_closure_incompatible.vp", 1, "c0c1c1a0a1f0f1e1e1");
+}
+
+#[test]
+fn the_closure_does_not_combine_reads_from_incompatible_executions() {
+	let (_, closure) =
+		crate::verify::verify("examples/test/history_closure_incompatible.vp").expect("analyses");
+	let (results, weakened) =
+		crate::verify::verify("examples/test/junglegym_hybrid_pq.vp").expect("analyses");
+	assert_eq!(
+		closure, "c0c1c1a0a1f0f1e1e1",
+		"the seed is learned only where Bob was handed the attacker's key, and sealed \
+		 exists only where he was handed the honest one; a root built from the first \
+		 must not open a ciphertext from the second, and nothing separates the two \
+		 steps but a rule inside the closure"
+	);
+	assert_eq!(
+		weakened, "c1c1c1a0a1f0f1e1e1",
+		"the same model with `PUBKEY[weak from phase 3]` hands over alice_eph, which \
+		 decapsulates the honest kem_ct in one execution, so the payload is genuinely lost"
+	);
+	let payload = results
+		.iter()
+		.find(|r| {
+			r.query
+				.constants
+				.first()
+				.is_some_and(|c| &*c.name == "payload")
+		})
+		.expect("the payload query");
+	assert!(
+		!payload.summary.contains("not a minimized witness"),
+		"with the incoherent route gone the phase-3 route is what remains, and it needs \
+		 no substitution at all, so its witness minimizes: {}",
+		payload.summary
+	);
+}
+
+#[test]
 fn test_history_incompatible_knowledge() {
 	run_model("history_incompatible_knowledge.vp", "a0");
 	run_model_sessions("history_incompatible_knowledge.vp", 1, "a0");
@@ -705,6 +747,12 @@ fn test_matching_run_two_inputs() {
 fn test_matching_run_nested_term() {
 	run_model("matching_run_nested_term.vp", "a1");
 	run_model_sessions("matching_run_nested_term.vp", 1, "a0");
+}
+
+#[test]
+fn test_matching_run_forged_unguarded() {
+	run_model("matching_run_forged_unguarded.vp", "a1");
+	run_model_sessions("matching_run_forged_unguarded.vp", 1, "a1");
 }
 
 #[test]

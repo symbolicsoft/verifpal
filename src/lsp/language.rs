@@ -401,7 +401,7 @@ fn block_close(text: &str, from: usize) -> Option<usize> {
 				while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
 					i += 1;
 				}
-				i += 2;
+				i += 1;
 			}
 			b'[' => depth += 1,
 			b']' => {
@@ -571,12 +571,17 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 
 	let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
 	let head = trimmed.trim_end();
-	let after_knows = head.len() >= "knows".len()
-		&& head[head.len() - "knows".len()..].eq_ignore_ascii_case("knows")
-		&& head[..head.len() - "knows".len()]
-			.chars()
-			.next_back()
-			.is_none_or(|c| !c.is_alphanumeric() && c != '_');
+	let after_knows = head
+		.len()
+		.checked_sub("knows".len())
+		.filter(|&at| head.is_char_boundary(at))
+		.is_some_and(|at| {
+			head[at..].eq_ignore_ascii_case("knows")
+				&& head[..at]
+					.chars()
+					.next_back()
+					.is_none_or(|c| !c.is_alphanumeric() && c != '_')
+		});
 	if after_knows {
 		return ["public", "private"]
 			.iter()

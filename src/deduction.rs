@@ -16,8 +16,14 @@ pub(crate) enum RuleDomain {
 	PrincipalAssigned,
 }
 
-type RuleFn =
-	fn(&VerifyContext, &Value, &PrincipalState, &AttackerState, &Arc<MutationRecord>) -> bool;
+type RuleFn = fn(
+	&VerifyContext,
+	&ProtocolTrace,
+	&Value,
+	&PrincipalState,
+	&AttackerState,
+	&Arc<MutationRecord>,
+) -> bool;
 
 pub(crate) struct RuleGroup {
 	pub domain: RuleDomain,
@@ -55,7 +61,7 @@ pub(crate) fn compute_knowledge_closure(
 		}
 		let attacker = ctx.attacker_snapshot();
 
-		if !try_deduction_step(ctx, &attacker, ps, &record, &index) {
+		if !try_deduction_step(ctx, km, &attacker, ps, &record, &index) {
 			ctx.analysis_count_increment();
 			return Ok(());
 		}
@@ -64,6 +70,7 @@ pub(crate) fn compute_knowledge_closure(
 
 fn try_deduction_step(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	ps: &PrincipalState,
 	record: &Arc<MutationRecord>,
@@ -76,7 +83,7 @@ fn try_deduction_step(
 			RuleDomain::AttackerKnown => {
 				for known in attacker.known.iter() {
 					for rule in group.rules {
-						progress |= rule(ctx, known, ps, attacker, record);
+						progress |= rule(ctx, km, known, ps, attacker, record);
 					}
 				}
 			}
@@ -86,7 +93,7 @@ fn try_deduction_step(
 						continue;
 					}
 					for rule in group.rules {
-						progress |= rule(ctx, &sv.value, ps, attacker, record);
+						progress |= rule(ctx, km, &sv.value, ps, attacker, record);
 					}
 				}
 			}
@@ -95,13 +102,22 @@ fn try_deduction_step(
 	progress
 }
 
+#[allow(clippy::too_many_arguments)]
 fn learn(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
 	value: &Value,
 	record: &Arc<MutationRecord>,
 	derivation: DerivationRecord,
 	message: impl FnOnce() -> String,
 ) -> bool {
+	if attacker.knows(value).is_none()
+		&& !combination_coheres(ctx, km, ps, attacker, record, &derivation)
+	{
+		return false;
+	}
 	if !ctx.attacker_put_with(value, record, derivation) {
 		return false;
 	}
@@ -109,8 +125,435 @@ fn learn(
 	true
 }
 
+/// Whether the reads a derivation rests on can all have happened in one
+/// execution.
+///
+/// Knowledge is global and monotone, so a rule may combine a value read out of
+/// one execution of a principal with one that exists only in another: a seed
+/// learned because Bob was handed the attacker's key, and a ciphertext Alice
+/// only computes once she has verified Bob's signature over the honest one.
+/// No install separates the two, so the validator's filters never see it, and
+/// the result is a term no execution produces.
+///
+/// So the combination is checked where it is made. The reads the ingredients
+/// bottom out in are collected, each with the substitution *it depends on*:
+/// not the whole record of the state it was read from, which lists every
+/// install there, but the installs in the dependency cone of its slot within
+/// the reader's own computation, followed into the values installed there.
+/// Two reads that need different values at one slot are refused outright.
+/// Otherwise the union is replayed as the one execution it describes
+/// (`reexec::replay_diffs`, carried forward through every principal it
+/// reaches, cached per substitution and phase), and every read recorded under
+/// a different substitution must still be *reached* there.
+///
+/// Reached, not equal. A run that halts before a slot never produced it, and
+/// that is a fact about the execution. A slot that is reached but holds
+/// something else is not: the union is assembled from ambient records, which
+/// list every install in the state a value came from rather than the ones it
+/// needed, so a mismatch there is as likely to be an artifact of the union as
+/// a real disagreement. Refusing on mismatch was measured and cost real
+/// attacks in `test1.vp`, `test3.vp`, `test5.vp` and `noise_xx_mutual.vp`,
+/// which the `leaks` and `weaken` sweeps caught as lost attacks.
+fn combination_coheres(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	ambient: &Arc<MutationRecord>,
+	derivation: &DerivationRecord,
+) -> bool {
+	let ingredients = derivation.ingredients();
+	if ingredients.is_empty() || !any_taint(attacker) {
+		return true;
+	}
+	let mut walk = Walk {
+		seen: Vec::new(),
+		memo: IdMap::default(),
+		reads: Vec::new(),
+		union: Vec::new(),
+	};
+	if derivation.reads_from_state() {
+		merge_into(&tainted(ambient), &mut walk.union);
+	}
+	for ingredient in &ingredients {
+		collect_reads(km, ps, attacker, ingredient, &mut walk);
+	}
+	let Walk {
+		reads, mut union, ..
+	} = walk;
+	if union.is_empty() {
+		return true;
+	}
+	for read in &reads {
+		if !merge_into(&read.needs, &mut union) {
+			return false;
+		}
+	}
+	union.sort_by_key(|(slot, _)| *slot);
+	let signature = crate::context::diffs_signature(&union);
+	if reads.iter().all(|read| read.signature == signature) {
+		return true;
+	}
+	let replayed = ctx.replayed(km, &union, attacker);
+	reads
+		.iter()
+		.filter(|read| read.signature != signature)
+		.all(|read| {
+			let Some(state) = replayed.iter().find(|state| state.id == read.reader) else {
+				return true;
+			};
+			read.slot < state.values.len() && !state.slot_unreached(read.slot)
+		})
+}
+
+type ConeCache = IdMap<(PrincipalId, usize), Arc<Vec<usize>>>;
+type TaintFlag = (Arc<Vec<Arc<MutationRecord>>>, bool);
+
+thread_local! {
+	static ANY_TAINT: std::cell::RefCell<Option<TaintFlag>> = const { std::cell::RefCell::new(None) };
+	static CONES: std::cell::RefCell<ConeCache> = std::cell::RefCell::new(IdMap::default());
+}
+
+/// Discard the per-trace cone cache. Cones are a function of the protocol
+/// trace alone, and every analysis brings a new one.
+pub(crate) fn cone_cache_reset() {
+	CONES.with(|cones| cones.borrow_mut().clear());
+}
+
+/// Whether any value the attacker holds was recorded under a substitution. If
+/// none was, every combination is trivially of one execution, and the gate can
+/// answer without walking anything.
+///
+/// Memoised per snapshot, since the check is linear in what the attacker knows
+/// and the gate runs inside the closure's fixed point. The cell keeps the `Arc`
+/// it was computed from rather than its address: `AttackerState` is
+/// copy-on-write, so a records vector that dies frees its block, the allocator
+/// hands the same block to the next vector of that size, and a cached `false`
+/// would then answer for a *tainted* snapshot and switch the whole gate off.
+fn any_taint(attacker: &AttackerState) -> bool {
+	ANY_TAINT.with(|cell| {
+		let mut cell = cell.borrow_mut();
+		if let Some((seen, hit)) = cell.as_ref()
+			&& Arc::ptr_eq(seen, &attacker.mutation_records)
+		{
+			return *hit;
+		}
+		let hit = attacker
+			.mutation_records
+			.iter()
+			.any(|record| record.diffs.iter().any(|diff| diff.tainted));
+		*cell = Some((Arc::clone(&attacker.mutation_records), hit));
+		hit
+	})
+}
+
+fn tainted(record: &MutationRecord) -> Vec<(SlotIdx, Value)> {
+	record
+		.diffs
+		.iter()
+		.filter(|diff| diff.tainted)
+		.map(|diff| (diff.index, diff.value.clone()))
+		.collect()
+}
+
+/// One read a derivation rests on: what was read, where, by whom, and the
+/// substitution that read depends on.
+struct Read {
+	slot: usize,
+	reader: PrincipalId,
+	needs: Vec<(SlotIdx, Value)>,
+	signature: u64,
+}
+
+/// Merge a substitution into the union, reporting a contradiction: two reads
+/// that need different values at one slot cannot both have happened,
+/// whatever a replay would show.
+fn merge_absorb(needs: &[(SlotIdx, Value)], union: &mut Vec<(SlotIdx, Value)>) {
+	for (slot, value) in needs {
+		if !union.iter().any(|(held, _)| held == slot) {
+			union.push((*slot, value.clone()));
+		}
+	}
+}
+
+fn merge_into(needs: &[(SlotIdx, Value)], union: &mut Vec<(SlotIdx, Value)>) -> bool {
+	let mut coherent = true;
+	for (slot, value) in needs {
+		match union.iter().find(|(held, _)| held == slot) {
+			Some((_, held)) => coherent &= held.equivalent(value, true),
+			None => union.push((*slot, value.clone())),
+		}
+	}
+	coherent
+}
+
+/// The reads an ingredient rests on, whether or not the attacker holds it as
+/// a term.
+///
+/// A rule may use an ingredient it never learned: `obtainable` rebuilds a key
+/// in place out of the walked state, rewriting it and reconstructing the
+/// result from arguments the attacker holds, or projecting it from a sibling
+/// output it can open. The seed learned under a substitution can then sit two
+/// levels inside a key nothing in attacker knowledge names. So the walk asks
+/// the cascade itself which arguments it rebuilt from, and follows those; it
+/// does not guess at routes, since a route the cascade did not take would
+/// refuse combinations that are sound.
+/// The accumulators the read walk fills: which known terms it has already
+/// visited, the per-term precondition memo, the reads it found, and the union
+/// of every record it passed through.
+struct Walk {
+	seen: Vec<usize>,
+	memo: IdMap<usize, Vec<(SlotIdx, Value)>>,
+	reads: Vec<Read>,
+	union: Vec<(SlotIdx, Value)>,
+}
+
+fn collect_reads(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	term: &Value,
+	walk: &mut Walk,
+) {
+	if let Some(idx) = attacker.knows(term) {
+		collect_leaves(km, attacker, idx, walk);
+		return;
+	}
+	let Value::Primitive(p) = term else {
+		return;
+	};
+	if let Some(rebuilt) = can_reconstruct_primitive(p, ps, attacker) {
+		for argument in &rebuilt.from {
+			collect_reads(km, ps, attacker, argument, walk);
+		}
+		return;
+	}
+	let Ok(spec) = crate::primitive::primitive_get(p.id) else {
+		return;
+	};
+	let Some(&outputs) = spec.output.iter().max() else {
+		return;
+	};
+	for j in (0..outputs.max(0) as usize).filter(|&j| j != p.output) {
+		let sibling = Arc::new(p.with_output(j));
+		let projected = Value::Primitive(Arc::clone(&sibling));
+		if attacker.knows(&projected).is_none() {
+			continue;
+		}
+		let Some(opened) = can_decompose(&sibling, ps, attacker) else {
+			continue;
+		};
+		collect_reads(km, ps, attacker, &projected, walk);
+		for key in &opened.used {
+			collect_reads(km, ps, attacker, key, walk);
+		}
+		return;
+	}
+}
+
+/// The reads a known term bottoms out in.
+fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, walk: &mut Walk) {
+	if let Some(record) = attacker.record(idx) {
+		let taints = tainted(record);
+		merge_absorb(&taints, &mut walk.union);
+	}
+	if walk.seen.contains(&idx.get()) {
+		return;
+	}
+	walk.seen.push(idx.get());
+	let Some(derivation) = attacker.derivation(idx) else {
+		return;
+	};
+	match derivation {
+		DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
+			let reader = km
+				.slots
+				.get(slot.get())
+				.map(|s| s.creator)
+				.unwrap_or(crate::principal::ATTACKER_ID);
+			let needs = read_preconditions(
+				km,
+				attacker,
+				idx,
+				&mut walk.memo,
+				&mut Vec::new(),
+				&mut false,
+			);
+			walk.reads.push(Read {
+				slot: slot.get(),
+				reader,
+				signature: crate::context::diffs_signature(&needs),
+				needs,
+			});
+		}
+		DerivationRecord::Initial => {}
+		other => {
+			for ingredient in other.ingredients() {
+				if let Some(inner) = attacker.knows(ingredient) {
+					collect_leaves(km, attacker, inner, walk);
+				}
+			}
+		}
+	}
+}
+
+/// The substitution a read depends on: the installs in the dependency cone of
+/// its slot within the reader's own computation, followed into the values
+/// installed there. A record lists every install in the state a value was
+/// read from; most of them the value never touched, and treating them as
+/// preconditions makes two unrelated reads of one principal contradict each
+/// other.
+fn read_preconditions(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	idx: KnownIdx,
+	memo: &mut IdMap<usize, Vec<(SlotIdx, Value)>>,
+	active: &mut Vec<usize>,
+	cut: &mut bool,
+) -> Vec<(SlotIdx, Value)> {
+	if let Some(hit) = memo.get(&idx.get()) {
+		return hit.clone();
+	}
+	if active.contains(&idx.get()) {
+		*cut = true;
+		return Vec::new();
+	}
+	active.push(idx.get());
+	let mut out: Vec<(SlotIdx, Value)> = Vec::new();
+	let (slot, record) = match (attacker.derivation(idx), attacker.record(idx)) {
+		(
+			Some(DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot }),
+			Some(record),
+		) => (slot.get(), Arc::clone(record)),
+		(Some(other), _) => {
+			for ingredient in other.ingredients() {
+				if let Some(inner) = attacker.knows(ingredient) {
+					let mut inner_cut = false;
+					for need in
+						read_preconditions(km, attacker, inner, memo, active, &mut inner_cut)
+					{
+						if !out.iter().any(|(held, _)| *held == need.0) {
+							out.push(need);
+						}
+					}
+					*cut |= inner_cut;
+				}
+			}
+			active.pop();
+			if !*cut {
+				memo.insert(idx.get(), out.clone());
+			}
+			return out;
+		}
+		_ => {
+			active.pop();
+			return out;
+		}
+	};
+	let reader = km.slots.get(slot).map(|s| s.creator).unwrap_or(0);
+	for &at in reach_cone(km, reader, slot).iter() {
+		let Some(diff) = record
+			.diffs
+			.iter()
+			.find(|diff| diff.tainted && diff.index.get() == at)
+		else {
+			continue;
+		};
+		if !out.iter().any(|(held, _)| held.get() == at) {
+			out.push((diff.index, diff.value.clone()));
+		}
+		if let Some(inner) = attacker.knows(&diff.value) {
+			let mut inner_cut = false;
+			for need in read_preconditions(km, attacker, inner, memo, active, &mut inner_cut) {
+				if !out.iter().any(|(held, _)| *held == need.0) {
+					out.push(need);
+				}
+			}
+			*cut |= inner_cut;
+		}
+	}
+	out.sort_by_key(|(slot, _)| *slot);
+	active.pop();
+	if !*cut {
+		memo.insert(idx.get(), out.clone());
+	}
+	out
+}
+
+/// Everything a read of `slot` by `principal` depends on: the slots its value
+/// is built from, and the slots every check the principal had to pass on the
+/// way to it is built from. A value the principal computes after a signature
+/// check exists only in executions where that check passed, so an install that
+/// made it pass is a precondition of the read even though the value's own
+/// definition never mentions it. Dropping those let a signature harvested from
+/// one execution of a run stand beside a seed harvested from another.
+fn reach_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Arc<Vec<usize>> {
+	if let Some(hit) = CONES.with(|cones| cones.borrow().get(&(principal, slot)).cloned()) {
+		return hit;
+	}
+	let built = Arc::new(reach_cone_uncached(km, principal, slot));
+	CONES.with(|cones| {
+		cones
+			.borrow_mut()
+			.insert((principal, slot), Arc::clone(&built))
+	});
+	built
+}
+
+fn reach_cone_uncached(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Vec<usize> {
+	let mut out = own_cone(km, principal, slot);
+	let Some(declared_at) = km.slots.get(slot).map(|s| s.declared_at) else {
+		return out;
+	};
+	for (at, trace_slot) in km.slots.iter().enumerate() {
+		if trace_slot.creator != principal || trace_slot.declared_at >= declared_at {
+			continue;
+		}
+		let checked = matches!(&trace_slot.initial_value, Value::Primitive(p) if p.instance_check);
+		if !checked {
+			continue;
+		}
+		for reached in own_cone(km, principal, at) {
+			if !out.contains(&reached) {
+				out.push(reached);
+			}
+		}
+	}
+	out
+}
+
+/// The slots a slot's value is built from within one principal's own
+/// computation: the slot itself, and every slot its definition mentions,
+/// following definitions only through slots that principal created. A slot it
+/// received is a leaf, whatever its sender computed it from.
+fn own_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Vec<usize> {
+	let mut out: Vec<usize> = vec![slot];
+	let mut frontier: Vec<usize> = vec![slot];
+	while let Some(at) = frontier.pop() {
+		let Some(trace_slot) = km.slots.get(at) else {
+			continue;
+		};
+		if trace_slot.creator != principal && at != slot {
+			continue;
+		}
+		let mut mentioned: Vec<Constant> = Vec::new();
+		trace_slot.initial_value.collect_constants(&mut mentioned);
+		for c in mentioned {
+			let Some(&next) = km.index.get(&c.id) else {
+				continue;
+			};
+			if !out.contains(&next) {
+				out.push(next);
+				frontier.push(next);
+			}
+		}
+	}
+	out
+}
+
 fn rule_decompose(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -126,6 +569,9 @@ fn rule_decompose(
 	for revealed in &result.revealed {
 		learned |= learn(
 			ctx,
+			km,
+			ps,
+			attacker,
 			revealed,
 			record,
 			DerivationRecord::Decomposed {
@@ -147,6 +593,7 @@ fn rule_decompose(
 
 fn rule_break_weak(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -162,6 +609,9 @@ fn rule_break_weak(
 	for r in revealed {
 		progress |= learn(
 			ctx,
+			km,
+			ps,
+			attacker,
 			&r,
 			record,
 			DerivationRecord::Broken {
@@ -183,6 +633,7 @@ fn rule_break_weak(
 
 fn rule_reconstruct(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -193,7 +644,7 @@ fn rule_reconstruct(
 		Value::Primitive(p) => {
 			let result = can_reconstruct_primitive(p, ps, attacker);
 			for arg in &p.arguments {
-				found |= rule_reconstruct(ctx, arg, ps, attacker, record);
+				found |= rule_reconstruct(ctx, km, arg, ps, attacker, record);
 			}
 			result
 		}
@@ -210,27 +661,37 @@ fn rule_reconstruct(
 			None => DerivationRecord::Reconstructed { from: used.clone() },
 		};
 		let forged = reconstructed.forged;
-		found |= learn(ctx, value, record, derivation, || match forged {
-			Some(capability) => format!(
-				"{} forged from {} under the declared `{}` assumption.",
-				info_output_text(value),
-				pretty_values(&used),
-				capability.name(),
-			),
-			None => format!(
-				"{} obtained by reconstructing with {}.",
-				info_output_text(value),
-				pretty_values(&used),
-			),
-		});
+		found |= learn(
+			ctx,
+			km,
+			ps,
+			attacker,
+			value,
+			record,
+			derivation,
+			|| match forged {
+				Some(capability) => format!(
+					"{} forged from {} under the declared `{}` assumption.",
+					info_output_text(value),
+					pretty_values(&used),
+					capability.name(),
+				),
+				None => format!(
+					"{} obtained by reconstructing with {}.",
+					info_output_text(value),
+					pretty_values(&used),
+				),
+			},
+		);
 	}
 	found
 }
 
 fn rule_recompose(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
-	_ps: &PrincipalState,
+	ps: &PrincipalState,
 	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
@@ -242,6 +703,9 @@ fn rule_recompose(
 	};
 	learn(
 		ctx,
+		km,
+		ps,
+		attacker,
 		&result.revealed,
 		record,
 		DerivationRecord::Recomposed {
@@ -261,9 +725,10 @@ fn rule_recompose(
 
 fn rule_equivalize(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
 	ps: &PrincipalState,
-	_attacker: &AttackerState,
+	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	if let Value::Constant(c) = value
@@ -287,6 +752,9 @@ fn rule_equivalize(
 		let sv = &ps.values[slot];
 		found |= learn(
 			ctx,
+			km,
+			ps,
+			attacker,
 			&sv.value,
 			record,
 			DerivationRecord::Obtained {
@@ -306,9 +774,10 @@ fn rule_equivalize(
 
 fn rule_concat_extract(
 	ctx: &VerifyContext,
+	km: &ProtocolTrace,
 	value: &Value,
-	_ps: &PrincipalState,
-	_attacker: &AttackerState,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	let Value::Primitive(prim) = value else {
@@ -321,6 +790,9 @@ fn rule_concat_extract(
 	for arg in &prim.arguments {
 		found |= learn(
 			ctx,
+			km,
+			ps,
+			attacker,
 			arg,
 			record,
 			DerivationRecord::ConcatFragment { of: value.clone() },

@@ -55,7 +55,7 @@ pub(crate) fn validate(
 		if !crate::primitive::admissible(&ground) {
 			return Ok(false);
 		}
-		if !guards.bound.admits_at(ps.id, slot, &ground) {
+		if !guards.bound.admits_at(km, ps.id, slot, &ground) {
 			note_depth_cut(ctx, slot, &ground, &ps, guards.bound);
 			return Ok(false);
 		}
@@ -221,7 +221,7 @@ pub(crate) fn attacker_can_derive(
 	}
 }
 
-fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
+pub(crate) fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
 	if snapshot.knows(v).is_some() {
 		return true;
 	}

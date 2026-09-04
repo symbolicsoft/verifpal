@@ -47,6 +47,10 @@ impl Controllable {
 
 pub(crate) struct TermBound {
 	max_depth: usize,
+	deep: std::cell::OnceCell<Deep>,
+}
+
+struct Deep {
 	protocol: IdSet<u64>,
 	ids: Vec<ValueId>,
 	creators: Vec<PrincipalId>,
@@ -62,40 +66,57 @@ impl TermBound {
 			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
 			.max()
 			.unwrap_or(0);
-		let mut protocol: IdSet<u64> = IdSet::default();
-		for slot in &km.slots {
-			crate::hashing::collect_subterm_hashes(
-				&resolve_trace_constant(&slot.constant, km),
-				&mut protocol,
-			);
-		}
 		TermBound {
 			max_depth,
-			protocol,
-			ids: km.slots.iter().map(|slot| slot.constant.id).collect(),
-			creators: km.slots.iter().map(|slot| slot.creator).collect(),
-			consumes: km
-				.slots
-				.iter()
-				.map(|slot| unwrapped_by(&slot.initial_value))
-				.collect(),
-			peel: std::cell::RefCell::new(IdMap::default()),
+			deep: std::cell::OnceCell::new(),
 		}
 	}
 
-	pub(crate) fn admits_at(&self, principal: PrincipalId, slot: usize, v: &Value) -> bool {
+	fn deep(&self, km: &ProtocolTrace) -> &Deep {
+		self.deep.get_or_init(|| {
+			let mut protocol: IdSet<u64> = IdSet::default();
+			for slot in &km.slots {
+				crate::hashing::collect_subterm_hashes(
+					&resolve_trace_constant(&slot.constant, km),
+					&mut protocol,
+				);
+			}
+			Deep {
+				protocol,
+				ids: km.slots.iter().map(|slot| slot.constant.id).collect(),
+				creators: km.slots.iter().map(|slot| slot.creator).collect(),
+				consumes: km
+					.slots
+					.iter()
+					.map(|slot| unwrapped_by(&slot.initial_value))
+					.collect(),
+				peel: std::cell::RefCell::new(IdMap::default()),
+			}
+		})
+	}
+
+	pub(crate) fn admits_at(
+		&self,
+		km: &ProtocolTrace,
+		principal: PrincipalId,
+		slot: usize,
+		v: &Value,
+	) -> bool {
 		let depth = term_depth(v);
 		if depth <= self.max_depth {
 			return true;
 		}
-		depth <= self.max_depth + self.peel_depth(principal, slot)
-			&& self.depth_over_protocol(v) <= self.max_depth
+		let deep = self.deep(km);
+		depth <= self.max_depth + deep.peel_depth(principal, slot)
+			&& deep.depth_over_protocol(v) <= self.max_depth
 	}
 
 	pub(crate) fn depth(&self) -> usize {
 		self.max_depth
 	}
+}
 
+impl Deep {
 	fn depth_over_protocol(&self, v: &Value) -> usize {
 		match v {
 			Value::Constant(_) => 0,
@@ -248,7 +269,7 @@ impl CausalOrder {
 	}
 }
 
-fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerState>> {
+pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerState>> {
 	if keep.iter().all(|&keep| keep) {
 		return None;
 	}
@@ -344,11 +365,13 @@ type Agreement = (
 	Option<Arc<AttackerState>>,
 );
 
+type Agreed = (Arc<MutationRecord>, Vec<usize>, bool);
+
 pub(crate) struct Coherence {
 	principal: PrincipalId,
 	forwarded: Vec<Option<Value>>,
 	agreed: std::cell::RefCell<IdMap<u64, Vec<Agreement>>>,
-	histories: std::cell::RefCell<Vec<(usize, Vec<usize>, bool)>>,
+	histories: std::cell::RefCell<Vec<Agreed>>,
 }
 
 impl Coherence {
@@ -440,19 +463,18 @@ impl Coherence {
 		if diffs.is_empty() {
 			return true;
 		}
-		let key = Arc::as_ptr(record) as usize;
-		if let Some(&(_, _, hit)) = self
+		if let Some((_, _, hit)) = self
 			.histories
 			.borrow()
 			.iter()
-			.find(|(seen, seen_authored, _)| *seen == key && seen_authored == authored)
+			.find(|(seen, seen_authored, _)| Arc::ptr_eq(seen, record) && seen_authored == authored)
 		{
-			return hit;
+			return *hit;
 		}
 		let agrees = self.replays_agree(ctx, km, attacker, &diffs, authored);
 		self.histories
 			.borrow_mut()
-			.push((key, authored.to_vec(), agrees));
+			.push((Arc::clone(record), authored.to_vec(), agrees));
 		agrees
 	}
 
@@ -716,6 +738,100 @@ pub(crate) fn execute_forward(
 		}
 	}
 	Ok(out)
+}
+
+/// Replay a recorded substitution as the one execution it describes.
+///
+/// A `MutationRecord` names the slots the attacker had changed when a value
+/// was read, not the principal each change was delivered to; a merged record
+/// carries diffs from several. Every principal that receives one of the
+/// changed slots is run under the diffs that reach it, and the runs are then
+/// carried forward together to a fixed point, so that what the substitution
+/// did to the rest of the protocol is present in the result. It is one
+/// execution, not one per principal: a principal that was handed a value on a
+/// leg keeps it, whatever its honest peer would have emitted there, since that
+/// delivery is what the substitution *is*. Running the recipients separately
+/// and letting the last one's consequences win was how a man-in-the-middle
+/// run of Bob got replaced by a Bob fed Alice's honest flight.
+pub(crate) fn replay_diffs(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	diffs: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
+) -> Vec<PrincipalState> {
+	let seeds: Vec<(&PrincipalState, Vec<(SlotIdx, Value)>)> = ctx
+		.principal_states()
+		.iter()
+		.filter_map(|principal| {
+			let mine: Vec<(SlotIdx, Value)> = diffs
+				.iter()
+				.filter(|(slot, _)| {
+					principal.meta.get(slot.get()).is_some_and(|meta| {
+						meta.creator != principal.id && meta.wire.contains(&principal.id)
+					})
+				})
+				.cloned()
+				.collect();
+			(!mine.is_empty()).then_some((principal, mine))
+		})
+		.collect();
+	if seeds.is_empty() {
+		return Vec::new();
+	}
+	let mut out: Vec<PrincipalState> = Vec::new();
+	for (principal, mine) in &seeds {
+		if let Ok(state) = reexecute(&principal.clone_for_depth(true), mine, attacker, km) {
+			out.push(state);
+		}
+	}
+	let mut applied: Vec<(PrincipalId, Vec<(SlotIdx, Value)>)> = Vec::new();
+	for _ in 0..ctx.principal_states().len() {
+		let mut changed = false;
+		for pristine in ctx.principal_states() {
+			let seed: &[(SlotIdx, Value)] = seeds
+				.iter()
+				.find(|(principal, _)| principal.id == pristine.id)
+				.map(|(_, mine)| mine.as_slice())
+				.unwrap_or(&[]);
+			let forwarded: Vec<(SlotIdx, Value)> = forwarded_installs(km, &out, pristine, attacker)
+				.into_iter()
+				.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
+				.collect();
+			if forwarded.is_empty() {
+				continue;
+			}
+			if applied
+				.iter()
+				.any(|(id, seen)| *id == pristine.id && same_installs(seen, &forwarded))
+			{
+				continue;
+			}
+			let base = pristine.clone_for_depth(true);
+			let ran = if seed.is_empty() {
+				reexecute_forwarded(&base, &forwarded, attacker)
+			} else {
+				let mut all = seed.to_vec();
+				all.extend(forwarded.iter().cloned());
+				reexecute(&base, &all, attacker, km)
+			};
+			let Ok(state) = ran else {
+				continue;
+			};
+			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
+				Some((_, seen)) => *seen = forwarded,
+				None => applied.push((pristine.id, forwarded)),
+			}
+			match out.iter_mut().find(|held| held.id == pristine.id) {
+				Some(held) => *held = state,
+				None => out.push(state),
+			}
+			changed = true;
+		}
+		if !changed {
+			break;
+		}
+	}
+	out
 }
 
 fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {

@@ -1,0 +1,119 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0c1c1a0a1f0f1e1e1 at one session and at two.
+//
+// junglegym_hybrid_pq.vp with the phase-3 weakening on Alice's ephemeral key
+// removed, so that nothing ever hands over alice_eph. The root needs both
+// shared secrets. The DH half is free once bob_eph leaks. The KEM half is
+// not: the attacker learns kem_seed only by handing Bob PUBKEY(nil), so that
+// Bob encapsulates to a key the attacker can open, and in that execution
+// Bob's signed transcript names PUBKEY(nil), Alice's names her real key, her
+// SIGNVERIF fails and sealed is never computed. In the execution where sealed
+// exists, kem_ct is encapsulated to PUBKEY(alice_eph). No single execution
+// reveals payload.
+//
+// The engine used to report it anyway, and the report was assembled entirely
+// inside the knowledge closure: kem_seed from the first execution, the honest
+// encapsulation rebuilt from it, the honest root, and then the honest sealed
+// opened, with no install between the steps for the validator's filters to
+// see. The gate now sits where the combination is made. A rule that combines
+// reads from different executions replays the union of their substitutions,
+// carried forward through every principal it reaches, and refuses the
+// combination if any read it rests on is not reproduced; two reads that need
+// different values at one slot are refused outright. Reads are collected by
+// asking the obtainable cascade which arguments it rebuilt a key from, since
+// the seed can sit two layers inside a key nothing in attacker knowledge
+// names, and a value installed into a state hands its own preconditions to
+// everything read out of that state afterwards, which is what closes the
+// two-session route through Bob's second run.
+//
+// The other eight verdicts are the same as in junglegym_hybrid_pq.vp and
+// must not move.
+
+attacker[active]
+
+principal Alice[
+	knows private alice_ltk
+	knows public ctx
+	alice_ltpk = PUBKEY(alice_ltk)
+	generates alice_eph
+	alice_ephpk = PUBKEY(alice_eph)
+]
+
+principal Bob[
+	knows private bob_ltk
+	knows public ctx
+	bob_ltpk = PUBKEY(bob_ltk)
+	generates bob_eph
+	bob_ephpk = PUBKEY(bob_eph)
+	generates kem_seed
+]
+
+Alice -> Bob: [alice_ltpk], alice_ephpk
+Bob   -> Alice: [bob_ltpk], bob_ephpk
+
+principal Bob[
+	kem_ss, kem_ct = KEM_ENCAP(alice_ephpk, kem_seed)
+	dh_ss = DH_KEX(alice_ephpk, bob_eph)
+	transcript = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root, chain, auth_key = HKDF(CONCAT(dh_ss, kem_ss), transcript, ctx)
+	bob_sig = SIGN(bob_ltk, HASH(transcript, root))
+	confirm = MAC(auth_key, transcript)
+]
+
+Bob -> Alice: kem_ct, bob_sig, confirm
+
+principal Alice[
+	kem_ss_a = KEM_DECAP(alice_eph, kem_ct)?
+	dh_ss_a = DH_KEX(bob_ephpk, alice_eph)
+	transcript_a = CONCAT(alice_ephpk, bob_ephpk, ctx)
+	root_a, chain_a, auth_key_a = HKDF(CONCAT(dh_ss_a, kem_ss_a), transcript_a, ctx)
+	_ = SIGNVERIF(bob_ltpk, HASH(transcript_a, root_a), bob_sig)?
+	_ = ASSERT(confirm, MAC(auth_key_a, transcript_a))?
+	generates payload
+	sealed = AEAD_ENC(root_a, payload, transcript_a)
+	receipt = MAC(chain_a, sealed)
+]
+
+Alice -> Bob: sealed, receipt
+
+principal Bob[
+	_ = ASSERT(receipt, MAC(chain, sealed))?
+	payload_b = AEAD_DEC(root, sealed, transcript)?
+	ack = HASH(payload_b, chain)
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	_ = ASSERT(ack, HASH(payload, chain_a))?
+]
+
+phase[1]
+
+principal Bob[
+	leaks bob_eph
+]
+
+phase[2]
+
+principal Alice[
+	leaks alice_ltk
+]
+
+phase[3]
+
+queries[
+	confidentiality? payload
+	confidentiality? root
+	confidentiality? kem_seed
+	authentication? Bob -> Alice: bob_sig
+	authentication? Alice -> Bob: sealed[
+		precondition[Bob -> Alice: ack]
+	]
+	freshness? payload
+	freshness? ctx
+	equivalence? root, root_a
+	equivalence? auth_key, auth_key_a
+]

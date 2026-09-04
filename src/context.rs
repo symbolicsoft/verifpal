@@ -30,6 +30,7 @@ use crate::util::*;
 use crate::value::compute_slot_diffs;
 
 type Execution = (PrincipalId, Vec<(SlotIdx, Value)>);
+type Replay = (u64, i32, usize, Arc<Vec<PrincipalState>>);
 
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
@@ -52,10 +53,24 @@ pub(crate) struct VerifyContext {
 	searched: AtomicBool,
 	execution: RwLock<Option<Execution>>,
 	origin_only: RwLock<IdSet<usize>>,
+	replays: RwLock<Vec<Replay>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
 	cancel: Arc<AtomicBool>,
+}
+
+pub(crate) fn diffs_signature(diffs: &[(SlotIdx, Value)]) -> u64 {
+	let mut hash = 0xcbf2_9ce4_8422_2325u64;
+	let mut mix = |word: u64| {
+		hash ^= word;
+		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+	};
+	for (slot, value) in diffs {
+		mix(slot.get() as u64);
+		mix(value.hash_value());
+	}
+	hash
 }
 
 fn derivation_provenance(
@@ -208,6 +223,7 @@ impl VerifyContext {
 		let unresolved = results.len() as i32;
 		analysis_count_reset();
 		VerifyContext {
+			replays: RwLock::new(Vec::new()),
 			origin_only: RwLock::new(IdSet::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			results: RwLock::new(results),
@@ -268,8 +284,11 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
-		self.note_truncation(Truncation::TermDepth);
-		write_lock(&self.depth_cuts).insert((principal, slot))
+		let first = write_lock(&self.depth_cuts).insert((principal, slot));
+		if first {
+			self.note_truncation(Truncation::TermDepth);
+		}
+		first
 	}
 
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
@@ -378,6 +397,33 @@ impl VerifyContext {
 
 	pub(crate) fn note_origin_only(&self, query_index: usize) -> bool {
 		write_lock(&self.origin_only).insert(query_index)
+	}
+
+	/// The execution a substitution set describes, replayed once and shared by
+	/// every combination the closure then tests against it.
+	///
+	/// Keyed on what the attacker knows as well as on the substitution and the
+	/// phase: the replay runs `try_guard_bypass`, which reads knowledge, and
+	/// knowledge grows through the closure's fixed point, so a replay computed
+	/// early would otherwise answer for a later state that gets further.
+	pub(crate) fn replayed(
+		&self,
+		km: &ProtocolTrace,
+		diffs: &[(SlotIdx, Value)],
+		attacker: &AttackerState,
+	) -> Arc<Vec<PrincipalState>> {
+		let key = diffs_signature(diffs);
+		let phase = attacker.current_phase;
+		let known = attacker.known.len();
+		if let Some((_, _, _, hit)) = read_lock(&self.replays)
+			.iter()
+			.find(|(seen, at, held, _)| *seen == key && *at == phase && *held == known)
+		{
+			return Arc::clone(hit);
+		}
+		let built = Arc::new(crate::reexec::replay_diffs(self, km, diffs, attacker));
+		write_lock(&self.replays).push((key, phase, known, Arc::clone(&built)));
+		built
 	}
 
 	pub(crate) fn note_execution(&self, principal: PrincipalId, installs: &[(SlotIdx, Value)]) {
@@ -670,6 +716,7 @@ impl VerifyContext {
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
 			execution: RwLock::new(None),
 			origin_only: RwLock::new(IdSet::default()),
+			replays: RwLock::new(Vec::new()),
 			sessions: self.sessions,
 			honest,
 			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),

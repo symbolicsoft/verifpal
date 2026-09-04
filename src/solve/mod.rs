@@ -284,10 +284,10 @@ fn propose(
 		}
 	}
 
+	let protocol = protocol_terms(km, ps);
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
-		let protocol = protocol_terms(km, ps);
 		for &slot in &sym.var_slots {
 			let Some(meta) = ps.meta.get(slot) else {
 				continue;
@@ -324,10 +324,10 @@ fn propose(
 		.collect();
 	proposals.extend(keyed);
 
-	let protocol = protocol_terms(km, ps);
+	let honest = honest_slot_terms(km, ps, sym);
 	let aligned: Vec<Substitution> = proposals
 		.iter()
-		.flat_map(|proposal| aligned_held_free(km, ps, sym, proposal, attacker, &protocol))
+		.flat_map(|proposal| aligned_held_free(&honest, sym, proposal, attacker, &protocol))
 		.collect();
 	proposals.extend(aligned);
 
@@ -433,8 +433,7 @@ fn preserved_free(
 }
 
 fn aligned_held_free(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	honest: &[Value],
 	sym: &SymbolicState,
 	proposal: &Substitution,
 	attacker: &AttackerState,
@@ -465,7 +464,7 @@ fn aligned_held_free(
 				&& !held.equivalent(honest, true);
 			aligned.then(|| held.clone())
 		};
-		if let Some(filled) = fill_aligned(km, ps, sym, proposal, &filler) {
+		if let Some(filled) = fill_aligned_with(honest, sym, proposal, &filler) {
 			out.push(filled);
 		}
 	}
@@ -479,20 +478,42 @@ fn fill_aligned(
 	proposal: &Substitution,
 	filler: &dyn Fn(&Value) -> Option<Value>,
 ) -> Option<Substitution> {
+	fill_aligned_with(&honest_slot_terms(km, ps, sym), sym, proposal, filler)
+}
+
+/// The honest term behind each variable slot, resolved once. `fill_aligned` is
+/// called for every proposal and, for the aligned family, for every held term
+/// besides, so resolving the whole trace inside that loop is the difference
+/// between a constant factor and a multiplicative one.
+fn honest_slot_terms(km: &ProtocolTrace, ps: &PrincipalState, sym: &SymbolicState) -> Vec<Value> {
+	sym.var_slots
+		.iter()
+		.map(|&slot| match ps.meta.get(slot) {
+			Some(meta) => resolve_trace_constant(&meta.constant, km),
+			None => crate::value::value_nil(),
+		})
+		.collect()
+}
+
+fn fill_aligned_with(
+	honest: &[Value],
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	filler: &dyn Fn(&Value) -> Option<Value>,
+) -> Option<Substitution> {
 	let mut out = proposal.clone();
 	let mut filled = false;
-	for &slot in &sym.var_slots {
+	for (at, &slot) in sym.var_slots.iter().enumerate() {
 		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
 			continue;
 		}
 		let Some(term) = sym.var_terms.get(slot).and_then(Option::as_ref) else {
 			continue;
 		};
-		let Some(meta) = ps.meta.get(slot) else {
+		let Some(honest) = honest.get(at) else {
 			continue;
 		};
-		let honest = resolve_trace_constant(&meta.constant, km);
-		filled |= fill_free_positions(&vars::apply(term, proposal), &honest, filler, &mut out);
+		filled |= fill_free_positions(&vars::apply(term, proposal), honest, filler, &mut out);
 	}
 	filled.then_some(out)
 }

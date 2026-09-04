@@ -462,7 +462,7 @@ impl<'a> Minimizer<'a> {
 		value: &Value,
 	) -> bool {
 		crate::primitive::admissible(value)
-			&& bound.admits_at(session.id, slot, value)
+			&& bound.admits_at(self.km, session.id, slot, value)
 			&& !crate::solve::validate::contains_failed_check(value)
 			&& crate::solve::validate::attacker_can_derive(
 				self.ctx,
@@ -1071,7 +1071,7 @@ pub(crate) fn assert_reported_attacks_replay(
 			.iter()
 			.filter(|(slot, value)| {
 				!(crate::primitive::admissible(value)
-					&& bound.admits_at(base.id, slot.get(), value)
+					&& bound.admits_at(km, base.id, slot.get(), value)
 					&& !crate::solve::validate::contains_failed_check(value)
 					&& crate::solve::validate::attacker_can_derive(
 						ctx,

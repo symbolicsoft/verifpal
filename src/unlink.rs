@@ -393,7 +393,7 @@ fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
 	})
 }
 
-fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
+pub(crate) fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 	let h = v.hash_value();
 	let size = attacker.known.len();
 	let mut known: Vec<Value> = Vec::with_capacity(size);

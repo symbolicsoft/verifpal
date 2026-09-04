@@ -30,7 +30,7 @@ pub(crate) fn emitted_by_matching_run(
 		.filter(|&j| corresponds(km, j, base, sender, ps.id))
 		.filter(|&j| !pristine_is(km, j, &target))
 		.collect();
-	if candidates.is_empty() {
+	if candidates.is_empty() || forgeable_without_sender(km, ps, sender, &target, attacker) {
 		return false;
 	}
 	let bound = TermBound::of(km);
@@ -93,7 +93,7 @@ impl Emission<'_> {
 				continue;
 			}
 			if !admissible(&value)
-				|| !self.bound.admits_at(origin.id, at, &value)
+				|| !self.bound.admits_at(self.km, origin.id, at, &value)
 				|| !attacker_can_derive(self.ctx, self.km, at, &value, origin, self.attacker)
 			{
 				return false;
@@ -145,6 +145,50 @@ fn delivered_to(ps: &PrincipalState, at: usize) -> Option<Value> {
 			.get(at)
 			.is_some_and(|meta| meta.wire.contains(&ps.id));
 	handed.then(|| sv.value.clone())
+}
+
+/// Whether the attacker could have produced the delivered value on its own.
+///
+/// A matching run excuses an acceptance only where the run is the sole source
+/// of what was accepted. Where the attacker can build the value from what it
+/// holds with every read off the sender's runs taken away, a run that would
+/// also have emitted it changes nothing: the forgery stands whether or not the
+/// sender was driven, and reporting it as excused would make removing a guard
+/// lose an attack, which the `unguard` property forbids. The reads are taken
+/// away transitively, so a term the attacker assembled out of something it
+/// learned from the sender goes with them. A `knows` constant is static data
+/// rather than anything a run produced, and its slot's creator is only its
+/// first declarer, so a read of one is never a read off the sender.
+fn forgeable_without_sender(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sender: PrincipalId,
+	target: &Value,
+	attacker: &AttackerState,
+) -> bool {
+	let n = attacker.known.len();
+	let mut keep = vec![true; n];
+	for i in 0..n {
+		keep[i] = match attacker.derivation(KnownIdx(i)) {
+			None | Some(DerivationRecord::Initial) => true,
+			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
+				!km.slots.get(slot.get()).is_some_and(|read| {
+					read.constant.declaration != Some(Declaration::Knows)
+						&& km.interchangeable_with(read.creator, sender)
+				})
+			}
+			Some(other) => other.ingredients().iter().all(|v| {
+				attacker
+					.knows(v)
+					.map(|found| found.0 >= i || keep[found.0])
+					.unwrap_or(true)
+			}),
+		};
+	}
+	let without_sender = crate::reexec::retain_known(attacker, &keep);
+	let view = without_sender.as_deref().unwrap_or(attacker);
+	let view = crate::unlink::attacker_without(view, target);
+	crate::solve::validate::derivable(target, ps, &view)
 }
 
 fn corresponds(

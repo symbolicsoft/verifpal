@@ -1,0 +1,50 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// matching_run_forged_not_emitted.vp with the guard on Alice's nonce removed,
+// which is the variant the `unguard` metamorphic property builds. Now the
+// attacker *could* drive Alice into emitting MAC(k, nil), and a run that emits
+// what Bob accepts is what the matching-run exemption looks for. But Mallory
+// leaks the key, so the attacker forges the tag without touching Alice, and in
+// that execution Bob accepts a value Alice never sent. The exemption is for an
+// acceptance whose only possible source is the sender's run; where the attacker
+// can build the value with every read off the sender taken away, the forgery
+// stands and removing a guard must not make it disappear.
+
+attacker[active]
+
+principal Alice[
+	knows private mfu_k
+]
+
+principal Carol[
+	generates mfu_n
+]
+
+principal Bob[
+	knows private mfu_k
+]
+
+principal Mallory[
+	knows private mfu_k
+	leaks mfu_k
+]
+
+Carol -> Alice: mfu_n
+Carol -> Bob: mfu_n
+
+principal Alice[
+	mfu_t = MAC(mfu_k, mfu_n)
+]
+
+Alice -> Bob: mfu_t
+
+principal Bob[
+	_ = ASSERT(mfu_t, MAC(mfu_k, mfu_n))?
+]
+
+queries[
+	authentication? Alice -> Bob: mfu_t
+]
