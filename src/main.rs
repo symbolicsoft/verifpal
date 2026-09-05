@@ -430,11 +430,12 @@ enum Commands {
 		color: ColorArg,
 	},
 	#[command(
-		about = "Print version, homepage and contributor credits",
+		about = "Print version, homepage and author",
 		long_about = "Print the Verifpal banner, which is the version you are running and the \
-		              project's homepage, followed by its author and by the people who have \
-		              contributed meaningful suggestions, bug reports, ideas or discussion to \
-		              the project.\n\n\
+		              project's homepage, followed by its author and by where to find the Wall \
+		              of Honor in the Verifpal User Manual, which names the people who have \
+		              contributed suggestions, bug reports, ideas or discussion to the \
+		              project.\n\n\
 		              This command also runs the same release check that verify does, printing \
 		              one line on stderr if a newer version of Verifpal has been tagged. It \
 		              takes no options and reads no files."
@@ -819,26 +820,11 @@ fn main() {
 			let update_check = update_check_start(VERSION);
 			info_banner(VERSION);
 			out!("Verifpal is authored by Nadim Kobeissi.");
-			out!("The following individuals have contributed");
-			out!("meaningful suggestions, bug reports, ideas");
-			out!("or discussion to the Verifpal project:");
+			out!("Everyone who has contributed to Verifpal is");
+			out!("named on the Wall of Honor in the Verifpal");
+			out!("User Manual:");
 			out!();
-			out!("  - Angèle Bossuat");
-			out!("  - Bruno Blanchet (Prof. Dr.)");
-			out!("  - Fabian Drinck");
-			out!("  - Friedrich Wiemer");
-			out!("  - Georgio Nicolas");
-			out!("  - Jean-Philippe Aumasson (Dr.)");
-			out!("  - Laurent Grémy");
-			out!("  - Loup Vaillant David");
-			out!("  - Mario Raso");
-			out!("  - Michiel Leenars");
-			out!("  - Mukesh Tiwari (Dr.)");
-			out!("  - Oleksandra \"Sasha\" Lapiha");
-			out!("  - Oskar Goldhahn");
-			out!("  - Renaud Lifchitz");
-			out!("  - Sebastian R. Verschoor");
-			out!("  - Tom Roeder");
+			out!("  https://static.verifpal.com/manual.pdf");
 			update_check_report(&update_check);
 			0
 		}
