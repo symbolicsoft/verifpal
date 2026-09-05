@@ -24,24 +24,28 @@ principal Alice[
 	knows private master_key
 	knows private key_ab, key_ac
 	knows private m_to_bob, m_to_carol
-	to_bob = AEAD_ENC(key_ab, m_to_bob, nil)
-	to_carol = AEAD_ENC(key_ac, m_to_carol, nil)
-	escrow_bob = AEAD_ENC(master_key, m_to_bob, nil)
-	escrow_carol = AEAD_ENC(master_key, m_to_carol, nil)
+	generates n_to_bob
+	to_bob = AEAD_ENC(key_ab, n_to_bob, m_to_bob, nil)
+	generates n_to_carol
+	to_carol = AEAD_ENC(key_ac, n_to_carol, m_to_carol, nil)
+	generates n_escrow_bob
+	escrow_bob = AEAD_ENC(master_key, n_escrow_bob, m_to_bob, nil)
+	generates n_escrow_carol
+	escrow_carol = AEAD_ENC(master_key, n_escrow_carol, m_to_carol, nil)
 ]
 
-Alice -> Bob: to_bob, escrow_bob
-Alice -> Carol: to_carol, escrow_carol
+Alice -> Bob: n_to_bob, to_bob, n_escrow_bob, escrow_bob
+Alice -> Carol: n_to_carol, to_carol, n_escrow_carol, escrow_carol
 
 principal Bob[
 	knows private key_ab
-	got_bob = AEAD_DEC(key_ab, to_bob, nil)?
+	got_bob = AEAD_DEC(key_ab, n_to_bob, to_bob, nil)?
 	_ = HASH(got_bob)
 ]
 
 principal Carol[
 	knows private key_ac
-	got_carol = AEAD_DEC(key_ac, to_carol, nil)?
+	got_carol = AEAD_DEC(key_ac, n_to_carol, to_carol, nil)?
 	_ = HASH(got_carol)
 ]
 

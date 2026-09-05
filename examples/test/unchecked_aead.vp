@@ -19,15 +19,16 @@ principal Alice[
 	generates ad
 	ss         = DH_KEX(b_public, a)
 	key        = HASH(ss)
-	ciphertext = AEAD_ENC(key, plaintext, ad)
+	generates n_ciphertext
+	ciphertext = AEAD_ENC(key, n_ciphertext, plaintext, ad)
 ]
 
-Alice -> Bob : ad, ciphertext
+Alice -> Bob: ad, n_ciphertext, ciphertext
 
 principal Bob[
 	ss_        = DH_KEX(a_public, b)
 	key_       = HASH(ss_)
-	plaintext_ = AEAD_DEC(key_, ciphertext, ad)
+	plaintext_ = AEAD_DEC(key_, n_ciphertext, ciphertext, ad)
 ]
 
 queries[

@@ -16,28 +16,31 @@ principal Bob[
 	gab = DH_KEX(ga, b)
 	generates eb
 	geb = PUBKEY(eb)
-	e1 = AEAD_ENC(gab, geb, gb)
+	generates n_e1
+	e1 = AEAD_ENC(gab, n_e1, geb, gb)
 ]
 
-Bob -> Alice: [gb], e1
+Bob -> Alice: [gb], n_e1, e1
 
 principal Alice[
 	gba = DH_KEX(gb, a)
-	geb_a = AEAD_DEC(gba, e1, gb)?
+	geb_a = AEAD_DEC(gba, n_e1, e1, gb)?
 	generates ea
 	gea = PUBKEY(ea)
-	e2 = AEAD_ENC(gba, gea, ga)
+	generates n_e2
+	e2 = AEAD_ENC(gba, n_e2, gea, ga)
 	shared_secret_a = DH_KEX(geb_a, ea)
 	generates m1
-	e3 = AEAD_ENC(shared_secret_a, m1, ga)
+	generates n_e3
+	e3 = AEAD_ENC(shared_secret_a, n_e3, m1, ga)
 ]
 
-Alice -> Bob: e2, e3
+Alice -> Bob: n_e2, e2, n_e3, e3
 
 principal Bob[
-	gea_b = AEAD_DEC(gab, e2, ga)?
+	gea_b = AEAD_DEC(gab, n_e2, e2, ga)?
 	shared_secret_b = DH_KEX(gea_b, eb)
-	m1_b = AEAD_DEC(shared_secret_b, e3, ga)
+	m1_b = AEAD_DEC(shared_secret_b, n_e3, e3, ga)
 ]
 
 principal Bob[

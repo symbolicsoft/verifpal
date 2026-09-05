@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — the same message sealed twice under the same key, nonce and
+// associated data is the same ciphertext twice, and the attacker learns
+// nothing from holding one value under two names. Every constant here is
+// declared rather than generated, so the two sessions produce the same
+// term as well. The pairing needs two encryptions that differ.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private n
+	knows private m
+	knows public ad
+	e1 = AEAD_ENC(k, n, m, ad)
+	e2 = AEAD_ENC(k, n, m, ad)
+]
+
+Alice -> Bob: e1, e2
+
+principal Bob[
+	knows private k
+	knows private n
+	knows public ad
+	d1 = AEAD_DEC(k, n, e1, ad)?
+	d2 = AEAD_DEC(k, n, e2, ad)?
+]
+
+queries[
+	confidentiality? m
+]

@@ -9,15 +9,16 @@ principal Alice[
 	knows private k
 	knows private m
 	knows public ad
-	e = AEAD_ENC[malleable](k, m, ad)
+	generates n_e
+	e = AEAD_ENC[malleable](k, n_e, m, ad)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	knows private k
 	knows public ad
-	d = AEAD_DEC(k, e, ad)
+	d = AEAD_DEC(k, n_e, e, ad)
 	_ = HASH(d)
 ]
 

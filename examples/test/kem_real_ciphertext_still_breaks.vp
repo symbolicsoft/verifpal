@@ -37,13 +37,14 @@ Bob -> Alice: kcr_ct1
 
 principal Alice[
 	kcr_k = KEM_DECAP(kcr_sk, kcr_ct1)?
-	kcr_e = AEAD_ENC(kcr_k, kcr_m, nil)
+	generates n_kcr_e
+	kcr_e = AEAD_ENC(kcr_k, n_kcr_e, kcr_m, nil)
 ]
 
-Alice -> Bob: kcr_e
+Alice -> Bob: n_kcr_e, kcr_e
 
 principal Bob[
-	_ = AEAD_DEC(kcr_ss1, kcr_e, nil)?
+	_ = AEAD_DEC(kcr_ss1, n_kcr_e, kcr_e, nil)?
 ]
 
 queries[

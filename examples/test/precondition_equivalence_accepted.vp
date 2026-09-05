@@ -44,13 +44,14 @@ principal Client[
 	k_client = DH_KEX(gs, c)
 	_ = SIGNVERIF(server_pk, gs, sig)?
 	generates request
-	req = AEAD_ENC(k_client, request, nil)
+	generates n_req
+	req = AEAD_ENC(k_client, n_req, request, nil)
 ]
 
-Client -> Server: req
+Client -> Server: n_req, req
 
 principal Server[
-	_ = AEAD_DEC(k_server, req, nil)?
+	_ = AEAD_DEC(k_server, n_req, req, nil)?
 ]
 
 queries[

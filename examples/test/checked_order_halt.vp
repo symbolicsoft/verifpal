@@ -12,24 +12,30 @@
 // discarding the whole state rather than its tail — would take the first
 // verdict down to a0 and hide a genuine forgery behind an unrelated failure
 // further down the same principal.
+// The nonces on `n_e_first`, `n_e_second` are declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 
 attacker[active]
 
 principal Alice[
 	knows private k_first, k_second
 	knows private m_first, m_second
-	e_first = AEAD_ENC(k_first, m_first, nil)
-	e_second = AEAD_ENC(k_second, m_second, nil)
+	knows private n_e_first
+	e_first = AEAD_ENC(k_first, n_e_first, m_first, nil)
+	knows private n_e_second
+	e_second = AEAD_ENC(k_second, n_e_second, m_second, nil)
 	leaks k_first
 ]
 
-Alice -> Bob: e_first, e_second
+Alice -> Bob: n_e_first, e_first, n_e_second, e_second
 
 principal Bob[
 	knows private k_first, k_second
-	d_first = AEAD_DEC(k_first, e_first, nil)?
+	d_first = AEAD_DEC(k_first, n_e_first, e_first, nil)?
 	first_use = HASH(d_first)
-	d_second = AEAD_DEC(k_second, e_second, nil)?
+	d_second = AEAD_DEC(k_second, n_e_second, e_second, nil)?
 	second_use = HASH(d_second)
 ]
 

@@ -33,13 +33,14 @@ Alice -> Bob: gae, proof
 principal Bob[
 	bs = DH_KEX(gae, be)
 	_ = SIGNVERIF(ga, bs, proof)?
-	ciphertext = AEAD_ENC(bs, message, nil)
+	generates n_ciphertext
+	ciphertext = AEAD_ENC(bs, n_ciphertext, message, nil)
 ]
 
-Bob -> Alice: ciphertext
+Bob -> Alice: n_ciphertext, ciphertext
 
 principal Alice[
-	_ = AEAD_DEC(as, ciphertext, nil)?
+	_ = AEAD_DEC(as, n_ciphertext, ciphertext, nil)?
 ]
 
 queries[

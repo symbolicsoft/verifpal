@@ -18,22 +18,24 @@ attacker[active]
 principal Server[
 	knows private ticket_key
 	generates resumed_key
-	ticket = AEAD_ENC(ticket_key, resumed_key, nil)
+	generates n_ticket
+	ticket = AEAD_ENC(ticket_key, n_ticket, resumed_key, nil)
 	leaks ticket_key
 ]
 
-Server -> Client: ticket, resumed_key
+Server -> Client: n_ticket, ticket, resumed_key
 
 principal Client[
 	knows private m_resumed
-	sealed = AEAD_ENC(resumed_key, m_resumed, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(resumed_key, n_sealed, m_resumed, nil)
 ]
 
-Client -> Server: sealed
+Client -> Server: n_sealed, sealed
 
 principal Server[
-	recovered = AEAD_DEC(ticket_key, ticket, nil)?
-	got = AEAD_DEC(recovered, sealed, nil)?
+	recovered = AEAD_DEC(ticket_key, n_ticket, ticket, nil)?
+	got = AEAD_DEC(recovered, n_sealed, sealed, nil)?
 	_ = HASH(got)
 ]
 

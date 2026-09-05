@@ -24,16 +24,17 @@ principal Alice[
 	knows private m
 	generates r
 	ss, ct = KEM_ENCAP(ekb, r)
-	e = AEAD_ENC(ss, m, nil)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, m, nil)
 	sig = SIGN(siga, ct)
 ]
 
-Alice -> Bob: ct, e, sig
+Alice -> Bob: ct, n_e, e, sig
 
 principal Bob[
 	_ = SIGNVERIF(ga, ct, sig)?
 	ssb = KEM_DECAP(dkb, ct)
-	d = AEAD_DEC(ssb, e, nil)?
+	d = AEAD_DEC(ssb, n_e, e, nil)?
 ]
 
 queries[

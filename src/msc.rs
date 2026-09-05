@@ -442,8 +442,8 @@ mod tests {
 			"k \u{2190} DH_KEX(ga, b)"
 		);
 		assert_eq!(
-			step("k", None, Some("AEAD_DEC(k, e, ad)?"), true).label(),
-			"k \u{2190} AEAD_DEC(k, e, ad)?",
+			step("k", None, Some("AEAD_DEC(k, n, e, ad)?"), true).label(),
+			"k \u{2190} AEAD_DEC(k, n, e, ad)?",
 			"the printed expression already carries its own check mark"
 		);
 		assert_eq!(

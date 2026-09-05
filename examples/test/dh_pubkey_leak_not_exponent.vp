@@ -29,13 +29,15 @@ principal Alice[
 	ga_leaked = PUBKEY(a_leaked)
 	k_shown = DH_KEX(gb, a_shown)
 	k_leaked = DH_KEX(gb, a_leaked)
-	e_shown = AEAD_ENC(k_shown, m_shown, nil)
-	e_leaked = AEAD_ENC(k_leaked, m_leaked, nil)
+	generates n_e_shown
+	e_shown = AEAD_ENC(k_shown, n_e_shown, m_shown, nil)
+	generates n_e_leaked
+	e_leaked = AEAD_ENC(k_leaked, n_e_leaked, m_leaked, nil)
 	leaks ga_shown
 	leaks a_leaked
 ]
 
-Alice -> Bob: e_shown, e_leaked
+Alice -> Bob: n_e_shown, e_shown, n_e_leaked, e_leaked
 
 principal Bob[
 	_ = HASH(e_shown, e_leaked)

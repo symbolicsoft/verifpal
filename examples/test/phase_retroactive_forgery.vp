@@ -22,10 +22,11 @@ principal Alice[
 	generates m
 	_ = SIGNVERIF(gb, gs, sig)?
 	k = DH_KEX(gs, a)
-	c = AEAD_ENC(k, m, nil)
+	generates n_c
+	c = AEAD_ENC(k, n_c, m, nil)
 ]
 
-Alice -> Bob: ga, c
+Alice -> Bob: ga, n_c, c
 
 phase[1]
 

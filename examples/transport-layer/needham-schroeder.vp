@@ -75,17 +75,19 @@ principal Server[
 	// The "ticket": k_ab and the claimed initiator A, sealed for Bob.
 	// Nothing in it is fresh from Bob's point of view — no nonce of his,
 	// no timestamp. This is the Denning-Sacco flaw, verbatim.
-	e_bob = AEAD_ENC(k_bs, CONCAT(k_ab, A), nil)
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bs, n_e_bob, CONCAT(k_ab, A), nil)
 	// Alice's copy: her nonce (freshness for her), the key, the peer name,
 	// and the ticket to forward.
-	e_alice = AEAD_ENC(k_as, CONCAT(n_a, k_ab, B, e_bob), nil)
+	generates n_e_alice
+	e_alice = AEAD_ENC(k_as, n_e_alice, CONCAT(n_a, k_ab, B, e_bob), nil)
 ]
 
 // Message 2, guarded: the attacker cannot substitute the server's reply.
-Server -> Alice: [e_alice]
+Server -> Alice: [n_e_alice], [n_e_bob], [e_alice]
 
 principal Alice[
-	e_alice_dec = AEAD_DEC(k_as, e_alice, nil)
+	e_alice_dec = AEAD_DEC(k_as, n_e_alice, e_alice, nil)
 	// SPLIT undoes CONCAT, binding each component to a name.
 	n_a_response, k_ab_alice, B_alice, e_bob_alice = SPLIT(e_alice_dec)
 	// The `?` makes the nonce check *enforced*: if it fails, Alice halts.
@@ -96,31 +98,33 @@ principal Alice[
 // Message 3: Alice forwards the ticket. Unguarded — and Bob will accept
 // ANY well-formed ticket under k_bs here, including one recorded from an
 // old session whose key the attacker has since compromised.
-Alice -> Bob: e_bob_alice
+Alice -> Bob: n_e_bob, e_bob_alice
 
 principal Bob[
-	e_bob_dec = AEAD_DEC(k_bs, e_bob_alice, nil)
+	e_bob_dec = AEAD_DEC(k_bs, n_e_bob, e_bob_alice, nil)
 	k_ab_bob, A_bob = SPLIT(e_bob_dec)
 	// Bob's challenge: he encrypts his nonce under the session key, so
 	// only a holder of k_ab should be able to answer. With a compromised
 	// k_ab, the attacker answers it directly.
-	e_n_b = AEAD_ENC(k_ab_bob, n_b, nil)
+	generates n_e_n_b
+	e_n_b = AEAD_ENC(k_ab_bob, n_e_n_b, n_b, nil)
 ]
 
-Bob -> Alice: e_n_b
+Bob -> Alice: n_e_n_b, e_n_b
 
 principal Alice[
-	n_b_alice = AEAD_DEC(k_ab_alice, e_n_b, nil)
+	n_b_alice = AEAD_DEC(k_ab_alice, n_e_n_b, e_n_b, nil)
 	// Stand-in for "n_b - 1": any agreed transformation proving Alice
 	// could read the challenge works symbolically; HASH is the idiom.
 	n_b_minus_one = HASH(n_b_alice)
-	e_n_b_minus_one = AEAD_ENC(k_ab_alice, n_b_minus_one, nil)
+	generates n_e_n_b_minus_one
+	e_n_b_minus_one = AEAD_ENC(k_ab_alice, n_e_n_b_minus_one, n_b_minus_one, nil)
 ]
 
-Alice -> Bob: e_n_b_minus_one
+Alice -> Bob: n_e_n_b_minus_one, e_n_b_minus_one
 
 principal Bob[
-	n_b_minus_one_bob = AEAD_DEC(k_ab_bob, e_n_b_minus_one, nil)
+	n_b_minus_one_bob = AEAD_DEC(k_ab_bob, n_e_n_b_minus_one, e_n_b_minus_one, nil)
 	// Bob's enforced check that his challenge was answered. The attacker
 	// passes it with the compromised key, so it gates nothing.
 	_ = ASSERT(n_b_minus_one_bob, HASH(n_b))?

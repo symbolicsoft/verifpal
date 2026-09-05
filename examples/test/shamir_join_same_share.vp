@@ -19,15 +19,16 @@ principal Dealer[
 	generates secret
 	share_one, share_two, share_three = SHAMIR_SPLIT(secret)
 	knows private payload
-	sealed = AEAD_ENC(secret, payload, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(secret, n_sealed, payload, nil)
 	leaks share_one
 ]
 
-Dealer -> Bob: share_one, sealed
+Dealer -> Bob: share_one, n_sealed, sealed
 
 principal Bob[
 	rejoined = SHAMIR_JOIN(share_one, share_one)
-	opened = AEAD_DEC(rejoined, sealed, nil)
+	opened = AEAD_DEC(rejoined, n_sealed, sealed, nil)
 	_ = HASH(opened)
 ]
 

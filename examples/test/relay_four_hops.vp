@@ -13,6 +13,10 @@
 // single-sender or single-recipient simplification of either would start
 // reporting the wrong provenance — most likely by attributing the message to
 // the first hop rather than to whoever actually put it on the wire.
+// The nonce on `n_body` is declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 
 attacker[active]
 
@@ -20,29 +24,30 @@ principal Alice[
 	knows private mac_key
 	knows private m
 	knows private seal_key
-	body = AEAD_ENC(seal_key, m, nil)
+	knows private n_body
+	body = AEAD_ENC(seal_key, n_body, m, nil)
 	tag = MAC(mac_key, body)
 ]
 
-Alice -> HopOne: body, tag
+Alice -> HopOne: n_body, body, tag
 
 principal HopOne[
 	_ = HASH(body, tag)
 ]
 
-HopOne -> HopTwo: body, tag
+HopOne -> HopTwo: n_body, body, tag
 
 principal HopTwo[
 	_ = HASH(body, tag)
 ]
 
-HopTwo -> Dana: body, tag
+HopTwo -> Dana: n_body, body, tag
 
 principal Dana[
 	knows private mac_key
 	knows private seal_key
 	_ = ASSERT(MAC(mac_key, body), tag)?
-	got = AEAD_DEC(seal_key, body, nil)?
+	got = AEAD_DEC(seal_key, n_body, body, nil)?
 	_ = HASH(got)
 ]
 

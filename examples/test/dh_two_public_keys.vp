@@ -32,14 +32,15 @@ Bob -> Alice: [gb]
 principal Alice[
 	knows private m
 	ss = DH_KEX(gb, a)
-	e = AEAD_ENC(ss, m, nil)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, m, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	ssb = DH_KEX(ga, b)
-	mb = AEAD_DEC(ssb, e, nil)?
+	mb = AEAD_DEC(ssb, n_e, e, nil)?
 ]
 
 queries[

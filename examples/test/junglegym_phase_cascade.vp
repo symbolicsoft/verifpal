@@ -53,20 +53,21 @@ Auditor -> Archive: [auditor_ltpk], [auditor_ephpk]
 principal Archive[
 	agreed = DH_KEX(auditor_ephpk, archive_eph)
 	sealing, signing, binding = HKDF(agreed, CONCAT(archive_ephpk, auditor_ephpk), epoch)
-	sealed_now = AEAD_ENC(sealing, ledger_entry, label)
+	generates n_sealed_now
+	sealed_now = AEAD_ENC(sealing, n_sealed_now, ledger_entry, label)
 	generates claim
 	claim_tag = MAC[forgeable from phase 3](shared_mk, CONCAT(claim, epoch))
 	binding_tag = MAC(binding, CONCAT(sealed_now, claim))
 ]
 
-Archive -> Auditor: sealed_now, claim, claim_tag, binding_tag
+Archive -> Auditor: n_sealed_now, sealed_now, claim, claim_tag, binding_tag
 
 principal Auditor[
 	agreed_a = DH_KEX(archive_ephpk, auditor_eph)
 	sealing_a, signing_a, binding_a = HKDF(agreed_a, CONCAT(archive_ephpk, auditor_ephpk), epoch)
 	_ = ASSERT(binding_tag, MAC(binding_a, CONCAT(sealed_now, claim)))?
 	_ = ASSERT(claim_tag, MAC(shared_mk, CONCAT(claim, epoch)))?
-	entry_a = AEAD_DEC(sealing_a, sealed_now, label)?
+	entry_a = AEAD_DEC(sealing_a, n_sealed_now, sealed_now, label)?
 	countersig = SIGN(auditor_ltk, HASH(entry_a, claim, epoch))
 ]
 

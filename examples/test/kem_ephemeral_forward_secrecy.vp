@@ -22,14 +22,15 @@ principal Alice[
 	generates r
 	_ = SIGNVERIF(gb, ekb, ekbsig)?
 	ss, ct = KEM_ENCAP(ekb, r)
-	e = AEAD_ENC(ss, m, nil)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, m, nil)
 ]
 
-Alice -> Bob: ct, e
+Alice -> Bob: ct, n_e, e
 
 principal Bob[
 	ssb = KEM_DECAP(dkb, ct)
-	d = AEAD_DEC(ssb, e, nil)?
+	d = AEAD_DEC(ssb, n_e, e, nil)?
 ]
 
 phase[1]

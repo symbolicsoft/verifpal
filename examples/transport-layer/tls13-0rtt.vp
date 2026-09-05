@@ -78,10 +78,11 @@ principal Client[
 	cEarlyTraffic = HKDF(earlySecret, labelCEtraffic, transcriptCH)
 
 	generates earlyMsg
-	earlyData = AEAD_ENC(cEarlyTraffic, earlyMsg, nil)
+	generates n_earlyData
+	earlyData = AEAD_ENC(cEarlyTraffic, n_earlyData, earlyMsg, nil)
 ]
 
-Client -> Server: gce, binder, earlyData
+Client -> Server: gce, binder, n_earlyData, earlyData
 
 principal Server[
 	knows private psk
@@ -97,7 +98,7 @@ principal Server[
 
 	transcriptCH_s = HASH(gce, binder)
 	cEarlyTraffic_s = HKDF(earlySecret_s, labelCEtraffic, transcriptCH_s)
-	earlyMsg_dec = AEAD_DEC(cEarlyTraffic_s, earlyData, nil)?
+	earlyMsg_dec = AEAD_DEC(cEarlyTraffic_s, n_earlyData, earlyData, nil)?
 
 	generates se
 	gse = PUBKEY(se)
@@ -137,20 +138,22 @@ principal Client[
 
 	cFinishedKey_c = HKDF(cHsTraffic_c, labelFinished, nil)
 	clientFinished = MAC(cFinishedKey_c, transcriptSFin_c)
-	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, clientFinished, nil)
+	generates n_clientFinishedEnc
+	clientFinishedEnc = AEAD_ENC(cHsTraffic_c, n_clientFinishedEnc, clientFinished, nil)
 
 	generates appMsg
-	appData = AEAD_ENC(cApTraffic_c, appMsg, nil)
+	generates n_appData
+	appData = AEAD_ENC(cApTraffic_c, n_appData, appMsg, nil)
 ]
 
-Client -> Server: clientFinishedEnc, appData
+Client -> Server: n_clientFinishedEnc, clientFinishedEnc, n_appData, appData
 
 principal Server[
-	cfDec = AEAD_DEC(cHsTraffic, clientFinishedEnc, nil)?
+	cfDec = AEAD_DEC(cHsTraffic, n_clientFinishedEnc, clientFinishedEnc, nil)?
 	cFinishedKey_s = HKDF(cHsTraffic, labelFinished, nil)
 	expectedCF = MAC(cFinishedKey_s, transcriptSFin_s)
 	cfOk = ASSERT(cfDec, expectedCF)?
-	appMsg_dec = AEAD_DEC(cApTraffic, appData, nil)?
+	appMsg_dec = AEAD_DEC(cApTraffic, n_appData, appData, nil)?
 ]
 
 phase[1]

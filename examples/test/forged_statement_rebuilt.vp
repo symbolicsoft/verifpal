@@ -66,22 +66,24 @@ principal Signer[
 	stmt = CONCAT(c_stmt, gs, nonce_s)
 	sig = SIGN(ssk, stmt)
 	k = HKDF(nil, DH_KEX(gx_s, y), nil)
-	env = AEAD_ENC(k, CONCAT(gs, sig), c_ad)
+	generates n_env
+	env = AEAD_ENC(k, n_env, CONCAT(gs, sig), c_ad)
 ]
 
-Signer -> Verifier: gy, env
+Signer -> Verifier: gy, n_env, env
 
 principal Verifier[
 	kv = HKDF(nil, DH_KEX(gy, x), nil)
-	d = AEAD_DEC(kv, env, c_ad)?
+	d = AEAD_DEC(kv, n_env, env, c_ad)?
 	iss_v, sig_v = SPLIT(d)?
 	_ = ASSERT(iss_v, gs)?
 	stmt_v = CONCAT(c_stmt, iss_v, nonce)
 	_ = SIGNVERIF(iss_v, stmt_v, sig_v)?
-	out = AEAD_ENC(kv, secret, c_ad)
+	generates n_out
+	out = AEAD_ENC(kv, n_out, secret, c_ad)
 ]
 
-Verifier -> Signer: out
+Verifier -> Signer: n_out, out
 
 queries[
 	confidentiality? secret

@@ -42,29 +42,32 @@ principal Alice[
 	k_ab = DH_KEX(gb, a)
 	k_ac = DH_KEX(gc, a)
 	knows private m_ac
-	e_ab = AEAD_ENC(k_ab, m_ab, nil)
-	e_ac = AEAD_ENC(k_ac, m_ac, nil)
+	generates n_e_ab
+	e_ab = AEAD_ENC(k_ab, n_e_ab, m_ab, nil)
+	generates n_e_ac
+	e_ac = AEAD_ENC(k_ac, n_e_ac, m_ac, nil)
 ]
 
 principal Carol[
 	knows private m_cb
 	k_cb = DH_KEX(gb, c)
-	e_cb = AEAD_ENC(k_cb, m_cb, nil)
+	generates n_e_cb
+	e_cb = AEAD_ENC(k_cb, n_e_cb, m_cb, nil)
 ]
 
-Alice -> Bob: e_ab
-Carol -> Bob: e_cb
-Alice -> Carol: e_ac
+Alice -> Bob: n_e_ab, e_ab
+Carol -> Bob: n_e_cb, e_cb
+Alice -> Carol: n_e_ac, e_ac
 
 principal Bob[
-	_ = AEAD_DEC(DH_KEX(ga, b), e_ab, nil)?
-	_ = AEAD_DEC(DH_KEX(gc, b), e_cb, nil)?
+	_ = AEAD_DEC(DH_KEX(ga, b), n_e_ab, e_ab, nil)?
+	_ = AEAD_DEC(DH_KEX(gc, b), n_e_cb, e_cb, nil)?
 	leaks b
 ]
 
 principal Carol[
 	k_ca = DH_KEX(ga, c)
-	_ = AEAD_DEC(k_ca, e_ac, nil)?
+	_ = AEAD_DEC(k_ca, n_e_ac, e_ac, nil)?
 ]
 
 queries[

@@ -21,23 +21,27 @@ principal Server [
 	generates es
 	m2 = PUBKEY(es)
 	shared_s = DH_KEX(m1, es)
-	m3a = AEAD_ENC(shared_s, gs, nil)
-	m3b = AEAD_ENC(shared_s, SIGN(s, HASH(m1, m2)), nil)
+	generates n_m3a
+	m3a = AEAD_ENC(shared_s, n_m3a, gs, nil)
+	generates n_m3b
+	m3b = AEAD_ENC(shared_s, n_m3b, SIGN(s, HASH(m1, m2)), nil)
 ]
 
-Server -> Client: m2, m3a, m3b
+Server -> Client: m2, n_m3a, m3a, n_m3b, m3b
 
 principal Client [
 	shared_c = DH_KEX(m2, ec)
-	gs_dec = AEAD_DEC(shared_c, m3a, nil)
-	m3b_dec = AEAD_DEC(shared_c, m3b, nil)
+	gs_dec = AEAD_DEC(shared_c, n_m3a, m3a, nil)
+	m3b_dec = AEAD_DEC(shared_c, n_m3b, m3b, nil)
 	valid_c = SIGNVERIF(gs_dec, HASH(m1, m2), m3b_dec)?
-	m4a = AEAD_ENC(shared_c, gc, nil)
+	generates n_m4a
+	m4a = AEAD_ENC(shared_c, n_m4a, gc, nil)
 	knows private pt1
-	req = AEAD_ENC(shared_c, pt1, nil)
+	generates n_req
+	req = AEAD_ENC(shared_c, n_req, pt1, nil)
 ]
 
-Client -> Server: [m4a], [req]
+Client -> Server: [n_m4a], [m4a], [n_req], [req]
 
 queries[
 	confidentiality? pt1

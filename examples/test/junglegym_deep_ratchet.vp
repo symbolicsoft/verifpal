@@ -63,12 +63,13 @@ principal Origin[
 	r4 = HKDF(CONCAT(p4, q4, s4), CONCAT(t4, u4), domain)
 	// The payload is sealed under the deepest key and bound to every layer.
 	generates cargo
-	shipped = AEAD_ENC(r4, cargo, HASH(r1, r2, r3))
+	generates n_shipped
+	shipped = AEAD_ENC(r4, n_shipped, cargo, HASH(r1, r2, r3))
 	stamp = MAC(r3, CONCAT(shipped, HASH(r4, salt)))
 	_ = HASH(shipped, stamp, domain)
 ]
 
-Origin → Mirror: kem_ct, shipped, stamp
+Origin → Mirror: kem_ct, n_shipped, shipped, stamp
 
 principal Mirror[
 	/* Mirror walks the identical ladder from the other side of the DH. */
@@ -84,7 +85,7 @@ principal Mirror[
 	p4m, q4m, s4m, t4m, u4m = SPLIT(CONCAT(m3, m2, m1, salt, domain))
 	m4 = HKDF(CONCAT(p4m, q4m, s4m), CONCAT(t4m, u4m), domain)
 	_ = ASSERT(stamp, MAC(m3, CONCAT(shipped, HASH(m4, salt))))?
-	landed = AEAD_DEC(m4, shipped, HASH(m1, m2, m3))?
+	landed = AEAD_DEC(m4, n_shipped, shipped, HASH(m1, m2, m3))?
 	echo = MAC(m1, CONCAT(landed, HASH(m2, m3, m4)))
 ]
 

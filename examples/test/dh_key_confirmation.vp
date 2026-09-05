@@ -1,29 +1,41 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0e1 at two sessions, c0a0e0 at one. Read the one-session
-// verdict for the argument this model was written to make; the two-session
-// divergence is a separate and later finding, described after it.
+// Expected: c0a0e1 at one session, c0a1e1 at two. The equivalence query
+// fails for a different reason at each count, and the one-session reason is
+// the sharper one; the two-session authentication failure is the ordinary
+// duplicate acceptance of a first flight.
 //
 // An anonymous Diffie-Hellman exchange with both public
 // keys sent UNGUARDED, which is normally the definition of a man in the
-// middle, made safe by a pre-shared key used for nothing but confirming the
+// middle, made "safe" by a pre-shared key used for nothing but confirming the
 // transcript. Every value the attacker might substitute is covered by a MAC it
-// cannot produce, so every substitution halts the recipient instead of
-// steering it.
+// cannot produce, so every substitution of its own halts the recipient instead
+// of steering it: the confidentiality and authentication queries hold at
+// either session count.
 //
-// At two sessions the equivalence query fails, and the reason is worth the
-// space. The confirmation MAC covers `gb` and nothing else, so replaying a
-// sibling session's (gb, conf_b) pair whole gets past Alice's ASSERT on its
-// own merits: the MAC is Bob's, just from the wrong run. Alice then derives
-// DH_KEX(gb#2, a) while Bob still holds DH_KEX(ga, b), and the two disagree.
-// Confirming the transcript is not the same as confirming which run produced
-// it, and nothing here binds the exchange to one. Substitution is still
-// impossible, which is why both other queries hold at either session count.
+// At one session the equivalence query fails by reflection. The confirmation
+// MAC covers `gb` and nothing else, so Alice's own (ga, conf_a) handed back to
+// her as (gb, conf_b) is a valid confirmation: MAC(psk, ga) is Bob's MAC over
+// a share, just not over Bob's share. Alice derives DH_KEX(ga, a) while Bob
+// holds DH_KEX(ga, b), and the two disagree. Nothing here is forged; the
+// attacker never touches psk. This was a missed attack until the solver
+// learned that leaving a DH share as it is, or handing back one it observed,
+// obliges it to hold the public value and not the exponent.
 //
-// The one-session verdict is the point: this is the shape the unguarded MitM
-// models in this directory are missing, and it says that guards in a Verifpal
-// model stand in for an authentication mechanism rather than for magic. The
+// At two sessions it fails a second way: replaying a sibling session's
+// (gb, conf_b) pair whole gets past Alice's ASSERT on its own merits, the MAC
+// is Bob's, just from the wrong run, and Alice derives DH_KEX(gb#2, a) while
+// Bob still holds DH_KEX(ga, b). Confirming the transcript is not the same as
+// confirming which run produced it, or who did, and nothing here binds the
+// exchange to either. The same replay in the other direction, the sibling
+// Alice's (ga, conf_a) handed to this Bob while she is handed his share so
+// that her sealed box opens for him, is what fails the authentication query
+// at two sessions: Alice sent that share once and Bob accepts it twice.
+//
+// The lesson is the one the unguarded MitM models in this directory are
+// missing: guards in a Verifpal model stand in for an authentication
+// mechanism rather than for magic, and a MAC over one share is not one. The
 // equivalence query is the strongest of the three — not merely "the attacker
 // learns nothing" but "the two of them agree", which is what key confirmation
 // is actually for.
@@ -54,13 +66,14 @@ principal Alice[
 	knows private m
 	_ = ASSERT(MAC(psk, gb), conf_b)?
 	k_alice = DH_KEX(gb, a)
-	sealed = AEAD_ENC(k_alice, m, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(k_alice, n_sealed, m, nil)
 ]
 
-Alice -> Bob: sealed
+Alice -> Bob: n_sealed, sealed
 
 principal Bob[
-	opened = AEAD_DEC(k_bob, sealed, nil)?
+	opened = AEAD_DEC(k_bob, n_sealed, sealed, nil)?
 	_ = HASH(opened)
 ]
 

@@ -6,15 +6,16 @@ attacker[active]
 principal Bob[
 	knows private k
 	generates m
-	c = AEAD_ENC(k, m, nil)
+	generates n_c
+	c = AEAD_ENC(k, n_c, m, nil)
 ]
 
-Bob -> Alice: c
+Bob -> Alice: n_c, c
 
 principal Alice[
 	knows private k
 	generates s
-	m_a = AEAD_DEC(k, c, nil)?
+	m_a = AEAD_DEC(k, n_c, c, nil)?
 	gs = PUBKEY(s)
 	tag = MAC(m_a, gs)
 ]

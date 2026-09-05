@@ -29,17 +29,19 @@ principal Alice[
 	knows private m_static, m_ephemeral
 	ss_static, ct_static = KEM_ENCAP(ek_static, r_static)
 	ss_ephemeral, ct_ephemeral = KEM_ENCAP(ek_ephemeral, r_ephemeral)
-	sealed_static = AEAD_ENC(ss_static, m_static, nil)
-	sealed_ephemeral = AEAD_ENC(ss_ephemeral, m_ephemeral, nil)
+	generates n_sealed_static
+	sealed_static = AEAD_ENC(ss_static, n_sealed_static, m_static, nil)
+	generates n_sealed_ephemeral
+	sealed_ephemeral = AEAD_ENC(ss_ephemeral, n_sealed_ephemeral, m_ephemeral, nil)
 ]
 
-Alice -> Bob: ct_static, sealed_static, ct_ephemeral, sealed_ephemeral
+Alice -> Bob: ct_static, n_sealed_static, sealed_static, ct_ephemeral, n_sealed_ephemeral, sealed_ephemeral
 
 principal Bob[
 	back_static = KEM_DECAP(dk_static, ct_static)
 	back_ephemeral = KEM_DECAP(dk_ephemeral, ct_ephemeral)
-	_ = AEAD_DEC(back_static, sealed_static, nil)?
-	_ = AEAD_DEC(back_ephemeral, sealed_ephemeral, nil)?
+	_ = AEAD_DEC(back_static, n_sealed_static, sealed_static, nil)?
+	_ = AEAD_DEC(back_ephemeral, n_sealed_ephemeral, sealed_ephemeral, nil)?
 ]
 
 phase[1]

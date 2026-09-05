@@ -110,10 +110,11 @@ principal Alice[
 	// The associated data binds both identities — AD = IK_A || IK_B, the
 	// same order in both directions — and the header's ratchet key, so
 	// replaying the ciphertext in another context fails AEAD_DEC.
-	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
+	generates n_e1
+	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: galongterm, gae1, gae2, e1
+Alice -> Bob: galongterm, gae1, gae2, n_e1, e1
 
 principal Bob[
 	// Bob mirrors X3DH from his side: same four DH values, opposite
@@ -127,7 +128,7 @@ principal Bob[
 	brkab1, bckab1 = HKDF(bmaster, bkshared1, nil)
 	bkenc1 = HKDF(nil, MAC(bckab1, nil), nil)
 	// Checked decryption: a forged or replayed e1 halts Bob here.
-	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))?
+	m1_d = AEAD_DEC(bkenc1, n_e1, e1, HASH(galongterm, gblongterm, gae2))?
 ]
 
 // Message 2: Bob replies, advancing the DH ratchet with his own fresh
@@ -140,16 +141,17 @@ principal Bob[
 	bkshared2 = DH_KEX(gae2, be)
 	brkba2, bckba2 = HKDF(brkab1, bkshared2, nil)
 	bkenc2 = HKDF(nil, MAC(bckba2, nil), nil)
-	e2 = AEAD_ENC(bkenc2, m2, HASH(galongterm, gblongterm, gbe))
+	generates n_e2
+	e2 = AEAD_ENC(bkenc2, n_e2, m2, HASH(galongterm, gblongterm, gbe))
 ]
 
-Bob -> Alice: gbe, e2
+Bob -> Alice: gbe, n_e2, e2
 
 principal Alice[
 	akshared2 = DH_KEX(gbe, ae2)
 	arkba2, ackba2 = HKDF(arkab1, akshared2, nil)
 	akenc2 = HKDF(nil, MAC(ackba2, nil), nil)
-	m2_d = AEAD_DEC(akenc2, e2, HASH(galongterm, gblongterm, gbe))?
+	m2_d = AEAD_DEC(akenc2, n_e2, e2, HASH(galongterm, gblongterm, gbe))?
 ]
 
 // Message 3: back to Alice — another full ratchet step.
@@ -159,16 +161,17 @@ principal Alice[
 	akshared3 = DH_KEX(gbe, ae3)
 	arkab3, ackab3 = HKDF(arkba2, akshared3, nil)
 	akenc3 = HKDF(nil, MAC(ackab3, nil), nil)
-	e3 = AEAD_ENC(akenc3, m3, HASH(galongterm, gblongterm, gae3))
+	generates n_e3
+	e3 = AEAD_ENC(akenc3, n_e3, m3, HASH(galongterm, gblongterm, gae3))
 ]
 
-Alice -> Bob: gae3, e3
+Alice -> Bob: gae3, n_e3, e3
 
 principal Bob[
 	bkshared3 = DH_KEX(gae3, be)
 	brkab3, bckab3 = HKDF(brkba2, bkshared3, nil)
 	bkenc3 = HKDF(nil, MAC(bckab3, nil), nil)
-	m3_d = AEAD_DEC(bkenc3, e3, HASH(galongterm, gblongterm, gae3))?
+	m3_d = AEAD_DEC(bkenc3, n_e3, e3, HASH(galongterm, gblongterm, gae3))?
 ]
 
 phase[1]

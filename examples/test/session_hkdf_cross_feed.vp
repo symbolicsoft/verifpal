@@ -27,16 +27,17 @@ principal Alice[
 	generates salt
 	generates m
 	k_alice, _, _ = HKDF(salt, ikm, info)
-	e = AEAD_ENC(k_alice, m, nil)
+	generates n_e
+	e = AEAD_ENC(k_alice, n_e, m, nil)
 ]
 
-Alice -> Bob: salt, e
+Alice -> Bob: salt, n_e, e
 
 principal Bob[
 	knows private ikm
 	knows public info
 	k_bob, _, _ = HKDF(salt, ikm, info)
-	d = AEAD_DEC(k_bob, e, nil)?
+	d = AEAD_DEC(k_bob, n_e, e, nil)?
 	_ = HASH(d)
 ]
 

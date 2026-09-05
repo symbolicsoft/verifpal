@@ -22,31 +22,34 @@ principal Alice[
 	knows private m_group, m_bob, m_carol
 	k_bob = HASH(pairwise_root, tag_bob)
 	k_carol = HASH(pairwise_root, tag_carol)
-	e_group = AEAD_ENC(group_key, m_group, nil)
-	e_bob = AEAD_ENC(k_bob, m_bob, nil)
-	e_carol = AEAD_ENC(k_carol, m_carol, nil)
+	generates n_e_group
+	e_group = AEAD_ENC(group_key, n_e_group, m_group, nil)
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bob, n_e_bob, m_bob, nil)
+	generates n_e_carol
+	e_carol = AEAD_ENC(k_carol, n_e_carol, m_carol, nil)
 ]
 
-Alice -> Bob: e_group, e_bob
-Alice -> Carol: e_group, e_carol
-Alice -> Mallory: e_group
+Alice -> Bob: n_e_group, e_group, n_e_bob, e_bob
+Alice -> Carol: n_e_group, e_group, n_e_carol, e_carol
+Alice -> Mallory: n_e_group, e_group
 
 principal Mallory[
 	knows private group_key
-	seen = AEAD_DEC(group_key, e_group, nil)?
+	seen = AEAD_DEC(group_key, n_e_group, e_group, nil)?
 	leaks group_key
 ]
 
 principal Bob[
 	knows private pairwise_root
 	knows public tag_bob
-	_ = AEAD_DEC(HASH(pairwise_root, tag_bob), e_bob, nil)?
+	_ = AEAD_DEC(HASH(pairwise_root, tag_bob), n_e_bob, e_bob, nil)?
 ]
 
 principal Carol[
 	knows private pairwise_root
 	knows public tag_carol
-	_ = AEAD_DEC(HASH(pairwise_root, tag_carol), e_carol, nil)?
+	_ = AEAD_DEC(HASH(pairwise_root, tag_carol), n_e_carol, e_carol, nil)?
 ]
 
 queries[

@@ -22,11 +22,13 @@ principal Client[
 	offer_open = CONCAT(suite_weak, suite_strong)
 	offer_bound = CONCAT(suite_weak, suite_strong)
 	offer_tag = MAC(psk, offer_bound)
-	weak_open = AEAD_ENC[weak](psk, m_open, suite_weak)
-	weak_bound = AEAD_ENC(psk, m_bound, suite_weak)
+	generates n_weak_open
+	weak_open = AEAD_ENC[weak](psk, n_weak_open, m_open, suite_weak)
+	generates n_weak_bound
+	weak_bound = AEAD_ENC(psk, n_weak_bound, m_bound, suite_weak)
 ]
 
-Client -> Server: offer_open, weak_open, offer_bound, offer_tag, weak_bound
+Client -> Server: offer_open, n_weak_open, weak_open, offer_bound, offer_tag, n_weak_bound, weak_bound
 
 principal Server[
 	knows private psk
@@ -34,8 +36,8 @@ principal Server[
 	chosen_open, _ = SPLIT(offer_open)?
 	_ = ASSERT(MAC(psk, offer_bound), offer_tag)?
 	chosen_bound, _ = SPLIT(offer_bound)?
-	got_open = AEAD_DEC(psk, weak_open, chosen_open)?
-	got_bound = AEAD_DEC(psk, weak_bound, chosen_bound)?
+	got_open = AEAD_DEC(psk, n_weak_open, weak_open, chosen_open)?
+	got_bound = AEAD_DEC(psk, n_weak_bound, weak_bound, chosen_bound)?
 	_ = HASH(got_open, got_bound)
 ]
 

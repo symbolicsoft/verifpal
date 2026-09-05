@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::primitive::{PRIM_HASH, primitive_def};
+use crate::primitive::{filler_primitive, primitive_def};
 use crate::types::*;
 
 use super::symbolic::SymbolicState;
@@ -62,14 +62,17 @@ pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Optio
 }
 
 pub(crate) fn fillers() -> Vec<Value> {
-	let widths = primitive_def(PRIM_HASH)
+	let Some(filler) = filler_primitive() else {
+		return vec![value_nil()];
+	};
+	let widths = primitive_def(filler)
 		.map(|d| d.arity().to_vec())
 		.unwrap_or_default();
 	std::iter::once(value_nil())
 		.chain(
 			widths
 				.iter()
-				.map(|&k| Value::primitive(PRIM_HASH, vec![value_nil(); k.max(0) as usize], 0)),
+				.map(|&k| Value::primitive(filler, vec![value_nil(); k.max(0) as usize], 0)),
 		)
 		.collect()
 }

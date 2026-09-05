@@ -788,7 +788,7 @@ impl Narrator<'_> {
 				show(of),
 				join_oriented(using, table, attacker, installed),
 			),
-			DerivationRecord::ConcatFragment { of } => {
+			DerivationRecord::Fragment { of } => {
 				format!("Attacker splits {} and takes {}.", show(of), v)
 			}
 			DerivationRecord::Rewritten { of, using } => match of {
@@ -820,6 +820,21 @@ impl Narrator<'_> {
 				capability.name(),
 				join_terms(using, table),
 				v,
+			),
+			DerivationRecord::Reused { of, with } => format!(
+				"Attacker recovers {} from {}: {} shares its {}.",
+				v,
+				show(of),
+				show(with),
+				crate::primitive::reuse_fixed_names(of),
+			),
+			DerivationRecord::ReusedForge { with, using } => format!(
+				"Attacker forges {} under the {} shared by {} and {}, using {}.",
+				v,
+				crate::primitive::reuse_fixed_names(&with[0]),
+				show(&with[0]),
+				show(&with[1]),
+				join_terms(using, table),
 			),
 		})
 	}
@@ -1344,10 +1359,10 @@ mod tests {
 			knows private nsk_b\n\
 			nsk_gb = PUBKEY(nsk_b)\n\
 			nsk_k = DH_KEX(nsk_ga, nsk_b)\n\
-			generates nsk_n\n\
-			nsk_e = AEAD_ENC(nsk_k, nsk_n, nil)\n\
+			generates nsk_n, nsk_iv\n\
+			nsk_e = AEAD_ENC(nsk_k, nsk_iv, nsk_n, nil)\n\
 			]\n\
-			Bob -> Alice: nsk_gb, nsk_e\n\
+			Bob -> Alice: nsk_gb, nsk_iv, nsk_e\n\
 			queries[\n\
 			confidentiality? nsk_n\n\
 			]\n";
@@ -1556,7 +1571,12 @@ mod tests {
 		let chk = make_constant("bwn_chk");
 		let dec = Primitive {
 			id: PRIM_AEAD_DEC,
-			arguments: vec![k.clone(), e.clone(), crate::value::value_nil()],
+			arguments: vec![
+				k.clone(),
+				make_constant("bwn_n"),
+				e.clone(),
+				crate::value::value_nil(),
+			],
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),

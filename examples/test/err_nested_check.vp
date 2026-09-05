@@ -14,14 +14,15 @@ attacker[passive]
 principal Alice[
 	knows private m
 	generates k
-	e = AEAD_ENC(k, m, nil)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	knows private kb
-	h = HASH(AEAD_DEC(kb, e, nil)?)
+	h = HASH(AEAD_DEC(kb, n_e, e, nil)?)
 ]
 
 queries[

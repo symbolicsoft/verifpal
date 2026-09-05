@@ -200,6 +200,89 @@ fn memo_obtainable_put(
 	});
 }
 
+pub(crate) fn same_fixed(a: &Value, b: &Value) -> bool {
+	let (Value::Primitive(a), Value::Primitive(b)) = (a, b) else {
+		return false;
+	};
+	let Some(rule) = reuse_rule(a.id) else {
+		return false;
+	};
+	a.id == b.id
+		&& a.arguments.len() == b.arguments.len()
+		&& rule
+			.fixed
+			.iter()
+			.all(|&at| match (a.arguments.get(at), b.arguments.get(at)) {
+				(Some(x), Some(y)) => x.hash_value() == y.hash_value() && x.equivalent(y, true),
+				_ => false,
+			})
+}
+
+pub(crate) fn reused_pair(a: &Value, b: &Value) -> bool {
+	same_fixed(a, b) && !a.equivalent(b, true)
+}
+
+fn read_values(
+	attacker: &AttackerState,
+	value: &Value,
+	out: &mut Vec<(SlotIdx, Value)>,
+	seen: &mut Vec<Value>,
+) {
+	if seen.iter().any(|s| s.equivalent(value, true)) {
+		return;
+	}
+	seen.push(value.clone());
+	let Some(idx) = attacker.knows(value) else {
+		return;
+	};
+	let Some(record) = attacker.derivation(idx) else {
+		return;
+	};
+	match record {
+		DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
+			out.push((*slot, value.clone()));
+		}
+		_ => {
+			for ingredient in record.ingredients() {
+				read_values(attacker, ingredient, out, seen);
+			}
+		}
+	}
+}
+
+pub(crate) fn one_execution(attacker: &AttackerState, a: &Value, b: &Value) -> bool {
+	let mut reads_a = Vec::new();
+	let mut reads_b = Vec::new();
+	read_values(attacker, a, &mut reads_a, &mut Vec::new());
+	read_values(attacker, b, &mut reads_b, &mut Vec::new());
+	reads_a.iter().all(|(slot_a, value_a)| {
+		reads_b
+			.iter()
+			.all(|(slot_b, value_b)| slot_a != slot_b || value_a.equivalent(value_b, true))
+	})
+}
+
+pub(crate) fn reused(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 2]> {
+	reuse_rule(p.id)?;
+	let probe = Value::Primitive(Arc::new(p.clone()));
+	attacker
+		.reused
+		.iter()
+		.find(|pair| {
+			same_fixed(&pair[0], &probe)
+				&& attacker.knows(&pair[0]).is_some()
+				&& attacker.knows(&pair[1]).is_some()
+		})
+		.cloned()
+}
+
+pub(crate) fn forgeable_by_reuse(p: &Primitive, attacker: &AttackerState) -> &'static [usize] {
+	match (reused(p, attacker), reuse_rule(p.id)) {
+		(Some(_), Some(rule)) => &rule.forgeable,
+		_ => &[],
+	}
+}
+
 pub(crate) fn can_decompose(
 	p: &Primitive,
 	ps: &PrincipalState,
@@ -399,10 +482,13 @@ fn can_reconstruct_primitive_directly(
 	let forgeable_secret = ps
 		.capabilities
 		.forgeable_secret_position(rewritten_prim, attacker.current_phase);
+	let reused = reused(rewritten_prim, attacker);
+	let by_reuse = forgeable_by_reuse(rewritten_prim, attacker);
+	let exempt = |i: usize| Some(i) == forgeable_secret || by_reuse.contains(&i);
 	let mut has = Vec::new();
 	let mut skipped = 0usize;
 	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
-		if Some(i) == forgeable_secret {
+		if exempt(i) {
 			skipped += 1;
 			continue;
 		}
@@ -413,10 +499,12 @@ fn can_reconstruct_primitive_directly(
 	if has.len() + skipped < rewritten_prim.arguments.len() {
 		return None;
 	}
-	Some(ReconstructResult {
-		from: has,
-		forged: (skipped > 0).then_some(Capability::Forgeable),
-	})
+	let forged = match (skipped, reused) {
+		(0, _) => None,
+		(_, Some(pair)) => Some(Forged::Reuse(pair)),
+		(_, None) => Some(Forged::Assumption(Capability::Forgeable)),
+	};
+	Some(ReconstructResult { from: has, forged })
 }
 
 pub(crate) fn reduce_once(v: &Value) -> Value {
@@ -593,6 +681,126 @@ mod tests {
 		let mut index = CapabilityIndex::default();
 		index.insert(&Value::Primitive(Arc::new(annotated)));
 		Arc::new(index)
+	}
+
+	#[test]
+	fn a_reused_nonce_needs_two_distinct_terms_under_one_key_and_nonce() {
+		let k = make_constant("rn_k");
+		let n = make_constant("rn_n");
+		let ad = make_constant("rn_ad");
+		let m1 = make_constant("rn_m1");
+		let m2 = make_constant("rn_m2");
+		let e1 = make_primitive(PRIM_AEAD_ENC, vec![k.clone(), n.clone(), m1, ad.clone()], 0);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), m2.clone(), ad.clone()],
+			0,
+		);
+		let other_nonce = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), make_constant("rn_n2"), m2.clone(), ad.clone()],
+			0,
+		);
+		let other_key = make_primitive(PRIM_AEAD_ENC, vec![make_constant("rn_k2"), n, m2, ad], 0);
+		let Value::Primitive(p1) = &e1 else {
+			panic!("expected a primitive");
+		};
+		let Value::Primitive(p_other) = &other_nonce else {
+			panic!("expected a primitive");
+		};
+		let confirmed = |known: Vec<Value>, pair: [Value; 2]| {
+			let mut attacker = make_attacker_state(known);
+			attacker.reused = Arc::new(vec![pair]);
+			attacker
+		};
+		assert!(reused_pair(&e1, &e2));
+		assert!(!reused_pair(&e1, &e1));
+		assert!(!reused_pair(&e1, &other_nonce));
+		assert!(!reused_pair(&e1, &other_key));
+		let pair = [e1.clone(), e2.clone()];
+		assert!(reused(p1, &confirmed(vec![e1.clone(), e2.clone()], pair.clone())).is_some());
+		assert!(reused(p1, &confirmed(vec![e1.clone()], pair.clone())).is_none());
+		assert!(reused(p_other, &confirmed(vec![e1.clone(), e2.clone()], pair)).is_none());
+		assert!(reused(p1, &make_attacker_state(vec![e1.clone(), e2.clone()])).is_none());
+	}
+
+	#[test]
+	fn two_values_of_one_slot_are_not_a_reused() {
+		let k = make_constant("tvo_k");
+		let n = make_constant("tvo_n");
+		let ad = make_constant("tvo_ad");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("tvo_m1"), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("tvo_m2"), ad.clone()],
+			0,
+		);
+		let Value::Primitive(p1) = &e1 else {
+			panic!("expected a primitive");
+		};
+		let read_from = |slots: [usize; 2]| {
+			let mut attacker = make_attacker_state(vec![e1.clone(), e2.clone()]);
+			attacker.derivations = Arc::new(vec![
+				DerivationRecord::Obtained {
+					slot: SlotIdx(slots[0]),
+				},
+				DerivationRecord::Obtained {
+					slot: SlotIdx(slots[1]),
+				},
+			]);
+			attacker
+		};
+		let _ = p1;
+		assert!(!one_execution(&read_from([3, 3]), &e1, &e2));
+		assert!(one_execution(&read_from([3, 4]), &e1, &e2));
+		let opened = make_primitive(PRIM_AEAD_ENC, vec![k, n, e1.clone(), ad], 0);
+		let mut attacker = make_attacker_state(vec![e1.clone(), e2.clone(), opened.clone()]);
+		attacker.derivations = Arc::new(vec![
+			DerivationRecord::Decomposed {
+				of: opened.clone(),
+				using: vec![],
+			},
+			DerivationRecord::Obtained { slot: SlotIdx(7) },
+			DerivationRecord::Obtained { slot: SlotIdx(7) },
+		]);
+		assert!(!one_execution(&attacker, &e1, &e2));
+	}
+
+	#[test]
+	fn a_reused_nonce_makes_a_ciphertext_buildable_without_its_key_or_nonce() {
+		let k = make_constant("rf_k");
+		let n = make_constant("rf_n");
+		let ad = make_constant("rf_ad");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("rf_m1"), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("rf_m2"), ad.clone()],
+			0,
+		);
+		let m3 = make_constant("rf_m3");
+		let Value::Primitive(target) =
+			make_primitive(PRIM_AEAD_ENC, vec![k, n, m3.clone(), ad.clone()], 0)
+		else {
+			panic!("expected a primitive");
+		};
+		let ps = make_principal_state("Theory", 0, vec![], vec![]);
+		let mut with_pair =
+			make_attacker_state(vec![e1.clone(), e2.clone(), m3.clone(), ad.clone()]);
+		with_pair.reused = Arc::new(vec![[e1.clone(), e2]]);
+		let result =
+			can_reconstruct_primitive(&target, &ps, &with_pair).expect("forgeable under reuse");
+		assert!(matches!(result.forged, Some(Forged::Reuse(_))));
+		assert_eq!(result.from.len(), 2);
+		let without_pair = make_attacker_state(vec![e1, m3, ad]);
+		assert!(can_reconstruct_primitive(&target, &ps, &without_pair).is_none());
 	}
 
 	#[test]

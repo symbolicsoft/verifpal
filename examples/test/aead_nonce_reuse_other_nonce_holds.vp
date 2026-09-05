@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c0 — a reused nonce gives up the messages under that nonce
+// and nothing else. m1 and m2 share n1 and both fall; m3 is under n2, used
+// once, and stays confidential under the same key. Everything is declared,
+// not generated, so the second session repeats the first term for term and
+// adds no pairing of its own.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private n1, n2
+	knows private m1, m2, m3
+	knows public ad
+	e1 = AEAD_ENC(k, n1, m1, ad)
+	e2 = AEAD_ENC(k, n1, m2, ad)
+	e3 = AEAD_ENC(k, n2, m3, ad)
+]
+
+Alice -> Bob: e1, e2, e3
+
+principal Bob[
+	knows private k
+	knows private n1, n2
+	knows public ad
+	d1 = AEAD_DEC(k, n1, e1, ad)?
+	d2 = AEAD_DEC(k, n1, e2, ad)?
+	d3 = AEAD_DEC(k, n2, e3, ad)?
+]
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? m3
+]

@@ -7,29 +7,34 @@ principal P1[
    knows private k1
    knows private M
    knows public c
-   key = AEAD_ENC(k1, c, c)
-   msg1 = AEAD_ENC(key, M, c)
-   msg3 = AEAD_ENC(AEAD_ENC(k1,msg1,c),c,c)
+   knows private n_k1
+   key = AEAD_ENC(k1, n_k1, c, c)
+   generates n_msg1
+   msg1 = AEAD_ENC(key, n_msg1, M, c)
+   generates n_msg3
+   msg3 = AEAD_ENC(AEAD_ENC(k1, n_k1, msg1, c), n_msg3, c, c)
 ]
 
-P1 -> P2: msg1
+P1 -> P2: n_msg1, msg1
 
 principal P2[
    knows private k1
    knows private k2
    knows public c
-   msg2 = AEAD_ENC(k2,AEAD_ENC(k1,msg1,c),c)
+   knows private n_k1
+   generates n_msg2
+   msg2 = AEAD_ENC(k2, n_msg2, AEAD_ENC(k1, n_k1, msg1, c), c)
 ]
 
-P2 -> P3: [msg2]
+P2 -> P3: [n_msg2], [msg2]
 
-P1 -> P3: msg3
+P1 -> P3: n_msg3, msg3
 
 principal P3[
    knows private k2
    knows public c
-   clear = AEAD_DEC(k2,msg2,c)?
-   msg4 = AEAD_DEC(clear,msg3,c)?
+   clear = AEAD_DEC(k2, n_msg2, msg2, c)?
+   msg4 = AEAD_DEC(clear, n_msg3, msg3, c)?
 ]
 
 P3 -> P1: [msg4]

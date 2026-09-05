@@ -35,38 +35,41 @@ principal Alice[
 	knows public a_name, b_name
 	generates kab
 	generates ta
-	m1 = AEAD_ENC(k_as, CONCAT(ta, b_name, kab), nil)
+	generates n_m1
+	m1 = AEAD_ENC(k_as, n_m1, CONCAT(ta, b_name, kab), nil)
 	generates ma
 ]
 
-Alice -> Server: m1
+Alice -> Server: n_m1, m1
 
 principal Server[
 	knows private k_as
 	knows private k_bs
 	knows public a_name
 	generates ts
-	d1 = AEAD_DEC(k_as, m1, nil)?
+	d1 = AEAD_DEC(k_as, n_m1, m1, nil)?
 	ta_s, b_s, kab_s = SPLIT(d1)
-	m2 = AEAD_ENC(k_bs, CONCAT(ts, a_name, kab_s), nil)
+	generates n_m2
+	m2 = AEAD_ENC(k_bs, n_m2, CONCAT(ts, a_name, kab_s), nil)
 ]
 
-Server -> Bob: m2
+Server -> Bob: n_m2, m2
 
 principal Bob[
 	knows private k_bs
-	d2 = AEAD_DEC(k_bs, m2, nil)?
+	d2 = AEAD_DEC(k_bs, n_m2, m2, nil)?
 	ts_b, a_b, kab_b = SPLIT(d2)
 ]
 
 principal Alice[
-	e = AEAD_ENC(kab, ma, nil)
+	generates n_e
+	e = AEAD_ENC(kab, n_e, ma, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
-	dm = AEAD_DEC(kab_b, e, nil)?
+	dm = AEAD_DEC(kab_b, n_e, e, nil)?
 ]
 
 phase[1]

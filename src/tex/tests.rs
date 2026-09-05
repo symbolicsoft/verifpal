@@ -10,10 +10,10 @@ use crate::types::TraceValue;
 const GOLDEN_SOURCE: &str = concat!(
 	"attacker[active]\n\n",
 	"principal Alice[\n\tgenerates a\n\tga = PUBKEY(a)\n\tknows private m\n",
-	"\te = AEAD_ENC(k, m, ad)\n]\n\n",
+	"\tknows private n\n\te = AEAD_ENC(k, n, m, ad)\n]\n\n",
 	"Alice -> Bob: [ga], e\n\n",
 	"phase[1]\n\n",
-	"principal Bob[\n\tleaks b\n\td = AEAD_DEC(k, e, ad)?\n]\n\n",
+	"principal Bob[\n\tleaks b\n\td = AEAD_DEC(k, n, e, ad)?\n]\n\n",
 	"queries[\n\tconfidentiality? m\n\tauthentication? Alice -> Bob: e\n]\n"
 );
 
@@ -78,7 +78,7 @@ fn golden_run() -> Run {
 		},
 		ReportStep {
 			kind: "gate".to_string(),
-			text: "Bob's AEAD_DEC(k, e, ad)? check passes on an attacker-controlled key."
+			text: "Bob's AEAD_DEC(k, n, e, ad)? check passes on an attacker-controlled key."
 				.to_string(),
 			sender: None,
 			recipient: None,

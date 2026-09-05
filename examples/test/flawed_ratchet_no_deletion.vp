@@ -20,15 +20,18 @@ principal Alice[
 	k_one = HASH(root)
 	k_two = HASH(k_one)
 	k_three = HASH(k_two)
-	e_one = AEAD_ENC(k_one, m_one, nil)
-	e_two = AEAD_ENC(k_two, m_two, nil)
-	e_three = AEAD_ENC(k_three, m_three, nil)
+	generates n_e_one
+	e_one = AEAD_ENC(k_one, n_e_one, m_one, nil)
+	generates n_e_two
+	e_two = AEAD_ENC(k_two, n_e_two, m_two, nil)
+	generates n_e_three
+	e_three = AEAD_ENC(k_three, n_e_three, m_three, nil)
 	leaks k_one
 	leaks k_two
 	leaks k_three
 ]
 
-Alice -> Bob: e_one, e_two, e_three
+Alice -> Bob: n_e_one, e_one, n_e_two, e_two, n_e_three, e_three
 
 principal Bob[
 	_ = HASH(e_one, e_two, e_three)

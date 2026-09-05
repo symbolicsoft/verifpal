@@ -1352,7 +1352,7 @@ fn test_scuttlebutt() {
 	run_model_at(
 		"examples/messaging/scuttlebutt.vp",
 		"scuttlebutt.vp",
-		"c1c0c1c0a1a1a0a1a1e1",
+		"c1c0c1c0a1a1a1a1a1e1",
 	);
 }
 
@@ -2511,6 +2511,33 @@ fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
 	);
 }
 #[test]
+fn aead_nonce_reuse_models() {
+	run_model_sessions("aead_nonce_reuse_sessions.vp", 1, "c0");
+	run_model_sessions("aead_nonce_reuse_sessions.vp", 2, "c1");
+	run_model_sessions("aead_nonce_fresh_sessions.vp", 1, "c0");
+	run_model_sessions("aead_nonce_fresh_sessions.vp", 2, "c0");
+	run_model("aead_nonce_reuse_counter.vp", "c1c1");
+	run_model("aead_nonce_reuse_same_plaintext_different_ad.vp", "c1");
+	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 1, "c0");
+	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 2, "c0");
+	run_model("aead_nonce_reuse_other_nonce_holds.vp", "c1c1c0");
+	run_model("aead_nonce_needed_to_decrypt.vp", "c0");
+	run_model("aead_nonce_leaked_decrypts.vp", "c1");
+	run_model_err("err_aead_wrong_nonce.vp", "cannot succeed as written");
+	run_model_err(
+		"err_aead_three_arguments.vp",
+		"takes 4 arguments, but 3 were given",
+	);
+	run_model_sessions("aead_nonce_reuse_forgery.vp", 1, "a1");
+	run_model_sessions("aead_nonce_reuse_forgery.vp", 2, "a1");
+	run_model_sessions("aead_nonce_distinct_forgery_holds.vp", 1, "a0");
+	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 1, "c0");
+	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 2, "c1");
+	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 1, "c0");
+	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 2, "c0");
+}
+
+#[test]
 fn a_false_attack_pin_survives_at_one_session() {
 	run_model_sessions("foreign_halt_no_oracle.vp", 1, "a0");
 	run_model_sessions("aead_replay_not_forgery.vp", 1, "a0c0");
@@ -2697,7 +2724,8 @@ fn test_dh_exponent_reuse() {
 }
 #[test]
 fn test_dh_key_confirmation() {
-	run_model("dh_key_confirmation.vp", "c0a0e1");
+	run_model("dh_key_confirmation.vp", "c0a1e1");
+	run_model_sessions("dh_key_confirmation.vp", 1, "c0a0e1");
 }
 #[test]
 fn test_dh_mitm_half_guarded() {

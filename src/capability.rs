@@ -135,6 +135,8 @@ pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
 
 pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 	let name = primitive_name(id);
+	let exchange_key =
+		crate::primitive::commutativity_rule(id).map(|rule| primitive_name(rule.constructor));
 	if primitive_is_core(id) {
 		return format!(
 			"{} is a core primitive and carries no cryptographic guarantee to weaken",
@@ -146,11 +148,12 @@ pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 			"{} provides authenticity, not confidentiality; did you mean `{}[forgeable]`?",
 			name, name
 		),
-		Capability::Weak if name == "DH_KEX" => {
-			"discrete log is a property of the key, not the exchange; \
-			 did you mean `PUBKEY[weak]`?"
-				.to_string()
-		}
+		Capability::Weak if exchange_key.is_some() => format!(
+			"the secret `{}` derives is only as hidden as the key it is built on; \
+			 did you mean `{}[weak]`?",
+			name,
+			exchange_key.unwrap_or_default()
+		),
 		Capability::Forgeable => format!(
 			"{} has no secret argument; anyone who knows its inputs can compute it",
 			name
@@ -413,7 +416,7 @@ mod tests {
 		let k = make_constant("cidx_k");
 		let m = make_constant("cidx_m");
 		let ad = make_constant("cidx_ad");
-		let plain = make_primitive(PRIM_AEAD_ENC, vec![k, m, ad], 0);
+		let plain = make_primitive(PRIM_AEAD_ENC, vec![k, make_constant("cidx_n"), m, ad], 0);
 
 		let mut index = CapabilityIndex::default();
 		index.insert(&annotated(plain.clone(), Capability::Weak, 0));

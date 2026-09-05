@@ -1501,7 +1501,7 @@ pub enum DerivationRecord {
 		of: Value,
 		using: Vec<Value>,
 	},
-	ConcatFragment {
+	Fragment {
 		of: Value,
 	},
 	Rewritten {
@@ -1511,6 +1511,14 @@ pub enum DerivationRecord {
 	Broken {
 		of: Value,
 		capability: Capability,
+		using: Vec<Value>,
+	},
+	Reused {
+		of: Value,
+		with: Value,
+	},
+	ReusedForge {
+		with: [Value; 2],
 		using: Vec<Value>,
 	},
 }
@@ -1538,10 +1546,9 @@ impl DerivationRecord {
 					..
 				},
 			) => ca == cb && a.equivalent(b, true),
-			(
-				DerivationRecord::ConcatFragment { of: a },
-				DerivationRecord::ConcatFragment { of: b },
-			) => a.equivalent(b, true),
+			(DerivationRecord::Fragment { of: a }, DerivationRecord::Fragment { of: b }) => {
+				a.equivalent(b, true)
+			}
 			_ => {
 				std::mem::discriminant(self) == std::mem::discriminant(other)
 					&& same_terms(&self.ingredients(), &other.ingredients())
@@ -1570,8 +1577,14 @@ impl DerivationRecord {
 				v.extend(using.iter());
 				v
 			}
+			DerivationRecord::Reused { of, with } => vec![of, with],
+			DerivationRecord::ReusedForge { with, using } => {
+				let mut v: Vec<&Value> = with.iter().collect();
+				v.extend(using.iter());
+				v
+			}
 			DerivationRecord::Reconstructed { from } => from.iter().collect(),
-			DerivationRecord::ConcatFragment { of } => vec![of],
+			DerivationRecord::Fragment { of } => vec![of],
 			DerivationRecord::Initial
 			| DerivationRecord::Leaked { .. }
 			| DerivationRecord::Obtained { .. } => vec![],
@@ -1599,6 +1612,7 @@ pub struct AttackerState {
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
 	pub alternates: Arc<Vec<Vec<Route>>>,
+	pub reused: Arc<Vec<[Value; 2]>>,
 }
 
 impl Default for AttackerState {
@@ -1610,6 +1624,7 @@ impl Default for AttackerState {
 			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
 			alternates: Arc::new(vec![]),
+			reused: Arc::new(vec![]),
 		}
 	}
 }
@@ -1625,9 +1640,14 @@ pub struct DecomposeResult {
 	pub used: Vec<Value>,
 }
 
+pub enum Forged {
+	Assumption(Capability),
+	Reuse([Value; 2]),
+}
+
 pub struct ReconstructResult {
 	pub from: Vec<Value>,
-	pub forged: Option<Capability>,
+	pub forged: Option<Forged>,
 }
 
 pub struct RecomposeResult {
@@ -1642,6 +1662,40 @@ mod tests {
 	use crate::testutil::*;
 	use crate::value::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn nonce_reuse_records_list_both_ciphertexts_as_ingredients() {
+		let k = make_constant("nrr_k");
+		let n = make_constant("nrr_n");
+		let ad = make_constant("nrr_ad");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("nrr_m1"), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k, n, make_constant("nrr_m2"), ad.clone()],
+			0,
+		);
+		let reuse = DerivationRecord::Reused {
+			of: e1.clone(),
+			with: e2.clone(),
+		};
+		assert_eq!(reuse.ingredients().len(), 2);
+		let forged = DerivationRecord::ReusedForge {
+			with: [e1.clone(), e2.clone()],
+			using: vec![ad.clone()],
+		};
+		assert_eq!(forged.ingredients().len(), 3);
+		assert!(reuse.same_route(&DerivationRecord::Reused {
+			of: e1.clone(),
+			with: e2.clone(),
+		}));
+		assert!(!reuse.same_route(&DerivationRecord::Reused { of: e2, with: e1 }));
+		assert!(!reuse.reads_from_state());
+		assert!(!forged.reads_from_state());
+	}
 
 	#[test]
 	fn value_accessors() {

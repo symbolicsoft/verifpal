@@ -43,14 +43,15 @@ Mallory -> Alice: [gm]
 
 principal Alice[
 	k = HKDF(DH_KEX(gpeer, a), peer_tag, nil)
-	e = AEAD_ENC(k, m, peer_tag)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, peer_tag)
 ]
 
-Alice -> Bob: [ga], e
+Alice -> Bob: [ga], n_e, e
 
 principal Bob[
 	kb = HKDF(DH_KEX(ga, b), bob_tag, nil)
-	db = AEAD_DEC(kb, e, bob_tag)?
+	db = AEAD_DEC(kb, n_e, e, bob_tag)?
 ]
 
 scenarios[

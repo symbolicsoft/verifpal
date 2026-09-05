@@ -428,6 +428,7 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 		mutation_records: Arc::new(mutation_records),
 		derivations: Arc::new(derivations),
 		alternates: Arc::new(alternates),
+		reused: Arc::clone(&attacker.reused),
 	}
 }
 

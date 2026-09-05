@@ -46,33 +46,36 @@ Initiator -> Responder: gie
 principal Responder[
 	ee_r = DH_KEX(gie, re)
 	k_ee_r, _, _ = HKDF(protocol_name, ee_r, gie)
-	static_r = AEAD_ENC(k_ee_r, grs, gre)
+	generates n_static_r
+	static_r = AEAD_ENC(k_ee_r, n_static_r, grs, gre)
 	se_r = DH_KEX(gie, rs)
 	k_se_r, _, _ = HKDF(k_ee_r, se_r, gre)
 ]
 
-Responder -> Initiator: gre, static_r
+Responder -> Initiator: gre, n_static_r, static_r
 
 principal Initiator[
 	knows private payload
 	ee_i = DH_KEX(gre, ie)
 	k_ee_i, _, _ = HKDF(protocol_name, ee_i, gie)
-	seen_rs = AEAD_DEC(k_ee_i, static_r, gre)?
+	seen_rs = AEAD_DEC(k_ee_i, n_static_r, static_r, gre)?
 	es_i = DH_KEX(seen_rs, ie)
 	k_es_i, _, _ = HKDF(k_ee_i, es_i, gre)
-	static_i = AEAD_ENC(k_es_i, gis, gie)
+	generates n_static_i
+	static_i = AEAD_ENC(k_es_i, n_static_i, gis, gie)
 	ss_i = DH_KEX(seen_rs, is_static)
 	k_final_i, _, _ = HKDF(k_es_i, ss_i, gis)
-	sealed = AEAD_ENC(k_final_i, payload, gis)
+	generates n_sealed
+	sealed = AEAD_ENC(k_final_i, n_sealed, payload, gis)
 ]
 
-Initiator -> Responder: static_i, sealed
+Initiator -> Responder: n_static_i, static_i, n_sealed, sealed
 
 principal Responder[
-	seen_is = AEAD_DEC(k_se_r, static_i, gie)?
+	seen_is = AEAD_DEC(k_se_r, n_static_i, static_i, gie)?
 	ss_r = DH_KEX(seen_is, rs)
 	k_final_r, _, _ = HKDF(k_se_r, ss_r, seen_is)
-	opened = AEAD_DEC(k_final_r, sealed, seen_is)?
+	opened = AEAD_DEC(k_final_r, n_sealed, sealed, seen_is)?
 	_ = HASH(opened)
 ]
 

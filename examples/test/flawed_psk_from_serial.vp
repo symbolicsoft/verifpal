@@ -22,17 +22,18 @@ principal Device[
 	knows public serial_number, model_code
 	knows private telemetry
 	psk = HASH(serial_number, model_code)
-	report = AEAD_ENC(psk, telemetry, nil)
+	generates n_report
+	report = AEAD_ENC(psk, n_report, telemetry, nil)
 	tag = MAC(psk, report)
 ]
 
-Device -> Collector: report, tag
+Device -> Collector: n_report, report, tag
 
 principal Collector[
 	knows public serial_number, model_code
 	collector_psk = HASH(serial_number, model_code)
 	_ = ASSERT(MAC(collector_psk, report), tag)?
-	got = AEAD_DEC(collector_psk, report, nil)?
+	got = AEAD_DEC(collector_psk, n_report, report, nil)?
 	_ = HASH(got)
 ]
 

@@ -42,18 +42,20 @@ Bob -> Alice: [hco_gb]
 
 principal Alice[
 	hco_ka = DH_KEX(hco_gb, hco_a)
-	hco_leak = AEAD_ENC(hco_ck, hco_na, hco_label)
+	generates n_hco_leak
+	hco_leak = AEAD_ENC(hco_ck, n_hco_leak, hco_na, hco_label)
 	hco_e = ENC(hco_ka, hco_na)
-	hco_c = AEAD_ENC(hco_na, hco_msg, nil)
+	generates n_hco_c
+	hco_c = AEAD_ENC(hco_na, n_hco_c, hco_msg, nil)
 ]
 
-Alice -> Charlie: hco_leak
-Alice -> Bob: hco_e, hco_c
+Alice -> Charlie: n_hco_leak, hco_leak
+Alice -> Bob: hco_e, n_hco_c, hco_c
 
 principal Bob[
 	hco_kb = DH_KEX(hco_ga, hco_b)
 	hco_n = DEC(hco_kb, hco_e)
-	hco_p = AEAD_DEC(hco_n, hco_c, nil)?
+	hco_p = AEAD_DEC(hco_n, n_hco_c, hco_c, nil)?
 	hco_h = HASH(hco_p)
 ]
 

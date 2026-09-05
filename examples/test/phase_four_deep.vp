@@ -17,20 +17,24 @@ attacker[passive]
 principal Alice[
 	knows private k_zero, k_one, k_two, k_three
 	knows private m_zero, m_one, m_two, m_three
-	e_zero = AEAD_ENC(k_zero, m_zero, nil)
-	e_one = AEAD_ENC(k_one, m_one, nil)
-	e_two = AEAD_ENC(k_two, m_two, nil)
-	e_three = AEAD_ENC(k_three, m_three, nil)
+	generates n_e_zero
+	e_zero = AEAD_ENC(k_zero, n_e_zero, m_zero, nil)
+	generates n_e_one
+	e_one = AEAD_ENC(k_one, n_e_one, m_one, nil)
+	generates n_e_two
+	e_two = AEAD_ENC(k_two, n_e_two, m_two, nil)
+	generates n_e_three
+	e_three = AEAD_ENC(k_three, n_e_three, m_three, nil)
 ]
 
-Alice -> Bob: e_zero, e_one, e_two, e_three
+Alice -> Bob: n_e_zero, e_zero, n_e_one, e_one, n_e_two, e_two, n_e_three, e_three
 
 principal Bob[
 	knows private k_zero, k_one, k_two, k_three
-	d_zero = AEAD_DEC(k_zero, e_zero, nil)?
-	d_one = AEAD_DEC(k_one, e_one, nil)?
-	d_two = AEAD_DEC(k_two, e_two, nil)?
-	d_three = AEAD_DEC(k_three, e_three, nil)?
+	d_zero = AEAD_DEC(k_zero, n_e_zero, e_zero, nil)?
+	d_one = AEAD_DEC(k_one, n_e_one, e_one, nil)?
+	d_two = AEAD_DEC(k_two, n_e_two, e_two, nil)?
+	d_three = AEAD_DEC(k_three, n_e_three, e_three, nil)?
 	_ = HASH(d_zero, d_one, d_two, d_three)
 ]
 

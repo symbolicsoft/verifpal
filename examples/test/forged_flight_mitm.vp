@@ -36,15 +36,16 @@ principal Server[
 	transcript = HASH(gce, gs)
 	sig = SIGN(sk, transcript)
 	fin = MAC(k, sig)
-	flight = AEAD_ENC(k, CONCAT(sig, fin), nil)
+	generates n_flight
+	flight = AEAD_ENC(k, n_flight, CONCAT(sig, fin), nil)
 ]
 
-Server -> Client: gs, flight
+Server -> Client: gs, n_flight, flight
 
 principal Client[
 	k_c = HKDF(DH_KEX(gs, ce), nil, nil)
 	transcript_c = HASH(gce, gs)
-	plain = AEAD_DEC(k_c, flight, nil)?
+	plain = AEAD_DEC(k_c, n_flight, flight, nil)?
 	sig_c, fin_c = SPLIT(plain)
 	valid = SIGNVERIF(gsk, transcript_c, sig_c)?
 	finok = ASSERT(fin_c, MAC(k_c, sig_c))?

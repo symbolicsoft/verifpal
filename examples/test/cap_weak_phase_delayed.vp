@@ -10,16 +10,18 @@ principal Alice[
 	knows private k
 	knows private m_now
 	knows private m_later
-	e_now = AEAD_ENC(k, m_now, nil)
-	e_later = AEAD_ENC[weak from phase 2](k, m_later, nil)
+	generates n_e_now
+	e_now = AEAD_ENC(k, n_e_now, m_now, nil)
+	generates n_e_later
+	e_later = AEAD_ENC[weak from phase 2](k, n_e_later, m_later, nil)
 ]
 
-Alice -> Bob: e_now, e_later
+Alice -> Bob: n_e_now, e_now, n_e_later, e_later
 
 principal Bob[
 	knows private k
-	d_now = AEAD_DEC(k, e_now, nil)
-	d_later = AEAD_DEC(k, e_later, nil)
+	d_now = AEAD_DEC(k, n_e_now, e_now, nil)
+	d_later = AEAD_DEC(k, n_e_later, e_later, nil)
 ]
 
 phase[1]

@@ -12,6 +12,10 @@
 // matches position 2 against position 2 — so the same replay fails the check
 // and halts Bob before the value is used. Domain separation is the entire
 // difference between the two verdicts.
+// The nonce on `n_e_fresh_one` is declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 
 attacker[active]
 
@@ -19,17 +23,19 @@ principal Alice[
 	knows private k
 	knows public ad_shared, ad_zero
 	knows private m_shared_zero, m_fresh_zero
-	e_shared_zero = AEAD_ENC(k, m_shared_zero, ad_shared)
-	e_fresh_zero = AEAD_ENC(k, m_fresh_zero, ad_zero)
+	generates n_e_shared_zero
+	e_shared_zero = AEAD_ENC(k, n_e_shared_zero, m_shared_zero, ad_shared)
+	generates n_e_fresh_zero
+	e_fresh_zero = AEAD_ENC(k, n_e_fresh_zero, m_fresh_zero, ad_zero)
 ]
 
-Alice -> Bob: e_shared_zero, e_fresh_zero
+Alice -> Bob: n_e_shared_zero, e_shared_zero, n_e_fresh_zero, e_fresh_zero
 
 principal Bob[
 	knows private k
 	knows public ad_shared, ad_zero
-	d_shared_zero = AEAD_DEC(k, e_shared_zero, ad_shared)?
-	d_fresh_zero = AEAD_DEC(k, e_fresh_zero, ad_zero)?
+	d_shared_zero = AEAD_DEC(k, n_e_shared_zero, e_shared_zero, ad_shared)?
+	d_fresh_zero = AEAD_DEC(k, n_e_fresh_zero, e_fresh_zero, ad_zero)?
 	_ = HASH(d_shared_zero, d_fresh_zero)
 ]
 
@@ -38,16 +44,18 @@ phase[1]
 principal Alice[
 	knows public ad_one
 	knows private m_shared_one, m_fresh_one
-	e_shared_one = AEAD_ENC(k, m_shared_one, ad_shared)
-	e_fresh_one = AEAD_ENC(k, m_fresh_one, ad_one)
+	generates n_e_shared_one
+	e_shared_one = AEAD_ENC(k, n_e_shared_one, m_shared_one, ad_shared)
+	knows private n_e_fresh_one
+	e_fresh_one = AEAD_ENC(k, n_e_fresh_one, m_fresh_one, ad_one)
 ]
 
-Alice -> Bob: e_shared_one, e_fresh_one
+Alice -> Bob: n_e_shared_one, e_shared_one, n_e_fresh_one, e_fresh_one
 
 principal Bob[
 	knows public ad_one
-	d_shared_one = AEAD_DEC(k, e_shared_one, ad_shared)?
-	d_fresh_one = AEAD_DEC(k, e_fresh_one, ad_one)?
+	d_shared_one = AEAD_DEC(k, n_e_shared_one, e_shared_one, ad_shared)?
+	d_fresh_one = AEAD_DEC(k, n_e_fresh_one, e_fresh_one, ad_one)?
 	_ = HASH(d_shared_one, d_fresh_one)
 ]
 

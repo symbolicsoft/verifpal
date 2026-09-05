@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at --sessions 1, a1 at the default two — the counterweight to
+// aead_nonce_reuse_forgery.vp with three distinct nonces. No pair shares a
+// nonce, nothing gives up the authentication key, and Bob accepts only what
+// Alice sealed. At two sessions the other run's e3 replays into this one and
+// injective agreement fails, which is the ordinary cross-session replay and
+// not what this model pins; the one-session verdict is.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private n1, n2, n3
+	knows public ad
+	generates m1, m2, m3
+	e1 = AEAD_ENC(k, n1, m1, ad)
+	e2 = AEAD_ENC(k, n2, m2, ad)
+	e3 = AEAD_ENC(k, n3, m3, ad)
+]
+
+Alice -> Bob: e1, e2, e3
+
+principal Bob[
+	knows private k
+	knows private n1, n2, n3
+	knows public ad
+	d3 = AEAD_DEC(k, n3, e3, ad)?
+	h = HASH(d3)
+]
+
+queries[
+	authentication? Alice -> Bob: e3
+]

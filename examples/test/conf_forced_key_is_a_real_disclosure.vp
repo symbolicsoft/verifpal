@@ -32,10 +32,11 @@ Alice -> Bob: cfk_ga
 principal Bob[
 	knows private cfk_note
 	cfk_s = DH_KEX(cfk_ga, cfk_b)
-	cfk_e = AEAD_ENC(cfk_s, cfk_note, nil)
+	generates n_cfk_e
+	cfk_e = AEAD_ENC(cfk_s, n_cfk_e, cfk_note, nil)
 ]
 
-Bob -> Alice: cfk_gb, cfk_e
+Bob -> Alice: cfk_gb, n_cfk_e, cfk_e
 
 queries[
 	confidentiality? cfk_s

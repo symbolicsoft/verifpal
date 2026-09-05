@@ -22,17 +22,19 @@ principal Alice[
 	dh_a = DH_KEX(gb, a)
 	session_key_a = HKDF(HASH(psk, dh_a), nil, nil)
 	generates m1, m2
-	e1 = AEAD_ENC(session_key_a, m1, nil)
-	e2 = AEAD_ENC(session_key_a, m2, nil)
+	generates n_e1
+	e1 = AEAD_ENC(session_key_a, n_e1, m1, nil)
+	generates n_e2
+	e2 = AEAD_ENC(session_key_a, n_e2, m2, nil)
 ]
 
-Alice -> Bob: e1, e2
+Alice -> Bob: n_e1, e1, n_e2, e2
 
 principal Bob[
 	dh_b = DH_KEX(ga, b)
 	session_key_b = HKDF(HASH(psk, dh_b), nil, nil)
-	m1_b = AEAD_DEC(session_key_b, e1, nil)?
-	m2_b = AEAD_DEC(session_key_b, e2, nil)?
+	m1_b = AEAD_DEC(session_key_b, n_e1, e1, nil)?
+	m2_b = AEAD_DEC(session_key_b, n_e2, e2, nil)?
 ]
 
 phase[1]

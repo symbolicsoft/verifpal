@@ -4,6 +4,10 @@
 // Expected: a0 — the phone accepts the wrapped private key only through a
 // checked AEAD_DEC under a key derived from the private password, which the
 // attacker never holds, so the only blob that passes is the one Alice stored.
+// The nonce on `n_e_alice_private_key` is declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 
 attacker[active]
 
@@ -13,18 +17,20 @@ principal Alice[
     knows private alice_password
     alice_master_decryption, alice_master_auth = HKDF(alice_username, HASH(alice_password), const_e)
     knows private alice_private_key
-    e_alice_private_key = AEAD_ENC(alice_master_decryption, alice_private_key, alice_username)
+    knows private n_e_alice_private_key
+    e_alice_private_key = AEAD_ENC(alice_master_decryption, n_e_alice_private_key, alice_private_key, alice_username)
     alice_public_key = PUBKEY(alice_private_key)
 ]
 
-Alice -> Server: [e_alice_private_key], [alice_master_auth], [alice_public_key]
+Alice -> Server: [n_e_alice_private_key], [e_alice_private_key], [alice_master_auth], [alice_public_key]
 
 principal Alice[
     generates e_a
-    e_e_a = AEAD_ENC(alice_private_key, e_a, alice_username)
+    generates n_e_e_a
+    e_e_a = AEAD_ENC(alice_private_key, n_e_e_a, e_a, alice_username)
 ]
 
-Alice -> Server: e_e_a
+Alice -> Server: n_e_e_a, e_e_a
 
 principal AlicePhone[
     knows public const_e
@@ -39,10 +45,10 @@ principal Server[
     _ = ASSERT(alicephone_master_auth, alice_master_auth)?
 ]
 
-Server -> AlicePhone: e_alice_private_key
+Server -> AlicePhone: n_e_alice_private_key, e_alice_private_key
 
 principal AlicePhone[
-	alicephone_private_key = AEAD_DEC(alicephone_master_decryption, e_alice_private_key, alice_username)?
+	alicephone_private_key = AEAD_DEC(alicephone_master_decryption, n_e_alice_private_key, e_alice_private_key, alice_username)?
 ]
 
 queries[

@@ -1141,7 +1141,7 @@ section.model[hidden] {
 
 </details>
 <button type="button" class="traceStep" data-step="3" aria-pressed="false"><span class="n">3</span><span class="line"><span class="kind mutations">mutations</span>Attacker intercepts the message from Alice to Bob and delivers:<span class="traceVal"><span class="tvName">ga</span> <span class="tvArrow">&#8656;</span> <span class="tvNew">PUBKEY(nil)</span><span class="tvWas">honest value: PUBKEY(a)</span></span></span></button>
-<button type="button" class="traceStep" data-step="4" aria-pressed="false"><span class="n">4</span><span class="line"><span class="kind gate">gate</span>Bob&#39;s AEAD_DEC(k, e, ad)? passes.</span></button>
+<button type="button" class="traceStep" data-step="4" aria-pressed="false"><span class="n">4</span><span class="line"><span class="kind gate">gate</span>Bob&#39;s AEAD_DEC(k, n, e, ad)? passes.</span></button>
 <button type="button" class="traceStep" data-step="5" aria-pressed="false"><span class="n">5</span><span class="line"><span class="kind bypass">bypass</span>Alice&#39;s SIGNVERIF check is defeated, accepting PUBKEY(nil).</span></button>
 <button type="button" class="traceStep" data-step="6" aria-pressed="false"><span class="n">6</span><span class="line"><span class="kind replay">replay</span>Attacker replays e1 from another session.</span></button>
 

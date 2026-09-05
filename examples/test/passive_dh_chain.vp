@@ -26,23 +26,25 @@ Carol -> Bob: gc
 principal Alice[
 	generates secret
 	key_ab = HASH(DH_KEX(gb, a))
-	e_ab = AEAD_ENC(key_ab, secret, nil)
+	generates n_e_ab
+	e_ab = AEAD_ENC(key_ab, n_e_ab, secret, nil)
 ]
 
-Alice -> Bob: e_ab
+Alice -> Bob: n_e_ab, e_ab
 
 principal Bob[
 	key_ba = HASH(DH_KEX(ga, b))
-	secret_b = AEAD_DEC(key_ba, e_ab, nil)?
+	secret_b = AEAD_DEC(key_ba, n_e_ab, e_ab, nil)?
 	key_bc = HASH(DH_KEX(gc, b))
-	e_bc = AEAD_ENC(key_bc, secret_b, nil)
+	generates n_e_bc
+	e_bc = AEAD_ENC(key_bc, n_e_bc, secret_b, nil)
 ]
 
-Bob -> Carol: e_bc
+Bob -> Carol: n_e_bc, e_bc
 
 principal Carol[
 	key_cb = HASH(DH_KEX(gb, c))
-	secret_c = AEAD_DEC(key_cb, e_bc, nil)?
+	secret_c = AEAD_DEC(key_cb, n_e_bc, e_bc, nil)?
 ]
 
 queries[

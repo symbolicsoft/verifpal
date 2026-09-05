@@ -712,7 +712,7 @@ mod tests {
 	fn gate() -> ReportStep {
 		ReportStep {
 			kind: "gate".to_string(),
-			text: "Bob's AEAD_DEC(k, e, ad)? passes.".to_string(),
+			text: "Bob's AEAD_DEC(k, n, e, ad)? passes.".to_string(),
 			sender: None,
 			recipient: None,
 			principal: Some("Bob".to_string()),
@@ -1483,7 +1483,7 @@ mod tests {
 				principal: None,
 				values: vec![TraceValue {
 					name: "e1".to_string(),
-					installed: Some("AEAD_ENC(k, m, ad)".to_string()),
+					installed: Some("AEAD_ENC(k, n, m, ad)".to_string()),
 					was: None,
 					guarded: false,
 				}],

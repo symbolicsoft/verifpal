@@ -95,16 +95,17 @@ principal Beacon[
 	sig2 = UNBLIND(blind_k2, doc2, blind_sig2)
 	_ = SIGNVERIF(anchor_pk, doc1, sig1)?
 	_ = SIGNVERIF(anchor_pk, doc2, sig2)?
-	vault = AEAD_ENC(escrow_b, CONCAT(sig1, sig2), tag1)
+	generates n_vault
+	vault = AEAD_ENC(escrow_b, n_vault, CONCAT(sig1, sig2), tag1)
 ]
 
-Beacon → Cipher: vault
+Beacon → Cipher: n_vault, vault
 
 principal Cipher[
 	// Cipher holds two of three shares and can rebuild the escrow key.
 	_ = RINGSIGNVERIF(ring_ga, ring_gb, ring_gc, tag2, ring_sig2)?
 	escrow_c = SHAMIR_JOIN(share_b, share_c)
-	opened = AEAD_DEC(escrow_c, vault, tag1)?
+	opened = AEAD_DEC(escrow_c, n_vault, vault, tag1)?
 	got1, got2 = SPLIT(opened)
 	_ = SIGNVERIF(anchor_pk, doc1, got1)?
 	receipt = MAC(escrow_c, opened)

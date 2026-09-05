@@ -39,19 +39,21 @@ principal Alice[
 	knows private m_bob, m_carol
 	k_bob = DH_KEX(gb, a)
 	k_carol = DH_KEX(gc, a)
-	e_bob = AEAD_ENC(k_bob, m_bob, nil)
-	e_carol = AEAD_ENC(k_carol, m_carol, nil)
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bob, n_e_bob, m_bob, nil)
+	generates n_e_carol
+	e_carol = AEAD_ENC(k_carol, n_e_carol, m_carol, nil)
 ]
 
-Alice -> Bob: e_bob
-Alice -> Carol: e_carol
+Alice -> Bob: n_e_bob, e_bob
+Alice -> Carol: n_e_carol, e_carol
 
 principal Bob[
-	_ = AEAD_DEC(DH_KEX(ga, b), e_bob, nil)?
+	_ = AEAD_DEC(DH_KEX(ga, b), n_e_bob, e_bob, nil)?
 ]
 
 principal Carol[
-	_ = AEAD_DEC(DH_KEX(ga, c), e_carol, nil)?
+	_ = AEAD_DEC(DH_KEX(ga, c), n_e_carol, e_carol, nil)?
 	leaks c
 ]
 

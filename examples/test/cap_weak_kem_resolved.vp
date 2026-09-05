@@ -29,14 +29,15 @@ principal Alice[
 	knows private m
 	generates r
 	ss, ct = KEM_ENCAP[weak](ek, r)
-	e = AEAD_ENC(ss, m, nil)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, m, nil)
 ]
 
-Alice -> Bob: ct, e
+Alice -> Bob: ct, n_e, e
 
 principal Bob[
 	ssb = KEM_DECAP(dk, ct)
-	d = AEAD_DEC(ssb, e, nil)?
+	d = AEAD_DEC(ssb, n_e, e, nil)?
 ]
 
 queries[

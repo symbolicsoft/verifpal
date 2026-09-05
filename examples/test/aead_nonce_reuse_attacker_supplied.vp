@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at --sessions 1, c1 at 2 — the nonce comes from the peer and
+// travels unguarded, so the attacker chooses it. One run of Alice makes one
+// ciphertext whatever nonce she is handed. Two runs handed the same nonce
+// seal two fresh messages under one (k, n), and the pair gives up both. This
+// is the active route: the pairing exists only in the state the attacker
+// arranges, and the solver has to install the same nonce into both runs.
+
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	knows public ad
+	generates m
+	e = AEAD_ENC(k, nb, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, nb, e, ad)?
+]
+
+queries[
+	confidentiality? m
+]

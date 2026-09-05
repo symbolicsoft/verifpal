@@ -24,16 +24,17 @@ principal Alice[
 	ss, ct = KEM_ENCAP(ekb, r)
 	dh = DH_KEX(gb, a)
 	k = HKDF(dh, ss, nil)
-	e = AEAD_ENC(k, m, nil)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
 ]
 
-Alice -> Bob: [ga], ct, e
+Alice -> Bob: [ga], ct, n_e, e
 
 principal Bob[
 	ssb = KEM_DECAP(dkb, ct)
 	dhb = DH_KEX(ga, b)
 	kb = HKDF(dhb, ssb, nil)
-	d = AEAD_DEC(kb, e, nil)?
+	d = AEAD_DEC(kb, n_e, e, nil)?
 ]
 
 phase[1]

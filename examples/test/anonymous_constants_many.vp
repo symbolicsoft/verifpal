@@ -23,15 +23,16 @@ principal Alice[
 	_, _, _ = HKDF(salt, root, nil)
 	key_one, _, _ = HKDF(salt, root, salt)
 	_ = MAC(root, salt)
-	sealed = AEAD_ENC(key_one, share_two, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(key_one, n_sealed, share_two, nil)
 ]
 
-Alice -> Bob: sealed, [salt]
+Alice -> Bob: n_sealed, sealed, [salt]
 
 principal Bob[
 	knows private root
 	key_b, _, _ = HKDF(salt, root, salt)
-	got = AEAD_DEC(key_b, sealed, nil)?
+	got = AEAD_DEC(key_b, n_sealed, sealed, nil)?
 	_ = HASH(got)
 ]
 

@@ -66,35 +66,38 @@ principal Signer[
 	stmt = CONCAT(c_stmt, gs, nonce_s)
 	sig = SIGN(ssk, stmt)
 	k = HKDF(nil, DH_KEX(gx_s, y), nil)
-	env = AEAD_ENC(k, CONCAT(gs, sig), c_ad)
+	generates n_env
+	env = AEAD_ENC(k, n_env, CONCAT(gs, sig), c_ad)
 ]
 
-Signer -> Mallory: [gy], [env]
+Signer -> Mallory: [gy], [n_env], [env]
 
 principal Mallory[
 	km = HKDF(nil, DH_KEX(gy, m), nil)
-	dm = AEAD_DEC(km, env, c_ad)?
+	dm = AEAD_DEC(km, n_env, env, c_ad)?
 	iss_m, sig_m = SPLIT(dm)?
 	kv_m = HKDF(nil, DH_KEX(gx_m, m), nil)
-	env2 = AEAD_ENC(kv_m, CONCAT(iss_m, sig_m), c_ad)
+	generates n_env2
+	env2 = AEAD_ENC(kv_m, n_env2, CONCAT(iss_m, sig_m), c_ad)
 ]
 
-Mallory -> Verifier: [gm], [env2]
+Mallory -> Verifier: [gm], [n_env2], [env2]
 
 principal Verifier[
 	kv = HKDF(nil, DH_KEX(gm, x), nil)
-	d = AEAD_DEC(kv, env2, c_ad)?
+	d = AEAD_DEC(kv, n_env2, env2, c_ad)?
 	iss_v, sig_v = SPLIT(d)?
 	_ = ASSERT(iss_v, gs)?
 	stmt_v = CONCAT(c_stmt, iss_v, nonce)
 	_ = SIGNVERIF(iss_v, stmt_v, sig_v)?
-	out = AEAD_ENC(kv, secret, c_ad)
+	generates n_out
+	out = AEAD_ENC(kv, n_out, secret, c_ad)
 ]
 
-Verifier -> Mallory: [out]
+Verifier -> Mallory: [n_out], [out]
 
 principal Mallory[
-	got = AEAD_DEC(kv_m, out, c_ad)?
+	got = AEAD_DEC(kv_m, n_out, out, c_ad)?
 ]
 
 queries[

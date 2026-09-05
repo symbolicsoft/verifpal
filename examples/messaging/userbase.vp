@@ -59,7 +59,8 @@ principal UserA[
 	passwordBasedEncryptionKeyA = HKDF(passwordHkdfKeyA, passwordBasedEncryptionKeySaltA, nil)
 	// Key wrapping: the seed, sealed under a password-derived key, safe
 	// to park on an untrusted server.
-	passwordEncryptedSeedA = AEAD_ENC(passwordBasedEncryptionKeyA, seedA, nil)
+	generates n_passwordEncryptedSeedA
+	passwordEncryptedSeedA = AEAD_ENC(passwordBasedEncryptionKeyA, n_passwordEncryptedSeedA, seedA, nil)
 ]
 
 principal UserA[
@@ -79,7 +80,7 @@ principal UserA[
 // Signup: everything the server ever learns. Note what is in this list —
 // the token, the salts (public by nature), and wrapped ciphertext — and
 // what is not: no password, no seed, no encryption key.
-UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, passwordEncryptedSeedA
+UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, n_passwordEncryptedSeedA, passwordEncryptedSeedA
 
 principal UserB[
 	knows private passB
@@ -91,7 +92,8 @@ principal UserB[
 	passwordHkdfKeyB = HKDF(passwordHashB, nil, nil)
 	passwordTokenB = HKDF(passwordHkdfKeyB, passwordTokenSaltB, nil)
 	passwordBasedEncryptionKeyB = HKDF(passwordHkdfKeyB, passwordBasedEncryptionKeySaltB, nil)
-	passwordEncryptedSeedB = AEAD_ENC(passwordBasedEncryptionKeyB, seedB, nil)
+	generates n_passwordEncryptedSeedB
+	passwordEncryptedSeedB = AEAD_ENC(passwordBasedEncryptionKeyB, n_passwordEncryptedSeedB, seedB, nil)
 ]
 
 principal UserB[
@@ -105,43 +107,47 @@ principal UserB[
 	publicKeyB = PUBKEY(dhPrivateKeyB)
 ]
 
-UserB -> Server: passwordTokenB, publicKeyB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, dhKeySaltB, hmacKeySaltB, passwordBasedEncryptionKeySaltB, passwordEncryptedSeedB
+UserB -> Server: passwordTokenB, publicKeyB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, dhKeySaltB, hmacKeySaltB, passwordBasedEncryptionKeySaltB, n_passwordEncryptedSeedB, passwordEncryptedSeedB
 
 // Storing data: a per-database key, itself wrapped under the hierarchy
 // (another level of key wrapping), then the item under the database key.
 principal UserA[
 	generates dbKeyA
-	encryptedDbKeyA = AEAD_ENC(encryptionKeyA, dbKeyA, nil)
+	generates n_encryptedDbKeyA
+	encryptedDbKeyA = AEAD_ENC(encryptionKeyA, n_encryptedDbKeyA, dbKeyA, nil)
 ]
 
-UserA -> Server: encryptedDbKeyA
+UserA -> Server: n_encryptedDbKeyA, encryptedDbKeyA
 
 principal UserA[
 	knows private itemA
-	encryptedItemA = AEAD_ENC(dbKeyA, itemA, nil)
+	generates n_encryptedItemA
+	encryptedItemA = AEAD_ENC(dbKeyA, n_encryptedItemA, itemA, nil)
 ]
 
-UserA -> Server: encryptedItemA
+UserA -> Server: n_encryptedItemA, encryptedItemA
 
 principal UserB[
 	generates dbKeyB
-	encryptedDbKeyB = AEAD_ENC(encryptionKeyB, dbKeyB, nil)
+	generates n_encryptedDbKeyB
+	encryptedDbKeyB = AEAD_ENC(encryptionKeyB, n_encryptedDbKeyB, dbKeyB, nil)
 ]
 
-UserB -> Server: encryptedDbKeyB
+UserB -> Server: n_encryptedDbKeyB, encryptedDbKeyB
 
 principal UserB[
 	knows private itemB
-	encryptedItemB = AEAD_ENC(dbKeyB, itemB, nil)
+	generates n_encryptedItemB
+	encryptedItemB = AEAD_ENC(dbKeyB, n_encryptedItemB, itemB, nil)
 ]
 
-UserB -> Server: encryptedItemB
+UserB -> Server: n_encryptedItemB, encryptedItemB
 
 // Adding a device: the server relays the stored blobs and public salts.
 // Nothing in these two messages is sensitive on its own.
-Server -> UserA_OtherDevice: encryptedItemA, encryptedDbKeyA, passwordEncryptedSeedA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, passwordBasedEncryptionKeySaltA
+Server -> UserA_OtherDevice: n_encryptedItemA, encryptedItemA, n_encryptedDbKeyA, encryptedDbKeyA, n_passwordEncryptedSeedA, passwordEncryptedSeedA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, passwordBasedEncryptionKeySaltA
 
-Server -> UserB_OtherDevice: encryptedItemB, encryptedDbKeyB, passwordEncryptedSeedB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, passwordBasedEncryptionKeySaltB
+Server -> UserB_OtherDevice: n_encryptedItemB, encryptedItemB, n_encryptedDbKeyB, encryptedDbKeyB, n_passwordEncryptedSeedB, passwordEncryptedSeedB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, passwordBasedEncryptionKeySaltB
 
 // The new device knows exactly one secret — the password — and re-derives
 // the entire hierarchy: unwrap the seed, rebuild the master key, unwrap
@@ -154,11 +160,11 @@ principal UserA_OtherDevice[
 	passwordHkdfKeyA_ = HKDF(passwordHashA_, nil, nil)
 	passwordTokenA_ = HKDF(passwordHkdfKeyA_, passwordTokenSaltA, nil)
 	passwordBasedEncryptionKeyA_ = HKDF(passwordHkdfKeyA_, passwordBasedEncryptionKeySaltA, nil)
-	seedA_ = AEAD_DEC(passwordBasedEncryptionKeyA_, passwordEncryptedSeedA, nil)?
+	seedA_ = AEAD_DEC(passwordBasedEncryptionKeyA_, n_passwordEncryptedSeedA, passwordEncryptedSeedA, nil)?
 	masterKeyA_ = HKDF(seedA_, nil, nil)
 	encryptionKeyA_ = HKDF(masterKeyA_, encryptionKeySaltA, nil)
-	dbKeyA_ = AEAD_DEC(encryptionKeyA_, encryptedDbKeyA, nil)?
-	itemA_ = AEAD_DEC(dbKeyA_, encryptedItemA, nil)?
+	dbKeyA_ = AEAD_DEC(encryptionKeyA_, n_encryptedDbKeyA, encryptedDbKeyA, nil)?
+	itemA_ = AEAD_DEC(dbKeyA_, n_encryptedItemA, encryptedItemA, nil)?
 ]
 
 principal UserB_OtherDevice[
@@ -167,11 +173,11 @@ principal UserB_OtherDevice[
 	passwordHkdfKeyB_ = HKDF(passwordHashB_, nil, nil)
 	passwordTokenB_ = HKDF(passwordHkdfKeyB_, passwordTokenSaltB, nil)
 	passwordBasedEncryptionKeyB_ = HKDF(passwordHkdfKeyB_, passwordBasedEncryptionKeySaltB, nil)
-	seedB_ = AEAD_DEC(passwordBasedEncryptionKeyB_, passwordEncryptedSeedB, nil)?
+	seedB_ = AEAD_DEC(passwordBasedEncryptionKeyB_, n_passwordEncryptedSeedB, passwordEncryptedSeedB, nil)?
 	masterKeyB_ = HKDF(seedB_, nil, nil)
 	encryptionKeyB_ = HKDF(masterKeyB_, encryptionKeySaltB, nil)
-	dbKeyB_ = AEAD_DEC(encryptionKeyB_, encryptedDbKeyB, nil)?
-	itemB_ = AEAD_DEC(dbKeyB_, encryptedItemB, nil)?
+	dbKeyB_ = AEAD_DEC(encryptionKeyB_, n_encryptedDbKeyB, encryptedDbKeyB, nil)?
+	itemB_ = AEAD_DEC(dbKeyB_, n_encryptedItemB, encryptedItemB, nil)?
 ]
 
 queries[

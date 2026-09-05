@@ -30,11 +30,13 @@ principal Alice[
 	generates a, m1, m2
 	ga = PUBKEY(a)
 	k = DH_KEX(gb, a)
-	c1 = AEAD_ENC(k, m1, nil)
-	c2 = AEAD_ENC(k, m2, nil)
+	generates n_c1
+	c1 = AEAD_ENC(k, n_c1, m1, nil)
+	generates n_c2
+	c2 = AEAD_ENC(k, n_c2, m2, nil)
 ]
 
-Alice -> Bob: [ga], c1, c2
+Alice -> Bob: [ga], n_c1, c1, n_c2, c2
 
 principal Alice[
 	_ = SIGNVERIF(pk, gb, sig)?
@@ -45,8 +47,8 @@ Alice -> Bob: ack
 
 principal Bob[
 	kb = DH_KEX(ga, b)
-	d1 = AEAD_DEC(kb, c1, nil)?
-	d2 = AEAD_DEC(kb, c2, nil)?
+	d1 = AEAD_DEC(kb, n_c1, c1, nil)?
+	d2 = AEAD_DEC(kb, n_c2, c2, nil)?
 	_ = HASH(ack)
 ]
 

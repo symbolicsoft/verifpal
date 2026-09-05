@@ -7,14 +7,15 @@ principal Alice[
 	knows private k
 	knows private m
 	generates n
-	c = AEAD_ENC(k, m, n)
+	generates n_c
+	c = AEAD_ENC(k, n_c, m, n)
 ]
 
-Alice -> Bob: c, n
+Alice -> Bob: n_c, c, n
 
 principal Bob[
 	knows private k
-	m_b = AEAD_DEC(k, c, n)?
+	m_b = AEAD_DEC(k, n_c, c, n)?
 ]
 
 queries[

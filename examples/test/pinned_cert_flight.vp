@@ -40,15 +40,16 @@ principal Bob[
 	fk = HASH(k, labelFin)
 	tcv = HASH(t, s)
 	fin = MAC(fk, tcv)
-	msg = AEAD_ENC(k, CONCAT(pk, s, fin), nil)
+	generates n_msg
+	msg = AEAD_ENC(k, n_msg, CONCAT(pk, s, fin), nil)
 ]
 
-Bob -> Alice: gb, msg
+Bob -> Alice: gb, n_msg, msg
 
 principal Alice[
 	knows public labelFin
 	k_a = DH_KEX(gb, a)
-	d = AEAD_DEC(k_a, msg, nil)?
+	d = AEAD_DEC(k_a, n_msg, msg, nil)?
 	pk_a, s_a, fin_a = SPLIT(d)
 	t_a = HASH(ga, gb, pk_a)
 	ok = SIGNVERIF(pk, t_a, s_a)?
@@ -57,10 +58,11 @@ principal Alice[
 	expFin = MAC(fk_a, tcv_a)
 	finOk = ASSERT(fin_a, expFin)?
 	generates aliceSecret
-	ct = AEAD_ENC(k_a, aliceSecret, nil)
+	generates n_ct
+	ct = AEAD_ENC(k_a, n_ct, aliceSecret, nil)
 ]
 
-Alice -> Bob: ct
+Alice -> Bob: n_ct, ct
 
 queries[
 	confidentiality? aliceSecret

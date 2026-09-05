@@ -24,23 +24,25 @@ principal Alice[
 	knows public c_ad
 	generates a
 	ga = PUBKEY(a)
-	req = AEAD_ENC(k, ga, c_ad)
+	generates n_req
+	req = AEAD_ENC(k, n_req, ga, c_ad)
 	leaks k
 ]
 
-Alice -> Bob: req
+Alice -> Bob: n_req, req
 
 principal Bob[
 	knows private k
 	knows public c_ad
 	generates b
 	gb = PUBKEY(b)
-	gx_b = AEAD_DEC(k, req, c_ad)?
+	gx_b = AEAD_DEC(k, n_req, req, c_ad)?
 	s = DH_KEX(gx_b, b)
-	tok = AEAD_ENC(s, c_ad, c_ad)
+	generates n_tok
+	tok = AEAD_ENC(s, n_tok, c_ad, c_ad)
 ]
 
-Bob -> Alice: gb, tok
+Bob -> Alice: gb, n_tok, tok
 
 principal Alice[
 	_ = HASH(gb)
