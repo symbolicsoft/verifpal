@@ -374,6 +374,7 @@ impl<'a> Minimizer<'a> {
 				let honest = self.km.slots.get(*i).map(|slot| {
 					crate::resolution::resolve_trace_term(&slot.initial_value, self.km)
 				});
+				let mut accepted: Vec<(Installs, (usize, usize, usize))> = Vec::new();
 				for shape in shapes {
 					if !self.validator_admits(session, bound, *i, &shape) {
 						continue;
@@ -394,12 +395,18 @@ impl<'a> Minimizer<'a> {
 					if seen.iter().any(|s| same_install_set(s, &trial)) {
 						continue;
 					}
-					if climb_key(self.scenario_cost(group, &trial)) <= climb_key(here) {
-						seen.push(trial.clone());
-						installs = trial;
-						advanced = true;
-						break;
+					let cost = self.scenario_cost(group, &trial);
+					if cost <= here {
+						accepted.push((trial, cost));
 					}
+				}
+				if let Some((trial, _)) = accepted
+					.into_iter()
+					.min_by_key(|(_, (bypasses, halts, stuck))| (*halts, *bypasses, *stuck))
+				{
+					seen.push(trial.clone());
+					installs = trial;
+					advanced = true;
 				}
 			}
 			if !advanced {
@@ -908,10 +915,6 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
-}
-
-fn climb_key((bypasses, halts, stuck): (usize, usize, usize)) -> (usize, usize, usize) {
-	(halts, bypasses.saturating_add(stuck), bypasses)
 }
 
 fn same_install_set(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
