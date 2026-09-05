@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u1u1 — a value assembled from observed chunks by a tuple
+// constructor is observed, and links exactly as its chunks do.
+//
+// `t1` and `t2` never travel under their own names, but every chunk does:
+// `h1` and `n1` reach Bob, `h2` and `n2` reach Carol, and the first query
+// shows the attacker constructing `t1` from those two observations. `h1` and
+// `h2` are linked through the leaked `a`, since the attacker holds `gb`, `gc`
+// and `a` and recomputes both hashes. `t1` is `CONCAT(h1, n1)`: it carries
+// nothing the two observations did not already carry, so the third query is
+// the second query with a nonce beside each value and must fail the same way.
+// The gate once asked only whether the queried value sat *inside* a disclosed
+// slot, and a tuple *of* disclosed slots never did, so this was `u0`.
+// unlink_never_sent is the counterweight: a hash of a leaked seed is a fresh
+// value the attacker can recompute but has never observed, and stays `u0`.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: gb
+Carol -> Alice: gc
+
+principal Alice[
+	knows private a
+	leaks a
+	generates n1
+	generates n2
+	k1 = DH_KEX(gb, a)
+	k2 = DH_KEX(gc, a)
+	h1 = HASH(k1)
+	h2 = HASH(k2)
+	t1 = CONCAT(h1, n1)
+	t2 = CONCAT(h2, n2)
+]
+
+Alice -> Bob: h1, n1
+Alice -> Carol: h2, n2
+
+queries[
+	confidentiality? t1
+	unlinkability? h1, h2
+	unlinkability? t1, t2
+]

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{PrimitiveSpec, primitive_check_undoing};
+use crate::primitive::{PrimitiveSpec, primitive_check_undoing, primitive_core_reveals_args};
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
 
@@ -351,19 +351,52 @@ fn carried_observably(
 		return false;
 	};
 	let (target, _) = ps.resolve_constant(c, true);
-	if attacker.knows(&target).is_none() {
+	observed_value(&target, i, km, ps, attacker)
+}
+
+fn observed_value(
+	target: &Value,
+	own: usize,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
+	if attacker.knows(target).is_none() {
 		return false;
 	}
+	if carried_by_disclosed_slot(target, own, km, ps, attacker) {
+		return true;
+	}
+	match target {
+		Value::Constant(k) => ps
+			.index_of(k)
+			.is_some_and(|j| ps.meta[j].constant.qualifier == Some(Qualifier::Public)),
+		Value::Primitive(p) => {
+			primitive_core_reveals_args(p.id)
+				&& p.arguments
+					.iter()
+					.all(|arg| observed_value(arg, own, km, ps, attacker))
+		}
+	}
+}
+
+fn carried_by_disclosed_slot(
+	target: &Value,
+	own: usize,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
 	let target_hash = target.hash_value();
 	for (j, (meta, values)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
-		if j == i
+		if j == own
 			|| !disclosed(j, km, ps, attacker.current_phase)
 			|| attacker.knows(&values.value).is_none()
 		{
 			continue;
 		}
 		let (carrier, _) = ps.resolve_constant(&meta.constant, true);
-		if contains_equivalent_subterm(&carrier, &target, target_hash) {
+		if contains_equivalent_subterm(&carrier, target, target_hash) {
 			return true;
 		}
 	}
@@ -505,6 +538,15 @@ mod tests {
 			unreachable!()
 		};
 		constant.qualifier = Some(Qualifier::Private);
+		Value::Constant(constant)
+	}
+
+	fn assigned_constant(name: &str) -> Value {
+		let Value::Constant(mut constant) = make_constant(name) else {
+			unreachable!()
+		};
+		constant.qualifier = None;
+		constant.declaration = Some(Declaration::Assignment);
 		Value::Constant(constant)
 	}
 
@@ -751,6 +793,81 @@ mod tests {
 		let km = trace_from(&ps);
 
 		assert!(!is_observable(target_constant, &km, &ps, &attacker));
+	}
+
+	#[test]
+	fn a_tuple_of_observed_values_is_observable_and_a_hash_of_them_is_not() {
+		use crate::primitive::PRIM_CONCAT;
+
+		let h = private_constant("ul_tuple_h");
+		let n = private_constant("ul_tuple_n");
+		let tuple_name = assigned_constant("ul_tuple_t");
+		let hashed_name = assigned_constant("ul_tuple_hashed");
+		let partial_name = assigned_constant("ul_tuple_partial");
+		let hidden = private_constant("ul_tuple_hidden");
+		let (Value::Constant(h_c), Value::Constant(n_c), Value::Constant(hidden_c)) =
+			(&h, &n, &hidden)
+		else {
+			unreachable!()
+		};
+		let (Value::Constant(tuple_c), Value::Constant(hashed_c), Value::Constant(partial_c)) =
+			(&tuple_name, &hashed_name, &partial_name)
+		else {
+			unreachable!()
+		};
+		let tuple = make_primitive(PRIM_CONCAT, vec![h.clone(), n.clone()], 0);
+		let hashed = make_primitive(PRIM_HASH, vec![h.clone(), n.clone()], 0);
+		let partial = make_primitive(PRIM_CONCAT, vec![h.clone(), hidden.clone()], 0);
+		let ps = make_principal_state(
+			"Tester",
+			1,
+			vec![
+				make_slot_meta(h_c, false),
+				make_slot_meta(n_c, false),
+				make_slot_meta(hidden_c, true),
+				make_slot_meta(tuple_c, true),
+				make_slot_meta(hashed_c, true),
+				make_slot_meta(partial_c, true),
+			],
+			vec![
+				make_slot_values(&h, 1),
+				make_slot_values(&n, 1),
+				make_slot_values(&hidden, 1),
+				make_slot_values(&tuple, 1),
+				make_slot_values(&hashed, 1),
+				make_slot_values(&partial, 1),
+			],
+		);
+		let attacker = make_attacker_state(vec![
+			h.clone(),
+			n.clone(),
+			hidden.clone(),
+			tuple.clone(),
+			hashed.clone(),
+			partial.clone(),
+		]);
+		let km = trace_from(&ps);
+
+		assert!(is_observable(h_c, &km, &ps, &attacker));
+		assert!(is_observable(n_c, &km, &ps, &attacker));
+		assert!(
+			is_observable(tuple_c, &km, &ps, &attacker),
+			"a tuple of two observed values carries nothing they did not"
+		);
+		assert!(
+			!is_observable(hashed_c, &km, &ps, &attacker),
+			"a hash of two observed values is a value nobody observed"
+		);
+		assert!(
+			!is_observable(partial_c, &km, &ps, &attacker),
+			"a tuple with an unobserved argument is not observed"
+		);
+
+		let attacker = make_attacker_state(vec![h.clone(), n.clone(), hidden, hashed, partial]);
+		assert!(
+			!is_observable(tuple_c, &km, &ps, &attacker),
+			"the knowledge half still gates the tuple itself"
+		);
 	}
 
 	#[test]

@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 — the recipient-side shape of unlink_reassembled_chunks. Alice
+// sends the chunks and each peer builds its own session identifier from them.
+// `sid1` is computed by Bob and `sid2` by Carol, neither travels, and both are
+// concatenations of values that did. The attacker holds `a`, `gb` and `gc`,
+// recomputes `h1` and `h2`, and so can tell that the two identifiers were
+// built for the same `a`. A session identifier assembled from the transcript
+// is as observable as the transcript.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: gb
+Carol -> Alice: gc
+
+principal Alice[
+	knows private a
+	leaks a
+	generates n1
+	generates n2
+	k1 = DH_KEX(gb, a)
+	k2 = DH_KEX(gc, a)
+	h1 = HASH(k1)
+	h2 = HASH(k2)
+]
+
+Alice -> Bob: h1, n1
+Alice -> Carol: h2, n2
+
+principal Bob[
+	sid1 = CONCAT(h1, n1)
+	_ = HASH(sid1)
+]
+
+principal Carol[
+	sid2 = CONCAT(h2, n2)
+	_ = HASH(sid2)
+]
+
+queries[
+	unlinkability? sid1, sid2
+]

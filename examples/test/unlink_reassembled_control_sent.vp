@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u1u1 — the control for unlink_reassembled_chunks: the assembled
+// values `t1` and `t2` travel beside their chunks. Sending a value the
+// attacker already constructs adds nothing to its knowledge, so the verdict
+// on `t1, t2` must be the same with and without the extra wire value. This
+// was always `u1`; the chunks-only model was `u0` until observability was
+// closed under tuple assembly, and this pair is what keeps the two in step.
+
+attacker[passive]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: gb
+Carol -> Alice: gc
+
+principal Alice[
+	knows private a
+	leaks a
+	generates n1
+	generates n2
+	k1 = DH_KEX(gb, a)
+	k2 = DH_KEX(gc, a)
+	h1 = HASH(k1)
+	h2 = HASH(k2)
+	t1 = CONCAT(h1, n1)
+	t2 = CONCAT(h2, n2)
+]
+
+Alice -> Bob: h1, n1, t1
+Alice -> Carol: h2, n2, t2
+
+queries[
+	confidentiality? t1
+	unlinkability? h1, h2
+	unlinkability? t1, t2
+]

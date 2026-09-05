@@ -2044,6 +2044,22 @@ fn test_unlink_signature_links() {
 fn test_unlink_carried_in_ciphertext() {
 	run_model("unlink_carried_in_ciphertext.vp", "u1u0");
 }
+#[test]
+fn test_unlink_reassembled_chunks() {
+	run_model("unlink_reassembled_chunks.vp", "c1u1u1");
+}
+#[test]
+fn test_unlink_reassembled_chunks_one_session() {
+	run_model_sessions("unlink_reassembled_chunks.vp", 1, "c1u1u1");
+}
+#[test]
+fn test_unlink_reassembled_by_recipient() {
+	run_model("unlink_reassembled_by_recipient.vp", "u1");
+}
+#[test]
+fn test_unlink_reassembled_control_sent() {
+	run_model("unlink_reassembled_control_sent.vp", "c1u1u1");
+}
 
 #[test]
 fn test_unlink_signature_recognized() {
