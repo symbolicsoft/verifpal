@@ -15,6 +15,71 @@ fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 
 thread_local! {
 	static ANALYSIS_COUNT: Cell<u32> = const { Cell::new(0) };
+	static CURRENT_GENERATION: Cell<u64> = const { Cell::new(0) };
+}
+
+static ANALYSIS_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+static LIVE_GENERATIONS: RwLock<Vec<u64>> = RwLock::new(Vec::new());
+
+#[cfg(feature = "cli")]
+pub(crate) fn live_generations() -> usize {
+	read_lock(&LIVE_GENERATIONS).len()
+}
+
+pub(crate) fn next_generation() -> u64 {
+	let generation = ANALYSIS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+	write_lock(&LIVE_GENERATIONS).push(generation);
+	generation
+}
+
+pub(crate) fn enter_generation(generation: u64) {
+	CURRENT_GENERATION.with(|g| g.set(generation));
+}
+
+pub(crate) fn current_generation() -> u64 {
+	CURRENT_GENERATION.with(|g| g.get())
+}
+
+pub(crate) struct GenerationGuard(u64);
+
+impl GenerationGuard {
+	pub(crate) fn enter() -> GenerationGuard {
+		let generation = next_generation();
+		enter_generation(generation);
+		GenerationGuard(generation)
+	}
+}
+
+impl Drop for GenerationGuard {
+	fn drop(&mut self) {
+		write_lock(&LIVE_GENERATIONS).retain(|&live| live != self.0);
+	}
+}
+
+pub(crate) struct Generational<T> {
+	generation: u64,
+	inner: T,
+}
+
+impl<T: Default> Default for Generational<T> {
+	fn default() -> Self {
+		Generational {
+			generation: 0,
+			inner: T::default(),
+		}
+	}
+}
+
+impl<T: Default> Generational<T> {
+	pub(crate) fn fresh(&mut self) -> &mut T {
+		let now = current_generation();
+		if self.generation != now {
+			self.generation = now;
+			self.inner = T::default();
+		}
+		&mut self.inner
+	}
 }
 
 pub(crate) fn analysis_count_get() -> usize {

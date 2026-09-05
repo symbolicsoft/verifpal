@@ -8,6 +8,8 @@ pub(crate) mod symbolic;
 pub(crate) mod validate;
 pub(crate) mod vars;
 
+use std::sync::Arc;
+
 use crate::context::VerifyContext;
 use crate::hashing::collect_subterm_hashes;
 use crate::info::info_message;
@@ -268,18 +270,24 @@ fn propose(
 	let mut proposals: Vec<Substitution> = Vec::new();
 
 	let results = ctx.results_get();
-	for result in &results {
-		if result.resolved || pass != Pass::Targeted {
-			continue;
-		}
-		for query in std::iter::once(&result.query).chain(result.variants.iter()) {
-			#[cfg(test)]
-			ctx.goals_noted(result.query_index, 1);
-			proposals.extend(goals_for_query(query, km, ps, sym, deducer, &empty));
-		}
-	}
-
 	if pass == Pass::Targeted {
+		let mut pending: Vec<&Query> = Vec::new();
+		for result in &results {
+			if result.resolved {
+				continue;
+			}
+			for query in std::iter::once(&result.query).chain(result.variants.iter()) {
+				#[cfg(test)]
+				ctx.goals_noted(result.query_index, 1);
+				pending.push(query);
+			}
+		}
+		let basis = deducer.basis();
+		let goals = crate::parallel::map_ordered((0..pending.len()).collect(), |at| {
+			let lane = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), at as u32 + 1);
+			goals_for_query(pending[at], km, ps, sym, &lane, &empty)
+		});
+		proposals.extend(goals.into_iter().flatten());
 		proposals.extend(deducer.constraint_goals(sym, &empty));
 	}
 
@@ -299,14 +307,18 @@ fn propose(
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
-		for &slot in &sym.var_slots {
+		let basis = deducer.basis();
+		let candidates = crate::parallel::map_ordered((0..sym.var_slots.len()).collect(), |at| {
+			let slot = sym.var_slots[at];
 			let Some(meta) = ps.meta.get(slot) else {
-				continue;
+				return Vec::new();
 			};
 			let honest = resolve_trace_constant(&meta.constant, km);
-			for candidate in
-				slot_candidates(attacker, sym, deducer, &protocol, &honest, &blanket, slot)
-			{
+			let lane = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), at as u32 + 1);
+			slot_candidates(attacker, sym, &lane, &protocol, &honest, &blanket, slot)
+		});
+		for (&slot, candidates) in sym.var_slots.iter().zip(candidates) {
+			for candidate in candidates {
 				let var_id = vars::attacker_var_id(slot);
 				let mut alone = Substitution::default();
 				alone.insert(var_id, candidate.clone());
@@ -324,14 +336,16 @@ fn propose(
 	}
 
 	let honest = honest_slot_terms(km, ps, sym);
-	let keyed: Vec<Substitution> = proposals
-		.iter()
-		.flat_map(|proposal| {
+	let keyed: Vec<Substitution> =
+		crate::parallel::map_ordered((0..proposals.len()).collect(), |at| {
+			let proposal = &proposals[at];
 			[
 				keyed_free(&honest, sym, proposal),
 				preserved_free(&honest, sym, proposal, attacker),
 			]
 		})
+		.into_iter()
+		.flatten()
 		.flatten()
 		.collect();
 	proposals.extend(keyed);
@@ -343,9 +357,12 @@ fn propose(
 		.iter()
 		.any(|r| !r.resolved && r.query.kind == QueryKind::Equivalence)
 	{
-		let distinguished: Vec<Substitution> = proposals
-			.iter()
-			.filter_map(|proposal| diverge::distinguish(sym, proposal))
+		let distinguished: Vec<Substitution> =
+			crate::parallel::map_ordered((0..proposals.len()).collect(), |at| {
+				diverge::distinguish(sym, &proposals[at])
+			})
+			.into_iter()
+			.flatten()
 			.collect();
 		proposals.extend(distinguished);
 	}
@@ -541,8 +558,8 @@ fn aligned_held_free(
 				.is_some_and(|(a, b)| a.equivalent(b, true))
 			&& !held.equivalent(occupant, true)
 	};
-	let mut out = Vec::new();
-	for proposal in proposals {
+	crate::parallel::map_ordered((0..proposals.len()).collect(), |at| {
+		let proposal = &proposals[at];
 		let positions = free_positions(honest, sym, proposal);
 		let mut candidates: Vec<usize> = Vec::new();
 		for (_, occupant) in &positions {
@@ -555,6 +572,7 @@ fn aligned_held_free(
 		}
 		candidates.sort_unstable();
 		candidates.dedup();
+		let mut out = Vec::new();
 		for i in candidates {
 			let held = &attacker.known[i];
 			if !positions
@@ -571,8 +589,11 @@ fn aligned_held_free(
 			}
 			out.push(filled);
 		}
-	}
-	out
+		out
+	})
+	.into_iter()
+	.flatten()
+	.collect()
 }
 
 fn free_positions<'a>(

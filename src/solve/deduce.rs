@@ -25,8 +25,9 @@ pub(crate) struct Deducer<'a> {
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
-	basis: IdSet<u64>,
+	basis: Arc<IdSet<u64>>,
 	fresh: Cell<u32>,
+	fresh_end: u32,
 }
 
 impl<'a> Deducer<'a> {
@@ -49,6 +50,20 @@ impl<'a> Deducer<'a> {
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
 	) -> Self {
+		for term in &sym.terms {
+			collect_subterm_hashes(term, &mut basis);
+		}
+		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
+	}
+
+	pub(crate) fn in_lane(
+		ps: &PrincipalState,
+		attacker: &'a AttackerState,
+		sym: &'a SymbolicState,
+		basis: Arc<IdSet<u64>>,
+		lane: u32,
+	) -> Self {
+		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
 		let mut wire_terms = Vec::new();
 		for (idx, meta) in ps.meta.iter().enumerate() {
 			if meta.wire.is_empty() && !meta.constant.leaked {
@@ -60,9 +75,6 @@ impl<'a> Deducer<'a> {
 			if let Some(term) = sym.terms.get(idx) {
 				wire_terms.push(term.clone());
 			}
-		}
-		for term in &sym.terms {
-			collect_subterm_hashes(term, &mut basis);
 		}
 		let mut slot_terms = Vec::new();
 		for &slot in &sym.var_slots {
@@ -82,8 +94,13 @@ impl<'a> Deducer<'a> {
 			memo: RefCell::new(IdMap::default()),
 			active: RefCell::new(Vec::new()),
 			cycles_cut: Cell::new(0),
-			fresh: Cell::new(0),
+			fresh: Cell::new(fresh),
+			fresh_end,
 		}
+	}
+
+	pub(crate) fn basis(&self) -> Arc<IdSet<u64>> {
+		Arc::clone(&self.basis)
 	}
 
 	pub(crate) fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -148,6 +165,10 @@ impl<'a> Deducer<'a> {
 
 	fn fresh_var(&self) -> Value {
 		let n = self.fresh.get();
+		assert!(
+			n < self.fresh_end,
+			"a solver lane ran out of fresh variables"
+		);
 		self.fresh.set(n + 1);
 		super::vars::free_var(n)
 	}
@@ -1038,6 +1059,19 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn free_variable_lanes_are_disjoint_and_leave_the_sequential_half_alone() {
+		let (seq_start, seq_end) = super::super::vars::free_lane_bounds(0);
+		assert_eq!(seq_start, 0);
+		let (one_start, one_end) = super::super::vars::free_lane_bounds(1);
+		let (two_start, two_end) = super::super::vars::free_lane_bounds(2);
+		assert!(seq_end <= two_start);
+		assert_eq!(two_end, one_start);
+		assert_eq!(one_end, u32::MAX - super::super::vars::FREE_VAR_BASE + 1);
+		let (last_start, _) = super::super::vars::free_lane_bounds(super::super::vars::FREE_LANES);
+		assert_eq!(last_start, seq_end);
+	}
 	use crate::testutil::*;
 
 	fn unblind_over(k: &Value, m: &Value, sig: &Value) -> Primitive {

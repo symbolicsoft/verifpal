@@ -44,9 +44,7 @@ fn analyze_sessions_traced_cancellable(
 	cancel: Arc<AtomicBool>,
 ) -> VResult<(VerifyContext, ProtocolTrace)> {
 	let sessions = sessions.max(1);
-	crate::theory::rewrite_cache_reset();
-	crate::rewrite::reduce_cache_reset();
-	crate::deduction::cone_cache_reset();
+	let _generation = crate::context::GenerationGuard::enter();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
 	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors) =

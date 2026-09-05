@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use crate::context::Generational;
 use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::primitive::*;
 use crate::types::*;
@@ -101,16 +102,13 @@ fn structurally_identical(a: &Value, b: &Value) -> bool {
 
 thread_local! {
 	static MEMO: RefCell<Option<ObtainableMemo>> = const { RefCell::new(None) };
-	static REWRITE_CACHE: RefCell<RewriteCache> = RefCell::new(IdMap::default());
-}
-
-pub(crate) fn rewrite_cache_reset() {
-	REWRITE_CACHE.with(|c| c.borrow_mut().clear());
+	static REWRITE_CACHE: RefCell<Generational<RewriteCache>> = RefCell::new(Generational::default());
 }
 
 fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
 	REWRITE_CACHE.with(|c| {
-		c.borrow()
+		c.borrow_mut()
+			.fresh()
 			.get(&key)?
 			.iter()
 			.find(|(candidate, _)| {
@@ -123,6 +121,7 @@ fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
 fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
 	REWRITE_CACHE.with(|c| {
 		c.borrow_mut()
+			.fresh()
 			.entry(key)
 			.or_default()
 			.push((Arc::clone(p), result.clone()));
@@ -671,6 +670,23 @@ mod tests {
 	use crate::testutil::*;
 	use crate::value::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn a_rewrite_cached_under_one_generation_is_not_served_under_the_next() {
+		crate::context::enter_generation(crate::context::next_generation());
+		let k = make_constant("tgen_k");
+		let m = make_constant("tgen_m");
+		let enc = make_primitive(primitive_get_enum("ENC").unwrap(), vec![k.clone(), m], 0);
+		let dec = make_primitive(primitive_get_enum("DEC").unwrap(), vec![k, enc], 0);
+		let Value::Primitive(p) = &dec else {
+			panic!("expected a primitive");
+		};
+		let key = crate::hashing::primitive_hash(p);
+		assert!(can_rewrite(p).0);
+		assert!(rewrite_cache_get(key, p).is_some());
+		crate::context::enter_generation(crate::context::next_generation());
+		assert!(rewrite_cache_get(key, p).is_none());
+	}
 
 	fn weak_index(v: &Value, onset: i32) -> Arc<CapabilityIndex> {
 		let Value::Primitive(p) = v else {

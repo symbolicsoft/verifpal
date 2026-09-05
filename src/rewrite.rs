@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use crate::context::Generational;
 use crate::theory::{can_rewrite, structurally_identical_primitive};
 use crate::types::*;
 
@@ -17,11 +18,7 @@ struct Reduced {
 type ReduceCache = IdMap<u64, Vec<(Arc<Primitive>, Reduced)>>;
 
 thread_local! {
-	static REDUCE_CACHE: RefCell<ReduceCache> = RefCell::new(IdMap::default());
-}
-
-pub(crate) fn reduce_cache_reset() {
-	REDUCE_CACHE.with(|c| c.borrow_mut().clear());
+	static REDUCE_CACHE: RefCell<Generational<ReduceCache>> = RefCell::new(Generational::default());
 }
 
 pub(crate) fn perform_primitive_rewrite(
@@ -44,6 +41,7 @@ fn reduce_term(p: &Arc<Primitive>) -> Reduced {
 	let computed = reduce_term_uncached(p);
 	REDUCE_CACHE.with(|c| {
 		c.borrow_mut()
+			.fresh()
 			.entry(key)
 			.or_default()
 			.push((Arc::clone(p), computed.clone()));
@@ -53,7 +51,8 @@ fn reduce_term(p: &Arc<Primitive>) -> Reduced {
 
 fn reduce_cache_get(key: u64, p: &Arc<Primitive>) -> Option<Reduced> {
 	REDUCE_CACHE.with(|c| {
-		c.borrow()
+		c.borrow_mut()
+			.fresh()
 			.get(&key)?
 			.iter()
 			.find(|(candidate, _)| {
@@ -119,8 +118,25 @@ mod tests {
 		)
 	}
 
+	#[test]
+	fn a_reduction_cached_under_one_generation_is_not_served_under_the_next() {
+		crate::context::enter_generation(crate::context::next_generation());
+		let k = make_constant("rgen_k");
+		let m = make_constant("rgen_m");
+		let enc = make_primitive(primitive_get_enum("ENC").unwrap(), vec![k.clone(), m], 0);
+		let dec = make_primitive(primitive_get_enum("DEC").unwrap(), vec![k, enc], 0);
+		let Value::Primitive(p) = &dec else {
+			panic!("expected a primitive");
+		};
+		let key = crate::hashing::primitive_hash(p);
+		assert!(reduce_term(p).rewritten);
+		assert!(reduce_cache_get(key, p).is_some());
+		crate::context::enter_generation(crate::context::next_generation());
+		assert!(reduce_cache_get(key, p).is_none());
+	}
+
 	fn rewrite(value: &Value) -> (PrincipalState, Option<Primitive>) {
-		reduce_cache_reset();
+		crate::context::enter_generation(crate::context::next_generation());
 		let mut ps = one_slot(value);
 		let Value::Primitive(p) = value else {
 			panic!("expected a primitive");
@@ -221,7 +237,7 @@ mod tests {
 				0,
 			)
 		};
-		reduce_cache_reset();
+		crate::context::enter_generation(crate::context::next_generation());
 		let mut first = one_slot(&build());
 		let Value::Primitive(p) = build() else {
 			unreachable!()

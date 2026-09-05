@@ -307,7 +307,8 @@ type NeedsMemo = (Arc<Vec<Arc<MutationRecord>>>, IdMap<usize, Vec<Need>>);
 
 thread_local! {
 	static ANY_TAINT: std::cell::RefCell<Option<TaintFlag>> = const { std::cell::RefCell::new(None) };
-	static CONES: std::cell::RefCell<ConeCache> = std::cell::RefCell::new(IdMap::default());
+	static CONES: std::cell::RefCell<crate::context::Generational<ConeCache>> =
+		std::cell::RefCell::new(crate::context::Generational::default());
 	static NEEDS: std::cell::RefCell<Option<NeedsMemo>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -322,12 +323,6 @@ fn keep_needs_memo(attacker: &AttackerState, memo: IdMap<usize, Vec<Need>>) {
 	NEEDS.with(|cell| {
 		*cell.borrow_mut() = Some((Arc::clone(&attacker.mutation_records), memo));
 	});
-}
-
-/// Discard the per-trace cone cache. Cones are a function of the protocol
-/// trace alone, and every analysis brings a new one.
-pub(crate) fn cone_cache_reset() {
-	CONES.with(|cones| cones.borrow_mut().clear());
 }
 
 /// Whether any value the attacker holds was recorded under a substitution. If
@@ -608,13 +603,16 @@ fn read_preconditions(
 /// definition never mentions it. Dropping those let a signature harvested from
 /// one execution of a run stand beside a seed harvested from another.
 fn reach_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Arc<Vec<usize>> {
-	if let Some(hit) = CONES.with(|cones| cones.borrow().get(&(principal, slot)).cloned()) {
+	if let Some(hit) =
+		CONES.with(|cones| cones.borrow_mut().fresh().get(&(principal, slot)).cloned())
+	{
 		return hit;
 	}
 	let built = Arc::new(reach_cone_uncached(km, principal, slot));
 	CONES.with(|cones| {
 		cones
 			.borrow_mut()
+			.fresh()
 			.insert((principal, slot), Arc::clone(&built))
 	});
 	built

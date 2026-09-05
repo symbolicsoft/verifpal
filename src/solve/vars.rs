@@ -10,6 +10,24 @@ pub(crate) const ATTACKER_VAR_BASE: ValueId = 0x8000_0000;
 
 pub(crate) const FREE_VAR_BASE: ValueId = 0xC000_0000;
 
+pub(crate) const FREE_LANE_STRIDE: u32 = 1 << 16;
+
+pub(crate) const FREE_LANES: u32 = 1 << 13;
+
+pub(crate) fn free_lane_bounds(lane: u32) -> (u32, u32) {
+	assert!(
+		lane <= FREE_LANES,
+		"free-variable lane {lane} is beyond the {FREE_LANES} available"
+	);
+	let top = u32::MAX - FREE_VAR_BASE + 1;
+	if lane == 0 {
+		(0, top - FREE_LANES * FREE_LANE_STRIDE)
+	} else {
+		let start = top - lane * FREE_LANE_STRIDE;
+		(start, start + FREE_LANE_STRIDE)
+	}
+}
+
 pub(crate) fn is_free_var_id(id: ValueId) -> bool {
 	id >= FREE_VAR_BASE
 }

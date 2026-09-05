@@ -25,6 +25,7 @@ mod metamorphic;
 mod model_tests;
 pub(crate) mod msc;
 pub(crate) mod narrate;
+pub(crate) mod parallel;
 pub(crate) mod parser;
 pub(crate) mod pretty;
 pub(crate) mod primitive;

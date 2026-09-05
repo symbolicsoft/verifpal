@@ -26,7 +26,7 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli = ["clap", "clap_complete", "clap_mangen", "colored", "ureq", "lsp"]
+cli = ["clap", "clap_complete", "clap_mangen", "colored", "ureq", "lsp", "rayon"]
 lsp = ["dep:crossbeam-channel", "dep:lsp-server", "dep:lsp-types"]
 wasm = ["wasm-bindgen"]
 
@@ -39,6 +39,7 @@ colored = { version = "3", optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
 lsp-server = { version = "0.10", optional = true }
 lsp-types = { version = "0.97", optional = true }
+rayon = { version = "1.12", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
