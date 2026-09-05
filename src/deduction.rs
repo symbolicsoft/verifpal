@@ -947,9 +947,10 @@ fn rule_reuse(
 }
 
 type PairKey = (PrincipalId, u64, u64, i32, usize, u64);
+type Pairs = crate::context::Generational<IdMap<PairKey, Vec<(Value, Value, bool)>>>;
 
 thread_local! {
-	static PAIRS: std::cell::RefCell<crate::context::Generational<IdMap<PairKey, bool>>> =
+	static PAIRS: std::cell::RefCell<Pairs> =
 		std::cell::RefCell::new(crate::context::Generational::default());
 }
 
@@ -969,14 +970,26 @@ fn pair_vetted(
 		attacker.known.len(),
 		attacker.routes_epoch,
 	);
-	if let Some(hit) = PAIRS.with(|memo| memo.borrow_mut().fresh().get(&key).copied()) {
-		return hit;
+	let remembered = PAIRS.with(|memo| {
+		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(a, b, _)| a.equivalent(of, true) && b.equivalent(with, true))
+				.map(|(_, _, vetted)| *vetted)
+		})
+	});
+	if let Some(vetted) = remembered {
+		return vetted;
 	}
 	let vetted = reused_pair(of, with)
 		&& one_execution(attacker, of, with)
 		&& pair_coheres(ctx, km, ps, attacker, of, with);
 	PAIRS.with(|memo| {
-		memo.borrow_mut().fresh().insert(key, vetted);
+		memo.borrow_mut()
+			.fresh()
+			.entry(key)
+			.or_default()
+			.push((of.clone(), with.clone(), vetted));
 	});
 	vetted
 }

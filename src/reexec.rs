@@ -970,17 +970,17 @@ fn keyed_position(prim: &Primitive) -> Option<usize> {
 }
 
 thread_local! {
-	static BYPASS_MISSES: std::cell::RefCell<Option<Vec<(PrincipalId, Primitive)>>> =
+	static BYPASS_DECISIONS: std::cell::RefCell<Option<Vec<(PrincipalId, Primitive, bool)>>> =
 		const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) fn record_bypass_misses() {
-	BYPASS_MISSES.with(|misses| *misses.borrow_mut() = Some(Vec::new()));
+pub(crate) fn record_bypass_decisions() {
+	BYPASS_DECISIONS.with(|decisions| *decisions.borrow_mut() = Some(Vec::new()));
 }
 
-pub(crate) fn take_bypass_misses() -> Vec<(PrincipalId, Primitive)> {
-	BYPASS_MISSES
-		.with(|misses| misses.borrow_mut().take())
+pub(crate) fn take_bypass_decisions() -> Vec<(PrincipalId, Primitive, bool)> {
+	BYPASS_DECISIONS
+		.with(|decisions| decisions.borrow_mut().take())
 		.unwrap_or_default()
 }
 
@@ -990,13 +990,16 @@ pub(crate) fn bypass_is_constructible(
 	attacker: &AttackerState,
 ) -> bool {
 	let constructible = bypass_constructible(prim, ps, attacker);
-	if !constructible {
-		BYPASS_MISSES.with(|misses| {
-			if let Some(misses) = misses.borrow_mut().as_mut() {
-				misses.push((ps.id, prim.clone()));
-			}
-		});
-	}
+	BYPASS_DECISIONS.with(|decisions| {
+		if let Some(decisions) = decisions.borrow_mut().as_mut()
+			&& !decisions.iter().any(|(who, seen, _)| {
+				*who == ps.id
+					&& crate::hashing::primitive_hash(seen) == crate::hashing::primitive_hash(prim)
+					&& crate::theory::structurally_identical_primitive(seen, prim)
+			}) {
+			decisions.push((ps.id, prim.clone(), constructible));
+		}
+	});
 	constructible
 }
 

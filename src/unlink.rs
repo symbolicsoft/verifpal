@@ -468,9 +468,10 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 }
 
 type LeavesKey = (PrincipalId, u64, i32, usize, usize, u64);
+type Leaves = Generational<IdMap<LeavesKey, Vec<(Value, Option<Vec<Value>>)>>>;
 
 thread_local! {
-	static LEAVES: std::cell::RefCell<Generational<IdMap<LeavesKey, Option<Vec<Value>>>>> =
+	static LEAVES: std::cell::RefCell<Leaves> =
 		std::cell::RefCell::new(Generational::default());
 }
 
@@ -487,15 +488,27 @@ pub(crate) fn origin_leaves(
 		attacker.reused.len(),
 		attacker.routes_epoch,
 	);
-	if let Some(hit) = LEAVES.with(|memo| memo.borrow_mut().fresh().get(&key).cloned()) {
-		return hit;
+	let remembered = LEAVES.with(|memo| {
+		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(seen, _)| crate::theory::structurally_identical(seen, v))
+				.map(|(_, leaves)| leaves.clone())
+		})
+	});
+	if let Some(leaves) = remembered {
+		return leaves;
 	}
 	let without_self = attacker_without(attacker, v);
 	let mut out = Vec::new();
 	let mut expanded = Vec::new();
 	let leaves = collect_leaves(v, ps, &without_self, &mut expanded, &mut out).then_some(out);
 	LEAVES.with(|memo| {
-		memo.borrow_mut().fresh().insert(key, leaves.clone());
+		memo.borrow_mut()
+			.fresh()
+			.entry(key)
+			.or_default()
+			.push((v.clone(), leaves.clone()));
 	});
 	leaves
 }

@@ -90,7 +90,7 @@ pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> 
 			.all(|(p, q)| structurally_identical(p, q))
 }
 
-fn structurally_identical(a: &Value, b: &Value) -> bool {
+pub(crate) fn structurally_identical(a: &Value, b: &Value) -> bool {
 	match (a, b) {
 		(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
 		(Value::Primitive(x), Value::Primitive(y)) => {

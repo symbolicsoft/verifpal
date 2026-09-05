@@ -91,12 +91,14 @@ pub(crate) fn validate(
 	let restricted = guards.history.compatible(ctx, km, &ps, &chosen, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
 	let phase = governing.current_phase;
-	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |misses| {
-		misses.iter().all(|(who, prim)| {
+	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |decisions| {
+		decisions.iter().all(|(who, prim, was)| {
 			ctx.principal_states()
 				.iter()
 				.find(|state| state.id == *who)
-				.is_none_or(|state| !crate::reexec::bypass_is_constructible(prim, state, governing))
+				.is_none_or(|state| {
+					*was || !crate::reexec::bypass_is_constructible(prim, state, governing)
+				})
 		})
 	});
 	let executed = match recalled {
@@ -110,13 +112,13 @@ pub(crate) fn validate(
 			executed
 		}
 		None => {
-			crate::reexec::record_bypass_misses();
+			crate::reexec::record_bypass_decisions();
 			let executed = crate::reexec::execute_forward(ctx, km, &ps, &installs, governing);
-			let misses = crate::reexec::take_bypass_misses();
+			let decisions = crate::reexec::take_bypass_decisions();
 			let Ok(executed) = executed else {
 				return Ok(false);
 			};
-			ctx.remember_execution(ps.id, key, signature, phase, &executed, misses);
+			ctx.remember_execution(ps.id, key, signature, phase, &executed, decisions);
 			executed
 		}
 	};

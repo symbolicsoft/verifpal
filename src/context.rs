@@ -90,6 +90,7 @@ fn analysis_count_reset() {
 	ANALYSIS_COUNT.with(|c| c.set(0));
 }
 
+use crate::theory::structurally_identical;
 use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
@@ -151,19 +152,23 @@ struct Execution {
 	signature: Vec<(usize, Value)>,
 	phase: i32,
 	states: Vec<StoredState>,
-	misses: Vec<(PrincipalId, Primitive)>,
+	decisions: Vec<(PrincipalId, Primitive, bool)>,
 	closed: Option<Saturation>,
 }
 
 const REMEMBERED_EXECUTIONS: usize = 200_000;
 
+fn same_term(a: &Value, b: &Value) -> bool {
+	a.hash_value() == b.hash_value() && structurally_identical(a, b)
+}
+
 fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
-	a.value.equivalent(&b.value, true)
-		&& a.pre_rewrite.equivalent(&b.pre_rewrite, true)
-		&& a.original.equivalent(&b.original, true)
+	same_term(&a.value, &b.value)
+		&& same_term(&a.pre_rewrite, &b.pre_rewrite)
+		&& same_term(&a.original, &b.original)
 		&& match (&a.bypassed, &b.bypassed) {
 			(None, None) => true,
-			(Some(x), Some(y)) => x.equivalent(y, true),
+			(Some(x), Some(y)) => same_term(x, y),
 			_ => false,
 		} && a.provenance.creator == b.provenance.creator
 		&& a.provenance.sender == b.provenance.sender
@@ -175,7 +180,7 @@ fn same_signature(a: &[(usize, Value)], b: &[(usize, Value)]) -> bool {
 	a.len() == b.len()
 		&& a.iter()
 			.zip(b.iter())
-			.all(|((sa, va), (sb, vb))| sa == sb && va.equivalent(vb, true))
+			.all(|((sa, va), (sb, vb))| sa == sb && same_term(va, vb))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -611,7 +616,7 @@ impl VerifyContext {
 		signature: &[(usize, Value)],
 		phase: i32,
 		states: &[PrincipalState],
-		misses: Vec<(PrincipalId, Primitive)>,
+		decisions: Vec<(PrincipalId, Primitive, bool)>,
 	) {
 		if read_lock(&self.executions).len() >= REMEMBERED_EXECUTIONS {
 			return;
@@ -648,7 +653,7 @@ impl VerifyContext {
 				signature: signature.to_vec(),
 				phase,
 				states: stored,
-				misses,
+				decisions,
 				closed: None,
 			});
 	}
@@ -697,14 +702,14 @@ impl VerifyContext {
 		key: u64,
 		signature: &[(usize, Value)],
 		phase: i32,
-		still_valid: impl Fn(&[(PrincipalId, Primitive)]) -> bool,
+		still_valid: impl Fn(&[(PrincipalId, Primitive, bool)]) -> bool,
 	) -> Option<(Vec<PrincipalState>, bool)> {
 		let mut executions = write_lock(&self.executions);
 		let bucket = executions.get_mut(&(principal, key))?;
 		let at = bucket
 			.iter()
 			.position(|seen| seen.phase == phase && same_signature(&seen.signature, signature))?;
-		if !still_valid(&bucket[at].misses) {
+		if !still_valid(&bucket[at].decisions) {
 			bucket.remove(at);
 			return None;
 		}
