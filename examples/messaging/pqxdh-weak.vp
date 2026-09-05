@@ -56,16 +56,17 @@ principal Alice[
 	ss, ct = KEM_ENCAP(ekb, r)
 	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss)
 	akenc = HKDF(amaster, c1, nil)
-	e1 = AEAD_ENC(akenc, m1, HASH(galongterm, gblongterm, gae1))
+	generates n_e1
+	e1 = AEAD_ENC(akenc, n_e1, m1, HASH(galongterm, gblongterm, gae1))
 ]
 
-Alice -> Bob: [galongterm], gae1, ct, e1
+Alice -> Bob: [galongterm], gae1, ct, n_e1, e1
 
 principal Bob[
 	bss = KEM_DECAP(dkb, ct)
 	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss)
 	bkenc = HKDF(bmaster, c1, nil)
-	m1_d = AEAD_DEC(bkenc, e1, HASH(galongterm, gblongterm, gae1))?
+	m1_d = AEAD_DEC(bkenc, n_e1, e1, HASH(galongterm, gblongterm, gae1))?
 ]
 
 // Phase 1 contains no leaks at all: the annotations above are the entire

@@ -35,22 +35,24 @@ principal Alice[
 	generates msg
 	sig = SIGN(a, msg)
 	shared_ac = DH_KEX(gc, a)
-	envelope = AEAD_ENC(shared_ac, CONCAT(msg, sig), ga)
+	generates n_envelope
+	envelope = AEAD_ENC(shared_ac, n_envelope, CONCAT(msg, sig), ga)
 ]
 
-Alice -> Carol: envelope
+Alice -> Carol: n_envelope, envelope
 
 principal Carol[
-	inner = AEAD_DEC(DH_KEX(ga, c), envelope, ga)?
+	inner = AEAD_DEC(DH_KEX(ga, c), n_envelope, envelope, ga)?
 	msg_c, sig_c = SPLIT(inner)?
 	shared_cb = DH_KEX(gb, c)
-	re_envelope = AEAD_ENC(shared_cb, CONCAT(msg_c, sig_c), gc)
+	generates n_re_envelope
+	re_envelope = AEAD_ENC(shared_cb, n_re_envelope, CONCAT(msg_c, sig_c), gc)
 ]
 
-Carol -> Bob: re_envelope
+Carol -> Bob: n_re_envelope, re_envelope
 
 principal Bob[
-	inner_b = AEAD_DEC(DH_KEX(gc, b), re_envelope, gc)?
+	inner_b = AEAD_DEC(DH_KEX(gc, b), n_re_envelope, re_envelope, gc)?
 	msg_b, sig_b = SPLIT(inner_b)?
 	_ = SIGNVERIF(ga, msg_b, sig_b)?
 	audit_mac = MAC(DH_KEX(gd, b), msg_b)

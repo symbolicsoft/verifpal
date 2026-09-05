@@ -8,18 +8,20 @@ principal Alice[
 	knows public ad
 	generates m1
 	generates m2
-	e1 = AEAD_ENC(k, m1, ad)
-	e2 = AEAD_ENC(k, m2, ad)
+	generates n_e1
+	e1 = AEAD_ENC(k, n_e1, m1, ad)
+	generates n_e2
+	e2 = AEAD_ENC(k, n_e2, m2, ad)
 	leaks k
 ]
 
-Alice -> Bob: e1, e2
+Alice -> Bob: n_e1, e1, n_e2, e2
 
 principal Bob[
 	knows private k
 	knows public ad
-	d1 = AEAD_DEC(k, e1, ad)?
-	d2 = AEAD_DEC(k, e2, ad)?
+	d1 = AEAD_DEC(k, n_e1, e1, ad)?
+	d2 = AEAD_DEC(k, n_e2, e2, ad)?
 ]
 
 queries[

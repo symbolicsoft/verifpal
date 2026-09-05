@@ -8,7 +8,8 @@ principal Alice[
 	generates m, a
 	ga = PUBKEY(a)
 	kk = HASH(k)
-	e = AEAD_ENC(kk, m, nil)
+	generates n_e
+	e = AEAD_ENC(kk, n_e, m, nil)
 ]
 
 principal Bob[
@@ -18,11 +19,11 @@ principal Bob[
 
 Bob -> Alice: gb
 
-Alice -> Bob: ga, e
+Alice -> Bob: ga, n_e, e
 
 principal Bob[
 	kk_b = HASH(k)
-	m_b = AEAD_DEC(kk_b, e, nil)?
+	m_b = AEAD_DEC(kk_b, n_e, e, nil)?
 	shared = DH_KEX(ga, b)
 	tag = MAC(shared, m_b)
 ]

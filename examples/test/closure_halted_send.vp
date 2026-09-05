@@ -53,17 +53,18 @@ principal Alice[
 	transcript_a = CONCAT(alice_ephpk, bob_ephpk, ctx)
 	root_a, chain_a, auth_key_a = HKDF(CONCAT(dh_ss_a, kem_ss_a), transcript_a, ctx)
 	generates payload
-	sealed = AEAD_ENC(root_a, payload, transcript_a)
+	generates n_sealed
+	sealed = AEAD_ENC(root_a, n_sealed, payload, transcript_a)
 	receipt = MAC(chain_a, sealed)
 	_ = SIGNVERIF(bob_ltpk, HASH(transcript_a, root_a), bob_sig)?
 	_ = ASSERT(confirm, MAC(auth_key_a, transcript_a))?
 ]
 
-Alice -> Bob: sealed, receipt
+Alice -> Bob: n_sealed, sealed, receipt
 
 principal Bob[
 	_ = ASSERT(receipt, MAC(chain, sealed))?
-	payload_b = AEAD_DEC(root, sealed, transcript)?
+	payload_b = AEAD_DEC(root, n_sealed, sealed, transcript)?
 	ack = HASH(payload_b, chain)
 ]
 

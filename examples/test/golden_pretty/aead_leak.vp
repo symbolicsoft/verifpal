@@ -17,14 +17,15 @@ Bob -> Alice: [public_key_bob]
 principal Alice[
 	knows private message
 	shared_secret_alice = DH_KEX(public_key_bob, private_key_alice)
-	ciphertext_and_tag = AEAD_ENC(shared_secret_alice, message, shared_secret_alice)
+	generates n_ciphertext_and_tag
+	ciphertext_and_tag = AEAD_ENC(shared_secret_alice, n_ciphertext_and_tag, message, shared_secret_alice)
 ]
 
-Alice -> Bob: ciphertext_and_tag
+Alice -> Bob: n_ciphertext_and_tag, ciphertext_and_tag
 
 principal Bob[
 	shared_secret_bob = DH_KEX(public_key_alice, private_key_bob)
-	decrypted_message = AEAD_DEC(shared_secret_bob, ciphertext_and_tag, shared_secret_bob)?
+	decrypted_message = AEAD_DEC(shared_secret_bob, n_ciphertext_and_tag, ciphertext_and_tag, shared_secret_bob)?
 ]
 
 queries[

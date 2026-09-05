@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 — the key alone does not decrypt. k is leaked, the nonce is
+// declared on both sides and never travels, and the ciphertext is the same
+// in every session because everything in it is declared. Decrypting needs
+// the key and the nonce; the attacker has one of them.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private n
+	knows private m
+	knows public ad
+	leaks k
+	e = AEAD_ENC(k, n, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows private n
+	knows public ad
+	d = AEAD_DEC(k, n, e, ad)?
+]
+
+queries[
+	confidentiality? m
+]

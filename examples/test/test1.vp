@@ -15,29 +15,32 @@ principal Alice[
 	knows private aa
 	ga = PUBKEY(a)
 	gaa = PUBKEY(aa)
-	egaa = AEAD_ENC(DH_KEX(gb, a), gaa, nil)
+	generates n_egaa
+	egaa = AEAD_ENC(DH_KEX(gb, a), n_egaa, gaa, nil)
 ]
 
-Alice -> Bob: ga, egaa
+Alice -> Bob: ga, n_egaa, egaa
 
 principal Bob[
-	b_gaa = AEAD_DEC(DH_KEX(ga, b), egaa, nil)
+	b_gaa = AEAD_DEC(DH_KEX(ga, b), n_egaa, egaa, nil)
 	knows private m
-	em = AEAD_ENC(DH_KEX(b_gaa, b), m, nil)
+	generates n_em
+	em = AEAD_ENC(DH_KEX(b_gaa, b), n_em, m, nil)
 ]
 
-Bob -> Alice: em
+Bob -> Alice: n_em, em
 
 principal Alice[
-	x = AEAD_DEC(DH_KEX(gb, aa), em, nil)?
+	x = AEAD_DEC(DH_KEX(gb, aa), n_em, em, nil)?
 	knows private m2
-	em2 = AEAD_ENC(DH_KEX(gb, aa), m2, nil)
+	generates n_em2
+	em2 = AEAD_ENC(DH_KEX(gb, aa), n_em2, m2, nil)
 ]
 
-Alice -> Bob: em2
+Alice -> Bob: n_em2, em2
 
 principal Bob[
-	_ = AEAD_DEC(DH_KEX(b_gaa, b), em2, nil)?
+	_ = AEAD_DEC(DH_KEX(b_gaa, b), n_em2, em2, nil)?
 ]
 
 queries[

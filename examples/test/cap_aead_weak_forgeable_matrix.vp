@@ -14,6 +14,10 @@
 // verdict three times. Three keys rather than one is what keeps the rows
 // independent: under a shared key the forged ciphertext from one row would be
 // accepted in another, and the table would fill in for the wrong reason.
+// The nonces on `n_e_weak`, `n_e_forge`, `n_e_both` are declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 
 attacker[active]
 
@@ -21,19 +25,22 @@ principal Alice[
 	knows private k_weak, k_forge, k_both
 	knows private m_weak, m_forge, m_both
 	knows public ad
-	e_weak = AEAD_ENC[weak](k_weak, m_weak, ad)
-	e_forge = AEAD_ENC[forgeable](k_forge, m_forge, ad)
-	e_both = AEAD_ENC[weak, forgeable](k_both, m_both, ad)
+	knows private n_e_weak
+	e_weak = AEAD_ENC[weak](k_weak, n_e_weak, m_weak, ad)
+	knows private n_e_forge
+	e_forge = AEAD_ENC[forgeable](k_forge, n_e_forge, m_forge, ad)
+	knows private n_e_both
+	e_both = AEAD_ENC[weak, forgeable](k_both, n_e_both, m_both, ad)
 ]
 
-Alice -> Bob: e_weak, e_forge, e_both
+Alice -> Bob: n_e_weak, e_weak, n_e_forge, e_forge, n_e_both, e_both
 
 principal Bob[
 	knows private k_weak, k_forge, k_both
 	knows public ad
-	d_weak = AEAD_DEC(k_weak, e_weak, ad)?
-	d_forge = AEAD_DEC(k_forge, e_forge, ad)?
-	d_both = AEAD_DEC(k_both, e_both, ad)?
+	d_weak = AEAD_DEC(k_weak, n_e_weak, e_weak, ad)?
+	d_forge = AEAD_DEC(k_forge, n_e_forge, e_forge, ad)?
+	d_both = AEAD_DEC(k_both, n_e_both, e_both, ad)?
 	_ = HASH(d_weak, d_forge, d_both)
 ]
 

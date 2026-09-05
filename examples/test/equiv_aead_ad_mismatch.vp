@@ -18,16 +18,17 @@ principal Alice[
 	knows private aead_key
 	knows private payload
 	knows public ad_real, ad_other
-	sealed = AEAD_ENC(aead_key, payload, ad_real)
+	generates n_sealed
+	sealed = AEAD_ENC(aead_key, n_sealed, payload, ad_real)
 ]
 
-Alice -> Bob: sealed
+Alice -> Bob: n_sealed, sealed
 
 principal Bob[
 	knows private aead_key
 	knows public ad_real, ad_other
-	opened_right = AEAD_DEC(aead_key, sealed, ad_real)
-	opened_wrong = AEAD_DEC(aead_key, sealed, ad_other)
+	opened_right = AEAD_DEC(aead_key, n_sealed, sealed, ad_real)
+	opened_wrong = AEAD_DEC(aead_key, n_sealed, sealed, ad_other)
 	_ = HASH(opened_right, opened_wrong)
 ]
 

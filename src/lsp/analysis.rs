@@ -290,10 +290,10 @@ mod tests {
 		knows private an_b\n\
 		an_gb = PUBKEY(an_b)\n\
 		an_k = DH_KEX(an_ga, an_b)\n\
-		generates an_m\n\
-		an_e = AEAD_ENC(an_k, an_m, nil)\n\
+		generates an_m, an_n\n\
+		an_e = AEAD_ENC(an_k, an_n, an_m, nil)\n\
 		]\n\
-		Bob -> Alice: an_gb, an_e\n\
+		Bob -> Alice: an_gb, an_n, an_e\n\
 		queries[\n\
 		confidentiality? an_m\n\
 		]\n";

@@ -64,15 +64,16 @@ principal Alice[
 	_ = ASSERT(MAC(mac_alice, gb_ident), tag_b)?
 	sig_a = SIGN(a_ident, CONCAT(ga, gb))
 	tag_a = MAC(mac_alice, ga_ident)
-	e_alice = AEAD_ENC(enc_alice, m_alice, nil)
+	generates n_e_alice
+	e_alice = AEAD_ENC(enc_alice, n_e_alice, m_alice, nil)
 ]
 
-Alice -> Bob: sig_a, tag_a, e_alice
+Alice -> Bob: sig_a, tag_a, n_e_alice, e_alice
 
 principal Bob[
 	_ = SIGNVERIF(ga_ident, CONCAT(ga, gb), sig_a)?
 	_ = ASSERT(MAC(mac_bob, ga_ident), tag_a)?
-	got = AEAD_DEC(enc_bob, e_alice, nil)?
+	got = AEAD_DEC(enc_bob, n_e_alice, e_alice, nil)?
 	_ = HASH(got)
 ]
 

@@ -35,21 +35,21 @@ pub(crate) fn build(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> SymbolicState {
-	build_assuming_honest(controllable, ps, attacker, None)
+	build_assuming_honest(controllable, ps, attacker, &[])
 }
 
 pub(crate) fn build_assuming_honest(
 	controllable: &crate::reexec::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	honest: Option<usize>,
+	honest: &[usize],
 ) -> SymbolicState {
 	let n = ps.values.len();
 	let mut var_terms: Vec<Option<Value>> = vec![None; n];
 	let mut var_slots = Vec::new();
 
 	for (idx, slot) in var_terms.iter_mut().enumerate() {
-		if !controllable.admits(ps, attacker, idx) || honest == Some(idx) {
+		if !controllable.admits(ps, attacker, idx) || honest.contains(&idx) {
 			continue;
 		}
 		let name = &ps.meta[idx].constant.name;
@@ -205,7 +205,7 @@ mod tests {
 		let (km, ps, attacker) = bob();
 		let controllable = crate::reexec::Controllable::of(&km, &ps, &attacker);
 		let ga = slot(&ps, "sym_ga");
-		let refined = build_assuming_honest(&controllable, &ps, &attacker, Some(ga));
+		let refined = build_assuming_honest(&controllable, &ps, &attacker, &[ga]);
 		assert!(!refined.is_var_slot(ga), "the held slot is not a variable");
 		assert!(refined.var_slots.is_empty());
 		for name in ["sym_ga", "sym_k", "sym_t"] {

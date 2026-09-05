@@ -54,10 +54,11 @@ principal Alice[
 	akshared1 = DH_KEX(gbs, ae2)
 	arkab1, ackab1 = HKDF(amaster, akshared1, nil)
 	akenc1 = HKDF(nil, MAC(ackab1, nil), nil)
-	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
+	generates n_e1
+	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: [galongterm], gae1, gae2, e1
+Alice -> Bob: [galongterm], gae1, gae2, n_e1, e1
 
 principal Bob[
 	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo))
@@ -67,7 +68,7 @@ principal Bob[
 	bkshared1 = DH_KEX(gae2, bs)
 	brkab1, bckab1 = HKDF(bmaster, bkshared1, nil)
 	bkenc1 = HKDF(nil, MAC(bckab1, nil), nil)
-	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))?
+	m1_d = AEAD_DEC(bkenc1, n_e1, e1, HASH(galongterm, gblongterm, gae2))?
 ]
 
 principal Bob[
@@ -76,16 +77,17 @@ principal Bob[
 	bkshared2 = DH_KEX(gae2, be)
 	brkba2, bckba2 = HKDF(brkab1, bkshared2, nil)
 	bkenc2 = HKDF(nil, MAC(bckba2, nil), nil)
-	e2 = AEAD_ENC(bkenc2, m2, HASH(galongterm, gblongterm, gbe))
+	generates n_e2
+	e2 = AEAD_ENC(bkenc2, n_e2, m2, HASH(galongterm, gblongterm, gbe))
 ]
 
-Bob -> Alice: gbe, e2
+Bob -> Alice: gbe, n_e2, e2
 
 principal Alice[
 	akshared2 = DH_KEX(gbe, ae2)
 	arkba2, ackba2 = HKDF(arkab1, akshared2, nil)
 	akenc2 = HKDF(nil, MAC(ackba2, nil), nil)
-	m2_d = AEAD_DEC(akenc2, e2, HASH(galongterm, gblongterm, gbe))?
+	m2_d = AEAD_DEC(akenc2, n_e2, e2, HASH(galongterm, gblongterm, gbe))?
 ]
 
 principal Alice[
@@ -94,16 +96,17 @@ principal Alice[
 	akshared3 = DH_KEX(gbe, ae3)
 	arkab3, ackab3 = HKDF(arkba2, akshared3, nil)
 	akenc3 = HKDF(nil, MAC(ackab3, nil), nil)
-	e3 = AEAD_ENC(akenc3, m3, HASH(galongterm, gblongterm, gae3))
+	generates n_e3
+	e3 = AEAD_ENC(akenc3, n_e3, m3, HASH(galongterm, gblongterm, gae3))
 ]
 
-Alice -> Bob: gae3, e3
+Alice -> Bob: gae3, n_e3, e3
 
 principal Bob[
 	bkshared3 = DH_KEX(gae3, be)
 	brkab3, bckab3 = HKDF(brkba2, bkshared3, nil)
 	bkenc3 = HKDF(nil, MAC(bckab3, nil), nil)
-	m3_d = AEAD_DEC(bkenc3, e3, HASH(galongterm, gblongterm, gae3))?
+	m3_d = AEAD_DEC(bkenc3, n_e3, e3, HASH(galongterm, gblongterm, gae3))?
 ]
 
 principal Bob[
@@ -112,16 +115,17 @@ principal Bob[
 	bkshared4 = DH_KEX(gae3, be2)
 	brkba4, bckba4 = HKDF(brkab3, bkshared4, nil)
 	bkenc4 = HKDF(nil, MAC(bckba4, nil), nil)
-	e4 = AEAD_ENC(bkenc4, m4, HASH(galongterm, gblongterm, gbe2))
+	generates n_e4
+	e4 = AEAD_ENC(bkenc4, n_e4, m4, HASH(galongterm, gblongterm, gbe2))
 ]
 
-Bob -> Alice: gbe2, e4
+Bob -> Alice: gbe2, n_e4, e4
 
 principal Alice[
 	akshared4 = DH_KEX(gbe2, ae3)
 	arkba4, ackba4 = HKDF(arkab3, akshared4, nil)
 	akenc4 = HKDF(nil, MAC(ackba4, nil), nil)
-	m4_d = AEAD_DEC(akenc4, e4, HASH(galongterm, gblongterm, gbe2))?
+	m4_d = AEAD_DEC(akenc4, n_e4, e4, HASH(galongterm, gblongterm, gbe2))?
 ]
 
 principal Alice[
@@ -130,16 +134,17 @@ principal Alice[
 	akshared5 = DH_KEX(gbe2, ae4)
 	arkab5, ackab5 = HKDF(arkba4, akshared5, nil)
 	akenc5 = HKDF(nil, MAC(ackab5, nil), nil)
-	e5 = AEAD_ENC(akenc5, m5, HASH(galongterm, gblongterm, gae4))
+	generates n_e5
+	e5 = AEAD_ENC(akenc5, n_e5, m5, HASH(galongterm, gblongterm, gae4))
 ]
 
-Alice -> Bob: gae4, e5
+Alice -> Bob: gae4, n_e5, e5
 
 principal Bob[
 	bkshared5 = DH_KEX(gae4, be2)
 	brkab5, bckab5 = HKDF(brkba4, bkshared5, nil)
 	bkenc5 = HKDF(nil, MAC(bckab5, nil), nil)
-	m5_d = AEAD_DEC(bkenc5, e5, HASH(galongterm, gblongterm, gae4))?
+	m5_d = AEAD_DEC(bkenc5, n_e5, e5, HASH(galongterm, gblongterm, gae4))?
 ]
 
 principal Bob[
@@ -148,16 +153,17 @@ principal Bob[
 	bkshared6 = DH_KEX(gae4, be3)
 	brkba6, bckba6 = HKDF(brkab5, bkshared6, nil)
 	bkenc6 = HKDF(nil, MAC(bckba6, nil), nil)
-	e6 = AEAD_ENC(bkenc6, m6, HASH(galongterm, gblongterm, gbe3))
+	generates n_e6
+	e6 = AEAD_ENC(bkenc6, n_e6, m6, HASH(galongterm, gblongterm, gbe3))
 ]
 
-Bob -> Alice: gbe3, e6
+Bob -> Alice: gbe3, n_e6, e6
 
 principal Alice[
 	akshared6 = DH_KEX(gbe3, ae4)
 	arkba6, ackba6 = HKDF(arkab5, akshared6, nil)
 	akenc6 = HKDF(nil, MAC(ackba6, nil), nil)
-	m6_d = AEAD_DEC(akenc6, e6, HASH(galongterm, gblongterm, gbe3))?
+	m6_d = AEAD_DEC(akenc6, n_e6, e6, HASH(galongterm, gblongterm, gbe3))?
 ]
 
 principal Alice[
@@ -166,16 +172,17 @@ principal Alice[
 	akshared7 = DH_KEX(gbe3, ae5)
 	arkab7, ackab7 = HKDF(arkba6, akshared7, nil)
 	akenc7 = HKDF(nil, MAC(ackab7, nil), nil)
-	e7 = AEAD_ENC(akenc7, m7, HASH(galongterm, gblongterm, gae5))
+	generates n_e7
+	e7 = AEAD_ENC(akenc7, n_e7, m7, HASH(galongterm, gblongterm, gae5))
 ]
 
-Alice -> Bob: gae5, e7
+Alice -> Bob: gae5, n_e7, e7
 
 principal Bob[
 	bkshared7 = DH_KEX(gae5, be3)
 	brkab7, bckab7 = HKDF(brkba6, bkshared7, nil)
 	bkenc7 = HKDF(nil, MAC(bckab7, nil), nil)
-	m7_d = AEAD_DEC(bkenc7, e7, HASH(galongterm, gblongterm, gae5))?
+	m7_d = AEAD_DEC(bkenc7, n_e7, e7, HASH(galongterm, gblongterm, gae5))?
 ]
 
 principal Bob[
@@ -184,16 +191,17 @@ principal Bob[
 	bkshared8 = DH_KEX(gae5, be4)
 	brkba8, bckba8 = HKDF(brkab7, bkshared8, nil)
 	bkenc8 = HKDF(nil, MAC(bckba8, nil), nil)
-	e8 = AEAD_ENC(bkenc8, m8, HASH(galongterm, gblongterm, gbe4))
+	generates n_e8
+	e8 = AEAD_ENC(bkenc8, n_e8, m8, HASH(galongterm, gblongterm, gbe4))
 ]
 
-Bob -> Alice: gbe4, e8
+Bob -> Alice: gbe4, n_e8, e8
 
 principal Alice[
 	akshared8 = DH_KEX(gbe4, ae5)
 	arkba8, ackba8 = HKDF(arkab7, akshared8, nil)
 	akenc8 = HKDF(nil, MAC(ackba8, nil), nil)
-	m8_d = AEAD_DEC(akenc8, e8, HASH(galongterm, gblongterm, gbe4))?
+	m8_d = AEAD_DEC(akenc8, n_e8, e8, HASH(galongterm, gblongterm, gbe4))?
 ]
 
 principal Alice[
@@ -202,16 +210,17 @@ principal Alice[
 	akshared9 = DH_KEX(gbe4, ae6)
 	arkab9, ackab9 = HKDF(arkba8, akshared9, nil)
 	akenc9 = HKDF(nil, MAC(ackab9, nil), nil)
-	e9 = AEAD_ENC(akenc9, m9, HASH(galongterm, gblongterm, gae6))
+	generates n_e9
+	e9 = AEAD_ENC(akenc9, n_e9, m9, HASH(galongterm, gblongterm, gae6))
 ]
 
-Alice -> Bob: gae6, e9
+Alice -> Bob: gae6, n_e9, e9
 
 principal Bob[
 	bkshared9 = DH_KEX(gae6, be4)
 	brkab9, bckab9 = HKDF(brkba8, bkshared9, nil)
 	bkenc9 = HKDF(nil, MAC(bckab9, nil), nil)
-	m9_d = AEAD_DEC(bkenc9, e9, HASH(galongterm, gblongterm, gae6))?
+	m9_d = AEAD_DEC(bkenc9, n_e9, e9, HASH(galongterm, gblongterm, gae6))?
 ]
 
 principal Bob[
@@ -220,16 +229,17 @@ principal Bob[
 	bkshared10 = DH_KEX(gae6, be5)
 	brkba10, bckba10 = HKDF(brkab9, bkshared10, nil)
 	bkenc10 = HKDF(nil, MAC(bckba10, nil), nil)
-	e10 = AEAD_ENC(bkenc10, m10, HASH(galongterm, gblongterm, gbe5))
+	generates n_e10
+	e10 = AEAD_ENC(bkenc10, n_e10, m10, HASH(galongterm, gblongterm, gbe5))
 ]
 
-Bob -> Alice: gbe5, e10
+Bob -> Alice: gbe5, n_e10, e10
 
 principal Alice[
 	akshared10 = DH_KEX(gbe5, ae6)
 	arkba10, ackba10 = HKDF(arkab9, akshared10, nil)
 	akenc10 = HKDF(nil, MAC(ackba10, nil), nil)
-	m10_d = AEAD_DEC(akenc10, e10, HASH(galongterm, gblongterm, gbe5))?
+	m10_d = AEAD_DEC(akenc10, n_e10, e10, HASH(galongterm, gblongterm, gbe5))?
 ]
 
 principal Alice[
@@ -238,16 +248,17 @@ principal Alice[
 	akshared11 = DH_KEX(gbe5, ae7)
 	arkab11, ackab11 = HKDF(arkba10, akshared11, nil)
 	akenc11 = HKDF(nil, MAC(ackab11, nil), nil)
-	e11 = AEAD_ENC(akenc11, m11, HASH(galongterm, gblongterm, gae7))
+	generates n_e11
+	e11 = AEAD_ENC(akenc11, n_e11, m11, HASH(galongterm, gblongterm, gae7))
 ]
 
-Alice -> Bob: gae7, e11
+Alice -> Bob: gae7, n_e11, e11
 
 principal Bob[
 	bkshared11 = DH_KEX(gae7, be5)
 	brkab11, bckab11 = HKDF(brkba10, bkshared11, nil)
 	bkenc11 = HKDF(nil, MAC(bckab11, nil), nil)
-	m11_d = AEAD_DEC(bkenc11, e11, HASH(galongterm, gblongterm, gae7))?
+	m11_d = AEAD_DEC(bkenc11, n_e11, e11, HASH(galongterm, gblongterm, gae7))?
 ]
 
 principal Bob[
@@ -256,16 +267,17 @@ principal Bob[
 	bkshared12 = DH_KEX(gae7, be6)
 	brkba12, bckba12 = HKDF(brkab11, bkshared12, nil)
 	bkenc12 = HKDF(nil, MAC(bckba12, nil), nil)
-	e12 = AEAD_ENC(bkenc12, m12, HASH(galongterm, gblongterm, gbe6))
+	generates n_e12
+	e12 = AEAD_ENC(bkenc12, n_e12, m12, HASH(galongterm, gblongterm, gbe6))
 ]
 
-Bob -> Alice: gbe6, e12
+Bob -> Alice: gbe6, n_e12, e12
 
 principal Alice[
 	akshared12 = DH_KEX(gbe6, ae7)
 	arkba12, ackba12 = HKDF(arkab11, akshared12, nil)
 	akenc12 = HKDF(nil, MAC(ackba12, nil), nil)
-	m12_d = AEAD_DEC(akenc12, e12, HASH(galongterm, gblongterm, gbe6))?
+	m12_d = AEAD_DEC(akenc12, n_e12, e12, HASH(galongterm, gblongterm, gbe6))?
 ]
 
 phase[1]

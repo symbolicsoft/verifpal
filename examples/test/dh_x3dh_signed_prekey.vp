@@ -39,17 +39,18 @@ principal Alice[
 	dh_two = DH_KEX(gb_ident, a_eph)
 	dh_three = DH_KEX(gb_prekey, a_eph)
 	master_a, _, _ = HKDF(nil, CONCAT(dh_one, dh_two, dh_three), nil)
-	sealed = AEAD_ENC(master_a, m, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(master_a, n_sealed, m, nil)
 ]
 
-Alice -> Bob: [ga_ident], ga_eph, sealed
+Alice -> Bob: [ga_ident], ga_eph, n_sealed, sealed
 
 principal Bob[
 	dh_one_b = DH_KEX(ga_ident, b_prekey)
 	dh_two_b = DH_KEX(ga_eph, b_ident)
 	dh_three_b = DH_KEX(ga_eph, b_prekey)
 	master_b, _, _ = HKDF(nil, CONCAT(dh_one_b, dh_two_b, dh_three_b), nil)
-	opened = AEAD_DEC(master_b, sealed, nil)
+	opened = AEAD_DEC(master_b, n_sealed, sealed, nil)
 	_ = HASH(opened)
 ]
 

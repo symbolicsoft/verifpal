@@ -41,15 +41,16 @@ principal Bob[
 	knows private m_bob
 	_ = SIGNVERIF(ga_ident, ga, sig_a)?
 	k_bob = DH_KEX(ga, b)
-	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bob, n_e_bob, m_bob, nil)
 ]
 
-Bob -> Alice: e_bob
+Bob -> Alice: n_e_bob, e_bob
 
 principal Alice[
 	_ = SIGNVERIF(gb_ident, gb, sig_b)?
 	k_alice = DH_KEX(gb, a)
-	got = AEAD_DEC(k_alice, e_bob, nil)?
+	got = AEAD_DEC(k_alice, n_e_bob, e_bob, nil)?
 	_ = HASH(got)
 ]
 

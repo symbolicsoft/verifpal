@@ -14,14 +14,15 @@ principal Alice[
 	knows private f1, f2, f3, f4, f5
 	knows private bundle_key
 	bundle = CONCAT(f1, f2, f3, f4, f5)
-	sealed = AEAD_ENC(bundle_key, bundle, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(bundle_key, n_sealed, bundle, nil)
 ]
 
-Alice -> Bob: sealed
+Alice -> Bob: n_sealed, sealed
 
 principal Bob[
 	knows private bundle_key
-	g1, g2, g3, g4, g5 = SPLIT(AEAD_DEC(bundle_key, sealed, nil))?
+	g1, g2, g3, g4, g5 = SPLIT(AEAD_DEC(bundle_key, n_sealed, sealed, nil))?
 	_ = HASH(g1, g2, g3, g4, g5)
 ]
 

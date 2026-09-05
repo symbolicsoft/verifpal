@@ -33,15 +33,16 @@ principal Server[
     knows private escoreA
     ss_serverA = DH_KEX(Alice_pub, server_priv)
     sym_key_serverA = HKDF(Alice_id, ss_serverA, nil)
-    encrypted_escoreA = AEAD_ENC(sym_key_serverA, escoreA, nil)
+    generates n_encrypted_escoreA
+    encrypted_escoreA = AEAD_ENC(sym_key_serverA, n_encrypted_escoreA, escoreA, nil)
 ]
 
-Server -> Alice: [encrypted_escoreA], server_pub
+Server -> Alice: [n_encrypted_escoreA], [encrypted_escoreA], server_pub
 
 principal Alice[
     ss_Alice = DH_KEX(server_pub, Alice_priv)
     sym_key_Alice = HKDF(Alice_id, ss_Alice, nil)
-    decrypted_escoreA = AEAD_DEC(sym_key_Alice, encrypted_escoreA, nil)?
+    decrypted_escoreA = AEAD_DEC(sym_key_Alice, n_encrypted_escoreA, encrypted_escoreA, nil)?
 ]
 
 Bob -> Server: Bob_pub
@@ -50,15 +51,16 @@ principal Server[
     knows private escoreB
     ss_serverB = DH_KEX(Bob_pub, server_priv)
     sym_key_serverB = HKDF(Bob_id, ss_serverB, nil)
-    encrypted_escoreB = AEAD_ENC(sym_key_serverB, escoreB, nil)
+    generates n_encrypted_escoreB
+    encrypted_escoreB = AEAD_ENC(sym_key_serverB, n_encrypted_escoreB, escoreB, nil)
 ]
 
-Server -> Bob: [encrypted_escoreB], server_pub
+Server -> Bob: [n_encrypted_escoreB], [encrypted_escoreB], server_pub
 
 principal Bob[
     ss_Bob = DH_KEX(server_pub, Bob_priv)
     sym_key_Bob = HKDF(Bob_id, ss_Bob, nil)
-    decrypted_escoreB = AEAD_DEC(sym_key_Bob, encrypted_escoreB, nil)?
+    decrypted_escoreB = AEAD_DEC(sym_key_Bob, n_encrypted_escoreB, encrypted_escoreB, nil)?
 ]
 
 queries[

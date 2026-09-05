@@ -40,10 +40,11 @@ principal Alice[
 	master = HASH(dh1, dh2, dh3)
 	rk, ck = HKDF(master, nil, nil)
 	generates msg
-	enc_msg = AEAD_ENC(ck, msg, ga_ident)
+	generates n_enc_msg
+	enc_msg = AEAD_ENC(ck, n_enc_msg, msg, ga_ident)
 ]
 
-Alice -> Bob: [ga_ident], [ga_eph], enc_msg
+Alice -> Bob: [ga_ident], [ga_eph], n_enc_msg, enc_msg
 
 principal Bob[
 	dh1_b = DH_KEX(ga_ident, b_signed)
@@ -51,7 +52,7 @@ principal Bob[
 	dh3_b = DH_KEX(ga_eph, b_signed)
 	master_b = HASH(dh1_b, dh2_b, dh3_b)
 	rk_b, ck_b = HKDF(master_b, nil, nil)
-	msg_b = AEAD_DEC(ck_b, enc_msg, ga_ident)?
+	msg_b = AEAD_DEC(ck_b, n_enc_msg, enc_msg, ga_ident)?
 ]
 
 queries[

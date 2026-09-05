@@ -8,14 +8,15 @@ principal Alice[
 	generates k
 	generates m
 	s1, s2, s3 = SHAMIR_SPLIT(k)
-	e = AEAD_ENC(k, m, nil)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
 ]
 
-Alice -> Bob: e, s1, s2
+Alice -> Bob: n_e, e, s1, s2
 
 principal Bob[
 	kk = SHAMIR_JOIN(s1, s2)
-	d = AEAD_DEC(kk, e, nil)?
+	d = AEAD_DEC(kk, n_e, e, nil)?
 ]
 
 queries[

@@ -237,11 +237,11 @@ pub(crate) fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState
 					.enumerate()
 					.all(|(i, a)| !vary.contains(&i) || derivable(a, ps, snapshot));
 			}
-			let exempt = forgeable_secret_position(p, ps, snapshot);
-			p.arguments
-				.iter()
-				.enumerate()
-				.all(|(i, a)| Some(i) == exempt || derivable(a, ps, snapshot))
+			let exempt_secret = forgeable_secret_position(p, ps, snapshot);
+			let by_reuse = crate::theory::forgeable_by_reuse(p, snapshot);
+			p.arguments.iter().enumerate().all(|(i, a)| {
+				Some(i) == exempt_secret || by_reuse.contains(&i) || derivable(a, ps, snapshot)
+			})
 		}
 	}
 }
@@ -308,7 +308,7 @@ pub(crate) fn contains_failed_check(v: &Value) -> bool {
 #[cfg(test)]
 mod tests {
 	use super::derivable;
-	use crate::primitive::{PRIM_ENC, PRIM_PUBKEY, PRIM_SIGN};
+	use crate::primitive::{PRIM_AEAD_ENC, PRIM_ENC, PRIM_PUBKEY, PRIM_SIGN};
 	use crate::testutil::*;
 	use crate::value::value_nil;
 
@@ -370,6 +370,37 @@ mod tests {
 			 derivation, but the validator cannot build it, so every proposal carrying it \
 			 is discarded and the rule never fires"
 		);
+	}
+
+	#[test]
+	fn derivable_forges_under_a_reused_nonce_without_the_key() {
+		let k = make_constant("drn_k");
+		let n = make_constant("drn_n");
+		let ad = make_constant("drn_ad");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("drn_m1"), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("drn_m2"), ad.clone()],
+			0,
+		);
+		let target = make_primitive(PRIM_AEAD_ENC, vec![k, n, value_nil(), ad.clone()], 0);
+		let mut confirmed = make_attacker_state(vec![e1.clone(), e2.clone(), ad.clone()]);
+		confirmed.reused = std::sync::Arc::new(vec![[e1.clone(), e2.clone()]]);
+		assert!(derivable(&target, &empty_state(), &confirmed));
+		assert!(!derivable(
+			&target,
+			&empty_state(),
+			&make_attacker_state(vec![e1.clone(), e2, ad.clone()])
+		));
+		assert!(!derivable(
+			&target,
+			&empty_state(),
+			&make_attacker_state(vec![e1, ad])
+		));
 	}
 
 	#[test]

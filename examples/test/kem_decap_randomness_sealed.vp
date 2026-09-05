@@ -25,10 +25,11 @@ principal Alice[
 	knows public ctx
 	generates r
 	ss, ct = KEM_ENCAP(ekb, r)
-	e = AEAD_ENC(ss, ctx, ctx)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, ctx, ctx)
 ]
 
-Alice -> Bob: ct, e
+Alice -> Bob: ct, n_e, e
 
 queries[
 	confidentiality? ss

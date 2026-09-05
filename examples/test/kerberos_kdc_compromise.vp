@@ -25,26 +25,29 @@ principal KDC[
 	knows private kdc_service_key
 	knows private kdc_client_key
 	generates session_key
-	ticket = AEAD_ENC(kdc_service_key, session_key, nil)
-	client_part = AEAD_ENC(kdc_client_key, session_key, nil)
+	generates n_ticket
+	ticket = AEAD_ENC(kdc_service_key, n_ticket, session_key, nil)
+	generates n_client_part
+	client_part = AEAD_ENC(kdc_client_key, n_client_part, session_key, nil)
 	leaks kdc_service_key
 ]
 
-KDC -> Client: ticket, client_part
+KDC -> Client: n_ticket, ticket, n_client_part, client_part
 
 principal Client[
 	knows private kdc_client_key
 	knows private request
-	got_session = AEAD_DEC(kdc_client_key, client_part, nil)?
-	authenticator = AEAD_ENC(got_session, request, nil)
+	got_session = AEAD_DEC(kdc_client_key, n_client_part, client_part, nil)?
+	generates n_authenticator
+	authenticator = AEAD_ENC(got_session, n_authenticator, request, nil)
 ]
 
-Client -> Service: ticket, authenticator
+Client -> Service: n_ticket, ticket, n_authenticator, authenticator
 
 principal Service[
 	knows private kdc_service_key
-	service_session = AEAD_DEC(kdc_service_key, ticket, nil)?
-	got_request = AEAD_DEC(service_session, authenticator, nil)?
+	service_session = AEAD_DEC(kdc_service_key, n_ticket, ticket, nil)?
+	got_request = AEAD_DEC(service_session, n_authenticator, authenticator, nil)?
 	_ = HASH(got_request)
 ]
 

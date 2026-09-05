@@ -30,22 +30,24 @@ Bob -> Alice: gb
 principal Alice[
 	knows private m_alice
 	k_alice = DH_KEX(gb, a)
-	e_alice = AEAD_ENC(k_alice, m_alice, nil)
+	generates n_e_alice
+	e_alice = AEAD_ENC(k_alice, n_e_alice, m_alice, nil)
 ]
 
-Alice -> Bob: e_alice
+Alice -> Bob: n_e_alice, e_alice
 
 principal Bob[
 	knows private m_bob
 	k_bob = DH_KEX(ga, b)
-	got_alice = AEAD_DEC(k_bob, e_alice, nil)?
-	e_bob = AEAD_ENC(k_bob, m_bob, nil)
+	got_alice = AEAD_DEC(k_bob, n_e_alice, e_alice, nil)?
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bob, n_e_bob, m_bob, nil)
 ]
 
-Bob -> Alice: e_bob
+Bob -> Alice: n_e_bob, e_bob
 
 principal Alice[
-	got_bob = AEAD_DEC(k_alice, e_bob, nil)?
+	got_bob = AEAD_DEC(k_alice, n_e_bob, e_bob, nil)?
 	_ = HASH(got_bob)
 ]
 

@@ -29,16 +29,17 @@ principal Initiator[
 	ge = PUBKEY(e)
 	es = DH_KEX(grs, e)
 	k_init, _, _ = HKDF(protocol_name, es, ge)
-	sealed = AEAD_ENC(k_init, payload, ge)
+	generates n_sealed
+	sealed = AEAD_ENC(k_init, n_sealed, payload, ge)
 ]
 
-Initiator -> Responder: ge, sealed
+Initiator -> Responder: ge, n_sealed, sealed
 
 principal Responder[
 	knows public protocol_name
 	se = DH_KEX(ge, rs)
 	k_resp, _, _ = HKDF(protocol_name, se, ge)
-	opened = AEAD_DEC(k_resp, sealed, ge)?
+	opened = AEAD_DEC(k_resp, n_sealed, sealed, ge)?
 	_ = HASH(opened)
 ]
 

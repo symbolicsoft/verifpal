@@ -43,18 +43,20 @@ Bob -> Alice: hik_gb
 
 principal Alice[
 	hik_ka = DH_KEX(hik_gb, hik_a)
-	hik_leak = AEAD_ENC(hik_ka, hik_na, hik_label)
+	generates n_hik_leak
+	hik_leak = AEAD_ENC(hik_ka, n_hik_leak, hik_na, hik_label)
 	hik_e = ENC(hik_ka, hik_na)
-	hik_c = AEAD_ENC(hik_na, hik_msg, nil)
+	generates n_hik_c
+	hik_c = AEAD_ENC(hik_na, n_hik_c, hik_msg, nil)
 ]
 
-Alice -> Charlie: hik_leak
-Alice -> Bob: hik_e, hik_c
+Alice -> Charlie: n_hik_leak, hik_leak
+Alice -> Bob: hik_e, n_hik_c, hik_c
 
 principal Bob[
 	hik_kb = DH_KEX(hik_ga, hik_b)
 	hik_n = DEC(hik_kb, hik_e)
-	hik_p = AEAD_DEC(hik_n, hik_c, nil)?
+	hik_p = AEAD_DEC(hik_n, n_hik_c, hik_c, nil)?
 	hik_h = HASH(hik_p)
 ]
 

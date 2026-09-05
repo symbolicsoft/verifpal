@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at --sessions 1 and at 2 — Alice seals three messages under
+// one key and one nonce. The first two give the attacker the authentication
+// key for that pair, so it can tag a plaintext of its own choosing under
+// (k, n, ad) and Bob's checked decryption of the third accepts it: an origin
+// failure with no key ever leaked. The attacker learns m1, m2 and m3 as well,
+// but the query is about what Bob accepts. At two sessions the replay of the
+// other run's e3 is the same a1 by another route; one session pins the
+// forgery.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private n
+	knows public ad
+	generates m1, m2, m3
+	e1 = AEAD_ENC(k, n, m1, ad)
+	e2 = AEAD_ENC(k, n, m2, ad)
+	e3 = AEAD_ENC(k, n, m3, ad)
+]
+
+Alice -> Bob: e1, e2, e3
+
+principal Bob[
+	knows private k
+	knows private n
+	knows public ad
+	d3 = AEAD_DEC(k, n, e3, ad)?
+	h = HASH(d3)
+]
+
+queries[
+	authentication? Alice -> Bob: e3
+]

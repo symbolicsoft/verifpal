@@ -40,18 +40,20 @@ principal Alice[
 	eph_sig = SIGN(a_ident, g_signed)
 	k_signed = DH_KEX(gb_signed, eph_signed)
 	k_bare = DH_KEX(gb_bare, eph_bare)
-	e_signed = AEAD_ENC(k_signed, m_signed, nil)
-	e_bare = AEAD_ENC(k_bare, m_bare, nil)
+	generates n_e_signed
+	e_signed = AEAD_ENC(k_signed, n_e_signed, m_signed, nil)
+	generates n_e_bare
+	e_bare = AEAD_ENC(k_bare, n_e_bare, m_bare, nil)
 ]
 
-Alice -> Bob: [ga_ident], g_signed, eph_sig, g_bare, e_signed, e_bare
+Alice -> Bob: [ga_ident], g_signed, eph_sig, g_bare, n_e_signed, e_signed, n_e_bare, e_bare
 
 principal Bob[
 	_ = SIGNVERIF(ga_ident, g_signed, eph_sig)?
 	kb_signed = DH_KEX(g_signed, b_signed)
 	kb_bare = DH_KEX(g_bare, b_bare)
-	d_signed = AEAD_DEC(kb_signed, e_signed, nil)?
-	d_bare = AEAD_DEC(kb_bare, e_bare, nil)?
+	d_signed = AEAD_DEC(kb_signed, n_e_signed, e_signed, nil)?
+	d_bare = AEAD_DEC(kb_bare, n_e_bare, e_bare, nil)?
 	_ = HASH(d_signed, d_bare)
 ]
 

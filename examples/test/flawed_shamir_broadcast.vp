@@ -19,14 +19,15 @@ principal Dealer[
 	generates vault_key
 	share_one, share_two, share_three = SHAMIR_SPLIT(vault_key)
 	knows private archive
-	sealed = AEAD_ENC(vault_key, archive, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(vault_key, n_sealed, archive, nil)
 ]
 
-Dealer -> Bob: share_one, share_two, share_three, sealed
+Dealer -> Bob: share_one, share_two, share_three, n_sealed, sealed
 
 principal Bob[
 	rejoined = SHAMIR_JOIN(share_one, share_two)
-	got = AEAD_DEC(rejoined, sealed, nil)?
+	got = AEAD_DEC(rejoined, n_sealed, sealed, nil)?
 	_ = HASH(got)
 ]
 

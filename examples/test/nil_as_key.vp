@@ -18,18 +18,21 @@ attacker[passive]
 principal Alice[
 	knows private real_key
 	knows private m_nil, m_key
-	e_nil = AEAD_ENC(nil, m_nil, nil)
-	e_key = AEAD_ENC(real_key, m_key, nil)
-	nested = AEAD_ENC(nil, e_key, nil)
+	generates n_e_nil
+	e_nil = AEAD_ENC(nil, n_e_nil, m_nil, nil)
+	generates n_e_key
+	e_key = AEAD_ENC(real_key, n_e_key, m_key, nil)
+	generates n_nested
+	nested = AEAD_ENC(nil, n_nested, e_key, nil)
 ]
 
-Alice -> Bob: e_nil, nested
+Alice -> Bob: n_e_nil, e_nil, n_e_key, n_nested, nested
 
 principal Bob[
 	knows private real_key
-	d_nil = AEAD_DEC(nil, e_nil, nil)?
-	inner = AEAD_DEC(nil, nested, nil)?
-	d_key = AEAD_DEC(real_key, inner, nil)?
+	d_nil = AEAD_DEC(nil, n_e_nil, e_nil, nil)?
+	inner = AEAD_DEC(nil, n_nested, nested, nil)?
+	d_key = AEAD_DEC(real_key, n_e_key, inner, nil)?
 	_ = HASH(d_nil, d_key)
 ]
 

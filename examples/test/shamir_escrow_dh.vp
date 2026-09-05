@@ -30,11 +30,12 @@ Bob -> Alice: gb
 principal Alice[
 	knows private minutes
 	session = DH_KEX(gb, a)
-	record = AEAD_ENC(session, minutes, nil)
+	generates n_record
+	record = AEAD_ENC(session, n_record, minutes, nil)
 	escrow_one, escrow_two, escrow_three = SHAMIR_SPLIT(session)
 ]
 
-Alice -> Bob: record
+Alice -> Bob: n_record, record
 Alice -> EscrowOne: escrow_one
 Alice -> EscrowTwo: escrow_two
 Alice -> EscrowThree: escrow_three

@@ -145,10 +145,11 @@ mod tests {
 		let other = make_constant("rwf_other");
 		let m = make_constant("rwf_m");
 		let ad = make_constant("rwf_ad");
-		let sealed = make_primitive(PRIM_AEAD_ENC, vec![k, m, ad.clone()], 0);
+		let n = make_constant("rwf_n");
+		let sealed = make_primitive(PRIM_AEAD_ENC, vec![k, n.clone(), m, ad.clone()], 0);
 		let dec = Value::Primitive(Arc::new(Primitive {
 			id: PRIM_AEAD_DEC,
-			arguments: vec![other, sealed, ad],
+			arguments: vec![other, n, sealed, ad],
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),

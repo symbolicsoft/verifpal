@@ -64,10 +64,11 @@ principal Sender[
 	// struct of §5.1.
 	ks_context = CONCAT(mode_base, HASH(nil), HASH(info))
 	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
-	ct = AEAD_ENC(key, pt, aad)
+	generates n_ct
+	ct = AEAD_ENC(key, n_ct, pt, aad)
 ]
 
-Sender -> Recipient: kem_enc, ct
+Sender -> Recipient: kem_enc, n_ct, ct
 
 principal Recipient[
 	knows public info, aad, l_kem, mode_base
@@ -78,7 +79,7 @@ principal Recipient[
 	r_shared_secret = HKDF(nil, r_dh, r_kem_context)
 	r_ks_context = CONCAT(mode_base, HASH(nil), HASH(info))
 	r_key, r_base_nonce, r_exporter_secret = HKDF(r_shared_secret, nil, r_ks_context)
-	r_pt = AEAD_DEC(r_key, ct, aad)?
+	r_pt = AEAD_DEC(r_key, n_ct, ct, aad)?
 ]
 
 queries[

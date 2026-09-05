@@ -39,14 +39,15 @@ Requester -> Signer: gq
 
 principal Signer[
 	k1 = HKDF(nil, DH_KEX(gq, y), nil)
-	env1 = AEAD_ENC(k1, sig, c_ad)
+	generates n_env1
+	env1 = AEAD_ENC(k1, n_env1, sig, c_ad)
 ]
 
-Signer -> Requester: gy, env1
+Signer -> Requester: gy, n_env1, env1
 
 principal Requester[
 	k1r = HKDF(nil, DH_KEX(gy, q), nil)
-	sig_r = AEAD_DEC(k1r, env1, c_ad)?
+	sig_r = AEAD_DEC(k1r, n_env1, env1, c_ad)?
 ]
 
 principal Verifier[
@@ -60,21 +61,23 @@ Verifier -> Signer: gx
 
 principal Signer[
 	k2 = HKDF(nil, DH_KEX(gx, y), nil)
-	env2 = AEAD_ENC(k2, CONCAT(gs, sig), c_ad)
+	generates n_env2
+	env2 = AEAD_ENC(k2, n_env2, CONCAT(gs, sig), c_ad)
 ]
 
-Signer -> Verifier: gy, env2
+Signer -> Verifier: gy, n_env2, env2
 
 principal Verifier[
 	k2v = HKDF(nil, DH_KEX(gy, x), nil)
-	d2 = AEAD_DEC(k2v, env2, c_ad)?
+	d2 = AEAD_DEC(k2v, n_env2, env2, c_ad)?
 	iss_v, sig_v = SPLIT(d2)?
 	_ = ASSERT(iss_v, gs)?
 	_ = SIGNVERIF(iss_v, msg, sig_v)?
-	out = AEAD_ENC(k2v, secret, c_ad)
+	generates n_out
+	out = AEAD_ENC(k2v, n_out, secret, c_ad)
 ]
 
-Verifier -> Requester: out
+Verifier -> Requester: n_out, out
 
 queries[
 	confidentiality? secret

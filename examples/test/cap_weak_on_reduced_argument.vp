@@ -17,14 +17,15 @@ principal Alice[
 	knows private m
 	knows private n
 	x, y = SPLIT(CONCAT(m, n))
-	e = AEAD_ENC[weak](k, x, nil)
+	generates n_e
+	e = AEAD_ENC[weak](k, n_e, x, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	knows private k
-	d = AEAD_DEC(k, e, nil)?
+	d = AEAD_DEC(k, n_e, e, nil)?
 ]
 
 queries[

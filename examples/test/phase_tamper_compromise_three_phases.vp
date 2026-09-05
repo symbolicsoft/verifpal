@@ -15,10 +15,11 @@ principal Alice[
 	generates e, m
 	ge = PUBKEY(e)
 	k = HASH(DH_KEX(gs, e), DH_KEX(gb, e))
-	c = AEAD_ENC(k, m, nil)
+	generates n_c
+	c = AEAD_ENC(k, n_c, m, nil)
 ]
 
-Alice -> Bob: ge, c
+Alice -> Bob: ge, n_c, c
 
 phase[1]
 

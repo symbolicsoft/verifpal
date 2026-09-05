@@ -22,13 +22,16 @@ principal Alice[
 	branch_lost = HASH(root, label_lost)
 	branch_kept = HASH(root, label_kept)
 	child_lost = HASH(branch_lost, label_child)
-	e_lost = AEAD_ENC(branch_lost, m_lost, nil)
-	e_child = AEAD_ENC(child_lost, m_child, nil)
-	e_kept = AEAD_ENC(branch_kept, m_kept, nil)
+	generates n_e_lost
+	e_lost = AEAD_ENC(branch_lost, n_e_lost, m_lost, nil)
+	generates n_e_child
+	e_child = AEAD_ENC(child_lost, n_e_child, m_child, nil)
+	generates n_e_kept
+	e_kept = AEAD_ENC(branch_kept, n_e_kept, m_kept, nil)
 	leaks branch_lost
 ]
 
-Alice -> Bob: e_lost, e_child, e_kept
+Alice -> Bob: n_e_lost, e_lost, n_e_child, e_child, n_e_kept, e_kept
 
 principal Bob[
 	_ = HASH(e_lost, e_child, e_kept)

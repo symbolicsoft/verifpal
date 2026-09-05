@@ -166,14 +166,7 @@ fn unwrapped_by(v: &Value) -> Option<ValueId> {
 	let Value::Primitive(p) = v else {
 		return None;
 	};
-	let at = match primitive_get(p.id)
-		.ok()
-		.and_then(|spec| spec.rewrite.as_ref())
-	{
-		Some(rule) => rule.from,
-		None if p.id == crate::primitive::PRIM_SPLIT => 0,
-		None => return None,
-	};
+	let at = crate::primitive::primitive_unwraps(p.id)?;
 	match p.arguments.get(at) {
 		Some(Value::Constant(c)) => Some(c.id),
 		_ => None,
@@ -313,6 +306,7 @@ pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Ar
 		mutation_records: Arc::new(mutation_records),
 		derivations: Arc::new(derivations),
 		alternates: Arc::new(alternates),
+		reused: Arc::clone(&attacker.reused),
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 	}))
@@ -1240,6 +1234,7 @@ mod tests {
 			})]),
 			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
 			alternates: std::sync::Arc::new(vec![Vec::new()]),
+			reused: std::sync::Arc::new(vec![]),
 		}
 	}
 
@@ -1329,12 +1324,14 @@ mod tests {
 			principal Bob[\n\
 			knows private ctl_secret\n\
 			generates ctl_kk\n\
-			ctl_c = AEAD_ENC(ctl_kk, ctl_secret, nil)\n\
+			knows private ctl_n\n\
+			ctl_c = AEAD_ENC(ctl_kk, ctl_n, ctl_secret, nil)\n\
 			]\n\
 			Bob -> Alice: ctl_c\n\
 			principal Alice[\n\
 			knows private ctl_kk2\n\
-			ctl_m = AEAD_DEC(ctl_kk2, ctl_c, nil)\n\
+			knows private ctl_n\n\
+			ctl_m = AEAD_DEC(ctl_kk2, ctl_n, ctl_c, nil)\n\
 			]\n\
 			queries[\n\
 			confidentiality? ctl_secret\n\

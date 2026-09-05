@@ -18,27 +18,30 @@ attacker[passive]
 principal Alice[
 	knows private gateway_key, direct_key
 	knows private m_forwarded, m_direct
-	e_forwarded = AEAD_ENC(gateway_key, m_forwarded, nil)
-	e_direct = AEAD_ENC(direct_key, m_direct, nil)
+	generates n_e_forwarded
+	e_forwarded = AEAD_ENC(gateway_key, n_e_forwarded, m_forwarded, nil)
+	generates n_e_direct
+	e_direct = AEAD_ENC(direct_key, n_e_direct, m_direct, nil)
 ]
 
-Alice -> Gateway: e_forwarded
-Alice -> Dana: e_direct
+Alice -> Gateway: n_e_forwarded, e_forwarded
+Alice -> Dana: n_e_direct, e_direct
 
 principal Gateway[
 	knows private gateway_key
 	knows private onward_key
-	opened = AEAD_DEC(gateway_key, e_forwarded, nil)?
-	resealed = AEAD_ENC(onward_key, opened, nil)
+	opened = AEAD_DEC(gateway_key, n_e_forwarded, e_forwarded, nil)?
+	generates n_resealed
+	resealed = AEAD_ENC(onward_key, n_resealed, opened, nil)
 	leaks onward_key
 ]
 
-Gateway -> Dana: resealed
+Gateway -> Dana: n_resealed, resealed
 
 principal Dana[
 	knows private onward_key, direct_key
-	got_forwarded = AEAD_DEC(onward_key, resealed, nil)?
-	got_direct = AEAD_DEC(direct_key, e_direct, nil)?
+	got_forwarded = AEAD_DEC(onward_key, n_resealed, resealed, nil)?
+	got_direct = AEAD_DEC(direct_key, n_e_direct, e_direct, nil)?
 	_ = HASH(got_forwarded, got_direct)
 ]
 

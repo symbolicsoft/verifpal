@@ -20,15 +20,16 @@ principal Server[
 	generates content_key
 	server_pk = PUBKEY(server_sk)
 	banner_sig = SIGN(server_sk, CONCAT(server_name, version))
-	sealed = AEAD_ENC(content_key, payload, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(content_key, n_sealed, payload, nil)
 ]
 
-Server -> Client: [server_pk], banner_sig, content_key, sealed
+Server -> Client: [server_pk], banner_sig, content_key, n_sealed, sealed
 
 principal Client[
 	knows public server_name, version
 	_ = SIGNVERIF(server_pk, CONCAT(server_name, version), banner_sig)?
-	got = AEAD_DEC(content_key, sealed, nil)?
+	got = AEAD_DEC(content_key, n_sealed, sealed, nil)?
 	_ = HASH(got)
 ]
 

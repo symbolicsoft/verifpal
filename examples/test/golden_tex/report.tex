@@ -324,7 +324,7 @@ Query & Verdict & Scope of the verdict & Line \\
 \item \vpactor{Attacker} is handed \vpterm{\vpconst{b}} by a leaks declaration.
 \item \vpactor{Attacker} obtains \vpterm{\vpconst{ga}} on the wire.
 \item \vpactor{Attacker} replaces \vpterm{\vpconst{ga}} with \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})}.\vpon{Alice}{Bob}
-\item \vpactor{Bob}'s \vpterm{\vpprim{AEAD}{DEC}\vpchecked{}(\vpconst{k},\vpsep \vpconst{e},\vpsep \vpconst{ad})} check passes on an attacker-controlled key.
+\item \vpactor{Bob}'s \vpterm{\vpprim{AEAD}{DEC}\vpchecked{}(\vpconst{k},\vpsep \vpconst{n},\vpsep \vpconst{e},\vpsep \vpconst{ad})} check passes on an attacker-controlled key.
 \item \vpactor{Alice}'s SIGNVERIF check is defeated, accepting \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})}.
 \item \vpactor{Attacker} computes \vpterm{\vpprim{DH}{KEX}(\vpprimo{PUBKEY}(\vpconst{a}),\vpsep \vpconst{nil})}, obtaining k.
 \item \vpactor{Attacker} decrypts \vpterm{\vpconst{e}}, obtaining m.
@@ -361,7 +361,8 @@ principal Alice[
 	generates a
 	ga = PUBKEY(a)
 	knows private m
-	e = AEAD_ENC(k, m, ad)
+	knows private n
+	e = AEAD_ENC(k, n, m, ad)
 ]
 
 Alice -> Bob: [ga], e
@@ -370,7 +371,7 @@ phase[1]
 
 principal Bob[
 	leaks b
-	d = AEAD_DEC(k, e, ad)?
+	d = AEAD_DEC(k, n, e, ad)?
 ]
 
 queries[

@@ -19,10 +19,11 @@ principal Alice[
 	generates secret_s
 	share_a, share_b, share_c = SHAMIR_SPLIT(secret_s)
 	knows private cargo
-	sealed = AEAD_ENC(secret_s, cargo, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(secret_s, n_sealed, cargo, nil)
 ]
 
-Alice -> Bob: share_a, sealed
+Alice -> Bob: share_a, n_sealed, sealed
 
 principal Bob[
 	digest_b = HASH(share_a, sealed)

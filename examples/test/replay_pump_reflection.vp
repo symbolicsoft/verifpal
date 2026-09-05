@@ -34,19 +34,21 @@ attacker[active]
 principal Alice[
 	knows private k
 	generates m
-	e1 = AEAD_ENC(k, m, nil)
+	generates n_e1
+	e1 = AEAD_ENC(k, n_e1, m, nil)
 ]
 
-Alice -> Bob: e1
+Alice -> Bob: n_e1, e1
 
 principal Bob[
 	knows private k
-	d = AEAD_DEC(k, e1, nil)?
+	d = AEAD_DEC(k, n_e1, e1, nil)?
 	h = HASH(d)
-	e2 = AEAD_ENC(k, h, nil)
+	generates n_e2
+	e2 = AEAD_ENC(k, n_e2, h, nil)
 ]
 
-Bob -> Alice: e2
+Bob -> Alice: n_e2, e2
 
 queries[
 	confidentiality? m

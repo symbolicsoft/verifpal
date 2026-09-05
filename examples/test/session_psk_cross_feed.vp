@@ -22,14 +22,15 @@ attacker[active]
 principal Alice[
 	knows private psk
 	generates m
-	e = AEAD_ENC(psk, m, nil)
+	generates n_e
+	e = AEAD_ENC(psk, n_e, m, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	knows private psk
-	d = AEAD_DEC(psk, e, nil)?
+	d = AEAD_DEC(psk, n_e, e, nil)?
 ]
 
 queries[

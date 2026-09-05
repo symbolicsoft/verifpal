@@ -9,21 +9,24 @@ principal Alice[
 	ck1, mk1 = HKDF(root_key, nil, nil)
 	ck2, mk2 = HKDF(ck1, nil, nil)
 	ck3, mk3 = HKDF(ck2, nil, nil)
-	e1 = AEAD_ENC(mk1, m1, nil)
-	e2 = AEAD_ENC(mk2, m2, nil)
-	e3 = AEAD_ENC(mk3, m3, nil)
+	generates n_e1
+	e1 = AEAD_ENC(mk1, n_e1, m1, nil)
+	generates n_e2
+	e2 = AEAD_ENC(mk2, n_e2, m2, nil)
+	generates n_e3
+	e3 = AEAD_ENC(mk3, n_e3, m3, nil)
 ]
 
-Alice -> Bob: e1, e2, e3
+Alice -> Bob: n_e1, e1, n_e2, e2, n_e3, e3
 
 principal Bob[
 	knows private root_key
 	ck1_b, mk1_b = HKDF(root_key, nil, nil)
 	ck2_b, mk2_b = HKDF(ck1_b, nil, nil)
 	ck3_b, mk3_b = HKDF(ck2_b, nil, nil)
-	m1_b = AEAD_DEC(mk1_b, e1, nil)?
-	m2_b = AEAD_DEC(mk2_b, e2, nil)?
-	m3_b = AEAD_DEC(mk3_b, e3, nil)?
+	m1_b = AEAD_DEC(mk1_b, n_e1, e1, nil)?
+	m2_b = AEAD_DEC(mk2_b, n_e2, e2, nil)?
+	m3_b = AEAD_DEC(mk3_b, n_e3, e3, nil)?
 ]
 
 queries[

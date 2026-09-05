@@ -31,11 +31,13 @@ principal Alice[
 	raw = DH_KEX(gb, a)
 	k_hybrid, _, _ = HKDF(psk, raw, info)
 	k_bare, _, _ = HKDF(nil, raw, info)
-	e_hybrid = AEAD_ENC(k_hybrid, m_hybrid, nil)
-	e_bare = AEAD_ENC(k_bare, m_bare, nil)
+	generates n_e_hybrid
+	e_hybrid = AEAD_ENC(k_hybrid, n_e_hybrid, m_hybrid, nil)
+	generates n_e_bare
+	e_bare = AEAD_ENC(k_bare, n_e_bare, m_bare, nil)
 ]
 
-Alice -> Bob: ga, e_hybrid, e_bare
+Alice -> Bob: ga, n_e_hybrid, e_hybrid, n_e_bare, e_bare
 
 principal Bob[
 	knows private psk
@@ -43,8 +45,8 @@ principal Bob[
 	raw_b = DH_KEX(ga, b)
 	kb_hybrid, _, _ = HKDF(psk, raw_b, info)
 	kb_bare, _, _ = HKDF(nil, raw_b, info)
-	d_hybrid = AEAD_DEC(kb_hybrid, e_hybrid, nil)
-	d_bare = AEAD_DEC(kb_bare, e_bare, nil)
+	d_hybrid = AEAD_DEC(kb_hybrid, n_e_hybrid, e_hybrid, nil)
+	d_bare = AEAD_DEC(kb_bare, n_e_bare, e_bare, nil)
 	_ = HASH(d_hybrid, d_bare)
 ]
 

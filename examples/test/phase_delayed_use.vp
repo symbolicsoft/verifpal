@@ -18,11 +18,13 @@ attacker[passive]
 principal Alice[
 	knows private k_lost, k_held
 	knows private m_lost, m_held
-	e_lost = AEAD_ENC(k_lost, m_lost, nil)
-	e_held = AEAD_ENC(k_held, m_held, nil)
+	generates n_e_lost
+	e_lost = AEAD_ENC(k_lost, n_e_lost, m_lost, nil)
+	generates n_e_held
+	e_held = AEAD_ENC(k_held, n_e_held, m_held, nil)
 ]
 
-Alice -> Bob: e_lost, e_held
+Alice -> Bob: n_e_lost, e_lost, n_e_held, e_held
 
 phase[1]
 
@@ -34,8 +36,8 @@ phase[2]
 
 principal Bob[
 	knows private k_lost, k_held
-	d_lost = AEAD_DEC(k_lost, e_lost, nil)?
-	d_held = AEAD_DEC(k_held, e_held, nil)?
+	d_lost = AEAD_DEC(k_lost, n_e_lost, e_lost, nil)?
+	d_held = AEAD_DEC(k_held, n_e_held, e_held, nil)?
 	_ = HASH(d_lost, d_held)
 ]
 

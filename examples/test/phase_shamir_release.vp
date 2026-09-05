@@ -20,11 +20,13 @@ principal Dealer[
 	open_one, open_two, open_three = SHAMIR_SPLIT(secret_open)
 	kept_one, kept_two, kept_three = SHAMIR_SPLIT(secret_kept)
 	knows private cargo_open, cargo_kept
-	sealed_open = AEAD_ENC(secret_open, cargo_open, nil)
-	sealed_kept = AEAD_ENC(secret_kept, cargo_kept, nil)
+	generates n_sealed_open
+	sealed_open = AEAD_ENC(secret_open, n_sealed_open, cargo_open, nil)
+	generates n_sealed_kept
+	sealed_kept = AEAD_ENC(secret_kept, n_sealed_kept, cargo_kept, nil)
 ]
 
-Dealer -> Bob: sealed_open, sealed_kept
+Dealer -> Bob: n_sealed_open, sealed_open, n_sealed_kept, sealed_kept
 
 principal Bob[
 	_ = HASH(sealed_open, sealed_kept)

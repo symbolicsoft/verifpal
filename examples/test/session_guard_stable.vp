@@ -31,17 +31,19 @@ principal Alice[
 	ga_open = PUBKEY(a_open)
 	k_sealed = DH_KEX(gb_sealed, a_sealed)
 	k_open = DH_KEX(gb_open, a_open)
-	e_sealed = AEAD_ENC(k_sealed, m_sealed, nil)
-	e_open = AEAD_ENC(k_open, m_open, nil)
+	generates n_e_sealed
+	e_sealed = AEAD_ENC(k_sealed, n_e_sealed, m_sealed, nil)
+	generates n_e_open
+	e_open = AEAD_ENC(k_open, n_e_open, m_open, nil)
 ]
 
-Alice -> Bob: [ga_sealed], ga_open, e_sealed, e_open
+Alice -> Bob: [ga_sealed], ga_open, n_e_sealed, e_sealed, n_e_open, e_open
 
 principal Bob[
 	kb_sealed = DH_KEX(ga_sealed, b_sealed)
 	kb_open = DH_KEX(ga_open, b_open)
-	d_sealed = AEAD_DEC(kb_sealed, e_sealed, nil)?
-	d_open = AEAD_DEC(kb_open, e_open, nil)?
+	d_sealed = AEAD_DEC(kb_sealed, n_e_sealed, e_sealed, nil)?
+	d_open = AEAD_DEC(kb_open, n_e_open, e_open, nil)?
 	_ = HASH(d_sealed, d_open)
 ]
 

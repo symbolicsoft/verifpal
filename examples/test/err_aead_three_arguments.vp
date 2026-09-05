@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: error — the pre-nonce spelling. The arity error names the
+// signature and a help line says the second argument is now the nonce, so
+// a model written for an older Verifpal explains its own fix.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public ad
+	e = AEAD_ENC(k, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, e, ad)?
+]
+
+queries[
+	confidentiality? m
+]

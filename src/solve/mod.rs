@@ -163,7 +163,7 @@ fn solve_principal(
 		if ctx.all_resolved() || ctx.cancelled() {
 			return Ok(());
 		}
-		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, Some(honest));
+		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
 		if !refined.var_slots.is_empty() {
 			solve_with(
 				ctx,
@@ -182,8 +182,8 @@ fn solve_principal(
 	Ok(())
 }
 
-fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<usize> {
-	let mut out: Vec<usize> = Vec::new();
+fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
+	let mut out: Vec<Vec<usize>> = Vec::new();
 	for term in &sym.terms {
 		collect_blocking_slots(term, &mut out);
 	}
@@ -192,7 +192,7 @@ fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<usize> {
 	out
 }
 
-fn collect_blocking_slots(v: &Value, out: &mut Vec<usize>) {
+fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>) {
 	let Value::Primitive(p) = v else {
 		return;
 	};
@@ -200,10 +200,21 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<usize>) {
 		.ok()
 		.and_then(|s| s.rewrite.as_ref())
 		&& !crate::theory::can_rewrite(p).0
-		&& let Some(Value::Constant(c)) = p.arguments.get(rule.from)
-		&& vars::is_slot_var_id(c.id)
 	{
-		out.push(vars::slot_of_var_id(c.id));
+		let mut group = Vec::new();
+		let positions = std::iter::once(rule.from).chain(rule.matching.iter().map(|(o, _)| *o));
+		for position in positions {
+			if let Some(Value::Constant(c)) = p.arguments.get(position)
+				&& vars::is_slot_var_id(c.id)
+			{
+				group.push(vars::slot_of_var_id(c.id));
+			}
+		}
+		group.sort();
+		group.dedup();
+		if !group.is_empty() {
+			out.push(group);
+		}
 	}
 	for a in &p.arguments {
 		collect_blocking_slots(a, out);
@@ -339,7 +350,61 @@ fn propose(
 		proposals.extend(distinguished);
 	}
 
+	let (replays, others): (Vec<Substitution>, Vec<Substitution>) = proposals
+		.into_iter()
+		.partition(|proposal| sibling_replay(km, ps, sym, proposal));
+	let mut proposals = others;
+	match pass {
+		Pass::Targeted => {
+			ctx.defer_replays(
+				ps.id,
+				replays
+					.into_iter()
+					.map(|replay| replay.into_iter().collect())
+					.collect(),
+			);
+		}
+		Pass::Constructed => {
+			proposals.extend(replays);
+			proposals.extend(
+				ctx.take_deferred_replays(ps.id)
+					.into_iter()
+					.map(|bindings| bindings.into_iter().collect::<Substitution>()),
+			);
+		}
+	}
 	proposals
+}
+
+fn sibling_replay(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+) -> bool {
+	let mut slots = 0usize;
+	for (id, value) in proposal.iter() {
+		if !vars::is_slot_var_id(*id) {
+			continue;
+		}
+		let slot = vars::slot_of_var_id(*id);
+		let Some(meta) = ps.meta.get(slot) else {
+			return false;
+		};
+		let installed = match sym.var_terms.get(slot) {
+			Some(Some(term)) => vars::apply(term, proposal),
+			_ => value.clone(),
+		};
+		let siblings = crate::query::session_sibling_values(&meta.constant, km);
+		if !siblings
+			.iter()
+			.any(|sibling| sibling.equivalent(&installed, true))
+		{
+			return false;
+		}
+		slots += 1;
+	}
+	slots > 0
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -362,6 +427,10 @@ fn dispose(
 	for proposal in dedupe(proposals) {
 		if ctx.all_resolved() || ctx.cancelled() {
 			break;
+		}
+		let proposal = leave_honest_slots(km, ps, sym, proposal);
+		if proposal.is_empty() {
+			continue;
 		}
 		let signature = install_signature(sym, &proposal);
 		let key = signature_hash(&signature);
@@ -611,6 +680,41 @@ fn fill_free_positions(
 			}),
 		_ => false,
 	}
+}
+
+fn leave_honest_slots(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: Substitution,
+) -> Substitution {
+	let mut dropped: Vec<ValueId> = Vec::new();
+	for &slot in &sym.var_slots {
+		let id = vars::attacker_var_id(slot);
+		let Some(term) = &sym.var_terms[slot] else {
+			continue;
+		};
+		if !proposal.contains_key(&id) || slot >= ps.values.len() {
+			continue;
+		}
+		let ground = vars::ground_free(&vars::apply(term, &proposal));
+		if vars::contains_var(&ground) || crate::reexec::attacker_authored(&ground, slot, km, ps) {
+			continue;
+		}
+		let referenced = proposal
+			.iter()
+			.any(|(other, value)| *other != id && vars::occurs(id, value, &proposal));
+		if !referenced {
+			dropped.push(id);
+		}
+	}
+	if dropped.is_empty() {
+		return proposal;
+	}
+	proposal
+		.into_iter()
+		.filter(|(id, _)| !dropped.contains(id))
+		.collect()
 }
 
 fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize, Value)> {

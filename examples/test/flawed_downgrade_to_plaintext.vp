@@ -32,14 +32,15 @@ principal Alice[
 	generates a
 	ga = PUBKEY(a)
 	k = DH_KEX(gb, a)
-	protected = AEAD_ENC(k, payload, nil)
+	generates n_protected
+	protected = AEAD_ENC(k, n_protected, payload, nil)
 ]
 
-Alice -> Bob: [ga], protected, payload, hint
+Alice -> Bob: [ga], n_protected, protected, payload, hint
 
 principal Bob[
 	kb = DH_KEX(ga, b)
-	got_protected = AEAD_DEC(kb, protected, nil)?
+	got_protected = AEAD_DEC(kb, n_protected, protected, nil)?
 	_ = HASH(got_protected, payload, hint)
 ]
 

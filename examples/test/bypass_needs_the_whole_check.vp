@@ -16,6 +16,10 @@
 //
 // bypass_needs_the_whole_check_ad_leaked.vp is the counterweight: leak `ad`
 // too and the forgery really is constructible, so the a1 comes back.
+// The nonce on `n_c` is declared rather than generated so the ciphertext
+// stays the same value in every session, as it was before nonces were named:
+// generated per run it would add a cross-session duplicate acceptance at two
+// sessions, which is not what this model is about.
 attacker[active]
 
 principal Alice[
@@ -23,15 +27,16 @@ principal Alice[
 	knows private ad
 	leaks k
 	knows private plain
-	c = AEAD_ENC(k, plain, ad)
+	knows private n_c
+	c = AEAD_ENC(k, n_c, plain, ad)
 ]
 
-Alice -> Bob: c
+Alice -> Bob: n_c, c
 
 principal Bob[
 	knows private k
 	knows private ad
-	m = AEAD_DEC(k, c, ad)?
+	m = AEAD_DEC(k, n_c, c, ad)?
 	generates s
 	out = HASH(s, m)
 ]

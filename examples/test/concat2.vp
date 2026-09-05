@@ -14,13 +14,14 @@ principal Alice[
 	generates Na
 	generates m1
 	m = CONCAT(Na, m1)
-	e_m = AEAD_ENC(k_ab, m, nil)
+	generates n_e_m
+	e_m = AEAD_ENC(k_ab, n_e_m, m, nil)
 ]
 
-Alice -> Bob: e_m
+Alice -> Bob: n_e_m, e_m
 
 principal Bob[
-	m_dec = AEAD_DEC(k_ab, e_m, nil)?
+	m_dec = AEAD_DEC(k_ab, n_e_m, e_m, nil)?
 	Na_dec, m1_dec = SPLIT(m_dec)?
 	_ = ASSERT(Na_dec, m1_dec)
 ]

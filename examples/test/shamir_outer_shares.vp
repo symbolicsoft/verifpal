@@ -15,13 +15,14 @@ principal Dealer[
 	pair_one, pair_two, pair_three = SHAMIR_SPLIT(secret_pair)
 	lone_one, lone_two, lone_three = SHAMIR_SPLIT(secret_lone)
 	knows private cargo
-	sealed = AEAD_ENC(secret_pair, cargo, nil)
+	generates n_sealed
+	sealed = AEAD_ENC(secret_pair, n_sealed, cargo, nil)
 	leaks pair_one
 	leaks pair_three
 	leaks lone_two
 ]
 
-Dealer -> Bob: sealed
+Dealer -> Bob: n_sealed, sealed
 
 principal Bob[
 	_ = HASH(sealed)

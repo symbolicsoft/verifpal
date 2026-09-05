@@ -57,7 +57,8 @@ principal Sender[
 	ss1 = HKDF(nil, dh1, kem_context1)
 	ks_context1 = CONCAT(mode_base, HASH(nil), HASH(info))
 	key1, nonce1, exp1 = HKDF(ss1, nil, ks_context1)
-	ct_base = AEAD_ENC(key1, pt_base, aad)
+	generates n_ct_base
+	ct_base = AEAD_ENC(key1, n_ct_base, pt_base, aad)
 	// SealPSK(pk_r, info, aad, pt_psk, psk, psk_id). Same KEM, same
 	// adversary; the key schedule differs by the mode byte, the psk_id hash
 	// and — the point — the psk in the ikm position.
@@ -67,10 +68,11 @@ principal Sender[
 	ss2 = HKDF(nil, dh2, kem_context2)
 	ks_context2 = CONCAT(mode_psk, HASH(psk_id), HASH(info))
 	key2, nonce2, exp2 = HKDF(ss2, psk, ks_context2)
-	ct_psk = AEAD_ENC(key2, pt_psk, aad)
+	generates n_ct_psk
+	ct_psk = AEAD_ENC(key2, n_ct_psk, pt_psk, aad)
 ]
 
-Sender -> Recipient: kem_enc1, ct_base, kem_enc2, ct_psk
+Sender -> Recipient: kem_enc1, n_ct_base, ct_base, kem_enc2, n_ct_psk, ct_psk
 
 principal Recipient[
 	knows public info, aad, l_kem, mode_base, mode_psk, psk_id
@@ -79,13 +81,13 @@ principal Recipient[
 	r_ss1 = HKDF(nil, r_dh1, r_kem_context1)
 	r_ks_context1 = CONCAT(mode_base, HASH(nil), HASH(info))
 	r_key1, r_nonce1, r_exp1 = HKDF(r_ss1, nil, r_ks_context1)
-	r_pt_base = AEAD_DEC(r_key1, ct_base, aad)?
+	r_pt_base = AEAD_DEC(r_key1, n_ct_base, ct_base, aad)?
 	r_dh2 = DH_KEX(kem_enc2, sk_r)
 	r_kem_context2 = CONCAT(l_kem, kem_enc2, pk_r)
 	r_ss2 = HKDF(nil, r_dh2, r_kem_context2)
 	r_ks_context2 = CONCAT(mode_psk, HASH(psk_id), HASH(info))
 	r_key2, r_nonce2, r_exp2 = HKDF(r_ss2, psk, r_ks_context2)
-	r_pt_psk = AEAD_DEC(r_key2, ct_psk, aad)?
+	r_pt_psk = AEAD_DEC(r_key2, n_ct_psk, ct_psk, aad)?
 ]
 
 // Discrete log falls here. Everything above was recorded in phase 0.

@@ -18,17 +18,19 @@ principal Alice[
 	generates timestamp
 	knows private m_first, m_second
 	session_key = HASH(username, timestamp, device_id)
-	e_first = AEAD_ENC(session_key, m_first, nil)
-	e_second = AEAD_ENC(session_key, m_second, nil)
+	generates n_e_first
+	e_first = AEAD_ENC(session_key, n_e_first, m_first, nil)
+	generates n_e_second
+	e_second = AEAD_ENC(session_key, n_e_second, m_second, nil)
 ]
 
-Alice -> Bob: timestamp, e_first, e_second
+Alice -> Bob: timestamp, n_e_first, e_first, n_e_second, e_second
 
 principal Bob[
 	knows public username, device_id
 	bob_key = HASH(username, timestamp, device_id)
-	_ = AEAD_DEC(bob_key, e_first, nil)?
-	_ = AEAD_DEC(bob_key, e_second, nil)?
+	_ = AEAD_DEC(bob_key, n_e_first, e_first, nil)?
+	_ = AEAD_DEC(bob_key, n_e_second, e_second, nil)?
 ]
 
 queries[

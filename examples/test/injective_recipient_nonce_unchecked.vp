@@ -32,13 +32,14 @@ principal Alice[
 Bob -> Alice: irn_nb
 
 principal Alice[
-	irn_resp = AEAD_ENC(irn_k, irn_nb, irn_label)
+	generates n_irn_resp
+	irn_resp = AEAD_ENC(irn_k, n_irn_resp, irn_nb, irn_label)
 ]
 
-Alice -> Bob: irn_resp
+Alice -> Bob: n_irn_resp, irn_resp
 
 principal Bob[
-	irn_got = AEAD_DEC(irn_k, irn_resp, irn_label)?
+	irn_got = AEAD_DEC(irn_k, n_irn_resp, irn_resp, irn_label)?
 ]
 
 queries[

@@ -41,16 +41,17 @@ principal Alice[
 	generates r
 	ss, ct = KEM_ENCAP(ek, r)
 	generates m
-	e = AEAD_ENC(ss, m, nil)
+	generates n_e
+	e = AEAD_ENC(ss, n_e, m, nil)
 	sg = SIGN(sk, CONCAT(ct, e))
 ]
 
-Alice -> Bob: ct, e, sg
+Alice -> Bob: ct, n_e, e, sg
 
 principal Bob[
 	_ = SIGNVERIF(apk, CONCAT(ct, e), sg)?
 	ss2 = KEM_DECAP(dk, ct)
-	d = AEAD_DEC(ss2, e, nil)?
+	d = AEAD_DEC(ss2, n_e, e, nil)?
 ]
 
 queries[

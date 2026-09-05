@@ -41,13 +41,14 @@ Carol -> Alice: ire_salt
 Carol -> Bob: ire_salt
 
 principal Alice[
-	ire_resp = AEAD_ENC(ire_k, CONCAT(ire_nb, ire_salt), nil)
+	generates n_ire_resp
+	ire_resp = AEAD_ENC(ire_k, n_ire_resp, CONCAT(ire_nb, ire_salt), nil)
 ]
 
-Alice -> Bob: ire_resp
+Alice -> Bob: n_ire_resp, ire_resp
 
 principal Bob[
-	ire_got = AEAD_DEC(ire_k, ire_resp, nil)?
+	ire_got = AEAD_DEC(ire_k, n_ire_resp, ire_resp, nil)?
 	ire_seen, ire_s = SPLIT(ire_got)?
 	_ = ASSERT(ire_s, ire_salt)?
 ]

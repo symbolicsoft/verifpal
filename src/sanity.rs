@@ -30,23 +30,19 @@ fn ordinal(n: usize) -> &'static str {
 }
 
 fn restriction_note(outer: PrimitiveId, inner: PrimitiveId, position: usize) -> String {
-	let outer_name = primitive_name(outer);
-	let inner_name = primitive_name(inner);
-	if outer_name == "DH_KEX" && position == 1 {
-		return "the second argument to `DH_KEX` is a private exponent, not a public \
-		        value; keeping it that way is what makes the Diffie-Hellman \
-		        assumption structural rather than a special rule"
-			.to_string();
+	let declared = argument_restrictions(outer)
+		.iter()
+		.find(|restriction| restriction.position == position)
+		.map(|restriction| restriction.note)
+		.filter(|note| !note.is_empty());
+	match declared {
+		Some(note) => note.to_string(),
+		None => format!(
+			"the term space stays finite only if `{}` is never applied on top of `{}` here",
+			primitive_name(outer),
+			primitive_name(inner)
+		),
 	}
-	if outer_name == "PUBKEY" {
-		return "`PUBKEY` derives a public value from a private one, so its argument \
-		        cannot already be public"
-			.to_string();
-	}
-	format!(
-		"the term space stays finite only if `{}` is never applied on top of `{}` here",
-		outer_name, inner_name
-	)
 }
 
 pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
@@ -174,7 +170,7 @@ pub(crate) fn sanity_assignment_constants(
 				.note(format!("its signature is `{}`", primitive_signature(p.id))));
 			}
 			if !arity.contains(&arg_count) {
-				return Err(VerifpalError::sanity(
+				let err = VerifpalError::sanity(
 					format!(
 						"`{}` takes {} argument{}, but {} {} given",
 						primitive_name(p.id),
@@ -186,7 +182,11 @@ pub(crate) fn sanity_assignment_constants(
 					.into(),
 				)
 				.narrow(primitive_name(p.id))
-				.note(format!("its signature is `{}`", primitive_signature(p.id))));
+				.note(format!("its signature is `{}`", primitive_signature(p.id)));
+				return Err(match primitive_arity_help(p.id, arg_count) {
+					Some(help) => err.help(help),
+					None => err,
+				});
 			}
 			for arg in &p.arguments {
 				constants = sanity_assignment_constants(arg, &constants)?;
@@ -541,8 +541,10 @@ fn sanity_queries_check_known(
 			m.recipient_name, c
 		))
 		.help(format!(
-			"have {} check or use `{}`, for example inside an `AEAD_DEC(…)?` or `SIGNVERIF(…)?`",
-			m.recipient_name, c
+			"have {} check or use `{}`, for example inside {}",
+			m.recipient_name,
+			c,
+			checked_examples()
 		)));
 	}
 	Ok(())
@@ -675,14 +677,21 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 
 pub(crate) const MAX_PRINCIPALS: usize = 128;
 
+fn checked_examples() -> String {
+	primitive_checkable_names()
+		.iter()
+		.take(2)
+		.map(|name| format!("`{}(…)?`", name))
+		.collect::<Vec<_>>()
+		.join(" or ")
+}
+
 fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
-	if p.id != PRIM_SPLIT {
-		return None;
-	}
+	let tuple = primitive_projects(p.id)?;
 	let Some(Value::Primitive(inner)) = p.arguments.first() else {
 		return None;
 	};
-	if inner.id != PRIM_CONCAT || p.output < inner.arguments.len() {
+	if inner.id != tuple || p.output < inner.arguments.len() {
 		return None;
 	}
 	let fields = inner.arguments.len();
@@ -802,21 +811,21 @@ pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
 	let Value::Primitive(p) = value else {
 		return Ok(());
 	};
-	for (position, banned) in argument_restrictions(p.id) {
-		if let Some(Value::Primitive(inner)) = p.arguments.get(*position)
-			&& banned.contains(&inner.id)
+	for restriction in argument_restrictions(p.id) {
+		if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
+			&& restriction.banned.contains(&inner.id)
 		{
 			return Err(VerifpalError::sanity(
 				format!(
 					"`{}` cannot take `{}` as its {} argument",
 					primitive_name(p.id),
 					primitive_name(inner.id),
-					ordinal(*position + 1)
+					ordinal(restriction.position + 1)
 				)
 				.into(),
 			)
 			.narrow(primitive_name(inner.id))
-			.note(restriction_note(p.id, inner.id, *position))
+			.note(restriction_note(p.id, inner.id, restriction.position))
 			.help(format!(
 				"pass a value the principal holds directly; the signature is `{}`",
 				primitive_signature(p.id)

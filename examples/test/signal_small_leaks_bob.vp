@@ -38,10 +38,11 @@ principal Alice[
 	akshared1 = DH_KEX(gbs, ae2)
 	arkab1, ackab1 = HKDF(akshared1, arkba1, nil)
 	akenc1, akenc2 = HKDF(MAC(ackab1, nil), nil, nil)
-	e1 = AEAD_ENC(akenc1, m1, HASH(galongterm, gblongterm, gae2))
+	generates n_e1
+	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: [galongterm], gae1, gae2, e1
+Alice -> Bob: [galongterm], gae1, gae2, n_e1, e1
 
 principal Bob[
 	leaks blongterm
@@ -53,7 +54,7 @@ principal Bob[
 	bkshared1 = DH_KEX(gae2, bs)
 	brkab1, bckab1 = HKDF(bkshared1, brkba1, nil)
 	bkenc1, bkenc2 = HKDF(MAC(bckab1, nil), nil, nil)
-	m1_d = AEAD_DEC(bkenc1, e1, HASH(galongterm, gblongterm, gae2))
+	m1_d = AEAD_DEC(bkenc1, n_e1, e1, HASH(galongterm, gblongterm, gae2))
 ]
 
 phase[1]

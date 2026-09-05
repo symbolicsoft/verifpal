@@ -322,15 +322,13 @@ pub(crate) fn step_problems(
 					));
 				}
 			}
-			DerivationRecord::ConcatFragment { of } => match of {
-				Value::Primitive(p) if p.id == crate::primitive::PRIM_CONCAT => {
+			DerivationRecord::Fragment { of } => match of {
+				Value::Primitive(p) if crate::primitive::primitive_core_reveals_args(p.id) => {
 					if !p.arguments.iter().any(|a| a.equivalent(target, true)) {
-						problems.push(wrong(
-							"takes a fragment that is not in the CONCAT it splits",
-						));
+						problems.push(wrong("takes a fragment that is not in the tuple it splits"));
 					}
 				}
-				_ => problems.push(wrong("splits something that is not a CONCAT")),
+				_ => problems.push(wrong("splits something that is not a tuple")),
 			},
 			DerivationRecord::Recomposed { of, .. } => match of {
 				Value::Primitive(p) => {
@@ -414,6 +412,73 @@ pub(crate) fn step_problems(
 					}
 				}
 				_ => problems.push(wrong("breaks something that is not a primitive")),
+			},
+			DerivationRecord::Reused { of, with } => {
+				if !crate::theory::reused_pair(of, with) {
+					problems.push(wrong(
+						"claims a reuse between terms that do not share their fixed arguments, \
+						 or are one term",
+					));
+				}
+				if !crate::theory::one_execution(attacker, of, with) {
+					problems.push(wrong(
+						"pairs two values of one slot, which no single execution holds",
+					));
+				}
+				let revealed = match of {
+					Value::Primitive(p) => crate::primitive::reuse_rule(p.id).is_some_and(|rule| {
+						rule.reveals.iter().any(|reveal| match *reveal {
+							crate::primitive::Reveal::Argument(index) => {
+								p.arguments.get(index).is_some_and(|a| {
+									crate::theory::reduce_once(a).equivalent(target, true)
+								})
+							}
+							crate::primitive::Reveal::Output(output) => {
+								Value::Primitive(std::sync::Arc::new(p.with_output(output)))
+									.equivalent(target, true)
+							}
+						})
+					}),
+					Value::Constant(_) => false,
+				};
+				if !revealed {
+					problems.push(wrong(
+						"recovers a value that is not among what the reused term reveals",
+					));
+				}
+			}
+			DerivationRecord::ReusedForge { with, using } => match target {
+				Value::Primitive(p) => {
+					let [a, b] = with;
+					if !(crate::theory::reused_pair(a, b) && crate::theory::same_fixed(target, a)) {
+						problems.push(wrong(
+							"forges under a pair that is not reused, or under other fixed \
+							 arguments",
+						));
+					}
+					if !crate::theory::one_execution(attacker, a, b) {
+						problems.push(wrong(
+							"forges under two values of one slot, which no single execution holds",
+						));
+					}
+					let free = |i: &usize| {
+						crate::primitive::reuse_rule(p.id)
+							.is_none_or(|rule| !rule.forgeable.contains(i))
+					};
+					let accounted = |i: usize| {
+						p.arguments
+							.get(i)
+							.is_some_and(|x| using.iter().any(|u| u.equivalent(x, true)))
+					};
+					if (0..p.arguments.len()).filter(free).any(|i| !accounted(i)) {
+						problems.push(wrong(
+							"forges a term whose free arguments are not among what it used",
+						));
+					}
+				}
+				Value::Constant(_) => {
+					problems.push(wrong("forges something that is not a primitive"))
+				}
 			},
 			DerivationRecord::Initial => {}
 		}
@@ -560,6 +625,12 @@ mod tests {
 		make_primitive(crate::primitive::PRIM_HASH, vec![v.clone()], 0)
 	}
 
+	fn checked(steps: &[Step], ps: &PrincipalState, attacker: &AttackerState) -> Vec<String> {
+		let mut problems = derivation_problems(steps, ps, attacker);
+		problems.extend(step_problems(steps, &make_trace(), ps, attacker, 0));
+		problems
+	}
+
 	fn derive(target: Value, ingredients: Vec<Value>) -> Step {
 		Step::Derive {
 			text: format!("Attacker constructs {}", target),
@@ -567,6 +638,102 @@ mod tests {
 			ingredients,
 			record: DerivationRecord::Initial,
 		}
+	}
+
+	#[test]
+	fn a_nonce_reuse_step_must_open_a_reused_pair() {
+		use crate::primitive::PRIM_AEAD_ENC;
+		let k = make_constant("tcn_k");
+		let n = make_constant("tcn_n");
+		let ad = make_constant("tcn_ad");
+		let m1 = make_constant("tcn_m1");
+		let m2 = make_constant("tcn_m2");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), m1.clone(), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), m2.clone(), ad.clone()],
+			0,
+		);
+		let e3 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k, make_constant("tcn_n2"), m2.clone(), ad],
+			0,
+		);
+		let ps = make_principal_state("TraceCheck", 0, vec![], vec![]);
+		let attacker = make_attacker_state(vec![e1.clone(), e2.clone(), e3.clone()]);
+		let check = |steps: &[Step]| checked(steps, &ps, &attacker);
+		let step = |of: &Value, with: &Value, target: &Value| Step::Derive {
+			text: "Attacker recovers".to_string(),
+			target: target.clone(),
+			ingredients: vec![of.clone(), with.clone()],
+			record: DerivationRecord::Reused {
+				of: of.clone(),
+				with: with.clone(),
+			},
+		};
+		let ok = check(&[step(&e1, &e2, &m1)]);
+		assert!(ok.is_empty(), "{:?}", ok);
+		let wrong_nonce = check(&[step(&e1, &e3, &m1)]);
+		assert!(
+			wrong_nonce.iter().any(|p| p.contains("do not share")),
+			"{:?}",
+			wrong_nonce
+		);
+		let wrong_plaintext = check(&[step(&e1, &e2, &m2)]);
+		assert!(
+			wrong_plaintext
+				.iter()
+				.any(|p| p.contains("not among what the reused")),
+			"{:?}",
+			wrong_plaintext
+		);
+	}
+
+	#[test]
+	fn a_nonce_forgery_step_must_account_for_plaintext_and_ad() {
+		use crate::primitive::PRIM_AEAD_ENC;
+		let k = make_constant("tcf_k");
+		let n = make_constant("tcf_n");
+		let ad = make_constant("tcf_ad");
+		let e1 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("tcf_m1"), ad.clone()],
+			0,
+		);
+		let e2 = make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), make_constant("tcf_m2"), ad.clone()],
+			0,
+		);
+		let m3 = make_constant("tcf_m3");
+		let forged = make_primitive(PRIM_AEAD_ENC, vec![k, n, m3.clone(), ad.clone()], 0);
+		let ps = make_principal_state("TraceCheck", 0, vec![], vec![]);
+		let attacker = make_attacker_state(vec![e1.clone(), e2.clone(), m3.clone(), ad.clone()]);
+		let check = |steps: &[Step]| checked(steps, &ps, &attacker);
+		let step = |using: Vec<Value>| Step::Derive {
+			text: "Attacker forges".to_string(),
+			target: forged.clone(),
+			ingredients: vec![e1.clone(), e2.clone()]
+				.into_iter()
+				.chain(using.clone())
+				.collect(),
+			record: DerivationRecord::ReusedForge {
+				with: [e1.clone(), e2.clone()],
+				using,
+			},
+		};
+		let ok = check(&[step(vec![m3.clone(), ad.clone()])]);
+		assert!(ok.is_empty(), "{:?}", ok);
+		let missing = check(&[step(vec![m3])]);
+		assert!(
+			missing.iter().any(|p| p.contains("not among what it used")),
+			"{:?}",
+			missing
+		);
 	}
 
 	#[test]

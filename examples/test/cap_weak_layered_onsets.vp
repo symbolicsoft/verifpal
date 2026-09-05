@@ -23,16 +23,18 @@ attacker[passive]
 principal Alice[
 	knows private inner_key, outer_key
 	knows private payload
-	inner = AEAD_ENC[weak from phase 2](inner_key, payload, nil)
-	outer = AEAD_ENC[weak from phase 1](outer_key, inner, nil)
+	generates n_inner
+	inner = AEAD_ENC[weak from phase 2](inner_key, n_inner, payload, nil)
+	generates n_outer
+	outer = AEAD_ENC[weak from phase 1](outer_key, n_outer, inner, nil)
 ]
 
-Alice -> Bob: outer
+Alice -> Bob: n_inner, n_outer, outer
 
 principal Bob[
 	knows private inner_key, outer_key
-	seen_inner = AEAD_DEC(outer_key, outer, nil)?
-	seen_payload = AEAD_DEC(inner_key, seen_inner, nil)?
+	seen_inner = AEAD_DEC(outer_key, n_outer, outer, nil)?
+	seen_payload = AEAD_DEC(inner_key, n_inner, seen_inner, nil)?
 	_ = HASH(seen_payload)
 ]
 

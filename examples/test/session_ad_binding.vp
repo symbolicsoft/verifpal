@@ -26,17 +26,19 @@ principal Alice[
 	knows public ad_static
 	generates ad_session
 	generates m_loose, m_bound
-	e_loose = AEAD_ENC(psk, m_loose, ad_static)
-	e_bound = AEAD_ENC(psk, m_bound, ad_session)
+	generates n_e_loose
+	e_loose = AEAD_ENC(psk, n_e_loose, m_loose, ad_static)
+	generates n_e_bound
+	e_bound = AEAD_ENC(psk, n_e_bound, m_bound, ad_session)
 ]
 
-Alice -> Bob: e_loose, e_bound, [ad_session]
+Alice -> Bob: n_e_loose, e_loose, n_e_bound, e_bound, [ad_session]
 
 principal Bob[
 	knows private psk
 	knows public ad_static
-	d_loose = AEAD_DEC(psk, e_loose, ad_static)?
-	d_bound = AEAD_DEC(psk, e_bound, ad_session)?
+	d_loose = AEAD_DEC(psk, n_e_loose, e_loose, ad_static)?
+	d_bound = AEAD_DEC(psk, n_e_bound, e_bound, ad_session)?
 	_ = HASH(d_loose, d_bound)
 ]
 

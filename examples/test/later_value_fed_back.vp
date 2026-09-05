@@ -42,14 +42,15 @@ Bob -> Alice: n
 
 principal Alice[
 	ka = HASH(k, n)
-	w = AEAD_ENC(ka, p, nil)
+	generates n_w
+	w = AEAD_ENC(ka, n_w, p, nil)
 ]
 
-Alice -> Bob: w
+Alice -> Bob: n_w, w
 
 principal Bob[
 	kb = HASH(k, n)
-	pb = AEAD_DEC(kb, w, nil)?
+	pb = AEAD_DEC(kb, n_w, w, nil)?
 ]
 
 principal Alice[
@@ -59,10 +60,11 @@ principal Alice[
 Alice -> Bob: u
 
 principal Bob[
-	v = AEAD_ENC(kb, u, nil)
+	generates n_v
+	v = AEAD_ENC(kb, n_v, u, nil)
 ]
 
-Bob -> Alice: v
+Bob -> Alice: n_v, v
 
 queries[
 	authentication? Alice -> Bob: w

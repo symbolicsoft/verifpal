@@ -25,40 +25,21 @@ const RESERVED: &[&str] = &[
 	"unlinkability",
 	"equivalence",
 	"precondition",
-	"ringsign",
-	"ringsignverif",
 	"primitive",
-	"hash",
-	"hkdf",
-	"aead_enc",
-	"aead_dec",
-	"enc",
-	"dec",
-	"mac",
-	"assert",
-	"sign",
-	"signverif",
-	"pke_enc",
-	"pke_dec",
-	"shamir_split",
-	"shamir_join",
-	"concat",
-	"split",
 	crate::util::ANONYMOUS_PREFIX,
-	"blind",
-	"unblind",
-	"pubkey",
-	"dh_kex",
-	"kem_encap",
-	"kem_decap",
 	"g",
 	"queries",
 	"scenarios",
 ];
 
+fn names_a_primitive(lower: &str) -> bool {
+	crate::primitive::primitive_get_enum(&lower.to_uppercase()).is_ok()
+}
+
 pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 	let lower = s.to_lowercase();
 	if RESERVED.contains(&lower.as_str())
+		|| names_a_primitive(&lower)
 		|| lower.starts_with("attacker")
 		|| lower.starts_with(crate::util::ANONYMOUS_PREFIX)
 	{
@@ -67,8 +48,8 @@ pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 		)
 		.narrow(s.to_string())
 		.note(
-			"the language keywords, and any name beginning with `attacker` or \
-			 `unnamed`, are reserved so that a model cannot shadow them",
+			"the language keywords, the primitive names, and any name beginning with \
+			 `attacker` or `unnamed` are reserved so that a model cannot shadow them",
 		)
 		.help(format!("rename it, for example to `{}_value`", s)));
 	}
@@ -151,7 +132,8 @@ impl<'a> Parser<'a> {
 		let span = self.last_ident;
 		let name = std::str::from_utf8(&self.input[span.start..span.end]).unwrap_or("");
 		let lower = name.to_lowercase();
-		if lower != "attacker" && RESERVED.contains(&lower.as_str()) {
+		if lower != "attacker" && (RESERVED.contains(&lower.as_str()) || names_a_primitive(&lower))
+		{
 			return Err(VerifpalError::parse(
 				format!("`{}` is a reserved word and cannot name a principal", name).into(),
 			)
@@ -1868,7 +1850,7 @@ mod tests {
 
 	#[test]
 	fn parses_capability_with_phase_onset() {
-		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap2_k\n\tknows private cap2_m\n\tknows private cap2_ad\n\tcap2_e = AEAD_ENC[forgeable, weak from phase 2](cap2_k, cap2_m, cap2_ad)\n]\nqueries[\n\tconfidentiality? cap2_m\n]\n";
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private cap2_k\n\tknows private cap2_m\n\tknows private cap2_ad\n\tknows private cap2_n\n\tcap2_e = AEAD_ENC[forgeable, weak from phase 2](cap2_k, cap2_n, cap2_m, cap2_ad)\n]\nqueries[\n\tconfidentiality? cap2_m\n]\n";
 		let m = parse_string("cap2.vp", src).expect("parses");
 		let p = first_primitive(&m).expect("a primitive");
 		assert_eq!(p.capabilities.onset(Capability::Forgeable), Some(0));
@@ -1954,14 +1936,18 @@ mod tests {
 	#[test]
 	fn a_wrong_arity_names_the_primitive_signature() {
 		let text = model_error(
-			"attacker[active]\nprincipal Alice[\n\tknows private wa_m\n\twa_e = AEAD_ENC(wa_m, wa_m)\n]\nqueries[\n\tconfidentiality? wa_m\n]\n",
+			"attacker[active]\nprincipal Alice[\n\tknows private wa_m\n\twa_e = AEAD_ENC(wa_m, wa_m, wa_m)\n]\nqueries[\n\tconfidentiality? wa_m\n]\n",
 		);
 		assert!(
-			text.contains("`AEAD_ENC` takes 3 arguments, but 2 were given"),
+			text.contains("`AEAD_ENC` takes 4 arguments, but 3 were given"),
 			"{text}"
 		);
 		assert!(
-			text.contains("its signature is `AEAD_ENC(key, plaintext, ad)`"),
+			text.contains("its signature is `AEAD_ENC(key, nonce, plaintext, ad)`"),
+			"{text}"
+		);
+		assert!(
+			text.contains("take a nonce as their second argument"),
 			"{text}"
 		);
 	}
@@ -2098,16 +2084,16 @@ mod tests {
 
 	#[test]
 	fn every_primitive_name_is_reserved() {
-		let missing: Vec<&str> = crate::primitive::primitive_names()
+		let shadowable: Vec<&str> = crate::primitive::primitive_names()
 			.into_iter()
-			.filter(|name| !RESERVED.contains(&name.to_lowercase().as_str()))
+			.filter(|name| check_reserved(&name.to_lowercase()).is_ok())
 			.collect();
 		assert!(
-			missing.is_empty(),
+			shadowable.is_empty(),
 			"a primitive whose name is not reserved can be shadowed by a constant, \
 			 so the same identifier means one thing at a call site and another as a \
-			 value. Adding a primitive means adding its lowercase name to RESERVED: \
-			 {missing:?}"
+			 value; the reserved check reads the registry, so a new primitive is \
+			 reserved by declaring it: {shadowable:?}"
 		);
 	}
 

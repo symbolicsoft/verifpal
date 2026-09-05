@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::equivalence::equivalent_primitives;
 use crate::hashing::collect_subterm_hashes;
 use crate::primitive::*;
+use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
 use crate::value::value_nil;
 
@@ -20,6 +21,7 @@ pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	capabilities: Arc<CapabilityIndex>,
 	wire_terms: Vec<Value>,
+	slot_terms: Vec<(ValueId, Value)>,
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
@@ -62,11 +64,20 @@ impl<'a> Deducer<'a> {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
+		let mut slot_terms = Vec::new();
+		for &slot in &sym.var_slots {
+			if let Some(Some(term)) = sym.var_terms.get(slot)
+				&& as_var(term).is_none()
+			{
+				slot_terms.push((super::vars::attacker_var_id(slot), term.clone()));
+			}
+		}
 
 		Deducer {
 			attacker,
 			capabilities: ps.capabilities.clone(),
 			wire_terms,
+			slot_terms,
 			basis,
 			memo: RefCell::new(IdMap::default()),
 			active: RefCell::new(Vec::new()),
@@ -164,12 +175,15 @@ impl<'a> Deducer<'a> {
 		None
 	}
 
-	fn concat_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
-		let Ok(concat_spec) = primitive_def(PRIM_CONCAT) else {
+	fn tuple_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
+		let Some(tuple) = primitive_projects(p.id) else {
+			return Vec::new();
+		};
+		let Ok(tuple_spec) = primitive_def(tuple) else {
 			return Vec::new();
 		};
 		let mut out = Vec::new();
-		for arity in concat_spec.arity().iter().map(|a| *a as usize) {
+		for arity in tuple_spec.arity().iter().map(|a| *a as usize) {
 			if p.output >= arity {
 				continue;
 			}
@@ -177,7 +191,7 @@ impl<'a> Deducer<'a> {
 			if let Some(target) = at_output {
 				arguments[p.output] = target.clone();
 			}
-			out.push(Value::primitive(PRIM_CONCAT, arguments, 0));
+			out.push(Value::primitive(tuple, arguments, 0));
 		}
 		out
 	}
@@ -242,11 +256,64 @@ impl<'a> Deducer<'a> {
 			Value::Primitive(p) => {
 				self.solve_primitive(p, s, out);
 				self.solve_by_malleability(p, s, out);
+				self.solve_by_reuse(p, s, out);
 			}
 			Value::Constant(_) => {}
 		}
 
 		self.solve_by_decomposition(g, s, out);
+	}
+
+	fn solve_by_reuse(&self, target: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
+		let Some(rule) = reuse_rule(target.id) else {
+			return;
+		};
+		let mut offered: Vec<&Value> = Vec::new();
+		for pair in self.attacker.reused.iter() {
+			let Value::Primitive(held) = &pair[0] else {
+				continue;
+			};
+			if held.id != target.id || held.arguments.len() != target.arguments.len() {
+				continue;
+			}
+			if self.attacker.knows(&pair[0]).is_none() || self.attacker.knows(&pair[1]).is_none() {
+				continue;
+			}
+			if offered.iter().any(|seen| same_fixed(seen, &pair[0])) {
+				continue;
+			}
+			offered.push(&pair[0]);
+			let mut fixed = s.clone();
+			let mut aligned = true;
+			for &at in &rule.fixed {
+				match match_value(&target.arguments[at], &held.arguments[at], &fixed) {
+					Some(next) => fixed = next,
+					None => {
+						aligned = false;
+						break;
+					}
+				}
+			}
+			if !aligned {
+				continue;
+			}
+			let mut frontier = vec![fixed];
+			for (i, argument) in target.arguments.iter().enumerate() {
+				if rule.forgeable.contains(&i) {
+					continue;
+				}
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					self.solve_into(argument, candidate, &mut next);
+				}
+				if next.is_empty() {
+					frontier.clear();
+					break;
+				}
+				frontier = dedupe(next);
+			}
+			out.extend(frontier);
+		}
 	}
 
 	fn solve_by_malleability(
@@ -424,9 +491,10 @@ impl<'a> Deducer<'a> {
 		out: &mut Vec<Substitution>,
 	) {
 		let forgeable_secret = self.forgeable_secret(p);
+		let by_reuse = forgeable_by_reuse(p, self.attacker);
 		let mut frontier = vec![s.clone()];
 		for (i, arg) in p.arguments.iter().enumerate() {
-			if Some(i) == forgeable_secret {
+			if Some(i) == forgeable_secret || by_reuse.contains(&i) {
 				continue;
 			}
 			let mut next = Vec::new();
@@ -648,10 +716,10 @@ impl<'a> Deducer<'a> {
 			out.extend(self.invert(from, &shape, s));
 		}
 
-		if p.id == PRIM_SPLIT
+		if primitive_is_projection(p.id)
 			&& let Some(inner) = p.arguments.first()
 		{
-			for candidate in self.concat_shapes(p, Some(target)) {
+			for candidate in self.tuple_shapes(p, Some(target)) {
 				out.extend(self.invert(inner, &candidate, s));
 			}
 		}
@@ -663,11 +731,14 @@ impl<'a> Deducer<'a> {
 		let Some(inner) = p.arguments.first() else {
 			return Vec::new();
 		};
-		let Some(width) = concat_width(p.output) else {
+		let Some(tuple) = primitive_projects(p.id) else {
+			return Vec::new();
+		};
+		let Some(width) = tuple_width(tuple, p.output) else {
 			return Vec::new();
 		};
 		let arguments: Vec<Value> = (0..width).map(|_| self.fresh_var()).collect();
-		let candidate = Value::primitive(PRIM_CONCAT, arguments, 0);
+		let candidate = Value::primitive(tuple, arguments, 0);
 		let mut out = Vec::new();
 		for bound in self.invert(inner, &candidate, base) {
 			out.extend(self.require_constructible(&bound, base, false));
@@ -685,7 +756,7 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		may_shape: bool,
 	) -> Vec<Substitution> {
-		if p.id == PRIM_ASSERT && p.arguments.len() == 2 {
+		if primitive_is_equality(p.id) && p.arguments.len() == 2 {
 			let mut out = Vec::new();
 			for (pattern, target) in [(0usize, 1usize), (1, 0)] {
 				for bound in self.invert(&p.arguments[pattern], &p.arguments[target], base) {
@@ -695,11 +766,11 @@ impl<'a> Deducer<'a> {
 			return dedupe(out);
 		}
 
-		if p.id == PRIM_SPLIT
+		if primitive_is_projection(p.id)
 			&& let Some(inner) = p.arguments.first()
 		{
 			let mut out = Vec::new();
-			for candidate in self.concat_shapes(p, None) {
+			for candidate in self.tuple_shapes(p, None) {
 				for bound in self.invert(inner, &candidate, base) {
 					out.extend(self.require_constructible(&bound, base, false));
 				}
@@ -786,7 +857,13 @@ impl<'a> Deducer<'a> {
 		obligations.sort_by_key(|(id, _)| *id);
 
 		let mut frontier = vec![s.clone()];
-		for (_, obligation) in obligations {
+		for (id, obligation) in obligations {
+			let wire = self
+				.slot_terms
+				.iter()
+				.find(|(slot_id, _)| *slot_id == id)
+				.map(|(_, term)| apply(term, s));
+			let obligation = wire.as_ref().unwrap_or(obligation);
 			let mut next = Vec::new();
 			for candidate in &frontier {
 				self.solve_into(obligation, candidate, &mut next);
@@ -800,8 +877,8 @@ impl<'a> Deducer<'a> {
 	}
 }
 
-fn concat_width(output: usize) -> Option<usize> {
-	primitive_def(PRIM_CONCAT)
+fn tuple_width(tuple: PrimitiveId, output: usize) -> Option<usize> {
+	primitive_def(tuple)
 		.ok()?
 		.arity()
 		.iter()
@@ -813,7 +890,7 @@ fn concat_width(output: usize) -> Option<usize> {
 fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 	match v {
 		Value::Primitive(p) => {
-			if p.id == PRIM_SPLIT
+			if primitive_is_projection(p.id)
 				&& p.arguments
 					.first()
 					.is_some_and(|a| matches!(a, Value::Primitive(_)) && contains_var(a))
@@ -832,7 +909,7 @@ fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 fn widest_checked_projections(checked: Vec<Primitive>) -> Vec<Primitive> {
 	let splits: Vec<Primitive> = checked
 		.iter()
-		.filter(|p| p.id == PRIM_SPLIT)
+		.filter(|p| primitive_is_projection(p.id))
 		.cloned()
 		.collect();
 	if splits.is_empty() {
@@ -841,7 +918,10 @@ fn widest_checked_projections(checked: Vec<Primitive>) -> Vec<Primitive> {
 	let widest = widest_projections(&splits);
 	checked
 		.into_iter()
-		.filter(|p| p.id != PRIM_SPLIT || widest.iter().any(|q| equivalent_primitives(q, p, true)))
+		.filter(|p| {
+			!primitive_is_projection(p.id)
+				|| widest.iter().any(|q| equivalent_primitives(q, p, true))
+		})
 		.collect()
 }
 

@@ -25,7 +25,8 @@ principal Alice[
 	knows private m
 	knows private x
 	k2 = ENC(k1, m)
-	c = AEAD_ENC(k2, x, nil)
+	generates n_c
+	c = AEAD_ENC(k2, n_c, x, nil)
 	leaks k1
 ]
 
@@ -33,7 +34,7 @@ principal Bob[
 	knows private k1
 ]
 
-Alice -> Bob: c
+Alice -> Bob: n_c, c
 
 queries[
 	confidentiality? x

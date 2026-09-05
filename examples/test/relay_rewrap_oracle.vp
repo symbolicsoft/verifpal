@@ -10,7 +10,8 @@
 // The attack needs `forwarded` to stay honest, and that is the whole point of
 // the model. `symbolic::build` turns every controllable slot into a variable,
 // so with `forwarded` unguarded Client's recovered = AEAD_DEC(relay_key,
-// $forwarded, label) stops reducing, the chain to sealed_doc is severed, and
+// n_forwarded, $forwarded, label) stops reducing, the chain to sealed_doc is
+// severed, and
 // the goal that drives the oracle is never generated. The attacker gains the
 // option of replacing forwarded and loses the ability to reason through it.
 // Reported c0 until the search learned to also build the abstraction in which
@@ -26,29 +27,34 @@ principal Server[
 	knows private storage_key
 	knows private document
 	knows public label
-	wrapping = AEAD_ENC(storage_key, label, label)
-	sealed_doc = AEAD_ENC(wrapping, document, label)
-	rewrap_request = AEAD_ENC(AEAD_ENC(storage_key, sealed_doc, label), label, label)
+	knows private n_storage
+	wrapping = AEAD_ENC(storage_key, n_storage, label, label)
+	generates n_sealed_doc
+	sealed_doc = AEAD_ENC(wrapping, n_sealed_doc, document, label)
+	generates n_rewrap_request
+	rewrap_request = AEAD_ENC(AEAD_ENC(storage_key, n_storage, sealed_doc, label), n_rewrap_request, label, label)
 ]
 
-Server -> Relay: sealed_doc
+Server -> Relay: n_sealed_doc, sealed_doc
 
 principal Relay[
 	knows private storage_key
 	knows private relay_key
 	knows public label
-	forwarded = AEAD_ENC(relay_key, AEAD_ENC(storage_key, sealed_doc, label), label)
+	knows private n_storage
+	generates n_forwarded
+	forwarded = AEAD_ENC(relay_key, n_forwarded, AEAD_ENC(storage_key, n_storage, sealed_doc, label), label)
 ]
 
-Relay -> Client: forwarded
+Relay -> Client: n_forwarded, forwarded
 
-Server -> Client: rewrap_request
+Server -> Client: n_rewrap_request, rewrap_request
 
 principal Client[
 	knows private relay_key
 	knows public label
-	recovered = AEAD_DEC(relay_key, forwarded, label)?
-	opened = AEAD_DEC(recovered, rewrap_request, label)?
+	recovered = AEAD_DEC(relay_key, n_forwarded, forwarded, label)?
+	opened = AEAD_DEC(recovered, n_rewrap_request, rewrap_request, label)?
 ]
 
 Client -> Server: [opened]

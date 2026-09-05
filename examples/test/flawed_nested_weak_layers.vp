@@ -19,18 +19,19 @@ attacker[passive]
 principal Alice[
 	knows private outer_key, middle_key, inner_key
 	knows private secret
-	inner = AEAD_ENC[weak](inner_key, secret, nil)
+	generates n_inner
+	inner = AEAD_ENC[weak](inner_key, n_inner, secret, nil)
 	middle = ENC[weak](middle_key, inner)
 	outer = PKE_ENC[weak](PUBKEY(outer_key), middle)
 ]
 
-Alice -> Bob: outer
+Alice -> Bob: n_inner, outer
 
 principal Bob[
 	knows private outer_key, middle_key, inner_key
 	seen_middle = PKE_DEC(outer_key, outer)
 	seen_inner = DEC(middle_key, seen_middle)
-	seen_secret = AEAD_DEC(inner_key, seen_inner, nil)?
+	seen_secret = AEAD_DEC(inner_key, n_inner, seen_inner, nil)?
 	_ = HASH(seen_secret)
 ]
 

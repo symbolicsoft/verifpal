@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 — one plaintext, one key, one nonce, two associated-data
+// values. The ciphertext bytes are identical, but GHASH runs over the
+// associated data too, so the two tags differ under one mask and the pair
+// still gives up the authentication key. The trigger needs the two
+// encryptions to differ somewhere; associated data is somewhere.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private n
+	knows private m
+	knows public ad1, ad2
+	e1 = AEAD_ENC(k, n, m, ad1)
+	e2 = AEAD_ENC(k, n, m, ad2)
+]
+
+Alice -> Bob: e1, e2
+
+principal Bob[
+	knows private k
+	knows private n
+	knows public ad1, ad2
+	d1 = AEAD_DEC(k, n, e1, ad1)?
+	d2 = AEAD_DEC(k, n, e2, ad2)?
+]
+
+queries[
+	confidentiality? m
+]

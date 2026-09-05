@@ -31,17 +31,19 @@ principal Alice[
 	doc_sig = SIGN(a_shared, doc)
 	k_shared = DH_KEX(gb, a_shared)
 	k_separate = DH_KEX(gb, a_separate)
-	e_shared = AEAD_ENC(k_shared, m_shared, nil)
-	e_separate = AEAD_ENC(k_separate, m_separate, nil)
+	generates n_e_shared
+	e_shared = AEAD_ENC(k_shared, n_e_shared, m_shared, nil)
+	generates n_e_separate
+	e_separate = AEAD_ENC(k_separate, n_e_separate, m_separate, nil)
 	leaks a_shared
 ]
 
-Alice -> Bob: [ga_shared], [ga_separate], doc, doc_sig, e_shared, e_separate
+Alice -> Bob: [ga_shared], [ga_separate], doc, doc_sig, n_e_shared, e_shared, n_e_separate, e_separate
 
 principal Bob[
 	_ = SIGNVERIF(ga_shared, doc, doc_sig)?
-	_ = AEAD_DEC(DH_KEX(ga_shared, b), e_shared, nil)?
-	_ = AEAD_DEC(DH_KEX(ga_separate, b), e_separate, nil)?
+	_ = AEAD_DEC(DH_KEX(ga_shared, b), n_e_shared, e_shared, nil)?
+	_ = AEAD_DEC(DH_KEX(ga_separate, b), n_e_separate, e_separate, nil)?
 ]
 
 queries[

@@ -297,14 +297,15 @@ principal Server[
 	serverFinished = MAC(sFinishedKey, transcriptCV)
 	// Certificate, CertificateVerify and Finished, sealed under the
 	// server handshake traffic secret (§5.2), record 0 under that key.
-	serverFlight = AEAD_ENC(sHsTraffic, CONCAT(serverName, gSigKey, serverCertSig, serverCV, serverFinished), seq0)
+	generates n_serverFlight
+	serverFlight = AEAD_ENC(sHsTraffic, n_serverFlight, CONCAT(serverName, gSigKey, serverCertSig, serverCV, serverFinished), seq0)
 	transcriptSFin = HASH(transcriptCV, serverFinished)
 	cApTraffic = HKDF(mainSecret, labelCApTraffic, transcriptSFin)
 	sApTraffic = HKDF(mainSecret, labelSApTraffic, transcriptSFin)
 	exporterSecret = HKDF(mainSecret, labelExpMaster, transcriptSFin)
 ]
 
-Server -> Client: sr, gse, serverFlight
+Server -> Client: sr, gse, n_serverFlight, serverFlight
 
 principal Client[
 	dhe_c = DH_KEX(gse, ce)
@@ -316,7 +317,7 @@ principal Client[
 	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptSH_c)
 	derivedHS_c = HKDF(handshakeSecret_c, labelDerived, nil)
 	mainSecret_c = HKDF(derivedHS_c, nil, nil)
-	serverFlightDec = AEAD_DEC(sHsTraffic_c, serverFlight, seq0)?
+	serverFlightDec = AEAD_DEC(sHsTraffic_c, n_serverFlight, serverFlight, seq0)?
 	certName, certKey, certSig, serverCV_c, serverFinished_c = SPLIT(serverFlightDec)
 	// §4.5.1.3: the chain is validated against the trust anchor, and the
 	// certified name is the one the client meant to reach.
@@ -344,19 +345,21 @@ principal Client[
 	transcriptCCV = HASH(transcriptCCert, clientCV)
 	cFinishedKey_c = HKDF(cHsTraffic_c, labelFinished, nil)
 	clientFinished = MAC(cFinishedKey_c, transcriptCCV)
-	clientFlight = AEAD_ENC(cHsTraffic_c, CONCAT(clientId, clientPk, clientCertSig, clientCV, clientFinished), seq0)
+	generates n_clientFlight
+	clientFlight = AEAD_ENC(cHsTraffic_c, n_clientFlight, CONCAT(clientId, clientPk, clientCertSig, clientCV, clientFinished), seq0)
 	// §7.1: the resumption secret covers the transcript through client
 	// Finished.
 	transcriptCFin_c = HASH(transcriptCCV, clientFinished)
 	resumptionSecret_c = HKDF(mainSecret_c, labelResMaster, transcriptCFin_c)
 	generates appMsg1
-	appData1 = AEAD_ENC(cApTraffic_c, appMsg1, seq0)
+	generates n_appData1
+	appData1 = AEAD_ENC(cApTraffic_c, n_appData1, appMsg1, seq0)
 ]
 
-Client -> Server: clientFlight, appData1
+Client -> Server: n_clientFlight, clientFlight, n_appData1, appData1
 
 principal Server[
-	clientFlightDec = AEAD_DEC(cHsTraffic, clientFlight, seq0)?
+	clientFlightDec = AEAD_DEC(cHsTraffic, n_clientFlight, clientFlight, seq0)?
 	clientId_s, clientPk_s, clientCertSig_s, clientCV_s, clientFinished_s = SPLIT(clientFlightDec)
 	_ = SIGNVERIF(caPk, CONCAT(clientId_s, clientPk_s), clientCertSig_s)?
 	transcriptCCert_s = HASH(transcriptSFin, clientId_s, clientPk_s, clientCertSig_s)
@@ -369,37 +372,42 @@ principal Server[
 	resumptionSecret = HKDF(mainSecret, labelResMaster, transcriptCFin)
 	// §4.5.3: application data from the client is read only once its
 	// Finished has been verified.
-	appMsg1_s = AEAD_DEC(cApTraffic, appData1, seq0)?
+	appMsg1_s = AEAD_DEC(cApTraffic, n_appData1, appData1, seq0)?
 	// §4.7.1: two NewSessionTickets, each with its own nonce and so its
 	// own PSK; the tickets are records 0 and 1 under sApTraffic.
 	generates ticketNonce1, ticketNonce2
 	resPsk1 = HKDF(resumptionSecret, labelResumption, ticketNonce1)
 	resPsk2 = HKDF(resumptionSecret, labelResumption, ticketNonce2)
-	newSessionTicket1 = AEAD_ENC(sApTraffic, ticketNonce1, seq0)
-	newSessionTicket2 = AEAD_ENC(sApTraffic, ticketNonce2, seq1)
+	generates n_newSessionTicket1
+	newSessionTicket1 = AEAD_ENC(sApTraffic, n_newSessionTicket1, ticketNonce1, seq0)
+	generates n_newSessionTicket2
+	newSessionTicket2 = AEAD_ENC(sApTraffic, n_newSessionTicket2, ticketNonce2, seq1)
 	generates appMsg2
-	appData2 = AEAD_ENC(sApTraffic, appMsg2, seq2)
+	generates n_appData2
+	appData2 = AEAD_ENC(sApTraffic, n_appData2, appMsg2, seq2)
 	// §4.7.3: KeyUpdate goes out under the old key; §7.2: the next
 	// generation is one HKDF-Expand-Label away, and its sequence numbers
 	// start over (§5.3).
-	keyUpdate = AEAD_ENC(sApTraffic, updateNotRequested, seq3)
+	generates n_keyUpdate
+	keyUpdate = AEAD_ENC(sApTraffic, n_keyUpdate, updateNotRequested, seq3)
 	sApTraffic1 = HKDF(sApTraffic, labelTrafficUpd, nil)
 	generates appMsg3
-	appData3 = AEAD_ENC(sApTraffic1, appMsg3, seq0)
+	generates n_appData3
+	appData3 = AEAD_ENC(sApTraffic1, n_appData3, appMsg3, seq0)
 ]
 
-Server -> Client: newSessionTicket1, newSessionTicket2, appData2, keyUpdate, appData3
+Server -> Client: n_newSessionTicket1, newSessionTicket1, n_newSessionTicket2, newSessionTicket2, n_appData2, appData2, n_keyUpdate, keyUpdate, n_appData3, appData3
 
 principal Client[
-	ticketNonce1_c = AEAD_DEC(sApTraffic_c, newSessionTicket1, seq0)?
-	ticketNonce2_c = AEAD_DEC(sApTraffic_c, newSessionTicket2, seq1)?
+	ticketNonce1_c = AEAD_DEC(sApTraffic_c, n_newSessionTicket1, newSessionTicket1, seq0)?
+	ticketNonce2_c = AEAD_DEC(sApTraffic_c, n_newSessionTicket2, newSessionTicket2, seq1)?
 	resPsk1_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce1_c)
 	resPsk2_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce2_c)
-	appMsg2_c = AEAD_DEC(sApTraffic_c, appData2, seq2)?
-	keyUpdate_c = AEAD_DEC(sApTraffic_c, keyUpdate, seq3)?
+	appMsg2_c = AEAD_DEC(sApTraffic_c, n_appData2, appData2, seq2)?
+	keyUpdate_c = AEAD_DEC(sApTraffic_c, n_keyUpdate, keyUpdate, seq3)?
 	_ = ASSERT(keyUpdate_c, updateNotRequested)?
 	sApTraffic1_c = HKDF(sApTraffic_c, labelTrafficUpd, nil)
-	appMsg3_c = AEAD_DEC(sApTraffic1_c, appData3, seq0)?
+	appMsg3_c = AEAD_DEC(sApTraffic1_c, n_appData3, appData3, seq0)?
 ]
 
 phase[1]

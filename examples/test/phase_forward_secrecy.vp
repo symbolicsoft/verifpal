@@ -46,15 +46,16 @@ principal Alice[
 	eph_shared_a = DH_KEX(geb, ea)
 	session_key_a = HASH(eph_shared_a)
 	generates secret_msg
-	encrypted = AEAD_ENC(session_key_a, secret_msg, nil)
+	generates n_encrypted
+	encrypted = AEAD_ENC(session_key_a, n_encrypted, secret_msg, nil)
 ]
 
-Alice -> Bob: encrypted
+Alice -> Bob: n_encrypted, encrypted
 
 principal Bob[
 	eph_shared_b = DH_KEX(gea, eb)
 	session_key_b = HASH(eph_shared_b)
-	decrypted = AEAD_DEC(session_key_b, encrypted, nil)?
+	decrypted = AEAD_DEC(session_key_b, n_encrypted, encrypted, nil)?
 ]
 
 phase[1]

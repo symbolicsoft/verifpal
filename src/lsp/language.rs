@@ -1115,7 +1115,7 @@ queries[\n\
 
 	#[test]
 	fn nil_is_documented_as_a_keyword_and_offered_once() {
-		let source = "attacker[passive]\nprincipal Alice[\n\tknows private nl_k\n\t_ = AEAD_ENC(nl_k, nl_k, nil)\n]\nqueries[\n\tconfidentiality? nl_k\n]\n";
+		let source = "attacker[passive]\nprincipal Alice[\n\tknows private nl_k\n\t_ = AEAD_ENC(nl_k, nl_k, nl_k, nil)\n]\nqueries[\n\tconfidentiality? nl_k\n]\n";
 		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		docs.open(
 			"file:///nl.vp".to_string(),
@@ -1192,7 +1192,10 @@ queries[\n\
 		);
 		let d = docs.get("file:///sb.vp").expect("open");
 		let help = signature_help(d, d.line.position(src.len())).expect("help");
-		assert_eq!(help.signatures[0].label, "AEAD_ENC(key, plaintext, ad)");
+		assert_eq!(
+			help.signatures[0].label,
+			"AEAD_ENC(key, nonce, plaintext, ad)"
+		);
 		assert_eq!(help.active_parameter, Some(1));
 	}
 
@@ -1298,7 +1301,10 @@ queries[\n\
 		);
 		let d = docs.get("file:///s.vp").expect("open");
 		let help = signature_help(d, d.line.position(src.len())).expect("help");
-		assert_eq!(help.signatures[0].label, "AEAD_ENC(key, plaintext, ad)");
+		assert_eq!(
+			help.signatures[0].label,
+			"AEAD_ENC(key, nonce, plaintext, ad)"
+		);
 		assert_eq!(help.active_parameter, Some(1));
 	}
 

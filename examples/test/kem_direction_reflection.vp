@@ -30,27 +30,31 @@ principal Alice[
 	knows private m_alice
 	knows public dir_out, dir_back
 	ss_alice, ct = KEM_ENCAP(ek, r)
-	loose_out = AEAD_ENC(ss_alice, m_alice, nil)
-	bound_out = AEAD_ENC(ss_alice, m_alice, dir_out)
+	generates n_loose_out
+	loose_out = AEAD_ENC(ss_alice, n_loose_out, m_alice, nil)
+	generates n_bound_out
+	bound_out = AEAD_ENC(ss_alice, n_bound_out, m_alice, dir_out)
 ]
 
-Alice -> Bob: ct, loose_out, bound_out
+Alice -> Bob: ct, n_loose_out, loose_out, n_bound_out, bound_out
 
 principal Bob[
 	knows private m_bob
 	knows public dir_out, dir_back
 	ss_bob = KEM_DECAP(dk, ct)?
-	_ = AEAD_DEC(ss_bob, loose_out, nil)?
-	_ = AEAD_DEC(ss_bob, bound_out, dir_out)?
-	loose_back = AEAD_ENC(ss_bob, m_bob, nil)
-	bound_back = AEAD_ENC(ss_bob, m_bob, dir_back)
+	_ = AEAD_DEC(ss_bob, n_loose_out, loose_out, nil)?
+	_ = AEAD_DEC(ss_bob, n_bound_out, bound_out, dir_out)?
+	generates n_loose_back
+	loose_back = AEAD_ENC(ss_bob, n_loose_back, m_bob, nil)
+	generates n_bound_back
+	bound_back = AEAD_ENC(ss_bob, n_bound_back, m_bob, dir_back)
 ]
 
-Bob -> Alice: loose_back, bound_back
+Bob -> Alice: n_loose_back, loose_back, n_bound_back, bound_back
 
 principal Alice[
-	got_loose = AEAD_DEC(ss_alice, loose_back, nil)?
-	got_bound = AEAD_DEC(ss_alice, bound_back, dir_back)?
+	got_loose = AEAD_DEC(ss_alice, n_loose_back, loose_back, nil)?
+	got_bound = AEAD_DEC(ss_alice, n_bound_back, bound_back, dir_back)?
 	_ = HASH(got_loose, got_bound)
 ]
 

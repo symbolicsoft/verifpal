@@ -25,15 +25,16 @@ principal Alice[
 	generates a
 	ga = PUBKEY(a)
 	k = DH_KEX(gb, a)
-	e = AEAD_ENC(k, m, nil)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
 	leaks a
 ]
 
-Alice -> Bob: [ga], e
+Alice -> Bob: [ga], n_e, e
 
 principal Bob[
 	kb = DH_KEX(ga, b)
-	got = AEAD_DEC(kb, e, nil)?
+	got = AEAD_DEC(kb, n_e, e, nil)?
 	_ = HASH(got)
 	leaks kb
 ]

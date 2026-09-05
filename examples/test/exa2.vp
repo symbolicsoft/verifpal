@@ -9,6 +9,7 @@ principal P1[
 	knows public c
 	generates n1
 	generates n2
+	generates n_kdf, n_msg
 ]
 
 P1 -> P2: n1
@@ -20,9 +21,9 @@ principal P2[
 P2 -> P1: x1
 
 principal P1[
-	k1 = AEAD_ENC(k, n1, c)
-	k2 = AEAD_ENC(k, x1, c)
-	msg = AEAD_DEC(k2, AEAD_ENC(k1, m, c), c)
+	k1 = AEAD_ENC(k, n_kdf, n1, c)
+	k2 = AEAD_ENC(k, n_kdf, x1, c)
+	msg = AEAD_DEC(k2, n_msg, AEAD_ENC(k1, n_msg, m, c), c)
 ]
 
 P1 -> P2: msg

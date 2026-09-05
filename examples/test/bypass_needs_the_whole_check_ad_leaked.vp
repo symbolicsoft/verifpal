@@ -17,15 +17,16 @@ principal Alice[
 	leaks k
 	leaks ad
 	knows private plain
-	c = AEAD_ENC(k, plain, ad)
+	generates n_c
+	c = AEAD_ENC(k, n_c, plain, ad)
 ]
 
-Alice -> Bob: c
+Alice -> Bob: n_c, c
 
 principal Bob[
 	knows private k
 	knows private ad
-	m = AEAD_DEC(k, c, ad)?
+	m = AEAD_DEC(k, n_c, c, ad)?
 	generates s
 	out = HASH(s, m)
 ]

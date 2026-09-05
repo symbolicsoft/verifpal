@@ -34,14 +34,15 @@ Bob -> Alice: [gb]
 principal Alice[
 	generates m
 	k_alice = DH_KEX(gb, a_static)
-	e = AEAD_ENC(k_alice, m, nil)
+	generates n_e
+	e = AEAD_ENC(k_alice, n_e, m, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 principal Bob[
 	k_bob = DH_KEX(ga, b_static)
-	d = AEAD_DEC(k_bob, e, nil)?
+	d = AEAD_DEC(k_bob, n_e, e, nil)?
 	_ = HASH(d)
 ]
 

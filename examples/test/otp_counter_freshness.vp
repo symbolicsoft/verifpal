@@ -18,7 +18,10 @@
 // housekeeping rather than protocol: unguarded, the recipient resolves either
 // token to a bare constant and both come out f1; under shared associated data
 // the attacker simply swaps one for the other and the comparison is about
-// nothing.
+// nothing. The static token's nonce is declared on both sides rather than
+// generated, so the token stays the same value in every run, which is the
+// point of it; the counted token's nonce is generated, as a device deriving
+// its nonce from the counter would, and travels guarded beside the token.
 
 attacker[active]
 
@@ -26,18 +29,20 @@ principal Device[
 	knows private device_key
 	knows private device_id
 	knows public ad_static, ad_counted
-	generates counter
-	static_token = AEAD_ENC(device_key, device_id, ad_static)
-	counted_token = AEAD_ENC(device_key, CONCAT(device_id, counter), ad_counted)
+	knows private iv_static
+	generates counter, n_counted
+	static_token = AEAD_ENC(device_key, iv_static, device_id, ad_static)
+	counted_token = AEAD_ENC(device_key, n_counted, CONCAT(device_id, counter), ad_counted)
 ]
 
-Device -> Server: [static_token], [counted_token]
+Device -> Server: [static_token], [n_counted], [counted_token]
 
 principal Server[
 	knows private device_key
 	knows public ad_static, ad_counted
-	seen_static = AEAD_DEC(device_key, static_token, ad_static)?
-	seen_counted = AEAD_DEC(device_key, counted_token, ad_counted)?
+	knows private iv_static
+	seen_static = AEAD_DEC(device_key, iv_static, static_token, ad_static)?
+	seen_counted = AEAD_DEC(device_key, n_counted, counted_token, ad_counted)?
 	_ = HASH(seen_static, seen_counted)
 ]
 

@@ -32,17 +32,19 @@ principal Alice[
 	generates r_first, r_second
 	ss_first, ct_first = KEM_ENCAP(ek, r_first)
 	ss_second, ct_second = KEM_ENCAP(ek, r_second)
-	e_first = AEAD_ENC(ss_first, m_first, nil)
-	e_second = AEAD_ENC(ss_second, m_second, nil)
+	generates n_e_first
+	e_first = AEAD_ENC(ss_first, n_e_first, m_first, nil)
+	generates n_e_second
+	e_second = AEAD_ENC(ss_second, n_e_second, m_second, nil)
 ]
 
-Alice -> Bob: ct_first, e_first, ct_second, e_second
+Alice -> Bob: ct_first, n_e_first, e_first, ct_second, n_e_second, e_second
 
 principal Bob[
 	back_first = KEM_DECAP(dk, ct_first)
 	back_second = KEM_DECAP(dk, ct_second)
-	_ = AEAD_DEC(back_first, e_first, nil)?
-	_ = AEAD_DEC(back_second, e_second, nil)?
+	_ = AEAD_DEC(back_first, n_e_first, e_first, nil)?
+	_ = AEAD_DEC(back_second, n_e_second, e_second, nil)?
 ]
 
 queries[

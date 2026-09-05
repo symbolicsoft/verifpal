@@ -37,8 +37,11 @@ type Replay = (
 	Option<Arc<Vec<PrincipalState>>>,
 );
 
+type DeferredReplay = (PrincipalId, Vec<(ValueId, Value)>);
+
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
+	deferred_replays: RwLock<Vec<DeferredReplay>>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
 	file_name: String,
@@ -251,6 +254,7 @@ impl VerifyContext {
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			origin_only: RwLock::new(IdSet::default()),
 			attacker: RwLock::new(AttackerState::new()),
+			deferred_replays: RwLock::new(Vec::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			file_name: m.file_name.clone(),
@@ -510,6 +514,38 @@ impl VerifyContext {
 		read_lock(&self.attacker).clone()
 	}
 
+	pub(crate) fn defer_replays(
+		&self,
+		principal: PrincipalId,
+		replays: Vec<Vec<(ValueId, Value)>>,
+	) {
+		let mut deferred = write_lock(&self.deferred_replays);
+		deferred.retain(|(who, _)| *who != principal);
+		deferred.extend(replays.into_iter().map(|bindings| (principal, bindings)));
+	}
+
+	pub(crate) fn take_deferred_replays(
+		&self,
+		principal: PrincipalId,
+	) -> Vec<Vec<(ValueId, Value)>> {
+		let mut deferred = write_lock(&self.deferred_replays);
+		let (mine, rest): (Vec<_>, Vec<_>) =
+			deferred.drain(..).partition(|(who, _)| *who == principal);
+		*deferred = rest;
+		mine.into_iter().map(|(_, bindings)| bindings).collect()
+	}
+
+	pub(crate) fn attacker_note_reuse(&self, pair: [Value; 2]) {
+		let mut state = write_lock(&self.attacker);
+		let seen = state.reused.iter().any(|held| {
+			(held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true))
+				|| (held[0].equivalent(&pair[1], true) && held[1].equivalent(&pair[0], true))
+		});
+		if !seen {
+			Arc::make_mut(&mut state.reused).push(pair);
+		}
+	}
+
 	pub(crate) fn attacker_knows(&self, value: &Value) -> bool {
 		read_lock(&self.attacker).knows(value).is_some()
 	}
@@ -745,6 +781,7 @@ impl VerifyContext {
 		let results_len = results.len();
 		VerifyContext {
 			attacker: RwLock::new(self.attacker_snapshot()),
+			deferred_replays: RwLock::new(Vec::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			file_name: self.file_name.clone(),
@@ -798,10 +835,10 @@ mod tests {
 			knows private cx_b\n\
 			cx_gb = PUBKEY(cx_b)\n\
 			cx_k = DH_KEX(cx_ga, cx_b)\n\
-			generates cx_m\n\
-			cx_e = AEAD_ENC(cx_k, cx_m, nil)\n\
+			generates cx_m, cx_n\n\
+			cx_e = AEAD_ENC(cx_k, cx_n, cx_m, nil)\n\
 			]\n\
-			Bob -> Alice: cx_gb, cx_e\n\
+			Bob -> Alice: cx_gb, cx_n, cx_e\n\
 			queries[\n\
 			confidentiality? cx_m\n\
 			]\n";
@@ -847,13 +884,13 @@ mod tests {
 			knows private cz_b\n\
 			cz_gb = PUBKEY(cz_b)\n\
 			cz_k = DH_KEX(cz_ga, cz_b)\n\
-			generates cz_m\n\
-			cz_e = AEAD_ENC(cz_k, cz_m, nil)\n\
+			generates cz_m, cz_n\n\
+			cz_e = AEAD_ENC(cz_k, cz_n, cz_m, nil)\n\
 			]\n\
-			Bob -> Alice: cz_gb, cz_e\n\
+			Bob -> Alice: cz_gb, cz_n, cz_e\n\
 			principal Alice[\n\
 			cz_k2 = DH_KEX(cz_gb, cz_a)\n\
-			cz_d = AEAD_DEC(cz_k2, cz_e, nil)\n\
+			cz_d = AEAD_DEC(cz_k2, cz_n, cz_e, nil)\n\
 			]\n\
 			queries[\n\
 			confidentiality? cz_m\n\

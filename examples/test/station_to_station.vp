@@ -40,35 +40,39 @@ Bob -> Alice: [gb_ident], gb
 principal Bob[
 	k_bob = DH_KEX(ga, b)
 	sig_bob = SIGN(b_ident, CONCAT(ga, gb))
-	sealed_bob = AEAD_ENC(k_bob, sig_bob, ad_auth)
+	generates n_sealed_bob
+	sealed_bob = AEAD_ENC(k_bob, n_sealed_bob, sig_bob, ad_auth)
 ]
 
-Bob -> Alice: sealed_bob
+Bob -> Alice: n_sealed_bob, sealed_bob
 
 principal Alice[
 	knows private m_alice
 	k_alice = DH_KEX(gb, a)
-	seen_bob = AEAD_DEC(k_alice, sealed_bob, ad_auth)?
+	seen_bob = AEAD_DEC(k_alice, n_sealed_bob, sealed_bob, ad_auth)?
 	_ = SIGNVERIF(gb_ident, CONCAT(ga, gb), seen_bob)?
 	sig_alice = SIGN(a_ident, CONCAT(ga, gb))
-	sealed_alice = AEAD_ENC(k_alice, sig_alice, ad_auth)
-	e_alice = AEAD_ENC(k_alice, m_alice, ad_a2b)
+	generates n_sealed_alice
+	sealed_alice = AEAD_ENC(k_alice, n_sealed_alice, sig_alice, ad_auth)
+	generates n_e_alice
+	e_alice = AEAD_ENC(k_alice, n_e_alice, m_alice, ad_a2b)
 ]
 
-Alice -> Bob: sealed_alice, e_alice
+Alice -> Bob: n_sealed_alice, sealed_alice, n_e_alice, e_alice
 
 principal Bob[
 	knows private m_bob
-	seen_alice = AEAD_DEC(k_bob, sealed_alice, ad_auth)?
+	seen_alice = AEAD_DEC(k_bob, n_sealed_alice, sealed_alice, ad_auth)?
 	_ = SIGNVERIF(ga_ident, CONCAT(ga, gb), seen_alice)?
-	got_alice = AEAD_DEC(k_bob, e_alice, ad_a2b)?
-	e_bob = AEAD_ENC(k_bob, m_bob, ad_b2a)
+	got_alice = AEAD_DEC(k_bob, n_e_alice, e_alice, ad_a2b)?
+	generates n_e_bob
+	e_bob = AEAD_ENC(k_bob, n_e_bob, m_bob, ad_b2a)
 ]
 
-Bob -> Alice: e_bob
+Bob -> Alice: n_e_bob, e_bob
 
 principal Alice[
-	got_bob = AEAD_DEC(k_alice, e_bob, ad_b2a)?
+	got_bob = AEAD_DEC(k_alice, n_e_bob, e_bob, ad_b2a)?
 	_ = HASH(got_bob)
 ]
 

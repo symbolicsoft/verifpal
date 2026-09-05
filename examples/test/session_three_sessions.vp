@@ -46,21 +46,23 @@ Charlie -> Alice: [gc]
 principal Alice[
 	kb = DH_KEX(gb, a)
 	kc = DH_KEX(gc, a)
-	eb = AEAD_ENC(kb, m, nil)
-	ec = AEAD_ENC(kc, m, nil)
+	generates n_eb
+	eb = AEAD_ENC(kb, n_eb, m, nil)
+	generates n_ec
+	ec = AEAD_ENC(kc, n_ec, m, nil)
 ]
 
-Alice -> Bob: eb
-Alice -> Charlie: ec
+Alice -> Bob: n_eb, eb
+Alice -> Charlie: n_ec, ec
 
 principal Bob[
 	kb2 = DH_KEX(ga, b)
-	db = AEAD_DEC(kb2, eb, nil)?
+	db = AEAD_DEC(kb2, n_eb, eb, nil)?
 ]
 
 principal Charlie[
 	kc2 = DH_KEX(ga, c)
-	dc = AEAD_DEC(kc2, ec, nil)?
+	dc = AEAD_DEC(kc2, n_ec, ec, nil)?
 ]
 
 queries[

@@ -37,30 +37,32 @@ principal Alice[
 	rk1, ck_a1 = HKDF(dh_root, nil, nil)
 	mk_a1, _ = HKDF(ck_a1, nil, nil)
 	generates msg1
-	e1 = AEAD_ENC(mk_a1, msg1, ga_eph0)
+	generates n_e1
+	e1 = AEAD_ENC(mk_a1, n_e1, msg1, ga_eph0)
 ]
 
-Alice -> Bob: e1
+Alice -> Bob: n_e1, e1
 
 principal Bob[
 	dh_root_b = HASH(DH_KEX(ga_id, b_id), DH_KEX(ga_eph0, b_eph0))
 	rk1_b, ck_b1 = HKDF(dh_root_b, nil, nil)
 	mk_b1, _ = HKDF(ck_b1, nil, nil)
-	msg1_b = AEAD_DEC(mk_b1, e1, ga_eph0)?
+	msg1_b = AEAD_DEC(mk_b1, n_e1, e1, ga_eph0)?
 	generates b_eph1
 	gb_eph1 = PUBKEY(b_eph1)
 	rk2_b, ck_b2 = HKDF(rk1_b, HASH(DH_KEX(ga_eph0, b_eph1)), nil)
 	mk_b2, _ = HKDF(ck_b2, nil, nil)
 	generates msg2
-	e2 = AEAD_ENC(mk_b2, msg2, gb_eph1)
+	generates n_e2
+	e2 = AEAD_ENC(mk_b2, n_e2, msg2, gb_eph1)
 ]
 
-Bob -> Alice: [gb_eph1], e2
+Bob -> Alice: [gb_eph1], n_e2, e2
 
 principal Alice[
 	rk2, ck_a2 = HKDF(rk1, HASH(DH_KEX(gb_eph1, a_eph0)), nil)
 	mk_a2, _ = HKDF(ck_a2, nil, nil)
-	msg2_a = AEAD_DEC(mk_a2, e2, gb_eph1)?
+	msg2_a = AEAD_DEC(mk_a2, n_e2, e2, gb_eph1)?
 ]
 
 queries[

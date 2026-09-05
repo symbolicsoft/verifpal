@@ -22,18 +22,20 @@ principal Alice[
 	generates m_static, m_rotated
 	k_static = HASH(root)
 	k_rotated = HASH(root, session_salt)
-	e_static = AEAD_ENC(k_static, m_static, nil)
-	e_rotated = AEAD_ENC(k_rotated, m_rotated, nil)
+	generates n_e_static
+	e_static = AEAD_ENC(k_static, n_e_static, m_static, nil)
+	generates n_e_rotated
+	e_rotated = AEAD_ENC(k_rotated, n_e_rotated, m_rotated, nil)
 ]
 
-Alice -> Bob: e_static, e_rotated, [session_salt]
+Alice -> Bob: n_e_static, e_static, n_e_rotated, e_rotated, [session_salt]
 
 principal Bob[
 	knows private root
 	k_static_b = HASH(root)
 	k_rotated_b = HASH(root, session_salt)
-	d_static = AEAD_DEC(k_static_b, e_static, nil)?
-	d_rotated = AEAD_DEC(k_rotated_b, e_rotated, nil)?
+	d_static = AEAD_DEC(k_static_b, n_e_static, e_static, nil)?
+	d_rotated = AEAD_DEC(k_rotated_b, n_e_rotated, e_rotated, nil)?
 	_ = HASH(d_static, d_rotated)
 ]
 

@@ -514,7 +514,7 @@ mod tests {
 
 	#[test]
 	fn a_primitive_name_splits_at_its_underscore() {
-		let out = term("AEAD_ENC(k, m, ad)");
+		let out = term("AEAD_ENC(k, n, m, ad)");
 		assert!(out.contains("\\vpprim{AEAD}{ENC}"), "{out}");
 		let out = term("HASH(m)");
 		assert!(out.contains("\\vpprimo{HASH}"), "{out}");
@@ -533,10 +533,10 @@ mod tests {
 			"nil",
 			"[ga]",
 			"HASH(m)",
-			"AEAD_ENC(DH_KEX(PUBKEY(nil), b), m, ad)",
-			"AEAD_DEC(k, e, ad)?",
+			"AEAD_ENC(DH_KEX(PUBKEY(nil), b), n, m, ad)",
+			"AEAD_DEC(k, n, e, ad)?",
 			"HASH[weak](m)",
-			"AEAD_ENC[weak, forgeable from phase 2](k, m, ad)",
+			"AEAD_ENC[weak, forgeable from phase 2](k, n, m, ad)",
 			"SPLIT(CONCAT(a, b))",
 			"na#2",
 			"gb@2",

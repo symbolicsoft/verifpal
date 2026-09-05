@@ -7,15 +7,16 @@ principal Alice[
 	knows private a
 	knows private b
 	knows private m
-	e = AEAD_ENC(b, m, nil)
+	generates n_e
+	e = AEAD_ENC(b, n_e, m, nil)
 	c = CONCAT(a, b)
 ]
 
-Alice -> Bob: e, c
+Alice -> Bob: n_e, e, c
 
 principal Bob[
 	aa, bb = SPLIT(c)
-	_ = AEAD_DEC(bb, e, nil)?
+	_ = AEAD_DEC(bb, n_e, e, nil)?
 ]
 
 queries[

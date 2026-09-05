@@ -22,24 +22,26 @@ principal Alice[
 	generates r1
 	ss1, ct1 = KEM_ENCAP(gb, r1)
 	knows private m1
-	e1 = AEAD_ENC(ss1, m1, nil)
+	generates n_e1
+	e1 = AEAD_ENC(ss1, n_e1, m1, nil)
 ]
 
 principal Carol[
 	generates r2
 	ss2, ct2 = KEM_ENCAP(gb, r2)
 	knows private m2
-	e2 = AEAD_ENC(ss2, m2, nil)
+	generates n_e2
+	e2 = AEAD_ENC(ss2, n_e2, m2, nil)
 ]
 
-Alice -> Bob: ct1, e1
-Carol -> Bob: ct2, e2
+Alice -> Bob: ct1, n_e1, e1
+Carol -> Bob: ct2, n_e2, e2
 
 principal Bob[
 	k1 = KEM_DECAP(b, ct1)?
 	k2 = KEM_DECAP(b, ct2)?
-	d1 = AEAD_DEC(k1, e1, nil)?
-	d2 = AEAD_DEC(k2, e2, nil)?
+	d1 = AEAD_DEC(k1, n_e1, e1, nil)?
+	d2 = AEAD_DEC(k2, n_e2, e2, nil)?
 ]
 
 queries[

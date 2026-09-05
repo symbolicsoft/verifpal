@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at --sessions 1, c1 at 2 — a declared nonce under a long-term
+// key is the same nonce in every session, and each session encrypts a fresh
+// message under it. One session is one ciphertext and nothing to compare it
+// with. Two sessions put AEAD_ENC(k, n, m, ad) and AEAD_ENC(k, n, m#2, ad) on
+// the wire together, and two ciphertexts under one key and nonce reveal both
+// plaintexts. The attacker never learns n itself; it does not need to.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private n
+	knows public ad
+	generates m
+	e = AEAD_ENC(k, n, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows private n
+	knows public ad
+	d = AEAD_DEC(k, n, e, ad)?
+]
+
+queries[
+	confidentiality? m
+]

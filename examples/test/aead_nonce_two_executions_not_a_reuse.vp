@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at --sessions 1 and at 2 — two executions of one run are not
+// two encryptions. Bob's challenge travels unguarded, so the attacker can hand
+// Alice something else and watch her seal it under the same key and nonce as
+// the honest run; but in any one execution Alice seals once. Pairing her
+// honest ciphertext with the one from the tampered execution would recover m,
+// and that is the incompatible-histories false attack in nonce clothing: the
+// two ciphertexts are two values of one slot, and no execution holds both. At
+// two sessions the nonce is generated per run, so there is nothing to pair
+// there either.
+
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	knows public ad
+	generates n, m
+	e = AEAD_ENC(k, n, CONCAT(nb, m), ad)
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, n, e, ad)?
+	nb_seen, m_seen = SPLIT(d)?
+]
+
+queries[
+	confidentiality? m
+]

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: error — Alice seals under n1 and sends n2, so Bob's checked
+// decryption fails in the honest run. A decryption matches the nonce the
+// way it matches the associated data, and a protocol that never completes
+// is a model error, not a passing query.
+
+attacker[passive]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public ad
+	generates n1, n2
+	e = AEAD_ENC(k, n1, m, ad)
+]
+
+Alice -> Bob: n2, e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, n2, e, ad)?
+]
+
+queries[
+	confidentiality? m
+]

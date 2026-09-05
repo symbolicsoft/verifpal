@@ -70,6 +70,7 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		current_phase: 0,
 		mutation_records: Arc::new(known.iter().map(|_| Arc::clone(&free)).collect()),
 		alternates: Arc::new(vec![Vec::new(); known.len()]),
+		reused: Arc::new(vec![]),
 		derivations: Arc::new(known.iter().map(|_| DerivationRecord::Initial).collect()),
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),

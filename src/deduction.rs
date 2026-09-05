@@ -6,9 +6,10 @@ use std::sync::Arc;
 use crate::context::VerifyContext;
 use crate::info::{info_deduction, info_output_text};
 use crate::pretty::pretty_values;
-use crate::primitive::primitive_core_reveals_args;
+use crate::primitive::{Reveal, primitive_core_reveals_args, reuse_fixed_names, reuse_rule};
 use crate::theory::{
 	can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite, obtainable,
+	one_execution, reduce_once, reused_pair,
 };
 use crate::types::*;
 use crate::value::compute_slot_diffs;
@@ -103,6 +104,7 @@ fn try_deduction_step(
 			}
 		}
 	}
+	progress |= rule_reuse(ctx, km, ps, attacker, record);
 	progress
 }
 
@@ -217,6 +219,53 @@ fn combination_coheres(
 	})
 }
 
+fn pair_coheres(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	a: &Value,
+	b: &Value,
+) -> bool {
+	let mut walk = Walk {
+		seen: IdSet::default(),
+		memo: take_needs_memo(attacker),
+		reads: Vec::new(),
+		union: Vec::new(),
+	};
+	collect_reads(km, ps, attacker, a, &mut walk);
+	collect_reads(km, ps, attacker, b, &mut walk);
+	let Walk {
+		reads,
+		mut union,
+		memo,
+		..
+	} = walk;
+	keep_needs_memo(attacker, memo);
+	for read in &reads {
+		if !merge_into(&read.needs, &mut union) {
+			return false;
+		}
+	}
+	if union.is_empty() {
+		return true;
+	}
+	union.sort_by_key(|(state, slot, _)| (*state, *slot));
+	let Some(replayed) = ctx.replayed(km, &seeds_of(&union), attacker) else {
+		return false;
+	};
+	reads.iter().all(|read| {
+		replayed
+			.iter()
+			.find(|state| state.id == read.reader)
+			.is_some_and(|state| {
+				read.slot < state.values.len()
+					&& !state.slot_unreached(read.slot)
+					&& state.values[read.slot].value.equivalent(&read.value, true)
+			})
+	})
+}
+
 type Need = (PrincipalId, SlotIdx, Value);
 
 fn needs_signature(needs: &[Need]) -> u64 {
@@ -320,6 +369,7 @@ fn tainted(record: &MutationRecord) -> Vec<Need> {
 struct Read {
 	slot: usize,
 	reader: PrincipalId,
+	value: Value,
 	needs: Vec<Need>,
 	signature: u64,
 }
@@ -442,6 +492,7 @@ fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, w
 			walk.reads.push(Read {
 				slot: slot.get(),
 				reader,
+				value: attacker.known[idx.get()].clone(),
 				signature: needs_signature(&needs),
 				needs,
 			});
@@ -727,15 +778,19 @@ fn rule_reconstruct(
 	};
 	if let Some(reconstructed) = result {
 		let used = reconstructed.from;
-		let derivation = match reconstructed.forged {
-			Some(capability) => DerivationRecord::Broken {
+		let forged = reconstructed.forged;
+		let derivation = match &forged {
+			Some(Forged::Assumption(capability)) => DerivationRecord::Broken {
 				of: value.clone(),
-				capability,
+				capability: *capability,
+				using: used.clone(),
+			},
+			Some(Forged::Reuse(with)) => DerivationRecord::ReusedForge {
+				with: with.clone(),
 				using: used.clone(),
 			},
 			None => DerivationRecord::Reconstructed { from: used.clone() },
 		};
-		let forged = reconstructed.forged;
 		found |= learn(
 			ctx,
 			km,
@@ -744,12 +799,20 @@ fn rule_reconstruct(
 			value,
 			record,
 			derivation,
-			|| match forged {
-				Some(capability) => format!(
+			|| match &forged {
+				Some(Forged::Assumption(capability)) => format!(
 					"{} forged from {} under the declared `{}` assumption.",
 					info_output_text(value),
 					pretty_values(&used),
 					capability.name(),
+				),
+				Some(Forged::Reuse(with)) => format!(
+					"{} forged from {} under the {} shared by {} and {}.",
+					info_output_text(value),
+					pretty_values(&used),
+					reuse_fixed_names(&with[0]),
+					with[0],
+					with[1],
 				),
 				None => format!(
 					"{} obtained by reconstructing with {}.",
@@ -760,6 +823,87 @@ fn rule_reconstruct(
 		);
 	}
 	found
+}
+
+fn rule_reuse(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	record: &Arc<MutationRecord>,
+) -> bool {
+	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
+	for (i, known) in attacker.known.iter().enumerate() {
+		let Value::Primitive(p) = known else {
+			continue;
+		};
+		let Some(rule) = reuse_rule(p.id) else {
+			continue;
+		};
+		let mut key = u64::from(p.id);
+		for &at in &rule.fixed {
+			let Some(argument) = p.arguments.get(at) else {
+				continue;
+			};
+			key = key.rotate_left(17).wrapping_add(argument.hash_value());
+		}
+		buckets.entry(key).or_default().push(i);
+	}
+	let mut progress = false;
+	for members in buckets.values() {
+		if members.len() < 2 {
+			continue;
+		}
+		for &i in members {
+			let of = &attacker.known[i];
+			let Some(&j) = members.iter().find(|&&j| {
+				reused_pair(of, &attacker.known[j])
+					&& one_execution(attacker, of, &attacker.known[j])
+					&& pair_coheres(ctx, km, ps, attacker, of, &attacker.known[j])
+			}) else {
+				continue;
+			};
+			let with = &attacker.known[j];
+			let Value::Primitive(p) = of else {
+				continue;
+			};
+			let Some(rule) = reuse_rule(p.id) else {
+				continue;
+			};
+			ctx.attacker_note_reuse([of.clone(), with.clone()]);
+			for reveal in &rule.reveals {
+				let revealed = match *reveal {
+					Reveal::Argument(index) => match p.arguments.get(index) {
+						Some(argument) => reduce_once(argument),
+						None => continue,
+					},
+					Reveal::Output(output) => Value::Primitive(Arc::new(p.with_output(output))),
+				};
+				progress |= learn(
+					ctx,
+					km,
+					ps,
+					attacker,
+					&revealed,
+					record,
+					DerivationRecord::Reused {
+						of: of.clone(),
+						with: with.clone(),
+					},
+					|| {
+						format!(
+							"{} recovered from {}: {} shares its {}.",
+							info_output_text(&revealed),
+							of,
+							with,
+							reuse_fixed_names(of),
+						)
+					},
+				);
+			}
+		}
+	}
+	progress
 }
 
 fn rule_rewrite_forward(
@@ -911,7 +1055,7 @@ fn rule_concat_extract(
 			attacker,
 			arg,
 			record,
-			DerivationRecord::ConcatFragment { of: value.clone() },
+			DerivationRecord::Fragment { of: value.clone() },
 			|| {
 				format!(
 					"{} obtained as a concatenated fragment of {}.",

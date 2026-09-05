@@ -37,51 +37,56 @@ principal Alice[
 	knows public a_name, b_name
 	generates na
 	generates m_id
-	t1 = AEAD_ENC(k_as, CONCAT(na, m_id, a_name, b_name), nil)
+	generates n_t1
+	t1 = AEAD_ENC(k_as, n_t1, CONCAT(na, m_id, a_name, b_name), nil)
 ]
 
-Alice -> Bob: m_id, t1
+Alice -> Bob: m_id, n_t1, t1
 
 principal Bob[
 	knows private k_bs
 	knows public a_name, b_name
 	generates nb
-	t2 = AEAD_ENC(k_bs, CONCAT(nb, m_id, a_name, b_name), nil)
+	generates n_t2
+	t2 = AEAD_ENC(k_bs, n_t2, CONCAT(nb, m_id, a_name, b_name), nil)
 ]
 
-Bob -> Server: m_id, t1, t2
+Bob -> Server: m_id, n_t1, t1, n_t2, t2
 
 principal Server[
 	knows private k_as
 	knows private k_bs
 	generates kab
-	d1 = AEAD_DEC(k_as, t1, nil)?
+	d1 = AEAD_DEC(k_as, n_t1, t1, nil)?
 	na_s, m1_s, a1_s, b1_s = SPLIT(d1)
-	d2 = AEAD_DEC(k_bs, t2, nil)?
+	d2 = AEAD_DEC(k_bs, n_t2, t2, nil)?
 	nb_s, m2_s, a2_s, b2_s = SPLIT(d2)
-	t3 = AEAD_ENC(k_as, CONCAT(na_s, kab), nil)
-	t4 = AEAD_ENC(k_bs, CONCAT(nb_s, kab), nil)
+	generates n_t3
+	t3 = AEAD_ENC(k_as, n_t3, CONCAT(na_s, kab), nil)
+	generates n_t4
+	t4 = AEAD_ENC(k_bs, n_t4, CONCAT(nb_s, kab), nil)
 ]
 
-Server -> Bob: t3, t4
+Server -> Bob: n_t3, t3, n_t4, t4
 
 principal Bob[
-	d4 = AEAD_DEC(k_bs, t4, nil)?
+	d4 = AEAD_DEC(k_bs, n_t4, t4, nil)?
 	nb_b, kab_b = SPLIT(d4)
 	_ = ASSERT(nb_b, nb)?
 ]
 
-Bob -> Alice: t3
+Bob -> Alice: n_t3, t3
 
 principal Alice[
-	d3 = AEAD_DEC(k_as, t3, nil)?
+	d3 = AEAD_DEC(k_as, n_t3, t3, nil)?
 	na_a, kab_a = SPLIT(d3)
 	_ = ASSERT(na_a, na)?
 	generates secret_a
-	e = AEAD_ENC(kab_a, secret_a, nil)
+	generates n_e
+	e = AEAD_ENC(kab_a, n_e, secret_a, nil)
 ]
 
-Alice -> Bob: e
+Alice -> Bob: n_e, e
 
 queries[
 	confidentiality? kab

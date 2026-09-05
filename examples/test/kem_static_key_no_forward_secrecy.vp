@@ -19,15 +19,17 @@ principal Alice[
 	generates r1, r2
 	ss1, ct1 = KEM_ENCAP(ekb, r1)
 	ss2, ct2 = KEM_ENCAP(ekb, r2)
-	e1 = AEAD_ENC(ss1, m1, nil)
-	e2 = AEAD_ENC(ss2, m2, nil)
+	generates n_e1
+	e1 = AEAD_ENC(ss1, n_e1, m1, nil)
+	generates n_e2
+	e2 = AEAD_ENC(ss2, n_e2, m2, nil)
 ]
 
-Alice -> Bob: ct1, e1, ct2, e2
+Alice -> Bob: ct1, n_e1, e1, ct2, n_e2, e2
 
 principal Bob[
 	ssb1 = KEM_DECAP(dkb, ct1)
-	d1 = AEAD_DEC(ssb1, e1, nil)?
+	d1 = AEAD_DEC(ssb1, n_e1, e1, nil)?
 ]
 
 phase[1]

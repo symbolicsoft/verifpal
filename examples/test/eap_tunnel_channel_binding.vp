@@ -52,23 +52,25 @@ principal Client[
 	bare_in_two = HASH(inner_secret)
 	bound_in_one = HASH(inner_secret, tunnel_one)
 	bound_in_two = HASH(inner_secret, tunnel_two)
-	sealed_one = AEAD_ENC(tunnel_one, CONCAT(bare_in_one, bound_in_one), nil)
-	sealed_two = AEAD_ENC(tunnel_two, CONCAT(bare_in_two, bound_in_two), nil)
+	generates n_sealed_one
+	sealed_one = AEAD_ENC(tunnel_one, n_sealed_one, CONCAT(bare_in_one, bound_in_one), nil)
+	generates n_sealed_two
+	sealed_two = AEAD_ENC(tunnel_two, n_sealed_two, CONCAT(bare_in_two, bound_in_two), nil)
 ]
 
-Client -> ServerOne: [pub_one], sealed_one
-Client -> ServerTwo: [pub_two], sealed_two
+Client -> ServerOne: [pub_one], n_sealed_one, sealed_one
+Client -> ServerTwo: [pub_two], n_sealed_two, sealed_two
 
 principal ServerOne[
 	server_tunnel_one = DH_KEX(pub_one, sk_one)
-	seen_bare_one, seen_bound_one = SPLIT(AEAD_DEC(server_tunnel_one, sealed_one, nil))?
+	seen_bare_one, seen_bound_one = SPLIT(AEAD_DEC(server_tunnel_one, n_sealed_one, sealed_one, nil))?
 	_ = ASSERT(HASH(inner_secret), seen_bare_one)?
 	_ = ASSERT(HASH(inner_secret, server_tunnel_one), seen_bound_one)?
 ]
 
 principal ServerTwo[
 	server_tunnel_two = DH_KEX(pub_two, sk_two)
-	seen_bare_two, seen_bound_two = SPLIT(AEAD_DEC(server_tunnel_two, sealed_two, nil))?
+	seen_bare_two, seen_bound_two = SPLIT(AEAD_DEC(server_tunnel_two, n_sealed_two, sealed_two, nil))?
 	_ = ASSERT(HASH(inner_secret), seen_bare_two)?
 	_ = ASSERT(HASH(inner_secret, server_tunnel_two), seen_bound_two)?
 ]

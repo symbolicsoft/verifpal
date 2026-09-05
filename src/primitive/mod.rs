@@ -8,6 +8,7 @@ mod spec;
 use self::spec::{build_core_specs, build_primitive_specs};
 use crate::types::*;
 
+#[cfg(test)]
 pub(crate) use self::spec::*;
 
 pub(crate) type FilterFn = fn(&Primitive, &Value, usize) -> (Value, bool);
@@ -18,6 +19,27 @@ pub(crate) type RewriteToFn = fn(&Primitive) -> Value;
 pub(crate) enum Reveal {
 	Argument(usize),
 	Output(usize),
+}
+
+#[derive(Clone, Copy, Default)]
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+pub(crate) struct PrimitiveDoc {
+	pub example: &'static str,
+	pub help: &'static str,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReuseRule {
+	pub fixed: Vec<usize>,
+	pub reveals: Vec<Reveal>,
+	pub forgeable: Vec<usize>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ArgumentRestriction {
+	pub position: usize,
+	pub banned: Vec<PrimitiveId>,
+	pub note: &'static str,
 }
 
 #[derive(Clone)]
@@ -60,7 +82,12 @@ pub(crate) struct PrimitiveCoreSpec {
 	pub core_rule: Option<CoreRuleFn>,
 	pub definition_check: bool,
 	pub reveals_args: bool,
+	pub projection_of: Option<PrimitiveId>,
+	pub equality: bool,
+	pub unwraps: Option<usize>,
 	pub arg_names: Vec<&'static str>,
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+	pub doc: PrimitiveDoc,
 }
 
 #[derive(Clone, Copy)]
@@ -92,14 +119,19 @@ pub(crate) struct PrimitiveSpec {
 	pub definition_check: bool,
 	pub bypass_key: Option<BypassKeyKind>,
 	pub commutativity: Option<CommutativityRule>,
-	pub argument_restrictions: Vec<(usize, Vec<PrimitiveId>)>,
+	pub argument_restrictions: Vec<ArgumentRestriction>,
 	pub key_derivation: bool,
 	pub identifying_positions: Vec<usize>,
 	pub weak_reveals: Vec<usize>,
 	pub weak_reveals_output: Option<usize>,
 	pub forgeable_secret: Option<usize>,
 	pub malleable_vary: Vec<usize>,
+	pub reuse: Option<ReuseRule>,
+	pub divergence_filler: bool,
+	pub arity_help: Option<(i32, &'static str)>,
 	pub arg_names: Vec<&'static str>,
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+	pub doc: PrimitiveDoc,
 }
 
 static CORE_SPECS: LazyLock<[Option<PrimitiveCoreSpec>; 256]> = LazyLock::new(|| {
@@ -330,16 +362,16 @@ pub(crate) fn value_is_key_derivation(v: &Value) -> bool {
 }
 
 pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) -> Vec<Value> {
-	for (position, banned) in argument_restrictions(id) {
-		while let Some(Value::Primitive(inner)) = arguments.get(*position) {
-			if !banned.contains(&inner.id)
+	for restriction in argument_restrictions(id) {
+		while let Some(Value::Primitive(inner)) = arguments.get(restriction.position) {
+			if !restriction.banned.contains(&inner.id)
 				|| !primitive_is_key_derivation(inner.id)
 				|| inner.arguments.len() != 1
 			{
 				break;
 			}
 			let unwrapped = inner.arguments[0].clone();
-			arguments[*position] = unwrapped;
+			arguments[restriction.position] = unwrapped;
 		}
 	}
 	arguments
@@ -349,9 +381,9 @@ pub(crate) fn admissible(v: &Value) -> bool {
 	let Value::Primitive(p) = v else {
 		return true;
 	};
-	for (position, banned) in argument_restrictions(p.id) {
-		if let Some(Value::Primitive(inner)) = p.arguments.get(*position)
-			&& banned.contains(&inner.id)
+	for restriction in argument_restrictions(p.id) {
+		if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
+			&& restriction.banned.contains(&inner.id)
 		{
 			return false;
 		}
@@ -359,7 +391,7 @@ pub(crate) fn admissible(v: &Value) -> bool {
 	p.arguments.iter().all(admissible)
 }
 
-pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [(usize, Vec<PrimitiveId>)] {
+pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [ArgumentRestriction] {
 	primitive_get(id)
 		.map(|s| s.argument_restrictions.as_slice())
 		.unwrap_or(&[])
@@ -375,6 +407,76 @@ pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
 	CORE_SPECS[id as usize]
 		.as_ref()
 		.is_some_and(|s| s.reveals_args)
+}
+
+pub(crate) fn primitive_projects(id: PrimitiveId) -> Option<PrimitiveId> {
+	CORE_SPECS[id as usize].as_ref()?.projection_of
+}
+
+pub(crate) fn primitive_is_projection(id: PrimitiveId) -> bool {
+	primitive_projects(id).is_some()
+}
+
+pub(crate) fn primitive_is_equality(id: PrimitiveId) -> bool {
+	CORE_SPECS[id as usize].as_ref().is_some_and(|s| s.equality)
+}
+
+pub(crate) fn primitive_unwraps(id: PrimitiveId) -> Option<usize> {
+	match CORE_SPECS[id as usize].as_ref() {
+		Some(core) => core.unwraps,
+		None => PRIM_SPECS[id as usize]
+			.as_ref()?
+			.rewrite
+			.as_ref()
+			.map(|rule| rule.from),
+	}
+}
+
+pub(crate) fn filler_primitive() -> Option<PrimitiveId> {
+	prim_specs().find(|s| s.divergence_filler).map(|s| s.id)
+}
+
+pub(crate) fn reuse_rule(id: PrimitiveId) -> Option<&'static ReuseRule> {
+	PRIM_SPECS[id as usize].as_ref()?.reuse.as_ref()
+}
+
+pub(crate) fn reuse_fixed_names(v: &Value) -> String {
+	let Value::Primitive(p) = v else {
+		return String::new();
+	};
+	let (Some(rule), Ok(spec)) = (reuse_rule(p.id), primitive_get(p.id)) else {
+		return String::new();
+	};
+	let names: Vec<&str> = rule
+		.fixed
+		.iter()
+		.filter_map(|&at| spec.arg_names.get(at).copied())
+		.collect();
+	match names.len() {
+		0 => String::new(),
+		1 => names[0].to_string(),
+		n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
+	}
+}
+
+pub(crate) fn primitive_arity_help(id: PrimitiveId, given: i32) -> Option<&'static str> {
+	let (arity, help) = PRIM_SPECS[id as usize].as_ref()?.arity_help?;
+	(arity == given).then_some(help)
+}
+
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+pub(crate) fn primitive_docs() -> Vec<(&'static str, PrimitiveDoc)> {
+	core_specs()
+		.map(|s| (s.name, s.doc))
+		.chain(prim_specs().map(|s| (s.name, s.doc)))
+		.collect()
+}
+
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+pub(crate) fn primitives_supporting(
+	supports: impl Fn(PrimitiveId) -> bool,
+) -> Vec<&'static PrimitiveSpec> {
+	prim_specs().filter(|s| supports(s.id)).collect()
 }
 
 pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
@@ -538,13 +640,13 @@ mod tests {
 			};
 			let bare: Vec<PrimitiveId> = argument_restrictions(spec.id)
 				.iter()
-				.find(|(position, _)| *position == rule.bare)
-				.map(|(_, banned)| banned.clone())
+				.find(|restriction| restriction.position == rule.bare)
+				.map(|restriction| restriction.banned.clone())
 				.unwrap_or_default();
 			let wrapped: Vec<PrimitiveId> = argument_restrictions(rule.constructor)
 				.iter()
-				.find(|(position, _)| *position == 0)
-				.map(|(_, banned)| banned.clone())
+				.find(|restriction| restriction.position == 0)
+				.map(|restriction| restriction.banned.clone())
 				.unwrap_or_default();
 			let mut bare = bare;
 			let mut wrapped = wrapped;
@@ -740,9 +842,31 @@ mod tests {
 			for &i in &spec.identifying_positions {
 				may("identifying_positions", i);
 			}
-			for (position, banned) in &spec.argument_restrictions {
-				may("argument_restrictions", *position);
-				for &id in banned {
+			if let Some(rule) = &spec.reuse {
+				for &i in &rule.fixed {
+					must("reuse.fixed", i);
+				}
+				for &i in &rule.forgeable {
+					must("reuse.forgeable", i);
+				}
+				for reveal in &rule.reveals {
+					match *reveal {
+						Reveal::Argument(i) => must("reuse.reveal", i),
+						Reveal::Output(i) => out("reuse.reveal_output", i),
+					}
+				}
+			}
+
+			if let Some((arity, help)) = spec.arity_help {
+				assert!(
+					!spec.arity.contains(&arity) && !help.is_empty(),
+					"{name}.arity_help names an arity the primitive accepts, or says nothing"
+				);
+			}
+
+			for restriction in &spec.argument_restrictions {
+				may("argument_restrictions", restriction.position);
+				for &id in &restriction.banned {
 					assert!(
 						primitive_get(id).is_ok() || primitive_core_get(id).is_ok(),
 						"{name}.argument_restrictions bans an id that is not a primitive"
@@ -782,5 +906,64 @@ mod tests {
 		assert!(!primitive_has_rewrite_rule(PRIM_ENC));
 		assert!(!primitive_has_rewrite_rule(PRIM_SIGN));
 		assert!(!primitive_has_rewrite_rule(PRIM_MAC));
+	}
+
+	const TEST_ONLY: &[&str] = &[
+		"metamorphic.rs",
+		"model_tests.rs",
+		"testutil.rs",
+		"tracecheck.rs",
+		"tex/tests.rs",
+	];
+
+	#[test]
+	fn the_engine_names_no_primitive_outside_its_spec() {
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+		let names = primitive_names();
+		let mut offenders: Vec<String> = Vec::new();
+		let mut stack = vec![root.clone()];
+		while let Some(dir) = stack.pop() {
+			for entry in std::fs::read_dir(&dir).expect("read src") {
+				let path = entry.expect("entry").path();
+				if path.is_dir() {
+					stack.push(path);
+					continue;
+				}
+				if path.extension().is_none_or(|e| e != "rs") {
+					continue;
+				}
+				let rel = path
+					.strip_prefix(&root)
+					.expect("under src")
+					.to_string_lossy()
+					.replace('\\', "/");
+				if rel.starts_with("primitive/") || TEST_ONLY.contains(&rel.as_str()) {
+					continue;
+				}
+				let text = std::fs::read_to_string(&path).expect("read");
+				let code = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+				for (n, line) in code.lines().enumerate() {
+					let line = line.trim();
+					if line.starts_with("//") {
+						continue;
+					}
+					let quotes_one = names.iter().any(|name| {
+						line.contains(&format!("\"{name}\""))
+							|| line.contains(&format!("\"{}\"", name.to_lowercase()))
+					});
+					if line.contains("PRIM_") || quotes_one {
+						offenders.push(format!("{rel}:{}: {line}", n + 1));
+					}
+				}
+			}
+		}
+		assert!(
+			offenders.is_empty(),
+			"a primitive is declared once, in src/primitive/spec.rs, and the engine \
+			 interprets what the spec says; a line that names one by id or by name is \
+			 semantics the spec should carry as a field the engine reads generically. \
+			 Add the field, not the branch:\n  {}",
+			offenders.join("\n  ")
+		);
 	}
 }

@@ -43,14 +43,18 @@ principal Alice[
 	ct_classical_second = PKE_ENC(pk_classical_second, share_second)
 	k_pq_broken, _, _ = HKDF(ss_first, share_first, info)
 	k_classical_broken, _, _ = HKDF(ss_second, share_second, info)
-	e_pq_broken = AEAD_ENC(k_pq_broken, m_pq_broken, nil)
-	e_classical_broken = AEAD_ENC(k_classical_broken, m_classical_broken, nil)
-	e_pq_only = AEAD_ENC(ss_first, m_pq_only, nil)
-	e_classical_only = AEAD_ENC(share_second, m_classical_only, nil)
+	generates n_e_pq_broken
+	e_pq_broken = AEAD_ENC(k_pq_broken, n_e_pq_broken, m_pq_broken, nil)
+	generates n_e_classical_broken
+	e_classical_broken = AEAD_ENC(k_classical_broken, n_e_classical_broken, m_classical_broken, nil)
+	generates n_e_pq_only
+	e_pq_only = AEAD_ENC(ss_first, n_e_pq_only, m_pq_only, nil)
+	generates n_e_classical_only
+	e_classical_only = AEAD_ENC(share_second, n_e_classical_only, m_classical_only, nil)
 ]
 
 Alice -> Bob: ct_pq_first, ct_classical_first, ct_pq_second, ct_classical_second
-Alice -> Bob: e_pq_broken, e_classical_broken, e_pq_only, e_classical_only
+Alice -> Bob: n_e_pq_broken, e_pq_broken, n_e_classical_broken, e_classical_broken, n_e_pq_only, e_pq_only, n_e_classical_only, e_classical_only
 
 principal Bob[
 	leaks dk_pq_first
