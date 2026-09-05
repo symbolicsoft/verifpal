@@ -1,0 +1,40 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u0 at one session and at two.
+//
+// Bob derives two tokens from two independently generated nonces under two
+// public labels. Replacing Alice's nonce with Carol's on the wire gives the
+// two tokens a common origin, but that origin is a value the attacker itself
+// put there, so exhibiting it says nothing about the honest tokens. A shared
+// secret that the attacker supplied on the wire is not a link witness.
+
+attacker[active]
+
+principal Alice[
+	generates ufo_na
+]
+
+principal Carol[
+	generates ufo_nc
+]
+
+Alice -> Bob: ufo_na
+Carol -> Bob: ufo_nc
+
+principal Bob[
+	knows public ufo_c1, ufo_c2
+	ufo_p = HASH(ufo_na, ufo_c1)
+	ufo_q = HASH(ufo_nc, ufo_c2)
+]
+
+Bob -> Dave: ufo_p, ufo_q
+
+principal Dave[
+	_ = HASH(ufo_p)
+	_ = HASH(ufo_q)
+]
+
+queries[
+	unlinkability? ufo_p, ufo_q
+]

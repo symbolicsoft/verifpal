@@ -65,6 +65,7 @@ pub(crate) fn construct_protocol_trace(
 		copy_siblings: IdMap::default(),
 		interchangeable: IdMap::default(),
 		actors: IdMap::default(),
+		equivalence_queried: IdSet::default(),
 	};
 	let declared = model_declarations(m);
 	let mut leaks: Vec<LeakEvent> = Vec::new();
@@ -746,7 +747,7 @@ fn construct_wire_index(
 			if !travel.guard {
 				travel.guard = msg_const.guard && (is_recipient || is_creator);
 			}
-			if !msg_const.guard {
+			if !msg_const.guard || travel.mutatable_to.contains(&message.sender) {
 				append_unique(&mut travel.mutatable_to, message.recipient);
 			}
 		}

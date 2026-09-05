@@ -1,0 +1,35 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// Unblinding is a public operation. The attacker sees the blind signature on
+// the wire, knows the public message, and is handed the blinding factor, so
+// it computes UNBLIND(k, m, blindsig) = SIGN(sk, m) itself, which is the
+// bank's coin. No principal writes the UNBLIND: the closure has to build the
+// term for the attacker out of what it holds, not only rewrite the ones the
+// protocol computes.
+
+attacker[passive]
+
+principal Alice[
+	knows public bau_m
+	generates bau_k
+	bau_blinded = BLIND(bau_k, bau_m)
+	leaks bau_k
+]
+
+Alice -> Bank: bau_blinded
+
+principal Bank[
+	knows private bau_sk
+	knows public bau_m
+	bau_blindsig = SIGN(bau_sk, bau_blinded)
+	bau_coin = SIGN(bau_sk, bau_m)
+]
+
+Bank -> Alice: bau_blindsig
+
+queries[
+	confidentiality? bau_coin
+]

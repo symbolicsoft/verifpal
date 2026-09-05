@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// The corrupt peer's private key is derived from a public seed, so the
+// attacker computes it without any leak. A value every principal can compute
+// from public constants is compromised from the start, and the run in which
+// Alice's peer holds it is a corrupt-peer run, exactly as if the key had been
+// leaked.
+
+attacker[active]
+
+principal Bob[
+	knows private scd_b
+	scd_gb = PUBKEY(scd_b)
+]
+
+principal Mallory[
+	knows public scd_seed
+	scd_mk = HASH(scd_seed)
+	scd_gm = PUBKEY(scd_mk)
+]
+
+principal Alice[
+	knows private scd_a
+	knows public scd_gpeer
+	generates scd_ni
+]
+
+Bob -> Alice: [scd_gb]
+Mallory -> Alice: [scd_gm]
+
+principal Alice[
+	scd_m1 = PKE_ENC(scd_gpeer, scd_ni)
+]
+
+Alice -> Bob: scd_m1
+
+principal Bob[
+	scd_d = PKE_DEC(scd_b, scd_m1)
+	_ = HASH(scd_d)
+]
+
+scenarios[
+	Alice[scd_gpeer = scd_gb]
+	Alice[scd_gpeer = scd_gm]
+]
+
+queries[
+	confidentiality? scd_ni
+]

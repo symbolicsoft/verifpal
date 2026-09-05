@@ -5,7 +5,9 @@
 // mitigation §9.1.1 itself recommends: "produce a digital signature over
 // (enc, ct) tuples using a sender's private key".
 //
-// Expected: c1a0, at one session and at two.
+// Expected: c1a0 at one session and c1a1 at two, the two-session
+// authentication failure being the same first-flight duplicate acceptance
+// that hpke_auth.vp reports at two sessions.
 //
 // hpke_auth_kci.vp is c1a1. Adding the signature moves the authentication
 // query back to a0 and leaves confidentiality at c1, and both halves of that

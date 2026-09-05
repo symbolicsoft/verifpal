@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u0 at one session and at two.
+//
+// Bob tags two independently generated nonces under a key nobody else holds.
+// The attacker can replace both nonces with a value of its own and watch the
+// two tags come out equal, but that equality is its own construction: the
+// honest tags are different terms, and the attacker's view is the same
+// whether or not the honest nonces are linked. An observed equality links two
+// values only when the honest values are equal as well.
+
+attacker[active]
+
+principal Alice[
+	generates ufe_na
+]
+
+principal Carol[
+	generates ufe_nc
+]
+
+Alice -> Bob: ufe_na
+Carol -> Bob: ufe_nc
+
+principal Bob[
+	knows private ufe_k
+	ufe_p = MAC(ufe_k, ufe_na)
+	ufe_q = MAC(ufe_k, ufe_nc)
+]
+
+Bob -> Dave: ufe_p, ufe_q
+
+principal Dave[
+	_ = HASH(ufe_p)
+	_ = HASH(ufe_q)
+]
+
+queries[
+	unlinkability? ufe_p, ufe_q
+]

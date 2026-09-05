@@ -97,6 +97,8 @@ fn analyze_sessions_traced_cancellable(
 	trace.copy_siblings = copy_sibling_groups(&trace.slots);
 	trace.interchangeable = interchangeable;
 	trace.actors = actors;
+	trace.equivalence_queried =
+		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
 	capability_reach_notice(&trace, &states);
 	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
@@ -649,6 +651,13 @@ fn verify_end(
 fn chrono_time_string() -> String {
 	use chrono::Local;
 	Local::now().format("%I:%M:%S %p").to_string()
+}
+
+fn equivalence_queried<'a>(queries: impl Iterator<Item = &'a Query>) -> IdSet<ValueId> {
+	queries
+		.filter(|query| query.kind == QueryKind::Equivalence)
+		.flat_map(|query| query.constants.iter().map(|c| c.id))
+		.collect()
 }
 
 fn copy_sibling_groups(slots: &[TraceSlot]) -> IdMap<ValueId, Arc<Vec<ValueId>>> {

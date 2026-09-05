@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
+// Expected: c0a0 at one session and at two.
+//
 // Signal PQXDH: X3DH plus a signed KEM prekey, with the KEM shared secret
 // mixed into the master secret. Phase 1 leaks every Diffie-Hellman private
 // value, which is the harvest-now-decrypt-later adversary: an attacker who

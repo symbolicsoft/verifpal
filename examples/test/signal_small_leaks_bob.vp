@@ -5,7 +5,8 @@
 // in phase 0. Because blongterm signs the prekey bundle, leaking it is enough to
 // sign PUBKEY(nil) prekeys past Alice's SIGNVERIF and run a full man-in-the-middle,
 // so m1 falls (c1) — Bob's identity key is the asymmetric one here. e1 is unguarded,
-// hence a1 as well.
+// hence a1 as well. At one session m1 holds (c0a1), since Bob's leak follows
+// the flight the forged prekey enables; the second run's leak is independent.
 attacker[active]
 
 principal Alice[

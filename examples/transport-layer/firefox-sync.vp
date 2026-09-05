@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
+// Expected: c0a0 at one session and at two.
+//
 // A simplified model of the Firefox Sync account protocol ("onepw"): one
 // password, stretched into two independent keys with different destinies —
 // an encryption key the server must NEVER learn, and an authentication

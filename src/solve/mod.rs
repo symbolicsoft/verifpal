@@ -283,9 +283,11 @@ fn propose(
 			}
 		}
 		let basis = deducer.basis();
-		let goals = crate::parallel::map_ordered((0..pending.len()).collect(), |at| {
-			let lane = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), at as u32 + 1);
-			goals_for_query(pending[at], km, ps, sym, &lane, &empty)
+		let goals = crate::parallel::map_ordered(lanes(pending.len()), |(lane, range)| {
+			let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
+			range
+				.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
+				.collect::<Vec<_>>()
 		});
 		proposals.extend(goals.into_iter().flatten());
 		proposals.extend(deducer.constraint_goals(sym, &empty));
@@ -308,16 +310,21 @@ fn propose(
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
 		let basis = deducer.basis();
-		let candidates = crate::parallel::map_ordered((0..sym.var_slots.len()).collect(), |at| {
-			let slot = sym.var_slots[at];
-			let Some(meta) = ps.meta.get(slot) else {
-				return Vec::new();
-			};
-			let honest = resolve_trace_constant(&meta.constant, km);
-			let lane = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), at as u32 + 1);
-			slot_candidates(attacker, sym, &lane, &protocol, &honest, &blanket, slot)
-		});
-		for (&slot, candidates) in sym.var_slots.iter().zip(candidates) {
+		let candidates =
+			crate::parallel::map_ordered(lanes(sym.var_slots.len()), |(lane, range)| {
+				let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
+				range
+					.map(|at| {
+						let slot = sym.var_slots[at];
+						let Some(meta) = ps.meta.get(slot) else {
+							return Vec::new();
+						};
+						let honest = resolve_trace_constant(&meta.constant, km);
+						slot_candidates(attacker, sym, &deducer, &protocol, &honest, &blanket, slot)
+					})
+					.collect::<Vec<_>>()
+			});
+		for (&slot, candidates) in sym.var_slots.iter().zip(candidates.into_iter().flatten()) {
 			for candidate in candidates {
 				let var_id = vars::attacker_var_id(slot);
 				let mut alone = Substitution::default();
@@ -968,6 +975,14 @@ fn relay_substitution(
 		);
 	}
 	out
+}
+
+fn lanes(count: usize) -> Vec<(u32, std::ops::Range<usize>)> {
+	let width = vars::FREE_LANES as usize;
+	let size = count.div_ceil(width).max(1);
+	(0..count.div_ceil(size))
+		.map(|lane| (lane as u32 + 1, lane * size..((lane + 1) * size).min(count)))
+		.collect()
 }
 
 fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> IdSet<u64> {

@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c1 at one session and at two.
+//
+// Alice seals rpu_m1 under a public nonce and receives nothing, so no
+// substitution ever reaches her run. Carol's nonce comes from Dave over an
+// unguarded wire, and replacing it with that same public nonce makes Carol
+// seal rpu_m2 under exactly Alice's key and nonce. Two ciphertexts under one
+// key and nonce give up both plaintexts. The pair rests on a read out of
+// Alice, whom the replay of the substitution never executes, and a reader the
+// replay does not reach holds its honest value, which is what the read says.
+
+attacker[active]
+
+principal Alice[
+	knows private rpu_k
+	knows private rpu_m1
+	knows public rpu_n
+	knows public rpu_ad
+	rpu_e1 = AEAD_ENC(rpu_k, rpu_n, rpu_m1, rpu_ad)
+]
+
+Alice -> Bob: rpu_e1
+
+principal Dave[
+	generates rpu_cn
+]
+
+Dave -> Carol: rpu_cn
+
+principal Carol[
+	knows private rpu_k
+	knows public rpu_ad
+	generates rpu_m2
+	rpu_e2 = AEAD_ENC(rpu_k, rpu_cn, rpu_m2, rpu_ad)
+]
+
+Carol -> Bob: rpu_e2
+
+principal Bob[
+	knows private rpu_k
+	knows public rpu_n
+	knows public rpu_ad
+	rpu_d1 = AEAD_DEC(rpu_k, rpu_n, rpu_e1, rpu_ad)?
+	_ = HASH(rpu_e2)
+]
+
+queries[
+	confidentiality? rpu_m1
+	confidentiality? rpu_m2
+]

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
+// Expected: c0c1c0 at one session and at two.
+//
 // The CEN (Contact Event Numbers) protocol, an early decentralized COVID-19
 // contact-tracing design from the TCN Coalition. Each phone derives a
 // forward-only chain of keys from a root it never discloses:

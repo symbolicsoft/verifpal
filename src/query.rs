@@ -300,7 +300,10 @@ fn query_authentication(
 		Some(km.slots.get(i)?.initial_value.clone())
 	});
 	result.subtype = sibling_replay.then(|| {
-		if recipient_contributed(&c, km, ps) {
+		let forged_context = mutated_info
+			.state()
+			.is_some_and(|w| forged_recipient_context(km, w, ps.id));
+		if recipient_contributed(&c, km, ps) || forged_context {
 			Subtype::DuplicateAcceptance
 		} else {
 			Subtype::ReplayableFirstFlight
@@ -417,6 +420,21 @@ fn recipient_contributed(c: &Constant, km: &ProtocolTrace, ps: &PrincipalState) 
 		km.index_of(inner).is_some_and(|i| {
 			let slot = &km.slots[i];
 			slot.constant.fresh && km.same_actor(slot.creator, ps.id)
+		})
+	})
+}
+
+fn forged_recipient_context(
+	km: &ProtocolTrace,
+	w: &PrincipalState,
+	recipient: PrincipalId,
+) -> bool {
+	w.values.iter().enumerate().any(|(i, sv)| {
+		if !sv.provenance.attacker_tainted || sv.provenance.sender != ATTACKER_ID {
+			return false;
+		}
+		km.slots.get(i).is_some_and(|slot| {
+			recipient_contributed(&slot.constant, km, w) && km.same_actor(w.id, recipient)
 		})
 	})
 }

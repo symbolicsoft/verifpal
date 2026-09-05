@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
+// Expected: c1a1 at one session and at two.
+//
 // The "hello world" of Verifpal: an unauthenticated Diffie-Hellman key
 // exchange, followed by one encrypted message. Both queries FAIL (c1a1),
 // and that is the whole lesson — a DH exchange whose public keys travel

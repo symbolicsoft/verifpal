@@ -35,10 +35,22 @@ pub(crate) fn find_link_witness(
 	}
 	let (av, _) = ps.resolve_constant(a, true);
 	let (bv, _) = ps.resolve_constant(b, true);
+	let honest =
+		|c: &Constant| crate::theory::reduce_once(&crate::value::resolve_trace_constant(c, km));
 	witness_observed_equality(&av, &bv, ps, attacker)
+		.filter(|_| honest(a).equivalent(&honest(b), true))
 		.or_else(|| witness_identifying_check(&av, &bv, ps, attacker))
 		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
 		.or_else(|| witness_recognized_secret(&av, &bv, ps, attacker))
+		.filter(|witness| !attacker_supplied(&witness.value, ps))
+}
+
+fn attacker_supplied(v: &Value, ps: &PrincipalState) -> bool {
+	ps.values.iter().any(|sv| {
+		sv.provenance.attacker_tainted
+			&& sv.provenance.sender == crate::principal::ATTACKER_ID
+			&& sv.pre_rewrite.equivalent(v, true)
+	})
 }
 
 impl LinkWitness {
@@ -464,10 +476,11 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 		alternates: Arc::new(alternates),
 		reused: Arc::clone(&attacker.reused),
 		routes_epoch: attacker.routes_epoch,
+		chain: crate::types::next_chain(),
 	}
 }
 
-type LeavesKey = (PrincipalId, u64, i32, usize, usize, u64);
+type LeavesKey = (PrincipalId, u64, i32, usize, usize, u64, u64);
 type Leaves = Generational<IdMap<LeavesKey, Vec<(Value, Option<Vec<Value>>)>>>;
 
 thread_local! {
@@ -487,6 +500,7 @@ pub(crate) fn origin_leaves(
 		attacker.known.len(),
 		attacker.reused.len(),
 		attacker.routes_epoch,
+		attacker.chain,
 	);
 	let remembered = LEAVES.with(|memo| {
 		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {

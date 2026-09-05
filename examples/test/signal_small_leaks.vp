@@ -6,7 +6,10 @@
 // sign PUBKEY(nil) prekeys past Alice's SIGNVERIF, and alongterm supplies the
 // remaining DH share, so amaster is reconstructible and m1 falls (c1). A key
 // compromised in the same phase buys no forward secrecy. e1 is unguarded, so Bob
-// accepts an attacker-authored ciphertext too (a1).
+// accepts an attacker-authored ciphertext too (a1). At one session m1 holds
+// (c0a1): Bob leaks blongterm only after receiving Alice's flight, which she
+// sends only after the forged prekey passed her check, so within one run the
+// leak cannot enable the forgery; a second run of Bob leaks it independently.
 attacker[active]
 
 principal Alice[

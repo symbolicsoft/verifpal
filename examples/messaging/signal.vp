@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
+// Expected: c0a0c0a0c0a0 at one session and at two.
+//
 // The Signal protocol: an X3DH handshake followed by three messages of the
 // Double Ratchet, following the two Signal specifications (X3DH revision 1,
 // The Double Ratchet Algorithm revision 4). Phase 1 then leaks BOTH parties'
@@ -114,7 +116,7 @@ principal Alice[
 	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
 ]
 
-Alice -> Bob: galongterm, gae1, gae2, n_e1, e1
+Alice -> Bob: [galongterm], gae1, gae2, n_e1, e1
 
 principal Bob[
 	// Bob mirrors X3DH from his side: same four DH values, opposite

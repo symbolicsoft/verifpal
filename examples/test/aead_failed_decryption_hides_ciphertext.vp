@@ -1,0 +1,32 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// Bob computes a MAC tag under a key the attacker never sees, then feeds it
+// to an AEAD decryption under a public key and nonce. That decryption cannot
+// succeed, since the tag is not a ciphertext, and what Bob puts on the wire is
+// a failure carrying nothing about the tag. A decryption primitive must not
+// declare that the key holder reads the ciphertext argument back out of it:
+// the result of a decryption is the plaintext or nothing.
+
+attacker[passive]
+
+principal Bob[
+	knows private afd_kmac
+	knows public afd_msg
+	knows public afd_kpub
+	knows public afd_npub
+	afd_tag = MAC(afd_kmac, afd_msg)
+	afd_d = AEAD_DEC(afd_kpub, afd_npub, afd_tag, nil)
+]
+
+Bob -> Alice: afd_d
+
+principal Alice[
+	afd_h = HASH(afd_d)
+]
+
+queries[
+	confidentiality? afd_tag
+]

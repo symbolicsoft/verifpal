@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1a1f1 at one session and at two.
+//
+// relay_forward_before_check.vp with one more guarded relay hop: m reaches
+// Bob unguarded, Bob relays it guarded to Carol, Carol relays it guarded to
+// Dave, and Dave uses it. The one unguarded leg decides what Dave uses exactly
+// as it decides what Carol uses, so a guard on a relayed value is upstream of
+// the substitution at every later hop, not only at the first.
+
+attacker[active]
+
+principal Alice[
+	knows private rgt_sk
+	rgt_pk = PUBKEY(rgt_sk)
+	generates rgt_m
+	rgt_s = SIGN(rgt_sk, rgt_m)
+]
+
+Alice -> Bob: [rgt_pk], rgt_m, rgt_s
+
+principal Bob[
+	_ = HASH(rgt_m)
+]
+
+Bob -> Carol: [rgt_m]
+
+principal Carol[
+	_ = HASH(rgt_m)
+]
+
+Carol -> Dave: [rgt_m]
+
+principal Dave[
+	rgt_h = HASH(rgt_m)
+]
+
+queries[
+	authentication? Bob -> Carol: rgt_m
+	authentication? Carol -> Dave: rgt_m
+	freshness? rgt_m
+]

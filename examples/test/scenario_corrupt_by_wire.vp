@@ -1,0 +1,57 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// spore_ns_pk.vp's shape with Mallory publishing her private key by sending
+// it in the clear instead of writing leaks. The attacker holds scw_mk either
+// way, so the run in which Alice's peer is Mallory is a corrupt-peer run
+// either way, and Alice's nonce encrypted to that peer is not a claim the
+// model makes. A secret that travels bare on a message is compromised from
+// that message's phase.
+
+attacker[active]
+
+principal Bob[
+	knows private scw_b
+	scw_gb = PUBKEY(scw_b)
+]
+
+principal Mallory[
+	knows private scw_mk
+	scw_gm = PUBKEY(scw_mk)
+]
+
+principal Alice[
+	knows private scw_a
+	knows public scw_gpeer
+	generates scw_ni
+]
+
+Bob -> Alice: [scw_gb]
+Mallory -> Alice: [scw_gm]
+Mallory -> Bob: scw_mk
+
+principal Bob[
+	_ = HASH(scw_mk)
+]
+
+principal Alice[
+	scw_m1 = PKE_ENC(scw_gpeer, scw_ni)
+]
+
+Alice -> Bob: scw_m1
+
+principal Bob[
+	scw_d = PKE_DEC(scw_b, scw_m1)
+	_ = HASH(scw_d)
+]
+
+scenarios[
+	Alice[scw_gpeer = scw_gb]
+	Alice[scw_gpeer = scw_gm]
+]
+
+queries[
+	confidentiality? scw_ni
+]

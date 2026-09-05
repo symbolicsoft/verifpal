@@ -271,12 +271,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			arity: vec![4],
 			output: vec![1],
-			decompose: Some(DecomposeRule {
-				given: vec![0, 1],
-				output: None,
-				reveals: vec![Reveal::Argument(2)],
-				filter: filter_identity,
-			}),
 			rewrite: Some(RewriteRule {
 				id: PRIM_AEAD_ENC,
 				from: 2,
@@ -466,12 +460,6 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			arity: vec![2],
 			output: vec![1],
-			decompose: Some(DecomposeRule {
-				given: vec![0],
-				output: None,
-				reveals: vec![Reveal::Argument(1)],
-				filter: filter_identity,
-			}),
 			rewrite: Some(RewriteRule {
 				id: PRIM_PKE_ENC,
 				from: 1,

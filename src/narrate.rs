@@ -67,6 +67,24 @@ impl NameTable {
 		}
 	}
 
+	pub(crate) fn compress_outer_preferring(
+		&self,
+		v: &Value,
+		preferred: &str,
+		outer: &[&str],
+		inner: &[&str],
+	) -> String {
+		if !excluded(outer, preferred)
+			&& self
+				.entries
+				.iter()
+				.any(|(known, name)| &**name == preferred && known.equivalent(v, true))
+		{
+			return preferred.to_string();
+		}
+		self.compress_outer_excluding(v, outer, inner)
+	}
+
 	fn named_excluding(&self, v: &Value, exclude: &[&str]) -> Option<&Arc<str>> {
 		self.entries
 			.iter()
@@ -142,6 +160,7 @@ pub(crate) enum Step {
 		name: Arc<str>,
 		value: String,
 		sibling: bool,
+		session: bool,
 		#[cfg(test)]
 		installed: Value,
 	},
@@ -231,15 +250,6 @@ fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
 		Value::Constant(c) => ids.contains(&c.id),
 		Value::Primitive(p) => p.arguments.iter().any(|a| mentions(a, ids)),
 	}
-}
-
-fn mutated_names(ps: &PrincipalState) -> Vec<Arc<str>> {
-	ps.values
-		.iter()
-		.enumerate()
-		.filter(|(_, sv)| reportable(sv))
-		.map(|(i, _)| Arc::clone(&ps.meta[i].constant.name))
-		.collect()
 }
 
 pub(crate) fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
@@ -345,6 +355,7 @@ pub(crate) fn mutation_groups(
 		let (sender, recipient) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
 		let sibling = crate::query::copy_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
+		let session = crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
 		if replayed(sv) || sibling {
 			replays.push((
 				i,
@@ -354,6 +365,7 @@ pub(crate) fn mutation_groups(
 					name: Arc::clone(&sm.constant.name),
 					value: oriented(&sv.pre_rewrite, table, own, own, attacker),
 					sibling,
+					session,
 					#[cfg(test)]
 					installed: sv.pre_rewrite.clone(),
 				},
@@ -463,16 +475,29 @@ fn wire_leg(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> (PrincipalId, 
 	(creator, ps.id)
 }
 
-pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable, shadowed: &[&str]) -> Vec<Step> {
+pub(crate) fn gate_steps(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	table: &NameTable,
+	shadowed: &[&str],
+) -> Vec<Step> {
 	let mut steps = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		let Value::Primitive(p) = &sv.pre_rewrite else {
 			continue;
 		};
-		if !p.instance_check || sv.provenance.creator != ps.id {
+		if !p.instance_check || sv.provenance.creator != ps.id || ps.slot_unreached(i) {
 			continue;
 		}
-		if !p.arguments.iter().any(|a| value_is_tainted(a, ps)) {
+		let tainted = crate::deduction::own_cone(km, ps.id, i)
+			.into_iter()
+			.filter(|&slot| slot != i)
+			.any(|slot| {
+				ps.values
+					.get(slot)
+					.is_some_and(|sv| sv.provenance.attacker_tainted)
+			});
+		if !tainted {
 			continue;
 		}
 		if !can_rewrite(p).0 {
@@ -509,6 +534,7 @@ pub(crate) fn gate_steps(ps: &PrincipalState, table: &NameTable, shadowed: &[&st
 	steps
 }
 
+#[cfg(test)]
 pub(crate) fn value_is_tainted(v: &Value, ps: &PrincipalState) -> bool {
 	if ps
 		.values
@@ -601,6 +627,13 @@ impl<'a> Narrator<'a> {
 		};
 
 		if matches!(derivation, DerivationRecord::Initial) && !root {
+			return;
+		}
+		if !root
+			&& let DerivationRecord::Obtained { slot } = derivation
+			&& self.carried.iter().any(|c| {
+				c.slot == slot.get() && c.via.is_empty() && c.value.equivalent(value, true)
+			}) {
 			return;
 		}
 
@@ -712,11 +745,17 @@ impl Narrator<'_> {
 		);
 		let show =
 			|x: &Value| table.compress_excluding(&attacker_orientation(x, attacker), installed);
-		let v = table.compress_outer_excluding(
-			&attacker_orientation(value, attacker),
-			exclude,
-			installed,
-		);
+		let preferred = match derivation {
+			DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot } => {
+				km.slots.get(slot.get()).map(|s| s.constant.name.as_ref())
+			}
+			_ => None,
+		};
+		let oriented = attacker_orientation(value, attacker);
+		let v = match preferred {
+			Some(name) => table.compress_outer_preferring(&oriented, name, exclude, installed),
+			None => table.compress_outer_excluding(&oriented, exclude, installed),
+		};
 		Some(match derivation {
 			DerivationRecord::Initial => format!("Attacker knows {}: it is public.", v),
 			DerivationRecord::Leaked { .. } => {
@@ -729,10 +768,9 @@ impl Narrator<'_> {
 					.via
 					.iter()
 					.map(|(name, value)| {
-						format!(
-							"{name} with {}",
-							table.compress_excluding(value, &[name.as_str()])
-						)
+						let mut hidden: Vec<&str> = installed.to_vec();
+						hidden.push(name.as_str());
+						format!("{name} with {}", table.compress_excluding(value, &hidden))
 					})
 					.collect::<Vec<_>>()
 					.join(", ");
@@ -782,16 +820,15 @@ impl Narrator<'_> {
 					_ => format!("Attacker constructs {} from {}.", v, parts),
 				}
 			}
-			DerivationRecord::Recomposed { of, using } => format!(
-				"Attacker recomposes {} from enough shares of {} ({}).",
+			DerivationRecord::Recomposed { using, .. } => format!(
+				"Attacker recomposes {} from enough of its shares ({}).",
 				v,
-				show(of),
 				join_oriented(using, table, attacker, installed),
 			),
 			DerivationRecord::Fragment { of } => {
 				format!("Attacker splits {} and takes {}.", show(of), v)
 			}
-			DerivationRecord::Rewritten { of, using } => match of {
+			DerivationRecord::Rewritten { of, using, .. } => match of {
 				Value::Primitive(p) => format!(
 					"Attacker applies {} to {}, obtaining {}.",
 					crate::primitive::primitive_name(p.id),
@@ -978,6 +1015,7 @@ fn step_data(s: &Step) -> crate::types::TraceStep {
 }
 
 pub(crate) struct CarriedIn {
+	pub slot: usize,
 	pub value: Value,
 	pub via: Vec<(String, Value)>,
 	pub origin: Option<String>,
@@ -992,10 +1030,11 @@ fn carried_in(
 ) -> Vec<CarriedIn> {
 	ps.values
 		.iter()
-		.filter(|sv| {
+		.enumerate()
+		.filter(|(_, sv)| {
 			sv.provenance.attacker_tainted && sv.provenance.sender == crate::principal::ATTACKER_ID
 		})
-		.map(|sv| {
+		.map(|(slot, sv)| {
 			let ambient = if witnessed.knows(&sv.pre_rewrite).is_some() {
 				witnessed
 			} else {
@@ -1015,6 +1054,7 @@ fn carried_in(
 					_ => None,
 				});
 			CarriedIn {
+				slot,
 				value: sv.pre_rewrite.clone(),
 				via: record
 					.map(|r| {
@@ -1092,7 +1132,6 @@ pub(crate) fn narrate_attack(
 		}
 	}
 	let shadowed_refs: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
-	let installed = mutated_names(&witness.ps);
 	let carried = carried_in(km, &witness.ps, &witness.attacker, ambient);
 	let narrator = Narrator::new(
 		km,
@@ -1137,9 +1176,7 @@ pub(crate) fn narrate_attack(
 	}
 	steps.extend(bypasses);
 	for state in &states {
-		let own = mutated_names(state);
-		let own_refs: Vec<&str> = own.iter().map(|s| &**s).collect();
-		steps.extend(gate_steps(state, &table, &own_refs));
+		steps.extend(gate_steps(km, state, &table, &shadowed_refs));
 	}
 
 	steps.extend(narrator.derivation_steps(target, &shadowed_refs, &mut seen, true));
@@ -1163,7 +1200,7 @@ pub(crate) fn narrate_attack(
 		steps,
 		target: target.clone(),
 		table,
-		shadowed: installed,
+		shadowed,
 		state: Some(witness.ps.clone()),
 	}
 }
@@ -1223,10 +1260,15 @@ fn render_one(step: &Step) -> String {
 			name,
 			value,
 			sibling,
+			session,
 			..
 		} if *sibling => format!(
-			"Attacker replays {} ({} to {}) from another session, where it is {}.",
-			name, sender, recipient, value,
+			"Attacker replays {} ({} to {}) from another {}, where it is {}.",
+			name,
+			sender,
+			recipient,
+			if *session { "session" } else { "scenario" },
+			value,
 		),
 		Step::Replay {
 			sender,
@@ -1641,19 +1683,40 @@ mod tests {
 		make_principal_state("Alice", 0, meta, values)
 	}
 
+	fn gate_trace(ps: &PrincipalState) -> ProtocolTrace {
+		let mut km = make_trace();
+		for (i, sm) in ps.meta.iter().enumerate() {
+			km.index.entry(sm.constant.id).or_insert(i);
+			km.slots.push(TraceSlot {
+				declared_span: Span::default(),
+				constant: sm.constant.clone(),
+				initial_value: ps.values[i].pre_rewrite.clone(),
+				creator: ps.id,
+				known_by: vec![],
+				sent_by: vec![],
+				declared_at: i as i32,
+				phases: vec![0],
+			});
+		}
+		km
+	}
+
 	#[test]
 	fn gate_steps_only_report_checks_that_pass() {
 		use crate::narrate::{NameTable, gate_steps};
 		let failing = gate_state("gs_b");
 		let table = NameTable::from_state(&failing);
 		assert!(
-			gate_steps(&failing, &table, &[]).is_empty(),
+			gate_steps(&gate_trace(&failing), &failing, &table, &[]).is_empty(),
 			"a check that does not pass must not be narrated as passing"
 		);
 
 		let passing = gate_state("gs_a");
 		let table = NameTable::from_state(&passing);
-		assert_eq!(gate_steps(&passing, &table, &[]).len(), 1);
+		assert_eq!(
+			gate_steps(&gate_trace(&passing), &passing, &table, &[]).len(),
+			1
+		);
 	}
 
 	#[test]

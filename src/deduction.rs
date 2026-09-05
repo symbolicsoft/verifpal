@@ -45,6 +45,7 @@ static DEDUCTION_RULES: &[RuleGroup] = &[
 		rules: &[
 			(rule_decompose, Reads::Knowledge),
 			(rule_break_weak, Reads::Knowledge),
+			(rule_rewrite_build, Reads::Knowledge),
 		],
 	},
 	RuleGroup {
@@ -195,30 +196,16 @@ fn combination_coheres(
 	if ingredients.is_empty() || !any_taint(attacker) {
 		return true;
 	}
-	let mut walk = Walk {
-		seen: IdSet::default(),
-		memo: take_needs_memo(attacker),
-		reads: Vec::new(),
-		union: Vec::new(),
+	let seed: Vec<Need> = if derivation.reads_from_state() {
+		let mut seed = Vec::new();
+		merge_into(&tainted(ambient), &mut seed);
+		seed
+	} else {
+		Vec::new()
 	};
-	if derivation.reads_from_state() {
-		merge_into(&tainted(ambient), &mut walk.union);
-	}
-	for ingredient in &ingredients {
-		collect_reads(km, ps, attacker, ingredient, &mut walk);
-	}
-	let Walk {
-		reads,
-		mut union,
-		memo,
-		..
-	} = walk;
-	keep_needs_memo(attacker, memo);
-	for read in &reads {
-		if !merge_into(&read.needs, &mut union) {
-			return false;
-		}
-	}
+	let Some((reads, mut union)) = gather_reads(km, ps, attacker, &ingredients, &seed) else {
+		return false;
+	};
 	if union.is_empty() {
 		return true;
 	}
@@ -249,26 +236,9 @@ fn pair_coheres(
 	a: &Value,
 	b: &Value,
 ) -> bool {
-	let mut walk = Walk {
-		seen: IdSet::default(),
-		memo: take_needs_memo(attacker),
-		reads: Vec::new(),
-		union: Vec::new(),
+	let Some((reads, mut union)) = gather_reads(km, ps, attacker, &[a, b], &[]) else {
+		return false;
 	};
-	collect_reads(km, ps, attacker, a, &mut walk);
-	collect_reads(km, ps, attacker, b, &mut walk);
-	let Walk {
-		reads,
-		mut union,
-		memo,
-		..
-	} = walk;
-	keep_needs_memo(attacker, memo);
-	for read in &reads {
-		if !merge_into(&read.needs, &mut union) {
-			return false;
-		}
-	}
 	if union.is_empty() {
 		return true;
 	}
@@ -277,14 +247,17 @@ fn pair_coheres(
 		return false;
 	};
 	reads.iter().all(|read| {
-		replayed
-			.iter()
-			.find(|state| state.id == read.reader)
-			.is_some_and(|state| {
-				read.slot < state.values.len()
-					&& !state.slot_unreached(read.slot)
-					&& state.values[read.slot].value.equivalent(&read.value, true)
-			})
+		let holds = |state: &PrincipalState| {
+			read.slot < state.values.len()
+				&& !state.slot_unreached(read.slot)
+				&& state.values[read.slot].value.equivalent(&read.value, true)
+		};
+		match replayed.iter().find(|state| state.id == read.reader) {
+			Some(state) => holds(state),
+			None => ctx
+				.execution_base(read.reader)
+				.is_some_and(|base| holds(&base)),
+		}
 	})
 }
 
@@ -427,6 +400,37 @@ struct Walk {
 	memo: IdMap<usize, Vec<Need>>,
 	reads: Vec<Read>,
 	union: Vec<Need>,
+}
+
+fn gather_reads(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	terms: &[&Value],
+	seed: &[Need],
+) -> Option<(Vec<Read>, Vec<Need>)> {
+	let mut walk = Walk {
+		seen: IdSet::default(),
+		memo: take_needs_memo(attacker),
+		reads: Vec::new(),
+		union: seed.to_vec(),
+	};
+	for term in terms {
+		collect_reads(km, ps, attacker, term, &mut walk);
+	}
+	let Walk {
+		reads,
+		mut union,
+		memo,
+		..
+	} = walk;
+	keep_needs_memo(attacker, memo);
+	for read in &reads {
+		if !merge_into(&read.needs, &mut union) {
+			return None;
+		}
+	}
+	Some((reads, union))
 }
 
 /// The reads an ingredient rests on, whether or not the attacker holds it as
@@ -686,7 +690,7 @@ fn emitted_at(km: &ProtocolTrace, slot: &TraceSlot, principal: PrincipalId) -> i
 /// computation: the slot itself, and every slot its definition mentions,
 /// following definitions only through slots that principal created. A slot it
 /// received is a leaf, whatever its sender computed it from.
-fn own_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Vec<usize> {
+pub(crate) fn own_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Vec<usize> {
 	let mut out: Vec<usize> = vec![slot];
 	let mut frontier: Vec<usize> = vec![slot];
 	while let Some(at) = frontier.pop() {
@@ -946,7 +950,7 @@ fn rule_reuse(
 	progress
 }
 
-type PairKey = (PrincipalId, u64, u64, i32, usize, u64);
+type PairKey = (PrincipalId, u64, u64, i32, usize, usize, u64, u64);
 type Pairs = crate::context::Generational<IdMap<PairKey, Vec<(Value, Value, bool)>>>;
 
 thread_local! {
@@ -968,7 +972,9 @@ fn pair_vetted(
 		with.hash_value(),
 		attacker.current_phase,
 		attacker.known.len(),
+		attacker.reused.len(),
 		attacker.routes_epoch,
+		attacker.chain,
 	);
 	let remembered = PAIRS.with(|memo| {
 		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
@@ -1023,6 +1029,7 @@ fn rule_rewrite_forward(
 		DerivationRecord::Rewritten {
 			of: pre_rewrite.clone(),
 			using: using.clone(),
+			built: false,
 		},
 		|| {
 			format!(
@@ -1033,6 +1040,117 @@ fn rule_rewrite_forward(
 			)
 		},
 	)
+}
+
+fn rule_rewrite_build(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	value: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	record: &Arc<MutationRecord>,
+) -> bool {
+	let Value::Primitive(inner) = value else {
+		return false;
+	};
+	if can_decompose(inner, ps, attacker).is_some() {
+		return false;
+	}
+	let mut progress = false;
+	for spec in crate::primitive::primitives_rewriting(inner.id) {
+		let Some(rule) = spec.rewrite.as_ref() else {
+			continue;
+		};
+		if rule
+			.from_output
+			.is_some_and(|output| output != inner.output)
+		{
+			continue;
+		}
+		let mut pool: Vec<Value> = Vec::new();
+		for (_, positions) in &rule.matching {
+			for &at in positions {
+				let Some(pinned) = inner.arguments.get(at) else {
+					continue;
+				};
+				let mut candidates = vec![pinned.clone()];
+				if let Value::Primitive(p) = pinned {
+					candidates.extend(p.arguments.iter().cloned());
+				}
+				for candidate in candidates {
+					if obtainable(&candidate, ps, attacker)
+						&& !pool.iter().any(|held| held.equivalent(&candidate, true))
+					{
+						pool.push(candidate);
+					}
+				}
+			}
+		}
+		if pool.is_empty() {
+			continue;
+		}
+		for &arity in &spec.arity {
+			let arity = arity as usize;
+			if rule.from >= arity {
+				continue;
+			}
+			let open: Vec<usize> = (0..arity).filter(|&at| at != rule.from).collect();
+			let mut choice = vec![0usize; open.len()];
+			loop {
+				let mut args = vec![value.clone(); arity];
+				for (&at, &pick) in open.iter().zip(choice.iter()) {
+					args[at] = pool[pick].clone();
+				}
+				let built = Value::primitive(spec.id, args, 0);
+				if let Value::Primitive(p) = &built {
+					let (reduces, reduced) = can_rewrite(p);
+					if reduces
+						&& !reduced.equivalent(&built, true)
+						&& attacker.knows(&reduced).is_none()
+					{
+						let using = p.arguments.clone();
+						progress |= learn(
+							ctx,
+							km,
+							ps,
+							attacker,
+							&reduced,
+							record,
+							DerivationRecord::Rewritten {
+								of: built.clone(),
+								using: using.clone(),
+								built: true,
+							},
+							|| {
+								format!(
+									"{} obtained by applying {} to {}.",
+									info_output_text(&reduced),
+									crate::primitive::primitive_name(spec.id),
+									pretty_values(&using),
+								)
+							},
+						);
+					}
+				}
+				let mut digit = 0;
+				loop {
+					if digit == choice.len() {
+						break;
+					}
+					choice[digit] += 1;
+					if choice[digit] < pool.len() {
+						break;
+					}
+					choice[digit] = 0;
+					digit += 1;
+				}
+				if digit == choice.len() {
+					break;
+				}
+			}
+		}
+	}
+	progress
 }
 
 fn rule_recompose(

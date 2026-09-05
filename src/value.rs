@@ -517,6 +517,7 @@ mod tests {
 			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
+			equivalence_queried: IdSet::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 0)];
@@ -559,6 +560,7 @@ mod tests {
 			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
+			equivalence_queried: IdSet::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let mut sv = make_slot_values(&mutated, 0);
@@ -603,6 +605,7 @@ mod tests {
 			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
+			equivalence_queried: IdSet::default(),
 		};
 		let meta = vec![make_slot_meta(&c, true)];
 		let values = vec![make_slot_values(&val, 3)];

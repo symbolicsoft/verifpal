@@ -1,9 +1,14 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 0] = [];
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
+	("bypass_needs_the_signed_message_public.vp", 0),
+	("scuttlebutt.vp", 5),
+	("scuttlebutt.vp", 9),
+];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 2] =
+	[("scuttlebutt.vp", 5), ("scuttlebutt.vp", 6)];
 
 const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 
@@ -11,12 +16,23 @@ const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 6] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 17] = [
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
+	"examples/transport-layer/firefox-sync.vp",
 	"examples/contact-tracing/lc-dp-3t.vp",
+	"examples/contact-tracing/cen.vp",
 	"examples/messaging/pqxdh-weak.vp",
+	"examples/messaging/pqxdh.vp",
+	"examples/messaging/scuttlebutt.vp",
+	"examples/messaging/signal.vp",
+	"examples/messaging/userbase.vp",
+	"examples/hpke/hpke_auth.vp",
+	"examples/hpke/hpke_auth_kci.vp",
+	"examples/hpke/hpke_auth_kci_signed.vp",
+	"examples/hpke/hpke_base.vp",
+	"examples/hpke/hpke_psk_pq.vp",
 	"examples/silly/cloudbackup.vp",
 ];
 
@@ -207,7 +223,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			if !summary.contains("Attack trace:") {
 				traceless.push(key.clone());
 			}
-			if summary.contains("does not halt at") {
+			if summary.contains("does not halt") {
 				bypass.push(key.clone());
 			}
 			if summary.contains("not a minimized witness") {
@@ -1340,7 +1356,7 @@ fn test_userbase() {
 }
 #[test]
 fn test_signal() {
-	run_model_at("examples/messaging/signal.vp", "signal.vp", "c0a1c1a0c0a1");
+	run_model_at("examples/messaging/signal.vp", "signal.vp", "c0a0c0a0c0a0");
 }
 #[test]
 fn test_scuttlebutt() {
@@ -3351,4 +3367,59 @@ fn test_relay_halt_before_forward_leaked() {
 #[test]
 fn test_relay_halt_before_forward_leaked_one_session() {
 	run_model_sessions("relay_halt_before_forward_leaked.vp", 1, "a1");
+}
+#[test]
+fn test_aead_nonce_reuse_partner_unreached() {
+	run_model("aead_nonce_reuse_partner_unreached.vp", "c1c1");
+	run_model_sessions("aead_nonce_reuse_partner_unreached.vp", 1, "c1c1");
+}
+#[test]
+fn test_causal_late_leak() {
+	run_model("causal_late_leak.vp", "a1");
+	run_model_sessions("causal_late_leak.vp", 1, "a0");
+}
+#[test]
+fn test_equivalence_unused_received() {
+	run_model("equivalence_unused_received.vp", "e1");
+	run_model_sessions("equivalence_unused_received.vp", 1, "e1");
+}
+#[test]
+fn test_blind_signature_attacker_unblinds() {
+	run_model("blind_signature_attacker_unblinds.vp", "c1");
+	run_model_sessions("blind_signature_attacker_unblinds.vp", 1, "c1");
+}
+#[test]
+fn test_aead_failed_decryption_hides_ciphertext() {
+	run_model("aead_failed_decryption_hides_ciphertext.vp", "c0");
+	run_model_sessions("aead_failed_decryption_hides_ciphertext.vp", 1, "c0");
+}
+#[test]
+fn test_unlink_forced_equality() {
+	run_model("unlink_forced_equality.vp", "u0");
+	run_model_sessions("unlink_forced_equality.vp", 1, "u0");
+}
+#[test]
+fn test_unlink_forced_origin() {
+	run_model("unlink_forced_origin.vp", "u0");
+	run_model_sessions("unlink_forced_origin.vp", 1, "u0");
+}
+#[test]
+fn test_relay_guard_transitive() {
+	run_model("relay_guard_transitive.vp", "a1a1f1");
+	run_model_sessions("relay_guard_transitive.vp", 1, "a1a1f1");
+}
+#[test]
+fn test_scenario_corrupt_by_wire() {
+	run_model("scenario_corrupt_by_wire.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_wire.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_derivation() {
+	run_model("scenario_corrupt_by_derivation.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_derivation.vp", 1, "c0");
+}
+#[test]
+fn test_gate_taint_by_provenance() {
+	run_model("gate_taint_by_provenance.vp", "a1");
+	run_model_sessions("gate_taint_by_provenance.vp", 1, "a1");
 }

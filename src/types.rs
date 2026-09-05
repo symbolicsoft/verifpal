@@ -1256,6 +1256,7 @@ pub struct ProtocolTrace {
 	pub copy_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub actors: IdMap<PrincipalId, PrincipalId>,
+	pub equivalence_queried: IdSet<ValueId>,
 }
 
 impl ProtocolTrace {
@@ -1522,6 +1523,7 @@ pub enum DerivationRecord {
 	Rewritten {
 		of: Value,
 		using: Vec<Value>,
+		built: bool,
 	},
 	Broken {
 		of: Value,
@@ -1612,7 +1614,7 @@ impl DerivationRecord {
 			DerivationRecord::Leaked { .. }
 				| DerivationRecord::Obtained { .. }
 				| DerivationRecord::Reconstructed { .. }
-				| DerivationRecord::Rewritten { .. }
+				| DerivationRecord::Rewritten { built: false, .. }
 		)
 	}
 }
@@ -1629,6 +1631,13 @@ pub struct AttackerState {
 	pub alternates: Arc<Vec<Vec<Route>>>,
 	pub reused: Arc<Vec<[Value; 2]>>,
 	pub routes_epoch: u64,
+	pub chain: u64,
+}
+
+static CHAINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub(crate) fn next_chain() -> u64 {
+	CHAINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Default for AttackerState {
@@ -1642,6 +1651,7 @@ impl Default for AttackerState {
 			alternates: Arc::new(vec![]),
 			reused: Arc::new(vec![]),
 			routes_epoch: 0,
+			chain: next_chain(),
 		}
 	}
 }

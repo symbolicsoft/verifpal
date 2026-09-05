@@ -1,0 +1,39 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and a1 at two.
+//
+// Alice signs a nonce; Bob checks the signature and only then answers; only
+// after Bob's answer does Alice leak her signing key. Forging the signature
+// Bob checks needs that key, and the key is disclosed only because that very
+// check passed. Within one run the substitution is causally impossible, and
+// so is the guard bypass that would spend the same key at the same check. A
+// second run of Alice leaks the key independently of this Bob, which is a
+// genuine forgery at two sessions.
+
+attacker[active]
+
+principal Alice[
+	knows private cll_a
+	cll_ga = PUBKEY(cll_a)
+	generates cll_na
+	cll_sig = SIGN(cll_a, cll_na)
+]
+
+Alice -> Bob: [cll_ga], cll_na, cll_sig
+
+principal Bob[
+	_ = SIGNVERIF(cll_ga, cll_na, cll_sig)?
+	generates cll_ok
+]
+
+Bob -> Alice: cll_ok
+
+principal Alice[
+	_ = HASH(cll_ok)
+	leaks cll_a
+]
+
+queries[
+	authentication? Alice -> Bob: cll_sig
+]

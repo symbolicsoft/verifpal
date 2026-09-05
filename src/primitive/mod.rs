@@ -244,6 +244,12 @@ pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static Primit
 		.min_by_key(|s| s.id)
 }
 
+pub(crate) fn primitives_rewriting(
+	id: PrimitiveId,
+) -> impl Iterator<Item = &'static PrimitiveSpec> {
+	prim_specs().filter(move |s| s.rewrite.as_ref().is_some_and(|r| r.id == id))
+}
+
 pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
 	primitive_def(id)
 		.map(|d| d.has_rewrite_rule())

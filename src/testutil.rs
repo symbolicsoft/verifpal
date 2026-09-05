@@ -75,6 +75,7 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 		routes_epoch: 0,
+		chain: crate::types::next_chain(),
 	}
 }
 

@@ -1,0 +1,34 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// Bob's checked decryption takes nil as its associated data, and the attacker
+// replaces an unrelated unguarded value with nil. The decryption's inputs all
+// come from guarded slots, so its passing is not a gate the attacker
+// controls, and the trace must not say so: a check is attacker-influenced
+// only when a slot in its own dependency cone was installed, not when one of
+// its arguments happens to equal a value installed elsewhere.
+
+attacker[active]
+
+principal Alice[
+	knows private gtp_k
+	generates gtp_n
+	generates gtp_m
+	generates gtp_o
+	gtp_e = AEAD_ENC(gtp_k, gtp_n, gtp_m, nil)
+	gtp_junk = HASH(gtp_o)
+]
+
+Alice -> Bob: [gtp_n], [gtp_e], gtp_junk
+
+principal Bob[
+	knows private gtp_k
+	gtp_d = AEAD_DEC(gtp_k, gtp_n, gtp_e, nil)?
+	gtp_h = HASH(gtp_junk)
+]
+
+queries[
+	authentication? Alice -> Bob: gtp_junk
+]

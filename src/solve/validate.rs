@@ -92,12 +92,12 @@ pub(crate) fn validate(
 	let governing = restricted.as_deref().unwrap_or(&governing);
 	let phase = governing.current_phase;
 	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |decisions| {
-		decisions.iter().all(|(who, prim, was)| {
+		decisions.iter().all(|(who, prim, at, was)| {
 			ctx.principal_states()
 				.iter()
 				.find(|state| state.id == *who)
 				.is_none_or(|state| {
-					*was || !crate::reexec::bypass_is_constructible(prim, state, governing)
+					*was == crate::reexec::bypass_constructible_at(km, prim, state, *at, governing)
 				})
 		})
 	});

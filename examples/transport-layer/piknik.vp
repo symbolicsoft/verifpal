@@ -7,7 +7,10 @@
 // some of those shared secrets DON'T stay secret: the keyed-hash key skk
 // and the key identifier ekid are handed to the attacker outright with
 // `leaks`, the wire is fully attacker-controlled, and the untrusted server
-// is simply modeled AS the attacker. All queries hold (c0a0a0a0f0):
+// is simply modeled AS the attacker. At one session all queries hold
+// (c0a0a0a0f0); at the default two sessions the two authentication queries
+// over n and ct report injective-agreement replays (c0a0a1a1f0), the other
+// run's signed content being accepted a second time:
 //
 //   confidentiality? m    HOLDS — the clipboard content is encrypted under
 //     a key derived from `keygen`, which is never leaked. Losing the MAC

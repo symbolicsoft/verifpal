@@ -171,13 +171,15 @@ impl Emission<'_> {
 			self.j,
 			self.attacker.current_phase,
 			self.attacker.known.len(),
+			self.attacker.reused.len(),
 			self.attacker.routes_epoch,
+			self.attacker.chain,
 			mixed,
 		)
 	}
 }
 
-type EmissionKey = (PrincipalId, usize, i32, usize, u64, u64);
+type EmissionKey = (PrincipalId, usize, i32, usize, usize, u64, u64, u64);
 
 struct Emitted {
 	installs: Vec<(SlotIdx, Value)>,
@@ -185,7 +187,7 @@ struct Emitted {
 	emits: bool,
 }
 
-type ForgeableKey = (PrincipalId, PrincipalId, i32, usize, u64, u64);
+type ForgeableKey = (PrincipalId, PrincipalId, i32, usize, usize, u64, u64, u64);
 
 type Emissions = Generational<IdMap<EmissionKey, Vec<Emitted>>>;
 
@@ -246,7 +248,9 @@ fn forgeable_without_sender(
 		sender,
 		attacker.current_phase,
 		attacker.known.len(),
+		attacker.reused.len(),
 		attacker.routes_epoch,
+		attacker.chain,
 		target.hash_value(),
 	);
 	let remembered = FORGEABLE.with(|memo| {

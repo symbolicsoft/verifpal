@@ -610,12 +610,12 @@ impl<'a> Minimizer<'a> {
 	}
 
 	fn choose(&self) -> Option<Chosen> {
-		let mut chosen: Option<(PrincipalState, Installs, Addressed, Breadth, bool)> = None;
+		let mut chosen: Option<(PrincipalState, Installs, Addressed, Breadth, bool, bool)> = None;
 		let mut fallback: Option<(PrincipalState, Installs, Addressed, Breadth)> = None;
 		for rung in LADDER {
 			if chosen
 				.as_ref()
-				.is_some_and(|(_, _, _, _, grounded)| *grounded)
+				.is_some_and(|(_, _, _, _, grounded, _)| *grounded)
 			{
 				break;
 			}
@@ -640,9 +640,16 @@ impl<'a> Minimizer<'a> {
 					let bypassed = needs_guard_bypass(&witness.ps)
 						|| witness.others.iter().any(needs_guard_bypass);
 					if !bypassed {
-						let better = chosen.is_none()
-							|| (witness.grounded
-								&& !chosen.as_ref().is_some_and(|(_, _, _, _, was)| *was));
+						let halted = witness.ps.halted_at.is_some();
+						let better = match chosen.as_ref() {
+							None => true,
+							Some((base, _, _, _, was_grounded, was_halted)) => {
+								(witness.grounded && !*was_grounded)
+									|| (base.id == session.id
+										&& witness.grounded == *was_grounded
+										&& !halted && *was_halted)
+							}
+						};
 						if better {
 							chosen = Some((
 								session.clone(),
@@ -650,9 +657,10 @@ impl<'a> Minimizer<'a> {
 								addressed,
 								rung.breadth,
 								witness.grounded,
+								halted,
 							));
 						}
-						if witness.grounded {
+						if witness.grounded && !halted {
 							break 'rung;
 						}
 						continue;
@@ -661,11 +669,17 @@ impl<'a> Minimizer<'a> {
 						fallback = Some((session.clone(), candidate, addressed, rung.breadth));
 					}
 				}
+				if chosen
+					.as_ref()
+					.is_some_and(|(_, _, _, _, grounded, _)| *grounded)
+				{
+					break 'rung;
+				}
 			}
 		}
 		let explanatory = chosen.is_some();
 		match chosen {
-			Some((base, installs, addressed, breadth, grounded)) => Some(Chosen {
+			Some((base, installs, addressed, breadth, grounded, _)) => Some(Chosen {
 				base,
 				installs,
 				addressed,
@@ -1420,6 +1434,7 @@ fn probe_with(
 
 	let mut ordered: Vec<&(SlotIdx, Value)> = installs.iter().collect();
 	ordered.sort_by_key(|(slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
+	let order = crate::reexec::CausalOrder::of(km, base.id);
 	let mut grounded = true;
 	for reached in 1..=ordered.len() {
 		let (slot, value) = ordered[reached - 1];
@@ -1432,6 +1447,12 @@ fn probe_with(
 			base,
 			&known,
 		) {
+			grounded = false;
+			break;
+		}
+		if let Some(available) = order.available(base, slot.get(), &known)
+			&& !crate::solve::validate::derivable(value, base, &available)
+		{
 			grounded = false;
 			break;
 		}

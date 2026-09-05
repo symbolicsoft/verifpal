@@ -4,7 +4,11 @@
 // RFC 9180 HPKE in mode_auth (§5.1.3), over DHKEM's AuthEncap/AuthDecap
 // (§4.1).
 //
-// Expected: c0a0, at one session and at two.
+// Expected: c0a0 at one session and c0a1 at two. The two-session
+// authentication failure is not a forgery: a second run of the recipient
+// accepts the whole first flight a second time, and it is reported as a
+// duplicate acceptance, since the recipient contributes nothing to that
+// flight before accepting it.
 //
 // This is hpke_base.vp with one leg added to the KEM and one identity added
 // to the KEM context, which is precisely how the RFC describes the

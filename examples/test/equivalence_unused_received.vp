@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e1 at one session and at two.
+//
+// Two peers sharing a PSK send Bob a key-confirmation tag over the same
+// public transcript, so the two tags are honestly one term. Bob never puts
+// either tag inside a primitive, and an equivalence query compares the slots
+// as they are, so a slot the recipient only holds is still one the attacker
+// may replace: both legs are unguarded, and replacing either makes Bob's two
+// slots stop agreeing.
+
+attacker[active]
+
+principal Alice[
+	knows public eur_transcript
+	knows private eur_psk
+	eur_tag_a = MAC(eur_psk, eur_transcript)
+]
+
+principal Carol[
+	knows public eur_transcript
+	knows private eur_psk
+	eur_tag_c = MAC(eur_psk, eur_transcript)
+]
+
+Alice -> Bob: eur_tag_a
+Carol -> Bob: eur_tag_c
+
+principal Bob[
+	knows public eur_transcript
+]
+
+queries[
+	equivalence? eur_tag_a, eur_tag_c
+]

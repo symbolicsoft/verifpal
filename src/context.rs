@@ -99,7 +99,7 @@ type Replay = (
 	u64,
 	crate::reexec::Seeds,
 	i32,
-	usize,
+	(usize, usize, u64, u64),
 	Option<Arc<Vec<PrincipalState>>>,
 );
 
@@ -152,7 +152,7 @@ struct Execution {
 	signature: Vec<(usize, Value)>,
 	phase: i32,
 	states: Vec<StoredState>,
-	decisions: Vec<(PrincipalId, Primitive, bool)>,
+	decisions: Vec<(PrincipalId, Primitive, i32, bool)>,
 	closed: Option<Saturation>,
 }
 
@@ -582,7 +582,12 @@ impl VerifyContext {
 	) -> Option<Arc<Vec<PrincipalState>>> {
 		let key = seeds_signature(seeds);
 		let phase = attacker.current_phase;
-		let known = attacker.known.len();
+		let known = (
+			attacker.known.len(),
+			attacker.reused.len(),
+			attacker.routes_epoch,
+			attacker.chain,
+		);
 		if let Some((_, _, _, _, hit)) =
 			read_lock(&self.replays)
 				.iter()
@@ -596,7 +601,7 @@ impl VerifyContext {
 		built
 	}
 
-	fn execution_base(&self, principal: PrincipalId) -> Option<Arc<PrincipalState>> {
+	pub(crate) fn execution_base(&self, principal: PrincipalId) -> Option<Arc<PrincipalState>> {
 		if let Some(base) = read_lock(&self.bases).get(&principal) {
 			return Some(Arc::clone(base));
 		}
@@ -616,7 +621,7 @@ impl VerifyContext {
 		signature: &[(usize, Value)],
 		phase: i32,
 		states: &[PrincipalState],
-		decisions: Vec<(PrincipalId, Primitive, bool)>,
+		decisions: Vec<(PrincipalId, Primitive, i32, bool)>,
 	) {
 		if read_lock(&self.executions).len() >= REMEMBERED_EXECUTIONS {
 			return;
@@ -702,7 +707,7 @@ impl VerifyContext {
 		key: u64,
 		signature: &[(usize, Value)],
 		phase: i32,
-		still_valid: impl Fn(&[(PrincipalId, Primitive, bool)]) -> bool,
+		still_valid: impl Fn(&[(PrincipalId, Primitive, i32, bool)]) -> bool,
 	) -> Option<(Vec<PrincipalState>, bool)> {
 		let mut executions = write_lock(&self.executions);
 		let bucket = executions.get_mut(&(principal, key))?;
@@ -1058,7 +1063,7 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn scratch_for_witness(&self, query_index: usize) -> VerifyContext {
-		self.scratch(query_index, None)
+		self.scratch(query_index, self.honest.clone())
 	}
 
 	fn scratch(

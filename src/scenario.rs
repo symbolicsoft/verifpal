@@ -432,6 +432,31 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 	out
 }
 
+fn public_declarations(m: &Model) -> IdSet<ValueId> {
+	let mut out: IdSet<ValueId> = IdSet::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expr in &p.expressions {
+			if expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Public) {
+				for c in &expr.constants {
+					out.insert(c.id);
+				}
+			}
+		}
+	}
+	out
+}
+
+fn computable_publicly(v: &Value, public: &IdSet<ValueId>) -> bool {
+	let mut constants = Vec::new();
+	v.collect_constants(&mut constants);
+	constants
+		.iter()
+		.all(|c| c.is_nil() || public.contains(&c.id))
+}
+
 fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
 	let mut out: IdMap<ValueId, i32> = IdMap::default();
@@ -453,9 +478,18 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 					}
 				}
 			}
-			Block::Message(_) => {}
+			Block::Message(message) => {
+				for c in &message.constants {
+					if !secret.contains(&c.id) {
+						continue;
+					}
+					let at = out.entry(c.id).or_insert(phase);
+					*at = (*at).min(phase);
+				}
+			}
 		}
 	}
+	let public = public_declarations(m);
 	loop {
 		let mut changed = false;
 		for block in &m.blocks {
@@ -466,8 +500,10 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 				let Some(value) = &expression.assigned else {
 					continue;
 				};
-				let Some(from) = earliest_mentioned(value, &out) else {
-					continue;
+				let from = match earliest_mentioned(value, &out) {
+					Some(from) => from,
+					None if computable_publicly(value, &public) => 0,
+					None => continue,
 				};
 				for c in &expression.constants {
 					match out.get(&c.id) {

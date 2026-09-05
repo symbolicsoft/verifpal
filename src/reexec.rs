@@ -253,24 +253,28 @@ impl CausalOrder {
 	}
 
 	fn restrict(&self, blocked: &[bool], attacker: &AttackerState) -> Option<Arc<AttackerState>> {
-		let n = attacker.known.len();
-		let mut reachable = vec![false; n];
-		for i in 0..n {
-			reachable[i] = match attacker.derivation(KnownIdx(i)) {
-				None | Some(DerivationRecord::Initial) => true,
-				Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-					!blocked.get(slot.0).copied().unwrap_or(false)
-				}
-				Some(other) => other.ingredients().iter().all(|v| {
-					attacker
-						.knows(v)
-						.map(|found| found.0 >= i || reachable[found.0])
-						.unwrap_or(true)
-				}),
-			};
-		}
-		retain_known(attacker, &reachable)
+		restrict_known(blocked, attacker)
 	}
+}
+
+fn restrict_known(blocked: &[bool], attacker: &AttackerState) -> Option<Arc<AttackerState>> {
+	let n = attacker.known.len();
+	let mut reachable = vec![false; n];
+	for i in 0..n {
+		reachable[i] = match attacker.derivation(KnownIdx(i)) {
+			None | Some(DerivationRecord::Initial) => true,
+			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
+				!blocked.get(slot.0).copied().unwrap_or(false)
+			}
+			Some(other) => other.ingredients().iter().all(|v| {
+				attacker
+					.knows(v)
+					.map(|found| found.0 >= i || reachable[found.0])
+					.unwrap_or(true)
+			}),
+		};
+	}
+	retain_known(attacker, &reachable)
 }
 
 pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerState>> {
@@ -318,6 +322,7 @@ pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Ar
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 		routes_epoch: attacker.routes_epoch,
+		chain: crate::types::next_chain(),
 	}))
 }
 
@@ -351,14 +356,34 @@ fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap
 
 fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Vec<bool> {
 	let after = influenced_from(km, principal, at);
+	let downstream =
+		|who: PrincipalId, when: i32| after.get(&who).is_some_and(|&reached| when >= reached);
 	km.slots
 		.iter()
 		.map(|slot| {
-			after
-				.get(&slot.creator)
-				.is_some_and(|&reached| slot.declared_at >= reached)
-				&& !slot.constant.is_nil()
-				&& slot.constant.qualifier != Some(Qualifier::Public)
+			if slot.constant.is_nil() || slot.constant.qualifier == Some(Qualifier::Public) {
+				return false;
+			}
+			if downstream(slot.creator, slot.declared_at) {
+				return true;
+			}
+			let mut disclosed = false;
+			let sends = slot
+				.sent_by
+				.iter()
+				.map(|event| (event.sender, event.declared_at));
+			let leaks = km
+				.leaks
+				.iter()
+				.filter(|leak| leak.constant_id == slot.constant.id)
+				.map(|leak| (leak.principal_id, leak.declared_at));
+			for (who, when) in sends.chain(leaks) {
+				disclosed = true;
+				if !downstream(who, when) {
+					return false;
+				}
+			}
+			disclosed
 		})
 		.collect()
 }
@@ -366,7 +391,7 @@ fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Ve
 type Delivery = (usize, Value, bool);
 type Agreement = (Vec<usize>, Arc<Vec<Value>>, Option<Arc<AttackerState>>);
 
-type Agreed = (Arc<MutationRecord>, Vec<usize>, bool);
+type Agreed = (Arc<MutationRecord>, Vec<usize>, Arc<Vec<Value>>, bool);
 
 pub(crate) struct Coherence {
 	principal: PrincipalId,
@@ -464,14 +489,23 @@ impl Coherence {
 		if diffs.is_empty() {
 			return true;
 		}
-		if let Some((_, _, hit)) = locked(&self.histories)
-			.iter()
-			.find(|(seen, seen_authored, _)| Arc::ptr_eq(seen, record) && seen_authored == authored)
-		{
+		if let Some((_, _, _, hit)) =
+			locked(&self.histories)
+				.iter()
+				.find(|(seen, seen_authored, known, _)| {
+					Arc::ptr_eq(seen, record)
+						&& seen_authored == authored
+						&& Arc::ptr_eq(known, &attacker.known)
+				}) {
 			return *hit;
 		}
 		let agrees = self.replays_agree(ctx, km, attacker, &diffs, authored);
-		locked(&self.histories).push((Arc::clone(record), authored.to_vec(), agrees));
+		locked(&self.histories).push((
+			Arc::clone(record),
+			authored.to_vec(),
+			Arc::clone(&attacker.known),
+			agrees,
+		));
 		agrees
 	}
 
@@ -618,7 +652,10 @@ pub(crate) fn attacker_controllable(
 	{
 		return false;
 	}
-	if !km.constant_used_by(ps.id, &meta.constant) && meta.sent_at.is_none() {
+	if !km.constant_used_by(ps.id, &meta.constant)
+		&& meta.sent_at.is_none()
+		&& !km.equivalence_queried.contains(&meta.constant.id)
+	{
 		return false;
 	}
 	true
@@ -695,7 +732,7 @@ fn reexecute_with(
 
 	let foreign = foreign_halts(&ps, &failures);
 
-	if let Some(bypassed) = try_guard_bypass(&ps_pre, &ps, &failures, attacker)? {
+	if let Some(bypassed) = try_guard_bypass(km, &ps_pre, &ps, &failures, attacker)? {
 		ps = bypassed;
 	} else {
 		ps = halt_at(ps, &failures);
@@ -913,7 +950,7 @@ fn relays_are_forwarded(
 			!prim.instance_check
 				|| ps.values[*idx].provenance.creator != sender
 				|| ps.meta[*idx].declared_at >= send.declared_at
-				|| bypass_is_constructible(prim, ps, attacker)
+				|| bypass_is_constructible(km, prim, ps, *idx, attacker)
 		})
 	})
 }
@@ -969,35 +1006,97 @@ fn keyed_position(prim: &Primitive) -> Option<usize> {
 	}
 }
 
+type BypassDecision = (PrincipalId, Primitive, i32, bool);
+
+type BlockedAt = crate::context::Generational<IdMap<(PrincipalId, i32), Arc<Vec<bool>>>>;
+type RestrictedAt = crate::context::Generational<
+	IdMap<(PrincipalId, i32, u64, usize, u64), Option<Arc<AttackerState>>>,
+>;
+
 thread_local! {
-	static BYPASS_DECISIONS: std::cell::RefCell<Option<Vec<(PrincipalId, Primitive, bool)>>> =
+	static BYPASS_DECISIONS: std::cell::RefCell<Option<Vec<BypassDecision>>> =
 		const { std::cell::RefCell::new(None) };
+	static BLOCKED_AT: std::cell::RefCell<BlockedAt> =
+		std::cell::RefCell::new(crate::context::Generational::default());
+	static RESTRICTED_AT: std::cell::RefCell<RestrictedAt> =
+		std::cell::RefCell::new(crate::context::Generational::default());
 }
 
 pub(crate) fn record_bypass_decisions() {
 	BYPASS_DECISIONS.with(|decisions| *decisions.borrow_mut() = Some(Vec::new()));
 }
 
-pub(crate) fn take_bypass_decisions() -> Vec<(PrincipalId, Primitive, bool)> {
+pub(crate) fn take_bypass_decisions() -> Vec<BypassDecision> {
 	BYPASS_DECISIONS
 		.with(|decisions| decisions.borrow_mut().take())
 		.unwrap_or_default()
 }
 
-pub(crate) fn bypass_is_constructible(
+fn held_at(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	at: i32,
+	attacker: &AttackerState,
+) -> Option<Arc<AttackerState>> {
+	let blocked = BLOCKED_AT.with(|cache| {
+		cache
+			.borrow_mut()
+			.fresh()
+			.entry((principal, at))
+			.or_insert_with(|| Arc::new(unreachable_before(km, principal, at)))
+			.clone()
+	});
+	if !blocked.iter().any(|&blocked| blocked) {
+		return None;
+	}
+	let key = (
+		principal,
+		at,
+		attacker.chain,
+		attacker.known.len(),
+		attacker.routes_epoch,
+	);
+	if let Some(hit) = RESTRICTED_AT.with(|cache| cache.borrow_mut().fresh().get(&key).cloned()) {
+		return hit;
+	}
+	let built = restrict_known(&blocked, attacker);
+	RESTRICTED_AT.with(|cache| {
+		cache.borrow_mut().fresh().insert(key, built.clone());
+	});
+	built
+}
+
+pub(crate) fn bypass_constructible_at(
+	km: &ProtocolTrace,
 	prim: &Primitive,
 	ps: &PrincipalState,
+	at: i32,
 	attacker: &AttackerState,
 ) -> bool {
-	let constructible = bypass_constructible(prim, ps, attacker);
+	match held_at(km, ps.id, at, attacker) {
+		Some(held) => bypass_constructible(prim, ps, &held),
+		None => bypass_constructible(prim, ps, attacker),
+	}
+}
+
+fn bypass_is_constructible(
+	km: &ProtocolTrace,
+	prim: &Primitive,
+	ps: &PrincipalState,
+	idx: usize,
+	attacker: &AttackerState,
+) -> bool {
+	let at = ps.meta.get(idx).map(|meta| meta.declared_at).unwrap_or(0);
+	let constructible = bypass_constructible_at(km, prim, ps, at, attacker);
 	BYPASS_DECISIONS.with(|decisions| {
 		if let Some(decisions) = decisions.borrow_mut().as_mut()
-			&& !decisions.iter().any(|(who, seen, _)| {
+			&& !decisions.iter().any(|(who, seen, seen_at, _)| {
 				*who == ps.id
+					&& *seen_at == at
 					&& crate::hashing::primitive_hash(seen) == crate::hashing::primitive_hash(prim)
 					&& crate::theory::structurally_identical_primitive(seen, prim)
 			}) {
-			decisions.push((ps.id, prim.clone(), constructible));
+			decisions.push((ps.id, prim.clone(), at, constructible));
 		}
 	});
 	constructible
@@ -1027,6 +1126,7 @@ fn bypass_constructible(prim: &Primitive, ps: &PrincipalState, attacker: &Attack
 }
 
 fn try_guard_bypass(
+	km: &ProtocolTrace,
 	ps_pre: &PrincipalState,
 	ps_resolved: &PrincipalState,
 	failures: &[(Primitive, usize)],
@@ -1037,7 +1137,7 @@ fn try_guard_bypass(
 		.filter(|(prim, idx)| {
 			prim.instance_check
 				&& ps_resolved.values[*idx].provenance.creator == ps_resolved.id
-				&& bypass_is_constructible(prim, ps_resolved, attacker)
+				&& bypass_is_constructible(km, prim, ps_resolved, *idx, attacker)
 		})
 		.map(|(_, idx)| *idx)
 		.collect();
@@ -1064,7 +1164,7 @@ fn try_guard_bypass(
 			{
 				continue;
 			}
-			if bypass_is_constructible(prim, &ps, attacker) {
+			if bypass_is_constructible(km, prim, &ps, *idx, attacker) {
 				ps.values[*idx].override_all_bypassed(attacker_public_key());
 				injected = true;
 			}
@@ -1239,6 +1339,7 @@ mod tests {
 			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
+			equivalence_queried: IdSet::default(),
 		};
 		let ps = make_principal_state(
 			"Bob",
@@ -1275,6 +1376,7 @@ mod tests {
 			alternates: std::sync::Arc::new(vec![Vec::new()]),
 			reused: std::sync::Arc::new(vec![]),
 			routes_epoch: 0,
+			chain: crate::types::next_chain(),
 		}
 	}
 
