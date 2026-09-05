@@ -1,6 +1,6 @@
-Verifpal 1.4.2
+Verifpal 1.4.3
 
-All major changes between Verifpal 1.0.0 and 1.4.2 are covered
+All major changes between Verifpal 1.0.0 and 1.4.3 are covered
 in the following blog post:
 
 https://symbolic.software/blog/2026-09-04-verifpal-1-4/
