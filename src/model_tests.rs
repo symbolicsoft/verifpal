@@ -8,7 +8,7 @@ const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 4] = [
 	("noise_xx_mutual.vp", 2),
 ];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 1] = [("closure_two_recipients.vp", 0)];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
 
 const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 

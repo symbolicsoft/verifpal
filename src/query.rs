@@ -35,14 +35,21 @@ fn attack_trace_with(
 		return Narration::none(target(ps));
 	}
 	let ambient = ctx.attacker_snapshot();
-	let witness = minimize_witness(ctx, km, ps, query_index, seed);
+	let claimed = target(ps);
+	let witness = minimize_witness(ctx, km, ps, query_index, seed, Some(&claimed));
 	#[cfg(test)]
 	ctx.witness_put(
 		query_index,
 		ResultWitness {
 			installs: witness.installs.clone(),
+			addressed: witness.addressed.clone(),
 			wide: witness.wide,
-			narrated: crate::narrate::narrated_installs(&witness.ps),
+			narrated: witness
+				.others
+				.iter()
+				.chain(std::iter::once(&witness.ps))
+				.flat_map(crate::narrate::narrated_installs)
+				.collect(),
 			principal: witness.ps.id,
 			phase: ambient.current_phase,
 			reproduced: witness.reproduced,

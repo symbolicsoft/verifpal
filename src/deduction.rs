@@ -514,6 +514,20 @@ fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, w
 /// read from; most of them the value never touched, and treating them as
 /// preconditions makes two unrelated reads of one principal contradict each
 /// other.
+pub(crate) fn needs_of(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	value: &Value,
+) -> Vec<(PrincipalId, SlotIdx, Value)> {
+	let Some(idx) = attacker.knows(value) else {
+		return Vec::new();
+	};
+	let mut memo: IdMap<usize, Vec<Need>> = IdMap::default();
+	let mut active: Vec<usize> = Vec::new();
+	let mut cut = false;
+	read_preconditions(km, attacker, idx, &mut memo, &mut active, &mut cut)
+}
+
 fn read_preconditions(
 	km: &ProtocolTrace,
 	attacker: &AttackerState,

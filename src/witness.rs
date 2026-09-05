@@ -49,11 +49,22 @@ enum Scope {
 
 type Installs = Vec<(SlotIdx, Value)>;
 
+pub(crate) type Addressed = Vec<(PrincipalId, SlotIdx, Value)>;
+
+fn addressed_to(addressed: &[(PrincipalId, SlotIdx, Value)], id: PrincipalId) -> Installs {
+	addressed
+		.iter()
+		.filter(|(at, _, _)| *at == id)
+		.map(|(_, slot, value)| (*slot, value.clone()))
+		.collect()
+}
+
 #[derive(Clone, Copy)]
 enum Family {
 	SingleSlot,
 	WholeFlight,
 	AcrossSessions,
+	SplitRecipients,
 }
 
 struct Rung {
@@ -63,7 +74,7 @@ struct Rung {
 	keeps_fallback: bool,
 }
 
-const LADDER: [Rung; 3] = [
+const LADDER: [Rung; 4] = [
 	Rung {
 		family: Family::SingleSlot,
 		scope: Scope::Own,
@@ -82,6 +93,12 @@ const LADDER: [Rung; 3] = [
 		breadth: Breadth::All,
 		keeps_fallback: true,
 	},
+	Rung {
+		family: Family::SplitRecipients,
+		scope: Scope::Any,
+		breadth: Breadth::All,
+		keeps_fallback: false,
+	},
 ];
 
 fn dedup_in_order<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
@@ -96,6 +113,7 @@ fn dedup_in_order<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
 
 pub(crate) struct Witness {
 	pub ps: PrincipalState,
+	pub others: Vec<PrincipalState>,
 	#[cfg(test)]
 	pub wide: bool,
 	pub attacker: AttackerState,
@@ -104,6 +122,8 @@ pub(crate) struct Witness {
 	pub out_of_order: Vec<String>,
 	#[cfg(test)]
 	pub installs: Installs,
+	#[cfg(test)]
+	pub addressed: Addressed,
 }
 
 struct Minimizer<'a> {
@@ -114,6 +134,7 @@ struct Minimizer<'a> {
 	ambient: AttackerState,
 	sessions: Vec<PrincipalState>,
 	mutations: Installs,
+	needs: Addressed,
 	everywhere: Installs,
 	bound: crate::reexec::TermBound,
 	guards: Vec<(PrincipalId, crate::reexec::Controllable)>,
@@ -126,8 +147,12 @@ impl<'a> Minimizer<'a> {
 		ps: &PrincipalState,
 		query_index: usize,
 		mutations: Installs,
+		target: Option<&Value>,
 	) -> Minimizer<'a> {
 		let ambient = ctx.attacker_snapshot();
+		let needs: Addressed = target
+			.map(|value| crate::deduction::needs_of(km, &ambient, value))
+			.unwrap_or_default();
 		let phase = ambient.current_phase;
 		let mut sessions: Vec<PrincipalState> = Vec::new();
 		for state in ctx.principal_states() {
@@ -158,6 +183,7 @@ impl<'a> Minimizer<'a> {
 			ambient,
 			sessions,
 			mutations,
+			needs,
 			everywhere: Vec::new(),
 			bound: crate::reexec::TermBound::of(km),
 			guards,
@@ -368,7 +394,7 @@ impl<'a> Minimizer<'a> {
 					if seen.iter().any(|s| same_install_set(s, &trial)) {
 						continue;
 					}
-					if self.scenario_cost(group, &trial) <= here {
+					if climb_key(self.scenario_cost(group, &trial)) <= climb_key(here) {
 						seen.push(trial.clone());
 						installs = trial;
 						advanced = true;
@@ -426,12 +452,68 @@ impl<'a> Minimizer<'a> {
 		out
 	}
 
-	fn family(&self, family: Family, session: &PrincipalState) -> Vec<Installs> {
+	fn family(&self, family: Family, session: &PrincipalState) -> Vec<(Installs, Addressed)> {
+		match family {
+			Family::SplitRecipients => self.split_recipients(),
+			other => self
+				.plain_family(other, session)
+				.into_iter()
+				.map(|installs| (installs, Vec::new()))
+				.collect(),
+		}
+	}
+
+	fn plain_family(&self, family: Family, session: &PrincipalState) -> Vec<Installs> {
 		match family {
 			Family::SingleSlot => self.single_slot(session),
 			Family::WholeFlight => self.whole_flight(session),
 			Family::AcrossSessions => self.across_sessions(session),
+			Family::SplitRecipients => Vec::new(),
 		}
+	}
+
+	fn split_recipients(&self) -> Vec<(Installs, Addressed)> {
+		let mut split: Vec<SlotIdx> = Vec::new();
+		for (at, slot, value) in &self.needs {
+			let differs = self
+				.needs
+				.iter()
+				.any(|(other, s, v)| s == slot && other != at && !v.equivalent(value, true));
+			if differs && !split.contains(slot) {
+				split.push(*slot);
+			}
+		}
+		if split.is_empty() {
+			return Vec::new();
+		}
+		let addressed: Addressed = self
+			.needs
+			.iter()
+			.filter(|(at, slot, _)| {
+				split.contains(slot)
+					&& self.sessions.iter().any(|session| {
+						session.id == *at
+							&& self
+								.guards
+								.iter()
+								.find(|(id, _)| *id == session.id)
+								.is_some_and(|(_, guard)| {
+									guard.admits(session, &self.ambient, slot.get())
+								})
+					})
+			})
+			.cloned()
+			.collect();
+		if addressed.is_empty() {
+			return Vec::new();
+		}
+		let shared: Installs = self
+			.mutations
+			.iter()
+			.filter(|(s, _)| !split.contains(s))
+			.cloned()
+			.collect();
+		vec![(shared, addressed)]
 	}
 
 	fn single_slot(&self, session: &PrincipalState) -> Vec<Installs> {
@@ -465,6 +547,7 @@ impl<'a> Minimizer<'a> {
 		&self,
 		base: &PrincipalState,
 		installs: &[(SlotIdx, Value)],
+		addressed: &[(PrincipalId, SlotIdx, Value)],
 		breadth: Breadth,
 	) -> Option<Witness> {
 		probe_with(
@@ -472,10 +555,21 @@ impl<'a> Minimizer<'a> {
 			self.km,
 			base,
 			installs,
+			addressed,
 			self.query_index,
 			self.phase,
 			breadth,
 		)
+	}
+
+	fn addressed_buildable(&self, addressed: &[(PrincipalId, SlotIdx, Value)]) -> bool {
+		let bound = &self.bound;
+		addressed.iter().all(|(at, slot, value)| {
+			self.sessions
+				.iter()
+				.find(|session| session.id == *at)
+				.is_some_and(|session| self.validator_admits(session, bound, slot.get(), value))
+		})
 	}
 
 	fn buildable(&self, session: &PrincipalState, candidate: &Installs) -> bool {
@@ -508,32 +602,48 @@ impl<'a> Minimizer<'a> {
 			)
 	}
 
-	fn choose(&self) -> Option<(PrincipalState, Installs, Breadth, bool, bool)> {
-		let mut chosen: Option<(PrincipalState, Installs, Breadth, bool)> = None;
-		let mut fallback: Option<(PrincipalState, Installs, Breadth)> = None;
+	fn choose(&self) -> Option<Chosen> {
+		let mut chosen: Option<(PrincipalState, Installs, Addressed, Breadth, bool)> = None;
+		let mut fallback: Option<(PrincipalState, Installs, Addressed, Breadth)> = None;
 		for rung in LADDER {
-			if chosen.as_ref().is_some_and(|(_, _, _, grounded)| *grounded) {
+			if chosen
+				.as_ref()
+				.is_some_and(|(_, _, _, _, grounded)| *grounded)
+			{
 				break;
 			}
 			'rung: for session in &self.sessions {
-				for candidate in self.family(rung.family, session) {
+				for (candidate, addressed) in self.family(rung.family, session) {
 					let candidate = match rung.scope {
 						Scope::Own => self.controlled(session, candidate),
 						Scope::Any => self.controlled_by_any(candidate),
 					};
-					if !self.buildable(session, &candidate) {
+					let empty = candidate.is_empty() && addressed.is_empty();
+					if empty
+						|| (!candidate.is_empty() && !self.buildable(session, &candidate))
+						|| !self.addressed_buildable(&addressed)
+					{
 						continue;
 					}
-					let Some(witness) = self.probe_at(session, &candidate, rung.breadth) else {
+					let Some(witness) =
+						self.probe_at(session, &candidate, &addressed, rung.breadth)
+					else {
 						continue;
 					};
-					if !needs_guard_bypass(&witness.ps) {
+					let bypassed = needs_guard_bypass(&witness.ps)
+						|| witness.others.iter().any(needs_guard_bypass);
+					if !bypassed {
 						let better = chosen.is_none()
 							|| (witness.grounded
-								&& !chosen.as_ref().is_some_and(|(_, _, _, was)| *was));
+								&& !chosen.as_ref().is_some_and(|(_, _, _, _, was)| *was));
 						if better {
-							chosen =
-								Some((session.clone(), candidate, rung.breadth, witness.grounded));
+							chosen = Some((
+								session.clone(),
+								candidate,
+								addressed,
+								rung.breadth,
+								witness.grounded,
+							));
 						}
 						if witness.grounded {
 							break 'rung;
@@ -541,48 +651,93 @@ impl<'a> Minimizer<'a> {
 						continue;
 					}
 					if rung.keeps_fallback && fallback.is_none() {
-						fallback = Some((session.clone(), candidate, rung.breadth));
+						fallback = Some((session.clone(), candidate, addressed, rung.breadth));
 					}
 				}
 			}
 		}
 		let explanatory = chosen.is_some();
 		match chosen {
-			Some((base, installs, breadth, grounded)) => {
-				Some((base, installs, breadth, explanatory, grounded))
-			}
-			None => fallback
-				.map(|(base, installs, breadth)| (base, installs, breadth, explanatory, false)),
+			Some((base, installs, addressed, breadth, grounded)) => Some(Chosen {
+				base,
+				installs,
+				addressed,
+				breadth,
+				explanatory,
+				grounded,
+			}),
+			None => fallback.map(|(base, installs, addressed, breadth)| Chosen {
+				base,
+				installs,
+				addressed,
+				breadth,
+				explanatory,
+				grounded: false,
+			}),
 		}
 	}
 
-	fn drop_one(
-		&self,
-		base: &PrincipalState,
-		installs: &Installs,
-		breadth: Breadth,
-		explanatory: bool,
-		grounded: bool,
-	) -> Installs {
+	fn drop_one(&self, chosen: &Chosen) -> (Installs, Addressed) {
+		let Chosen {
+			base,
+			installs,
+			addressed,
+			breadth,
+			explanatory,
+			grounded,
+		} = chosen;
 		let mut keep = installs.clone();
+		let mut keep_addressed = addressed.clone();
 		for (slot, _) in installs {
 			let trial: Installs = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
 			if trial.len() == keep.len() {
 				continue;
 			}
-			let Some(witness) = self.probe_at(base, &trial, breadth) else {
+			let Some(witness) = self.probe_at(base, &trial, &keep_addressed, *breadth) else {
 				continue;
 			};
-			if explanatory && needs_guard_bypass(&witness.ps) {
+			if *explanatory && needs_guard_bypass(&witness.ps) {
 				continue;
 			}
-			if grounded && !witness.grounded {
+			if *grounded && !witness.grounded {
 				continue;
 			}
 			keep = trial;
 		}
-		keep
+		for (at, slot, _) in addressed {
+			let trial: Addressed = keep_addressed
+				.iter()
+				.filter(|(a, s, _)| !(a == at && s == slot))
+				.cloned()
+				.collect();
+			if trial.len() == keep_addressed.len() {
+				continue;
+			}
+			let Some(witness) = self.probe_at(base, &keep, &trial, *breadth) else {
+				continue;
+			};
+			if *explanatory
+				&& (needs_guard_bypass(&witness.ps)
+					|| witness.others.iter().any(needs_guard_bypass))
+			{
+				continue;
+			}
+			if *grounded && !witness.grounded {
+				continue;
+			}
+			keep_addressed = trial;
+		}
+		(keep, keep_addressed)
 	}
+}
+
+struct Chosen {
+	base: PrincipalState,
+	installs: Installs,
+	addressed: Addressed,
+	breadth: Breadth,
+	explanatory: bool,
+	grounded: bool,
 }
 
 fn seeded_mutations(
@@ -677,9 +832,11 @@ pub(crate) fn minimize_witness(
 	ps: &PrincipalState,
 	query_index: usize,
 	seed: &[(SlotIdx, Value)],
+	target: Option<&Value>,
 ) -> Witness {
 	let unminimized = |reproduced: bool| Witness {
 		ps: ps.clone(),
+		others: Vec::new(),
 		#[cfg(test)]
 		wide: false,
 		attacker: ctx.attacker_snapshot(),
@@ -688,6 +845,8 @@ pub(crate) fn minimize_witness(
 		out_of_order: Vec::new(),
 		#[cfg(test)]
 		installs: Vec::new(),
+		#[cfg(test)]
+		addressed: Vec::new(),
 	};
 
 	if in_minimization() {
@@ -702,14 +861,16 @@ pub(crate) fn minimize_witness(
 		return unminimized(true);
 	}
 
-	let m = Minimizer::new(ctx, km, ps, query_index, mutations);
+	let m = Minimizer::new(ctx, km, ps, query_index, mutations, target);
 
-	let Some((base, candidate, breadth, explanatory, grounded)) = m.choose() else {
+	let Some(chosen) = m.choose() else {
 		return unminimized(false);
 	};
-	let keep = m.drop_one(&base, &candidate, breadth, explanatory, grounded);
+	let (keep, keep_addressed) = m.drop_one(&chosen);
+	let base = chosen.base;
+	let breadth = chosen.breadth;
 
-	match m.probe_at(&base, &keep, breadth) {
+	match m.probe_at(&base, &keep, &keep_addressed, breadth) {
 		Some(mut witness) => {
 			#[cfg(test)]
 			for (slot, value) in &keep {
@@ -733,16 +894,24 @@ pub(crate) fn minimize_witness(
 						.unwrap_or_default(),
 				);
 			}
-			witness.out_of_order =
-				out_of_order_harvest(ctx, km, &base, &keep, query_index, m.phase);
+			witness.out_of_order = if keep_addressed.is_empty() {
+				out_of_order_harvest(ctx, km, &base, &keep, query_index, m.phase)
+			} else {
+				Vec::new()
+			};
 			#[cfg(test)]
 			{
 				witness.installs = keep;
+				witness.addressed = keep_addressed;
 			}
 			witness
 		}
 		None => unminimized(false),
 	}
+}
+
+fn climb_key((bypasses, halts, stuck): (usize, usize, usize)) -> (usize, usize, usize) {
+	(halts, bypasses.saturating_add(stuck), bypasses)
 }
 
 fn same_install_set(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
@@ -1021,6 +1190,14 @@ pub(crate) fn assert_reported_attacks_replay(
 			.installs
 			.iter()
 			.map(|(slot, value)| format!("      {} := {}", name_of(slot), value))
+			.chain(witness.addressed.iter().map(|(at, slot, value)| {
+				format!(
+					"      {} := {} (into {})",
+					name_of(slot),
+					value,
+					km.principal_name(*at)
+				)
+			}))
 			.collect();
 		let caveat = if witness.out_of_order.is_empty() {
 			String::new()
@@ -1037,6 +1214,7 @@ pub(crate) fn assert_reported_attacks_replay(
 				km,
 				&base,
 				&witness.installs,
+				&witness.addressed,
 				result.query_index,
 				witness.phase,
 				witness.wide,
@@ -1055,24 +1233,41 @@ pub(crate) fn assert_reported_attacks_replay(
 		);
 		let bound = crate::reexec::TermBound::of(km);
 		let ambient = ctx.attacker_snapshot();
-		let unjustified: Vec<String> = witness
+		let admits = |state: &PrincipalState, slot: &SlotIdx, value: &Value| {
+			crate::primitive::admissible(value)
+				&& bound.admits_at(km, state.id, slot.get(), value)
+				&& !crate::solve::validate::contains_failed_check(value)
+				&& crate::solve::validate::attacker_can_derive(
+					ctx,
+					km,
+					slot.get(),
+					value,
+					state,
+					&ambient,
+				)
+		};
+		let mut unjustified: Vec<String> = witness
 			.installs
 			.iter()
-			.filter(|(slot, value)| {
-				!(crate::primitive::admissible(value)
-					&& bound.admits_at(km, base.id, slot.get(), value)
-					&& !crate::solve::validate::contains_failed_check(value)
-					&& crate::solve::validate::attacker_can_derive(
-						ctx,
-						km,
-						slot.get(),
-						value,
-						&base,
-						&ambient,
-					))
-			})
+			.filter(|(slot, value)| !admits(&base, slot, value))
 			.map(|(slot, value)| format!("{} := {}", name_of(slot), value))
 			.collect();
+		for (at, slot, value) in &witness.addressed {
+			let justified = ctx
+				.principal_states()
+				.iter()
+				.find(|s| s.id == *at)
+				.map(|s| s.clone_for_depth(true))
+				.is_some_and(|state| admits(&state, slot, value));
+			if !justified {
+				unjustified.push(format!(
+					"{} := {} (into {})",
+					name_of(slot),
+					value,
+					km.principal_name(*at)
+				));
+			}
+		}
 		assert!(
 			unjustified.is_empty(),
 			"WITNESS \u{2022} {} query {} ({}) prints a trace that installs {} term(s) \
@@ -1091,6 +1286,7 @@ pub(crate) fn assert_reported_attacks_replay(
 			.installs
 			.iter()
 			.map(|(slot, _)| *slot)
+			.chain(witness.addressed.iter().map(|(_, slot, _)| *slot))
 			.filter(|slot| !witness.narrated.contains(slot))
 			.map(|slot| name_of(&slot))
 			.collect();
@@ -1116,19 +1312,35 @@ pub(crate) fn minimization_guard() -> impl Drop {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn replays(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	base: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
+	addressed: &[(PrincipalId, SlotIdx, Value)],
 	query_index: usize,
 	phase: i32,
 	wide: bool,
 ) -> bool {
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
-	let breadth = if wide { Breadth::All } else { Breadth::Base };
-	probe_with(ctx, km, base, installs, query_index, phase, breadth).is_some()
+	let breadth = if wide || !addressed.is_empty() {
+		Breadth::All
+	} else {
+		Breadth::Base
+	};
+	probe_with(
+		ctx,
+		km,
+		base,
+		installs,
+		addressed,
+		query_index,
+		phase,
+		breadth,
+	)
+	.is_some()
 }
 
 fn probe(
@@ -1139,18 +1351,41 @@ fn probe(
 	query_index: usize,
 	phase: i32,
 ) -> Option<Witness> {
-	probe_with(ctx, km, base, installs, query_index, phase, Breadth::Base)
+	probe_with(
+		ctx,
+		km,
+		base,
+		installs,
+		&[],
+		query_index,
+		phase,
+		Breadth::Base,
+	)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn probe_with(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	base: &PrincipalState,
-	installs: &[(SlotIdx, Value)],
+	shared: &[(SlotIdx, Value)],
+	addressed: &[(PrincipalId, SlotIdx, Value)],
 	query_index: usize,
 	phase: i32,
 	breadth: Breadth,
 ) -> Option<Witness> {
+	let mut own: Installs = shared.to_vec();
+	for (slot, value) in addressed_to(addressed, base.id) {
+		if !own.iter().any(|(s, _)| *s == slot) {
+			own.push((slot, value));
+		}
+	}
+	let installs: &[(SlotIdx, Value)] = &own;
+	let breadth = if addressed.is_empty() {
+		breadth
+	} else {
+		Breadth::All
+	};
 	let scratch = ctx.scratch_for_witness(query_index);
 	crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
 	for state in ctx.principal_states() {
@@ -1214,7 +1449,8 @@ fn probe_with(
 		}
 		for (session, guard) in &others {
 			let seeded = scratch.attacker_snapshot();
-			let mine = admitted_by(guard, session, &seeded, earlier.clone());
+			let mut mine = admitted_by(guard, session, &seeded, earlier.clone());
+			mine.extend(addressed_to(addressed, session.id));
 			if mine.is_empty() {
 				continue;
 			}
@@ -1225,18 +1461,26 @@ fn probe_with(
 		}
 	}
 
+	let mut carried: Vec<PrincipalState> = Vec::new();
 	if breadth == Breadth::All {
 		let mut held = 0usize;
 		for _ in 0..ctx.principal_states().len().max(1) {
+			carried.clear();
 			for (session, guard) in &others {
 				let seeded = scratch.attacker_snapshot();
-				let mine = admitted_by(guard, session, &seeded, installs.to_vec());
+				let mut mine = admitted_by(guard, session, &seeded, installs.to_vec());
+				let theirs = addressed_to(addressed, session.id);
+				let addressed_here = !theirs.is_empty();
+				mine.extend(theirs);
 				if mine.is_empty() {
 					continue;
 				}
 				let governing = governing_attacker(&scratch, km, &mine, &seeded);
 				if let Ok(other) = reexecute(session, &mine, &governing, km) {
 					let _ = compute_knowledge_closure(&scratch, km, &other);
+					if addressed_here {
+						carried.push(other);
+					}
 				}
 			}
 			let grown = scratch.attacker_snapshot().known.len();
@@ -1265,8 +1509,11 @@ fn probe_with(
 		#[cfg(test)]
 		installs: installs.to_vec(),
 		#[cfg(test)]
+		addressed: addressed.to_vec(),
+		#[cfg(test)]
 		wide: breadth == Breadth::All,
 		ps,
+		others: carried,
 		attacker: scratch.attacker_snapshot(),
 		// A probe returns only when the re-executed state resolved the query.
 		reproduced: true,
@@ -1300,7 +1547,7 @@ mod tests {
 		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
 
-		let w = minimize_witness(&ctx, &km, &pure, 0, &[]);
+		let w = minimize_witness(&ctx, &km, &pure, 0, &[], None);
 		assert_eq!(w.ps.values.len(), pure.values.len());
 	}
 

@@ -1078,7 +1078,9 @@ pub(crate) fn narrate_attack(
 	ambient: &AttackerState,
 	prelude: Vec<Step>,
 ) -> Narration {
-	let states: Vec<&PrincipalState> = vec![&witness.ps];
+	let states: Vec<&PrincipalState> = std::iter::once(&witness.ps)
+		.chain(witness.others.iter())
+		.collect();
 	let table = NameTable::from_states(states.iter().copied());
 	let mut seen: Vec<KnownIdx> = Vec::new();
 	let mut shadowed: Vec<Arc<str>> = Vec::new();
