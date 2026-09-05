@@ -2,20 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // TLS 1.3 (RFC 9846, which obsoletes RFC 8446): the full handshake of
-// Figure 1 with every optional message present, followed by the
-// post-handshake messages of §4.7. The server authenticates with a
-// certificate, the server requests one from the client and the client
-// authenticates with it, both certificates are issued by a certificate
-// authority, and once the handshake completes the server hands out two
-// resumption tickets and rotates its sending key. The companion model
-// tls13-0rtt.vp is the resumption handshake those tickets are for.
+// Figure 1 with certificate-based authentication of both endpoints,
+// followed by the post-handshake messages of §4.7. The server
+// authenticates with a certificate, the server requests one from the
+// client and the client authenticates with it, both certificates are
+// issued by a certificate authority, and once the handshake completes
+// the server hands out two resumption tickets and rotates its sending
+// key. The companion model tls13-0rtt.vp is the resumption handshake
+// those tickets are for.
 //
 // What is here, section by section:
 //   §4.1   the running transcript hash, extended message by message;
-//   §4.2   ClientHello and ServerHello as (random, key share) pairs;
+//   §4.2   ClientHello and ServerHello as key shares;
 //   §4.3.8 fresh key shares per connection (`generates ce`, `generates se`);
-//   §4.4   EncryptedExtensions and CertificateRequest, carried as public
-//          constants both sides fold into the transcript;
 //   §4.5.1 Certificate as (name, key, CA signature over both), for both
 //          endpoints, validated against a trust anchor received guarded;
 //   §4.5.2 CertificateVerify over the transcript, prefixed by the context
@@ -23,10 +22,13 @@
 //   §4.5.3 Finished as a MAC keyed by a finished key expanded from the
 //          sender's handshake traffic secret, over the transcript through
 //          CertificateVerify;
-//   §5.2   records as AEAD under the traffic secret of the sender, the
-//   §5.3   third argument standing in for the record header and the
-//          per-record nonce derived from the sequence number, so a record
-//          is accepted only in its place (F.2, order protection);
+//   §5.2   records as AEAD under the traffic secret of the sender, with
+//          the record header as the additional data;
+//   §5.3   the per-record nonce formed from the sender's write IV and the
+//   §7.3   record sequence number, the IV expanded from the traffic
+//          secret under its own label, so a record is accepted only in
+//          its place (F.2, order protection) and nothing about the nonce
+//          travels;
 //   §7.1   the key schedule from HKDF-Extract(0, 0) through the derived
 //          steps to the main secret, every Derive-Secret carrying its own
 //          label and the transcript hash of that point, plus the exporter
@@ -78,13 +80,14 @@
 // dhe = DH_KEX(gce, se), and neither signing key is an ingredient. That is
 // F.1's "forward secret with respect to long-term keys". Phase 2 leaks
 // sApTraffic1, the server's sending secret after its KeyUpdate. appMsg3
-// was encrypted under it and falls; appMsg2 was encrypted under the
-// generation before, which HKDF-Expand-Label cannot be run backwards to,
-// and holds. That is F.2's "forward secrecy after key change", and the
-// only failure among the application data. F.2 also says the other
-// direction is not provided: leak generation 0 instead and every later
-// generation follows from it. This model does not show that, because one
-// file can leak in one order.
+// was encrypted under it and falls, the attacker expanding the write IV
+// from the leaked secret and forming the nonce as the client does;
+// appMsg2 was encrypted under the generation before, which
+// HKDF-Expand-Label cannot be run backwards to, and holds. That is F.2's
+// "forward secrecy after key change", and the only failure among the
+// application data. F.2 also says the other direction is not provided:
+// leak generation 0 instead and every later generation follows from it.
+// This model does not show that, because one file can leak in one order.
 //
 // Resumption (F.1, tickets):
 //   confidentiality? resPsk2     HOLDS
@@ -121,26 +124,24 @@
 // Verifpal's authentication query is injective agreement, so a hold rules
 // out replay as well as forgery. The server's flight is accepted only
 // under a signature, by a key a trust anchor vouches for, over a
-// transcript that contains the client's own key share and random; the
-// client's flight is accepted under the same construction, over a
-// transcript that also contains the server's certificate and Finished.
-// The second half is where the scenarios[] block earns its place. The
-// client that talks to Mallory signs a CertificateVerify for that
-// handshake, and the attacker holds it afterwards. Reusing it against the
-// honest server is the attack F.1 describes for constructions "that do
-// not bind to the server's certificate" ([PSK-FINISHED], [Kraw16]), and
-// it fails here because the client's signature covers the server's
-// Certificate and the shares of this connection. Every record after the
-// handshake is sealed under a secret that mixes both ephemeral shares, so
-// a record lifted from a concurrent connection decrypts nowhere, and the
-// sequence number in the additional data keeps the four records the
-// server sends under one key from standing in for each other.
+// transcript that contains the client's own key share; the client's
+// flight is accepted under the same construction, over a transcript that
+// also contains the server's certificate and Finished. The second half is
+// where the scenarios[] block earns its place. The client that talks to
+// Mallory signs a CertificateVerify for that handshake, and the attacker
+// holds it afterwards. Reusing it against the honest server is the attack
+// F.1 describes for constructions "that do not bind to the server's
+// certificate" ([PSK-FINISHED], [Kraw16]), and it fails here because the
+// client's signature covers the server's Certificate and the shares of
+// this connection. Every record after the handshake is sealed under a
+// secret that mixes both ephemeral shares, so a record lifted from a
+// concurrent connection decrypts nowhere, and the sequence number in the
+// nonce keeps the four records the server sends under one key from
+// standing in for each other.
 //
 // Uniqueness of the session keys (F.1):
 //   freshness? sApTraffic, freshness? cApTraffic_c   HOLD
-// Both traffic secrets descend from the per-connection se and ce; §7 says
-// the transcript's randoms alone would do this, and they are in the
-// transcript too.
+// Both traffic secrets descend from the per-connection se and ce.
 //
 // Modelling notes.
 //
@@ -152,12 +153,25 @@
 // Mallory's certificate carries Mallory's public key, whose private half
 // leaks, so a run configured with it is a run with a corrupt peer and its
 // claims are not the protocol's to answer for. The client reads the
-// expected name out of the configured certificate and compares it with
-// the name in the Certificate message it receives, which is hostname
-// verification as a browser does it; nothing else about the configured
-// certificate is consulted. Drop that comparison and the attacker presents
-// Mallory's genuine certificate to a client that wanted the honest server,
-// which is the misbinding of F.9.
+// expected name out of the configured certificate and checks the CA's
+// signature over that name and the key in the Certificate message it
+// receives, which is hostname verification as a browser does it; nothing
+// else about the configured certificate is consulted. Check the received
+// name instead and the attacker presents Mallory's genuine certificate to
+// a client that wanted the honest server, which is the misbinding of F.9.
+//
+// The server's certificate check has the same shape, and needs it. The
+// CA certifies Mallory too, so a server that accepted any certificate
+// the CA issued would accept Mallory as its client, and the attacker,
+// holding Mallory's key, would complete the client side of the handshake
+// against the honest server: the client-flight and appData1
+// authentication queries would fail and the server's gated session
+// secrets would be shared with the attacker, all of it correct TLS with
+// a peer the server never meant to serve. A deployment with client
+// certificates decides which certified identities it serves, so the
+// server here holds the identity of its one client and checks the CA's
+// signature over that identity and the key in the certificate it
+// receives. The transcript still covers the bytes as received (§4.1).
 //
 // Client certificates change the reading of this model against the
 // server-only handshake that browsers run. Without them the server has no
@@ -168,15 +182,36 @@
 // With them those claims hold, and the ungated sHsTraffic query above is
 // what remains of that story.
 //
+// Records follow §5.2 and §5.3. Each traffic secret stands for the write
+// key §7.3 expands from it, and the write IV is expanded from it under
+// the "iv" label; the per-record nonce is that IV combined with the
+// record sequence number, written HASH(iv, seq) because Verifpal has no
+// XOR, and the additional data is the record header, the same public
+// bytes on every record. Sequence numbers start over whenever the key
+// changes (§5.3), so the first record under the updated secret is seq0
+// again. An earlier version of this model drew a fresh nonce per record
+// and sent it beside the ciphertext; TLS does neither, and the extra
+// wire slot per record was what put the analysis out of reach.
+//
+// Three things the RFC has are left out because they cannot move a
+// verdict and each one widened the search. The ClientHello and
+// ServerHello randoms are absent: the transcript already binds the fresh
+// key shares, and a random is a bare constant nothing checks on its own.
+// EncryptedExtensions and CertificateRequest are absent from the
+// transcript: as constants both sides already hold they could only sit in
+// it inertly (parameter negotiation is not modelled, see below). And each
+// endpoint's name check is folded into its certificate check, so a
+// certificate for the wrong name fails one check earlier than it did and
+// the endpoint halts in the same place.
+//
 // Not modelled: parameter negotiation and its downgrade protection
 // (there is one cipher suite and one group), HelloRetryRequest and
 // cookies, the PSK and 0-RTT modes (tls13-0rtt.vp), post-handshake
 // client authentication, the exporter interface over the exporter secret,
 // alerts, record padding, and the within-connection sequence-number
-// checks beyond what the additional data expresses. Key compromise
-// impersonation (F.1) is not tested either: it needs a handshake run
-// after the client's key has leaked, and every handshake here runs at
-// phase 0.
+// checks beyond what the nonce expresses. Key compromise impersonation
+// (F.1) is not tested either: it needs a handshake run after the
+// client's key has leaked, and every handshake here runs at phase 0.
 
 attacker[active]
 
@@ -245,33 +280,35 @@ Mallory -> Client: [mallCert]
 
 principal Client[
 	knows public peerCert
-	knows public encryptedExtensions, certificateRequest, updateNotRequested
+	knows public recordHeader, updateNotRequested
 	knows public seq0, seq1, seq2, seq3
-	knows public labelDerived, labelFinished
+	knows public labelDerived, labelFinished, labelIv
 	knows public labelCHsTraffic, labelSHsTraffic
 	knows public labelCApTraffic, labelSApTraffic
 	knows public labelExpMaster, labelResMaster
 	knows public labelResumption, labelTrafficUpd
 	knows public ctxServerCV, ctxClientCV
 	expectedName, _, _ = SPLIT(peerCert)
-	// ClientHello (§4.2.2): random and key share, fresh per connection.
-	generates cr, ce
+	// ClientHello (§4.2.2): a key share, fresh per connection.
+	generates ce
 	gce = PUBKEY(ce)
 ]
 
-Client -> Server: cr, gce
+Client -> Server: gce
 
 principal Server[
-	knows public encryptedExtensions, certificateRequest, updateNotRequested
+	// The server knows which client it serves; see the modelling notes.
+	knows private clientId
+	knows public recordHeader, updateNotRequested
 	knows public seq0, seq1, seq2, seq3
-	knows public labelDerived, labelFinished
+	knows public labelDerived, labelFinished, labelIv
 	knows public labelCHsTraffic, labelSHsTraffic
 	knows public labelCApTraffic, labelSApTraffic
 	knows public labelExpMaster, labelResMaster
 	knows public labelResumption, labelTrafficUpd
 	knows public ctxServerCV, ctxClientCV
 	// ServerHello (§4.2.3).
-	generates sr, se
+	generates se
 	gse = PUBKEY(se)
 	dhe = DH_KEX(gce, se)
 	// §7.1. HKDF(salt, ikm, nil) is HKDF-Extract; HKDF(secret, label,
@@ -280,15 +317,16 @@ principal Server[
 	earlySecret = HKDF(nil, nil, nil)
 	derivedES = HKDF(earlySecret, labelDerived, nil)
 	handshakeSecret = HKDF(derivedES, dhe, nil)
-	transcriptSH = HASH(cr, gce, sr, gse)
+	transcriptSH = HASH(gce, gse)
 	cHsTraffic = HKDF(handshakeSecret, labelCHsTraffic, transcriptSH)
 	sHsTraffic = HKDF(handshakeSecret, labelSHsTraffic, transcriptSH)
+	// §7.3: the write IVs of both directions' handshake keys.
+	cHsIv = HKDF(cHsTraffic, labelIv, nil)
+	sHsIv = HKDF(sHsTraffic, labelIv, nil)
 	derivedHS = HKDF(handshakeSecret, labelDerived, nil)
 	mainSecret = HKDF(derivedHS, nil, nil)
-	// §4.4: EncryptedExtensions and CertificateRequest extend the
-	// transcript; §4.5.1: then the Certificate.
-	transcriptCR = HASH(transcriptSH, encryptedExtensions, certificateRequest)
-	transcriptCert = HASH(transcriptCR, serverName, gSigKey, serverCertSig)
+	// §4.5.1: the transcript through the Certificate.
+	transcriptCert = HASH(transcriptSH, serverName, gSigKey, serverCertSig)
 	// §4.5.2: CertificateVerify, with the server context string.
 	serverCV = SIGN(sigKey, CONCAT(ctxServerCV, transcriptCert))
 	transcriptCV = HASH(transcriptCert, serverCV)
@@ -297,34 +335,35 @@ principal Server[
 	serverFinished = MAC(sFinishedKey, transcriptCV)
 	// Certificate, CertificateVerify and Finished, sealed under the
 	// server handshake traffic secret (§5.2), record 0 under that key.
-	generates n_serverFlight
-	serverFlight = AEAD_ENC(sHsTraffic, n_serverFlight, CONCAT(serverName, gSigKey, serverCertSig, serverCV, serverFinished), seq0)
+	serverFlight = AEAD_ENC(sHsTraffic, HASH(sHsIv, seq0), CONCAT(serverName, gSigKey, serverCertSig, serverCV, serverFinished), recordHeader)
 	transcriptSFin = HASH(transcriptCV, serverFinished)
 	cApTraffic = HKDF(mainSecret, labelCApTraffic, transcriptSFin)
 	sApTraffic = HKDF(mainSecret, labelSApTraffic, transcriptSFin)
+	cApIv = HKDF(cApTraffic, labelIv, nil)
+	sApIv = HKDF(sApTraffic, labelIv, nil)
 	exporterSecret = HKDF(mainSecret, labelExpMaster, transcriptSFin)
 ]
 
-Server -> Client: sr, gse, n_serverFlight, serverFlight
+Server -> Client: gse, serverFlight
 
 principal Client[
 	dhe_c = DH_KEX(gse, ce)
 	earlySecret_c = HKDF(nil, nil, nil)
 	derivedES_c = HKDF(earlySecret_c, labelDerived, nil)
 	handshakeSecret_c = HKDF(derivedES_c, dhe_c, nil)
-	transcriptSH_c = HASH(cr, gce, sr, gse)
+	transcriptSH_c = HASH(gce, gse)
 	cHsTraffic_c = HKDF(handshakeSecret_c, labelCHsTraffic, transcriptSH_c)
 	sHsTraffic_c = HKDF(handshakeSecret_c, labelSHsTraffic, transcriptSH_c)
+	cHsIv_c = HKDF(cHsTraffic_c, labelIv, nil)
+	sHsIv_c = HKDF(sHsTraffic_c, labelIv, nil)
 	derivedHS_c = HKDF(handshakeSecret_c, labelDerived, nil)
 	mainSecret_c = HKDF(derivedHS_c, nil, nil)
-	serverFlightDec = AEAD_DEC(sHsTraffic_c, n_serverFlight, serverFlight, seq0)?
+	serverFlightDec = AEAD_DEC(sHsTraffic_c, HASH(sHsIv_c, seq0), serverFlight, recordHeader)?
 	certName, certKey, certSig, serverCV_c, serverFinished_c = SPLIT(serverFlightDec)
-	// §4.5.1.3: the chain is validated against the trust anchor, and the
-	// certified name is the one the client meant to reach.
-	_ = SIGNVERIF(caPk, CONCAT(certName, certKey), certSig)?
-	_ = ASSERT(certName, expectedName)?
-	transcriptCR_c = HASH(transcriptSH_c, encryptedExtensions, certificateRequest)
-	transcriptCert_c = HASH(transcriptCR_c, certName, certKey, certSig)
+	// §4.5.1.3: the chain is validated against the trust anchor, for the
+	// name the client meant to reach.
+	_ = SIGNVERIF(caPk, CONCAT(expectedName, certKey), certSig)?
+	transcriptCert_c = HASH(transcriptSH_c, certName, certKey, certSig)
 	// §4.5.2: the signature is checked under the key in the certificate,
 	// not under anything the client knew in advance.
 	_ = SIGNVERIF(certKey, CONCAT(ctxServerCV, transcriptCert_c), serverCV_c)?
@@ -335,6 +374,8 @@ principal Client[
 	transcriptSFin_c = HASH(transcriptCV_c, serverFinished_c)
 	cApTraffic_c = HKDF(mainSecret_c, labelCApTraffic, transcriptSFin_c)
 	sApTraffic_c = HKDF(mainSecret_c, labelSApTraffic, transcriptSFin_c)
+	cApIv_c = HKDF(cApTraffic_c, labelIv, nil)
+	sApIv_c = HKDF(sApTraffic_c, labelIv, nil)
 	exporterSecret_c = HKDF(mainSecret_c, labelExpMaster, transcriptSFin_c)
 	// The client's authentication block (§4.5, Table 2): Certificate,
 	// CertificateVerify with the client context string over the
@@ -345,23 +386,23 @@ principal Client[
 	transcriptCCV = HASH(transcriptCCert, clientCV)
 	cFinishedKey_c = HKDF(cHsTraffic_c, labelFinished, nil)
 	clientFinished = MAC(cFinishedKey_c, transcriptCCV)
-	generates n_clientFlight
-	clientFlight = AEAD_ENC(cHsTraffic_c, n_clientFlight, CONCAT(clientId, clientPk, clientCertSig, clientCV, clientFinished), seq0)
+	clientFlight = AEAD_ENC(cHsTraffic_c, HASH(cHsIv_c, seq0), CONCAT(clientId, clientPk, clientCertSig, clientCV, clientFinished), recordHeader)
 	// §7.1: the resumption secret covers the transcript through client
 	// Finished.
 	transcriptCFin_c = HASH(transcriptCCV, clientFinished)
 	resumptionSecret_c = HKDF(mainSecret_c, labelResMaster, transcriptCFin_c)
 	generates appMsg1
-	generates n_appData1
-	appData1 = AEAD_ENC(cApTraffic_c, n_appData1, appMsg1, seq0)
+	appData1 = AEAD_ENC(cApTraffic_c, HASH(cApIv_c, seq0), appMsg1, recordHeader)
 ]
 
-Client -> Server: n_clientFlight, clientFlight, n_appData1, appData1
+Client -> Server: clientFlight, appData1
 
 principal Server[
-	clientFlightDec = AEAD_DEC(cHsTraffic, n_clientFlight, clientFlight, seq0)?
+	clientFlightDec = AEAD_DEC(cHsTraffic, HASH(cHsIv, seq0), clientFlight, recordHeader)?
 	clientId_s, clientPk_s, clientCertSig_s, clientCV_s, clientFinished_s = SPLIT(clientFlightDec)
-	_ = SIGNVERIF(caPk, CONCAT(clientId_s, clientPk_s), clientCertSig_s)?
+	// The chain is validated against the trust anchor, for the client
+	// this server serves.
+	_ = SIGNVERIF(caPk, CONCAT(clientId, clientPk_s), clientCertSig_s)?
 	transcriptCCert_s = HASH(transcriptSFin, clientId_s, clientPk_s, clientCertSig_s)
 	_ = SIGNVERIF(clientPk_s, CONCAT(ctxClientCV, transcriptCCert_s), clientCV_s)?
 	transcriptCCV_s = HASH(transcriptCCert_s, clientCV_s)
@@ -372,42 +413,39 @@ principal Server[
 	resumptionSecret = HKDF(mainSecret, labelResMaster, transcriptCFin)
 	// §4.5.3: application data from the client is read only once its
 	// Finished has been verified.
-	appMsg1_s = AEAD_DEC(cApTraffic, n_appData1, appData1, seq0)?
+	appMsg1_s = AEAD_DEC(cApTraffic, HASH(cApIv, seq0), appData1, recordHeader)?
 	// §4.7.1: two NewSessionTickets, each with its own nonce and so its
 	// own PSK; the tickets are records 0 and 1 under sApTraffic.
 	generates ticketNonce1, ticketNonce2
 	resPsk1 = HKDF(resumptionSecret, labelResumption, ticketNonce1)
 	resPsk2 = HKDF(resumptionSecret, labelResumption, ticketNonce2)
-	generates n_newSessionTicket1
-	newSessionTicket1 = AEAD_ENC(sApTraffic, n_newSessionTicket1, ticketNonce1, seq0)
-	generates n_newSessionTicket2
-	newSessionTicket2 = AEAD_ENC(sApTraffic, n_newSessionTicket2, ticketNonce2, seq1)
+	newSessionTicket1 = AEAD_ENC(sApTraffic, HASH(sApIv, seq0), ticketNonce1, recordHeader)
+	newSessionTicket2 = AEAD_ENC(sApTraffic, HASH(sApIv, seq1), ticketNonce2, recordHeader)
 	generates appMsg2
-	generates n_appData2
-	appData2 = AEAD_ENC(sApTraffic, n_appData2, appMsg2, seq2)
+	appData2 = AEAD_ENC(sApTraffic, HASH(sApIv, seq2), appMsg2, recordHeader)
 	// §4.7.3: KeyUpdate goes out under the old key; §7.2: the next
-	// generation is one HKDF-Expand-Label away, and its sequence numbers
-	// start over (§5.3).
-	generates n_keyUpdate
-	keyUpdate = AEAD_ENC(sApTraffic, n_keyUpdate, updateNotRequested, seq3)
+	// generation is one HKDF-Expand-Label away, with its own write IV,
+	// and its sequence numbers start over (§5.3).
+	keyUpdate = AEAD_ENC(sApTraffic, HASH(sApIv, seq3), updateNotRequested, recordHeader)
 	sApTraffic1 = HKDF(sApTraffic, labelTrafficUpd, nil)
+	sApIv1 = HKDF(sApTraffic1, labelIv, nil)
 	generates appMsg3
-	generates n_appData3
-	appData3 = AEAD_ENC(sApTraffic1, n_appData3, appMsg3, seq0)
+	appData3 = AEAD_ENC(sApTraffic1, HASH(sApIv1, seq0), appMsg3, recordHeader)
 ]
 
-Server -> Client: n_newSessionTicket1, newSessionTicket1, n_newSessionTicket2, newSessionTicket2, n_appData2, appData2, n_keyUpdate, keyUpdate, n_appData3, appData3
+Server -> Client: newSessionTicket1, newSessionTicket2, appData2, keyUpdate, appData3
 
 principal Client[
-	ticketNonce1_c = AEAD_DEC(sApTraffic_c, n_newSessionTicket1, newSessionTicket1, seq0)?
-	ticketNonce2_c = AEAD_DEC(sApTraffic_c, n_newSessionTicket2, newSessionTicket2, seq1)?
+	ticketNonce1_c = AEAD_DEC(sApTraffic_c, HASH(sApIv_c, seq0), newSessionTicket1, recordHeader)?
+	ticketNonce2_c = AEAD_DEC(sApTraffic_c, HASH(sApIv_c, seq1), newSessionTicket2, recordHeader)?
 	resPsk1_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce1_c)
 	resPsk2_c = HKDF(resumptionSecret_c, labelResumption, ticketNonce2_c)
-	appMsg2_c = AEAD_DEC(sApTraffic_c, n_appData2, appData2, seq2)?
-	keyUpdate_c = AEAD_DEC(sApTraffic_c, n_keyUpdate, keyUpdate, seq3)?
+	appMsg2_c = AEAD_DEC(sApTraffic_c, HASH(sApIv_c, seq2), appData2, recordHeader)?
+	keyUpdate_c = AEAD_DEC(sApTraffic_c, HASH(sApIv_c, seq3), keyUpdate, recordHeader)?
 	_ = ASSERT(keyUpdate_c, updateNotRequested)?
 	sApTraffic1_c = HKDF(sApTraffic_c, labelTrafficUpd, nil)
-	appMsg3_c = AEAD_DEC(sApTraffic1_c, n_appData3, appData3, seq0)?
+	sApIv1_c = HKDF(sApTraffic1_c, labelIv, nil)
+	appMsg3_c = AEAD_DEC(sApTraffic1_c, HASH(sApIv1_c, seq0), appData3, recordHeader)?
 ]
 
 phase[1]
