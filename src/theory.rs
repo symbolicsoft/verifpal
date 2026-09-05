@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::equivalence::equivalent_primitives;
+use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::primitive::*;
 use crate::types::*;
 
@@ -93,7 +93,7 @@ fn structurally_identical(a: &Value, b: &Value) -> bool {
 	match (a, b) {
 		(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
 		(Value::Primitive(x), Value::Primitive(y)) => {
-			Arc::ptr_eq(x, y) || structurally_identical_primitive(x, y)
+			Arc::ptr_eq(x, y) || memoised_pair(2, x, y, || structurally_identical_primitive(x, y))
 		}
 		_ => false,
 	}

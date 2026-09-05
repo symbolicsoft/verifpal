@@ -5,32 +5,47 @@ use std::sync::Arc;
 
 use crate::types::*;
 
+type TraceMemo = IdMap<usize, Option<Value>>;
+
 pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
 	let value = Value::Constant(c.clone());
-	resolve_trace_value(&value, trace).unwrap_or(value)
+	resolve_trace_value(&value, trace, &mut TraceMemo::default()).unwrap_or(value)
 }
 
 pub(crate) fn resolve_trace_term(value: &Value, trace: &ProtocolTrace) -> Value {
-	resolve_trace_value(value, trace).unwrap_or_else(|| value.clone())
+	resolve_trace_value(value, trace, &mut TraceMemo::default()).unwrap_or_else(|| value.clone())
 }
 
-fn resolve_trace_value(value: &Value, trace: &ProtocolTrace) -> Option<Value> {
+fn resolve_trace_value(
+	value: &Value,
+	trace: &ProtocolTrace,
+	memo: &mut TraceMemo,
+) -> Option<Value> {
 	let Value::Constant(c) = value else {
-		return resolve_trace_primitive(value, trace);
+		return resolve_trace_primitive(value, trace, memo);
 	};
 	let idx = trace.index_of(c)?;
+	if let Some(hit) = memo.get(&idx) {
+		return hit.clone();
+	}
 	let resolved = &trace.slots[idx].initial_value;
-	match resolved {
+	let out = match resolved {
 		Value::Constant(rc) => (rc.id != c.id).then(|| resolved.clone()),
 		Value::Primitive(_) => {
-			Some(resolve_trace_primitive(resolved, trace).unwrap_or_else(|| resolved.clone()))
+			Some(resolve_trace_primitive(resolved, trace, memo).unwrap_or_else(|| resolved.clone()))
 		}
-	}
+	};
+	memo.insert(idx, out.clone());
+	out
 }
 
-fn resolve_trace_primitive(value: &Value, trace: &ProtocolTrace) -> Option<Value> {
+fn resolve_trace_primitive(
+	value: &Value,
+	trace: &ProtocolTrace,
+	memo: &mut TraceMemo,
+) -> Option<Value> {
 	let prim = value.as_primitive()?;
-	prim.map_arguments(|arg| resolve_trace_value(arg, trace))
+	prim.map_arguments(|arg| resolve_trace_value(arg, trace, memo))
 		.map(|mapped| Value::Primitive(Arc::new(mapped)))
 }
 

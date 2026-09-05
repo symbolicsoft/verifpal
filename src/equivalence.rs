@@ -1,7 +1,48 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::cell::RefCell;
+use std::sync::Arc;
+
 use crate::types::*;
+
+#[derive(Default)]
+struct PairMemo {
+	depth: usize,
+	equal: IdSet<(usize, usize, u8)>,
+}
+
+thread_local! {
+	static PAIRS: RefCell<PairMemo> = RefCell::new(PairMemo::default());
+}
+
+pub(crate) fn memoised_pair(
+	kind: u8,
+	a: &Arc<Primitive>,
+	b: &Arc<Primitive>,
+	compute: impl FnOnce() -> bool,
+) -> bool {
+	let (x, y) = (Arc::as_ptr(a) as usize, Arc::as_ptr(b) as usize);
+	let key = if x <= y { (x, y, kind) } else { (y, x, kind) };
+	let (known, nested) = PAIRS.with(|memo| {
+		let mut memo = memo.borrow_mut();
+		memo.depth += 1;
+		let nested = memo.depth > 1;
+		(nested && memo.equal.contains(&key), nested)
+	});
+	let result = known || compute();
+	PAIRS.with(|memo| {
+		let mut memo = memo.borrow_mut();
+		if result && nested && !known {
+			memo.equal.insert(key);
+		}
+		memo.depth -= 1;
+		if memo.depth == 0 && !memo.equal.is_empty() {
+			memo.equal = IdSet::default();
+		}
+	});
+	result
+}
 
 pub(crate) fn equivalent_primitives(p1: &Primitive, p2: &Primitive, consider_output: bool) -> bool {
 	if p1.id != p2.id {

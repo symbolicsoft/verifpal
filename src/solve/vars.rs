@@ -58,7 +58,14 @@ pub(crate) fn as_var(v: &Value) -> Option<ValueId> {
 pub(crate) fn contains_var(v: &Value) -> bool {
 	match v {
 		Value::Constant(c) => is_var_id(c.id),
-		Value::Primitive(p) => p.arguments.iter().any(contains_var),
+		Value::Primitive(p) => {
+			if let Some(has) = p.hash.has_variables() {
+				return has;
+			}
+			let has = p.arguments.iter().any(contains_var);
+			p.hash.set_has_variables(has);
+			has
+		}
 	}
 }
 
@@ -96,15 +103,33 @@ pub(crate) fn apply(v: &Value, s: &Substitution) -> Value {
 	if s.is_empty() || !contains_var(v) {
 		return v.clone();
 	}
+	let mut shared: IdMap<usize, Value> = IdMap::default();
+	apply_shared(v, s, &mut shared)
+}
+
+fn apply_shared(v: &Value, s: &Substitution, shared: &mut IdMap<usize, Value>) -> Value {
+	if !contains_var(v) {
+		return v.clone();
+	}
 	match v {
 		Value::Constant(c) => match s.get(&c.id) {
-			Some(bound) => apply(bound, s),
+			Some(bound) => apply_shared(bound, s, shared),
 			None => v.clone(),
 		},
 		Value::Primitive(p) => {
-			let args: Vec<Value> = p.arguments.iter().map(|a| apply(a, s)).collect();
+			let key = Arc::as_ptr(p) as usize;
+			if let Some(hit) = shared.get(&key) {
+				return hit.clone();
+			}
+			let args: Vec<Value> = p
+				.arguments
+				.iter()
+				.map(|a| apply_shared(a, s, shared))
+				.collect();
 			let args = crate::primitive::normalise_arguments(p.id, args);
-			Value::Primitive(Arc::new(p.with_arguments(args)))
+			let out = Value::Primitive(Arc::new(p.with_arguments(args)));
+			shared.insert(key, out.clone());
+			out
 		}
 	}
 }
@@ -163,6 +188,11 @@ pub(crate) fn ground_free(v: &Value) -> Value {
 }
 
 pub(crate) fn ground_free_as(v: &Value, filler: &Value) -> Value {
+	let mut shared: IdMap<usize, Value> = IdMap::default();
+	ground_free_shared(v, filler, &mut shared)
+}
+
+fn ground_free_shared(v: &Value, filler: &Value, shared: &mut IdMap<usize, Value>) -> Value {
 	match v {
 		Value::Constant(c) => {
 			if is_free_var_id(c.id) {
@@ -172,13 +202,19 @@ pub(crate) fn ground_free_as(v: &Value, filler: &Value) -> Value {
 			}
 		}
 		Value::Primitive(p) => {
+			let key = Arc::as_ptr(p) as usize;
+			if let Some(hit) = shared.get(&key) {
+				return hit.clone();
+			}
 			let args: Vec<Value> = p
 				.arguments
 				.iter()
-				.map(|a| ground_free_as(a, filler))
+				.map(|a| ground_free_shared(a, filler, shared))
 				.collect();
 			let args = crate::primitive::normalise_arguments(p.id, args);
-			Value::Primitive(Arc::new(p.with_arguments(args)))
+			let out = Value::Primitive(Arc::new(p.with_arguments(args)));
+			shared.insert(key, out.clone());
+			out
 		}
 	}
 }

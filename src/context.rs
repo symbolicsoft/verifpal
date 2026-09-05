@@ -62,6 +62,7 @@ pub(crate) struct VerifyContext {
 	origin_only: RwLock<IdSet<usize>>,
 	replays: RwLock<Vec<Replay>>,
 	basis: RwLock<(i32, usize, IdSet<u64>)>,
+	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -252,6 +253,7 @@ impl VerifyContext {
 		VerifyContext {
 			replays: RwLock::new(Vec::new()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
+			term_bound: std::sync::OnceLock::new(),
 			origin_only: RwLock::new(IdSet::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			deferred_replays: RwLock::new(Vec::new()),
@@ -454,6 +456,11 @@ impl VerifyContext {
 		let built = crate::reexec::replay_diffs(self, km, seeds, attacker).map(Arc::new);
 		write_lock(&self.replays).push((key, seeds.to_vec(), phase, known, built.clone()));
 		built
+	}
+
+	pub(crate) fn term_bound(&self, km: &ProtocolTrace) -> &crate::reexec::TermBound {
+		self.term_bound
+			.get_or_init(|| crate::reexec::TermBound::of(km))
 	}
 
 	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> IdSet<u64> {
@@ -792,6 +799,7 @@ impl VerifyContext {
 			origin_only: RwLock::new(IdSet::default()),
 			replays: RwLock::new(Vec::new()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
+			term_bound: std::sync::OnceLock::new(),
 			sessions: self.sessions,
 			honest,
 			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),

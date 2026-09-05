@@ -854,6 +854,13 @@ fn rule_reuse(
 		let Some(rule) = reuse_rule(p.id) else {
 			continue;
 		};
+		if rule.fixed.iter().all(|&at| {
+			p.arguments
+				.get(at)
+				.is_some_and(|a| obtainable(a, ps, attacker))
+		}) {
+			continue;
+		}
 		let mut key = u64::from(p.id);
 		for &at in &rule.fixed {
 			let Some(argument) = p.arguments.get(at) else {

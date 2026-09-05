@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use crate::equivalence::equivalent_primitives;
+use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::hashing::primitive_hash;
 use crate::resolution::constant_used_by_principal;
 use crate::rewrite::perform_primitive_rewrite;
@@ -165,7 +165,9 @@ impl Value {
 				if consider_output && primitive_hash(p1) != primitive_hash(p2) {
 					return false;
 				}
-				equivalent_primitives(p1, p2, consider_output)
+				memoised_pair(u8::from(consider_output), p1, p2, || {
+					equivalent_primitives(p1, p2, consider_output)
+				})
 			}
 			_ => false,
 		}

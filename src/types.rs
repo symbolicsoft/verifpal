@@ -658,13 +658,14 @@ pub struct Constant {
 }
 
 #[derive(Debug, Default)]
-pub struct HashCell(std::sync::atomic::AtomicU64);
+pub struct HashCell(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU8);
 
 impl Clone for HashCell {
 	fn clone(&self) -> Self {
-		HashCell(std::sync::atomic::AtomicU64::new(
-			self.0.load(std::sync::atomic::Ordering::Relaxed),
-		))
+		HashCell(
+			std::sync::atomic::AtomicU64::new(self.0.load(std::sync::atomic::Ordering::Relaxed)),
+			std::sync::atomic::AtomicU8::new(self.1.load(std::sync::atomic::Ordering::Relaxed)),
+		)
 	}
 }
 
@@ -680,6 +681,19 @@ impl HashCell {
 	}
 	pub fn clear(&self) {
 		self.0.store(0, std::sync::atomic::Ordering::Relaxed);
+	}
+	pub fn has_variables(&self) -> Option<bool> {
+		match self.1.load(std::sync::atomic::Ordering::Relaxed) {
+			0 => None,
+			1 => Some(false),
+			_ => Some(true),
+		}
+	}
+	pub fn set_has_variables(&self, has: bool) {
+		self.1.store(
+			if has { 2 } else { 1 },
+			std::sync::atomic::Ordering::Relaxed,
+		);
 	}
 }
 

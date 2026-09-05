@@ -47,7 +47,7 @@ impl Controllable {
 
 pub(crate) struct TermBound {
 	max_depth: usize,
-	deep: std::cell::OnceCell<Deep>,
+	deep: std::sync::OnceLock<Deep>,
 }
 
 struct Deep {
@@ -55,7 +55,7 @@ struct Deep {
 	ids: Vec<ValueId>,
 	creators: Vec<PrincipalId>,
 	consumes: Vec<Option<ValueId>>,
-	peel: std::cell::RefCell<IdMap<(PrincipalId, usize), usize>>,
+	peel: std::sync::RwLock<IdMap<(PrincipalId, usize), usize>>,
 }
 
 impl TermBound {
@@ -68,7 +68,7 @@ impl TermBound {
 			.unwrap_or(0);
 		TermBound {
 			max_depth,
-			deep: std::cell::OnceCell::new(),
+			deep: std::sync::OnceLock::new(),
 		}
 	}
 
@@ -90,7 +90,7 @@ impl TermBound {
 					.iter()
 					.map(|slot| unwrapped_by(&slot.initial_value))
 					.collect(),
-				peel: std::cell::RefCell::new(IdMap::default()),
+				peel: std::sync::RwLock::new(IdMap::default()),
 			}
 		})
 	}
@@ -135,12 +135,20 @@ impl Deep {
 	}
 
 	fn peel_depth(&self, principal: PrincipalId, slot: usize) -> usize {
-		if let Some(&hit) = self.peel.borrow().get(&(principal, slot)) {
+		if let Some(&hit) = self
+			.peel
+			.read()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(&(principal, slot))
+		{
 			return hit;
 		}
 		let mut visiting: Vec<usize> = Vec::new();
 		let depth = self.peel_from(principal, slot, &mut visiting);
-		self.peel.borrow_mut().insert((principal, slot), depth);
+		self.peel
+			.write()
+			.unwrap_or_else(|e| e.into_inner())
+			.insert((principal, slot), depth);
 		depth
 	}
 
