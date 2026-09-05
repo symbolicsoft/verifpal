@@ -142,7 +142,7 @@ fn solve_principal(
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
 	let order = crate::reexec::CausalOrder::of(km, ps.id);
-	let history = crate::reexec::Coherence::of(km, ps);
+	let history = ctx.coherence(km, ps, &attacker);
 	let sym = symbolic::build(&controllable, ps, &attacker);
 	if sym.var_slots.is_empty() {
 		return Ok(());
@@ -458,7 +458,8 @@ fn dispose(
 		{
 			continue;
 		}
-		bucket.push(seen.len());
+		let at = seen.len();
+		bucket.push(at);
 		seen.push(signature);
 		let guards = crate::reexec::Guards {
 			controllable,
@@ -480,7 +481,9 @@ fn dispose(
 				),
 			)
 		});
-		let ran = validate::validate(ctx, km, ps, sym, &guards, attacker, &proposal)?;
+		let ran = validate::validate(
+			ctx, km, ps, sym, &guards, attacker, &proposal, &seen[at], key,
+		)?;
 		trace_proposal(ps, sym, &proposal, ran);
 	}
 	Ok(())

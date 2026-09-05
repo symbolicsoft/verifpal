@@ -28,23 +28,38 @@ type RuleFn = fn(
 	&Arc<MutationRecord>,
 ) -> bool;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reads {
+	Knowledge,
+	State,
+}
+
 pub(crate) struct RuleGroup {
 	pub domain: RuleDomain,
-	pub rules: &'static [RuleFn],
+	rules: &'static [(RuleFn, Reads)],
 }
 
 static DEDUCTION_RULES: &[RuleGroup] = &[
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
-		rules: &[rule_decompose, rule_break_weak],
+		rules: &[
+			(rule_decompose, Reads::Knowledge),
+			(rule_break_weak, Reads::Knowledge),
+		],
 	},
 	RuleGroup {
 		domain: RuleDomain::PrincipalAssigned,
-		rules: &[rule_reconstruct, rule_recompose],
+		rules: &[
+			(rule_reconstruct, Reads::State),
+			(rule_recompose, Reads::State),
+		],
 	},
 	RuleGroup {
 		domain: RuleDomain::AttackerKnown,
-		rules: &[rule_equivalize, rule_concat_extract],
+		rules: &[
+			(rule_equivalize, Reads::State),
+			(rule_concat_extract, Reads::Knowledge),
+		],
 	},
 ];
 
@@ -80,12 +95,16 @@ fn try_deduction_step(
 	index: &Arc<crate::theory::StateIndex>,
 ) -> bool {
 	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker, index);
+	let saturated = ctx.knowledge_rules_saturated(ps.id, attacker);
 	let mut progress = false;
 	for group in DEDUCTION_RULES {
 		match group.domain {
 			RuleDomain::AttackerKnown => {
 				for known in attacker.known.iter() {
-					for rule in group.rules {
+					for (rule, reads) in group.rules {
+						if saturated && *reads == Reads::Knowledge {
+							continue;
+						}
 						progress |= rule(ctx, km, known, ps, attacker, record);
 					}
 				}
@@ -95,7 +114,7 @@ fn try_deduction_step(
 					if ps.slot_unreached(slot) {
 						continue;
 					}
-					for rule in group.rules {
+					for (rule, _) in group.rules {
 						progress |= rule(ctx, km, &sv.value, ps, attacker, record);
 					}
 					progress |=
@@ -104,7 +123,10 @@ fn try_deduction_step(
 			}
 		}
 	}
-	progress |= rule_reuse(ctx, km, ps, attacker, record);
+	if !saturated {
+		progress |= rule_reuse(ctx, km, ps, attacker, record);
+		ctx.note_knowledge_rules_saturated(ps.id, attacker);
+	}
 	progress
 }
 
@@ -875,11 +897,10 @@ fn rule_reuse(
 		}
 		for &i in members {
 			let of = &attacker.known[i];
-			let Some(&j) = members.iter().find(|&&j| {
-				reused_pair(of, &attacker.known[j])
-					&& one_execution(attacker, of, &attacker.known[j])
-					&& pair_coheres(ctx, km, ps, attacker, of, &attacker.known[j])
-			}) else {
+			let Some(&j) = members
+				.iter()
+				.find(|&&j| pair_vetted(ctx, km, ps, attacker, of, &attacker.known[j]))
+			else {
 				continue;
 			};
 			let with = &attacker.known[j];
@@ -923,6 +944,41 @@ fn rule_reuse(
 		}
 	}
 	progress
+}
+
+type PairKey = (PrincipalId, u64, u64, i32, usize, u64);
+
+thread_local! {
+	static PAIRS: std::cell::RefCell<crate::context::Generational<IdMap<PairKey, bool>>> =
+		std::cell::RefCell::new(crate::context::Generational::default());
+}
+
+fn pair_vetted(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	of: &Value,
+	with: &Value,
+) -> bool {
+	let key = (
+		ps.id,
+		of.hash_value(),
+		with.hash_value(),
+		attacker.current_phase,
+		attacker.known.len(),
+		attacker.routes_epoch,
+	);
+	if let Some(hit) = PAIRS.with(|memo| memo.borrow_mut().fresh().get(&key).copied()) {
+		return hit;
+	}
+	let vetted = reused_pair(of, with)
+		&& one_execution(attacker, of, with)
+		&& pair_coheres(ctx, km, ps, attacker, of, with);
+	PAIRS.with(|memo| {
+		memo.borrow_mut().fresh().insert(key, vetted);
+	});
+	vetted
 }
 
 fn rule_rewrite_forward(

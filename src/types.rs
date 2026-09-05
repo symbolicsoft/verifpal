@@ -1628,6 +1628,7 @@ pub struct AttackerState {
 	pub derivations: Arc<Vec<DerivationRecord>>,
 	pub alternates: Arc<Vec<Vec<Route>>>,
 	pub reused: Arc<Vec<[Value; 2]>>,
+	pub routes_epoch: u64,
 }
 
 impl Default for AttackerState {
@@ -1640,6 +1641,7 @@ impl Default for AttackerState {
 			derivations: Arc::new(vec![]),
 			alternates: Arc::new(vec![]),
 			reused: Arc::new(vec![]),
+			routes_epoch: 0,
 		}
 	}
 }

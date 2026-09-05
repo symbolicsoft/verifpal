@@ -317,6 +317,7 @@ pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Ar
 		reused: Arc::clone(&attacker.reused),
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
+		routes_epoch: attacker.routes_epoch,
 	}))
 }
 
@@ -370,8 +371,12 @@ type Agreed = (Arc<MutationRecord>, Vec<usize>, bool);
 pub(crate) struct Coherence {
 	principal: PrincipalId,
 	forwarded: Vec<Option<Value>>,
-	agreed: std::cell::RefCell<IdMap<u64, Vec<Agreement>>>,
-	histories: std::cell::RefCell<Vec<Agreed>>,
+	agreed: std::sync::Mutex<IdMap<u64, Vec<Agreement>>>,
+	histories: std::sync::Mutex<Vec<Agreed>>,
+}
+
+fn locked<T>(lock: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+	lock.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Coherence {
@@ -387,8 +392,8 @@ impl Coherence {
 		Coherence {
 			principal: ps.id,
 			forwarded,
-			agreed: std::cell::RefCell::new(IdMap::default()),
-			histories: std::cell::RefCell::new(Vec::new()),
+			agreed: std::sync::Mutex::new(IdMap::default()),
+			histories: std::sync::Mutex::new(Vec::new()),
 		}
 	}
 
@@ -410,7 +415,7 @@ impl Coherence {
 			.collect();
 		let size = attacker.known.len();
 		let key = authored_hash(&authored, Arc::as_ptr(&attacker.known), size);
-		if let Some(bucket) = self.agreed.borrow().get(&key)
+		if let Some(bucket) = locked(&self.agreed).get(&key)
 			&& let Some((_, _, hit)) = bucket
 				.iter()
 				.find(|(seen, known, _)| Arc::ptr_eq(known, &attacker.known) && *seen == authored)
@@ -436,7 +441,7 @@ impl Coherence {
 			};
 		}
 		let built = retain_known(attacker, &keep);
-		self.agreed.borrow_mut().entry(key).or_default().push((
+		locked(&self.agreed).entry(key).or_default().push((
 			authored,
 			Arc::clone(&attacker.known),
 			built.clone(),
@@ -459,18 +464,14 @@ impl Coherence {
 		if diffs.is_empty() {
 			return true;
 		}
-		if let Some((_, _, hit)) = self
-			.histories
-			.borrow()
+		if let Some((_, _, hit)) = locked(&self.histories)
 			.iter()
 			.find(|(seen, seen_authored, _)| Arc::ptr_eq(seen, record) && seen_authored == authored)
 		{
 			return *hit;
 		}
 		let agrees = self.replays_agree(ctx, km, attacker, &diffs, authored);
-		self.histories
-			.borrow_mut()
-			.push((Arc::clone(record), authored.to_vec(), agrees));
+		locked(&self.histories).push((Arc::clone(record), authored.to_vec(), agrees));
 		agrees
 	}
 
@@ -968,11 +969,38 @@ fn keyed_position(prim: &Primitive) -> Option<usize> {
 	}
 }
 
-fn bypass_is_constructible(
+thread_local! {
+	static BYPASS_MISSES: std::cell::RefCell<Option<Vec<(PrincipalId, Primitive)>>> =
+		const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn record_bypass_misses() {
+	BYPASS_MISSES.with(|misses| *misses.borrow_mut() = Some(Vec::new()));
+}
+
+pub(crate) fn take_bypass_misses() -> Vec<(PrincipalId, Primitive)> {
+	BYPASS_MISSES
+		.with(|misses| misses.borrow_mut().take())
+		.unwrap_or_default()
+}
+
+pub(crate) fn bypass_is_constructible(
 	prim: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
+	let constructible = bypass_constructible(prim, ps, attacker);
+	if !constructible {
+		BYPASS_MISSES.with(|misses| {
+			if let Some(misses) = misses.borrow_mut().as_mut() {
+				misses.push((ps.id, prim.clone()));
+			}
+		});
+	}
+	constructible
+}
+
+fn bypass_constructible(prim: &Primitive, ps: &PrincipalState, attacker: &AttackerState) -> bool {
 	let Some(key) = primitive_extract_bypass_key(prim) else {
 		return false;
 	};
@@ -1243,6 +1271,7 @@ mod tests {
 			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
 			alternates: std::sync::Arc::new(vec![Vec::new()]),
 			reused: std::sync::Arc::new(vec![]),
+			routes_epoch: 0,
 		}
 	}
 

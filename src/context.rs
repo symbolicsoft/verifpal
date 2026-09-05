@@ -128,10 +128,73 @@ pub(crate) struct VerifyContext {
 	replays: RwLock<Vec<Replay>>,
 	basis: RwLock<(i32, usize, IdSet<u64>)>,
 	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
+	saturation: RwLock<IdMap<PrincipalId, Saturation>>,
+	executions: RwLock<IdMap<(PrincipalId, u64), Vec<Execution>>>,
+	bases: RwLock<IdMap<PrincipalId, Arc<PrincipalState>>>,
+	coherence: RwLock<IdMap<PrincipalId, (Saturation, Arc<crate::reexec::Coherence>)>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
 	cancel: Arc<AtomicBool>,
+}
+
+struct StoredState {
+	id: PrincipalId,
+	len: usize,
+	diffs: Vec<(usize, SlotValues)>,
+	halted_at: Option<i32>,
+	foreign_halts: Vec<(PrincipalId, usize)>,
+	forwarded: bool,
+}
+
+struct Execution {
+	signature: Vec<(usize, Value)>,
+	phase: i32,
+	states: Vec<StoredState>,
+	misses: Vec<(PrincipalId, Primitive)>,
+	closed: Option<Saturation>,
+}
+
+const REMEMBERED_EXECUTIONS: usize = 200_000;
+
+fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
+	a.value.equivalent(&b.value, true)
+		&& a.pre_rewrite.equivalent(&b.pre_rewrite, true)
+		&& a.original.equivalent(&b.original, true)
+		&& match (&a.bypassed, &b.bypassed) {
+			(None, None) => true,
+			(Some(x), Some(y)) => x.equivalent(y, true),
+			_ => false,
+		} && a.provenance.creator == b.provenance.creator
+		&& a.provenance.sender == b.provenance.sender
+		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
+		&& a.provenance.bypass_injected == b.provenance.bypass_injected
+}
+
+fn same_signature(a: &[(usize, Value)], b: &[(usize, Value)]) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b.iter())
+			.all(|((sa, va), (sb, vb))| sa == sb && va.equivalent(vb, true))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Saturation {
+	phase: i32,
+	known: usize,
+	reused: usize,
+	routes_epoch: u64,
+}
+
+impl Saturation {
+	fn of(attacker: &AttackerState) -> Saturation {
+		Saturation {
+			phase: attacker.current_phase,
+			known: attacker.known.len(),
+			reused: attacker.reused.len(),
+			routes_epoch: attacker.routes_epoch,
+		}
+	}
 }
 
 fn seeds_signature(seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)]) -> u64 {
@@ -265,6 +328,7 @@ fn attacker_state_absorb(
 				.zip(state.record(existing).cloned());
 			Arc::make_mut(&mut state.mutation_records)[existing.get()] = candidate;
 			Arc::make_mut(&mut state.derivations)[existing.get()] = derivation;
+			state.routes_epoch += 1;
 			if let Some((displaced, prior)) = displaced {
 				let alternates = Arc::make_mut(&mut state.alternates);
 				if let Some(entry) = alternates.get_mut(existing.get())
@@ -320,6 +384,10 @@ impl VerifyContext {
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			origin_only: RwLock::new(IdSet::default()),
+			saturation: RwLock::new(IdMap::default()),
+			executions: RwLock::new(IdMap::default()),
+			bases: RwLock::new(IdMap::default()),
+			coherence: RwLock::new(IdMap::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			deferred_replays: RwLock::new(Vec::new()),
 			results: RwLock::new(results),
@@ -521,6 +589,161 @@ impl VerifyContext {
 		let built = crate::reexec::replay_diffs(self, km, seeds, attacker).map(Arc::new);
 		write_lock(&self.replays).push((key, seeds.to_vec(), phase, known, built.clone()));
 		built
+	}
+
+	fn execution_base(&self, principal: PrincipalId) -> Option<Arc<PrincipalState>> {
+		if let Some(base) = read_lock(&self.bases).get(&principal) {
+			return Some(Arc::clone(base));
+		}
+		let pristine = self.states.iter().find(|state| state.id == principal)?;
+		let mut base = pristine.clone_for_depth(true);
+		base.resolve_all_values().ok()?;
+		base.perform_all_rewrites();
+		let base = Arc::new(base);
+		write_lock(&self.bases).insert(principal, Arc::clone(&base));
+		Some(base)
+	}
+
+	pub(crate) fn remember_execution(
+		&self,
+		principal: PrincipalId,
+		key: u64,
+		signature: &[(usize, Value)],
+		phase: i32,
+		states: &[PrincipalState],
+		misses: Vec<(PrincipalId, Primitive)>,
+	) {
+		if read_lock(&self.executions).len() >= REMEMBERED_EXECUTIONS {
+			return;
+		}
+		let mut stored = Vec::with_capacity(states.len());
+		for state in states {
+			let Some(base) = self.execution_base(state.id) else {
+				return;
+			};
+			if state.values.len() > base.values.len() {
+				return;
+			}
+			let diffs = state
+				.values
+				.iter()
+				.zip(base.values.iter())
+				.enumerate()
+				.filter(|(_, (mine, theirs))| !same_slot(mine, theirs))
+				.map(|(i, (mine, _))| (i, mine.clone()))
+				.collect();
+			stored.push(StoredState {
+				id: state.id,
+				len: state.values.len(),
+				diffs,
+				halted_at: state.halted_at,
+				foreign_halts: state.foreign_halts.clone(),
+				forwarded: state.forwarded,
+			});
+		}
+		write_lock(&self.executions)
+			.entry((principal, key))
+			.or_default()
+			.push(Execution {
+				signature: signature.to_vec(),
+				phase,
+				states: stored,
+				misses,
+				closed: None,
+			});
+	}
+
+	pub(crate) fn coherence(
+		&self,
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
+		attacker: &AttackerState,
+	) -> Arc<crate::reexec::Coherence> {
+		let now = Saturation::of(attacker);
+		if let Some((seen, history)) = read_lock(&self.coherence).get(&ps.id)
+			&& *seen == now
+		{
+			return Arc::clone(history);
+		}
+		let history = Arc::new(crate::reexec::Coherence::of(km, ps));
+		write_lock(&self.coherence).insert(ps.id, (now, Arc::clone(&history)));
+		history
+	}
+
+	pub(crate) fn knowledge_saturation(&self) -> Saturation {
+		Saturation::of(&read_lock(&self.attacker))
+	}
+
+	pub(crate) fn note_execution_closed(
+		&self,
+		principal: PrincipalId,
+		key: u64,
+		signature: &[(usize, Value)],
+		phase: i32,
+		against: Saturation,
+	) {
+		if let Some(bucket) = write_lock(&self.executions).get_mut(&(principal, key))
+			&& let Some(seen) = bucket
+				.iter_mut()
+				.find(|seen| seen.phase == phase && same_signature(&seen.signature, signature))
+		{
+			seen.closed = Some(against);
+		}
+	}
+
+	pub(crate) fn recall_execution(
+		&self,
+		principal: PrincipalId,
+		key: u64,
+		signature: &[(usize, Value)],
+		phase: i32,
+		still_valid: impl Fn(&[(PrincipalId, Primitive)]) -> bool,
+	) -> Option<(Vec<PrincipalState>, bool)> {
+		let mut executions = write_lock(&self.executions);
+		let bucket = executions.get_mut(&(principal, key))?;
+		let at = bucket
+			.iter()
+			.position(|seen| seen.phase == phase && same_signature(&seen.signature, signature))?;
+		if !still_valid(&bucket[at].misses) {
+			bucket.remove(at);
+			return None;
+		}
+		let closed = bucket[at].closed == Some(Saturation::of(&read_lock(&self.attacker)));
+		let stored = &bucket[at].states;
+		let bases = read_lock(&self.bases);
+		let mut out = Vec::with_capacity(stored.len());
+		for state in stored {
+			let base = bases.get(&state.id)?;
+			let mut rebuilt = (**base).clone();
+			if state.len < rebuilt.values.len() {
+				rebuilt.values.truncate(state.len);
+				Arc::make_mut(&mut rebuilt.meta).truncate(state.len);
+			}
+			for (i, slot) in &state.diffs {
+				rebuilt.values[*i] = slot.clone();
+			}
+			rebuilt.halted_at = state.halted_at;
+			rebuilt.foreign_halts = state.foreign_halts.clone();
+			rebuilt.forwarded = state.forwarded;
+			out.push(rebuilt);
+		}
+		Some((out, closed))
+	}
+
+	pub(crate) fn knowledge_rules_saturated(
+		&self,
+		principal: PrincipalId,
+		attacker: &AttackerState,
+	) -> bool {
+		read_lock(&self.saturation).get(&principal) == Some(&Saturation::of(attacker))
+	}
+
+	pub(crate) fn note_knowledge_rules_saturated(
+		&self,
+		principal: PrincipalId,
+		attacker: &AttackerState,
+	) {
+		write_lock(&self.saturation).insert(principal, Saturation::of(attacker));
 	}
 
 	pub(crate) fn term_bound(&self, km: &ProtocolTrace) -> &crate::reexec::TermBound {
@@ -862,6 +1085,10 @@ impl VerifyContext {
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
 			origin_only: RwLock::new(IdSet::default()),
+			saturation: RwLock::new(IdMap::default()),
+			executions: RwLock::new(IdMap::default()),
+			bases: RwLock::new(IdMap::default()),
+			coherence: RwLock::new(IdMap::default()),
 			replays: RwLock::new(Vec::new()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),

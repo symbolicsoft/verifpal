@@ -1,10 +1,12 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::context::VerifyContext;
+use std::cell::RefCell;
+
+use crate::context::{Generational, VerifyContext};
 use crate::primitive::admissible;
 use crate::principal::ATTACKER_ID;
-use crate::reexec::{Controllable, TermBound, governing_attacker, reexecute};
+use crate::reexec::{Controllable, TermBound, governing_attacker, reexecute, same_installs};
 use crate::solve::validate::attacker_can_derive;
 use crate::theory::reduce_once;
 use crate::types::*;
@@ -100,24 +102,53 @@ impl Emission<'_> {
 			if value.equivalent(&origin.values[at].value, true) {
 				continue;
 			}
-			if !admissible(&value)
-				|| !self.bound.admits_at(self.km, origin.id, at, &value)
-				|| !attacker_can_derive(self.ctx, self.km, at, &value, origin, self.attacker)
-			{
-				return false;
-			}
 			installs.push((SlotIdx(at), value));
 		}
 		if installs.is_empty() {
 			return false;
 		}
-		let governing = governing_attacker(self.ctx, self.km, &installs, self.attacker);
-		let Ok(out) = reexecute(
-			&origin.clone_for_depth(true),
-			&installs,
-			&governing,
-			self.km,
-		) else {
+		let key = self.key(&installs, target);
+		let remembered = EMISSIONS.with(|memo| {
+			memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
+				bucket
+					.iter()
+					.find(|seen| {
+						same_installs(&seen.installs, &installs)
+							&& seen.target.equivalent(target, true)
+					})
+					.map(|seen| seen.emits)
+			})
+		});
+		if let Some(emits) = remembered {
+			return emits;
+		}
+		let emits = self.runs_to(&installs, target);
+		EMISSIONS.with(|memo| {
+			memo.borrow_mut()
+				.fresh()
+				.entry(key)
+				.or_default()
+				.push(Emitted {
+					installs,
+					target: target.clone(),
+					emits,
+				});
+		});
+		emits
+	}
+
+	fn runs_to(&self, installs: &[(SlotIdx, Value)], target: &Value) -> bool {
+		let origin = self.origin;
+		if !installs.iter().all(|(at, value)| {
+			admissible(value)
+				&& self.bound.admits_at(self.km, origin.id, at.get(), value)
+				&& attacker_can_derive(self.ctx, self.km, at.get(), value, origin, self.attacker)
+		}) {
+			return false;
+		}
+		let governing = governing_attacker(self.ctx, self.km, installs, self.attacker);
+		let Ok(out) = reexecute(&origin.clone_for_depth(true), installs, &governing, self.km)
+		else {
 			return false;
 		};
 		if self.j >= out.values.len() || out.slot_unreached(self.j) {
@@ -125,6 +156,44 @@ impl Emission<'_> {
 		}
 		reduce_once(&out.values[self.j].value).equivalent(target, true)
 	}
+
+	fn key(&self, installs: &[(SlotIdx, Value)], target: &Value) -> EmissionKey {
+		let mut mixed = target.hash_value();
+		for (at, value) in installs {
+			mixed = mixed
+				.rotate_left(13)
+				.wrapping_add(at.get() as u64)
+				.rotate_left(17)
+				.wrapping_add(value.hash_value());
+		}
+		(
+			self.origin.id,
+			self.j,
+			self.attacker.current_phase,
+			self.attacker.known.len(),
+			self.attacker.routes_epoch,
+			mixed,
+		)
+	}
+}
+
+type EmissionKey = (PrincipalId, usize, i32, usize, u64, u64);
+
+struct Emitted {
+	installs: Vec<(SlotIdx, Value)>,
+	target: Value,
+	emits: bool,
+}
+
+type ForgeableKey = (PrincipalId, PrincipalId, i32, usize, u64, u64);
+
+type Emissions = Generational<IdMap<EmissionKey, Vec<Emitted>>>;
+
+type Forgeable = Generational<IdMap<ForgeableKey, Vec<(Value, bool)>>>;
+
+thread_local! {
+	static EMISSIONS: RefCell<Emissions> = RefCell::new(Generational::default());
+	static FORGEABLE: RefCell<Forgeable> = RefCell::new(Generational::default());
 }
 
 fn driving_installs(
@@ -166,6 +235,43 @@ fn delivered_to(ps: &PrincipalState, at: usize) -> Option<Value> {
 /// rather than anything a run produced, and its slot's creator is only its
 /// first declarer, so a read of one is never a read off the sender.
 fn forgeable_without_sender(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sender: PrincipalId,
+	target: &Value,
+	attacker: &AttackerState,
+) -> bool {
+	let key = (
+		ps.id,
+		sender,
+		attacker.current_phase,
+		attacker.known.len(),
+		attacker.routes_epoch,
+		target.hash_value(),
+	);
+	let remembered = FORGEABLE.with(|memo| {
+		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(seen, _)| seen.equivalent(target, true))
+				.map(|(_, forgeable)| *forgeable)
+		})
+	});
+	if let Some(forgeable) = remembered {
+		return forgeable;
+	}
+	let forgeable = forgeable_without_sender_uncached(km, ps, sender, target, attacker);
+	FORGEABLE.with(|memo| {
+		memo.borrow_mut()
+			.fresh()
+			.entry(key)
+			.or_default()
+			.push((target.clone(), forgeable));
+	});
+	forgeable
+}
+
+fn forgeable_without_sender_uncached(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	sender: PrincipalId,

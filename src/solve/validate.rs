@@ -13,6 +13,7 @@ use crate::verify::verify_resolve_queries;
 use super::symbolic::SymbolicState;
 use super::vars::{Substitution, apply};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -21,6 +22,8 @@ pub(crate) fn validate(
 	guards: &crate::reexec::Guards,
 	attacker: &AttackerState,
 	subst: &Substitution,
+	signature: &[(usize, Value)],
+	key: u64,
 ) -> VResult<bool> {
 	let ps = ps_base.clone_for_depth(true);
 	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
@@ -87,10 +90,38 @@ pub(crate) fn validate(
 	let governing = crate::reexec::governing_attacker(ctx, km, &installs, attacker);
 	let restricted = guards.history.compatible(ctx, km, &ps, &chosen, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
-	let Ok(executed) = crate::reexec::execute_forward(ctx, km, &ps, &installs, governing) else {
-		return Ok(false);
+	let phase = governing.current_phase;
+	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |misses| {
+		misses.iter().all(|(who, prim)| {
+			ctx.principal_states()
+				.iter()
+				.find(|state| state.id == *who)
+				.is_none_or(|state| !crate::reexec::bypass_is_constructible(prim, state, governing))
+		})
+	});
+	let executed = match recalled {
+		Some((executed, closed)) => {
+			if closed {
+				for _ in &executed {
+					ctx.analysis_count_increment();
+				}
+				return Ok(true);
+			}
+			executed
+		}
+		None => {
+			crate::reexec::record_bypass_misses();
+			let executed = crate::reexec::execute_forward(ctx, km, &ps, &installs, governing);
+			let misses = crate::reexec::take_bypass_misses();
+			let Ok(executed) = executed else {
+				return Ok(false);
+			};
+			ctx.remember_execution(ps.id, key, signature, phase, &executed, misses);
+			executed
+		}
 	};
 
+	let against = ctx.knowledge_saturation();
 	for (i, state) in executed.iter().enumerate() {
 		if i == 0 {
 			note_malleable_reshapes(ctx, km, state, &installs, governing);
@@ -100,6 +131,7 @@ pub(crate) fn validate(
 	for state in &executed {
 		let _ = verify_resolve_queries(ctx, km, state);
 	}
+	ctx.note_execution_closed(ps.id, key, signature, phase, against);
 	Ok(true)
 }
 

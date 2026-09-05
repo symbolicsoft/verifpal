@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::context::Generational;
 use crate::primitive::{PrimitiveSpec, primitive_check_undoing, primitive_core_reveals_args};
 use crate::theory::{can_recompose, can_reconstruct_primitive};
 use crate::types::*;
@@ -462,7 +463,15 @@ fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
 		derivations: Arc::new(derivations),
 		alternates: Arc::new(alternates),
 		reused: Arc::clone(&attacker.reused),
+		routes_epoch: attacker.routes_epoch,
 	}
+}
+
+type LeavesKey = (PrincipalId, u64, i32, usize, usize, u64);
+
+thread_local! {
+	static LEAVES: std::cell::RefCell<Generational<IdMap<LeavesKey, Option<Vec<Value>>>>> =
+		std::cell::RefCell::new(Generational::default());
 }
 
 pub(crate) fn origin_leaves(
@@ -470,10 +479,25 @@ pub(crate) fn origin_leaves(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
+	let key = (
+		ps.id,
+		v.hash_value(),
+		attacker.current_phase,
+		attacker.known.len(),
+		attacker.reused.len(),
+		attacker.routes_epoch,
+	);
+	if let Some(hit) = LEAVES.with(|memo| memo.borrow_mut().fresh().get(&key).cloned()) {
+		return hit;
+	}
 	let without_self = attacker_without(attacker, v);
 	let mut out = Vec::new();
 	let mut expanded = Vec::new();
-	collect_leaves(v, ps, &without_self, &mut expanded, &mut out).then_some(out)
+	let leaves = collect_leaves(v, ps, &without_self, &mut expanded, &mut out).then_some(out);
+	LEAVES.with(|memo| {
+		memo.borrow_mut().fresh().insert(key, leaves.clone());
+	});
+	leaves
 }
 
 fn collect_leaves(
