@@ -33,7 +33,7 @@ principal Anchor[
 	knows public tag1, tag2
 	anchor_pk = PUBKEY(anchor_sk)
 	generates escrow
-	share_a, share_b, share_c = SHAMIR_SPLIT(escrow)
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](escrow)
 	generates ring_a
 	ring_ga = PUBKEY(ring_a)
 ]
@@ -104,7 +104,7 @@ Beacon → Cipher: n_vault, vault
 principal Cipher[
 	// Cipher holds two of three shares and can rebuild the escrow key.
 	_ = RINGSIGNVERIF(ring_ga, ring_gb, ring_gc, tag2, ring_sig2)?
-	escrow_c = SHAMIR_JOIN(share_b, share_c)
+	escrow_c = THRESHOLD_JOIN(share_b, share_c)
 	opened = AEAD_DEC(escrow_c, n_vault, vault, tag1)?
 	got1, got2 = SPLIT(opened)
 	_ = SIGNVERIF(anchor_pk, doc1, got1)?

@@ -17,8 +17,8 @@ attacker[passive]
 
 principal Dealer[
 	generates secret_open, secret_kept
-	open_one, open_two, open_three = SHAMIR_SPLIT(secret_open)
-	kept_one, kept_two, kept_three = SHAMIR_SPLIT(secret_kept)
+	open_one, open_two, open_three = THRESHOLD_SPLIT[2](secret_open)
+	kept_one, kept_two, kept_three = THRESHOLD_SPLIT[2](secret_kept)
 	knows private cargo_open, cargo_kept
 	generates n_sealed_open
 	sealed_open = AEAD_ENC(secret_open, n_sealed_open, cargo_open, nil)

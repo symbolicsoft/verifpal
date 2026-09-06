@@ -8,7 +8,7 @@ use crate::primitive::{
 	BypassKeyKind, attacker_public_key, primitive_extract_bypass_key, primitive_get,
 };
 use crate::principal::ATTACKER_ID;
-use crate::theory::{obtainable, reduce_once};
+use crate::theory::{can_rewrite, obtainable, reduce_once};
 use crate::types::*;
 use crate::value::{resolve_trace_constant, resolve_trace_term};
 
@@ -1125,6 +1125,35 @@ fn bypass_constructible(prim: &Primitive, ps: &PrincipalState, attacker: &Attack
 	})
 }
 
+fn honest_input_accepted(km: &ProtocolTrace, prim: &Primitive, idx: usize) -> bool {
+	let Ok(spec) = primitive_get(prim.id) else {
+		return false;
+	};
+	let Some(rule) = spec.rewrite.as_ref() else {
+		return false;
+	};
+	let Some(slot) = km.slots.get(idx) else {
+		return false;
+	};
+	let Value::Primitive(honest) = resolve_trace_term(&slot.initial_value, km) else {
+		return false;
+	};
+	let Some(honest_from) = honest.arguments.get(rule.from) else {
+		return false;
+	};
+	if rule.from >= prim.arguments.len() {
+		return false;
+	}
+	let mut arguments = prim.arguments.clone();
+	arguments[rule.from] = reduce_once(honest_from);
+	let restored = Primitive {
+		arguments,
+		hash: HashCell::default(),
+		..prim.clone()
+	};
+	can_rewrite(&Arc::new(restored)).0
+}
+
 fn try_guard_bypass(
 	km: &ProtocolTrace,
 	ps_pre: &PrincipalState,
@@ -1137,6 +1166,7 @@ fn try_guard_bypass(
 		.filter(|(prim, idx)| {
 			prim.instance_check
 				&& ps_resolved.values[*idx].provenance.creator == ps_resolved.id
+				&& !honest_input_accepted(km, prim, *idx)
 				&& bypass_is_constructible(km, prim, ps_resolved, *idx, attacker)
 		})
 		.map(|(_, idx)| *idx)
@@ -1164,7 +1194,9 @@ fn try_guard_bypass(
 			{
 				continue;
 			}
-			if bypass_is_constructible(km, prim, &ps, *idx, attacker) {
+			if !honest_input_accepted(km, prim, *idx)
+				&& bypass_is_constructible(km, prim, &ps, *idx, attacker)
+			{
 				ps.values[*idx].override_all_bypassed(attacker_public_key());
 				injected = true;
 			}
@@ -1449,6 +1481,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let halts = super::creator_halts(&ps, &[(failing.clone(), 0)]);

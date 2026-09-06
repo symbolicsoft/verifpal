@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at every session count.
+//
+// The counterweight to history_own_later_emission.vp: Bob sends his second
+// box right after the first, before he needs anything from Alice. His second
+// box delivered into Alice's first-box slot decrypts under her key without
+// any earlier execution of her run having handed it over, in one session as
+// a plain message confusion and at two through Bob#2 as well. That is a
+// genuine attack, and the refusal that empties the other model must leave it
+// alone.
+
+attacker[active]
+
+principal Alice[
+	generates ea
+	gea = PUBKEY(ea)
+]
+
+principal Bob[
+	knows private lb
+	glb = PUBKEY(lb)
+	generates eb
+	geb = PUBKEY(eb)
+]
+
+Bob -> Alice: [glb]
+
+Alice -> Bob: gea
+
+Bob -> Alice: geb
+
+principal Alice[
+	k_a = HASH(DH_KEX(geb, ea), DH_KEX(glb, ea))
+]
+
+principal Bob[
+	k_b = HASH(DH_KEX(gea, eb), DH_KEX(gea, lb))
+	sig = SIGN(lb, HASH(gea, geb))
+	generates n1
+	box1 = AEAD_ENC(k_b, n1, sig, nil)
+	knows private m2
+	generates n3
+	box3 = AEAD_ENC(k_b, n3, m2, nil)
+]
+
+Bob -> Alice: n1, box1
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	s = AEAD_DEC(k_a, n1, box1, nil)?
+	_ = SIGNVERIF(glb, HASH(gea, geb), s)?
+	m2a = AEAD_DEC(k_a, n3, box3, nil)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

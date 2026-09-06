@@ -1,0 +1,17 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: error — a split must state its threshold; there is no default, because
+// // an implicit threshold hides the one number that matters.
+
+attacker[passive]
+
+principal Dealer[
+	generates k
+	s1, s2, s3 = THRESHOLD_SPLIT(k)
+	_ = HASH(s1, s2, s3)
+]
+
+queries[
+	confidentiality? k
+]

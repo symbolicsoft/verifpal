@@ -230,6 +230,53 @@ fn variants_weakened(model: &Model) -> Vec<Model> {
 	out
 }
 
+fn variants_rethresholded(model: &Model, delta: i64) -> Vec<Model> {
+	let mut out = Vec::new();
+	if model
+		.queries
+		.iter()
+		.any(|q| matches!(q.kind, QueryKind::Equivalence | QueryKind::Unlinkability))
+	{
+		return out;
+	}
+	for (bi, block) in model.blocks.iter().enumerate() {
+		let Block::Principal(principal) = block else {
+			continue;
+		};
+		for (ei, expression) in principal.expressions.iter().enumerate() {
+			let Some(Value::Primitive(p)) = expression.assigned.as_ref() else {
+				continue;
+			};
+			let Some(rule) = crate::primitive::primitive_threshold(p.id) else {
+				continue;
+			};
+			let threshold = p.threshold as i64 + delta;
+			if threshold < rule.min as i64 || threshold > expression.constants.len() as i64 {
+				continue;
+			}
+			let mut changed = (**p).clone();
+			changed.threshold = threshold as usize;
+			changed.hash = HashCell::default();
+			let mut variant = model.clone();
+			if let Some(Block::Principal(principal)) = variant.blocks.get_mut(bi)
+				&& let Some(e) = principal.expressions.get_mut(ei)
+			{
+				e.assigned = Some(Value::Primitive(std::sync::Arc::new(changed)));
+				out.push(variant);
+			}
+		}
+	}
+	out
+}
+
+fn variants_lowered(model: &Model) -> Vec<Model> {
+	variants_rethresholded(model, -1)
+}
+
+fn variants_raised(model: &Model) -> Vec<Model> {
+	variants_rethresholded(model, 1)
+}
+
 #[derive(Default)]
 struct Report {
 	compared: usize,
@@ -973,6 +1020,28 @@ mod tests {
 			Strength::Stronger,
 			180,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn lowering_a_threshold_never_loses_an_attack() {
+		check_monotone(
+			"lower",
+			variants_lowered,
+			Strength::Stronger,
+			4,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	fn raising_a_threshold_never_adds_an_attack() {
+		check_monotone(
+			"raise",
+			variants_raised,
+			Strength::Weaker,
+			10,
+			Sweep::Exhaustive,
 		);
 	}
 

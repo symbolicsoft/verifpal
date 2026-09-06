@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 — the group public key is interpolated from enough verification
+// shares. The dealer publishes PUBKEY of two shares of a 2-of-3 split and
+// never sends PUBKEY(k), and the attacker combines the two into it anyway,
+// which is how a FROST verifier that only ever saw participants' verification
+// shares can check a signature. The key itself is out of reach.
+
+attacker[passive]
+
+principal Dealer[
+	generates k
+	pk = PUBKEY(k)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	v1 = PUBKEY(s1)
+	v2 = PUBKEY(s2)
+]
+
+Dealer -> Bob: v1, v2
+
+principal Bob[
+	_ = HASH(v1, v2)
+]
+
+queries[
+	confidentiality? pk
+	confidentiality? k
+]

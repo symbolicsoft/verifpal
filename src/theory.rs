@@ -82,6 +82,7 @@ fn index_slots_by_hash(ps: &PrincipalState) -> IdMap<u64, Vec<usize>> {
 pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
 	x.id == y.id
 		&& x.output == y.output
+		&& x.threshold == y.threshold
 		&& x.instance_check == y.instance_check
 		&& x.arguments.len() == y.arguments.len()
 		&& x.arguments
@@ -420,30 +421,34 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 		return None;
 	}
 	let rule = primitive_get(p.id).ok()?.recompose.as_ref()?;
-	for given_set in &rule.given {
-		let mut candidates = Vec::new();
-		for &output_idx in given_set {
-			let probe = p.with_output(output_idx);
-			let hash = crate::hashing::primitive_hash(&probe);
-			let Some(indices) = attacker.known_map.get(&hash) else {
-				continue;
-			};
-			for &i in indices {
-				let Some(known @ Value::Primitive(known_prim)) = attacker.known.get(i) else {
-					continue;
-				};
-				if !equivalent_primitives(known_prim, p, false) || known_prim.output != output_idx {
-					continue;
-				}
-				candidates.push(known.clone());
-				if candidates.len() < given_set.len() {
-					continue;
-				}
-				return Some(RecomposeResult {
-					revealed: p.arguments[rule.reveal].clone(),
-					used: candidates,
-				});
+	if p.threshold == 0 {
+		return None;
+	}
+	let mut candidates = Vec::new();
+	for output_idx in 0..MAX_SHARES {
+		let probe = p.with_output(output_idx);
+		let hash = crate::hashing::primitive_hash(&probe);
+		let Some(indices) = attacker.known_map.get(&hash) else {
+			continue;
+		};
+		let held = indices.iter().find_map(|&i| match attacker.known.get(i) {
+			Some(known @ Value::Primitive(known_prim))
+				if equivalent_primitives(known_prim, p, false)
+					&& known_prim.output == output_idx =>
+			{
+				Some(known.clone())
 			}
+			_ => None,
+		});
+		let Some(known) = held else {
+			continue;
+		};
+		candidates.push(known);
+		if candidates.len() == p.threshold {
+			return Some(RecomposeResult {
+				revealed: p.arguments[rule.reveal].clone(),
+				used: candidates,
+			});
 		}
 	}
 	None
@@ -496,14 +501,163 @@ fn can_reconstruct_primitive_directly(
 		}
 	}
 	if has.len() + skipped < rewritten_prim.arguments.len() {
-		return None;
+		let from = combinable(rewritten_prim, ps, attacker)?;
+		return Some(ReconstructResult {
+			from,
+			forged: None,
+			combined: true,
+		});
 	}
 	let forged = match (skipped, reused) {
 		(0, _) => None,
 		(_, Some(pair)) => Some(Forged::Reuse(pair)),
 		(_, None) => Some(Forged::Assumption(Capability::Forgeable)),
 	};
-	Some(ReconstructResult { from: has, forged })
+	Some(ReconstructResult {
+		from: has,
+		forged,
+		combined: false,
+	})
+}
+
+struct PartialGroup {
+	split: Arc<Primitive>,
+	agree: Vec<Value>,
+	arity: usize,
+	held: Vec<(usize, Value)>,
+}
+
+fn partial_groups(
+	target: &Primitive,
+	rule: &CombineRule,
+	attacker: &AttackerState,
+) -> Vec<PartialGroup> {
+	let Some(reveal) = primitive_get(rule.split)
+		.ok()
+		.and_then(|s| s.recompose.as_ref())
+		.map(|r| r.reveal)
+	else {
+		return Vec::new();
+	};
+	let secret = &target.arguments[0];
+	let mut groups: Vec<PartialGroup> = Vec::new();
+	for known in attacker.known.iter() {
+		let Value::Primitive(q) = known else {
+			continue;
+		};
+		if q.id != rule.partial {
+			continue;
+		}
+		let Some(Value::Primitive(share)) = q.arguments.get(rule.share) else {
+			continue;
+		};
+		if share.id != rule.split
+			|| share.threshold == 0
+			|| !share
+				.arguments
+				.get(reveal)
+				.is_some_and(|s| s.equivalent(secret, true))
+		{
+			continue;
+		}
+		let carried = rule.carry.iter().enumerate().all(|(c, &pos)| {
+			match (q.arguments.get(pos), target.arguments.get(1 + c)) {
+				(Some(a), Some(b)) => a.equivalent(b, true),
+				_ => false,
+			}
+		});
+		if !carried {
+			continue;
+		}
+		let Some(agree) = rule
+			.agree
+			.iter()
+			.map(|&i| q.arguments.get(i).cloned())
+			.collect::<Option<Vec<Value>>>()
+		else {
+			continue;
+		};
+		let group = groups.iter_mut().find(|g| {
+			equivalent_primitives(&g.split, share, false)
+				&& g.arity == q.arguments.len()
+				&& g.agree
+					.iter()
+					.zip(agree.iter())
+					.all(|(a, b)| a.equivalent(b, true))
+		});
+		match group {
+			Some(g) => {
+				if !g.held.iter().any(|(o, _)| *o == share.output) {
+					g.held.push((share.output, known.clone()));
+				}
+			}
+			None => groups.push(PartialGroup {
+				split: Arc::clone(share),
+				agree,
+				arity: q.arguments.len(),
+				held: vec![(share.output, known.clone())],
+			}),
+		}
+	}
+	groups
+}
+
+fn combinable(
+	target: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	for (_, rule) in combines_into(target.id) {
+		if target.arguments.len() != 1 + rule.carry.len() {
+			continue;
+		}
+		for group in partial_groups(target, rule, attacker) {
+			let threshold = group.split.threshold;
+			let mut used: Vec<Value> = group.held.iter().map(|(_, v)| v.clone()).collect();
+			if used.len() >= threshold {
+				used.truncate(threshold);
+				return Some(used);
+			}
+			for output in 0..MAX_SHARES {
+				if group.held.iter().any(|(o, _)| *o == output) {
+					continue;
+				}
+				let share = Value::Primitive(Arc::new(group.split.with_output(output)));
+				let arguments: Vec<Value> = (0..group.arity)
+					.map(|i| {
+						if i == rule.share {
+							share.clone()
+						} else if let Some(at) = rule.agree.iter().position(|&a| a == i) {
+							group.agree[at].clone()
+						} else if let Some(at) = rule.carry.iter().position(|&c| c == i) {
+							target.arguments[1 + at].clone()
+						} else {
+							crate::value::value_nil()
+						}
+					})
+					.collect();
+				let candidate = Value::primitive(rule.partial, arguments, 0);
+				if !obtainable(&candidate, ps, attacker) {
+					continue;
+				}
+				used.push(candidate);
+				if used.len() >= threshold {
+					return Some(used);
+				}
+			}
+		}
+	}
+	None
+}
+
+#[cfg(test)]
+pub(crate) fn combination_holds(target: &Primitive, from: &[Value]) -> bool {
+	combines_into(target.id).any(|(join, rule)| {
+		let joined = Primitive::new(join, from.to_vec(), 0);
+		combine_with(&joined, rule).is_some_and(|built| {
+			built.equivalent(&Value::Primitive(Arc::new(target.clone())), true)
+		})
+	})
 }
 
 pub(crate) fn reduce_once(v: &Value) -> Value {
@@ -536,6 +690,9 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 	let pc: &Arc<Primitive> = reduced.as_ref().unwrap_or(p);
 	if let Some(rebuilt) = can_rebuild(pc) {
 		return (true, reduced_once(&rebuilt));
+	}
+	if let Some(combined) = can_combine(pc) {
+		return (true, reduced_once(&combined));
 	}
 	let wrap = || Value::Primitive(Arc::clone(pc));
 	if primitive_is_core(pc.id) {
@@ -626,42 +783,89 @@ fn matching_is_injective(
 	false
 }
 
+pub(crate) fn can_combine(p: &Primitive) -> Option<Value> {
+	if primitive_is_core(p.id) {
+		return None;
+	}
+	combine_rules(p.id)
+		.iter()
+		.find_map(|rule| combine_with(p, rule))
+}
+
+fn combine_with(p: &Primitive, rule: &CombineRule) -> Option<Value> {
+	let reveal = primitive_get(rule.split).ok()?.recompose.as_ref()?.reveal;
+	let mut partials: Vec<&Primitive> = Vec::with_capacity(p.arguments.len());
+	for a in &p.arguments {
+		let Value::Primitive(q) = a else {
+			return None;
+		};
+		if q.id != rule.partial {
+			return None;
+		}
+		partials.push(q);
+	}
+	let first = *partials.first()?;
+	for q in &partials[1..] {
+		if q.arguments.len() != first.arguments.len() {
+			return None;
+		}
+		for &i in &rule.agree {
+			if !q
+				.arguments
+				.get(i)?
+				.equivalent(first.arguments.get(i)?, true)
+			{
+				return None;
+			}
+		}
+	}
+	let shares: Vec<Value> = partials
+		.iter()
+		.map(|q| q.arguments.get(rule.share).cloned())
+		.collect::<Option<Vec<Value>>>()?;
+	let shares = shares_of_one_split(&shares, rule.split)?;
+	let mut arguments = vec![shares[0].arguments.get(reveal)?.clone()];
+	for &i in &rule.carry {
+		arguments.push(first.arguments.get(i)?.clone());
+	}
+	Some(Value::primitive(rule.whole, arguments, 0))
+}
+
 pub(crate) fn can_rebuild(p: &Primitive) -> Option<Value> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
 	let rule = primitive_get(p.id).ok()?.rebuild.as_ref()?;
-	for given_set in &rule.given {
-		let mut has = Vec::new();
-		for &arg_idx in given_set {
-			if arg_idx >= p.arguments.len() {
-				continue;
-			}
-			if let Value::Primitive(arg_p) = &p.arguments[arg_idx]
-				&& arg_p.id == rule.id
-			{
-				has.push(&p.arguments[arg_idx]);
-			}
+	let shares = shares_of_one_split(&p.arguments, rule.id)?;
+	Some(shares[0].arguments[rule.reveal].clone())
+}
+
+pub(crate) fn shares_of_one_split(
+	arguments: &[Value],
+	split: PrimitiveId,
+) -> Option<Vec<&Primitive>> {
+	let mut shares: Vec<&Primitive> = Vec::with_capacity(arguments.len());
+	for a in arguments {
+		let Value::Primitive(share) = a else {
+			return None;
+		};
+		if share.id != split {
+			return None;
 		}
-		if has.len() < given_set.len() {
-			continue;
-		}
-		let all_ok = has.iter().enumerate().all(|(i, a)| {
-			has[i + 1..].iter().all(|b| match (a, b) {
-				(Value::Primitive(x), Value::Primitive(y)) => {
-					equivalent_primitives(x, y, false) && x.output != y.output
-				}
-				_ => false,
-			})
-		});
-		if !all_ok {
-			continue;
-		}
-		if let Value::Primitive(h0) = has[0] {
-			return Some(h0.arguments[rule.reveal].clone());
-		}
+		shares.push(share);
 	}
-	None
+	let first = *shares.first()?;
+	if first.threshold == 0
+		|| !shares
+			.iter()
+			.all(|s| equivalent_primitives(s, first, false))
+	{
+		return None;
+	}
+	let mut outputs: Vec<usize> = shares.iter().map(|s| s.output).collect();
+	outputs.sort_unstable();
+	outputs.dedup();
+	(outputs.len() >= first.threshold).then_some(shares)
 }
 
 #[cfg(test)]
@@ -906,6 +1110,7 @@ mod tests {
 				output,
 				instance_check: false,
 				capabilities: Capabilities::default(),
+				threshold: 0,
 				hash: HashCell::default(),
 			})
 		};
@@ -935,6 +1140,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (rewritten, value) = can_rewrite(&Arc::new(dec));
@@ -955,6 +1161,7 @@ mod tests {
 			output: 1,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -985,6 +1192,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		})
 	}
@@ -1035,6 +1243,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
@@ -1051,10 +1260,210 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
 		assert!(!rewritten);
+	}
+
+	#[test]
+	fn recompose_counts_distinct_held_shares_against_the_threshold() {
+		let secret = make_constant("rct_secret");
+		let split = |t: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0);
+			p.threshold = t;
+			p
+		};
+		let share =
+			|t: usize, output: usize| Value::Primitive(Arc::new(split(t).with_output(output)));
+		let two_of_five = make_attacker_state(vec![share(2, 1), share(2, 4)]);
+		let opened = can_recompose(&split(2), &two_of_five).expect("any two shares recover");
+		assert!(opened.revealed.equivalent(&secret, true));
+		let short = make_attacker_state(vec![share(3, 1), share(3, 2), share(3, 2)]);
+		assert!(can_recompose(&split(3), &short).is_none());
+		let enough = make_attacker_state(vec![share(3, 1), share(3, 2), share(3, 4)]);
+		assert!(can_recompose(&split(3), &enough).is_some());
+		let wrong_threshold = make_attacker_state(vec![share(2, 1), share(2, 2), share(3, 4)]);
+		assert!(can_recompose(&split(3), &wrong_threshold).is_none());
+	}
+
+	fn tsh_share(secret: &Value, t: usize, output: usize) -> Value {
+		let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+		p.threshold = t;
+		Value::Primitive(Arc::new(p))
+	}
+
+	fn tsh_partial(share: Value, nonce: &str, commitments: &Value, message: &Value) -> Value {
+		make_primitive(
+			PRIM_THRESHOLD_SIGN,
+			vec![
+				share,
+				make_constant(nonce),
+				commitments.clone(),
+				message.clone(),
+			],
+			0,
+		)
+	}
+
+	fn tsh_reduce(v: &Value) -> (bool, Value) {
+		crate::context::enter_generation(crate::context::next_generation());
+		let Value::Primitive(p) = v else {
+			panic!("a primitive");
+		};
+		can_rewrite(p)
+	}
+
+	fn tsh_state(name: &str) -> PrincipalState {
+		let dummy = Constant {
+			name: Arc::from(name),
+			id: test_value_id(name),
+			..Constant::default()
+		};
+		make_principal_state(
+			"Test",
+			0,
+			vec![make_slot_meta(&dummy, true)],
+			vec![make_slot_values(&value_nil(), 0)],
+		)
+	}
+
+	#[test]
+	fn a_join_of_partials_over_distinct_shares_is_the_plain_signature() {
+		let k = make_constant("cmb_k");
+		let m = make_constant("cmb_m");
+		let c = make_constant("cmb_c");
+		let join = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				tsh_partial(tsh_share(&k, 2, 0), "cmb_n1", &c, &m),
+				tsh_partial(tsh_share(&k, 2, 2), "cmb_n2", &c, &m),
+			],
+			0,
+		);
+		let (ok, reduced) = tsh_reduce(&join);
+		assert!(ok);
+		assert!(reduced.equivalent(&make_primitive(PRIM_SIGN, vec![k, m], 0), true));
+	}
+
+	#[test]
+	fn partials_that_disagree_or_repeat_a_share_do_not_combine() {
+		let k = make_constant("cmd_k");
+		let m = make_constant("cmd_m");
+		let c = make_constant("cmd_c");
+		let other = make_constant("cmd_other");
+		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
+		let mixed = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				tsh_partial(tsh_share(&k, 2, 0), "cmd_n1", &c, &m),
+				tsh_partial(tsh_share(&k, 2, 1), "cmd_n2", &other, &m),
+			],
+			0,
+		);
+		assert!(!tsh_reduce(&mixed).1.equivalent(&sig, true));
+		let repeated = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				tsh_partial(tsh_share(&k, 2, 1), "cmd_n1", &c, &m),
+				tsh_partial(tsh_share(&k, 2, 1), "cmd_n2", &c, &m),
+			],
+			0,
+		);
+		assert!(!tsh_reduce(&repeated).1.equivalent(&sig, true));
+		let short = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				tsh_partial(tsh_share(&k, 3, 0), "cmd_n1", &c, &m),
+				tsh_partial(tsh_share(&k, 3, 1), "cmd_n2", &c, &m),
+			],
+			0,
+		);
+		assert!(!tsh_reduce(&short).1.equivalent(&sig, true));
+		let enough = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				tsh_partial(tsh_share(&k, 3, 0), "cmd_n1", &c, &m),
+				tsh_partial(tsh_share(&k, 3, 1), "cmd_n2", &c, &m),
+				tsh_partial(tsh_share(&k, 3, 4), "cmd_n3", &c, &m),
+			],
+			0,
+		);
+		assert!(tsh_reduce(&enough).1.equivalent(&sig, true));
+	}
+
+	#[test]
+	fn a_join_of_verification_shares_is_the_group_key() {
+		let k = make_constant("cmp_k");
+		let join = make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![
+				make_primitive(PRIM_PUBKEY, vec![tsh_share(&k, 2, 1)], 0),
+				make_primitive(PRIM_PUBKEY, vec![tsh_share(&k, 2, 2)], 0),
+			],
+			0,
+		);
+		let (ok, reduced) = tsh_reduce(&join);
+		assert!(ok);
+		assert!(reduced.equivalent(&make_primitive(PRIM_PUBKEY, vec![k], 0), true));
+	}
+
+	#[test]
+	fn a_signature_is_reconstructed_from_a_held_partial_and_a_held_share() {
+		let k = make_constant("cmr_k");
+		let m = make_constant("cmr_m");
+		let c = make_constant("cmr_c");
+		let ps = tsh_state("cmr_dummy");
+		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
+		let Value::Primitive(sig_p) = &sig else {
+			panic!("a primitive");
+		};
+		let partial = tsh_partial(tsh_share(&k, 2, 0), "cmr_n1", &c, &m);
+		let with_share = make_attacker_state(vec![
+			partial.clone(),
+			tsh_share(&k, 2, 2),
+			value_nil(),
+			c.clone(),
+			m.clone(),
+		]);
+		let built = can_reconstruct_primitive(sig_p, &ps, &with_share).expect("t pieces suffice");
+		assert_eq!(built.from.len(), 2);
+		assert!(built.from.iter().any(|f| f.equivalent(&partial, true)));
+		assert!(built.forged.is_none());
+		let same_share = make_attacker_state(vec![
+			partial.clone(),
+			tsh_share(&k, 2, 0),
+			value_nil(),
+			c.clone(),
+			m.clone(),
+		]);
+		assert!(can_reconstruct_primitive(sig_p, &ps, &same_share).is_none());
+		let partial_only = make_attacker_state(vec![partial, value_nil(), c, m]);
+		assert!(can_reconstruct_primitive(sig_p, &ps, &partial_only).is_none());
+	}
+
+	#[test]
+	fn partials_under_different_commitments_do_not_reconstruct_a_signature() {
+		let k = make_constant("cmz_k");
+		let m = make_constant("cmz_m");
+		let ps = tsh_state("cmz_dummy");
+		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
+		let Value::Primitive(sig_p) = &sig else {
+			panic!("a primitive");
+		};
+		let attacker = make_attacker_state(vec![
+			tsh_partial(tsh_share(&k, 2, 0), "cmz_n1", &make_constant("cmz_c1"), &m),
+			tsh_partial(tsh_share(&k, 2, 1), "cmz_n2", &make_constant("cmz_c2"), &m),
+			value_nil(),
+		]);
+		assert!(can_reconstruct_primitive(sig_p, &ps, &attacker).is_none());
+		let agreeing = make_attacker_state(vec![
+			tsh_partial(tsh_share(&k, 2, 0), "cmz_n1", &make_constant("cmz_c1"), &m),
+			tsh_partial(tsh_share(&k, 2, 1), "cmz_n2", &make_constant("cmz_c1"), &m),
+			value_nil(),
+		]);
+		assert!(can_reconstruct_primitive(sig_p, &ps, &agreeing).is_some());
 	}
 
 	#[test]
@@ -1067,6 +1476,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -1103,6 +1513,7 @@ mod tests {
 			output: 1,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -1138,6 +1549,7 @@ mod tests {
 			output: 1,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {
@@ -1167,6 +1579,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (rewritten, value) = can_rewrite(&Arc::new(decap));
@@ -1188,6 +1601,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (rewritten, _) = can_rewrite(&Arc::new(decap));
@@ -1204,6 +1618,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let c_dummy = Constant {

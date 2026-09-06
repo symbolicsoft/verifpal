@@ -6,8 +6,9 @@ use crate::deduction::compute_knowledge_closure;
 use crate::info::info_message;
 use crate::primitive::primitive_get;
 use crate::reexec::attacker_authored;
-use crate::theory::can_rewrite;
+use crate::theory::{can_rewrite, reduce_once};
 use crate::types::*;
+use crate::value::resolve_trace_constant;
 use crate::verify::verify_resolve_queries;
 
 use super::symbolic::SymbolicState;
@@ -83,7 +84,7 @@ pub(crate) fn validate(
 		installs.push((SlotIdx(slot), ground));
 	}
 
-	if !worthwhile {
+	if !worthwhile || spends_another_execution(km, &ps, &chosen, attacker) {
 		return Ok(false);
 	}
 
@@ -232,6 +233,58 @@ fn note_depth_cut(
 		InfoLevel::Info,
 		false,
 	);
+}
+
+fn spends_another_execution(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	chosen: &[(usize, Value, bool)],
+	attacker: &AttackerState,
+) -> bool {
+	chosen.iter().any(|(_, ground, _)| {
+		needs_of_term(km, attacker, ground)
+			.iter()
+			.any(|(who, at, need)| {
+				let at = at.get();
+				*who == ps.id
+					&& ps
+						.meta
+						.get(at)
+						.is_some_and(|meta| meta.wire.contains(&ps.id))
+					&& {
+						let here = chosen
+							.iter()
+							.find(|(slot, _, _)| *slot == at)
+							.map(|(_, value, _)| value.clone())
+							.or_else(|| {
+								km.slots
+									.get(at)
+									.map(|slot| resolve_trace_constant(&slot.constant, km))
+							});
+						here.is_some_and(|here| {
+							!reduce_once(&here).equivalent(&reduce_once(need), true)
+						})
+					}
+			})
+	})
+}
+
+fn needs_of_term(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	value: &Value,
+) -> Vec<(PrincipalId, SlotIdx, Value)> {
+	if attacker.knows(value).is_some() {
+		return crate::deduction::needs_of(km, attacker, value);
+	}
+	match value {
+		Value::Constant(_) => Vec::new(),
+		Value::Primitive(p) => p
+			.arguments
+			.iter()
+			.flat_map(|argument| needs_of_term(km, attacker, argument))
+			.collect(),
+	}
 }
 
 pub(crate) fn attacker_can_derive(

@@ -1,14 +1,9 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 3] = [
-	("bypass_needs_the_signed_message_public.vp", 0),
-	("scuttlebutt.vp", 5),
-	("scuttlebutt.vp", 9),
-];
+const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 0] = [];
 
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 2] =
-	[("scuttlebutt.vp", 5), ("scuttlebutt.vp", 6)];
+const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
 
 const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
 
@@ -1363,7 +1358,7 @@ fn test_scuttlebutt() {
 	run_model_at(
 		"examples/messaging/scuttlebutt.vp",
 		"scuttlebutt.vp",
-		"c1c0c1c0a1a1a1a1a1e1",
+		"c1c0c1c0a1a1a0a1a1e1",
 	);
 }
 
@@ -1649,7 +1644,26 @@ fn test_scenario_order_is_not_a_verdict_swapped() {
 }
 #[test]
 fn test_bypass_needs_the_signed_message_public() {
-	run_model("bypass_needs_the_signed_message_public.vp", "a1");
+	run_model("bypass_needs_the_signed_message_public.vp", "a0");
+	run_model_sessions("bypass_needs_the_signed_message_public.vp", 1, "a0");
+}
+
+#[test]
+fn test_bypass_needs_the_signed_message_wire() {
+	run_model("bypass_needs_the_signed_message_wire.vp", "a1");
+	run_model_sessions("bypass_needs_the_signed_message_wire.vp", 1, "a1");
+}
+
+#[test]
+fn test_history_own_later_emission() {
+	run_model("history_own_later_emission.vp", "a0");
+	run_model_sessions("history_own_later_emission.vp", 1, "a0");
+}
+
+#[test]
+fn test_history_own_early_emission() {
+	run_model("history_own_early_emission.vp", "a1");
+	run_model_sessions("history_own_early_emission.vp", 1, "a1");
 }
 #[test]
 fn test_scenario_peer_compromised_later() {
@@ -3422,4 +3436,133 @@ fn test_scenario_corrupt_by_derivation() {
 fn test_gate_taint_by_provenance() {
 	run_model("gate_taint_by_provenance.vp", "a1");
 	run_model_sessions("gate_taint_by_provenance.vp", 1, "a1");
+}
+
+#[test]
+fn test_threshold_sign() {
+	run_model("threshold_sign.vp", "c0c0a0");
+	run_model_sessions("threshold_sign.vp", 1, "c0c0a0");
+}
+
+#[test]
+fn test_threshold_sign_rogue_coordinator() {
+	run_model("threshold_sign_rogue_coordinator.vp", "c0c0a1");
+	run_model_sessions("threshold_sign_rogue_coordinator.vp", 1, "c0c0a1");
+}
+
+#[test]
+fn test_threshold_sign_leaked_share_and_oracle() {
+	run_model("threshold_sign_leaked_share_and_oracle.vp", "c0c0a1");
+	run_model_sessions("threshold_sign_leaked_share_and_oracle.vp", 1, "c0c0a1");
+}
+
+#[test]
+fn test_threshold_sign_leaked_share_holds() {
+	run_model("threshold_sign_leaked_share_holds.vp", "c0c0a0");
+	run_model_sessions("threshold_sign_leaked_share_holds.vp", 1, "c0c0a0");
+}
+
+#[test]
+fn test_threshold_sign_forgeable_partial() {
+	run_model("threshold_sign_forgeable_partial.vp", "c0c0a1");
+	run_model_sessions("threshold_sign_forgeable_partial.vp", 1, "c0c0a1");
+}
+
+#[test]
+fn test_threshold_sign_forgeable_absent() {
+	run_model("threshold_sign_forgeable_absent.vp", "c0c0a0");
+	run_model_sessions("threshold_sign_forgeable_absent.vp", 1, "c0c0a0");
+}
+
+#[test]
+fn test_threshold_sign_nonce_reuse_sessions() {
+	run_model("threshold_sign_nonce_reuse_sessions.vp", "c0c1a1");
+	run_model_sessions("threshold_sign_nonce_reuse_sessions.vp", 1, "c0c0a0");
+}
+
+#[test]
+fn test_threshold_sign_nonce_reuse() {
+	run_model("threshold_sign_nonce_reuse.vp", "c0c1");
+}
+
+#[test]
+fn test_threshold_sign_fresh_nonces() {
+	run_model("threshold_sign_fresh_nonces.vp", "c0c0");
+}
+
+#[test]
+fn test_threshold_sign_three_of_five() {
+	run_model("threshold_sign_three_of_five.vp", "c0c0a0");
+	run_model_sessions("threshold_sign_three_of_five.vp", 1, "c0c0a0");
+}
+
+#[test]
+fn test_threshold_sign_three_of_five_two_oracles() {
+	run_model("threshold_sign_three_of_five_two_oracles.vp", "c0c0a1");
+	run_model_sessions("threshold_sign_three_of_five_two_oracles.vp", 1, "c0c0a1");
+}
+
+#[test]
+fn test_threshold_sign_three_of_five_two_oracles_hold() {
+	run_model("threshold_sign_three_of_five_two_oracles_hold.vp", "c0c0a0");
+	run_model_sessions(
+		"threshold_sign_three_of_five_two_oracles_hold.vp",
+		1,
+		"c0c0a0",
+	);
+}
+
+#[test]
+fn test_threshold_join_agreement() {
+	run_model("threshold_join_agreement.vp", "e0e0e1e1");
+}
+
+#[test]
+fn test_threshold_group_key_from_shares() {
+	run_model("threshold_group_key_from_shares.vp", "c1c0");
+}
+
+#[test]
+fn test_threshold_three_of_five() {
+	run_model("threshold_three_of_five.vp", "c0c1");
+}
+
+#[test]
+fn test_threshold_eight_of_ten() {
+	run_model("threshold_eight_of_ten.vp", "c0c1");
+}
+
+#[test]
+fn test_threshold_thresholds_are_distinct() {
+	run_model("threshold_thresholds_are_distinct.vp", "e1e1");
+}
+
+#[test]
+fn test_err_threshold_above_shares() {
+	run_model_err("err_threshold_above_shares.vp", "needs at least 4 shares");
+}
+
+#[test]
+fn test_err_threshold_one() {
+	run_model_err("err_threshold_one.vp", "makes every share the secret");
+}
+
+#[test]
+fn test_err_threshold_missing() {
+	run_model_err("err_threshold_missing.vp", "needs a threshold");
+}
+
+#[test]
+fn test_err_threshold_on_hash() {
+	run_model_err("err_threshold_on_hash.vp", "takes no threshold");
+}
+
+#[test]
+fn test_err_threshold_twice() {
+	run_model_err("err_threshold_twice.vp", "declared twice");
+}
+
+#[test]
+fn test_err_shamir_renamed() {
+	run_model_err("err_shamir_renamed.vp", "THRESHOLD_SPLIT");
 }

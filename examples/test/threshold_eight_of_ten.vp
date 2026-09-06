@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — an 8-of-10 split. Seven leaked shares of the first secret hold
+// it, eight leaked shares of the second give it up, and the count is all
+// that decides.
+
+attacker[passive]
+
+principal Dealer[
+	generates kept
+	generates lost
+	a1, a2, a3, a4, a5, a6, a7, a8, a9, a10 = THRESHOLD_SPLIT[8](kept)
+	b1, b2, b3, b4, b5, b6, b7, b8, b9, b10 = THRESHOLD_SPLIT[8](lost)
+	leaks a1
+	leaks a2
+	leaks a3
+	leaks a4
+	leaks a5
+	leaks a6
+	leaks a7
+	leaks b2
+	leaks b3
+	leaks b4
+	leaks b5
+	leaks b6
+	leaks b7
+	leaks b8
+	leaks b9
+]
+
+
+queries[
+	confidentiality? kept
+	confidentiality? lost
+]

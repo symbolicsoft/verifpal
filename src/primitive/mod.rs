@@ -28,6 +28,13 @@ pub(crate) struct PrimitiveDoc {
 	pub help: &'static str,
 }
 
+pub(crate) const MAX_SHARES: usize = 16;
+
+#[derive(Clone, Copy)]
+pub(crate) struct ThresholdSpec {
+	pub min: usize,
+}
+
 #[derive(Clone)]
 pub(crate) struct ReuseRule {
 	pub fixed: Vec<usize>,
@@ -52,7 +59,6 @@ pub(crate) struct DecomposeRule {
 
 #[derive(Clone)]
 pub(crate) struct RecomposeRule {
-	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
@@ -67,9 +73,18 @@ pub(crate) struct RewriteRule {
 }
 
 #[derive(Clone)]
+pub(crate) struct CombineRule {
+	pub partial: PrimitiveId,
+	pub split: PrimitiveId,
+	pub share: usize,
+	pub agree: Vec<usize>,
+	pub carry: Vec<usize>,
+	pub whole: PrimitiveId,
+}
+
+#[derive(Clone)]
 pub(crate) struct RebuildRule {
 	pub id: PrimitiveId,
-	pub given: Vec<Vec<usize>>,
 	pub reveal: usize,
 }
 
@@ -116,6 +131,7 @@ pub(crate) struct PrimitiveSpec {
 	pub recompose: Option<RecomposeRule>,
 	pub rewrite: Option<RewriteRule>,
 	pub rebuild: Option<RebuildRule>,
+	pub combine: Vec<CombineRule>,
 	pub definition_check: bool,
 	pub bypass_key: Option<BypassKeyKind>,
 	pub commutativity: Option<CommutativityRule>,
@@ -127,6 +143,7 @@ pub(crate) struct PrimitiveSpec {
 	pub forgeable_secret: Option<usize>,
 	pub malleable_vary: Vec<usize>,
 	pub reuse: Option<ReuseRule>,
+	pub threshold: Option<ThresholdSpec>,
 	pub divergence_filler: bool,
 	pub arity_help: Option<(i32, &'static str)>,
 	pub arg_names: Vec<&'static str>,
@@ -440,6 +457,41 @@ pub(crate) fn primitive_unwraps(id: PrimitiveId) -> Option<usize> {
 
 pub(crate) fn filler_primitive() -> Option<PrimitiveId> {
 	prim_specs().find(|s| s.divergence_filler).map(|s| s.id)
+}
+
+pub(crate) fn combine_rules(id: PrimitiveId) -> &'static [CombineRule] {
+	primitive_get(id)
+		.map(|s| s.combine.as_slice())
+		.unwrap_or(&[])
+}
+
+pub(crate) fn combines_into(
+	whole: PrimitiveId,
+) -> impl Iterator<Item = (PrimitiveId, &'static CombineRule)> {
+	prim_specs().flat_map(move |spec| {
+		spec.combine
+			.iter()
+			.filter(move |rule| rule.whole == whole)
+			.map(move |rule| (spec.id, rule))
+	})
+}
+
+pub(crate) fn primitive_threshold(id: PrimitiveId) -> Option<ThresholdSpec> {
+	primitive_get(id).ok().and_then(|s| s.threshold)
+}
+
+pub(crate) fn primitives_with_threshold() -> Vec<&'static str> {
+	prim_specs()
+		.filter(|s| s.threshold.is_some())
+		.map(|s| s.name)
+		.collect()
+}
+
+pub(crate) fn primitive_renamed(name: &str) -> Option<&'static str> {
+	spec::RENAMED
+		.iter()
+		.find(|(old, _)| old.eq_ignore_ascii_case(name))
+		.map(|(_, new)| *new)
 }
 
 pub(crate) fn reuse_rule(id: PrimitiveId) -> Option<&'static ReuseRule> {
@@ -757,11 +809,10 @@ mod tests {
 
 			if let Some(rule) = &spec.recompose {
 				must("recompose.reveal", rule.reveal);
-				for set in &rule.given {
-					for &i in set {
-						out("recompose.given", i);
-					}
-				}
+				assert!(
+					spec.threshold.is_some(),
+					"{name} recomposes from its outputs, so it needs a threshold to count them against"
+				);
 			}
 
 			if let Some(rule) = &spec.rewrite {
@@ -802,11 +853,48 @@ mod tests {
 					inner.name,
 					narrowest(&inner.arity)
 				);
-				for set in &rule.given {
-					for &i in set {
-						may("rebuild.given", i);
-					}
+				assert!(
+					inner.threshold.is_some(),
+					"{name}.rebuild counts shares of {}, which declares no threshold",
+					inner.name
+				);
+			}
+
+			for rule in &spec.combine {
+				let partial = primitive_get(rule.partial)
+					.unwrap_or_else(|_| panic!("{name}.combine.partial is not a primitive"));
+				let split = primitive_get(rule.split)
+					.unwrap_or_else(|_| panic!("{name}.combine.split is not a primitive"));
+				let whole = primitive_get(rule.whole)
+					.unwrap_or_else(|_| panic!("{name}.combine.whole is not a primitive"));
+				let fewest = narrowest(&partial.arity);
+				for (what, i) in std::iter::once(("combine.share", rule.share))
+					.chain(rule.agree.iter().map(|&i| ("combine.agree", i)))
+					.chain(rule.carry.iter().map(|&i| ("combine.carry", i)))
+				{
+					assert!(
+						i < fewest,
+						"{name}.{what} is argument {i} of {}, which may have as few as {fewest} \
+						 arguments, and the engine indexes it directly",
+						partial.name
+					);
 				}
+				assert!(
+					!rule.agree.contains(&rule.share) && !rule.carry.contains(&rule.share),
+					"{name}.combine names the share position as one that agrees or carries"
+				);
+				assert!(
+					split.threshold.is_some(),
+					"{name}.combine counts shares of {}, which declares no threshold",
+					split.name
+				);
+				assert!(
+					whole.arity.contains(&((1 + rule.carry.len()) as i32)),
+					"{name}.combine builds {} from the secret and {} carried arguments, \
+					 which is not an arity it takes",
+					whole.name,
+					rule.carry.len()
+				);
 			}
 
 			match spec.bypass_key {

@@ -19,7 +19,7 @@ principal Alice[
 	knows private root
 	generates salt
 	_ = HASH(root)
-	_, share_two, _ = SHAMIR_SPLIT(root)
+	_, share_two, _ = THRESHOLD_SPLIT[2](root)
 	_, _, _ = HKDF(salt, root, nil)
 	key_one, _, _ = HKDF(salt, root, salt)
 	_ = MAC(root, salt)

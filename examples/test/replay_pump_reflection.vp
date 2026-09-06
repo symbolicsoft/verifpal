@@ -14,9 +14,11 @@
 //     e2 = AEAD_ENC(k, HASH(m), nil)    rung 1, what Bob echoes
 //     e2'= AEAD_ENC(k, HASH(HASH(m)), nil)   rung 2, if rung 1 is fed back
 //
-// Feeding rung n into e1 yields rung n+1, and only the depth bound stops it:
-// the ladder climbs until a rung nests deeper than anything the protocol
-// computes, which the tool reports. This is the shape that made
+// Feeding rung n into e1 yields rung n+1. Each run of Bob can be fed once,
+// since a rung Bob emitted under one input may not be spent against the same
+// run under another (`spends_another_execution`), so at k sessions the ladder
+// climbs k rungs and stops; the depth bound is the backstop for a ladder
+// that outgrows the protocol before it runs out of runs, which is what made
 // `needham-schroeder.vp` diverge before that bound existed.
 //
 // `a1` — the rung-1 reflection attack MUST still be found. The attacker never

@@ -24,12 +24,19 @@ impl fmt::Display for Primitive {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let name = primitive_name(self.id);
 		write!(f, "{}", name)?;
-		if !self.capabilities.is_empty() {
+		let threshold = crate::primitive::primitive_threshold(self.id).map(|_| self.threshold);
+		if threshold.is_some() || !self.capabilities.is_empty() {
 			write!(f, "[")?;
-			for (i, (cap, onset)) in self.capabilities.iter().enumerate() {
-				if i > 0 {
+			let mut first = true;
+			if let Some(t) = threshold {
+				write!(f, "{}", t)?;
+				first = false;
+			}
+			for (cap, onset) in self.capabilities.iter() {
+				if !first {
 					write!(f, ", ")?;
 				}
+				first = false;
 				write!(f, "{}", cap.name())?;
 				if onset > 0 {
 					write!(f, " from phase {}", onset)?;
@@ -472,6 +479,17 @@ mod tests {
 			"got: {}",
 			once
 		);
+	}
+
+	#[test]
+	fn pretty_round_trips_a_threshold_parameter() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private prt_k\n\tprt_a, prt_b, prt_c, prt_d, prt_e = THRESHOLD_SPLIT[3](prt_k)\n\tprt_j = THRESHOLD_JOIN(prt_a, prt_c, prt_e)\n]\n\nqueries[\n\tconfidentiality? prt_k\n]\n";
+		let m = parse_string("t.vp", src).expect("parse");
+		let once = pretty_model(&m);
+		let m2 = parse_string("t.vp", &once).expect("reparse");
+		let twice = pretty_model(&m2);
+		assert_eq!(once, twice);
+		assert!(once.contains("THRESHOLD_SPLIT[3](prt_k)"), "got: {}", once);
 	}
 
 	#[test]

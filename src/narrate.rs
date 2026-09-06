@@ -97,7 +97,7 @@ impl NameTable {
 		let args: Vec<String> = p.arguments.iter().map(show).collect();
 		format!(
 			"{}({}){}{}",
-			primitive_name(p.id),
+			head(p),
 			args.join(", "),
 			projection(p),
 			if p.instance_check { "?" } else { "" }
@@ -115,7 +115,14 @@ impl NameTable {
 	}
 }
 
-pub(crate) fn projection(p: &Primitive) -> String {
+pub(crate) fn head(p: &Primitive) -> String {
+	match crate::primitive::primitive_threshold(p.id) {
+		Some(_) => format!("{}[{}]", primitive_name(p.id), p.threshold),
+		None => primitive_name(p.id).to_string(),
+	}
+}
+
+fn projection(p: &Primitive) -> String {
 	if crate::primitive::primitive_has_single_output(p.id) {
 		return String::new();
 	}
@@ -512,7 +519,7 @@ pub(crate) fn gate_steps(
 			.collect();
 		let primitive = format!(
 			"{}({}){}",
-			primitive_name(p.id),
+			head(p),
 			args.join(", "),
 			if p.instance_check { "?" } else { "" }
 		);
@@ -820,6 +827,11 @@ impl Narrator<'_> {
 					_ => format!("Attacker constructs {} from {}.", v, parts),
 				}
 			}
+			DerivationRecord::Combined { from } => format!(
+				"Attacker combines {} out of the partial signatures {}.",
+				v,
+				join_oriented(from, table, attacker, installed),
+			),
 			DerivationRecord::Recomposed { using, .. } => format!(
 				"Attacker recomposes {} from enough of its shares ({}).",
 				v,
@@ -1624,6 +1636,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let meta = vec![
@@ -1666,6 +1679,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let meta = vec![

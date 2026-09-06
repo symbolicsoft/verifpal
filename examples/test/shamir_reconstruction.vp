@@ -5,7 +5,7 @@ attacker[active]
 
 principal Dealer[
 	generates secret
-	s1, s2, s3 = SHAMIR_SPLIT(secret)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](secret)
 ]
 
 Dealer -> Alice: s1
@@ -22,7 +22,7 @@ principal Carol[]
 Bob -> Carol: s2
 
 principal Carol[
-	reconstructed = SHAMIR_JOIN(s2, s3)
+	reconstructed = THRESHOLD_JOIN(s2, s3)
 ]
 
 queries[

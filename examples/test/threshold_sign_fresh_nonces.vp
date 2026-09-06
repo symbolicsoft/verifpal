@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0 — `threshold_sign_nonce_reuse.vp` with a fresh nonce per signing,
+// which is what the RFC requires and what keeps the share.
+
+attacker[passive]
+
+principal Dealer[
+	knows private psk_a
+	generates k
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	ea = ENC(psk_a, s1)
+]
+
+Dealer -> Alice: ea
+
+principal Alice[
+	knows private psk_a
+	sa = DEC(psk_a, ea)
+	generates na1
+	generates na2
+	knows public m1
+	knows public m2
+	knows public cl
+	p1 = THRESHOLD_SIGN(sa, na1, cl, m1)
+	p2 = THRESHOLD_SIGN(sa, na2, cl, m2)
+]
+
+Alice -> Bob: p1, p2
+
+principal Bob[
+	_ = HASH(p1, p2)
+]
+
+queries[
+	confidentiality? k
+	confidentiality? s1
+]

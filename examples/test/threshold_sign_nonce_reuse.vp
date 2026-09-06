@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — a nonce used twice inside one run, which RFC 9591 forbids
+// and calls a complete key-recovery attack. Alice signs two messages with one
+// nonce, and a passive attacker holding both partials recovers her share: the
+// plain-Schnorr reading, one nonce standing for FROST's hiding-and-binding
+// pair. The key stays secret, because one share is one share; the point is
+// that the share is lost to nonce reuse and nothing else, which
+// `threshold_sign_fresh_nonces.vp` confirms by giving the second signing its
+// own nonce.
+
+attacker[passive]
+
+principal Dealer[
+	knows private psk_a
+	generates k
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	ea = ENC(psk_a, s1)
+]
+
+Dealer -> Alice: ea
+
+principal Alice[
+	knows private psk_a
+	sa = DEC(psk_a, ea)
+	generates na
+	knows public m1
+	knows public m2
+	knows public cl
+	p1 = THRESHOLD_SIGN(sa, na, cl, m1)
+	p2 = THRESHOLD_SIGN(sa, na, cl, m2)
+]
+
+Alice -> Bob: p1, p2
+
+principal Bob[
+	_ = HASH(p1, p2)
+]
+
+queries[
+	confidentiality? k
+	confidentiality? s1
+]

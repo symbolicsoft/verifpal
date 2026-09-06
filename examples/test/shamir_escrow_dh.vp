@@ -32,7 +32,7 @@ principal Alice[
 	session = DH_KEX(gb, a)
 	generates n_record
 	record = AEAD_ENC(session, n_record, minutes, nil)
-	escrow_one, escrow_two, escrow_three = SHAMIR_SPLIT(session)
+	escrow_one, escrow_two, escrow_three = THRESHOLD_SPLIT[2](session)
 ]
 
 Alice -> Bob: n_record, record

@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 — a threshold is a threshold at 3-of-5. Two leaked shares of the
+// first secret recover nothing, three leaked shares of the second recover it.
+
+attacker[passive]
+
+principal Dealer[
+	generates kept
+	generates lost
+	a1, a2, a3, a4, a5 = THRESHOLD_SPLIT[3](kept)
+	b1, b2, b3, b4, b5 = THRESHOLD_SPLIT[3](lost)
+	leaks a1
+	leaks a4
+	leaks b2
+	leaks b3
+	leaks b5
+]
+
+
+queries[
+	confidentiality? kept
+	confidentiality? lost
+]

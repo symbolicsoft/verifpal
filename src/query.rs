@@ -268,15 +268,10 @@ fn query_authentication(
 	};
 	result.resolved = true;
 	result.options = options;
-	let assigned = &ps.values[index].value;
 	let before = match (&ps.values[index].bypassed, km.slots.get(index)) {
 		(Some(_), Some(slot)) => &slot.initial_value,
 		_ => &ps.values[index].pre_rewrite,
 	};
-	let seed = attacker
-		.knows(assigned)
-		.map(|i| recorded_mutations(attacker, i))
-		.unwrap_or_default();
 	let prelude = |state: &PrincipalState| {
 		if sender == ATTACKER_ID {
 			return Vec::new();
@@ -293,7 +288,7 @@ fn query_authentication(
 		}]
 	};
 	let mutated_info =
-		attack_trace_with(ctx, km, ps, query_index, |_| before.clone(), &seed, prelude);
+		attack_trace_with(ctx, km, ps, query_index, |_| before.clone(), &[], prelude);
 	let witnessed = mutated_info.state().and_then(|w| {
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;

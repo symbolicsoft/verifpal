@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c0 — SHAMIR_SPLIT's recompose rule lists the pairs {0,1}, {0,2}
+// Expected: c1c0 — THRESHOLD_SPLIT's recompose rule lists the pairs {0,1}, {0,2}
 // and {1,2}, and the corpus only ever exercised the adjacent one. Here the
 // attacker is handed the FIRST and THIRD shares of one secret and a single
 // share of another, so the model separates "any two of three" from "the first
@@ -12,8 +12,8 @@ attacker[passive]
 principal Dealer[
 	generates secret_pair
 	generates secret_lone
-	pair_one, pair_two, pair_three = SHAMIR_SPLIT(secret_pair)
-	lone_one, lone_two, lone_three = SHAMIR_SPLIT(secret_lone)
+	pair_one, pair_two, pair_three = THRESHOLD_SPLIT[2](secret_pair)
+	lone_one, lone_two, lone_three = THRESHOLD_SPLIT[2](secret_lone)
 	knows private cargo
 	generates n_sealed
 	sealed = AEAD_ENC(secret_pair, n_sealed, cargo, nil)

@@ -6,7 +6,7 @@
 // long-term, so both sessions split the *same* value, and share_a#2 is the
 // same term as share_a rather than a second, independent share. One share
 // reaches the wire per session; two sessions of one share are still one
-// share, and SHAMIR_JOIN needs two distinct ones.
+// share, and THRESHOLD_JOIN needs two distinct ones.
 //
 // This is the model to look at if session expansion ever starts freshening
 // something it should share, or if the attacker's knowledge set stops
@@ -17,7 +17,7 @@ attacker[active]
 
 principal Alice[
 	knows private secret_s
-	share_a, share_b, share_c = SHAMIR_SPLIT(secret_s)
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret_s)
 ]
 
 Alice -> Bob: share_a

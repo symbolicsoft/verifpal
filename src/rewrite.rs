@@ -169,6 +169,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		}));
 		let (ps, failed) = rewrite(&dec);
@@ -199,11 +200,15 @@ mod tests {
 	}
 
 	#[test]
-	fn shamir_join_rebuilds_the_secret_from_two_distinct_shares() {
+	fn threshold_join_rebuilds_the_secret_from_two_distinct_shares() {
 		let secret = make_constant("rws_secret");
-		let share = |output: usize| make_primitive(PRIM_SHAMIR_SPLIT, vec![secret.clone()], output);
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 2;
+			Value::Primitive(Arc::new(p))
+		};
 		let (ps, failed) = rewrite(&make_primitive(
-			PRIM_SHAMIR_JOIN,
+			PRIM_THRESHOLD_JOIN,
 			vec![share(0), share(1)],
 			0,
 		));
@@ -212,10 +217,53 @@ mod tests {
 	}
 
 	#[test]
+	fn a_three_of_five_join_needs_three_distinct_shares() {
+		let secret = make_constant("rw35_secret");
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 3;
+			Value::Primitive(Arc::new(p))
+		};
+		let join = |shares: Vec<Value>| make_primitive(PRIM_THRESHOLD_JOIN, shares, 0);
+		let (ps, _) = rewrite(&join(vec![share(0), share(2), share(4)]));
+		assert!(ps.values[0].value.equivalent(&secret, true));
+		let two = join(vec![share(0), share(4)]);
+		let (ps, _) = rewrite(&two);
+		assert!(ps.values[0].value.equivalent(&two, true));
+		let repeated = join(vec![share(0), share(0), share(2)]);
+		let (ps, _) = rewrite(&repeated);
+		assert!(ps.values[0].value.equivalent(&repeated, true));
+	}
+
+	#[test]
+	fn a_two_of_n_join_accepts_any_two_shares() {
+		let secret = make_constant("rw2n_secret");
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 2;
+			Value::Primitive(Arc::new(p))
+		};
+		let (ps, _) = rewrite(&make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![share(4), share(3)],
+			0,
+		));
+		assert!(ps.values[0].value.equivalent(&secret, true));
+		let (ps, _) = rewrite(&make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![share(1), share(3), share(0)],
+			0,
+		));
+		assert!(ps.values[0].value.equivalent(&secret, true));
+	}
+
+	#[test]
 	fn two_shares_of_the_same_output_do_not_rebuild_anything() {
 		let secret = make_constant("rwd_secret");
-		let share = make_primitive(PRIM_SHAMIR_SPLIT, vec![secret.clone()], 0);
-		let join = make_primitive(PRIM_SHAMIR_JOIN, vec![share.clone(), share], 0);
+		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0);
+		split.threshold = 2;
+		let share = Value::Primitive(Arc::new(split));
+		let join = make_primitive(PRIM_THRESHOLD_JOIN, vec![share.clone(), share], 0);
 		let (ps, _) = rewrite(&join);
 		assert!(
 			ps.values[0].value.equivalent(&join, true),

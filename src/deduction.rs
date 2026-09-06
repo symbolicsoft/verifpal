@@ -817,6 +817,7 @@ fn rule_reconstruct(
 	if let Some(reconstructed) = result {
 		let used = reconstructed.from;
 		let forged = reconstructed.forged;
+		let combined = reconstructed.combined;
 		let derivation = match &forged {
 			Some(Forged::Assumption(capability)) => DerivationRecord::Broken {
 				of: value.clone(),
@@ -827,6 +828,7 @@ fn rule_reconstruct(
 				with: with.clone(),
 				using: used.clone(),
 			},
+			None if combined => DerivationRecord::Combined { from: used.clone() },
 			None => DerivationRecord::Reconstructed { from: used.clone() },
 		};
 		found |= learn(
@@ -851,6 +853,11 @@ fn rule_reconstruct(
 					reuse_fixed_names(&with[0]),
 					with[0],
 					with[1],
+				),
+				None if combined => format!(
+					"{} obtained by combining {}.",
+					info_output_text(value),
+					pretty_values(&used),
 				),
 				None => format!(
 					"{} obtained by reconstructing with {}.",

@@ -364,6 +364,17 @@ pub(crate) fn step_problems(
 				}
 				_ => problems.push(wrong("opens something that is not a primitive")),
 			},
+			DerivationRecord::Combined { from } => match target {
+				Value::Primitive(p) => {
+					if !crate::theory::combination_holds(p, from) {
+						problems.push(wrong(
+							"combines partial signatures that do not interpolate to what the \
+							 step claims",
+						));
+					}
+				}
+				_ => problems.push(wrong("combines into something that is not a primitive")),
+			},
 			DerivationRecord::Reconstructed { from } => match target {
 				Value::Primitive(p) => {
 					let mut shapes: Vec<std::sync::Arc<Primitive>> = vec![p.clone()];

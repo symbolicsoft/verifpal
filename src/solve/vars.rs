@@ -365,6 +365,7 @@ mod tests {
 				output: 0,
 				instance_check: false,
 				capabilities: Capabilities::default(),
+				threshold: 0,
 				hash: HashCell::default(),
 			}))
 		};
@@ -391,6 +392,7 @@ mod tests {
 				output: 0,
 				instance_check: false,
 				capabilities: Capabilities::default(),
+				threshold: 0,
 				hash: HashCell::default(),
 			}))
 		};
@@ -420,6 +422,7 @@ mod tests {
 				output: 0,
 				instance_check: false,
 				capabilities: Capabilities::default(),
+				threshold: 0,
 				hash: HashCell::default(),
 			}))
 		};

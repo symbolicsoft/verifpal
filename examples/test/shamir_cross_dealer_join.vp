@@ -7,7 +7,7 @@
 //
 // The equivalence query is the sharp one: it asserts that the joined value is
 // NOT the first dealer's secret. A rebuild rule that matched on share position
-// without checking that both shares came from the same SHAMIR_SPLIT would make
+// without checking that both shares came from the same THRESHOLD_SPLIT would make
 // this hold, and would hand every protocol in the tree a way to assemble a key
 // out of shares of other keys.
 
@@ -15,7 +15,7 @@ attacker[active]
 
 principal DealerOne[
 	generates key_one
-	one_a, one_b, one_c = SHAMIR_SPLIT(key_one)
+	one_a, one_b, one_c = THRESHOLD_SPLIT[2](key_one)
 	knows private cargo
 	generates n_sealed
 	sealed = AEAD_ENC(key_one, n_sealed, cargo, nil)
@@ -23,14 +23,14 @@ principal DealerOne[
 
 principal DealerTwo[
 	generates key_two
-	two_a, two_b, two_c = SHAMIR_SPLIT(key_two)
+	two_a, two_b, two_c = THRESHOLD_SPLIT[2](key_two)
 ]
 
 DealerOne -> Bob: one_a, n_sealed, sealed
 DealerTwo -> Bob: two_a
 
 principal Bob[
-	mixed = SHAMIR_JOIN(one_a, two_a)
+	mixed = THRESHOLD_JOIN(one_a, two_a)
 	opened = AEAD_DEC(mixed, n_sealed, sealed, nil)
 	_ = HASH(opened)
 ]

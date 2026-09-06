@@ -37,7 +37,7 @@ fn token_type(kind: TokenKind) -> Option<u32> {
 		TokenKind::Qualifier => "parameter",
 		TokenKind::QueryKind => "type",
 		TokenKind::Capability => "decorator",
-		TokenKind::PhaseNumber => "number",
+		TokenKind::PhaseNumber | TokenKind::Threshold => "number",
 		TokenKind::Arrow | TokenKind::Assign | TokenKind::Check => "operator",
 		TokenKind::Comment => "comment",
 	};

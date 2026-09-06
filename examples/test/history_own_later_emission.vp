@@ -1,0 +1,78 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at every session count.
+//
+// Alice accepts Bob's first box only after verifying the signature inside it,
+// and sends her reply under the same key afterwards; Bob's second box exists
+// only once he has that reply. At two sessions the attacker can route Alice's
+// key share into Bob#2 and Bob#2's first box back to her, but that is Bob#2
+// talking to Alice, a matching run, and no forgery. The attack the search
+// used to report delivered Bob#2's *second* box into Alice's first-box slot:
+// it decrypts under the same key, so her check accepts it. But Bob#2 sends
+// that box only after receiving the reply Alice sends after accepting a first
+// box, so the witness needs one execution of Alice's run to hand the attacker
+// what it spends against a different execution of the same run. The
+// validator refuses knowledge whose preconditions name a different value at
+// one of the executing run's own receive slots (`spends_another_execution`).
+// history_own_early_emission.vp is the counterweight.
+
+attacker[active]
+
+principal Alice[
+	generates ea
+	gea = PUBKEY(ea)
+]
+
+principal Bob[
+	knows private lb
+	glb = PUBKEY(lb)
+	generates eb
+	geb = PUBKEY(eb)
+]
+
+Bob -> Alice: [glb]
+
+Alice -> Bob: gea
+
+Bob -> Alice: geb
+
+principal Alice[
+	k_a = HASH(DH_KEX(geb, ea), DH_KEX(glb, ea))
+]
+
+principal Bob[
+	k_b = HASH(DH_KEX(gea, eb), DH_KEX(gea, lb))
+	sig = SIGN(lb, HASH(gea, geb))
+	generates n1
+	box1 = AEAD_ENC(k_b, n1, sig, nil)
+]
+
+Bob -> Alice: n1, box1
+
+principal Alice[
+	s = AEAD_DEC(k_a, n1, box1, nil)?
+	_ = SIGNVERIF(glb, HASH(gea, geb), s)?
+	knows private m1
+	generates n2
+	box2 = AEAD_ENC(k_a, n2, m1, nil)
+]
+
+Alice -> Bob: n2, box2
+
+principal Bob[
+	m1b = AEAD_DEC(k_b, n2, box2, nil)?
+	knows private m2
+	generates n3
+	box3 = AEAD_ENC(k_b, n3, m2, nil)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	m2a = AEAD_DEC(k_a, n3, box3, nil)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

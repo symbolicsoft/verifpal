@@ -134,6 +134,7 @@ struct Minimizer<'a> {
 	ambient: AttackerState,
 	sessions: Vec<PrincipalState>,
 	mutations: Installs,
+	pruned: Installs,
 	needs: Addressed,
 	everywhere: Installs,
 	bound: crate::reexec::TermBound,
@@ -183,12 +184,14 @@ impl<'a> Minimizer<'a> {
 			ambient,
 			sessions,
 			mutations,
+			pruned: Vec::new(),
 			needs,
 			everywhere: Vec::new(),
 			bound: crate::reexec::TermBound::of(km),
 			guards,
 		};
 		m.everywhere = m.mitm_everywhere();
+		m.pruned = m.prune_seed();
 		m
 	}
 
@@ -343,10 +346,58 @@ impl<'a> Minimizer<'a> {
 				}
 			}
 		}
+		if let Some((_, Value::Primitive(current))) = installs.iter().find(|(s, _)| s.get() == at) {
+			let honest =
+				self.km.slots.get(at).map(|slot| {
+					crate::resolution::resolve_trace_term(&slot.initial_value, self.km)
+				});
+			let settled = |position: usize| {
+				let argument = &current.arguments[position];
+				let unchanged = matches!(&honest, Some(Value::Primitive(h)) if h.id == current.id
+					&& h.arguments.get(position).is_some_and(|a| a.equivalent(argument, true)));
+				unchanged
+					&& matches!(argument, Value::Constant(c) if self
+						.km
+						.index_of(c)
+						.and_then(|i| self.km.slots.get(i))
+						.is_some_and(|slot| !slot.sent_by.is_empty()))
+			};
+			let wanted: Vec<Value> = shapes.clone();
+			for shape in wanted {
+				for position in 0..current.arguments.len() {
+					if settled(position) || current.arguments[position].equivalent(&shape, true) {
+						continue;
+					}
+					let mut arguments = current.arguments.clone();
+					arguments[position] = shape.clone();
+					let nested = Value::Primitive(std::sync::Arc::new(Primitive {
+						arguments,
+						hash: HashCell::default(),
+						..(**current).clone()
+					}));
+					if !shapes.iter().any(|s| s.equivalent(&nested, true)) {
+						shapes.push(nested);
+					}
+				}
+			}
+		}
 		shapes
 	}
 
-	fn forged_flight(&self, session: &PrincipalState, base: Installs, wide: bool) -> Vec<Installs> {
+	fn forged_flight(
+		&self,
+		session: &PrincipalState,
+		base: Installs,
+		wide: bool,
+		relaxed: bool,
+	) -> Vec<Installs> {
+		let rank = |(bypasses, halts, stuck): (usize, usize, usize)| {
+			if relaxed {
+				(halts, bypasses, stuck)
+			} else {
+				(bypasses, halts, stuck)
+			}
+		};
 		let mut installs = self.admitted(session, base, wide);
 		if installs.is_empty() {
 			return Vec::new();
@@ -396,7 +447,9 @@ impl<'a> Minimizer<'a> {
 						continue;
 					}
 					let cost = self.scenario_cost(group, &trial);
-					if cost <= here {
+					if (relaxed && rank(cost) < rank(here))
+						|| (!relaxed && rank(cost) <= rank(here))
+					{
 						accepted.push((trial, cost));
 					}
 				}
@@ -523,29 +576,68 @@ impl<'a> Minimizer<'a> {
 		vec![(shared, addressed)]
 	}
 
+	fn seeds(&self) -> Vec<Installs> {
+		if self.pruned.len() == self.mutations.len() {
+			vec![self.mutations.clone()]
+		} else {
+			vec![self.pruned.clone(), self.mutations.clone()]
+		}
+	}
+
+	fn prune_seed(&self) -> Installs {
+		let Some(session) = self.sessions.first() else {
+			return self.mutations.clone();
+		};
+		let mut keep = self.controlled(session, self.mutations.clone());
+		if keep.is_empty() {
+			return self.mutations.clone();
+		}
+		for (slot, _) in self.mutations.clone() {
+			let trial: Installs = keep.iter().filter(|(s, _)| *s != slot).cloned().collect();
+			if trial.len() == keep.len() || trial.is_empty() {
+				continue;
+			}
+			if self.probe_at(session, &trial, &[], Breadth::Base).is_some() {
+				keep = trial;
+			}
+		}
+		keep
+	}
+
 	fn single_slot(&self, session: &PrincipalState) -> Vec<Installs> {
-		let mut families = vec![self.mitm_for(session), self.mutations.clone()];
+		let mut families = vec![self.mitm_for(session)];
+		families.extend(self.seeds());
 		families.extend(self.forged_from(session, self.mitm_for(session), false));
-		families.extend(self.forged_from(session, self.mutations.clone(), false));
+		for seed in self.seeds() {
+			families.extend(self.forged_from(session, seed, false));
+		}
 		families.extend(self.forged_alone(session));
 		families.extend(self.replayed_from(session));
 		families
 	}
 
 	fn whole_flight(&self, session: &PrincipalState) -> Vec<Installs> {
-		[self.mitm_for(session), self.mutations.clone()]
-			.into_iter()
-			.flat_map(|base| self.forged_flight(session, base, false))
-			.collect()
+		let mut families: Vec<Installs> = Vec::new();
+		for relaxed in [false, true] {
+			for base in std::iter::once(self.mitm_for(session)).chain(self.seeds()) {
+				families.extend(self.forged_flight(session, base, false, relaxed));
+			}
+		}
+		families
 	}
 
 	fn across_sessions(&self, session: &PrincipalState) -> Vec<Installs> {
-		let mut families = vec![self.mutations.clone(), self.everywhere.clone()];
+		let mut families = self.seeds();
+		families.push(self.everywhere.clone());
 		families.extend(self.forged_from(session, self.everywhere.clone(), true));
-		families.extend(self.forged_from(session, self.mutations.clone(), true));
+		for seed in self.seeds() {
+			families.extend(self.forged_from(session, seed, true));
+		}
 		families.extend(self.replayed_from(session));
-		for base in [self.everywhere.clone(), self.mutations.clone()] {
-			families.extend(self.forged_flight(session, base, false));
+		for relaxed in [false, true] {
+			for base in std::iter::once(self.everywhere.clone()).chain(self.seeds()) {
+				families.extend(self.forged_flight(session, base, false, relaxed));
+			}
 		}
 		families
 	}
@@ -1432,37 +1524,47 @@ fn probe_with(
 		Vec::new()
 	};
 
-	let mut ordered: Vec<&(SlotIdx, Value)> = installs.iter().collect();
-	ordered.sort_by_key(|(slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
+	let mut remaining: Vec<(SlotIdx, Value)> = installs.to_vec();
+	remaining.sort_by_key(|(slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
 	let order = crate::reexec::CausalOrder::of(km, base.id);
 	let mut grounded = true;
-	for reached in 1..=ordered.len() {
-		let (slot, value) = ordered[reached - 1];
+	let mut earlier: Installs = Vec::new();
+	while !remaining.is_empty() {
 		let known = scratch.attacker_snapshot();
-		if !crate::solve::validate::attacker_can_derive(
-			&scratch,
-			km,
-			slot.get(),
-			value,
-			base,
-			&known,
-		) {
+		let next = (0..remaining.len()).find(|&at| {
+			let (slot, value) = &remaining[at];
+			let recipients = base
+				.meta
+				.get(slot.get())
+				.map(|m| m.wire.as_slice())
+				.unwrap_or(&[]);
+			let preceded = remaining[..at].iter().any(|(other, _)| {
+				base.meta
+					.get(other.get())
+					.is_some_and(|m| m.wire.iter().any(|r| recipients.contains(r)))
+			});
+			if preceded {
+				return false;
+			}
+			crate::solve::validate::attacker_can_derive(
+				&scratch,
+				km,
+				slot.get(),
+				value,
+				base,
+				&known,
+			) && order
+				.available(base, slot.get(), &known)
+				.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
+		});
+		let Some(at) = next else {
 			grounded = false;
 			break;
-		}
-		if let Some(available) = order.available(base, slot.get(), &known)
-			&& !crate::solve::validate::derivable(value, base, &available)
-		{
-			grounded = false;
+		};
+		earlier.push(remaining.remove(at));
+		if remaining.is_empty() {
 			break;
 		}
-		if reached == ordered.len() {
-			break;
-		}
-		let earlier: Installs = ordered[..reached]
-			.iter()
-			.map(|&pair| pair.clone())
-			.collect();
 		let seeded = scratch.attacker_snapshot();
 		let governing = governing_attacker(&scratch, km, &earlier, &seeded);
 		if let Ok(partial) = reexecute(base, &earlier, &governing, km) {

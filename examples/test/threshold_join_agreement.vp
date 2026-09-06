@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0e0e1e1 — what the join accepts. Two partials over distinct shares,
+// the same commitments and the same message interpolate to the plain
+// signature, and so does any other qualifying pair, so both agree with
+// SIGN(k, m). A partial over a different commitment list belongs to another
+// signing session and does not combine, and two partials under one share are
+// one share, so those joins stay irreducible and differ from the signature.
+
+attacker[passive]
+
+principal Dealer[
+	generates k
+	generates na
+	generates nb
+	generates nc
+	generates na2
+	knows public m
+	knows public cl
+	knows public cl_other
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	pa = THRESHOLD_SIGN(s1, na, cl, m)
+	pb = THRESHOLD_SIGN(s2, nb, cl, m)
+	pc = THRESHOLD_SIGN(s3, nc, cl, m)
+	pa2 = THRESHOLD_SIGN(s1, na2, cl, m)
+	pb_other = THRESHOLD_SIGN(s2, nb, cl_other, m)
+	sig = THRESHOLD_JOIN(pa, pb)
+	sig_other_pair = THRESHOLD_JOIN(pb, pc)
+	plain = SIGN(k, m)
+	join_mixed = THRESHOLD_JOIN(pa, pb_other)
+	join_same_share = THRESHOLD_JOIN(pa, pa2)
+	_ = HASH(sig, sig_other_pair, plain, join_mixed, join_same_share)
+]
+
+queries[
+	equivalence? sig, plain
+	equivalence? sig, sig_other_pair
+	equivalence? sig, join_mixed
+	equivalence? sig, join_same_share
+]

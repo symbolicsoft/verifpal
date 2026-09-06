@@ -21,8 +21,8 @@ pub(crate) const PRIM_SIGN: PrimitiveId = 12;
 pub(crate) const PRIM_SIGNVERIF: PrimitiveId = 13;
 pub(crate) const PRIM_PKE_ENC: PrimitiveId = 14;
 pub(crate) const PRIM_PKE_DEC: PrimitiveId = 15;
-pub(crate) const PRIM_SHAMIR_SPLIT: PrimitiveId = 16;
-pub(crate) const PRIM_SHAMIR_JOIN: PrimitiveId = 17;
+pub(crate) const PRIM_THRESHOLD_SPLIT: PrimitiveId = 16;
+pub(crate) const PRIM_THRESHOLD_JOIN: PrimitiveId = 17;
 pub(crate) const PRIM_RINGSIGN: PrimitiveId = 18;
 pub(crate) const PRIM_RINGSIGNVERIF: PrimitiveId = 19;
 pub(crate) const PRIM_BLIND: PrimitiveId = 20;
@@ -31,6 +31,12 @@ pub(crate) const PRIM_PUBKEY: PrimitiveId = 22;
 pub(crate) const PRIM_DH_KEX: PrimitiveId = 23;
 pub(crate) const PRIM_KEM_ENCAP: PrimitiveId = 24;
 pub(crate) const PRIM_KEM_DECAP: PrimitiveId = 25;
+pub(crate) const PRIM_THRESHOLD_SIGN: PrimitiveId = 26;
+
+pub(super) const RENAMED: &[(&str, &str)] = &[
+	("SHAMIR_SPLIT", "THRESHOLD_SPLIT"),
+	("SHAMIR_JOIN", "THRESHOLD_JOIN"),
+];
 
 const AEAD_NONCE_HELP: &str = "`AEAD_ENC` and `AEAD_DEC` take a nonce as their second argument: \
                                `AEAD_ENC(key, nonce, plaintext, ad)` and \
@@ -471,35 +477,72 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
-			id: PRIM_SHAMIR_SPLIT,
+			id: PRIM_THRESHOLD_SPLIT,
 			arg_names: vec!["secret"],
-			name: "SHAMIR_SPLIT",
+			name: "THRESHOLD_SPLIT",
 			doc: PrimitiveDoc {
-				example: "SHAMIR_SPLIT(k): s1, s2, s3",
-				help: "In Verifpal, we allow splitting the key into three shares such that only two shares are required to reconstitute it.",
+				example: "THRESHOLD_SPLIT[t](k): s1, …, sn",
+				help: "Shares a secret so that any t of the n bound shares recover it, and fewer reveal nothing. The bracket carries the threshold t, at least 2 and at most n, and n is the number of shares bound on the left. Any t distinct shares recover k through THRESHOLD_JOIN, and the shares double as the signing shares of THRESHOLD_SIGN.",
 			},
 			arity: vec![1],
-			output: vec![3],
-			recompose: Some(RecomposeRule {
-				given: vec![vec![0, 1], vec![0, 2], vec![1, 2]],
-				reveal: 0,
-			}),
+			output: (2..=MAX_SHARES as i32).collect(),
+			recompose: Some(RecomposeRule { reveal: 0 }),
+			threshold: Some(ThresholdSpec { min: 2 }),
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
-			id: PRIM_SHAMIR_JOIN,
-			arg_names: vec!["share_a", "share_b"],
-			name: "SHAMIR_JOIN",
+			id: PRIM_THRESHOLD_JOIN,
+			arg_names: vec![
+				"piece1", "piece2", "piece3", "piece4", "piece5", "piece6", "piece7", "piece8",
+				"piece9", "piece10", "piece11", "piece12", "piece13", "piece14", "piece15",
+				"piece16",
+			],
+			name: "THRESHOLD_JOIN",
 			doc: PrimitiveDoc {
-				example: "SHAMIR_JOIN(sa, sb): k",
-				help: "Here, sa and sb must be two distinct elements out of the set (s1, s2, s3) in order to obtain k.",
+				example: "THRESHOLD_JOIN(s1, s2, ...): k",
+				help: "Lagrange interpolation over pieces of one THRESHOLD_SPLIT. Given at least t distinct shares it yields the secret; given at least t partial signatures from THRESHOLD_SIGN over distinct shares, the same commitments and the same message, it yields the plain signature SIGN(k, message), which SIGNVERIF checks under PUBKEY(k); given at least t PUBKEY(share) values it yields PUBKEY(k). Fewer than t pieces, a repeated share, or partials that disagree leave the term unreduced.",
 			},
-			arity: vec![2],
+			arity: (2..=MAX_SHARES as i32).collect(),
 			output: vec![1],
 			rebuild: Some(RebuildRule {
-				id: PRIM_SHAMIR_SPLIT,
-				given: vec![vec![0, 1], vec![1, 0]],
+				id: PRIM_THRESHOLD_SPLIT,
 				reveal: 0,
+			}),
+			combine: vec![
+				CombineRule {
+					partial: PRIM_THRESHOLD_SIGN,
+					split: PRIM_THRESHOLD_SPLIT,
+					share: 0,
+					agree: vec![2, 3],
+					carry: vec![3],
+					whole: PRIM_SIGN,
+				},
+				CombineRule {
+					partial: PRIM_PUBKEY,
+					split: PRIM_THRESHOLD_SPLIT,
+					share: 0,
+					agree: vec![],
+					carry: vec![],
+					whole: PRIM_PUBKEY,
+				},
+			],
+			..PrimitiveSpec::default()
+		},
+		PrimitiveSpec {
+			id: PRIM_THRESHOLD_SIGN,
+			arg_names: vec!["share", "nonce", "commitments", "message"],
+			name: "THRESHOLD_SIGN",
+			doc: PrimitiveDoc {
+				example: "THRESHOLD_SIGN(share, nonce, commitments, message): partial",
+				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce, `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message). Reusing a nonce under one share, whatever else differs, reveals the share.",
+			},
+			arity: vec![4],
+			output: vec![1],
+			forgeable_secret: Some(0),
+			reuse: Some(ReuseRule {
+				fixed: vec![0, 1],
+				reveals: vec![Reveal::Argument(0)],
+				forgeable: vec![],
 			}),
 			..PrimitiveSpec::default()
 		},
@@ -667,6 +710,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (_, ok) = filter_extract_dh_exponent(&p, &k, 0);
@@ -683,6 +727,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let (_, ok) = filter_extract_dh_exponent(&p, &hashed, 0);

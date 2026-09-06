@@ -17,7 +17,7 @@ attacker[passive]
 
 principal Dealer[
 	generates vault_key
-	share_one, share_two, share_three = SHAMIR_SPLIT(vault_key)
+	share_one, share_two, share_three = THRESHOLD_SPLIT[2](vault_key)
 	knows private archive
 	generates n_sealed
 	sealed = AEAD_ENC(vault_key, n_sealed, archive, nil)
@@ -26,7 +26,7 @@ principal Dealer[
 Dealer -> Bob: share_one, share_two, share_three, n_sealed, sealed
 
 principal Bob[
-	rejoined = SHAMIR_JOIN(share_one, share_two)
+	rejoined = THRESHOLD_JOIN(share_one, share_two)
 	got = AEAD_DEC(rejoined, n_sealed, sealed, nil)?
 	_ = HASH(got)
 ]

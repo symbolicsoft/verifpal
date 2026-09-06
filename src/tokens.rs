@@ -15,6 +15,7 @@ pub(crate) enum TokenKind {
 	PrimitiveName,
 	QueryKind,
 	Capability,
+	Threshold,
 	PhaseNumber,
 	Arrow,
 	Assign,

@@ -702,6 +702,7 @@ pub struct Primitive {
 	pub id: PrimitiveId,
 	pub arguments: Vec<Value>,
 	pub output: usize,
+	pub threshold: usize,
 	pub instance_check: bool,
 	pub capabilities: Capabilities,
 	pub hash: HashCell,
@@ -713,6 +714,7 @@ impl Primitive {
 			id,
 			arguments,
 			output,
+			threshold: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			hash: HashCell::default(),
@@ -724,6 +726,7 @@ impl Primitive {
 			id: self.id,
 			arguments,
 			output: self.output,
+			threshold: self.threshold,
 			instance_check: self.instance_check,
 			capabilities: self.capabilities,
 			hash: HashCell::default(),
@@ -735,6 +738,7 @@ impl Primitive {
 			id: self.id,
 			arguments: self.arguments.clone(),
 			output,
+			threshold: self.threshold,
 			instance_check: self.instance_check,
 			capabilities: self.capabilities,
 			hash: HashCell::default(),
@@ -1513,6 +1517,9 @@ pub enum DerivationRecord {
 	Reconstructed {
 		from: Vec<Value>,
 	},
+	Combined {
+		from: Vec<Value>,
+	},
 	Recomposed {
 		of: Value,
 		using: Vec<Value>,
@@ -1575,13 +1582,13 @@ impl DerivationRecord {
 
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
-			DerivationRecord::Decomposed { of, using }
-			| DerivationRecord::Recomposed { of, using } => {
+			DerivationRecord::Decomposed { of, using } => {
 				let mut v = vec![of];
 				v.extend(using.iter());
 				v
 			}
-			DerivationRecord::Rewritten { using, .. } => using.iter().collect(),
+			DerivationRecord::Recomposed { using, .. }
+			| DerivationRecord::Rewritten { using, .. } => using.iter().collect(),
 			DerivationRecord::Broken {
 				of,
 				using,
@@ -1600,7 +1607,9 @@ impl DerivationRecord {
 				v.extend(using.iter());
 				v
 			}
-			DerivationRecord::Reconstructed { from } => from.iter().collect(),
+			DerivationRecord::Reconstructed { from } | DerivationRecord::Combined { from } => {
+				from.iter().collect()
+			}
 			DerivationRecord::Fragment { of } => vec![of],
 			DerivationRecord::Initial
 			| DerivationRecord::Leaked { .. }
@@ -1614,6 +1623,7 @@ impl DerivationRecord {
 			DerivationRecord::Leaked { .. }
 				| DerivationRecord::Obtained { .. }
 				| DerivationRecord::Reconstructed { .. }
+				| DerivationRecord::Combined { .. }
 				| DerivationRecord::Rewritten { built: false, .. }
 		)
 	}
@@ -1675,6 +1685,7 @@ pub enum Forged {
 pub struct ReconstructResult {
 	pub from: Vec<Value>,
 	pub forged: Option<Forged>,
+	pub combined: bool,
 }
 
 pub struct RecomposeResult {
@@ -1842,6 +1853,7 @@ mod tests {
 			output: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let p2 = p.with_arguments(vec![b.clone()]);

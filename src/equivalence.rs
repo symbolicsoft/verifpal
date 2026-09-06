@@ -45,7 +45,7 @@ pub(crate) fn memoised_pair(
 }
 
 pub(crate) fn equivalent_primitives(p1: &Primitive, p2: &Primitive, consider_output: bool) -> bool {
-	if p1.id != p2.id {
+	if p1.id != p2.id || p1.threshold != p2.threshold {
 		return false;
 	}
 	if consider_output && (p1.output != p2.output) {
@@ -77,6 +77,27 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn splits_of_one_secret_under_different_thresholds_are_different_values() {
+		let k = make_constant("eqt_k");
+		let split = |t: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![k.clone()], 1);
+			p.threshold = t;
+			Value::Primitive(std::sync::Arc::new(p))
+		};
+		assert!(split(2).equivalent(&split(2), true));
+		assert!(!split(2).equivalent(&split(3), true));
+		assert_ne!(split(2).hash_value(), split(3).hash_value());
+		let Value::Primitive(a) = split(2) else {
+			panic!("a primitive");
+		};
+		let Value::Primitive(b) = split(3) else {
+			panic!("a primitive");
+		};
+		assert!(!crate::theory::structurally_identical_primitive(&a, &b));
+		assert!(a.with_output(0).threshold == 2 && a.with_arguments(vec![k]).threshold == 2);
+	}
 
 	fn pubkey(inner: Value) -> Value {
 		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
@@ -146,6 +167,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -154,6 +176,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		assert!(equivalent_primitives(&p1, &p2, true));
@@ -169,6 +192,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -177,6 +201,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		assert!(!equivalent_primitives(&p1, &p2, true));
@@ -191,6 +216,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		let p2 = Primitive {
@@ -199,6 +225,7 @@ mod tests {
 			output: 1,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		};
 		assert!(!equivalent_primitives(&p1, &p2, true));

@@ -13,7 +13,9 @@ pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
 }
 
 fn primitive_hash_uncached(p: &Primitive) -> u64 {
-	let base = (p.id as u64).wrapping_mul(2654435761) ^ (p.output as u64).wrapping_mul(97);
+	let base = (p.id as u64).wrapping_mul(2654435761)
+		^ (p.output as u64).wrapping_mul(97)
+		^ (p.threshold as u64).wrapping_mul(1000003);
 	if let Some((inner, bare)) = crate::primitive::commutativity_parts_ref(p) {
 		let mut h1 = inner.hash_value();
 		let mut h2 = bare.hash_value();

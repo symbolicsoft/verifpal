@@ -1,13 +1,21 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1 — the counterweight to bypass_needs_the_signed_message.vp.
+// Expected: a0 — the same protocol as bypass_needs_the_signed_message.vp with
+// the signed message public instead of shared-secret.
 //
-// The same protocol with the signed message public instead of shared-secret.
-// The attacker holds the signing key and can now also build the message, so
-// SIGN(a, ad) really is constructible and Bob really does accept a signature
-// Alice never produced. Without this, the a0 of the other model could equally
-// have been "never bypass a signature check".
+// The attacker holds the leaked signing key and the message, so SIGN(a, ad)
+// is a term it can build. It is also the only term Bob's check accepts: the
+// verification key is guarded and the message is fixed, and SIGNVERIF pins
+// both. The attacker can therefore put on the wire nothing Bob accepts that
+// Alice did not already send, and re-sending the honest signature is a
+// forward, not a forgery. A guard bypass here would narrate `sig := nil` and
+// a check that "does not halt" for a value the recipient already accepts from
+// the sender, which is why try_guard_bypass refuses a defeated check that
+// passes with its honest input restored (honest_input_accepted).
+// bypass_needs_the_signed_message_wire.vp is the counterweight: once the
+// message travels on the wire the attacker picks it, and SIGN(a, nil) over a
+// substituted message is a genuine forgery.
 
 attacker[active]
 

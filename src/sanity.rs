@@ -225,6 +225,27 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 			primitive_name(p.id)
 		)));
 	}
+	if crate::primitive::primitive_threshold(p.id).is_some() && p.threshold > outputs.len() {
+		return Err(VerifpalError::sanity(
+			format!(
+				"`{}[{}]` needs at least {} shares, but {} {} bound here",
+				primitive_name(p.id),
+				p.threshold,
+				p.threshold,
+				outputs.len(),
+				if outputs.len() == 1 { "is" } else { "are" }
+			)
+			.into(),
+		)
+		.narrow(primitive_name(p.id))
+		.note(
+			"the threshold is how many shares recover the secret, so it cannot exceed the number of shares",
+		)
+		.help(format!(
+			"lower the threshold, or bind at least {} constants on the left of the `=`",
+			p.threshold
+		)));
+	}
 	if p.instance_check && !definition_check {
 		return Err(VerifpalError::sanity(
 			format!("`{}` cannot be checked with `?`", primitive_name(p.id)).into(),

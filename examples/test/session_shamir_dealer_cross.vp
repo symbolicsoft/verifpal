@@ -17,7 +17,7 @@ attacker[active]
 
 principal Alice[
 	generates secret_s
-	share_a, share_b, share_c = SHAMIR_SPLIT(secret_s)
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret_s)
 	knows private cargo
 	generates n_sealed
 	sealed = AEAD_ENC(secret_s, n_sealed, cargo, nil)

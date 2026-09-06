@@ -278,11 +278,122 @@ impl<'a> Deducer<'a> {
 				self.solve_primitive(p, s, out);
 				self.solve_by_malleability(p, s, out);
 				self.solve_by_reuse(p, s, out);
+				self.solve_by_combination(p, s, out);
 			}
 			Value::Constant(_) => {}
 		}
 
 		self.solve_by_decomposition(g, s, out);
+	}
+
+	fn solve_by_combination(
+		&self,
+		target: &Primitive,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		for (_, rule) in combines_into(target.id) {
+			if target.arguments.len() != 1 + rule.carry.len() {
+				continue;
+			}
+			let Some(reveal) = primitive_get(rule.split)
+				.ok()
+				.and_then(|split| split.recompose.as_ref())
+				.map(|recompose| recompose.reveal)
+			else {
+				continue;
+			};
+			let arity = primitive_get(rule.partial)
+				.ok()
+				.and_then(|partial| partial.arity.first().copied())
+				.unwrap_or(0)
+				.max(0) as usize;
+			for split in self.held_splits(rule) {
+				let Some(secret) = split.arguments.get(reveal) else {
+					continue;
+				};
+				let Some(bound) = match_value(&target.arguments[0], secret, s) else {
+					continue;
+				};
+				let shared: Vec<Value> = rule
+					.agree
+					.iter()
+					.map(|&i| match rule.carry.iter().position(|&c| c == i) {
+						Some(at) => target.arguments[1 + at].clone(),
+						None => self.fresh_var(),
+					})
+					.collect();
+				let threshold = split.threshold;
+				let mut frontier: Vec<(Substitution, usize)> = vec![(bound, 0)];
+				let mut done: Vec<Substitution> = Vec::new();
+				for output in 0..MAX_SHARES {
+					let after = MAX_SHARES - output - 1;
+					let share = Value::Primitive(Arc::new(split.with_output(output)));
+					let arguments: Vec<Value> = (0..arity)
+						.map(|i| {
+							if i == rule.share {
+								share.clone()
+							} else if let Some(at) = rule.agree.iter().position(|&a| a == i) {
+								shared[at].clone()
+							} else if let Some(at) = rule.carry.iter().position(|&c| c == i) {
+								target.arguments[1 + at].clone()
+							} else {
+								self.fresh_var()
+							}
+						})
+						.collect();
+					let partial = Value::primitive(rule.partial, arguments, 0);
+					let mut next = Vec::new();
+					for (candidate, count) in &frontier {
+						if count + after >= threshold {
+							next.push((candidate.clone(), *count));
+						}
+						let mut solved = Vec::new();
+						self.solve_into(&partial, candidate, &mut solved);
+						for solution in dedupe(solved) {
+							if count + 1 >= threshold {
+								done.push(solution);
+							} else {
+								next.push((solution, count + 1));
+							}
+						}
+					}
+					if next.is_empty() {
+						break;
+					}
+					frontier = next;
+				}
+				out.extend(dedupe(done));
+			}
+		}
+	}
+
+	fn held_splits(&self, rule: &CombineRule) -> Vec<Arc<Primitive>> {
+		let mut splits: Vec<Arc<Primitive>> = Vec::new();
+		for known in self.attacker.known.iter() {
+			let Value::Primitive(q) = known else {
+				continue;
+			};
+			let share = if q.id == rule.split {
+				q
+			} else if q.id == rule.partial {
+				match q.arguments.get(rule.share) {
+					Some(Value::Primitive(share)) if share.id == rule.split => share,
+					_ => continue,
+				}
+			} else {
+				continue;
+			};
+			if share.threshold == 0
+				|| splits
+					.iter()
+					.any(|seen| equivalent_primitives(seen, share, false))
+			{
+				continue;
+			}
+			splits.push(Arc::clone(share));
+		}
+		splits
 	}
 
 	fn solve_by_reuse(&self, target: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -1081,6 +1192,7 @@ mod tests {
 			output: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
+			threshold: 0,
 			hash: HashCell::default(),
 		}
 	}

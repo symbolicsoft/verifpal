@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c1 — a threshold is a threshold. SHAMIR_JOIN's rebuild rule
+// Expected: c0c1 — a threshold is a threshold. THRESHOLD_JOIN's rebuild rule
 // enumerates the ordered pairs of DISTINCT share positions, so joining a share
 // with itself is not one of them and yields an irreducible term rather than
 // the secret. Bob really does compute that term and the attacker really can
@@ -17,7 +17,7 @@ attacker[active]
 
 principal Dealer[
 	generates secret
-	share_one, share_two, share_three = SHAMIR_SPLIT(secret)
+	share_one, share_two, share_three = THRESHOLD_SPLIT[2](secret)
 	knows private payload
 	generates n_sealed
 	sealed = AEAD_ENC(secret, n_sealed, payload, nil)
@@ -27,7 +27,7 @@ principal Dealer[
 Dealer -> Bob: share_one, n_sealed, sealed
 
 principal Bob[
-	rejoined = SHAMIR_JOIN(share_one, share_one)
+	rejoined = THRESHOLD_JOIN(share_one, share_one)
 	opened = AEAD_DEC(rejoined, n_sealed, sealed, nil)
 	_ = HASH(opened)
 ]

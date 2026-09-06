@@ -1,0 +1,89 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0 — FROST as RFC 9591 lays it out, at a 2-of-3 threshold.
+// A dealer shares the signing key over pre-shared keys, each
+// share bundle bound to the group key so a share cannot be replayed into
+// another key generation, two participants commit to fresh nonces,
+// the coordinator picks the message and distributes each participant's
+// commitment to the others over authenticated channels, each participant
+// assembles the commitment list around its own commitment, as the RFC
+// requires it to check, each participant returns a partial, and the
+// coordinator interpolates them into a plain signature that the verifier
+// checks under PUBKEY(k) with the ordinary SIGNVERIF. No signer ever holds the
+// key and the dealer never uses it again, the attacker sees every partial and learns neither the key nor a
+// share, and the only signature the verifier accepts is the one the
+// coordinator sent.
+
+attacker[active]
+
+principal Dealer[
+	knows private psk_a
+	knows private psk_b
+	generates k
+	pk = PUBKEY(k)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	generates nd_a
+	ea = AEAD_ENC(psk_a, nd_a, s1, pk)
+	generates nd_b
+	eb = AEAD_ENC(psk_b, nd_b, s2, pk)
+]
+
+Dealer -> Alice: [pk], nd_a, ea
+Dealer -> Bob: [pk], nd_b, eb
+Dealer -> Coordinator: [pk]
+Dealer -> Verifier: [pk]
+
+principal Alice[
+	knows private psk_a
+	sa = AEAD_DEC(psk_a, nd_a, ea, pk)?
+	generates na
+	ca = PUBKEY(na)
+]
+
+principal Bob[
+	knows private psk_b
+	sb = AEAD_DEC(psk_b, nd_b, eb, pk)?
+	generates nb
+	cb = PUBKEY(nb)
+]
+
+Alice -> Coordinator: ca
+Bob -> Coordinator: cb
+
+principal Coordinator[
+	generates m
+]
+
+Coordinator -> Alice: [m], [cb]
+Coordinator -> Bob: [m], [ca]
+
+principal Alice[
+	cl_a = CONCAT(ca, cb)
+	pa = THRESHOLD_SIGN(sa, na, cl_a, m)
+]
+
+principal Bob[
+	cl_b = CONCAT(ca, cb)
+	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
+]
+
+Alice -> Coordinator: pa
+Bob -> Coordinator: pb
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb)
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+Coordinator -> Verifier: m, sig
+
+principal Verifier[
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+queries[
+	confidentiality? k
+	confidentiality? s1
+	authentication? Coordinator -> Verifier: sig
+]

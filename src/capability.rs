@@ -347,6 +347,14 @@ impl CapabilityIndex {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::primitive::{PRIM_THRESHOLD_SIGN, PRIM_THRESHOLD_SPLIT};
+
+	#[test]
+	fn a_partial_signature_is_forgeable_without_its_share() {
+		assert!(supports(PRIM_THRESHOLD_SIGN, Capability::Forgeable));
+		assert!(!supports(PRIM_THRESHOLD_SIGN, Capability::Weak));
+		assert!(!supports(PRIM_THRESHOLD_SPLIT, Capability::Forgeable));
+	}
 
 	#[test]
 	fn default_capabilities_are_empty() {

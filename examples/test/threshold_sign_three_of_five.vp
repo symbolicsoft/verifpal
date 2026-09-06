@@ -1,0 +1,100 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0 — FROST at a 3-of-5 threshold with three participants, a leaked
+// fourth share and one unguarded participant. One share plus one oracle is
+// two pieces, and the threshold is three, so the attacker is one partial
+// short and the verifier accepts only the coordinator's signature.
+
+attacker[active]
+
+principal Dealer[
+	knows private psk_a
+	knows private psk_b
+	knows private psk_c
+	generates k
+	pk = PUBKEY(k)
+	s1, s2, s3, s4, s5 = THRESHOLD_SPLIT[3](k)
+	generates nd_a
+	ea = AEAD_ENC(psk_a, nd_a, s1, pk)
+	generates nd_b
+	eb = AEAD_ENC(psk_b, nd_b, s2, pk)
+	generates nd_c
+	ec = AEAD_ENC(psk_c, nd_c, s3, pk)
+	leaks s4
+]
+
+Dealer -> Alice: [pk], nd_a, ea
+Dealer -> Bob: [pk], nd_b, eb
+Dealer -> Carol: [pk], nd_c, ec
+Dealer -> Coordinator: [pk]
+Dealer -> Verifier: [pk]
+
+principal Alice[
+	knows private psk_a
+	sa = AEAD_DEC(psk_a, nd_a, ea, pk)?
+	generates na
+	ca = PUBKEY(na)
+]
+
+principal Bob[
+	knows private psk_b
+	sb = AEAD_DEC(psk_b, nd_b, eb, pk)?
+	generates nb
+	cb = PUBKEY(nb)
+]
+
+principal Carol[
+	knows private psk_c
+	sc = AEAD_DEC(psk_c, nd_c, ec, pk)?
+	generates nc
+	cc = PUBKEY(nc)
+]
+
+Alice -> Coordinator: ca
+Bob -> Coordinator: cb
+Carol -> Coordinator: cc
+
+principal Coordinator[
+	generates m
+]
+
+Coordinator -> Alice: m, cb, cc
+Coordinator -> Bob: [m], [ca], [cc]
+Coordinator -> Carol: [m], [ca], [cb]
+
+principal Alice[
+	cl_a = CONCAT(ca, cb, cc)
+	pa = THRESHOLD_SIGN(sa, na, cl_a, m)
+]
+
+principal Bob[
+	cl_b = CONCAT(ca, cb, cc)
+	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
+]
+
+principal Carol[
+	cl_c = CONCAT(ca, cb, cc)
+	pc = THRESHOLD_SIGN(sc, nc, cl_c, m)
+]
+
+Alice -> Coordinator: pa
+Bob -> Coordinator: pb
+Carol -> Coordinator: pc
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb, pc)
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+Coordinator -> Verifier: m, sig
+
+principal Verifier[
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+queries[
+	confidentiality? k
+	confidentiality? s1
+	authentication? Coordinator -> Verifier: sig
+]

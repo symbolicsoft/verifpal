@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1e1 — a split's threshold is part of its identity. The first share of
+// a 2-of-3 split of a secret is not the first share of a 3-of-3 split of the
+// same secret, or shares of one would rebuild with shares of the other; and
+// two shares of one split are two values.
+
+attacker[passive]
+
+principal Dealer[
+	generates secret
+	a1, a2, a3 = THRESHOLD_SPLIT[2](secret)
+	b1, b2, b3 = THRESHOLD_SPLIT[3](secret)
+	_ = HASH(a1, a2, b1)
+]
+
+queries[
+	equivalence? a1, b1
+	equivalence? a1, a2
+]

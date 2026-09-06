@@ -631,6 +631,7 @@ fn token_class(kind: TokenKind) -> Option<&'static str> {
 		TokenKind::Comment => Some("c"),
 		TokenKind::ConstantName
 		| TokenKind::PhaseNumber
+		| TokenKind::Threshold
 		| TokenKind::Arrow
 		| TokenKind::Assign
 		| TokenKind::Check

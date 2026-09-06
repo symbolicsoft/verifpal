@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // Expected: f1f0 — a share is exactly as fresh as the secret it was split
-// from. SHAMIR_SPLIT is a multi-output primitive, so its outputs carry an
+// from. THRESHOLD_SPLIT is a multi-output primitive, so its outputs carry an
 // output index alongside the argument, and this is the model that asserts the
 // freshness descent looks THROUGH that index at the argument rather than
 // treating a derived output as a value in its own right.
@@ -21,8 +21,8 @@ attacker[active]
 principal Dealer[
 	knows private static_secret
 	generates fresh_secret
-	static_one, static_two, static_three = SHAMIR_SPLIT(static_secret)
-	fresh_one, fresh_two, fresh_three = SHAMIR_SPLIT(fresh_secret)
+	static_one, static_two, static_three = THRESHOLD_SPLIT[2](static_secret)
+	fresh_one, fresh_two, fresh_three = THRESHOLD_SPLIT[2](fresh_secret)
 ]
 
 Dealer -> Bob: [static_one], [fresh_one]

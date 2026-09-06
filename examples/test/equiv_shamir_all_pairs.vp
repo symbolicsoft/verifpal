@@ -7,7 +7,7 @@
 // producing something: a rule that reconstructed a per-pair term would satisfy
 // every two-argument query in the tree and fail this one.
 //
-// The reversed pair is in there deliberately. SHAMIR_JOIN's given list carries
+// The reversed pair is in there deliberately. THRESHOLD_JOIN's given list carries
 // both orders of every pair, so joining the third share with the first must
 // agree with joining the first with the third, and an omission in that list
 // would show up here and nowhere else.
@@ -17,10 +17,10 @@ attacker[passive]
 principal Dealer[
 	generates secret
 	generates decoy
-	share_one, share_two, share_three = SHAMIR_SPLIT(secret)
-	join_low = SHAMIR_JOIN(share_one, share_two)
-	join_mid = SHAMIR_JOIN(share_two, share_three)
-	join_rev = SHAMIR_JOIN(share_three, share_one)
+	share_one, share_two, share_three = THRESHOLD_SPLIT[2](secret)
+	join_low = THRESHOLD_JOIN(share_one, share_two)
+	join_mid = THRESHOLD_JOIN(share_two, share_three)
+	join_rev = THRESHOLD_JOIN(share_three, share_one)
 	_ = HASH(join_low, join_mid, join_rev, decoy)
 ]
 

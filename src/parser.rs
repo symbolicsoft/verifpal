@@ -1,7 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::primitive::{primitive_get_enum, primitive_names};
+use crate::primitive::{
+	primitive_get_enum, primitive_names, primitive_renamed, primitive_threshold,
+	primitives_with_threshold,
+};
 use crate::principal::PrincipalNames;
 use crate::types::*;
 use crate::util::did_you_mean;
@@ -1281,12 +1284,43 @@ impl<'a> Parser<'a> {
 			})
 	}
 
-	fn parse_capabilities(&mut self) -> VResult<Capabilities> {
+	fn parse_bracket(&mut self) -> VResult<(Capabilities, Option<(usize, Span)>)> {
 		let start = self.pos;
 		self.expect("[")?;
 		let mut caps = Capabilities::default();
+		let mut threshold: Option<(usize, Span)> = None;
 		loop {
 			self.consume_trivia();
+			if self.peek().is_some_and(|c| c.is_ascii_digit()) {
+				let digits_start = self.pos;
+				while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
+					self.pos += 1;
+				}
+				let span = Span::new(digits_start, self.pos);
+				let text =
+					String::from_utf8_lossy(&self.input[digits_start..self.pos]).into_owned();
+				let value: usize = text.parse().map_err(|_| {
+					VerifpalError::parse(format!("`{}` is not a threshold", text).into())
+						.at(span)
+						.help("a threshold is a small whole number, e.g. `[2]`")
+				})?;
+				if threshold.is_some() {
+					return Err(VerifpalError::parse(
+						"the threshold is declared twice on this primitive".into(),
+					)
+					.at(span)
+					.labelled("declared again here")
+					.help("keep one threshold in the bracket"));
+				}
+				self.record(span, crate::tokens::TokenKind::Threshold);
+				threshold = Some((value, span));
+				self.consume_trivia();
+				if self.peek() == Some(b',') {
+					self.advance();
+					continue;
+				}
+				break;
+			}
 			let word = self.parse_identifier()?;
 			let word_span = self.last_ident;
 			let cap = Capability::from_name(&word).ok_or_else(|| {
@@ -1322,7 +1356,7 @@ impl<'a> Parser<'a> {
 		}
 		self.consume_trivia();
 		self.expect("]")?;
-		Ok(caps)
+		Ok((caps, threshold))
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
@@ -1350,10 +1384,10 @@ impl<'a> Parser<'a> {
 		);
 		let prim_name = name.to_uppercase();
 		self.skip_whitespace();
-		let capabilities = if self.peek() == Some(b'[') {
-			self.parse_capabilities()?
+		let (capabilities, threshold) = if self.peek() == Some(b'[') {
+			self.parse_bracket()?
 		} else {
-			Capabilities::default()
+			(Capabilities::default(), None)
 		};
 		self.skip_whitespace();
 		let open_paren = self.pos;
@@ -1393,15 +1427,69 @@ impl<'a> Parser<'a> {
 			self.advance();
 		}
 		let prim_id = primitive_get_enum(&prim_name).map_err(|_| {
-			VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into())
-				.at(Span::new(name_start, name_end))
-				.labelled("not a Verifpal primitive")
-				.suggest(did_you_mean(&prim_name, primitive_names()))
+			let unknown = VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into())
+				.at(Span::new(name_start, name_end));
+			match primitive_renamed(&prim_name) {
+				Some(new_name) => unknown
+					.labelled(format!("now called `{}`", new_name))
+					.note(format!(
+						"`{}` was renamed `{}`; a split now carries its threshold in a bracket, e.g. `{}[2](…)` for two-of-n",
+						prim_name,
+						new_name,
+						primitives_with_threshold().first().copied().unwrap_or(new_name)
+					))
+					.help(format!("write `{}` instead", new_name)),
+				None => unknown
+					.labelled("not a Verifpal primitive")
+					.suggest(did_you_mean(&prim_name, primitive_names())),
+			}
 		})?;
+		let threshold = match (primitive_threshold(prim_id), threshold) {
+			(Some(_), None) => {
+				return Err(VerifpalError::parse(
+					format!("`{}` needs a threshold", prim_name).into(),
+				)
+				.at(Span::new(name_start, name_end))
+				.note(
+					"the number in the bracket is how many of the bound shares recover the secret",
+				)
+				.help(format!(
+					"write `{}[2](…)` for a scheme where any two shares suffice",
+					prim_name
+				)));
+			}
+			(None, Some((_, span))) => {
+				return Err(VerifpalError::parse(
+					format!("`{}` takes no threshold", prim_name).into(),
+				)
+				.at(span)
+				.note(format!(
+					"a threshold belongs on a primitive that shares a secret: {}",
+					crate::util::quoted_list(
+						&primitives_with_threshold()
+							.iter()
+							.map(|s| s.to_string())
+							.collect::<Vec<String>>()
+					)
+				))
+				.help("remove the number from the bracket"));
+			}
+			(Some(rule), Some((t, span))) if t < rule.min => {
+				return Err(VerifpalError::parse(
+					format!("a threshold of {} makes every share the secret", t).into(),
+				)
+				.at(span)
+				.note(format!("the smallest threshold is {}", rule.min))
+				.help(format!("write `{}[{}](…)`", prim_name, rule.min)));
+			}
+			(Some(_), Some((t, _))) => t,
+			(None, None) => 0,
+		};
 		Ok(Value::Primitive(Arc::new(Primitive {
 			id: prim_id,
 			arguments,
 			output: 0,
+			threshold,
 			instance_check: check,
 			capabilities,
 			hash: HashCell::default(),
@@ -1836,6 +1924,66 @@ mod tests {
 				Some(Value::Primitive(p)) => Some((**p).clone()),
 				_ => None,
 			})
+	}
+
+	#[test]
+	fn parses_a_threshold_parameter() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private thp_k\n\tthp_a, thp_b, thp_c, thp_d, thp_e = THRESHOLD_SPLIT[3](thp_k)\n]\nqueries[\n\tconfidentiality? thp_k\n]\n";
+		let m = parse_string("thp.vp", src).expect("parses");
+		let p = first_primitive(&m).expect("a primitive");
+		assert_eq!(p.threshold, 3);
+		assert!(p.capabilities.is_empty());
+	}
+
+	#[test]
+	fn a_threshold_may_share_its_bracket_with_a_capability() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private thc_k\n\tknows private thc_n\n\tknows private thc_c\n\tknows private thc_m\n\tthc_a, thc_b, thc_c2 = THRESHOLD_SPLIT[2](thc_k)\n\tthc_p = THRESHOLD_SIGN[forgeable](thc_a, thc_n, thc_c, thc_m)\n]\nqueries[\n\tconfidentiality? thc_k\n]\n";
+		let m = parse_string("thc.vp", src).expect("parses");
+		let Block::Principal(principal) = &m.blocks[0] else {
+			panic!("a principal");
+		};
+		let Some(Value::Primitive(p)) = principal.expressions[5].assigned.as_ref() else {
+			panic!("a primitive");
+		};
+		assert!(p.capabilities.has(Capability::Forgeable));
+		assert_eq!(p.threshold, 0);
+	}
+
+	#[test]
+	fn a_split_without_a_threshold_is_refused() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private thm_k\n\tthm_a, thm_b, thm_c = THRESHOLD_SPLIT(thm_k)\n]\nqueries[\n\tconfidentiality? thm_k\n]\n";
+		let err = parse_string("thm.vp", src).expect_err("should reject");
+		let text = format!("{}", err);
+		assert!(text.contains("threshold"), "got: {}", text);
+		assert!(text.contains("THRESHOLD_SPLIT[2]"), "got: {}", text);
+	}
+
+	#[test]
+	fn a_threshold_on_a_primitive_that_takes_none_is_refused() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private thn_m\n\tthn_h = HASH[3](thn_m)\n]\nqueries[\n\tconfidentiality? thn_m\n]\n";
+		let err = parse_string("thn.vp", src).expect_err("should reject");
+		let text = format!("{}", err);
+		assert!(
+			text.contains("HASH") && text.contains("threshold"),
+			"got: {}",
+			text
+		);
+	}
+
+	#[test]
+	fn a_threshold_declared_twice_is_refused() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private tht_k\n\ttht_a, tht_b, tht_c = THRESHOLD_SPLIT[2, 3](tht_k)\n]\nqueries[\n\tconfidentiality? tht_k\n]\n";
+		let err = parse_string("tht.vp", src).expect_err("should reject");
+		let text = format!("{}", err);
+		assert!(text.contains("twice"), "got: {}", text);
+	}
+
+	#[test]
+	fn the_old_shamir_names_point_at_their_replacements() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private ths_k\n\tths_a, ths_b, ths_c = SHAMIR_SPLIT(ths_k)\n]\nqueries[\n\tconfidentiality? ths_k\n]\n";
+		let err = parse_string("ths.vp", src).expect_err("should reject");
+		let text = format!("{}", err);
+		assert!(text.contains("THRESHOLD_SPLIT"), "got: {}", text);
 	}
 
 	#[test]

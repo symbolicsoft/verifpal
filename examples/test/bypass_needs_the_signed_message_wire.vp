@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 — the counterweight to bypass_needs_the_signed_message.vp.
+//
+// The same protocol with the signed message travelling on the wire instead of
+// being a secret Alice and Bob share. The attacker holds the leaked signing
+// key and can now pick the message Bob verifies against, so SIGN(a, nil) over
+// a substituted `ad` is a term Bob accepts that Alice never produced. Without
+// this, the a0 of the other model could equally have been "a leaked signing
+// key never breaks a signature check".
+
+attacker[active]
+
+principal Alice[
+	knows private a
+	leaks a
+	ga = PUBKEY(a)
+	generates ad
+	sig = SIGN(a, ad)
+]
+
+Alice -> Bob: [ga], ad, sig
+
+principal Bob[
+	_ = SIGNVERIF(ga, ad, sig)?
+	generates s
+	out = HASH(s, ad)
+]
+
+Bob -> Alice: out
+
+queries[
+	authentication? Alice -> Bob: sig
+]
