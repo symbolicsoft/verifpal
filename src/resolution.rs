@@ -109,10 +109,6 @@ fn compute_visibility(
 	}
 }
 
-/// What one `resolve_all_values` has already resolved: each slot reached by
-/// name, and each primitive reached by pointer under a root. An installed
-/// term is a resolved graph, and walking it once per path made the transcript
-/// hashes a TLS flight carries several times over cost a visit per path.
 pub(crate) struct ResolveMemo {
 	slots: Vec<[Option<Value>; 2]>,
 	terms: IdMap<TermKey, (Arc<Primitive>, Option<Value>)>,

@@ -26,6 +26,7 @@ pub(crate) struct Deducer<'a> {
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
 	basis: Arc<IdSet<u64>>,
+	by_head: IdMap<(PrimitiveId, usize), Vec<usize>>,
 	fresh: Cell<u32>,
 	fresh_end: u32,
 }
@@ -85,12 +86,23 @@ impl<'a> Deducer<'a> {
 			}
 		}
 
+		let mut by_head: IdMap<(PrimitiveId, usize), Vec<usize>> = IdMap::default();
+		for (at, held) in attacker.known.iter().enumerate() {
+			if let Value::Primitive(p) = held {
+				by_head
+					.entry((p.id, p.arguments.len()))
+					.or_default()
+					.push(at);
+			}
+		}
+
 		Deducer {
 			attacker,
 			capabilities: ps.capabilities.clone(),
 			wire_terms,
 			slot_terms,
 			basis,
+			by_head,
 			memo: RefCell::new(IdMap::default()),
 			active: RefCell::new(Vec::new()),
 			cycles_cut: Cell::new(0),
@@ -256,15 +268,11 @@ impl<'a> Deducer<'a> {
 		if let Value::Primitive(pattern) = g
 			&& contains_var(g)
 		{
-			for known in self.attacker.known.iter() {
-				let Value::Primitive(candidate) = known else {
+			let head = (pattern.id, pattern.arguments.len());
+			for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
+				let Some(known) = self.attacker.known.get(at) else {
 					continue;
 				};
-				if candidate.id != pattern.id
-					|| candidate.arguments.len() != pattern.arguments.len()
-				{
-					continue;
-				}
 				if let Some(bound) = match_value(g, known, s) {
 					out.extend(self.require_constructible(&bound, s, true));
 				}

@@ -171,6 +171,7 @@ pub(crate) struct VerifyContext {
 	executions: RwLock<IdMap<(PrincipalId, u64), Vec<Execution>>>,
 	bases: RwLock<IdMap<PrincipalId, Arc<PrincipalState>>>,
 	coherence: RwLock<IdMap<PrincipalId, (Saturation, Arc<crate::reexec::Coherence>)>>,
+	baselines: RwLock<IdMap<(PrincipalId, i32), Arc<Baseline>>>,
 	prefer_replication: AtomicBool,
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
@@ -185,6 +186,11 @@ struct StoredState {
 	foreign_halts: Vec<(PrincipalId, usize)>,
 	starved: Vec<usize>,
 	forwarded: bool,
+}
+
+pub(crate) struct Baseline {
+	attacker: AttackerState,
+	saturation: IdMap<PrincipalId, Saturation>,
 }
 
 struct Execution {
@@ -433,6 +439,7 @@ impl VerifyContext {
 			executions: RwLock::new(IdMap::default()),
 			bases: RwLock::new(IdMap::default()),
 			coherence: RwLock::new(IdMap::default()),
+			baselines: RwLock::new(IdMap::default()),
 			attacker: RwLock::new(AttackerState::new()),
 			deferred_replays: RwLock::new(Vec::new()),
 			results: RwLock::new(results),
@@ -717,6 +724,33 @@ impl VerifyContext {
 		let history = Arc::new(crate::reexec::Coherence::of(km, ps));
 		write_lock(&self.coherence).insert(ps.id, (now, Arc::clone(&history)));
 		history
+	}
+
+	pub(crate) fn cached_baseline(
+		&self,
+		principal: PrincipalId,
+		phase: i32,
+	) -> Option<Arc<Baseline>> {
+		read_lock(&self.baselines).get(&(principal, phase)).cloned()
+	}
+
+	pub(crate) fn baseline_reached(&self) -> Baseline {
+		Baseline {
+			attacker: self.attacker_snapshot(),
+			saturation: read_lock(&self.saturation).clone(),
+		}
+	}
+
+	pub(crate) fn store_baseline(&self, principal: PrincipalId, phase: i32, baseline: Baseline) {
+		write_lock(&self.baselines).insert((principal, phase), Arc::new(baseline));
+	}
+
+	pub(crate) fn install_baseline(&self, baseline: &Baseline) {
+		let mut state = write_lock(&self.attacker);
+		*state = baseline.attacker.clone();
+		state.chain = crate::types::next_chain();
+		drop(state);
+		*write_lock(&self.saturation) = baseline.saturation.clone();
 	}
 
 	pub(crate) fn knowledge_saturation(&self) -> Saturation {
@@ -1139,6 +1173,7 @@ impl VerifyContext {
 			executions: RwLock::new(IdMap::default()),
 			bases: RwLock::new(IdMap::default()),
 			coherence: RwLock::new(IdMap::default()),
+			baselines: RwLock::new(IdMap::default()),
 			replays: RwLock::new(Recent::default()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),

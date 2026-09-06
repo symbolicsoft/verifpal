@@ -1511,18 +1511,24 @@ fn probe_with(
 		Breadth::All
 	};
 	let scratch = ctx.scratch_for_witness(query_index);
-	crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
-	for state in ctx.principal_states() {
-		let mut honest = state.clone_for_depth(true);
-		if honest.resolve_all_values().is_err() {
-			continue;
+	match ctx.cached_baseline(base.id, phase) {
+		Some(baseline) => scratch.install_baseline(&baseline),
+		None => {
+			crate::verify::attacker_seed_phase(&scratch, km, base, phase).ok()?;
+			for state in ctx.principal_states() {
+				let mut honest = state.clone_for_depth(true);
+				if honest.resolve_all_values().is_err() {
+					continue;
+				}
+				let _ = honest.perform_all_rewrites();
+				let honest = crate::verify::halt_honest_run(ctx, km, honest);
+				if scratch.attacker_phase_update(km, &honest, phase).is_err() {
+					continue;
+				}
+				let _ = compute_knowledge_closure(&scratch, km, &honest);
+			}
+			ctx.store_baseline(base.id, phase, scratch.baseline_reached());
 		}
-		let _ = honest.perform_all_rewrites();
-		let honest = crate::verify::halt_honest_run(ctx, km, honest);
-		if scratch.attacker_phase_update(km, &honest, phase).is_err() {
-			continue;
-		}
-		let _ = compute_knowledge_closure(&scratch, km, &honest);
 	}
 	let others: Vec<(PrincipalState, crate::reexec::Controllable)> = if breadth == Breadth::All {
 		ctx.principal_states()

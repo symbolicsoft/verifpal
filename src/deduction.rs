@@ -96,6 +96,7 @@ fn try_deduction_step(
 	index: &Arc<crate::theory::StateIndex>,
 ) -> bool {
 	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker, index);
+	reset_reconstructed();
 	let saturated = ctx.knowledge_rules_saturated(ps.id, attacker);
 	let mut progress = false;
 	for group in DEDUCTION_RULES {
@@ -795,6 +796,15 @@ fn rule_break_weak(
 	progress
 }
 
+thread_local! {
+	static RECONSTRUCTED: std::cell::RefCell<IdSet<usize>> =
+		std::cell::RefCell::new(IdSet::default());
+}
+
+fn reset_reconstructed() {
+	RECONSTRUCTED.with(|seen| seen.borrow_mut().clear());
+}
+
 fn rule_reconstruct(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -803,14 +813,12 @@ fn rule_reconstruct(
 	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
-	rule_reconstruct_walk(ctx, km, value, ps, attacker, record, &mut IdSet::default())
+	RECONSTRUCTED.with(|seen| {
+		let mut seen = seen.borrow_mut();
+		rule_reconstruct_walk(ctx, km, value, ps, attacker, record, &mut seen)
+	})
 }
 
-/// The walk visits each shared subterm once. The rule reads knowledge only
-/// through the pass snapshot, so a second visit of one subterm within one walk
-/// computes the same answer and learns nothing the first did not; walking the
-/// term as a tree cost a TLS transcript, which holds the previous hash twice
-/// at every level, a visit per path.
 fn rule_reconstruct_walk(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
