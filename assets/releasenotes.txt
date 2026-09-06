@@ -1,6 +1,8 @@
-Verifpal 1.4.3
+Verifpal 1.4.4
 
-All major changes between Verifpal 1.0.0 and 1.4.3 are covered
-in the following blog post:
+Changes since v1.4.3:
 
-https://symbolic.software/blog/2026-09-04-verifpal-1-4/
+Verifpal now models threshold cryptography, such as FROST-like threshold
+signing. More details in this blog post:
+
+https://symbolic.software/blog/2026-09-06-verifpal-threshold-cryptography/
