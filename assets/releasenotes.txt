@@ -1,4 +1,9 @@
-Verifpal 1.4.5
+Verifpal 1.4.6
+
+Changes since v1.4.5:
+
+- Add SimpleX models
+- Fix regression
 
 Changes since v1.4.4:
 
