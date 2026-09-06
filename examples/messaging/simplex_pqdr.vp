@@ -1,0 +1,223 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0c0a0a0a0e0 at one session and at two.
+//
+// SimpleX's post-quantum augmented double ratchet (PQDR): the end-to-end
+// layer of the SMP agent protocol, following pqdr.md and the reference
+// implementation's Crypto/Ratchet.hs. Three messages, two full ratchet
+// steps, and the whole PQ key schedule written out.
+//
+// What makes this different from the Signal handshake in signal.vp and
+// pqxdh.vp, and worth its own model:
+//
+//   There are no identity keys. None. A SimpleX connection is agreed by
+//   four ephemeral X448 keys, two per side, generated for this one
+//   connection and never reused. All the authentication in the protocol
+//   comes from the invitation link having travelled out-of-band. That is
+//   why the link is guarded here and why nothing else needs to be.
+//
+//   The key agreement has THREE Diffie-Hellman legs, not four:
+//     dh1 = DH(a1, b2)   dh2 = DH(a2, b1)   dh3 = DH(a2, b2)
+//   There is no DH(a1, b1); a1's only other job is to name the connection
+//   in the associated data. This is pqX3dh in Ratchet.hs.
+//
+//   The post-quantum augmentation is a DOUBLE KEM running in parallel with
+//   the DH ratchet, and this is the whole point of the design. At every
+//   ratchet step a party decapsulates the ciphertext it just received
+//   (feeding its RECEIVING chain) and encapsulates a fresh secret to the
+//   encapsulation key it just received (feeding its SENDING chain), while
+//   generating a new KEM key pair for its peer to encapsulate to next.
+//   pqdr.md calls it "a parallel ping-pong, with two balls in play all the
+//   time". Contrast PQXDH, which augments the handshake only: pqdr.md's
+//   objection is that "if the attacker at any point obtains long term keys
+//   from any of the devices, the break-in recovery will not be post-quantum
+//   resistant". The phase below is that objection, made concrete.
+//
+// PHASE 1 COMPROMISES THE ENTIRE INITIAL HANDSHAKE. Both parties' X3DH
+// keys, Alice's initial KEM decapsulation key, Bob's encapsulation
+// randomness, and every DH ratchet private in the conversation are handed
+// to the attacker. Nothing is withheld except the KEM key pairs generated
+// *during* the ratchet. The verdicts split exactly where the theory says:
+//
+//   confidentiality? m1   FAILS — m1 rides the root key the handshake
+//     produced, and the handshake is entirely in the attacker's hands. So
+//     is every header key, so the ratchet keys and KEM parameters that
+//     header encryption normally hides are readable too.
+//   confidentiality? m2   HOLDS — one ratchet step later the root key has
+//     absorbed a KEM secret encapsulated to a key pair born after the
+//     compromise. Every Diffie-Hellman value in the model is on the table
+//     and it does not help.
+//   confidentiality? m3   HOLDS — and stays held for the same reason a
+//     step further on.
+//
+// That is post-quantum break-in recovery, and it is exactly what the
+// parallel KEM buys over augmenting the handshake alone. Delete ssk2 from
+// the root KDF of message 2 and m2 falls with m1; that one argument is the
+// entire difference between this design and PQXDH.
+//
+//   authentication? (all three)  HOLD — an attacker on the wire cannot
+//     produce a ratchet message either side accepts, because every message
+//     key descends from the guarded invitation. The ratchet payloads travel
+//     unguarded so the search has something to try.
+//   equivalence? m2, m2_b        HOLDS — Bob's view of Alice's message is
+//     Alice's message.
+//
+// Modelling notes. The invitation link is guarded: it is passed out-of-band
+// as a link or QR code, and it is the only authenticated thing in the
+// protocol. Bob's reply key material is guarded too, because its
+// authenticity is what the SMP layer below is responsible for — see
+// simplex_smp.vp, whose confirmation race is precisely what happens when
+// that assumption fails. The ratchet ciphertexts and encrypted headers are
+// left open in both directions. Message counters and the skipped-key store
+// are omitted: they are ordering machinery, not secrets. Each chain key
+// yields exactly one message key here, so KDF_CK's next-chain-key output is
+// elided with `_`, as in signal.vp.
+
+attacker[active]
+
+principal Alice[
+	// The three HKDF info strings, verbatim from Ratchet.hs.
+	knows public info_x3dh, info_root, info_chain
+	// The connection link's key material: two X448 keys and an sntrup761
+	// encapsulation key. Fresh for this connection, and that is all the
+	// identity SimpleX has.
+	generates a1, a2, ka
+	ga1 = PUBKEY(a1)
+	ga2 = PUBKEY(a2)
+	eka = PUBKEY(ka)
+]
+
+principal Bob[
+	knows public info_x3dh, info_root, info_chain
+]
+
+// The connection link, passed out-of-band. Every guard in this model
+// ultimately rests on this one.
+Alice -> Bob: [ga1], [ga2], [eka]
+
+principal Bob[
+	generates b1, b2, r1
+	gb1 = PUBKEY(b1)
+	gb2 = PUBKEY(b2)
+	// KEM #1 of the parallel pair: Bob encapsulates to the link's key.
+	ssk1, ct1 = KEM_ENCAP(eka, r1)
+	// pqX3dh: three DH legs plus the encapsulated secret, one HKDF into a
+	// sending header key, the peer's next header key, and the root key.
+	dh1 = DH_KEX(ga1, b2)
+	dh2 = DH_KEX(ga2, b1)
+	dh3 = DH_KEX(ga2, b2)
+	hk, nhk, rk0 = HKDF(nil, CONCAT(dh1, dh2, dh3, ssk1), info_x3dh)
+	// The associated data both ratchets carry for the connection's life.
+	ad = CONCAT(gb1, ga1)
+	// initSndRatchet: a fresh DH ratchet key and the first root step, the
+	// KEM secret riding alongside the DH output.
+	generates bd0
+	gbd0 = PUBKEY(bd0)
+	rk1, cks1, nhks1 = HKDF(rk0, CONCAT(DH_KEX(ga2, bd0), ssk1), info_root)
+	// Bob's own new KEM key pair: this is the ball Alice will hit back.
+	generates kb
+	ekb = PUBKEY(kb)
+	// chainKdf, whose four outputs are the next chain key, the message
+	// key, the body IV and the header IV.
+	_, mk1, iv1, ehiv1 = HKDF(nil, cks1, info_chain)
+	// The encrypted header hides the ratchet key from the routers.
+	hdr1 = AEAD_ENC(hk, ehiv1, gbd0, ad)
+	generates m1
+	e1 = AEAD_ENC(mk1, iv1, m1, CONCAT(ad, hdr1))
+]
+
+// Bob's reply. The key agreement half is guarded because delivering it
+// intact is the SMP layer's job; the ratchet message itself is not.
+Bob -> Alice: [gb1], [gb2], [ct1], [ekb], ehiv1, hdr1, e1
+
+principal Alice[
+	ssk1_a = KEM_DECAP(ka, ct1)?
+	dh1_a = DH_KEX(gb2, a1)
+	dh2_a = DH_KEX(gb1, a2)
+	dh3_a = DH_KEX(gb2, a2)
+	hk_a, nhk_a, rk0_a = HKDF(nil, CONCAT(dh1_a, dh2_a, dh3_a, ssk1_a), info_x3dh)
+	ad_a = CONCAT(gb1, ga1)
+	// Alice decrypts the header first, which is what tells her a ratchet
+	// step is due, then takes the receiving half of that step.
+	gbd0_a = AEAD_DEC(hk_a, ehiv1, hdr1, ad_a)?
+	rk1_a, ckr1_a, nhkr1_a = HKDF(rk0_a, CONCAT(DH_KEX(gbd0_a, a2), ssk1_a), info_root)
+	_, mk1_a, iv1_a, _ = HKDF(nil, ckr1_a, info_chain)
+	m1_a = AEAD_DEC(mk1_a, iv1_a, e1, CONCAT(ad_a, hdr1))?
+]
+
+principal Alice[
+	// The sending half of the same ratchet step. A fresh DH key, a fresh
+	// encapsulation to Bob's key (KEM #2), and a fresh KEM key pair of her
+	// own for the next round: two balls in play.
+	generates ad1
+	gad1 = PUBKEY(ad1)
+	generates r2
+	ssk2, ct2 = KEM_ENCAP(ekb, r2)
+	generates ka2
+	eka2 = PUBKEY(ka2)
+	rk2_a, cks_a, nhks_a = HKDF(rk1_a, CONCAT(DH_KEX(gbd0_a, ad1), ssk2), info_root)
+	_, mk2, iv2, ehiv2 = HKDF(nil, cks_a, info_chain)
+	// Her sending header key is the "next header key" the handshake set
+	// aside for her, which is exactly the one Bob is waiting on.
+	hdr2 = AEAD_ENC(nhk_a, ehiv2, CONCAT(gad1, eka2, ct2), ad_a)
+	generates m2
+	e2 = AEAD_ENC(mk2, iv2, m2, CONCAT(ad_a, hdr2))
+]
+
+Alice -> Bob: ehiv2, hdr2, e2
+
+principal Bob[
+	hdr2_b = AEAD_DEC(nhk, ehiv2, hdr2, ad)?
+	gad1_b, eka2_b, ct2_b = SPLIT(hdr2_b)?
+	ssk2_b = KEM_DECAP(kb, ct2_b)?
+	rk2_b, ckr_b, nhkr_b = HKDF(rk1, CONCAT(DH_KEX(gad1_b, bd0), ssk2_b), info_root)
+	_, mk2_b, iv2_b, _ = HKDF(nil, ckr_b, info_chain)
+	m2_b = AEAD_DEC(mk2_b, iv2_b, e2, CONCAT(ad, hdr2))?
+]
+
+principal Bob[
+	// Bob's own ratchet step: decapsulate what arrived, encapsulate to
+	// what arrived, and generate the next key pair.
+	generates bd1
+	gbd1 = PUBKEY(bd1)
+	generates r3
+	ssk3, ct3 = KEM_ENCAP(eka2_b, r3)
+	generates kb2
+	ekb2 = PUBKEY(kb2)
+	rk3_b, cks_b3, nhks_b3 = HKDF(rk2_b, CONCAT(DH_KEX(gad1_b, bd1), ssk3), info_root)
+	_, mk3, iv3, ehiv3 = HKDF(nil, cks_b3, info_chain)
+	hdr3 = AEAD_ENC(nhks1, ehiv3, CONCAT(gbd1, ekb2, ct3), ad)
+	generates m3
+	e3 = AEAD_ENC(mk3, iv3, m3, CONCAT(ad, hdr3))
+]
+
+Bob -> Alice: ehiv3, hdr3, e3
+
+principal Alice[
+	hdr3_a = AEAD_DEC(nhkr1_a, ehiv3, hdr3, ad_a)?
+	gbd1_a, ekb2_a, ct3_a = SPLIT(hdr3_a)?
+	ssk3_a = KEM_DECAP(ka2, ct3_a)?
+	rk3_a, ckr3_a, nhkr3_a = HKDF(rk2_a, CONCAT(DH_KEX(gbd1_a, ad1), ssk3_a), info_root)
+	_, mk3_a, iv3_a, _ = HKDF(nil, ckr3_a, info_chain)
+	m3_a = AEAD_DEC(mk3_a, iv3_a, e3, CONCAT(ad_a, hdr3))?
+]
+
+phase[1]
+
+// The whole initial handshake falls: both parties' X3DH keys, the KEM key
+// the link advertised, the randomness Bob encapsulated with, and every
+// Diffie-Hellman ratchet private in the conversation. Withheld: only the
+// KEM key pairs and encapsulation randomness generated during the ratchet.
+principal Alice[leaks a1, a2, ka, ad1]
+principal Bob[leaks b1, b2, r1, bd0, bd1]
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? m3
+	authentication? Bob -> Alice: e1
+	authentication? Alice -> Bob: e2
+	authentication? Bob -> Alice: e3
+	equivalence? m2, m2_b
+]

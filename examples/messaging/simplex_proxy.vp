@@ -1,0 +1,174 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0a1 at one session and at two.
+//
+// SimpleX 2-hop onion message routing: the SMP proxy, added in SMP v8 and
+// called "private routing" in the clients. Queues live on routers the
+// RECIPIENT chose, so a sender connecting directly hands its IP address and
+// session to a party the recipient may control. Instead the sender picks
+// its own router and has it forward: PRXY to open a proxied session, PKEY
+// carrying the destination router's certificate chain and signed session
+// key, then PFWD from client to proxy and RFWD from proxy to destination.
+//
+// Three encryption layers ride the forwarded command, and the model keeps
+// all three: e2e between the communicating clients, s2r between the sending
+// client and the destination router, and p2r between the proxy and the
+// destination router. The queries test what each one is for.
+//
+//   confidentiality? mbody   HOLDS — the layering. The proxy re-encrypts and
+//     forwards a command it cannot read, so it does not learn the message,
+//     and it does not learn which destination queue the client is writing
+//     to either. That is the point of the layer: the spec notes the proxy
+//     must reuse one session with all clients for a given destination, so
+//     without s2r it would see every client's queues.
+//   authentication? Proxy -> Client: gssk   HOLDS — the anti-MITM-by-proxy
+//     measure, and it works. The client validates the certificate chain
+//     against the fingerprint carried in the router address it already has
+//     from the queue URI, then checks the session key's signature under
+//     that certificate. A proxy that substitutes its own session key fails
+//     both. Take the fingerprint check out and the proxy reads everything;
+//     that check is the whole argument.
+//   authentication? Proxy -> Router: rfwd   FAILS — the destination router
+//     accepts a forwarded transmission the proxy did not send, at one
+//     session and at two. This is not the replay the specification already
+//     concedes; it is a step below that, and it falsifies what the p2r
+//     layer is for.
+//
+// THE p2r LAYER IS AN UNAUTHENTICATED DIFFIE-HELLMAN. The destination
+// router's handshake key is signed by its certificate, so the proxy knows
+// who it is talking to. Nothing runs in the other direction: `clientHello`
+// carries a bare `clientKey` with no signature, and the destination router
+// has no way to tell one proxy from anybody else. The shared secret is
+// therefore agreed anonymously on one side, and the trace says what that
+// costs. The attacker replaces the proxy's handshake key with its own, so
+// the router derives a p2r secret the attacker knows; it then unwraps the
+// proxy's RFWD, reads the correlation ID, the client's per-command key and
+// the forwarded transmission, and re-wraps them into an RFWD of its own
+// that the router accepts and processes.
+//
+// What that is and is not. It is a real gap in a defence-in-depth layer:
+// simplex-messaging.md has the proxy "additionally encrypt the body to
+// prevent correlation by ciphertext (in case TLS is compromised)", and the
+// layer does not survive an attacker who is ACTIVE on the proxy-to-router
+// hop. It is not a refutation of security.md's claim that correlation gains
+// no efficiency "even in case of a compromised transport protocol": that
+// sentence is about an observer, and an observer cannot complete the
+// handshake in the proxy's place. Stripping the layer takes an active
+// man-in-the-middle who has already defeated TLS on that hop, which is a
+// strictly stronger adversary than the one the claim addresses. What
+// survives either way is the s2r layer, which is why the message body and
+// the destination queue stay hidden in the first two queries.
+//
+// The fix is the one the protocol already has in the other direction: sign
+// the proxy's handshake key, or require the service certificate that
+// `optClientService` added in v16, so the destination router agrees the p2r
+// secret with a party it has authenticated.
+//
+// Modelling notes. The client's per-command X25519 key is fresh per command
+// as the spec requires, and the correlation ID is its nonce. The
+// destination router's response path (RRES, PRES) is omitted; it carries
+// the same layers in reverse and adds nothing to test. The certificate
+// chain is one self-signed offline certificate rather than the two to four
+// the spec allows, since the extra links only re-sign the same key. The
+// fingerprint reaches the client guarded because it arrives inside the
+// connection link, which travels out-of-band.
+
+attacker[active]
+
+principal Router[
+	knows public tag_cmd, tag_fwd, tag_e2e
+	// The offline certificate whose fingerprint is the router's identity
+	// and appears in every address that names this router.
+	generates ca
+	gca = PUBKEY(ca)
+	fp = HASH(gca)
+	// The per-session online key, signed by the offline certificate.
+	generates ssk
+	gssk = PUBKEY(ssk)
+	certsig = SIGN(ca, gssk)
+]
+
+principal Client[
+	knows public tag_cmd, tag_fwd, tag_e2e
+]
+
+principal Proxy[
+	knows public tag_cmd, tag_fwd, tag_e2e
+]
+
+// The router's identity, as it reaches the sending client: inside the queue
+// URI, which arrived over the out-of-band connection link. The client names
+// that router to its proxy in PRXY, fingerprint included.
+Router -> Client: [fp]
+Client -> Proxy: [fp]
+
+// The proxy opens its session with the destination router.
+Router -> Proxy: gca, gssk, certsig
+
+principal Proxy[
+	// The proxy validates the destination router exactly as the client
+	// will: fingerprint, then signature. It has the fingerprint because
+	// the client named the router in PRXY.
+	_ = ASSERT(HASH(gca), fp)?
+	_ = SIGNVERIF(gca, gssk, certsig)?
+	generates pr
+	gpr = PUBKEY(pr)
+	// One signed router key serves both layers: the spec's signedRouterKey
+	// is combined with the proxy's handshake key here and with the client's
+	// per-command key below.
+	p2r = DH_KEX(gssk, pr)
+]
+
+Proxy -> Router: gpr
+
+principal Router[
+	p2r_r = DH_KEX(gpr, ssk)
+]
+
+// PKEY: the proxy hands the client what the destination router said.
+Proxy -> Client: gca, gssk, certsig
+
+principal Client[
+	// The two checks that stop a MITM by the proxy.
+	_ = ASSERT(HASH(gca), fp)?
+	_ = SIGNVERIF(gca, gssk, certsig)?
+	// A per-command key, combined with the router's session key. The
+	// correlation ID is the nonce.
+	generates ck
+	gck = PUBKEY(ck)
+	s2r = DH_KEX(gssk, ck)
+	generates corrid
+	// The SEND command's payload is already sealed for the recipient at
+	// the SMP queue's own e2e layer before any of this begins. The
+	// destination router reads the command; nobody reads the payload.
+	knows private e2ekey
+	generates mbody
+	generates n_body
+	m = AEAD_ENC(e2ekey, n_body, mbody, tag_e2e)
+	pfwd = AEAD_ENC(s2r, corrid, m, tag_cmd)
+]
+
+Client -> Proxy: gck, corrid, pfwd
+
+principal Proxy[
+	// The proxy adds its own layer so that the bytes it received and the
+	// bytes it sends cannot be correlated inside TLS.
+	generates fcorrid
+	rfwd = AEAD_ENC(p2r, fcorrid, CONCAT(corrid, gck, pfwd), tag_fwd)
+]
+
+Proxy -> Router: fcorrid, rfwd
+
+principal Router[
+	body = AEAD_DEC(p2r_r, fcorrid, rfwd, tag_fwd)?
+	corrid_r, gck_r, pfwd_r = SPLIT(body)?
+	s2r_r = DH_KEX(gck_r, ssk)
+	m_r = AEAD_DEC(s2r_r, corrid_r, pfwd_r, tag_cmd)?
+]
+
+queries[
+	confidentiality? mbody
+	authentication? Proxy -> Client: gssk
+	authentication? Proxy -> Router: rfwd
+]

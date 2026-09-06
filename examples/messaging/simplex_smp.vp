@@ -1,0 +1,216 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0a1f0 at one session and at two.
+//
+// SimpleX Messaging Protocol (SMP), version 20: the simplex queue, which is
+// the one primitive SimpleX routers offer. Alice creates a unidirectional
+// queue on a Router she chooses, hands Bob the queue address out-of-band,
+// and Bob sends into it. There are no identities anywhere in this protocol:
+// every key is fresh per queue, and the only thing that ties Bob to the
+// queue is that he got the invitation.
+//
+// The three participants map exactly onto the spec's SMP model: Alice is the
+// recipient (who creates the queue and chooses the Router), Bob is the
+// sender, and the Router is chosen and possibly controlled by Alice.
+//
+// Two layers of encryption ride on one queue, and the queries separate them:
+//
+//   confidentiality? m1                    HOLDS — the end-to-end layer.
+//     Bob seals m1 under DH_KEX(gek, sdh); ek never leaves Alice and sdh
+//     never leaves Bob, so the Router carries a ciphertext it cannot open.
+//     This is SMP's central claim: compromising the router does not
+//     compromise the messages.
+//   authentication? Router -> Alice: rmsg2 HOLDS — the router-to-recipient
+//     layer. The Router re-encrypts every body under DH_KEX(grdhk, sdhk)
+//     before delivering it, so the bytes Alice receives share no ciphertext
+//     with the bytes Bob sent. That is an anti-correlation measure, and the
+//     query says the envelope itself is Router-authentic.
+//   authentication? Bob -> Router: e1      FAILS — and this is the point of
+//     the model. Read on.
+//   freshness? m1                          HOLDS — m1 is generated per run.
+//
+// One thing this model taught its author. Written without the "K" and "_"
+// header bytes that tell a confirmation body from a message body, m1 is NOT
+// confidential: Alice decrypts whatever arrives in the confirmation slot and
+// then publishes the plaintext as the sender key in her KEY command, so
+// handing her a later message ciphertext turns her into a decryption oracle
+// and prints m1 on the wire. Restore the header byte and confidentiality
+// comes back. The wire format's cheapest-looking field is doing real work.
+//
+// THE CONFIRMATION RACE. The first message into a new queue is deliberately
+// unauthorized: the queue is not secured yet, and it is that very message
+// that carries the sender key the Router will later verify against
+// (simplex-messaging.md, "Send message": "This initial message to the queue
+// must not be authorized"). Alice takes the sender key out of it, secures
+// the queue with KEY, and from then on the Router rejects anything not
+// signed under that key. So whoever gets a confirmation in first *becomes*
+// the sender, for good. The spec says so twice: "it's a race to secure the
+// queue" (SMP procedure, step 4.3), and, in agent-protocol.md's fast duplex
+// section, "an attacker who compromised TLS and uses the sender queue ID
+// sent to the recipient to secure the queue before the sender can. This
+// attack is very hard, and accepting its risk is better than worse UX."
+//
+// This model puts the attacker exactly there. Alice's own connection to the
+// Router is guarded — TLS with the router certificate fingerprint pinned
+// from the queue URI, which is what the guards on those legs mean — while
+// Bob's leg to the Router is left open, modelling the compromised sender
+// transport the spec's note contemplates. The attacker then reads Alice's
+// per-queue key gek off the invitation, seals a confirmation of its own to
+// it, and Alice secures the queue with the attacker's sender key. From that
+// moment the Router verifies the attacker's signatures, so e1 is accepted
+// from a sender that is not Bob.
+//
+// Note what does NOT fall with it: m1 stays confidential. Winning the race
+// makes the attacker Alice's sender; it does not make it Bob's reader. This
+// is the asymmetry security.md states as "an attacker who observes Alice
+// showing an introduction message to Bob CAN impersonate Bob to Alice" and
+// "CANNOT impersonate Alice to Bob".
+//
+// Modelling notes. Queue IDs are omitted: they are addressing metadata, and
+// Verifpal's attacker sees every value that crosses a wire, so the model
+// cannot express "the attacker does not know where to send". Their secrecy
+// inside TLS is the real gate on the race, and removing them makes the
+// model say plainly what it is testing rather than pretending otherwise.
+// The deniable authenticator SMP recommends for sender commands (a NaCl
+// crypto_box over the transmission hash under DH(queue key, router session
+// key)) is written here as a signature: Verifpal has one authentication
+// primitive family, and the repudiation property the real scheme buys is
+// not something a symbolic model distinguishes. See simplex_pqdr.vp for the
+// double ratchet the agent layers on top of this queue, and simplex_proxy.vp
+// for the 2-hop onion routing that protects the sender's transport.
+
+attacker[active]
+
+principal Alice[
+	// The two header bytes the wire format uses to tell a confirmation
+	// body from a message body: "K" senderKey against "_" clientMsgBody.
+	// crypto_box has no associated data, so the real separation is that
+	// leading byte inside the padded plaintext; carrying it as AD is how
+	// the model says "this ciphertext is only valid in this context".
+	knows public tag_key, tag_msg
+	// Three key pairs, all fresh and all used for this one queue: ek to
+	// agree the end-to-end secret with whoever sends, rk to authorize her
+	// own commands to the Router, rdhk to agree the secret the Router
+	// uses to re-encrypt bodies it delivers to her.
+	generates ek
+	generates rk
+	generates rdhk
+	gek = PUBKEY(ek)
+	grk = PUBKEY(rk)
+	grdhk = PUBKEY(rdhk)
+	// NEW must be authorized under the private half of grk, proving Alice
+	// holds the key the Router is about to bind the queue to.
+	new_auth = SIGN(rk, HASH(grk, grdhk))
+]
+
+principal Bob[
+	knows public tag_key, tag_msg
+]
+
+// Alice's own transport to her Router: TLS with the router certificate
+// fingerprint pinned from the router address. The guards are that pinning.
+Alice -> Router: [grk], [grdhk], [new_auth]
+
+principal Router[
+	generates sdhk
+	gsdhk = PUBKEY(sdhk)
+	_ = SIGNVERIF(grk, HASH(grk, grdhk), new_auth)?
+	// The IDS response's DH half: the secret under which the Router will
+	// encrypt every body it hands to this recipient.
+	ss_router = DH_KEX(grdhk, sdhk)
+]
+
+Router -> Alice: [gsdhk]
+
+principal Alice[
+	ss_alice = DH_KEX(gsdhk, rdhk)
+]
+
+// The out-of-band message: the queue URI, carrying the key Bob must use to
+// agree the end-to-end secret. Guarded, because SMP requires this to travel
+// over a channel the parties already trust. Guarded is not secret, though,
+// and gek being public to a network observer is what the race turns on.
+Alice -> Bob: [gek]
+
+principal Bob[
+	// Bob's own two fresh keys: sk to authorize his sends once the queue
+	// is secured, sdh to agree the end-to-end secret with Alice.
+	generates sk
+	generates sdh
+	gsk = PUBKEY(sk)
+	gsdh = PUBKEY(sdh)
+	e2e_bob = DH_KEX(gek, sdh)
+	generates n_conf
+	// The SMP confirmation: the "K" header plus the sender key, sealed to
+	// Alice's queue key. Sent with NO authorization, by design.
+	conf = AEAD_ENC(e2e_bob, n_conf, gsk, tag_key)
+]
+
+// The sender's leg, left open: this is the compromised transport the spec's
+// own note about the confirmation race contemplates.
+Bob -> Router: gsdh, n_conf, conf
+
+principal Router[
+	generates msgid1
+	// Delivery re-encryption. msgId doubles as the nonce, exactly as the
+	// spec says: "Message ID is used as a nonce for router/recipient
+	// encryption of message bodies."
+	rmsg1 = AEAD_ENC(ss_router, msgid1, CONCAT(gsdh, n_conf, conf), nil)
+]
+
+Router -> Alice: [msgid1], [rmsg1]
+
+principal Alice[
+	body1 = AEAD_DEC(ss_alice, msgid1, rmsg1, nil)?
+	gsdh_a, n_conf_a, conf_a = SPLIT(body1)?
+	// Alice agrees the end-to-end secret against whatever key arrived.
+	// Nothing here tells her it is Bob's.
+	e2e_alice = DH_KEX(gsdh_a, ek)
+	// Domain separation is load-bearing here. Without it Alice is a
+	// decryption oracle: she publishes whatever she decrypts as the sender
+	// key in the KEY command below, so feeding her a message body where a
+	// confirmation belongs hands out its plaintext. The header byte is
+	// what stops that, and it is not decoration.
+	gsk_a = AEAD_DEC(e2e_alice, n_conf_a, conf_a, tag_key)?
+	// KEY: the queue is secured to that sender key, permanently.
+	key_auth = SIGN(rk, HASH(gsk_a))
+]
+
+Alice -> Router: [gsk_a], [key_auth]
+
+principal Router[
+	_ = SIGNVERIF(grk, HASH(gsk_a), key_auth)?
+]
+
+principal Bob[
+	generates m1
+	generates n_e1
+	e1 = AEAD_ENC(e2e_bob, n_e1, m1, tag_msg)
+	// Now that the queue is secured, SEND must carry an authorization the
+	// Router can verify under the key it was given.
+	send_auth = SIGN(sk, HASH(n_e1, e1))
+]
+
+Bob -> Router: n_e1, e1, send_auth
+
+principal Router[
+	_ = SIGNVERIF(gsk_a, HASH(n_e1, e1), send_auth)?
+	generates msgid2
+	rmsg2 = AEAD_ENC(ss_router, msgid2, CONCAT(n_e1, e1), nil)
+]
+
+Router -> Alice: [msgid2], [rmsg2]
+
+principal Alice[
+	body2 = AEAD_DEC(ss_alice, msgid2, rmsg2, nil)?
+	n_e1_a, e1_a = SPLIT(body2)?
+	m1_a = AEAD_DEC(e2e_alice, n_e1_a, e1_a, tag_msg)?
+]
+
+queries[
+	confidentiality? m1
+	authentication? Router -> Alice: rmsg2
+	authentication? Bob -> Router: e1
+	freshness? m1
+]

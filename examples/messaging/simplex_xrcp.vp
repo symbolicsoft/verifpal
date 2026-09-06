@@ -1,0 +1,142 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0a0 at one session and at two.
+//
+// SimpleX Remote Control Protocol (XRCP), from xrcp.md: a desktop
+// "controller" drives a phone "host" that holds the chat database, so the
+// host's UI locks and the controller proxies commands into its core. The
+// interesting part is that the two devices are on the same local network
+// with no server between them, so all the trust has to be built from an
+// out-of-band invitation and a code the user reads off both screens.
+//
+// The key agreement is a hybrid, and it is asymmetric in an unusual way.
+// The controller announces a session X25519 key, a session Ed25519 key and
+// its long-term Ed25519 identity, signing the announcement under both
+// signature keys. The host replies with its own X25519 key in the clear and
+// its KEM encapsulation key encrypted under the Diffie-Hellman secret. The
+// controller encapsulates and the session secret becomes SHA3-256 of the DH
+// secret and the KEM secret together; every later message key comes out of
+// a chain seeded from it. So the KEM key never has to fit in a QR code, and
+// the session is post-quantum from the second flight onward.
+//
+//   confidentiality? cmd  HOLDS — the command the controller sends is
+//     sealed under a chain key descending from both the DH and the KEM
+//     agreement, and neither half is available to a network attacker.
+//   authentication? Host -> Controller: hello_h  HOLDS — but only because
+//     of the session code, and that is the point of the query. xrcp.md's
+//     threat model concedes that an attacker who observed the out-of-band
+//     announcement "can connect to controller instead of the host" and
+//     "present incorrect data to the controller"; the controller runs the
+//     TCP server, so anyone who saw the invitation can reach it. Nothing in
+//     the cryptography stops that. What stops it is the user comparing a
+//     digest of the TLS channel binding on the two screens before the host
+//     is unlocked. That comparison is the guard on `seccode` below, and it
+//     is load-bearing, and measurably so: delete the ASSERT and the model
+//     reads c1a1a0, the attacker standing in for the host and reading the
+//     command. The whole protocol rests on a human comparing two strings.
+//   authentication? Controller -> Host: enc_cmd  HOLDS — every command
+//     carries two signatures, session and long-term, over the channel
+//     binding as well as the body, so a command cannot be lifted from one
+//     session into another.
+//
+// Modelling notes. The session code is a digest of the tls-unique channel
+// binding, which Verifpal cannot represent directly; it is written here as
+// a digest over the two session public keys, which is what the binding
+// commits to for the purposes of this analysis, and it travels guarded
+// because it travels through the user rather than the network. The
+// long-term controller identity is guarded for the same reason: xrcp.md
+// requires the first session's invitation to be out-of-band, and every
+// later announcement repeats the same long-term key. Multicast
+// announcements for later sessions, the certificate chains, and the counter
+// and attachment framing of the command encoding are omitted; they carry no
+// secrets this analysis can use.
+
+attacker[active]
+
+principal Controller[
+	knows public info_init, info_chain, tag_hello, tag_cmd
+	// The long-term identity, established in the first session and
+	// repeated in every announcement afterwards.
+	knows private ltsk
+	gltsk = PUBKEY(ltsk)
+	// Per-session signature and key-agreement keys.
+	generates ssk
+	gssk = PUBKEY(ssk)
+	generates cdh
+	gcdh = PUBKEY(cdh)
+	ann = CONCAT(gssk, gcdh)
+	sig_s = SIGN(ssk, ann)
+	sig_l = SIGN(ltsk, ann)
+]
+
+principal Host[
+	knows public info_init, info_chain, tag_hello, tag_cmd
+]
+
+// The long-term identity, pinned out-of-band at the first pairing.
+Controller -> Host: [gltsk]
+
+// The announcement. Signed twice, so the session keys are bound to the
+// identity the host already pinned.
+Controller -> Host: gssk, gcdh, sig_s, sig_l
+
+principal Host[
+	ann_h = CONCAT(gssk, gcdh)
+	_ = SIGNVERIF(gssk, ann_h, sig_s)?
+	_ = SIGNVERIF(gltsk, ann_h, sig_l)?
+	generates hdh
+	ghdh = PUBKEY(hdh)
+	dhs = DH_KEX(gcdh, hdh)
+	// The KEM encapsulation key is too large for a QR code, so it travels
+	// here instead, encrypted under the DH secret just agreed.
+	generates kh
+	ekh = PUBKEY(kh)
+	generates n_hh
+	hello_h = AEAD_ENC(dhs, n_hh, ekh, tag_hello)
+	// The session security code, shown on the host's screen.
+	seccode = HASH(ghdh, gcdh)
+]
+
+Host -> Controller: ghdh, n_hh, hello_h
+
+// The user reads the code off the host and compares it with the
+// controller's. This message is the user, not the network.
+Host -> Controller: [seccode]
+
+principal Controller[
+	// The comparison. Everything below depends on it.
+	_ = ASSERT(HASH(ghdh, gcdh), seccode)?
+	dhs_c = DH_KEX(ghdh, cdh)
+	ekh_c = AEAD_DEC(dhs_c, n_hh, hello_h, tag_hello)?
+	generates r
+	kss, kct = KEM_ENCAP(ekh_c, r)
+	// The hybrid secret, and the two chain keys it seeds.
+	sess_c = HASH(dhs_c, kss)
+	snd_c, rcv_c = HKDF(nil, sess_c, info_init)
+	_, mk_c, nonce_c = HKDF(nil, snd_c, info_chain)
+	generates cmd
+	enc_cmd = AEAD_ENC(mk_c, nonce_c, cmd, tag_cmd)
+	// Commands are signed after encryption, under both keys, over the
+	// channel binding as well as the body.
+	sig_cmd_s = SIGN(ssk, HASH(seccode, enc_cmd))
+	sig_cmd_l = SIGN(ltsk, HASH(seccode, enc_cmd))
+]
+
+Controller -> Host: kct, enc_cmd, sig_cmd_s, sig_cmd_l
+
+principal Host[
+	kss_h = KEM_DECAP(kh, kct)?
+	sess_h = HASH(dhs, kss_h)
+	snd_h, rcv_h = HKDF(nil, sess_h, info_init)
+	_, mk_h, nonce_h = HKDF(nil, snd_h, info_chain)
+	_ = SIGNVERIF(gssk, HASH(seccode, enc_cmd), sig_cmd_s)?
+	_ = SIGNVERIF(gltsk, HASH(seccode, enc_cmd), sig_cmd_l)?
+	cmd_h = AEAD_DEC(mk_h, nonce_h, enc_cmd, tag_cmd)?
+]
+
+queries[
+	confidentiality? cmd
+	authentication? Host -> Controller: hello_h
+	authentication? Controller -> Host: enc_cmd
+]

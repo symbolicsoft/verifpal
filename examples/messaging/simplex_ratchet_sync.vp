@@ -1,0 +1,252 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c1a1 at one session and at two.
+//
+// SimpleX ratchet renegotiation (the agent protocol's `agentRatchetKey`
+// envelope, RSYNC to the client application), modelled against the
+// reference implementation. This model exists because of what the code
+// does, not because of what the specification says, and the two disagree.
+//
+// THE CLAIM UNDER TEST. agent-protocol.md's threat model states that a
+// destination router "cannot compromise end-to-end encryption even with
+// full access to the per-queue NaCl DH secret", and that an attacker
+// holding a client's decrypted database "cannot decrypt future messages
+// once the client application resumes communication and the double ratchet
+// completes a new ratchet step, provided PQDR is active". Both claims rest
+// on the double ratchet being independent of the SMP layer beneath it.
+//
+// WHAT THE CODE DOES. In Agent.hs, a received SMP client message is opened
+// with `decryptClientMessage e2eDh` — the per-queue crypto_box secret — and
+// an `AgentRatchetKey` envelope is dispatched straight to `newRatchetKey`
+// (Agent.hs:3196). `newRatchetKey` (Agent.hs:3638), for a connection in the
+// ordinary healthy state RSOk, calls `sendReplyKey`: it generates fresh
+// X3DH parameters, sends them to the peer, runs pqX3dh against the
+// parameters that just arrived, and calls `recreateRatchet`, which deletes
+// the existing ratchet and installs the new one. There is no
+// ratchet-level authentication on that envelope — it is the message that
+// REPLACES the ratchet, so it cannot be inside it — and no user
+// confirmation. The only replay guard is `ratchetExists`, a SHA-256 of the
+// offered key pair, which any freshly generated attacker key pair passes.
+//
+// So the double ratchet's forward secrecy and break-in recovery are capped
+// by the per-queue Diffie-Hellman secret, which is agreed once when the
+// queue is created, is never ratcheted, is never rotated for the life of
+// the queue, and sits in the client database. Compromise it once, at any
+// time, and every future ratchet can be reset to one the attacker chose.
+//
+// THE MODEL. Alice creates the connection; the link carries both the SMP
+// queue key gek and the ratchet parameters, as it does in reality. Bob
+// joins, agrees the per-queue secret DH_KEX(gek, sdh), runs the
+// post-quantum X3DH and sends the first ratchet message. Phase 1 leaks one
+// value: Alice's per-queue key ek. Nothing else. No ratchet state, no X3DH
+// key, no KEM key. Then Bob sends a routine renegotiation and the attacker
+// replaces it.
+//
+//   confidentiality? m1  HOLDS — Bob's message, under the original ratchet.
+//     Holding the per-queue secret strips the SMP envelope and reveals a
+//     ratchet ciphertext the attacker still cannot open. This is the
+//     property the design intends.
+//   confidentiality? m2  HOLDS — and this is the counterweight that makes
+//     the next line mean something. Alice sends m2 AFTER the leak, still
+//     under the original ratchet, and it is safe. The leak on its own buys
+//     the attacker nothing against the end-to-end layer.
+//   confidentiality? m3  FAILS — Alice sends m3 after processing the
+//     forged renegotiation. Her ratchet is now one the attacker chose the
+//     other half of, so the message is in the clear to it. Nothing was
+//     broken cryptographically: the ratchet was replaced through a
+//     supported code path, using a key the design treats as expendable.
+//   authentication? Bob -> Alice: rkey  FAILS — Alice accepts and acts on
+//     a renegotiation Bob did not send.
+//
+// WHAT THE MODEL COMPRESSES. `newRatchetKey` ends in `notifyAgreed`, which
+// leaves the connection in RSAgreed, and `ratchetSyncSendProhibited`
+// (Store.hs:478) covers RSAgreed, so the victim will not send anything yet.
+// The state clears in the AgentMsgEnvelope path, where `resetRatchetSync`
+// returns it to RSOk once a message decrypts under the new ratchet. So the
+// attacker has to send one message of its own before its victim will speak,
+// which it can do, since it chose half the new key agreement and receives
+// the other half in the victim's own reply. The model omits that step: it
+// has Alice send m3 directly. The verdict is about what the attacker can
+// read, and that is unchanged, but the real sequence is one flight longer.
+// Note also that the agent emits an RSYNC event to the client application
+// at RSAgreed, so the attack is not silent at the API; whether any client
+// surfaces or gates on it is outside this repository.
+//
+// TWO DETAILS FROM THE IMPLEMENTATION WORTH KNOWING. First, the
+// renegotiated key agreement is Diffie-Hellman ONLY. `sendReplyKey` calls
+// `generateRcvE2EParams`, which PROPOSES an encapsulation key without a
+// ciphertext, and both `pqX3dhSnd` and `pqX3dhRcv` yield `kemAccepted =
+// Nothing` when the KEM parameters on both sides are proposals. So the
+// re-established root key carries no post-quantum secret at all — the KEM
+// only re-enters at the next DH ratchet step. That is written out below,
+// and it means a forced renegotiation also strips the connection's
+// post-quantum protection at the moment of the reset.
+//
+// Second, `initRatchet` picks which side initialises the sending ratchet by
+// comparing SHA-256 of the two offered key pairs. The attacker chooses its
+// own key pair, so it chooses the branch its victim takes. This model puts
+// Alice on the `otherwise` branch, where she initialises a SENDING ratchet
+// and therefore speaks first — which is what turns the takeover into
+// plaintext rather than merely a denial of service.
+//
+// Modelling notes. The SMP envelope around ordinary ratchet messages is
+// omitted: the attacker holds its key in phase 1, so wrapping them changes
+// nothing and costs the search a great deal. It is kept exactly where it is
+// load-bearing, around the renegotiation, because there it is the ONLY
+// protection. Message counters, the skipped-key store and the previous
+// message hash chain are omitted; the hash chain guards agent messages
+// inside the ratchet and does not reach this envelope, which is handled
+// before ratchet decryption. See simplex_pqdr.vp for the ratchet this
+// attack resets and simplex_smp.vp for the queue layer that agrees ek.
+
+attacker[active]
+
+principal Alice[
+	knows public info_x3dh, info_root, info_chain
+	// The envelope type bytes: "C" confirmation, "M" message, "R" ratchet
+	// key. Carried as associated data, which is what the type byte does.
+	knows public tag_rkey
+	// The SMP queue's e2e key, the `dh=` parameter of the queue URI. One
+	// key pair, for the life of the queue, with no ratcheting of any kind.
+	generates ek
+	gek = PUBKEY(ek)
+	// The ratchet parameters, the `e2e=` parameter of the same link.
+	generates a1, a2, ka
+	ga1 = PUBKEY(a1)
+	ga2 = PUBKEY(a2)
+	eka = PUBKEY(ka)
+]
+
+principal Bob[
+	knows public info_x3dh, info_root, info_chain
+	knows public tag_rkey
+]
+
+// The connection link, out-of-band. One link, both layers' key material.
+Alice -> Bob: [gek], [ga1], [ga2], [eka]
+
+principal Bob[
+	generates sdh
+	gsdh = PUBKEY(sdh)
+	// The per-queue secret. This one value is the whole subject of the
+	// model: static, unratcheted, and in both parties' databases.
+	e2edh = DH_KEX(gek, sdh)
+	generates b1, b2, r1
+	gb1 = PUBKEY(b1)
+	gb2 = PUBKEY(b2)
+	ssk1, ct1 = KEM_ENCAP(eka, r1)
+	dh1 = DH_KEX(ga1, b2)
+	dh2 = DH_KEX(ga2, b1)
+	dh3 = DH_KEX(ga2, b2)
+	hk, nhk, rk0 = HKDF(nil, CONCAT(dh1, dh2, dh3, ssk1), info_x3dh)
+	ad = CONCAT(gb1, ga1)
+	generates bd0
+	gbd0 = PUBKEY(bd0)
+	rk1, cks1, nhks1 = HKDF(rk0, CONCAT(DH_KEX(ga2, bd0), ssk1), info_root)
+	generates kb
+	ekb = PUBKEY(kb)
+	_, mk1, iv1, ehiv1 = HKDF(nil, cks1, info_chain)
+	hdr1 = AEAD_ENC(hk, ehiv1, gbd0, ad)
+	generates m1
+	e1 = AEAD_ENC(mk1, iv1, m1, CONCAT(ad, hdr1))
+]
+
+// Bob's confirmation. The key agreement half is guarded here on purpose:
+// this model assumes the connection was established perfectly, so that the
+// only thing on trial is the renegotiation. simplex_smp.vp is where the
+// confirmation's own authenticity is put to the test.
+Bob -> Alice: [gsdh], [gb1], [gb2], [ct1], [ekb], ehiv1, hdr1, e1
+
+principal Alice[
+	e2edh_a = DH_KEX(gsdh, ek)
+	ssk1_a = KEM_DECAP(ka, ct1)?
+	dh1_a = DH_KEX(gb2, a1)
+	dh2_a = DH_KEX(gb1, a2)
+	dh3_a = DH_KEX(gb2, a2)
+	hk_a, nhk_a, rk0_a = HKDF(nil, CONCAT(dh1_a, dh2_a, dh3_a, ssk1_a), info_x3dh)
+	ad_a = CONCAT(gb1, ga1)
+	gbd0_a = AEAD_DEC(hk_a, ehiv1, hdr1, ad_a)?
+	rk1_a, ckr1_a, nhkr1_a = HKDF(rk0_a, CONCAT(DH_KEX(gbd0_a, a2), ssk1_a), info_root)
+	_, mk1_a, iv1_a, _ = HKDF(nil, ckr1_a, info_chain)
+	m1_a = AEAD_DEC(mk1_a, iv1_a, e1, CONCAT(ad_a, hdr1))?
+]
+
+phase[1]
+
+// One value. A stolen database, a compromised device, or exactly the
+// adversary agent-protocol.md names when it says a destination router
+// "cannot compromise end-to-end encryption even with full access to the
+// per-queue NaCl DH secret".
+principal Alice[leaks ek]
+
+principal Alice[
+	// Alice's own ratchet step and a message under the ORIGINAL ratchet,
+	// sent after the leak. The counterweight: this one is safe.
+	generates ad1
+	gad1 = PUBKEY(ad1)
+	generates r2
+	ssk2, ct2 = KEM_ENCAP(ekb, r2)
+	generates ka2
+	eka2 = PUBKEY(ka2)
+	rk2_a, cks_a, nhks_a = HKDF(rk1_a, CONCAT(DH_KEX(gbd0_a, ad1), ssk2), info_root)
+	_, mk2, iv2, ehiv2 = HKDF(nil, cks_a, info_chain)
+	hdr2 = AEAD_ENC(nhk_a, ehiv2, CONCAT(gad1, eka2, ct2), ad_a)
+	generates m2
+	e2 = AEAD_ENC(mk2, iv2, m2, CONCAT(ad_a, hdr2))
+]
+
+Alice -> Bob: ehiv2, hdr2, e2
+
+principal Bob[
+	// A routine re-synchronisation. Bob offers fresh X3DH parameters in an
+	// agentRatchetKey envelope, whose only protection is the per-queue
+	// secret. Note the KEM key is PROPOSED: no ciphertext accompanies it,
+	// so whatever root key results carries no post-quantum secret.
+	generates c1, c2, kc
+	gc1 = PUBKEY(c1)
+	gc2 = PUBKEY(c2)
+	ekc = PUBKEY(kc)
+	generates n_rk
+	rkey = AEAD_ENC(e2edh, n_rk, CONCAT(gc1, gc2, ekc), tag_rkey)
+]
+
+Bob -> Alice: n_rk, rkey
+
+principal Alice[
+	// newRatchetKey, RSOk branch. Alice opens the envelope with the one
+	// key the attacker now holds, and acts on whatever is inside it.
+	rkbody = AEAD_DEC(e2edh_a, n_rk, rkey, tag_rkey)?
+	gc1_a, gc2_a, ekc_a = SPLIT(rkbody)?
+	// sendReplyKey: fresh parameters of her own, sent to the peer.
+	generates d1, d2, kd
+	gd1 = PUBKEY(d1)
+	gd2 = PUBKEY(d2)
+	ekd = PUBKEY(kd)
+	// pqX3dhSnd. Both sides proposed a KEM key and neither sent a
+	// ciphertext, so kemAccepted is Nothing and this is three DH legs and
+	// nothing else. The post-quantum agreement is gone at the reset.
+	ndh1 = DH_KEX(gc1_a, d2)
+	ndh2 = DH_KEX(gc2_a, d1)
+	ndh3 = DH_KEX(gc2_a, d2)
+	rhk, rnhk, nrk0 = HKDF(nil, CONCAT(ndh1, ndh2, ndh3), info_x3dh)
+	nad = CONCAT(gd1, gc1_a)
+	// initSndRatchet against the peer's second key. rootKdf with no KEM
+	// secret is the bare Diffie-Hellman output.
+	generates ad0
+	gad0 = PUBKEY(ad0)
+	nrk1, ncks, nnhks = HKDF(nrk0, DH_KEX(gc2_a, ad0), info_root)
+	_, nmk1, niv1, nehiv1 = HKDF(nil, ncks, info_chain)
+	nhdr1 = AEAD_ENC(rhk, nehiv1, gad0, nad)
+	generates m3
+	e3 = AEAD_ENC(nmk1, niv1, m3, CONCAT(nad, nhdr1))
+]
+
+Alice -> Bob: gd1, gd2, ekd, nehiv1, nhdr1, e3
+
+queries[
+	confidentiality? m1
+	confidentiality? m2
+	confidentiality? m3
+	authentication? Bob -> Alice: rkey
+]

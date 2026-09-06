@@ -1,0 +1,115 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0 at one session and at two.
+//
+// SimpleX push notifications, from push-notifications.md and the NKEY / NID
+// / NSUB / NMSG commands of simplex-messaging.md. iOS forbids background
+// services, so message arrival has to reach the device through Apple. The
+// design's problem is that this inserts two parties nobody trusts — a
+// SimpleX notification router and Apple's push service — into a path that
+// must leak nothing.
+//
+// The answer is a separate DH agreement with a separate identifier. The
+// recipient sends NKEY with a notifier verification key and a fresh
+// Curve25519 key; the SMP router answers NID with a notifier ID unrelated
+// to the queue's recipient and sender IDs, and its own Curve25519 key. The
+// secret those two agree encrypts the notification metadata, and it is
+// agreed between the SMP router and the RECIPIENT'S DEVICE — the
+// notification router in between only relays a blob.
+//
+//   confidentiality? msgid  HOLDS — the message ID inside the notification
+//     is end-to-end encrypted between the SMP router and the device, so
+//     the notification router and Apple carry it without reading it. This
+//     is what lets push-notifications.md claim the notification router
+//     "cannot learn queue addresses for receiving or sending messages".
+//   confidentiality? m      HOLDS — the message body never enters this
+//     path at all. A notification carries a message ID and a timestamp and
+//     nothing else, which is why the push provider learns only that a
+//     notification happened.
+//   authentication? NtfRouter -> Device: nmsg  HOLDS — the device rejects
+//     any notification blob the SMP router did not seal.
+//
+// What the model does NOT contradict, and worth stating plainly, is that
+// the client hands the notification router the PRIVATE notifier key: the
+// SNEW command's `notifierKey` is "private key used to authorize requests
+// to subscribe to message notifications". That is deliberate, since the
+// notification router must issue NSUB on the client's behalf, and it is why
+// the threat model concedes that a notification router learns how many
+// queues a user receives from and can undetectably drop notifications. It
+// is also why a second subscriber silently displaces the first. None of
+// that is a confidentiality break, and the queries above are the part that
+// has to hold for the design to be worth having.
+//
+// Modelling notes. The client-to-SMP-router legs are guarded: they run
+// inside TLS with the router certificate pinned. The notification router's
+// relay leg to the device is left open, since that party is not trusted.
+// APNS is not modelled as a principal; it is a relay with strictly less
+// access than the notification router already has.
+
+attacker[active]
+
+principal Device[
+	knows public tag_ntf
+	// The notifier verification key, and the DH key that will protect the
+	// notification metadata. Neither is related to the queue's own keys.
+	generates nk
+	gnk = PUBKEY(nk)
+	generates rntf
+	grntf = PUBKEY(rntf)
+]
+
+principal NtfRouter[
+	knows public tag_ntf
+]
+
+// NKEY, inside TLS with the router certificate pinned.
+Device -> Router: [gnk], [grntf]
+
+principal Router[
+	knows public tag_ntf
+	generates sntf
+	gsntf = PUBKEY(sntf)
+	// The notifier ID: a third identifier for this queue, unrelated to the
+	// recipient and sender IDs the router already holds.
+	generates ntfid
+	nss = DH_KEX(grntf, sntf)
+]
+
+// NID.
+Router -> Device: [gsntf], [ntfid]
+
+principal Device[
+	nss_d = DH_KEX(gsntf, rntf)
+]
+
+principal Router[
+	// A message arrives in the queue. Its body goes to the recipient over
+	// SMP as usual; only its ID and timestamp go down the notification
+	// path.
+	generates m
+	generates msgid
+	generates ts
+	generates n_nmsg
+	nmsg = AEAD_ENC(nss, n_nmsg, CONCAT(msgid, ts), tag_ntf)
+]
+
+// NMSG to the notification router, which has subscribed with the notifier
+// key the device registered with it.
+Router -> NtfRouter: [n_nmsg], [nmsg]
+
+// The push path: notification router to device, by way of a provider. Left
+// open, because neither party is trusted.
+NtfRouter -> Device: n_nmsg, nmsg
+
+principal Device[
+	meta = AEAD_DEC(nss_d, n_nmsg, nmsg, tag_ntf)?
+	msgid_d, ts_d = SPLIT(meta)?
+	_ = HASH(msgid_d, ts_d)
+]
+
+queries[
+	confidentiality? msgid
+	confidentiality? m
+	authentication? NtfRouter -> Device: nmsg
+]

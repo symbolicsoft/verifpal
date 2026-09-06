@@ -11,13 +11,21 @@ const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 17] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 25] = [
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
 	"examples/transport-layer/firefox-sync.vp",
 	"examples/contact-tracing/lc-dp-3t.vp",
 	"examples/contact-tracing/cen.vp",
+	"examples/messaging/simplex_smp.vp",
+	"examples/messaging/simplex_xrcp.vp",
+	"examples/messaging/simplex_pqdr.vp",
+	"examples/messaging/simplex_ratchet_sync.vp",
+	"examples/messaging/simplex_shortlink.vp",
+	"examples/messaging/simplex_proxy.vp",
+	"examples/messaging/simplex_xftp.vp",
+	"examples/messaging/simplex_ntf.vp",
 	"examples/messaging/pqxdh-weak.vp",
 	"examples/messaging/pqxdh.vp",
 	"examples/messaging/scuttlebutt.vp",
@@ -1352,6 +1360,123 @@ fn test_userbase() {
 #[test]
 fn test_signal() {
 	run_model_at("examples/messaging/signal.vp", "signal.vp", "c0a0c0a0c0a0");
+}
+#[test]
+fn test_cap_forgeable_still_binds_its_key() {
+	run_model("cap_forgeable_still_binds_its_key.vp", "a1");
+	run_model_sessions("cap_forgeable_still_binds_its_key.vp", 1, "a1");
+}
+#[test]
+fn test_simplex_xrcp() {
+	run_model_at(
+		"examples/messaging/simplex_xrcp.vp",
+		"simplex_xrcp.vp",
+		"c0a0a0",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_xrcp.vp",
+		"simplex_xrcp.vp",
+		1,
+		"c0a0a0",
+	);
+}
+#[test]
+fn test_simplex_smp() {
+	run_model_at(
+		"examples/messaging/simplex_smp.vp",
+		"simplex_smp.vp",
+		"c0a0a1f0",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_smp.vp",
+		"simplex_smp.vp",
+		1,
+		"c0a0a1f0",
+	);
+}
+#[test]
+fn test_simplex_pqdr() {
+	run_model_at(
+		"examples/messaging/simplex_pqdr.vp",
+		"simplex_pqdr.vp",
+		"c1c0c0a0a0a0e0",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_pqdr.vp",
+		"simplex_pqdr.vp",
+		1,
+		"c1c0c0a0a0a0e0",
+	);
+}
+#[test]
+fn test_simplex_ratchet_sync() {
+	run_model_at(
+		"examples/messaging/simplex_ratchet_sync.vp",
+		"simplex_ratchet_sync.vp",
+		"c0c0c1a1",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_ratchet_sync.vp",
+		"simplex_ratchet_sync.vp",
+		1,
+		"c0c0c1a1",
+	);
+}
+#[test]
+fn test_simplex_shortlink() {
+	run_model_at(
+		"examples/messaging/simplex_shortlink.vp",
+		"simplex_shortlink.vp",
+		"a1e0e1",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_shortlink.vp",
+		"simplex_shortlink.vp",
+		1,
+		"a1e0e1",
+	);
+}
+#[test]
+fn test_simplex_proxy() {
+	run_model_at(
+		"examples/messaging/simplex_proxy.vp",
+		"simplex_proxy.vp",
+		"c0a0a1",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_proxy.vp",
+		"simplex_proxy.vp",
+		1,
+		"c0a0a1",
+	);
+}
+#[test]
+fn test_simplex_xftp() {
+	run_model_at(
+		"examples/messaging/simplex_xftp.vp",
+		"simplex_xftp.vp",
+		"c0a1e0",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_xftp.vp",
+		"simplex_xftp.vp",
+		1,
+		"c0a1e0",
+	);
+}
+#[test]
+fn test_simplex_ntf() {
+	run_model_at(
+		"examples/messaging/simplex_ntf.vp",
+		"simplex_ntf.vp",
+		"c0c0a0",
+	);
+	run_model_sessions_at(
+		"examples/messaging/simplex_ntf.vp",
+		"simplex_ntf.vp",
+		1,
+		"c0c0a0",
+	);
 }
 #[test]
 fn test_scuttlebutt() {

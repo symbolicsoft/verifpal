@@ -1,0 +1,164 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1e0e1 at one session and at two.
+//
+// SimpleX short links: the compact form of a connection link, where the
+// connection data lives on the SMP router and the URI fragment carries only
+// the key that opens it. Modelled from agent-protocol.md's "Short links"
+// section and Crypto/ShortLink.hs.
+//
+// The construction is a commitment. The fixed link data — the agent version
+// range, an Ed25519 root key, and the connection request — is hashed to
+// give the link key, `linkKey = SHA3-256(fixedData)`; the link ID the router
+// files it under and the key that encrypts it are both HKDF outputs of that
+// link key. So the router stores a blob it cannot read, filed under an
+// identifier it cannot invert, and the client that resolves the link
+// re-hashes what comes back and refuses it unless it hashes to the link key
+// it already holds. Substituting the fixed data is hopeless: change one
+// byte and the hash no longer matches. That is a good design and this model
+// confirms it.
+//
+// THE USER DATA IS NOT COMMITTED TO. Alongside the fixed data the router
+// stores `encUserData`, which for a contact address carries the `direct`
+// flag, the OWNERS LIST, the relay list and the profile. It is encrypted
+// under the same key, and it is signed — by the root key, or by one of the
+// owner keys the list itself names. But it is not hashed into the link key,
+// it carries no version number, no counter and no timestamp, and nothing
+// binds it to any particular update. `LSET` overwrites it whenever the
+// owner changes a profile or an owners list, and every blob the owner ever
+// signed stays valid forever.
+//
+// So a router that keeps the old blobs can serve any of them, and the
+// resolving client's checks all pass. The verdicts say exactly that:
+//
+//   authentication? Router -> Joiner: sig_ud2   FAILS — the Joiner accepts,
+//     and verifies, a user-data signature the Router did not send in this
+//     exchange. A garbage signature could not witness this: a use inside a
+//     failed check does not count as acceptance, so the only thing that
+//     reaches the verdict is a signature the Owner really made, over an
+//     older version.
+//   equivalence? connreq, connreq_j             HOLDS — the connection
+//     request the Joiner walks away with is the one the Owner published.
+//     The hash commitment does its job, and this is the counterweight that
+//     makes the next line a statement about the user data specifically.
+//   equivalence? current_owners, seen_owners    FAILS — the owners list the
+//     Joiner ends up trusting is not the current one. It is the previous
+//     version, replayed, and it verified.
+//
+// WHY IT MATTERS. The owners list is an authorisation list: `decryptLinkData`
+// accepts user data signed by the root key OR by any owner it names, and
+// `validateLinkOwners` walks a chain of `authOwnerSig` signatures rooted at
+// the root key. There is no revocation in that chain. Removing an owner is
+// done by publishing a user-data blob that no longer names them — which is
+// precisely the update a rollback undoes. A router that serves the previous
+// blob restores a removed owner's authority over the link, and, because
+// that owner can then sign user data of their own, over everything the link
+// says thereafter. The same rollback restores a stale `direct` flag or a
+// previously advertised relay list.
+//
+// The fix is small and the asymmetry with the fixed data suggests it: give
+// the signed user data a monotonic version, and have the resolving client
+// refuse a version below one it has already seen for this link. Nothing
+// else in the construction needs to change.
+//
+// Modelling notes. The Ed25519 signature over each blob travels beside its
+// ciphertext here rather than inside it; in the implementation it is the
+// first field of the padded plaintext. Nothing in the analysis turns on
+// which, because the encryption key is not what protects integrity. The
+// Owner's LSET legs to the Router are guarded: they run inside TLS with the
+// router certificate pinned, and an attacker rewriting an upload is a
+// different and less interesting question. The LGET answer is left open,
+// because an untrusted router choosing which of the blobs it holds to serve
+// is the whole subject. Verifpal's attacker reads every value that crosses
+// a wire, so the model cannot also test the router's blindness to the link
+// data; that property rests on the link key staying in a URI fragment the
+// router never receives, which the guard here stands in for.
+
+attacker[active]
+
+principal Owner[
+	// The HKDF info string, verbatim, and the two blob type tags.
+	knows public info_contact, tag_fd, tag_ud
+	generates rootsk
+	rootpk = PUBKEY(rootsk)
+	// The connection request: the queue URI and ratchet parameters that
+	// the link exists to deliver.
+	knows private connreq
+	// Fixed link data, and the link key committing to it.
+	fd = CONCAT(rootpk, connreq)
+	linkkey = HASH(fd)
+	// contactShortLinkKdf: 56 bytes split into a 24-byte link ID and a
+	// 32-byte secret_box key.
+	linkid, enckey = HKDF(nil, linkkey, info_contact)
+	sig_fd = SIGN(rootsk, fd)
+	generates n_fd
+	enc_fd = AEAD_ENC(enckey, n_fd, fd, tag_fd)
+	// User data, version one: the root key and a second authorised owner.
+	generates ownersk_b
+	ownerpk_b = PUBKEY(ownersk_b)
+	ud1 = CONCAT(rootpk, ownerpk_b)
+	sig_ud1 = SIGN(rootsk, ud1)
+	generates n_ud1
+	enc_ud1 = AEAD_ENC(enckey, n_ud1, ud1, tag_ud)
+]
+
+// The router stores the two blobs and hands them back on request. It
+// never holds a key that opens either of them.
+principal Router[]
+
+principal Joiner[
+	knows public info_contact, tag_fd, tag_ud
+]
+
+// LSET, inside TLS with the router certificate pinned.
+Owner -> Router: [linkid], [n_fd], [enc_fd], [sig_fd], [n_ud1], [enc_ud1], [sig_ud1]
+
+principal Owner[
+	// LSET again, later: the second owner is removed. This is what
+	// revocation looks like — a new blob that no longer names them.
+	ud2 = CONCAT(rootpk, nil)
+	sig_ud2 = SIGN(rootsk, ud2)
+	generates n_ud2
+	enc_ud2 = AEAD_ENC(enckey, n_ud2, ud2, tag_ud)
+	// The authorisation the link currently carries.
+	current_owners = HASH(ud2)
+]
+
+Owner -> Router: [n_ud2], [enc_ud2], [sig_ud2]
+
+// The short link itself, out-of-band as a URI or a QR code. The fragment
+// after the '#' never reaches the router.
+Owner -> Joiner: [linkkey]
+
+principal Joiner[
+	linkid_j, enckey_j = HKDF(nil, linkkey, info_contact)
+]
+
+// The LGET answer. The router serves what it has; nothing in the protocol
+// says which version that must be.
+Router -> Joiner: n_fd, enc_fd, sig_fd, n_ud2, enc_ud2, sig_ud2
+
+principal Joiner[
+	fd_j = AEAD_DEC(enckey_j, n_fd, enc_fd, tag_fd)?
+	// The commitment check: this is what makes the fixed data immovable.
+	_ = ASSERT(HASH(fd_j), linkkey)?
+	rootpk_j, connreq_j = SPLIT(fd_j)?
+	_ = SIGNVERIF(rootpk_j, fd_j, sig_fd)?
+	// The user data has a signature and nothing else. Every check below
+	// passes on any blob the owner ever published.
+	ud_j = AEAD_DEC(enckey_j, n_ud2, enc_ud2, tag_ud)?
+	_ = SIGNVERIF(rootpk_j, ud_j, sig_ud2)?
+	// Everything queried below is computed only once every check above has
+	// passed, so a substitution that merely halts the Joiner proves
+	// nothing: only a blob that verifies can reach these.
+	owner_root_j, owner_b_j = SPLIT(ud_j)?
+	seen_owners = HASH(ud_j)
+	_ = HASH(owner_root_j, owner_b_j)
+]
+
+queries[
+	authentication? Router -> Joiner: sig_ud2
+	equivalence? connreq, connreq_j
+	equivalence? current_owners, seen_owners
+]
