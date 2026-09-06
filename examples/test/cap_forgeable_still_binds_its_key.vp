@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// A relay re-encrypts a stored blob to a recipient under a Diffie-Hellman
+// secret the two agree over an open leg, and the recipient checks what it
+// gets against a digest it already holds. The attack is the ordinary man in
+// the middle on that leg: the attacker substitutes the relay's ephemeral
+// public key, re-seals the SAME blob under the secret it now shares with
+// the recipient, and the digest check passes because the content did not
+// change. The recipient accepts an `out` the relay did not send.
+//
+// The point of the model is the `forgeable` annotation. It says the
+// attacker can mint a ciphertext under this key without holding the key,
+// which is strictly more power, so it may not remove the attack above.
+// `solve_primitive_arguments` used to `continue` past a forgeable-exempt
+// argument, which stopped the solver requiring that argument to be
+// constructible and also threw away the bindings solving it would have
+// produced -- here the very binding of the relay's key share that the
+// attack is made of. The exemption now widens the frontier instead of
+// replacing it: the position is solved as before AND allowed through
+// unsolved. Drop the annotation and the verdict must not move, which is
+// what `weakening_a_primitive_never_loses_an_attack` checks over the whole
+// corpus; this model is the small pin under it.
+
+attacker[active]
+
+principal Sender[
+	knows public t
+	knows private payload
+	generates k, n
+	blob = AEAD_ENC(k, n, payload, t)
+	digest = HASH(blob)
+]
+
+principal Recipient[
+	knows public t
+	generates r
+	gr = PUBKEY(r)
+]
+
+Sender -> Relay: [blob]
+Sender -> Recipient: [digest], [k], [n]
+Recipient -> Relay: gr
+
+principal Relay[
+	knows public t
+	generates sd
+	gsd = PUBKEY(sd)
+	ss = DH_KEX(gr, sd)
+	generates cn
+	out = AEAD_ENC[forgeable](ss, cn, blob, t)
+]
+
+Relay -> Recipient: gsd, cn, out
+
+principal Recipient[
+	ssr = DH_KEX(gsd, r)
+	blob_r = AEAD_DEC(ssr, cn, out, t)?
+	_ = ASSERT(HASH(blob_r), digest)?
+	payload_r = AEAD_DEC(k, n, blob_r, t)?
+]
+
+queries[
+	authentication? Relay -> Recipient: out
+]

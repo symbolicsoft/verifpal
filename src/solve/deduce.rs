@@ -626,14 +626,14 @@ impl<'a> Deducer<'a> {
 		let by_reuse = forgeable_by_reuse(p, self.attacker);
 		let mut frontier = vec![s.clone()];
 		for (i, arg) in p.arguments.iter().enumerate() {
-			if Some(i) == forgeable_secret || by_reuse.contains(&i) {
-				continue;
-			}
+			let exempt = Some(i) == forgeable_secret || by_reuse.contains(&i);
 			let mut next = Vec::new();
 			for candidate in &frontier {
 				self.solve_into(arg, candidate, &mut next);
 			}
-			if next.is_empty() {
+			if exempt {
+				next.extend(frontier.iter().cloned());
+			} else if next.is_empty() {
 				return;
 			}
 			frontier = dedupe(next);
