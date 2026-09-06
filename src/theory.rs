@@ -14,7 +14,7 @@ pub(crate) struct TermMemo<R> {
 	inserted: usize,
 }
 
-const TERM_MEMO_SWEEP: usize = 1 << 16;
+const TERM_MEMO_SWEEP: usize = 65536;
 
 impl<R> Default for TermMemo<R> {
 	fn default() -> Self {
@@ -40,10 +40,9 @@ impl<R: Clone> TermMemo<R> {
 			self.inserted = 0;
 			self.sweep();
 		}
-		self.entries
-			.entry(key)
-			.or_default()
-			.push((Arc::downgrade(p), result));
+		let bucket = self.entries.entry(key).or_default();
+		bucket.retain(|(weak, _)| weak.strong_count() > 0);
+		bucket.push((Arc::downgrade(p), result));
 	}
 
 	fn sweep(&mut self) {
