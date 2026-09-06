@@ -3662,3 +3662,8 @@ fn test_scenario_corrupt_needs_every_ingredient() {
 	run_model("scenario_corrupt_needs_every_ingredient.vp", "c1");
 	run_model_sessions("scenario_corrupt_needs_every_ingredient.vp", 1, "c1");
 }
+#[test]
+fn test_scenario_corrupt_by_certified_key() {
+	run_model("scenario_corrupt_by_certified_key.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_certified_key.vp", 1, "c0");
+}

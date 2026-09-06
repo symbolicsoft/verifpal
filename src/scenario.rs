@@ -213,6 +213,7 @@ fn interchangeable_clones(
 #[cfg(test)]
 pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
 	let compromised = compromised_constants(m);
+	let mentions = assignment_mentions(m);
 	m.scenarios
 		.iter()
 		.map(|s| {

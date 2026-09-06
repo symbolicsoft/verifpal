@@ -1,0 +1,91 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// The client is configured with the certificate of the peer it means to
+// reach, and checks the CA's signature over that name and the key it is
+// handed. The second scenario configures it for Mallory, whose signing key
+// the attacker holds, so in that run the check legitimately fails against
+// the honest server's certificate and the clone halts. That is a corrupt
+// peer failing a check, not a model error, and the claims of the honest run
+// still stand: the secret is sealed to a key that never leaks.
+//
+// A certificate is not something the attacker can compute — the CA signed
+// it — but it names a key whose private half is compromised, and a run
+// configured with it is a run with a corrupt peer. Corruption inference and
+// attacker-computability are separate questions, and reading the first as
+// the second made every scenario here honest, so the failing check became a
+// model error and `examples/transport-layer/tls13.vp` stopped analysing.
+// scenario_corrupt_needs_every_ingredient.vp is the other side: a key
+// derived from two secrets is not compromised when one half leaks.
+
+attacker[active]
+
+principal CA[
+	knows private caKey
+	caPk = PUBKEY(caKey)
+]
+
+principal Server[
+	knows private sk
+	knows public sname
+	gsk = PUBKEY(sk)
+]
+
+principal Mallory[
+	knows private mk
+	knows public mname
+	gmk = PUBKEY(mk)
+	leaks mk
+]
+
+Server -> CA: [gsk]
+Mallory -> CA: [gmk]
+
+principal CA[
+	knows public sname, mname
+	sCertSig = SIGN(caKey, CONCAT(sname, gsk))
+	mCertSig = SIGN(caKey, CONCAT(mname, gmk))
+]
+
+CA -> Server: [sCertSig]
+CA -> Mallory: [mCertSig]
+CA -> Client: [caPk]
+
+principal Server[
+	sCert = CONCAT(sname, gsk, sCertSig)
+]
+
+principal Mallory[
+	mCert = CONCAT(mname, gmk, mCertSig)
+]
+
+Server -> Client: [sCert]
+Mallory -> Client: [mCert]
+
+Server -> Client: gsk, sCertSig
+
+principal Client[
+	knows public peerCert
+	expectedName, _, _ = SPLIT(peerCert)
+	_ = SIGNVERIF(caPk, CONCAT(expectedName, gsk), sCertSig)?
+	generates secret
+	sealed = PKE_ENC(gsk, secret)
+]
+
+Client -> Server: sealed
+
+principal Server[
+	got = PKE_DEC(sk, sealed)
+	_ = HASH(got)
+]
+
+scenarios[
+	Client[peerCert = sCert]
+	Client[peerCert = mCert]
+]
+
+queries[
+	confidentiality? secret
+]
