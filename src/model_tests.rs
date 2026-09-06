@@ -3640,3 +3640,8 @@ fn test_cap_forgeable_keeps_a_real_reuse() {
 	run_model("cap_forgeable_keeps_a_real_reuse.vp", "c1");
 	run_model_sessions("cap_forgeable_keeps_a_real_reuse.vp", 1, "c1");
 }
+#[test]
+fn test_forged_bundle_from_held_terms() {
+	run_model("forged_bundle_from_held_terms.vp", "c1");
+	run_model_sessions("forged_bundle_from_held_terms.vp", 1, "c1");
+}

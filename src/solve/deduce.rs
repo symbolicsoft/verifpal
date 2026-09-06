@@ -1023,9 +1023,7 @@ fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
 	match v {
 		Value::Primitive(p) => {
 			if primitive_is_projection(p.id)
-				&& p.arguments
-					.first()
-					.is_some_and(|a| matches!(a, Value::Primitive(_)) && contains_var(a))
+				&& p.arguments.first().is_some_and(contains_var)
 				&& !out.iter().any(|q| equivalent_primitives(q, p, true))
 			{
 				out.push((**p).clone());

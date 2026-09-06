@@ -1,0 +1,75 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// A certificate and the key it certifies travel as one bundle the recipient
+// splits, which is what a certificate is. Mallory holds a certificate the CA
+// genuinely issued over Mallory's own key, and leaks the private half. The
+// attacker assembles the two into a bundle of its own, hands it to the
+// browser, and the signature check passes because nothing was forged: the CA
+// really did sign that key. The browser then seals its secret to Mallory.
+//
+// The engine used to miss this. `constraint_goals` materialises the plaintext
+// a stuck `SPLIT` demands, but `collect_stuck_splits` only looked at a split
+// whose argument was a primitive carrying a variable. Where the whole bundle
+// is the controllable wire slot its symbolic term is a bare variable, so the
+// split was never counted as stuck, the plaintext was never materialised, and
+// the check's own shape was never solved against the terms the attacker
+// holds. Splitting the bundle into two wire slots found the same attack, and
+// so did handing the bundle over with `leaks`, which is what made the gap a
+// property of the search rather than of the protocol.
+
+attacker[active]
+
+principal CA[
+	knows private ca_sk
+	ca_pk = PUBKEY(ca_sk)
+]
+
+principal Mallory[
+	knows private m_sk
+	m_pk = PUBKEY(m_sk)
+	leaks m_sk
+]
+
+principal Bank[
+	knows private b_sk
+	b_pk = PUBKEY(b_sk)
+]
+
+Mallory -> CA: [m_pk]
+Bank -> CA: [b_pk]
+
+principal CA[
+	m_cert = SIGN(ca_sk, m_pk)
+	b_cert = SIGN(ca_sk, b_pk)
+]
+
+CA -> Mallory: m_cert
+CA -> Bank: b_cert
+CA -> Browser: [ca_pk]
+
+principal Bank[
+	blob = CONCAT(b_pk, b_cert)
+]
+
+Bank -> Browser: blob
+
+principal Browser[
+	knows private secret
+	p1, c1 = SPLIT(blob)
+	_ = SIGNVERIF(ca_pk, p1, c1)?
+	sealed = PKE_ENC(p1, secret)
+]
+
+Browser -> Bank: sealed
+
+principal Bank[
+	got = PKE_DEC(b_sk, sealed)
+	_ = HASH(got)
+]
+
+queries[
+	confidentiality? secret
+]

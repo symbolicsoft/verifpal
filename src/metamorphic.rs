@@ -151,6 +151,28 @@ fn variants_unguarded(model: &Model) -> Vec<Model> {
 	out
 }
 
+fn variants_guarded(model: &Model) -> Vec<Model> {
+	let mut out = Vec::new();
+	for (bi, block) in model.blocks.iter().enumerate() {
+		let Block::Message(message) = block else {
+			continue;
+		};
+		for (ci, constant) in message.constants.iter().enumerate() {
+			if constant.guard {
+				continue;
+			}
+			let mut variant = model.clone();
+			if let Some(Block::Message(m)) = variant.blocks.get_mut(bi)
+				&& let Some(c) = m.constants.get_mut(ci)
+			{
+				c.guard = true;
+			}
+			out.push(variant);
+		}
+	}
+	out
+}
+
 fn variants_leaked(model: &Model) -> Vec<Model> {
 	let mut out = Vec::new();
 	for (bi, block) in model.blocks.iter().enumerate() {
@@ -1019,6 +1041,29 @@ mod tests {
 			variants_unguarded,
 			Strength::Stronger,
 			180,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn adding_a_guard_never_adds_an_attack_exhaustively() {
+		check_monotone(
+			"guard",
+			variants_guarded,
+			Strength::Weaker,
+			900,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	fn adding_a_guard_never_adds_an_attack() {
+		check_monotone(
+			"guard",
+			variants_guarded,
+			Strength::Weaker,
+			600,
 			Sweep::Fast,
 		);
 	}
