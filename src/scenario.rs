@@ -64,7 +64,8 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 
 	let freshen = m.freshened_constants();
 	let compromised = compromised_constants(m);
-	let declared = honest_first(&m.scenarios, &compromised);
+	let mentions = assignment_mentions(m);
+	let declared = honest_first(&m.scenarios, &compromised, &mentions);
 	let m = &Model {
 		scenarios: declared,
 		..m.clone()
@@ -94,7 +95,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 
 	let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 	for k in 0..count {
-		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised);
+		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions);
 		if corrupt_from <= 0 {
 			continue;
 		}
@@ -107,7 +108,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 	for query in &m.queries {
 		let mut variants = Vec::new();
 		for k in 1..count {
-			if scenario_corrupt_from(&m.scenarios[k], &compromised) <= 0 {
+			if scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions) <= 0 {
 				continue;
 			}
 			let variant = clone_query(query, k, sessions, &freshen, &pids);
@@ -138,7 +139,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 				.iter()
 				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
 				.collect(),
-			honest: scenario_corrupt_from(s, &compromised) > 0,
+			honest: scenario_corrupt_from(s, &compromised, &mentions) > 0,
 		})
 		.collect();
 
@@ -222,24 +223,62 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 				.collect();
 			(
 				format!("{}[{}]", s.principal_name, bindings.join(", ")),
-				scenario_corrupt_from(s, &compromised),
+				scenario_corrupt_from(s, &compromised, &mentions),
 			)
 		})
 		.collect()
 }
 
-fn honest_first(scenarios: &[Scenario], compromised: &IdMap<ValueId, i32>) -> Vec<Scenario> {
+fn honest_first(
+	scenarios: &[Scenario],
+	compromised: &IdMap<ValueId, i32>,
+	mentions: &IdMap<ValueId, Vec<ValueId>>,
+) -> Vec<Scenario> {
 	let mut out: Vec<Scenario> = scenarios.to_vec();
-	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised)));
+	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised, mentions)));
 	out
 }
 
-fn scenario_corrupt_from(scenario: &Scenario, compromised: &IdMap<ValueId, i32>) -> i32 {
+fn assignment_mentions(m: &Model) -> IdMap<ValueId, Vec<ValueId>> {
+	let mut out: IdMap<ValueId, Vec<ValueId>> = IdMap::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expression in &p.expressions {
+			let Some(value) = &expression.assigned else {
+				continue;
+			};
+			let mut constants = Vec::new();
+			value.collect_constants(&mut constants);
+			let ids: Vec<ValueId> = constants.iter().map(|c| c.id).collect();
+			for c in &expression.constants {
+				out.entry(c.id).or_insert_with(|| ids.clone());
+			}
+		}
+	}
+	out
+}
+
+fn scenario_corrupt_from(
+	scenario: &Scenario,
+	compromised: &IdMap<ValueId, i32>,
+	mentions: &IdMap<ValueId, Vec<ValueId>>,
+) -> i32 {
 	scenario
 		.bindings
 		.iter()
 		.filter(|(target, value)| target.id != value.id)
-		.filter_map(|(_, value)| compromised.get(&value.id).copied())
+		.filter_map(|(_, value)| {
+			if let Some(&at) = compromised.get(&value.id) {
+				return Some(at);
+			}
+			mentions
+				.get(&value.id)?
+				.iter()
+				.filter_map(|id| compromised.get(id).copied())
+				.min()
+		})
 		.min()
 		.unwrap_or(i32::MAX)
 }
@@ -955,7 +994,9 @@ mod tests {
 			]\n";
 		let m = parse_string("pcl.vp", src).expect("parses");
 		let compromised = compromised_constants(&m);
-		let corrupt_from = |i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised);
+		let mentions = assignment_mentions(&m);
+		let corrupt_from =
+			|i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised, &mentions);
 
 		assert_eq!(
 			corrupt_from(1),
