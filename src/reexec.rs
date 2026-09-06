@@ -646,8 +646,11 @@ pub(crate) fn attacker_controllable(
 	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
 		return false;
 	}
-	if !km
-		.mutation_phase(idx)
+	if !meta
+		.delivery_phases
+		.iter()
+		.map(|&(_, phase)| phase)
+		.min()
 		.is_some_and(|phase| phase <= attacker.current_phase)
 	{
 		return false;
@@ -663,14 +666,10 @@ pub(crate) fn attacker_controllable(
 
 pub(crate) fn governing_attacker(
 	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	installs: &[(SlotIdx, Value)],
+	phases: &[i32],
 	ambient: &AttackerState,
 ) -> AttackerState {
-	let earliest = installs
-		.iter()
-		.filter_map(|(slot, _)| km.mutation_phase(slot.get()))
-		.min();
+	let earliest = phases.iter().copied().min();
 	match earliest {
 		Some(phase) if phase < ambient.current_phase => {
 			ctx.attacker_knowledge_at(phase).unwrap_or_default()
@@ -685,12 +684,23 @@ pub(crate) fn reexecute(
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
-	reexecute_with(ps_base, installs, &[], attacker, km)
+	reexecute_with(ps_base, installs, None, &[], attacker, km)
+}
+
+pub(crate) fn reexecute_at(
+	ps_base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	phases: &[i32],
+	attacker: &AttackerState,
+	km: &ProtocolTrace,
+) -> VResult<PrincipalState> {
+	reexecute_with(ps_base, installs, Some(phases), &[], attacker, km)
 }
 
 fn reexecute_with(
 	ps_base: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
+	phases: Option<&[i32]>,
 	forwarded: &[(SlotIdx, Value)],
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
@@ -703,9 +713,10 @@ fn reexecute_with(
 			slot.get() < ps.values.len() && attacker_authored(ground, slot.get(), km, &ps)
 		})
 		.collect();
-	for ((slot, ground), authored) in installs.iter().zip(authored) {
+	for (i, ((slot, ground), authored)) in installs.iter().zip(authored).enumerate() {
 		if slot.get() < ps.values.len() {
-			install(&mut ps, slot.get(), ground.clone(), authored);
+			let at = phases.and_then(|phases| phases.get(i).copied());
+			install(&mut ps, slot.get(), ground.clone(), authored, at);
 		}
 	}
 	for (slot, value) in forwarded {
@@ -731,6 +742,7 @@ fn reexecute_with(
 	}
 
 	let foreign = foreign_halts(&ps, &failures);
+	let starved = starved_slots(km, &ps, &foreign);
 
 	if let Some(bypassed) = try_guard_bypass(km, &ps_pre, &ps, &failures, attacker)? {
 		ps = bypassed;
@@ -738,8 +750,68 @@ fn reexecute_with(
 		ps = halt_at(ps, &failures);
 	}
 	ps.foreign_halts = foreign;
+	ps.starved = starved;
 	ps.forwarded = !forwarded.is_empty();
 	Ok(ps)
+}
+
+fn starved_slots(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	foreign: &[(PrincipalId, usize)],
+) -> Vec<usize> {
+	if foreign.is_empty() {
+		return Vec::new();
+	}
+	let n = ps.values.len().min(km.slots.len());
+	let halted_at = |who: PrincipalId| {
+		foreign
+			.iter()
+			.find(|&&(halted, _)| halted == who)
+			.and_then(|&(_, at)| km.slots.get(at))
+			.map(|slot| slot.declared_at)
+	};
+	let mut unreached: Vec<bool> = (0..n)
+		.map(|i| {
+			let Some(meta) = ps.meta.get(i) else {
+				return false;
+			};
+			if foreign
+				.iter()
+				.any(|&(who, at)| who == meta.creator && i >= at)
+			{
+				return true;
+			}
+			let Some(halted) = halted_at(meta.creator) else {
+				return false;
+			};
+			km.slots[i]
+				.sent_by
+				.iter()
+				.any(|event| event.sender == meta.creator && event.recipient == ps.id)
+				&& !km.slots[i].sent_by.iter().any(|event| {
+					event.sender == meta.creator
+						&& event.recipient == ps.id
+						&& event.declared_at <= halted
+				})
+		})
+		.collect();
+	let mut out = Vec::new();
+	for i in 0..n {
+		if unreached[i] {
+			continue;
+		}
+		let mut mentioned: Vec<Constant> = Vec::new();
+		km.slots[i].initial_value.collect_constants(&mut mentioned);
+		if mentioned
+			.iter()
+			.any(|c| km.index_of(c).is_some_and(|j| j < n && unreached[j]))
+		{
+			unreached[i] = true;
+			out.push(i);
+		}
+	}
+	out
 }
 
 pub(crate) fn execute_forward(
@@ -747,9 +819,10 @@ pub(crate) fn execute_forward(
 	km: &ProtocolTrace,
 	base: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
+	phases: Option<&[i32]>,
 	attacker: &AttackerState,
 ) -> VResult<Vec<PrincipalState>> {
-	let first = reexecute(base, installs, attacker, km)?;
+	let first = reexecute_with(base, installs, phases, &[], attacker, km)?;
 	let mut out = vec![first];
 	forward_to_fixpoint(ctx, km, &mut out, &[], Some(base.id), attacker);
 	Ok(out)
@@ -793,6 +866,7 @@ fn forward_to_fixpoint(
 			let Ok(state) = reexecute_with(
 				&pristine.clone_for_depth(true),
 				seed,
+				None,
 				&forwarded,
 				attacker,
 				km,
@@ -816,7 +890,6 @@ fn forward_to_fixpoint(
 }
 
 /// Replay a recorded substitution as the one execution it describes.
-///
 /// A `MutationRecord` names the slots the attacker had changed when a value
 /// was read, not the principal each change was delivered to; a merged record
 /// carries diffs from several. Every principal that receives one of the
@@ -956,12 +1029,15 @@ fn relays_are_forwarded(
 }
 
 pub(crate) fn halt_at_failed_checks(
+	km: &ProtocolTrace,
 	mut ps: PrincipalState,
 	failures: &[(Primitive, usize)],
 ) -> PrincipalState {
 	let foreign = foreign_halts(&ps, failures);
+	let starved = starved_slots(km, &ps, &foreign);
 	ps = halt_at(ps, failures);
 	ps.foreign_halts = foreign;
+	ps.starved = starved;
 	ps
 }
 
@@ -1291,10 +1367,17 @@ fn collect_slot_references(v: &Value, ps: &PrincipalState, out: &mut Vec<usize>,
 	}
 }
 
-pub(crate) fn install(ps: &mut PrincipalState, slot: usize, ground: Value, authored: bool) {
+pub(crate) fn install(
+	ps: &mut PrincipalState,
+	slot: usize,
+	ground: Value,
+	authored: bool,
+	at: Option<i32>,
+) {
 	let previous = ps.values[slot].value.clone();
 	let sv = &mut ps.values[slot];
 	sv.original = previous;
+	sv.installed_at = at;
 	sv.provenance.creator = ATTACKER_ID;
 	sv.provenance.attacker_tainted = true;
 	if authored {

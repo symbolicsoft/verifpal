@@ -267,7 +267,7 @@ impl Analysis {
 				.assumptions
 				.iter()
 				.map(|(term, capability, onset)| Assumption {
-					term: term.to_string(),
+					term: crate::pretty::term_with_projections(term),
 					capability: capability.name().to_string(),
 					from_phase: *onset,
 				})

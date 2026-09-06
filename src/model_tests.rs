@@ -3566,3 +3566,77 @@ fn test_err_threshold_twice() {
 fn test_err_shamir_renamed() {
 	run_model_err("err_shamir_renamed.vp", "THRESHOLD_SPLIT");
 }
+#[test]
+fn test_phase_second_delivery() {
+	run_model("phase_second_delivery.vp", "a1a1");
+	run_model_sessions("phase_second_delivery.vp", 1, "a0a1");
+}
+#[test]
+fn test_phase_second_delivery_later_leak() {
+	run_model("phase_second_delivery_later_leak.vp", "a1a1");
+	run_model_sessions("phase_second_delivery_later_leak.vp", 1, "a0a0");
+}
+#[test]
+fn test_phase_relay_guarded_delivery() {
+	run_model("phase_relay_guarded_delivery.vp", "a1a0");
+	run_model_sessions("phase_relay_guarded_delivery.vp", 1, "a0a0");
+}
+#[test]
+fn test_equivalence_starved_by_foreign_halt() {
+	run_model("equivalence_starved_by_foreign_halt.vp", "e1");
+	run_model_sessions("equivalence_starved_by_foreign_halt.vp", 1, "e0");
+}
+#[test]
+fn test_unlink_forced_origin_derived() {
+	run_model("unlink_forced_origin_derived.vp", "u0");
+	run_model_sessions("unlink_forced_origin_derived.vp", 1, "u0");
+}
+#[test]
+fn test_unlink_public_identifier() {
+	run_model("unlink_public_identifier.vp", "u0u0");
+}
+#[test]
+fn test_unlink_recognized_nested_message() {
+	run_model("unlink_recognized_nested_message.vp", "u1");
+	run_model_sessions("unlink_recognized_nested_message.vp", 1, "u1");
+}
+#[test]
+fn test_relay_guarded_replay_is_not_a_duplicate() {
+	run_model("relay_guarded_replay_is_not_a_duplicate.vp", "a0a0");
+	run_model_sessions("relay_guarded_replay_is_not_a_duplicate.vp", 1, "a0a0");
+}
+#[test]
+fn test_relay_guarded_replay_open_hop() {
+	run_model("relay_guarded_replay_open_hop.vp", "a1a0");
+	run_model_sessions("relay_guarded_replay_open_hop.vp", 1, "a0a0");
+}
+#[test]
+fn test_unlink_sealed_carrier_not_observed() {
+	run_model("unlink_sealed_carrier_not_observed.vp", "u0");
+	run_model_sessions("unlink_sealed_carrier_not_observed.vp", 1, "u0");
+}
+#[test]
+fn test_unlink_sealed_carrier_opened() {
+	run_model("unlink_sealed_carrier_opened.vp", "u1");
+	run_model_sessions("unlink_sealed_carrier_opened.vp", 1, "u1");
+}
+#[test]
+fn test_cap_forgeable_is_not_a_reuse_pair() {
+	run_model("cap_forgeable_is_not_a_reuse_pair.vp", "c0a1");
+	run_model_sessions("cap_forgeable_is_not_a_reuse_pair.vp", 1, "c0a1");
+}
+#[test]
+fn test_cap_forgeable_guard_never_adds_an_attack() {
+	run_model("cap_forgeable_guard_never_adds_an_attack.vp", "c0");
+	run_model_sessions("cap_forgeable_guard_never_adds_an_attack.vp", 1, "c0");
+}
+#[test]
+fn test_threshold_sign_forgeable_is_not_a_reuse() {
+	run_model("threshold_sign_forgeable_is_not_a_reuse.vp", "c0c0");
+	run_model_sessions("threshold_sign_forgeable_is_not_a_reuse.vp", 1, "c0c0");
+}
+#[test]
+fn test_cap_forgeable_keeps_a_real_reuse() {
+	run_model("cap_forgeable_keeps_a_real_reuse.vp", "c1");
+	run_model_sessions("cap_forgeable_keeps_a_real_reuse.vp", 1, "c1");
+}

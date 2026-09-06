@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use crate::context::{Generational, VerifyContext};
 use crate::primitive::admissible;
 use crate::principal::ATTACKER_ID;
-use crate::reexec::{Controllable, TermBound, governing_attacker, reexecute, same_installs};
+use crate::reexec::{Controllable, TermBound, governing_attacker, reexecute_at, same_installs};
 use crate::solve::validate::attacker_can_derive;
 use crate::theory::reduce_once;
 use crate::types::*;
@@ -139,16 +139,25 @@ impl Emission<'_> {
 
 	fn runs_to(&self, installs: &[(SlotIdx, Value)], target: &Value) -> bool {
 		let origin = self.origin;
-		if !installs.iter().all(|(at, value)| {
-			admissible(value)
-				&& self.bound.admits_at(self.km, origin.id, at.get(), value)
-				&& attacker_can_derive(self.ctx, self.km, at.get(), value, origin, self.attacker)
-		}) {
-			return false;
+		let mut phases: Vec<i32> = Vec::with_capacity(installs.len());
+		for (at, value) in installs {
+			if !admissible(value) || !self.bound.admits_at(self.km, origin.id, at.get(), value) {
+				return false;
+			}
+			let Some(phase) = attacker_can_derive(self.ctx, at.get(), value, origin, self.attacker)
+			else {
+				return false;
+			};
+			phases.push(phase);
 		}
-		let governing = governing_attacker(self.ctx, self.km, installs, self.attacker);
-		let Ok(out) = reexecute(&origin.clone_for_depth(true), installs, &governing, self.km)
-		else {
+		let governing = governing_attacker(self.ctx, &phases, self.attacker);
+		let Ok(out) = reexecute_at(
+			&origin.clone_for_depth(true),
+			installs,
+			&phases,
+			&governing,
+			self.km,
+		) else {
 			return false;
 		};
 		if self.j >= out.values.len() || out.slot_unreached(self.j) {

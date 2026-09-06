@@ -1,0 +1,47 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0a1 at one session and at two.
+//
+// Alice seals one message under a key the attacker never holds, with a public
+// nonce, under a declared `forgeable` assumption. The assumption says the
+// attacker can produce a ciphertext `AEAD_DEC` accepts without the key, which
+// is why the authentication query fails. It says nothing about the keystream,
+// so the message stays confidential.
+//
+// The engine used to mint a ciphertext under that assumption and then pair it
+// with Alice's own under the shared key and nonce, reading `m` out through the
+// nonce-reuse rule. That rule is evidence about the encryption function: two
+// ciphertexts the *protocol* produced under one key and nonce repeat the
+// keystream. A term the attacker made itself repeats nothing, so pairing it
+// turned an authenticity assumption into a confidentiality one and collapsed
+// `forgeable` into `weak`. `rule_reuse` now refuses a bucket member the
+// attacker could mint (`attacker_mints`), and asks it of the term rather than
+// of its derivation, since the attacker installs what it mints and reads it
+// back out of the state it put it in.
+//
+// cap_aead_weak_forgeable_matrix.vp is the truth table this restores, and
+// cap_forgeable_aead.vp is the pair that keeps the two capabilities apart.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public n_pub, ad
+	e = AEAD_ENC[forgeable](k, n_pub, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public n_pub, ad
+	d = AEAD_DEC(k, n_pub, e, ad)?
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

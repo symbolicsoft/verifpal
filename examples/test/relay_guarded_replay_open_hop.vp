@@ -1,0 +1,44 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a0 at one session and a1a0 at two.
+//
+// relay_guarded_replay_is_not_a_duplicate.vp with the relay's own leg left
+// open. Now the attacker does not need the leg above: it takes Bob's other
+// run's flight off the wire and hands it to this Carol, who accepts a
+// sending Bob made once and his other Carol accepts too. That is a genuine
+// duplicate acceptance, and it is what keeps the guarded case from being
+// read as a blanket exemption.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], [m], [s]
+Alice -> Carol: [pk]
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Bob -> Carol: m, s
+
+principal Carol[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Carol -> Dave: [m]
+
+principal Dave[
+	h = HASH(m)
+]
+
+queries[
+	authentication? Bob -> Carol: m
+	authentication? Carol -> Dave: m
+]

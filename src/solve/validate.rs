@@ -28,6 +28,7 @@ pub(crate) fn validate(
 ) -> VResult<bool> {
 	let ps = ps_base.clone_for_depth(true);
 	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
+	let mut phases: Vec<i32> = Vec::new();
 	let mut worthwhile = false;
 
 	let mut chosen: Vec<(usize, Value, bool)> = Vec::new();
@@ -66,9 +67,9 @@ pub(crate) fn validate(
 		if contains_failed_check(&ground) {
 			return Ok(false);
 		}
-		if !attacker_can_derive(ctx, km, slot, &ground, &ps, attacker) {
+		let Some(at) = attacker_can_derive(ctx, slot, &ground, &ps, attacker) else {
 			return Ok(false);
-		}
+		};
 		if let Some(available) = guards.order.available(&ps, slot, attacker)
 			&& !derivable(&ground, &ps, &available)
 		{
@@ -82,13 +83,14 @@ pub(crate) fn validate(
 			worthwhile = true;
 		}
 		installs.push((SlotIdx(slot), ground));
+		phases.push(at);
 	}
 
 	if !worthwhile || spends_another_execution(km, &ps, &chosen, attacker) {
 		return Ok(false);
 	}
 
-	let governing = crate::reexec::governing_attacker(ctx, km, &installs, attacker);
+	let governing = crate::reexec::governing_attacker(ctx, &phases, attacker);
 	let restricted = guards.history.compatible(ctx, km, &ps, &chosen, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
 	let phase = governing.current_phase;
@@ -114,7 +116,8 @@ pub(crate) fn validate(
 		}
 		None => {
 			crate::reexec::record_bypass_decisions();
-			let executed = crate::reexec::execute_forward(ctx, km, &ps, &installs, governing);
+			let executed =
+				crate::reexec::execute_forward(ctx, km, &ps, &installs, Some(&phases), governing);
 			let decisions = crate::reexec::take_bypass_decisions();
 			let Ok(executed) = executed else {
 				return Ok(false);
@@ -289,22 +292,35 @@ fn needs_of_term(
 
 pub(crate) fn attacker_can_derive(
 	ctx: &VerifyContext,
-	km: &ProtocolTrace,
 	slot: usize,
 	ground: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-) -> bool {
-	let earliest = km.mutation_phase(slot);
-	match earliest {
-		Some(earliest) if earliest < attacker.current_phase => {
-			match ctx.attacker_knowledge_at(earliest) {
-				Some(snapshot) => derivable(ground, ps, &snapshot),
-				None => false,
-			}
+) -> Option<i32> {
+	let meta = ps.meta.get(slot)?;
+	let cap = meta
+		.delivery_phases
+		.iter()
+		.find(|&&(who, _)| who == ps.id)
+		.map(|&(_, phase)| phase)
+		.unwrap_or(attacker.current_phase)
+		.min(attacker.current_phase);
+	let mut candidates: Vec<i32> = meta
+		.delivery_phases
+		.iter()
+		.map(|&(_, phase)| phase)
+		.filter(|&phase| phase <= cap)
+		.collect();
+	candidates.sort_unstable();
+	candidates.dedup();
+	candidates.into_iter().find(|&phase| {
+		if phase < attacker.current_phase {
+			ctx.attacker_knowledge_at(phase)
+				.is_some_and(|snapshot| derivable(ground, ps, &snapshot))
+		} else {
+			derivable(ground, ps, attacker)
 		}
-		_ => derivable(ground, ps, attacker),
-	}
+	})
 }
 
 pub(crate) fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {

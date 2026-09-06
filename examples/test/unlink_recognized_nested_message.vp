@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u1 at one session and at two.
+//
+// Two signers under two keys sign one leaked serial, each wrapped beside a
+// public label. The attacker assembles CONCAT(serial, c1) and
+// CONCAT(serial, c2) from what it holds and runs SIGNVERIF over each
+// signature, and both pass: the same serial sits inside both. With the bare
+// serial as the message this already linked; the recognized-secret witness
+// used to stop at the message argument itself and never asked what the
+// message was assembled from, so a wrapper hid the shared serial.
+
+attacker[passive]
+
+principal Alice[
+	knows private serial
+	knows public c1
+	generates ska
+	ga = PUBKEY(ska)
+	s1 = SIGN(ska, CONCAT(serial, c1))
+	leaks serial
+]
+
+principal Bob[
+	knows private serial
+	knows public c2
+	generates skb
+	gb = PUBKEY(skb)
+	s2 = SIGN(skb, CONCAT(serial, c2))
+]
+
+Alice -> Verifier: [ga], s1
+Bob -> Verifier: [gb], s2
+
+principal Verifier[
+	knows private serial
+	knows public c1, c2
+	_ = SIGNVERIF(ga, CONCAT(serial, c1), s1)?
+	_ = SIGNVERIF(gb, CONCAT(serial, c2), s2)?
+]
+
+queries[
+	unlinkability? s1, s2
+]

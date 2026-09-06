@@ -409,7 +409,7 @@ pub(crate) fn halt_honest_run(
 	if suppressed.is_empty() {
 		return ps;
 	}
-	crate::reexec::halt_at_failed_checks(ps, &suppressed)
+	crate::reexec::halt_at_failed_checks(km, ps, &suppressed)
 }
 
 pub(crate) fn attacker_seed_phase(
@@ -471,7 +471,7 @@ pub(crate) fn generate_trace(
 		});
 	}
 	if !suppressed.is_empty() {
-		ps_resolved = crate::reexec::halt_at_failed_checks(ps_resolved, &suppressed);
+		ps_resolved = crate::reexec::halt_at_failed_checks(km, ps_resolved, &suppressed);
 	}
 	for (index, sv) in ps_resolved.values.iter().enumerate() {
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
@@ -585,7 +585,11 @@ fn verify_end(
 			false,
 		);
 		for term in &assumptions {
-			info_message(&format!("{}", term), InfoLevel::Warning, false);
+			info_message(
+				&crate::pretty::term_with_projections(term),
+				InfoLevel::Warning,
+				false,
+			);
 		}
 		crate::info::info_blank_line();
 	}

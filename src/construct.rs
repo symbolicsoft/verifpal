@@ -672,7 +672,8 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				}
 			}
 			let travel = wire_index.get(&c.id);
-			index_map.insert(c.id, meta_vec.len());
+			let at = meta_vec.len();
+			index_map.insert(c.id, at);
 			meta_vec.push(SlotMeta {
 				constant: c.clone(),
 				creator: slot.creator,
@@ -688,6 +689,16 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 					.min(),
 				declared_at: slot.declared_at,
 				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),
+				delivery_phases: travel
+					.map(|t| {
+						t.mutatable_to
+							.iter()
+							.filter_map(|&who| {
+								trace.substitution_phase(at, who).map(|phase| (who, phase))
+							})
+							.collect()
+					})
+					.unwrap_or_default(),
 				phase: slot.phases.clone(),
 			});
 			values_vec.push(SlotValues {
@@ -695,6 +706,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				pre_rewrite: slot.initial_value.clone(),
 				original: slot.initial_value.clone(),
 				bypassed: None,
+				installed_at: None,
 				provenance: Provenance {
 					creator: slot.creator,
 					sender,
@@ -712,6 +724,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 			leaks: trace.leaks.clone(),
 			halted_at: None,
 			foreign_halts: Vec::new(),
+			starved: Vec::new(),
 			capabilities: capabilities.clone(),
 			forwarded: false,
 		});
@@ -773,6 +786,7 @@ impl PrincipalState {
 					// Purification is now total: a bypassed slot cleans up like
 					// any other, because the honest value was never overwritten.
 					bypassed: if purify { None } else { sv.bypassed.clone() },
+					installed_at: if purify { None } else { sv.installed_at },
 					provenance: Provenance {
 						creator: sv.provenance.creator,
 						sender: sv.provenance.sender,
@@ -802,6 +816,11 @@ impl PrincipalState {
 				Vec::new()
 			} else {
 				self.foreign_halts.clone()
+			},
+			starved: if purify {
+				Vec::new()
+			} else {
+				self.starved.clone()
 			},
 			capabilities: self.capabilities.clone(),
 			forwarded: if purify { false } else { self.forwarded },

@@ -102,6 +102,7 @@ pub(crate) fn make_principal_state(
 		halted_at: None,
 		forwarded: false,
 		foreign_halts: Vec::new(),
+		starved: Vec::new(),
 		capabilities: Arc::new(CapabilityIndex::default()),
 	}
 }
@@ -117,6 +118,7 @@ pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 		sent_at: None,
 		declared_at: 0,
 		mutatable_to: vec![],
+		delivery_phases: vec![],
 		phase: vec![0],
 	}
 }
@@ -124,6 +126,7 @@ pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 	SlotValues {
 		bypassed: None,
+		installed_at: None,
 		value: v.clone(),
 		pre_rewrite: v.clone(),
 		original: v.clone(),

@@ -101,7 +101,7 @@ fn slot_term(
 }
 
 fn reaches(ps: &PrincipalState, idx: usize, owner: PrincipalId) -> bool {
-	owner == ps.id || ps.meta[idx].mutatable_to.contains(&owner)
+	owner == ps.id || ps.mutation_reaches(idx, owner)
 }
 
 fn inline(

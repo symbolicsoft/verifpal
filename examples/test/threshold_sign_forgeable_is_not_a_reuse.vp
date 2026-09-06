@@ -1,0 +1,50 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0c0 at one session and at two.
+//
+// Alice signs once. `THRESHOLD_SIGN` declares `forgeable_secret: Some(0)`, the
+// share, and a reuse rule over the share and nonce that reveals that same
+// share, so minting a partial under the declared assumption and pairing it
+// with Alice's own recovered the share it was exempted from holding, and the
+// group key with it. RFC 9591's key recovery needs two partials the signer
+// produced: two equations in one unknown. A fabricated partial is not a second
+// equation, and here there is only one real one.
+//
+// threshold_sign_nonce_reuse.vp is the genuine article, where one signer signs
+// twice under one nonce and gives the share up.
+
+attacker[active]
+
+principal Dealer[
+	knows private psk_a
+	generates k
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	ea = ENC(psk_a, s1)
+]
+
+Dealer -> Alice: [ea]
+
+principal Carol[
+	generates cl_seed
+]
+
+Carol -> Alice: cl_seed
+
+principal Alice[
+	knows private psk_a
+	knows public na_pub, msg
+	sa = DEC(psk_a, ea)
+	pa = THRESHOLD_SIGN[forgeable](sa, na_pub, cl_seed, msg)
+]
+
+Alice -> Bob: pa
+
+principal Bob[
+	_ = HASH(pa)
+]
+
+queries[
+	confidentiality? s1
+	confidentiality? k
+]

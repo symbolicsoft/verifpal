@@ -1,0 +1,33 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u0u0.
+//
+// Tokens built from public constants under a public key. A check that
+// succeeds for both under an identifier anyone holds identifies nobody, in
+// the same way that a hash of public constants identifies nobody: the key
+// is common to every principal in the model. The identifying check used to
+// be the one witness that never asked whether its identifier depends on a
+// secret, so two ciphertexts under a public key linked, and so did two
+// signatures.
+
+attacker[passive]
+
+principal Alice[
+	knows public c1, c2, n1, n2, kpub
+	e1 = AEAD_ENC(kpub, n1, c1, nil)
+	e2 = AEAD_ENC(kpub, n2, c2, nil)
+	s1 = SIGN(kpub, c1)
+	s2 = SIGN(kpub, c2)
+]
+
+Alice -> Bob: e1, e2, s1, s2
+
+principal Bob[
+	_ = HASH(e1, e2, s1, s2)
+]
+
+queries[
+	unlinkability? e1, e2
+	unlinkability? s1, s2
+]

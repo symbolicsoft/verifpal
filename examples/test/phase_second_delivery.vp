@@ -1,0 +1,53 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a1 at one session and a1a1 at two.
+//
+// One constant, two deliveries in two phases. Alice MACs x under a key Bob
+// and Carol share with her, hands the pair to Bob in phase 0, leaks the key
+// in phase 1 and only then hands the same pair to Carol. Bob's delivery is
+// safe: forging the tag for it needs the key in phase 0, and the key is not
+// disclosed until phase 1. Carol's delivery is not: when it happens the key
+// is public, so the attacker forges a tag over a value of its own and Carol
+// accepts it.
+//
+// The engine used to judge every delivery of a constant against the phase of
+// its first, so a forgery derivable only in phase 1 was refused at Carol
+// because Bob had been handed the pair in phase 0. An install now carries
+// the earliest phase whose knowledge builds it and reaches only the
+// recipients delivered from that phase on: Carol sees the forgery, Bob's
+// view stays honest. At two sessions each delivery is a replay of the other
+// session's pair, since the key is shared across sessions.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates x
+	t = MAC(k, x)
+]
+
+Alice -> Bob: x, t
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks k
+]
+
+Alice -> Carol: x, t
+
+principal Carol[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+queries[
+	authentication? Alice -> Bob: x
+	authentication? Alice -> Carol: x
+]

@@ -1,0 +1,40 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// The counterweight to cap_forgeable_is_not_a_reuse_pair.vp. Alice seals two
+// messages under one key and one nonce; the attacker knows the first
+// plaintext and not the second. That is a genuine reuse pair — both
+// ciphertexts came out of the real encryption function — so the second
+// plaintext follows, and it follows whether or not `forgeable` is declared on
+// the first call. Drop the annotation and the verdict must not move.
+//
+// This is what stops the mint refusal from being read as "mintable members
+// are never paired": a ciphertext whose plaintext the attacker happens to
+// hold is mintable under the assumption and is still a real ciphertext, so
+// `protocol_produced` keeps it. Refusing on mintability alone lost this
+// attack the moment the assumption was declared, which the `weaken` property
+// forbids.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public m1, n, ad
+	knows private m2
+	e1 = AEAD_ENC[forgeable](k, n, m1, ad)
+	e2 = AEAD_ENC(k, n, m2, ad)
+]
+
+Alice -> Bob: e1, e2
+
+principal Bob[
+	knows private k
+	knows public n, ad
+	d = AEAD_DEC(k, n, e2, ad)?
+]
+
+queries[
+	confidentiality? m2
+]

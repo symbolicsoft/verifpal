@@ -7,7 +7,7 @@ use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
 use crate::primitive::attacker_public_key;
-use crate::reexec::{governing_attacker, reexecute};
+use crate::reexec::{governing_attacker, reexecute, reexecute_at};
 use crate::types::*;
 use crate::value::value_nil;
 use crate::verify::verify_resolve_queries;
@@ -50,6 +50,21 @@ enum Scope {
 type Installs = Vec<(SlotIdx, Value)>;
 
 pub(crate) type Addressed = Vec<(PrincipalId, SlotIdx, Value)>;
+
+fn phases_of(
+	ctx: &VerifyContext,
+	installs: &[(SlotIdx, Value)],
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Vec<i32> {
+	installs
+		.iter()
+		.map(|(slot, value)| {
+			crate::solve::validate::attacker_can_derive(ctx, slot.get(), value, ps, attacker)
+				.unwrap_or(attacker.current_phase)
+		})
+		.collect()
+}
 
 fn addressed_to(addressed: &[(PrincipalId, SlotIdx, Value)], id: PrincipalId) -> Installs {
 	addressed
@@ -693,12 +708,12 @@ impl<'a> Minimizer<'a> {
 			&& !crate::solve::validate::contains_failed_check(value)
 			&& crate::solve::validate::attacker_can_derive(
 				self.ctx,
-				self.km,
 				slot,
 				value,
 				session,
 				&self.ambient,
 			)
+			.is_some()
 	}
 
 	fn choose(&self) -> Option<Chosen> {
@@ -990,12 +1005,12 @@ pub(crate) fn minimize_witness(
 				assert!(
 					crate::solve::validate::attacker_can_derive(
 						ctx,
-						km,
 						slot.get(),
 						value,
 						&base,
 						&m.ambient
-					),
+					)
+					.is_some(),
 					"WITNESS \u{2022} query {} is explained by installing {} into {}, a term the \
 					 attacker cannot build from what it knows. A trace naming a substitution \
 					 nothing derives is a trace a reader cannot follow.",
@@ -1060,7 +1075,7 @@ fn checks_wanting_shapes(
 			continue;
 		}
 		let authored = crate::reexec::attacker_authored(value, slot.get(), km, &staged);
-		crate::reexec::install(&mut staged, slot.get(), value.clone(), authored);
+		crate::reexec::install(&mut staged, slot.get(), value.clone(), authored, None);
 	}
 	if crate::reexec::slot_graph_is_cyclic(&staged) || staged.resolve_all_values().is_err() {
 		return Vec::new();
@@ -1348,12 +1363,12 @@ pub(crate) fn assert_reported_attacks_replay(
 				&& !crate::solve::validate::contains_failed_check(value)
 				&& crate::solve::validate::attacker_can_derive(
 					ctx,
-					km,
 					slot.get(),
 					value,
 					state,
 					&ambient,
 				)
+				.is_some()
 		};
 		let mut unjustified: Vec<String> = witness
 			.installs
@@ -1529,6 +1544,7 @@ fn probe_with(
 	let order = crate::reexec::CausalOrder::of(km, base.id);
 	let mut grounded = true;
 	let mut earlier: Installs = Vec::new();
+	let mut earlier_phases: Vec<i32> = Vec::new();
 	while !remaining.is_empty() {
 		let known = scratch.attacker_snapshot();
 		let next = (0..remaining.len()).find(|&at| {
@@ -1546,14 +1562,8 @@ fn probe_with(
 			if preceded {
 				return false;
 			}
-			crate::solve::validate::attacker_can_derive(
-				&scratch,
-				km,
-				slot.get(),
-				value,
-				base,
-				&known,
-			) && order
+			crate::solve::validate::attacker_can_derive(&scratch, slot.get(), value, base, &known)
+				.is_some() && order
 				.available(base, slot.get(), &known)
 				.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
 		});
@@ -1561,13 +1571,18 @@ fn probe_with(
 			grounded = false;
 			break;
 		};
-		earlier.push(remaining.remove(at));
+		let (slot, value) = remaining.remove(at);
+		earlier_phases.push(
+			crate::solve::validate::attacker_can_derive(&scratch, slot.get(), &value, base, &known)
+				.unwrap_or(known.current_phase),
+		);
+		earlier.push((slot, value));
 		if remaining.is_empty() {
 			break;
 		}
 		let seeded = scratch.attacker_snapshot();
-		let governing = governing_attacker(&scratch, km, &earlier, &seeded);
-		if let Ok(partial) = reexecute(base, &earlier, &governing, km) {
+		let governing = governing_attacker(&scratch, &earlier_phases, &seeded);
+		if let Ok(partial) = reexecute_at(base, &earlier, &earlier_phases, &governing, km) {
 			let _ = compute_knowledge_closure(&scratch, km, &partial);
 		}
 		if breadth != Breadth::All {
@@ -1580,8 +1595,9 @@ fn probe_with(
 			if mine.is_empty() {
 				continue;
 			}
-			let governing = governing_attacker(&scratch, km, &mine, &seeded);
-			if let Ok(other) = reexecute(session, &mine, &governing, km) {
+			let phases = phases_of(&scratch, &mine, session, &seeded);
+			let governing = governing_attacker(&scratch, &phases, &seeded);
+			if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km) {
 				let _ = compute_knowledge_closure(&scratch, km, &other);
 			}
 		}
@@ -1601,8 +1617,9 @@ fn probe_with(
 				if mine.is_empty() {
 					continue;
 				}
-				let governing = governing_attacker(&scratch, km, &mine, &seeded);
-				if let Ok(other) = reexecute(session, &mine, &governing, km) {
+				let phases = phases_of(&scratch, &mine, session, &seeded);
+				let governing = governing_attacker(&scratch, &phases, &seeded);
+				if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km) {
 					let _ = compute_knowledge_closure(&scratch, km, &other);
 					if addressed_here {
 						carried.push(other);
@@ -1618,8 +1635,11 @@ fn probe_with(
 	}
 
 	let ambient = scratch.attacker_snapshot();
-	let governing = governing_attacker(&scratch, km, installs, &ambient);
-	let executed = crate::reexec::execute_forward(&scratch, km, base, installs, &governing).ok()?;
+	let phases = phases_of(&scratch, installs, base, &ambient);
+	let governing = governing_attacker(&scratch, &phases, &ambient);
+	let executed =
+		crate::reexec::execute_forward(&scratch, km, base, installs, Some(&phases), &governing)
+			.ok()?;
 	let ps = executed.first()?.clone();
 	crate::solve::validate::note_malleable_reshapes(&scratch, km, &ps, installs, &governing);
 	for state in &executed {

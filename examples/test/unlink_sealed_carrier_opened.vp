@@ -1,0 +1,35 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u1 at one session and at two.
+//
+// The counterweight to unlink_sealed_carrier_not_observed.vp: the same two
+// tokens in the same sealed bundle, with the wrapping key leaked as well. The
+// attacker opens the carrier, so both tokens really were shown to it, and the
+// leaked seed then links them. This is what keeps the observability rule from
+// refusing every value that travels inside a ciphertext.
+
+attacker[active]
+
+principal Alice[
+	knows private wrap
+	generates seed
+	knows public lab1, lab2
+	tok1 = HASH(seed, lab1)
+	tok2 = HASH(seed, lab2)
+	generates n1
+	sealed = AEAD_ENC(wrap, n1, CONCAT(tok1, tok2), nil)
+	leaks seed
+	leaks wrap
+]
+
+Alice -> Bob: n1, sealed
+
+principal Bob[
+	knows private wrap
+	opened = AEAD_DEC(wrap, n1, sealed, nil)?
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

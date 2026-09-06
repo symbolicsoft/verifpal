@@ -145,6 +145,7 @@ struct StoredState {
 	diffs: Vec<(usize, SlotValues)>,
 	halted_at: Option<i32>,
 	foreign_halts: Vec<(PrincipalId, usize)>,
+	starved: Vec<usize>,
 	forwarded: bool,
 }
 
@@ -170,7 +171,8 @@ fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
 			(None, None) => true,
 			(Some(x), Some(y)) => same_term(x, y),
 			_ => false,
-		} && a.provenance.creator == b.provenance.creator
+		} && a.installed_at == b.installed_at
+		&& a.provenance.creator == b.provenance.creator
 		&& a.provenance.sender == b.provenance.sender
 		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
 		&& a.provenance.bypass_injected == b.provenance.bypass_injected
@@ -648,6 +650,7 @@ impl VerifyContext {
 				diffs,
 				halted_at: state.halted_at,
 				foreign_halts: state.foreign_halts.clone(),
+				starved: state.starved.clone(),
 				forwarded: state.forwarded,
 			});
 		}
@@ -734,6 +737,7 @@ impl VerifyContext {
 			}
 			rebuilt.halted_at = state.halted_at;
 			rebuilt.foreign_halts = state.foreign_halts.clone();
+			rebuilt.starved = state.starved.clone();
 			rebuilt.forwarded = state.forwarded;
 			out.push(rebuilt);
 		}

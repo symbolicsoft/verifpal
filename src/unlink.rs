@@ -37,12 +37,42 @@ pub(crate) fn find_link_witness(
 	let (bv, _) = ps.resolve_constant(b, true);
 	let honest =
 		|c: &Constant| crate::theory::reduce_once(&crate::value::resolve_trace_constant(c, km));
+	if !honest(a).equivalent(&honest(b), true) && !share_secret_subterm(a, b, km, ps) {
+		return None;
+	}
 	witness_observed_equality(&av, &bv, ps, attacker)
 		.filter(|_| honest(a).equivalent(&honest(b), true))
 		.or_else(|| witness_identifying_check(&av, &bv, ps, attacker))
 		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
 		.or_else(|| witness_recognized_secret(&av, &bv, ps, attacker))
 		.filter(|witness| !attacker_supplied(&witness.value, ps))
+}
+
+fn share_secret_subterm(
+	a: &Constant,
+	b: &Constant,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+) -> bool {
+	let mut of_a: Vec<Value> = Vec::new();
+	collect_subterms(&crate::value::resolve_trace_constant(a, km), &mut of_a);
+	let mut of_b: Vec<Value> = Vec::new();
+	collect_subterms(&crate::value::resolve_trace_constant(b, km), &mut of_b);
+	of_b.iter().any(|t| {
+		depends_on_secret(t, ps)
+			&& of_a
+				.iter()
+				.any(|s| s.hash_value() == t.hash_value() && s.equivalent(t, true))
+	})
+}
+
+fn collect_subterms(v: &Value, out: &mut Vec<Value>) {
+	out.push(v.clone());
+	if let Value::Primitive(p) = v {
+		for arg in &p.arguments {
+			collect_subterms(arg, out);
+		}
+	}
 }
 
 fn attacker_supplied(v: &Value, ps: &PrincipalState) -> bool {
@@ -106,7 +136,8 @@ fn witness_identifying_check(
 		key_arg,
 		&ap.arguments[key_arg],
 	)?;
-	if !crate::theory::obtainable(&identifier, ps, attacker) {
+	if !crate::theory::obtainable(&identifier, ps, attacker) || !depends_on_secret(&identifier, ps)
+	{
 		return None;
 	}
 	Some(LinkWitness {
@@ -221,6 +252,9 @@ fn recognized_secrets(
 				continue;
 			}
 			push_leaf(&mut out, arg);
+			for leaf in origin_leaves(arg, ps, attacker).unwrap_or_default() {
+				push_leaf(&mut out, &leaf);
+			}
 		}
 	}
 	out.into_iter().map(|w| (w, check.id)).collect()
@@ -409,24 +443,33 @@ fn carried_by_disclosed_slot(
 			continue;
 		}
 		let (carrier, _) = ps.resolve_constant(&meta.constant, true);
-		if contains_equivalent_subterm(&carrier, target, target_hash) {
+		if opened_subterm(&carrier, target, target_hash, ps, attacker) {
 			return true;
 		}
 	}
 	false
 }
 
-fn contains_equivalent_subterm(value: &Value, target: &Value, target_hash: u64) -> bool {
+fn opened_subterm(
+	value: &Value,
+	target: &Value,
+	target_hash: u64,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> bool {
 	if value.hash_value() == target_hash && value.equivalent(target, true) {
 		return true;
 	}
-	match value {
-		Value::Constant(_) => false,
-		Value::Primitive(p) => p
-			.arguments
-			.iter()
-			.any(|arg| contains_equivalent_subterm(arg, target, target_hash)),
+	let Value::Primitive(p) = value else {
+		return false;
+	};
+	if !primitive_core_reveals_args(p.id) && crate::theory::can_decompose(p, ps, attacker).is_none()
+	{
+		return false;
 	}
+	p.arguments
+		.iter()
+		.any(|arg| opened_subterm(arg, target, target_hash, ps, attacker))
 }
 
 fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {

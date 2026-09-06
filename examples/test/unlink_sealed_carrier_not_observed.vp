@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u0 at one session and at two.
+//
+// Two tokens derived from a leaked seed, travelling only inside a ciphertext
+// under a key nobody gives up. The attacker can recompute both from the seed,
+// but it never saw either: the carrier went past it sealed. Observability
+// asks whether a value was shown, and a value carried inside something the
+// attacker cannot open was not.
+//
+// The engine used to accept any syntactic subterm of a disclosed slot, so a
+// token the attacker could recompute counted as observed merely because the
+// protocol had put it inside a message. `opened_subterm` now requires the
+// path down to it to pass through terms the attacker can open — a tuple, or
+// a primitive whose `decompose` it can run.
+// unlink_sealed_carrier_opened.vp is the counterweight, where the key leaks
+// and the same carrier is open.
+
+attacker[active]
+
+principal Alice[
+	knows private wrap
+	generates seed
+	knows public lab1, lab2
+	tok1 = HASH(seed, lab1)
+	tok2 = HASH(seed, lab2)
+	generates n1
+	sealed = AEAD_ENC(wrap, n1, CONCAT(tok1, tok2), nil)
+	leaks seed
+]
+
+Alice -> Bob: n1, sealed
+
+principal Bob[
+	knows private wrap
+	opened = AEAD_DEC(wrap, n1, sealed, nil)?
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

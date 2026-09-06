@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a0 at one session and at two.
+//
+// Alice signs a message and hands it to Bob unguarded; Bob verifies and
+// relays both under guards; Carol verifies again. At two sessions the
+// attacker replays Alice's other flight into Bob, whose signature check
+// passes because the signature is honest, and Bob then forwards that
+// message himself. Carol accepts what Bob sent her, once, and Carol's other
+// run accepts what Bob's other run sent it, once.
+//
+// The engine used to report the relayed leg as a duplicate acceptance on the
+// strength of the value equalling a sibling session's, without asking
+// whether this run of the sender had emitted it. A guard says the attacker
+// cannot choose what arrives on that leg, so the answer is that it did, and
+// the substitution being described belongs to the open leg above it.
+// relay_guarded_replay_open_hop.vp is the counterweight, where the same
+// flight arrives on a leg the attacker can touch and the duplicate is real.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+Alice -> Carol: [pk]
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Bob -> Carol: [m], [s]
+
+principal Carol[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Carol -> Dave: [m]
+
+principal Dave[
+	h = HASH(m)
+]
+
+queries[
+	authentication? Bob -> Carol: m
+	authentication? Carol -> Dave: m
+]

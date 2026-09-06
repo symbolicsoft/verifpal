@@ -1,0 +1,46 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a0 at one session and a1a1 at two.
+//
+// The counterweight to phase_second_delivery.vp: the same two deliveries,
+// with the key leaked only in phase 2, after Carol has been handed the pair
+// in phase 1. A delivery is judged against the knowledge of its own phase,
+// so the phase-2 key forges neither Bob's phase-0 delivery nor Carol's
+// phase-1 one. At two sessions each delivery is a replay of the other
+// session's pair.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates x
+	t = MAC(k, x)
+]
+
+Alice -> Bob: x, t
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+phase[1]
+
+Alice -> Carol: x, t
+
+principal Carol[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+phase[2]
+
+principal Alice[
+	leaks k
+]
+
+queries[
+	authentication? Alice -> Bob: x
+	authentication? Alice -> Carol: x
+]

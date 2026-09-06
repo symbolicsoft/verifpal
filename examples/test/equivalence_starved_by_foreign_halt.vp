@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e0 at one session and e1 at two.
+//
+// Bob decrypts under a check and forwards the plaintext to Carol under a
+// guard; Carol hashes what she is handed. Replacing the nonce on the way to
+// Bob makes his checked decryption fail, and a principal that halts at a
+// check sends nothing after it: Carol never receives d and never computes x.
+// A comparison between Alice's hash and a value Carol never reached is not
+// a divergence, so at one session the query holds.
+//
+// The engine used to compare it anyway: the halt withheld Bob's own slots,
+// but Carol's x, computed from a slot she was never handed, was read as
+// reached, and it resolved to a hash of the failed decryption. A slot whose
+// definition reads a withheld slot is now withheld too. At two sessions the
+// attacker routes the other session's nonce and ciphertext into Bob, who
+// decrypts m#2 under the shared key and hands it on, and Carol's hash of it
+// genuinely differs from Alice's.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m, n
+	e = AEAD_ENC(k, n, m, nil)
+	hm = HASH(m)
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, n, e, nil)?
+]
+
+Bob -> Carol: [d]
+
+principal Carol[
+	x = HASH(d)
+]
+
+queries[
+	equivalence? hm, x
+]

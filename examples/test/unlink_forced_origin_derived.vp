@@ -1,0 +1,49 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u0 at one session and at two.
+//
+// unlink_forced_origin.vp one derivation deeper. Bob hashes each nonce
+// before deriving a token from it, so replacing Alice's nonce with Carol's
+// on the wire gives the two tokens the common origin HASH(nc), a value the
+// attacker never put on a wire itself but one that exists only because of
+// its substitution. The honest tokens share nothing, and a link says the
+// two values came from one party: a witness the attacker manufactured by
+// feeding one party's input to another is not evidence about them.
+//
+// The engine used to refuse only a shared origin that was literally the
+// installed value, so the derived one slipped through. It now requires the
+// honest values to share a secret-dependent subterm before it looks for any
+// witness, which is what unlink_active_links.vp still satisfies: there the
+// honest tokens already share the key the man in the middle reveals.
+
+attacker[active]
+
+principal Alice[
+	generates na
+]
+
+principal Carol[
+	generates nc
+]
+
+Alice -> Bob: na
+Carol -> Bob: nc
+
+principal Bob[
+	knows public c1, c2
+	f1 = HASH(na)
+	f2 = HASH(nc)
+	p = HASH(f1, c1)
+	q = HASH(f2, c2)
+]
+
+Bob -> Dave: p, q
+
+principal Dave[
+	_ = HASH(p, q)
+]
+
+queries[
+	unlinkability? p, q
+]

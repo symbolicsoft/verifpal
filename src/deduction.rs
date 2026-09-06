@@ -885,6 +885,9 @@ fn rule_reuse(
 		let Some(rule) = reuse_rule(p.id) else {
 			continue;
 		};
+		if attacker_mints(p, ps, attacker) && !protocol_produced(ctx, known) {
+			continue;
+		}
 		if rule.fixed.iter().all(|&at| {
 			p.arguments
 				.get(at)
@@ -955,6 +958,25 @@ fn rule_reuse(
 		}
 	}
 	progress
+}
+
+fn attacker_mints(p: &Arc<Primitive>, ps: &PrincipalState, attacker: &AttackerState) -> bool {
+	can_reconstruct_primitive(p, ps, attacker).is_some_and(|built| built.forged.is_some())
+}
+
+fn protocol_produced(ctx: &VerifyContext, value: &Value) -> bool {
+	let hash = value.hash_value();
+	ctx.principal_states().iter().any(|state| {
+		ctx.execution_base(state.id).is_some_and(|base| {
+			base.values.iter().enumerate().any(|(i, sv)| {
+				base.meta
+					.get(i)
+					.is_some_and(|meta| meta.creator == state.id)
+					&& sv.value.hash_value() == hash
+					&& sv.value.equivalent(value, true)
+			})
+		})
+	})
 }
 
 type PairKey = (PrincipalId, u64, u64, i32, usize, usize, u64, u64);

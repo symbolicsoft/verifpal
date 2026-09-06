@@ -399,12 +399,37 @@ fn query_authentication_get_pass_indices(
 		if !sibling_replay {
 			sibling_replay = copy_sibling_replay(&c, &ps.values[idx].value, km);
 		}
+		if sibling_replay && delivery_is_guarded(km, idx, query.message.sender, ps.id) {
+			return Ok((vec![], query.message.sender, c, false));
+		}
 		if sibling_replay && !recipient_contributed(&c, km, ps) {
 			note_origin_only(ctx, query, query_index);
 		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
 	Ok((indices, sender, c, sibling_replay))
+}
+
+fn delivery_is_guarded(
+	km: &ProtocolTrace,
+	slot: usize,
+	sender: PrincipalId,
+	recipient: PrincipalId,
+) -> bool {
+	let Some(trace_slot) = km.slots.get(slot) else {
+		return false;
+	};
+	let mut delivered = false;
+	for event in &trace_slot.sent_by {
+		if event.sender != sender || event.recipient != recipient {
+			continue;
+		}
+		delivered = true;
+		if !event.guarded {
+			return false;
+		}
+	}
+	delivered
 }
 
 fn recipient_contributed(c: &Constant, km: &ProtocolTrace, ps: &PrincipalState) -> bool {
@@ -662,7 +687,7 @@ fn query_equivalence(
 		let Some(slot) = slot else {
 			return Ok(result);
 		};
-		if ps.slot_unreached(slot) || value_check_failed(&value) {
+		if ps.slot_unreached(slot) || ps.slot_starved(slot) || value_check_failed(&value) {
 			return Ok(result);
 		}
 		values.push(value);

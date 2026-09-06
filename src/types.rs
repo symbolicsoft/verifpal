@@ -1322,14 +1322,35 @@ impl ProtocolTrace {
 		}
 	}
 
-	pub(crate) fn mutation_phase(&self, slot: usize) -> Option<i32> {
+	pub(crate) fn substitution_phase(&self, slot: usize, recipient: PrincipalId) -> Option<i32> {
+		self.substitution_phase_from(slot, recipient, &mut Vec::new())
+	}
+
+	fn substitution_phase_from(
+		&self,
+		slot: usize,
+		recipient: PrincipalId,
+		visiting: &mut Vec<PrincipalId>,
+	) -> Option<i32> {
 		let trace_slot = self.slots.get(slot)?;
-		trace_slot
+		if visiting.contains(&recipient) {
+			return None;
+		}
+		visiting.push(recipient);
+		let earliest = trace_slot
 			.sent_by
 			.iter()
-			.filter(|event| !event.guarded)
-			.map(|event| event.phase)
-			.min()
+			.filter(|event| event.recipient == recipient)
+			.filter_map(|event| {
+				if event.guarded {
+					self.substitution_phase_from(slot, event.sender, visiting)
+				} else {
+					Some(event.phase)
+				}
+			})
+			.min();
+		visiting.pop();
+		earliest
 	}
 }
 
@@ -1352,6 +1373,7 @@ pub struct SlotMeta {
 	pub sent_at: Option<i32>,
 	pub declared_at: i32,
 	pub mutatable_to: Vec<PrincipalId>,
+	pub delivery_phases: Vec<(PrincipalId, i32)>,
 	pub phase: Vec<i32>,
 }
 
@@ -1369,6 +1391,7 @@ pub struct SlotValues {
 	pub pre_rewrite: Value,
 	pub original: Value,
 	pub bypassed: Option<Value>,
+	pub installed_at: Option<i32>,
 	pub provenance: Provenance,
 }
 
@@ -1402,6 +1425,7 @@ pub struct PrincipalState {
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
 	pub foreign_halts: Vec<(PrincipalId, usize)>,
+	pub starved: Vec<usize>,
 	pub capabilities: Arc<CapabilityIndex>,
 	pub forwarded: bool,
 }
@@ -1445,6 +1469,10 @@ impl PrincipalState {
 			.any(|&(principal, at)| principal == meta.creator && i >= at)
 	}
 
+	pub fn slot_starved(&self, i: usize) -> bool {
+		self.starved.binary_search(&i).is_ok()
+	}
+
 	pub fn withheld_by_own_halt(&self, i: usize) -> bool {
 		let (Some(halted_at), Some(sm)) = (self.halted_at, self.meta.get(i)) else {
 			return false;
@@ -1475,6 +1503,22 @@ impl PrincipalState {
 			self.values[i].perceived()
 		} else {
 			&self.values[i].value
+		}
+	}
+
+	pub fn mutation_reaches(&self, slot: usize, principal: PrincipalId) -> bool {
+		let Some(meta) = self.meta.get(slot) else {
+			return false;
+		};
+		if !meta.mutatable_to.contains(&principal) {
+			return false;
+		}
+		match self.values.get(slot).and_then(|sv| sv.installed_at) {
+			None => true,
+			Some(at) => meta
+				.delivery_phases
+				.iter()
+				.any(|&(who, phase)| who == principal && phase >= at),
 		}
 	}
 }

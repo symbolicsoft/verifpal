@@ -1,0 +1,38 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// The same shape as cap_forgeable_is_not_a_reuse_pair.vp with a generated
+// nonce that travels guarded. A guard only takes capability away from the
+// attacker, so it can never turn a query that holds into one that fails, and
+// the unguarded spelling of this model holds.
+//
+// It did not. Guarding the nonce removed the substitution the search would
+// otherwise have made on it, and the search fell back to minting a ciphertext
+// under the declared `forgeable` assumption and pairing that mint with
+// Alice's own. The verdict moved from c0 to c1 on the strength of one pair of
+// brackets, which is the shortest proof that the pairing was wrong.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public ad
+	generates n_e
+	e = AEAD_ENC[forgeable](k, n_e, m, ad)
+]
+
+Alice -> Bob: [n_e], e
+
+principal Bob[
+	knows private k
+	knows public ad
+	d = AEAD_DEC(k, n_e, e, ad)?
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+]

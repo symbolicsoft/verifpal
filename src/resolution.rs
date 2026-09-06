@@ -60,7 +60,7 @@ pub(crate) fn state_mentions(
 		Value::Constant(c) => {
 			if c.id == target {
 				return match ps.index_of(c) {
-					Some(idx) => owner == ps.id || ps.meta[idx].mutatable_to.contains(&owner),
+					Some(idx) => owner == ps.id || ps.mutation_reaches(idx, owner),
 					None => false,
 				};
 			}
@@ -103,9 +103,7 @@ fn compute_visibility(
 
 	let forced = existing_use_original || root_from_other;
 	if forced {
-		!ps.meta[slot_idx]
-			.mutatable_to
-			.contains(&ps.values[root_index].provenance.creator)
+		!ps.mutation_reaches(slot_idx, ps.values[root_index].provenance.creator)
 	} else {
 		ps.should_use_original(slot_idx)
 	}

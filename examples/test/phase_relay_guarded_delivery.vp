@@ -1,0 +1,50 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a0 at one session and a1a0 at two.
+//
+// Bob receives the MACed pair unguarded in phase 0 and relays it to Carol
+// under guards in phase 1, after the key has leaked. Carol's delivery is in
+// phase 1, but a guard admits only the substitution made upstream, on the
+// way to Bob, and that happened in phase 0 with no key in hand: Bob's check
+// would have refused it. So the phase that governs a guarded relay is the
+// phase of the unguarded delivery it stands for, and the phase-1 key forges
+// nothing here.
+//
+// At two sessions the open leg into Bob takes the other session's pair,
+// which his check accepts because the key is shared, and that is a genuine
+// duplicate acceptance of Alice's sending. The relayed leg is not: Bob
+// forwards what he himself accepted, once, and Carol takes it once.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates x
+	t = MAC(k, x)
+]
+
+Alice -> Bob: x, t
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks k
+]
+
+Bob -> Carol: [x], [t]
+
+principal Carol[
+	knows private k
+	_ = ASSERT(MAC(k, x), t)?
+]
+
+queries[
+	authentication? Alice -> Bob: x
+	authentication? Bob -> Carol: x
+]

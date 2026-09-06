@@ -59,6 +59,32 @@ impl fmt::Display for Primitive {
 	}
 }
 
+pub(crate) fn term_with_projections(v: &Value) -> String {
+	let Value::Primitive(p) = v else {
+		return v.to_string();
+	};
+	let head = Primitive {
+		arguments: Vec::new(),
+		instance_check: false,
+		hash: HashCell::default(),
+		..(**p).clone()
+	}
+	.to_string();
+	let arguments: Vec<String> = p.arguments.iter().map(term_with_projections).collect();
+	let projection = if crate::primitive::primitive_has_single_output(p.id) {
+		String::new()
+	} else {
+		format!("|{}", p.output + 1)
+	};
+	format!(
+		"{}({}){}{}",
+		head.trim_end_matches("()"),
+		arguments.join(", "),
+		projection,
+		if p.instance_check { "?" } else { "" },
+	)
+}
+
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
