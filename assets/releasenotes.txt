@@ -1,4 +1,8 @@
-Verifpal 1.4.4
+Verifpal 1.4.5
+
+Changes since v1.4.4:
+
+- Soundness/completeness fixes + more regression tests
 
 Changes since v1.4.3:
 
