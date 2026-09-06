@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use crate::context::{Generational, VerifyContext};
+use crate::context::{Generational, KnowledgeKey, Recent, VerifyContext};
 use crate::primitive::admissible;
 use crate::principal::ATTACKER_ID;
 use crate::reexec::{Controllable, TermBound, governing_attacker, reexecute_at, same_installs};
@@ -107,17 +107,22 @@ impl Emission<'_> {
 		if installs.is_empty() {
 			return false;
 		}
+		let group = KnowledgeKey::of(self.attacker);
 		let key = self.key(&installs, target);
 		let remembered = EMISSIONS.with(|memo| {
-			memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
-				bucket
-					.iter()
-					.find(|seen| {
-						same_installs(&seen.installs, &installs)
-							&& seen.target.equivalent(target, true)
-					})
-					.map(|seen| seen.emits)
-			})
+			memo.borrow_mut()
+				.fresh()
+				.group(group)
+				.get(&key)
+				.and_then(|bucket| {
+					bucket
+						.iter()
+						.find(|seen| {
+							same_installs(&seen.installs, &installs)
+								&& seen.target.equivalent(target, true)
+						})
+						.map(|seen| seen.emits)
+				})
 		});
 		if let Some(emits) = remembered {
 			return emits;
@@ -126,6 +131,7 @@ impl Emission<'_> {
 		EMISSIONS.with(|memo| {
 			memo.borrow_mut()
 				.fresh()
+				.group(group)
 				.entry(key)
 				.or_default()
 				.push(Emitted {
@@ -175,20 +181,11 @@ impl Emission<'_> {
 				.rotate_left(17)
 				.wrapping_add(value.hash_value());
 		}
-		(
-			self.origin.id,
-			self.j,
-			self.attacker.current_phase,
-			self.attacker.known.len(),
-			self.attacker.reused.len(),
-			self.attacker.routes_epoch,
-			self.attacker.chain,
-			mixed,
-		)
+		(self.origin.id, self.j, mixed)
 	}
 }
 
-type EmissionKey = (PrincipalId, usize, i32, usize, usize, u64, u64, u64);
+type EmissionKey = (PrincipalId, usize, u64);
 
 struct Emitted {
 	installs: Vec<(SlotIdx, Value)>,
@@ -196,11 +193,11 @@ struct Emitted {
 	emits: bool,
 }
 
-type ForgeableKey = (PrincipalId, PrincipalId, i32, usize, usize, u64, u64, u64);
+type ForgeableKey = (PrincipalId, PrincipalId, u64);
 
-type Emissions = Generational<IdMap<EmissionKey, Vec<Emitted>>>;
+type Emissions = Generational<Recent<KnowledgeKey, EmissionKey, Vec<Emitted>>>;
 
-type Forgeable = Generational<IdMap<ForgeableKey, Vec<(Value, bool)>>>;
+type Forgeable = Generational<Recent<KnowledgeKey, ForgeableKey, Vec<(Value, bool)>>>;
 
 thread_local! {
 	static EMISSIONS: RefCell<Emissions> = RefCell::new(Generational::default());
@@ -252,23 +249,19 @@ fn forgeable_without_sender(
 	target: &Value,
 	attacker: &AttackerState,
 ) -> bool {
-	let key = (
-		ps.id,
-		sender,
-		attacker.current_phase,
-		attacker.known.len(),
-		attacker.reused.len(),
-		attacker.routes_epoch,
-		attacker.chain,
-		target.hash_value(),
-	);
+	let group = KnowledgeKey::of(attacker);
+	let key = (ps.id, sender, target.hash_value());
 	let remembered = FORGEABLE.with(|memo| {
-		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|(seen, _)| seen.equivalent(target, true))
-				.map(|(_, forgeable)| *forgeable)
-		})
+		memo.borrow_mut()
+			.fresh()
+			.group(group)
+			.get(&key)
+			.and_then(|bucket| {
+				bucket
+					.iter()
+					.find(|(seen, _)| seen.equivalent(target, true))
+					.map(|(_, forgeable)| *forgeable)
+			})
 	});
 	if let Some(forgeable) = remembered {
 		return forgeable;
@@ -277,6 +270,7 @@ fn forgeable_without_sender(
 	FORGEABLE.with(|memo| {
 		memo.borrow_mut()
 			.fresh()
+			.group(group)
 			.entry(key)
 			.or_default()
 			.push((target.clone(), forgeable));

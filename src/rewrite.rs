@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::context::Generational;
-use crate::theory::{can_rewrite, structurally_identical_primitive};
+use crate::theory::{TermMemo, can_rewrite};
 use crate::types::*;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ struct Reduced {
 	value: Value,
 }
 
-type ReduceCache = IdMap<u64, Vec<(Arc<Primitive>, Reduced)>>;
+type ReduceCache = TermMemo<Reduced>;
 
 thread_local! {
 	static REDUCE_CACHE: RefCell<Generational<ReduceCache>> = RefCell::new(Generational::default());
@@ -39,27 +39,12 @@ fn reduce_term(p: &Arc<Primitive>) -> Reduced {
 		return hit;
 	}
 	let computed = reduce_term_uncached(p);
-	REDUCE_CACHE.with(|c| {
-		c.borrow_mut()
-			.fresh()
-			.entry(key)
-			.or_default()
-			.push((Arc::clone(p), computed.clone()));
-	});
+	REDUCE_CACHE.with(|c| c.borrow_mut().fresh().put(key, p, computed.clone()));
 	computed
 }
 
 fn reduce_cache_get(key: u64, p: &Arc<Primitive>) -> Option<Reduced> {
-	REDUCE_CACHE.with(|c| {
-		c.borrow_mut()
-			.fresh()
-			.get(&key)?
-			.iter()
-			.find(|(candidate, _)| {
-				Arc::ptr_eq(candidate, p) || structurally_identical_primitive(candidate, p)
-			})
-			.map(|(_, hit)| hit.clone())
-	})
+	REDUCE_CACHE.with(|c| c.borrow_mut().fresh().get(key, p))
 }
 
 fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {

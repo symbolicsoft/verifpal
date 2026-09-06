@@ -82,6 +82,50 @@ impl<T: Default> Generational<T> {
 	}
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct KnowledgeKey {
+	saturation: Saturation,
+	chain: u64,
+}
+
+impl KnowledgeKey {
+	pub(crate) fn of(attacker: &AttackerState) -> KnowledgeKey {
+		KnowledgeKey {
+			saturation: Saturation::of(attacker),
+			chain: attacker.chain,
+		}
+	}
+}
+
+const RECENT_GROUPS: usize = 8;
+
+pub(crate) struct Recent<G, K, V> {
+	groups: Vec<(G, IdMap<K, V>)>,
+}
+
+impl<G, K, V> Default for Recent<G, K, V> {
+	fn default() -> Self {
+		Recent { groups: Vec::new() }
+	}
+}
+
+impl<G: PartialEq, K: std::hash::Hash + Eq, V> Recent<G, K, V> {
+	pub(crate) fn group(&mut self, group: G) -> &mut IdMap<K, V> {
+		match self.groups.iter().position(|(seen, _)| *seen == group) {
+			Some(0) => {}
+			Some(at) => {
+				let found = self.groups.remove(at);
+				self.groups.insert(0, found);
+			}
+			None => {
+				self.groups.truncate(RECENT_GROUPS - 1);
+				self.groups.insert(0, (group, IdMap::default()));
+			}
+		}
+		&mut self.groups[0].1
+	}
+}
+
 pub(crate) fn analysis_count_get() -> usize {
 	ANALYSIS_COUNT.with(|c| c.get()) as usize
 }
@@ -95,13 +139,7 @@ use crate::types::*;
 use crate::util::*;
 use crate::value::compute_slot_diffs;
 
-type Replay = (
-	u64,
-	crate::reexec::Seeds,
-	i32,
-	(usize, usize, u64, u64),
-	Option<Arc<Vec<PrincipalState>>>,
-);
+type Replay = (crate::reexec::Seeds, Option<Arc<Vec<PrincipalState>>>);
 
 type DeferredReplay = (PrincipalId, Vec<(ValueId, Value)>);
 
@@ -126,7 +164,7 @@ pub(crate) struct VerifyContext {
 	#[cfg(test)]
 	searched: AtomicBool,
 	origin_only: RwLock<IdSet<usize>>,
-	replays: RwLock<Vec<Replay>>,
+	replays: RwLock<Recent<KnowledgeKey, u64, Vec<Replay>>>,
 	basis: RwLock<(i32, usize, IdSet<u64>)>,
 	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
 	saturation: RwLock<IdMap<PrincipalId, Saturation>>,
@@ -387,7 +425,7 @@ impl VerifyContext {
 		let unresolved = results.len() as i32;
 		analysis_count_reset();
 		VerifyContext {
-			replays: RwLock::new(Vec::new()),
+			replays: RwLock::new(Recent::default()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			origin_only: RwLock::new(IdSet::default()),
@@ -583,23 +621,21 @@ impl VerifyContext {
 		attacker: &AttackerState,
 	) -> Option<Arc<Vec<PrincipalState>>> {
 		let key = seeds_signature(seeds);
-		let phase = attacker.current_phase;
-		let known = (
-			attacker.known.len(),
-			attacker.reused.len(),
-			attacker.routes_epoch,
-			attacker.chain,
-		);
-		if let Some((_, _, _, _, hit)) =
-			read_lock(&self.replays)
-				.iter()
-				.find(|(seen, of, at, held, _)| {
-					*seen == key && *at == phase && *held == known && same_seeds(of, seeds)
-				}) {
-			return hit.clone();
+		let group = KnowledgeKey::of(attacker);
+		if let Some(hit) = write_lock(&self.replays)
+			.group(group)
+			.get(&key)
+			.and_then(|bucket| bucket.iter().find(|(of, _)| same_seeds(of, seeds)))
+			.map(|(_, hit)| hit.clone())
+		{
+			return hit;
 		}
 		let built = crate::reexec::replay_diffs(self, km, seeds, attacker).map(Arc::new);
-		write_lock(&self.replays).push((key, seeds.to_vec(), phase, known, built.clone()));
+		write_lock(&self.replays)
+			.group(group)
+			.entry(key)
+			.or_default()
+			.push((seeds.to_vec(), built.clone()));
 		built
 	}
 
@@ -1103,7 +1139,7 @@ impl VerifyContext {
 			executions: RwLock::new(IdMap::default()),
 			bases: RwLock::new(IdMap::default()),
 			coherence: RwLock::new(IdMap::default()),
-			replays: RwLock::new(Vec::new()),
+			replays: RwLock::new(Recent::default()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			sessions: self.sessions,

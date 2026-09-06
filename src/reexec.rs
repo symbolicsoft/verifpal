@@ -1086,7 +1086,11 @@ type BypassDecision = (PrincipalId, Primitive, i32, bool);
 
 type BlockedAt = crate::context::Generational<IdMap<(PrincipalId, i32), Arc<Vec<bool>>>>;
 type RestrictedAt = crate::context::Generational<
-	IdMap<(PrincipalId, i32, u64, usize, u64), Option<Arc<AttackerState>>>,
+	crate::context::Recent<
+		crate::context::KnowledgeKey,
+		(PrincipalId, i32),
+		Option<Arc<AttackerState>>,
+	>,
 >;
 
 thread_local! {
@@ -1125,19 +1129,24 @@ fn held_at(
 	if !blocked.iter().any(|&blocked| blocked) {
 		return None;
 	}
-	let key = (
-		principal,
-		at,
-		attacker.chain,
-		attacker.known.len(),
-		attacker.routes_epoch,
-	);
-	if let Some(hit) = RESTRICTED_AT.with(|cache| cache.borrow_mut().fresh().get(&key).cloned()) {
+	let group = crate::context::KnowledgeKey::of(attacker);
+	if let Some(hit) = RESTRICTED_AT.with(|cache| {
+		cache
+			.borrow_mut()
+			.fresh()
+			.group(group)
+			.get(&(principal, at))
+			.cloned()
+	}) {
 		return hit;
 	}
 	let built = restrict_known(&blocked, attacker);
 	RESTRICTED_AT.with(|cache| {
-		cache.borrow_mut().fresh().insert(key, built.clone());
+		cache
+			.borrow_mut()
+			.fresh()
+			.group(group)
+			.insert((principal, at), built.clone());
 	});
 	built
 }

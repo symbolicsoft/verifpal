@@ -242,7 +242,7 @@ impl PrincipalState {
 	pub fn resolve_all_values(&mut self) -> VResult<()> {
 		let n = self.values.len();
 		let mut resolved = Vec::with_capacity(n);
-		let mut memo: ResolveMemo = vec![[None, None]; n];
+		let mut memo = ResolveMemo::new(n);
 		let ps_ref: &PrincipalState = &*self;
 		for i in 0..n {
 			let use_original = ps_ref.should_use_original(i);

@@ -109,7 +109,25 @@ fn compute_visibility(
 	}
 }
 
-pub(crate) type ResolveMemo = Vec<[Option<Value>; 2]>;
+/// What one `resolve_all_values` has already resolved: each slot reached by
+/// name, and each primitive reached by pointer under a root. An installed
+/// term is a resolved graph, and walking it once per path made the transcript
+/// hashes a TLS flight carries several times over cost a visit per path.
+pub(crate) struct ResolveMemo {
+	slots: Vec<[Option<Value>; 2]>,
+	terms: IdMap<TermKey, (Arc<Primitive>, Option<Value>)>,
+}
+
+type TermKey = (usize, usize, bool, bool);
+
+impl ResolveMemo {
+	pub(crate) fn new(slots: usize) -> ResolveMemo {
+		ResolveMemo {
+			slots: vec![[None, None]; slots],
+			terms: IdMap::default(),
+		}
+	}
+}
 
 pub(crate) fn resolve_ps_values(
 	value: &Value,
@@ -148,7 +166,7 @@ pub(crate) fn resolve_ps_values(
 		hops += 1;
 	}
 	let rerooted = slot_idx != root_index;
-	if rerooted && let Some(hit) = &memo[slot_idx][usize::from(use_orig)] {
+	if rerooted && let Some(hit) = &memo.slots[slot_idx][usize::from(use_orig)] {
 		return Ok(Some(hit.clone()));
 	}
 	let resolved = if use_orig {
@@ -166,7 +184,7 @@ pub(crate) fn resolve_ps_values(
 		Value::Primitive(_) => {
 			let mapped = resolve_ps_primitive(resolved, resolved, slot_idx, ps, use_orig, memo)?;
 			let out = mapped.unwrap_or_else(|| resolved.clone());
-			memo[slot_idx][usize::from(use_orig)] = Some(out.clone());
+			memo.slots[slot_idx][usize::from(use_orig)] = Some(out.clone());
 			Ok(Some(out))
 		}
 	}
@@ -180,7 +198,20 @@ fn resolve_ps_primitive(
 	use_original: bool,
 	memo: &mut ResolveMemo,
 ) -> VResult<Option<Value>> {
-	let prim = value.try_as_primitive()?;
+	let Value::Primitive(prim) = value else {
+		return Err(VerifpalError::resolution("expected a primitive".into()));
+	};
+	let key = (
+		Arc::as_ptr(prim) as usize,
+		root_index,
+		use_original,
+		matches!(root_value, Value::Primitive(_)),
+	);
+	if let Some((held, hit)) = memo.terms.get(&key)
+		&& Arc::ptr_eq(held, prim)
+	{
+		return Ok(hit.clone());
+	}
 	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
 		false
 	} else {
@@ -189,7 +220,9 @@ fn resolve_ps_primitive(
 	let mapped = prim.try_map_arguments(|arg| {
 		resolve_ps_values(arg, root_value, root_index, ps, use_orig, memo)
 	})?;
-	Ok(mapped.map(|mapped| Value::Primitive(Arc::new(mapped))))
+	let out = mapped.map(|mapped| Value::Primitive(Arc::new(mapped)));
+	memo.terms.insert(key, (Arc::clone(prim), out.clone()));
+	Ok(out)
 }
 
 pub(crate) fn principal_uses_constant(

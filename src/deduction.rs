@@ -803,12 +803,32 @@ fn rule_reconstruct(
 	attacker: &AttackerState,
 	record: &Arc<MutationRecord>,
 ) -> bool {
+	rule_reconstruct_walk(ctx, km, value, ps, attacker, record, &mut IdSet::default())
+}
+
+/// The walk visits each shared subterm once. The rule reads knowledge only
+/// through the pass snapshot, so a second visit of one subterm within one walk
+/// computes the same answer and learns nothing the first did not; walking the
+/// term as a tree cost a TLS transcript, which holds the previous hash twice
+/// at every level, a visit per path.
+fn rule_reconstruct_walk(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	value: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	record: &Arc<MutationRecord>,
+	visited: &mut IdSet<usize>,
+) -> bool {
 	let mut found = false;
 	let result = match value {
 		Value::Primitive(p) => {
+			if !visited.insert(Arc::as_ptr(p) as usize) {
+				return false;
+			}
 			let result = can_reconstruct_primitive(p, ps, attacker);
 			for arg in &p.arguments {
-				found |= rule_reconstruct(ctx, km, arg, ps, attacker, record);
+				found |= rule_reconstruct_walk(ctx, km, arg, ps, attacker, record, visited);
 			}
 			result
 		}
@@ -979,8 +999,10 @@ fn protocol_produced(ctx: &VerifyContext, value: &Value) -> bool {
 	})
 }
 
-type PairKey = (PrincipalId, u64, u64, i32, usize, usize, u64, u64);
-type Pairs = crate::context::Generational<IdMap<PairKey, Vec<(Value, Value, bool)>>>;
+type PairKey = (PrincipalId, u64, u64);
+type Pairs = crate::context::Generational<
+	crate::context::Recent<crate::context::KnowledgeKey, PairKey, Vec<(Value, Value, bool)>>,
+>;
 
 thread_local! {
 	static PAIRS: std::cell::RefCell<Pairs> =
@@ -995,23 +1017,19 @@ fn pair_vetted(
 	of: &Value,
 	with: &Value,
 ) -> bool {
-	let key = (
-		ps.id,
-		of.hash_value(),
-		with.hash_value(),
-		attacker.current_phase,
-		attacker.known.len(),
-		attacker.reused.len(),
-		attacker.routes_epoch,
-		attacker.chain,
-	);
+	let group = crate::context::KnowledgeKey::of(attacker);
+	let key = (ps.id, of.hash_value(), with.hash_value());
 	let remembered = PAIRS.with(|memo| {
-		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|(a, b, _)| a.equivalent(of, true) && b.equivalent(with, true))
-				.map(|(_, _, vetted)| *vetted)
-		})
+		memo.borrow_mut()
+			.fresh()
+			.group(group)
+			.get(&key)
+			.and_then(|bucket| {
+				bucket
+					.iter()
+					.find(|(a, b, _)| a.equivalent(of, true) && b.equivalent(with, true))
+					.map(|(_, _, vetted)| *vetted)
+			})
 	});
 	if let Some(vetted) = remembered {
 		return vetted;
@@ -1022,6 +1040,7 @@ fn pair_vetted(
 	PAIRS.with(|memo| {
 		memo.borrow_mut()
 			.fresh()
+			.group(group)
 			.entry(key)
 			.or_default()
 			.push((of.clone(), with.clone(), vetted));

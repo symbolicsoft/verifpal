@@ -9,7 +9,52 @@ use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::primitive::*;
 use crate::types::*;
 
-type RewriteCache = IdMap<u64, Vec<(Arc<Primitive>, (bool, Value))>>;
+pub(crate) struct TermMemo<R> {
+	entries: IdMap<u64, Vec<(std::sync::Weak<Primitive>, R)>>,
+	inserted: usize,
+}
+
+const TERM_MEMO_SWEEP: usize = 1 << 16;
+
+impl<R> Default for TermMemo<R> {
+	fn default() -> Self {
+		TermMemo {
+			entries: IdMap::default(),
+			inserted: 0,
+		}
+	}
+}
+
+impl<R: Clone> TermMemo<R> {
+	pub(crate) fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<R> {
+		self.entries.get(&key)?.iter().find_map(|(weak, hit)| {
+			let held = weak.upgrade()?;
+			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p))
+				.then(|| hit.clone())
+		})
+	}
+
+	pub(crate) fn put(&mut self, key: u64, p: &Arc<Primitive>, result: R) {
+		self.inserted += 1;
+		if self.inserted >= TERM_MEMO_SWEEP {
+			self.inserted = 0;
+			self.sweep();
+		}
+		self.entries
+			.entry(key)
+			.or_default()
+			.push((Arc::downgrade(p), result));
+	}
+
+	fn sweep(&mut self) {
+		self.entries.retain(|_, bucket| {
+			bucket.retain(|(weak, _)| weak.strong_count() > 0);
+			!bucket.is_empty()
+		});
+	}
+}
+
+type RewriteCache = TermMemo<(bool, Value)>;
 
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
@@ -107,26 +152,11 @@ thread_local! {
 }
 
 fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
-	REWRITE_CACHE.with(|c| {
-		c.borrow_mut()
-			.fresh()
-			.get(&key)?
-			.iter()
-			.find(|(candidate, _)| {
-				Arc::ptr_eq(candidate, p) || structurally_identical_primitive(candidate, p)
-			})
-			.map(|(_, hit)| hit.clone())
-	})
+	REWRITE_CACHE.with(|c| c.borrow_mut().fresh().get(key, p))
 }
 
 fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
-	REWRITE_CACHE.with(|c| {
-		c.borrow_mut()
-			.fresh()
-			.entry(key)
-			.or_default()
-			.push((Arc::clone(p), result.clone()));
-	});
+	REWRITE_CACHE.with(|c| c.borrow_mut().fresh().put(key, p, result.clone()));
 }
 
 pub(crate) struct DeductionMemo<'a> {
