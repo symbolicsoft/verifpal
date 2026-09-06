@@ -3645,3 +3645,20 @@ fn test_forged_bundle_from_held_terms() {
 	run_model("forged_bundle_from_held_terms.vp", "c1");
 	run_model_sessions("forged_bundle_from_held_terms.vp", 1, "c1");
 }
+#[test]
+fn test_scenario_binding_is_not_a_forgery() {
+	run_model("scenario_binding_is_not_a_forgery.vp", "a0");
+	run_model_sessions("scenario_binding_is_not_a_forgery.vp", 1, "a0");
+}
+#[test]
+fn test_scenario_identity_binding_keeps_the_error() {
+	run_model_err(
+		"scenario_identity_binding_keeps_the_error.vp",
+		"this check fails in the honest run",
+	);
+}
+#[test]
+fn test_scenario_corrupt_needs_every_ingredient() {
+	run_model("scenario_corrupt_needs_every_ingredient.vp", "c1");
+	run_model_sessions("scenario_corrupt_needs_every_ingredient.vp", 1, "c1");
+}

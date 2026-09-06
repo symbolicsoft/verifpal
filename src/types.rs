@@ -1260,6 +1260,7 @@ pub struct ProtocolTrace {
 	pub copy_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub actors: IdMap<PrincipalId, PrincipalId>,
+	pub scenario_bound: IdSet<ValueId>,
 	pub equivalence_queried: IdSet<ValueId>,
 }
 
@@ -1270,6 +1271,25 @@ impl ProtocolTrace {
 
 	pub(crate) fn same_actor(&self, a: PrincipalId, b: PrincipalId) -> bool {
 		Self::grouped(&self.actors, a, b)
+	}
+
+	pub(crate) fn interchangeable_for(&self, a: PrincipalId, b: PrincipalId, slot: usize) -> bool {
+		if self.interchangeable_with(a, b) {
+			return true;
+		}
+		if !self.same_actor(a, b) || self.scenario_bound.is_empty() {
+			return false;
+		}
+		let Some(trace_slot) = self.slots.get(slot) else {
+			return false;
+		};
+		let mut constants = Vec::new();
+		crate::value::resolve_trace_constant(&trace_slot.constant, self)
+			.collect_constants(&mut constants);
+		!constants.iter().any(|c| {
+			self.scenario_bound
+				.contains(&crate::value::copy_index_of(c.id).1)
+		})
 	}
 
 	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {

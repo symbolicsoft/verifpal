@@ -1052,7 +1052,7 @@ mod tests {
 			"guard",
 			variants_guarded,
 			Strength::Weaker,
-			900,
+			1800,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1063,7 +1063,7 @@ mod tests {
 			"guard",
 			variants_guarded,
 			Strength::Weaker,
-			600,
+			1700,
 			Sweep::Fast,
 		);
 	}

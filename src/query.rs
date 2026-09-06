@@ -711,8 +711,14 @@ fn query_equivalence(
 				let (shown, slot) = state.resolve_constant(c, false);
 				let _slot = slot?;
 				hidden.push(&c.name);
-				let rendered = table.compress_excluding(&shown, &hidden);
+				let named = table.compress_excluding(&shown, &hidden);
 				hidden.pop();
+				let rendered = match &shown {
+					Value::Primitive(_) if !named.contains('(') => {
+						crate::pretty::term_with_projections(&shown)
+					}
+					_ => named,
+				};
 				Some(crate::narrate::Step::Resolves {
 					name: std::sync::Arc::clone(&c.name),
 					value: rendered,

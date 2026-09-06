@@ -1454,6 +1454,7 @@ mod tests {
 			copy_siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
+			scenario_bound: IdSet::default(),
 			equivalence_queried: IdSet::default(),
 		};
 		let ps = make_principal_state(

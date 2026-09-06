@@ -1,0 +1,44 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: rejected — the checked decryption fails in the honest run.
+//
+// An identity binding is a no-op, so adding one must not change what the
+// model means. Here the model is broken: Bob decrypts under a key Alice did
+// not encrypt with, and the honest run fails the check, which is a model
+// error rather than an attack.
+//
+// The scenario block used to hide it. Corruption is inferred from the values
+// a scenario binds, and `pw` is leaked, so binding `pw` to itself marked the
+// only run corrupt; a corrupt-peer clone may legitimately fail a checked
+// primitive, so the error was suppressed and the model reported a pass.
+// Binding a constant to itself substitutes nothing, and the corruption
+// inference now skips such bindings, as the interchangeability key already
+// did.
+
+attacker[passive]
+
+principal Alice[
+	knows private pw
+	knows private k1
+	generates s, n
+	e = AEAD_ENC(k1, n, s, nil)
+	leaks pw
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	knows private pw
+	knows private k2
+	d = AEAD_DEC(k2, n, e, nil)?
+	_ = HASH(d)
+]
+
+scenarios[
+	Alice[pw = pw]
+]
+
+queries[
+	confidentiality? s
+]

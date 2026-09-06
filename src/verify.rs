@@ -47,7 +47,7 @@ fn analyze_sessions_traced_cancellable(
 	let _generation = crate::context::GenerationGuard::enter();
 	crate::info::info_reset_deductions();
 	let scenario_expanded;
-	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors) =
+	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors, bound) =
 		if m.scenarios.is_empty() {
 			(
 				m,
@@ -56,6 +56,7 @@ fn analyze_sessions_traced_cancellable(
 				Vec::new(),
 				IdMap::default(),
 				IdMap::default(),
+				IdSet::default(),
 			)
 		} else {
 			let e = crate::scenario::expand_scenarios(m, sessions)?;
@@ -67,6 +68,7 @@ fn analyze_sessions_traced_cancellable(
 				e.query_variants,
 				e.interchangeable.into_iter().collect(),
 				e.actors.into_iter().collect(),
+				e.bound.into_iter().collect(),
 			)
 		};
 	let expanded;
@@ -97,6 +99,7 @@ fn analyze_sessions_traced_cancellable(
 	trace.copy_siblings = copy_sibling_groups(&trace.slots);
 	trace.interchangeable = interchangeable;
 	trace.actors = actors;
+	trace.scenario_bound = bound;
 	trace.equivalence_queried =
 		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
 	capability_reach_notice(&trace, &states);

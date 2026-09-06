@@ -65,6 +65,7 @@ pub(crate) fn construct_protocol_trace(
 		copy_siblings: IdMap::default(),
 		interchangeable: IdMap::default(),
 		actors: IdMap::default(),
+		scenario_bound: IdSet::default(),
 		equivalence_queried: IdSet::default(),
 	};
 	let declared = model_declarations(m);

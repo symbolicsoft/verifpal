@@ -16,6 +16,7 @@ pub(crate) struct ScenarioExpansion {
 	pub(crate) query_variants: Vec<Vec<Query>>,
 	pub(crate) interchangeable: Vec<(PrincipalId, PrincipalId)>,
 	pub(crate) actors: Vec<(PrincipalId, PrincipalId)>,
+	pub(crate) bound: Vec<ValueId>,
 }
 
 pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpansion> {
@@ -28,6 +29,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 			query_variants: Vec::new(),
 			interchangeable: Vec::new(),
 			actors: Vec::new(),
+			bound: Vec::new(),
 		});
 	}
 	sanity_scenarios(m)?;
@@ -161,6 +163,13 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 			.flat_map(|&(id, _)| (0..count).map(move |k| (id, k)))
 			.map(|(id, k)| (mapped_principal(id, k, &pids), id))
 			.collect(),
+		bound: m
+			.scenarios
+			.iter()
+			.flat_map(|s| s.bindings.iter())
+			.filter(|(target, value)| target.id != value.id)
+			.map(|(_, value)| value.id)
+			.collect(),
 	})
 }
 
@@ -229,6 +238,7 @@ fn scenario_corrupt_from(scenario: &Scenario, compromised: &IdMap<ValueId, i32>)
 	scenario
 		.bindings
 		.iter()
+		.filter(|(target, value)| target.id != value.id)
 		.filter_map(|(_, value)| compromised.get(&value.id).copied())
 		.min()
 		.unwrap_or(i32::MAX)
@@ -449,14 +459,6 @@ fn public_declarations(m: &Model) -> IdSet<ValueId> {
 	out
 }
 
-fn computable_publicly(v: &Value, public: &IdSet<ValueId>) -> bool {
-	let mut constants = Vec::new();
-	v.collect_constants(&mut constants);
-	constants
-		.iter()
-		.all(|c| c.is_nil() || public.contains(&c.id))
-}
-
 fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
 	let mut out: IdMap<ValueId, i32> = IdMap::default();
@@ -500,10 +502,8 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 				let Some(value) = &expression.assigned else {
 					continue;
 				};
-				let from = match earliest_mentioned(value, &out) {
-					Some(from) => from,
-					None if computable_publicly(value, &public) => 0,
-					None => continue,
+				let Some(from) = computable_from(value, &out, &public) else {
+					continue;
 				};
 				for c in &expression.constants {
 					match out.get(&c.id) {
@@ -523,15 +523,21 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	out
 }
 
-fn earliest_mentioned(v: &Value, ids: &IdMap<ValueId, i32>) -> Option<i32> {
-	match v {
-		Value::Constant(c) => ids.get(&c.id).copied(),
-		Value::Primitive(p) => p
-			.arguments
-			.iter()
-			.filter_map(|a| earliest_mentioned(a, ids))
-			.min(),
+fn computable_from(
+	v: &Value,
+	compromised: &IdMap<ValueId, i32>,
+	public: &IdSet<ValueId>,
+) -> Option<i32> {
+	let mut constants = Vec::new();
+	v.collect_constants(&mut constants);
+	let mut at = 0;
+	for c in &constants {
+		if c.is_nil() || public.contains(&c.id) {
+			continue;
+		}
+		at = at.max(compromised.get(&c.id).copied()?);
 	}
+	Some(at)
 }
 
 fn clone_principal_ids(

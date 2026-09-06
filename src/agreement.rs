@@ -331,11 +331,11 @@ fn corresponds(
 	if copy_index_of(slot.constant.id).1 != base {
 		return false;
 	}
-	if slot.creator == ATTACKER_ID || !km.interchangeable_with(slot.creator, sender) {
+	if slot.creator == ATTACKER_ID || !km.interchangeable_for(slot.creator, sender, j) {
 		return false;
 	}
 	slot.sent_by.iter().any(|event| {
-		km.interchangeable_with(event.sender, sender) && km.same_actor(event.recipient, recipient)
+		km.interchangeable_for(event.sender, sender, j) && km.same_actor(event.recipient, recipient)
 	})
 }
 

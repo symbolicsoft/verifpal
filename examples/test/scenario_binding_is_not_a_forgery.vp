@@ -1,0 +1,57 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and at two.
+//
+// session_sign_oracle_cross.vp with a scenarios block that binds a public
+// label Bob never uses in the signature. Routing Alice's challenge to Bob's
+// other run and bringing its answer back forges nothing, and the label the
+// scenario rebinds appears nowhere in what Alice accepts.
+//
+// The engine used to withdraw the matching-run exemption anyway. Two clones
+// of a principal are interchangeable only where the scenario left that
+// principal's bindings alone, and the comparison was over the whole binding
+// set, so any binding at all made every clone of Bob a different run and the
+// signature he genuinely produced was reported as the attacker's. The
+// question is now asked per value: a binding separates two clones only where
+// the value in hand depends on something the scenario rebinds, which is what
+// keeps `spore_ns_pk.vp` at `a1` — Lowe's `m1` is sealed to the bound peer
+// key itself.
+
+attacker[active]
+
+principal Alice[
+	knows public label_one, label_two, label
+	generates na
+]
+
+principal Bob[
+	knows private sk
+	knows public label_one, label_two, label
+	pk = PUBKEY(sk)
+	generates nb
+	_ = HASH(label)
+]
+
+Bob -> Alice: [pk], nb
+
+Alice -> Bob: na
+
+principal Bob[
+	sig = SIGN(sk, CONCAT(na, nb))
+]
+
+Bob -> Alice: sig
+
+principal Alice[
+	_ = SIGNVERIF(pk, CONCAT(na, nb), sig)?
+]
+
+scenarios[
+	Bob[label = label_one]
+	Bob[label = label_two]
+]
+
+queries[
+	authentication? Bob -> Alice: sig
+]

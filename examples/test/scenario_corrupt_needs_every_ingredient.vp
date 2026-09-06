@@ -1,0 +1,73 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+//
+// Bob's private key is derived from two secrets and only one of them leaks,
+// so the attacker cannot compute it and Bob is as honest as a peer whose key
+// leaks nothing at all. His public key still reaches Alice unguarded, so in
+// the run whose peer is Bob the attacker substitutes its own key, Alice
+// derives a shared secret the attacker owns, and the message is readable.
+//
+// Corruption used to be inferred from any compromised ingredient, so the one
+// leaked half marked the derived key compromised, the run holding it was
+// read as a corrupt peer, and the claims it could have answered were
+// dropped along with this attack. An assignment is now compromised only
+// where every ingredient the attacker would need is public or already
+// compromised, dated at the last of them rather than the first.
+// scenario_corrupt_by_derivation.vp is the counterweight, where the whole
+// derivation really is public. Carol's guarded key is what makes the
+// over-marking visible: with Bob's run wrongly read as corrupt, the only
+// honest peer left is one the attacker cannot touch, and the verdict falls
+// back to a hold.
+
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private bseed, bpepper
+	b = HASH(bseed, bpepper)
+	gb = PUBKEY(b)
+	leaks bseed
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Carol -> Alice: [gc]
+Bob -> Alice: gb
+Mallory -> Alice: [gm]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates m
+	k = DH_KEX(gpeer, a)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
+]
+
+Alice -> Dave: ga, n_e, e
+
+principal Dave[
+	knows private dk
+	d = HASH(e, dk)
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? m
+]
