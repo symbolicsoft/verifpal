@@ -35,14 +35,16 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 }
 
 pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut IdSet<u64>) {
-	out.insert(v.hash_value());
-	match v {
-		Value::Primitive(p) => {
-			for a in &p.arguments {
-				collect_subterm_hashes(a, out);
+	let mut seen = IdSet::default();
+	let mut pending = vec![v];
+	while let Some(value) = pending.pop() {
+		out.insert(value.hash_value());
+		if let Value::Primitive(p) = value {
+			if !seen.insert(std::sync::Arc::as_ptr(p) as usize) {
+				continue;
 			}
+			pending.extend(p.arguments.iter());
 		}
-		Value::Constant(_) => {}
 	}
 }
 
@@ -51,6 +53,35 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn collecting_a_shared_transcript_keeps_every_subterm() {
+		let mut term = make_constant("shared_transcript_seed");
+		let mut expected = IdSet::from_iter([term.hash_value()]);
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+			expected.insert(term.hash_value());
+		}
+		let mut found = IdSet::default();
+		collect_subterm_hashes(&term, &mut found);
+		assert_eq!(found, expected);
+	}
+
+	#[test]
+	fn equivalent_terms_can_have_different_subterms() {
+		let x = make_constant("subterms_dh_x");
+		let y = make_constant("subterms_dh_y");
+		let left = dh_kex(x.clone(), y.clone());
+		let right = dh_kex(y, x);
+		assert!(left.equivalent(&right, true));
+		let root = make_primitive(PRIM_HASH, vec![left.clone(), right.clone()], 0);
+		let mut found = IdSet::default();
+		collect_subterm_hashes(&root, &mut found);
+		for term in [&left, &right] {
+			let key = &term.as_primitive().unwrap().arguments[0];
+			assert!(found.contains(&key.hash_value()));
+		}
+	}
 
 	fn dh_kex(pubkey_inner: Value, bare: Value) -> Value {
 		let pk = make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![pubkey_inner], 0);

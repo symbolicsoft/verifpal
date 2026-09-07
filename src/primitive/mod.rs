@@ -63,11 +63,26 @@ pub(crate) struct RecomposeRule {
 }
 
 #[derive(Clone)]
+pub(crate) enum RewriteTo {
+	Fixed(Value),
+	Computed(RewriteToFn),
+}
+
+impl RewriteTo {
+	pub(crate) fn apply(&self, inner: &Primitive) -> Value {
+		match self {
+			Self::Fixed(value) => value.clone(),
+			Self::Computed(compute) => compute(inner),
+		}
+	}
+}
+
+#[derive(Clone)]
 pub(crate) struct RewriteRule {
 	pub id: PrimitiveId,
 	pub from: usize,
 	pub from_output: Option<usize>,
-	pub to: RewriteToFn,
+	pub to: RewriteTo,
 	pub matching: Vec<(usize, Vec<usize>)>,
 	pub filter: FilterFn,
 }

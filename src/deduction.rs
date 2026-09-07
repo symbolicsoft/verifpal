@@ -1117,6 +1117,14 @@ fn rule_rewrite_build(
 		let Some(rule) = spec.rewrite.as_ref() else {
 			continue;
 		};
+		if spec.definition_check
+			&& spec.rebuild.is_none()
+			&& spec.combine.is_empty()
+			&& let crate::primitive::RewriteTo::Fixed(result) = &rule.to
+			&& attacker.knows(result).is_some()
+		{
+			continue;
+		}
 		if rule
 			.from_output
 			.is_some_and(|output| output != inner.output)

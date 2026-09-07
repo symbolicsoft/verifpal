@@ -66,7 +66,10 @@ fn unify_into(a: &Value, b: &Value, s: &mut Substitution) -> bool {
 	match (a.as_ref(), b.as_ref()) {
 		(Value::Constant(_), Value::Constant(_)) => a.equivalent(&b, true),
 		(Value::Primitive(p1), Value::Primitive(p2)) => {
-			if p1.id != p2.id || p1.output != p2.output || p1.arguments.len() != p2.arguments.len()
+			if p1.id != p2.id
+				|| p1.output != p2.output
+				|| p1.threshold != p2.threshold
+				|| p1.arguments.len() != p2.arguments.len()
 			{
 				return false;
 			}
@@ -157,7 +160,10 @@ fn match_structural(pattern: &Value, target: &Value, s: &mut Substitution) -> bo
 	match (pattern, target) {
 		(Value::Constant(_), _) => match_into(pattern, target, s),
 		(Value::Primitive(p1), Value::Primitive(p2)) => {
-			if p1.id != p2.id || p1.output != p2.output || p1.arguments.len() != p2.arguments.len()
+			if p1.id != p2.id
+				|| p1.output != p2.output
+				|| p1.threshold != p2.threshold
+				|| p1.arguments.len() != p2.arguments.len()
 			{
 				return false;
 			}
@@ -190,6 +196,27 @@ mod tests {
 	use super::*;
 	use crate::primitive::primitive_get_enum;
 	use crate::testutil::*;
+
+	#[test]
+	fn matching_and_unification_preserve_a_shares_threshold() {
+		let variable = crate::solve::vars::attacker_var(0, "threshold_match");
+		let key = make_private("threshold_match_key");
+		let share = |secret: Value, threshold| {
+			let mut p = Primitive::new(crate::primitive::PRIM_THRESHOLD_SPLIT, vec![secret], 0);
+			p.threshold = threshold;
+			Value::Primitive(std::sync::Arc::new(p))
+		};
+		let pattern = share(variable, 2);
+		let empty = Substitution::default();
+		for threshold in [2, 3] {
+			let target = share(key.clone(), threshold);
+			assert_eq!(
+				match_value(&pattern, &target, &empty).is_some(),
+				threshold == 2
+			);
+			assert_eq!(unify(&pattern, &target, &empty).is_some(), threshold == 2);
+		}
+	}
 
 	fn pubkey(inner: Value) -> Value {
 		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)

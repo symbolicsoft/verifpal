@@ -15,7 +15,7 @@ struct Reduced {
 	value: Value,
 }
 
-type ReduceCache = TermMemo<Reduced>;
+type ReduceCache = TermMemo<(bool, bool)>;
 
 thread_local! {
 	static REDUCE_CACHE: RefCell<Generational<ReduceCache>> = RefCell::new(Generational::default());
@@ -39,12 +39,30 @@ fn reduce_term(p: &Arc<Primitive>) -> Reduced {
 		return hit;
 	}
 	let computed = reduce_term_uncached(p);
-	REDUCE_CACHE.with(|c| c.borrow_mut().fresh().put(key, p, computed.clone()));
+	REDUCE_CACHE.with(|c| {
+		c.borrow_mut().fresh().put(
+			key,
+			p,
+			(computed.failed.is_some(), computed.rewritten),
+			computed.value.clone(),
+		);
+	});
 	computed
 }
 
 fn reduce_cache_get(key: u64, p: &Arc<Primitive>) -> Option<Reduced> {
-	REDUCE_CACHE.with(|c| c.borrow_mut().fresh().get(key, p))
+	REDUCE_CACHE.with(|c| {
+		let ((failed, rewritten), value) = c.borrow_mut().fresh().get(key, p)?;
+		Some(Reduced {
+			failed: if failed {
+				value.as_primitive().cloned()
+			} else {
+				None
+			},
+			rewritten,
+			value,
+		})
+	})
 }
 
 fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {
@@ -91,6 +109,29 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn a_reduce_cache_releases_discarded_inputs_after_eviction() {
+		crate::context::enter_generation(crate::context::next_generation());
+		let p = Arc::new(Primitive::new(
+			PRIM_HASH,
+			vec![make_constant("reduce_lifetime")],
+			0,
+		));
+		let weak = Arc::downgrade(&p);
+		assert!(reduce_term(&p).rewritten);
+		assert!(reduce_cache_get(crate::hashing::primitive_hash(&p), &p).is_some());
+		drop(p);
+		for index in 0..2048 {
+			let next = Arc::new(Primitive::new(
+				PRIM_HASH,
+				vec![make_constant(&format!("reduce_eviction_{index}"))],
+				0,
+			));
+			reduce_term(&next);
+		}
+		assert!(weak.upgrade().is_none());
+	}
 
 	fn one_slot(value: &Value) -> PrincipalState {
 		let name = make_constant("rw_slot");

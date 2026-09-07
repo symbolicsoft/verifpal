@@ -10,50 +10,75 @@ use crate::primitive::*;
 use crate::types::*;
 
 pub(crate) struct TermMemo<R> {
-	entries: IdMap<u64, Vec<(std::sync::Weak<Primitive>, R)>>,
+	entries: IdMap<u64, Vec<TermMemoEntry<R>>>,
 	inserted: usize,
+	recent: std::collections::VecDeque<Arc<Primitive>>,
+}
+
+struct TermMemoEntry<R> {
+	input: std::sync::Weak<Primitive>,
+	result: R,
+	value: Option<Value>,
 }
 
 const TERM_MEMO_SWEEP: usize = 65536;
+const TERM_MEMO_RECENT: usize = 1024;
 
 impl<R> Default for TermMemo<R> {
 	fn default() -> Self {
 		TermMemo {
 			entries: IdMap::default(),
 			inserted: 0,
+			recent: std::collections::VecDeque::new(),
 		}
 	}
 }
 
 impl<R: Clone> TermMemo<R> {
-	pub(crate) fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<R> {
-		self.entries.get(&key)?.iter().find_map(|(weak, hit)| {
-			let held = weak.upgrade()?;
-			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p))
-				.then(|| hit.clone())
+	pub(crate) fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<(R, Value)> {
+		self.entries.get(&key)?.iter().find_map(|entry| {
+			let held = entry.input.upgrade()?;
+			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p)).then(|| {
+				(
+					entry.result.clone(),
+					entry.value.clone().unwrap_or(Value::Primitive(held)),
+				)
+			})
 		})
 	}
 
-	pub(crate) fn put(&mut self, key: u64, p: &Arc<Primitive>, result: R) {
+	pub(crate) fn put(&mut self, key: u64, p: &Arc<Primitive>, result: R, value: Value) {
+		if self.recent.len() == TERM_MEMO_RECENT {
+			self.recent.pop_front();
+		}
+		self.recent.push_back(Arc::clone(p));
 		self.inserted += 1;
 		if self.inserted >= TERM_MEMO_SWEEP {
 			self.inserted = 0;
 			self.sweep();
 		}
 		let bucket = self.entries.entry(key).or_default();
-		bucket.retain(|(weak, _)| weak.strong_count() > 0);
-		bucket.push((Arc::downgrade(p), result));
+		bucket.retain(|entry| entry.input.strong_count() > 0);
+		let value = match &value {
+			Value::Primitive(output) if Arc::ptr_eq(p, output) => None,
+			_ => Some(value),
+		};
+		bucket.push(TermMemoEntry {
+			input: Arc::downgrade(p),
+			result,
+			value,
+		});
 	}
 
 	fn sweep(&mut self) {
 		self.entries.retain(|_, bucket| {
-			bucket.retain(|(weak, _)| weak.strong_count() > 0);
+			bucket.retain(|entry| entry.input.strong_count() > 0);
 			!bucket.is_empty()
 		});
 	}
 }
 
-type RewriteCache = TermMemo<(bool, Value)>;
+type RewriteCache = TermMemo<bool>;
 
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
@@ -155,7 +180,11 @@ fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
 }
 
 fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
-	REWRITE_CACHE.with(|c| c.borrow_mut().fresh().put(key, p, result.clone()));
+	REWRITE_CACHE.with(|c| {
+		c.borrow_mut()
+			.fresh()
+			.put(key, p, result.0, result.1.clone())
+	});
 }
 
 pub(crate) struct DeductionMemo<'a> {
@@ -755,7 +784,7 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		if !can_rewrite_primitive(pc) {
 			return (!prim.definition_check, wrap());
 		}
-		return (true, (rule.to)(from_p));
+		return (true, rule.to.apply(from_p));
 	}
 	(!prim.definition_check, wrap())
 }
@@ -903,6 +932,33 @@ mod tests {
 	use crate::testutil::*;
 	use crate::value::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn a_rewrite_cache_releases_discarded_inputs_after_eviction() {
+		crate::context::enter_generation(crate::context::next_generation());
+		let p = Arc::new(Primitive::new(
+			PRIM_HASH,
+			vec![make_constant("cache_lifetime")],
+			0,
+		));
+		let weak = Arc::downgrade(&p);
+		assert!(can_rewrite(&p).0);
+		assert!(rewrite_cache_get(crate::hashing::primitive_hash(&p), &p).is_some());
+		drop(p);
+		for index in 0..TERM_MEMO_RECENT {
+			let next = Arc::new(Primitive::new(
+				PRIM_HASH,
+				vec![make_constant(&format!("rewrite_eviction_{index}"))],
+				0,
+			));
+			rewrite_cache_put(
+				crate::hashing::primitive_hash(&next),
+				&next,
+				&(true, Value::Primitive(Arc::clone(&next))),
+			);
+		}
+		assert!(weak.upgrade().is_none());
+	}
 
 	#[test]
 	fn a_rewrite_cached_under_one_generation_is_not_served_under_the_next() {

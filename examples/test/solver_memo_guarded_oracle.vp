@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at both session counts. Bob's MAC oracle always receives Alice's
+// fresh y over a guarded delivery, so it never emits MAC(k, CONCAT(m, n)).
+// Choosing x alone cannot disclose the MAC needed to construct secret.
+attacker[active]
+
+principal Alice[
+	knows public m, n
+	generates x, y
+	hx = HASH(x)
+	hm = HASH(m)
+]
+
+Alice -> Bob: x, [y], [hx], [hm]
+
+principal Bob[
+	knows private k
+	tag = MAC(k, CONCAT(x, y))
+	secret = HASH(HASH(x), MAC(k, CONCAT(m, n)))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

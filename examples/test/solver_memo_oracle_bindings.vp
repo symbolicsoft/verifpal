@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at both session counts. Choosing x = m and y = n makes Bob emit
+// the otherwise private MAC used in secret; the attacker can then hash it with
+// hm. Trying an incompatible x first must not cache that oracle's failure for
+// every later choice of x. Both inputs must change, so single-slot proposals
+// cannot recover the attack the goal solver missed.
+attacker[active]
+
+principal Alice[
+	knows public m, n
+	generates x, y
+	hx = HASH(x)
+	hm = HASH(m)
+]
+
+Alice -> Bob: x, y, [hx], [hm]
+
+principal Bob[
+	knows private k
+	tag = MAC(k, CONCAT(x, y))
+	secret = HASH(HASH(x), MAC(k, CONCAT(m, n)))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

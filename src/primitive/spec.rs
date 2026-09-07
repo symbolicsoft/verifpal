@@ -145,10 +145,6 @@ fn rewrite_to_kem_secret(p: &Primitive) -> Value {
 	Value::Primitive(Arc::new(p.with_output(0)))
 }
 
-fn rewrite_to_nil(_p: &Primitive) -> Value {
-	value_nil()
-}
-
 fn rewrite_to_unblind(p: &Primitive) -> Value {
 	let inner = match &p.arguments[1] {
 		Value::Primitive(inner_p) => inner_p.arguments[1].clone(),
@@ -281,7 +277,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_AEAD_ENC,
 				from: 2,
 				from_output: None,
-				to: rewrite_to_arg2,
+				to: RewriteTo::Computed(rewrite_to_arg2),
 				matching: vec![(0, vec![0]), (1, vec![1]), (3, vec![3])],
 				filter: filter_aead_dec_rewrite,
 			}),
@@ -331,7 +327,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_ENC,
 				from: 1,
 				from_output: None,
-				to: rewrite_to_arg1,
+				to: RewriteTo::Computed(rewrite_to_arg1),
 				matching: vec![(0, vec![0])],
 				filter: filter_dec_rewrite,
 			}),
@@ -425,7 +421,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_SIGN,
 				from: 2,
 				from_output: None,
-				to: rewrite_to_nil,
+				to: RewriteTo::Fixed(value_nil()),
 				matching: vec![(0, vec![0]), (1, vec![1])],
 				filter: filter_extract_dh_exponent,
 			}),
@@ -470,7 +466,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_PKE_ENC,
 				from: 1,
 				from_output: None,
-				to: rewrite_to_arg1,
+				to: RewriteTo::Computed(rewrite_to_arg1),
 				matching: vec![(0, vec![0])],
 				filter: filter_derived_key_rewrite,
 			}),
@@ -579,7 +575,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_RINGSIGN,
 				from: 4,
 				from_output: None,
-				to: rewrite_to_nil,
+				to: RewriteTo::Fixed(value_nil()),
 				matching: vec![
 					(0, vec![0, 1, 2]),
 					(1, vec![0, 1, 2]),
@@ -628,7 +624,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_SIGN,
 				from: 2,
 				from_output: None,
-				to: rewrite_to_unblind,
+				to: RewriteTo::Computed(rewrite_to_unblind),
 				matching: vec![(0, vec![1])],
 				filter: filter_unblind_rewrite,
 			}),
@@ -679,7 +675,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				id: PRIM_KEM_ENCAP,
 				from: 1,
 				from_output: Some(1),
-				to: rewrite_to_kem_secret,
+				to: RewriteTo::Computed(rewrite_to_kem_secret),
 				matching: vec![(0, vec![0])],
 				filter: filter_derived_key_rewrite,
 			}),

@@ -118,20 +118,7 @@ impl TermBound {
 
 impl Deep {
 	fn depth_over_protocol(&self, v: &Value) -> usize {
-		match v {
-			Value::Constant(_) => 0,
-			Value::Primitive(p) => {
-				if self.protocol.contains(&v.hash_value()) {
-					return 0;
-				}
-				1 + p
-					.arguments
-					.iter()
-					.map(|a| self.depth_over_protocol(a))
-					.max()
-					.unwrap_or(0)
-			}
-		}
+		term_depth_outside(v, &self.protocol, &mut IdMap::default())
 	}
 
 	fn peel_depth(&self, principal: PrincipalId, slot: usize) -> usize {
@@ -615,9 +602,29 @@ pub(crate) struct Guards<'a> {
 }
 
 fn term_depth(v: &Value) -> usize {
+	term_depth_outside(v, &IdSet::default(), &mut IdMap::default())
+}
+
+fn term_depth_outside(v: &Value, basis: &IdSet<u64>, memo: &mut IdMap<usize, usize>) -> usize {
 	match v {
 		Value::Constant(_) => 0,
-		Value::Primitive(p) => 1 + p.arguments.iter().map(term_depth).max().unwrap_or(0),
+		Value::Primitive(p) => {
+			if !basis.is_empty() && basis.contains(&v.hash_value()) {
+				return 0;
+			}
+			let key = Arc::as_ptr(p) as usize;
+			if let Some(&depth) = memo.get(&key) {
+				return depth;
+			}
+			let depth = 1 + p
+				.arguments
+				.iter()
+				.map(|a| term_depth_outside(a, basis, memo))
+				.max()
+				.unwrap_or(0);
+			memo.insert(key, depth);
+			depth
+		}
 	}
 }
 
@@ -1425,6 +1432,25 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 mod tests {
 	use crate::testutil::*;
 	use crate::types::{PrincipalState, SlotIdx};
+
+	#[test]
+	fn shared_transcript_depth_respects_the_protocol_boundary() {
+		use super::*;
+		let mut term = make_constant("shared_depth_seed");
+		let mut basis = IdSet::default();
+		for depth in 1..=40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+			if depth == 16 {
+				basis.insert(term.hash_value());
+			}
+		}
+		assert_eq!(term_depth(&term), 40);
+		assert_eq!(term_depth_outside(&term, &basis, &mut IdMap::default()), 24);
+	}
 
 	fn coherence_fixture(
 		delivered: &crate::types::Value,

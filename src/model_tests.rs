@@ -3792,3 +3792,14 @@ fn test_scenario_corrupt_by_certified_key() {
 	run_model("scenario_corrupt_by_certified_key.vp", "c0");
 	run_model_sessions("scenario_corrupt_by_certified_key.vp", 1, "c0");
 }
+
+#[test]
+fn test_solver_memo_preserves_oracle_bindings() {
+	for (model, code) in [
+		("solver_memo_oracle_bindings.vp", "c1"),
+		("solver_memo_guarded_oracle.vp", "c0"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}

@@ -191,16 +191,6 @@ pub(crate) fn bind(s: &mut Substitution, id: ValueId, v: Value) -> bool {
 	}
 }
 
-pub(crate) fn compose(a: &Substitution, b: &Substitution) -> Option<Substitution> {
-	let mut out = a.clone();
-	for (id, v) in b {
-		if !bind(&mut out, *id, v.clone()) {
-			return None;
-		}
-	}
-	Some(out)
-}
-
 pub(crate) fn ground_free(v: &Value) -> Value {
 	ground_free_as(v, &value_nil())
 }
@@ -253,7 +243,7 @@ pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 		})
 }
 
-fn substitution_hash(s: &Substitution) -> u64 {
+pub(crate) fn substitution_hash(s: &Substitution) -> u64 {
 	let mut acc: u64 = s.len() as u64;
 	for (id, v) in s {
 		let mut entry = (*id as u64)
