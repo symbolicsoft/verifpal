@@ -307,7 +307,7 @@ fn forgeable_without_sender_uncached(
 	if let Some(held) = attacker.knows(target) {
 		keep[held.get()] = false;
 	}
-	let without_sender = crate::reexec::retain_known(attacker, &keep);
+	let without_sender = attacker.retaining(&keep);
 	let view = without_sender.as_deref().unwrap_or(attacker);
 	crate::solve::validate::derivable(target, ps, view)
 }

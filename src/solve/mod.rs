@@ -11,7 +11,6 @@ pub(crate) mod vars;
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::hashing::collect_subterm_hashes;
 use crate::info::info_message;
 use crate::types::*;
 use crate::value::{push_unique_value, resolve_trace_constant};
@@ -27,7 +26,7 @@ pub(crate) fn verify_active(
 	principal_states: &[PrincipalState],
 ) -> VResult<()> {
 	info_message("Attacker is configured as active.", InfoLevel::Info, false);
-	let bound = &crate::reexec::TermBound::of(km);
+	let bound = ctx.term_bound(km);
 	let Some(seed) = principal_states.first() else {
 		return Ok(());
 	};
@@ -148,21 +147,14 @@ fn solve_principal(
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
-	let order = crate::reexec::CausalOrder::of(km, ps.id);
 	let history = ctx.coherence(km, ps, &attacker);
+	let guards = crate::reexec::Guards {
+		controllable: &controllable,
+		bound,
+		history: &history,
+	};
 	if search == Search::Direct || pass != Pass::Targeted {
-		return solve_with(
-			ctx,
-			km,
-			ps,
-			pass,
-			bound,
-			&attacker,
-			&controllable,
-			&order,
-			&history,
-			&sym,
-		);
+		return solve_with(ctx, km, ps, pass, &attacker, &guards, &sym);
 	}
 	for honest in slots_blocking_reduction(&sym) {
 		if ctx.all_resolved() || ctx.cancelled() {
@@ -170,18 +162,7 @@ fn solve_principal(
 		}
 		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
 		if !refined.var_slots.is_empty() {
-			solve_with(
-				ctx,
-				km,
-				ps,
-				pass,
-				bound,
-				&attacker,
-				&controllable,
-				&order,
-				&history,
-				&refined,
-			)?;
+			solve_with(ctx, km, ps, pass, &attacker, &guards, &refined)?;
 		}
 	}
 	Ok(())
@@ -230,17 +211,13 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 	}
 }
 
-#[allow(clippy::too_many_arguments)]
 fn solve_with(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	pass: Pass,
-	bound: &crate::reexec::TermBound,
 	attacker: &AttackerState,
-	controllable: &crate::reexec::Controllable,
-	order: &crate::reexec::CausalOrder,
-	history: &crate::reexec::Coherence,
+	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
 ) -> VResult<()> {
 	#[cfg(test)]
@@ -248,22 +225,9 @@ fn solve_with(
 
 	let deducer = Deducer::with_basis(ps, attacker, sym, ctx.known_subterms(attacker));
 	let proposals = propose(ctx, km, ps, pass, attacker, sym, &deducer);
-	dispose(
-		ctx,
-		km,
-		ps,
-		pass,
-		bound,
-		attacker,
-		controllable,
-		order,
-		history,
-		sym,
-		proposals,
-	)
+	dispose(ctx, km, ps, pass, attacker, guards, sym, proposals)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn propose(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -312,7 +276,7 @@ fn propose(
 		}
 	}
 
-	let protocol = protocol_terms(km, ps);
+	let protocol = ctx.term_bound(km).protocol(km);
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
@@ -327,7 +291,7 @@ fn propose(
 							return Vec::new();
 						};
 						let honest = resolve_trace_constant(&meta.constant, km);
-						slot_candidates(attacker, sym, &deducer, &protocol, &honest, &blanket, slot)
+						slot_candidates(attacker, sym, &deducer, protocol, &honest, &blanket, slot)
 					})
 					.collect::<Vec<_>>()
 			});
@@ -364,7 +328,7 @@ fn propose(
 		.collect();
 	proposals.extend(keyed);
 
-	let aligned = aligned_held_free(&honest, sym, &proposals, attacker, &protocol);
+	let aligned = aligned_held_free(&honest, sym, &proposals, attacker, protocol);
 	proposals.extend(aligned);
 
 	if results
@@ -444,11 +408,8 @@ fn dispose(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	pass: Pass,
-	bound: &crate::reexec::TermBound,
 	attacker: &AttackerState,
-	controllable: &crate::reexec::Controllable,
-	order: &crate::reexec::CausalOrder,
-	history: &crate::reexec::Coherence,
+	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
 	proposals: Vec<Substitution>,
 ) -> VResult<()> {
@@ -475,12 +436,6 @@ fn dispose(
 		let at = seen.len();
 		bucket.push(at);
 		seen.push(signature);
-		let guards = crate::reexec::Guards {
-			controllable,
-			bound,
-			order,
-			history,
-		};
 		checked += 1;
 		crate::info::info_status_update(|| {
 			crate::verify::status_line(
@@ -495,9 +450,7 @@ fn dispose(
 				),
 			)
 		});
-		let ran = validate::validate(
-			ctx, km, ps, sym, &guards, attacker, &proposal, &seen[at], key,
-		)?;
+		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key)?;
 		trace_proposal(ps, sym, &proposal, ran);
 	}
 	Ok(())
@@ -998,14 +951,6 @@ fn lanes(count: usize) -> Vec<(u32, std::ops::Range<usize>)> {
 	(0..count.div_ceil(size))
 		.map(|lane| (lane as u32 + 1, lane * size..((lane + 1) * size).min(count)))
 		.collect()
-}
-
-fn protocol_terms(km: &ProtocolTrace, ps: &PrincipalState) -> IdSet<u64> {
-	let mut out = IdSet::default();
-	for meta in ps.meta.iter() {
-		collect_subterm_hashes(&resolve_trace_constant(&meta.constant, km), &mut out);
-	}
-	out
 }
 
 fn slot_candidates(

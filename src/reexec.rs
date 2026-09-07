@@ -111,6 +111,10 @@ impl TermBound {
 			&& deep.depth_over_protocol(v) <= self.max_depth
 	}
 
+	pub(crate) fn protocol(&self, km: &ProtocolTrace) -> &IdSet<u64> {
+		&self.deep(km).protocol
+	}
+
 	pub(crate) fn depth(&self) -> usize {
 		self.max_depth
 	}
@@ -168,76 +172,21 @@ fn unwrapped_by(v: &Value) -> Option<ValueId> {
 	}
 }
 
-type Restriction = (
-	*const Vec<bool>,
-	Arc<Vec<Value>>,
-	Option<Arc<AttackerState>>,
-);
-
-pub(crate) struct CausalOrder {
-	principal: PrincipalId,
-	blocked: Vec<Option<Arc<Vec<bool>>>>,
-	restricted: std::cell::RefCell<Vec<Restriction>>,
-}
-
-impl CausalOrder {
-	pub(crate) fn of(km: &ProtocolTrace, principal: PrincipalId) -> CausalOrder {
-		let mut cache: Vec<(i32, Arc<Vec<bool>>)> = Vec::new();
-		let mut blocked = vec![None; km.slots.len()];
-		for (slot, entry) in blocked.iter_mut().enumerate() {
-			let Some(at) = km.slots[slot]
-				.sent_by
-				.iter()
-				.filter(|event| event.recipient == principal)
-				.map(|event| event.declared_at)
-				.min()
-			else {
-				continue;
-			};
-			let set = match cache.iter().find(|&&(when, _)| when == at) {
-				Some((_, set)) => Arc::clone(set),
-				None => {
-					let set = Arc::new(unreachable_before(km, principal, at));
-					cache.push((at, Arc::clone(&set)));
-					set
-				}
-			};
-			if set.iter().any(|&blocked| blocked) {
-				*entry = Some(set);
-			}
-		}
-		CausalOrder {
-			principal,
-			blocked,
-			restricted: std::cell::RefCell::new(Vec::new()),
-		}
-	}
-
-	pub(crate) fn available(
-		&self,
-		ps: &PrincipalState,
-		slot: usize,
-		attacker: &AttackerState,
-	) -> Option<Arc<AttackerState>> {
-		if self.principal != ps.id {
-			return None;
-		}
-		let blocked = self.blocked.get(slot)?.as_ref()?;
-		let key = Arc::as_ptr(blocked);
-		if let Some((_, _, hit)) = self
-			.restricted
-			.borrow()
-			.iter()
-			.find(|(seen, known, _)| *seen == key && Arc::ptr_eq(known, &attacker.known))
-		{
-			return hit.clone();
-		}
-		let built = restrict_known(blocked, ps, attacker);
-		self.restricted
-			.borrow_mut()
-			.push((key, Arc::clone(&attacker.known), built.clone()));
-		built
-	}
+pub(crate) fn available_before_receive(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	slot: usize,
+	attacker: &AttackerState,
+) -> Option<Arc<AttackerState>> {
+	let at = km
+		.slots
+		.get(slot)?
+		.sent_by
+		.iter()
+		.filter(|event| event.recipient == ps.id)
+		.map(|event| event.declared_at)
+		.min()?;
+	held_at(km, ps, at, attacker)
 }
 
 fn reachable_knowledge(
@@ -302,56 +251,7 @@ fn restrict_known(
 	let reachable = reachable_knowledge(ps, attacker, |_, slot| {
 		!blocked.get(slot.get()).copied().unwrap_or(false)
 	});
-	retain_known(attacker, &reachable)
-}
-
-pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Arc<AttackerState>> {
-	if keep.iter().all(|&keep| keep) {
-		return None;
-	}
-	let known: Vec<Value> = attacker
-		.known
-		.iter()
-		.zip(keep.iter())
-		.filter(|&(_, &keep)| keep)
-		.map(|(v, _)| v.clone())
-		.collect();
-	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, v) in known.iter().enumerate() {
-		known_map.entry(v.hash_value()).or_default().push(i);
-	}
-	let mutation_records = attacker
-		.mutation_records
-		.iter()
-		.zip(keep.iter())
-		.filter(|&(_, &keep)| keep)
-		.map(|(r, _)| Arc::clone(r))
-		.collect();
-	let derivations = attacker
-		.derivations
-		.iter()
-		.zip(keep.iter())
-		.filter(|&(_, &keep)| keep)
-		.map(|(d, _)| d.clone())
-		.collect();
-	let alternates = attacker
-		.alternates
-		.iter()
-		.zip(keep.iter())
-		.filter(|&(_, &keep)| keep)
-		.map(|(d, _)| d.clone())
-		.collect();
-	Some(Arc::new(AttackerState {
-		current_phase: attacker.current_phase,
-		mutation_records: Arc::new(mutation_records),
-		derivations: Arc::new(derivations),
-		alternates: Arc::new(alternates),
-		reused: Arc::clone(&attacker.reused),
-		known: Arc::new(known),
-		known_map: Arc::new(known_map),
-		routes_epoch: attacker.routes_epoch,
-		chain: crate::types::next_chain(),
-	}))
+	attacker.retaining(&reachable)
 }
 
 fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
@@ -489,7 +389,6 @@ fn unreachable_from(km: &ProtocolTrace, after: &IdMap<PrincipalId, i32>) -> Vec<
 		.collect()
 }
 
-type Delivery = (usize, Value, bool);
 type Agreement = (Vec<usize>, Arc<Vec<Value>>, Option<Arc<AttackerState>>);
 
 type Agreed = (Arc<MutationRecord>, Vec<usize>, Arc<Vec<Value>>, bool);
@@ -528,35 +427,30 @@ impl Coherence {
 		ctx: &VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
-		delivered: &[Delivery],
+		authored: &[usize],
 		attacker: &AttackerState,
 	) -> Option<Arc<AttackerState>> {
 		if self.principal != ps.id {
 			return None;
 		}
-		let authored: Vec<usize> = delivered
-			.iter()
-			.filter(|(_, _, authored)| *authored)
-			.map(|(slot, _, _)| *slot)
-			.collect();
 		let size = attacker.known.len();
-		let key = authored_hash(&authored, Arc::as_ptr(&attacker.known), size);
+		let key = authored_hash(authored, Arc::as_ptr(&attacker.known), size);
 		if let Some(bucket) = locked(&self.agreed).get(&key)
 			&& let Some((_, _, hit)) = bucket
 				.iter()
-				.find(|(seen, known, _)| Arc::ptr_eq(known, &attacker.known) && *seen == authored)
+				.find(|(seen, known, _)| Arc::ptr_eq(known, &attacker.known) && seen == authored)
 		{
 			return hit.clone();
 		}
 		let keep = reachable_knowledge(ps, attacker, |i, slot| {
-			self.forwards(km, attacker, i, slot.get(), &authored)
+			self.forwards(km, attacker, i, slot.get(), authored)
 				&& attacker.record(KnownIdx(i)).is_some_and(|record| {
-					self.execution_agrees(ctx, km, attacker, record, &authored)
+					self.execution_agrees(ctx, km, attacker, record, authored)
 				})
 		});
-		let built = retain_known(attacker, &keep);
+		let built = attacker.retaining(&keep);
 		locked(&self.agreed).entry(key).or_default().push((
-			authored,
+			authored.to_vec(),
 			Arc::clone(&attacker.known),
 			built.clone(),
 		));
@@ -699,7 +593,6 @@ fn authored_hash(authored: &[usize], known: *const Vec<Value>, size: usize) -> u
 pub(crate) struct Guards<'a> {
 	pub(crate) controllable: &'a Controllable,
 	pub(crate) bound: &'a TermBound,
-	pub(crate) order: &'a CausalOrder,
 	pub(crate) history: &'a Coherence,
 }
 
@@ -1539,6 +1432,54 @@ mod tests {
 	use crate::types::{PrincipalState, SlotIdx};
 
 	#[test]
+	fn causal_cache_preserves_the_receive_cut_and_knowledge_identity() {
+		use super::*;
+		let _generation = crate::context::GenerationGuard::enter();
+		let model = crate::parser::parse_string(
+			"causal_cache.vp",
+			"attacker[active]\nprincipal Alice[\ngenerates x\n]\nprincipal Bob[\nknows private early, late\nleaks early\n]\nAlice -> Bob: x\nprincipal Bob[\ntag = MAC(late, x)\nleaks late\n]\nqueries[\nconfidentiality? late\n]\n",
+		).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ps = states.iter().find(|state| state.name == "Bob").unwrap();
+		let early = trace_constant(&km, "early");
+		let late = trace_constant(&km, "late");
+		let slot = |value: &Value| SlotIdx(km.index_of(value.as_constant().unwrap()).unwrap());
+		let mut attacker = make_attacker_state(vec![early.clone(), late.clone()]);
+		attacker.derivations = Arc::new(vec![
+			DerivationRecord::Leaked { slot: slot(&early) },
+			DerivationRecord::Leaked { slot: slot(&late) },
+		]);
+		let x = slot(&trace_constant(&km, "x")).get();
+		let receive_at = km.slots[x].sent_by[0].declared_at;
+		let restricted = available_before_receive(&km, ps, x, &attacker).unwrap();
+		assert!(restricted.knows(&early).is_some());
+		assert!(restricted.knows(&late).is_none());
+		assert!(Arc::ptr_eq(
+			&restricted,
+			&held_at(&km, ps, receive_at, &attacker).unwrap()
+		));
+		let check_at = km.slots[slot(&trace_constant(&km, "tag")).get()].declared_at;
+		assert!(
+			held_at(&km, ps, check_at, &attacker)
+				.unwrap()
+				.knows(&late)
+				.is_none()
+		);
+		let after_leak = km.leaks.iter().map(|leak| leak.declared_at).max().unwrap() + 1;
+		assert!(held_at(&km, ps, after_leak, &attacker).is_none());
+		let other = make_attacker_state(vec![early, late]);
+		assert!(available_before_receive(&km, ps, x, &other).is_none());
+		let mut upgraded = attacker.clone();
+		Arc::make_mut(&mut upgraded.derivations)[1] = DerivationRecord::Initial;
+		upgraded.routes_epoch += 1;
+		assert!(available_before_receive(&km, ps, x, &upgraded).is_none());
+		assert!(Arc::ptr_eq(
+			&restricted,
+			&available_before_receive(&km, ps, x, &attacker).unwrap()
+		));
+	}
+
+	#[test]
 	fn causal_knowledge_follows_unheld_shared_inputs() {
 		use super::*;
 		let leaked = make_private("recipe_leaked");
@@ -1742,14 +1683,12 @@ mod tests {
 	fn the_same_term_is_kept_where_the_attacker_authors_what_is_delivered() {
 		let honest = make_constant("coh_honest_b");
 		let other = make_constant("coh_other_b");
-		let forged = make_constant("coh_forged_b");
 		let (km, ps) = coherence_fixture(&honest);
 		let history = super::Coherence::of(&km, &ps);
 		let attacker = coherence_attacker(&other, 1);
-		let delivered = [(0usize, forged, true)];
 		assert!(
 			history
-				.compatible(&coherence_context(), &km, &ps, &delivered, &attacker)
+				.compatible(&coherence_context(), &km, &ps, &[0], &attacker)
 				.is_none(),
 			"authoring what the recipient is handed claims nothing about what the sender \
 			 produced, so the sender's other execution is not contradicted"

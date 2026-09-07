@@ -14,56 +14,6 @@ use crate::theory::{
 use crate::types::*;
 use crate::value::compute_slot_diffs;
 
-pub(crate) enum RuleDomain {
-	AttackerKnown,
-	PrincipalAssigned,
-}
-
-type RuleFn = fn(
-	&VerifyContext,
-	&ProtocolTrace,
-	&Value,
-	&PrincipalState,
-	&AttackerState,
-	&Arc<MutationRecord>,
-) -> bool;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Reads {
-	Knowledge,
-	State,
-}
-
-pub(crate) struct RuleGroup {
-	pub domain: RuleDomain,
-	rules: &'static [(RuleFn, Reads)],
-}
-
-static DEDUCTION_RULES: &[RuleGroup] = &[
-	RuleGroup {
-		domain: RuleDomain::AttackerKnown,
-		rules: &[
-			(rule_decompose, Reads::Knowledge),
-			(rule_break_weak, Reads::Knowledge),
-			(rule_rewrite_build, Reads::Knowledge),
-		],
-	},
-	RuleGroup {
-		domain: RuleDomain::PrincipalAssigned,
-		rules: &[
-			(rule_reconstruct, Reads::State),
-			(rule_recompose, Reads::State),
-		],
-	},
-	RuleGroup {
-		domain: RuleDomain::AttackerKnown,
-		rules: &[
-			(rule_equivalize, Reads::State),
-			(rule_concat_extract, Reads::Knowledge),
-		],
-	},
-];
-
 pub(crate) fn compute_knowledge_closure(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -99,30 +49,25 @@ fn try_deduction_step(
 	reset_reconstructed();
 	let saturated = ctx.knowledge_rules_saturated(ps.id, attacker);
 	let mut progress = false;
-	for group in DEDUCTION_RULES {
-		match group.domain {
-			RuleDomain::AttackerKnown => {
-				for known in attacker.known.iter() {
-					for (rule, reads) in group.rules {
-						if saturated && *reads == Reads::Knowledge {
-							continue;
-						}
-						progress |= rule(ctx, km, known, ps, attacker, record);
-					}
-				}
-			}
-			RuleDomain::PrincipalAssigned => {
-				for (slot, sv) in ps.values.iter().enumerate() {
-					if ps.slot_unreached(slot) {
-						continue;
-					}
-					for (rule, _) in group.rules {
-						progress |= rule(ctx, km, &sv.value, ps, attacker, record);
-					}
-					progress |=
-						rule_rewrite_forward(ctx, km, &sv.pre_rewrite, ps, attacker, record);
-				}
-			}
+	if !saturated {
+		for known in attacker.known.iter() {
+			progress |= rule_decompose(ctx, km, known, ps, attacker, record);
+			progress |= rule_break_weak(ctx, km, known, ps, attacker, record);
+			progress |= rule_rewrite_build(ctx, km, known, ps, attacker, record);
+		}
+	}
+	for (slot, sv) in ps.values.iter().enumerate() {
+		if ps.slot_unreached(slot) {
+			continue;
+		}
+		progress |= rule_reconstruct(ctx, km, &sv.value, ps, attacker, record);
+		progress |= rule_recompose(ctx, km, &sv.value, ps, attacker, record);
+		progress |= rule_rewrite_forward(ctx, km, &sv.pre_rewrite, ps, attacker, record);
+	}
+	for known in attacker.known.iter() {
+		progress |= rule_equivalize(ctx, km, known, ps, attacker, record);
+		if !saturated {
+			progress |= rule_concat_extract(ctx, km, known, ps, attacker, record);
 		}
 	}
 	if !saturated {

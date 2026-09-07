@@ -62,7 +62,8 @@ impl Grown {
 	}
 
 	fn rebuild(&mut self, attacker: &AttackerState) {
-		self.state = crate::reexec::retain_known(attacker, &self.keep)
+		self.state = attacker
+			.retaining(&self.keep)
 			.map(|kept| (*kept).clone())
 			.unwrap_or_else(|| attacker.clone());
 	}

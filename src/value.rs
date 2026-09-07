@@ -324,6 +324,56 @@ impl ProtocolTrace {
 }
 
 impl AttackerState {
+	pub(crate) fn retaining(&self, keep: &[bool]) -> Option<Arc<AttackerState>> {
+		assert_eq!(keep.len(), self.known.len());
+		if keep.iter().all(|&keep| keep) {
+			return None;
+		}
+		let known: Vec<Value> = self
+			.known
+			.iter()
+			.zip(keep.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(v, _)| v.clone())
+			.collect();
+		let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
+		for (i, v) in known.iter().enumerate() {
+			known_map.entry(v.hash_value()).or_default().push(i);
+		}
+		let mutation_records = self
+			.mutation_records
+			.iter()
+			.zip(keep.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(r, _)| Arc::clone(r))
+			.collect();
+		let derivations = self
+			.derivations
+			.iter()
+			.zip(keep.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(d, _)| d.clone())
+			.collect();
+		let alternates = self
+			.alternates
+			.iter()
+			.zip(keep.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(d, _)| d.clone())
+			.collect();
+		Some(Arc::new(AttackerState {
+			current_phase: self.current_phase,
+			mutation_records: Arc::new(mutation_records),
+			derivations: Arc::new(derivations),
+			alternates: Arc::new(alternates),
+			reused: Arc::clone(&self.reused),
+			known: Arc::new(known),
+			known_map: Arc::new(known_map),
+			routes_epoch: self.routes_epoch,
+			chain: crate::types::next_chain(),
+		}))
+	}
+
 	pub fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
 		self.derivations.get(idx.get())
 	}
@@ -369,6 +419,50 @@ mod tests {
 	use crate::primitive::*;
 	use crate::testutil::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn filtering_knowledge_preserves_routes_and_invalidates_its_chain() {
+		let values: Vec<Value> = ["retained_a", "retained_b", "retained_c"]
+			.map(make_constant)
+			.into();
+		let mut attacker = make_attacker_state(values.clone());
+		attacker.current_phase = 3;
+		attacker.routes_epoch = 7;
+		for i in 0..values.len() {
+			let derivation = DerivationRecord::Obtained {
+				slot: SlotIdx(i + 4),
+			};
+			Arc::make_mut(&mut attacker.derivations)[i] = derivation.clone();
+			Arc::make_mut(&mut attacker.alternates)[i]
+				.push((derivation, Arc::clone(&attacker.mutation_records[i])));
+		}
+		Arc::make_mut(&mut attacker.reused).push([values[0].clone(), values[2].clone()]);
+		assert!(attacker.retaining(&[true; 3]).is_none());
+		let retained = attacker.retaining(&[false, true, true]).unwrap();
+		assert_eq!(retained.current_phase, 3);
+		assert_eq!(retained.routes_epoch, 7);
+		assert_ne!(retained.chain, attacker.chain);
+		assert!(retained.knows(&values[0]).is_none());
+		assert!(Arc::ptr_eq(&retained.reused, &attacker.reused));
+		for (i, value) in values.iter().enumerate().skip(1) {
+			let idx = retained.knows(value).unwrap();
+			assert_eq!(idx.get(), i - 1);
+			assert!(
+				matches!(retained.derivation(idx), Some(DerivationRecord::Obtained { slot }) if slot.get() == i + 4)
+			);
+			assert!(Arc::ptr_eq(
+				retained.record(idx).unwrap(),
+				attacker.record(KnownIdx(i)).unwrap()
+			));
+			assert_eq!(retained.routes(idx).count(), 2);
+		}
+		let empty = attacker.retaining(&[false; 3]).unwrap();
+		assert!(empty.known.is_empty());
+		assert!(empty.known_map.is_empty());
+		assert!(empty.derivations.is_empty());
+		assert!(empty.mutation_records.is_empty());
+		assert!(empty.alternates.is_empty());
+	}
 
 	#[test]
 	fn session_bands_stay_below_the_solver_ranges() {

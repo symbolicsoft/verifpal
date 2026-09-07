@@ -545,48 +545,26 @@ fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
 }
 
 fn attacker_without(attacker: &AttackerState, v: &Value) -> AttackerState {
-	let h = v.hash_value();
-	let size = attacker.known.len();
-	let mut known: Vec<Value> = Vec::with_capacity(size);
-	let mut mutation_records: Vec<Arc<MutationRecord>> = Vec::with_capacity(size);
-	let mut derivations: Vec<DerivationRecord> = Vec::with_capacity(size);
-	let mut alternates: Vec<Vec<(DerivationRecord, Arc<MutationRecord>)>> =
-		Vec::with_capacity(size);
-	let mut known_map: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, k) in attacker.known.iter().enumerate() {
-		if k.hash_value() == h && k.equivalent(v, true) {
-			continue;
-		}
-		let Some(record) = attacker.mutation_records.get(i) else {
-			continue;
-		};
-		let Some(derivation) = attacker.derivations.get(i) else {
-			continue;
-		};
-		known_map
-			.entry(k.hash_value())
-			.or_default()
-			.push(known.len());
-		known.push(k.clone());
-		mutation_records.push(Arc::clone(record));
-		derivations.push(derivation.clone());
-		alternates.push(attacker.alternates.get(i).cloned().unwrap_or_default());
-	}
-	AttackerState {
-		current_phase: attacker.current_phase,
-		known: Arc::new(known),
-		known_map: Arc::new(known_map),
-		mutation_records: Arc::new(mutation_records),
-		derivations: Arc::new(derivations),
-		alternates: Arc::new(alternates),
-		reused: Arc::clone(&attacker.reused),
-		routes_epoch: attacker.routes_epoch,
-		chain: crate::types::next_chain(),
-	}
+	let hash = v.hash_value();
+	let keep: Vec<bool> = attacker
+		.known
+		.iter()
+		.map(|known| known.hash_value() != hash || !known.equivalent(v, true))
+		.collect();
+	attacker
+		.retaining(&keep)
+		.map(|state| (*state).clone())
+		.unwrap_or_else(|| attacker.clone())
 }
 
-type LeavesKey = (PrincipalId, u64, i32, usize, usize, u64, u64);
-type Leaves = Generational<IdMap<LeavesKey, Vec<(Value, Option<Vec<Value>>)>>>;
+type LeavesKey = (PrincipalId, u64);
+type Leaves = Generational<
+	crate::context::Recent<
+		crate::context::KnowledgeKey,
+		LeavesKey,
+		Vec<(Value, Option<Vec<Value>>)>,
+	>,
+>;
 
 thread_local! {
 	static LEAVES: std::cell::RefCell<Leaves> =
@@ -598,22 +576,19 @@ pub(crate) fn origin_leaves(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
-	let key = (
-		ps.id,
-		v.hash_value(),
-		attacker.current_phase,
-		attacker.known.len(),
-		attacker.reused.len(),
-		attacker.routes_epoch,
-		attacker.chain,
-	);
+	let key = (ps.id, v.hash_value());
+	let group = crate::context::KnowledgeKey::of(attacker);
 	let remembered = LEAVES.with(|memo| {
-		memo.borrow_mut().fresh().get(&key).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|(seen, _)| crate::theory::structurally_identical(seen, v))
-				.map(|(_, leaves)| leaves.clone())
-		})
+		memo.borrow_mut()
+			.fresh()
+			.group(group)
+			.get(&key)
+			.and_then(|bucket| {
+				bucket
+					.iter()
+					.find(|(seen, _)| crate::theory::structurally_identical(seen, v))
+					.map(|(_, leaves)| leaves.clone())
+			})
 	});
 	if let Some(leaves) = remembered {
 		return leaves;
@@ -625,6 +600,7 @@ pub(crate) fn origin_leaves(
 	LEAVES.with(|memo| {
 		memo.borrow_mut()
 			.fresh()
+			.group(group)
 			.entry(key)
 			.or_default()
 			.push((v.clone(), leaves.clone()));

@@ -11,87 +11,72 @@ use crate::types::*;
 use crate::value::resolve_trace_constant;
 use crate::verify::verify_resolve_queries;
 
-use super::symbolic::SymbolicState;
-use super::vars::{Substitution, apply};
-
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps_base: &PrincipalState,
-	sym: &SymbolicState,
 	guards: &crate::reexec::Guards,
 	attacker: &AttackerState,
-	subst: &Substitution,
 	signature: &[(usize, Value)],
 	key: u64,
 ) -> VResult<bool> {
 	let ps = ps_base.clone_for_depth(true);
 	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
 	let mut phases: Vec<i32> = Vec::new();
-	let mut worthwhile = false;
 
-	let mut chosen: Vec<(usize, Value, bool)> = Vec::new();
-	for &slot in &sym.var_slots {
-		let Some(var_term) = &sym.var_terms[slot] else {
-			continue;
-		};
-		if !subst.contains_key(&super::vars::attacker_var_id(slot)) {
-			continue;
-		}
-		let ground = super::vars::ground_free(&apply(var_term, subst));
-		if super::vars::contains_var(&ground) {
-			continue;
-		}
-		if slot >= ps.values.len() {
-			continue;
-		}
-		let authored = attacker_authored(&ground, slot, km, &ps);
-		chosen.push((slot, ground, authored));
-	}
-	let coherent = guards.history.compatible(ctx, km, &ps, &chosen, attacker);
-	let attacker = coherent.as_deref().unwrap_or(attacker);
-
-	for (slot, ground, authored) in &chosen {
-		let (slot, ground) = (*slot, ground.clone());
-		if !guards.controllable.admits(&ps, attacker, slot) {
-			return Ok(false);
-		}
-		if !crate::primitive::admissible(&ground) {
-			return Ok(false);
-		}
-		if !guards.bound.admits_at(km, ps.id, slot, &ground) {
-			note_depth_cut(ctx, slot, &ground, &ps, guards.bound);
-			return Ok(false);
-		}
-		if contains_failed_check(&ground) {
-			return Ok(false);
-		}
-		let Some(at) = attacker_can_derive(ctx, slot, &ground, &ps, attacker) else {
-			return Ok(false);
-		};
-		if let Some(available) = guards.order.available(&ps, slot, attacker)
-			&& !derivable(&ground, &ps, &available)
+	let mut authored = Vec::new();
+	for (i, &(slot, ref ground)) in signature.iter().enumerate() {
+		if slot >= ps.values.len()
+			|| super::vars::contains_var(ground)
+			|| signature[..i].iter().any(|(seen, _)| *seen == slot)
 		{
 			return Ok(false);
 		}
-		if ctx.replication_only() && replays_own_freshness(km, &ground, &ps, attacker) {
+		if attacker_authored(ground, slot, km, &ps) {
+			authored.push(slot);
+		}
+	}
+	let coherent = guards.history.compatible(ctx, km, &ps, &authored, attacker);
+	let attacker = coherent.as_deref().unwrap_or(attacker);
+
+	for &(slot, ref ground) in signature {
+		if !guards.controllable.admits(&ps, attacker, slot) {
+			return Ok(false);
+		}
+		if !crate::primitive::admissible(ground) {
+			return Ok(false);
+		}
+		if !guards.bound.admits_at(km, ps.id, slot, ground) {
+			note_depth_cut(ctx, slot, ground, &ps, guards.bound);
+			return Ok(false);
+		}
+		if contains_failed_check(ground) {
+			return Ok(false);
+		}
+		let Some(at) = attacker_can_derive(ctx, slot, ground, &ps, attacker) else {
+			return Ok(false);
+		};
+		if let Some(available) = crate::reexec::available_before_receive(km, &ps, slot, attacker)
+			&& !derivable(ground, &ps, &available)
+		{
+			return Ok(false);
+		}
+		if ctx.replication_only() && replays_own_freshness(km, ground, &ps, attacker) {
 			ctx.note_replication_rejection();
 			return Ok(false);
 		}
-		if *authored {
-			worthwhile = true;
-		}
-		installs.push((SlotIdx(slot), ground));
+		installs.push((SlotIdx(slot), ground.clone()));
 		phases.push(at);
 	}
 
-	if !worthwhile || spends_another_execution(km, &ps, &chosen, attacker) {
+	if authored.is_empty() || spends_another_execution(km, &ps, signature, attacker) {
 		return Ok(false);
 	}
 
 	let governing = crate::reexec::governing_attacker(ctx, &phases, attacker);
-	let restricted = guards.history.compatible(ctx, km, &ps, &chosen, &governing);
+	let restricted = guards
+		.history
+		.compatible(ctx, km, &ps, &authored, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
 	let phase = governing.current_phase;
 	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |decisions| {
@@ -239,10 +224,10 @@ fn note_depth_cut(
 fn spends_another_execution(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	chosen: &[(usize, Value, bool)],
+	chosen: &[(usize, Value)],
 	attacker: &AttackerState,
 ) -> bool {
-	chosen.iter().any(|(_, ground, _)| {
+	chosen.iter().any(|(_, ground)| {
 		needs_of_term(km, attacker, ground)
 			.iter()
 			.any(|(who, at, need)| {
@@ -255,8 +240,8 @@ fn spends_another_execution(
 					&& {
 						let here = chosen
 							.iter()
-							.find(|(slot, _, _)| *slot == at)
-							.map(|(_, value, _)| value.clone())
+							.find(|(slot, _)| *slot == at)
+							.map(|(_, value)| value.clone())
 							.or_else(|| {
 								km.slots
 									.get(at)
@@ -408,6 +393,58 @@ mod tests {
 
 	fn empty_state() -> crate::types::PrincipalState {
 		make_principal_state("Test", 0, vec![], vec![])
+	}
+
+	#[test]
+	fn concrete_proposals_are_checked_independently_of_the_solver() {
+		use crate::context::VerifyContext;
+		use crate::reexec::{Coherence, Controllable, Guards};
+		use crate::types::Value;
+		let _generation = crate::context::GenerationGuard::enter();
+		let model = crate::parser::parse_string(
+			"concrete_proposals.vp",
+			"attacker[active]\nprincipal Alice[\ngenerates a, b\n]\nAlice -> Bob: a, [b]\nprincipal Bob[\nx = HASH(a)\n]\nqueries[\nequivalence? a, b\n]\n",
+		)
+		.unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ps = states.iter().find(|ps| ps.name == "Bob").unwrap();
+		let slot = |name| {
+			km.index_of(trace_constant(&km, name).as_constant().unwrap())
+				.unwrap()
+		};
+		let a = slot("a");
+		let attacker = make_attacker_state(vec![value_nil()]);
+		let ctx = VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let controllable = Controllable::of(&km, ps, &attacker);
+		let history = Coherence::of(&km, ps);
+		let guards = Guards {
+			controllable: &controllable,
+			bound: ctx.term_bound(&km),
+			history: &history,
+		};
+		for bad in [
+			vec![(slot("b"), value_nil()), (a, value_nil())],
+			vec![(slot("x"), value_nil()), (a, value_nil())],
+			vec![(a, trace_constant(&km, "b"))],
+			vec![(ps.values.len(), value_nil()), (a, value_nil())],
+			vec![(a, crate::solve::vars::free_var(0))],
+			vec![
+				(a, value_nil()),
+				(
+					a,
+					Value::primitive(crate::primitive::PRIM_HASH, vec![value_nil()], 0),
+				),
+			],
+		] {
+			assert!(!super::validate(&ctx, &km, ps, &guards, &attacker, &bad, 0).unwrap());
+			assert!(!ctx.query_is_resolved(0));
+			assert_eq!(ctx.attacker_known_count(), 0);
+		}
+		let _minimizing = crate::witness::minimization_guard();
+		assert!(
+			super::validate(&ctx, &km, ps, &guards, &attacker, &[(a, value_nil())], 0).unwrap()
+		);
+		assert!(ctx.query_is_resolved(0));
 	}
 
 	#[test]

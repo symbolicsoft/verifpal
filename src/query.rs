@@ -1197,6 +1197,19 @@ mod tcb_tests {
 	#[test]
 	fn an_install_is_proven_controllable_then_derivable_before_it_is_executed() {
 		let validate_rs = engine_source("solve/validate.rs");
+		let parameters = fn_parameter_types(&validate_rs, "validate");
+		assert_eq!(
+			parameters,
+			[
+				"&VerifyContext",
+				"&ProtocolTrace",
+				"&PrincipalState",
+				"&crate::reexec::Guards",
+				"&AttackerState",
+				"&[(usize, Value)]",
+				"u64"
+			]
+		);
 		let body = fn_body(&validate_rs, "validate");
 		assert!(
 			!body.is_empty(),

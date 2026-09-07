@@ -153,7 +153,7 @@ struct Minimizer<'a> {
 	pruned: Installs,
 	needs: Addressed,
 	everywhere: Installs,
-	bound: crate::reexec::TermBound,
+	bound: &'a crate::reexec::TermBound,
 	guards: Vec<(PrincipalId, crate::reexec::Controllable)>,
 }
 
@@ -205,7 +205,7 @@ impl<'a> Minimizer<'a> {
 			pruned: Vec::new(),
 			needs,
 			everywhere: Vec::new(),
-			bound: crate::reexec::TermBound::of(km),
+			bound: ctx.term_bound(km),
 			guards,
 		};
 		m.everywhere = m.mitm_everywhere();
@@ -421,7 +421,7 @@ impl<'a> Minimizer<'a> {
 			return Vec::new();
 		}
 		let slots = self.reachable_slots(session, wide);
-		let bound = &self.bound;
+		let bound = self.bound;
 		let group: &[PrincipalState] = if wide {
 			&self.sessions
 		} else {
@@ -681,7 +681,7 @@ impl<'a> Minimizer<'a> {
 	}
 
 	fn addressed_buildable(&self, addressed: &[(PrincipalId, SlotIdx, Value)]) -> bool {
-		let bound = &self.bound;
+		let bound = self.bound;
 		addressed.iter().all(|(at, slot, value)| {
 			self.sessions
 				.iter()
@@ -694,7 +694,7 @@ impl<'a> Minimizer<'a> {
 		if candidate.is_empty() {
 			return false;
 		}
-		let bound = &self.bound;
+		let bound = self.bound;
 		candidate
 			.iter()
 			.all(|(slot, value)| self.validator_admits(session, bound, slot.get(), value))
@@ -1572,7 +1572,6 @@ fn probe_with(
 
 	let mut remaining: Vec<(SlotIdx, Value)> = installs.to_vec();
 	remaining.sort_by_key(|(slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
-	let order = crate::reexec::CausalOrder::of(km, base.id);
 	let mut grounded = true;
 	let mut earlier: Installs = Vec::new();
 	let mut earlier_phases: Vec<i32> = Vec::new();
@@ -1594,8 +1593,7 @@ fn probe_with(
 				return false;
 			}
 			crate::solve::validate::attacker_can_derive(&scratch, slot.get(), value, base, &known)
-				.is_some() && order
-				.available(base, slot.get(), &known)
+				.is_some() && crate::reexec::available_before_receive(km, base, slot.get(), &known)
 				.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
 		});
 		let Some(at) = next else {
