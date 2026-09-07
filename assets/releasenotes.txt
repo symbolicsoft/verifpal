@@ -1,10 +1,13 @@
-Verifpal 1.4.7
+Verifpal 1.4.8
+
+Changes since v1.4.7:
+
+- Massive improvements to RAM usage for large models, inspired by debugging
+session with Mikerah Quintyne-Collins. Thanks, Mikerah!
 
 Changes since v1.4.6:
 
 - Many performance improvements and bug fixes.
-
-Verifpal 1.4.6
 
 Changes since v1.4.5:
 
