@@ -83,7 +83,7 @@ type RewriteCache = TermMemo<bool>;
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
 	entries: IdMap<u64, Vec<(Value, bool)>>,
-	index: Arc<StateIndex>,
+	index: Option<Arc<StateIndex>>,
 }
 
 impl ObtainableMemo {
@@ -118,6 +118,7 @@ pub(crate) fn slots_equivalent_to(ps: &PrincipalState, value: &Value) -> Vec<usi
 		}
 		Some(
 			memo.index
+				.as_ref()?
 				.slots_by_hash
 				.get(&hash)
 				.map(|candidates| {
@@ -205,18 +206,18 @@ impl<'a> DeductionMemo<'a> {
 				borrowed: std::marker::PhantomData,
 			};
 		}
-		Self::scoped(ps, attacker, &StateIndex::of(ps))
+		Self::scoped(ps, attacker, None)
 	}
 
 	pub(crate) fn scoped(
 		ps: &'a PrincipalState,
 		attacker: &'a AttackerState,
-		index: &Arc<StateIndex>,
+		index: Option<&Arc<StateIndex>>,
 	) -> DeductionMemo<'a> {
 		let installed = ObtainableMemo {
 			owner: (ps as *const _, attacker as *const _),
 			entries: IdMap::default(),
-			index: Arc::clone(index),
+			index: index.cloned(),
 		};
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
@@ -999,6 +1000,38 @@ mod tests {
 	use std::sync::Arc;
 
 	#[test]
+	fn dependency_checks_do_not_build_a_slot_index() {
+		let leaf = make_constant("dependency_index_leaf");
+		let ps = make_principal_state(
+			"Alice",
+			1,
+			vec![make_slot_meta(leaf.as_constant().unwrap(), true)],
+			vec![make_slot_values(&leaf, 1)],
+		);
+		let attacker = make_attacker_state(vec![leaf.clone()]);
+		let term = make_primitive(PRIM_HASH, vec![leaf.clone()], 0);
+		{
+			let mut inputs = KnowledgeInputs::new(&ps, &attacker);
+			assert_eq!(inputs.of_value(&term), Some(vec![KnownIdx(0)]));
+			assert!(MEMO.with(|memo| memo.borrow().as_ref().unwrap().index.is_none()));
+			assert_eq!(slots_equivalent_to(&ps, &leaf), vec![0]);
+		}
+		let index = StateIndex::of(&ps);
+		let _scope = DeductionMemo::scoped(&ps, &attacker, Some(&index));
+		{
+			let mut inputs = KnowledgeInputs::new(&ps, &attacker);
+			assert_eq!(inputs.of_value(&term), Some(vec![KnownIdx(0)]));
+		}
+		assert!(MEMO.with(|memo| {
+			Arc::ptr_eq(
+				memo.borrow().as_ref().unwrap().index.as_ref().unwrap(),
+				&index,
+			)
+		}));
+		assert_eq!(slots_equivalent_to(&ps, &leaf), vec![0]);
+	}
+
+	#[test]
 	fn a_rewrite_cache_releases_discarded_inputs_after_eviction() {
 		crate::context::enter_generation(crate::context::next_generation());
 		let p = Arc::new(Primitive::new(
@@ -1184,7 +1217,7 @@ mod tests {
 		let poor = make_attacker_state(vec![]);
 		let rich = make_attacker_state(vec![k, m]);
 
-		let _scope = DeductionMemo::scoped(&ps, &poor, &index);
+		let _scope = DeductionMemo::scoped(&ps, &poor, Some(&index));
 		assert!(
 			!obtainable(&sealed, &ps, &poor),
 			"an attacker holding nothing cannot build it"

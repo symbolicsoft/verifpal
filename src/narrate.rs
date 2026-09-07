@@ -223,23 +223,11 @@ fn replayed(sv: &SlotValues) -> bool {
 }
 
 pub(crate) fn constant_leaves(v: &Value) -> Vec<Constant> {
-	let mut out: Vec<Constant> = Vec::new();
-	fn walk_leaves(v: &Value, out: &mut Vec<Constant>) {
-		match v {
-			Value::Constant(c) => {
-				if !out.iter().any(|e| e.id == c.id) {
-					out.push(c.clone());
-				}
-			}
-			Value::Primitive(p) => {
-				for a in p.arguments.iter() {
-					walk_leaves(a, out);
-				}
-			}
-		}
-	}
-	walk_leaves(v, &mut out);
-	out
+	let mut seen = IdSet::default();
+	v.constant_leaves()
+		.filter(|c| seen.insert(c.id))
+		.cloned()
+		.collect()
 }
 
 #[cfg(test)]
@@ -250,13 +238,6 @@ pub(crate) fn narrated_installs(ps: &PrincipalState) -> Vec<SlotIdx> {
 		.filter(|(_, sv)| sv.provenance.sender == ATTACKER_ID || replayed(sv))
 		.map(|(i, _)| SlotIdx(i))
 		.collect()
-}
-
-fn mentions(v: &Value, ids: &IdSet<u32>) -> bool {
-	match v {
-		Value::Constant(c) => ids.contains(&c.id),
-		Value::Primitive(p) => p.arguments.iter().any(|a| mentions(a, ids)),
-	}
 }
 
 pub(crate) fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc<str>> {
@@ -270,7 +251,12 @@ pub(crate) fn shadowed_names(km: &ProtocolTrace, ps: &PrincipalState) -> Vec<Arc
 	loop {
 		let before = ids.len();
 		for slot in km.slots.iter() {
-			if !ids.contains(&slot.constant.id) && mentions(&slot.initial_value, &ids) {
+			if !ids.contains(&slot.constant.id)
+				&& slot
+					.initial_value
+					.constant_leaves()
+					.any(|c| ids.contains(&c.id))
+			{
 				ids.insert(slot.constant.id);
 			}
 		}
@@ -1447,6 +1433,21 @@ mod tests {
 			assert!(KINDS.contains(&step.kind), "unknown kind {:?}", step.kind);
 			assert!(!step.text.is_empty(), "a step must render to text");
 		}
+	}
+
+	#[test]
+	fn narration_collects_shared_leaves_once() {
+		let left = make_constant("narration_dag_left");
+		let right = make_constant("narration_dag_right");
+		let mut term = make_primitive(PRIM_HASH, vec![left.clone(), right.clone()], 0);
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let term = make_primitive(PRIM_HASH, vec![right.clone(), term, left.clone()], 0);
+		let leaves = constant_leaves(&term);
+		assert_eq!(leaves.len(), 2);
+		assert_eq!(leaves[0].id, right.as_constant().unwrap().id);
+		assert_eq!(leaves[1].id, left.as_constant().unwrap().id);
 	}
 
 	fn name_table_state() -> PrincipalState {

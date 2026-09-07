@@ -45,7 +45,7 @@ fn try_deduction_step(
 	record: &Arc<MutationRecord>,
 	index: &Arc<crate::theory::StateIndex>,
 ) -> bool {
-	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker, index);
+	let _memo = crate::theory::DeductionMemo::scoped(ps, attacker, Some(index));
 	reset_reconstructed();
 	let saturated = ctx.knowledge_rules_saturated(ps.id, attacker);
 	let mut progress = false;
@@ -341,11 +341,12 @@ fn merge_into(needs: &[Need], union: &mut Vec<Need>) -> bool {
 /// The accumulators the read walk fills: which known terms it has already
 /// visited, the per-term precondition memo, the reads it found, and the union
 /// of every record it passed through.
-struct Walk {
+struct Walk<'a> {
 	seen: IdSet<usize>,
 	memo: IdMap<usize, Vec<Need>>,
 	reads: Vec<Read>,
 	union: Vec<Need>,
+	inputs: crate::theory::KnowledgeInputs<'a>,
 }
 
 fn gather_reads(
@@ -360,9 +361,13 @@ fn gather_reads(
 		memo: take_needs_memo(attacker),
 		reads: Vec::new(),
 		union: seed.to_vec(),
+		inputs: crate::theory::KnowledgeInputs::new(ps, attacker),
 	};
 	for term in terms {
-		collect_reads(km, ps, attacker, term, &mut walk);
+		if !collect_reads(km, attacker, term, &mut walk) {
+			keep_needs_memo(attacker, walk.memo);
+			return None;
+		}
 	}
 	let Walk {
 		reads,
@@ -392,54 +397,30 @@ fn gather_reads(
 /// refuse combinations that are sound.
 fn collect_reads(
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
 	attacker: &AttackerState,
 	term: &Value,
-	walk: &mut Walk,
-) {
-	if let Some(idx) = attacker.knows(term) {
-		collect_leaves(km, attacker, idx, walk);
-		return;
-	}
-	let Value::Primitive(p) = term else {
-		return;
+	walk: &mut Walk<'_>,
+) -> bool {
+	let Some(inputs) = walk.inputs.of_value(term) else {
+		return false;
 	};
-	if let Some(rebuilt) = can_reconstruct_primitive(p, ps, attacker) {
-		for argument in &rebuilt.from {
-			collect_reads(km, ps, attacker, argument, walk);
-		}
-		return;
-	}
-	let Ok(spec) = crate::primitive::primitive_get(p.id) else {
-		return;
-	};
-	let Some(&outputs) = spec.output.iter().max() else {
-		return;
-	};
-	for j in (0..outputs.max(0) as usize).filter(|&j| j != p.output) {
-		let sibling = Arc::new(p.with_output(j));
-		let projected = Value::Primitive(Arc::clone(&sibling));
-		if attacker.knows(&projected).is_none() {
-			continue;
-		}
-		let Some(opened) = can_decompose(&sibling, ps, attacker) else {
-			continue;
-		};
-		collect_reads(km, ps, attacker, &projected, walk);
-		for key in &opened.used {
-			collect_reads(km, ps, attacker, key, walk);
-		}
-		return;
-	}
+	inputs
+		.into_iter()
+		.all(|idx| collect_leaves(km, attacker, idx, walk))
 }
 
 /// The reads a known term bottoms out in.
-fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, walk: &mut Walk) {
+fn collect_leaves(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	idx: KnownIdx,
+	walk: &mut Walk<'_>,
+) -> bool {
 	if !walk.seen.insert(idx.get()) {
-		return;
+		return true;
 	}
 	let Some(derivation) = attacker.derivation(idx) else {
-		return;
+		return true;
 	};
 	match derivation {
 		DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
@@ -467,12 +448,13 @@ fn collect_leaves(km: &ProtocolTrace, attacker: &AttackerState, idx: KnownIdx, w
 		DerivationRecord::Initial => {}
 		other => {
 			for ingredient in other.ingredients() {
-				if let Some(inner) = attacker.knows(ingredient) {
-					collect_leaves(km, attacker, inner, walk);
+				if !collect_reads(km, attacker, ingredient, walk) {
+					return false;
 				}
 			}
 		}
 	}
+	true
 }
 
 /// The substitution a read depends on: the installs in the dependency cone of
@@ -1283,6 +1265,105 @@ fn rule_concat_extract(
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn closure_rejects_histories_hidden_by_in_place_ingredients() {
+		use crate::primitive::PRIM_HASH;
+		use crate::testutil::{make_attacker_state, trace_constant};
+		let _generation = crate::context::GenerationGuard::enter();
+		let model = parse_string(
+			"closure_hidden_histories.vp",
+			"attacker[active]\nprincipal Alice[\nknows public one\ngenerates x\n]\nAlice -> Bob: x\nprincipal Bob[\nknows private ka, kb\nleft = MAC(ka, x)\nright = MAC(kb, x)\n]\nBob -> Carol: left, right\nprincipal Carol[]\nqueries[\nconfidentiality? left\n]\n",
+		)
+		.unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let bob = states.iter().find(|state| state.name == "Bob").unwrap();
+		let slot = |name| {
+			SlotIdx(
+				km.index_of(trace_constant(&km, name).as_constant().unwrap())
+					.unwrap(),
+			)
+		};
+		let nil = crate::value::value_nil();
+		let one = trace_constant(&km, "one");
+		let available = make_attacker_state(vec![nil.clone(), one.clone()]);
+		let execute = |input| {
+			crate::reexec::reexecute(
+				&bob.clone_for_depth(true),
+				&[(slot("x"), input)],
+				&available,
+				&km,
+			)
+			.unwrap()
+		};
+		let first = execute(nil.clone());
+		let second = execute(one.clone());
+		let left = first.values[slot("left").get()].value.clone();
+		let factor = Value::primitive(PRIM_HASH, vec![left.clone()], 0);
+		let derived = Value::primitive(PRIM_HASH, vec![factor.clone()], 0);
+		for (other, coherent) in [(&first, true), (&second, false)] {
+			let right = other.values[slot("right").get()].value.clone();
+			let mut attacker = make_attacker_state(vec![
+				nil.clone(),
+				one.clone(),
+				left.clone(),
+				right.clone(),
+				derived.clone(),
+			]);
+			attacker.derivations = Arc::new(vec![
+				DerivationRecord::Initial,
+				DerivationRecord::Initial,
+				DerivationRecord::Obtained { slot: slot("left") },
+				DerivationRecord::Obtained {
+					slot: slot("right"),
+				},
+				DerivationRecord::Reconstructed {
+					from: vec![factor.clone()],
+				},
+			]);
+			let records = Arc::make_mut(&mut attacker.mutation_records);
+			records[2] = compute_slot_diffs(&first, &km, 0);
+			records[3] = compute_slot_diffs(other, &km, 0);
+			records[4] = Arc::clone(&records[2]);
+			assert!(gather_reads(&km, bob, &attacker, &[&derived], &[]).is_some());
+			assert_eq!(
+				gather_reads(&km, bob, &attacker, &[&derived, &right], &[]).is_some(),
+				coherent
+			);
+		}
+	}
+
+	#[test]
+	fn closure_reads_follow_in_place_ingredients() {
+		use crate::primitive::PRIM_HASH;
+		use crate::testutil::{make_attacker_state, trace_constant};
+		let _generation = crate::context::GenerationGuard::enter();
+		let model = parse_string(
+			"closure_ingredients.vp",
+			"attacker[passive]\nprincipal Alice[\ngenerates leaf\nleaks leaf\n]\nqueries[\nconfidentiality? leaf\n]\n",
+		)
+		.unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let leaf = trace_constant(&km, "leaf");
+		let slot = SlotIdx(km.index_of(leaf.as_constant().unwrap()).unwrap());
+		let mut factor = leaf.clone();
+		for _ in 0..40 {
+			factor = Value::primitive(PRIM_HASH, vec![factor.clone(), factor.clone(), factor], 0);
+		}
+		let target = Value::primitive(PRIM_HASH, vec![factor.clone()], 0);
+		let mut attacker = make_attacker_state(vec![leaf, target.clone()]);
+		attacker.derivations = Arc::new(vec![
+			DerivationRecord::Leaked { slot },
+			DerivationRecord::Reconstructed {
+				from: vec![factor.clone()],
+			},
+		]);
+		for term in [&target, &factor] {
+			let (reads, _) = gather_reads(&km, &states[0], &attacker, &[term], &[]).unwrap();
+			assert_eq!(reads.len(), 1);
+			assert_eq!(reads[0].slot, slot.get());
+		}
+	}
+
 	#[test]
 	fn honestly_computed_nested_terms_are_protocol_produced() {
 		let source = "attacker[passive]\nprincipal Alice[\nknows private key, message\ngenerates nonce\nwrapped = ENC(nil, AEAD_ENC(key, nonce, message, nil))\n]\nAlice -> Bob: wrapped\nprincipal Bob[]\nqueries[\nconfidentiality? message\n]\n";

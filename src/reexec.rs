@@ -189,7 +189,7 @@ pub(crate) fn available_before_receive(
 	held_at(km, ps, at, attacker)
 }
 
-fn reachable_knowledge(
+pub(crate) fn reachable_knowledge(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	mut source_allowed: impl FnMut(usize, SlotIdx) -> bool,

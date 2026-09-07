@@ -285,25 +285,12 @@ fn forgeable_without_sender_uncached(
 	target: &Value,
 	attacker: &AttackerState,
 ) -> bool {
-	let n = attacker.known.len();
-	let mut keep = vec![true; n];
-	for i in 0..n {
-		keep[i] = match attacker.derivation(KnownIdx(i)) {
-			None | Some(DerivationRecord::Initial) => true,
-			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-				!km.slots.get(slot.get()).is_some_and(|read| {
-					read.constant.declaration == Some(Declaration::Assignment)
-						&& km.interchangeable_with(read.creator, sender)
-				})
-			}
-			Some(other) => other.ingredients().iter().all(|v| {
-				attacker
-					.knows(v)
-					.map(|found| found.0 >= i || keep[found.0])
-					.unwrap_or(true)
-			}),
-		};
-	}
+	let mut keep = crate::reexec::reachable_knowledge(ps, attacker, |_, slot| {
+		!km.slots.get(slot.get()).is_some_and(|read| {
+			read.constant.declaration == Some(Declaration::Assignment)
+				&& km.interchangeable_with(read.creator, sender)
+		})
+	});
 	if let Some(held) = attacker.knows(target) {
 		keep[held.get()] = false;
 	}
@@ -364,4 +351,58 @@ fn run_copy(km: &ProtocolTrace, constant: &Constant, run: u32) -> Option<Value> 
 	};
 	let &slot = km.index.get(&id)?;
 	Some(resolve_trace_constant(&km.slots[slot].constant, km))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::primitive::{PRIM_HASH, PRIM_MAC};
+	use crate::testutil::{make_attacker_state, trace_constant};
+	use std::sync::Arc;
+
+	#[test]
+	fn sender_filter_follows_in_place_and_later_ingredients() {
+		let model = crate::parser::parse_string(
+			"sender_ingredients.vp",
+			"attacker[passive]\nprincipal Alice[\nknows private key\ntoken = HASH(key)\n]\nAlice -> Bob: token\nprincipal Bob[\nseen = HASH(token)\n]\nqueries[\nconfidentiality? key\n]\n",
+		)
+		.unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let alice = states.iter().find(|state| state.name == "Alice").unwrap();
+		let bob = states.iter().find(|state| state.name == "Bob").unwrap();
+		let nil = crate::value::value_nil();
+		for (name, forgeable) in [("token", false), ("key", true)] {
+			let source = trace_constant(&km, name);
+			let slot = SlotIdx(km.index_of(source.as_constant().unwrap()).unwrap());
+			let source = resolve_trace_constant(source.as_constant().unwrap(), &km);
+			for (in_place, reverse) in [(false, false), (true, false), (false, true)] {
+				let ingredient = if in_place {
+					Value::primitive(PRIM_HASH, vec![source.clone()], 0)
+				} else {
+					source.clone()
+				};
+				let derived = Value::primitive(PRIM_MAC, vec![ingredient.clone(), nil.clone()], 0);
+				let target = Value::primitive(PRIM_HASH, vec![derived.clone()], 0);
+				let mut known = vec![source.clone(), derived, nil.clone()];
+				let mut derivations = vec![
+					DerivationRecord::Obtained { slot },
+					DerivationRecord::Reconstructed {
+						from: vec![ingredient, nil.clone()],
+					},
+					DerivationRecord::Initial,
+				];
+				if reverse {
+					known.swap(0, 1);
+					derivations.swap(0, 1);
+				}
+				let mut attacker = make_attacker_state(known);
+				attacker.derivations = Arc::new(derivations);
+				assert_eq!(
+					forgeable_without_sender_uncached(&km, bob, alice.id, &target, &attacker),
+					forgeable,
+					"source={name}, in_place={in_place}, reverse={reverse}"
+				);
+			}
+		}
+	}
 }
