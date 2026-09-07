@@ -3851,3 +3851,31 @@ fn test_shared_transcript_metadata() {
 	run_model("shared_transcript_metadata.vp", "c0f0");
 	run_model_sessions("shared_transcript_metadata.vp", 1, "c0f0");
 }
+
+#[test]
+fn test_shared_transcript_search() {
+	run_model("shared_transcript_search.vp", "c0");
+	run_model_sessions("shared_transcript_search.vp", 1, "c0");
+}
+
+#[test]
+fn test_solver_preserves_causally_valid_commutative_alternatives() {
+	for (model, code) in [
+		("solver_dh_causal_alternative.vp", "c1"),
+		("solver_dh_causal_guarded.vp", "c0"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}
+
+#[test]
+fn test_unlinkability_observes_nonce_reuse_disclosures() {
+	for (model, code) in [
+		("unlink_reused_carrier.vp", "u1c1"),
+		("unlink_distinct_nonce_carrier.vp", "u0c0"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}

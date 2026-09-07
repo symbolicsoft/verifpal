@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0c0 at both session counts. Distinct nonces leave both wire
+// ciphertexts sealed. Recomputing the tokens from their leaked seed does not
+// mean they were observed in the protocol, and the marker remains secret.
+attacker[passive]
+
+principal Alice[
+	knows private k, marker
+	knows public label1, label2
+	generates seed, n1, n2
+	t1 = HASH(seed, label1)
+	t2 = HASH(seed, label2)
+	sealed1 = AEAD_ENC(k, n1, CONCAT(t1, marker), nil)
+	sealed2 = AEAD_ENC(k, n2, t2, nil)
+	leaks seed
+]
+
+Alice -> Bob: sealed1, sealed2
+
+principal Bob[]
+
+queries[
+	unlinkability? t1, t2
+	confidentiality? marker
+]

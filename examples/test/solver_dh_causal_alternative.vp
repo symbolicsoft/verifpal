@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at both session counts. x = a, y = b is too early to use a,
+// but x = b, y = a reaches the same shared key after a has been disclosed.
+// The first algebraic match must not hide the second, causally valid request.
+attacker[active]
+
+principal Alice[
+	knows public b
+	generates x
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	knows public b
+	generates a
+	leaks a
+]
+
+principal Alice[
+	generates y
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k
+	tag = MAC(k, DH_KEX(PUBKEY(x), y))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

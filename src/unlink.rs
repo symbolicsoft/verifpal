@@ -512,6 +512,24 @@ fn opened_subterm(
 		if let Some(revealed) = crate::theory::can_break_weak(p, ps, attacker) {
 			pending.extend(revealed.into_iter().rev());
 		}
+		if let Some(rule) = crate::primitive::reuse_rule(p.id)
+			&& attacker.reused.iter().any(|pair| {
+				pair.iter().any(|member| member.equivalent(&value, true))
+					&& pair.iter().all(|member| attacker.knows(member).is_some())
+			}) {
+			for reveal in rule.reveals.iter().rev() {
+				match *reveal {
+					crate::primitive::Reveal::Argument(index) => {
+						if let Some(argument) = p.arguments.get(index) {
+							pending.push(crate::theory::reduce_once(argument));
+						}
+					}
+					crate::primitive::Reveal::Output(output) => {
+						pending.push(Value::Primitive(Arc::new(p.with_output(output))));
+					}
+				}
+			}
+		}
 	}
 	false
 }
@@ -740,6 +758,43 @@ mod tests {
 			&ps,
 			&attacker
 		));
+	}
+
+	#[test]
+	fn reuse_observation_requires_a_held_vetted_pair_containing_the_carrier() {
+		let key = make_private("observed_reuse_key");
+		let nonce = make_private("observed_reuse_nonce");
+		let message = make_private("observed_reuse_message");
+		let other = make_private("observed_reuse_other");
+		let third = make_private("observed_reuse_third");
+		let seal = |message: Value| {
+			Value::primitive(
+				crate::primitive::PRIM_AEAD_ENC,
+				vec![
+					key.clone(),
+					nonce.clone(),
+					message,
+					crate::value::value_nil(),
+				],
+				0,
+			)
+		};
+		let first = seal(message.clone());
+		let second = seal(other.clone());
+		let unpaired = seal(third.clone());
+		let ps = state_from(&[key.clone(), nonce, message.clone(), other, third.clone()]);
+		let observes = |carrier: &Value, target: &Value, attacker: &AttackerState| {
+			opened_subterm(carrier, target, target.hash_value(), &ps, attacker)
+		};
+		let mut attacker = make_attacker_state(vec![first.clone(), second.clone()]);
+		assert!(!observes(&first, &message, &attacker));
+		attacker.reused = Arc::new(vec![[first.clone(), second.clone()]]);
+		assert!(observes(&first, &message, &attacker));
+		assert!(!observes(&first, &key, &attacker));
+		assert!(!observes(&unpaired, &third, &attacker));
+		let mut restricted = make_attacker_state(vec![first.clone(), message.clone()]);
+		restricted.reused = attacker.reused.clone();
+		assert!(!observes(&first, &message, &restricted));
 	}
 
 	fn state_from(values: &[Value]) -> PrincipalState {

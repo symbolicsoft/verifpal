@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1c1 at both session counts. Reusing the encryption nonce opens
+// both wire ciphertexts. The exposed tokens are linked by their leaked seed;
+// the marker is disclosed without giving up the encryption key.
+attacker[passive]
+
+principal Alice[
+	knows private k, marker
+	knows public label1, label2
+	generates seed, n
+	t1 = HASH(seed, label1)
+	t2 = HASH(seed, label2)
+	sealed1 = AEAD_ENC(k, n, CONCAT(t1, marker), nil)
+	sealed2 = AEAD_ENC(k, n, t2, nil)
+	leaks seed
+]
+
+Alice -> Bob: sealed1, sealed2
+
+principal Bob[]
+
+queries[
+	unlinkability? t1, t2
+	confidentiality? marker
+]

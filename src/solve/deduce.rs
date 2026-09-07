@@ -11,7 +11,7 @@ use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
 use crate::value::value_nil;
 
-use super::matching::{match_value, unify};
+use super::matching::{match_value, match_values, unify};
 use super::symbolic::SymbolicState;
 use super::vars::{
 	Substitution, apply, as_var, bind, contains_var, dedupe, same_substitution, substitution_hash,
@@ -274,7 +274,7 @@ impl<'a> Deducer<'a> {
 				let Some(known) = self.attacker.known.get(at) else {
 					continue;
 				};
-				if let Some(bound) = match_value(g, known, s) {
+				for bound in match_values(g, known, s) {
 					out.extend(self.require_constructible(&bound, s, true));
 				}
 			}
@@ -528,7 +528,7 @@ impl<'a> Deducer<'a> {
 			if !contains_var(term) {
 				continue;
 			}
-			if let Some(bound) = match_value(term, goal, s) {
+			for bound in match_values(term, goal, s) {
 				out.extend(self.require_constructible(&bound, s, false));
 			}
 			self.solve_by_oracle(term, goal, s, out);
@@ -732,15 +732,25 @@ impl<'a> Deducer<'a> {
 
 	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
 		let mut out = Vec::new();
+		let mut seen = IdSet::default();
 		for term in &sym.terms {
-			self.collect_forgeable(term, var_id, &mut out);
+			self.collect_forgeable(term, var_id, &mut out, &mut seen);
 		}
 		out
 	}
 
-	fn collect_forgeable(&self, v: &Value, var_id: ValueId, out: &mut Vec<Value>) {
+	fn collect_forgeable(
+		&self,
+		v: &Value,
+		var_id: ValueId,
+		out: &mut Vec<Value>,
+		seen: &mut IdSet<usize>,
+	) {
 		match v {
 			Value::Primitive(p) => {
+				if !seen.insert(Arc::as_ptr(p) as usize) {
+					return;
+				}
 				if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())
 					&& let Some(from) = p.arguments.get(rule.from)
 					&& as_var(from) == Some(var_id)
@@ -755,7 +765,7 @@ impl<'a> Deducer<'a> {
 					}
 				}
 				for a in &p.arguments {
-					self.collect_forgeable(a, var_id, out);
+					self.collect_forgeable(a, var_id, out, seen);
 				}
 			}
 			Value::Constant(_) => {}
@@ -1169,6 +1179,33 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn forgeable_shape_collection_visits_a_shared_check_once() {
+		let variable = super::super::vars::attacker_var(0, "dag_shape");
+		let key = make_private("dag_shape_key");
+		let check = Value::primitive(PRIM_DEC, vec![key.clone(), variable.clone()], 0);
+		let mut term = check.clone();
+		for _ in 0..40 {
+			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let sym = SymbolicState {
+			terms: vec![term.clone(), check, term],
+			var_slots: vec![0],
+			var_terms: vec![Some(variable.clone())],
+		};
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let attacker = make_attacker_state(vec![]);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let shapes = deducer.forgeable_shapes(&sym, as_var(&variable).unwrap());
+		assert_eq!(shapes.len(), 1);
+		let Value::Primitive(shape) = &shapes[0] else {
+			panic!("a decryption requires an encryption shape");
+		};
+		assert_eq!(shape.id, PRIM_ENC);
+		assert!(shape.arguments[0].equivalent(&key, true));
+		assert!(contains_var(&shape.arguments[1]));
+	}
 
 	#[test]
 	fn constraint_collection_visits_shared_terms_once() {

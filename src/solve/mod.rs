@@ -186,18 +186,22 @@ fn solve_principal(
 
 fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
 	let mut out: Vec<Vec<usize>> = Vec::new();
+	let mut seen = IdSet::default();
 	for term in &sym.terms {
-		collect_blocking_slots(term, &mut out);
+		collect_blocking_slots(term, &mut out, &mut seen);
 	}
 	out.sort();
 	out.dedup();
 	out
 }
 
-fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>) {
+fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet<usize>) {
 	let Value::Primitive(p) = v else {
 		return;
 	};
+	if !seen.insert(Arc::as_ptr(p) as usize) {
+		return;
+	}
 	if let Some(rule) = crate::primitive::primitive_get(p.id)
 		.ok()
 		.and_then(|s| s.rewrite.as_ref())
@@ -219,7 +223,7 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>) {
 		}
 	}
 	for a in &p.arguments {
-		collect_blocking_slots(a, out);
+		collect_blocking_slots(a, out, seen);
 	}
 }
 
@@ -1056,6 +1060,27 @@ mod tests {
 	use crate::testutil::{make_attacker_state, make_constant};
 	use crate::value::value_nil;
 	use vars::free_var;
+
+	#[test]
+	fn blocking_slot_collection_visits_shared_checks_once() {
+		let x = vars::attacker_var(0, "dag_block_x");
+		let y = vars::attacker_var(1, "dag_block_y");
+		let check = Value::primitive(
+			crate::primitive::PRIM_AEAD_DEC,
+			vec![x, value_nil(), y, value_nil()],
+			0,
+		);
+		let mut term = check.clone();
+		for _ in 0..40 {
+			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let sym = SymbolicState {
+			terms: vec![term.clone(), check, term],
+			var_slots: vec![0, 1],
+			var_terms: vec![],
+		};
+		assert_eq!(slots_blocking_reduction(&sym), vec![vec![0, 1]]);
+	}
 
 	fn bundle(second: Value) -> Value {
 		Value::primitive(PRIM_CONCAT, vec![make_constant("kfp_tag"), second], 0)

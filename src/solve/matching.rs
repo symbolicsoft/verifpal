@@ -8,7 +8,7 @@ use crate::types::*;
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
 
 pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
-	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone())
+	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone()).next()
 }
 
 pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
@@ -48,57 +48,63 @@ fn resolved<'a>(v: &'a Value, s: &Substitution) -> Cow<'a, Value> {
 }
 
 fn solve_equations<const UNIFY: bool>(
-	mut pending: Vec<(Value, Value)>,
-	mut s: Substitution,
-) -> Option<Substitution> {
-	let mut alternatives = Vec::new();
-	loop {
-		let Some((a, b)) = pending.pop() else {
-			return Some(s);
-		};
-		let a = resolved(&a, &s);
-		let b = if UNIFY {
-			resolved(&b, &s)
-		} else {
-			Cow::Borrowed(&b)
-		};
-		if a.equivalent(&b, true) {
-			continue;
-		}
-		if let Some(id) = as_var(&a) {
-			if bind(&mut s, id, b.into_owned()) {
+	pending: Vec<(Value, Value)>,
+	s: Substitution,
+) -> impl Iterator<Item = Substitution> {
+	let mut alternatives = vec![(pending, s)];
+	std::iter::from_fn(move || {
+		let (mut pending, mut s) = alternatives.pop()?;
+		loop {
+			let Some((a, b)) = pending.pop() else {
+				return Some(s);
+			};
+			let a = resolved(&a, &s);
+			let b = if UNIFY {
+				resolved(&b, &s)
+			} else {
+				Cow::Borrowed(&b)
+			};
+			if a.equivalent(&b, true) {
 				continue;
 			}
-		} else if UNIFY && let Some(id) = as_var(&b) {
-			if bind(&mut s, id, a.into_owned()) {
+			if let Some(id) = as_var(&a) {
+				if bind(&mut s, id, b.into_owned()) {
+					continue;
+				}
+			} else if UNIFY && let Some(id) = as_var(&b) {
+				if bind(&mut s, id, a.into_owned()) {
+					continue;
+				}
+			} else if (contains_var(&a) || (UNIFY && contains_var(&b)))
+				&& let (Value::Primitive(p1), Value::Primitive(p2)) = (a.as_ref(), b.as_ref())
+				&& p1.id == p2.id
+				&& p1.output == p2.output
+				&& p1.threshold == p2.threshold
+				&& p1.arguments.len() == p2.arguments.len()
+			{
+				if let Some((u1, v1, u2, v2)) = commutative_swap(p1, p2)
+					&& !crate::theory::structurally_identical(u1, v1)
+					&& !crate::theory::structurally_identical(u2, v2)
+				{
+					let mut swapped = pending.clone();
+					swapped.push((v1.clone(), u2.clone()));
+					swapped.push((u1.clone(), v2.clone()));
+					alternatives.push((swapped, s.clone()));
+				}
+				pending.extend(
+					p1.arguments
+						.iter()
+						.zip(&p2.arguments)
+						.rev()
+						.map(|(a, b)| (a.clone(), b.clone())),
+				);
 				continue;
 			}
-		} else if (contains_var(&a) || (UNIFY && contains_var(&b)))
-			&& let (Value::Primitive(p1), Value::Primitive(p2)) = (a.as_ref(), b.as_ref())
-			&& p1.id == p2.id
-			&& p1.output == p2.output
-			&& p1.threshold == p2.threshold
-			&& p1.arguments.len() == p2.arguments.len()
-		{
-			if let Some((u1, v1, u2, v2)) = commutative_swap(p1, p2) {
-				let mut swapped = pending.clone();
-				swapped.push((v1.clone(), u2.clone()));
-				swapped.push((u1.clone(), v2.clone()));
-				alternatives.push((swapped, s.clone()));
-			}
-			pending.extend(
-				p1.arguments
-					.iter()
-					.zip(&p2.arguments)
-					.rev()
-					.map(|(a, b)| (a.clone(), b.clone())),
-			);
-			continue;
+			let (retry, bindings) = alternatives.pop()?;
+			pending = retry;
+			s = bindings;
 		}
-		let (retry, bindings) = alternatives.pop()?;
-		pending = retry;
-		s = bindings;
-	}
+	})
 }
 
 fn commutative_swap<'a>(
@@ -118,6 +124,14 @@ pub(crate) fn match_value(
 	if !contains_var(pattern) {
 		return pattern.equivalent(target, true).then(|| s.clone());
 	}
+	match_values(pattern, target, s).next()
+}
+
+pub(crate) fn match_values(
+	pattern: &Value,
+	target: &Value,
+	s: &Substitution,
+) -> impl Iterator<Item = Substitution> {
 	solve_equations::<false>(vec![(pattern.clone(), target.clone())], s.clone())
 }
 
@@ -185,6 +199,53 @@ mod tests {
 		assert!(crate::solve::vars::apply(&y, &found).equivalent(&target, true));
 		assert!(match_value(&x, &x, &Substitution::default()).is_some());
 		assert_eq!(initial.len(), 1);
+	}
+
+	#[test]
+	fn matching_enumerates_both_commutative_assignments() {
+		let x = crate::solve::vars::attacker_var(0, "alternatives_x");
+		let y = crate::solve::vars::attacker_var(1, "alternatives_y");
+		let a = make_private("alternatives_a");
+		let b = make_private("alternatives_b");
+		let pattern = dh_kex(pubkey(x.clone()), y.clone());
+		let target = dh_kex(pubkey(a.clone()), b.clone());
+		let empty = Substitution::default();
+		let found: Vec<_> = match_values(&pattern, &target, &empty).collect();
+		assert_eq!(found.len(), 2);
+		for (bindings, expected) in found.iter().zip([&a, &b]) {
+			assert!(crate::solve::vars::apply(&x, bindings).equivalent(expected, true));
+			assert!(crate::solve::vars::apply(&pattern, bindings).equivalent(&target, true));
+		}
+		let constrained = Substitution::from_iter([(as_var(&x).unwrap(), b)]);
+		let constrained: Vec<_> = match_values(&pattern, &target, &constrained).collect();
+		assert_eq!(constrained.len(), 1);
+		assert!(crate::solve::vars::apply(&y, &constrained[0]).equivalent(&a, true));
+	}
+
+	#[test]
+	fn symmetric_exponents_do_not_multiply_identical_match_branches() {
+		let atom = make_private("symmetric_match_atom");
+		let mut pattern = atom.clone();
+		let mut target = atom.clone();
+		for i in 0..30 {
+			let x = crate::solve::vars::attacker_var(2 * i, "symmetric_match_x");
+			let y = crate::solve::vars::attacker_var(2 * i + 1, "symmetric_match_y");
+			pattern = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![pattern, dh_kex(pubkey(x), y)],
+				0,
+			);
+			target = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![target, dh_kex(pubkey(atom.clone()), atom.clone())],
+				0,
+			);
+		}
+		let empty = Substitution::default();
+		let found: Vec<_> = match_values(&pattern, &target, &empty).take(2).collect();
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].len(), 60);
+		assert!(crate::solve::vars::apply(&pattern, &found[0]).equivalent(&target, true));
 	}
 
 	#[test]
