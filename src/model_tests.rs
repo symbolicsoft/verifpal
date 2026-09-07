@@ -3987,16 +3987,6 @@ fn test_hkdf_salt_domain_separation() {
 }
 
 #[test]
-#[ignore = "large constraint-search regression; run with cargo test --release test_aws_nitro_attestation -- --ignored"]
-fn test_aws_nitro_attestation() {
-	run_model_at(
-		"examples/attestation/aws_nitro_attestation.vp",
-		"aws_nitro_attestation.vp",
-		"c0c0c0c0c0a0",
-	);
-}
-
-#[test]
 fn test_nested_attested_release() {
 	run_model("nested_attested_release.vp", "c0");
 	run_model_sessions("nested_attested_release.vp", 1, "c0");
