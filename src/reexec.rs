@@ -1366,18 +1366,11 @@ pub(crate) fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
 }
 
 fn collect_slot_references(v: &Value, ps: &PrincipalState, out: &mut Vec<usize>, from: usize) {
-	match v {
-		Value::Constant(c) => {
-			if let Some(i) = ps.index_of(c)
-				&& !out[from..].contains(&i)
-			{
-				out.push(i);
-			}
-		}
-		Value::Primitive(p) => {
-			for a in &p.arguments {
-				collect_slot_references(a, ps, out, from);
-			}
+	for c in v.constant_leaves() {
+		if let Some(i) = ps.index_of(c)
+			&& !out[from..].contains(&i)
+		{
+			out.push(i);
 		}
 	}
 }
@@ -1431,6 +1424,36 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 mod tests {
 	use crate::testutil::*;
 	use crate::types::{PrincipalState, SlotIdx};
+
+	#[test]
+	fn slot_reference_collection_visits_shared_terms_once() {
+		use super::*;
+		let first = make_constant("slot_dag_first");
+		let second = make_constant("slot_dag_second");
+		let ps = make_principal_state(
+			"Beacon",
+			1,
+			vec![
+				make_slot_meta(first.as_constant().unwrap(), true),
+				make_slot_meta(second.as_constant().unwrap(), true),
+			],
+			vec![make_slot_values(&first, 1), make_slot_values(&second, 1)],
+		);
+		let mut term = first;
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		let wrapped = Value::primitive(crate::primitive::PRIM_HASH, vec![term, second], 0);
+		let mut references = vec![1];
+		collect_slot_references(&wrapped, &ps, &mut references, 1);
+		assert_eq!(references, vec![1, 0, 1]);
+		collect_slot_references(&wrapped, &ps, &mut references, 1);
+		assert_eq!(references, vec![1, 0, 1]);
+	}
 
 	#[test]
 	fn shared_transcript_depth_respects_the_protocol_boundary() {

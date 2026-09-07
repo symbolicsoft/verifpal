@@ -3859,11 +3859,22 @@ fn test_shared_transcript_search() {
 }
 
 #[test]
+fn test_shared_transcript_replay() {
+	run_model("shared_transcript_replay.vp", "c0");
+	run_model_sessions("shared_transcript_replay.vp", 1, "c0");
+}
+
+#[test]
 fn test_solver_preserves_causally_valid_commutative_alternatives() {
 	for (model, code) in [
 		("solver_dh_causal_alternative.vp", "c1"),
 		("solver_dh_causal_guarded.vp", "c0"),
 		("solver_dh_wrapped_causal_alternative.vp", "c1"),
+		("solver_dh_nested_causal_alternative.vp", "c1"),
+		("solver_dh_nested_causal_guarded.vp", "c0"),
+		("solver_dh_nested_causal_sealed.vp", "c0"),
+		("solver_dh_nested_causal_nonce_hidden.vp", "c0"),
+		("solver_dh_bundled_causal_alternative.vp", "c1"),
 		("solver_dh_wrapped_causal_guarded.vp", "c0"),
 		("solver_dh_sealed_causal_alternative.vp", "c0"),
 	] {

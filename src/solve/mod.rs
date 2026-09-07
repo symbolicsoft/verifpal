@@ -640,19 +640,36 @@ fn collect_free_positions<'a>(
 	proposal: &Substitution,
 	out: &mut Vec<(ValueId, &'a Value)>,
 ) {
-	match (proposed, honest) {
-		(Value::Constant(c), _) => {
-			if vars::is_free_var_id(c.id) && !proposal.contains_key(&c.id) {
-				out.push((c.id, honest));
+	out.extend(
+		aligned_free_positions(proposed, honest).filter(|(id, _)| !proposal.contains_key(id)),
+	);
+}
+
+fn aligned_free_positions<'a>(
+	proposed: &Value,
+	honest: &'a Value,
+) -> impl Iterator<Item = (ValueId, &'a Value)> {
+	let mut pending = vec![(proposed, honest)];
+	let mut seen = IdSet::default();
+	std::iter::from_fn(move || {
+		while let Some((proposed, honest)) = pending.pop() {
+			if !vars::contains_var(proposed) {
+				continue;
+			}
+			match (proposed, honest) {
+				(Value::Constant(c), _) if vars::is_free_var_id(c.id) => {
+					return Some((c.id, honest));
+				}
+				(Value::Primitive(p), Value::Primitive(h)) if p.id == h.id => {
+					if seen.insert((Arc::as_ptr(p) as usize, Arc::as_ptr(h) as usize)) {
+						pending.extend(p.arguments.iter().zip(h.arguments.iter()).rev());
+					}
+				}
+				_ => {}
 			}
 		}
-		(Value::Primitive(p), Value::Primitive(h)) if p.id == h.id => {
-			for (a, b) in p.arguments.iter().zip(h.arguments.iter()) {
-				collect_free_positions(a, b, proposal, out);
-			}
-		}
-		_ => {}
-	}
+		None
+	})
 }
 
 /// The honest term behind each variable slot, resolved once. `fill_aligned_with` is
@@ -698,26 +715,16 @@ fn fill_free_positions(
 	filler: &dyn Fn(&Value) -> Option<Value>,
 	out: &mut Substitution,
 ) -> bool {
-	match (proposed, honest) {
-		(Value::Constant(c), _) => {
-			if !vars::is_free_var_id(c.id) || out.contains_key(&c.id) {
-				return false;
-			}
-			let Some(value) = filler(honest) else {
-				return false;
-			};
-			out.insert(c.id, value);
-			true
+	let mut filled = false;
+	for (id, honest) in aligned_free_positions(proposed, honest) {
+		if !out.contains_key(&id)
+			&& let Some(value) = filler(honest)
+		{
+			out.insert(id, value);
+			filled = true;
 		}
-		(Value::Primitive(p), Value::Primitive(h)) if p.id == h.id => p
-			.arguments
-			.iter()
-			.zip(h.arguments.iter())
-			.fold(false, |filled, (a, b)| {
-				filled | fill_free_positions(a, b, filler, out)
-			}),
-		_ => false,
 	}
+	filled
 }
 
 fn leave_honest_slots(
@@ -1065,6 +1072,55 @@ mod tests {
 	use vars::free_var;
 
 	#[test]
+	fn free_position_walks_visit_shared_term_pairs_once() {
+		let mut proposed = free_var(0);
+		let key = Value::primitive(PRIM_PUBKEY, vec![make_constant("free_dag_key")], 0);
+		let mut honest = key.clone();
+		for _ in 0..40 {
+			proposed = Value::primitive(
+				PRIM_HASH,
+				vec![proposed.clone(), proposed.clone(), proposed],
+				0,
+			);
+			honest = Value::primitive(PRIM_HASH, vec![honest.clone(), honest.clone(), honest], 0);
+		}
+		let mut positions = Vec::new();
+		collect_free_positions(&proposed, &honest, &Substitution::default(), &mut positions);
+		assert_eq!(positions.len(), 3);
+		assert!(
+			positions
+				.iter()
+				.all(|(id, value)| *id == free_var_id(0) && value.equivalent(&key, true))
+		);
+		let filled = keyed_positions(&proposed, &honest);
+		assert_eq!(filled.len(), 1);
+		assert!(filled[&free_var_id(0)].equivalent(&attacker_public_key(), true));
+		assert_eq!(aligned_free_positions(&honest, &honest).count(), 0);
+	}
+
+	#[test]
+	fn a_shared_proposal_keeps_distinct_honest_contexts() {
+		let proposal = Value::primitive(PRIM_HASH, vec![free_var(0)], 0);
+		let plain = make_constant("free_context_plain");
+		let public = Value::primitive(PRIM_PUBKEY, vec![make_constant("free_context_key")], 0);
+		let honest = Value::primitive(
+			PRIM_CONCAT,
+			vec![
+				Value::primitive(PRIM_HASH, vec![plain.clone()], 0),
+				Value::primitive(PRIM_HASH, vec![public.clone()], 0),
+			],
+			0,
+		);
+		let proposed = Value::primitive(PRIM_CONCAT, vec![proposal.clone(), proposal], 0);
+		let positions: Vec<_> = aligned_free_positions(&proposed, &honest).collect();
+		assert_eq!(positions.len(), 2);
+		assert!(positions[0].1.equivalent(&plain, true));
+		assert!(positions[1].1.equivalent(&public, true));
+		let filled = keyed_positions(&proposed, &honest);
+		assert!(filled[&free_var_id(0)].equivalent(&attacker_public_key(), true));
+	}
+
+	#[test]
 	fn an_uncontrollable_principal_needs_no_symbolic_execution() {
 		let source = "attacker[active]\nprincipal Alice[\ngenerates nonce\n]\nAlice -> Bob: [nonce]\nprincipal Bob[\nknows private secret\nresult = HASH(nonce, secret)\n]\nqueries[\nconfidentiality? secret\n]\n";
 		let model = crate::parser::parse_string("guarded.vp", source).unwrap();
@@ -1072,7 +1128,7 @@ mod tests {
 		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
 		let bound = crate::reexec::TermBound::of(&km);
 		for mut ps in states {
-			let mut term = make_constant("guarded_dag_leaf");
+			let mut term = crate::testutil::trace_constant(&km, "nonce");
 			for _ in 0..40 {
 				term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 			}

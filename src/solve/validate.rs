@@ -203,12 +203,10 @@ fn replays_own_freshness(
 }
 
 fn carries_own_fresh(v: &Value, ps: &PrincipalState) -> bool {
-	match v {
-		Value::Constant(c) => ps
-			.index_of(c)
-			.is_some_and(|i| ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id),
-		Value::Primitive(p) => p.arguments.iter().any(|a| carries_own_fresh(a, ps)),
-	}
+	v.constant_leaves().any(|c| {
+		ps.index_of(c)
+			.is_some_and(|i| ps.meta[i].constant.fresh && ps.values[i].provenance.creator == ps.id)
+	})
 }
 
 fn note_depth_cut(
@@ -394,18 +392,11 @@ fn forgeable_secret_position(
 }
 
 pub(crate) fn contains_failed_check(v: &Value) -> bool {
-	match v {
-		Value::Primitive(p) => {
-			if p.instance_check
+	crate::value::subterms(v).any(|term| {
+		matches!(term, Value::Primitive(p) if p.instance_check
 				&& primitive_get(p.id).is_ok_and(|spec| spec.rewrite.is_some())
-				&& !can_rewrite(p).0
-			{
-				return true;
-			}
-			p.arguments.iter().any(contains_failed_check)
-		}
-		Value::Constant(_) => false,
-	}
+				&& !can_rewrite(p).0)
+	})
 }
 
 #[cfg(test)]
@@ -417,6 +408,41 @@ mod tests {
 
 	fn empty_state() -> crate::types::PrincipalState {
 		make_principal_state("Test", 0, vec![], vec![])
+	}
+
+	#[test]
+	fn validation_predicates_visit_shared_terms_once() {
+		use crate::types::Value;
+		let leaf = make_constant("validation_dag_leaf");
+		let mut metadata = make_slot_meta(leaf.as_constant().unwrap(), true);
+		metadata.constant.fresh = true;
+		let mut ps = make_principal_state(
+			"Beacon",
+			1,
+			vec![metadata],
+			vec![make_slot_values(&leaf, 1)],
+		);
+		let mut term = leaf;
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		assert!(!super::contains_failed_check(&term));
+		assert!(super::carries_own_fresh(&term, &ps));
+		ps.values[0].provenance.creator = 2;
+		assert!(!super::carries_own_fresh(&term, &ps));
+		let mut check = crate::types::Primitive::new(
+			crate::primitive::PRIM_AEAD_DEC,
+			vec![value_nil(), value_nil(), value_nil(), value_nil()],
+			0,
+		);
+		check.instance_check = true;
+		let checked = Value::Primitive(std::sync::Arc::new(check));
+		let wrapped = Value::primitive(crate::primitive::PRIM_HASH, vec![term, checked], 0);
+		assert!(super::contains_failed_check(&wrapped));
 	}
 
 	#[test]

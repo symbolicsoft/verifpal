@@ -416,17 +416,19 @@ pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) ->
 }
 
 pub(crate) fn admissible(v: &Value) -> bool {
-	let Value::Primitive(p) = v else {
-		return true;
-	};
-	for restriction in argument_restrictions(p.id) {
-		if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
-			&& restriction.banned.contains(&inner.id)
-		{
-			return false;
+	crate::value::subterms(v).all(|term| {
+		let Value::Primitive(p) = term else {
+			return true;
+		};
+		for restriction in argument_restrictions(p.id) {
+			if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
+				&& restriction.banned.contains(&inner.id)
+			{
+				return false;
+			}
 		}
-	}
-	p.arguments.iter().all(admissible)
+		true
+	})
 }
 
 pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [ArgumentRestriction] {
@@ -572,6 +574,20 @@ pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn admissibility_visits_shared_terms_once() {
+		let key = crate::testutil::make_private("admissible_dag_key");
+		let public = Value::primitive(PRIM_PUBKEY, vec![key], 0);
+		let mut term = public.clone();
+		for _ in 0..40 {
+			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		assert!(admissible(&term));
+		let invalid = Value::primitive(PRIM_PUBKEY, vec![public], 0);
+		let wrapped = Value::primitive(PRIM_HASH, vec![term, invalid], 0);
+		assert!(!admissible(&wrapped));
+	}
 
 	#[test]
 	fn pubkey_and_dh_kex_resolve_by_name() {

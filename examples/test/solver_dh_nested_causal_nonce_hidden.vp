@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at both session counts. Opening the inner carrier requires
+// its nonce as well as its key, even though the outer carrier opens.
+attacker[active]
+
+principal Alice[
+	knows public b, wrapping, inner_wrapping
+	generates x
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	knows public b, wrapping, inner_wrapping
+	generates a
+	leaks a
+]
+
+principal Alice[
+	generates y
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k, inner_nonce
+	tag = ENC(wrapping, AEAD_ENC(inner_wrapping, inner_nonce, MAC(k, DH_KEX(PUBKEY(x), y)), nil))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

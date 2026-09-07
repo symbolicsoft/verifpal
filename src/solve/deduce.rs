@@ -24,6 +24,7 @@ struct SolvedGoal {
 }
 
 type GoalMemo = IdMap<(u64, u64), Vec<SolvedGoal>>;
+type DecompositionMemo = IdMap<usize, (Arc<Primitive>, Vec<Substitution>)>;
 
 pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
@@ -686,59 +687,48 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_by_decomposition(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
+		let mut memo = DecompositionMemo::default();
 		for term in &self.wire_terms {
-			let Value::Primitive(p) = term else {
-				continue;
-			};
-			if primitive_is_core(p.id) {
-				continue;
-			}
-			let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.decompose.as_ref()) else {
-				continue;
-			};
-			if rule.output.is_some_and(|output| p.output != output) {
-				continue;
-			}
-			for reveal in &rule.reveals {
-				let revealed = match *reveal {
-					Reveal::Argument(index) => match p.arguments.get(index) {
-						Some(argument) => argument.clone(),
-						None => continue,
-					},
-					Reveal::Output(output) => Value::Primitive(Arc::new(p.with_output(output))),
-				};
-				let filter_fn = rule.filter;
-
-				let mut frontier: Vec<_> = match_values(&revealed, goal, s).collect();
-				if frontier.is_empty() {
-					continue;
-				}
-				let mut viable = true;
-				for &arg_idx in rule.given.iter() {
-					let Some(arg) = p.arguments.get(arg_idx) else {
-						viable = false;
-						break;
-					};
-					let (filtered, valid) = filter_fn(p, arg, arg_idx);
-					if !valid {
-						viable = false;
-						break;
-					}
-					let mut next = Vec::new();
-					for candidate in &frontier {
-						self.solve_into(&filtered, candidate, &mut next);
-					}
-					if next.is_empty() {
-						viable = false;
-						break;
-					}
-					frontier = dedupe(next);
-				}
-				if viable {
-					out.extend(frontier);
-				}
-			}
+			out.extend(self.solve_decomposition_from(term, goal, s, &mut memo));
 		}
+	}
+
+	fn solve_decomposition_from(
+		&self,
+		term: &Value,
+		goal: &Value,
+		s: &Substitution,
+		memo: &mut DecompositionMemo,
+	) -> Vec<Substitution> {
+		let Value::Primitive(p) = term else {
+			return Vec::new();
+		};
+		let key = Arc::as_ptr(p) as usize;
+		if let Some((_, solutions)) = memo.get(&key) {
+			return solutions.clone();
+		}
+		let Some((revealed, given)) = decomposition_targets(p) else {
+			return Vec::new();
+		};
+		let mut out = Vec::new();
+		for value in revealed {
+			let mut frontier: Vec<_> = match_values(&value, goal, s).collect();
+			frontier.extend(self.solve_decomposition_from(&value, goal, s, memo));
+			for required in &given {
+				if frontier.is_empty() {
+					break;
+				}
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					self.solve_into(required, candidate, &mut next);
+				}
+				frontier = dedupe(next);
+			}
+			out.extend(frontier);
+		}
+		let out = dedupe(out);
+		memo.insert(key, (Arc::clone(p), out.clone()));
+		out
 	}
 
 	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
@@ -1039,6 +1029,36 @@ impl<'a> Deducer<'a> {
 	}
 }
 
+fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
+	if primitive_core_reveals_args(p.id) {
+		return Some((p.arguments.clone(), Vec::new()));
+	}
+	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	if rule.output.is_some_and(|output| p.output != output) {
+		return None;
+	}
+	let mut given = Vec::new();
+	for &index in &rule.given {
+		let argument = p.arguments.get(index)?;
+		let (filtered, valid) = (rule.filter)(p, argument, index);
+		if !valid {
+			return None;
+		}
+		given.push(filtered);
+	}
+	let revealed = rule
+		.reveals
+		.iter()
+		.filter_map(|reveal| match *reveal {
+			Reveal::Argument(index) => p.arguments.get(index).cloned(),
+			Reveal::Output(output) => {
+				(output != p.output).then(|| Value::Primitive(Arc::new(p.with_output(output))))
+			}
+		})
+		.collect();
+	Some((revealed, given))
+}
+
 fn tuple_width(tuple: PrimitiveId, output: usize) -> Option<usize> {
 	primitive_def(tuple)
 		.ok()?
@@ -1329,6 +1349,78 @@ mod tests {
 			assert_eq!(found.len(), 1);
 			assert!(equivalent_primitives(&found[0], &split, true));
 		}
+	}
+
+	#[test]
+	fn nested_decomposition_requires_every_opening_input() {
+		let outer = make_private("nested_open_outer");
+		let nonce = make_private("nested_open_nonce");
+		let inner = make_private("nested_open_inner");
+		let secret = make_private("nested_open_secret");
+		let message = make_constant("nested_open_message");
+		let variable = super::super::vars::attacker_var(0, "nested_open_input");
+		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
+		let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
+		let encrypted = Value::primitive(PRIM_ENC, vec![inner.clone(), plaintext], 0);
+		let wire = Value::primitive(
+			PRIM_AEAD_ENC,
+			vec![outer.clone(), nonce.clone(), encrypted, value_nil()],
+			0,
+		);
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![wire.clone()],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		for mask in 0..8 {
+			let mut held = vec![message.clone()];
+			for (at, input) in [&outer, &nonce, &inner].into_iter().enumerate() {
+				if mask & (1 << at) != 0 {
+					held.push(input.clone());
+				}
+			}
+			let attacker = make_attacker_state(held);
+			let deducer = Deducer::new(&ps, &attacker, &sym);
+			let solutions = deducer.solve_decomposition_from(
+				&wire,
+				&goal,
+				&Substitution::default(),
+				&mut DecompositionMemo::default(),
+			);
+			assert_eq!(solutions.len(), usize::from(mask == 7));
+			for solution in solutions {
+				assert!(apply(&variable, &solution).equivalent(&message, true));
+			}
+		}
+	}
+
+	#[test]
+	fn nested_decomposition_visits_shared_carriers_once() {
+		let key = make_constant("nested_dag_key");
+		let secret = make_private("nested_dag_secret");
+		let message = make_constant("nested_dag_message");
+		let variable = super::super::vars::attacker_var(0, "nested_dag_input");
+		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
+		let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
+		let mut wire = Value::primitive(PRIM_ENC, vec![key.clone(), plaintext], 0);
+		for _ in 0..40 {
+			wire = Value::primitive(PRIM_CONCAT, vec![wire.clone(), wire.clone(), wire], 0);
+		}
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![wire.clone()],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let attacker = make_attacker_state(vec![key, message.clone()]);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let mut memo = DecompositionMemo::default();
+		let solutions =
+			deducer.solve_decomposition_from(&wire, &goal, &Substitution::default(), &mut memo);
+		assert_eq!(memo.len(), 41);
+		assert_eq!(solutions.len(), 1);
+		assert!(apply(&variable, &solutions[0]).equivalent(&message, true));
 	}
 
 	#[test]
