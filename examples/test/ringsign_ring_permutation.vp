@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at both session counts.
+// A ring signature authenticates membership of the unordered ring. Swapping
+// Beta's and Gamma's public keys preserves that ring, so verification passes
+// without authenticating which principal supplied each position. Both keys
+// are unguarded here. Separate names keep the signer's ring inputs distinct
+// from the verifier's receives; ringsign_ring_collapse.vp guards Gamma's key to isolate
+// the rejected attack that duplicates a member instead of permuting the ring.
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+	knows public msg
+]
+
+principal Beta[
+	knows private b
+	gb = PUBKEY(b)
+	beta_ring_key = PUBKEY(b)
+]
+
+principal Gamma[
+	knows private c
+	gc = PUBKEY(c)
+	gamma_ring_key = PUBKEY(c)
+]
+
+Beta -> Alice: [beta_ring_key]
+Gamma -> Alice: [gamma_ring_key]
+
+principal Alice[
+	sig = RINGSIGN(a, beta_ring_key, gamma_ring_key, msg)
+]
+
+Alice -> Bob: [ga], [sig]
+Beta -> Bob: gb
+Gamma -> Bob: gc
+
+principal Bob[
+	knows public msg
+	_ = RINGSIGNVERIF(ga, gb, gc, msg, sig)?
+	generates s
+	ok = HASH(s, gb)
+]
+
+Bob -> Alice: ok
+
+queries[
+	authentication? Beta -> Bob: gb
+]

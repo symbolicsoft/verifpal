@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at both session counts.
+// Anyone can establish the outer DH channel. Nested parsing and policy
+// checks require a signed attestation binding the release key, so control
+// of that channel does not disclose the secret.
+
+attacker[active]
+
+principal Authority[
+	knows private signing_key
+	verification_key = PUBKEY(signing_key)
+	knows public image, kind, context
+]
+Authority -> Server: [verification_key]
+
+principal Client[
+	generates private_key, ephemeral
+	public_key = PUBKEY(private_key)
+	share = PUBKEY(ephemeral)
+]
+Client -> Authority: [public_key]
+principal Authority[
+	document = CONCAT(kind, public_key, HASH(image))
+	signature = SIGN(signing_key, document)
+]
+Authority -> Client: [document], [signature]
+Client -> Server: share
+principal Server[
+	generates server_ephemeral
+	server_share = PUBKEY(server_ephemeral)
+	server_key = DH_KEX(share, server_ephemeral)
+]
+Server -> Client: server_share
+principal Client[
+	client_key = DH_KEX(server_share, ephemeral)
+	recipient = CONCAT(document, signature)
+	generates nonce
+	request = AEAD_ENC(client_key, nonce, CONCAT(context, recipient), nil)
+]
+Client -> Server: nonce, request
+principal Server[
+	record = AEAD_DEC(server_key, nonce, request, nil)?
+	received_context, received_recipient = SPLIT(record)?
+	_ = ASSERT(received_context, context)?
+	received_document, received_signature = SPLIT(received_recipient)?
+	_ = SIGNVERIF(verification_key, received_document, received_signature)?
+	document_kind, attested_key, measurements = SPLIT(received_document)?
+	_ = ASSERT(document_kind, kind)?
+	_ = ASSERT(measurements, HASH(image))?
+	knows private secret
+	release = PKE_ENC(attested_key, secret)
+]
+Server -> Client: release
+queries[
+	confidentiality? secret
+]

@@ -51,7 +51,7 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			collect_subterm_hashes(held, &mut known);
 		}
-		Self::with_basis(ps, attacker, sym, known.clone(), &known)
+		Self::with_basis(ps, attacker, sym, known)
 	}
 
 	pub(crate) fn with_basis(
@@ -59,12 +59,11 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
-		protocol: &IdSet<u64>,
 	) -> Self {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
-		Self::in_lane(ps, attacker, sym, Arc::new(basis), protocol, 0)
+		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
 	}
 
 	pub(crate) fn in_lane(
@@ -72,7 +71,6 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		basis: Arc<IdSet<u64>>,
-		protocol: &IdSet<u64>,
 		lane: u32,
 	) -> Self {
 		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
@@ -99,12 +97,6 @@ impl<'a> Deducer<'a> {
 
 		let mut by_head: IdMap<(PrimitiveId, usize), Vec<usize>> = IdMap::default();
 		for (at, held) in attacker.known.iter().enumerate() {
-			let constructed = match attacker.derivation(KnownIdx(at)) {
-				Some(DerivationRecord::Reconstructed { .. }) => true,
-				Some(DerivationRecord::Obtained { slot }) => attacker.record(KnownIdx(at)).is_some_and(|record| record.diffs.iter().any(|diff| diff.index == *slot && diff.tainted)),
-				_ => false,
-			};
-			if constructed && !protocol.contains(&held.hash_value()) { continue; }
 			if let Value::Primitive(p) = held {
 				by_head
 					.entry((p.id, p.arguments.len()))
@@ -254,7 +246,10 @@ impl<'a> Deducer<'a> {
 	) {
 		for candidate in self.solve(shape, s) {
 			let ground = apply(shape, &candidate);
-			if (!defer_free && contains_var(&ground)) || crate::value::subterms(&ground).any(|term| as_var(term).is_some_and(super::vars::is_slot_var_id)) {
+			if (!defer_free && contains_var(&ground))
+				|| crate::value::subterms(&ground)
+					.any(|term| as_var(term).is_some_and(super::vars::is_slot_var_id))
+			{
 				continue;
 			}
 			let mut extended = candidate;
@@ -791,30 +786,51 @@ impl<'a> Deducer<'a> {
 	}
 
 	pub(crate) fn constraint_goals(
-		&self,
+		mut self,
 		ctx: &crate::context::VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		sym: &SymbolicState,
-		base: &Substitution,
 	) -> Vec<Substitution> {
+		let protocol = ctx.term_bound(km).protocol(km);
+		for entries in self.by_head.values_mut() {
+			entries.retain(|&at| {
+				let constructed = match self.attacker.derivation(KnownIdx(at)) {
+					Some(DerivationRecord::Reconstructed { .. }) => true,
+					Some(DerivationRecord::Obtained { slot }) => {
+						self.attacker.record(KnownIdx(at)).is_some_and(|record| {
+							record
+								.diffs
+								.iter()
+								.any(|diff| diff.index == *slot && diff.tainted)
+						})
+					}
+					_ => false,
+				};
+				!constructed || protocol.contains(&self.attacker.known[at].hash_value())
+			});
+		}
+		let base = &Substitution::default();
 		let groups = constraint_sets(ctx, km, ps, sym);
 		let mut out = Vec::new();
 		let mut combined = vec![base.clone()];
 		for slots in groups {
-			let checked: Vec<_> = slots.iter().filter_map(|&slot| sym.terms[slot].as_primitive().cloned()).collect();
-			let owner = ps.meta[*slots.last().unwrap()].creator;
+			let checked: Vec<_> = slots
+				.iter()
+				.filter_map(|&slot| sym.terms[slot].as_primitive().cloned())
+				.collect();
 			let checked = widest_checked_projections(checked);
-			eprintln!("[perf] group {owner} checks {}", checked.len());
 			let mut frontier = vec![base.clone()];
 			for check in &checked {
+				if primitive_is_projection(check.id) {
+					continue;
+				}
 				frontier.extend(self.satisfy_check(check, base));
 				self.memo.borrow_mut().clear();
 			}
 			let mut frontier = super::vars::dedupe_slots(frontier);
 			let mut seen = super::vars::SeenSubstitutions::default();
 			let mut keys = Vec::new();
-			let mut partials = Vec::new();
 			for _ in 0..=checked.len() {
 				let mut changed = false;
 				for p in &checked {
@@ -826,7 +842,11 @@ impl<'a> Deducer<'a> {
 							continue;
 						}
 						if !refined.arguments.iter().any(contains_var) {
-							if primitive_extract_bypass_key(&refined).is_some_and(|key| crate::theory::obtainable(&key, ps, self.attacker)) { next.push(candidate); }
+							if primitive_extract_bypass_key(&refined).is_some_and(|key| {
+								crate::theory::obtainable(&key, ps, self.attacker)
+							}) {
+								next.push(candidate);
+							}
 							continue;
 						}
 						let solutions = self.satisfy_check(&refined, &candidate);
@@ -840,7 +860,6 @@ impl<'a> Deducer<'a> {
 							if !seen.contains(&keys, &key) {
 								keys.push(key);
 								seen.absorb(&keys);
-								partials.push(solution.clone());
 								changed = true;
 							}
 						}
@@ -848,16 +867,19 @@ impl<'a> Deducer<'a> {
 					}
 					frontier = super::vars::dedupe_slots(next);
 				}
-				eprintln!("[perf] group {owner} frontier {} partials {}", frontier.len(), partials.len());
 				if !changed {
 					break;
 				}
 			}
-			frontier.retain(|candidate| checked.iter().all(|p| {
-				let refined = refine_check(p, candidate);
-				check_passes(&refined) || primitive_extract_bypass_key(&refined).is_some_and(|key| contains_var(&key) || crate::theory::obtainable(&key, ps, self.attacker))
-			}));
-			eprintln!("[perf] accepted {}", frontier.len());
+			frontier.retain(|candidate| {
+				checked.iter().all(|p| {
+					let refined = refine_check(p, candidate);
+					check_passes(&refined)
+						|| primitive_extract_bypass_key(&refined).is_some_and(|key| {
+							contains_var(&key) || crate::theory::obtainable(&key, ps, self.attacker)
+						})
+				})
+			});
 			combined = combine(&combined, &frontier);
 			out.extend(frontier);
 		}
@@ -882,13 +904,22 @@ impl<'a> Deducer<'a> {
 		};
 		if out.is_empty()
 			&& let Value::Primitive(q) = target
-			&& p.id == q.id && p.output == q.output && p.threshold == q.threshold
+			&& p.id == q.id
+			&& p.output == q.output
+			&& p.threshold == q.threshold
 			&& p.arguments.len() == q.arguments.len()
 		{
 			let mut frontier = vec![s.clone()];
 			for (a, b) in p.arguments.iter().zip(&q.arguments) {
-				frontier = dedupe(frontier.iter().flat_map(|bindings| self.invert(a, b, bindings)).collect());
-				if frontier.is_empty() { break; }
+				frontier = dedupe(
+					frontier
+						.iter()
+						.flat_map(|bindings| self.invert(a, b, bindings))
+						.collect(),
+				);
+				if frontier.is_empty() {
+					break;
+				}
 			}
 			out.extend(frontier);
 		}
@@ -908,25 +939,6 @@ impl<'a> Deducer<'a> {
 			}
 		}
 
-		dedupe(out)
-	}
-
-	fn satisfy_split(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
-		let Some(inner) = p.arguments.first() else {
-			return Vec::new();
-		};
-		let Some(tuple) = primitive_projects(p.id) else {
-			return Vec::new();
-		};
-		let Some(width) = tuple_width(tuple, p.output) else {
-			return Vec::new();
-		};
-		let arguments: Vec<Value> = (0..width).map(|_| self.fresh_var()).collect();
-		let candidate = Value::primitive(tuple, arguments, 0);
-		let mut out = Vec::new();
-		for bound in self.invert(inner, &candidate, base) {
-			out.extend(self.require_constructible(&bound, base, false));
-		}
 		dedupe(out)
 	}
 
@@ -1081,16 +1093,37 @@ fn constraint_sets(
 			checks.entry(meta.creator).or_default().push(slot);
 		}
 	}
-	let mut endpoints: Vec<_> = checks.iter().filter_map(|(owner, slots)| slots.last().map(|slot| (*owner, ps.meta[*slot].declared_at, Some(*slot)))).collect();
+	let mut endpoints: Vec<_> = checks
+		.iter()
+		.filter_map(|(owner, slots)| {
+			slots
+				.last()
+				.map(|slot| (*owner, (ps.meta[*slot].declared_at, *slot + 1), Some(*slot)))
+		})
+		.collect();
 	for (index, slot) in km.slots.iter().enumerate() {
-		endpoints.extend(slot.sent_by.iter().map(|event| (event.sender, event.declared_at, Some(index))));
+		endpoints.extend(
+			slot.sent_by
+				.iter()
+				.map(|event| (event.sender, (event.declared_at, 0), Some(index))),
+		);
 	}
-	endpoints.extend(km.leaks.iter().map(|event| (event.principal_id, event.declared_at, ps.index.get(&event.constant_id).copied())));
+	endpoints.extend(km.leaks.iter().map(|event| {
+		(
+			event.principal_id,
+			(event.declared_at, 0),
+			ps.index.get(&event.constant_id).copied(),
+		)
+	}));
 	for result in ctx.results_get() {
 		for query in std::iter::once(&result.query).chain(&result.variants) {
 			for constant in query.constants.iter().chain(&query.message.constants) {
 				if let Some(slot) = ps.index_of(constant) {
-					endpoints.push((ps.meta[slot].creator, ps.meta[slot].declared_at, Some(slot)));
+					endpoints.push((
+						ps.meta[slot].creator,
+						(ps.meta[slot].declared_at, slot + 1),
+						Some(slot),
+					));
 				}
 			}
 		}
@@ -1099,30 +1132,47 @@ fn constraint_sets(
 	endpoints.dedup();
 	let mut groups = Vec::new();
 	for (owner, at, target) in endpoints {
-		let mut pending: Vec<_> = checks.get(&owner).into_iter().flatten().copied().filter(|slot| ps.meta[*slot].declared_at <= at).collect();
+		let mut pending: Vec<_> = checks
+			.get(&owner)
+			.into_iter()
+			.flatten()
+			.copied()
+			.filter(|slot| (ps.meta[*slot].declared_at, *slot) < at)
+			.collect();
 		pending.extend(target);
 		let mut visited = IdSet::default();
 		let mut needed = IdSet::default();
 		while let Some(slot) = pending.pop() {
-			if !visited.insert(slot) || sym.is_var_slot(slot) { continue; }
+			if !visited.insert(slot) || sym.is_var_slot(slot) {
+				continue;
+			}
 			let meta = &ps.meta[slot];
 			if let Value::Primitive(p) = &ps.values[slot].value
-				&& primitive_is_projection(p.id) { needed.insert(slot); }
+				&& primitive_is_projection(p.id)
+			{
+				needed.insert(slot);
+			}
 			for &check in checks.get(&meta.creator).into_iter().flatten() {
-				if ps.meta[check].declared_at <= meta.declared_at {
+				if check <= slot {
 					needed.insert(check);
-					if check != slot { pending.push(check); }
+					if check != slot {
+						pending.push(check);
+					}
 				}
 			}
 			for constant in ps.values[slot].value.constant_leaves() {
-				if let Some(dependency) = ps.index_of(constant) { pending.push(dependency); }
+				if let Some(dependency) = ps.index_of(constant) {
+					pending.push(dependency);
+				}
 			}
 		}
 		let mut needed: Vec<_> = needed.into_iter().filter(|&slot| {
 			matches!(&sym.terms[slot], Value::Primitive(p) if (p.instance_check || primitive_is_projection(p.id)) && p.arguments.iter().any(contains_var))
 		}).collect();
 		needed.sort_unstable();
-		if !needed.is_empty() && !groups.contains(&needed) { groups.push(needed); }
+		if !needed.is_empty() && !groups.contains(&needed) {
+			groups.push(needed);
+		}
 	}
 	groups
 }
@@ -1157,28 +1207,6 @@ fn revealed_values(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
 			}
 		})
 		.collect()
-}
-
-fn tuple_width(tuple: PrimitiveId, output: usize) -> Option<usize> {
-	primitive_def(tuple)
-		.ok()?
-		.arity()
-		.iter()
-		.map(|&a| a.max(0) as usize)
-		.filter(|&a| a > output)
-		.min()
-}
-
-fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
-	for term in crate::value::subterms(v) {
-		if let Value::Primitive(p) = term
-			&& primitive_is_projection(p.id)
-			&& p.arguments.first().is_some_and(contains_var)
-			&& !out.iter().any(|q| equivalent_primitives(q, p, true))
-		{
-			out.push((**p).clone());
-		}
-	}
 }
 
 fn widest_checked_projections(checked: Vec<Primitive>) -> Vec<Primitive> {
@@ -1231,17 +1259,6 @@ fn refine_check(p: &Primitive, s: &Substitution) -> Primitive {
 
 fn check_passes(p: &Primitive) -> bool {
 	crate::theory::can_rewrite(&Arc::new(p.clone())).0
-}
-
-fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
-	for term in crate::value::subterms(v) {
-		if let Value::Primitive(p) = term
-			&& p.instance_check
-			&& !out.iter().any(|q| equivalent_primitives(q, p, true))
-		{
-			out.push((**p).clone());
-		}
-	}
 }
 
 pub(crate) fn build_rewrite_shapes_with(
@@ -1435,20 +1452,55 @@ mod tests {
 	}
 
 	#[test]
-	fn constraint_collection_visits_shared_terms_once() {
-		let variable = super::super::vars::attacker_var(0, "dag_constraint");
-		let mut split = Primitive::new(PRIM_SPLIT, vec![variable], 0);
-		split.instance_check = true;
-		let mut term = Value::Primitive(Arc::new(split.clone()));
-		for _ in 0..40 {
-			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
-		}
-		for collect in [collect_checked, collect_stuck_splits] {
-			let mut found = Vec::new();
-			collect(&term, &mut found);
-			assert_eq!(found.len(), 1);
-			assert!(equivalent_primitives(&found[0], &split, true));
-		}
+	fn constraint_sets_keep_emissions_before_later_checks() {
+		let source = "attacker[active]
+principal Sender[
+knows public left, right
+payload = CONCAT(left, right)
+]
+Sender -> Bob: payload
+principal Bob[
+first, second = SPLIT(payload)?
+before = ASSERT(first, left)?
+early = HASH(first)
+]
+Bob -> Sender: early
+principal Bob[
+after = ASSERT(second, right)?
+late = HASH(second)
+]
+Bob -> Sender: late
+queries[
+authentication? Sender -> Bob: payload
+]
+";
+		let model = crate::parser::parse_string("constraint-prefix.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ps = states.iter().find(|ps| ps.name == "Bob").unwrap();
+		let attacker = make_attacker_state(vec![]);
+		let controllable = crate::reexec::Controllable::of(&km, ps, &attacker);
+		let sym = super::super::symbolic::build(&controllable, ps, &attacker);
+		let ctx =
+			crate::context::VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let groups = constraint_sets(&ctx, &km, ps, &sym);
+		let slot = |name: &str| {
+			ps.meta
+				.iter()
+				.position(|meta| &*meta.constant.name == name)
+				.unwrap()
+		};
+		let before = slot("before");
+		let after = slot("after");
+		assert!(
+			groups
+				.iter()
+				.any(|group| group.contains(&before) && !group.contains(&after))
+		);
+		assert!(
+			groups
+				.iter()
+				.any(|group| group.contains(&before) && group.contains(&after))
+		);
 	}
 
 	#[test]

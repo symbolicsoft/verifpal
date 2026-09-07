@@ -253,7 +253,11 @@ pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 }
 
 pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
-	fn rename(v: &Value, names: &mut IdMap<ValueId, Value>, shared: &mut IdMap<usize, Value>) -> Value {
+	fn rename(
+		v: &Value,
+		names: &mut IdMap<ValueId, Value>,
+		shared: &mut IdMap<usize, Value>,
+	) -> Value {
 		if !contains_var(v) {
 			return v.clone();
 		}
@@ -268,7 +272,11 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 				if let Some(hit) = shared.get(&key) {
 					return hit.clone();
 				}
-				let args = p.arguments.iter().map(|a| rename(a, names, shared)).collect();
+				let args = p
+					.arguments
+					.iter()
+					.map(|a| rename(a, names, shared))
+					.collect();
 				let out = Value::Primitive(Arc::new(p.with_arguments(args)));
 				shared.insert(key, out.clone());
 				out
@@ -281,7 +289,10 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 	let values: Vec<_> = slots.iter().map(|id| apply(&s[id], s)).collect();
 	let mut names = IdMap::default();
 	let mut shared = IdMap::default();
-	slots.into_iter().zip(values.iter().map(|v| rename(v, &mut names, &mut shared))).collect()
+	slots
+		.into_iter()
+		.zip(values.iter().map(|v| rename(v, &mut names, &mut shared)))
+		.collect()
 }
 
 pub(crate) fn dedupe_slots(mut candidates: Vec<Substitution>) -> Vec<Substitution> {
@@ -369,28 +380,71 @@ mod tests {
 	#[test]
 	fn canonical_slots_ignore_existential_names_and_unused_bindings() {
 		let slot = attacker_var_id(0);
-		let tuple = |a: Value, b: Value| Value::primitive(crate::primitive::PRIM_CONCAT, vec![a, b], 0);
+		let tuple =
+			|a: Value, b: Value| Value::primitive(crate::primitive::PRIM_CONCAT, vec![a, b], 0);
 		let left = Substitution::from_iter([
 			(slot, tuple(free_var(10), free_var(11))),
 			(FREE_VAR_BASE + 11, free_var(10)),
 			(FREE_VAR_BASE + 12, value_nil()),
 		]);
 		let right = Substitution::from_iter([(slot, tuple(free_var(20), free_var(20)))]);
-		assert!(same_substitution(&canonical_slots(&left), &canonical_slots(&right)));
+		assert!(same_substitution(
+			&canonical_slots(&left),
+			&canonical_slots(&right)
+		));
 		let distinct = Substitution::from_iter([(slot, tuple(free_var(20), free_var(21)))]);
-		assert!(!same_substitution(&canonical_slots(&left), &canonical_slots(&distinct)));
+		assert!(!same_substitution(
+			&canonical_slots(&left),
+			&canonical_slots(&distinct)
+		));
+	}
+
+	#[test]
+	fn canonical_slots_preserve_shared_graphs() {
+		let make = |id| {
+			let mut term = free_var(id);
+			for _ in 0..40 {
+				term = Value::primitive(
+					crate::primitive::PRIM_HASH,
+					vec![term.clone(), term.clone(), term],
+					0,
+				);
+			}
+			Substitution::from_iter([(attacker_var_id(0), term)])
+		};
+		let left = canonical_slots(&make(10));
+		let right = canonical_slots(&make(100));
+		assert!(same_substitution(&left, &right));
+		assert_eq!(
+			crate::value::subterms(&left[&attacker_var_id(0)])
+				.filter(|v| matches!(v, Value::Primitive(_)))
+				.count(),
+			40
+		);
 	}
 
 	#[test]
 	fn canonical_slots_preserve_sharing_between_receives() {
-		let make = |first, second| Substitution::from_iter([
-			(attacker_var_id(0), free_var(first)),
-			(attacker_var_id(1), free_var(second)),
-		]);
-		assert!(same_substitution(&canonical_slots(&make(10, 10)), &canonical_slots(&make(20, 20))));
-		assert!(!same_substitution(&canonical_slots(&make(10, 10)), &canonical_slots(&make(20, 21))));
-		let unbound_slot = Substitution::from_iter([(attacker_var_id(0), attacker_var(1, "unbound"))]);
-		assert!(!same_substitution(&canonical_slots(&make(10, 10)), &canonical_slots(&unbound_slot)));
+		let make = |first, second| {
+			Substitution::from_iter([
+				(attacker_var_id(0), free_var(first)),
+				(attacker_var_id(1), free_var(second)),
+			])
+		};
+		assert!(same_substitution(
+			&canonical_slots(&make(10, 10)),
+			&canonical_slots(&make(20, 20))
+		));
+		assert!(!same_substitution(
+			&canonical_slots(&make(10, 10)),
+			&canonical_slots(&make(20, 21))
+		));
+		let unbound_slot =
+			Substitution::from_iter([(attacker_var_id(0), attacker_var(1, "unbound"))]);
+		assert!(!same_substitution(
+			&canonical_slots(&make(10, 10)),
+			&canonical_slots(&unbound_slot)
+		));
 	}
 
 	#[test]

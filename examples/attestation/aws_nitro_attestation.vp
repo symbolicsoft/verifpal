@@ -1,0 +1,152 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0c0c0c0a0 at two sessions.
+// Regression for constraint-search memory growth in a nested attested key
+// release model. Transport keys, signed inputs, attestation policy, wrapped
+// keys and application completion must agree in one executable flight.
+// These are symbolic assumptions, not a verification of deployed AWS code.
+
+attacker[active]
+principal Provisioner[
+    knows public approved_image, production_role, image_signing_certificate
+    knows public kms_key_id, object_id, application_label
+    knows public aws_region, kms_service, decrypt_operation, nitro_document_tag
+    knows public tls_handshake_tag, client_to_server_tag, server_to_client_tag
+    knows public sigv4_tag
+    expected_pcr0 = HASH(approved_image)
+    expected_pcr3 = HASH(production_role)
+    expected_pcr8 = HASH(image_signing_certificate)
+    object_context = CONCAT(kms_key_id, object_id, application_label)
+    aws_scope = CONCAT(aws_region, kms_service)
+]
+Provisioner -> KMS: [expected_pcr0], [expected_pcr3], [expected_pcr8], [object_context], [aws_scope]
+Provisioner -> DataOwner: [object_context]
+Provisioner -> Enclave: [object_context], [aws_scope]
+principal NitroHypervisor[
+    knows private nitro_signing_key
+    nitro_verification_key = PUBKEY(nitro_signing_key)
+]
+NitroHypervisor -> KMS: [nitro_verification_key]
+principal KMS[
+    knows private kms_tls_signing_key
+    kms_tls_verification_key = PUBKEY(kms_tls_signing_key)
+]
+KMS -> Enclave: [kms_tls_verification_key]
+principal DataOwner[
+    knows private owner_signing_key
+    owner_verification_key = PUBKEY(owner_signing_key)
+]
+DataOwner -> Enclave: [owner_verification_key]
+principal KMS[
+    knows private kms_secret_key, data_secret_key, parent_iam_credentials
+    generates wrapping_nonce
+    wrapped_key_ciphertext = AEAD_ENC(kms_secret_key, wrapping_nonce, data_secret_key, object_context)
+    wrapped_key_blob = CONCAT(wrapping_nonce, wrapped_key_ciphertext)
+]
+KMS -> DataOwner: [wrapped_key_blob]
+principal DataOwner[
+    knows private data_secret_key, data
+    generates data_nonce
+    encrypted_data = AEAD_ENC(data_secret_key, data_nonce, data, object_context)
+    input_package = CONCAT(wrapped_key_blob, data_nonce, encrypted_data, object_context)
+    input_signature = SIGN(owner_signing_key, input_package)
+]
+DataOwner -> Parent: input_package, input_signature
+principal Parent[
+    knows private parent_iam_credentials
+    leaks parent_iam_credentials
+]
+Parent -> Enclave: parent_iam_credentials, input_package, input_signature
+principal Enclave[
+    _ = SIGNVERIF(owner_verification_key, input_package, input_signature)?
+    requested_blob, received_data_nonce, received_ciphertext, received_context = SPLIT(input_package)?
+    _ = ASSERT(received_context, object_context)?
+    generates enclave_private_key
+    enclave_public_key = PUBKEY(enclave_private_key)
+]
+Enclave -> NitroHypervisor: [enclave_public_key]
+principal NitroHypervisor[
+    knows public approved_image, production_role, image_signing_certificate
+    measured_pcr0 = HASH(approved_image)
+    measured_pcr3 = HASH(production_role)
+    measured_pcr8 = HASH(image_signing_certificate)
+    measured_pcrs = CONCAT(measured_pcr0, measured_pcr3, measured_pcr8)
+    attestation = CONCAT(nitro_document_tag, enclave_public_key, measured_pcrs)
+    attestation_signature = SIGN(nitro_signing_key, attestation)
+]
+NitroHypervisor -> Enclave: [attestation], [attestation_signature]
+principal Enclave[
+    generates client_ephemeral
+    client_share = PUBKEY(client_ephemeral)
+]
+Enclave -> KMS: client_share
+principal KMS[
+    generates server_ephemeral
+    server_share = PUBKEY(server_ephemeral)
+    server_transcript = CONCAT(tls_handshake_tag, aws_scope, client_share, server_share)
+    server_handshake_signature = SIGN(kms_tls_signing_key, server_transcript)
+    server_shared_secret = DH_KEX(client_share, server_ephemeral)
+    server_request_key = HKDF(HASH(server_transcript), server_shared_secret, client_to_server_tag)
+    server_response_key = HKDF(HASH(server_transcript), server_shared_secret, server_to_client_tag)
+]
+KMS -> Enclave: server_share, server_handshake_signature
+principal Enclave[
+    client_transcript = CONCAT(tls_handshake_tag, aws_scope, client_share, server_share)
+    _ = SIGNVERIF(kms_tls_verification_key, client_transcript, server_handshake_signature)?
+    client_shared_secret = DH_KEX(server_share, client_ephemeral)
+    client_request_key = HKDF(HASH(client_transcript), client_shared_secret, client_to_server_tag)
+    client_response_key = HKDF(HASH(client_transcript), client_shared_secret, server_to_client_tag)
+    recipient = CONCAT(attestation, attestation_signature)
+    request_body = CONCAT(decrypt_operation, kms_key_id, received_context, requested_blob, recipient)
+    request = CONCAT(aws_scope, request_body)
+    request_authentication = MAC(parent_iam_credentials, HASH(sigv4_tag, request))
+    request_record = CONCAT(request, request_authentication)
+    generates request_nonce
+    tls_request = AEAD_ENC(client_request_key, request_nonce, request_record, HASH(client_transcript))
+]
+Enclave -> KMS: request_nonce, tls_request
+principal KMS[
+    received_record = AEAD_DEC(server_request_key, request_nonce, tls_request, HASH(server_transcript))?
+    received_request, received_authentication = SPLIT(received_record)?
+    _ = ASSERT(received_authentication, MAC(parent_iam_credentials, HASH(sigv4_tag, received_request)))?
+    received_scope, received_body = SPLIT(received_request)?
+    _ = ASSERT(received_scope, aws_scope)?
+    received_operation, received_key_id, kms_context, kms_blob, kms_recipient = SPLIT(received_body)?
+    _ = ASSERT(received_operation, decrypt_operation)?
+    _ = ASSERT(received_key_id, kms_key_id)?
+    _ = ASSERT(kms_context, object_context)?
+    document, document_signature = SPLIT(kms_recipient)?
+    _ = SIGNVERIF(nitro_verification_key, document, document_signature)?
+    document_kind, attested_public_key, attested_pcrs = SPLIT(document)?
+    _ = ASSERT(document_kind, nitro_document_tag)?
+    attested_pcr0, attested_pcr3, attested_pcr8 = SPLIT(attested_pcrs)?
+    _ = ASSERT(attested_pcr0, expected_pcr0)?
+    _ = ASSERT(attested_pcr3, expected_pcr3)?
+    _ = ASSERT(attested_pcr8, expected_pcr8)?
+    kms_wrapping_nonce, kms_wrapped_ciphertext = SPLIT(kms_blob)?
+    key_to_release = AEAD_DEC(kms_secret_key, kms_wrapping_nonce, kms_wrapped_ciphertext, kms_context)?
+    ciphertext_for_recipient = PKE_ENC(attested_public_key, key_to_release)
+    generates response_nonce
+    tls_response = AEAD_ENC(server_response_key, response_nonce, ciphertext_for_recipient, HASH(server_transcript))
+]
+KMS -> Enclave: response_nonce, tls_response
+principal Enclave[
+    delivered_key_ciphertext = AEAD_DEC(client_response_key, response_nonce, tls_response, HASH(client_transcript))?
+    plaintext_data_key = PKE_DEC(enclave_private_key, delivered_key_ciphertext)
+    dec_data = AEAD_DEC(plaintext_data_key, received_data_nonce, received_ciphertext, received_context)?
+    completed = HASH(application_label, input_package)
+]
+Enclave -> Parent: completed
+queries[
+    confidentiality? data
+    confidentiality? data_secret_key
+    confidentiality? kms_secret_key
+    confidentiality? enclave_private_key
+    confidentiality? plaintext_data_key[
+        precondition[Enclave -> Parent: completed]
+    ]
+    authentication? KMS -> Enclave: tls_response[
+        precondition[Enclave -> Parent: completed]
+    ]
+]

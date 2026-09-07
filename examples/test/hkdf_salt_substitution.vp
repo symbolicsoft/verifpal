@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 at both session counts.
+// The receiving device accepts an untrusted wrapping salt. Replacing it
+// with the public token salt makes the exposed token its decryption key,
+// allowing an attacker-authored ciphertext to pass the checked decryption.
+attacker[active]
+
+principal Server[]
+
+principal Client[
+	knows private password, item
+	generates token_salt, wrapping_salt, item_nonce
+	token = HKDF(password, token_salt, nil)
+	wrapping_key = HKDF(password, wrapping_salt, nil)
+	sealed = AEAD_ENC(wrapping_key, item_nonce, item, nil)
+]
+
+Client -> Server: token, token_salt, wrapping_salt, item_nonce, sealed
+Server -> Device: token_salt, wrapping_salt, item_nonce, sealed
+
+principal Device[
+	knows private password
+	key = HKDF(password, wrapping_salt, nil)
+	opened = AEAD_DEC(key, item_nonce, sealed, nil)?
+]
+
+queries[
+	confidentiality? item
+	authentication? Server -> Device: sealed
+]

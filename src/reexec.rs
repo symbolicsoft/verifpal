@@ -77,10 +77,7 @@ impl TermBound {
 			let mut protocol: IdSet<u64> = IdSet::default();
 			for slot in &km.slots {
 				let term = resolve_trace_constant(&slot.constant, km);
-				crate::hashing::collect_subterm_hashes(
-					&term,
-					&mut protocol,
-				);
+				crate::hashing::collect_subterm_hashes(&term, &mut protocol);
 				crate::hashing::collect_subterm_hashes(&reduce_once(&term), &mut protocol);
 			}
 			Deep {

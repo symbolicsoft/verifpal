@@ -3,9 +3,9 @@
 //
 // Expected: a0 — a ring signature binds the whole ring, not just one member.
 //
-// Alice signs over the ring {ga, gb, gc}. Beta's and Gamma's keys reach Bob
-// unguarded, so the attacker may replace them; Alice's key and the signature
-// are guarded, so it may not touch those. Replacing gb with ga leaves Bob
+// Alice signs over the ring {ga, gb, gc}. Beta's key reaches Bob
+// unguarded, so the attacker may replace it; Alice's and Gamma's keys and
+// the signature are guarded, preventing the valid ring-permutation attack. Replacing gb with ga leaves Bob
 // verifying against the degenerate ring {ga, ga, gc}, which is not the ring
 // the signature was made over: real verification fails and Bob halts.
 //
@@ -42,7 +42,7 @@ principal Alice[
 
 Alice -> Bob: [ga], [sig]
 Beta -> Bob: gb
-Gamma -> Bob: gc
+Gamma -> Bob: [gc]
 
 principal Bob[
 	knows public msg

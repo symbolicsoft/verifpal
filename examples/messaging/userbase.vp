@@ -1,18 +1,20 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c0a0a0 at one session and c0c0a1a1 at two, the two authentication queries falling to cross-session replays.
+// Expected: c0c0a1a1 at both session counts.
 //
-// The end-to-end encryption scheme of Userbase, a database service for web
-// apps in which the server stores only ciphertext. Two users each run a
-// key hierarchy rooted in a memorable password, and each adds a second
-// device that reconstructs everything from that password alone. The stored
-// items stay confidential from server and network alike, and at one session
-// a device accepts only genuinely-stored items (c0c0a0a0). At two sessions
-// the authentication queries fail (c0c0a1a1): the same user runs the
-// hierarchy twice under one password, and a new device handed the OTHER
-// run's stored blobs and salts unwraps and accepts them, a cross-session
-// replay.
+// A model of the end-to-end encryption scheme of Userbase, a database
+// service in which the server stores ciphertext. Two users each derive a
+// hierarchy from a password and add a device that reconstructs it.
+//
+// The items remain confidential, but this model admits a salt-substitution
+// attack even at one session. The login token and seed-wrapping key use the
+// same HKDF output and info. Replacing the wrapping salt with the public
+// token salt makes the receiving device use the exposed login token as its
+// decryption key. The attacker then supplies its own seed, database key and
+// item, satisfying all three checked decryptions. This is a finding about
+// this model; it does not establish how the deployed service separates keys.
+// At two sessions, replaying another run's hierarchy is also possible.
 //
 // The password is declared `knows private`, an unguessable secret. Verifpal
 // has no notion of a low-entropy value, so the model assumes the real
@@ -28,13 +30,10 @@
 //                                       └─► hmacKey
 //   dbKey (random) encrypts the actual items.
 //
-// Two ideas to take away. First, key separation: the server is handed
-// passwordToken as a login credential, and learning it does not help with
-// its sibling passwordBasedEncryptionKey — parallel HKDF outputs are
-// independent. Second, key wrapping: the random seed is stored ON the
-// server, encrypted under a password-derived key, which is what lets a
-// brand-new device bootstrap from nothing but the password while the
-// server hosts only ciphertext.
+// The distinct salts in the honest run do not enforce key separation at
+// the receiving device, which accepts both salts from the wire. Binding a
+// distinct purpose into HKDF's info would prevent this salt substitution;
+// hkdf_salt_domain_separation.vp pins that counterweight.
 
 attacker[active]
 
@@ -154,8 +153,8 @@ Server -> UserB_OtherDevice: n_encryptedItemB, encryptedItemB, n_encryptedDbKeyB
 // The new device knows exactly one secret — the password — and re-derives
 // the entire hierarchy: unwrap the seed, rebuild the master key, unwrap
 // the database key, decrypt the item. Every unwrap is a checked (`?`)
-// AEAD_DEC, so a substituted blob halts the device instead of being
-// accepted — that chain of checks is why the authentication queries hold.
+// AEAD_DEC. These checks verify the supplied blobs under the derived keys;
+// they cannot detect that an attacker-selected salt made a key public.
 principal UserA_OtherDevice[
 	knows private passA
 	passwordHashA_ = HASH(passA, passwordSaltA)

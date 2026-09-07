@@ -1354,7 +1354,7 @@ fn test_userbase() {
 		"examples/messaging/userbase.vp",
 		"userbase.vp",
 		1,
-		"c0c0a0a0",
+		"c0c0a1a1",
 	);
 }
 #[test]
@@ -1734,6 +1734,11 @@ fn test_aead_replay_not_forgery() {
 #[test]
 fn test_ringsign_ring_collapse() {
 	run_model("ringsign_ring_collapse.vp", "a0");
+}
+#[test]
+fn test_ringsign_ring_permutation() {
+	run_model("ringsign_ring_permutation.vp", "a1");
+	run_model_sessions("ringsign_ring_permutation.vp", 1, "a1");
 }
 #[test]
 fn test_unlink_kem_needs_the_private_key() {
@@ -3967,4 +3972,38 @@ fn test_unlinkability_observes_nonce_reuse_disclosures() {
 fn test_threshold_subset_search() {
 	run_model("threshold_subset_search.vp", "a0");
 	run_model_sessions("threshold_subset_search.vp", 1, "a0");
+}
+
+#[test]
+fn test_hkdf_salt_substitution() {
+	run_model("hkdf_salt_substitution.vp", "c0a1");
+	run_model_sessions("hkdf_salt_substitution.vp", 1, "c0a1");
+}
+
+#[test]
+fn test_hkdf_salt_domain_separation() {
+	run_model("hkdf_salt_domain_separation.vp", "c0a1");
+	run_model_sessions("hkdf_salt_domain_separation.vp", 1, "c0a0");
+}
+
+#[test]
+#[ignore = "large constraint-search regression; run with cargo test --release test_aws_nitro_attestation -- --ignored"]
+fn test_aws_nitro_attestation() {
+	run_model_at(
+		"examples/attestation/aws_nitro_attestation.vp",
+		"aws_nitro_attestation.vp",
+		"c0c0c0c0c0a0",
+	);
+}
+
+#[test]
+fn test_nested_attested_release() {
+	run_model("nested_attested_release.vp", "c0");
+	run_model_sessions("nested_attested_release.vp", 1, "c0");
+}
+
+#[test]
+fn test_nested_attested_release_unsigned() {
+	run_model("nested_attested_release_unsigned.vp", "c1");
+	run_model_sessions("nested_attested_release_unsigned.vp", 1, "c1");
 }
