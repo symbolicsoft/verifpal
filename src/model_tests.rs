@@ -3863,6 +3863,9 @@ fn test_solver_preserves_causally_valid_commutative_alternatives() {
 	for (model, code) in [
 		("solver_dh_causal_alternative.vp", "c1"),
 		("solver_dh_causal_guarded.vp", "c0"),
+		("solver_dh_wrapped_causal_alternative.vp", "c1"),
+		("solver_dh_wrapped_causal_guarded.vp", "c0"),
+		("solver_dh_sealed_causal_alternative.vp", "c0"),
 	] {
 		run_model(model, code);
 		run_model_sessions(model, 1, code);

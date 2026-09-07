@@ -141,12 +141,15 @@ fn solve_principal(
 ) -> VResult<()> {
 	let attacker = ctx.attacker_snapshot();
 	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
-	let order = crate::reexec::CausalOrder::of(km, ps.id);
-	let history = ctx.coherence(km, ps, &attacker);
+	if !(0..ps.values.len()).any(|slot| controllable.admits(ps, &attacker, slot)) {
+		return Ok(());
+	}
 	let sym = symbolic::build(&controllable, ps, &attacker);
 	if sym.var_slots.is_empty() {
 		return Ok(());
 	}
+	let order = crate::reexec::CausalOrder::of(km, ps.id);
+	let history = ctx.coherence(km, ps, &attacker);
 	if search == Search::Direct || pass != Pass::Targeted {
 		return solve_with(
 			ctx,
@@ -1060,6 +1063,28 @@ mod tests {
 	use crate::testutil::{make_attacker_state, make_constant};
 	use crate::value::value_nil;
 	use vars::free_var;
+
+	#[test]
+	fn an_uncontrollable_principal_needs_no_symbolic_execution() {
+		let source = "attacker[active]\nprincipal Alice[\ngenerates nonce\n]\nAlice -> Bob: [nonce]\nprincipal Bob[\nknows private secret\nresult = HASH(nonce, secret)\n]\nqueries[\nconfidentiality? secret\n]\n";
+		let model = crate::parser::parse_string("guarded.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
+		let bound = crate::reexec::TermBound::of(&km);
+		for mut ps in states {
+			let mut term = make_constant("guarded_dag_leaf");
+			for _ in 0..40 {
+				term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+			}
+			ps.values.last_mut().unwrap().value = term;
+			for search in [Search::Direct, Search::Refined] {
+				for pass in [Pass::Targeted, Pass::Constructed] {
+					solve_principal(&ctx, &km, &ps, pass, &bound, search).unwrap();
+				}
+			}
+		}
+		assert!(!ctx.search_reached_a_controllable_slot());
+	}
 
 	#[test]
 	fn blocking_slot_collection_visits_shared_checks_once() {

@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at both session counts. The guarded inputs cannot be replaced
+// to obtain a tag over the queried shared key, even when its carrier opens.
+attacker[active]
+
+principal Alice[
+	knows public b, wrapping
+	generates x
+]
+
+Alice -> Bob: [x]
+
+principal Bob[
+	knows public b, wrapping
+	generates a
+	leaks a
+]
+
+principal Alice[
+	generates y
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	knows private k
+	tag = ENC(wrapping, MAC(k, DH_KEX(PUBKEY(x), y)))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

@@ -556,7 +556,11 @@ impl<'a> Deducer<'a> {
 		let Some(Value::Primitive(inner)) = p.arguments.get(rule.from) else {
 			return;
 		};
-		if inner.id != rule.id {
+		if inner.id != rule.id
+			|| rule
+				.from_output
+				.is_some_and(|output| inner.output != output)
+		{
 			return;
 		}
 		let filter = rule.filter;
@@ -692,6 +696,9 @@ impl<'a> Deducer<'a> {
 			let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.decompose.as_ref()) else {
 				continue;
 			};
+			if rule.output.is_some_and(|output| p.output != output) {
+				continue;
+			}
 			for reveal in &rule.reveals {
 				let revealed = match *reveal {
 					Reveal::Argument(index) => match p.arguments.get(index) {
@@ -700,12 +707,12 @@ impl<'a> Deducer<'a> {
 					},
 					Reveal::Output(output) => Value::Primitive(Arc::new(p.with_output(output))),
 				};
-				let Some(aligned) = match_value(&revealed, goal, s) else {
-					continue;
-				};
 				let filter_fn = rule.filter;
 
-				let mut frontier = vec![aligned];
+				let mut frontier: Vec<_> = match_values(&revealed, goal, s).collect();
+				if frontier.is_empty() {
+					continue;
+				}
 				let mut viable = true;
 				for &arg_idx in rule.given.iter() {
 					let Some(arg) = p.arguments.get(arg_idx) else {
@@ -1321,6 +1328,52 @@ mod tests {
 			collect(&term, &mut found);
 			assert_eq!(found.len(), 1);
 			assert!(equivalent_primitives(&found[0], &split, true));
+		}
+	}
+
+	#[test]
+	fn deduction_routes_require_the_declared_encapsulation_projection() {
+		let key = make_private("route_projection_key");
+		let public = Value::primitive(PRIM_PUBKEY, vec![key.clone()], 0);
+		let variable = super::super::vars::attacker_var(0, "route_projection_input");
+		let randomness = make_constant("route_projection_randomness");
+		let secret = Value::primitive(PRIM_KEM_ENCAP, vec![public.clone(), randomness.clone()], 0);
+		let name = make_constant("route_projection_wire");
+		let attacker = make_attacker_state(vec![key.clone(), randomness.clone()]);
+		for output in [0, 1] {
+			let wire = Value::primitive(
+				PRIM_KEM_ENCAP,
+				vec![public.clone(), variable.clone()],
+				output,
+			);
+			let ps = make_principal_state(
+				"Beacon",
+				1,
+				vec![make_slot_meta(name.as_constant().unwrap(), false)],
+				vec![make_slot_values(&wire, 1)],
+			);
+			let sym = SymbolicState {
+				terms: vec![wire.clone()],
+				var_slots: vec![],
+				var_terms: vec![],
+			};
+			let deducer = Deducer::new(&ps, &attacker, &sym);
+			let mut decomposed = Vec::new();
+			deducer.solve_by_decomposition(&randomness, &Substitution::default(), &mut decomposed);
+			let check = Value::primitive(PRIM_KEM_DECAP, vec![key.clone(), wire], 0);
+			let mut rewritten = Vec::new();
+			deducer.solve_by_rewrite_match(
+				&check,
+				&secret,
+				&Substitution::default(),
+				&mut rewritten,
+			);
+			for solutions in [decomposed, rewritten] {
+				assert_eq!(solutions.len(), output);
+				for solution in solutions {
+					assert!(apply(&variable, &solution).equivalent(&randomness, true));
+				}
+			}
 		}
 	}
 
