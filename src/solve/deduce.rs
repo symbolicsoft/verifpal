@@ -51,7 +51,7 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			collect_subterm_hashes(held, &mut known);
 		}
-		Self::with_basis(ps, attacker, sym, known.clone(), &known)
+		Self::with_basis(ps, attacker, sym, known)
 	}
 
 	pub(crate) fn with_basis(
@@ -59,12 +59,11 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
-		protocol: &IdSet<u64>,
 	) -> Self {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
-		Self::in_lane(ps, attacker, sym, Arc::new(basis), protocol, 0)
+		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
 	}
 
 	pub(crate) fn in_lane(
@@ -72,7 +71,6 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		basis: Arc<IdSet<u64>>,
-		protocol: &IdSet<u64>,
 		lane: u32,
 	) -> Self {
 		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
@@ -104,7 +102,7 @@ impl<'a> Deducer<'a> {
 				Some(DerivationRecord::Obtained { slot }) => attacker.record(KnownIdx(at)).is_some_and(|record| record.diffs.iter().any(|diff| diff.index == *slot && diff.tainted)),
 				_ => false,
 			};
-			if constructed && !protocol.contains(&held.hash_value()) { continue; }
+			if constructed { continue; }
 			if let Value::Primitive(p) = held {
 				by_head
 					.entry((p.id, p.arguments.len()))
@@ -249,11 +247,12 @@ impl<'a> Deducer<'a> {
 		shape: &Value,
 		var_id: ValueId,
 		s: &Substitution,
+		defer_free: bool,
 		out: &mut Vec<Substitution>,
 	) {
 		for candidate in self.solve(shape, s) {
 			let ground = apply(shape, &candidate);
-			if contains_var(&ground) {
+			if (!defer_free && contains_var(&ground)) || crate::value::subterms(&ground).any(|term| as_var(term).is_some_and(super::vars::is_slot_var_id)) {
 				continue;
 			}
 			let mut extended = candidate;
@@ -632,7 +631,7 @@ impl<'a> Deducer<'a> {
 		let Some(shape) = self.rewrite_shape_yielding(p, rule, goal) else {
 			return;
 		};
-		self.bind_from_shape(&shape, var_id, s, out);
+		self.bind_from_shape(&shape, var_id, s, false, out);
 	}
 
 	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -791,114 +790,106 @@ impl<'a> Deducer<'a> {
 
 	pub(crate) fn constraint_goals(
 		&self,
+		ctx: &crate::context::VerifyContext,
+		km: &ProtocolTrace,
+		ps: &PrincipalState,
 		sym: &SymbolicState,
 		base: &Substitution,
 	) -> Vec<Substitution> {
-		let mut checked = Vec::new();
-		for term in &sym.terms {
-			collect_checked(term, &mut checked);
-		}
-		let checked = widest_checked_projections(checked);
-		let mut splits: Vec<Primitive> = Vec::new();
-		for term in &sym.terms {
-			collect_stuck_splits(term, &mut splits);
-		}
+		let groups = constraint_sets(ctx, km, ps, sym);
 		let mut out = Vec::new();
-		let mut combined: Vec<Substitution> = vec![base.clone()];
-		eprintln!("[perf] constraints {} splits {}", checked.len(), splits.len());
-		for p in &checked {
-			eprintln!("[perf] checking {}.{}", primitive_name(p.id), p.output);
-			if combined.len() == 1 { eprintln!("[perf] check {p}"); }
-			let solved = self.satisfy_check(p, base);
-			self.memo.borrow_mut().clear();
-			eprintln!("[perf] solved {} combined {}", solved.len(), combined.len());
-			if solved.is_empty() {
-				continue;
+		let mut combined = vec![base.clone()];
+		for slots in groups {
+			let checked: Vec<_> = slots.iter().filter_map(|&slot| sym.terms[slot].as_primitive().cloned()).collect();
+			let owner = ps.meta[*slots.last().unwrap()].creator;
+			let checked = widest_checked_projections(checked);
+			eprintln!("[perf] group {owner} checks {}", checked.len());
+			let mut frontier = vec![base.clone()];
+			for check in &checked {
+				frontier.extend(self.satisfy_check(check, base));
+				self.memo.borrow_mut().clear();
 			}
-			combined = combine(&combined, &solved);
-			out.extend(solved);
-		}
-		for p in widest_projections(&splits) {
-			let solved = self.satisfy_split(&p, base);
-			self.memo.borrow_mut().clear();
-			if solved.is_empty() {
-				continue;
-			}
-			combined = combine(&combined, &solved);
-			out.extend(solved);
-		}
-		out.extend(combined);
-		let mut seen = super::vars::SeenSubstitutions::default();
-		let mut keys = Vec::new();
-		out.retain(|s| {
-			let key = super::vars::canonical_slots(s);
-			if seen.contains(&keys, &key) {
-				return false;
-			}
-			keys.push(key);
-			seen.absorb(&keys);
-			true
-		});
-		let mut frontier = out.clone();
-
-		let check_vars: Vec<Vec<ValueId>> = checked
-			.iter()
-			.map(|p| {
-				let mut ids = Vec::new();
-				for a in &p.arguments {
-					super::vars::collect_vars(a, &mut ids);
-				}
-				ids
-			})
-			.collect();
-
-		for round in 0..checked.len() {
-			eprintln!("[perf] round {round} frontier {}", frontier.len());
-			let mut discovered = Vec::new();
-			for (p, vars) in checked.iter().zip(check_vars.iter()) {
-				for candidate in &frontier {
-					if !vars.iter().any(|id| candidate.contains_key(id)) {
-						continue;
-					}
-					let refined = refine_check(p, candidate);
-					if equivalent_primitives(&refined, p, true)
-						|| !refined.arguments.iter().any(contains_var)
-						|| check_passes(&refined)
-					{
-						continue;
-					}
-					let solutions = self.satisfy_check(&refined, candidate);
-					self.memo.borrow_mut().clear();
-					for solution in solutions {
-						let key = super::vars::canonical_slots(&solution);
-						if seen.contains(&keys, &key) {
+			let mut frontier = super::vars::dedupe_slots(frontier);
+			let mut seen = super::vars::SeenSubstitutions::default();
+			let mut keys = Vec::new();
+			let mut partials = Vec::new();
+			for _ in 0..=checked.len() {
+				let mut changed = false;
+				for p in &checked {
+					let mut next = Vec::new();
+					for candidate in frontier {
+						let refined = refine_check(p, &candidate);
+						if check_passes(&refined) {
+							next.push(candidate);
 							continue;
 						}
-						keys.push(key);
-						seen.absorb(&keys);
-						discovered.push(solution);
+						if !refined.arguments.iter().any(contains_var) {
+							if primitive_extract_bypass_key(&refined).is_some_and(|key| crate::theory::obtainable(&key, ps, self.attacker)) { next.push(candidate); }
+							continue;
+						}
+						let solutions = self.satisfy_check(&refined, &candidate);
+						self.memo.borrow_mut().clear();
+						if solutions.is_empty() {
+							next.push(candidate);
+							continue;
+						}
+						for solution in &solutions {
+							let key = super::vars::canonical_slots(solution);
+							if !seen.contains(&keys, &key) {
+								keys.push(key);
+								seen.absorb(&keys);
+								partials.push(solution.clone());
+								changed = true;
+							}
+						}
+						next.extend(solutions);
 					}
+					frontier = super::vars::dedupe_slots(next);
+				}
+				eprintln!("[perf] group {owner} frontier {} partials {}", frontier.len(), partials.len());
+				if !changed {
+					break;
 				}
 			}
-			discovered = dedupe(discovered);
-			if discovered.is_empty() {
-				break;
-			}
-			out.extend(discovered.clone());
-			frontier = discovered;
+			frontier.retain(|candidate| checked.iter().all(|p| {
+				let refined = refine_check(p, candidate);
+				check_passes(&refined) || primitive_extract_bypass_key(&refined).is_some_and(|key| contains_var(&key) || crate::theory::obtainable(&key, ps, self.attacker))
+			}));
+			eprintln!("[perf] accepted {}", frontier.len());
+			combined = combine(&combined, &frontier);
+			out.extend(frontier);
 		}
-		dedupe(out)
+		out.extend(combined);
+		super::vars::dedupe_slots(out)
 	}
 
 	fn invert(&self, term: &Value, target: &Value, s: &Substitution) -> Vec<Substitution> {
+		let term = crate::theory::reduce_once(&apply(term, s));
+		let target = crate::theory::reduce_once(&apply(target, s));
+		self.invert_reduced(&term, &target, s)
+	}
+
+	fn invert_reduced(&self, term: &Value, target: &Value, s: &Substitution) -> Vec<Substitution> {
 		let mut out = Vec::new();
-		if let Some(bound) = match_value(term, target, s) {
+		if let Some(bound) = unify(term, target, s) {
 			out.push(bound);
 		}
 
 		let Value::Primitive(p) = term else {
 			return dedupe(out);
 		};
+		if out.is_empty()
+			&& let Value::Primitive(q) = target
+			&& p.id == q.id && p.output == q.output && p.threshold == q.threshold
+			&& p.arguments.len() == q.arguments.len()
+		{
+			let mut frontier = vec![s.clone()];
+			for (a, b) in p.arguments.iter().zip(&q.arguments) {
+				frontier = dedupe(frontier.iter().flat_map(|bindings| self.invert(a, b, bindings)).collect());
+				if frontier.is_empty() { break; }
+			}
+			out.extend(frontier);
+		}
 
 		if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())
 			&& let Some(from) = p.arguments.get(rule.from)
@@ -985,11 +976,17 @@ impl<'a> Deducer<'a> {
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
 			for shape in &shapes {
-				self.bind_from_shape(shape, var_id, base, &mut out);
+				self.bind_from_shape(shape, var_id, base, true, &mut out);
 			}
 			return dedupe(out);
 		}
 		for shape in &shapes {
+			for solved in self.solve(shape, base) {
+				let target = crate::theory::reduce_once(&apply(shape, &solved));
+				for bound in self.invert(from, &target, &solved) {
+					out.extend(self.require_constructible(&bound, base, false));
+				}
+			}
 			for bound in self.invert(from, shape, base) {
 				out.extend(self.require_constructible(&bound, base, false));
 			}
@@ -1066,6 +1063,66 @@ impl<'a> Deducer<'a> {
 		}
 		frontier
 	}
+}
+
+fn constraint_sets(
+	ctx: &crate::context::VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+) -> Vec<Vec<usize>> {
+	let mut checks: IdMap<PrincipalId, Vec<usize>> = IdMap::default();
+	for (slot, (meta, value)) in ps.meta.iter().zip(&ps.values).enumerate() {
+		if let Value::Primitive(p) = &value.value
+			&& p.instance_check
+		{
+			checks.entry(meta.creator).or_default().push(slot);
+		}
+	}
+	let mut endpoints: Vec<_> = checks.iter().filter_map(|(owner, slots)| slots.last().map(|slot| (*owner, ps.meta[*slot].declared_at, Some(*slot)))).collect();
+	for (index, slot) in km.slots.iter().enumerate() {
+		endpoints.extend(slot.sent_by.iter().map(|event| (event.sender, event.declared_at, Some(index))));
+	}
+	endpoints.extend(km.leaks.iter().map(|event| (event.principal_id, event.declared_at, ps.index.get(&event.constant_id).copied())));
+	for result in ctx.results_get() {
+		for query in std::iter::once(&result.query).chain(&result.variants) {
+			for constant in query.constants.iter().chain(&query.message.constants) {
+				if let Some(slot) = ps.index_of(constant) {
+					endpoints.push((ps.meta[slot].creator, ps.meta[slot].declared_at, Some(slot)));
+				}
+			}
+		}
+	}
+	endpoints.sort_unstable();
+	endpoints.dedup();
+	let mut groups = Vec::new();
+	for (owner, at, target) in endpoints {
+		let mut pending: Vec<_> = checks.get(&owner).into_iter().flatten().copied().filter(|slot| ps.meta[*slot].declared_at <= at).collect();
+		pending.extend(target);
+		let mut visited = IdSet::default();
+		let mut needed = IdSet::default();
+		while let Some(slot) = pending.pop() {
+			if !visited.insert(slot) || sym.is_var_slot(slot) { continue; }
+			let meta = &ps.meta[slot];
+			if let Value::Primitive(p) = &ps.values[slot].value
+				&& primitive_is_projection(p.id) { needed.insert(slot); }
+			for &check in checks.get(&meta.creator).into_iter().flatten() {
+				if ps.meta[check].declared_at <= meta.declared_at {
+					needed.insert(check);
+					if check != slot { pending.push(check); }
+				}
+			}
+			for constant in ps.values[slot].value.constant_leaves() {
+				if let Some(dependency) = ps.index_of(constant) { pending.push(dependency); }
+			}
+		}
+		let mut needed: Vec<_> = needed.into_iter().filter(|&slot| {
+			matches!(&sym.terms[slot], Value::Primitive(p) if (p.instance_check || primitive_is_projection(p.id)) && p.arguments.iter().any(contains_var))
+		}).collect();
+		needed.sort_unstable();
+		if !needed.is_empty() && !groups.contains(&needed) { groups.push(needed); }
+	}
+	groups
 }
 
 fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {

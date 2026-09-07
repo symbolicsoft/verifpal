@@ -284,6 +284,21 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 	slots.into_iter().zip(values.iter().map(|v| rename(v, &mut names, &mut shared))).collect()
 }
 
+pub(crate) fn dedupe_slots(mut candidates: Vec<Substitution>) -> Vec<Substitution> {
+	let mut seen = SeenSubstitutions::default();
+	let mut keys = Vec::new();
+	candidates.retain(|s| {
+		let key = canonical_slots(s);
+		if seen.contains(&keys, &key) {
+			return false;
+		}
+		keys.push(key);
+		seen.absorb(&keys);
+		true
+	});
+	candidates
+}
+
 pub(crate) fn substitution_hash(s: &Substitution) -> u64 {
 	let mut acc: u64 = s.len() as u64;
 	for (id, v) in s {

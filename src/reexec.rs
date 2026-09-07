@@ -76,10 +76,12 @@ impl TermBound {
 		self.deep.get_or_init(|| {
 			let mut protocol: IdSet<u64> = IdSet::default();
 			for slot in &km.slots {
+				let term = resolve_trace_constant(&slot.constant, km);
 				crate::hashing::collect_subterm_hashes(
-					&resolve_trace_constant(&slot.constant, km),
+					&term,
 					&mut protocol,
 				);
+				crate::hashing::collect_subterm_hashes(&reduce_once(&term), &mut protocol);
 			}
 			Deep {
 				protocol,
