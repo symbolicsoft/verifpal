@@ -3865,6 +3865,75 @@ fn test_shared_transcript_replay() {
 }
 
 #[test]
+fn test_causal_derived_unblind() {
+	run_model_sessions("causal_derived_unblind.vp", 1, "a0");
+	run_model("causal_derived_unblind.vp", "a1");
+	run_model_sessions("causal_derived_unblind_early.vp", 1, "a1");
+	run_model("causal_derived_unblind_early.vp", "a1");
+}
+
+#[test]
+fn test_causal_oracle_cycle() {
+	for (model, sessions, expected) in [
+		("causal_oracle_cycle.vp", 1, "c1c1c0"),
+		("causal_oracle_cycle.vp", 2, "c1c1c1"),
+		("causal_oracle_cycle_early.vp", 1, "c1c1c1"),
+		("causal_oracle_cycle_early.vp", 2, "c1c1c1"),
+	] {
+		let path = format!("examples/test/{model}");
+		let (results, code) = crate::verify::verify_with_sessions(&path, sessions).unwrap();
+		assert_code(model, Some(sessions), &results, &code, expected);
+		for result in results {
+			assert!(
+				!result.summary.contains("not a minimized witness"),
+				"{}",
+				result.summary
+			);
+			assert!(
+				!result.summary.contains("not a causally ordered execution"),
+				"{}",
+				result.summary
+			);
+			assert!(
+				!result.summary.contains("only computes later"),
+				"{}",
+				result.summary
+			);
+		}
+	}
+}
+
+#[test]
+fn test_nested_nonce_reuse_disclosures() {
+	for model in [
+		"solver_dh_nested_reuse_opens_key.vp",
+		"solver_dh_nested_reuse_opens_nonce.vp",
+	] {
+		let path = format!("examples/test/{model}");
+		let (results, code) = crate::verify::verify(&path).unwrap();
+		assert_code(model, Some(2), &results, &code, "c1");
+		for result in results {
+			assert!(
+				!result.summary.contains("not a minimized witness"),
+				"{}",
+				result.summary
+			);
+			assert!(
+				!result.summary.contains("not a causally ordered execution"),
+				"{}",
+				result.summary
+			);
+			assert!(
+				!result.summary.contains("only computes later"),
+				"{}",
+				result.summary
+			);
+		}
+		run_model_sessions(model, 1, "c0");
+	}
+}
+
+#[test]
 fn test_solver_preserves_causally_valid_commutative_alternatives() {
 	for (model, code) in [
 		("solver_dh_causal_alternative.vp", "c1"),

@@ -232,35 +232,76 @@ impl CausalOrder {
 		{
 			return hit.clone();
 		}
-		let built = self.restrict(blocked, attacker);
+		let built = restrict_known(blocked, ps, attacker);
 		self.restricted
 			.borrow_mut()
 			.push((key, Arc::clone(&attacker.known), built.clone()));
 		built
 	}
-
-	fn restrict(&self, blocked: &[bool], attacker: &AttackerState) -> Option<Arc<AttackerState>> {
-		restrict_known(blocked, attacker)
-	}
 }
 
-fn restrict_known(blocked: &[bool], attacker: &AttackerState) -> Option<Arc<AttackerState>> {
+fn reachable_knowledge(
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	mut source_allowed: impl FnMut(usize, SlotIdx) -> bool,
+) -> Vec<bool> {
 	let n = attacker.known.len();
+	let mut inputs = crate::theory::KnowledgeInputs::new(ps, attacker);
 	let mut reachable = vec![false; n];
+	let mut dependents = vec![Vec::new(); n];
+	let mut missing = vec![0usize; n];
+	let mut ready = Vec::new();
 	for i in 0..n {
-		reachable[i] = match attacker.derivation(KnownIdx(i)) {
+		let available = match attacker.derivation(KnownIdx(i)) {
 			None | Some(DerivationRecord::Initial) => true,
 			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-				!blocked.get(slot.0).copied().unwrap_or(false)
+				source_allowed(i, *slot)
 			}
-			Some(other) => other.ingredients().iter().all(|v| {
-				attacker
-					.knows(v)
-					.map(|found| found.0 >= i || reachable[found.0])
-					.unwrap_or(true)
-			}),
+			Some(other) => {
+				let mut dependencies = IdSet::default();
+				let mut complete = true;
+				for value in other.ingredients() {
+					let Some(known) = inputs.of_value(value) else {
+						complete = false;
+						break;
+					};
+					dependencies.extend(known.into_iter().map(|idx| idx.get()));
+				}
+				if !complete {
+					continue;
+				}
+				missing[i] = dependencies.len();
+				for dependency in dependencies {
+					dependents[dependency].push(i);
+				}
+				missing[i] == 0
+			}
 		};
+		if available {
+			reachable[i] = true;
+			ready.push(i);
+		}
 	}
+	while let Some(known) = ready.pop() {
+		for &dependent in &dependents[known] {
+			missing[dependent] -= 1;
+			if missing[dependent] == 0 {
+				reachable[dependent] = true;
+				ready.push(dependent);
+			}
+		}
+	}
+	reachable
+}
+
+fn restrict_known(
+	blocked: &[bool],
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Arc<AttackerState>> {
+	let reachable = reachable_knowledge(ps, attacker, |_, slot| {
+		!blocked.get(slot.get()).copied().unwrap_or(false)
+	});
 	retain_known(attacker, &reachable)
 }
 
@@ -316,6 +357,13 @@ pub(crate) fn retain_known(attacker: &AttackerState, keep: &[bool]) -> Option<Ar
 fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
 	let mut after: IdMap<PrincipalId, i32> = IdMap::default();
 	after.insert(principal, at);
+	close_influences(km, after)
+}
+
+fn close_influences(
+	km: &ProtocolTrace,
+	mut after: IdMap<PrincipalId, i32>,
+) -> IdMap<PrincipalId, i32> {
 	loop {
 		let mut changed = false;
 		for slot in &km.slots {
@@ -343,6 +391,72 @@ fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap
 
 fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Vec<bool> {
 	let after = influenced_from(km, principal, at);
+	unreachable_from(km, &after)
+}
+
+fn available_before_pending(
+	km: &ProtocolTrace,
+	pending: &[(PrincipalId, SlotIdx)],
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Arc<AttackerState>> {
+	let mut after: IdMap<PrincipalId, i32> = IdMap::default();
+	for &(principal, slot) in pending {
+		let Some(at) = km.slots.get(slot.get()).and_then(|slot| {
+			slot.sent_by
+				.iter()
+				.filter(|event| event.recipient == principal)
+				.map(|event| event.declared_at)
+				.min()
+		}) else {
+			continue;
+		};
+		after
+			.entry(principal)
+			.and_modify(|earliest| *earliest = (*earliest).min(at))
+			.or_insert(at);
+	}
+	let after = close_influences(km, after);
+	restrict_known(&unreachable_from(km, &after), ps, attacker)
+}
+
+pub(crate) fn causally_grounded(
+	km: &ProtocolTrace,
+	installs: &[(PrincipalId, SlotIdx, Value)],
+	states: &[PrincipalState],
+	attacker: &AttackerState,
+) -> bool {
+	let mut remaining: Vec<_> = installs.iter().collect();
+	remaining
+		.sort_by_key(|(_, slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
+	while !remaining.is_empty() {
+		let pending: Vec<_> = remaining.iter().map(|(at, slot, _)| (*at, *slot)).collect();
+		let Some(ps) = states.iter().find(|state| state.id == remaining[0].0) else {
+			return false;
+		};
+		let available = available_before_pending(km, &pending, ps, attacker);
+		let available = available.as_deref().unwrap_or(attacker);
+		let next = remaining
+			.iter()
+			.enumerate()
+			.position(|(i, (at, _, value))| {
+				!remaining[..i].iter().any(|(who, _, _)| who == at)
+					&& states
+						.iter()
+						.find(|state| state.id == *at)
+						.is_some_and(|state| {
+							crate::solve::validate::derivable(value, state, available)
+						})
+			});
+		let Some(next) = next else {
+			return false;
+		};
+		remaining.remove(next);
+	}
+	true
+}
+
+fn unreachable_from(km: &ProtocolTrace, after: &IdMap<PrincipalId, i32>) -> Vec<bool> {
 	let downstream =
 		|who: PrincipalId, when: i32| after.get(&who).is_some_and(|&reached| when >= reached);
 	km.slots
@@ -434,24 +548,12 @@ impl Coherence {
 		{
 			return hit.clone();
 		}
-		let mut keep = vec![true; size];
-		for i in 0..size {
-			keep[i] = match attacker.derivation(KnownIdx(i)) {
-				None | Some(DerivationRecord::Initial) => true,
-				Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-					self.forwards(km, attacker, i, slot.get(), &authored)
-						&& attacker.record(KnownIdx(i)).is_some_and(|record| {
-							self.execution_agrees(ctx, km, attacker, record, &authored)
-						})
-				}
-				Some(other) => other.ingredients().iter().all(|v| {
-					attacker
-						.knows(v)
-						.map(|found| found.0 >= i || keep[found.0])
-						.unwrap_or(true)
-				}),
-			};
-		}
+		let keep = reachable_knowledge(ps, attacker, |i, slot| {
+			self.forwards(km, attacker, i, slot.get(), &authored)
+				&& attacker.record(KnownIdx(i)).is_some_and(|record| {
+					self.execution_agrees(ctx, km, attacker, record, &authored)
+				})
+		});
 		let built = retain_known(attacker, &keep);
 		locked(&self.agreed).entry(key).or_default().push((
 			authored,
@@ -913,7 +1015,7 @@ pub(crate) fn replay_diffs(
 	seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
 	attacker: &AttackerState,
 ) -> Option<Vec<PrincipalState>> {
-	let mut out: Vec<PrincipalState> = Vec::new();
+	let mut bases: Vec<&PrincipalState> = Vec::new();
 	let mut installed: Seeds = Vec::new();
 	for (principal, mine) in seeds {
 		let pristine = ctx
@@ -932,9 +1034,19 @@ pub(crate) fn replay_diffs(
 		if mine.is_empty() {
 			continue;
 		}
-		let state = reexecute(&pristine.clone_for_depth(true), &mine, attacker, km).ok()?;
-		out.push(state);
+		bases.push(pristine);
 		installed.push((*principal, mine));
+	}
+	let scheduled: Vec<_> = installed
+		.iter()
+		.flat_map(|(at, mine)| mine.iter().map(|(slot, value)| (*at, *slot, value.clone())))
+		.collect();
+	if !causally_grounded(km, &scheduled, ctx.principal_states(), attacker) {
+		return None;
+	}
+	let mut out = Vec::new();
+	for (pristine, (_, mine)) in bases.iter().zip(&installed) {
+		out.push(reexecute(&pristine.clone_for_depth(true), mine, attacker, km).ok()?);
 	}
 	if out.is_empty() {
 		return Some(out);
@@ -1120,10 +1232,11 @@ pub(crate) fn take_bypass_decisions() -> Vec<BypassDecision> {
 
 fn held_at(
 	km: &ProtocolTrace,
-	principal: PrincipalId,
+	ps: &PrincipalState,
 	at: i32,
 	attacker: &AttackerState,
 ) -> Option<Arc<AttackerState>> {
+	let principal = ps.id;
 	let blocked = BLOCKED_AT.with(|cache| {
 		cache
 			.borrow_mut()
@@ -1146,7 +1259,7 @@ fn held_at(
 	}) {
 		return hit;
 	}
-	let built = restrict_known(&blocked, attacker);
+	let built = restrict_known(&blocked, ps, attacker);
 	RESTRICTED_AT.with(|cache| {
 		cache
 			.borrow_mut()
@@ -1164,7 +1277,7 @@ pub(crate) fn bypass_constructible_at(
 	at: i32,
 	attacker: &AttackerState,
 ) -> bool {
-	match held_at(km, ps.id, at, attacker) {
+	match held_at(km, ps, at, attacker) {
 		Some(held) => bypass_constructible(prim, ps, &held),
 		None => bypass_constructible(prim, ps, attacker),
 	}
@@ -1424,6 +1537,60 @@ fn drop_after_index(mut ps: PrincipalState, at: usize) -> PrincipalState {
 mod tests {
 	use crate::testutil::*;
 	use crate::types::{PrincipalState, SlotIdx};
+
+	#[test]
+	fn causal_knowledge_follows_unheld_shared_inputs() {
+		use super::*;
+		let leaked = make_private("recipe_leaked");
+		let mut factor = leaked.clone();
+		for _ in 0..40 {
+			factor = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![factor.clone(), factor.clone(), factor],
+				0,
+			);
+		}
+		let target = Value::primitive(crate::primitive::PRIM_HASH, vec![factor.clone()], 0);
+		let ps = make_principal_state("Alice", 0, Vec::new(), Vec::new());
+		let mut attacker = make_attacker_state(vec![leaked, target.clone()]);
+		attacker.derivations = Arc::new(vec![
+			DerivationRecord::Leaked { slot: SlotIdx(0) },
+			DerivationRecord::Reconstructed { from: vec![factor] },
+		]);
+		assert!(restrict_known(&[false], &ps, &attacker).is_none());
+		let restricted = restrict_known(&[true], &ps, &attacker).unwrap();
+		assert!(restricted.known.is_empty());
+	}
+
+	#[test]
+	fn causal_knowledge_requires_grounded_later_dependencies() {
+		use super::*;
+		let leaf = make_private("recipe_later_leaf");
+		let target = Value::primitive(crate::primitive::PRIM_HASH, vec![leaf.clone()], 0);
+		let ps = make_principal_state("Alice", 0, Vec::new(), Vec::new());
+		let mut attacker = make_attacker_state(vec![target.clone(), leaf.clone()]);
+		attacker.derivations = Arc::new(vec![
+			DerivationRecord::Reconstructed { from: vec![leaf] },
+			DerivationRecord::Leaked { slot: SlotIdx(0) },
+		]);
+		assert!(restrict_known(&[false], &ps, &attacker).is_none());
+		assert!(
+			restrict_known(&[true], &ps, &attacker)
+				.unwrap()
+				.known
+				.is_empty()
+		);
+		Arc::make_mut(&mut attacker.derivations)[1] = DerivationRecord::Decomposed {
+			of: target,
+			using: Vec::new(),
+		};
+		assert!(
+			restrict_known(&[false], &ps, &attacker)
+				.unwrap()
+				.known
+				.is_empty()
+		);
+	}
 
 	#[test]
 	fn slot_reference_collection_visits_shared_terms_once() {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 // Expected: c0 at both session counts. The outer carrier opens, but the
-// inner wrapping key remains secret and its plaintext is not disclosed.
+// inner wrapping key is fresh per session and never disclosed.
 attacker[active]
 
 principal Alice[
@@ -24,7 +24,8 @@ principal Alice[
 Alice -> Bob: y
 
 principal Bob[
-	knows private k, inner_wrapping
+	knows private k
+	generates inner_wrapping
 	tag = ENC(wrapping, AEAD_ENC(inner_wrapping, inner_nonce, MAC(k, DH_KEX(PUBKEY(x), y)), nil))
 	secret = MAC(k, DH_KEX(PUBKEY(a), b))
 ]

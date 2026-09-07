@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c0 at one session, c1c1c1 at two. Each oracle can answer
+// alone; using both original runs needs each to leak before its own input.
+// Extra sessions can supply the nonces before the attacked oracle runs.
+attacker[active]
+
+principal Alice[
+	knows private ka, kb
+	generates x, y
+]
+
+Alice -> Bob: x
+Alice -> Dave: y
+
+principal Bob[
+	knows private ka
+	generates a
+	leaks a
+	t1 = MAC(ka, x)
+]
+
+Bob -> Alice: [a], t1
+
+principal Dave[
+	knows private kb
+	generates b
+	leaks b
+	t2 = MAC(kb, y)
+]
+
+Dave -> Alice: [b], t2
+
+principal Alice[
+	z1 = MAC(ka, b)
+	z2 = MAC(kb, a)
+	z = HASH(z1, z2)
+]
+
+queries[
+	confidentiality? z1
+	confidentiality? z2
+	confidentiality? z
+]

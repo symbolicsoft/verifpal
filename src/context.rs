@@ -1136,8 +1136,19 @@ impl VerifyContext {
 		self.scratch(query_index, self.honest.clone())
 	}
 
-	pub(crate) fn scratch_for_witness(&self, query_index: usize) -> VerifyContext {
-		self.scratch(query_index, self.honest.clone())
+	pub(crate) fn scratch_for_witness(
+		&self,
+		query_index: usize,
+		concrete: Option<&Query>,
+	) -> VerifyContext {
+		let scratch = self.scratch(query_index, self.honest.clone());
+		if let Some(query) = concrete
+			&& let Some(result) = write_lock(&scratch.results).get_mut(query_index)
+		{
+			result.query = query.clone();
+			result.variants.clear();
+		}
+		scratch
 	}
 
 	fn scratch(
@@ -1294,6 +1305,43 @@ mod tests {
 			Ok(results) => assert_eq!(results.len(), 2),
 			Err(e) => assert_eq!(e.kind, ErrorKind::Cancelled),
 		}
+	}
+
+	#[test]
+	fn witness_scratch_keeps_only_the_selected_session_variant() {
+		let source = "attacker[passive]\nprincipal Alice[\ngenerates first, second\n]\nqueries[\nconfidentiality? first\nconfidentiality? second\n]\n";
+		let model = parse_string("witness_variant.vp", source).unwrap();
+		let expanded = crate::sessions::expand_sessions(&model, 2, &[]).unwrap();
+		let selected = expanded.query_variants[0][0].clone();
+		let ctx = VerifyContext::new(
+			&expanded.model,
+			&[],
+			expanded.query_variants,
+			2,
+			None,
+			Vec::new(),
+		);
+		let scratch = ctx.scratch_for_witness(0, Some(&selected));
+		let results = scratch.results_get();
+		assert_eq!(
+			results[0].query.subject().unwrap().id,
+			selected.subject().unwrap().id
+		);
+		assert!(results[0].variants.is_empty());
+		assert!(!results[0].resolved);
+		assert!(results[1].resolved);
+		let original = ctx.results_get();
+		assert_ne!(
+			original[0].query.subject().unwrap().id,
+			selected.subject().unwrap().id
+		);
+		assert_eq!(original[0].variants.len(), 1);
+		assert_eq!(
+			ctx.scratch_for_witness(0, None).results_get()[0]
+				.variants
+				.len(),
+			1
+		);
 	}
 
 	#[test]

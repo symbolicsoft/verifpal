@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1 at one session and two. Both ingredients of the blinding
+// factor leak early enough to unblind and replace the first flight.
+attacker[active]
+
+principal Alice[
+	knows private sk, left, right
+	ga = PUBKEY(sk)
+	blindsig = SIGN(sk, BLIND(HASH(left, right), nil))
+	generates n
+	sig = SIGN(sk, n)
+	leaks left, right
+]
+
+Alice -> Carol: blindsig
+
+principal Carol[]
+
+Alice -> Bob: [ga], n, sig
+
+principal Bob[
+	_ = SIGNVERIF(ga, n, sig)?
+	generates ack
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	_ = HASH(ack)
+]
+
+queries[
+	authentication? Alice -> Bob: sig
+]

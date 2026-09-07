@@ -7,7 +7,7 @@ use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
 use crate::primitive::attacker_public_key;
-use crate::reexec::{governing_attacker, reexecute, reexecute_at};
+use crate::reexec::{causally_grounded, governing_attacker, reexecute, reexecute_at};
 use crate::types::*;
 use crate::value::value_nil;
 use crate::verify::verify_resolve_queries;
@@ -145,6 +145,7 @@ struct Minimizer<'a> {
 	ctx: &'a VerifyContext,
 	km: &'a ProtocolTrace,
 	query_index: usize,
+	concrete: Option<Query>,
 	phase: i32,
 	ambient: AttackerState,
 	sessions: Vec<PrincipalState>,
@@ -164,6 +165,7 @@ impl<'a> Minimizer<'a> {
 		query_index: usize,
 		mutations: Installs,
 		target: Option<&Value>,
+		concrete: Option<&Query>,
 	) -> Minimizer<'a> {
 		let ambient = ctx.attacker_snapshot();
 		let needs: Addressed = target
@@ -195,6 +197,7 @@ impl<'a> Minimizer<'a> {
 			ctx,
 			km,
 			query_index,
+			concrete: concrete.cloned(),
 			phase,
 			ambient,
 			sessions,
@@ -673,6 +676,7 @@ impl<'a> Minimizer<'a> {
 			self.query_index,
 			self.phase,
 			breadth,
+			self.concrete.as_ref(),
 		)
 	}
 
@@ -961,6 +965,7 @@ pub(crate) fn minimize_witness(
 	query_index: usize,
 	seed: &[(SlotIdx, Value)],
 	target: Option<&Value>,
+	concrete: Option<&Query>,
 ) -> Witness {
 	let unminimized = |reproduced: bool| Witness {
 		ps: ps.clone(),
@@ -989,7 +994,7 @@ pub(crate) fn minimize_witness(
 		return unminimized(true);
 	}
 
-	let m = Minimizer::new(ctx, km, ps, query_index, mutations, target);
+	let m = Minimizer::new(ctx, km, ps, query_index, mutations, target, concrete);
 
 	let Some(chosen) = m.choose() else {
 		return unminimized(false);
@@ -1023,7 +1028,15 @@ pub(crate) fn minimize_witness(
 				);
 			}
 			witness.out_of_order = if keep_addressed.is_empty() {
-				out_of_order_harvest(ctx, km, &base, &keep, query_index, m.phase)
+				out_of_order_harvest(
+					ctx,
+					km,
+					&base,
+					&keep,
+					query_index,
+					m.phase,
+					m.concrete.as_ref(),
+				)
 			} else {
 				Vec::new()
 			};
@@ -1211,6 +1224,7 @@ fn out_of_order_harvest(
 	installs: &[(SlotIdx, Value)],
 	query_index: usize,
 	phase: i32,
+	concrete: Option<&Query>,
 ) -> Vec<String> {
 	let ambient = ctx.attacker_snapshot();
 	let mut harvested: Vec<String> = Vec::new();
@@ -1226,7 +1240,7 @@ fn out_of_order_harvest(
 	if harvested.is_empty() {
 		return harvested;
 	}
-	if probe(ctx, km, base, &renamed, query_index, phase).is_some() {
+	if probe(ctx, km, base, &renamed, query_index, phase, concrete).is_some() {
 		return Vec::new();
 	}
 	harvested.sort();
@@ -1241,6 +1255,13 @@ fn harvested_late(
 	into: SlotIdx,
 	v: &Value,
 ) -> bool {
+	if !km
+		.slots
+		.get(into.get())
+		.is_some_and(|slot| slot.sent_by.iter().any(|event| event.recipient == target))
+	{
+		return false;
+	}
 	match ambient.knows(v).and_then(|idx| ambient.derivation(idx)) {
 		Some(DerivationRecord::Obtained { slot }) | Some(DerivationRecord::Leaked { slot }) => {
 			slot.get() >= into.get()
@@ -1463,6 +1484,7 @@ pub(crate) fn replays(
 		query_index,
 		phase,
 		breadth,
+		None,
 	)
 	.is_some()
 }
@@ -1474,6 +1496,7 @@ fn probe(
 	installs: &[(SlotIdx, Value)],
 	query_index: usize,
 	phase: i32,
+	concrete: Option<&Query>,
 ) -> Option<Witness> {
 	probe_with(
 		ctx,
@@ -1484,6 +1507,7 @@ fn probe(
 		query_index,
 		phase,
 		Breadth::Base,
+		concrete,
 	)
 }
 
@@ -1497,6 +1521,7 @@ fn probe_with(
 	query_index: usize,
 	phase: i32,
 	breadth: Breadth,
+	concrete: Option<&Query>,
 ) -> Option<Witness> {
 	let mut own: Installs = shared.to_vec();
 	for (slot, value) in addressed_to(addressed, base.id) {
@@ -1510,7 +1535,7 @@ fn probe_with(
 	} else {
 		Breadth::All
 	};
-	let scratch = ctx.scratch_for_witness(query_index);
+	let scratch = ctx.scratch_for_witness(query_index, concrete);
 	match ctx.cached_baseline(base.id, phase) {
 		Some(baseline) => scratch.install_baseline(&baseline),
 		None => {
@@ -1657,6 +1682,23 @@ fn probe_with(
 	if !scratch.query_is_resolved(query_index) {
 		return None;
 	}
+	let mut scheduled = Vec::new();
+	for state in ctx.principal_states() {
+		if state.id != base.id && breadth != Breadth::All {
+			continue;
+		}
+		let state = state.clone_for_depth(true);
+		let mut mine = controlled_installs(km, &state, &ambient, shared.to_vec());
+		mine.extend(addressed_to(addressed, state.id));
+		scheduled.extend(
+			mine.into_iter()
+				.map(|(slot, value)| (state.id, slot, value)),
+		);
+	}
+	let attacker = scratch.attacker_snapshot();
+	if !causally_grounded(km, &scheduled, ctx.principal_states(), &attacker) {
+		return None;
+	}
 	Some(Witness {
 		#[cfg(test)]
 		installs: installs.to_vec(),
@@ -1666,7 +1708,7 @@ fn probe_with(
 		wide: breadth == Breadth::All,
 		ps,
 		others: carried,
-		attacker: scratch.attacker_snapshot(),
+		attacker,
 		// A probe returns only when the re-executed state resolved the query.
 		reproduced: true,
 		grounded,
@@ -1679,6 +1721,93 @@ fn probe_with(
 #[cfg(test)]
 mod tests {
 	use crate::parser::parse_string;
+
+	#[test]
+	fn witness_installs_cannot_borrow_from_each_others_future() {
+		use crate::testutil::{make_attacker_state, trace_constant};
+		use crate::types::{DerivationRecord, SlotIdx};
+		let source = "attacker[active]\nprincipal Alice[\ngenerates x, y\n]\nAlice -> Bob: x\nprincipal Bob[\ngenerates a\nleaks a\n]\nAlice -> Dave: y\nprincipal Dave[\ngenerates b\nleaks b\n]\nqueries[\nconfidentiality? a\n]\n";
+		let model = parse_string("witness_cycle.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let slot = |name: &str| {
+			SlotIdx(
+				km.slots
+					.iter()
+					.position(|s| &*s.constant.name == name)
+					.unwrap(),
+			)
+		};
+		let a = trace_constant(&km, "a");
+		let b = trace_constant(&km, "b");
+		let nil = crate::value::value_nil();
+		let mut attacker = make_attacker_state(vec![nil.clone(), a.clone(), b.clone()]);
+		attacker.derivations = std::sync::Arc::new(vec![
+			DerivationRecord::Initial,
+			DerivationRecord::Leaked { slot: slot("a") },
+			DerivationRecord::Leaked { slot: slot("b") },
+		]);
+		let bob = states.iter().find(|s| s.name == "Bob").unwrap().id;
+		let dave = states.iter().find(|s| s.name == "Dave").unwrap().id;
+		assert!(super::harvested_late(&km, &attacker, bob, slot("x"), &a));
+		assert!(!super::harvested_late(&km, &attacker, bob, slot("y"), &a));
+		for (installs, expected) in [
+			(
+				vec![(bob, slot("x"), b.clone()), (dave, slot("y"), a.clone())],
+				false,
+			),
+			(
+				vec![(bob, slot("x"), nil), (dave, slot("y"), a.clone())],
+				true,
+			),
+			(vec![(bob, slot("x"), b)], true),
+			(vec![(bob, slot("x"), a)], false),
+		] {
+			assert_eq!(
+				super::causally_grounded(&km, &installs, &states, &attacker),
+				expected
+			);
+		}
+	}
+
+	#[test]
+	fn pending_receives_block_all_later_disclosures_of_one_secret() {
+		use crate::testutil::{make_attacker_state, trace_constant};
+		use crate::types::{DerivationRecord, SlotIdx};
+		let source = "attacker[active]\nprincipal Alice[\ngenerates x, y\n]\nprincipal Bob[\nknows private shared\n]\nprincipal Dave[\nknows private shared\n]\nAlice -> Bob: x\nprincipal Bob[\nleaks shared\n]\nAlice -> Dave: y\nprincipal Dave[\nleaks shared\n]\nqueries[\nconfidentiality? shared\n]\n";
+		let model = parse_string("witness_disclosures.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let slot = |name: &str| {
+			SlotIdx(
+				km.slots
+					.iter()
+					.position(|s| &*s.constant.name == name)
+					.unwrap(),
+			)
+		};
+		let shared = trace_constant(&km, "shared");
+		let mut attacker = make_attacker_state(vec![shared.clone()]);
+		attacker.derivations = std::sync::Arc::new(vec![DerivationRecord::Leaked {
+			slot: slot("shared"),
+		}]);
+		let bob = states.iter().find(|s| s.name == "Bob").unwrap().id;
+		let dave = states.iter().find(|s| s.name == "Dave").unwrap().id;
+		let installs = vec![(bob, slot("x"), shared.clone()), (dave, slot("y"), shared)];
+		assert!(super::causally_grounded(
+			&km,
+			&installs[..1],
+			&states,
+			&attacker
+		));
+		assert!(super::causally_grounded(
+			&km,
+			&installs[1..],
+			&states,
+			&attacker
+		));
+		assert!(!super::causally_grounded(
+			&km, &installs, &states, &attacker
+		));
+	}
 
 	#[test]
 	fn minimize_witness_is_identity_without_mutations() {
@@ -1699,7 +1828,7 @@ mod tests {
 		pure.resolve_all_values().expect("resolve");
 		ctx.attacker_phase_update(&km, &pure, 0).expect("phase");
 
-		let w = minimize_witness(&ctx, &km, &pure, 0, &[], None);
+		let w = minimize_witness(&ctx, &km, &pure, 0, &[], None, None);
 		assert_eq!(w.ps.values.len(), pure.values.len());
 	}
 

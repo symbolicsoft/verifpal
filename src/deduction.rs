@@ -998,8 +998,8 @@ fn protocol_produced(ctx: &VerifyContext, value: &Value) -> bool {
 				base.meta
 					.get(i)
 					.is_some_and(|meta| meta.creator == state.id)
-					&& sv.value.hash_value() == hash
-					&& sv.value.equivalent(value, true)
+					&& crate::value::subterms(&sv.value)
+						.any(|term| term.hash_value() == hash && term.equivalent(value, true))
 			})
 		})
 	})
@@ -1338,6 +1338,31 @@ fn rule_concat_extract(
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn honestly_computed_nested_terms_are_protocol_produced() {
+		let source = "attacker[passive]\nprincipal Alice[\nknows private key, message\ngenerates nonce\nwrapped = ENC(nil, AEAD_ENC(key, nonce, message, nil))\n]\nAlice -> Bob: wrapped\nprincipal Bob[]\nqueries[\nconfidentiality? message\n]\n";
+		let model = crate::parser::parse_string("nested_produced.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx =
+			crate::context::VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let wrapped = crate::resolution::resolve_trace_term(
+			&crate::testutil::trace_constant(&km, "wrapped"),
+			&km,
+		);
+		let crate::types::Value::Primitive(outer) = &wrapped else {
+			panic!("wrapper")
+		};
+		let crate::types::Value::Primitive(inner) = &outer.arguments[1] else {
+			panic!("ciphertext")
+		};
+		assert!(super::protocol_produced(&ctx, &wrapped));
+		assert!(super::protocol_produced(&ctx, &outer.arguments[1]));
+		let mut arguments = inner.arguments.clone();
+		arguments[2] = crate::value::value_nil();
+		let minted =
+			crate::types::Value::Primitive(std::sync::Arc::new(inner.with_arguments(arguments)));
+		assert!(!super::protocol_produced(&ctx, &minted));
+	}
 	use super::*;
 	use crate::parser::parse_string;
 

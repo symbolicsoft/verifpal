@@ -707,24 +707,32 @@ impl<'a> Deducer<'a> {
 		if let Some((_, solutions)) = memo.get(&key) {
 			return solutions.clone();
 		}
-		let Some((revealed, given)) = decomposition_targets(p) else {
+		let mut routes: Vec<_> = decomposition_targets(p).into_iter().collect();
+		if let Some(rule) = reuse_rule(p.id)
+			&& crate::theory::reused(p, self.attacker).is_some()
+		{
+			routes.push((revealed_values(p, &rule.reveals), Vec::new()));
+		}
+		if routes.is_empty() {
 			return Vec::new();
-		};
+		}
 		let mut out = Vec::new();
-		for value in revealed {
-			let mut frontier: Vec<_> = match_values(&value, goal, s).collect();
-			frontier.extend(self.solve_decomposition_from(&value, goal, s, memo));
-			for required in &given {
-				if frontier.is_empty() {
-					break;
+		for (revealed, given) in routes {
+			for value in revealed {
+				let mut frontier: Vec<_> = match_values(&value, goal, s).collect();
+				frontier.extend(self.solve_decomposition_from(&value, goal, s, memo));
+				for required in &given {
+					if frontier.is_empty() {
+						break;
+					}
+					let mut next = Vec::new();
+					for candidate in &frontier {
+						self.solve_into(required, candidate, &mut next);
+					}
+					frontier = dedupe(next);
 				}
-				let mut next = Vec::new();
-				for candidate in &frontier {
-					self.solve_into(required, candidate, &mut next);
-				}
-				frontier = dedupe(next);
+				out.extend(frontier);
 			}
-			out.extend(frontier);
 		}
 		let out = dedupe(out);
 		memo.insert(key, (Arc::clone(p), out.clone()));
@@ -1046,8 +1054,11 @@ fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
 		}
 		given.push(filtered);
 	}
-	let revealed = rule
-		.reveals
+	Some((revealed_values(p, &rule.reveals), given))
+}
+
+fn revealed_values(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
+	reveals
 		.iter()
 		.filter_map(|reveal| match *reveal {
 			Reveal::Argument(index) => p.arguments.get(index).cloned(),
@@ -1055,8 +1066,7 @@ fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
 				(output != p.output).then(|| Value::Primitive(Arc::new(p.with_output(output))))
 			}
 		})
-		.collect();
-	Some((revealed, given))
+		.collect()
 }
 
 fn tuple_width(tuple: PrimitiveId, output: usize) -> Option<usize> {
@@ -1348,6 +1358,67 @@ mod tests {
 			collect(&term, &mut found);
 			assert_eq!(found.len(), 1);
 			assert!(equivalent_primitives(&found[0], &split, true));
+		}
+	}
+
+	#[test]
+	fn nested_reuse_needs_a_held_matching_vetted_pair() {
+		let wrapping = make_constant("nested_reuse_wrapping");
+		let key = make_private("nested_reuse_key");
+		let nonce = make_private("nested_reuse_nonce");
+		let other_nonce = make_private("nested_reuse_other_nonce");
+		let secret = make_private("nested_reuse_secret");
+		let message = make_constant("nested_reuse_message");
+		let variable = super::super::vars::attacker_var(0, "nested_reuse_input");
+		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
+		let seal = |nonce: Value, plaintext: Value| {
+			Value::primitive(
+				PRIM_AEAD_ENC,
+				vec![key.clone(), nonce, plaintext, value_nil()],
+				0,
+			)
+		};
+		let pair = [
+			seal(nonce.clone(), make_private("nested_reuse_first")),
+			seal(nonce.clone(), make_private("nested_reuse_second")),
+		];
+		let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		for case in 0..4 {
+			let inner_nonce = if case == 3 {
+				other_nonce.clone()
+			} else {
+				nonce.clone()
+			};
+			let wire = Value::primitive(
+				PRIM_ENC,
+				vec![wrapping.clone(), seal(inner_nonce, plaintext.clone())],
+				0,
+			);
+			let sym = SymbolicState {
+				terms: vec![wire.clone()],
+				var_slots: vec![],
+				var_terms: vec![],
+			};
+			let mut held = vec![wrapping.clone(), message.clone(), pair[0].clone()];
+			if case != 2 {
+				held.push(pair[1].clone());
+			}
+			let mut attacker = make_attacker_state(held);
+			if case != 1 {
+				attacker.reused = Arc::new(vec![pair.clone()]);
+			}
+			let deducer = Deducer::new(&ps, &attacker, &sym);
+			let solutions = deducer.solve_decomposition_from(
+				&wire,
+				&goal,
+				&Substitution::default(),
+				&mut DecompositionMemo::default(),
+			);
+			assert_eq!(solutions.len(), usize::from(case == 0));
+			for solution in solutions {
+				assert!(apply(&variable, &solution).equivalent(&message, true));
+			}
 		}
 	}
 

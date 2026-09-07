@@ -193,6 +193,21 @@ pub(crate) struct DeductionMemo<'a> {
 }
 
 impl<'a> DeductionMemo<'a> {
+	fn ensure(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
+		let present = MEMO.with(|memo| {
+			memo.borrow()
+				.as_ref()
+				.is_some_and(|memo| memo.is_for(ps, attacker))
+		});
+		if present {
+			return DeductionMemo {
+				previous: None,
+				borrowed: std::marker::PhantomData,
+			};
+		}
+		Self::scoped(ps, attacker, &StateIndex::of(ps))
+	}
+
 	pub(crate) fn scoped(
 		ps: &'a PrincipalState,
 		attacker: &'a AttackerState,
@@ -435,23 +450,26 @@ pub(crate) fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerStat
 		return hit;
 	}
 	let result = match v {
-		Value::Primitive(p) => {
-			can_reconstruct_primitive(p, ps, attacker).is_some()
-				|| obtainable_by_output_projection(p, ps, attacker)
-		}
+		Value::Primitive(p) => construction_inputs(p, ps, attacker).is_some(),
 		Value::Constant(_) => false,
 	};
 	memo_obtainable_put(hash, v, ps, attacker, result);
 	result
 }
 
-fn obtainable_by_output_projection(
-	p: &Primitive,
+fn construction_inputs(
+	p: &Arc<Primitive>,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-) -> bool {
+) -> Option<Vec<Value>> {
+	if let Some(mut built) = can_reconstruct_primitive(p, ps, attacker) {
+		if let Some(Forged::Reuse(pair)) = built.forged {
+			built.from.extend(pair);
+		}
+		return Some(built.from);
+	}
 	let Ok(spec) = primitive_get(p.id) else {
-		return false;
+		return None;
 	};
 	let projects_output = spec.decompose.as_ref().is_some_and(|rule| {
 		rule.reveals
@@ -459,19 +477,66 @@ fn obtainable_by_output_projection(
 			.any(|reveal| matches!(*reveal, Reveal::Output(output) if output == p.output))
 	});
 	if !projects_output {
-		return false;
+		return None;
 	}
-	let Some(&outputs) = spec.output.iter().max() else {
-		return false;
-	};
+	let &outputs = spec.output.iter().max()?;
 	(0..outputs.max(0) as usize)
 		.filter(|&j| j != p.output)
-		.any(|j| {
+		.find_map(|j| {
 			let sibling = Arc::new(p.with_output(j));
-			attacker
-				.knows(&Value::Primitive(Arc::clone(&sibling)))
-				.is_some() && can_decompose(&sibling, ps, attacker).is_some()
+			let projected = Value::Primitive(Arc::clone(&sibling));
+			attacker.knows(&projected)?;
+			let mut inputs = can_decompose(&sibling, ps, attacker)?.used;
+			inputs.insert(0, projected);
+			Some(inputs)
 		})
+}
+
+pub(crate) struct KnowledgeInputs<'a> {
+	ps: &'a PrincipalState,
+	attacker: &'a AttackerState,
+	built: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
+	_memo: DeductionMemo<'a>,
+}
+
+impl<'a> KnowledgeInputs<'a> {
+	pub(crate) fn new(ps: &'a PrincipalState, attacker: &'a AttackerState) -> Self {
+		Self {
+			ps,
+			attacker,
+			built: IdMap::default(),
+			_memo: DeductionMemo::ensure(ps, attacker),
+		}
+	}
+
+	pub(crate) fn of_value(&mut self, value: &Value) -> Option<Vec<KnownIdx>> {
+		if let Some(idx) = self.attacker.knows(value) {
+			return Some(vec![idx]);
+		}
+		let Value::Primitive(p) = value else {
+			return value
+				.as_constant()
+				.is_some_and(|c| c.is_nil())
+				.then(Vec::new);
+		};
+		let key = Arc::as_ptr(p) as usize;
+		if let Some((_, found)) = self.built.get(&key) {
+			return found.clone();
+		}
+		self.built.insert(key, (Arc::clone(p), None));
+		let inputs = construction_inputs(p, self.ps, self.attacker)?;
+		let mut known = Vec::new();
+		let mut seen = IdSet::default();
+		for input in inputs {
+			for idx in self.of_value(&input)? {
+				if seen.insert(idx.get()) {
+					known.push(idx);
+				}
+			}
+		}
+		self.built.insert(key, (Arc::clone(p), Some(known.clone())));
+		Some(known)
+	}
 }
 
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {

@@ -660,10 +660,11 @@ fn aligned_free_positions<'a>(
 				(Value::Constant(c), _) if vars::is_free_var_id(c.id) => {
 					return Some((c.id, honest));
 				}
-				(Value::Primitive(p), Value::Primitive(h)) if p.id == h.id => {
-					if seen.insert((Arc::as_ptr(p) as usize, Arc::as_ptr(h) as usize)) {
-						pending.extend(p.arguments.iter().zip(h.arguments.iter()).rev());
-					}
+				(Value::Primitive(p), Value::Primitive(h))
+					if p.id == h.id
+						&& seen.insert((Arc::as_ptr(p) as usize, Arc::as_ptr(h) as usize)) =>
+				{
+					pending.extend(p.arguments.iter().zip(h.arguments.iter()).rev());
 				}
 				_ => {}
 			}

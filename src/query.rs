@@ -14,11 +14,14 @@ fn attack_trace(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	query: &Query,
 	query_index: usize,
 	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
 ) -> Narration {
-	attack_trace_with(ctx, km, ps, query_index, target, seed, |_| Vec::new())
+	attack_trace_with(ctx, km, ps, query, query_index, target, seed, |_| {
+		Vec::new()
+	})
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -26,6 +29,7 @@ fn attack_trace_with(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	query: &Query,
 	query_index: usize,
 	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
@@ -36,7 +40,7 @@ fn attack_trace_with(
 	}
 	let ambient = ctx.attacker_snapshot();
 	let claimed = target(ps);
-	let witness = minimize_witness(ctx, km, ps, query_index, seed, Some(&claimed));
+	let witness = minimize_witness(ctx, km, ps, query_index, seed, Some(&claimed), Some(query));
 	#[cfg(test)]
 	ctx.witness_put(
 		query_index,
@@ -169,6 +173,7 @@ fn query_confidentiality(
 		ctx,
 		km,
 		ps,
+		query,
 		query_index,
 		|state| {
 			state
@@ -287,8 +292,16 @@ fn query_authentication(
 			slot: SlotIdx(_idx),
 		}]
 	};
-	let mutated_info =
-		attack_trace_with(ctx, km, ps, query_index, |_| before.clone(), &[], prelude);
+	let mutated_info = attack_trace_with(
+		ctx,
+		km,
+		ps,
+		query,
+		query_index,
+		|_| before.clone(),
+		&[],
+		prelude,
+	);
 	let witnessed = mutated_info.state().and_then(|w| {
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;
@@ -610,8 +623,16 @@ fn query_freshness(
 			terms: leaves.iter().map(|c| Value::Constant(c.clone())).collect(),
 		}]
 	};
-	let mutated_info =
-		attack_trace_with(ctx, km, ps, query_index, |_| resolved.clone(), &[], prelude);
+	let mutated_info = attack_trace_with(
+		ctx,
+		km,
+		ps,
+		query,
+		query_index,
+		|_| resolved.clone(),
+		&[],
+		prelude,
+	);
 	result.resolved = true;
 	result.options = options;
 	result.set_summary(
@@ -646,8 +667,15 @@ fn query_unlinkability(
 			let Some(witness) = crate::unlink::find_link_witness(a, b, km, ps, attacker) else {
 				continue;
 			};
-			let mutated_info =
-				attack_trace(ctx, km, ps, query_index, |_| witness.value.clone(), &[]);
+			let mutated_info = attack_trace(
+				ctx,
+				km,
+				ps,
+				query,
+				query_index,
+				|_| witness.value.clone(),
+				&[],
+			);
 			let clause = witness.describe(&mutated_info.term(&witness.value));
 			result.resolved = true;
 			result.options = options;
@@ -728,7 +756,16 @@ fn query_equivalence(
 			})
 			.collect()
 	};
-	let mutated_info = attack_trace_with(ctx, km, ps, query_index, |_| empty.clone(), &[], prelude);
+	let mutated_info = attack_trace_with(
+		ctx,
+		km,
+		ps,
+		query,
+		query_index,
+		|_| empty.clone(),
+		&[],
+		prelude,
+	);
 	result.resolved = true;
 	result.options = options;
 	result.set_summary(

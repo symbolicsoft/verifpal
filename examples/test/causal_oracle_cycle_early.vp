@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c1 at one session and two. Dave leaks b before receiving y,
+// so the attacker can obtain Bob's response and a, then Dave's response.
+attacker[active]
+
+principal Alice[
+	knows private ka, kb
+	generates x, y
+]
+
+Alice -> Bob: x
+
+principal Dave[
+	knows private kb
+	generates b
+	leaks b
+]
+
+Alice -> Dave: y
+
+principal Bob[
+	knows private ka
+	generates a
+	leaks a
+	t1 = MAC(ka, x)
+]
+
+Bob -> Alice: [a], t1
+
+principal Dave[
+	t2 = MAC(kb, y)
+]
+
+Dave -> Alice: [b], t2
+
+principal Alice[
+	z1 = MAC(ka, b)
+	z2 = MAC(kb, a)
+	z = HASH(z1, z2)
+]
+
+queries[
+	confidentiality? z1
+	confidentiality? z2
+	confidentiality? z
+]
