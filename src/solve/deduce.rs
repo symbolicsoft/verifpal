@@ -1029,19 +1029,14 @@ fn tuple_width(tuple: PrimitiveId, output: usize) -> Option<usize> {
 }
 
 fn collect_stuck_splits(v: &Value, out: &mut Vec<Primitive>) {
-	match v {
-		Value::Primitive(p) => {
-			if primitive_is_projection(p.id)
-				&& p.arguments.first().is_some_and(contains_var)
-				&& !out.iter().any(|q| equivalent_primitives(q, p, true))
-			{
-				out.push((**p).clone());
-			}
-			for a in &p.arguments {
-				collect_stuck_splits(a, out);
-			}
+	for term in crate::value::subterms(v) {
+		if let Value::Primitive(p) = term
+			&& primitive_is_projection(p.id)
+			&& p.arguments.first().is_some_and(contains_var)
+			&& !out.iter().any(|q| equivalent_primitives(q, p, true))
+		{
+			out.push((**p).clone());
 		}
-		Value::Constant(_) => {}
 	}
 }
 
@@ -1098,16 +1093,13 @@ fn check_passes(p: &Primitive) -> bool {
 }
 
 fn collect_checked(v: &Value, out: &mut Vec<Primitive>) {
-	match v {
-		Value::Primitive(p) => {
-			if p.instance_check && !out.iter().any(|q| equivalent_primitives(q, p, true)) {
-				out.push((**p).clone());
-			}
-			for a in &p.arguments {
-				collect_checked(a, out);
-			}
+	for term in crate::value::subterms(v) {
+		if let Value::Primitive(p) = term
+			&& p.instance_check
+			&& !out.iter().any(|q| equivalent_primitives(q, p, true))
+		{
+			out.push((**p).clone());
 		}
-		Value::Constant(_) => {}
 	}
 }
 
@@ -1177,6 +1169,23 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn constraint_collection_visits_shared_terms_once() {
+		let variable = super::super::vars::attacker_var(0, "dag_constraint");
+		let mut split = Primitive::new(PRIM_SPLIT, vec![variable], 0);
+		split.instance_check = true;
+		let mut term = Value::Primitive(Arc::new(split.clone()));
+		for _ in 0..40 {
+			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		for collect in [collect_checked, collect_stuck_splits] {
+			let mut found = Vec::new();
+			collect(&term, &mut found);
+			assert_eq!(found.len(), 1);
+			assert!(equivalent_primitives(&found[0], &split, true));
+		}
+	}
 
 	#[test]
 	fn a_cached_goal_keeps_the_bindings_its_oracle_was_solved_under() {

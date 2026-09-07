@@ -3803,3 +3803,31 @@ fn test_solver_memo_preserves_oracle_bindings() {
 		run_model_sessions(model, 1, code);
 	}
 }
+
+#[test]
+fn test_solver_dh_backtracking() {
+	for (model, code) in [
+		("solver_dh_backtracking.vp", "c1"),
+		("solver_dh_guarded_oracle.vp", "c0"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}
+
+#[test]
+fn test_unlinkability_requires_an_executable_check() {
+	for (model, code) in [
+		("unlink_kem_secret_projection.vp", "u0c0"),
+		("unlink_aead_missing_inputs.vp", "u0u0c0c1"),
+		("unlink_aead_complete_inputs.vp", "u1u1c1c1"),
+		("unlink_signature_missing_messages.vp", "u0c0"),
+		("unlink_ring_missing_members.vp", "u0"),
+		("unlink_ring_complete_members.vp", "u1"),
+		("unlink_signature_links.vp", "u1"),
+		("unlink_kem_leaked_private_key.vp", "u1c1"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}

@@ -15,6 +15,23 @@ pub(crate) use crate::resolution::{
 	value_constant_contains_fresh_values,
 };
 
+pub(crate) fn subterms(v: &Value) -> impl Iterator<Item = &Value> {
+	let mut seen = IdSet::default();
+	let mut pending = vec![v];
+	std::iter::from_fn(move || {
+		loop {
+			let value = pending.pop()?;
+			if let Value::Primitive(p) = value {
+				if !seen.insert(Arc::as_ptr(p) as usize) {
+					continue;
+				}
+				pending.extend(p.arguments.iter().rev());
+			}
+			return Some(value);
+		}
+	})
+}
+
 pub(crate) struct ValueNames {
 	map: HashMap<Arc<str>, ValueId>,
 	counter: ValueId,

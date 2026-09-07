@@ -67,12 +67,7 @@ fn share_secret_subterm(
 }
 
 fn collect_subterms(v: &Value, out: &mut Vec<Value>) {
-	out.push(v.clone());
-	if let Value::Primitive(p) = v {
-		for arg in &p.arguments {
-			collect_subterms(arg, out);
-		}
-	}
+	out.extend(crate::value::subterms(v).cloned());
 }
 
 fn attacker_supplied(v: &Value, ps: &PrincipalState) -> bool {
@@ -138,6 +133,9 @@ fn witness_identifying_check(
 	)?;
 	if !crate::theory::obtainable(&identifier, ps, attacker) || !depends_on_secret(&identifier, ps)
 	{
+		return None;
+	}
+	if !check_is_runnable(check, ap, ps, attacker) || !check_is_runnable(check, bp, ps, attacker) {
 		return None;
 	}
 	Some(LinkWitness {
@@ -233,10 +231,7 @@ fn recognized_secrets(
 	let Some(rewrite) = check.rewrite.as_ref() else {
 		return Vec::new();
 	};
-	let runnable = rewrite.matching.iter().all(|(position, targets)| {
-		check_input_held(check, rewrite, *position, targets, p, ps, attacker)
-	});
-	if !runnable {
+	if !check_is_runnable(check, p, ps, attacker) {
 		return Vec::new();
 	}
 	let mut out: Vec<Value> = Vec::new();
@@ -301,21 +296,56 @@ fn check_input(
 	None
 }
 
-fn check_input_held(
+fn check_is_runnable(
 	check: &PrimitiveSpec,
-	rule: &crate::primitive::RewriteRule,
-	position: usize,
-	targets: &[usize],
 	p: &Primitive,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
-	targets.iter().any(|t| {
-		let Some(arg) = p.arguments.get(*t) else {
+	let Some(rule) = check.rewrite.as_ref() else {
+		return false;
+	};
+	if rule.id != p.id || rule.from_output.is_some_and(|output| output != p.output) {
+		return false;
+	}
+	let Some(&arity) = check.arity.last() else {
+		return false;
+	};
+	let mut arguments = vec![crate::value::value_nil(); arity as usize];
+	let Some(source) = arguments.get_mut(rule.from) else {
+		return false;
+	};
+	*source = Value::Primitive(Arc::new(p.clone()));
+	let mut candidates = vec![(arguments, Vec::new())];
+	for (position, targets) in &rule.matching {
+		let inputs: Vec<_> = targets
+			.iter()
+			.filter_map(|&target| {
+				let produced = p.arguments.get(target)?;
+				let input = check_input(check, rule, *position, target, produced)?;
+				crate::theory::obtainable(&input, ps, attacker).then_some((target, input))
+			})
+			.collect();
+		let mut next = Vec::new();
+		for (arguments, taken) in &candidates {
+			for (target, input) in &inputs {
+				if taken.contains(target) || *position >= arguments.len() {
+					continue;
+				}
+				let mut arguments = arguments.clone();
+				arguments[*position] = input.clone();
+				let mut taken = taken.clone();
+				taken.push(*target);
+				next.push((arguments, taken));
+			}
+		}
+		if next.is_empty() {
 			return false;
-		};
-		check_input(check, rule, position, *t, arg)
-			.is_some_and(|needed| crate::theory::obtainable(&needed, ps, attacker))
+		}
+		candidates = next;
+	}
+	candidates.into_iter().any(|(arguments, _)| {
+		crate::theory::can_rewrite(&Arc::new(Primitive::new(check.id, arguments, 0))).0
 	})
 }
 
@@ -613,6 +643,20 @@ mod tests {
 		PRIM_HASH, PRIM_MAC, PRIM_PUBKEY, PRIM_RINGSIGN, PRIM_RINGSIGNVERIF, PRIM_SIGN,
 	};
 	use crate::testutil::*;
+
+	#[test]
+	fn shared_subterms_are_collected_without_expansion() {
+		let seed = make_private("unlink_dag_seed");
+		let mut term = seed.clone();
+		for _ in 0..40 {
+			term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let mut found = Vec::new();
+		collect_subterms(&term, &mut found);
+		assert_eq!(found.len(), 43);
+		assert!(found[0].equivalent(&term, true));
+		assert!(found.last().unwrap().equivalent(&seed, true));
+	}
 
 	fn state_from(values: &[Value]) -> PrincipalState {
 		let mut meta = Vec::new();

@@ -35,17 +35,7 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 }
 
 pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut IdSet<u64>) {
-	let mut seen = IdSet::default();
-	let mut pending = vec![v];
-	while let Some(value) = pending.pop() {
-		out.insert(value.hash_value());
-		if let Value::Primitive(p) = value {
-			if !seen.insert(std::sync::Arc::as_ptr(p) as usize) {
-				continue;
-			}
-			pending.extend(p.arguments.iter());
-		}
-	}
+	out.extend(crate::value::subterms(v).map(Value::hash_value));
 }
 
 #[cfg(test)]

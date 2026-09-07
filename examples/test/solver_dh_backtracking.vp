@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at both session counts. Bob emits the private tag when x = b
+// and y = a. Matching the shared key alone also permits x = a and y = b, but
+// that ordering disagrees with the second field and must not hide the valid
+// oracle request. The attacker obtains the tag without ever learning k.
+attacker[active]
+
+principal Alice[
+	knows public a, b
+	generates x, y
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows public a, b
+	knows private k
+	tag = MAC(k, CONCAT(DH_KEX(PUBKEY(x), y), x))
+	secret = MAC(k, CONCAT(DH_KEX(PUBKEY(a), b), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

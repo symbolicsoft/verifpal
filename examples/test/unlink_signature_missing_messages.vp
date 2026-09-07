@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0c0 at both session counts. Observing a verification key does
+// not make SIGNVERIF executable without the signed messages. Independent
+// hidden messages also prevent comparing or reconstructing the signatures.
+attacker[passive]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m1, m2
+	s1 = SIGN(sk, m1)
+	s2 = SIGN(sk, m2)
+]
+
+Alice -> Bob: pk, s1, s2
+
+principal Bob[]
+
+queries[
+	unlinkability? s1, s2
+	confidentiality? m1
+]

@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1u1c1c1 at both session counts. Revealing the missing nonces and
+// associated data makes every decryption executable. Both ciphertext pairs
+// can now be tested under the leaked key, and their plaintext is disclosed.
+attacker[passive]
+
+principal Alice[
+	knows private k, m1, m2, m3, ad
+	leaks k
+	generates n1, n2, n3, n4
+	c1 = AEAD_ENC(k, n1, m1, nil)
+	c2 = AEAD_ENC(k, n2, m1, nil)
+	c3 = AEAD_ENC(k, n3, m2, ad)
+	c4 = AEAD_ENC(k, n4, m3, ad)
+	leaks n1, n2, ad
+]
+
+Alice -> Bob: c1, c2, n3, n4, c3, c4
+
+principal Bob[]
+
+queries[
+	unlinkability? c1, c2
+	unlinkability? c3, c4
+	confidentiality? m1
+	confidentiality? m2
+]

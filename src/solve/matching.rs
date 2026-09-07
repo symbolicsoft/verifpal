@@ -8,12 +8,7 @@ use crate::types::*;
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
 
 pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
-	let mut out = s.clone();
-	if unify_into(a, b, &mut out) {
-		Some(out)
-	} else {
-		None
-	}
+	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone())
 }
 
 pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
@@ -52,48 +47,57 @@ fn resolved<'a>(v: &'a Value, s: &Substitution) -> Cow<'a, Value> {
 	}
 }
 
-fn unify_into(a: &Value, b: &Value, s: &mut Substitution) -> bool {
-	let a = resolved(a, s);
-	let b = resolved(b, s);
-
-	if let Some(id) = as_var(&a) {
-		return unify_bind(id, &b, s);
-	}
-	if let Some(id) = as_var(&b) {
-		return unify_bind(id, &a, s);
-	}
-
-	match (a.as_ref(), b.as_ref()) {
-		(Value::Constant(_), Value::Constant(_)) => a.equivalent(&b, true),
-		(Value::Primitive(p1), Value::Primitive(p2)) => {
-			if p1.id != p2.id
-				|| p1.output != p2.output
-				|| p1.threshold != p2.threshold
-				|| p1.arguments.len() != p2.arguments.len()
-			{
-				return false;
-			}
-			if crate::primitive::commutativity_rule(p1.id).is_none() {
-				return p1
-					.arguments
-					.iter()
-					.zip(p2.arguments.iter())
-					.all(|(x, y)| unify_into(x, y, s));
-			}
-			let checkpoint = s.clone();
-			if p1
-				.arguments
-				.iter()
-				.zip(p2.arguments.iter())
-				.all(|(x, y)| unify_into(x, y, s))
-			{
-				return true;
-			}
-			*s = checkpoint;
-			commutative_swap(p1, p2)
-				.is_some_and(|(u1, v1, u2, v2)| unify_into(u1, v2, s) && unify_into(v1, u2, s))
+fn solve_equations<const UNIFY: bool>(
+	mut pending: Vec<(Value, Value)>,
+	mut s: Substitution,
+) -> Option<Substitution> {
+	let mut alternatives = Vec::new();
+	loop {
+		let Some((a, b)) = pending.pop() else {
+			return Some(s);
+		};
+		let a = resolved(&a, &s);
+		let b = if UNIFY {
+			resolved(&b, &s)
+		} else {
+			Cow::Borrowed(&b)
+		};
+		if a.equivalent(&b, true) {
+			continue;
 		}
-		_ => false,
+		if let Some(id) = as_var(&a) {
+			if bind(&mut s, id, b.into_owned()) {
+				continue;
+			}
+		} else if UNIFY && let Some(id) = as_var(&b) {
+			if bind(&mut s, id, a.into_owned()) {
+				continue;
+			}
+		} else if (contains_var(&a) || (UNIFY && contains_var(&b)))
+			&& let (Value::Primitive(p1), Value::Primitive(p2)) = (a.as_ref(), b.as_ref())
+			&& p1.id == p2.id
+			&& p1.output == p2.output
+			&& p1.threshold == p2.threshold
+			&& p1.arguments.len() == p2.arguments.len()
+		{
+			if let Some((u1, v1, u2, v2)) = commutative_swap(p1, p2) {
+				let mut swapped = pending.clone();
+				swapped.push((v1.clone(), u2.clone()));
+				swapped.push((u1.clone(), v2.clone()));
+				alternatives.push((swapped, s.clone()));
+			}
+			pending.extend(
+				p1.arguments
+					.iter()
+					.zip(&p2.arguments)
+					.rev()
+					.map(|(a, b)| (a.clone(), b.clone())),
+			);
+			continue;
+		}
+		let (retry, bindings) = alternatives.pop()?;
+		pending = retry;
+		s = bindings;
 	}
 }
 
@@ -106,89 +110,15 @@ fn commutative_swap<'a>(
 	Some((u1, v1, u2, v2))
 }
 
-fn unify_bind(id: ValueId, v: &Value, s: &mut Substitution) -> bool {
-	if as_var(v) == Some(id) {
-		return true;
-	}
-	match s.get(&id).cloned() {
-		None => {
-			if occurs(id, v, s) {
-				return false;
-			}
-			s.insert(id, v.clone());
-			true
-		}
-		Some(existing) => {
-			if existing.equivalent(v, true) {
-				return true;
-			}
-			unify_into(&existing, v, s)
-		}
-	}
-}
-
 pub(crate) fn match_value(
 	pattern: &Value,
 	target: &Value,
 	s: &Substitution,
 ) -> Option<Substitution> {
-	let mut out = s.clone();
-	if match_into(pattern, target, &mut out) {
-		Some(out)
-	} else {
-		None
+	if !contains_var(pattern) {
+		return pattern.equivalent(target, true).then(|| s.clone());
 	}
-}
-
-fn match_into(pattern: &Value, target: &Value, s: &mut Substitution) -> bool {
-	if let Some(id) = as_var(pattern) {
-		return bind(s, id, target.clone());
-	}
-
-	if contains_var(pattern) {
-		let applied = super::vars::apply(pattern, s);
-		if !contains_var(&applied) {
-			return applied.equivalent(target, true);
-		}
-		return match_structural(&applied, target, s);
-	}
-
-	pattern.equivalent(target, true)
-}
-
-fn match_structural(pattern: &Value, target: &Value, s: &mut Substitution) -> bool {
-	match (pattern, target) {
-		(Value::Constant(_), _) => match_into(pattern, target, s),
-		(Value::Primitive(p1), Value::Primitive(p2)) => {
-			if p1.id != p2.id
-				|| p1.output != p2.output
-				|| p1.threshold != p2.threshold
-				|| p1.arguments.len() != p2.arguments.len()
-			{
-				return false;
-			}
-			if crate::primitive::commutativity_rule(p1.id).is_none() {
-				return p1
-					.arguments
-					.iter()
-					.zip(p2.arguments.iter())
-					.all(|(a, b)| match_into(a, b, s));
-			}
-			let checkpoint = s.clone();
-			if p1
-				.arguments
-				.iter()
-				.zip(p2.arguments.iter())
-				.all(|(a, b)| match_into(a, b, s))
-			{
-				return true;
-			}
-			*s = checkpoint;
-			commutative_swap(p1, p2)
-				.is_some_and(|(u1, v1, u2, v2)| match_into(u1, v2, s) && match_into(v1, u2, s))
-		}
-		_ => false,
-	}
+	solve_equations::<false>(vec![(pattern.clone(), target.clone())], s.clone())
 }
 
 #[cfg(test)]
@@ -224,6 +154,62 @@ mod tests {
 
 	fn dh_kex(a: Value, b: Value) -> Value {
 		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![a, b], 0)
+	}
+
+	#[test]
+	fn commutative_matching_retries_after_a_later_argument_conflicts() {
+		let x = crate::solve::vars::attacker_var(0, "backtrack_x");
+		let y = crate::solve::vars::attacker_var(1, "backtrack_y");
+		let a = make_private("backtrack_a");
+		let b = make_private("backtrack_b");
+		let tuple = |args| make_primitive(crate::primitive::PRIM_CONCAT, args, 0);
+		let pattern = tuple(vec![dh_kex(pubkey(x.clone()), y.clone()), x.clone()]);
+		let target = tuple(vec![dh_kex(pubkey(a.clone()), b.clone()), b.clone()]);
+		for solve in [match_value, unify] {
+			let found = solve(&pattern, &target, &Substitution::default())
+				.expect("the swapped exponents satisfy both fields");
+			assert!(crate::solve::vars::apply(&x, &found).equivalent(&b, true));
+			assert!(crate::solve::vars::apply(&y, &found).equivalent(&a, true));
+			assert!(crate::solve::vars::apply(&pattern, &found).equivalent(&target, true));
+		}
+	}
+
+	#[test]
+	fn matching_resolves_an_existing_variable_alias() {
+		let x = crate::solve::vars::attacker_var(0, "match_alias_x");
+		let y = crate::solve::vars::free_var(0);
+		let target = make_private("match_alias_target");
+		let initial = Substitution::from_iter([(as_var(&x).unwrap(), y.clone())]);
+		let found = match_value(&x, &target, &initial).expect("the alias is still bindable");
+		assert!(crate::solve::vars::apply(&x, &found).equivalent(&target, true));
+		assert!(crate::solve::vars::apply(&y, &found).equivalent(&target, true));
+		assert!(match_value(&x, &x, &Substitution::default()).is_some());
+		assert_eq!(initial.len(), 1);
+	}
+
+	#[test]
+	fn matching_does_not_bind_target_variables() {
+		let x = crate::solve::vars::attacker_var(0, "match_rigid_x");
+		let y = crate::solve::vars::free_var(0);
+		let constant = make_private("match_rigid_constant");
+		let tuple = |args| make_primitive(crate::primitive::PRIM_CONCAT, args, 0);
+		let pattern = tuple(vec![x, constant.clone()]);
+		let target = tuple(vec![constant, y]);
+		assert!(match_value(&pattern, &target, &Substitution::default()).is_none());
+		assert!(unify(&pattern, &target, &Substitution::default()).is_some());
+	}
+
+	#[test]
+	fn unifying_a_ground_shared_term_does_not_expand_it() {
+		let mut term = make_private("unify_dag_seed");
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		assert!(unify(&term, &term, &Substitution::default()).is_some());
 	}
 
 	#[test]

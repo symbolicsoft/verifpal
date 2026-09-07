@@ -88,31 +88,23 @@ pub(crate) fn contains_var(v: &Value) -> bool {
 }
 
 pub(crate) fn collect_free_vars(v: &Value, out: &mut Vec<ValueId>) {
-	match v {
-		Value::Constant(c) => {
-			if is_free_var_id(c.id) && !out.contains(&c.id) {
-				out.push(c.id);
-			}
-		}
-		Value::Primitive(p) => {
-			for a in &p.arguments {
-				collect_free_vars(a, out);
-			}
-		}
-	}
+	collect_var_ids(v, out, is_free_var_id);
 }
 
 pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
-	match v {
-		Value::Constant(c) => {
-			if is_var_id(c.id) && !out.contains(&c.id) {
-				out.push(c.id);
-			}
-		}
-		Value::Primitive(p) => {
-			for a in &p.arguments {
-				collect_vars(a, out);
-			}
+	collect_var_ids(v, out, is_var_id);
+}
+
+fn collect_var_ids(v: &Value, out: &mut Vec<ValueId>, include: fn(ValueId) -> bool) {
+	if !contains_var(v) {
+		return;
+	}
+	for term in crate::value::subterms(v) {
+		if let Value::Constant(c) = term
+			&& include(c.id)
+			&& !out.contains(&c.id)
+		{
+			out.push(c.id);
 		}
 	}
 }
@@ -153,29 +145,33 @@ fn apply_shared(v: &Value, s: &Substitution, shared: &mut IdMap<usize, Value>) -
 }
 
 pub(crate) fn occurs(id: ValueId, v: &Value, s: &Substitution) -> bool {
-	let mut chasing = Vec::new();
-	occurs_in(id, v, s, &mut chasing)
-}
-
-fn occurs_in(id: ValueId, v: &Value, s: &Substitution, chasing: &mut Vec<ValueId>) -> bool {
-	match v {
-		Value::Constant(c) => {
-			if c.id == id {
-				return true;
-			}
-			if !is_var_id(c.id) || chasing.contains(&c.id) {
-				return false;
-			}
-			let Some(bound) = s.get(&c.id) else {
-				return false;
-			};
-			chasing.push(c.id);
-			let found = occurs_in(id, bound, s, chasing);
-			chasing.pop();
-			found
-		}
-		Value::Primitive(p) => p.arguments.iter().any(|a| occurs_in(id, a, s, chasing)),
+	if is_var_id(id) && !contains_var(v) {
+		return false;
 	}
+	let mut variables = IdSet::default();
+	let mut primitives = IdSet::default();
+	let mut pending = vec![v];
+	while let Some(term) = pending.pop() {
+		match term {
+			Value::Constant(c) => {
+				if c.id == id {
+					return true;
+				}
+				if is_var_id(c.id)
+					&& let Some(bound) = s.get(&c.id)
+					&& variables.insert(c.id)
+				{
+					pending.push(bound);
+				}
+			}
+			Value::Primitive(p) => {
+				if primitives.insert(Arc::as_ptr(p) as usize) {
+					pending.extend(p.arguments.iter().rev());
+				}
+			}
+		}
+	}
+	false
 }
 
 pub(crate) fn bind(s: &mut Substitution, id: ValueId, v: Value) -> bool {
@@ -309,6 +305,36 @@ pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 mod tests {
 	use super::*;
 	use crate::testutil::test_value_id;
+
+	#[test]
+	fn variable_walks_visit_shared_terms_without_expanding_them() {
+		let slot = attacker_var(0, "dag_slot");
+		let free = free_var(0);
+		let mut term = Value::primitive(
+			crate::primitive::PRIM_HASH,
+			vec![slot.clone(), free.clone()],
+			0,
+		);
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		let mut vars = Vec::new();
+		collect_vars(&term, &mut vars);
+		assert_eq!(vars, vec![as_var(&slot).unwrap(), as_var(&free).unwrap()]);
+		let mut frees = Vec::new();
+		collect_free_vars(&term, &mut frees);
+		assert_eq!(frees, vec![as_var(&free).unwrap()]);
+		let missing = attacker_var_id(1);
+		let mut bindings = Substitution::default();
+		assert!(!occurs(missing, &term, &bindings));
+		bindings.insert(as_var(&free).unwrap(), attacker_var(1, "dag_missing"));
+		assert!(occurs(missing, &term, &bindings));
+		assert!(!occurs(attacker_var_id(2), &term, &bindings));
+	}
 
 	fn solver_constant(name: &str) -> Value {
 		Value::Constant(Constant {

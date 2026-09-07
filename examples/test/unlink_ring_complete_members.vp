@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at both session counts. All ring members' public keys and the
+// signed message are available, so the attacker can verify both signatures
+// and recognize their common private message without identifying the signer.
+attacker[passive]
+
+principal Alice[
+	knows private a, b, c, m
+	pa = PUBKEY(a)
+	pb = PUBKEY(b)
+	pc = PUBKEY(c)
+	s1 = RINGSIGN(a, pb, pc, m)
+	s2 = RINGSIGN(b, pa, pc, m)
+	leaks m
+]
+
+Alice -> Bob: pa, pb, pc, s1, s2
+
+principal Bob[]
+
+queries[
+	unlinkability? s1, s2
+]
