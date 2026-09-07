@@ -808,10 +808,9 @@ fn starved_slots(
 		if unreached[i] {
 			continue;
 		}
-		let mut mentioned: Vec<Constant> = Vec::new();
-		km.slots[i].initial_value.collect_constants(&mut mentioned);
-		if mentioned
-			.iter()
+		if km.slots[i]
+			.initial_value
+			.constant_leaves()
 			.any(|c| km.index_of(c).is_some_and(|j| j < n && unreached[j]))
 		{
 			unreached[i] = true;

@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1c1 at both session counts. The attacker decapsulates both wire
+// ciphertexts, observing their shared-secret outputs and recovering their
+// common encapsulation seed. That seed links the secrets despite the distinct
+// recipient keys. The shared secrets need not travel under their own names.
+attacker[passive]
+
+principal Alice[
+	knows private k1, k2
+	leaks k1, k2
+	generates r
+	s1, c1 = KEM_ENCAP(PUBKEY(k1), r)
+	s2, c2 = KEM_ENCAP(PUBKEY(k2), r)
+]
+
+Alice -> Bob: c1, c2
+
+principal Bob[]
+
+queries[
+	unlinkability? s1, s2
+	confidentiality? r
+]

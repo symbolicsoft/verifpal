@@ -1283,13 +1283,12 @@ impl ProtocolTrace {
 		let Some(trace_slot) = self.slots.get(slot) else {
 			return false;
 		};
-		let mut constants = Vec::new();
-		crate::value::resolve_trace_constant(&trace_slot.constant, self)
-			.collect_constants(&mut constants);
-		!constants.iter().any(|c| {
-			self.scenario_bound
-				.contains(&crate::value::copy_index_of(c.id).1)
-		})
+		!crate::value::resolve_trace_constant(&trace_slot.constant, self)
+			.constant_leaves()
+			.any(|c| {
+				self.scenario_bound
+					.contains(&crate::value::copy_index_of(c.id).1)
+			})
 	}
 
 	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {

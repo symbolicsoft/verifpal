@@ -701,9 +701,7 @@ pub(crate) fn own_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) 
 		if trace_slot.creator != principal && at != slot {
 			continue;
 		}
-		let mut mentioned: Vec<Constant> = Vec::new();
-		trace_slot.initial_value.collect_constants(&mut mentioned);
-		for c in mentioned {
+		for c in trace_slot.initial_value.constant_leaves() {
 			let Some(&next) = km.index.get(&c.id) else {
 				continue;
 			};

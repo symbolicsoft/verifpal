@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0c0 at both session counts. Without weak encryption, the bundle
+// stays sealed. The attacker can recompute its tokens but never observes them;
+// the private marker stays secret too. This is the strong carrier counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private k, marker
+	knows public label1, label2
+	generates seed, n
+	t1 = HASH(seed, label1)
+	t2 = HASH(seed, label2)
+	sealed = AEAD_ENC(k, n, CONCAT(t1, t2, marker), nil)
+	leaks seed
+]
+
+Alice -> Bob: sealed
+
+principal Bob[]
+
+queries[
+	unlinkability? t1, t2
+	confidentiality? marker
+]

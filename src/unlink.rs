@@ -375,9 +375,7 @@ fn witness_observed_equality(
 }
 
 pub(crate) fn depends_on_secret(v: &Value, ps: &PrincipalState) -> bool {
-	let mut constants = Vec::new();
-	v.collect_constants(&mut constants);
-	constants.iter().any(|c| constant_is_secret(c, ps))
+	v.constant_leaves().any(|c| constant_is_secret(c, ps))
 }
 
 fn attacker_authored_slot(c: &Constant, ps: &PrincipalState) -> bool {
@@ -487,19 +485,35 @@ fn opened_subterm(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> bool {
-	if value.hash_value() == target_hash && value.equivalent(target, true) {
-		return true;
+	let mut seen: IdMap<u64, Vec<Value>> = IdMap::default();
+	let mut pending = vec![value.clone()];
+	while let Some(value) = pending.pop() {
+		let hash = value.hash_value();
+		if hash == target_hash && value.equivalent(target, true) {
+			return true;
+		}
+		let Value::Primitive(p) = &value else {
+			continue;
+		};
+		let bucket = seen.entry(hash).or_default();
+		if bucket
+			.iter()
+			.any(|prior| crate::theory::structurally_identical(prior, &value))
+		{
+			continue;
+		}
+		bucket.push(value.clone());
+		if primitive_core_reveals_args(p.id) {
+			pending.extend(p.arguments.iter().rev().cloned());
+		}
+		if let Some(opened) = crate::theory::can_decompose(p, ps, attacker) {
+			pending.extend(opened.revealed.into_iter().rev());
+		}
+		if let Some(revealed) = crate::theory::can_break_weak(p, ps, attacker) {
+			pending.extend(revealed.into_iter().rev());
+		}
 	}
-	let Value::Primitive(p) = value else {
-		return false;
-	};
-	if !primitive_core_reveals_args(p.id) && crate::theory::can_decompose(p, ps, attacker).is_none()
-	{
-		return false;
-	}
-	p.arguments
-		.iter()
-		.any(|arg| opened_subterm(arg, target, target_hash, ps, attacker))
+	false
 }
 
 fn constant_is_secret(c: &Constant, ps: &PrincipalState) -> bool {
@@ -656,6 +670,76 @@ mod tests {
 		assert_eq!(found.len(), 43);
 		assert!(found[0].equivalent(&term, true));
 		assert!(found.last().unwrap().equivalent(&seed, true));
+	}
+
+	#[test]
+	fn observation_search_does_not_expand_shared_tuples() {
+		let seed = make_constant("observation_dag_seed");
+		let missing = make_private("observation_dag_missing");
+		let ps = state_from(&[seed.clone(), missing.clone()]);
+		let attacker = make_attacker_state(vec![seed.clone()]);
+		let mut term = seed.clone();
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_CONCAT,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		assert!(!opened_subterm(
+			&term,
+			&missing,
+			missing.hash_value(),
+			&ps,
+			&attacker
+		));
+		assert!(opened_subterm(
+			&term,
+			&seed,
+			seed.hash_value(),
+			&ps,
+			&attacker
+		));
+		assert!(!depends_on_secret(&term, &ps));
+	}
+
+	#[test]
+	fn weak_output_observation_terminates_and_respects_its_phase() {
+		let secret = make_private("observed_weak_kem_key");
+		let seed = make_private("observed_weak_kem_seed");
+		let key = make_primitive(PRIM_PUBKEY, vec![secret], 0);
+		let mut p = Primitive::new(crate::primitive::PRIM_KEM_ENCAP, vec![key, seed.clone()], 1);
+		p.capabilities.set(Capability::Weak, 2);
+		let shared = Value::Primitive(Arc::new(p.with_output(0)));
+		let cipher = Value::Primitive(Arc::new(p));
+		let mut index = CapabilityIndex::default();
+		index.insert(&cipher);
+		index.insert(&shared);
+		let mut ps = state_from(std::slice::from_ref(&seed));
+		ps.capabilities = Arc::new(index);
+		let mut attacker = make_attacker_state(vec![cipher.clone(), shared.clone()]);
+		assert!(!opened_subterm(
+			&cipher,
+			&shared,
+			shared.hash_value(),
+			&ps,
+			&attacker
+		));
+		attacker.current_phase = 2;
+		assert!(opened_subterm(
+			&cipher,
+			&shared,
+			shared.hash_value(),
+			&ps,
+			&attacker
+		));
+		assert!(!opened_subterm(
+			&cipher,
+			&seed,
+			seed.hash_value(),
+			&ps,
+			&attacker
+		));
 	}
 
 	fn state_from(values: &[Value]) -> PrincipalState {

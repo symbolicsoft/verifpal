@@ -250,9 +250,7 @@ fn assignment_mentions(m: &Model) -> IdMap<ValueId, Vec<ValueId>> {
 			let Some(value) = &expression.assigned else {
 				continue;
 			};
-			let mut constants = Vec::new();
-			value.collect_constants(&mut constants);
-			let ids: Vec<ValueId> = constants.iter().map(|c| c.id).collect();
+			let ids: Vec<ValueId> = value.constant_leaves().map(|c| c.id).collect();
 			for c in &expression.constants {
 				out.entry(c.id).or_insert_with(|| ids.clone());
 			}
@@ -568,10 +566,8 @@ fn computable_from(
 	compromised: &IdMap<ValueId, i32>,
 	public: &IdSet<ValueId>,
 ) -> Option<i32> {
-	let mut constants = Vec::new();
-	v.collect_constants(&mut constants);
 	let mut at = 0;
-	for c in &constants {
+	for c in v.constant_leaves() {
 		if c.is_nil() || public.contains(&c.id) {
 			continue;
 		}

@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0c0 at both session counts. With neither decapsulation key, the
+// attacker cannot observe the shared-secret outputs or recover their seed.
+// Sharing syntactic arguments with a ciphertext does not expose a projection.
+attacker[passive]
+
+principal Alice[
+	knows private k1, k2
+	generates r
+	s1, c1 = KEM_ENCAP(PUBKEY(k1), r)
+	s2, c2 = KEM_ENCAP(PUBKEY(k2), r)
+]
+
+Alice -> Bob: c1, c2
+
+principal Bob[]
+
+queries[
+	unlinkability? s1, s2
+	confidentiality? r
+]

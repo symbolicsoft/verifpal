@@ -3831,3 +3831,23 @@ fn test_unlinkability_requires_an_executable_check() {
 		run_model_sessions(model, 1, code);
 	}
 }
+
+#[test]
+fn test_unlinkability_observes_only_extracted_values() {
+	for (model, code) in [
+		("unlink_kem_carried_output.vp", "u1c1"),
+		("unlink_kem_sealed_output.vp", "u0c0"),
+		("unlink_weak_carrier.vp", "u1c1"),
+		("unlink_strong_carrier.vp", "u0c0"),
+		("unlink_keys_not_carried.vp", "u0u1"),
+	] {
+		run_model(model, code);
+		run_model_sessions(model, 1, code);
+	}
+}
+
+#[test]
+fn test_shared_transcript_metadata() {
+	run_model("shared_transcript_metadata.vp", "c0f0");
+	run_model_sessions("shared_transcript_metadata.vp", 1, "c0f0");
+}

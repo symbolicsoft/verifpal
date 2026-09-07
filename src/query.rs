@@ -434,9 +434,7 @@ fn delivery_is_guarded(
 
 fn recipient_contributed(c: &Constant, km: &ProtocolTrace, ps: &PrincipalState) -> bool {
 	let resolved = crate::value::resolve_trace_constant(c, km);
-	let mut constants = Vec::new();
-	resolved.collect_constants(&mut constants);
-	constants.iter().any(|inner| {
+	resolved.constant_leaves().any(|inner| {
 		km.index_of(inner).is_some_and(|i| {
 			let slot = &km.slots[i];
 			slot.constant.fresh && km.same_actor(slot.creator, ps.id)

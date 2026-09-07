@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0u1 at both session counts. Opening encryption reveals its
+// plaintext, not its key. Recomputing t1 and t2 from the leaked seed does not
+// mean either key was observed. The wire ciphertexts themselves really are
+// observed and can be reconstructed and linked through that seed.
+attacker[passive]
+
+principal Alice[
+	knows public label1, label2
+	knows private m1, m2
+	generates seed, n1, n2
+	t1 = HASH(seed, label1)
+	t2 = HASH(seed, label2)
+	c1 = AEAD_ENC(t1, n1, m1, nil)
+	c2 = AEAD_ENC(t2, n2, m2, nil)
+	leaks seed
+]
+
+Alice -> Bob: n1, n2, c1, c2
+
+principal Bob[]
+
+queries[
+	unlinkability? t1, t2
+	unlinkability? c1, c2
+]

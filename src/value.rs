@@ -202,6 +202,9 @@ impl Value {
 			Value::Primitive(p) => primitive_hash(p),
 		}
 	}
+	pub(crate) fn constant_leaves(&self) -> impl Iterator<Item = &Constant> {
+		subterms(self).filter_map(Value::as_constant)
+	}
 	pub fn collect_constants(&self, out: &mut Vec<Constant>) {
 		match self {
 			Value::Constant(c) => out.push(c.clone()),
@@ -499,6 +502,28 @@ mod tests {
 		let mut out = Vec::new();
 		p.collect_constants(&mut out);
 		assert_eq!(out.len(), 2);
+	}
+
+	#[test]
+	fn constant_leaves_preserve_order_without_expanding_shared_subtrees() {
+		let a = make_constant("constant_leaves_a");
+		let b = make_constant("constant_leaves_b");
+		let mut term = make_primitive(PRIM_HASH, vec![a.clone(), a.clone(), b.clone()], 0);
+		let mut occurrences = Vec::new();
+		term.collect_constants(&mut occurrences);
+		assert_eq!(occurrences.len(), 3);
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let leaves: Vec<_> = term.constant_leaves().map(|c| c.id).collect();
+		assert_eq!(
+			leaves,
+			vec![
+				a.as_constant().unwrap().id,
+				a.as_constant().unwrap().id,
+				b.as_constant().unwrap().id
+			]
+		);
 	}
 
 	#[test]

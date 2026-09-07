@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
-use crate::types::{IdMap, Primitive, PrimitiveId, TraceSlot, Value};
+use crate::types::{IdMap, IdSet, Primitive, PrimitiveId, TraceSlot, Value};
 
 fn assumption_key(text: &str) -> String {
 	let mut out = String::with_capacity(text.len());
@@ -185,11 +185,18 @@ impl CapabilityIndex {
 	}
 
 	pub fn insert(&mut self, v: &Value) {
+		self.insert_shared(v, &mut IdSet::default());
+	}
+
+	fn insert_shared(&mut self, v: &Value, seen: &mut IdSet<usize>) {
 		let Value::Primitive(p) = v else {
 			return;
 		};
+		if !seen.insert(Arc::as_ptr(p) as usize) {
+			return;
+		}
 		for arg in &p.arguments {
-			self.insert(arg);
+			self.insert_shared(arg, seen);
 		}
 		if p.capabilities.is_empty() {
 			return;
@@ -349,6 +356,29 @@ mod tests {
 	use super::*;
 	use crate::primitive::{PRIM_THRESHOLD_SIGN, PRIM_THRESHOLD_SPLIT};
 
+	#[test]
+	fn capability_collection_visits_shared_subtrees_once() {
+		let seed = crate::testutil::make_private("capability_dag_seed");
+		let leaf = annotated(
+			Value::primitive(crate::primitive::PRIM_HASH, vec![seed], 0),
+			Capability::Weak,
+			2,
+		);
+		let mut term = leaf.clone();
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		let mut index = CapabilityIndex::default();
+		index.insert(&term);
+		let p = leaf.as_primitive().unwrap();
+		assert!(!index.in_force(p, Capability::Weak, 1));
+		assert!(index.in_force(p, Capability::Weak, 2));
+		assert!(!index.in_force(term.as_primitive().unwrap(), Capability::Weak, 2));
+	}
 	#[test]
 	fn a_partial_signature_is_forgeable_without_its_share() {
 		assert!(supports(PRIM_THRESHOLD_SIGN, Capability::Forgeable));

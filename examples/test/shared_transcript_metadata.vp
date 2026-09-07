@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0f0 at both session counts. The unsent transcript stays private
+// and depends on Alice's fresh seed. Eighteen shared hashing layers are a
+// small term graph, not hundreds of millions of separate constant occurrences.
+// Capability indexing and freshness checks must retain that sharing.
+attacker[passive]
+
+principal Alice[
+	generates seed
+	h0 = HASH(seed, seed, seed)
+	h1 = HASH(h0, h0, h0)
+	h2 = HASH(h1, h1, h1)
+	h3 = HASH(h2, h2, h2)
+	h4 = HASH(h3, h3, h3)
+	h5 = HASH(h4, h4, h4)
+	h6 = HASH(h5, h5, h5)
+	h7 = HASH(h6, h6, h6)
+	h8 = HASH(h7, h7, h7)
+	h9 = HASH(h8, h8, h8)
+	h10 = HASH(h9, h9, h9)
+	h11 = HASH(h10, h10, h10)
+	h12 = HASH(h11, h11, h11)
+	h13 = HASH(h12, h12, h12)
+	h14 = HASH(h13, h13, h13)
+	h15 = HASH(h14, h14, h14)
+	h16 = HASH(h15, h15, h15)
+	h17 = HASH(h16, h16, h16)
+]
+
+queries[
+	confidentiality? h17
+	freshness? h17
+]
+

@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1c1 at both session counts. Weak encryption exposes the bundle
+// on the wire. Its tokens are therefore observed, and the leaked common seed
+// links them. The private marker confirms that the carrier was actually opened.
+attacker[passive]
+
+principal Alice[
+	knows private k, marker
+	knows public label1, label2
+	generates seed, n
+	t1 = HASH(seed, label1)
+	t2 = HASH(seed, label2)
+	sealed = AEAD_ENC[weak](k, n, CONCAT(t1, t2, marker), nil)
+	leaks seed
+]
+
+Alice -> Bob: sealed
+
+principal Bob[]
+
+queries[
+	unlinkability? t1, t2
+	confidentiality? marker
+]

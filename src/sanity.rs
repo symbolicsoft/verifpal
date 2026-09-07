@@ -829,32 +829,31 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 }
 
 pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
-	let Value::Primitive(p) = value else {
-		return Ok(());
-	};
-	for restriction in argument_restrictions(p.id) {
-		if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
-			&& restriction.banned.contains(&inner.id)
-		{
-			return Err(VerifpalError::sanity(
-				format!(
-					"`{}` cannot take `{}` as its {} argument",
-					primitive_name(p.id),
-					primitive_name(inner.id),
-					ordinal(restriction.position + 1)
+	for term in crate::value::subterms(value) {
+		let Value::Primitive(p) = term else {
+			continue;
+		};
+		for restriction in argument_restrictions(p.id) {
+			if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
+				&& restriction.banned.contains(&inner.id)
+			{
+				return Err(VerifpalError::sanity(
+					format!(
+						"`{}` cannot take `{}` as its {} argument",
+						primitive_name(p.id),
+						primitive_name(inner.id),
+						ordinal(restriction.position + 1)
+					)
+					.into(),
 				)
-				.into(),
-			)
-			.narrow(primitive_name(inner.id))
-			.note(restriction_note(p.id, inner.id, restriction.position))
-			.help(format!(
-				"pass a value the principal holds directly; the signature is `{}`",
-				primitive_signature(p.id)
-			)));
+				.narrow(primitive_name(inner.id))
+				.note(restriction_note(p.id, inner.id, restriction.position))
+				.help(format!(
+					"pass a value the principal holds directly; the signature is `{}`",
+					primitive_signature(p.id)
+				)));
+			}
 		}
-	}
-	for arg in &p.arguments {
-		sanity_check_argument_restrictions(arg)?;
 	}
 	Ok(())
 }
@@ -863,6 +862,30 @@ pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
 mod tests {
 	use super::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn argument_restrictions_check_shared_terms_without_expanding_them() {
+		let secret = make_private("restriction_dag_secret");
+		let invalid = pubkey(pubkey(secret.clone()));
+		let expected = sanity_check_argument_restrictions(&invalid)
+			.unwrap_err()
+			.to_string();
+		for (mut term, bad) in [(secret, false), (invalid, true)] {
+			for _ in 0..40 {
+				term = Value::primitive(
+					crate::primitive::PRIM_HASH,
+					vec![term.clone(), term.clone(), term],
+					0,
+				);
+			}
+			let result = sanity_check_argument_restrictions(&term);
+			if bad {
+				assert_eq!(result.unwrap_err().to_string(), expected);
+			} else {
+				assert!(result.is_ok());
+			}
+		}
+	}
 
 	fn pubkey(inner: Value) -> Value {
 		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
