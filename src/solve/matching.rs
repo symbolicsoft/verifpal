@@ -13,28 +13,37 @@ pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substituti
 
 pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
 	let mut out = a.clone();
+	let mut pending = Vec::new();
+	let mut overlapping = Vec::new();
 	for (id, value) in b {
 		match out.get(id).cloned() {
 			None => {
-				if !bind(&mut out, *id, value.clone()) {
-					return None;
-				}
+				let variable = Value::Constant(Constant {
+					id: *id,
+					..Default::default()
+				});
+				pending.push((variable, value.clone()));
 			}
 			Some(existing) => {
 				if existing.equivalent(value, true) {
 					continue;
 				}
-				out = unify(&existing, value, &out)?;
-				let resolved = super::vars::apply(value, &out);
-				// Overwriting an existing binding bypasses `bind`, so the occurs
-				// check has to be repeated here or a cycle re-enters by the one
-				// door left open.
-				if occurs(*id, &resolved, &out) {
-					return None;
-				}
-				out.insert(*id, resolved);
+				pending.push((existing, value.clone()));
+				overlapping.push((*id, value));
 			}
 		}
+	}
+	if pending.is_empty() {
+		return Some(out);
+	}
+	pending.reverse();
+	out = solve_equations::<true>(pending, out).next()?;
+	for (id, value) in overlapping {
+		let resolved = super::vars::apply(value, &out);
+		if occurs(id, &resolved, &out) {
+			return None;
+		}
+		out.insert(id, resolved);
 	}
 	Some(out)
 }
@@ -220,6 +229,69 @@ mod tests {
 		let constrained: Vec<_> = match_values(&pattern, &target, &constrained).collect();
 		assert_eq!(constrained.len(), 1);
 		assert!(crate::solve::vars::apply(&y, &constrained[0]).equivalent(&a, true));
+	}
+
+	#[test]
+	fn merging_retries_an_exponent_ordering_across_separate_bindings() {
+		let x = crate::solve::vars::free_var(0);
+		let y = crate::solve::vars::free_var(1);
+		let a = make_private("merge_backtrack_a");
+		let b = make_private("merge_backtrack_b");
+		let mut right = Substitution::from_iter([
+			(crate::solve::vars::attacker_var_id(0), a.clone()),
+			(crate::solve::vars::attacker_var_id(1), b.clone()),
+		]);
+		let ids: Vec<_> = right.keys().copied().collect();
+		let left = Substitution::from_iter([
+			(ids[0], dh_kex(pubkey(x.clone()), y.clone())),
+			(ids[1], x.clone()),
+		]);
+		right.insert(ids[0], dh_kex(pubkey(a.clone()), b.clone()));
+		right.insert(ids[1], b.clone());
+		let found = merge(&left, &right).expect("the swapped ordering satisfies both bindings");
+		assert!(crate::solve::vars::apply(&x, &found).equivalent(&b, true));
+		assert!(crate::solve::vars::apply(&y, &found).equivalent(&a, true));
+		for (id, value) in &right {
+			assert!(found[id].equivalent(value, true));
+		}
+	}
+
+	#[test]
+	fn merging_still_refuses_a_cycle_between_partial_solutions() {
+		let x = crate::solve::vars::attacker_var(0, "merge_cycle_x");
+		let y = crate::solve::vars::attacker_var(1, "merge_cycle_y");
+		let left = Substitution::from_iter([(
+			as_var(&x).unwrap(),
+			Value::primitive(crate::primitive::PRIM_HASH, vec![y.clone()], 0),
+		)]);
+		let right = Substitution::from_iter([(
+			as_var(&y).unwrap(),
+			Value::primitive(crate::primitive::PRIM_HASH, vec![x], 0),
+		)]);
+		assert!(merge(&left, &right).is_none());
+		assert!(merge(&right, &left).is_none());
+	}
+
+	#[test]
+	fn merging_resolves_aliases_before_checking_new_bindings() {
+		let atom = make_private("merge_resolved_alias");
+		let mut right = Substitution::from_iter([
+			(crate::solve::vars::attacker_var_id(0), atom.clone()),
+			(crate::solve::vars::attacker_var_id(1), atom.clone()),
+		]);
+		let ids: Vec<_> = right.keys().copied().collect();
+		let variable = |id| {
+			Value::Constant(Constant {
+				id,
+				..Default::default()
+			})
+		};
+		let left = Substitution::from_iter([(ids[0], variable(ids[1]))]);
+		right.insert(ids[1], variable(ids[0]));
+		let found = merge(&left, &right).expect("both aliases resolve to the same atom");
+		for id in ids {
+			assert!(crate::solve::vars::apply(&variable(id), &found).equivalent(&atom, true));
+		}
 	}
 
 	#[test]

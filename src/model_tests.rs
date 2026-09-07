@@ -3879,3 +3879,9 @@ fn test_unlinkability_observes_nonce_reuse_disclosures() {
 		run_model_sessions(model, 1, code);
 	}
 }
+
+#[test]
+fn test_threshold_subset_search() {
+	run_model("threshold_subset_search.vp", "a0");
+	run_model_sessions("threshold_subset_search.vp", 1, "a0");
+}

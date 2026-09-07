@@ -338,6 +338,7 @@ impl<'a> Deducer<'a> {
 				for output in 0..MAX_SHARES {
 					let after = MAX_SHARES - output - 1;
 					let share = Value::Primitive(Arc::new(split.with_output(output)));
+					let mut local = Vec::new();
 					let arguments: Vec<Value> = (0..arity)
 						.map(|i| {
 							if i == rule.share {
@@ -347,7 +348,9 @@ impl<'a> Deducer<'a> {
 							} else if let Some(at) = rule.carry.iter().position(|&c| c == i) {
 								target.arguments[1 + at].clone()
 							} else {
-								self.fresh_var()
+								let variable = self.fresh_var();
+								local.push(as_var(&variable).unwrap());
+								variable
 							}
 						})
 						.collect();
@@ -360,6 +363,7 @@ impl<'a> Deducer<'a> {
 						let mut solved = Vec::new();
 						self.solve_into(&partial, candidate, &mut solved);
 						for solution in dedupe(solved) {
+							let solution = super::vars::remove_local_bindings(solution, &local);
 							if count + 1 >= threshold {
 								done.push(solution);
 							} else {
@@ -370,7 +374,7 @@ impl<'a> Deducer<'a> {
 					if next.is_empty() {
 						break;
 					}
-					frontier = next;
+					frontier = dedupe_counts(next);
 				}
 				out.extend(dedupe(done));
 			}
@@ -1176,9 +1180,105 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 	dedupe(out)
 }
 
+fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, usize)> {
+	let mut out: Vec<(Substitution, usize)> = Vec::new();
+	let mut buckets: IdMap<(u64, usize), Vec<usize>> = IdMap::default();
+	for (candidate, count) in candidates {
+		let bucket = buckets
+			.entry((substitution_hash(&candidate), count))
+			.or_default();
+		if bucket
+			.iter()
+			.any(|&at| same_substitution(&out[at].0, &candidate))
+		{
+			continue;
+		}
+		bucket.push(out.len());
+		out.push((candidate, count));
+	}
+	out
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn threshold_search_keeps_one_state_per_distinct_choice() {
+		let key = make_private("subset_search_key");
+		let message = make_private("subset_search_message");
+		let wanted = super::super::vars::free_var(10000);
+		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0);
+		split.threshold = 8;
+		let partials: Vec<_> = (0..16)
+			.map(|output| {
+				Value::primitive(
+					PRIM_THRESHOLD_SIGN,
+					vec![
+						Value::Primitive(Arc::new(split.with_output(output))),
+						make_private(&format!("subset_search_nonce_{output}")),
+						value_nil(),
+						message.clone(),
+					],
+					0,
+				)
+			})
+			.collect();
+		let attacker = make_attacker_state(partials);
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let target = Primitive::new(PRIM_SIGN, vec![key, wanted.clone()], 0);
+		let mut found = Vec::new();
+		deducer.solve_by_combination(&target, &Substitution::default(), &mut found);
+		assert_eq!(found.len(), 1);
+		assert!(apply(&wanted, &found[0]).equivalent(&message, true));
+		let regrouped = attacker
+			.known
+			.iter()
+			.enumerate()
+			.map(|(i, value)| {
+				let Value::Primitive(p) = value else {
+					unreachable!();
+				};
+				let mut arguments = p.arguments.clone();
+				arguments[2] = make_constant(&format!("subset_commitments_{}", i % 4));
+				Value::Primitive(Arc::new(p.with_arguments(arguments)))
+			})
+			.collect();
+		let attacker = make_attacker_state(regrouped);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let mut found = Vec::new();
+		deducer.solve_by_combination(&target, &Substitution::default(), &mut found);
+		assert!(
+			found.is_empty(),
+			"different commitments must not pool their counts"
+		);
+	}
+
+	#[test]
+	fn threshold_frontier_retains_distinct_counts_and_bindings_in_order() {
+		let id = super::super::vars::attacker_var_id(0);
+		let first = Substitution::from_iter([(id, make_private("count_first"))]);
+		let second = Substitution::from_iter([(id, make_private("count_second"))]);
+		let reduced = dedupe_counts(vec![
+			(first.clone(), 1),
+			(second.clone(), 2),
+			(first.clone(), 3),
+			(first.clone(), 1),
+		]);
+		assert_eq!(reduced.len(), 3);
+		assert!(same_substitution(&reduced[0].0, &first));
+		assert_eq!(reduced[0].1, 1);
+		assert!(same_substitution(&reduced[1].0, &second));
+		assert_eq!(reduced[1].1, 2);
+		assert!(same_substitution(&reduced[2].0, &first));
+		assert_eq!(reduced[2].1, 3);
+	}
 
 	#[test]
 	fn forgeable_shape_collection_visits_a_shared_check_once() {

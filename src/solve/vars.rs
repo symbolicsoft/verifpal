@@ -231,6 +231,19 @@ pub(crate) fn ground_remaining(v: &Value, s: &mut Substitution) {
 	}
 }
 
+pub(crate) fn remove_local_bindings(mut s: Substitution, ids: &[ValueId]) -> Substitution {
+	let local: Substitution = ids
+		.iter()
+		.filter_map(|id| s.remove(id).map(|value| (*id, value)))
+		.collect();
+	if !local.is_empty() {
+		for value in s.values_mut() {
+			*value = apply(value, &local);
+		}
+	}
+	s
+}
+
 pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 	a.len() == b.len()
 		&& a.iter().all(|(id, v)| match b.get(id) {
@@ -306,6 +319,34 @@ mod tests {
 	use super::*;
 	use crate::testutil::test_value_id;
 
+	#[test]
+	fn removing_local_bindings_preserves_the_remaining_choices() {
+		let slot = attacker_var(0, "local_projection_slot");
+		let first = free_var(0);
+		let second = free_var(1);
+		let kept = free_var(2);
+		let atom = solver_constant("local_projection_atom");
+		let term = Value::primitive(
+			crate::primitive::PRIM_HASH,
+			vec![first.clone(), kept.clone()],
+			0,
+		);
+		let original = Substitution::from_iter([
+			(as_var(&slot).unwrap(), term),
+			(as_var(&first).unwrap(), second.clone()),
+			(as_var(&second).unwrap(), atom),
+		]);
+		let removed = [as_var(&first).unwrap(), as_var(&second).unwrap()];
+		let projected = remove_local_bindings(original.clone(), &removed);
+		assert_eq!(projected.len(), 1);
+		assert!(apply(&slot, &original).equivalent(&apply(&slot, &projected), true));
+		assert!(occurs(
+			as_var(&kept).unwrap(),
+			&apply(&slot, &projected),
+			&projected
+		));
+		assert_eq!(original.len(), 3);
+	}
 	#[test]
 	fn variable_walks_visit_shared_terms_without_expanding_them() {
 		let slot = attacker_var(0, "dag_slot");

@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at both session counts. All sixteen partials sign the same
+// honest message: choosing another eight of them forges nothing. The guarded
+// verification key also prevents replaying another session's signature.
+attacker[active]
+
+principal Dealer[
+	generates k, m
+	pk = PUBKEY(k)
+	s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16 = THRESHOLD_SPLIT[8](k)
+	generates n1
+	p1 = THRESHOLD_SIGN(s1, n1, nil, m)
+	generates n2
+	p2 = THRESHOLD_SIGN(s2, n2, nil, m)
+	generates n3
+	p3 = THRESHOLD_SIGN(s3, n3, nil, m)
+	generates n4
+	p4 = THRESHOLD_SIGN(s4, n4, nil, m)
+	generates n5
+	p5 = THRESHOLD_SIGN(s5, n5, nil, m)
+	generates n6
+	p6 = THRESHOLD_SIGN(s6, n6, nil, m)
+	generates n7
+	p7 = THRESHOLD_SIGN(s7, n7, nil, m)
+	generates n8
+	p8 = THRESHOLD_SIGN(s8, n8, nil, m)
+	generates n9
+	p9 = THRESHOLD_SIGN(s9, n9, nil, m)
+	generates n10
+	p10 = THRESHOLD_SIGN(s10, n10, nil, m)
+	generates n11
+	p11 = THRESHOLD_SIGN(s11, n11, nil, m)
+	generates n12
+	p12 = THRESHOLD_SIGN(s12, n12, nil, m)
+	generates n13
+	p13 = THRESHOLD_SIGN(s13, n13, nil, m)
+	generates n14
+	p14 = THRESHOLD_SIGN(s14, n14, nil, m)
+	generates n15
+	p15 = THRESHOLD_SIGN(s15, n15, nil, m)
+	generates n16
+	p16 = THRESHOLD_SIGN(s16, n16, nil, m)
+	sig = THRESHOLD_JOIN(p1, p2, p3, p4, p5, p6, p7, p8)
+]
+
+Dealer -> Observer: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16
+
+principal Observer[]
+
+Dealer -> Verifier: [pk], m, sig
+
+principal Verifier[
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+queries[
+	authentication? Dealer -> Verifier: sig
+]
