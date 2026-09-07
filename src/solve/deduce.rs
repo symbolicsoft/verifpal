@@ -51,7 +51,7 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			collect_subterm_hashes(held, &mut known);
 		}
-		Self::with_basis(ps, attacker, sym, known)
+		Self::with_basis(ps, attacker, sym, known.clone(), &known)
 	}
 
 	pub(crate) fn with_basis(
@@ -59,11 +59,12 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
+		protocol: &IdSet<u64>,
 	) -> Self {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
-		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
+		Self::in_lane(ps, attacker, sym, Arc::new(basis), protocol, 0)
 	}
 
 	pub(crate) fn in_lane(
@@ -71,6 +72,7 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		basis: Arc<IdSet<u64>>,
+		protocol: &IdSet<u64>,
 		lane: u32,
 	) -> Self {
 		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
@@ -102,7 +104,7 @@ impl<'a> Deducer<'a> {
 				Some(DerivationRecord::Obtained { slot }) => attacker.record(KnownIdx(at)).is_some_and(|record| record.diffs.iter().any(|diff| diff.index == *slot && diff.tainted)),
 				_ => false,
 			};
-			if constructed { continue; }
+			if constructed && !protocol.contains(&held.hash_value()) { continue; }
 			if let Value::Primitive(p) = held {
 				by_head
 					.entry((p.id, p.arguments.len()))
