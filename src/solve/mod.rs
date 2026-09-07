@@ -223,8 +223,11 @@ fn solve_with(
 	#[cfg(test)]
 	ctx.note_search_reached_a_controllable_slot();
 
-	let deducer = Deducer::with_basis(ps, attacker, sym, ctx.known_subterms(attacker));
+	let deducer = Deducer::with_basis(ps, attacker, sym, ctx.known_subterms(attacker), ctx.term_bound(km).protocol(km));
+	eprintln!("[perf] {} {}", ps.name, pass.name());
+	eprintln!("[perf] slots {:?}", sym.var_slots.iter().map(|i| &ps.meta[*i].constant.name).collect::<Vec<_>>());
 	let proposals = propose(ctx, km, ps, pass, attacker, sym, &deducer);
+	eprintln!("[perf] proposed {}", proposals.len());
 	dispose(ctx, km, ps, pass, attacker, guards, sym, proposals)
 }
 
@@ -241,6 +244,7 @@ fn propose(
 	let mut proposals: Vec<Substitution> = Vec::new();
 
 	let results = ctx.results_get();
+	let protocol = ctx.term_bound(km).protocol(km);
 	if pass == Pass::Targeted {
 		let mut pending: Vec<&Query> = Vec::new();
 		for result in &results {
@@ -255,7 +259,7 @@ fn propose(
 		}
 		let basis = deducer.basis();
 		let goals = crate::parallel::map_ordered(lanes(pending.len()), |(lane, range)| {
-			let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
+			let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), protocol, lane);
 			range
 				.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
 				.collect::<Vec<_>>()
@@ -276,14 +280,13 @@ fn propose(
 		}
 	}
 
-	let protocol = ctx.term_bound(km).protocol(km);
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
 		let basis = deducer.basis();
 		let candidates =
 			crate::parallel::map_ordered(lanes(sym.var_slots.len()), |(lane, range)| {
-				let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
+				let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), protocol, lane);
 				range
 					.map(|at| {
 						let slot = sym.var_slots[at];

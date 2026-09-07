@@ -51,7 +51,7 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			collect_subterm_hashes(held, &mut known);
 		}
-		Self::with_basis(ps, attacker, sym, known)
+		Self::with_basis(ps, attacker, sym, known.clone(), &known)
 	}
 
 	pub(crate) fn with_basis(
@@ -59,11 +59,12 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
+		protocol: &IdSet<u64>,
 	) -> Self {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
-		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
+		Self::in_lane(ps, attacker, sym, Arc::new(basis), protocol, 0)
 	}
 
 	pub(crate) fn in_lane(
@@ -71,6 +72,7 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		basis: Arc<IdSet<u64>>,
+		protocol: &IdSet<u64>,
 		lane: u32,
 	) -> Self {
 		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
@@ -97,6 +99,12 @@ impl<'a> Deducer<'a> {
 
 		let mut by_head: IdMap<(PrimitiveId, usize), Vec<usize>> = IdMap::default();
 		for (at, held) in attacker.known.iter().enumerate() {
+			let constructed = match attacker.derivation(KnownIdx(at)) {
+				Some(DerivationRecord::Reconstructed { .. }) => true,
+				Some(DerivationRecord::Obtained { slot }) => attacker.record(KnownIdx(at)).is_some_and(|record| record.diffs.iter().any(|diff| diff.index == *slot && diff.tainted)),
+				_ => false,
+			};
+			if constructed && !protocol.contains(&held.hash_value()) { continue; }
 			if let Value::Primitive(p) = held {
 				by_head
 					.entry((p.id, p.arguments.len()))
@@ -797,8 +805,13 @@ impl<'a> Deducer<'a> {
 		}
 		let mut out = Vec::new();
 		let mut combined: Vec<Substitution> = vec![base.clone()];
+		eprintln!("[perf] constraints {} splits {}", checked.len(), splits.len());
 		for p in &checked {
+			eprintln!("[perf] checking {}.{}", primitive_name(p.id), p.output);
+			if combined.len() == 1 { eprintln!("[perf] check {p}"); }
 			let solved = self.satisfy_check(p, base);
+			self.memo.borrow_mut().clear();
+			eprintln!("[perf] solved {} combined {}", solved.len(), combined.len());
 			if solved.is_empty() {
 				continue;
 			}
@@ -807,6 +820,7 @@ impl<'a> Deducer<'a> {
 		}
 		for p in widest_projections(&splits) {
 			let solved = self.satisfy_split(&p, base);
+			self.memo.borrow_mut().clear();
 			if solved.is_empty() {
 				continue;
 			}
@@ -814,9 +828,17 @@ impl<'a> Deducer<'a> {
 			out.extend(solved);
 		}
 		out.extend(combined);
-		out = dedupe(out);
 		let mut seen = super::vars::SeenSubstitutions::default();
-		seen.absorb(&out);
+		let mut keys = Vec::new();
+		out.retain(|s| {
+			let key = super::vars::canonical_slots(s);
+			if seen.contains(&keys, &key) {
+				return false;
+			}
+			keys.push(key);
+			seen.absorb(&keys);
+			true
+		});
 		let mut frontier = out.clone();
 
 		let check_vars: Vec<Vec<ValueId>> = checked
@@ -830,7 +852,8 @@ impl<'a> Deducer<'a> {
 			})
 			.collect();
 
-		for _ in 0..checked.len() {
+		for round in 0..checked.len() {
+			eprintln!("[perf] round {round} frontier {}", frontier.len());
 			let mut discovered = Vec::new();
 			for (p, vars) in checked.iter().zip(check_vars.iter()) {
 				for candidate in &frontier {
@@ -844,16 +867,24 @@ impl<'a> Deducer<'a> {
 					{
 						continue;
 					}
-					discovered.extend(self.satisfy_check(&refined, candidate));
+					let solutions = self.satisfy_check(&refined, candidate);
+					self.memo.borrow_mut().clear();
+					for solution in solutions {
+						let key = super::vars::canonical_slots(&solution);
+						if seen.contains(&keys, &key) {
+							continue;
+						}
+						keys.push(key);
+						seen.absorb(&keys);
+						discovered.push(solution);
+					}
 				}
 			}
 			discovered = dedupe(discovered);
-			discovered.retain(|s| !seen.contains(&out, s));
 			if discovered.is_empty() {
 				break;
 			}
 			out.extend(discovered.clone());
-			seen.absorb(&out);
 			frontier = discovered;
 		}
 		dedupe(out)
