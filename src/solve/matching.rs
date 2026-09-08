@@ -117,7 +117,7 @@ fn solve_equations<const UNIFY: bool>(
 	})
 }
 
-fn commutative_equations<const UNIFY: bool>(
+pub(crate) fn commutative_equations<const UNIFY: bool>(
 	p1: &Primitive,
 	p2: &Primitive,
 ) -> Option<Vec<(Value, Value)>> {

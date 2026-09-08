@@ -929,19 +929,28 @@ impl<'a> Deducer<'a> {
 			&& p.threshold == q.threshold
 			&& p.arguments.len() == q.arguments.len()
 		{
-			let mut frontier = vec![s.clone()];
-			for (a, b) in p.arguments.iter().zip(&q.arguments) {
-				frontier = dedupe(
-					frontier
-						.iter()
-						.flat_map(|bindings| self.invert(a, b, bindings))
-						.collect(),
-				);
-				if frontier.is_empty() {
-					break;
+			let aligned = p
+				.arguments
+				.iter()
+				.cloned()
+				.zip(q.arguments.iter().cloned())
+				.collect::<Vec<_>>();
+			let swapped = super::matching::commutative_equations::<true>(p, q);
+			for equations in std::iter::once(aligned).chain(swapped) {
+				let mut frontier = vec![s.clone()];
+				for (a, b) in equations {
+					frontier = dedupe(
+						frontier
+							.iter()
+							.flat_map(|bindings| self.invert(&a, &b, bindings))
+							.collect(),
+					);
+					if frontier.is_empty() {
+						break;
+					}
 				}
+				out.extend(frontier);
 			}
-			out.extend(frontier);
 		}
 
 		if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())

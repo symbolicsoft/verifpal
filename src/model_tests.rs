@@ -4105,6 +4105,16 @@ fn test_solver_threshold_key_alignment() {
 }
 
 #[test]
+fn test_solver_nested_commutative_inversion() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_nested_commutative_inversion.vp", sessions, "c1");
+		run_model_sessions("solver_nested_commutative_unshaped.vp", sessions, "c1");
+		run_model_sessions("solver_nested_commutative_guarded.vp", sessions, "c0");
+		run_model_sessions("solver_nested_commutative_ordered.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_solver_unblind_bindings() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_unblind_bindings.vp", sessions, "c1");

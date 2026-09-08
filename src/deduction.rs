@@ -831,6 +831,7 @@ fn rule_reuse(
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
+	let mut produced = None;
 	for (i, known) in attacker.known.iter().enumerate() {
 		let Value::Primitive(p) = known else {
 			continue;
@@ -838,15 +839,21 @@ fn rule_reuse(
 		let Some(rule) = reuse_rule(p.id) else {
 			continue;
 		};
-		if attacker_mints(p, ps, attacker) && !protocol_produced(ctx, known) {
-			continue;
-		}
 		if rule.fixed.iter().all(|&at| {
 			p.arguments
 				.get(at)
 				.is_some_and(|a| obtainable(a, ps, attacker))
 		}) {
 			continue;
+		}
+		if attacker_mints(p, ps, attacker) {
+			let produced = produced.get_or_insert_with(|| protocol_produced(ctx));
+			if !produced
+				.get(&known.hash_value())
+				.is_some_and(|terms| terms.iter().any(|term| term.equivalent(known, true)))
+			{
+				continue;
+			}
 		}
 		let mut key = u64::from(p.id);
 		for &at in &rule.fixed {
@@ -917,19 +924,35 @@ fn attacker_mints(p: &Arc<Primitive>, ps: &PrincipalState, attacker: &AttackerSt
 	can_reconstruct_primitive(p, ps, attacker).is_some_and(|built| built.forged.is_some())
 }
 
-fn protocol_produced(ctx: &VerifyContext, value: &Value) -> bool {
-	let hash = value.hash_value();
-	ctx.principal_states().iter().any(|state| {
-		ctx.execution_base(state.id).is_some_and(|base| {
-			base.values.iter().enumerate().any(|(i, sv)| {
-				base.meta
-					.get(i)
-					.is_some_and(|meta| meta.creator == state.id)
-					&& crate::value::subterms(&sv.value)
-						.any(|term| term.hash_value() == hash && term.equivalent(value, true))
-			})
-		})
-	})
+fn protocol_produced(ctx: &VerifyContext) -> IdMap<u64, Vec<Value>> {
+	let mut produced: IdMap<u64, Vec<Value>> = IdMap::default();
+	let mut seen = IdSet::default();
+	for state in ctx.principal_states() {
+		let Some(base) = ctx.execution_base(state.id) else {
+			continue;
+		};
+		let mut pending: Vec<_> = base
+			.values
+			.iter()
+			.zip(base.meta.iter())
+			.filter(|(_, meta)| meta.creator == state.id)
+			.map(|(sv, _)| &sv.value)
+			.collect();
+		while let Some(term) = pending.pop() {
+			let Value::Primitive(p) = term else {
+				continue;
+			};
+			if !seen.insert(Arc::as_ptr(p) as usize) {
+				continue;
+			}
+			pending.extend(&p.arguments);
+			produced
+				.entry(term.hash_value())
+				.or_default()
+				.push(term.clone());
+		}
+	}
+	produced
 }
 
 type PairKey = (PrincipalId, u64, u64);
@@ -1365,6 +1388,25 @@ mod tests {
 	}
 
 	#[test]
+	fn protocol_produced_indexes_shared_terms_once() {
+		let mut source = String::from("attacker[passive]\nprincipal Alice[\nknows private seed\n");
+		for i in 0..40 {
+			let input = if i == 0 {
+				String::from("seed")
+			} else {
+				format!("t{}", i - 1)
+			};
+			source.push_str(&format!("t{i} = HASH({input}, {input}, {input})\n"));
+		}
+		source.push_str("]\nAlice -> Bob: t39\nprincipal Bob[]\nqueries[confidentiality? seed]\n");
+		let model = crate::parser::parse_string("produced_shared.vp", &source).unwrap();
+		let (_, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx = VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let produced = protocol_produced(&ctx);
+		assert_eq!(produced.values().map(Vec::len).sum::<usize>(), 40);
+	}
+
+	#[test]
 	fn honestly_computed_nested_terms_are_protocol_produced() {
 		let source = "attacker[passive]\nprincipal Alice[\nknows private key, message\ngenerates nonce\nwrapped = ENC(nil, AEAD_ENC(key, nonce, message, nil))\n]\nAlice -> Bob: wrapped\nprincipal Bob[]\nqueries[\nconfidentiality? message\n]\n";
 		let model = crate::parser::parse_string("nested_produced.vp", source).unwrap();
@@ -1381,13 +1423,19 @@ mod tests {
 		let crate::types::Value::Primitive(inner) = &outer.arguments[1] else {
 			panic!("ciphertext")
 		};
-		assert!(super::protocol_produced(&ctx, &wrapped));
-		assert!(super::protocol_produced(&ctx, &outer.arguments[1]));
+		let produced = super::protocol_produced(&ctx);
+		let contains = |value: &crate::types::Value| {
+			produced
+				.get(&value.hash_value())
+				.is_some_and(|terms| terms.iter().any(|term| term.equivalent(value, true)))
+		};
+		assert!(contains(&wrapped));
+		assert!(contains(&outer.arguments[1]));
 		let mut arguments = inner.arguments.clone();
 		arguments[2] = crate::value::value_nil();
 		let minted =
 			crate::types::Value::Primitive(std::sync::Arc::new(inner.with_arguments(arguments)));
-		assert!(!super::protocol_produced(&ctx, &minted));
+		assert!(!contains(&minted));
 	}
 	use super::*;
 	use crate::parser::parse_string;

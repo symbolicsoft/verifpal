@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one and two sessions. Replacing x with alt decrypts to
+// PUBKEY(HASH(b)); supplying HASH(a) as y swaps the DH exponents, passes
+// the equality check and obtains MAC(sk, HASH(a)). The public-key shape
+// is exposed only after the decryption has reduced.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public a, b
+	x = ENC(k, PUBKEY(HASH(a)))
+	alt = ENC(k, PUBKEY(HASH(b)))
+	y = HASH(b)
+]
+
+Alice -> Carol: [alt]
+
+principal Carol[
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows private k, sk
+	knows public a, b
+	_ = ASSERT(DH_KEX(DEC(k, x), y), DH_KEX(PUBKEY(HASH(a)), HASH(b)))?
+	tag = MAC(sk, y)
+	secret = MAC(sk, HASH(a))
+]
+
+Bob -> Carol: tag
+
+queries[
+	confidentiality? secret
+]

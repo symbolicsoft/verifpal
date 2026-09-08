@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one and two sessions. Checking y separately binds the
+// exponent order, so the shared-key equality cannot authorize the swap.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public a, b
+	x = ENC(k, HASH(a))
+	alt = ENC(k, HASH(b))
+	y = HASH(b)
+]
+
+Alice -> Carol: [alt]
+
+principal Carol[
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows private k, sk
+	knows public a, b
+	_ = ASSERT(y, HASH(b))?
+	_ = ASSERT(DH_KEX(PUBKEY(DEC(k, x)), y), DH_KEX(PUBKEY(HASH(a)), HASH(b)))?
+	tag = MAC(sk, y)
+	secret = MAC(sk, HASH(a))
+]
+
+Bob -> Carol: tag
+
+queries[
+	confidentiality? secret
+]
