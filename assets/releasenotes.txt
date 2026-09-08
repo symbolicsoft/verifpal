@@ -1,4 +1,8 @@
-Verifpal 1.4.8
+Verifpal 1.4.9
+
+Changes since v1.4.8:
+
+- Bug fixes and performance improvements.
 
 Changes since v1.4.7:
 
