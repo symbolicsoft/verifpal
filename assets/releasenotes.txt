@@ -1,4 +1,9 @@
-Verifpal 1.4.9
+Verifpal 1.4.10
+
+Changes since v1.4.9:
+
+Fix imprecision in forgeable threshold signatures relative to RFC 9591.
+Congrats to Abdulrahman Abdulaziz for discovering this bug!
 
 Changes since v1.4.8:
 
