@@ -1,23 +1,13 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — RINGSIGN declares forgeable_secret, and this is the only
-// model that exercises it. Bob issues two ring signatures with the same key,
-// one annotated and one not, and only the annotated message loses
-// authentication.
-//
-// The two rings are deliberately different. Over one shared ring the attacker
-// needs no forgery: both signatures verify under the same three keys, so it
-// simply swaps the two (message, signature) pairs and both queries fail for a
-// reason the annotation has nothing to do with. Disjoint membership makes the
-// pairs non-interchangeable, which is what leaves the declared forgery as the
-// only way through.
-//
-// Ring signatures are also the awkward case for the capability index: the term
-// has three key arguments and only the first is secret, so an exemption keyed
-// on "a key position" rather than on forgeable_secret's position 0 would let
-// the attacker forge by way of a ring member's PUBLIC key and take the second
-// query down with the first.
+// Expected: a1a1 at one session and two. Both ring signatures use the same
+// private signing key b, so the forgeable assumption permits signatures over
+// attacker-chosen messages in either ring. Changing the other public members
+// of the ring does not change the private key on which the assumption rests.
+// The attacker must still hold the public ring members and the new message.
+// cap_forgeable_other_key_holds.vp separates this from forgery under a different
+// private key, and the solver unit test also checks primitive and phase scope.
 
 attacker[active]
 

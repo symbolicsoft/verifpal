@@ -9,45 +9,36 @@ use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::primitive::*;
 use crate::types::*;
 
-pub(crate) struct TermMemo<R> {
-	entries: IdMap<u64, Vec<TermMemoEntry<R>>>,
+#[derive(Default)]
+struct RewriteCache {
+	entries: IdMap<u64, Vec<RewriteEntry>>,
 	inserted: usize,
 	recent: std::collections::VecDeque<Arc<Primitive>>,
 }
 
-struct TermMemoEntry<R> {
+struct RewriteEntry {
 	input: std::sync::Weak<Primitive>,
-	result: R,
+	result: bool,
 	value: Option<Value>,
 }
 
 const TERM_MEMO_SWEEP: usize = 65536;
 const TERM_MEMO_RECENT: usize = 1024;
 
-impl<R> Default for TermMemo<R> {
-	fn default() -> Self {
-		TermMemo {
-			entries: IdMap::default(),
-			inserted: 0,
-			recent: std::collections::VecDeque::new(),
-		}
-	}
-}
-
-impl<R: Clone> TermMemo<R> {
-	pub(crate) fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<(R, Value)> {
+impl RewriteCache {
+	fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
 		self.entries.get(&key)?.iter().find_map(|entry| {
 			let held = entry.input.upgrade()?;
 			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p)).then(|| {
 				(
-					entry.result.clone(),
+					entry.result,
 					entry.value.clone().unwrap_or(Value::Primitive(held)),
 				)
 			})
 		})
 	}
 
-	pub(crate) fn put(&mut self, key: u64, p: &Arc<Primitive>, result: R, value: Value) {
+	fn put(&mut self, key: u64, p: &Arc<Primitive>, result: bool, value: Value) {
 		if self.recent.len() == TERM_MEMO_RECENT {
 			self.recent.pop_front();
 		}
@@ -63,7 +54,7 @@ impl<R: Clone> TermMemo<R> {
 			Value::Primitive(output) if Arc::ptr_eq(p, output) => None,
 			_ => Some(value),
 		};
-		bucket.push(TermMemoEntry {
+		bucket.push(RewriteEntry {
 			input: Arc::downgrade(p),
 			result,
 			value,
@@ -77,8 +68,6 @@ impl<R: Clone> TermMemo<R> {
 		});
 	}
 }
-
-type RewriteCache = TermMemo<bool>;
 
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),

@@ -727,7 +727,7 @@ fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize
 		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
 			continue;
 		}
-		let ground = vars::ground_free(&vars::apply(term, proposal));
+		let ground = crate::theory::reduce_once(&vars::ground_free(&vars::apply(term, proposal)));
 		if vars::contains_var(&ground) {
 			continue;
 		}

@@ -1,107 +1,30 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::context::Generational;
-use crate::theory::{TermMemo, can_rewrite};
+use crate::theory::can_rewrite;
 use crate::types::*;
-
-#[derive(Clone)]
-struct Reduced {
-	failed: Option<Primitive>,
-	rewritten: bool,
-	value: Value,
-}
-
-type ReduceCache = TermMemo<(bool, bool)>;
-
-thread_local! {
-	static REDUCE_CACHE: RefCell<Generational<ReduceCache>> = RefCell::new(Generational::default());
-}
 
 pub(crate) fn perform_primitive_rewrite(
 	p: &Arc<Primitive>,
 	slot_index: usize,
 	ps: &mut PrincipalState,
 ) -> Option<Primitive> {
-	let reduced = reduce_term(p);
-	if reduced.rewritten {
-		ps.values[slot_index].set_value(reduced.value);
-	}
-	reduced.failed
-}
-
-fn reduce_term(p: &Arc<Primitive>) -> Reduced {
-	let key = crate::hashing::primitive_hash(p);
-	if let Some(hit) = reduce_cache_get(key, p) {
-		return hit;
-	}
-	let computed = reduce_term_uncached(p);
-	REDUCE_CACHE.with(|c| {
-		c.borrow_mut().fresh().put(
-			key,
-			p,
-			(computed.failed.is_some(), computed.rewritten),
-			computed.value.clone(),
-		);
-	});
-	computed
-}
-
-fn reduce_cache_get(key: u64, p: &Arc<Primitive>) -> Option<Reduced> {
-	REDUCE_CACHE.with(|c| {
-		let ((failed, rewritten), value) = c.borrow_mut().fresh().get(key, p)?;
-		Some(Reduced {
-			failed: if failed {
-				value.as_primitive().cloned()
-			} else {
-				None
-			},
-			rewritten,
-			value,
-		})
-	})
-}
-
-fn reduce_term_uncached(p: &Arc<Primitive>) -> Reduced {
-	let (rewritten, value) = reduce_arguments(p);
-	let mut reduced = Reduced {
-		failed: None,
-		rewritten,
-		value,
+	let (rewritten, value) = can_rewrite(p);
+	let failed = if rewritten {
+		None
+	} else {
+		value.as_primitive().cloned()
 	};
-	let Value::Primitive(root) = &reduced.value else {
-		return reduced;
-	};
-	let (rewritten_root, rewritten_value) = can_rewrite(&Arc::clone(root));
-	if !rewritten_root && let Some(p) = rewritten_value.as_primitive() {
-		reduced.failed = Some(p.clone());
+	if rewritten
+		|| crate::value::subterms(&Value::Primitive(Arc::clone(p)))
+			.skip(1)
+			.any(|term| matches!(term, Value::Primitive(inner) if can_rewrite(inner).0))
+	{
+		ps.values[slot_index].set_value(value);
 	}
-	reduced.rewritten = reduced.rewritten || rewritten_root;
-	reduced.value = rewritten_value;
-	reduced
-}
-
-fn reduce_arguments(p: &Arc<Primitive>) -> (bool, Value) {
-	let mut rewritten = false;
-	let mut new_args: Option<Vec<Value>> = None;
-	for (i, a) in p.arguments.iter().enumerate() {
-		let Value::Primitive(inner_p) = a else {
-			continue;
-		};
-		let r = reduce_term(inner_p);
-		if r.rewritten {
-			rewritten = true;
-			new_args.get_or_insert_with(|| p.arguments.clone())[i] = r.value;
-		}
-	}
-	let value = match new_args {
-		Some(args) => Value::Primitive(Arc::new(p.with_arguments(args))),
-		None => Value::Primitive(Arc::clone(p)),
-	};
-	(rewritten, value)
+	failed
 }
 
 #[cfg(test)]
@@ -109,29 +32,6 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
-
-	#[test]
-	fn a_reduce_cache_releases_discarded_inputs_after_eviction() {
-		crate::context::enter_generation(crate::context::next_generation());
-		let p = Arc::new(Primitive::new(
-			PRIM_HASH,
-			vec![make_constant("reduce_lifetime")],
-			0,
-		));
-		let weak = Arc::downgrade(&p);
-		assert!(reduce_term(&p).rewritten);
-		assert!(reduce_cache_get(crate::hashing::primitive_hash(&p), &p).is_some());
-		drop(p);
-		for index in 0..2048 {
-			let next = Arc::new(Primitive::new(
-				PRIM_HASH,
-				vec![make_constant(&format!("reduce_eviction_{index}"))],
-				0,
-			));
-			reduce_term(&next);
-		}
-		assert!(weak.upgrade().is_none());
-	}
 
 	fn one_slot(value: &Value) -> PrincipalState {
 		let name = make_constant("rw_slot");
@@ -144,23 +44,6 @@ mod tests {
 		)
 	}
 
-	#[test]
-	fn a_reduction_cached_under_one_generation_is_not_served_under_the_next() {
-		crate::context::enter_generation(crate::context::next_generation());
-		let k = make_constant("rgen_k");
-		let m = make_constant("rgen_m");
-		let enc = make_primitive(primitive_get_enum("ENC").unwrap(), vec![k.clone(), m], 0);
-		let dec = make_primitive(primitive_get_enum("DEC").unwrap(), vec![k, enc], 0);
-		let Value::Primitive(p) = &dec else {
-			panic!("expected a primitive");
-		};
-		let key = crate::hashing::primitive_hash(p);
-		assert!(reduce_term(p).rewritten);
-		assert!(reduce_cache_get(key, p).is_some());
-		crate::context::enter_generation(crate::context::next_generation());
-		assert!(reduce_cache_get(key, p).is_none());
-	}
-
 	fn rewrite(value: &Value) -> (PrincipalState, Option<Primitive>) {
 		crate::context::enter_generation(crate::context::next_generation());
 		let mut ps = one_slot(value);
@@ -169,6 +52,61 @@ mod tests {
 		};
 		let failed = perform_primitive_rewrite(&Arc::clone(p), 0, &mut ps);
 		(ps, failed)
+	}
+
+	#[test]
+	fn failed_checks_preserve_originals_unless_a_subterm_rewrites() {
+		let left = make_constant("rw_failure_left");
+		let right = make_constant("rw_failure_right");
+		let marker = make_constant("rw_failure_original");
+		let check = |a, b| make_primitive(PRIM_ASSERT, vec![a, b], 0);
+		let failed = check(left.clone(), right.clone());
+		let unchanged = make_primitive(PRIM_HASH, vec![left.clone()], 0);
+		let reduced = make_primitive(
+			PRIM_DEC,
+			vec![
+				left.clone(),
+				make_primitive(PRIM_ENC, vec![left.clone(), right.clone()], 0),
+			],
+			0,
+		);
+		for (term, updates_original) in [
+			(failed.clone(), false),
+			(check(failed, right.clone()), false),
+			(check(unchanged, right.clone()), true),
+			(check(reduced, left), true),
+		] {
+			let Value::Primitive(p) = &term else {
+				unreachable!();
+			};
+			for _ in 0..2 {
+				let mut ps = one_slot(&term);
+				ps.values[0].original = marker.clone();
+				let failure = perform_primitive_rewrite(p, 0, &mut ps);
+				assert!(failure.is_some());
+				assert_eq!(
+					ps.values[0].original.equivalent(&marker, true),
+					!updates_original
+				);
+				assert!(
+					ps.values[0]
+						.value
+						.equivalent(&crate::theory::reduce_once(&term), true)
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn unchanged_shared_terms_keep_their_nodes_during_state_rewriting() {
+		let mut term = make_constant("rw_shared_unchanged");
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let (ps, failed) = rewrite(&term);
+		assert!(failed.is_none());
+		assert!(ps.values[0].value.same_term(&term));
+		assert!(ps.values[0].original.same_term(&term));
 	}
 
 	#[test]
@@ -298,7 +236,7 @@ mod tests {
 	}
 
 	#[test]
-	fn the_reduce_cache_answers_for_a_structurally_identical_term() {
+	fn state_rewriting_accepts_a_structurally_identical_cached_term() {
 		let k = make_constant("rwc_k");
 		let m = make_constant("rwc_m");
 		let build = || {

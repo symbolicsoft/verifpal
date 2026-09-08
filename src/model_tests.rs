@@ -1366,6 +1366,22 @@ fn test_cap_forgeable_still_binds_its_key() {
 	run_model("cap_forgeable_still_binds_its_key.vp", "a1");
 	run_model_sessions("cap_forgeable_still_binds_its_key.vp", 1, "a1");
 }
+
+#[test]
+fn test_cap_forgeable_other_message() {
+	run_model("cap_forgeable_other_message.vp", "c1");
+	run_model_sessions("cap_forgeable_other_message.vp", 1, "c1");
+	run_model("cap_forgeable_other_key_holds.vp", "c0");
+	run_model_sessions("cap_forgeable_other_key_holds.vp", 1, "c0");
+}
+
+#[test]
+fn test_solver_constructible_reduct() {
+	run_model("solver_constructible_reduct.vp", "c1");
+	run_model_sessions("solver_constructible_reduct.vp", 1, "c1");
+	run_model("solver_constructible_reduct_guarded.vp", "c0");
+	run_model_sessions("solver_constructible_reduct_guarded.vp", 1, "c0");
+}
 #[test]
 fn test_simplex_xrcp() {
 	run_model_at(
@@ -1493,7 +1509,12 @@ fn test_junglegym_hybrid_pq() {
 }
 #[test]
 fn test_junglegym_threshold_ring() {
-	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a0u0u1u1f0f1e1e1");
+	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a1u0u1u1f0f1e1e1");
+	run_model_sessions(
+		"junglegym_threshold_ring.vp",
+		1,
+		"c1c0c0a1a1a1u0u1u1f0f1e1e1",
+	);
 }
 #[test]
 fn test_junglegym_phase_cascade() {
@@ -2831,7 +2852,8 @@ fn test_cap_err_mac_malleable() {
 }
 #[test]
 fn test_cap_forgeable_cert_chain() {
-	run_model("cap_forgeable_cert_chain.vp", "c1c0a1a0");
+	run_model("cap_forgeable_cert_chain.vp", "c1c1a1a1");
+	run_model_sessions("cap_forgeable_cert_chain.vp", 1, "c1c1a1a1");
 }
 #[test]
 fn test_cap_forgeable_mac() {
@@ -3259,7 +3281,8 @@ fn test_relay_four_hops() {
 }
 #[test]
 fn test_ringsign_forgeable_cap() {
-	run_model("ringsign_forgeable_cap.vp", "a1a0");
+	run_model("ringsign_forgeable_cap.vp", "a1a1");
+	run_model_sessions("ringsign_forgeable_cap.vp", 1, "a1a1");
 }
 #[test]
 fn test_ringsign_ring_order() {
@@ -4071,4 +4094,19 @@ fn test_weak_oracles_respect_the_annotated_smp_delivery() {
 			"{delivery}"
 		);
 	}
+}
+
+#[test]
+fn test_rewrite_goals_with_an_unguarded_pqdr_key() {
+	let source = std::fs::read_to_string("examples/messaging/simplex_pqdr.vp").unwrap();
+	let unguarded = source.replace("[ekb]", "ekb");
+	assert_ne!(unguarded, source);
+	let model = crate::parser::parse_string("pqdr-open-key.vp", &unguarded).unwrap();
+	let results = crate::verify::analyze_sessions(&model, 1)
+		.unwrap()
+		.results_get();
+	assert_eq!(
+		crate::types::VerifyResult::results_code(&results),
+		"c1c0c0a0a0a0e0"
+	);
 }

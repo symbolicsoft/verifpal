@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c0a1a0 — a forgeable signature at a certificate authority is not
-// a disclosure, it is an impersonation. The attacker mints a certificate over
+// Expected: c1c1a1a1 at one session and two. A forgeable signature at a
+// certificate authority permits impersonation. The attacker mints a certificate over
 // a public key it owns, Bob's SIGNVERIF passes, and Bob encrypts to the
 // attacker instead of to the server. This is the shape of every PKI
 // compromise, and it is the one that shows a declared assumption travelling
@@ -13,7 +13,8 @@
 // soft server's genuine key and certificate in place of the firm one's, and
 // both queries fail through simple certificate substitution. Binding the name
 // makes the two certificates non-interchangeable and leaves the forgery as the
-// only route.
+// only route. Both certificates use ca_sk, so the forgeable assumption permits
+// forgery for both names, including the unannotated cert_firm.
 //
 // The keys reaching the CA are guarded for the same reason blind_signing_oracle
 // .vp keeps one flight guarded: a CA that signs whatever arrives on an open

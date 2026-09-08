@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and two. The attacker replaces both ciphertexts
+// with PKE_ENC(pk, nil), so Bob decrypts them to nil and derives the known
+// wrapping key HASH(nil, nil). The wrapping ciphertext then reveals Bob's secret.
+// Deriving the two decryptions requires choosing inputs that reduce; it does
+// not require learning Bob's private decryption key.
+
+attacker[active]
+
+principal Bob[
+	knows private dk, secret
+	pk = PUBKEY(dk)
+]
+
+Bob -> Alice: [pk]
+
+principal Alice[
+	generates x, y
+	cx = PKE_ENC(pk, x)
+	cy = PKE_ENC(pk, y)
+]
+
+Alice -> Bob: cx, cy
+
+principal Bob[
+	dx = PKE_DEC(dk, cx)
+	dy = PKE_DEC(dk, cy)
+	key = HASH(dx, dy)
+	sealed = ENC(key, secret)
+]
+
+Bob -> Carol: sealed
+
+principal Carol[
+]
+
+queries[
+	confidentiality? secret
+]

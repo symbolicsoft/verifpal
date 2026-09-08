@@ -11,7 +11,7 @@ use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
 use crate::value::value_nil;
 
-use super::matching::{match_value, match_values, unifiers};
+use super::matching::{match_values, unifiers};
 use super::symbolic::SymbolicState;
 use super::vars::{
 	Substitution, apply, as_var, bind, contains_var, dedupe, same_substitution, substitution_hash,
@@ -142,7 +142,7 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
-		let g = apply(goal, s);
+		let g = crate::theory::reduce_once(&apply(goal, s));
 		let key = g.hash_value();
 		if !contains_var(&g) && self.attacker.knows(&g).is_some() {
 			out.push(s.clone());
@@ -509,7 +509,10 @@ impl<'a> Deducer<'a> {
 			{
 				continue;
 			}
-			if !self.capability_in_force(held, Capability::Malleable) {
+			if !self
+				.capabilities
+				.in_force(held, Capability::Malleable, self.attacker.current_phase)
+			{
 				continue;
 			}
 			let mut frontier = vec![s.clone()];
@@ -625,6 +628,16 @@ impl<'a> Deducer<'a> {
 		if let Some(swapped) = commutativity_swap(p) {
 			self.solve_primitive_arguments(&swapped, s, out);
 		}
+		if p.arguments.iter().any(contains_var) {
+			let term = Value::Primitive(Arc::new(p.clone()));
+			for bound in self.satisfy_check(p, s) {
+				let applied = apply(&term, &bound);
+				let reduced = crate::theory::reduce_once(&applied);
+				if !applied.equivalent(&reduced, true) {
+					self.solve_into(&reduced, &bound, out);
+				}
+			}
+		}
 	}
 
 	fn solve_primitive_arguments(
@@ -633,7 +646,12 @@ impl<'a> Deducer<'a> {
 		s: &Substitution,
 		out: &mut Vec<Substitution>,
 	) {
-		let forgeable_secret = self.forgeable_secret(p);
+		let forgeable_secret = self
+			.capabilities
+			.forgeable_secret_position(p, self.attacker.current_phase);
+		let secret_position = primitive_get(p.id)
+			.ok()
+			.and_then(|spec| spec.forgeable_secret);
 		let by_reuse = forgeable_by_reuse(p, self.attacker);
 		let mut frontier = vec![s.clone()];
 		for (i, arg) in p.arguments.iter().enumerate() {
@@ -644,39 +662,25 @@ impl<'a> Deducer<'a> {
 			}
 			if exempt {
 				next.extend(frontier.iter().cloned());
-			} else if next.is_empty() {
+			} else if Some(i) == secret_position && !self.capabilities.is_empty() {
+				for (term, caps) in self.capabilities.annotated_terms() {
+					if caps.in_force(Capability::Forgeable, self.attacker.current_phase)
+						&& let Value::Primitive(annotated) = term
+						&& annotated.id == p.id
+						&& let Some(secret) = annotated.arguments.get(i)
+					{
+						for candidate in &frontier {
+							next.extend(match_values(arg, secret, candidate));
+						}
+					}
+				}
+			}
+			if next.is_empty() {
 				return;
 			}
 			frontier = dedupe(next);
 		}
 		out.extend(frontier);
-	}
-
-	fn forgeable_secret(&self, p: &Primitive) -> Option<usize> {
-		if !self.capability_in_force(p, Capability::Forgeable) {
-			return None;
-		}
-		primitive_get(p.id).ok()?.forgeable_secret
-	}
-
-	fn capability_in_force(&self, p: &Primitive, cap: Capability) -> bool {
-		if self.capabilities.is_empty() {
-			return false;
-		}
-		let phase = self.attacker.current_phase;
-		if self.capabilities.in_force(p, cap, phase) {
-			return true;
-		}
-		let pattern = Value::Primitive(Arc::new(p.clone()));
-		if !contains_var(&pattern) {
-			return false;
-		}
-		let empty = Substitution::default();
-		self.capabilities.annotated_terms().any(|(term, caps)| {
-			caps.in_force(cap, phase)
-				&& matches!(term, Value::Primitive(q) if q.id == p.id)
-				&& match_value(&pattern, term, &empty).is_some()
-		})
 	}
 
 	fn solve_by_decomposition(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -1363,6 +1367,97 @@ fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn forgeable_goals_share_only_the_declared_key_primitive_and_phase() {
+		let key = make_private("forge_scope_key");
+		let other = make_private("forge_scope_other");
+		let message = make_constant("forge_scope_message");
+		let hidden = make_private("forge_scope_hidden");
+		let mut annotated = Primitive::new(PRIM_SIGN, vec![key.clone(), value_nil()], 0);
+		annotated.capabilities.set(Capability::Forgeable, 2);
+		let mut ps = make_principal_state("Scope", 1, vec![], vec![]);
+		Arc::make_mut(&mut ps.capabilities).insert(&Value::Primitive(Arc::new(annotated)));
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		for phase in [1, 2] {
+			let mut attacker = make_attacker_state(vec![value_nil(), message.clone()]);
+			attacker.current_phase = phase;
+			let deducer = Deducer::new(&ps, &attacker, &sym);
+			for (id, secret, payload, expected) in [
+				(PRIM_SIGN, &key, &message, phase == 2),
+				(PRIM_SIGN, &other, &message, false),
+				(PRIM_SIGN, &key, &hidden, false),
+				(PRIM_MAC, &key, &message, false),
+			] {
+				let goal = Value::primitive(id, vec![secret.clone(), payload.clone()], 0);
+				assert_eq!(
+					!deducer.solve(&goal, &Substitution::default()).is_empty(),
+					expected,
+					"{goal} at phase {phase}"
+				);
+			}
+			let variable = super::super::vars::attacker_var(0, "forge_scope_variable");
+			let goal = Value::primitive(PRIM_SIGN, vec![variable.clone(), message.clone()], 0);
+			let solutions = deducer.solve(&goal, &Substitution::default());
+			assert!(
+				solutions
+					.iter()
+					.any(|s| apply(&variable, s).equivalent(&value_nil(), true))
+			);
+			assert_eq!(
+				solutions
+					.iter()
+					.any(|s| apply(&variable, s).equivalent(&key, true)),
+				phase == 2,
+			);
+		}
+	}
+
+	#[test]
+	fn solving_a_reducible_goal_requires_its_result_to_be_derivable() {
+		let key = make_private("reduct_goal_key");
+		let hidden = make_private("reduct_goal_hidden");
+		let public = Value::primitive(PRIM_PUBKEY, vec![key.clone()], 0);
+		let sealed = Value::primitive(PRIM_PKE_ENC, vec![public.clone(), hidden.clone()], 0);
+		let ps = make_principal_state("Reduct", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let attacker = make_attacker_state(vec![value_nil(), public, sealed]);
+		let variable = super::super::vars::attacker_var(0, "reduct_goal_ciphertext");
+		let goal = Value::primitive(PRIM_PKE_DEC, vec![key, variable.clone()], 0);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let bound = Substitution::from_iter([(
+			as_var(&variable).unwrap(),
+			Value::primitive(
+				PRIM_PKE_ENC,
+				vec![attacker.known[1].clone(), value_nil()],
+				0,
+			),
+		)]);
+		let before = deducer.fresh.get();
+		let solved = deducer.solve(&goal, &bound);
+		assert_eq!(solved.len(), 1);
+		assert!(same_substitution(&solved[0], &bound));
+		assert_eq!(deducer.fresh.get(), before);
+		let solutions = deducer.solve(&goal, &Substitution::default());
+		assert!(!solutions.is_empty());
+		for solution in solutions {
+			let sent = super::super::vars::ground_free(&apply(&variable, &solution));
+			assert!(super::super::validate::derivable(&sent, &ps, &attacker));
+			let reduced = crate::theory::reduce_once(&super::super::vars::ground_free(&apply(
+				&goal, &solution,
+			)));
+			assert!(super::super::validate::derivable(&reduced, &ps, &attacker));
+			assert!(!reduced.equivalent(&hidden, true));
+		}
+	}
 
 	#[test]
 	fn combining_constraint_groups_keeps_alignments_needed_by_later_groups() {

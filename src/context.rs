@@ -163,7 +163,6 @@ pub(crate) struct VerifyContext {
 	query_goals: RwLock<Vec<usize>>,
 	#[cfg(test)]
 	searched: AtomicBool,
-	origin_only: RwLock<IdSet<usize>>,
 	replays: RwLock<Recent<KnowledgeKey, u64, Vec<Replay>>>,
 	basis: RwLock<(i32, usize, IdSet<u64>)>,
 	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
@@ -434,7 +433,6 @@ impl VerifyContext {
 			replays: RwLock::new(Recent::default()),
 			basis: RwLock::new((-1, 0, IdSet::default())),
 			term_bound: std::sync::OnceLock::new(),
-			origin_only: RwLock::new(IdSet::default()),
 			saturation: RwLock::new(IdMap::default()),
 			executions: RwLock::new(IdMap::default()),
 			bases: RwLock::new(IdMap::default()),
@@ -608,10 +606,6 @@ impl VerifyContext {
 				truncations,
 			};
 		}
-	}
-
-	pub(crate) fn note_origin_only(&self, query_index: usize) -> bool {
-		write_lock(&self.origin_only).insert(query_index)
 	}
 
 	/// The execution a substitution set describes, replayed once and shared by
@@ -1180,7 +1174,6 @@ impl VerifyContext {
 			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
 			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
 			truncations: RwLock::new(read_lock(&self.truncations).clone()),
-			origin_only: RwLock::new(IdSet::default()),
 			saturation: RwLock::new(IdMap::default()),
 			executions: RwLock::new(IdMap::default()),
 			bases: RwLock::new(IdMap::default()),

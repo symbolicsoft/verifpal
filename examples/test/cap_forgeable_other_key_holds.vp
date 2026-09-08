@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and two. The forgeable signature uses other_sk,
+// so it cannot certify an attacker key under the independent ca_sk trusted
+// by Browser. The bundled bank key and certificate cannot be replaced with
+// a certificate that passes Browser's check and exposes secret.
+
+attacker[active]
+
+principal Ca[
+	knows private ca_sk, other_sk
+	knows public context
+	ca_pk = PUBKEY(ca_sk)
+	tag = SIGN[forgeable](other_sk, context)
+]
+
+principal Bank[
+	knows private b_sk
+	b_pk = PUBKEY(b_sk)
+]
+
+Bank -> Ca: [b_pk]
+
+Ca -> Browser: [ca_pk], [tag]
+
+principal Ca[
+	cert = SIGN(ca_sk, CONCAT(context, b_pk))
+	blob = CONCAT(b_pk, cert)
+]
+
+Ca -> Browser: blob
+
+principal Browser[
+	knows public context
+	knows private secret
+	peer, signature = SPLIT(blob)
+	_ = SIGNVERIF(ca_pk, CONCAT(context, peer), signature)?
+	sealed = PKE_ENC(peer, secret)
+]
+
+Browser -> Bank: sealed
+
+queries[
+	confidentiality? secret
+]

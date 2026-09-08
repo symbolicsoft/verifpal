@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c1c0c0a1a1a0u0u1u1f0f1e1e1
+// Expected: c1c0c0a1a1a1u0u1u1f0f1e1e1 at one session and two.
+//
+// The receipt is forgeable too: replacing escrow_sealed with an encryption
+// of nil makes Beacon expect a MAC under nil. The attacker already recovers
+// the signature bundle using the disclosed escrow shares, so it can mint that
+// MAC and satisfy Beacon's final check without Cipher accepting the vault.
 //
 // Five-principal escrow: a Shamir-split key, ring signatures that must stay
 // anonymous, and blind signatures that must stay unlinkable.

@@ -135,6 +135,9 @@ impl QueryVerdict {
 
 fn emit_query_result(ctx: &VerifyContext, result: &VerifyResult) {
 	if ctx.results_put(result, &QueryVerdict(())) {
+		if result.subtype == Some(Subtype::ReplayableFirstFlight) {
+			note_origin_only(&result.query);
+		}
 		let headline = crate::pretty::query_line(&result.query);
 		let qualifier = result.subtype.map(Subtype::qualifier).unwrap_or_default();
 		crate::info::info_analysis_result(&headline, || {
@@ -253,7 +256,7 @@ fn query_authentication(
 		return Ok(result);
 	}
 	let (indices, sender, c, sibling_replay) =
-		query_authentication_get_pass_indices(ctx, query, query_index, km, ps, attacker)?;
+		query_authentication_get_pass_indices(ctx, query, km, ps, attacker)?;
 	if query.message.sender == sender {
 		return Ok(result);
 	}
@@ -370,7 +373,6 @@ fn query_find_constant_usage_indices(
 fn query_authentication_get_pass_indices(
 	ctx: &VerifyContext,
 	query: &Query,
-	query_index: usize,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
@@ -406,9 +408,6 @@ fn query_authentication_get_pass_indices(
 		}
 		if sibling_replay && delivery_is_guarded(km, idx, query.message.sender, ps.id) {
 			return Ok((vec![], query.message.sender, c, false));
-		}
-		if sibling_replay && !recipient_contributed(&c, km, ps) {
-			note_origin_only(ctx, query, query_index);
 		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
@@ -462,10 +461,7 @@ fn forged_recipient_context(
 	})
 }
 
-fn note_origin_only(ctx: &VerifyContext, query: &Query, query_index: usize) {
-	if !ctx.note_origin_only(query_index) {
-		return;
-	}
+fn note_origin_only(query: &Query) {
 	crate::info::info_message(
 		&format!(
 			"{} reports a duplicate that {} cannot rule out on its own: it contributes \
@@ -812,6 +808,36 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn duplicate_notices_belong_only_to_recorded_acceptances() {
+		crate::info::set_verbosity(crate::info::Verbosity::Normal);
+		for (file, expected) in [
+			("threshold_sign.vp", false),
+			("session_replay_breaks_injectivity.vp", true),
+		] {
+			let source = std::fs::read_to_string(format!("examples/test/{file}")).unwrap();
+			let model = crate::parser::parse_string(file, &source).unwrap();
+			let _ = crate::info::info_capture_take();
+			let _capture = crate::info::InfoCapture::new();
+			let ctx = crate::verify::analyze_sessions(&model, 2).unwrap();
+			let results = ctx.results_get();
+			let authentication = results
+				.iter()
+				.find(|result| result.query.kind == QueryKind::Authentication)
+				.unwrap();
+			assert_eq!(authentication.resolved, expected, "{file}");
+			if expected {
+				assert_eq!(authentication.subtype, Some(Subtype::ReplayableFirstFlight));
+				emit_query_result(&ctx, authentication);
+			}
+			let notices = crate::info::info_capture_take()
+				.iter()
+				.filter(|line| line.contains("reports a duplicate"))
+				.count();
+			assert_eq!(notices, usize::from(expected), "{file}");
+		}
+	}
+
+	#[test]
 	fn confidentiality_classification_walks_shared_terms_and_aliases() {
 		use crate::primitive::PRIM_HASH;
 		use crate::testutil::{
@@ -896,7 +922,6 @@ mod tests {
 		let (indices, sender, _, _) = query_authentication_get_pass_indices(
 			&ctx,
 			&model.queries[0],
-			0,
 			&trace,
 			state,
 			&attacker,

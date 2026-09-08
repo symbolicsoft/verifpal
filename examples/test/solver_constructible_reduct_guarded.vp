@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and two. The first ciphertext is guarded,
+// leaving dx equal to Alice's fresh secret x. Choosing the second decryption
+// result cannot make HASH(x, dy) derivable without learning x or dk.
+
+attacker[active]
+
+principal Bob[
+	knows private dk, secret
+	pk = PUBKEY(dk)
+]
+
+Bob -> Alice: [pk]
+
+principal Alice[
+	generates x, y
+	cx = PKE_ENC(pk, x)
+	cy = PKE_ENC(pk, y)
+]
+
+Alice -> Bob: [cx], cy
+
+principal Bob[
+	dx = PKE_DEC(dk, cx)
+	dy = PKE_DEC(dk, cy)
+	key = HASH(dx, dy)
+	sealed = ENC(key, secret)
+]
+
+Bob -> Carol: sealed
+
+principal Carol[
+]
+
+queries[
+	confidentiality? secret
+]
