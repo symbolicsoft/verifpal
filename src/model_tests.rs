@@ -3860,6 +3860,20 @@ fn test_unlinkability_observes_only_extracted_values() {
 }
 
 #[test]
+fn test_shared_transcript_usage() {
+	run_model("shared_transcript_usage.vp", "a0");
+	run_model_sessions("shared_transcript_usage.vp", 1, "a0");
+}
+
+#[test]
+fn test_aead_reuse_public_payloads() {
+	run_model("aead_reuse_public_payloads.vp", "c1c0c0");
+	run_model_sessions("aead_reuse_public_payloads.vp", 1, "c1c0c0");
+	run_model("aead_distinct_public_payloads.vp", "c0c0c0");
+	run_model_sessions("aead_distinct_public_payloads.vp", 1, "c0c0c0");
+}
+
+#[test]
 fn test_shared_transcript_metadata() {
 	run_model("shared_transcript_metadata.vp", "c0f0");
 	run_model_sessions("shared_transcript_metadata.vp", 1, "c0f0");

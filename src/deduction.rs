@@ -877,7 +877,7 @@ fn rule_reuse(
 			let Some(rule) = reuse_rule(p.id) else {
 				continue;
 			};
-			ctx.attacker_note_reuse([of.clone(), with.clone()]);
+			progress |= ctx.attacker_note_reuse([of.clone(), with.clone()]);
 			for reveal in &rule.reveals {
 				let revealed = match *reveal {
 					Reveal::Argument(index) => match p.arguments.get(index) {

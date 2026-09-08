@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0c0 at both session counts. With different nonces on the two
+// disclosed ciphertexts there is no reuse capability, so the attacker cannot
+// forge the key that opens sealed. Neither encryption key is disclosed.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, secret
+	knows public nonce, other_nonce, a, b, c, ad
+	first = AEAD_ENC(k, nonce, a, ad)
+	second = AEAD_ENC(k, other_nonce, b, ad)
+	forged_key = AEAD_ENC(k, nonce, c, ad)
+	sealed = ENC(forged_key, secret)
+	other = AEAD_ENC(k, other_nonce, c, ad)
+	leaks first, second, sealed
+]
+
+queries[
+	confidentiality? secret
+	confidentiality? k
+	confidentiality? other
+]

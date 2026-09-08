@@ -914,7 +914,7 @@ impl VerifyContext {
 		mine.into_iter().map(|(_, bindings)| bindings).collect()
 	}
 
-	pub(crate) fn attacker_note_reuse(&self, pair: [Value; 2]) {
+	pub(crate) fn attacker_note_reuse(&self, pair: [Value; 2]) -> bool {
 		let mut state = write_lock(&self.attacker);
 		let seen = state.reused.iter().any(|held| {
 			(held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true))
@@ -923,6 +923,7 @@ impl VerifyContext {
 		if !seen {
 			Arc::make_mut(&mut state.reused).push(pair);
 		}
+		!seen
 	}
 
 	pub(crate) fn attacker_knows(&self, value: &Value) -> bool {

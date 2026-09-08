@@ -15,8 +15,11 @@ pub(crate) fn unifiers(
 	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone())
 }
 
-pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {
-	let mut out = a.clone();
+pub(crate) fn merge<'a>(
+	a: &Substitution,
+	b: &'a Substitution,
+) -> impl Iterator<Item = Substitution> + use<'a> {
+	let out = a.clone();
 	let mut pending = Vec::new();
 	let mut overlapping = Vec::new();
 	for (id, value) in b {
@@ -37,19 +40,17 @@ pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> 
 			}
 		}
 	}
-	if pending.is_empty() {
-		return Some(out);
-	}
 	pending.reverse();
-	out = solve_equations::<true>(pending, out).next()?;
-	for (id, value) in overlapping {
-		let resolved = super::vars::apply(value, &out);
-		if occurs(id, &resolved, &out) {
-			return None;
+	solve_equations::<true>(pending, out).filter_map(move |mut out| {
+		for &(id, value) in &overlapping {
+			let resolved = super::vars::apply(value, &out);
+			if occurs(id, &resolved, &out) {
+				return None;
+			}
+			out.insert(id, resolved);
 		}
-		out.insert(id, resolved);
-	}
-	Some(out)
+		Some(out)
+	})
 }
 
 fn resolved<'a>(v: &'a Value, s: &Substitution) -> Cow<'a, Value> {
@@ -258,7 +259,9 @@ mod tests {
 		]);
 		right.insert(ids[0], dh_kex(pubkey(a.clone()), b.clone()));
 		right.insert(ids[1], b.clone());
-		let found = merge(&left, &right).expect("the swapped ordering satisfies both bindings");
+		let found = merge(&left, &right)
+			.next()
+			.expect("the swapped ordering satisfies both bindings");
 		assert!(crate::solve::vars::apply(&x, &found).equivalent(&b, true));
 		assert!(crate::solve::vars::apply(&y, &found).equivalent(&a, true));
 		for (id, value) in &right {
@@ -278,8 +281,8 @@ mod tests {
 			as_var(&y).unwrap(),
 			Value::primitive(crate::primitive::PRIM_HASH, vec![x], 0),
 		)]);
-		assert!(merge(&left, &right).is_none());
-		assert!(merge(&right, &left).is_none());
+		assert!(merge(&left, &right).next().is_none());
+		assert!(merge(&right, &left).next().is_none());
 	}
 
 	#[test]
@@ -298,7 +301,9 @@ mod tests {
 		};
 		let left = Substitution::from_iter([(ids[0], variable(ids[1]))]);
 		right.insert(ids[1], variable(ids[0]));
-		let found = merge(&left, &right).expect("both aliases resolve to the same atom");
+		let found = merge(&left, &right)
+			.next()
+			.expect("both aliases resolve to the same atom");
 		for id in ids {
 			assert!(crate::solve::vars::apply(&variable(id), &found).equivalent(&atom, true));
 		}

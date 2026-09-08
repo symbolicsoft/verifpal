@@ -1335,9 +1335,7 @@ pub(crate) fn combine(left: &[Substitution], right: &[Substitution]) -> Vec<Subs
 	let mut out = Vec::new();
 	for a in left {
 		for b in right {
-			if let Some(merged) = super::matching::merge(a, b) {
-				out.push(merged);
-			}
+			out.extend(super::matching::merge(a, b));
 		}
 	}
 	dedupe(out)
@@ -1365,6 +1363,33 @@ fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn combining_constraint_groups_keeps_alignments_needed_by_later_groups() {
+		let x = super::super::vars::free_var(0);
+		let y = super::super::vars::free_var(1);
+		let a = make_private("combine_later_a");
+		let b = make_private("combine_later_b");
+		let key = |a, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let slot = super::super::vars::attacker_var_id(0);
+		let left = Substitution::from_iter([(slot, key(x.clone(), y.clone()))]);
+		let right = Substitution::from_iter([(slot, key(a.clone(), b.clone()))]);
+		let merged = combine(&[left], &[right]);
+		assert_eq!(merged.len(), 2);
+		for (wanted, other) in [(&a, &b), (&b, &a)] {
+			let later = Substitution::from_iter([(as_var(&x).unwrap(), wanted.clone())]);
+			let found = combine(&merged, &[later]);
+			assert_eq!(found.len(), 1);
+			assert!(apply(&x, &found[0]).equivalent(wanted, true));
+			assert!(apply(&y, &found[0]).equivalent(other, true));
+		}
+	}
 
 	#[test]
 	fn rewrite_inversion_keeps_bindings_in_the_reduct() {

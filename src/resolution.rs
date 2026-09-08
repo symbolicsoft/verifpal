@@ -56,32 +56,41 @@ pub(crate) fn state_mentions(
 	owner: PrincipalId,
 	target: ValueId,
 ) -> bool {
-	match value {
-		Value::Constant(c) => {
-			if c.id == target {
-				return match ps.index_of(c) {
-					Some(idx) => owner == ps.id || ps.mutation_reaches(idx, owner),
-					None => false,
+	let mut pending = vec![(value, owner)];
+	let mut seen = IdSet::default();
+	while let Some((value, owner)) = pending.pop() {
+		match value {
+			Value::Constant(c) => {
+				if c.id == target {
+					if ps
+						.index_of(c)
+						.is_some_and(|idx| owner == ps.id || ps.mutation_reaches(idx, owner))
+					{
+						return true;
+					}
+					continue;
+				}
+				let Some(idx) = trace.index_of(c) else {
+					continue;
 				};
+				let inner = &trace.slots[idx].initial_value;
+				if !matches!(inner, Value::Primitive(_)) {
+					continue;
+				}
+				let next = ps
+					.index_of(c)
+					.map(|i| ps.values[i].provenance.creator)
+					.unwrap_or(trace.slots[idx].creator);
+				pending.push((inner, next));
 			}
-			let Some(idx) = trace.index_of(c) else {
-				return false;
-			};
-			let inner = &trace.slots[idx].initial_value;
-			if !matches!(inner, Value::Primitive(_)) {
-				return false;
+			Value::Primitive(p) => {
+				if seen.insert((Arc::as_ptr(p) as usize, owner)) {
+					pending.extend(p.arguments.iter().rev().map(|arg| (arg, owner)));
+				}
 			}
-			let next = ps
-				.index_of(c)
-				.map(|i| ps.values[i].provenance.creator)
-				.unwrap_or(trace.slots[idx].creator);
-			state_mentions(inner, trace, ps, next, target)
 		}
-		Value::Primitive(p) => p
-			.arguments
-			.iter()
-			.any(|arg| state_mentions(arg, trace, ps, owner, target)),
 	}
+	false
 }
 
 fn compute_visibility(
@@ -275,6 +284,54 @@ pub(crate) fn value_constant_contains_fresh_values(
 mod tests {
 	use super::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn use_checks_visit_shared_terms_without_expanding_their_occurrences() {
+		let target = make_constant("mentions_dag_target");
+		let seed = make_constant("mentions_dag_seed");
+		let ps = make_principal_state(
+			"Reader",
+			1,
+			vec![make_slot_meta(target.as_constant().unwrap(), true)],
+			vec![make_slot_values(&target, 1)],
+		);
+		let mut term = seed;
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		let trace = make_trace();
+		let id = target.as_constant().unwrap().id;
+		assert!(!state_mentions(&term, &trace, &ps, ps.id, id));
+		let used = Value::primitive(crate::primitive::PRIM_HASH, vec![term, target], 0);
+		assert!(state_mentions(&used, &trace, &ps, ps.id, id));
+	}
+
+	#[test]
+	fn use_checks_keep_distinct_owners_of_a_shared_term() {
+		let model = crate::parser::parse_string(
+			"mentions_owner.vp",
+			"attacker[passive]\n\
+			principal Alice[generates target\n sealed = HASH(target)]\n\
+			Alice -> Bob: target, sealed\n\
+			principal Bob[local = HASH(target)]\n\
+			queries[confidentiality? target]\n",
+		)
+		.unwrap();
+		let (trace, states) = crate::sanity::sanity(&model).unwrap();
+		let ps = states.iter().find(|state| state.name == "Bob").unwrap();
+		let target = trace_constant(&trace, "target");
+		let sealed = trace_constant(&trace, "sealed");
+		let slot = trace.index_of(sealed.as_constant().unwrap()).unwrap();
+		let shared = trace.slots[slot].initial_value.clone();
+		let id = target.as_constant().unwrap().id;
+		assert!(!state_mentions(&sealed, &trace, ps, ps.id, id));
+		let both = Value::primitive(crate::primitive::PRIM_HASH, vec![sealed, shared], 0);
+		assert!(state_mentions(&both, &trace, ps, ps.id, id));
+	}
 
 	#[test]
 	fn freshness_scans_a_shared_graph_without_enumerating_occurrences() {

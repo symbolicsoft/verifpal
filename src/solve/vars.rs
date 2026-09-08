@@ -599,7 +599,9 @@ mod tests {
 		let mut right = crate::solve::vars::Substitution::default();
 		right.insert(slot, concat(crate::solve::vars::free_var(1), b.clone()));
 
-		let merged = crate::solve::matching::merge(&left, &right).expect("should unify");
+		let merged = crate::solve::matching::merge(&left, &right)
+			.next()
+			.expect("should unify");
 		let value = merged.get(&slot).expect("slot bound");
 		assert!(value.equivalent(&concat(a, b), true));
 	}

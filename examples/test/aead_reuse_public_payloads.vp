@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0c0 at both session counts. Reusing a key and nonce on public
+// payloads reveals no new plaintext, but enables the forgery of forged_key.
+// That term opens sealed. The closure must continue after recording the pair
+// even when it learned no value. The secret key and the ciphertext under the
+// other nonce stay unknown.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, secret
+	knows public nonce, other_nonce, a, b, c, ad
+	first = AEAD_ENC(k, nonce, a, ad)
+	second = AEAD_ENC(k, nonce, b, ad)
+	forged_key = AEAD_ENC(k, nonce, c, ad)
+	sealed = ENC(forged_key, secret)
+	other = AEAD_ENC(k, other_nonce, c, ad)
+	leaks first, second, sealed
+]
+
+queries[
+	confidentiality? secret
+	confidentiality? k
+	confidentiality? other
+]
