@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1. Swapping the requested exponents preserves the signing key
+// and makes the requested message match the two disclosed partial signatures.
+attacker[active]
+principal Dealer[
+	knows private root
+	knows public a, b
+	key = HASH(root, DH_KEX(PUBKEY(a), b))
+	s1, s2 = THRESHOLD_SPLIT[2](key)
+	generates n1, n2
+	p1 = THRESHOLD_SIGN(s1, n1, nil, b)
+	p2 = THRESHOLD_SIGN(s2, n2, nil, b)
+]
+Dealer -> Carol: p1, p2
+principal Alice[
+	generates x, y
+]
+Alice -> Bob: x, y
+principal Bob[
+	knows private root
+	generates secret
+	requested = HASH(root, DH_KEX(PUBKEY(x), y))
+	wrapping = SIGN(requested, x)
+	sealed = ENC(wrapping, secret)
+]
+Bob -> Carol: sealed
+principal Carol[]
+queries[
+	confidentiality? secret
+]

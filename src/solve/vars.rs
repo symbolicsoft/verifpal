@@ -197,6 +197,9 @@ pub(crate) fn ground_free_as(v: &Value, filler: &Value) -> Value {
 }
 
 fn ground_free_shared(v: &Value, filler: &Value, shared: &mut IdMap<usize, Value>) -> Value {
+	if !contains_var(v) {
+		return v.clone();
+	}
 	match v {
 		Value::Constant(c) => {
 			if is_free_var_id(c.id) {
@@ -397,6 +400,42 @@ mod tests {
 			&canonical_slots(&left),
 			&canonical_slots(&distinct)
 		));
+	}
+
+	#[test]
+	fn grounding_reuses_ground_subgraphs_between_proposals() {
+		let mut ground = value_nil();
+		for _ in 0..40 {
+			ground = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![ground.clone(), ground.clone(), ground],
+				0,
+			);
+		}
+		let template = Value::primitive(
+			crate::primitive::PRIM_HASH,
+			vec![
+				ground.clone(),
+				free_var(0),
+				attacker_var(0, "grounding_slot"),
+			],
+			0,
+		);
+		for filler in [value_nil(), crate::primitive::attacker_public_key()] {
+			let instantiated = ground_free_as(&template, &filler);
+			let args = &instantiated.as_primitive().unwrap().arguments;
+			let (Value::Primitive(original), Value::Primitive(retained)) = (&ground, &args[0])
+			else {
+				panic!("the transcript is a primitive");
+			};
+			assert!(Arc::ptr_eq(original, retained));
+			assert!(args[1].equivalent(&filler, true));
+			assert_eq!(as_var(&args[2]), Some(attacker_var_id(0)));
+			assert!(crate::theory::structurally_identical(
+				&ground_free_as(&ground, &filler),
+				&ground
+			));
+		}
 	}
 
 	#[test]

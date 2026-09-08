@@ -11,12 +11,14 @@ use crate::util::copy_base_name;
 use crate::witness::Witness;
 
 pub(crate) struct NameTable {
-	entries: Vec<(Value, Arc<str>)>,
+	entries: IdMap<u64, Vec<(Value, Arc<str>)>>,
 }
 
 impl NameTable {
 	pub(crate) fn empty() -> NameTable {
-		NameTable { entries: vec![] }
+		NameTable {
+			entries: IdMap::default(),
+		}
 	}
 
 	pub(crate) fn from_state(ps: &PrincipalState) -> NameTable {
@@ -24,7 +26,7 @@ impl NameTable {
 	}
 
 	pub(crate) fn from_states<'a>(states: impl Iterator<Item = &'a PrincipalState>) -> NameTable {
-		let mut entries: Vec<(Value, Arc<str>)> = Vec::new();
+		let mut table = Self::empty();
 		let attacker_key = crate::primitive::attacker_public_key();
 		for ps in states {
 			for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
@@ -35,6 +37,7 @@ impl NameTable {
 					if matches!(form, Value::Constant(_)) || form.equivalent(&attacker_key, true) {
 						continue;
 					}
+					let entries = table.entries.entry(form.hash_value()).or_default();
 					if entries
 						.iter()
 						.any(|(v, n)| v.equivalent(form, true) && **n == *sm.constant.name)
@@ -45,7 +48,7 @@ impl NameTable {
 				}
 			}
 		}
-		NameTable { entries }
+		table
 	}
 
 	pub(crate) fn compress(&self, v: &Value) -> String {
@@ -77,7 +80,9 @@ impl NameTable {
 		if !excluded(outer, preferred)
 			&& self
 				.entries
-				.iter()
+				.get(&v.hash_value())
+				.into_iter()
+				.flatten()
 				.any(|(known, name)| &**name == preferred && known.equivalent(v, true))
 		{
 			return preferred.to_string();
@@ -87,6 +92,7 @@ impl NameTable {
 
 	fn named_excluding(&self, v: &Value, exclude: &[&str]) -> Option<&Arc<str>> {
 		self.entries
+			.get(&v.hash_value())?
 			.iter()
 			.filter(|(known, _)| known.equivalent(v, true))
 			.map(|(_, name)| name)
@@ -1470,6 +1476,46 @@ mod tests {
 			make_slot_values(&hash_kb, 0),
 		];
 		make_principal_state("Alice", 0, meta, values)
+	}
+
+	#[test]
+	fn name_table_disambiguates_collisions_and_preserves_alias_order() {
+		let atom = |id| {
+			Value::Constant(Constant {
+				id,
+				..Default::default()
+			})
+		};
+		let left = make_primitive(PRIM_HASH, vec![atom(10), atom(100)], 0);
+		let right = make_primitive(PRIM_HASH, vec![atom(11), atom(69)], 0);
+		assert_eq!(left.hash_value(), right.hash_value());
+		assert!(!left.equivalent(&right, true));
+		let names = ["collision_left", "collision_right", "collision_alias"];
+		let meta = names
+			.iter()
+			.map(|name| make_slot_meta(make_constant(name).as_constant().unwrap(), true))
+			.collect();
+		let values = [&left, &right, &left]
+			.into_iter()
+			.map(|v| make_slot_values(v, 0))
+			.collect();
+		let ps = make_principal_state("Alice", 0, meta, values);
+		let table = NameTable::from_states([&ps, &ps].into_iter());
+		assert_eq!(table.compress(&left), names[0]);
+		assert_eq!(table.compress(&right), names[1]);
+		assert_eq!(table.compress_excluding(&left, &[names[0]]), names[2]);
+		assert_eq!(
+			table.compress_outer_preferring(&left, names[2], &[], &[]),
+			names[2]
+		);
+		assert_eq!(
+			table.compress_outer_preferring(&left, names[1], &[], &[]),
+			names[0]
+		);
+		assert_eq!(
+			table.compress_outer_preferring(&left, names[2], &[names[2]], &[]),
+			names[0]
+		);
 	}
 
 	#[test]

@@ -4023,6 +4023,14 @@ fn test_solver_weak_oracle() {
 }
 
 #[test]
+fn test_solver_threshold_key_alignment() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_threshold_key_alignment.vp", sessions, "c1");
+		run_model_sessions("solver_threshold_key_alignment_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_solver_unblind_bindings() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_unblind_bindings.vp", sessions, "c1");

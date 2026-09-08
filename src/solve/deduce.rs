@@ -348,9 +348,12 @@ impl<'a> Deducer<'a> {
 				let Some(secret) = split.arguments.get(reveal) else {
 					continue;
 				};
-				let Some(bound) = match_value(&target.arguments[0], secret, s) else {
+				let mut frontier: Vec<_> = match_values(&target.arguments[0], secret, s)
+					.map(|bound| (bound, 0))
+					.collect();
+				if frontier.is_empty() {
 					continue;
-				};
+				}
 				let shared: Vec<Value> = rule
 					.agree
 					.iter()
@@ -360,7 +363,6 @@ impl<'a> Deducer<'a> {
 					})
 					.collect();
 				let threshold = split.threshold;
-				let mut frontier: Vec<(Substitution, usize)> = vec![(bound, 0)];
 				let mut done: Vec<Substitution> = Vec::new();
 				for output in 0..MAX_SHARES {
 					let after = MAX_SHARES - output - 1;
@@ -1678,6 +1680,53 @@ mod tests {
 			&ps,
 			&attacker
 		));
+	}
+
+	#[test]
+	fn threshold_search_retains_key_alignments_until_the_message_matches() {
+		let a = make_private("threshold_alignment_a");
+		let b = make_private("threshold_alignment_b");
+		let x = super::super::vars::attacker_var(0, "threshold_alignment_x");
+		let y = super::super::vars::attacker_var(1, "threshold_alignment_y");
+		let dh = |a: Value, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![dh(a.clone(), b.clone())], 0);
+		split.threshold = 2;
+		let partials = (0..2)
+			.map(|output| {
+				Value::primitive(
+					PRIM_THRESHOLD_SIGN,
+					vec![
+						Value::Primitive(Arc::new(split.with_output(output))),
+						value_nil(),
+						value_nil(),
+						b.clone(),
+					],
+					0,
+				)
+			})
+			.collect();
+		let attacker = make_attacker_state(partials);
+		let ps = make_principal_state("Beacon", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let target = Primitive::new(PRIM_SIGN, vec![dh(x.clone(), y.clone()), x.clone()], 0);
+		let mut found = Vec::new();
+		deducer.solve_by_combination(&target, &Substitution::default(), &mut found);
+		assert!(
+			found
+				.iter()
+				.any(|s| apply(&x, s).equivalent(&b, true) && apply(&y, s).equivalent(&a, true))
+		);
 	}
 
 	#[test]
