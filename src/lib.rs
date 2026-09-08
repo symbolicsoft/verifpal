@@ -31,6 +31,7 @@ pub(crate) mod pretty;
 pub(crate) mod primitive;
 pub(crate) mod principal;
 pub(crate) mod query;
+pub(crate) mod reads;
 pub(crate) mod reexec;
 pub(crate) mod report;
 pub(crate) mod resolution;

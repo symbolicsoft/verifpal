@@ -39,6 +39,8 @@ pub(crate) fn validate(
 	let coherent = guards.history.compatible(ctx, km, &ps, &authored, attacker);
 	let attacker = coherent.as_deref().unwrap_or(attacker);
 
+	let restrict =
+		|archived: &AttackerState| guards.history.compatible(ctx, km, &ps, &authored, archived);
 	for &(slot, ref ground) in signature {
 		if !guards.controllable.admits(&ps, attacker, slot) {
 			return Ok(false);
@@ -53,7 +55,7 @@ pub(crate) fn validate(
 		if contains_failed_check(ground) {
 			return Ok(false);
 		}
-		let Some(at) = attacker_can_derive(ctx, slot, ground, &ps, attacker) else {
+		let Some(at) = attacker_can_derive(ctx, slot, ground, &ps, attacker, &restrict) else {
 			return Ok(false);
 		};
 		if let Some(available) = crate::reexec::available_before_receive(km, &ps, slot, attacker)
@@ -231,6 +233,7 @@ pub(crate) fn attacker_can_derive(
 	ground: &Value,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
+	restrict: &dyn Fn(&AttackerState) -> Option<std::sync::Arc<AttackerState>>,
 ) -> Option<i32> {
 	let meta = ps.meta.get(slot)?;
 	let cap = meta
@@ -250,8 +253,10 @@ pub(crate) fn attacker_can_derive(
 	candidates.dedup();
 	candidates.into_iter().find(|&phase| {
 		if phase < attacker.current_phase {
-			ctx.attacker_knowledge_at(phase)
-				.is_some_and(|snapshot| derivable(ground, ps, &snapshot))
+			ctx.attacker_knowledge_at(phase).is_some_and(|snapshot| {
+				let restricted = restrict(&snapshot);
+				derivable(ground, ps, restricted.as_deref().unwrap_or(&snapshot))
+			})
 		} else {
 			derivable(ground, ps, attacker)
 		}

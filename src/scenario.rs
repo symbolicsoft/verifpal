@@ -469,11 +469,18 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 				Declaration::Knows => matches!(expr.qualifier, Some(Qualifier::Private)),
 				_ => false,
 			};
-			if !secret {
-				continue;
+			if secret {
+				for c in &expr.constants {
+					out.insert(c.id);
+				}
 			}
-			for c in &expr.constants {
-				out.insert(c.id);
+			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
+				if let Value::Primitive(inner) = term
+					&& crate::primitive::primitive_is_key_derivation(inner.id)
+					&& let Some(Value::Constant(c)) = inner.arguments.first()
+				{
+					out.insert(c.id);
+				}
 			}
 		}
 	}
@@ -944,6 +951,24 @@ mod tests {
 		assert!(
 			e.summaries.iter().all(|s| s.honest),
 			"only a leaked secret marks a peer corrupt: {:?}",
+			e.summaries
+		);
+	}
+
+	#[test]
+	fn a_leaked_derived_private_key_makes_its_scenario_corrupt() {
+		let src = SRC
+			.replace(
+				"scx_gm = PUBKEY(scx_mk)",
+				"scx_mk2 = HASH(scx_mk)\n\t\tscx_gm = PUBKEY(scx_mk2)",
+			)
+			.replace("leaks scx_mk", "leaks scx_mk2");
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(e.summaries[0].honest);
+		assert!(
+			!e.summaries[1].honest,
+			"a leaked assignment standing as a private key marks its peer corrupt: {:?}",
 			e.summaries
 		);
 	}

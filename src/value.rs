@@ -409,6 +409,7 @@ impl AttackerState {
 				}
 			}
 		}
+		crate::reads::miss(h);
 		None
 	}
 }

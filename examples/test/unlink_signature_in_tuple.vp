@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u1u1.
+//
+// Two bundles each carry a fresh nonce beside a signature under one key. The
+// attacker splits both bundles, since CONCAT reveals its arguments, and runs
+// SIGNVERIF over the two signatures under ga: both pass, so both bundles come
+// from the holder of sk, and the bundles are linked exactly as the bare
+// signatures are.
+//
+// The identifying-check and recognized-secret witnesses used to look only at
+// the queried values themselves, so the signatures inside the bundles were
+// found for the second query and missed for the first. Both witnesses are now
+// also tried over every pair of components a tuple exposes.
+
+attacker[passive]
+
+principal Alice[
+	knows public m1, m2
+	generates sk
+	generates n1, n2
+	ga = PUBKEY(sk)
+	s1 = SIGN(sk, m1)
+	s2 = SIGN(sk, m2)
+	b1 = CONCAT(n1, s1)
+	b2 = CONCAT(n2, s2)
+]
+
+Alice -> Bob: ga, b1, b2
+
+principal Bob[
+	knows public m1, m2
+	x1, y1 = SPLIT(b1)
+	x2, y2 = SPLIT(b2)
+	_ = SIGNVERIF(ga, m1, y1)?
+	_ = SIGNVERIF(ga, m2, y2)?
+]
+
+queries[
+	unlinkability? b1, b2
+	unlinkability? s1, s2
+]

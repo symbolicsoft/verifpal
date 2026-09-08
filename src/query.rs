@@ -664,7 +664,7 @@ fn query_unlinkability(
 				|_| witness.value.clone(),
 				&[],
 			);
-			let clause = witness.describe(&mutated_info.term(&witness.value));
+			let clause = witness.describe(&mutated_info.term_excluding(&witness.value, &[]));
 			result.resolved = true;
 			result.options = options;
 			result.set_summary(

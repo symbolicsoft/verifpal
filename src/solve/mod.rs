@@ -10,7 +10,7 @@ pub(crate) mod vars;
 
 use std::sync::Arc;
 
-use crate::context::VerifyContext;
+use crate::context::{PassKey, VerifyContext};
 use crate::info::info_message;
 use crate::types::*;
 use crate::value::{push_unique_value, resolve_trace_constant};
@@ -154,7 +154,7 @@ fn solve_principal(
 		history: &history,
 	};
 	if search == Search::Direct || pass != Pass::Targeted {
-		return solve_with(ctx, km, ps, pass, &attacker, &guards, &sym);
+		return solve_with(ctx, km, ps, pass, &attacker, &guards, &sym, &[]);
 	}
 	for honest in slots_blocking_reduction(&sym) {
 		if ctx.all_resolved() || ctx.cancelled() {
@@ -162,7 +162,7 @@ fn solve_principal(
 		}
 		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
 		if !refined.var_slots.is_empty() {
-			solve_with(ctx, km, ps, pass, &attacker, &guards, &refined)?;
+			solve_with(ctx, km, ps, pass, &attacker, &guards, &refined, &honest)?;
 		}
 	}
 	Ok(())
@@ -211,6 +211,7 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 fn solve_with(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -219,15 +220,100 @@ fn solve_with(
 	attacker: &AttackerState,
 	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
+	honest: &[usize],
 ) -> VResult<()> {
 	#[cfg(test)]
 	ctx.note_search_reached_a_controllable_slot();
 
-	let deducer = Deducer::with_basis(ps, attacker, sym, ctx.known_subterms(attacker));
-	let proposals = propose(ctx, km, ps, pass, attacker, sym, deducer);
+	let key = PassKey {
+		principal: ps.id,
+		targeted: pass == Pass::Targeted,
+		honest: honest.to_vec(),
+		phase: attacker.current_phase,
+		unresolved: ctx.unresolved_count(),
+		replays_from: (pass == Pass::Constructed)
+			.then(|| ctx.deferred_from(ps.id))
+			.flatten(),
+	};
+	let protocol = ctx.term_bound(km).protocol(km);
+	let recalled = ctx.pass_repeats(&key, attacker, protocol);
+	if solve_debug() {
+		eprintln!(
+			"[pass] {} {} honest={:?} phase={} unresolved={} recalled={}",
+			ps.name,
+			pass.name(),
+			key.honest,
+			key.phase,
+			key.unresolved,
+			recalled.is_some()
+		);
+	}
+	let fresh = || {
+		let honest_terms = sym
+			.var_slots
+			.iter()
+			.zip(honest_slot_terms(km, ps, sym))
+			.map(|(&slot, honest)| (vars::attacker_var_id(slot), honest))
+			.collect();
+		let deducer = Deducer::with_basis(
+			ps,
+			attacker,
+			sym,
+			ctx.known_subterms(attacker),
+			honest_terms,
+		);
+		let taken = match pass {
+			Pass::Targeted => Vec::new(),
+			Pass::Constructed => ctx.take_deferred_replays(ps.id),
+		};
+		crate::reads::observe(|| propose(ctx, km, ps, pass, attacker, sym, deducer, taken))
+	};
+	let proposed = match recalled {
+		Some(proposed) => {
+			#[cfg(test)]
+			if pass == Pass::Targeted {
+				for result in ctx.results_get() {
+					if !result.resolved {
+						ctx.goals_noted(result.query_index, 1 + result.variants.len());
+					}
+				}
+			}
+			if check_proposals() {
+				let ((proposals, replays), _) = fresh();
+				assert!(
+					proposals.len() == proposed.proposals.len()
+						&& proposals
+							.iter()
+							.zip(&proposed.proposals)
+							.all(|(a, b)| vars::same_substitution(a, b))
+						&& replays.len() == proposed.replays.len()
+						&& replays.iter().zip(&proposed.replays).all(|(a, b)| {
+							a.len() == b.len()
+								&& a.iter()
+									.zip(b)
+									.all(|((x, u), (y, v))| x == y && u.equivalent(v, true))
+						}),
+					"a recalled proposal search for {} differs from a fresh one",
+					ps.name
+				);
+			} else if pass == Pass::Constructed {
+				ctx.take_deferred_replays(ps.id);
+			}
+			proposed
+		}
+		None => {
+			let ((proposals, replays), reads) = fresh();
+			ctx.note_pass(key, proposals, replays, reads, attacker)
+		}
+	};
+	if pass == Pass::Targeted {
+		ctx.defer_replays(ps.id, proposed.id, proposed.replays.clone());
+	}
+	let proposals = proposed.proposals.clone();
 	dispose(ctx, km, ps, pass, attacker, guards, sym, proposals)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn propose(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -236,7 +322,8 @@ fn propose(
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	mut deducer: Deducer,
-) -> Vec<Substitution> {
+	taken: Vec<Vec<(ValueId, Value)>>,
+) -> (Vec<Substitution>, Vec<Vec<(ValueId, Value)>>) {
 	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
@@ -256,7 +343,7 @@ fn propose(
 		}
 		let goals = {
 			let in_lane = deducer.lane_factory();
-			crate::parallel::map_ordered(lanes(pending.len()), |(lane, range)| {
+			observed(lanes(pending.len()), |(lane, range)| {
 				let deducer = in_lane(lane);
 				range
 					.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
@@ -281,22 +368,20 @@ fn propose(
 
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
-		let relayed = relay_substitution(km, ps, sym);
 		let in_lane = deducer.lane_factory();
-		let candidates =
-			crate::parallel::map_ordered(lanes(sym.var_slots.len()), |(lane, range)| {
-				let deducer = in_lane(lane);
-				range
-					.map(|at| {
-						let slot = sym.var_slots[at];
-						let Some(meta) = ps.meta.get(slot) else {
-							return Vec::new();
-						};
-						let honest = resolve_trace_constant(&meta.constant, km);
-						slot_candidates(attacker, sym, &deducer, protocol, &honest, &blanket, slot)
-					})
-					.collect::<Vec<_>>()
-			});
+		let candidates = observed(lanes(sym.var_slots.len()), |(lane, range)| {
+			let deducer = in_lane(lane);
+			range
+				.map(|at| {
+					let slot = sym.var_slots[at];
+					let Some(meta) = ps.meta.get(slot) else {
+						return Vec::new();
+					};
+					let honest = resolve_trace_constant(&meta.constant, km);
+					slot_candidates(attacker, sym, &deducer, protocol, &honest, &blanket, slot)
+				})
+				.collect::<Vec<_>>()
+		});
 		for (&slot, candidates) in sym.var_slots.iter().zip(candidates.into_iter().flatten()) {
 			for candidate in candidates {
 				let var_id = vars::attacker_var_id(slot);
@@ -305,29 +390,25 @@ fn propose(
 				proposals.push(alone);
 				if !blanket.is_empty() {
 					let mut combined = blanket.clone();
-					combined.insert(var_id, candidate.clone());
+					combined.insert(var_id, candidate);
 					proposals.push(combined);
 				}
-				let mut with_relay = relayed.clone();
-				with_relay.insert(var_id, candidate);
-				proposals.push(with_relay);
 			}
 		}
 	}
 
 	let honest = honest_slot_terms(km, ps, sym);
-	let keyed: Vec<Substitution> =
-		crate::parallel::map_ordered((0..proposals.len()).collect(), |at| {
-			let proposal = &proposals[at];
-			[
-				keyed_free(&honest, sym, proposal),
-				preserved_free(&honest, sym, proposal, attacker),
-			]
-		})
-		.into_iter()
-		.flatten()
-		.flatten()
-		.collect();
+	let keyed: Vec<Substitution> = observed((0..proposals.len()).collect(), |at| {
+		let proposal = &proposals[at];
+		[
+			keyed_free(&honest, sym, proposal),
+			preserved_free(&honest, sym, proposal, attacker),
+		]
+	})
+	.into_iter()
+	.flatten()
+	.flatten()
+	.collect();
 	proposals.extend(keyed);
 
 	let aligned = aligned_held_free(&honest, sym, &proposals, attacker, protocol);
@@ -352,25 +433,23 @@ fn propose(
 		.partition(|proposal| sibling_replay(km, ps, sym, proposal));
 	let mut proposals = others;
 	match pass {
-		Pass::Targeted => {
-			ctx.defer_replays(
-				ps.id,
-				replays
-					.into_iter()
-					.map(|replay| replay.into_iter().collect())
-					.collect(),
-			);
-		}
+		Pass::Targeted => (
+			proposals,
+			replays
+				.into_iter()
+				.map(|replay| replay.into_iter().collect())
+				.collect(),
+		),
 		Pass::Constructed => {
 			proposals.extend(replays);
 			proposals.extend(
-				ctx.take_deferred_replays(ps.id)
+				taken
 					.into_iter()
 					.map(|bindings| bindings.into_iter().collect::<Substitution>()),
 			);
+			(proposals, Vec::new())
 		}
 	}
-	proposals
 }
 
 fn sibling_replay(
@@ -500,6 +579,7 @@ fn aligned_held_free(
 	protocol: &IdSet<u64>,
 ) -> Vec<Substitution> {
 	let mut index: IdMap<HeldShape, Vec<usize>> = IdMap::default();
+	crate::reads::protocol();
 	for (i, held) in attacker.known.iter().enumerate() {
 		let Value::Primitive(h) = held else {
 			continue;
@@ -872,6 +952,22 @@ fn solve_debug() -> bool {
 	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some())
 }
 
+fn check_proposals() -> bool {
+	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_CHECK_PROPOSALS").is_some())
+}
+
+fn observed<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -> Vec<R> {
+	let (out, logs): (Vec<R>, Vec<crate::reads::Reads>) =
+		crate::parallel::map_ordered(items, |item| crate::reads::observe(|| f(item)))
+			.into_iter()
+			.unzip();
+	for log in logs {
+		crate::reads::absorb(log);
+	}
+	out
+}
+
 fn trace_proposal(ps: &PrincipalState, sym: &SymbolicState, proposal: &Substitution, ran: bool) {
 	if !solve_debug() {
 		return;
@@ -929,24 +1025,6 @@ fn sibling_flight_substitutions(
 	out
 }
 
-fn relay_substitution(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-) -> Substitution {
-	let mut out = Substitution::default();
-	for &slot in &sym.var_slots {
-		let Some(meta) = ps.meta.get(slot) else {
-			continue;
-		};
-		out.insert(
-			vars::attacker_var_id(slot),
-			resolve_trace_constant(&meta.constant, km),
-		);
-	}
-	out
-}
-
 fn lanes(count: usize) -> Vec<(u32, std::ops::Range<usize>)> {
 	let width = vars::FREE_LANES as usize;
 	let size = count.div_ceil(width).max(1);
@@ -966,6 +1044,7 @@ fn slot_candidates(
 ) -> Vec<Value> {
 	let mut out = Vec::new();
 
+	crate::reads::protocol();
 	for candidate in attacker.known.iter() {
 		if !protocol.contains(&candidate.hash_value()) || candidate.equivalent(honest, true) {
 			continue;

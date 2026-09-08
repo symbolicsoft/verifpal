@@ -45,7 +45,27 @@ pub(crate) fn find_link_witness(
 		.or_else(|| witness_identifying_check(&av, &bv, ps, attacker))
 		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
 		.or_else(|| witness_recognized_secret(&av, &bv, ps, attacker))
+		.or_else(|| {
+			exposed(&av).iter().find_map(|x| {
+				exposed(&bv).iter().find_map(|y| {
+					if x.equivalent(&av, true) && y.equivalent(&bv, true) {
+						return None;
+					}
+					witness_identifying_check(x, y, ps, attacker)
+						.or_else(|| witness_recognized_secret(x, y, ps, attacker))
+				})
+			})
+		})
 		.filter(|witness| !attacker_supplied(&witness.value, ps))
+}
+
+fn exposed(v: &Value) -> Vec<Value> {
+	match v {
+		Value::Primitive(p) if primitive_core_reveals_args(p.id) => {
+			p.arguments.iter().flat_map(exposed).collect()
+		}
+		_ => vec![v.clone()],
+	}
 }
 
 fn share_secret_subterm(
@@ -150,23 +170,83 @@ fn witness_shared_secret(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<LinkWitness> {
-	let a_leaves = origin_leaves(av, ps, attacker)?;
-	let b_leaves = origin_leaves(bv, ps, attacker)?;
-	for w in &a_leaves {
-		if !depends_on_secret(w, ps) {
-			continue;
+	let a_leaves = origin_leaves(av, ps, attacker);
+	let b_leaves = origin_leaves(bv, ps, attacker);
+	let witness = |w: &Value| {
+		Some(LinkWitness {
+			kind: LinkWitnessKind::SharedSecret,
+			value: w.clone(),
+		})
+	};
+	if let (Some(a_leaves), Some(b_leaves)) = (&a_leaves, &b_leaves) {
+		for w in a_leaves {
+			if !depends_on_secret(w, ps) {
+				continue;
+			}
+			if w.equivalent(av, true) || w.equivalent(bv, true) {
+				continue;
+			}
+			if b_leaves.iter().any(|x| x.equivalent(w, true))
+				&& [av, bv]
+					.iter()
+					.any(|v| held_independently(w, ps, attacker, v))
+			{
+				return witness(w);
+			}
 		}
-		if w.equivalent(av, true) || w.equivalent(bv, true) {
-			continue;
-		}
-		if b_leaves.iter().any(|x| x.equivalent(w, true)) {
-			return Some(LinkWitness {
-				kind: LinkWitnessKind::SharedSecret,
-				value: w.clone(),
-			});
+	}
+	for (value, leaves) in [(av, &b_leaves), (bv, &a_leaves)] {
+		if depends_on_secret(value, ps)
+			&& attacker.knows(value).is_some()
+			&& leaves
+				.as_ref()
+				.is_some_and(|leaves| leaves.iter().any(|x| x.equivalent(value, true)))
+		{
+			return witness(value);
 		}
 	}
 	None
+}
+
+fn held_independently(
+	w: &Value,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	of: &Value,
+) -> bool {
+	let restricted = without_consequences(attacker, of);
+	restricted.knows(w).is_some()
+		|| crate::theory::obtainable(w, ps, &restricted)
+		|| restricted.known.iter().any(|known| match known {
+			Value::Primitive(q) => {
+				can_recompose(q, &restricted).is_some_and(|r| r.revealed.equivalent(w, true))
+			}
+			_ => false,
+		})
+}
+
+fn without_consequences(attacker: &AttackerState, v: &Value) -> AttackerState {
+	let mut dropped = vec![false; attacker.known.len()];
+	if let Some(idx) = attacker.knows(v) {
+		dropped[idx.get()] = true;
+	}
+	for i in 0..attacker.known.len() {
+		if dropped[i] {
+			continue;
+		}
+		dropped[i] = attacker.derivation(KnownIdx(i)).is_some_and(|derivation| {
+			derivation.ingredients().iter().any(|ingredient| {
+				attacker
+					.knows(ingredient)
+					.is_some_and(|at| dropped[at.get()])
+			})
+		});
+	}
+	let keep: Vec<bool> = dropped.iter().map(|d| !d).collect();
+	attacker
+		.retaining(&keep)
+		.map(|state| (*state).clone())
+		.unwrap_or_else(|| attacker.clone())
 }
 
 fn witness_recognized_secret(

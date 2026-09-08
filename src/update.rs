@@ -22,6 +22,9 @@ pub struct UpdateCheck {
 pub fn update_check_start(version: &str) -> UpdateCheck {
 	let (sender, receiver) = mpsc::channel();
 	let current = version.to_string();
+	if !crate::util::stdout_is_terminal() {
+		return UpdateCheck { receiver, current };
+	}
 	let user_agent = format!("verifpal/{}", version);
 	let requested = current.clone();
 	thread::spawn(move || {

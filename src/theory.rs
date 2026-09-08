@@ -547,6 +547,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	for output_idx in 0..MAX_SHARES {
 		let probe = p.with_output(output_idx);
 		let hash = crate::hashing::primitive_hash(&probe);
+		crate::reads::miss(hash);
 		let Some(indices) = attacker.known_map.get(&hash) else {
 			continue;
 		};
@@ -733,6 +734,7 @@ fn partial_groups(
 	};
 	let secret = &target.arguments[0];
 	let mut groups: Vec<PartialGroup> = Vec::new();
+	crate::reads::id(rule.partial);
 	for known in attacker.known.iter() {
 		let Value::Primitive(q) = known else {
 			continue;

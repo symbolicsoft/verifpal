@@ -1,0 +1,59 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// spore_ns_pk.vp's shape where Mallory's private key is not a declared secret
+// but an assignment, scl_mk2 = HASH(scl_mk), and it is that derived key she
+// leaks. The attacker holds the private half of scl_gm, so the run in which
+// Alice's peer is Mallory is a corrupt-peer run exactly as it is when the
+// leaked key is written knows private, and Alice's nonce encrypted to that
+// peer is not a claim the model makes.
+//
+// The engine used to seed compromise only from generates and knows private
+// constants, so leaking HASH(scl_mk) classified the run honest and reported
+// the attacker opening scl_m1@2 with the very key it was handed. A constant
+// that stands as the argument of a key derivation is a private key whatever
+// its declaration, and is a compromise seed when leaked or sent bare.
+// scenario_corrupt_by_derived_key_on_wire.vp is the bare-wire twin.
+
+attacker[active]
+
+principal Bob[
+	knows private scl_b
+	scl_gb = PUBKEY(scl_b)
+]
+
+principal Mallory[
+	knows private scl_mk
+	scl_mk2 = HASH(scl_mk)
+	scl_gm = PUBKEY(scl_mk2)
+	leaks scl_mk2
+]
+
+principal Alice[
+	knows public scl_gpeer
+	generates scl_ni
+]
+
+Bob -> Alice: [scl_gb]
+Mallory -> Alice: [scl_gm]
+
+principal Alice[
+	scl_m1 = PKE_ENC(scl_gpeer, scl_ni)
+]
+
+Alice -> Bob: scl_m1
+
+principal Bob[
+	scl_ni_b = PKE_DEC(scl_b, scl_m1)
+]
+
+scenarios[
+	Alice[scl_gpeer = scl_gb]
+	Alice[scl_gpeer = scl_gm]
+]
+
+queries[
+	confidentiality? scl_ni
+]

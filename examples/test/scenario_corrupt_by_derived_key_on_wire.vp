@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// scenario_corrupt_by_leaked_derived_key.vp with Mallory's derived private
+// key scd_mk2 = HASH(scd_mk) sent to Bob in the clear instead of leaked. The
+// attacker holds it either way, so the run in which Alice's peer is Mallory
+// is a corrupt-peer run either way, and the message Alice encrypts to that
+// peer is not a claim the model makes. A private key that travels bare on a
+// message is compromised from that message's phase, whatever its declaration.
+
+attacker[active]
+
+principal Bob[
+	knows private scd_b
+	scd_gb = PUBKEY(scd_b)
+]
+
+principal Mallory[
+	knows private scd_mk
+	scd_mk2 = HASH(scd_mk)
+	scd_gm = PUBKEY(scd_mk2)
+]
+
+principal Alice[
+	knows public scd_gpeer
+	generates scd_ni
+]
+
+Bob -> Alice: [scd_gb]
+Mallory -> Alice: [scd_gm]
+Mallory -> Bob: scd_mk2
+
+principal Alice[
+	scd_m1 = PKE_ENC(scd_gpeer, scd_ni)
+]
+
+Alice -> Bob: scd_m1
+
+principal Bob[
+	scd_ni_b = PKE_DEC(scd_b, scd_m1)
+]
+
+scenarios[
+	Alice[scd_gpeer = scd_gb]
+	Alice[scd_gpeer = scd_gm]
+]
+
+queries[
+	confidentiality? scd_ni
+]

@@ -600,6 +600,18 @@ fn test_history_incompatible_knowledge() {
 }
 
 #[test]
+fn test_history_phase_archive() {
+	run_model("history_phase_archive.vp", "a0");
+	run_model_sessions("history_phase_archive.vp", 1, "a0");
+}
+
+#[test]
+fn test_history_phase_archive_third_party() {
+	run_model("history_phase_archive_third_party.vp", "a0");
+	run_model_sessions("history_phase_archive_third_party.vp", 1, "a0");
+}
+
+#[test]
 fn test_history_compatible_oracle() {
 	run_model("history_compatible_oracle.vp", "a1");
 	run_model_sessions("history_compatible_oracle.vp", 1, "a1");
@@ -2222,6 +2234,21 @@ fn test_unlink_chain_forward() {
 	run_model("unlink_chain_forward.vp", "u0");
 }
 #[test]
+fn test_unlink_hash_chain_direct() {
+	run_model("unlink_hash_chain_direct.vp", "u1");
+	run_model_sessions("unlink_hash_chain_direct.vp", 1, "u1");
+}
+#[test]
+fn test_unlink_signature_in_tuple() {
+	run_model("unlink_signature_in_tuple.vp", "u1u1");
+	run_model_sessions("unlink_signature_in_tuple.vp", 1, "u1u1");
+}
+#[test]
+fn test_unlink_shares_recomposed_secret() {
+	run_model("unlink_shares_recomposed_secret.vp", "c1u0");
+	run_model_sessions("unlink_shares_recomposed_secret.vp", 1, "c1u0");
+}
+#[test]
 fn test_unlink_chain_root() {
 	run_model("unlink_chain_root.vp", "u1");
 }
@@ -3616,6 +3643,16 @@ fn test_relay_guard_transitive() {
 fn test_scenario_corrupt_by_wire() {
 	run_model("scenario_corrupt_by_wire.vp", "c0");
 	run_model_sessions("scenario_corrupt_by_wire.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_leaked_derived_key() {
+	run_model("scenario_corrupt_by_leaked_derived_key.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_leaked_derived_key.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_derived_key_on_wire() {
+	run_model("scenario_corrupt_by_derived_key_on_wire.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_derived_key_on_wire.vp", 1, "c0");
 }
 #[test]
 fn test_scenario_corrupt_by_derivation() {

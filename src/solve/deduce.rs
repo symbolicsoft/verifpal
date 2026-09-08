@@ -31,6 +31,7 @@ pub(crate) struct Deducer<'a> {
 	capabilities: Arc<CapabilityIndex>,
 	wire_terms: Arc<Vec<Value>>,
 	slot_terms: Arc<Vec<(ValueId, Value)>>,
+	honest: Arc<Substitution>,
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
@@ -51,7 +52,7 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			collect_subterm_hashes(held, &mut known);
 		}
-		Self::with_basis(ps, attacker, sym, known)
+		Self::with_basis(ps, attacker, sym, known, Substitution::default())
 	}
 
 	pub(crate) fn with_basis(
@@ -59,6 +60,7 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		mut basis: IdSet<u64>,
+		honest: Substitution,
 	) -> Self {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
@@ -100,6 +102,7 @@ impl<'a> Deducer<'a> {
 			capabilities: ps.capabilities.clone(),
 			wire_terms: Arc::new(wire_terms),
 			slot_terms: Arc::new(slot_terms),
+			honest: Arc::new(honest),
 			basis: Arc::new(basis),
 			by_head: Arc::new(by_head),
 			memo: RefCell::new(IdMap::default()),
@@ -115,6 +118,7 @@ impl<'a> Deducer<'a> {
 		let capabilities = Arc::clone(&self.capabilities);
 		let wire_terms = Arc::clone(&self.wire_terms);
 		let slot_terms = Arc::clone(&self.slot_terms);
+		let honest = Arc::clone(&self.honest);
 		let basis = Arc::clone(&self.basis);
 		let by_head = Arc::clone(&self.by_head);
 		move |lane| {
@@ -124,6 +128,7 @@ impl<'a> Deducer<'a> {
 				capabilities: Arc::clone(&capabilities),
 				wire_terms: Arc::clone(&wire_terms),
 				slot_terms: Arc::clone(&slot_terms),
+				honest: Arc::clone(&honest),
 				basis: Arc::clone(&basis),
 				by_head: Arc::clone(&by_head),
 				memo: RefCell::new(IdMap::default()),
@@ -244,11 +249,24 @@ impl<'a> Deducer<'a> {
 		let Ok(tuple_spec) = primitive_def(tuple) else {
 			return Vec::new();
 		};
+		let mut arities: Vec<usize> = tuple_spec
+			.arity()
+			.iter()
+			.map(|a| *a as usize)
+			.find(|&arity| p.output < arity)
+			.into_iter()
+			.collect();
+		if let Some(inner) = p.arguments.first()
+			&& let Value::Primitive(honest) =
+				crate::theory::reduce_once(&apply(inner, &self.honest))
+			&& honest.id == tuple
+			&& p.output < honest.arguments.len()
+			&& !arities.contains(&honest.arguments.len())
+		{
+			arities.push(honest.arguments.len());
+		}
 		let mut out = Vec::new();
-		for arity in tuple_spec.arity().iter().map(|a| *a as usize) {
-			if p.output >= arity {
-				continue;
-			}
+		for arity in arities {
 			let mut arguments: Vec<Value> = (0..arity).map(|_| self.fresh_var()).collect();
 			if let Some(target) = at_output {
 				arguments[p.output] = target.clone();
@@ -297,6 +315,7 @@ impl<'a> Deducer<'a> {
 			&& contains_var(g)
 		{
 			let head = (pattern.id, pattern.arguments.len());
+			crate::reads::pattern(g);
 			for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
 				let Some(known) = self.attacker.known.get(at) else {
 					continue;
@@ -412,6 +431,8 @@ impl<'a> Deducer<'a> {
 
 	fn held_splits(&self, rule: &CombineRule) -> Vec<Arc<Primitive>> {
 		let mut splits: Vec<Arc<Primitive>> = Vec::new();
+		crate::reads::id(rule.split);
+		crate::reads::id(rule.partial);
 		for known in self.attacker.known.iter() {
 			let Value::Primitive(q) = known else {
 				continue;
@@ -503,6 +524,7 @@ impl<'a> Deducer<'a> {
 			return;
 		}
 		let head = (target.id, target.arguments.len());
+		crate::reads::head(head.0, head.1);
 		for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
 			let Some(Value::Primitive(held)) = self.attacker.known.get(at) else {
 				continue;
@@ -617,6 +639,7 @@ impl<'a> Deducer<'a> {
 			return;
 		};
 		if !self.basis.contains(&goal.hash_value()) {
+			crate::reads::basis_miss(goal.hash_value());
 			return;
 		}
 		for (shape, bound) in self.rewrite_shapes_yielding(p, rule, goal, s) {

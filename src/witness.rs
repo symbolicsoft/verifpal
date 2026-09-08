@@ -60,8 +60,15 @@ fn phases_of(
 	installs
 		.iter()
 		.map(|(slot, value)| {
-			crate::solve::validate::attacker_can_derive(ctx, slot.get(), value, ps, attacker)
-				.unwrap_or(attacker.current_phase)
+			crate::solve::validate::attacker_can_derive(
+				ctx,
+				slot.get(),
+				value,
+				ps,
+				attacker,
+				&|_| None,
+			)
+			.unwrap_or(attacker.current_phase)
 		})
 		.collect()
 }
@@ -716,6 +723,7 @@ impl<'a> Minimizer<'a> {
 				value,
 				session,
 				&self.ambient,
+				&|_| None,
 			)
 			.is_some()
 	}
@@ -1013,7 +1021,8 @@ pub(crate) fn minimize_witness(
 						slot.get(),
 						value,
 						&base,
-						&m.ambient
+						&m.ambient,
+						&|_| None,
 					)
 					.is_some(),
 					"WITNESS \u{2022} query {} is explained by installing {} into {}, a term the \
@@ -1382,6 +1391,7 @@ pub(crate) fn assert_reported_attacks_replay(
 					value,
 					state,
 					&ambient,
+					&|_| None,
 				)
 				.is_some()
 		};
@@ -1586,8 +1596,15 @@ fn probe_with(
 			if preceded {
 				return false;
 			}
-			crate::solve::validate::attacker_can_derive(&scratch, slot.get(), value, base, &known)
-				.is_some() && crate::reexec::available_before_receive(km, base, slot.get(), &known)
+			crate::solve::validate::attacker_can_derive(
+				&scratch,
+				slot.get(),
+				value,
+				base,
+				&known,
+				&|_| None,
+			)
+			.is_some() && crate::reexec::available_before_receive(km, base, slot.get(), &known)
 				.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
 		});
 		let Some(at) = next else {
@@ -1596,8 +1613,15 @@ fn probe_with(
 		};
 		let (slot, value) = remaining.remove(at);
 		earlier_phases.push(
-			crate::solve::validate::attacker_can_derive(&scratch, slot.get(), &value, base, &known)
-				.unwrap_or(known.current_phase),
+			crate::solve::validate::attacker_can_derive(
+				&scratch,
+				slot.get(),
+				&value,
+				base,
+				&known,
+				&|_| None,
+			)
+			.unwrap_or(known.current_phase),
 		);
 		earlier.push((slot, value));
 		if remaining.is_empty() {

@@ -136,8 +136,17 @@ fn apply_shared(v: &Value, s: &Substitution, shared: &mut IdMap<usize, Value>) -
 				.iter()
 				.map(|a| apply_shared(a, s, shared))
 				.collect();
-			let args = crate::primitive::normalise_arguments(p.id, args);
-			let out = Value::Primitive(Arc::new(p.with_arguments(args)));
+			let unchanged = args.iter().zip(&p.arguments).all(|(a, b)| match (a, b) {
+				(Value::Primitive(a), Value::Primitive(b)) => Arc::ptr_eq(a, b),
+				(Value::Constant(a), Value::Constant(b)) => a.id == b.id,
+				_ => false,
+			});
+			let out = if unchanged {
+				v.clone()
+			} else {
+				let args = crate::primitive::normalise_arguments(p.id, args);
+				Value::Primitive(Arc::new(p.with_arguments(args)))
+			};
 			shared.insert(key, out.clone());
 			out
 		}

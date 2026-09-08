@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: u1.
+//
+// The second token is a hash of the first, and both are on the wire. The
+// attacker hashes tok0 and compares the result with tok1: in the world where
+// the two tokens come from one chain the comparison succeeds, in the world
+// where tok1 belongs to another chain it fails, so the tokens are linked.
+//
+// The shared-secret witness used to withhold each observed value from the
+// attacker and look for a common origin among what remained, so a token that
+// is itself the origin of the other was never found: tok0 has no origin the
+// attacker holds, and the search stopped there. A queried value that appears
+// among the origins of the other queried value is now a witness in its own
+// right. unlink_chain_forward.vp is the counterweight, where neither token
+// can be recomputed from the other.
+
+attacker[passive]
+
+principal Alice[
+	generates sk0
+	tok0 = HASH(sk0)
+	tok1 = HASH(tok0)
+]
+
+Alice -> Bob: tok0, tok1
+
+principal Bob[
+	_ = HASH(tok0)
+	_ = HASH(tok1)
+]
+
+queries[
+	unlinkability? tok0, tok1
+]

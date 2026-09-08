@@ -159,6 +159,12 @@ pub(crate) fn color_output_support() -> bool {
 }
 
 #[cfg(feature = "cli")]
+pub(crate) fn stdout_is_terminal() -> bool {
+	use std::io::IsTerminal;
+	std::io::stdout().is_terminal()
+}
+
+#[cfg(feature = "cli")]
 pub(crate) fn stderr_is_terminal() -> bool {
 	use std::io::IsTerminal;
 	if cfg!(target_arch = "wasm32") {

@@ -425,10 +425,15 @@ pub(crate) fn mutation_groups(
 }
 
 fn deep_resolve(ps: &PrincipalState, v: &Value) -> Value {
-	deep_resolve_from(ps, v, &mut Vec::new())
+	deep_resolve_from(ps, v, &mut Vec::new(), &mut IdMap::default())
 }
 
-fn deep_resolve_from(ps: &PrincipalState, v: &Value, chased: &mut Vec<ValueId>) -> Value {
+fn deep_resolve_from(
+	ps: &PrincipalState,
+	v: &Value,
+	chased: &mut Vec<ValueId>,
+	shared: &mut IdMap<usize, Value>,
+) -> Value {
 	match v {
 		Value::Constant(c) => {
 			let (resolved, _) = ps.resolve_constant(c, false);
@@ -436,19 +441,25 @@ fn deep_resolve_from(ps: &PrincipalState, v: &Value, chased: &mut Vec<ValueId>) 
 				Value::Constant(r) if r.id == c.id || chased.contains(&r.id) => resolved,
 				other => {
 					chased.push(c.id);
-					let out = deep_resolve_from(ps, other, chased);
+					let out = deep_resolve_from(ps, other, chased, shared);
 					chased.pop();
 					out
 				}
 			}
 		}
 		Value::Primitive(p) => {
+			let key = Arc::as_ptr(p) as usize;
+			if let Some(hit) = shared.get(&key) {
+				return hit.clone();
+			}
 			let arguments = p
 				.arguments
 				.iter()
-				.map(|a| deep_resolve_from(ps, a, chased))
+				.map(|a| deep_resolve_from(ps, a, chased, shared))
 				.collect();
-			Value::Primitive(std::sync::Arc::new(p.with_arguments(arguments)))
+			let out = Value::Primitive(Arc::new(p.with_arguments(arguments)));
+			shared.insert(key, out.clone());
+			out
 		}
 	}
 }
@@ -584,7 +595,14 @@ impl<'a> Narrator<'a> {
 		root: bool,
 	) -> Vec<Step> {
 		let mut steps: Vec<Step> = Vec::new();
-		self.walk(target, exclude, seen, &mut steps, root);
+		self.walk(
+			target,
+			exclude,
+			seen,
+			&mut IdSet::default(),
+			&mut steps,
+			root,
+		);
 		steps
 	}
 
@@ -593,17 +611,20 @@ impl<'a> Narrator<'a> {
 		value: &Value,
 		exclude: &[&str],
 		seen: &mut Vec<KnownIdx>,
+		unheld: &mut IdSet<usize>,
 		steps: &mut Vec<Step>,
 		root: bool,
 	) {
 		let Some(idx) = self.attacker.knows(value) else {
-			if let Value::Primitive(p) = value {
+			if let Value::Primitive(p) = value
+				&& unheld.insert(Arc::as_ptr(p) as usize)
+			{
 				for argument in p.arguments.iter() {
-					self.walk(argument, exclude, seen, steps, false);
+					self.walk(argument, exclude, seen, unheld, steps, false);
 				}
 				if let Some(twin) = crate::primitive::commutativity_swap(p) {
 					for argument in twin.arguments.iter() {
-						self.walk(argument, exclude, seen, steps, false);
+						self.walk(argument, exclude, seen, unheld, steps, false);
 					}
 				}
 			}
@@ -637,7 +658,7 @@ impl<'a> Narrator<'a> {
 		}
 
 		for ingredient in derivation.ingredients() {
-			self.walk(ingredient, exclude, seen, steps, false);
+			self.walk(ingredient, exclude, seen, unheld, steps, false);
 		}
 
 		if let Some(text) = self.describe(derivation, value, exclude) {
@@ -696,23 +717,39 @@ fn obtained_from_slot(km: &ProtocolTrace, slot: SlotIdx, v: &str) -> String {
 }
 
 fn attacker_orientation(v: &Value, attacker: &AttackerState) -> Value {
+	orient(v, attacker, &mut IdMap::default())
+}
+
+fn orient(v: &Value, attacker: &AttackerState, shared: &mut IdMap<usize, Value>) -> Value {
 	let Value::Primitive(p) = v else {
 		return v.clone();
 	};
+	let key = Arc::as_ptr(p) as usize;
+	if let Some(hit) = shared.get(&key) {
+		return hit.clone();
+	}
 	let args: Vec<Value> = p
 		.arguments
 		.iter()
-		.map(|a| attacker_orientation(a, attacker))
+		.map(|a| orient(a, attacker, shared))
 		.collect();
-	let here = p.with_arguments(args);
-	let Some(swapped) = crate::primitive::commutativity_swap(&here) else {
-		return Value::Primitive(Arc::new(here));
+	let unchanged = args.iter().zip(&p.arguments).all(|(a, b)| match (a, b) {
+		(Value::Primitive(a), Value::Primitive(b)) => Arc::ptr_eq(a, b),
+		(Value::Constant(a), Value::Constant(b)) => a.id == b.id,
+		_ => false,
+	});
+	let here = if unchanged {
+		Arc::clone(p)
+	} else {
+		Arc::new(p.with_arguments(args))
 	};
 	let holds = |q: &Primitive| q.arguments.iter().all(|a| attacker.knows(a).is_some());
-	if !holds(&here) && holds(&swapped) {
-		return Value::Primitive(Arc::new(swapped));
-	}
-	Value::Primitive(Arc::new(here))
+	let out = match crate::primitive::commutativity_swap(&here) {
+		Some(swapped) if !holds(&here) && holds(&swapped) => Value::Primitive(Arc::new(swapped)),
+		_ => Value::Primitive(here),
+	};
+	shared.insert(key, out.clone());
+	out
 }
 
 fn join_oriented(

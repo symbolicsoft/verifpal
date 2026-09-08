@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -141,11 +142,34 @@ use crate::value::compute_slot_diffs;
 
 type Replay = (crate::reexec::Seeds, Option<Arc<Vec<PrincipalState>>>);
 
-type DeferredReplay = (PrincipalId, Vec<(ValueId, Value)>);
+type Replays = Vec<Vec<(ValueId, Value)>>;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PassKey {
+	pub principal: PrincipalId,
+	pub targeted: bool,
+	pub honest: Vec<usize>,
+	pub phase: i32,
+	pub unresolved: i32,
+	pub replays_from: Option<u64>,
+}
+
+pub(crate) type Proposals = Vec<crate::solve::vars::Substitution>;
+
+pub(crate) struct Proposed {
+	pub id: u64,
+	pub proposals: Proposals,
+	pub replays: Replays,
+	reads: crate::reads::Reads,
+	known: usize,
+	reused: usize,
+	routes_epoch: u64,
+}
 
 pub(crate) struct VerifyContext {
 	attacker: RwLock<AttackerState>,
-	deferred_replays: RwLock<Vec<DeferredReplay>>,
+	deferred_replays: RwLock<IdMap<PrincipalId, (u64, Replays)>>,
+	passes: RwLock<HashMap<PassKey, Arc<Proposed>>>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
 	file_name: String,
@@ -237,7 +261,7 @@ pub(crate) struct Saturation {
 }
 
 impl Saturation {
-	fn of(attacker: &AttackerState) -> Saturation {
+	pub(crate) fn of(attacker: &AttackerState) -> Saturation {
 		Saturation {
 			phase: attacker.current_phase,
 			known: attacker.known.len(),
@@ -439,7 +463,8 @@ impl VerifyContext {
 			coherence: RwLock::new(IdMap::default()),
 			baselines: RwLock::new(IdMap::default()),
 			attacker: RwLock::new(AttackerState::new()),
-			deferred_replays: RwLock::new(Vec::new()),
+			deferred_replays: RwLock::new(IdMap::default()),
+			passes: RwLock::new(HashMap::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			file_name: m.file_name.clone(),
@@ -887,25 +912,61 @@ impl VerifyContext {
 		read_lock(&self.attacker).clone()
 	}
 
-	pub(crate) fn defer_replays(
-		&self,
-		principal: PrincipalId,
-		replays: Vec<Vec<(ValueId, Value)>>,
-	) {
-		let mut deferred = write_lock(&self.deferred_replays);
-		deferred.retain(|(who, _)| *who != principal);
-		deferred.extend(replays.into_iter().map(|bindings| (principal, bindings)));
+	pub(crate) fn defer_replays(&self, principal: PrincipalId, from: u64, replays: Replays) {
+		write_lock(&self.deferred_replays).insert(principal, (from, replays));
 	}
 
-	pub(crate) fn take_deferred_replays(
+	pub(crate) fn deferred_from(&self, principal: PrincipalId) -> Option<u64> {
+		read_lock(&self.deferred_replays)
+			.get(&principal)
+			.map(|(from, _)| *from)
+	}
+
+	pub(crate) fn take_deferred_replays(&self, principal: PrincipalId) -> Replays {
+		write_lock(&self.deferred_replays)
+			.remove(&principal)
+			.map(|(_, replays)| replays)
+			.unwrap_or_default()
+	}
+
+	pub(crate) fn unresolved_count(&self) -> i32 {
+		self.unresolved.load(Ordering::SeqCst)
+	}
+
+	pub(crate) fn pass_repeats(
 		&self,
-		principal: PrincipalId,
-	) -> Vec<Vec<(ValueId, Value)>> {
-		let mut deferred = write_lock(&self.deferred_replays);
-		let (mine, rest): (Vec<_>, Vec<_>) =
-			deferred.drain(..).partition(|(who, _)| *who == principal);
-		*deferred = rest;
-		mine.into_iter().map(|(_, bindings)| bindings).collect()
+		key: &PassKey,
+		attacker: &AttackerState,
+		protocol: &IdSet<u64>,
+	) -> Option<Arc<Proposed>> {
+		let stored = Arc::clone(read_lock(&self.passes).get(key)?);
+		(stored.reused == attacker.reused.len()
+			&& stored.routes_epoch == attacker.routes_epoch
+			&& stored.known <= attacker.known.len()
+			&& stored.reads.admits(attacker, stored.known, protocol))
+		.then_some(stored)
+	}
+
+	pub(crate) fn note_pass(
+		&self,
+		key: PassKey,
+		proposals: Proposals,
+		replays: Replays,
+		reads: crate::reads::Reads,
+		attacker: &AttackerState,
+	) -> Arc<Proposed> {
+		let mut passes = write_lock(&self.passes);
+		let stored = Arc::new(Proposed {
+			id: passes.len() as u64 + 1 + passes.values().map(|p| p.id).max().unwrap_or(0),
+			proposals,
+			replays,
+			reads,
+			known: attacker.known.len(),
+			reused: attacker.reused.len(),
+			routes_epoch: attacker.routes_epoch,
+		});
+		passes.insert(key, Arc::clone(&stored));
+		stored
 	}
 
 	pub(crate) fn attacker_note_reuse(&self, pair: [Value; 2]) -> bool {
@@ -1166,7 +1227,8 @@ impl VerifyContext {
 		let results_len = results.len();
 		VerifyContext {
 			attacker: RwLock::new(self.attacker_snapshot()),
-			deferred_replays: RwLock::new(Vec::new()),
+			deferred_replays: RwLock::new(IdMap::default()),
+			passes: RwLock::new(HashMap::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			file_name: self.file_name.clone(),

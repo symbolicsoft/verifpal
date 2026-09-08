@@ -150,7 +150,8 @@ impl Emission<'_> {
 			if !admissible(value) || !self.bound.admits_at(self.km, origin.id, at.get(), value) {
 				return false;
 			}
-			let Some(phase) = attacker_can_derive(self.ctx, at.get(), value, origin, self.attacker)
+			let Some(phase) =
+				attacker_can_derive(self.ctx, at.get(), value, origin, self.attacker, &|_| None)
 			else {
 				return false;
 			};
