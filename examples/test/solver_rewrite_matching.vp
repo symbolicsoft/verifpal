@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1. The attacker supplies x = b and y = a, so both the key
+// and nonce match and Bob discloses secret. The other key alignment fails.
+attacker[active]
+principal Alice[
+	knows public b
+	generates x
+]
+Alice -> Bob: x
+principal Bob[
+	knows public b
+	knows private secret
+	generates a
+	leaks a
+]
+principal Alice[
+	generates y
+]
+Alice -> Bob: y
+principal Bob[
+	response = AEAD_DEC(DH_KEX(PUBKEY(a), b), HASH(b), AEAD_ENC(DH_KEX(PUBKEY(x), y), HASH(x), secret, nil), nil)
+]
+Bob -> Carol: response
+principal Carol[]
+queries[
+	confidentiality? secret
+]

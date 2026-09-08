@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at both session counts. Even when the oracle computes
+// secret inside the hash, the unweakened hash conceals its preimage.
+attacker[active]
+principal Alice[
+	knows public b
+	generates x
+]
+Alice -> Bob: x
+principal Bob[
+	knows public b
+	generates a
+	leaks a
+]
+principal Alice[
+	generates y
+]
+Alice -> Bob: y
+principal Bob[
+	knows private k
+	tag = HASH(MAC(k, DH_KEX(PUBKEY(x), y)))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+	commitment = HASH(secret)
+]
+Bob -> Carol: tag
+principal Carol[]
+queries[
+	confidentiality? secret
+]

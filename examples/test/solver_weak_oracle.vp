@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at both session counts. Setting x = b and y = a makes
+// the oracle emit the declared weak commitment, revealing its MAC argument.
+attacker[active]
+principal Alice[
+	knows public b
+	generates x
+]
+Alice -> Bob: x
+principal Bob[
+	knows public b
+	generates a
+	leaks a
+]
+principal Alice[
+	generates y
+]
+Alice -> Bob: y
+principal Bob[
+	knows private k
+	tag = HASH(MAC(k, DH_KEX(PUBKEY(x), y)))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+	commitment = HASH[weak](secret)
+]
+Bob -> Carol: tag
+principal Carol[]
+queries[
+	confidentiality? secret
+]

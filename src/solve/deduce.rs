@@ -29,13 +29,13 @@ type DecompositionMemo = IdMap<usize, (Arc<Primitive>, Vec<Substitution>)>;
 pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	capabilities: Arc<CapabilityIndex>,
-	wire_terms: Vec<Value>,
-	slot_terms: Vec<(ValueId, Value)>,
+	wire_terms: Arc<Vec<Value>>,
+	slot_terms: Arc<Vec<(ValueId, Value)>>,
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
 	basis: Arc<IdSet<u64>>,
-	by_head: IdMap<(PrimitiveId, usize), Vec<usize>>,
+	by_head: Arc<IdMap<(PrimitiveId, usize), Vec<usize>>>,
 	fresh: Cell<u32>,
 	fresh_end: u32,
 }
@@ -63,17 +63,7 @@ impl<'a> Deducer<'a> {
 		for term in &sym.terms {
 			collect_subterm_hashes(term, &mut basis);
 		}
-		Self::in_lane(ps, attacker, sym, Arc::new(basis), 0)
-	}
-
-	pub(crate) fn in_lane(
-		ps: &PrincipalState,
-		attacker: &'a AttackerState,
-		sym: &'a SymbolicState,
-		basis: Arc<IdSet<u64>>,
-		lane: u32,
-	) -> Self {
-		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
+		let (fresh, fresh_end) = super::vars::free_lane_bounds(0);
 		let mut wire_terms = Vec::new();
 		for (idx, meta) in ps.meta.iter().enumerate() {
 			if meta.wire.is_empty() && !meta.constant.leaked {
@@ -108,10 +98,10 @@ impl<'a> Deducer<'a> {
 		Deducer {
 			attacker,
 			capabilities: ps.capabilities.clone(),
-			wire_terms,
-			slot_terms,
-			basis,
-			by_head,
+			wire_terms: Arc::new(wire_terms),
+			slot_terms: Arc::new(slot_terms),
+			basis: Arc::new(basis),
+			by_head: Arc::new(by_head),
 			memo: RefCell::new(IdMap::default()),
 			active: RefCell::new(Vec::new()),
 			cycles_cut: Cell::new(0),
@@ -120,8 +110,29 @@ impl<'a> Deducer<'a> {
 		}
 	}
 
-	pub(crate) fn basis(&self) -> Arc<IdSet<u64>> {
-		Arc::clone(&self.basis)
+	pub(crate) fn lane_factory(&self) -> impl Fn(u32) -> Self + Send + Sync + use<'a> {
+		let attacker = self.attacker;
+		let capabilities = Arc::clone(&self.capabilities);
+		let wire_terms = Arc::clone(&self.wire_terms);
+		let slot_terms = Arc::clone(&self.slot_terms);
+		let basis = Arc::clone(&self.basis);
+		let by_head = Arc::clone(&self.by_head);
+		move |lane| {
+			let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
+			Self {
+				attacker,
+				capabilities: Arc::clone(&capabilities),
+				wire_terms: Arc::clone(&wire_terms),
+				slot_terms: Arc::clone(&slot_terms),
+				basis: Arc::clone(&basis),
+				by_head: Arc::clone(&by_head),
+				memo: RefCell::new(IdMap::default()),
+				active: RefCell::new(Vec::new()),
+				cycles_cut: Cell::new(0),
+				fresh: Cell::new(fresh),
+				fresh_end,
+			}
+		}
 	}
 
 	pub(crate) fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -193,7 +204,7 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn rewrite_shapes(&self, outer: &Primitive, rule: &RewriteRule) -> Vec<Value> {
-		build_rewrite_shapes_with(outer, rule, || self.fresh_var())
+		build_rewrite_shapes_with(outer, rule, |_| self.fresh_var())
 	}
 
 	fn rewrite_shape_yielding(
@@ -523,7 +534,7 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_by_wire(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
-		for term in &self.wire_terms {
+		for term in self.wire_terms.iter() {
 			if !contains_var(term) {
 				continue;
 			}
@@ -558,39 +569,15 @@ impl<'a> Deducer<'a> {
 		{
 			return;
 		}
-		let filter = rule.filter;
-
-		let Some(mut current) = match_value(&rule.to.apply(inner), goal, s) else {
-			return;
-		};
-
-		for (outer_idx, inner_idxs) in &rule.matching {
-			let Some(outer_arg) = p.arguments.get(*outer_idx) else {
-				return;
-			};
-			let mut satisfied = false;
-			for &inner_idx in inner_idxs {
-				let Some(inner_arg) = inner.arguments.get(inner_idx) else {
-					continue;
-				};
-				let (filtered, valid) = filter(p, outer_arg, inner_idx);
-				if !valid {
-					continue;
+		for current in match_values(&rule.to.apply(inner), goal, s) {
+			let refined = refine_check(p, &current);
+			for shape in build_rewrite_shapes_with(&refined, rule, |at| inner.arguments[at].clone())
+			{
+				for bound in unifiers(&p.arguments[rule.from], &shape, &current) {
+					out.extend(self.require_constructible(&bound, s, false));
 				}
-				if let Some(next) = match_value(&filtered, inner_arg, &current)
-					.or_else(|| match_value(inner_arg, &filtered, &current))
-				{
-					current = next;
-					satisfied = true;
-					break;
-				}
-			}
-			if !satisfied {
-				return;
 			}
 		}
-
-		out.extend(self.require_constructible(&current, s, false));
 	}
 
 	fn solve_by_oracle(
@@ -682,7 +669,7 @@ impl<'a> Deducer<'a> {
 
 	fn solve_by_decomposition(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		let mut memo = DecompositionMemo::default();
-		for term in &self.wire_terms {
+		for term in self.wire_terms.iter() {
 			out.extend(self.solve_decomposition_from(term, goal, s, &mut memo));
 		}
 	}
@@ -701,20 +688,52 @@ impl<'a> Deducer<'a> {
 		if let Some((_, solutions)) = memo.get(&key) {
 			return solutions.clone();
 		}
-		let mut routes: Vec<_> = decomposition_targets(p).into_iter().collect();
+		let mut routes: Vec<_> = decomposition_targets(p)
+			.into_iter()
+			.map(|(revealed, given)| (revealed, given, None))
+			.collect();
 		if let Some(rule) = reuse_rule(p.id)
 			&& crate::theory::reused(p, self.attacker).is_some()
 		{
-			routes.push((revealed_values(p, &rule.reveals), Vec::new()));
+			routes.push((revealed_values(p, &rule.reveals), Vec::new(), None));
+		}
+		if !self.capabilities.is_empty()
+			&& let Ok(spec) = primitive_get(p.id)
+		{
+			let reveals: Vec<_> = spec
+				.weak_reveals
+				.iter()
+				.copied()
+				.map(Reveal::Argument)
+				.chain(spec.weak_reveals_output.map(Reveal::Output))
+				.collect();
+			let revealed = revealed_values(p, &reveals);
+			if !revealed.is_empty() {
+				for (annotated, caps) in self.capabilities.annotated_terms() {
+					if caps.in_force(Capability::Weak, self.attacker.current_phase)
+						&& matches!(annotated, Value::Primitive(q) if q.id == p.id && q.output == p.output)
+					{
+						routes.push((revealed.clone(), Vec::new(), Some(annotated)));
+					}
+				}
+			}
 		}
 		if routes.is_empty() {
 			return Vec::new();
 		}
 		let mut out = Vec::new();
-		for (revealed, given) in routes {
+		for (revealed, given, annotated) in routes {
 			for value in revealed {
 				let mut frontier: Vec<_> = match_values(&value, goal, s).collect();
 				frontier.extend(self.solve_decomposition_from(&value, goal, s, memo));
+				if let Some(annotated) = annotated {
+					frontier = dedupe(
+						frontier
+							.iter()
+							.flat_map(|candidate| match_values(term, annotated, candidate))
+							.collect(),
+					);
+				}
 				for required in &given {
 					if frontier.is_empty() {
 						break;
@@ -776,14 +795,14 @@ impl<'a> Deducer<'a> {
 	}
 
 	pub(crate) fn constraint_goals(
-		mut self,
+		&mut self,
 		ctx: &crate::context::VerifyContext,
 		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		sym: &SymbolicState,
 	) -> Vec<Substitution> {
 		let protocol = ctx.term_bound(km).protocol(km);
-		for entries in self.by_head.values_mut() {
+		for entries in Arc::make_mut(&mut self.by_head).values_mut() {
 			entries.retain(|&at| {
 				let constructed = match self.attacker.derivation(KnownIdx(at)) {
 					Some(DerivationRecord::Reconstructed { .. }) => true,
@@ -1251,7 +1270,7 @@ fn check_passes(p: &Primitive) -> bool {
 pub(crate) fn build_rewrite_shapes_with(
 	outer: &Primitive,
 	rule: &RewriteRule,
-	mut fill: impl FnMut() -> Value,
+	mut fill: impl FnMut(usize) -> Value,
 ) -> Vec<Value> {
 	let Ok(inner_spec) = primitive_get(rule.id) else {
 		return Vec::new();
@@ -1263,7 +1282,7 @@ pub(crate) fn build_rewrite_shapes_with(
 	let filter = rule.filter;
 
 	let mut partials: Vec<(Vec<Value>, Vec<usize>)> =
-		vec![((0..arity).map(|_| fill()).collect(), Vec::new())];
+		vec![((0..arity).map(&mut fill).collect(), Vec::new())];
 	for (outer_idx, inner_idxs) in &rule.matching {
 		let Some(outer_arg) = outer.arguments.get(*outer_idx) else {
 			return Vec::new();
@@ -1333,6 +1352,152 @@ fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn lanes_share_inputs_without_sharing_search_or_replay_restrictions() {
+		let key = make_private("lane_inputs_key");
+		let message = make_private("lane_inputs_message");
+		let held = Value::primitive(PRIM_ENC, vec![key.clone(), message.clone()], 0);
+		let attacker = make_attacker_state(vec![held]);
+		let ps = make_principal_state("Lanes", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let original = Deducer::new(&ps, &attacker, &sym);
+		let in_lane = original.lane_factory();
+		let mut restricted = in_lane(1);
+		let sibling = in_lane(2);
+		assert!(Arc::ptr_eq(&original.by_head, &restricted.by_head));
+		assert!(Arc::ptr_eq(&original.wire_terms, &sibling.wire_terms));
+		assert!(Arc::ptr_eq(&original.slot_terms, &sibling.slot_terms));
+		assert!(Arc::ptr_eq(&original.basis, &sibling.basis));
+		Arc::make_mut(&mut restricted.by_head).clear();
+		let mut variables = IdSet::default();
+		for (deducer, expected) in [(&restricted, 0), (&original, 1), (&sibling, 1)] {
+			let variable = deducer.fresh_var();
+			assert!(variables.insert(as_var(&variable).unwrap()));
+			assert!(deducer.memo.borrow().is_empty());
+			let goal = Value::primitive(PRIM_ENC, vec![key.clone(), variable.clone()], 0);
+			let solutions = deducer.solve(&goal, &Substitution::default());
+			assert_eq!(solutions.len(), expected);
+			for solution in solutions {
+				assert!(apply(&variable, &solution).equivalent(&message, true));
+			}
+		}
+	}
+
+	#[test]
+	fn rewrite_matching_keeps_the_alignment_required_by_the_nonce() {
+		let a = make_private("rewrite_match_a");
+		let b = make_private("rewrite_match_b");
+		let secret = make_private("rewrite_match_secret");
+		let x = super::super::vars::attacker_var(0, "rewrite_match_x");
+		let y = super::super::vars::attacker_var(1, "rewrite_match_y");
+		let dh = |a: Value, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let hash = |v| Value::primitive(PRIM_HASH, vec![v], 0);
+		let encrypted = Value::primitive(
+			PRIM_AEAD_ENC,
+			vec![
+				dh(x.clone(), y.clone()),
+				hash(x.clone()),
+				secret.clone(),
+				value_nil(),
+			],
+			0,
+		);
+		let wire = Value::primitive(
+			PRIM_AEAD_DEC,
+			vec![
+				dh(a.clone(), b.clone()),
+				hash(b.clone()),
+				encrypted,
+				value_nil(),
+			],
+			0,
+		);
+		let ps = make_principal_state("Rewrite", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![wire.clone()],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let attacker = make_attacker_state(vec![a.clone(), b.clone()]);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let mut found = Vec::new();
+		deducer.solve_by_rewrite_match(&wire, &secret, &Substitution::default(), &mut found);
+		assert_eq!(found.len(), 1);
+		assert!(apply(&x, &found[0]).equivalent(&b, true));
+		assert!(apply(&y, &found[0]).equivalent(&a, true));
+		assert!(crate::theory::reduce_once(&apply(&wire, &found[0])).equivalent(&secret, true));
+	}
+
+	#[test]
+	fn weak_decomposition_respects_capabilities_and_their_phase() {
+		let secret = make_private("weak_route_secret");
+		let message = make_constant("weak_route_message");
+		let variable = super::super::vars::attacker_var(0, "weak_route_input");
+		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
+		for annotated in [false, true] {
+			let mut p = Primitive::new(
+				PRIM_HASH,
+				vec![Value::primitive(
+					PRIM_MAC,
+					vec![secret.clone(), variable.clone()],
+					0,
+				)],
+				0,
+			);
+			if annotated {
+				p.capabilities.set(Capability::Weak, 1);
+			}
+			let wire = Value::Primitive(Arc::new(p));
+			let mut ps = make_principal_state("Weakness", 1, vec![], vec![]);
+			let declared = apply(
+				&wire,
+				&Substitution::from_iter([(as_var(&variable).unwrap(), message.clone())]),
+			);
+			Arc::make_mut(&mut ps.capabilities).insert(&declared);
+			let sym = SymbolicState {
+				terms: vec![wire.clone()],
+				var_slots: vec![],
+				var_terms: vec![],
+			};
+			for phase in [0, 1, 2] {
+				let mut attacker = make_attacker_state(vec![message.clone()]);
+				attacker.current_phase = phase;
+				let deducer = Deducer::new(&ps, &attacker, &sym);
+				let found = deducer.solve_decomposition_from(
+					&wire,
+					&goal,
+					&Substitution::default(),
+					&mut DecompositionMemo::default(),
+				);
+				assert_eq!(found.len(), usize::from(annotated && phase >= 1));
+				let other = Value::primitive(PRIM_MAC, vec![secret.clone(), value_nil()], 0);
+				assert!(
+					deducer
+						.solve_decomposition_from(
+							&wire,
+							&other,
+							&Substitution::default(),
+							&mut DecompositionMemo::default(),
+						)
+						.is_empty()
+				);
+				for solution in found {
+					assert!(apply(&variable, &solution).equivalent(&message, true));
+				}
+			}
+		}
+	}
 
 	#[test]
 	fn reuse_matching_keeps_the_alignment_required_by_the_nonce() {

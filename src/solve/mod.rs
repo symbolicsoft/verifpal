@@ -235,13 +235,12 @@ fn propose(
 	pass: Pass,
 	attacker: &AttackerState,
 	sym: &SymbolicState,
-	deducer: Deducer,
+	mut deducer: Deducer,
 ) -> Vec<Substitution> {
 	let empty = Substitution::default();
 	let mut proposals: Vec<Substitution> = Vec::new();
 
 	let results = ctx.results_get();
-	let basis = deducer.basis();
 	let protocol = ctx.term_bound(km).protocol(km);
 	if pass == Pass::Targeted {
 		let mut pending: Vec<&Query> = Vec::new();
@@ -255,12 +254,15 @@ fn propose(
 				pending.push(query);
 			}
 		}
-		let goals = crate::parallel::map_ordered(lanes(pending.len()), |(lane, range)| {
-			let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
-			range
-				.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
-				.collect::<Vec<_>>()
-		});
+		let goals = {
+			let in_lane = deducer.lane_factory();
+			crate::parallel::map_ordered(lanes(pending.len()), |(lane, range)| {
+				let deducer = in_lane(lane);
+				range
+					.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
+					.collect::<Vec<_>>()
+			})
+		};
 		proposals.extend(goals.into_iter().flatten());
 		proposals.extend(deducer.constraint_goals(ctx, km, ps, sym));
 	}
@@ -280,9 +282,10 @@ fn propose(
 	if pass == Pass::Constructed {
 		proposals.extend(sibling_flight_substitutions(km, ps, sym));
 		let relayed = relay_substitution(km, ps, sym);
+		let in_lane = deducer.lane_factory();
 		let candidates =
 			crate::parallel::map_ordered(lanes(sym.var_slots.len()), |(lane, range)| {
-				let deducer = Deducer::in_lane(ps, attacker, sym, Arc::clone(&basis), lane);
+				let deducer = in_lane(lane);
 				range
 					.map(|at| {
 						let slot = sym.var_slots[at];

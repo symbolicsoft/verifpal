@@ -1112,13 +1112,7 @@ fn shapes_the_checks_wanted(
 		let Some(rule) = rule else {
 			continue;
 		};
-		let mut at = 0usize;
-		let filler = || {
-			let position = at;
-			at += 1;
-			fill(position)
-		};
-		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, rule, filler) {
+		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, rule, &mut *fill) {
 			if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
 				shapes.push(shape);
 			}

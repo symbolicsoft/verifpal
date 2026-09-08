@@ -4005,3 +4005,40 @@ fn test_nested_attested_release_unsigned() {
 	run_model("nested_attested_release_unsigned.vp", "c1");
 	run_model_sessions("nested_attested_release_unsigned.vp", 1, "c1");
 }
+
+#[test]
+fn test_solver_rewrite_matching() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_rewrite_matching.vp", sessions, "c1");
+		run_model_sessions("solver_rewrite_matching_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_weak_oracle() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_weak_oracle.vp", sessions, "c1");
+		run_model_sessions("solver_weak_oracle_strong.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_weak_oracles_respect_the_annotated_smp_delivery() {
+	let source = std::fs::read_to_string("examples/messaging/simplex_smp.vp").unwrap();
+	for delivery in ["rmsg1", "rmsg2"] {
+		let weakened = source.replace(
+			&format!("{delivery} = AEAD_ENC("),
+			&format!("{delivery} = AEAD_ENC[weak]("),
+		);
+		assert_ne!(weakened, source);
+		let model = crate::parser::parse_string("weak-delivery.vp", &weakened).unwrap();
+		let results = crate::verify::analyze_sessions(&model, 1)
+			.unwrap()
+			.results_get();
+		assert_eq!(
+			results.iter().map(|r| r.resolved).collect::<Vec<_>>(),
+			vec![false, false, true, false],
+			"{delivery}"
+		);
+	}
+}
