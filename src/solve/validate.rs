@@ -227,8 +227,21 @@ fn spends_another_execution(
 	chosen: &[(usize, Value)],
 	attacker: &AttackerState,
 ) -> bool {
-	chosen.iter().any(|(_, ground)| {
-		needs_of_term(km, attacker, ground)
+	let mut pending: Vec<_> = chosen.iter().rev().map(|(_, ground)| ground).collect();
+	let mut seen = IdSet::default();
+	while let Some(ground) = pending.pop() {
+		if let Value::Primitive(p) = ground
+			&& !seen.insert(std::sync::Arc::as_ptr(p) as usize)
+		{
+			continue;
+		}
+		if attacker.knows(ground).is_none() {
+			if let Value::Primitive(p) = ground {
+				pending.extend(p.arguments.iter().rev());
+			}
+			continue;
+		}
+		if crate::deduction::needs_of(km, attacker, ground)
 			.iter()
 			.any(|(who, at, need)| {
 				let at = at.get();
@@ -251,26 +264,11 @@ fn spends_another_execution(
 							!reduce_once(&here).equivalent(&reduce_once(need), true)
 						})
 					}
-			})
-	})
-}
-
-fn needs_of_term(
-	km: &ProtocolTrace,
-	attacker: &AttackerState,
-	value: &Value,
-) -> Vec<(PrincipalId, SlotIdx, Value)> {
-	if attacker.knows(value).is_some() {
-		return crate::deduction::needs_of(km, attacker, value);
+			}) {
+			return true;
+		}
 	}
-	match value {
-		Value::Constant(_) => Vec::new(),
-		Value::Primitive(p) => p
-			.arguments
-			.iter()
-			.flat_map(|argument| needs_of_term(km, attacker, argument))
-			.collect(),
-	}
+	false
 }
 
 pub(crate) fn attacker_can_derive(
@@ -307,27 +305,45 @@ pub(crate) fn attacker_can_derive(
 }
 
 pub(crate) fn derivable(v: &Value, ps: &PrincipalState, snapshot: &AttackerState) -> bool {
+	let _memo = crate::theory::DeductionMemo::ensure(ps, snapshot);
+	derivable_shared(v, ps, snapshot, &mut IdMap::default())
+}
+
+fn derivable_shared(
+	v: &Value,
+	ps: &PrincipalState,
+	snapshot: &AttackerState,
+	seen: &mut IdMap<usize, bool>,
+) -> bool {
 	if snapshot.knows(v).is_some() {
 		return true;
 	}
 	match v {
 		Value::Constant(c) => c.is_nil(),
 		Value::Primitive(p) => {
+			let key = std::sync::Arc::as_ptr(p) as usize;
+			if let Some(&result) = seen.get(&key) {
+				return result;
+			}
 			if crate::theory::obtainable(v, ps, snapshot) {
 				return true;
 			}
-			if let Some((_, vary)) = malleable_positions(p, ps, snapshot) {
-				return p
-					.arguments
+			let result = if let Some((_, vary)) = malleable_positions(p, ps, snapshot) {
+				p.arguments
 					.iter()
 					.enumerate()
-					.all(|(i, a)| !vary.contains(&i) || derivable(a, ps, snapshot));
-			}
-			let exempt_secret = forgeable_secret_position(p, ps, snapshot);
-			let by_reuse = crate::theory::forgeable_by_reuse(p, snapshot);
-			p.arguments.iter().enumerate().all(|(i, a)| {
-				Some(i) == exempt_secret || by_reuse.contains(&i) || derivable(a, ps, snapshot)
-			})
+					.all(|(i, a)| !vary.contains(&i) || derivable_shared(a, ps, snapshot, seen))
+			} else {
+				let exempt_secret = forgeable_secret_position(p, ps, snapshot);
+				let by_reuse = crate::theory::forgeable_by_reuse(p, snapshot);
+				p.arguments.iter().enumerate().all(|(i, a)| {
+					Some(i) == exempt_secret
+						|| by_reuse.contains(&i)
+						|| derivable_shared(a, ps, snapshot, seen)
+				})
+			};
+			seen.insert(key, result);
+			result
 		}
 	}
 }
@@ -393,6 +409,25 @@ mod tests {
 
 	fn empty_state() -> crate::types::PrincipalState {
 		make_principal_state("Test", 0, vec![], vec![])
+	}
+
+	#[test]
+	fn receive_history_check_handles_shared_terms() {
+		use crate::types::Value;
+		let mut term = value_nil();
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		assert!(!super::spends_another_execution(
+			&make_trace(),
+			&empty_state(),
+			&[(0, term)],
+			&make_attacker_state(vec![value_nil()]),
+		));
 	}
 
 	#[test]
@@ -480,6 +515,35 @@ mod tests {
 		let checked = Value::Primitive(std::sync::Arc::new(check));
 		let wrapped = Value::primitive(crate::primitive::PRIM_HASH, vec![term, checked], 0);
 		assert!(super::contains_failed_check(&wrapped));
+	}
+
+	#[test]
+	fn derivability_checks_shared_malleable_terms() {
+		use crate::types::{Capability, Primitive, Value};
+		use std::sync::Arc;
+		let key = make_private("derive_dag_key");
+		let mut ciphertext = Primitive::new(
+			PRIM_ENC,
+			vec![key.clone(), make_private("derive_dag_message")],
+			0,
+		);
+		ciphertext.capabilities.set(Capability::Malleable, 0);
+		let ciphertext = Value::Primitive(Arc::new(ciphertext));
+		let attacker = make_attacker_state(vec![value_nil(), ciphertext.clone()]);
+		let mut ps = empty_state();
+		Arc::make_mut(&mut ps.capabilities).insert(&ciphertext);
+		let mut term = Value::primitive(PRIM_ENC, vec![key.clone(), value_nil()], 0);
+		for _ in 0..40 {
+			term = Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![term.clone(), term.clone(), term],
+				0,
+			);
+		}
+		assert!(derivable(&term, &ps, &attacker));
+		let secret = Value::primitive(crate::primitive::PRIM_HASH, vec![term.clone(), key], 0);
+		assert!(!derivable(&secret, &ps, &attacker));
+		assert!(!derivable(&term, &empty_state(), &attacker));
 	}
 
 	#[test]

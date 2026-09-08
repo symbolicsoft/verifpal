@@ -8,7 +8,15 @@ use crate::types::*;
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
 
 pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
-	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone()).next()
+	unifiers(a, b, s).next()
+}
+
+pub(crate) fn unifiers(
+	a: &Value,
+	b: &Value,
+	s: &Substitution,
+) -> impl Iterator<Item = Substitution> {
+	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone())
 }
 
 pub(crate) fn merge(a: &Substitution, b: &Substitution) -> Option<Substitution> {

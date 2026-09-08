@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1. Swapping the two hashed exponents passes Bob's equality check
+// and makes him disclose the MAC of the first exponent through the second.
+attacker[active]
+principal Alice[
+	knows private a
+	knows public b
+	x = HASH(a)
+]
+Alice -> Bob: x
+principal Bob[
+	knows private a, k
+	knows public b
+]
+principal Alice[
+	y = HASH(b)
+]
+Alice -> Bob: y
+principal Bob[
+	_ = ASSERT(DH_KEX(PUBKEY(x), y), DH_KEX(PUBKEY(HASH(a)), HASH(b)))?
+	tag = MAC(k, y)
+	secret = MAC(k, HASH(a))
+]
+Bob -> Carol: tag
+principal Carol[]
+queries[
+	confidentiality? secret
+]

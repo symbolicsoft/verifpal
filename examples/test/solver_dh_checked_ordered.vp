@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at both session counts. Binding the first exponent separately
+// prevents the swap that preserves the shared key in the companion model.
+attacker[active]
+principal Alice[
+	knows private a
+	knows public b
+	x = HASH(a)
+]
+Alice -> Bob: x
+principal Bob[
+	knows private a, k
+	knows public b
+]
+principal Alice[
+	y = HASH(b)
+]
+Alice -> Bob: y
+principal Bob[
+	_ = ASSERT(CONCAT(DH_KEX(PUBKEY(x), y), x), CONCAT(DH_KEX(PUBKEY(HASH(a)), HASH(b)), HASH(a)))?
+	tag = MAC(k, y)
+	secret = MAC(k, HASH(a))
+]
+Bob -> Carol: tag
+principal Carol[]
+queries[
+	confidentiality? secret
+]

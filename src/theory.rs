@@ -194,7 +194,7 @@ pub(crate) struct DeductionMemo<'a> {
 }
 
 impl<'a> DeductionMemo<'a> {
-	fn ensure(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
+	pub(crate) fn ensure(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
 		let present = MEMO.with(|memo| {
 			memo.borrow()
 				.as_ref()

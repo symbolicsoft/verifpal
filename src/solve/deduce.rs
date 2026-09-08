@@ -11,7 +11,7 @@ use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
 use crate::value::value_nil;
 
-use super::matching::{match_value, match_values, unify};
+use super::matching::{match_value, match_values, unifiers, unify};
 use super::symbolic::SymbolicState;
 use super::vars::{
 	Substitution, apply, as_var, bind, contains_var, dedupe, same_substitution, substitution_hash,
@@ -433,21 +433,18 @@ impl<'a> Deducer<'a> {
 				continue;
 			}
 			offered.push(&pair[0]);
-			let mut fixed = s.clone();
-			let mut aligned = true;
+			let mut frontier = vec![s.clone()];
 			for &at in &rule.fixed {
-				match match_value(&target.arguments[at], &held.arguments[at], &fixed) {
-					Some(next) => fixed = next,
-					None => {
-						aligned = false;
-						break;
-					}
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					next.extend(match_values(
+						&target.arguments[at],
+						&held.arguments[at],
+						candidate,
+					));
 				}
+				frontier = dedupe(next);
 			}
-			if !aligned {
-				continue;
-			}
-			let mut frontier = vec![fixed];
 			for (i, argument) in target.arguments.iter().enumerate() {
 				if rule.forgeable.contains(&i) {
 					continue;
@@ -491,8 +488,7 @@ impl<'a> Deducer<'a> {
 			if !self.capability_in_force(held, Capability::Malleable) {
 				continue;
 			}
-			let mut fixed = s.clone();
-			let mut aligned = true;
+			let mut frontier = vec![s.clone()];
 			for (i, (want, have)) in target
 				.arguments
 				.iter()
@@ -502,18 +498,12 @@ impl<'a> Deducer<'a> {
 				if spec.malleable_vary.contains(&i) {
 					continue;
 				}
-				match match_value(want, have, &fixed) {
-					Some(next) => fixed = next,
-					None => {
-						aligned = false;
-						break;
-					}
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					next.extend(match_values(want, have, candidate));
 				}
+				frontier = dedupe(next);
 			}
-			if !aligned {
-				continue;
-			}
-			let mut frontier = vec![fixed];
 			for &i in &spec.malleable_vary {
 				let Some(want) = target.arguments.get(i) else {
 					continue;
@@ -894,10 +884,7 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn invert_reduced(&self, term: &Value, target: &Value, s: &Substitution) -> Vec<Substitution> {
-		let mut out = Vec::new();
-		if let Some(bound) = unify(term, target, s) {
-			out.push(bound);
-		}
+		let mut out: Vec<_> = unifiers(term, target, s).collect();
 
 		let Value::Primitive(p) = term else {
 			return dedupe(out);
@@ -1346,6 +1333,99 @@ fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn reuse_matching_keeps_the_alignment_required_by_the_nonce() {
+		let a = make_private("reuse_match_a");
+		let b = make_private("reuse_match_b");
+		let x = super::super::vars::free_var(10000);
+		let y = super::super::vars::free_var(10001);
+		let dh = |a: Value, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let hash = |v| Value::primitive(PRIM_HASH, vec![v], 0);
+		let cipher = |key: Value, nonce: Value, message| {
+			Value::primitive(PRIM_AEAD_ENC, vec![key, nonce, message, value_nil()], 0)
+		};
+		let first = cipher(dh(a.clone(), b.clone()), hash(b.clone()), value_nil());
+		let second = cipher(dh(a.clone(), b.clone()), hash(b.clone()), hash(value_nil()));
+		let mut attacker = make_attacker_state(vec![value_nil(), first.clone(), second.clone()]);
+		attacker.reused = Arc::new(vec![[first, second]]);
+		let ps = make_principal_state("Reuse", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let target = cipher(
+			dh(x.clone(), y.clone()),
+			hash(x.clone()),
+			hash(hash(value_nil())),
+		);
+		let mut found = Vec::new();
+		deducer.solve_by_reuse(
+			target.as_primitive().unwrap(),
+			&Substitution::default(),
+			&mut found,
+		);
+		assert_eq!(found.len(), 1);
+		assert!(apply(&x, &found[0]).equivalent(&b, true));
+		assert!(apply(&y, &found[0]).equivalent(&a, true));
+		assert!(attacker.knows(&apply(&target, &found[0])).is_none());
+		assert!(super::super::validate::derivable(
+			&apply(&target, &found[0]),
+			&ps,
+			&attacker
+		));
+	}
+
+	#[test]
+	fn malleability_matching_keeps_the_constructible_alignment() {
+		let a = make_private("malleable_match_a");
+		let b = make_private("malleable_match_b");
+		let x = super::super::vars::free_var(10000);
+		let y = super::super::vars::free_var(10001);
+		let dh = |a: Value, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let mut held = Primitive::new(PRIM_ENC, vec![dh(a.clone(), b.clone()), value_nil()], 0);
+		held.capabilities.set(Capability::Malleable, 0);
+		let held = Value::Primitive(Arc::new(held));
+		let mut ps = make_principal_state("Malleability", 1, vec![], vec![]);
+		Arc::make_mut(&mut ps.capabilities).insert(&held);
+		let attacker = make_attacker_state(vec![value_nil(), b.clone(), held]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let target = Value::primitive(PRIM_ENC, vec![dh(x.clone(), y.clone()), x.clone()], 0);
+		let mut found = Vec::new();
+		deducer.solve_by_malleability(
+			target.as_primitive().unwrap(),
+			&Substitution::default(),
+			&mut found,
+		);
+		assert_eq!(found.len(), 1);
+		assert!(apply(&x, &found[0]).equivalent(&b, true));
+		assert!(apply(&y, &found[0]).equivalent(&a, true));
+		assert!(attacker.knows(&apply(&target, &found[0])).is_none());
+		assert!(super::super::validate::derivable(
+			&apply(&target, &found[0]),
+			&ps,
+			&attacker
+		));
+	}
 
 	#[test]
 	fn threshold_search_keeps_one_state_per_distinct_choice() {

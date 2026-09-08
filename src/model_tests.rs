@@ -3810,6 +3810,14 @@ fn test_solver_memo_preserves_oracle_bindings() {
 }
 
 #[test]
+fn test_solver_dh_checked_alternatives() {
+	run_model("solver_dh_checked_alternative.vp", "c1");
+	run_model_sessions("solver_dh_checked_alternative.vp", 1, "c1");
+	run_model("solver_dh_checked_ordered.vp", "c0");
+	run_model_sessions("solver_dh_checked_ordered.vp", 1, "c0");
+}
+
+#[test]
 fn test_solver_dh_backtracking() {
 	for (model, code) in [
 		("solver_dh_backtracking.vp", "c1"),
