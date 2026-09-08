@@ -11,7 +11,7 @@ use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
 use crate::value::value_nil;
 
-use super::matching::{match_value, match_values, unifiers, unify};
+use super::matching::{match_value, match_values, unifiers};
 use super::symbolic::SymbolicState;
 use super::vars::{
 	Substitution, apply, as_var, bind, contains_var, dedupe, same_substitution, substitution_hash,
@@ -207,23 +207,34 @@ impl<'a> Deducer<'a> {
 		build_rewrite_shapes_with(outer, rule, |_| self.fresh_var())
 	}
 
-	fn rewrite_shape_yielding(
+	fn rewrite_shapes_yielding(
 		&self,
 		outer: &Primitive,
 		rule: &RewriteRule,
 		target: &Value,
-	) -> Option<Value> {
-		let empty = Substitution::default();
-		for shape in self.rewrite_shapes(outer, rule) {
+		s: &Substitution,
+	) -> Vec<(Value, Substitution)> {
+		let mut out = Vec::new();
+		let first = self.fresh.get();
+		let shapes = self.rewrite_shapes(outer, rule);
+		let locals = first..self.fresh.get();
+		for shape in shapes {
 			let Value::Primitive(inner) = &shape else {
 				continue;
 			};
-			let Some(bound) = unify(&rule.to.apply(inner), target, &empty) else {
-				continue;
-			};
-			return Some(apply(&shape, &bound));
+			for bound in unifiers(&rule.to.apply(inner), target, s) {
+				let bindings = bound
+					.iter()
+					.filter(|(id, _)| {
+						!id.checked_sub(super::vars::FREE_VAR_BASE)
+							.is_some_and(|n| locals.contains(&n))
+					})
+					.map(|(&id, value)| (id, apply(value, &bound)))
+					.collect();
+				out.push((apply(&shape, &bound), bindings));
+			}
 		}
-		None
+		out
 	}
 
 	fn tuple_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
@@ -602,10 +613,9 @@ impl<'a> Deducer<'a> {
 		if !self.basis.contains(&goal.hash_value()) {
 			return;
 		}
-		let Some(shape) = self.rewrite_shape_yielding(p, rule, goal) else {
-			return;
-		};
-		self.bind_from_shape(&shape, var_id, s, false, out);
+		for (shape, bound) in self.rewrite_shapes_yielding(p, rule, goal, s) {
+			self.bind_from_shape(&shape, var_id, &bound, false, out);
+		}
 	}
 
 	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
@@ -932,9 +942,10 @@ impl<'a> Deducer<'a> {
 
 		if let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref())
 			&& let Some(from) = p.arguments.get(rule.from)
-			&& let Some(shape) = self.rewrite_shape_yielding(p, rule, target)
 		{
-			out.extend(self.invert(from, &shape, s));
+			for (shape, bound) in self.rewrite_shapes_yielding(p, rule, target, s) {
+				out.extend(self.invert(from, &shape, &bound));
+			}
 		}
 
 		if primitive_is_projection(p.id)
@@ -1352,6 +1363,83 @@ fn dedupe_counts(candidates: Vec<(Substitution, usize)>) -> Vec<(Substitution, u
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn rewrite_inversion_keeps_bindings_in_the_reduct() {
+		let key = make_private("invert_reduct_key");
+		let message = make_constant("invert_reduct_message");
+		let input = super::super::vars::attacker_var(0, "invert_reduct_input");
+		let signature = super::super::vars::attacker_var(1, "invert_reduct_signature");
+		let term = Value::primitive(PRIM_UNBLIND, vec![value_nil(), input.clone(), signature], 0);
+		let target = Value::primitive(PRIM_SIGN, vec![key, message.clone()], 0);
+		let ps = make_principal_state("Inversion", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let attacker = make_attacker_state(vec![]);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let found = deducer.invert(&term, &target, &Substitution::default());
+		assert!(!found.is_empty());
+		for solution in found {
+			assert!(
+				solution
+					.keys()
+					.all(|id| super::super::vars::is_slot_var_id(*id))
+			);
+			assert!(apply(&input, &solution).equivalent(&message, true));
+			assert!(crate::theory::reduce_once(&apply(&term, &solution)).equivalent(&target, true));
+		}
+	}
+
+	#[test]
+	fn rewrite_inversion_retains_commutative_alternatives_and_incoming_bindings() {
+		let a = make_constant("invert_alternatives_a");
+		let b = make_constant("invert_alternatives_b");
+		let key = make_private("invert_alternatives_key");
+		let x = super::super::vars::attacker_var(0, "invert_alternatives_x");
+		let y = super::super::vars::attacker_var(1, "invert_alternatives_y");
+		let sig = super::super::vars::attacker_var(2, "invert_alternatives_sig");
+		let dh = |a, b| {
+			Value::primitive(
+				PRIM_DH_KEX,
+				vec![Value::primitive(PRIM_PUBKEY, vec![a], 0), b],
+				0,
+			)
+		};
+		let term = Value::primitive(
+			PRIM_UNBLIND,
+			vec![value_nil(), dh(x.clone(), y.clone()), sig],
+			0,
+		);
+		let target = Value::primitive(PRIM_SIGN, vec![key, dh(a.clone(), b.clone())], 0);
+		let ps = make_principal_state("Alternatives", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let attacker = make_attacker_state(vec![]);
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let all = deducer.invert(&term, &target, &Substitution::default());
+		assert_eq!(all.len(), 2);
+		for (first, second) in [(a.clone(), b.clone()), (b, a)] {
+			assert!(
+				all.iter().any(|s| apply(&x, s).equivalent(&first, true)
+					&& apply(&y, s).equivalent(&second, true))
+			);
+			let incoming = Substitution::from_iter([(as_var(&x).unwrap(), first.clone())]);
+			let constrained = deducer.invert(&term, &target, &incoming);
+			assert_eq!(constrained.len(), 1);
+			assert!(apply(&x, &constrained[0]).equivalent(&first, true));
+			assert!(apply(&y, &constrained[0]).equivalent(&second, true));
+			assert!(
+				crate::theory::reduce_once(&apply(&term, &constrained[0]))
+					.equivalent(&target, true)
+			);
+		}
+	}
 
 	#[test]
 	fn lanes_share_inputs_without_sharing_search_or_replay_restrictions() {
@@ -2015,8 +2103,10 @@ authentication? Sender -> Bob: payload
 			.as_ref()
 			.expect("UNBLIND declares a rewrite rule");
 
-		let shape = deducer
-			.rewrite_shape_yielding(&outer, rule, &target)
+		let (shape, _) = deducer
+			.rewrite_shapes_yielding(&outer, rule, &target, &Substitution::default())
+			.into_iter()
+			.next()
 			.expect("UNBLIND can be inverted against a signature over its own message");
 
 		let expected = Value::primitive(
@@ -2068,8 +2158,8 @@ authentication? Sender -> Bob: payload
 
 		assert!(
 			deducer
-				.rewrite_shape_yielding(&outer, rule, &target)
-				.is_none(),
+				.rewrite_shapes_yielding(&outer, rule, &target, &Substitution::default())
+				.is_empty(),
 			"unblinding with blinding factor `inr_k` over message `inr_m` can only yield a \
 			 signature over `inr_m`; offering a shape for a signature over something else \
 			 proposes a term the rewrite does not produce"

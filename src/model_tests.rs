@@ -4023,6 +4023,14 @@ fn test_solver_weak_oracle() {
 }
 
 #[test]
+fn test_solver_unblind_bindings() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_unblind_bindings.vp", sessions, "c1");
+		run_model_sessions("solver_unblind_bindings_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_weak_oracles_respect_the_annotated_smp_delivery() {
 	let source = std::fs::read_to_string("examples/messaging/simplex_smp.vp").unwrap();
 	for delivery in ["rmsg1", "rmsg2"] {

@@ -7,10 +7,6 @@ use crate::types::*;
 
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
 
-pub(crate) fn unify(a: &Value, b: &Value, s: &Substitution) -> Option<Substitution> {
-	unifiers(a, b, s).next()
-}
-
 pub(crate) fn unifiers(
 	a: &Value,
 	b: &Value,
@@ -175,7 +171,10 @@ mod tests {
 				match_value(&pattern, &target, &empty).is_some(),
 				threshold == 2
 			);
-			assert_eq!(unify(&pattern, &target, &empty).is_some(), threshold == 2);
+			assert_eq!(
+				unifiers(&pattern, &target, &empty).next().is_some(),
+				threshold == 2
+			);
 		}
 	}
 
@@ -196,9 +195,12 @@ mod tests {
 		let tuple = |args| make_primitive(crate::primitive::PRIM_CONCAT, args, 0);
 		let pattern = tuple(vec![dh_kex(pubkey(x.clone()), y.clone()), x.clone()]);
 		let target = tuple(vec![dh_kex(pubkey(a.clone()), b.clone()), b.clone()]);
-		for solve in [match_value, unify] {
-			let found = solve(&pattern, &target, &Substitution::default())
-				.expect("the swapped exponents satisfy both fields");
+		let empty = Substitution::default();
+		for found in [
+			match_value(&pattern, &target, &empty),
+			unifiers(&pattern, &target, &empty).next(),
+		] {
+			let found = found.expect("the swapped exponents satisfy both fields");
 			assert!(crate::solve::vars::apply(&x, &found).equivalent(&b, true));
 			assert!(crate::solve::vars::apply(&y, &found).equivalent(&a, true));
 			assert!(crate::solve::vars::apply(&pattern, &found).equivalent(&target, true));
@@ -337,7 +339,11 @@ mod tests {
 		let pattern = tuple(vec![x, constant.clone()]);
 		let target = tuple(vec![constant, y]);
 		assert!(match_value(&pattern, &target, &Substitution::default()).is_none());
-		assert!(unify(&pattern, &target, &Substitution::default()).is_some());
+		assert!(
+			unifiers(&pattern, &target, &Substitution::default())
+				.next()
+				.is_some()
+		);
 	}
 
 	#[test]
@@ -350,7 +356,11 @@ mod tests {
 				0,
 			);
 		}
-		assert!(unify(&term, &term, &Substitution::default()).is_some());
+		assert!(
+			unifiers(&term, &term, &Substitution::default())
+				.next()
+				.is_some()
+		);
 	}
 
 	#[test]
@@ -372,7 +382,9 @@ mod tests {
 		let var = crate::solve::vars::attacker_var(1, "unc_slot");
 		let a = dh_kex(pubkey(var.clone()), y.clone());
 		let b = dh_kex(pubkey(y), x.clone());
-		let s = unify(&a, &b, &Substitution::default()).expect("unifies modulo commutativity");
+		let s = unifiers(&a, &b, &Substitution::default())
+			.next()
+			.expect("unifies modulo commutativity");
 		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
 	}
 

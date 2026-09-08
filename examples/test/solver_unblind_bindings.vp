@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one and two sessions. Delivering other and alt together
+// makes Bob unblind the signature over other. Neither single replacement
+// suffices, and the attacker cannot unblind alt without Bob's private factor.
+
+attacker[active]
+
+principal Alice[
+	knows private sk, r
+	knows public other
+	generates m
+	sig = SIGN(sk, BLIND(r, m))
+	alt = SIGN(sk, BLIND(r, other))
+]
+
+Alice -> Carol: alt
+
+principal Carol[
+]
+
+Alice -> Bob: m, sig
+
+principal Bob[
+	knows private r, sk
+	knows public other
+	unblinded = UNBLIND(r, m, sig)
+	secret = SIGN(sk, other)
+]
+
+Bob -> Carol: unblinded
+
+queries[
+	confidentiality? secret
+]

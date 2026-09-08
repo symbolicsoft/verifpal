@@ -226,26 +226,18 @@ fn attacker_supplied(
 }
 
 fn carries_a_secret(v: &Value, ps: &PrincipalState, seen: &mut Vec<ValueId>) -> bool {
-	match v {
-		Value::Constant(c) => {
-			let declared = ps.index_of(c).map(|i| &ps.meta[i].constant).unwrap_or(c);
-			if declared.fresh || declared.qualifier == Some(Qualifier::Private) {
-				return true;
-			}
-			if seen.contains(&c.id) {
-				return false;
-			}
-			seen.push(c.id);
-			match ps.index_of(c) {
-				Some(i) => match &ps.values[i].value {
-					Value::Constant(inner) if inner.id == c.id => false,
-					inner => carries_a_secret(inner, ps, seen),
-				},
-				None => false,
-			}
+	v.constant_leaves().any(|c| {
+		let declared = ps.index_of(c).map(|i| &ps.meta[i].constant).unwrap_or(c);
+		if declared.fresh || declared.qualifier == Some(Qualifier::Private) {
+			return true;
 		}
-		Value::Primitive(p) => p.arguments.iter().any(|a| carries_a_secret(a, ps, seen)),
-	}
+		if seen.contains(&c.id) {
+			return false;
+		}
+		seen.push(c.id);
+		ps.index_of(c)
+			.is_some_and(|i| carries_a_secret(&ps.values[i].value, ps, seen))
+	})
 }
 
 fn query_authentication(
@@ -816,8 +808,36 @@ fn preconditions_reached(
 }
 
 #[cfg(test)]
-mod behavior_tests {
+mod tests {
 	use super::*;
+
+	#[test]
+	fn confidentiality_classification_walks_shared_terms_and_aliases() {
+		use crate::primitive::PRIM_HASH;
+		use crate::testutil::{
+			make_constant, make_principal_state, make_private, make_slot_meta, make_slot_values,
+		};
+		let alias = make_constant("conf_shared_alias");
+		let secret = make_private("conf_shared_secret");
+		let mut public = value_nil();
+		for _ in 0..40 {
+			public = Value::primitive(PRIM_HASH, vec![public.clone(), public], 0);
+		}
+		let mut ps = make_principal_state(
+			"Shared",
+			1,
+			vec![make_slot_meta(alias.as_constant().unwrap(), true)],
+			vec![make_slot_values(&public, 1)],
+		);
+		assert!(!carries_a_secret(&public, &ps, &mut Vec::new()));
+		assert!(!carries_a_secret(&alias, &ps, &mut Vec::new()));
+		let private = Value::primitive(PRIM_HASH, vec![public, secret], 0);
+		ps.values[0].value = private.clone();
+		assert!(carries_a_secret(&alias, &ps, &mut Vec::new()));
+		assert!(carries_a_secret(&private, &ps, &mut Vec::new()));
+		ps.values[0].value = alias.clone();
+		assert!(!carries_a_secret(&alias, &ps, &mut Vec::new()));
+	}
 
 	#[test]
 	fn a_confidentiality_summary_includes_its_satisfied_precondition() {
