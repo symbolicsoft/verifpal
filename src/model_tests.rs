@@ -3672,6 +3672,12 @@ fn test_threshold_sign() {
 }
 
 #[test]
+fn test_threshold_sign_leaked_nonce() {
+	run_model("threshold_sign_leaked_nonce.vp", "c0c1a0");
+	run_model_sessions("threshold_sign_leaked_nonce.vp", 1, "c0c1a0");
+}
+
+#[test]
 fn test_threshold_sign_rogue_coordinator() {
 	run_model("threshold_sign_rogue_coordinator.vp", "c0c0a1");
 	run_model_sessions("threshold_sign_rogue_coordinator.vp", 1, "c0c0a1");
@@ -3859,8 +3865,8 @@ fn test_cap_forgeable_guard_never_adds_an_attack() {
 }
 #[test]
 fn test_threshold_sign_forgeable_is_not_a_reuse() {
-	run_model("threshold_sign_forgeable_is_not_a_reuse.vp", "c0c0");
-	run_model_sessions("threshold_sign_forgeable_is_not_a_reuse.vp", 1, "c0c0");
+	run_model("threshold_sign_forgeable_is_not_a_reuse.vp", "c1c0");
+	run_model_sessions("threshold_sign_forgeable_is_not_a_reuse.vp", 1, "c1c0");
 }
 #[test]
 fn test_cap_forgeable_keeps_a_real_reuse() {

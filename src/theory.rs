@@ -1805,6 +1805,46 @@ mod tests {
 	}
 
 	#[test]
+	fn threshold_sign_nonce_disclosure_needs_the_signing_context() {
+		let k = make_constant("tsnd_k");
+		let share = tsh_share(&k, 2, 0);
+		let nonce = make_constant("tsnd_nonce");
+		let commitments = make_constant("tsnd_commitments");
+		let message = make_constant("tsnd_message");
+		let partial = tsh_partial(share.clone(), "tsnd_nonce", &commitments, &message);
+		let Value::Primitive(p) = &partial else {
+			panic!("a partial signature");
+		};
+		let ps = tsh_state("tsnd_dummy");
+		let context = [nonce, commitments, message];
+		let mut known = vec![partial.clone()];
+		known.extend(context.iter().cloned());
+		let attacker = make_attacker_state(known);
+		let result = can_decompose(p, &ps, &attacker).expect("the nonce exposes the share");
+		assert_eq!(result.revealed.len(), 1);
+		assert!(result.revealed[0].equivalent(&share, true));
+		assert!(!obtainable(&k, &ps, &attacker), "one share is not the key");
+
+		for missing in 0..context.len() {
+			let mut known = vec![partial.clone()];
+			known.extend(
+				context
+					.iter()
+					.enumerate()
+					.filter(|(i, _)| *i != missing)
+					.map(|(_, value)| value.clone()),
+			);
+			if missing == 0 {
+				known.push(make_primitive(PRIM_PUBKEY, vec![context[0].clone()], 0));
+			}
+			assert!(
+				can_decompose(p, &ps, &make_attacker_state(known)).is_none(),
+				"missing input {missing} must prevent share recovery; a commitment is not the nonce"
+			);
+		}
+	}
+
+	#[test]
 	fn can_decompose_enc_with_key() {
 		let key = make_constant("cd_key");
 		let msg = make_constant("cd_msg");

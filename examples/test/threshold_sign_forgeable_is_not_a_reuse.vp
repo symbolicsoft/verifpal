@@ -1,18 +1,17 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: CC-BY-SA-4.0 */
 
-// Expected: c0c0 at one session and at two.
+// Expected: c1c0 at one session and at two.
 //
-// Alice signs once. `THRESHOLD_SIGN` declares `forgeable_secret: Some(0)`, the
-// share, and a reuse rule over the share and nonce that reveals that same
-// share, so minting a partial under the declared assumption and pairing it
-// with Alice's own recovered the share it was exempted from holding, and the
-// group key with it. RFC 9591's key recovery needs two partials the signer
-// produced: two equations in one unknown. A fabricated partial is not a second
-// equation, and here there is only one real one.
+// Alice signs once with a public nonce. The attacker recovers her share from
+// that honest partial, the nonce and the public signing context, without any
+// nonce reuse. The forgeable assumption must not hide this disclosure. One
+// share still does not reveal the group key.
 //
-// threshold_sign_nonce_reuse.vp is the genuine article, where one signer signs
-// twice under one nonce and gives the share up.
+// This originally tested fabricated reuse pairs, but its public nonce already
+// suffices for recovery. threshold_sign_nonce_reuse.vp covers two honest
+// partials sharing a secret nonce; cap_forgeable_is_not_a_reuse_pair.vp covers
+// the distinction between fabricated and honest reuse pairs.
 
 attacker[active]
 

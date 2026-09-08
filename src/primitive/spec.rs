@@ -530,10 +530,16 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_SIGN",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_SIGN(share, nonce, commitments, message): partial",
-				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce, `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message). Reusing a nonce under one share, whatever else differs, reveals the share.",
+				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce (representing FROST's hiding-and-binding nonce pair), `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message). Knowing a partial's nonce, commitments and message reveals its signing share. Reusing a nonce under one share, whatever else differs, reveals the share.",
 			},
 			arity: vec![4],
 			output: vec![1],
+			decompose: Some(DecomposeRule {
+				given: vec![1, 2, 3],
+				output: None,
+				reveals: vec![Reveal::Argument(0)],
+				filter: filter_identity,
+			}),
 			forgeable_secret: Some(0),
 			reuse: Some(ReuseRule {
 				fixed: vec![0, 1],
