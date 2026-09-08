@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0c0 at one and two sessions. The enclosing decryption erases
+// the malleable call, whose reduced plaintext is m. Holding its equivalent
+// ciphertext still licenses reshaping it to ENC(k, nil), opening wrapped.
+// The key and a message under a different key remain confidential.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, other, m, secret, safe
+	x = DEC(k, ENC[malleable](k, DEC(k, ENC(k, m))))
+	e = ENC(k, m)
+	wrapped = ENC(HASH(ENC(k, nil)), secret)
+	protected = ENC(HASH(ENC(other, nil)), safe)
+]
+
+Alice -> Bob: e, wrapped, protected
+
+principal Bob[]
+
+queries[
+	confidentiality? secret
+	confidentiality? k
+	confidentiality? safe
+]

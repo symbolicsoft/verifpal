@@ -113,10 +113,7 @@ pub(crate) fn validate(
 	};
 
 	let against = ctx.knowledge_saturation();
-	for (i, state) in executed.iter().enumerate() {
-		if i == 0 {
-			note_malleable_reshapes(ctx, km, state, &installs, governing);
-		}
+	for state in &executed {
 		let _ = compute_knowledge_closure(ctx, km, state);
 	}
 	for state in &executed {
@@ -124,49 +121,6 @@ pub(crate) fn validate(
 	}
 	ctx.note_execution_closed(ps.id, key, signature, phase, against);
 	Ok(true)
-}
-
-pub(crate) fn note_malleable_reshapes(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	installs: &[(SlotIdx, Value)],
-	snapshot: &AttackerState,
-) {
-	if ps.capabilities.is_empty() {
-		return;
-	}
-	let mut record = None;
-	for (_, ground) in installs {
-		let Value::Primitive(p) = ground else {
-			continue;
-		};
-		if snapshot.knows(ground).is_some() || crate::theory::obtainable(ground, ps, snapshot) {
-			continue;
-		}
-		let Some((held, vary)) = malleable_positions(p, ps, snapshot) else {
-			continue;
-		};
-		let using: Vec<Value> = vary
-			.iter()
-			.filter_map(|&i| p.arguments.get(i).cloned())
-			.collect();
-		if !using.iter().all(|a| derivable(a, ps, snapshot)) {
-			continue;
-		}
-		let diffs = record
-			.get_or_insert_with(|| crate::value::compute_slot_diffs(ps, km, snapshot.current_phase))
-			.clone();
-		ctx.attacker_put_with(
-			ground,
-			&diffs,
-			DerivationRecord::Broken {
-				of: held,
-				capability: Capability::Malleable,
-				using,
-			},
-		);
-	}
 }
 
 fn replays_own_freshness(
@@ -328,13 +282,13 @@ fn derivable_shared(
 			if crate::theory::obtainable(v, ps, snapshot) {
 				return true;
 			}
-			let result = if let Some((_, vary)) = malleable_positions(p, ps, snapshot) {
-				p.arguments
-					.iter()
-					.enumerate()
-					.all(|(i, a)| !vary.contains(&i) || derivable_shared(a, ps, snapshot, seen))
+			let result = if let Some((_, vary)) = crate::theory::malleable_source(p, ps, snapshot) {
+				vary.iter()
+					.all(|&i| derivable_shared(&p.arguments[i], ps, snapshot, seen))
 			} else {
-				let exempt_secret = forgeable_secret_position(p, ps, snapshot);
+				let exempt_secret = ps
+					.capabilities
+					.forgeable_secret_position(p, snapshot.current_phase);
 				let by_reuse = crate::theory::forgeable_by_reuse(p, snapshot);
 				p.arguments.iter().enumerate().all(|(i, a)| {
 					Some(i) == exempt_secret
@@ -346,50 +300,6 @@ fn derivable_shared(
 			result
 		}
 	}
-}
-
-fn malleable_positions(
-	p: &Primitive,
-	ps: &PrincipalState,
-	snapshot: &AttackerState,
-) -> Option<(Value, Vec<usize>)> {
-	let spec = primitive_get(p.id).ok()?;
-	if spec.malleable_vary.is_empty() {
-		return None;
-	}
-	for known in snapshot.known.iter() {
-		let Value::Primitive(held) = known else {
-			continue;
-		};
-		if held.id != p.id || held.output != p.output || held.arguments.len() != p.arguments.len() {
-			continue;
-		}
-		if !ps
-			.capabilities
-			.in_force(held, Capability::Malleable, snapshot.current_phase)
-		{
-			continue;
-		}
-		let anchored = p
-			.arguments
-			.iter()
-			.zip(held.arguments.iter())
-			.enumerate()
-			.all(|(i, (a, b))| spec.malleable_vary.contains(&i) || a.equivalent(b, true));
-		if anchored {
-			return Some((known.clone(), spec.malleable_vary.clone()));
-		}
-	}
-	None
-}
-
-fn forgeable_secret_position(
-	p: &Primitive,
-	ps: &PrincipalState,
-	snapshot: &AttackerState,
-) -> Option<usize> {
-	ps.capabilities
-		.forgeable_secret_position(p, snapshot.current_phase)
 }
 
 pub(crate) fn contains_failed_check(v: &Value) -> bool {

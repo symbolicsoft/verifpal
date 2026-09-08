@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0. The attacker can steer Bob into the target MAC, but cannot
+// open its carrier without the private wrapping key.
+attacker[active]
+
+principal Alice[
+	knows public b
+	knows private wrapping
+	generates x
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	knows public b
+	knows private wrapping
+	generates a
+	leaks a
+]
+
+principal Alice[
+	generates y
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k
+	tag = ENC(wrapping, MAC(k, DH_KEX(x, y)))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

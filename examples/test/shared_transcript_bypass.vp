@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0. Replacing seed makes Bob check a signature under a new
+// public transcript key. Testing that key must walk its shared graph once;
+// bypassing the check reveals nothing about the unrelated private secret.
+
+attacker[active]
+
+principal Alice[
+	generates seed
+	knows private secret
+	h0 = HASH(seed, seed)
+	h1 = HASH(h0, h0)
+	h2 = HASH(h1, h1)
+	h3 = HASH(h2, h2)
+	h4 = HASH(h3, h3)
+	h5 = HASH(h4, h4)
+	h6 = HASH(h5, h5)
+	h7 = HASH(h6, h6)
+	h8 = HASH(h7, h7)
+	h9 = HASH(h8, h8)
+	h10 = HASH(h9, h9)
+	h11 = HASH(h10, h10)
+	h12 = HASH(h11, h11)
+	h13 = HASH(h12, h12)
+	h14 = HASH(h13, h13)
+	h15 = HASH(h14, h14)
+	h16 = HASH(h15, h15)
+	h17 = HASH(h16, h16)
+	h18 = HASH(h17, h17)
+	h19 = HASH(h18, h18)
+	h20 = HASH(h19, h19)
+	h21 = HASH(h20, h20)
+	h22 = HASH(h21, h21)
+	h23 = HASH(h22, h22)
+	signature = SIGN(h23, nil)
+]
+
+Alice -> Bob: seed, [signature]
+
+principal Bob[
+	b0 = HASH(seed, seed)
+	b1 = HASH(b0, b0)
+	b2 = HASH(b1, b1)
+	b3 = HASH(b2, b2)
+	b4 = HASH(b3, b3)
+	b5 = HASH(b4, b4)
+	b6 = HASH(b5, b5)
+	b7 = HASH(b6, b6)
+	b8 = HASH(b7, b7)
+	b9 = HASH(b8, b8)
+	b10 = HASH(b9, b9)
+	b11 = HASH(b10, b10)
+	b12 = HASH(b11, b11)
+	b13 = HASH(b12, b12)
+	b14 = HASH(b13, b13)
+	b15 = HASH(b14, b14)
+	b16 = HASH(b15, b15)
+	b17 = HASH(b16, b16)
+	b18 = HASH(b17, b17)
+	b19 = HASH(b18, b18)
+	b20 = HASH(b19, b19)
+	b21 = HASH(b20, b20)
+	b22 = HASH(b21, b21)
+	b23 = HASH(b22, b22)
+	_ = SIGNVERIF(PUBKEY(b23), nil, signature)?
+]
+
+queries[
+	confidentiality? secret
+]

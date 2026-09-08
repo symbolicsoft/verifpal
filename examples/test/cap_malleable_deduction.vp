@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c0 at one and two sessions. Holding c licenses ENC(k, nil),
+// hence HASH(key) and the secret sealed under it, without revealing k.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, secret
+	knows public m
+	c = ENC[malleable](k, m)
+	key = ENC(k, nil)
+	wrapped = ENC(HASH(key), secret)
+]
+
+Alice -> Bob: c, wrapped
+
+principal Bob[
+]
+
+queries[
+	confidentiality? secret
+	confidentiality? key
+	confidentiality? k
+]

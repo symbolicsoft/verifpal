@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0a1 at one session, a1a1 at two. The malleable ciphertext is sent
+// only after Bob accepts early. A reshape of late cannot forge early.
+// Bob can nevertheless accept early replayed into late. At two sessions,
+// another session can finish and supply late before this one accepts early.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public lo, hi
+	early = ENC(k, CONCAT(lo, lo))
+	late = ENC[malleable](k, CONCAT(hi, hi))
+]
+
+Alice -> Bob: early
+
+principal Bob[
+	knows private k
+	x, y = SPLIT(DEC(k, early))?
+	ack = MAC(k, x)
+]
+
+Bob -> Alice: [ack]
+
+principal Alice[
+	checked = ASSERT(ack, MAC(k, lo))?
+]
+
+Alice -> Bob: late
+
+principal Bob[
+	a, b = SPLIT(DEC(k, late))?
+	receipt = MAC(k, a)
+]
+
+queries[
+	authentication? Alice -> Bob: early
+	authentication? Alice -> Bob: late
+]

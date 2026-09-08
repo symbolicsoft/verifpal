@@ -1658,7 +1658,7 @@ impl DerivationRecord {
 				capability,
 			} => {
 				let mut v = Vec::new();
-				if *capability == Capability::Weak {
+				if matches!(capability, Capability::Weak | Capability::Malleable) {
 					v.push(of);
 				}
 				v.extend(using.iter());
@@ -1741,7 +1741,7 @@ pub struct DecomposeResult {
 }
 
 pub enum Forged {
-	Assumption(Capability),
+	Assumption { capability: Capability, of: Value },
 	Reuse([Value; 2]),
 }
 

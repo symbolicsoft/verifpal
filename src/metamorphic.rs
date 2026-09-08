@@ -211,7 +211,9 @@ fn annotations(value: &Value, cap: Capability) -> Vec<Value> {
 		return Vec::new();
 	};
 	let mut out = Vec::new();
-	if crate::capability::supports(p.id, cap) && !p.capabilities.has(cap) {
+	if crate::capability::supports(p.id, cap)
+		&& p.capabilities.onset(cap).is_none_or(|phase| phase > 0)
+	{
 		let mut updated = (**p).clone();
 		updated.capabilities.set(cap, 0);
 		out.push(Value::Primitive(std::sync::Arc::new(updated)));

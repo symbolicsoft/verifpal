@@ -1664,7 +1664,6 @@ fn probe_with(
 		crate::reexec::execute_forward(&scratch, km, base, installs, Some(&phases), &governing)
 			.ok()?;
 	let ps = executed.first()?.clone();
-	crate::solve::validate::note_malleable_reshapes(&scratch, km, &ps, installs, &governing);
 	for state in &executed {
 		let _ = compute_knowledge_closure(&scratch, km, state);
 	}

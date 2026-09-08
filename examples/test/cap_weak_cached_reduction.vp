@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0 at one and two sessions. Normalizing an unannotated twin
+// first must not erase the later weak annotation when the rewrite cache
+// serves it. The reduced ciphertext reveals m and keeps its key secret.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, m
+	a = ENC(k, DEC(k, ENC(k, m)))
+	b = ENC[weak](k, DEC(k, ENC(k, m)))
+	e = ENC(k, m)
+]
+
+Alice -> Bob: e
+
+principal Bob[]
+
+queries[
+	confidentiality? m
+	confidentiality? k
+]

@@ -493,20 +493,21 @@ impl<'a> Deducer<'a> {
 		s: &Substitution,
 		out: &mut Vec<Substitution>,
 	) {
+		if self.capabilities.is_empty() {
+			return;
+		}
 		let Ok(spec) = primitive_get(target.id) else {
 			return;
 		};
 		if spec.malleable_vary.is_empty() {
 			return;
 		}
-		for known in self.attacker.known.iter() {
-			let Value::Primitive(held) = known else {
+		let head = (target.id, target.arguments.len());
+		for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
+			let Some(Value::Primitive(held)) = self.attacker.known.get(at) else {
 				continue;
 			};
-			if held.id != target.id
-				|| held.output != target.output
-				|| held.arguments.len() != target.arguments.len()
-			{
+			if held.output != target.output || held.threshold != target.threshold {
 				continue;
 			}
 			if !self
@@ -663,15 +664,12 @@ impl<'a> Deducer<'a> {
 			if exempt {
 				next.extend(frontier.iter().cloned());
 			} else if Some(i) == secret_position && !self.capabilities.is_empty() {
-				for (term, caps) in self.capabilities.annotated_terms() {
-					if caps.in_force(Capability::Forgeable, self.attacker.current_phase)
-						&& let Value::Primitive(annotated) = term
-						&& annotated.id == p.id
-						&& let Some(secret) = annotated.arguments.get(i)
-					{
-						for candidate in &frontier {
-							next.extend(match_values(arg, secret, candidate));
-						}
+				for secret in self
+					.capabilities
+					.forgeable_secrets(p.id, self.attacker.current_phase)
+				{
+					for candidate in &frontier {
+						next.extend(match_values(arg, secret, candidate));
 					}
 				}
 			}

@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at both session counts. The attacker sends PUBKEY(b) as x
+// before a leaks, then sends a as y. Bob emits the wrapped target MAC.
+// Sending PUBKEY(a) first would spend a disclosure that has not happened.
+attacker[active]
+
+principal Alice[
+	knows public b, wrapping
+	generates x
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	knows public b, wrapping
+	generates a
+	leaks a
+]
+
+principal Alice[
+	generates y
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k
+	tag = ENC(wrapping, MAC(k, DH_KEX(x, y)))
+	secret = MAC(k, DH_KEX(PUBKEY(a), b))
+]
+
+Bob -> Carol: tag
+
+principal Carol[]
+
+queries[
+	confidentiality? secret
+]

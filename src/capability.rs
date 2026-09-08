@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
-use crate::types::{IdMap, IdSet, Primitive, PrimitiveId, TraceSlot, Value};
+use crate::types::{IdMap, Primitive, PrimitiveId, TraceSlot, Value};
 
 fn assumption_key(text: &str) -> String {
 	let mut out = String::with_capacity(text.len());
@@ -185,32 +185,35 @@ impl CapabilityIndex {
 	}
 
 	pub fn insert(&mut self, v: &Value) {
-		self.insert_shared(v, &mut IdSet::default());
-	}
-
-	fn insert_shared(&mut self, v: &Value, seen: &mut IdSet<usize>) {
-		let Value::Primitive(p) = v else {
-			return;
-		};
-		if !seen.insert(Arc::as_ptr(p) as usize) {
-			return;
-		}
-		for arg in &p.arguments {
-			self.insert_shared(arg, seen);
-		}
-		if p.capabilities.is_empty() {
-			return;
-		}
-		self.insert_secret(p);
-		let hash = v.hash_value();
-		let bucket = self.buckets.entry(hash).or_default();
-		for (existing, caps) in bucket.iter_mut() {
-			if existing.equivalent(v, true) {
-				caps.merge(&p.capabilities);
-				return;
+		for term in crate::value::subterms(v) {
+			let Value::Primitive(p) = term else {
+				continue;
+			};
+			if p.capabilities.is_empty() {
+				continue;
+			}
+			let normalized = p
+				.map_arguments(|arg| {
+					let reduced = crate::theory::reduce_once(arg);
+					(!reduced.equivalent(arg, true)).then_some(reduced)
+				})
+				.map(|p| Value::Primitive(Arc::new(p)));
+			for value in std::iter::once(term).chain(normalized.as_ref()) {
+				let Value::Primitive(p) = value else {
+					continue;
+				};
+				self.insert_secret(p);
+				let bucket = self.buckets.entry(value.hash_value()).or_default();
+				if let Some((_, caps)) = bucket
+					.iter_mut()
+					.find(|(existing, _)| existing.equivalent(value, true))
+				{
+					caps.merge(&p.capabilities);
+				} else {
+					bucket.push((value.clone(), p.capabilities));
+				}
 			}
 		}
-		bucket.push((v.clone(), p.capabilities));
 	}
 
 	fn insert_secret(&mut self, p: &Primitive) {
@@ -233,9 +236,6 @@ impl CapabilityIndex {
 
 	pub fn forgeable_secret_position(&self, p: &Primitive, phase: i32) -> Option<usize> {
 		let position = primitive_get(p.id).ok()?.forgeable_secret?;
-		if self.in_force(p, Capability::Forgeable, phase) {
-			return Some(position);
-		}
 		if self.secrets.is_empty() {
 			return None;
 		}
@@ -247,6 +247,15 @@ impl CapabilityIndex {
 				caps.in_force(Capability::Forgeable, phase) && annotated.equivalent(secret, true)
 			})
 			.then_some(position)
+	}
+
+	pub fn forgeable_secrets(&self, id: PrimitiveId, phase: i32) -> impl Iterator<Item = &Value> {
+		self.secrets
+			.iter()
+			.filter(move |((primitive, _), _)| *primitive == id)
+			.flat_map(|(_, bucket)| bucket)
+			.filter(move |(_, caps)| caps.in_force(Capability::Forgeable, phase))
+			.map(|(secret, _)| secret)
 	}
 
 	pub fn lookup(&self, p: &Primitive) -> Capabilities {
@@ -355,6 +364,118 @@ impl CapabilityIndex {
 mod tests {
 	use super::*;
 	use crate::primitive::{PRIM_THRESHOLD_SIGN, PRIM_THRESHOLD_SPLIT};
+
+	#[test]
+	fn normalized_annotations_survive_erasure_and_cached_unannotated_twins() {
+		use crate::primitive::*;
+		use crate::testutil::make_private;
+		use crate::value::value_nil;
+
+		let k = make_private("normalized_cap_key");
+		let m = make_private("normalized_cap_message");
+		let reducible = |value: Value| {
+			Value::primitive(
+				PRIM_SPLIT,
+				vec![Value::primitive(PRIM_CONCAT, vec![value, value_nil()], 0)],
+				0,
+			)
+		};
+		for cap in Capability::ALL {
+			for spec in primitives_supporting(|id| supports(id, cap)) {
+				let id = spec.id;
+				for output in 0..*spec.output.iter().max().unwrap() as usize {
+					let arguments = (0..spec.arity[0])
+						.map(|i| if i == 0 { k.clone() } else { m.clone() })
+						.collect::<Vec<_>>();
+					crate::context::enter_generation(crate::context::next_generation());
+					let target = Value::primitive(id, arguments.clone(), output);
+					let original = Value::primitive(
+						id,
+						arguments.into_iter().map(reducible).collect(),
+						output,
+					);
+					assert!(crate::theory::reduce_once(&original).equivalent(&target, true));
+					let declared = annotated(original.clone(), cap, 2);
+					let erased = Value::primitive(
+						PRIM_SPLIT,
+						vec![Value::primitive(
+							PRIM_CONCAT,
+							vec![value_nil(), declared],
+							0,
+						)],
+						0,
+					);
+					assert!(crate::theory::reduce_once(&erased).equivalent(&value_nil(), true));
+					let mut index = CapabilityIndex::default();
+					index.insert(&erased);
+					for value in [&original, &target] {
+						let p = value.as_primitive().unwrap();
+						assert!(!index.in_force(p, cap, 1));
+						assert!(index.in_force(p, cap, 2));
+						for other in Capability::ALL.into_iter().filter(|other| *other != cap) {
+							assert!(!index.in_force(p, other, i32::MAX));
+						}
+					}
+					if cap == Capability::Forgeable {
+						let p = target.as_primitive().unwrap();
+						let mut arguments = p.arguments.clone();
+						*arguments.last_mut().unwrap() = value_nil();
+						let changed = Value::primitive(id, arguments, output);
+						let p = changed.as_primitive().unwrap();
+						assert!(index.forgeable_secret_position(p, 1).is_none());
+						assert_eq!(index.forgeable_secret_position(p, 2), spec.forgeable_secret);
+					}
+					let mut empty = CapabilityIndex::default();
+					empty.insert(&original);
+					assert!(empty.is_empty());
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn forgeable_secret_search_visits_each_key_once_at_its_earliest_phase() {
+		use crate::primitive::{PRIM_MAC, PRIM_SIGN};
+		let key = crate::testutil::make_private("forge_index_shared_key");
+		let later = crate::testutil::make_private("forge_index_later_key");
+		let mut index = CapabilityIndex::default();
+		for i in 0..128 {
+			let message = crate::testutil::make_private(&format!("forge_index_message_{i}"));
+			index.insert(&annotated(
+				Value::primitive(PRIM_SIGN, vec![key.clone(), message], 0),
+				Capability::Forgeable,
+				2 + i,
+			));
+		}
+		index.insert(&annotated(
+			Value::primitive(PRIM_SIGN, vec![later.clone(), crate::value::value_nil()], 0),
+			Capability::Forgeable,
+			4,
+		));
+		index.insert(&annotated(
+			Value::primitive(PRIM_MAC, vec![key.clone(), crate::value::value_nil()], 0),
+			Capability::Forgeable,
+			0,
+		));
+		for (phase, count) in [(1, 0), (2, 1), (3, 1), (4, 2)] {
+			let keys: Vec<_> = index.forgeable_secrets(PRIM_SIGN, phase).collect();
+			assert_eq!(keys.len(), count);
+			for secret in [&key, &later] {
+				let target = Value::primitive(
+					PRIM_SIGN,
+					vec![secret.clone(), crate::value::value_nil()],
+					0,
+				);
+				assert_eq!(
+					index
+						.forgeable_secret_position(target.as_primitive().unwrap(), phase)
+						.is_some(),
+					keys.iter().any(|found| found.equivalent(secret, true)),
+				);
+			}
+		}
+		assert_eq!(index.forgeable_secrets(PRIM_MAC, 0).count(), 1);
+	}
 
 	#[test]
 	fn capability_collection_visits_shared_subtrees_once() {

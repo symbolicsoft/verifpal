@@ -1272,6 +1272,43 @@ fn test_cap_weak_on_reduced_argument() {
 	run_model("cap_weak_on_reduced_argument.vp", "c1c1");
 	run_model_sessions("cap_weak_on_reduced_argument.vp", 1, "c1c1");
 }
+
+#[test]
+fn test_cap_annotations_survive_nested_and_cached_reductions() {
+	for (name, cap, expected) in [
+		("cap_weak_nested_reduction.vp", "weak", "c1c0"),
+		("cap_weak_cached_reduction.vp", "weak", "c1c0"),
+		("cap_forgeable_nested_reduction.vp", "forgeable", "c1c0c0"),
+		("cap_malleable_nested_reduction.vp", "malleable", "c1c0c0"),
+	] {
+		let source = std::fs::read_to_string(format!("examples/test/{name}")).unwrap();
+		for sessions in [1, 2] {
+			run_model_sessions(name, sessions, expected);
+			for attacker in ["passive", "active"] {
+				for enabled in [true, false] {
+					let mut variant =
+						source.replace("attacker[passive]", &format!("attacker[{attacker}]"));
+					if !enabled {
+						variant = variant.replace(&format!("[{cap}]"), "");
+					}
+					let model = crate::parser::parse_string(name, &variant).unwrap();
+					let results = crate::verify::analyze_sessions(&model, sessions)
+						.unwrap()
+						.results_get();
+					assert_eq!(
+						crate::types::VerifyResult::results_code(&results),
+						if enabled {
+							expected.to_string()
+						} else {
+							expected.replace('1', "0")
+						},
+						"{name}: sessions={sessions}, attacker={attacker}, enabled={enabled}",
+					);
+				}
+			}
+		}
+	}
+}
 #[test]
 fn test_cap_forgeable_on_reduced_key() {
 	run_model("cap_forgeable_on_reduced_key.vp", "a1");
@@ -4109,4 +4146,41 @@ fn test_rewrite_goals_with_an_unguarded_pqdr_key() {
 		crate::types::VerifyResult::results_code(&results),
 		"c1c0c0a0a0a0e0"
 	);
+}
+
+#[test]
+fn test_solver_dh_unshaped_causal_alternative() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_dh_unshaped_causal_alternative.vp", sessions, "c1");
+		run_model_sessions("solver_dh_unshaped_causal_guarded.vp", sessions, "c0");
+		run_model_sessions("solver_dh_unshaped_causal_sealed.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_shared_transcript_bypass() {
+	for sessions in [1, 2] {
+		run_model_sessions("shared_transcript_bypass.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_cap_malleable_deduction() {
+	for sessions in [1, 2] {
+		run_model_sessions("cap_malleable_deduction.vp", sessions, "c1c1c0");
+		run_model_sessions("cap_malleable_deduction_absent.vp", sessions, "c0c0c0");
+		run_model_sessions("cap_malleable_deduction_unheld.vp", sessions, "c0c0c0");
+	}
+}
+
+#[test]
+fn test_cap_malleable_causal_source() {
+	for sessions in [1, 2] {
+		run_model_sessions(
+			"cap_malleable_causal_source.vp",
+			sessions,
+			if sessions == 1 { "a0a1" } else { "a1a1" },
+		);
+		run_model_sessions("cap_malleable_early_source.vp", sessions, "a1a1");
+	}
 }

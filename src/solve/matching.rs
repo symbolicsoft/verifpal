@@ -96,13 +96,9 @@ fn solve_equations<const UNIFY: bool>(
 				&& p1.threshold == p2.threshold
 				&& p1.arguments.len() == p2.arguments.len()
 			{
-				if let Some((u1, v1, u2, v2)) = commutative_swap(p1, p2)
-					&& !crate::theory::structurally_identical(u1, v1)
-					&& !crate::theory::structurally_identical(u2, v2)
-				{
+				if let Some(equations) = commutative_equations::<UNIFY>(p1, p2) {
 					let mut swapped = pending.clone();
-					swapped.push((v1.clone(), u2.clone()));
-					swapped.push((u1.clone(), v2.clone()));
+					swapped.extend(equations.into_iter().rev());
 					alternatives.push((swapped, s.clone()));
 				}
 				pending.extend(
@@ -121,13 +117,53 @@ fn solve_equations<const UNIFY: bool>(
 	})
 }
 
-fn commutative_swap<'a>(
-	p1: &'a Primitive,
-	p2: &'a Primitive,
-) -> Option<(&'a Value, &'a Value, &'a Value, &'a Value)> {
-	let (u1, v1) = crate::primitive::commutativity_parts_ref(p1)?;
-	let (u2, v2) = crate::primitive::commutativity_parts_ref(p2)?;
-	Some((u1, v1, u2, v2))
+fn commutative_equations<const UNIFY: bool>(
+	p1: &Primitive,
+	p2: &Primitive,
+) -> Option<Vec<(Value, Value)>> {
+	let rule = crate::primitive::commutativity_rule(p1.id)?;
+	let left = crate::primitive::commutativity_parts_ref(p1);
+	let right = crate::primitive::commutativity_parts_ref(p2);
+	if [left, right]
+		.into_iter()
+		.flatten()
+		.any(|(u, v)| crate::theory::structurally_identical(u, v))
+	{
+		return None;
+	}
+	let mut equations = Vec::new();
+	match (left, right) {
+		(Some((u1, v1)), Some((u2, v2))) => {
+			equations.extend([(u1.clone(), v2.clone()), (v1.clone(), u2.clone())]);
+		}
+		(_, Some((u2, v2))) => {
+			equations.push((
+				p1.arguments[rule.wrapped].clone(),
+				Value::primitive(rule.constructor, vec![v2.clone()], 0),
+			));
+			equations.push((p1.arguments[rule.bare].clone(), u2.clone()));
+		}
+		_ if UNIFY => {
+			equations.push((
+				p1.arguments[rule.wrapped].clone(),
+				Value::primitive(rule.constructor, vec![p2.arguments[rule.bare].clone()], 0),
+			));
+			equations.push((
+				Value::primitive(rule.constructor, vec![p1.arguments[rule.bare].clone()], 0),
+				p2.arguments[rule.wrapped].clone(),
+			));
+		}
+		_ => return None,
+	}
+	equations.extend(
+		p1.arguments
+			.iter()
+			.zip(&p2.arguments)
+			.enumerate()
+			.filter(|(at, _)| *at != rule.wrapped && *at != rule.bare)
+			.map(|(_, (a, b))| (a.clone(), b.clone())),
+	);
+	Some(equations)
 }
 
 pub(crate) fn match_value(
@@ -240,6 +276,53 @@ mod tests {
 		let constrained: Vec<_> = match_values(&pattern, &target, &constrained).collect();
 		assert_eq!(constrained.len(), 1);
 		assert!(crate::solve::vars::apply(&y, &constrained[0]).equivalent(&a, true));
+	}
+
+	#[test]
+	fn commutative_matching_can_supply_a_missing_public_key_shape() {
+		let x = crate::solve::vars::attacker_var(0, "opaque_match_x");
+		let y = crate::solve::vars::attacker_var(1, "opaque_match_y");
+		let a = make_private("opaque_match_a");
+		let b = make_private("opaque_match_b");
+		let pattern = dh_kex(x.clone(), y.clone());
+		let target = dh_kex(pubkey(a.clone()), b.clone());
+		let empty = Substitution::default();
+		let matches: Vec<_> = match_values(&pattern, &target, &empty).collect();
+		assert_eq!(matches.len(), 2);
+		for (bindings, (key, exponent)) in matches.iter().zip([(&a, &b), (&b, &a)]) {
+			assert!(crate::solve::vars::apply(&x, bindings).equivalent(&pubkey(key.clone()), true));
+			assert!(crate::solve::vars::apply(&y, bindings).equivalent(exponent, true));
+			assert!(crate::solve::vars::apply(&pattern, bindings).equivalent(&target, true));
+		}
+		let fixed = Substitution::from_iter([(as_var(&y).unwrap(), a)]);
+		for (left, right) in [(&pattern, &target), (&target, &pattern)] {
+			let solutions: Vec<_> = unifiers(left, right, &fixed).collect();
+			assert_eq!(solutions.len(), 1);
+			assert!(
+				crate::solve::vars::apply(&x, &solutions[0]).equivalent(&pubkey(b.clone()), true)
+			);
+		}
+	}
+
+	#[test]
+	fn commutative_unification_can_shape_both_public_key_inputs() {
+		let x = crate::solve::vars::attacker_var(0, "opaque_unify_x");
+		let y = crate::solve::vars::attacker_var(1, "opaque_unify_y");
+		let a = make_private("opaque_unify_a");
+		let b = make_private("opaque_unify_b");
+		let left = dh_kex(x.clone(), a.clone());
+		let right = dh_kex(y.clone(), b.clone());
+		let empty = Substitution::default();
+		assert!(match_values(&left, &right, &empty).next().is_none());
+		let solutions: Vec<_> = unifiers(&left, &right, &empty).collect();
+		assert_eq!(solutions.len(), 1);
+		let bindings = &solutions[0];
+		assert!(crate::solve::vars::apply(&x, bindings).equivalent(&pubkey(b), true));
+		assert!(crate::solve::vars::apply(&y, bindings).equivalent(&pubkey(a), true));
+		assert!(
+			crate::solve::vars::apply(&left, bindings)
+				.equivalent(&crate::solve::vars::apply(&right, bindings), true)
+		);
 	}
 
 	#[test]

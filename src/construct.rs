@@ -646,10 +646,13 @@ fn construct_trace_render_message(
 pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
 	let mut capability_index = CapabilityIndex::default();
 	for slot in &trace.slots {
-		capability_index.insert(&slot.initial_value);
-		let resolved = crate::resolution::resolve_trace_term(&slot.initial_value, trace);
-		capability_index.insert(&crate::theory::reduce_once(&resolved));
-		capability_index.insert(&resolved);
+		for term in crate::value::subterms(&slot.initial_value) {
+			if !matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()) {
+				continue;
+			}
+			capability_index.insert(term);
+			capability_index.insert(&crate::resolution::resolve_trace_term(term, trace));
+		}
 	}
 	let capabilities = Arc::new(capability_index);
 	let mut states = Vec::new();
@@ -853,6 +856,20 @@ mod tests {
 	fn fixture() -> (ProtocolTrace, Vec<PrincipalState>) {
 		let m = crate::parser::parse_string("cst.vp", SRC).expect("parses");
 		crate::sanity::sanity(&m).expect("passes sanity")
+	}
+
+	#[test]
+	fn capability_collection_leaves_unannotated_transcripts_unexpanded() {
+		let mut source = String::from(
+			"attacker[passive]\nprincipal Alice[\nknows private secret\nknows public h0\n",
+		);
+		for i in 1..=1000 {
+			source.push_str(&format!("h{i} = HASH(h{}, h{})\n", i - 1, i - 1));
+		}
+		source.push_str("]\nqueries[confidentiality? secret]\n");
+		let model = crate::parser::parse_string("capability-transcript.vp", &source).unwrap();
+		let (_, states) = crate::sanity::sanity(&model).unwrap();
+		assert!(states.iter().all(|state| state.capabilities.is_empty()));
 	}
 
 	fn slot(km: &ProtocolTrace, name: &str) -> usize {

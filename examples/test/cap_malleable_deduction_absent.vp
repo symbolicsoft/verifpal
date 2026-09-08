@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0c0 at one and two sessions. Without malleability, knowing
+// a ciphertext under k provides neither another ciphertext nor its key.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, secret
+	knows public m
+	c = ENC(k, m)
+	key = ENC(k, nil)
+	wrapped = ENC(HASH(key), secret)
+]
+
+Alice -> Bob: c, wrapped
+
+principal Bob[
+]
+
+queries[
+	confidentiality? secret
+	confidentiality? key
+	confidentiality? k
+]

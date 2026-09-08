@@ -772,8 +772,8 @@ fn rule_reconstruct_walk(
 		let forged = reconstructed.forged;
 		let combined = reconstructed.combined;
 		let derivation = match &forged {
-			Some(Forged::Assumption(capability)) => DerivationRecord::Broken {
-				of: value.clone(),
+			Some(Forged::Assumption { capability, of }) => DerivationRecord::Broken {
+				of: of.clone(),
 				capability: *capability,
 				using: used.clone(),
 			},
@@ -793,7 +793,7 @@ fn rule_reconstruct_walk(
 			record,
 			derivation,
 			|| match &forged {
-				Some(Forged::Assumption(capability)) => format!(
+				Some(Forged::Assumption { capability, .. }) => format!(
 					"{} forged from {} under the declared `{}` assumption.",
 					info_output_text(value),
 					pretty_values(&used),

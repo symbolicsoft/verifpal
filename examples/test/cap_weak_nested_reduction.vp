@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0 at one and two sessions. The annotated encryption has
+// plaintext m after reduction, even though its enclosing decryption erases
+// the call. The held equivalent ciphertext reveals m, without revealing k.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, m
+	x = DEC(k, ENC[weak](k, DEC(k, ENC(k, m))))
+	e = ENC(k, m)
+]
+
+Alice -> Bob: e
+
+principal Bob[]
+
+queries[
+	confidentiality? m
+	confidentiality? k
+]

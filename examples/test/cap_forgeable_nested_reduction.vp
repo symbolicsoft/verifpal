@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0c0 at one and two sessions. The projection discards its
+// annotated MAC, but the reduced secret argument is still sk. Forgeability
+// under that key lets the attacker compute the wrapping key MAC(sk, nil).
+// It does not reveal sk or license a MAC under a different key.
+
+attacker[passive]
+
+principal Alice[
+	knows private k, sk, other, secret, safe
+	x = SPLIT(CONCAT(nil, MAC[forgeable](DEC(k, ENC(k, sk)), nil)))
+	wrapped = ENC(MAC(sk, nil), secret)
+	protected = ENC(MAC(other, nil), safe)
+]
+
+Alice -> Bob: wrapped, protected
+
+principal Bob[]
+
+queries[
+	confidentiality? secret
+	confidentiality? sk
+	confidentiality? safe
+]

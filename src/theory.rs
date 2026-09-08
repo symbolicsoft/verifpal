@@ -436,6 +436,7 @@ pub(crate) fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerStat
 	if matches!(v, Value::Constant(_)) {
 		return false;
 	}
+	let _memo = DeductionMemo::ensure(ps, attacker);
 	if let Some(hit) = memo_obtainable_get(hash, v, ps, attacker) {
 		return hit;
 	}
@@ -453,8 +454,13 @@ fn construction_inputs(
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
 	if let Some(mut built) = can_reconstruct_primitive(p, ps, attacker) {
-		if let Some(Forged::Reuse(pair)) = built.forged {
-			built.from.extend(pair);
+		match built.forged {
+			Some(Forged::Reuse(pair)) => built.from.extend(pair),
+			Some(Forged::Assumption {
+				capability: Capability::Malleable,
+				of,
+			}) => built.from.push(of),
+			_ => {}
 		}
 		return Some(built.from);
 	}
@@ -614,6 +620,9 @@ fn can_reconstruct_primitive_directly(
 		}
 	}
 	if has.len() + skipped < rewritten_prim.arguments.len() {
+		if let Some(reshaped) = can_reshape(rewritten_prim, ps, attacker) {
+			return Some(reshaped);
+		}
 		let from = combinable(rewritten_prim, ps, attacker)?;
 		return Some(ReconstructResult {
 			from,
@@ -624,13 +633,83 @@ fn can_reconstruct_primitive_directly(
 	let forged = match (skipped, reused) {
 		(0, _) => None,
 		(_, Some(pair)) => Some(Forged::Reuse(pair)),
-		(_, None) => Some(Forged::Assumption(Capability::Forgeable)),
+		(_, None) => Some(Forged::Assumption {
+			capability: Capability::Forgeable,
+			of: rewrite_value.clone(),
+		}),
 	};
 	Some(ReconstructResult {
 		from: has,
 		forged,
 		combined: false,
 	})
+}
+
+fn can_reshape(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<ReconstructResult> {
+	let (of, vary) = malleable_source(p, ps, attacker)?;
+	let from: Vec<Value> = vary
+		.iter()
+		.filter_map(|&i| p.arguments.get(i).cloned())
+		.collect();
+	if !from.iter().all(|v| obtainable(v, ps, attacker)) {
+		return None;
+	}
+	Some(ReconstructResult {
+		from,
+		forged: Some(Forged::Assumption {
+			capability: Capability::Malleable,
+			of,
+		}),
+		combined: false,
+	})
+}
+
+pub(crate) fn malleable_source(
+	p: &Primitive,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<(Value, &'static [usize])> {
+	if ps.capabilities.is_empty() {
+		return None;
+	}
+	let vary = &primitive_get(p.id).ok()?.malleable_vary;
+	if vary.is_empty() {
+		return None;
+	}
+	let mut source: Option<KnownIdx> = None;
+	for (annotated, caps) in ps.capabilities.annotated_terms() {
+		if !caps.in_force(Capability::Malleable, attacker.current_phase) {
+			continue;
+		}
+		let Value::Primitive(held) = annotated else {
+			continue;
+		};
+		if held.id != p.id
+			|| held.output != p.output
+			|| held.threshold != p.threshold
+			|| held.arguments.len() != p.arguments.len()
+			|| crate::equivalence::equivalent_primitives(held, p, true)
+			|| !p
+				.arguments
+				.iter()
+				.zip(&held.arguments)
+				.enumerate()
+				.all(|(i, (a, b))| vary.contains(&i) || a.equivalent(b, true))
+		{
+			continue;
+		}
+		let Some(known) = attacker.knows(annotated) else {
+			continue;
+		};
+		if source.is_none_or(|first| known.get() < first.get()) {
+			source = Some(known);
+		}
+	}
+	source.map(|known| (attacker.known[known.get()].clone(), vary.as_slice()))
 }
 
 struct PartialGroup {
@@ -987,6 +1066,91 @@ mod tests {
 	use crate::testutil::*;
 	use crate::value::*;
 	use std::sync::Arc;
+
+	#[test]
+	fn malleability_deduction_requires_its_source_phase_key_and_payload() {
+		let key = make_private("maul_deduction_key");
+		let other = make_private("maul_deduction_other");
+		let hidden = make_private("maul_deduction_hidden");
+		let mut source = Primitive::new(PRIM_ENC, vec![key.clone(), hidden.clone()], 0);
+		source.capabilities.set(Capability::Malleable, 2);
+		let source = Value::Primitive(Arc::new(source));
+		let target = Value::primitive(PRIM_ENC, vec![key.clone(), value_nil()], 0);
+		let mut ps = make_principal_state("Maul", 1, vec![], vec![]);
+		Arc::make_mut(&mut ps.capabilities).insert(&source);
+		for held in [false, true] {
+			for phase in [1, 2] {
+				let mut attacker = make_attacker_state(vec![value_nil()]);
+				if held {
+					attacker = make_attacker_state(vec![value_nil(), source.clone()]);
+				}
+				attacker.current_phase = phase;
+				for (term, expected) in [
+					(target.clone(), held && phase == 2),
+					(
+						Value::primitive(PRIM_HASH, vec![target.clone()], 0),
+						held && phase == 2,
+					),
+					(
+						Value::primitive(PRIM_ENC, vec![other.clone(), value_nil()], 0),
+						false,
+					),
+					(
+						Value::primitive(
+							PRIM_ENC,
+							vec![
+								key.clone(),
+								Value::primitive(PRIM_HASH, vec![hidden.clone()], 0),
+							],
+							0,
+						),
+						false,
+					),
+				] {
+					assert_eq!(obtainable(&term, &ps, &attacker), expected);
+					assert_eq!(
+						crate::solve::validate::derivable(&term, &ps, &attacker),
+						expected
+					);
+				}
+				if held && phase == 2 {
+					let inputs = KnowledgeInputs::new(&ps, &attacker)
+						.of_value(&target)
+						.unwrap();
+					assert!(inputs.contains(&attacker.knows(&source).unwrap()));
+					assert!(
+						can_reconstruct_primitive(
+							&Arc::new(source.as_primitive().unwrap().clone()),
+							&ps,
+							&attacker
+						)
+						.is_none()
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn an_unscoped_deduction_walks_a_shared_term_once() {
+		let leaf = make_constant("unscoped_deduction_leaf");
+		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let known = make_attacker_state(vec![leaf.clone()]);
+		let unknown = make_attacker_state(vec![]);
+		let mut term = leaf;
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		assert!(MEMO.with(|memo| memo.borrow().is_none()));
+		assert!(obtainable(&term, &ps, &known));
+		assert!(!obtainable(&term, &ps, &unknown));
+		assert!(MEMO.with(|memo| memo.borrow().is_none()));
+		let _scope = DeductionMemo::scoped(&ps, &unknown, None);
+		assert!(!obtainable(&term, &ps, &unknown));
+		assert!(obtainable(&term, &ps, &known));
+		assert!(!obtainable(&term, &ps, &unknown));
+		assert!(MEMO.with(|memo| memo.borrow().as_ref().unwrap().is_for(&ps, &unknown)));
+	}
 
 	#[test]
 	fn dependency_checks_do_not_build_a_slot_index() {
