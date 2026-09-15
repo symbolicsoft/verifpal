@@ -11,7 +11,7 @@ const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 25] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 23] = [
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
@@ -26,8 +26,6 @@ const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 25] = [
 	"examples/messaging/simplex_proxy.vp",
 	"examples/messaging/simplex_xftp.vp",
 	"examples/messaging/simplex_ntf.vp",
-	"examples/messaging/pqxdh-weak.vp",
-	"examples/messaging/pqxdh.vp",
 	"examples/messaging/scuttlebutt.vp",
 	"examples/messaging/signal.vp",
 	"examples/messaging/userbase.vp",
@@ -1342,16 +1340,6 @@ fn test_cap_multi_annotation() {
 #[test]
 fn test_cap_noop_annotated() {
 	run_model("cap_noop_annotated.vp", "c0a1");
-}
-
-#[test]
-fn test_pqxdh_weak() {
-	run_model_at("examples/messaging/pqxdh-weak.vp", "pqxdh-weak.vp", "c0a0");
-}
-
-#[test]
-fn test_pqxdh() {
-	run_model_at("examples/messaging/pqxdh.vp", "pqxdh.vp", "c0a0");
 }
 #[test]
 fn test_cen() {
