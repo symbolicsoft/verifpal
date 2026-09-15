@@ -1,98 +1,265 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0 at one session and at two.
+// Expected: c0a0c0a0c0a0 at one session and at two.
 //
-// Signal PQXDH: X3DH plus a signed KEM prekey, with the KEM shared secret
-// mixed into the master secret. Phase 1 leaks every Diffie-Hellman private
-// value, which is the harvest-now-decrypt-later adversary: an attacker who
-// records traffic today and breaks discrete log later (say, with a quantum
-// computer). The message must survive it carried by the KEM leg alone —
-// and it does: both queries hold (c0a0).
+// Signal's PQXDH handshake, revision 2, followed by three messages of the
+// Double Ratchet. The handshake follows Bhargavan, Jacomme, Kiefer and
+// Schmidt, "Formal verification of the PQXDH post-quantum key agreement
+// protocol for end-to-end secure messaging" (USENIX Security 2024), whose
+// Figure 4 is the wire format modeled here: the paper's Alex is Alice
+// below and its Blake is Bob. The ratchet follows the same two Signal
+// specifications as signal.vp, the classical handshake PQXDH extends.
 //
-// This is the hybrid argument in miniature. Classically, the four DH legs
-// protect the message even if the KEM falls; post-quantum, the KEM protects
-// it even when every DH private value is on the table. Delete `ss` from the
-// two master-secret hashes and confidentiality fails; that is the entire
-// reason PQXDH exists.
+// Phase 1 then leaks EVERY Diffie-Hellman private value in the model:
+// both identity keys, the signed and one-time prekeys, the X3DH
+// ephemeral and all three ratchet keys. That is the paper's harvest-now-
+// decrypt-later adversary (§3.2), one that records the conversation today
+// and computes discrete logarithms later, say with a quantum computer.
+// What it never gets is dkb, the KEM decapsulation key. Every query
+// holds (c0a0c0a0c0a0): the KEM shared secret enters the initial root
+// key, each ratchet step chains from the root key before it, and so
+// every message key of the conversation stays out of reach — which is
+// why a classical Double Ratchet seeded by PQXDH protects a whole
+// conversation against this adversary, not only its first message.
+// Delete ss and bss from the two session secrets and all three
+// confidentiality queries fail; that is the entire reason PQXDH exists.
 //
-// The two prekey signatures are domain-separated with the public tags c2
-// and c3. Without that separation an attacker swaps the KEM prekey for the
-// DH prekey, carrying Bob's genuine signature with it, and the KEM leg
-// quietly becomes a second classical leg — a real design lesson: signing
-// two things with one key requires making their signatures unmixable.
+// PQXDH is X3DH with a KEM leg (paper §2.3):
 //
-// Compare pqxdh-weak.vp, the same protocol with the adversary expressed as
-// a capability annotation instead of a list of leaks; and signal.vp for the
-// classical handshake this extends.
+//   1. Bob also holds a KEM key pair PQSPK_B: dkb is the decapsulation
+//      (private) key and ekb the encapsulation (public) key.
+//   2. His prekey bundle carries ekb and its signature under IK_B, next
+//      to the signed curve prekey.
+//   3. Alice encapsulates to it, (ss, ct) = KEM.encaps(ekb), and SS
+//      joins the four DH values in the KDF input:
+//        SK = HKDF(salt: 0, ikm: DH1 || DH2 || DH3 || DH4 || SS, info)
+//   4. Her first message carries ct.
+//   5. Bob decapsulates, ss = KEM.decaps(dkb, ct), and derives the same SK.
+//
+// SK is the Double Ratchet's initial root key exactly as in signal.vp,
+// so the three messages are that model's key schedule with the KEM
+// secret folded into its seed. The paper stops at the handshake — its
+// models give each connection one encrypted message and no follow-ups
+// (§3.1), and it verifies PQXDH in isolation (§7). Everything past
+// Bob's first decryption below is therefore the Signal specifications,
+// not the reference.
+//
+// Two of the paper's findings shape the model:
+//
+//   Public key confusion (§4.1.1). Revision 1 signed both prekeys under
+//   one key with nothing to tell a curve key from a KEM key. Revision 2
+//   requires the encodings EncodeEC and EncodeKEM to have disjoint
+//   ranges (§2.1), modeled here as the public tags ec_tag and kem_tag
+//   prefixed to each key before it is signed. They are written with
+//   CONCAT rather than HASH because an encoding is public and
+//   reversible; only the signature over it is not. Drop the tags and
+//   the swap becomes available: ekb and ekbsig are replaced by gbs and
+//   gbssig, Bob's own signature carries the substitution past Alice's
+//   check, and she encapsulates to a curve public key. Verifpal reports
+//   that swap where Bob's curve prekey is compromised while the
+//   exchange runs. It does not report it on this model, and the reason
+//   is the leak in phase 1: a key disclosed only downstream of the
+//   check it would forge is not held in time to forge it. The deployed
+//   consequence is the one the paper draws — encapsulating to a curve
+//   key puts the KEM outside the assumption that makes it secure, so
+//   the leg meant to survive the curve stops surviving it.
+//
+//   KEM re-encapsulation (§4.1.2). Under bare IND-CCA an attacker holding
+//   one compromised decapsulation key can re-encapsulate ss to another
+//   of Bob's KEM keys, so the two sides need not agree on which PQSPK
+//   was used. Revision 2 offers a choice: put ekb in the AEAD associated
+//   data, or use a KEM that binds ss to its public key (the paper's
+//   SH-CR, §5.3, which it proves for Kyber). Signal chose the latter and
+//   keeps AD = Encode(IK_A) || Encode(IK_B). Verifpal's KEM_DECAP inverts
+//   only its own KEM_ENCAP, so it is binding by construction, and this
+//   model follows the deployed choice.
+//
+// The paper's sharpest observation is about when bs falls, and this
+// model reproduces it. Move `leaks bs` up into phase 0, so that Bob's
+// signed curve prekey is compromised while the exchange runs, and the
+// model answers c0a1c1a0c0a1: both of Alice's messages to Bob lose
+// their authentication. The attacker computes DH1 = DH(IK_A, SPK_B)
+// for itself, brings its own ephemeral and its own encapsulation to
+// Bob's genuine KEM key, and hands Bob a whole first flight he accepts
+// as Alice's. No signature was forged and no primitive broken — Alice
+// authenticates to Bob through that one DH leg, so whoever holds SPK_B
+// can be anyone to Bob. That is the ephemeral key compromise
+// impersonation of Theorem 8, and it is why the leak below waits for
+// phase 1. The first message stays confidential even so, the KEM leg
+// being untouched; the second does not, Bob's ratchet having stepped
+// onto a key the attacker chose.
+//
+// Modeling notes. The paper assumes every KEM key is medium-term, since
+// an untrusted server can always serve the last-resort PQSPK_B and hold
+// back the one-time PQOPK_B (§2.3); so dkb is `knows private`, shared
+// across sessions like the signed curve prekey bs, while the one-time
+// curve prekey bo is `generates` and fresh per session. One identity
+// key pair both signs (XEdDSA) and does Diffie-Hellman, as deployed;
+// the paper's proofs split it in two (§5.5). The one-time curve prekey
+// is unsigned, as in the specification, so the attacker is free to
+// substitute gbo: the queries below hold anyway, which is the model's
+// version of the paper's remark that an unauthenticated OPK adds less
+// than one might expect, since a server can always serve a malicious
+// one or none at all (Theorem 7). The key identifiers Alice sends so
+// Bob can look up his prekeys are elided, the paper finding
+// them not security relevant (§5.1). So is the KDF's F prefix, the 32
+// bytes of 0xFF that separate this derivation from XEdDSA's use of the
+// same curve: distinct symbolic primitives separate them already, and
+// the KDF input concatenation is written as a HASH of its five parts.
+// As in signal.vp, the associated data models CONCAT(AD, header), both
+// identity keys in a fixed order plus the header's ratchet public key,
+// and each nonce is generated and sent rather than derived from the
+// message key.
 
 attacker[active]
 
 principal Alice[
-	// c1: HKDF info string; c2, c3: signature domain-separation tags.
-	knows public c1, c2, c3
+	// info: the KDF info string naming the application. ec_tag, kem_tag:
+	// the prefixes EncodeEC and EncodeKEM put on a key before signing it.
+	knows public info, ec_tag, kem_tag
+	// Alice's long-term identity key pair, IK_A.
 	knows private alongterm
 	galongterm = PUBKEY(alongterm)
 ]
 
 principal Bob[
-	knows public c1, c2, c3
-	// blongterm: identity key. bs: signed (curve) prekey.
-	knows private blongterm, bs
-	// bo: one-time curve prekey. dkb: the KEM decapsulation key — the
-	// post-quantum secret everything rides on.
-	generates bo, dkb
+	knows public info, ec_tag, kem_tag
+	// blongterm: the identity key IK_B. bs: the signed curve prekey
+	// SPK_B, which doubles as Bob's initial ratchet key pair. dkb: the
+	// KEM decapsulation key PQSPK_B — the post-quantum secret everything
+	// rides on.
+	knows private blongterm, bs, dkb
+	// bo: a one-time curve prekey OPK_B, fresh per session.
+	generates bo
 	gblongterm = PUBKEY(blongterm)
 	gbs = PUBKEY(bs)
 	gbo = PUBKEY(bo)
-	// ekb: the KEM encapsulation (public) key derived from dkb.
+	// ekb: the KEM encapsulation key, the public half of dkb.
 	ekb = PUBKEY(dkb)
-	// Each prekey is signed under its own domain tag — see the header.
-	gbssig = SIGN(blongterm, HASH(c2, gbs))
-	ekbsig = SIGN(blongterm, HASH(c3, ekb))
+	// Each prekey is signed under its own encoding, so a signature over a
+	// curve key can never be presented as one over a KEM key.
+	gbssig = SIGN(blongterm, CONCAT(ec_tag, gbs))
+	ekbsig = SIGN(blongterm, CONCAT(kem_tag, ekb))
 ]
 
-// Bob's prekey bundle. Only the identity key is guarded (verified
-// out-of-band); the prekeys are protected by their signatures.
+// Bob's prekey bundle, as fetched from the untrusted Signal server. The
+// identity key is guarded — anchored out-of-band by safety numbers — while
+// the two signed prekeys are protected by their signatures, not the wire.
 Bob -> Alice: [gblongterm], gbs, gbssig, gbo, ekb, ekbsig
 
 principal Alice[
-	// r is the KEM encapsulation randomness.
-	generates m1, ae1, r
+	// Both signatures are checked before either prekey is used anywhere:
+	// Alice aborts rather than run PQXDH against an unsigned prekey.
+	_ = SIGNVERIF(gblongterm, CONCAT(ec_tag, gbs), gbssig)?
+	_ = SIGNVERIF(gblongterm, CONCAT(kem_tag, ekb), ekbsig)?
+	// ae1: the ephemeral EK_A. r: the KEM encapsulation randomness.
+	generates ae1, r
 	gae1 = PUBKEY(ae1)
-	// Checked verifications: Alice refuses to proceed on either prekey
-	// unless Bob's signature over it, under the right domain tag, checks.
-	valid = SIGNVERIF(gblongterm, HASH(c2, gbs), gbssig)?
-	kvalid = SIGNVERIF(gblongterm, HASH(c3, ekb), ekbsig)?
-	// KEM_ENCAP returns two values at once: the shared secret ss (kept)
-	// and the ciphertext ct (sent, so Bob can recover the same ss).
+	// KEM.encaps yields two values at once: the shared secret ss, kept,
+	// and the ciphertext ct, sent so that Bob can recover the same ss.
 	ss, ct = KEM_ENCAP(ekb, r)
-	// The X3DH master secret with the KEM secret appended: five
-	// ingredients, of which the leak below will hand over four.
-	amaster = HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss)
-	akenc = HKDF(amaster, c1, nil)
-	generates n_e1
-	e1 = AEAD_ENC(akenc, n_e1, m1, HASH(galongterm, gblongterm, gae1))
+	// The session secret SK: the four X3DH shared secrets and the KEM
+	// secret through the KDF, under the info string naming the protocol.
+	amaster = HKDF(nil, HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss), info)
 ]
 
-Alice -> Bob: [galongterm], gae1, ct, n_e1, e1
+principal Alice[
+	generates m1, ae2
+	// ae2 is Alice's initial ratchet key; Bob's half is his signed prekey.
+	gae2 = PUBKEY(ae2)
+	akshared1 = DH_KEX(gbs, ae2)
+	// Ratchet initialization, one root-KDF step: SK is the initial root
+	// key, mixed with the first ratchet DH share — KDF_RK(SK, DH(ae2, SPK_B)).
+	arkab1, ackab1 = HKDF(amaster, akshared1, nil)
+	// Message key derivation: KDF_CK is an HMAC keyed by the chain key,
+	// and ENCRYPT expands it into the AEAD key with a zero-salt HKDF.
+	akenc1 = HKDF(nil, MAC(ackab1, nil), nil)
+	// The associated data binds both identities — AD = IK_A || IK_B, the
+	// same order in both directions — and the header's ratchet key, so
+	// replaying the ciphertext in another context fails AEAD_DEC.
+	generates n_e1
+	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
+]
+
+// Alice's initial message: her identity key, her ephemeral, the KEM
+// ciphertext, and the first ratchet message.
+Alice -> Bob: [galongterm], gae1, ct, gae2, n_e1, e1
 
 principal Bob[
-	// Decapsulation recovers the same shared secret from the ciphertext.
+	// Decapsulation recovers the KEM shared secret from the ciphertext,
+	// and Bob mirrors the four DH values from his side, opposite
+	// private/public halves — DH_KEX(PUBKEY(a), b) = DH_KEX(PUBKEY(b), a).
 	bss = KEM_DECAP(dkb, ct)
-	bmaster = HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss)
-	bkenc = HKDF(bmaster, c1, nil)
-	m1_d = AEAD_DEC(bkenc, n_e1, e1, HASH(galongterm, gblongterm, gae1))?
+	bmaster = HKDF(nil, HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss), info)
+]
+
+principal Bob[
+	// The receiving half of the same ratchet step.
+	bkshared1 = DH_KEX(gae2, bs)
+	brkab1, bckab1 = HKDF(bmaster, bkshared1, nil)
+	bkenc1 = HKDF(nil, MAC(bckab1, nil), nil)
+	// Checked decryption: a forged or replayed e1 halts Bob here.
+	m1_d = AEAD_DEC(bkenc1, n_e1, e1, HASH(galongterm, gblongterm, gae2))?
+]
+
+// Message 2: Bob replies, advancing the DH ratchet with his own fresh
+// ephemeral be, generated at send time (the deferred variant of §8.5).
+// Note the root-key chaining: each KDF_RK takes the previous root key as
+// its salt, so the KEM secret is folded into every future key.
+principal Bob[
+	generates m2, be
+	gbe = PUBKEY(be)
+	bkshared2 = DH_KEX(gae2, be)
+	brkba2, bckba2 = HKDF(brkab1, bkshared2, nil)
+	bkenc2 = HKDF(nil, MAC(bckba2, nil), nil)
+	generates n_e2
+	e2 = AEAD_ENC(bkenc2, n_e2, m2, HASH(galongterm, gblongterm, gbe))
+]
+
+Bob -> Alice: gbe, n_e2, e2
+
+principal Alice[
+	akshared2 = DH_KEX(gbe, ae2)
+	arkba2, ackba2 = HKDF(arkab1, akshared2, nil)
+	akenc2 = HKDF(nil, MAC(ackba2, nil), nil)
+	m2_d = AEAD_DEC(akenc2, n_e2, e2, HASH(galongterm, gblongterm, gbe))?
+]
+
+// Message 3: back to Alice — another full ratchet step.
+principal Alice[
+	generates m3, ae3
+	gae3 = PUBKEY(ae3)
+	akshared3 = DH_KEX(gbe, ae3)
+	arkab3, ackab3 = HKDF(arkba2, akshared3, nil)
+	akenc3 = HKDF(nil, MAC(ackab3, nil), nil)
+	generates n_e3
+	e3 = AEAD_ENC(akenc3, n_e3, m3, HASH(galongterm, gblongterm, gae3))
+]
+
+Alice -> Bob: gae3, n_e3, e3
+
+principal Bob[
+	bkshared3 = DH_KEX(gae3, be)
+	brkab3, bckab3 = HKDF(brkba2, bkshared3, nil)
+	bkenc3 = HKDF(nil, MAC(bckab3, nil), nil)
+	m3_d = AEAD_DEC(bkenc3, n_e3, e3, HASH(galongterm, gblongterm, gae3))?
 ]
 
 phase[1]
 
-// The harvest-now-decrypt-later event: every DH private value falls.
-// Conspicuously absent: dkb, the KEM decapsulation key.
-principal Alice[leaks alongterm, ae1]
-principal Bob[leaks blongterm, bs, bo]
+// The harvest-now-decrypt-later event: every Diffie-Hellman private value
+// in the conversation falls — identity keys, prekeys and ratchet keys
+// alike. Conspicuously absent: dkb, the KEM decapsulation key, and r,
+// the encapsulation randomness — the post-quantum side of the protocol.
+principal Alice[leaks alongterm, ae1, ae2, ae3]
+principal Bob[leaks blongterm, bs, bo, be]
 
 queries[
 	confidentiality? m1
 	authentication? Alice -> Bob: e1
+	confidentiality? m2
+	authentication? Bob -> Alice: e2
+	confidentiality? m3
+	authentication? Alice -> Bob: e3
 ]
