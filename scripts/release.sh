@@ -52,7 +52,7 @@ run() {
 
 # ---------------------------------------------------------------- preflight
 
-for tool in git cargo goreleaser make curl zig syft; do
+for tool in git cargo goreleaser make curl syft; do
 	command -v "${tool}" >/dev/null 2>&1 || die "${tool} is not on PATH."
 done
 
