@@ -822,9 +822,9 @@ fn main() {
 			out!("Verifpal is authored by Nadim Kobeissi.");
 			out!("Everyone who has contributed to Verifpal is");
 			out!("named on the Wall of Honor in the Verifpal");
-			out!("User Manual:");
+			out!("Documentation's Acknowledgments page:");
 			out!();
-			out!("  https://static.verifpal.com/manual.pdf");
+			out!("  https://verifpal.com/docs/acknowledgments/");
 			update_check_report(&update_check);
 			0
 		}

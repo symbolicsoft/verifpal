@@ -33,7 +33,7 @@ A passing query means "this search found no attack", which is weaker than a proo
 
 ## Getting Started
 
-Read the [Verifpal User Manual](https://static.verifpal.com/manual.pdf) first.
+Read the [Verifpal Documentation](https://verifpal.com/docs/) first.
 
 On Windows, install through [Scoop](https://scoop.sh):
 

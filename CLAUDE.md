@@ -4,7 +4,7 @@ Repository guidance for Claude Code.
 
 ## What this is
 
-Verifpal checks `.vp` cryptographic-protocol models for confidentiality, authentication, freshness, unlinkability and equivalence under passive/active attackers. Default: **two concurrent sessions per principal** (`--sessions k`); a hold means no attack found within that bound. One Rust crate (`verifpal` 1.4.2, edition 2024, Rust 1.98, GPL-3.0-only) builds the CLI and separate WASM library for website/VS Code. [User Manual](https://static.verifpal.com/manual.pdf): language reference; `README.md`: overview; [*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654): authoritative where this guide disagrees.
+Verifpal checks `.vp` cryptographic-protocol models for confidentiality, authentication, freshness, unlinkability and equivalence under passive/active attackers. Default: **two concurrent sessions per principal** (`--sessions k`); a hold means no attack found within that bound. One Rust crate (`verifpal` 1.4.2, edition 2024, Rust 1.98, GPL-3.0-only) builds the CLI and separate WASM library for website/VS Code. [User Manual](https://verifpal.com/docs/): language reference; `README.md`: overview; [*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654): authoritative where this guide disagrees.
 
 **Sound but incomplete:** `src/solve/` only proposes substitutions; `validate.rs` concretely re-executes them before recording results. Solver bugs may miss attacks but cannot invent them (Theorem 4; `query.rs::tcb_tests`).
 
