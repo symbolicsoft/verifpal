@@ -1,4 +1,8 @@
-Verifpal 1.4.10
+Verifpal 1.4.11
+
+Changes since v1.4.10:
+
+- completeness: only refuse derivation when no execution produces it
 
 Changes since v1.4.9:
 
