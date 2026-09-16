@@ -90,7 +90,7 @@ fn learn(
 ) -> bool {
 	if attacker.knows(value).is_none()
 		&& !ctx.attacker_knows(value)
-		&& !combination_coheres(ctx, km, ps, attacker, record, &derivation)
+		&& !combination_coheres(ctx, km, ps, attacker, value, record, &derivation)
 	{
 		return false;
 	}
@@ -135,6 +135,7 @@ fn combination_coheres(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
+	target: &Value,
 	ambient: &Arc<MutationRecord>,
 	derivation: &DerivationRecord,
 ) -> bool {
@@ -164,14 +165,42 @@ fn combination_coheres(
 	let Some(replayed) = ctx.replayed(km, &seeds_of(&union), attacker) else {
 		return false;
 	};
-	reads.iter().filter(|read| differs(read)).all(|read| {
-		let Some(state) = replayed.iter().find(|state| state.id == read.reader) else {
-			return true;
-		};
-		read.slot < state.values.len()
-			&& !state.slot_unreached(read.slot)
-			&& !state.withheld_by_own_halt(read.slot)
-	})
+	let reached = |who: PrincipalId, at: usize| match replayed.iter().find(|s| s.id == who) {
+		None => true,
+		Some(state) => {
+			at < state.values.len() && !state.slot_unreached(at) && !state.withheld_by_own_halt(at)
+		}
+	};
+	if reads
+		.iter()
+		.filter(|read| differs(read))
+		.all(|read| reached(read.reader, read.slot))
+	{
+		return true;
+	}
+	let keep = crate::reexec::reachable_knowledge(ps, attacker, |_, slot| {
+		let at = slot.get();
+		let who = km
+			.slots
+			.get(at)
+			.map(|s| s.creator)
+			.unwrap_or(crate::principal::ATTACKER_ID);
+		reached(who, at)
+	});
+	let Some(restricted) = attacker.retaining(&keep) else {
+		return true;
+	};
+	match derivation {
+		DerivationRecord::Decomposed { of, .. } => match of {
+			Value::Primitive(inner) => can_decompose(inner, ps, &restricted)
+				.is_some_and(|found| found.revealed.iter().any(|v| v.equivalent(target, true))),
+			Value::Constant(_) => false,
+		},
+		_ => derivation
+			.ingredients()
+			.iter()
+			.all(|ingredient| obtainable(ingredient, ps, &restricted)),
+	}
 }
 
 fn pair_coheres(

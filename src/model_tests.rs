@@ -657,6 +657,12 @@ fn test_closure_halted_send() {
 }
 
 #[test]
+fn test_closure_route_withheld_by_halt() {
+	run_model("closure_route_withheld_by_halt.vp", "c1");
+	run_model_sessions("closure_route_withheld_by_halt.vp", 1, "c1");
+}
+
+#[test]
 fn test_closure_cyclic_union() {
 	run_model("closure_cyclic_union.vp", "c1c1c0");
 	run_model_sessions("closure_cyclic_union.vp", 1, "c1c1c0");

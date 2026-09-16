@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// A derivation is refused only when no execution produces it, not when the
+// one route the closure happened to record is incoherent.
+//
+// The attacker swaps Bob's KEM encapsulation key for its own, which gives
+// up the shared secret but also fails the tag Alice checks after she has
+// already sent the message. Alice halts there, so she never reaches her
+// own leak and her ephemeral is withheld. Bob checks nothing, reaches
+// phase 1 and gives up bx, and DH_KEX(gbx, ae) is the same term as
+// DH_KEX(gae, bx), so the Diffie-Hellman leg is still open.
+//
+// The closure keeps one derivation per value and dedupes by equivalence,
+// so the route it records for that leg reads ae, the ephemeral the halted
+// run never discloses. Refusing on that route alone loses the attack even
+// though bx rebuilds the same value. `combination_coheres` therefore
+// restricts knowledge to what the replayed execution reaches and asks
+// whether the derivation still goes through there.
+//
+// Guarding gbx is what makes bx the only way through: with it open the
+// attacker replaces both keys and needs no leak at all.
+
+attacker[active]
+
+principal Alice[
+	knows public c0
+]
+
+principal Bob[
+	knows private bx, dkb
+	gbx = PUBKEY(bx)
+	ekb = PUBKEY(dkb)
+	tag = HASH(ekb)
+]
+
+Bob -> Alice: [gbx], ekb, [tag]
+
+principal Alice[
+	generates ae, r, m, n
+	gae = PUBKEY(ae)
+	s, ct = KEM_ENCAP(ekb, r)
+	k = HASH(DH_KEX(gbx, ae), s)
+	e = AEAD_ENC(k, n, m, nil)
+]
+
+Alice -> Bob: gae, ct, n, e
+
+principal Alice[
+	_ = ASSERT(HASH(ekb), tag)?
+]
+
+phase[1]
+
+principal Alice[leaks ae]
+principal Bob[leaks bx]
+
+queries[
+	confidentiality? m
+]
