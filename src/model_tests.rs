@@ -960,6 +960,76 @@ fn test_scenario_post_halt_leak_no_oracle() {
 }
 
 #[test]
+fn test_scenario_resumed_precomputed_send() {
+	run_model("scenario_resumed_precomputed_send.vp", "c1");
+	run_model_sessions("scenario_resumed_precomputed_send.vp", 1, "c1");
+}
+
+#[test]
+fn test_scenario_resumed_precomputed_leak() {
+	run_model("scenario_resumed_precomputed_leak.vp", "c1");
+	run_model_sessions("scenario_resumed_precomputed_leak.vp", 1, "c1");
+}
+
+#[test]
+fn scenario_resumed_disclosures_depend_on_reaching_the_event() {
+	for name in [
+		"scenario_resumed_precomputed_send.vp",
+		"scenario_resumed_precomputed_leak.vp",
+	] {
+		let source = std::fs::read_to_string(format!("examples/test/{name}")).expect("read model");
+		let assignment = "\tsealed = PKE_ENC(peerpk, master)\n";
+		let check = "\t_ = SIGNVERIF(peerpk, nil, sig)?\n";
+		let second_check = "\t_ = SIGNVERIF(bpk, nil, sig)?\n";
+		for (case, variant, expected) in [
+			(
+				"assigned after the check",
+				source.replace(
+					&format!("{assignment}{check}"),
+					&format!("{check}{assignment}"),
+				),
+				true,
+			),
+			(
+				"guarded signature",
+				source.replace("[bpk], sig", "[bpk], [sig]"),
+				false,
+			),
+			(
+				"passive attacker",
+				source.replace("attacker[active]", "attacker[passive]"),
+				false,
+			),
+			(
+				"another halt before disclosure",
+				source.replace(check, &format!("{check}{second_check}")),
+				false,
+			),
+			(
+				"another halt after disclosure",
+				source.replace(
+					"scenarios[",
+					&format!("principal Alice[\n{second_check}]\n\nscenarios["),
+				),
+				true,
+			),
+		] {
+			let model = crate::parser::parse_string(name, &variant).expect("parses");
+			for sessions in [1, 2] {
+				let results = crate::verify::analyze_sessions(&model, sessions)
+					.expect("analyzes")
+					.results_get();
+				assert_eq!(results.len(), 1);
+				assert_eq!(
+					results[0].resolved, expected,
+					"{name}: {case} at {sessions} sessions"
+				);
+			}
+		}
+	}
+}
+
+#[test]
 fn test_scenario_pre_halt_oracle() {
 	run_model("scenario_pre_halt_oracle.vp", "c1");
 	run_model_sessions("scenario_pre_halt_oracle.vp", 1, "c1");

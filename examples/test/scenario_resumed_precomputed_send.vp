@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions. Alice computes sealed before a check
+// that halts the corrupt-peer run. Replacing sig with SIGN(msk, nil) makes
+// the check pass and reaches the later send, exposing master under mpk.
+// Disclosure depends on reaching the send, not on when sealed was assigned.
+
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], sig
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	sealed = PKE_ENC(peerpk, master)
+	_ = SIGNVERIF(peerpk, nil, sig)?
+]
+
+Alice -> Bob: sealed
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

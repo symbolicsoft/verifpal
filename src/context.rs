@@ -1039,20 +1039,22 @@ impl VerifyContext {
 		record: &Arc<MutationRecord>,
 		phase: i32,
 	) {
-		let halts = read_lock(&self.honest_halts).clone();
-		if halts.is_empty() {
+		let Some(halted_at) = read_lock(&self.honest_halts)
+			.iter()
+			.find(|&&(principal, _)| principal == ps.id)
+			.and_then(|&(_, at)| km.slots.get(at))
+			.map(|slot| slot.declared_at)
+		else {
 			return;
-		}
+		};
 		let _ = self.absorb_wire_values(ps, record, phase, |slot, sv| {
-			if sv.provenance.creator != ps.id
-				|| !halts
-					.iter()
-					.any(|&(principal, at)| principal == ps.id && slot >= at)
-			{
+			if sv.provenance.creator != ps.id {
 				return None;
 			}
 			km.disclosure(slot, phase, |principal, declared_at| {
-				ps.event_reached(km, principal, declared_at)
+				principal == ps.id
+					&& declared_at > halted_at
+					&& ps.event_reached(km, principal, declared_at)
 			})
 		});
 	}
