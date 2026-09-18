@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and c1 at two.
+//
+// closure_route_collision.vp with a single oracle principal: two sessions
+// of Bob supply the two halves, one session cannot.
+
+attacker[active]
+principal Alice[
+	knows private k
+	knows public c0
+	knows public c1
+	generates x
+]
+Alice -> Bob: x
+principal Bob[
+	knows private k
+	s = HASH(k, x)
+]
+Bob -> Alice: s
+principal Alice[
+	generates m
+	kd = HASH(HASH(k, c0), HASH(k, c1))
+	e = ENC(kd, m)
+]
+Alice -> Carol: e
+principal Carol[
+	knows private k
+	knows public c0
+	knows public c1
+	kc = HASH(HASH(k, c0), HASH(k, c1))
+	d = DEC(kc, e)
+]
+queries[
+	confidentiality? m
+]

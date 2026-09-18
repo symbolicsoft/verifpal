@@ -106,7 +106,7 @@ fn analyze_sessions_traced_cancellable(
 	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
-	ctx.record_honest_halts(honest_run_halts(&ctx, &trace, &states)?);
+	ctx.record_honest_halts(&trace, honest_run_halts(&ctx, &trace, &states)?);
 	if sessions > 1 {
 		ctx.prefer_replication_valid_witnesses();
 	}

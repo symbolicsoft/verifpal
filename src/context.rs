@@ -148,6 +148,7 @@ type Replays = Vec<Vec<(ValueId, Value)>>;
 pub(crate) struct PassKey {
 	pub principal: PrincipalId,
 	pub targeted: bool,
+	pub(crate) addressed: bool,
 	pub honest: Vec<usize>,
 	pub phase: i32,
 	pub unresolved: i32,
@@ -180,6 +181,7 @@ pub(crate) struct VerifyContext {
 	sessions: u8,
 	honest: Option<IdMap<PrincipalId, i32>>,
 	honest_halts: RwLock<Vec<(PrincipalId, usize)>>,
+	honest_unreached: RwLock<Arc<Vec<bool>>>,
 	scenarios: Vec<ScenarioSummary>,
 	#[cfg(test)]
 	witnesses: RwLock<Vec<Option<ResultWitness>>>,
@@ -239,6 +241,7 @@ fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
 			(Some(x), Some(y)) => same_term(x, y),
 			_ => false,
 		} && a.installed_at == b.installed_at
+		&& a.addressed == b.addressed
 		&& a.provenance.creator == b.provenance.creator
 		&& a.provenance.sender == b.provenance.sender
 		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
@@ -475,6 +478,7 @@ impl VerifyContext {
 			sessions,
 			honest,
 			honest_halts: RwLock::new(Vec::new()),
+			honest_unreached: RwLock::new(Arc::new(Vec::new())),
 			scenarios,
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; unresolved as usize]),
@@ -570,8 +574,40 @@ impl VerifyContext {
 		}
 	}
 
-	pub(crate) fn record_honest_halts(&self, halts: Vec<(PrincipalId, usize)>) {
+	pub(crate) fn record_honest_halts(&self, km: &ProtocolTrace, halts: Vec<(PrincipalId, usize)>) {
+		*write_lock(&self.honest_unreached) =
+			Arc::new(crate::reexec::honest_run_unreached(km, &halts));
 		*write_lock(&self.honest_halts) = halts;
+	}
+
+	fn honest_run_reached(
+		&self,
+		km: &ProtocolTrace,
+		principal: PrincipalId,
+		declared_at: i32,
+	) -> bool {
+		read_lock(&self.honest_halts)
+			.iter()
+			.find(|&&(halted, _)| halted == principal)
+			.and_then(|&(_, at)| km.slots.get(at))
+			.is_none_or(|meta| declared_at <= meta.declared_at)
+	}
+
+	fn honest_run_computed(&self, slot: usize) -> bool {
+		!read_lock(&self.honest_unreached)
+			.get(slot)
+			.copied()
+			.unwrap_or(false)
+	}
+
+	pub(crate) fn honest_run_delivered(
+		&self,
+		km: &ProtocolTrace,
+		slot: usize,
+		event: &SendEvent,
+	) -> bool {
+		self.honest_run_computed(slot)
+			&& self.honest_run_reached(km, event.sender, event.declared_at)
 	}
 
 	pub(crate) fn honest_run_disclosure(
@@ -580,13 +616,11 @@ impl VerifyContext {
 		slot: usize,
 		phase: i32,
 	) -> Option<Disclosure> {
-		let halts = read_lock(&self.honest_halts);
+		if !self.honest_run_computed(slot) {
+			return None;
+		}
 		km.disclosure(slot, phase, |principal, declared_at| {
-			halts
-				.iter()
-				.find(|&&(halted, _)| halted == principal)
-				.and_then(|&(_, at)| km.slots.get(at))
-				.is_none_or(|meta| declared_at <= meta.declared_at)
+			self.honest_run_reached(km, principal, declared_at)
 		})
 	}
 
@@ -1039,22 +1073,26 @@ impl VerifyContext {
 		record: &Arc<MutationRecord>,
 		phase: i32,
 	) {
-		let Some(halted_at) = read_lock(&self.honest_halts)
-			.iter()
-			.find(|&&(principal, _)| principal == ps.id)
-			.and_then(|&(_, at)| km.slots.get(at))
-			.map(|slot| slot.declared_at)
-		else {
+		if read_lock(&self.honest_halts).is_empty() {
 			return;
-		};
+		}
 		let _ = self.absorb_wire_values(ps, record, phase, |slot, sv| {
-			if sv.provenance.creator != ps.id {
+			let holds_initially = sv.provenance.creator == ps.id
+				|| km.slots.get(slot).is_some_and(|trace_slot| {
+					trace_slot
+						.known_by
+						.iter()
+						.any(|&(holder, sender)| holder == ps.id && sender == ps.id)
+				});
+			if !holds_initially
+				|| ps.slot_unreached(slot)
+				|| ps.slot_starved(slot)
+				|| self.honest_run_disclosure(km, slot, phase).is_some()
+			{
 				return None;
 			}
 			km.disclosure(slot, phase, |principal, declared_at| {
-				principal == ps.id
-					&& declared_at > halted_at
-					&& ps.event_reached(km, principal, declared_at)
+				principal == ps.id && ps.event_reached(km, principal, declared_at)
 			})
 		});
 	}
@@ -1249,6 +1287,7 @@ impl VerifyContext {
 			sessions: self.sessions,
 			honest,
 			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),
+			honest_unreached: RwLock::new(Arc::clone(&read_lock(&self.honest_unreached))),
 			scenarios: self.scenarios.clone(),
 			#[cfg(test)]
 			witnesses: RwLock::new(vec![None; results_len]),

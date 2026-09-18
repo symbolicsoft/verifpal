@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a1 at one and two sessions.
+//
+// A certificate authority signs the name Alice registers as well as her
+// key, and Carol checks a certificate over the key she receives. The
+// attacker registers PUBKEY(nil) as a name: the authority's signature over
+// it is a certificate over an attacker key, Carol accepts that key, and the
+// attacker holds the resulting Diffie-Hellman secret and opens e.
+//
+// The name slot is constant-shaped, so no family filled it with a key.
+// Unifying the authority's emission SIGN(sk, name) with the shape Carol's
+// check wants, SIGN(sk, ga), binds name to Carol's key variable, which is
+// grounded by the honest key's alignment to the attacker's public key.
+// solver_oracle_input_domain_separated.vp separates the two signatures.
+
+attacker[active]
+
+principal Ca[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+
+principal Alice[
+	generates name, a
+	ga = PUBKEY(a)
+]
+
+Alice -> Ca: name, [ga]
+
+principal Ca[
+	cert_name = SIGN(sk, name)
+	cert_key = SIGN(sk, ga)
+]
+
+Ca -> Alice: cert_name, cert_key
+Ca -> Carol: [pk]
+
+Alice -> Carol: ga, cert_key
+
+principal Carol[
+	generates c, n, s
+	gc = PUBKEY(c)
+	_ = SIGNVERIF(pk, ga, cert_key)?
+	k = DH_KEX(ga, c)
+	e = AEAD_ENC(k, n, s, nil)
+]
+
+Carol -> Alice: gc, n, e
+
+principal Alice[
+	k2 = DH_KEX(gc, a)
+	d = AEAD_DEC(k2, n, e, nil)?
+]
+
+queries[
+	confidentiality? s
+	authentication? Alice -> Carol: cert_key
+]

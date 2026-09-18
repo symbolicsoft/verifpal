@@ -1,0 +1,78 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one and two sessions.
+//
+// halted_peer_downstream_reencrypt.vp with Bob's signature guarded. Alice@2
+// halts and never sends wrapped@2, so Bob@2 never re-seals anything to mpk.
+// Replaying scenario 1's wrapped and sigw into Bob@2 is accepted, but what
+// Bob@2 then re-seals to mpk is sealed under bpk, which msk does not open.
+//
+// Phase seeding used to publish out@2 from an untruncated pristine state in
+// which Bob@2 had received a message Alice@2 never sent.
+
+attacker[active]
+
+principal Alice[
+	knows private ask
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	peerbundle = CONCAT(peerpk, nil)
+]
+
+Alice -> Bob: [peerbundle]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+	wrapped = PKE_ENC(bpk, sealed)
+	sigw = SIGN(ask, wrapped)
+]
+
+Alice -> Bob: wrapped, sigw
+
+principal Bob[
+	_ = SIGNVERIF(apk, wrapped, sigw)?
+	sealed2 = PKE_DEC(bsk, wrapped)
+	peerseen, _ = SPLIT(peerbundle)
+	out = PKE_ENC(peerseen, sealed2)
+]
+
+Bob -> Carol: out
+
+principal Carol[
+	h = HASH(out)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

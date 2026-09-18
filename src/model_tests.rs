@@ -664,7 +664,7 @@ fn test_closure_route_withheld_by_halt() {
 
 #[test]
 fn test_closure_cyclic_union() {
-	run_model("closure_cyclic_union.vp", "c1c1c0");
+	run_model("closure_cyclic_union.vp", "c1c1c1");
 	run_model_sessions("closure_cyclic_union.vp", 1, "c1c1c0");
 }
 
@@ -969,6 +969,144 @@ fn test_scenario_resumed_precomputed_send() {
 fn test_scenario_resumed_precomputed_leak() {
 	run_model("scenario_resumed_precomputed_leak.vp", "c1");
 	run_model_sessions("scenario_resumed_precomputed_leak.vp", 1, "c1");
+}
+
+#[test]
+fn test_halted_peer_relay_holds() {
+	run_model("halted_peer_relay_holds.vp", "c0");
+	run_model_sessions("halted_peer_relay_holds.vp", 1, "c0");
+}
+
+#[test]
+fn test_halted_peer_relay() {
+	run_model("halted_peer_relay.vp", "c1");
+	run_model_sessions("halted_peer_relay.vp", 1, "c1");
+}
+
+#[test]
+fn test_halted_peer_precomputed_relay_holds() {
+	run_model("halted_peer_precomputed_relay_holds.vp", "c0");
+	run_model_sessions("halted_peer_precomputed_relay_holds.vp", 1, "c0");
+}
+
+#[test]
+fn test_halted_peer_downstream_reencrypt() {
+	run_model("halted_peer_downstream_reencrypt.vp", "c1");
+	run_model_sessions("halted_peer_downstream_reencrypt.vp", 1, "c1");
+}
+
+#[test]
+fn test_halted_peer_downstream_reencrypt_holds() {
+	run_model("halted_peer_downstream_reencrypt_holds.vp", "c0");
+	run_model_sessions("halted_peer_downstream_reencrypt_holds.vp", 1, "c0");
+}
+
+#[test]
+fn test_bypass_keeps_other_checks_honest() {
+	run_model("bypass_keeps_other_checks_honest.vp", "a1a1");
+	run_model_sessions("bypass_keeps_other_checks_honest.vp", 1, "a0a1");
+}
+
+#[test]
+fn test_matching_run_leaked_derived_key() {
+	run_model("matching_run_leaked_derived_key.vp", "a1");
+	run_model_sessions("matching_run_leaked_derived_key.vp", 1, "a1");
+}
+
+#[test]
+fn test_matching_run_public_key_output() {
+	run_model("matching_run_public_key_output.vp", "a1");
+	run_model_sessions("matching_run_public_key_output.vp", 1, "a1");
+}
+
+#[test]
+fn test_scenario_generated_identifier() {
+	run_model("scenario_generated_identifier.vp", "c1");
+	run_model_sessions("scenario_generated_identifier.vp", 1, "c1");
+}
+
+#[test]
+fn test_scenario_generated_salt_mentioned() {
+	run_model("scenario_generated_salt_mentioned.vp", "c1");
+	run_model_sessions("scenario_generated_salt_mentioned.vp", 1, "c1");
+}
+
+#[test]
+fn test_solver_oracle_input_prefix() {
+	run_model("solver_oracle_input_prefix.vp", "a1");
+	run_model_sessions("solver_oracle_input_prefix.vp", 1, "a1");
+}
+
+#[test]
+fn test_solver_oracle_input_prefix_private_tag() {
+	run_model("solver_oracle_input_prefix_private_tag.vp", "a1");
+	run_model_sessions("solver_oracle_input_prefix_private_tag.vp", 1, "a0");
+}
+
+#[test]
+fn test_solver_oracle_input_other_principal() {
+	run_model("solver_oracle_input_other_principal.vp", "a1");
+	run_model_sessions("solver_oracle_input_other_principal.vp", 1, "a1");
+}
+
+#[test]
+fn test_solver_oracle_input_salt() {
+	run_model("solver_oracle_input_salt.vp", "a1");
+	run_model_sessions("solver_oracle_input_salt.vp", 1, "a1");
+}
+
+#[test]
+fn test_solver_oracle_input_certifies_key() {
+	run_model("solver_oracle_input_certifies_key.vp", "c1a1");
+	run_model_sessions("solver_oracle_input_certifies_key.vp", 1, "c1a1");
+}
+
+#[test]
+fn test_solver_oracle_input_domain_separated() {
+	run_model("solver_oracle_input_domain_separated.vp", "c0a1");
+	run_model_sessions("solver_oracle_input_domain_separated.vp", 1, "c0a0");
+}
+
+#[test]
+fn test_split_delivery_equivalence() {
+	run_model("split_delivery_equivalence.vp", "e1");
+	run_model_sessions("split_delivery_equivalence.vp", 1, "e1");
+}
+
+#[test]
+fn test_split_delivery_equivalence_checked() {
+	run_model("split_delivery_equivalence_checked.vp", "e1");
+	run_model_sessions("split_delivery_equivalence_checked.vp", 1, "e1");
+}
+
+#[test]
+fn test_split_delivery_equivalence_guarded() {
+	run_model("split_delivery_equivalence_guarded.vp", "e1");
+	run_model_sessions("split_delivery_equivalence_guarded.vp", 1, "e0");
+}
+
+#[test]
+fn test_split_delivery_forgery() {
+	run_model("split_delivery_forgery.vp", "a1");
+	run_model_sessions("split_delivery_forgery.vp", 1, "a1");
+}
+
+#[test]
+fn test_split_delivery_rewrap() {
+	run_model("split_delivery_rewrap.vp", "c1c1");
+	run_model_sessions("split_delivery_rewrap.vp", 1, "c1c1");
+}
+
+#[test]
+fn test_closure_route_collision() {
+	run_model("closure_route_collision.vp", "c1");
+	run_model_sessions("closure_route_collision.vp", 1, "c1");
+}
+
+#[test]
+fn test_closure_route_collision_sessions() {
+	run_model("closure_route_collision_sessions.vp", "c1");
+	run_model_sessions("closure_route_collision_sessions.vp", 1, "c0");
 }
 
 #[test]

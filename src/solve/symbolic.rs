@@ -35,7 +35,7 @@ pub(crate) fn build(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> SymbolicState {
-	build_assuming_honest(controllable, ps, attacker, &[])
+	build_with(controllable, ps, attacker, &[], false)
 }
 
 pub(crate) fn build_assuming_honest(
@@ -43,6 +43,25 @@ pub(crate) fn build_assuming_honest(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	honest: &[usize],
+) -> SymbolicState {
+	build_with(controllable, ps, attacker, honest, false)
+}
+
+pub(crate) fn build_addressed(
+	controllable: &crate::reexec::Controllable,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	honest: &[usize],
+) -> SymbolicState {
+	build_with(controllable, ps, attacker, honest, true)
+}
+
+fn build_with(
+	controllable: &crate::reexec::Controllable,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	honest: &[usize],
+	addressed: bool,
 ) -> SymbolicState {
 	let n = ps.values.len();
 	let mut var_terms: Vec<Option<Value>> = vec![None; n];
@@ -61,7 +80,14 @@ pub(crate) fn build_assuming_honest(
 	let mut building: Vec<bool> = vec![false; n];
 	let mut terms: Vec<Value> = Vec::with_capacity(n);
 	for idx in 0..n {
-		terms.push(slot_term(idx, ps, &var_terms, &mut memo, &mut building));
+		terms.push(slot_term(
+			idx,
+			ps,
+			&var_terms,
+			addressed,
+			&mut memo,
+			&mut building,
+		));
 	}
 
 	SymbolicState {
@@ -75,6 +101,7 @@ fn slot_term(
 	idx: usize,
 	ps: &PrincipalState,
 	var_terms: &[Option<Value>],
+	addressed: bool,
 	memo: &mut Vec<Option<Value>>,
 	building: &mut Vec<bool>,
 ) -> Value {
@@ -92,7 +119,15 @@ fn slot_term(
 
 	let owner = ps.values[idx].provenance.creator;
 	building[idx] = true;
-	let inlined = inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
+	let inlined = inline(
+		&ps.values[idx].value,
+		ps,
+		var_terms,
+		owner,
+		addressed,
+		memo,
+		building,
+	);
 	building[idx] = false;
 
 	let reduced = reduce_once(&inlined);
@@ -100,8 +135,8 @@ fn slot_term(
 	reduced
 }
 
-fn reaches(ps: &PrincipalState, idx: usize, owner: PrincipalId) -> bool {
-	owner == ps.id || ps.mutation_reaches(idx, owner)
+fn reaches(ps: &PrincipalState, idx: usize, owner: PrincipalId, addressed: bool) -> bool {
+	owner == ps.id || (!addressed && ps.mutation_reaches(idx, owner))
 }
 
 fn inline(
@@ -109,23 +144,31 @@ fn inline(
 	ps: &PrincipalState,
 	var_terms: &[Option<Value>],
 	owner: PrincipalId,
+	addressed: bool,
 	memo: &mut Vec<Option<Value>>,
 	building: &mut Vec<bool>,
 ) -> Value {
 	match v {
 		Value::Constant(c) => match ps.index_of(c) {
 			Some(idx) => {
-				if var_terms[idx].is_some() && !reaches(ps, idx, owner) {
+				if var_terms[idx].is_some() && !reaches(ps, idx, owner, addressed) {
 					if building[idx] {
 						return v.clone();
 					}
 					building[idx] = true;
-					let honest =
-						inline(&ps.values[idx].value, ps, var_terms, owner, memo, building);
+					let honest = inline(
+						&ps.values[idx].value,
+						ps,
+						var_terms,
+						owner,
+						addressed,
+						memo,
+						building,
+					);
 					building[idx] = false;
 					return reduce_once(&honest);
 				}
-				slot_term(idx, ps, var_terms, memo, building)
+				slot_term(idx, ps, var_terms, addressed, memo, building)
 			}
 			None => v.clone(),
 		},
@@ -133,7 +176,7 @@ fn inline(
 			let args: Vec<Value> = p
 				.arguments
 				.iter()
-				.map(|a| inline(a, ps, var_terms, owner, memo, building))
+				.map(|a| inline(a, ps, var_terms, owner, addressed, memo, building))
 				.collect();
 			Value::Primitive(Arc::new(p.with_arguments(args)))
 		}
@@ -237,12 +280,12 @@ mod tests {
 		let _ = &attacker;
 		let ga = slot(&ps, "sym_ga");
 		assert!(
-			reaches(&ps, ga, ps.id),
+			reaches(&ps, ga, ps.id, false),
 			"the walked principal always reaches"
 		);
 		let creator = ps.values[ga].provenance.creator;
 		assert_eq!(
-			reaches(&ps, ga, creator),
+			reaches(&ps, ga, creator, false),
 			ps.meta[ga].mutatable_to.contains(&creator),
 			"for anyone else it is exactly the unguarded-delivery question"
 		);

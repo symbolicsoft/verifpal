@@ -164,6 +164,7 @@ impl Emission<'_> {
 			&phases,
 			&governing,
 			self.km,
+			false,
 		) else {
 			return false;
 		};
@@ -290,6 +291,7 @@ fn forgeable_without_sender_uncached(
 		!km.slots.get(slot.get()).is_some_and(|read| {
 			read.constant.declaration == Some(Declaration::Assignment)
 				&& km.interchangeable_with(read.creator, sender)
+				&& run_dependent(km, read)
 		})
 	});
 	if let Some(held) = attacker.knows(target) {
@@ -298,6 +300,19 @@ fn forgeable_without_sender_uncached(
 	let without_sender = attacker.retaining(&keep);
 	let view = without_sender.as_deref().unwrap_or(attacker);
 	crate::solve::validate::derivable(target, ps, view)
+}
+
+fn run_dependent(km: &ProtocolTrace, read: &TraceSlot) -> bool {
+	resolve_trace_constant(&read.constant, km)
+		.constant_leaves()
+		.any(|leaf| {
+			leaf.declaration != Some(Declaration::Knows)
+				&& !leaf.is_nil()
+				&& km
+					.index_of(leaf)
+					.and_then(|at| km.slots.get(at))
+					.is_some_and(|slot| slot.creator != read.creator)
+		})
 }
 
 fn corresponds(
@@ -365,7 +380,7 @@ mod tests {
 	fn sender_filter_follows_in_place_and_later_ingredients() {
 		let model = crate::parser::parse_string(
 			"sender_ingredients.vp",
-			"attacker[passive]\nprincipal Alice[\nknows private key\ntoken = HASH(key)\n]\nAlice -> Bob: token\nprincipal Bob[\nseen = HASH(token)\n]\nqueries[\nconfidentiality? key\n]\n",
+			"attacker[passive]\nprincipal Bob[\ngenerates challenge\n]\nBob -> Alice: challenge\nprincipal Alice[\nknows private key\ntoken = HASH(key, challenge)\n]\nAlice -> Bob: token\nprincipal Bob[\nseen = HASH(token)\n]\nqueries[\nconfidentiality? key\n]\n",
 		)
 		.unwrap();
 		let (km, states) = crate::sanity::sanity(&model).unwrap();

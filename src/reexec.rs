@@ -191,7 +191,16 @@ pub(crate) fn available_before_receive(
 pub(crate) fn reachable_knowledge(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
+	source_allowed: impl FnMut(usize, SlotIdx) -> bool,
+) -> Vec<bool> {
+	reachable_knowledge_via(ps, attacker, source_allowed, |_| false)
+}
+
+fn reachable_knowledge_via(
+	ps: &PrincipalState,
+	attacker: &AttackerState,
 	mut source_allowed: impl FnMut(usize, SlotIdx) -> bool,
+	mut alternate_allowed: impl FnMut(usize) -> bool,
 ) -> Vec<bool> {
 	let n = attacker.known.len();
 	let mut inputs = crate::theory::KnowledgeInputs::new(ps, attacker);
@@ -203,7 +212,7 @@ pub(crate) fn reachable_knowledge(
 		let available = match attacker.derivation(KnownIdx(i)) {
 			None | Some(DerivationRecord::Initial) => true,
 			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-				source_allowed(i, *slot)
+				source_allowed(i, *slot) || alternate_allowed(i)
 			}
 			Some(other) => {
 				let mut dependencies = IdSet::default();
@@ -216,13 +225,17 @@ pub(crate) fn reachable_knowledge(
 					dependencies.extend(known.into_iter().map(|idx| idx.get()));
 				}
 				if !complete {
+					if alternate_allowed(i) {
+						reachable[i] = true;
+						ready.push(i);
+					}
 					continue;
 				}
 				missing[i] = dependencies.len();
 				for dependency in dependencies {
 					dependents[dependency].push(i);
 				}
-				missing[i] == 0
+				missing[i] == 0 || alternate_allowed(i)
 			}
 		};
 		if available {
@@ -233,7 +246,7 @@ pub(crate) fn reachable_knowledge(
 	while let Some(known) = ready.pop() {
 		for &dependent in &dependents[known] {
 			missing[dependent] -= 1;
-			if missing[dependent] == 0 {
+			if missing[dependent] == 0 && !reachable[dependent] {
 				reachable[dependent] = true;
 				ready.push(dependent);
 			}
@@ -242,15 +255,58 @@ pub(crate) fn reachable_knowledge(
 	reachable
 }
 
+fn observable_slot(km: &ProtocolTrace, slot: usize) -> bool {
+	km.slots
+		.get(slot)
+		.is_some_and(|trace_slot| !trace_slot.sent_by.is_empty() || trace_slot.constant.leaked)
+}
+
 fn restrict_known(
 	blocked: &[bool],
+	observable: &dyn Fn(usize) -> bool,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> Option<Arc<AttackerState>> {
-	let reachable = reachable_knowledge(ps, attacker, |_, slot| {
-		!blocked.get(slot.get()).copied().unwrap_or(false)
-	});
+	let allowed = |slot: SlotIdx| !blocked.get(slot.get()).copied().unwrap_or(false);
+	let reachable = reachable_knowledge_via(
+		ps,
+		attacker,
+		|_, slot| allowed(slot),
+		|i| {
+			attacker.alternates.get(i).is_some_and(|routes| {
+				routes.iter().any(|(route, record)| match route {
+					DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
+						observable(slot.get())
+							&& allowed(*slot) && record
+							.tainted()
+							.all(|diff| public_construction(attacker, &diff.value, &mut Vec::new()))
+					}
+					_ => false,
+				})
+			})
+		},
+	);
 	attacker.retaining(&reachable)
+}
+
+fn public_construction(attacker: &AttackerState, value: &Value, walked: &mut Vec<usize>) -> bool {
+	let Some(idx) = attacker.knows(value) else {
+		return false;
+	};
+	if walked.contains(&idx.get()) {
+		return false;
+	}
+	walked.push(idx.get());
+	let free = match attacker.derivation(idx) {
+		Some(DerivationRecord::Initial) => true,
+		Some(DerivationRecord::Reconstructed { from } | DerivationRecord::Combined { from }) => {
+			from.iter()
+				.all(|ingredient| public_construction(attacker, ingredient, walked))
+		}
+		_ => false,
+	};
+	walked.pop();
+	free
 }
 
 fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
@@ -316,7 +372,12 @@ fn available_before_pending(
 			.or_insert(at);
 	}
 	let after = close_influences(km, after);
-	restrict_known(&unreachable_from(km, &after), ps, attacker)
+	restrict_known(
+		&unreachable_from(km, &after),
+		&|slot| observable_slot(km, slot),
+		ps,
+		attacker,
+	)
 }
 
 pub(crate) fn causally_grounded(
@@ -685,7 +746,7 @@ pub(crate) fn reexecute(
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
-	reexecute_with(ps_base, installs, None, &[], attacker, km)
+	reexecute_with(ps_base, installs, None, &[], attacker, km, false)
 }
 
 pub(crate) fn reexecute_at(
@@ -694,8 +755,17 @@ pub(crate) fn reexecute_at(
 	phases: &[i32],
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
+	addressed: bool,
 ) -> VResult<PrincipalState> {
-	reexecute_with(ps_base, installs, Some(phases), &[], attacker, km)
+	reexecute_with(
+		ps_base,
+		installs,
+		Some(phases),
+		&[],
+		attacker,
+		km,
+		addressed,
+	)
 }
 
 fn reexecute_with(
@@ -705,6 +775,7 @@ fn reexecute_with(
 	forwarded: &[(SlotIdx, Value)],
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
+	addressed: bool,
 ) -> VResult<PrincipalState> {
 	let mut ps = ps_base.clone();
 	let relayed = relayed_installs(&ps, installs);
@@ -717,7 +788,7 @@ fn reexecute_with(
 	for (i, ((slot, ground), authored)) in installs.iter().zip(authored).enumerate() {
 		if slot.get() < ps.values.len() {
 			let at = phases.and_then(|phases| phases.get(i).copied());
-			install(&mut ps, slot.get(), ground.clone(), authored, at);
+			install(&mut ps, slot.get(), ground.clone(), authored, at, addressed);
 		}
 	}
 	for (slot, value) in forwarded {
@@ -765,53 +836,16 @@ fn starved_slots(
 		return Vec::new();
 	}
 	let n = ps.values.len().min(km.slots.len());
-	let halted_at = |who: PrincipalId| {
-		foreign
-			.iter()
-			.find(|&&(halted, _)| halted == who)
-			.and_then(|&(_, at)| km.slots.get(at))
-			.map(|slot| slot.declared_at)
-	};
-	let mut unreached: Vec<bool> = (0..n)
-		.map(|i| {
-			let Some(meta) = ps.meta.get(i) else {
-				return false;
-			};
-			if foreign
+	let delivered = |i: usize| ps.values[i].provenance.attacker_tainted;
+	let unreached = unreached_slots(km, n, foreign, &delivered);
+	(0..n)
+		.filter(|&i| unreached[i])
+		.filter(|&i| {
+			!foreign
 				.iter()
-				.any(|&(who, at)| who == meta.creator && i >= at)
-			{
-				return true;
-			}
-			let Some(halted) = halted_at(meta.creator) else {
-				return false;
-			};
-			km.slots[i]
-				.sent_by
-				.iter()
-				.any(|event| event.sender == meta.creator && event.recipient == ps.id)
-				&& !km.slots[i].sent_by.iter().any(|event| {
-					event.sender == meta.creator
-						&& event.recipient == ps.id
-						&& event.declared_at <= halted
-				})
+				.any(|&(who, at)| who == km.slots[i].creator && i >= at)
 		})
-		.collect();
-	let mut out = Vec::new();
-	for i in 0..n {
-		if unreached[i] {
-			continue;
-		}
-		if km.slots[i]
-			.initial_value
-			.constant_leaves()
-			.any(|c| km.index_of(c).is_some_and(|j| j < n && unreached[j]))
-		{
-			unreached[i] = true;
-			out.push(i);
-		}
-	}
-	out
+		.collect()
 }
 
 pub(crate) fn execute_forward(
@@ -821,8 +855,9 @@ pub(crate) fn execute_forward(
 	installs: &[(SlotIdx, Value)],
 	phases: Option<&[i32]>,
 	attacker: &AttackerState,
+	addressed: bool,
 ) -> VResult<Vec<PrincipalState>> {
-	let first = reexecute_with(base, installs, phases, &[], attacker, km)?;
+	let first = reexecute_with(base, installs, phases, &[], attacker, km, addressed)?;
 	let mut out = vec![first];
 	forward_to_fixpoint(ctx, km, &mut out, &[], Some(base.id), attacker);
 	Ok(out)
@@ -850,10 +885,11 @@ fn forward_to_fixpoint(
 				.find(|(principal, _)| *principal == pristine.id)
 				.map(|(_, mine)| mine.as_slice())
 				.unwrap_or(&[]);
-			let forwarded: Vec<(SlotIdx, Value)> = forwarded_installs(km, out, pristine, attacker)
-				.into_iter()
-				.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
-				.collect();
+			let forwarded: Vec<(SlotIdx, Value)> =
+				forwarded_installs(ctx, km, out, pristine, attacker)
+					.into_iter()
+					.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
+					.collect();
 			if forwarded.is_empty() {
 				continue;
 			}
@@ -863,16 +899,18 @@ fn forward_to_fixpoint(
 			{
 				continue;
 			}
-			let Ok(state) = reexecute_with(
+			let Ok(mut state) = reexecute_with(
 				&pristine.clone_for_depth(true),
 				seed,
 				None,
 				&forwarded,
 				attacker,
 				km,
+				false,
 			) else {
 				continue;
 			};
+			adopt_foreign_halts(km, &mut state, out);
 			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
 				Some((_, seen)) => *seen = forwarded,
 				None => applied.push((pristine.id, forwarded)),
@@ -955,6 +993,7 @@ pub(crate) fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> b
 }
 
 fn forwarded_installs(
+	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	executed: &[PrincipalState],
 	target: &PrincipalState,
@@ -972,23 +1011,70 @@ fn forwarded_installs(
 			let Some(slot) = km.slots.get(at) else {
 				continue;
 			};
-			let sent = slot.sent_by.iter().any(|event| {
+			let sends = slot.sent_by.iter().filter(|event| {
 				event.sender == source.id
 					&& event.recipient == target.id
 					&& event.phase <= attacker.current_phase
 					&& source.event_reached(km, source.id, event.declared_at)
 			});
+			let mut sent = false;
+			let mut newly = false;
+			for event in sends {
+				sent = true;
+				newly |= !ctx.honest_run_delivered(km, at, event);
+			}
 			if !sent || at >= source.values.len() || source.slot_unreached(at) {
 				continue;
 			}
 			let emitted = &source.values[at].value;
-			if !attacker_authored(emitted, at, km, target) {
+			if !attacker_authored(emitted, at, km, target) && !(newly && !source.slot_starved(at)) {
 				continue;
 			}
 			out.push((SlotIdx(at), emitted.clone()));
 		}
 	}
 	out
+}
+
+fn adopt_foreign_halts(
+	km: &ProtocolTrace,
+	state: &mut PrincipalState,
+	executed: &[PrincipalState],
+) {
+	let mut changed = false;
+	for source in executed {
+		if source.id == state.id {
+			continue;
+		}
+		let actual = source
+			.halted_at
+			.is_some()
+			.then(|| source.values.len().saturating_sub(1));
+		let position = state
+			.foreign_halts
+			.iter()
+			.position(|&(who, _)| who == source.id);
+		match (position, actual) {
+			(Some(i), Some(at)) => {
+				if state.foreign_halts[i].1 != at {
+					state.foreign_halts[i].1 = at;
+					changed = true;
+				}
+			}
+			(Some(i), None) => {
+				state.foreign_halts.remove(i);
+				changed = true;
+			}
+			(None, Some(at)) => {
+				state.foreign_halts.push((source.id, at));
+				changed = true;
+			}
+			(None, None) => {}
+		}
+	}
+	if changed {
+		state.starved = starved_slots(km, state, &state.foreign_halts);
+	}
 }
 
 fn install_forwarded(ps: &mut PrincipalState, slot: usize, value: Value) {
@@ -1075,6 +1161,106 @@ pub(crate) fn creator_halts(
 	out
 }
 
+pub(crate) fn honest_run_unreached(
+	km: &ProtocolTrace,
+	halts: &[(PrincipalId, usize)],
+) -> Vec<bool> {
+	if halts.is_empty() {
+		return vec![false; km.slots.len()];
+	}
+	unreached_slots(km, km.slots.len(), halts, &|_| false)
+}
+
+fn unreached_slots(
+	km: &ProtocolTrace,
+	n: usize,
+	halts: &[(PrincipalId, usize)],
+	delivered: &dyn Fn(usize) -> bool,
+) -> Vec<bool> {
+	let mut unreached = vec![false; n];
+	let halt_of = |who: PrincipalId| {
+		halts
+			.iter()
+			.find(|&&(halted, _)| halted == who)
+			.map(|&(_, at)| at)
+	};
+	let event_reached = |who: PrincipalId, declared_at: i32| {
+		halt_of(who)
+			.and_then(|at| km.slots.get(at))
+			.is_none_or(|slot| declared_at <= slot.declared_at)
+	};
+	for i in 0..n {
+		if delivered(i) {
+			continue;
+		}
+		let slot = &km.slots[i];
+		if halt_of(slot.creator).is_some_and(|at| i >= at) {
+			unreached[i] = true;
+			continue;
+		}
+		unreached[i] = slot.initial_value.constant_leaves().any(|c| {
+			km.index_of(c).is_some_and(|j| {
+				j != i
+					&& j < n && !slot_held(
+					km,
+					&unreached,
+					&event_reached,
+					delivered,
+					slot.creator,
+					j,
+					&mut Vec::new(),
+				)
+			})
+		});
+	}
+	unreached
+}
+
+fn slot_held(
+	km: &ProtocolTrace,
+	unreached: &[bool],
+	event_reached: &dyn Fn(PrincipalId, i32) -> bool,
+	delivered: &dyn Fn(usize) -> bool,
+	who: PrincipalId,
+	slot: usize,
+	visiting: &mut Vec<PrincipalId>,
+) -> bool {
+	if unreached[slot] {
+		return false;
+	}
+	if delivered(slot) {
+		return true;
+	}
+	let trace_slot = &km.slots[slot];
+	if trace_slot.creator == who
+		|| trace_slot
+			.known_by
+			.iter()
+			.any(|&(holder, sender)| holder == who && sender == who)
+	{
+		return true;
+	}
+	if visiting.contains(&who) {
+		return false;
+	}
+	visiting.push(who);
+	let held = trace_slot.sent_by.iter().any(|event| {
+		event.recipient == who
+			&& event_reached(event.sender, event.declared_at)
+			&& slot_held(
+				km,
+				unreached,
+				event_reached,
+				delivered,
+				event.sender,
+				slot,
+				visiting,
+			)
+	});
+	visiting.pop();
+	held
+}
+
 fn foreign_halts(
 	ps: &PrincipalState,
 	failures: &[(Primitive, usize)],
@@ -1151,7 +1337,7 @@ fn held_at(
 	}) {
 		return hit;
 	}
-	let built = restrict_known(&blocked, ps, attacker);
+	let built = restrict_known(&blocked, &|slot| observable_slot(km, slot), ps, attacker);
 	RESTRICTED_AT.with(|cache| {
 		cache
 			.borrow_mut()
@@ -1272,14 +1458,14 @@ fn try_guard_bypass(
 		return Ok(None);
 	}
 
-	let mut ps = ps_pre.clone();
-	for idx in bypassable {
-		if idx < ps.values.len() {
-			ps.values[idx].override_all_bypassed(attacker_public_key());
-		}
-	}
-
+	let mut overridden = bypassable;
 	loop {
+		let mut ps = ps_pre.clone();
+		for &idx in &overridden {
+			if idx < ps.values.len() {
+				ps.values[idx].override_all_bypassed(attacker_public_key());
+			}
+		}
 		ps.resolve_all_values()?;
 		let round = ps.perform_all_rewrites();
 		let mut injected = false;
@@ -1287,24 +1473,21 @@ fn try_guard_bypass(
 			if !prim.instance_check
 				|| ps.values[*idx].provenance.creator != ps.id
 				|| ps.values[*idx].provenance.bypass_injected
+				|| overridden.contains(idx)
 			{
 				continue;
 			}
 			if !honest_input_accepted(km, prim, *idx)
 				&& bypass_is_constructible(km, prim, &ps, *idx, attacker)
 			{
-				ps.values[*idx].override_all_bypassed(attacker_public_key());
+				overridden.push(*idx);
 				injected = true;
 			}
 		}
 		if !injected {
-			break;
+			return Ok(Some(halt_at(ps, &round)));
 		}
 	}
-
-	ps.resolve_all_values()?;
-	let remaining = ps.perform_all_rewrites();
-	Ok(Some(halt_at(ps, &remaining)))
 }
 
 pub(crate) fn attacker_authored(
@@ -1386,11 +1569,13 @@ pub(crate) fn install(
 	ground: Value,
 	authored: bool,
 	at: Option<i32>,
+	addressed: bool,
 ) {
 	let previous = ps.values[slot].value.clone();
 	let sv = &mut ps.values[slot];
 	sv.original = previous;
 	sv.installed_at = at;
+	sv.addressed = addressed;
 	sv.provenance.creator = ATTACKER_ID;
 	sv.provenance.attacker_tainted = true;
 	if authored {
@@ -1497,8 +1682,8 @@ mod tests {
 			DerivationRecord::Leaked { slot: SlotIdx(0) },
 			DerivationRecord::Reconstructed { from: vec![factor] },
 		]);
-		assert!(restrict_known(&[false], &ps, &attacker).is_none());
-		let restricted = restrict_known(&[true], &ps, &attacker).unwrap();
+		assert!(restrict_known(&[false], &|_| false, &ps, &attacker).is_none());
+		let restricted = restrict_known(&[true], &|_| false, &ps, &attacker).unwrap();
 		assert!(restricted.known.is_empty());
 	}
 
@@ -1513,9 +1698,9 @@ mod tests {
 			DerivationRecord::Reconstructed { from: vec![leaf] },
 			DerivationRecord::Leaked { slot: SlotIdx(0) },
 		]);
-		assert!(restrict_known(&[false], &ps, &attacker).is_none());
+		assert!(restrict_known(&[false], &|_| false, &ps, &attacker).is_none());
 		assert!(
-			restrict_known(&[true], &ps, &attacker)
+			restrict_known(&[true], &|_| false, &ps, &attacker)
 				.unwrap()
 				.known
 				.is_empty()
@@ -1525,7 +1710,7 @@ mod tests {
 			using: Vec::new(),
 		};
 		assert!(
-			restrict_known(&[false], &ps, &attacker)
+			restrict_known(&[false], &|_| false, &ps, &attacker)
 				.unwrap()
 				.known
 				.is_empty()

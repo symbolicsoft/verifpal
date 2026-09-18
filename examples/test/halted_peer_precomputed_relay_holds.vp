@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one and two sessions.
+//
+// halted_peer_relay_holds.vp with sealed, wrapped and sigw computed before
+// Alice's check rather than after it. Alice@2 computes wrapped@2 and then
+// halts, so it is never sent: Bob@2 never receives it and never relays
+// sealed2@2.
+//
+// Bob@2's relay is starved by a delivery that never happened to Bob@2, and
+// that must hold in every principal's view of the protocol, not only in
+// Bob@2's own. A view in which the undelivered message is addressed to a
+// third principal used to treat the recipient's computation as reached, and
+// a name legitimately published by another execution then resolved, in that
+// view, to a value no execution computed.
+
+attacker[active]
+
+principal Alice[
+	knows private ask
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	sealed = PKE_ENC(peerpk, master)
+	wrapped = PKE_ENC(bpk, sealed)
+	sigw = SIGN(ask, wrapped)
+	_ = SIGNVERIF(peerpk, nil, sig)?
+]
+
+Alice -> Bob: wrapped, sigw
+
+principal Bob[
+	_ = SIGNVERIF(apk, wrapped, sigw)?
+	sealed2 = PKE_DEC(bsk, wrapped)
+]
+
+Bob -> Carol: sealed2
+
+principal Carol[
+	h = HASH(sealed2)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

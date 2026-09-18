@@ -1627,7 +1627,7 @@ mod tests {
 			.expect("index");
 		let mut mutated = bob.clone();
 		let attacker_key = crate::primitive::attacker_public_key();
-		crate::reexec::install(&mut mutated, slot, attacker_key, true, None);
+		crate::reexec::install(&mut mutated, slot, attacker_key, true, None, false);
 
 		let table = NameTable::from_state(&mutated);
 		let steps = mutation_steps(&km, &mutated, &table, &AttackerState::new());
@@ -1686,6 +1686,7 @@ mod tests {
 			crate::primitive::attacker_public_key(),
 			true,
 			None,
+			false,
 		);
 
 		let table = NameTable::from_state(&mutated);

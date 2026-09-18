@@ -459,31 +459,38 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 
 fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 	let mut out: IdSet<ValueId> = IdSet::default();
+	let mut generated: IdSet<ValueId> = IdSet::default();
+	let mut keyed: IdSet<ValueId> = IdSet::default();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
 			continue;
 		};
 		for expr in &p.expressions {
-			let secret = match expr.kind {
-				Declaration::Generates => true,
-				Declaration::Knows => matches!(expr.qualifier, Some(Qualifier::Private)),
-				_ => false,
-			};
-			if secret {
-				for c in &expr.constants {
-					out.insert(c.id);
+			match expr.kind {
+				Declaration::Generates => generated.extend(expr.constants.iter().map(|c| c.id)),
+				Declaration::Knows if matches!(expr.qualifier, Some(Qualifier::Private)) => {
+					out.extend(expr.constants.iter().map(|c| c.id));
 				}
+				_ => {}
 			}
 			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
-				if let Value::Primitive(inner) = term
-					&& crate::primitive::primitive_is_key_derivation(inner.id)
+				let Value::Primitive(inner) = term else {
+					continue;
+				};
+				if crate::primitive::primitive_is_key_derivation(inner.id)
 					&& let Some(Value::Constant(c)) = inner.arguments.first()
 				{
 					out.insert(c.id);
 				}
+				for at in crate::primitive::secret_positions(inner.id) {
+					if let Some(Value::Constant(c)) = inner.arguments.get(at) {
+						keyed.insert(c.id);
+					}
+				}
 			}
 		}
 	}
+	out.extend(generated.intersection(&keyed).copied());
 	out
 }
 

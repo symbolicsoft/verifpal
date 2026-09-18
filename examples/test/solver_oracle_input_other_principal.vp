@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions.
+//
+// solver_oracle_input_prefix.vp with the check moved to Dave: Bob tags
+// whatever Alice sends him, and Dave checks a tag over CONCAT(c0, m). The
+// attacker hands Bob y := CONCAT(c0, nil), takes MAC(k, CONCAT(c0, nil))
+// off the wire and delivers it to Dave with m := nil, whose check passes.
+//
+// Bob's own search had no goal to shape y with: the query's recipient is
+// Dave, and Bob's constraint sets keep only checks over Bob's variables.
+// The oracle-input family unifies each principal's symbolic emissions with
+// the shapes every principal's checks demand, so Bob's tag is proposed in
+// the form Dave will accept.
+//
+// Dave declares his key before any message so that a leak the `leaks`
+// sweep adds beside the declaration is disclosed before his check; leaked
+// after it, the key makes the closure record Bob's tag as built from the
+// key rather than read off the wire, and that route is causally late.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c0
+	generates y, m
+]
+
+principal Dave[
+	knows private k
+	knows public c0
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k
+	ty = MAC(k, y)
+]
+
+Bob -> Alice: ty
+
+principal Alice[
+	tm = MAC(k, CONCAT(c0, m))
+]
+
+Alice -> Dave: m, tm
+
+principal Dave[
+	_ = ASSERT(MAC(k, CONCAT(c0, m)), tm)?
+	h = HASH(m)
+]
+
+queries[
+	authentication? Alice -> Dave: m
+]

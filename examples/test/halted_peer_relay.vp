@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions.
+//
+// halted_peer_relay_holds.vp with Bob's signature unguarded. The attacker
+// holds msk, so it replaces sig@2 with SIGN(msk, nil), Alice@2's check passes
+// and she sends wrapped@2, sealed to Mallory's key and wrapped for Bob. Bob@2
+// verifies Alice's signature over it, unwraps it and relays sealed@2 to
+// Carol in the clear, where msk opens it.
+//
+// The honest run of scenario 2 never delivers wrapped@2, so Bob@2's relay
+// is not seeded by the honest run; it exists only because the forged check
+// was reached. A send the honest run never made is forwarded from the
+// execution that reaches it, and what the recipient then sends is
+// republished from that execution.
+
+attacker[active]
+
+principal Alice[
+	knows private ask
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], sig
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+	wrapped = PKE_ENC(bpk, sealed)
+	sigw = SIGN(ask, wrapped)
+]
+
+Alice -> Bob: wrapped, sigw
+
+principal Bob[
+	_ = SIGNVERIF(apk, wrapped, sigw)?
+	sealed2 = PKE_DEC(bsk, wrapped)
+]
+
+Bob -> Carol: sealed2
+
+principal Carol[
+	h = HASH(sealed2)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

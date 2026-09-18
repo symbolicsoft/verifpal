@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions.
+//
+// Alice tells Bob which peer key she used, sealed to her own signature. In
+// scenario 2 that peer is Mallory, whose private key the attacker holds.
+// Alice@2's check on Bob's signature fails in the honest run, so wrapped@2
+// is never sent. Replacing sig@2 with SIGN(msk, nil) makes the check pass;
+// Alice@2 sends wrapped@2, Bob@2 unwraps sealed@2 and re-seals it to the
+// peer key Alice named, which is mpk, and msk opens both layers.
+//
+// Bob's relay in scenario 1 seals to bpk, and replaying wrapped@2 into that
+// Bob yields PKE_ENC(bpk, sealed@2), which msk does not open: the only
+// route runs through Bob@2, whose reply the honest run never produced.
+
+attacker[active]
+
+principal Alice[
+	knows private ask
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], sig
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	peerbundle = CONCAT(peerpk, nil)
+]
+
+Alice -> Bob: [peerbundle]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+	wrapped = PKE_ENC(bpk, sealed)
+	sigw = SIGN(ask, wrapped)
+]
+
+Alice -> Bob: wrapped, sigw
+
+principal Bob[
+	_ = SIGNVERIF(apk, wrapped, sigw)?
+	sealed2 = PKE_DEC(bsk, wrapped)
+	peerseen, _ = SPLIT(peerbundle)
+	out = PKE_ENC(peerseen, sealed2)
+]
+
+Bob -> Carol: out
+
+principal Carol[
+	h = HASH(out)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

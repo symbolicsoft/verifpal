@@ -127,6 +127,7 @@ pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 	SlotValues {
 		bypassed: None,
 		installed_at: None,
+		addressed: false,
 		value: v.clone(),
 		pre_rewrite: v.clone(),
 		original: v.clone(),

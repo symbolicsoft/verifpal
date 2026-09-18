@@ -711,6 +711,7 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				original: slot.initial_value.clone(),
 				bypassed: None,
 				installed_at: None,
+				addressed: false,
 				provenance: Provenance {
 					creator: slot.creator,
 					sender,
@@ -791,6 +792,7 @@ impl PrincipalState {
 					// any other, because the honest value was never overwritten.
 					bypassed: if purify { None } else { sv.bypassed.clone() },
 					installed_at: if purify { None } else { sv.installed_at },
+					addressed: if purify { false } else { sv.addressed },
 					provenance: Provenance {
 						creator: sv.provenance.creator,
 						sender: sv.provenance.sender,

@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 at one and two sessions.
+//
+// Bob re-wraps a secret he decrypts from Alice under a key derived from
+// the share Carol sent him on an unguarded leg. Delivering PUBKEY(nil) to
+// Bob alone leaves Alice's guarded flight intact and puts the secret under
+// a key the attacker holds; at one session the shared substitution used
+// to break Alice's leg first and the query held.
+
+attacker[active]
+
+principal Carol[
+	knows private csk
+	cpk = PUBKEY(csk)
+	generates c
+	gc = PUBKEY(c)
+	sig = SIGN(csk, gc)
+]
+
+principal Bob[
+	knows private b, kab
+	gb = PUBKEY(b)
+]
+
+principal Alice[
+	knows private kab
+]
+
+Carol -> Alice: [cpk], gc, sig
+Carol -> Bob: gc
+Bob -> Carol: gb
+
+principal Alice[
+	_ = SIGNVERIF(cpk, gc, sig)?
+	generates y
+	cy = ENC(kab, y)
+]
+
+Alice -> Bob: [cy]
+
+principal Bob[
+	k2 = DH_KEX(gc, b)
+	y2 = DEC(kab, cy)
+	e = ENC(k2, y2)
+]
+
+Bob -> Carol: e
+
+queries[
+	confidentiality? y
+	confidentiality? y[
+		precondition[Alice -> Bob: cy]
+	]
+]

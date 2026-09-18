@@ -337,6 +337,7 @@ struct Read {
 	value: Value,
 	needs: Vec<Need>,
 	signature: u64,
+	known: KnownIdx,
 }
 
 fn merge_absorb(needs: &[Need], union: &mut Vec<Need>) {
@@ -399,18 +400,73 @@ fn gather_reads(
 		}
 	}
 	let Walk {
-		reads,
+		mut reads,
 		mut union,
 		memo,
 		..
 	} = walk;
 	keep_needs_memo(attacker, memo);
-	for read in &reads {
-		if !merge_into(&read.needs, &mut union) {
-			return None;
+	for read in reads.iter_mut() {
+		let mut merged = union.clone();
+		if merge_into(&read.needs, &mut merged) {
+			union = merged;
+			continue;
 		}
+		let (slot, needs) =
+			alternate_reads(km, attacker, read.known)
+				.into_iter()
+				.find(|(_, needs)| {
+					let mut merged = union.clone();
+					merge_into(needs, &mut merged)
+				})?;
+		merge_into(&needs, &mut union);
+		read.slot = slot;
+		read.reader = km
+			.slots
+			.get(slot)
+			.map(|s| s.creator)
+			.unwrap_or(crate::principal::ATTACKER_ID);
+		read.signature = needs_signature(&needs);
+		read.needs = needs;
 	}
 	Some((reads, union))
+}
+
+fn alternate_reads(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	known: KnownIdx,
+) -> Vec<(usize, Vec<Need>)> {
+	let Some(routes) = attacker.alternates.get(known.get()) else {
+		return Vec::new();
+	};
+	routes
+		.iter()
+		.filter_map(|(derivation, record)| {
+			let (DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot }) =
+				derivation
+			else {
+				return None;
+			};
+			let trace_slot = km.slots.get(slot.get())?;
+			if trace_slot.sent_by.is_empty() && !trace_slot.constant.leaked {
+				return None;
+			}
+			let mut memo: IdMap<usize, Vec<Need>> = IdMap::default();
+			let mut active: Vec<usize> = vec![known.get()];
+			let mut cut = false;
+			let needs = read_needs(
+				km,
+				attacker,
+				slot.get(),
+				record,
+				&mut memo,
+				&mut active,
+				&mut cut,
+			);
+			Some((slot.get(), needs))
+		})
+		.collect()
 }
 
 /// The reads an ingredient rests on, whether or not the attacker holds it as
@@ -472,6 +528,7 @@ fn collect_leaves(
 				value: attacker.known[idx.get()].clone(),
 				signature: needs_signature(&needs),
 				needs,
+				known: idx,
 			});
 		}
 		DerivationRecord::Initial => {}
@@ -552,6 +609,24 @@ fn read_preconditions(
 			return out;
 		}
 	};
+	let out = read_needs(km, attacker, slot, &record, memo, active, cut);
+	active.pop();
+	if !*cut {
+		memo.insert(idx.get(), out.clone());
+	}
+	out
+}
+
+fn read_needs(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	slot: usize,
+	record: &MutationRecord,
+	memo: &mut IdMap<usize, Vec<Need>>,
+	active: &mut Vec<usize>,
+	cut: &mut bool,
+) -> Vec<Need> {
+	let mut out: Vec<Need> = Vec::new();
 	let reader = km.slots.get(slot).map(|s| s.creator).unwrap_or(0);
 	for &at in reach_cone(km, reader, slot).iter() {
 		let Some(diff) = record
@@ -571,10 +646,6 @@ fn read_preconditions(
 		}
 	}
 	out.sort_by_key(|(state, slot, _)| (*state, *slot));
-	active.pop();
-	if !*cut {
-		memo.insert(idx.get(), out.clone());
-	}
 	out
 }
 
@@ -1239,10 +1310,9 @@ fn rule_equivalize(
 	record: &Arc<MutationRecord>,
 ) -> bool {
 	if let Value::Constant(c) = value
-		&& ps
-			.index_of(c)
-			.is_some_and(|slot| ps.withheld_by_own_halt(slot))
-	{
+		&& ps.index_of(c).is_some_and(|slot| {
+			ps.withheld_by_own_halt(slot) || ps.slot_unreached(slot) || ps.slot_starved(slot)
+		}) {
 		return false;
 	}
 	let resolved = if let Value::Constant(c) = value {

@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: CC-BY-SA-4.0 */
 
-// Expected: c1c1c0 at one session and at two.
+// Expected: c1c1c0 at one session and c1c1c1 at two.
 //
 // z1 needs Bob handed s := HASH(n) and z2 needs Bob handed n := HASH(s), each a
 // genuine attack on its own. z needs both tags from one run of Bob, and no
@@ -10,6 +10,11 @@
 // that cannot run is not an execution in which every read was reached, and the
 // gate has to refuse the combination rather than admit it because there was
 // no state to check against.
+//
+// At two sessions a second run of Bob supplies the other tag: Bob handed
+// s := HASH(n#2) and Bob#2 handed n#2 := HASH(s#2) coexist, so z#2 falls. The
+// closure reaches it through a read's recorded alternate route once the
+// primary routes of the two tags collide at one slot.
 
 attacker[active]
 

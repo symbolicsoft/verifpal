@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions.
+//
+// Alice's MAC key is derived from a seed she shares with Bob, and she leaks
+// the derived key. The attacker delivers n := nil and t := MAC(k, nil) to
+// Bob, whose check passes; Alice sent only MAC(k, n). A leaked key is the
+// attacker's own forging capability, exactly as a leaked generated key is
+// in matching_run_leaked_generated_key.vp.
+//
+// The matching-run exemption used to strip every read off an assignment
+// Alice's run produced before asking whether the attacker could build the
+// accepted value on its own, so a leaked derived key counted as something
+// only a driven run of Alice could supply, and Alice re-executed under Bob's
+// flight excused the forgery. That also broke the unguard property:
+// guarding n at Alice removed the driven run and reported a1, unguarding
+// it reported a0. Only reads whose value depends on something the run
+// received are taken away now; a value computable from the run's own
+// static and fresh data is disclosed in every execution.
+
+attacker[active]
+
+principal Alice[
+	knows private seed
+	k = HASH(seed)
+	leaks k
+]
+
+principal Carol[
+	generates n
+]
+
+principal Bob[
+	knows private seed
+	kb = HASH(seed)
+]
+
+Carol -> Alice: n
+Carol -> Bob: n
+
+principal Alice[
+	t = MAC(k, n)
+]
+
+Alice -> Bob: t
+
+principal Bob[
+	_ = ASSERT(t, MAC(kb, n))?
+]
+
+queries[
+	authentication? Alice -> Bob: t
+]

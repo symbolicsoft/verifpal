@@ -17,6 +17,7 @@ use crate::value::{push_unique_value, resolve_trace_constant};
 use crate::verify::verify_standard_run;
 
 use deduce::Deducer;
+use matching::unifiers;
 use symbolic::SymbolicState;
 use vars::{Substitution, dedupe};
 
@@ -154,18 +155,54 @@ fn solve_principal(
 		history: &history,
 	};
 	if search == Search::Direct || pass != Pass::Targeted {
-		return solve_with(ctx, km, ps, pass, &attacker, &guards, &sym, &[]);
-	}
-	for honest in slots_blocking_reduction(&sym) {
-		if ctx.all_resolved() || ctx.cancelled() {
-			return Ok(());
+		solve_with(ctx, km, ps, pass, &attacker, &guards, &sym, &[], false)?;
+	} else {
+		for honest in slots_blocking_reduction(&sym) {
+			if ctx.all_resolved() || ctx.cancelled() {
+				return Ok(());
+			}
+			let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
+			if !refined.var_slots.is_empty() {
+				solve_with(
+					ctx, km, ps, pass, &attacker, &guards, &refined, &honest, false,
+				)?;
+			}
 		}
-		let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
-		if !refined.var_slots.is_empty() {
-			solve_with(ctx, km, ps, pass, &attacker, &guards, &refined, &honest)?;
-		}
 	}
-	Ok(())
+	if pass != Pass::Targeted || ctx.all_resolved() || ctx.cancelled() {
+		return Ok(());
+	}
+	let shared: Vec<usize> = sym
+		.var_slots
+		.iter()
+		.copied()
+		.filter(|&slot| !directly_unguarded(km, ps, slot))
+		.collect();
+	if !sym.var_slots.iter().any(|&slot| split_delivered(ps, slot)) {
+		return Ok(());
+	}
+	let addressed = symbolic::build_addressed(&controllable, ps, &attacker, &shared);
+	if addressed.var_slots.is_empty() {
+		return Ok(());
+	}
+	solve_with(
+		ctx, km, ps, pass, &attacker, &guards, &addressed, &shared, true,
+	)
+}
+
+fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+	km.slots.get(slot).is_some_and(|trace_slot| {
+		trace_slot
+			.sent_by
+			.iter()
+			.any(|event| event.recipient == ps.id && !event.guarded)
+	})
+}
+
+fn split_delivered(ps: &PrincipalState, slot: usize) -> bool {
+	ps.meta
+		.get(slot)
+		.is_some_and(|meta| meta.mutatable_to.iter().any(|&who| who != ps.id))
 }
 
 fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
@@ -221,6 +258,7 @@ fn solve_with(
 	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
 	honest: &[usize],
+	addressed: bool,
 ) -> VResult<()> {
 	#[cfg(test)]
 	ctx.note_search_reached_a_controllable_slot();
@@ -228,6 +266,7 @@ fn solve_with(
 	let key = PassKey {
 		principal: ps.id,
 		targeted: pass == Pass::Targeted,
+		addressed,
 		honest: honest.to_vec(),
 		phase: attacker.current_phase,
 		unresolved: ctx.unresolved_count(),
@@ -239,9 +278,10 @@ fn solve_with(
 	let recalled = ctx.pass_repeats(&key, attacker, protocol);
 	if solve_debug() {
 		eprintln!(
-			"[pass] {} {} honest={:?} phase={} unresolved={} recalled={}",
+			"[pass] {} {}{} honest={:?} phase={} unresolved={} recalled={}",
 			ps.name,
 			pass.name(),
+			if addressed { " addressed" } else { "" },
 			key.honest,
 			key.phase,
 			key.unresolved,
@@ -310,7 +350,9 @@ fn solve_with(
 		ctx.defer_replays(ps.id, proposed.id, proposed.replays.clone());
 	}
 	let proposals = proposed.proposals.clone();
-	dispose(ctx, km, ps, pass, attacker, guards, sym, proposals)
+	dispose(
+		ctx, km, ps, pass, attacker, guards, sym, proposals, addressed,
+	)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -352,6 +394,7 @@ fn propose(
 		};
 		proposals.extend(goals.into_iter().flatten());
 		proposals.extend(deducer.constraint_goals(ctx, km, ps, sym));
+		proposals.extend(oracle_input_goals(ctx, km, ps, sym, attacker));
 	}
 
 	let blanket = blanket_substitution(sym);
@@ -452,6 +495,128 @@ fn propose(
 	}
 }
 
+fn oracle_input_goals(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	attacker: &AttackerState,
+) -> Vec<Substitution> {
+	let emissions: Vec<&Value> = (0..ps.values.len())
+		.filter(|&e| {
+			ps.values[e].provenance.creator == ps.id
+				&& (ps.meta[e].sent_at.is_some() || ps.meta[e].constant.leaked)
+		})
+		.map(|e| &sym.terms[e])
+		.filter(|term| vars::contains_var(term))
+		.collect();
+	if emissions.is_empty() {
+		return Vec::new();
+	}
+	let mut fresh = vars::free_lane_bounds(vars::FREE_LANES).0;
+	let mut wanted: Vec<(Value, Option<ValueId>)> = Vec::new();
+	let mut foreign: Substitution = Substitution::default();
+	let slot_var = |v: &Value| vars::as_var(v).filter(|&id| vars::is_slot_var_id(id));
+	for state in ctx.principal_states() {
+		let controllable = crate::reexec::Controllable::of(km, state, attacker);
+		let other = symbolic::build(&controllable, state, attacker);
+		for &slot in &other.var_slots {
+			if sym.var_slots.contains(&slot) {
+				continue;
+			}
+			let honest = resolve_trace_constant(&state.meta[slot].constant, km);
+			let filler = if crate::primitive::value_is_key_derivation(&honest) {
+				crate::primitive::attacker_public_key()
+			} else {
+				crate::value::value_nil()
+			};
+			foreign.insert(vars::attacker_var_id(slot), filler);
+		}
+		for c in 0..state.values.len() {
+			if state.values[c].provenance.creator != state.id {
+				continue;
+			}
+			let Value::Primitive(prim) = &other.terms[c] else {
+				continue;
+			};
+			if !prim.instance_check || !vars::contains_var(&other.terms[c]) {
+				continue;
+			}
+			let shapes: Vec<(Value, Option<ValueId>)> =
+				match crate::primitive::primitive_get(prim.id) {
+					Ok(spec) => match spec.rewrite.as_ref() {
+						Some(rule) => {
+							let target = prim.arguments.get(rule.from).and_then(slot_var);
+							deduce::build_rewrite_shapes_with(prim, rule, |_| {
+								let v = vars::free_var(fresh);
+								fresh += 1;
+								v
+							})
+							.into_iter()
+							.map(|shape| (shape, target))
+							.collect()
+						}
+						None => Vec::new(),
+					},
+					Err(_) => {
+						if crate::primitive::primitive_is_core(prim.id) && prim.arguments.len() == 2
+						{
+							vec![
+								(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
+								(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
+							]
+						} else {
+							Vec::new()
+						}
+					}
+				};
+			for (shape, target) in shapes {
+				if vars::contains_var(&shape)
+					&& !wanted
+						.iter()
+						.any(|(w, t)| *t == target && w.equivalent(&shape, true))
+				{
+					wanted.push((shape, target));
+				}
+			}
+		}
+	}
+	let empty = Substitution::default();
+	let mut out: Vec<Substitution> = Vec::new();
+	for emission in emissions {
+		for (shape, target) in &wanted {
+			for bound in unifiers(emission, shape, &empty) {
+				let mut proposal = Substitution::default();
+				for &slot in &sym.var_slots {
+					let id = vars::attacker_var_id(slot);
+					if !bound.contains_key(&id) {
+						continue;
+					}
+					let value = vars::apply(&vars::attacker_var(slot, ""), &bound);
+					if vars::as_var(&value) == Some(id) || vars::occurs(id, &value, &empty) {
+						continue;
+					}
+					proposal.insert(id, vars::ground_free(&vars::apply(&value, &foreign)));
+				}
+				if proposal.is_empty() {
+					continue;
+				}
+				if let Some(target) = target
+					&& sym.var_slots.contains(&vars::slot_of_var_id(*target))
+					&& !proposal.contains_key(target)
+				{
+					let value = vars::apply(emission, &bound);
+					if !vars::occurs(*target, &value, &proposal) {
+						proposal.insert(*target, vars::ground_free(&vars::apply(&value, &foreign)));
+					}
+				}
+				out.push(proposal);
+			}
+		}
+	}
+	out
+}
+
 fn sibling_replay(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -493,7 +658,9 @@ fn dispose(
 	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
 	proposals: Vec<Substitution>,
+	addressed: bool,
 ) -> VResult<()> {
+	let salt = if addressed { ADDRESSED_SALT } else { 0 };
 	let mut seen: Vec<Vec<(usize, Value)>> = Vec::new();
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	let mut checked = 0usize;
@@ -506,7 +673,7 @@ fn dispose(
 			continue;
 		}
 		let signature = install_signature(sym, &proposal);
-		let key = signature_hash(&signature);
+		let key = signature_hash(&signature) ^ salt;
 		let bucket = buckets.entry(key).or_default();
 		if bucket
 			.iter()
@@ -531,10 +698,105 @@ fn dispose(
 				),
 			)
 		});
-		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key)?;
-		trace_proposal(ps, sym, &proposal, ran);
+		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key, addressed)?;
+		trace_proposal(ps, sym, &proposal, ran, addressed);
+		if ran || seen[at].len() < 2 {
+			continue;
+		}
+		if !emits_an_install(ps, sym, &proposal, &seen[at]) {
+			continue;
+		}
+		let prefix = validate::admitted_prefix(ctx, km, ps, guards, attacker, &seen[at]);
+		if prefix.is_empty()
+			|| prefix.len() == seen[at].len()
+			|| !oracle_chain(ps, sym, &proposal, &seen[at], &prefix)
+		{
+			continue;
+		}
+		let key = signature_hash(&prefix) ^ salt;
+		let bucket = buckets.entry(key).or_default();
+		if bucket
+			.iter()
+			.any(|&i| same_install_signature(&seen[i], &prefix))
+		{
+			continue;
+		}
+		let at = seen.len();
+		bucket.push(at);
+		seen.push(prefix);
+		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key, addressed)?;
+		trace_signature(ps, &seen[at], ran, "prefix");
 	}
 	Ok(())
+}
+
+const ADDRESSED_SALT: u64 = 0x5A17_ADD2_E55E_D001;
+
+fn emissions_under(ps: &PrincipalState, sym: &SymbolicState, binding: &Substitution) -> Vec<Value> {
+	(0..ps.values.len())
+		.filter(|&e| {
+			ps.values[e].provenance.creator == ps.id
+				&& (ps.meta[e].sent_at.is_some() || ps.meta[e].constant.leaked)
+		})
+		.map(|e| {
+			crate::theory::reduce_once(&vars::ground_free(&vars::apply(&sym.terms[e], binding)))
+		})
+		.filter(|emitted| !vars::contains_var(emitted))
+		.collect()
+}
+
+fn emits_an_install(
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	signature: &[(usize, Value)],
+) -> bool {
+	let emissions = emissions_under(ps, sym, proposal);
+	signature.iter().any(|(_, ground)| {
+		let ground = crate::theory::reduce_once(ground);
+		emissions
+			.iter()
+			.any(|emitted| emitted.equivalent(&ground, true))
+	})
+}
+
+fn oracle_chain(
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	signature: &[(usize, Value)],
+	prefix: &[(usize, Value)],
+) -> bool {
+	let dropped: Vec<&(usize, Value)> = signature
+		.iter()
+		.filter(|(slot, _)| !prefix.iter().any(|(kept, _)| kept == slot))
+		.collect();
+	let mut restricted = proposal.clone();
+	for (slot, _) in &dropped {
+		restricted.remove(&vars::attacker_var_id(*slot));
+	}
+	let emissions = emissions_under(ps, sym, &restricted);
+	dropped.iter().all(|(_, ground)| {
+		let ground = crate::theory::reduce_once(ground);
+		emissions
+			.iter()
+			.any(|emitted| emitted.equivalent(&ground, true))
+	})
+}
+
+fn trace_signature(ps: &PrincipalState, signature: &[(usize, Value)], ran: bool, kind: &str) {
+	if !solve_debug() {
+		return;
+	}
+	let bindings: Vec<String> = signature
+		.iter()
+		.map(|(slot, ground)| format!("{}={ground}", ps.meta[*slot].constant.name))
+		.collect();
+	eprintln!(
+		"[solve] {} ran={ran} {kind} [{}]",
+		ps.name,
+		bindings.join(" ")
+	);
 }
 
 fn keyed_free(
@@ -968,12 +1230,23 @@ fn observed<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -
 	out
 }
 
-fn trace_proposal(ps: &PrincipalState, sym: &SymbolicState, proposal: &Substitution, ran: bool) {
+fn trace_proposal(
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	ran: bool,
+	addressed: bool,
+) {
 	if !solve_debug() {
 		return;
 	}
 	let bindings = binding_summary(ps, sym, proposal);
-	eprintln!("[solve] {} ran={ran} [{}]", ps.name, bindings.join(" "));
+	eprintln!(
+		"[solve] {} ran={ran}{} [{}]",
+		ps.name,
+		if addressed { " addressed" } else { "" },
+		bindings.join(" ")
+	);
 }
 
 fn binding_summary(

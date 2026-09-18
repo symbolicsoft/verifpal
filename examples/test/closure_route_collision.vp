@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions.
+//
+// Bob and Dave each tag whatever they receive under the shared key k, and
+// Alice's encryption key is a hash of the two tags over public constants.
+// Feeding c0 to Bob and c1 to Dave yields both halves in one execution.
+//
+// Knowledge keeps one derivation per value, and both HASH(k, c0) and
+// HASH(k, c1) were first read off Bob's slot, under xb := c0 and xb := c1
+// respectively. Combining them needed two values at one slot of one run, so
+// the closure refused the key although Dave's slot records the second half
+// under a substitution that coexists with the first. When primary routes
+// collide, a read's recorded alternate routes are tried before refusing;
+// only routes through a slot that travels or leaks count, since equivalize
+// records a route at every slot holding a known value, including private
+// ones nobody observed.
+
+attacker[active]
+principal Alice[
+	knows private k
+	knows public c0
+	knows public c1
+	generates xb
+	generates xd
+]
+Alice -> Bob: xb
+Alice -> Dave: xd
+principal Bob[
+	knows private k
+	sb = HASH(k, xb)
+]
+principal Dave[
+	knows private k
+	sd = HASH(k, xd)
+]
+Bob -> Alice: sb
+Dave -> Alice: sd
+principal Alice[
+	generates m
+	kd = HASH(HASH(k, c0), HASH(k, c1))
+	e = ENC(kd, m)
+]
+Alice -> Carol: e
+principal Carol[
+	knows private k
+	knows public c0
+	knows public c1
+	kc = HASH(HASH(k, c0), HASH(k, c1))
+	d = DEC(kc, e)
+]
+queries[ confidentiality? m ]

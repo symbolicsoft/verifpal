@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions.
+//
+// Bob tags whatever Alice sends first, and later checks a tag over
+// CONCAT(c0, m). The attacker hands Bob y := CONCAT(c0, nil), collects
+// MAC(k, CONCAT(c0, nil)), and then delivers m := nil with that tag: Bob's
+// check passes and HASH(m) is a use of a value Alice never sent.
+//
+// The search proposed the whole chain at once, and the validator refused
+// it because the tag is derivable only after the first install has run.
+// Nothing proposed the first install alone: its shape comes from the
+// check, not from any family that fills a slot on its own. A refused
+// proposal now falls back to the prefix of its installs that are already
+// proven controllable, derivable and causally available, which the next
+// round completes. solver_oracle_input_prefix_private_tag.vp withholds the
+// domain tag and holds at one session.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c0
+	generates y, m
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k
+	knows public c0
+	ty = MAC(k, y)
+]
+
+Bob -> Alice: ty
+
+principal Alice[
+	tm = MAC(k, CONCAT(c0, m))
+]
+
+Alice -> Bob: m, tm
+
+principal Bob[
+	_ = ASSERT(MAC(k, CONCAT(c0, m)), tm)?
+	h = HASH(m)
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

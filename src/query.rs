@@ -58,6 +58,11 @@ fn attack_trace_with(
 			phase: ambient.current_phase,
 			reproduced: witness.reproduced,
 			out_of_order: witness.out_of_order.clone(),
+			addressed_all: witness
+				.ps
+				.values
+				.iter()
+				.any(|sv| sv.provenance.attacker_tainted && sv.addressed),
 		},
 	);
 	let target = target(&witness.ps);
@@ -1252,7 +1257,8 @@ mod tcb_tests {
 				"&crate::reexec::Guards",
 				"&AttackerState",
 				"&[(usize, Value)]",
-				"u64"
+				"u64",
+				"bool"
 			]
 		);
 		let body = fn_body(&validate_rs, "validate");

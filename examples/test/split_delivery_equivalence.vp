@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e1 at one and two sessions.
+//
+// Carol sends her public share to Alice and to Bob on two unguarded legs,
+// and each derives a key from it and Alice's guarded nonce. The attacker
+// delivers the honest share to Alice and PUBKEY(nil) to Bob, so the two
+// keys differ.
+//
+// A state holds one value per slot, and a substitution used to reach every
+// unguarded recipient of that slot at once, so Alice's key changed with
+// Bob's and the two stayed equal. An install can now be addressed: the
+// mutation reaches only the principal whose state it lives in, every
+// other principal computes with the honest value, and the Targeted pass is
+// run once more over a symbolic state built that way for any principal
+// with a slot delivered unguarded to it and to someone else.
+// split_delivery_equivalence_guarded.vp guards Bob's leg and holds at one
+// session.
+
+attacker[active]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+Carol -> Alice: gc
+Carol -> Bob: gc
+
+principal Alice[
+	generates y
+	ka = HASH(gc, y)
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	kb = HASH(gc, y)
+]
+
+queries[
+	equivalence? ka, kb
+]

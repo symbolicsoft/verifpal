@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions.
+//
+// Bob checks a hash of Alice's public key and Carol's nonce. Anyone can
+// compute HASH(pka, nil), and Bob accepts it with n := nil, so the check
+// authenticates nothing. The same exemption as in
+// matching_run_leaked_derived_key.vp used to excuse this because pka is an
+// assignment output Alice's run emitted.
+
+attacker[active]
+
+principal Alice[
+	knows private ska
+	pka = PUBKEY(ska)
+]
+
+principal Carol[
+	generates n
+]
+
+principal Bob[
+	knows public tag
+]
+
+Alice -> Bob: [pka]
+Carol -> Alice: n
+Carol -> Bob: n
+
+principal Alice[
+	h = HASH(pka, n)
+]
+
+Alice -> Bob: h
+
+principal Bob[
+	_ = ASSERT(h, HASH(pka, n))?
+]
+
+queries[
+	authentication? Alice -> Bob: h
+]

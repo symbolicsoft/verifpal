@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions.
+//
+// Alice verifies Carol's signed share and hashes it with her nonce for
+// Bob, who recomputes the hash over the share he received on his own
+// unguarded leg. Delivering another key to Bob only, while Alice keeps the
+// signed one, lets the attacker hand Bob a hash Alice never computed.
+//
+// The shared symbolic state could not express this at all: with the
+// share replaced for everyone, Alice's check fails and her nonce is
+// starved, so no goal ever bound Bob's hash. The addressed symbolic state
+// inlines Alice's computation with the honest share.
+
+attacker[active]
+
+principal Carol[
+	knows private csk
+	cpk = PUBKEY(csk)
+	generates c
+	gc = PUBKEY(c)
+	sig = SIGN(csk, gc)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+Carol -> Alice: [cpk], gc, sig
+Carol -> Bob: gc
+
+principal Alice[
+	_ = SIGNVERIF(cpk, gc, sig)?
+	generates y
+	h = HASH(gc, y)
+]
+
+Alice -> Bob: [y], h
+
+principal Bob[
+	_ = ASSERT(h, HASH(gc, y))?
+]
+
+queries[
+	authentication? Alice -> Bob: h
+]

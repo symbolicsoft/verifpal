@@ -11,6 +11,7 @@ use crate::types::*;
 use crate::value::resolve_trace_constant;
 use crate::verify::verify_resolve_queries;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -19,6 +20,7 @@ pub(crate) fn validate(
 	attacker: &AttackerState,
 	signature: &[(usize, Value)],
 	key: u64,
+	addressed: bool,
 ) -> VResult<bool> {
 	let ps = ps_base.clone_for_depth(true);
 	let mut installs: Vec<(SlotIdx, Value)> = Vec::new();
@@ -103,8 +105,15 @@ pub(crate) fn validate(
 		}
 		None => {
 			crate::reexec::record_bypass_decisions();
-			let executed =
-				crate::reexec::execute_forward(ctx, km, &ps, &installs, Some(&phases), governing);
+			let executed = crate::reexec::execute_forward(
+				ctx,
+				km,
+				&ps,
+				&installs,
+				Some(&phases),
+				governing,
+				addressed,
+			);
 			let decisions = crate::reexec::take_bypass_decisions();
 			let Ok(executed) = executed else {
 				return Ok(false);
@@ -123,6 +132,43 @@ pub(crate) fn validate(
 	}
 	ctx.note_execution_closed(ps.id, key, signature, phase, against);
 	Ok(true)
+}
+
+pub(crate) fn admitted_prefix(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps_base: &PrincipalState,
+	guards: &crate::reexec::Guards,
+	attacker: &AttackerState,
+	signature: &[(usize, Value)],
+) -> Vec<(usize, Value)> {
+	let ps = ps_base.clone_for_depth(true);
+	let authored: Vec<usize> = signature
+		.iter()
+		.filter(|(slot, ground)| {
+			*slot < ps.values.len() && attacker_authored(ground, *slot, km, &ps)
+		})
+		.map(|(slot, _)| *slot)
+		.collect();
+	let coherent = guards.history.compatible(ctx, km, &ps, &authored, attacker);
+	let attacker = coherent.as_deref().unwrap_or(attacker);
+	let restrict =
+		|archived: &AttackerState| guards.history.compatible(ctx, km, &ps, &authored, archived);
+	signature
+		.iter()
+		.filter(|(slot, ground)| {
+			*slot < ps.values.len()
+				&& !super::vars::contains_var(ground)
+				&& guards.controllable.admits(&ps, attacker, *slot)
+				&& crate::primitive::admissible(ground)
+				&& guards.bound.admits_at(km, ps.id, *slot, ground)
+				&& !contains_failed_check(ground)
+				&& attacker_can_derive(ctx, *slot, ground, &ps, attacker, &restrict).is_some()
+				&& crate::reexec::available_before_receive(km, &ps, *slot, attacker)
+					.is_none_or(|available| derivable(ground, &ps, &available))
+		})
+		.cloned()
+		.collect()
 }
 
 fn replays_own_freshness(
@@ -386,13 +432,23 @@ mod tests {
 				),
 			],
 		] {
-			assert!(!super::validate(&ctx, &km, ps, &guards, &attacker, &bad, 0).unwrap());
+			assert!(!super::validate(&ctx, &km, ps, &guards, &attacker, &bad, 0, false).unwrap());
 			assert!(!ctx.query_is_resolved(0));
 			assert_eq!(ctx.attacker_known_count(), 0);
 		}
 		let _minimizing = crate::witness::minimization_guard();
 		assert!(
-			super::validate(&ctx, &km, ps, &guards, &attacker, &[(a, value_nil())], 0).unwrap()
+			super::validate(
+				&ctx,
+				&km,
+				ps,
+				&guards,
+				&attacker,
+				&[(a, value_nil())],
+				0,
+				false
+			)
+			.unwrap()
 		);
 		assert!(ctx.query_is_resolved(0));
 	}

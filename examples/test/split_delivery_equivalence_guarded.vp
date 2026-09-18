@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0 at one session and e1 at two.
+//
+// split_delivery_equivalence.vp with Bob's leg guarded: nothing can be
+// addressed to Bob alone, and a shared substitution changes both keys
+// alike. At two sessions the sibling session's share is a replay.
+
+attacker[active]
+
+principal Carol[
+	knows private csk
+	cpk = PUBKEY(csk)
+	generates c
+	gc = PUBKEY(c)
+	sig = SIGN(csk, gc)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+Carol -> Alice: [cpk], gc, sig
+Carol -> Bob: [gc]
+
+principal Alice[
+	_ = SIGNVERIF(cpk, gc, sig)?
+	generates y
+	ka = HASH(gc, y)
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	kb = HASH(gc, y)
+]
+
+queries[
+	equivalence? ka, kb
+]

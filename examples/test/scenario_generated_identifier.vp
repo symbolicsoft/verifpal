@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions.
+//
+// Alice binds her peer's key and identifier per scenario. Bob's identifier
+// is a generated value sent in the clear, so the attacker knows it, but
+// knowing a public identifier controls nobody. Bob's run is honest, gb
+// reaches Alice unguarded, and replacing it with PUBKEY(nil) opens e.
+//
+// Corruption inference used to count every generated constant as a secret
+// and every secret sent bare as a compromise, so the binding to bid marked
+// Alice's run with Bob as a corrupt-peer run and no query instance covered
+// it. A generated value is a secret only where it is used as one: in a
+// key position the registry declares. scenario_corrupt_by_wire.vp keeps a
+// private key sent bare as a compromise.
+
+attacker[active]
+
+principal Carol[
+	knows private c
+	knows public cid
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	generates bid
+	gb = PUBKEY(b)
+]
+
+principal Mallory[
+	knows private mk
+	knows public mid
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Carol -> Alice: [gc]
+Bob -> Alice: bid, gb
+Mallory -> Alice: [gm]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peerid
+	ga = PUBKEY(a)
+	generates m
+	k = HASH(DH_KEX(gpeer, a), peerid)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
+]
+
+Alice -> Dave: ga, n_e, e
+
+principal Dave[
+	knows private dk
+	d = HASH(e, dk)
+]
+
+Dave -> Bob: d
+
+scenarios[
+	Alice[gpeer = gc, peerid = cid]
+	Alice[gpeer = gb, peerid = bid]
+	Alice[gpeer = gm, peerid = mid]
+]
+
+queries[
+	confidentiality? m
+]

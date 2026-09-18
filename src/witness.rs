@@ -162,6 +162,7 @@ struct Minimizer<'a> {
 	everywhere: Installs,
 	bound: &'a crate::reexec::TermBound,
 	guards: Vec<(PrincipalId, crate::reexec::Controllable)>,
+	addressed_all: bool,
 }
 
 impl<'a> Minimizer<'a> {
@@ -214,6 +215,10 @@ impl<'a> Minimizer<'a> {
 			everywhere: Vec::new(),
 			bound: ctx.term_bound(km),
 			guards,
+			addressed_all: ps
+				.values
+				.iter()
+				.any(|sv| sv.provenance.attacker_tainted && sv.addressed),
 		};
 		m.everywhere = m.mitm_everywhere();
 		m.pruned = m.prune_seed();
@@ -683,6 +688,7 @@ impl<'a> Minimizer<'a> {
 			self.query_index,
 			self.phase,
 			breadth,
+			self.addressed_all,
 			self.concrete.as_ref(),
 		)
 	}
@@ -885,6 +891,7 @@ fn seeded_mutations(
 	ps: &PrincipalState,
 	seed: &[(SlotIdx, Value)],
 	attacker: &AttackerState,
+	target: Option<&Value>,
 ) -> Installs {
 	let mut mutations: Installs = if seed.is_empty() {
 		ps.values
@@ -899,21 +906,44 @@ fn seeded_mutations(
 			.cloned()
 			.collect()
 	};
-	close_over_history(km, attacker, &mut mutations);
+	close_over_history(km, attacker, &mut mutations, target, seed.is_empty());
 	mutations.sort_by_key(|(slot, _)| *slot);
 	mutations
 }
 
-fn close_over_history(km: &ProtocolTrace, attacker: &AttackerState, mutations: &mut Installs) {
+fn close_over_history(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	mutations: &mut Installs,
+	target: Option<&Value>,
+	seeded: bool,
+) {
 	let mut seen: Vec<KnownIdx> = Vec::new();
 	let mut generation: Vec<KnownIdx> = Vec::new();
 	for (_, value) in mutations.iter() {
 		enqueue_history(attacker, value, &mut seen, &mut generation);
 	}
+	if let Some(target) = target
+		&& !seeded
+	{
+		enqueue_history(attacker, target, &mut seen, &mut generation);
+	}
 	let mut next: Vec<KnownIdx> = Vec::new();
 	while !generation.is_empty() {
 		for idx in generation.drain(..) {
-			let Some(record) = attacker.record(idx) else {
+			let coexists = |record: &MutationRecord| {
+				record.tainted().all(|diff| {
+					!mutations.iter().any(|(slot, value)| {
+						*slot == diff.index && !value.equivalent(&diff.value, true)
+					})
+				})
+			};
+			let Some(record) = attacker
+				.routes(idx)
+				.filter_map(|(_, record)| record)
+				.find(|record| coexists(record))
+				.or_else(|| attacker.record(idx))
+			else {
 				continue;
 			};
 			for diff in record.tainted() {
@@ -997,7 +1027,7 @@ pub(crate) fn minimize_witness(
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
 
-	let mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot());
+	let mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot(), target);
 	if mutations.is_empty() {
 		return unminimized(true);
 	}
@@ -1097,7 +1127,14 @@ fn checks_wanting_shapes(
 			continue;
 		}
 		let authored = crate::reexec::attacker_authored(value, slot.get(), km, &staged);
-		crate::reexec::install(&mut staged, slot.get(), value.clone(), authored, None);
+		crate::reexec::install(
+			&mut staged,
+			slot.get(),
+			value.clone(),
+			authored,
+			None,
+			false,
+		);
 	}
 	if crate::reexec::slot_graph_is_cyclic(&staged) || staged.resolve_all_values().is_err() {
 		return Vec::new();
@@ -1366,6 +1403,7 @@ pub(crate) fn assert_reported_attacks_replay(
 				result.query_index,
 				witness.phase,
 				witness.wide,
+				witness.addressed_all,
 			),
 			"WITNESS • {} query {} ({}) reports an attack that its own minimized \
 			 witness does not reproduce. Re-executing {}'s session at phase {} with \
@@ -1471,6 +1509,7 @@ pub(crate) fn replays(
 	query_index: usize,
 	phase: i32,
 	wide: bool,
+	addressed_all: bool,
 ) -> bool {
 	let _guard = MinimizingGuard::new();
 	let _quiet = InfoQuiet::new();
@@ -1488,6 +1527,7 @@ pub(crate) fn replays(
 		query_index,
 		phase,
 		breadth,
+		addressed_all,
 		None,
 	)
 	.is_some()
@@ -1511,6 +1551,7 @@ fn probe(
 		query_index,
 		phase,
 		Breadth::Base,
+		false,
 		concrete,
 	)
 }
@@ -1525,6 +1566,7 @@ fn probe_with(
 	query_index: usize,
 	phase: i32,
 	breadth: Breadth,
+	addressed_all: bool,
 	concrete: Option<&Query>,
 ) -> Option<Witness> {
 	let mut own: Installs = shared.to_vec();
@@ -1629,7 +1671,14 @@ fn probe_with(
 		}
 		let seeded = scratch.attacker_snapshot();
 		let governing = governing_attacker(&scratch, &earlier_phases, &seeded);
-		if let Ok(partial) = reexecute_at(base, &earlier, &earlier_phases, &governing, km) {
+		if let Ok(partial) = reexecute_at(
+			base,
+			&earlier,
+			&earlier_phases,
+			&governing,
+			km,
+			addressed_all,
+		) {
 			let _ = compute_knowledge_closure(&scratch, km, &partial);
 		}
 		if breadth != Breadth::All {
@@ -1637,14 +1686,18 @@ fn probe_with(
 		}
 		for (session, guard) in &others {
 			let seeded = scratch.attacker_snapshot();
-			let mut mine = admitted_by(guard, session, &seeded, earlier.clone());
+			let mut mine = if addressed_all {
+				Vec::new()
+			} else {
+				admitted_by(guard, session, &seeded, earlier.clone())
+			};
 			mine.extend(addressed_to(addressed, session.id));
 			if mine.is_empty() {
 				continue;
 			}
 			let phases = phases_of(&scratch, &mine, session, &seeded);
 			let governing = governing_attacker(&scratch, &phases, &seeded);
-			if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km) {
+			if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km, false) {
 				let _ = compute_knowledge_closure(&scratch, km, &other);
 			}
 		}
@@ -1657,7 +1710,11 @@ fn probe_with(
 			carried.clear();
 			for (session, guard) in &others {
 				let seeded = scratch.attacker_snapshot();
-				let mut mine = admitted_by(guard, session, &seeded, installs.to_vec());
+				let mut mine = if addressed_all {
+					Vec::new()
+				} else {
+					admitted_by(guard, session, &seeded, installs.to_vec())
+				};
 				let theirs = addressed_to(addressed, session.id);
 				let addressed_here = !theirs.is_empty();
 				mine.extend(theirs);
@@ -1666,7 +1723,7 @@ fn probe_with(
 				}
 				let phases = phases_of(&scratch, &mine, session, &seeded);
 				let governing = governing_attacker(&scratch, &phases, &seeded);
-				if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km) {
+				if let Ok(other) = reexecute_at(session, &mine, &phases, &governing, km, false) {
 					let _ = compute_knowledge_closure(&scratch, km, &other);
 					if addressed_here {
 						carried.push(other);
@@ -1684,9 +1741,16 @@ fn probe_with(
 	let ambient = scratch.attacker_snapshot();
 	let phases = phases_of(&scratch, installs, base, &ambient);
 	let governing = governing_attacker(&scratch, &phases, &ambient);
-	let executed =
-		crate::reexec::execute_forward(&scratch, km, base, installs, Some(&phases), &governing)
-			.ok()?;
+	let executed = crate::reexec::execute_forward(
+		&scratch,
+		km,
+		base,
+		installs,
+		Some(&phases),
+		&governing,
+		addressed_all,
+	)
+	.ok()?;
 	let ps = executed.first()?.clone();
 	for state in &executed {
 		let _ = compute_knowledge_closure(&scratch, km, state);
@@ -1703,7 +1767,11 @@ fn probe_with(
 			continue;
 		}
 		let state = state.clone_for_depth(true);
-		let mut mine = controlled_installs(km, &state, &ambient, shared.to_vec());
+		let mut mine = if addressed_all && state.id != base.id {
+			Vec::new()
+		} else {
+			controlled_installs(km, &state, &ambient, shared.to_vec())
+		};
 		mine.extend(addressed_to(addressed, state.id));
 		scheduled.extend(
 			mine.into_iter()

@@ -909,6 +909,7 @@ pub(crate) struct ResultWitness {
 	pub phase: i32,
 	pub reproduced: bool,
 	pub out_of_order: Vec<String>,
+	pub addressed_all: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -1411,6 +1412,7 @@ pub struct SlotValues {
 	pub original: Value,
 	pub bypassed: Option<Value>,
 	pub installed_at: Option<i32>,
+	pub addressed: bool,
 	pub provenance: Provenance,
 }
 
@@ -1530,6 +1532,9 @@ impl PrincipalState {
 			return false;
 		};
 		if !meta.mutatable_to.contains(&principal) {
+			return false;
+		}
+		if principal != self.id && self.values.get(slot).is_some_and(|sv| sv.addressed) {
 			return false;
 		}
 		match self.values.get(slot).and_then(|sv| sv.installed_at) {

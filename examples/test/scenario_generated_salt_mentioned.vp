@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions.
+//
+// scenario_generated_identifier.vp with the identifier a hash of Bob's key
+// and a generated salt sent in the clear. The bound value mentions the
+// salt, and the mentions rule used to inherit the same mistaken compromise.
+
+attacker[active]
+
+principal Carol[
+	knows private c
+	knows public cid
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	generates salt
+	gb = PUBKEY(b)
+	bid = HASH(gb, salt)
+]
+
+principal Mallory[
+	knows private mk
+	knows public mid
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Carol -> Alice: [gc]
+Bob -> Alice: salt, bid, gb
+Mallory -> Alice: [gm]
+
+principal Alice[
+	knows private a
+	knows public gpeer, peerid
+	ga = PUBKEY(a)
+	generates m
+	k = HASH(DH_KEX(gpeer, a), peerid)
+	generates n_e
+	e = AEAD_ENC(k, n_e, m, nil)
+]
+
+Alice -> Dave: ga, n_e, e
+
+principal Dave[
+	knows private dk
+	d = HASH(e, dk)
+]
+
+Dave -> Bob: d
+
+scenarios[
+	Alice[gpeer = gc, peerid = cid]
+	Alice[gpeer = gb, peerid = bid]
+	Alice[gpeer = gm, peerid = mid]
+]
+
+queries[
+	confidentiality? m
+]

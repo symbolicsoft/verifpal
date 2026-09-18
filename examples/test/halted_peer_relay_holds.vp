@@ -1,0 +1,75 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one and two sessions.
+//
+// Alice's peer is Mallory in scenario 2 and Bob's signature is guarded, so
+// Alice@2 fails her check and never sends wrapped@2; Bob@2 never receives it
+// and never relays sealed2@2 to Carol. Nothing carrying master under mpk is
+// ever on the wire.
+//
+// Two false routes used to report c1 here. Phase seeding published every
+// wire value whose own sender had not halted, so Bob@2's relay of a message
+// Alice@2 never sent was handed to the attacker; and the closure resolved a
+// published name through a slot a foreign halt left uncomputed, so a name
+// Bob relays in scenario 1 stood for the value it would have had after an
+// input Alice never delivered. halted_peer_relay.vp is the counterweight
+// with the signature unguarded.
+
+attacker[active]
+
+principal Alice[
+	knows private ask
+	apk = PUBKEY(ask)
+]
+
+Alice -> Bob: [apk]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+	wrapped = PKE_ENC(bpk, sealed)
+	sigw = SIGN(ask, wrapped)
+]
+
+Alice -> Bob: wrapped, sigw
+
+principal Bob[
+	_ = SIGNVERIF(apk, wrapped, sigw)?
+	sealed2 = PKE_DEC(bsk, wrapped)
+]
+
+Bob -> Carol: sealed2
+
+principal Carol[
+	h = HASH(sealed2)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

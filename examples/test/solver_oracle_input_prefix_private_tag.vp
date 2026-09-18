@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and a1 at two.
+//
+// solver_oracle_input_prefix.vp with the domain tag private. The attacker
+// cannot shape Bob's oracle input to carry it, so the forgery is out of
+// reach; at two sessions the sibling session's honest pair is a replay.
+
+attacker[active]
+
+principal Alice[
+	knows private k, c1
+	generates y, m
+]
+
+Alice -> Bob: y
+
+principal Bob[
+	knows private k, c1
+	ty = MAC(k, y)
+]
+
+Bob -> Alice: ty
+
+principal Alice[
+	tm = MAC(k, CONCAT(c1, m))
+]
+
+Alice -> Bob: m, tm
+
+principal Bob[
+	_ = ASSERT(MAC(k, CONCAT(c1, m)), tm)?
+	h = HASH(m)
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

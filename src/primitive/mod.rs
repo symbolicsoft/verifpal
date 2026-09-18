@@ -386,6 +386,28 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 static KEY_DERIVATION: std::sync::LazyLock<Option<PrimitiveId>> =
 	std::sync::LazyLock::new(|| prim_specs().find(|s| s.key_derivation).map(|s| s.id));
 
+pub(crate) fn secret_positions(id: PrimitiveId) -> Vec<usize> {
+	let Ok(spec) = primitive_get(id) else {
+		return Vec::new();
+	};
+	let mut out: Vec<usize> = Vec::new();
+	if spec.key_derivation {
+		out.push(0);
+	}
+	if let Some(at) = spec.forgeable_secret {
+		out.push(at);
+	}
+	if let Some(rule) = spec.decompose.as_ref() {
+		out.extend(rule.given.iter().copied());
+	}
+	if let Some(BypassKeyKind::Derived { arg, .. }) = spec.bypass_key {
+		out.push(arg);
+	}
+	out.sort_unstable();
+	out.dedup();
+	out
+}
+
 pub(crate) fn key_derivation_of(inner: Value) -> Option<Value> {
 	let id = (*KEY_DERIVATION)?;
 	Some(Value::primitive(id, vec![inner], 0))
