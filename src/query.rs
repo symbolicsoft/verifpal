@@ -82,6 +82,20 @@ fn attack_trace_with(
 	narration
 }
 
+fn disclosure_seeds(attacker: &AttackerState, attacker_idx: KnownIdx) -> crate::reexec::Seeds {
+	let mut seeds: crate::reexec::Seeds = Vec::new();
+	let Some(record) = attacker.mutation_records.get(attacker_idx.get()) else {
+		return seeds;
+	};
+	for diff in record.tainted() {
+		match seeds.iter_mut().find(|(who, _)| *who == diff.state) {
+			Some((_, mine)) => mine.push((diff.index, diff.value.clone())),
+			None => seeds.push((diff.state, vec![(diff.index, diff.value.clone())])),
+		}
+	}
+	seeds
+}
+
 fn recorded_mutations(attacker: &AttackerState, attacker_idx: KnownIdx) -> Vec<(SlotIdx, Value)> {
 	attacker
 		.mutation_records
@@ -173,7 +187,17 @@ fn query_confidentiality(
 		Some(idx) => idx,
 		None => return Ok(result),
 	};
-	let Some(options) = preconditions_reached(query, km, ps, attacker.current_phase) else {
+	let disclosure = disclosure_seeds(attacker, attacker_idx);
+	let replayed = (!disclosure.is_empty())
+		.then(|| ctx.replayed(km, &disclosure, attacker))
+		.flatten();
+	let Some(options) = preconditions_reached_in(
+		query,
+		km,
+		ps,
+		attacker.current_phase,
+		replayed.as_deref().map(|states| states.as_slice()),
+	) else {
 		return Ok(result);
 	};
 	let seed = recorded_mutations(attacker, attacker_idx);
@@ -784,15 +808,33 @@ fn preconditions_reached(
 	ps: &PrincipalState,
 	phase: i32,
 ) -> Option<Vec<QueryOptionResult>> {
+	preconditions_reached_in(query, km, ps, phase, None)
+}
+
+fn preconditions_reached_in(
+	query: &Query,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	phase: i32,
+	witness: Option<&[PrincipalState]>,
+) -> Option<Vec<QueryOptionResult>> {
 	let mut options = Vec::with_capacity(query.options.len());
 	for option in &query.options {
 		let constant = option.message.constant().ok()?;
 		let slot = km.index_of(constant).and_then(|at| km.slots.get(at))?;
+		let sender_state = witness
+			.and_then(|states| {
+				states
+					.iter()
+					.find(|state| state.id == option.message.sender)
+			})
+			.unwrap_or(ps);
 		let reached = slot.sent_by.iter().any(|event| {
 			event.phase <= phase
 				&& event.sender == option.message.sender
 				&& event.recipient == option.message.recipient
 				&& ps.event_reached(km, event.sender, event.declared_at)
+				&& sender_state.event_reached(km, event.sender, event.declared_at)
 		});
 		if !reached {
 			return None;

@@ -1,0 +1,58 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c0 at one session and at two.
+//
+// The only way to the secret is to swap Bob's unguarded share for a key the
+// attacker owns, which leaves Bob's own key unchanged, so his decryption
+// fails and he never computes or sends his acknowledgement. A query gated on
+// that message therefore has nothing to answer about, while the ungated one
+// reports the attack.
+//
+// The gate asked the state that answered the query whether Bob reached the
+// send. Confidentiality is answerable from any state holding the secret, and
+// Alice's state sits upstream of Bob's halt and knows nothing about it, so
+// the gate passed. It is judged in the execution that disclosed the value
+// now, by replaying the substitutions its own record carries.
+attacker[active]
+
+principal Alice[
+	generates xa
+	generates xsec
+	xga = PUBKEY(xa)
+]
+
+principal Bob[
+	generates xb
+	xgb = PUBKEY(xb)
+]
+
+Alice -> Bob: [xga]
+Bob -> Alice: xgb
+
+principal Alice[
+	xk = DH_KEX(xgb, xa)
+	generates xn
+	xe = AEAD_ENC(xk, xn, xsec, nil)
+]
+
+Alice -> Bob: xn, xe
+
+principal Bob[
+	xkb = DH_KEX(xga, xb)
+	xp = AEAD_DEC(xkb, xn, xe, nil)?
+	xack = HASH(xp)
+]
+
+Bob -> Carol: xack
+
+principal Carol[
+	_ = HASH(xack)
+]
+
+queries[
+	confidentiality? xsec
+	confidentiality? xsec[
+		precondition[Bob -> Carol: xack]
+	]
+]

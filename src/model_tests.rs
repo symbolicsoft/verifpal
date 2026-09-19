@@ -1104,6 +1104,12 @@ fn test_starved_by_a_later_declarer() {
 }
 
 #[test]
+fn test_precondition_upstream_answerer() {
+	run_model_sessions("precondition_upstream_answerer.vp", 1, "c1c0");
+	run_model("precondition_upstream_answerer.vp", "c1c0");
+}
+
+#[test]
 fn test_precondition_independent_late_block() {
 	run_model_sessions("precondition_independent_late_block.vp", 1, "a1a1");
 	run_model("precondition_independent_late_block.vp", "a1a1");
