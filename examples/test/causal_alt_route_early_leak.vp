@@ -1,0 +1,49 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// The counterweight to causal_alt_route_late_leak.vp: the same protocol with
+// the MAC key leaked before Bob runs. The attacker then builds the tag
+// itself, in time, and the forgery stands at one session. Refusing every
+// alternate route would lose this.
+attacker[active]
+
+principal Mallory[
+	knows private k
+	leaks k
+]
+
+principal Alice[
+	knows private k, ska
+	pka = PUBKEY(ska)
+	generates ey, x
+	gy = PUBKEY(ey)
+	sigy = SIGN(ska, gy)
+	tm = MAC(k, PUBKEY(x))
+]
+
+principal Bob[
+	knows private k
+]
+
+Alice -> Bob: [pka]
+Alice -> Bob: gy
+
+principal Bob[
+	t = MAC(k, gy)
+]
+
+Bob -> Alice: t
+Alice -> Bob: [sigy]
+Alice -> Bob: x, tm
+
+principal Bob[
+	_ = SIGNVERIF(pka, gy, sigy)?
+	_ = ASSERT(tm, MAC(k, PUBKEY(x)))?
+	h = HASH(x)
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

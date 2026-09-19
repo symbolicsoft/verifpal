@@ -1,0 +1,67 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// Alice sends her nonce to a Server, which seals it for Bob; Bob answers with
+// a nonce of his own and Alice returns it sealed. Replacing Alice's na with
+// Bob's nb would make Bob's final ASSERT pass on a message Alice never sent,
+// but nb does not exist until Bob has opened the Server's ticket, which the
+// Server only builds after receiving na. The substitution is a causal cycle
+// and there is no single-session execution behind it.
+//
+// na is delivered to the Server, not to Bob, so the causal filter has to ask
+// what the attacker held before *that* delivery even while it is re-executing
+// Bob. Asking only about Bob's own receives finds no delivery event at all
+// and skips the check, which is how this reported an attack.
+//
+// At two sessions the attack is real and different: nb#2 belongs to another
+// run and is on the wire before this Alice sends, so na := nb#2 is available
+// in time.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates na
+]
+
+Alice -> Server: na
+
+principal Server[
+	knows private ks
+	generates nt
+	t = AEAD_ENC(ks, nt, na, nil)
+]
+
+Server -> Bob: nt, t
+
+principal Bob[
+	knows private k
+	knows private ks
+	generates nb
+	na_b = AEAD_DEC(ks, nt, t, nil)?
+	generates nc
+	c = AEAD_ENC(k, nc, na_b, nil)
+]
+
+Bob -> Alice: nc, c, nb
+
+principal Alice[
+	dc = AEAD_DEC(k, nc, c, nil)?
+	_ = ASSERT(dc, na)?
+	generates nr
+	r = AEAD_ENC(k, nr, nb, nil)
+]
+
+Alice -> Bob: nr, r
+
+principal Bob[
+	dr = AEAD_DEC(k, nr, r, nil)?
+	_ = ASSERT(dr, nb)?
+	_ = HASH(r)
+]
+
+queries[
+	authentication? Alice -> Bob: r
+]

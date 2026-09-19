@@ -2272,6 +2272,7 @@ authentication? Sender -> Bob: payload
 			id: PRIM_UNBLIND,
 			arguments: vec![k.clone(), m.clone(), sig.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,

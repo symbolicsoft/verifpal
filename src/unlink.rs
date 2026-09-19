@@ -57,6 +57,39 @@ pub(crate) fn find_link_witness(
 			})
 		})
 		.filter(|witness| !attacker_supplied(&witness.value, ps))
+		.filter(|witness| {
+			matches!(witness.kind, LinkWitnessKind::ObservedEquality)
+				|| carries_shared_secret(&witness.value, a, b, km, ps)
+		})
+}
+
+fn carries_shared_secret(
+	witness: &Value,
+	a: &Constant,
+	b: &Constant,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+) -> bool {
+	let mut of_a: Vec<Value> = Vec::new();
+	collect_subterms(&crate::value::resolve_trace_constant(a, km), &mut of_a);
+	let mut of_b: Vec<Value> = Vec::new();
+	collect_subterms(&crate::value::resolve_trace_constant(b, km), &mut of_b);
+	let mut secret_leaves: IdSet<ValueId> = IdSet::default();
+	for t in of_b.iter().filter(|t| {
+		depends_on_secret(t, ps)
+			&& of_a
+				.iter()
+				.any(|s| s.hash_value() == t.hash_value() && s.equivalent(t, true))
+	}) {
+		for c in t.constant_leaves() {
+			if depends_on_secret(&Value::Constant(c.clone()), ps) {
+				secret_leaves.insert(c.id);
+			}
+		}
+	}
+	witness
+		.constant_leaves()
+		.any(|c| secret_leaves.contains(&c.id))
 }
 
 fn exposed(v: &Value) -> Vec<Value> {

@@ -1,0 +1,61 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// Carol tags Bob's guarded nonce twice over: t = MAC(k, MAC(k, CONCAT(nb,
+// nc))). Two principals hold the MAC key and each will tag whatever it is
+// handed, so the attacker walks the layers: Alice turns CONCAT(nb, nil) into
+// the inner tag, Dave turns that into the outer one, and Bob accepts nc :=
+// nil against it. Carol never sent that nonce.
+//
+// Reaching it needs the shapes a check demands to include the ones nested
+// inside them: proposing only the outer tag asks each oracle for a value
+// that is not derivable yet, and the chain never starts.
+attacker[active]
+
+principal Bob[
+	knows private k
+	generates nb
+]
+
+Bob -> Carol: [nb]
+
+principal Carol[
+	knows private k
+	generates nc
+	r = HASH(nc)
+	r2 = HASH(nc, nc)
+	t = MAC(k, MAC(k, CONCAT(nb, nc)))
+]
+
+Carol -> Alice: r
+Carol -> Dave: r2
+Carol -> Bob: nc, t
+
+principal Alice[
+	knows private k
+	o = MAC(k, r)
+]
+
+Alice -> Carol: o
+
+principal Dave[
+	knows private k
+	o2 = MAC(k, r2)
+]
+
+Dave -> Carol: o2
+
+principal Carol[
+	_ = HASH(o, o2)
+]
+
+principal Bob[
+	_ = ASSERT(MAC(k, MAC(k, CONCAT(nb, nc))), t)?
+	h = HASH(nc)
+]
+
+queries[
+	authentication? Carol -> Bob: nc
+]

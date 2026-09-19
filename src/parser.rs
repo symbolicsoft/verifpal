@@ -1490,6 +1490,7 @@ impl<'a> Parser<'a> {
 			arguments,
 			output: 0,
 			threshold,
+			instance: 0,
 			instance_check: check,
 			capabilities,
 			hash: HashCell::default(),

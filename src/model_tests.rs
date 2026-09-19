@@ -1068,6 +1068,66 @@ fn test_solver_oracle_input_domain_separated() {
 }
 
 #[test]
+fn test_threshold_reshare_is_a_new_sharing() {
+	run_model_sessions("threshold_reshare_is_a_new_sharing.vp", 1, "c0");
+	run_model("threshold_reshare_is_a_new_sharing.vp", "c0");
+}
+
+#[test]
+fn test_unlink_forced_key_carries_no_secret() {
+	run_model_sessions("unlink_forced_key_carries_no_secret.vp", 1, "u0");
+	run_model("unlink_forced_key_carries_no_secret.vp", "u0");
+}
+
+#[test]
+fn test_solver_oracle_chained_inputs() {
+	run_model_sessions("solver_oracle_chained_inputs.vp", 1, "a1");
+	run_model("solver_oracle_chained_inputs.vp", "a1");
+}
+
+#[test]
+fn test_solver_oracle_chained_inputs_separated() {
+	run_model_sessions("solver_oracle_chained_inputs_separated.vp", 1, "a0");
+	run_model("solver_oracle_chained_inputs_separated.vp", "a0");
+}
+
+#[test]
+fn test_causal_foreign_receive() {
+	run_model_sessions("causal_foreign_receive.vp", 1, "a0");
+	run_model("causal_foreign_receive.vp", "a1");
+}
+
+#[test]
+fn test_causal_foreign_receive_early() {
+	run_model_sessions("causal_foreign_receive_early.vp", 1, "a1");
+	run_model("causal_foreign_receive_early.vp", "a1");
+}
+
+#[test]
+fn test_causal_alt_route_late_leak() {
+	run_model_sessions("causal_alt_route_late_leak.vp", 1, "a0");
+	run_model("causal_alt_route_late_leak.vp", "a1");
+}
+
+#[test]
+fn test_causal_alt_route_early_leak() {
+	run_model_sessions("causal_alt_route_early_leak.vp", 1, "a1");
+	run_model("causal_alt_route_early_leak.vp", "a1");
+}
+
+#[test]
+fn test_split_delivery_through_relay() {
+	run_model_sessions("split_delivery_through_relay.vp", 1, "e0");
+	run_model("split_delivery_through_relay.vp", "e0");
+}
+
+#[test]
+fn test_split_delivery_through_open_relay() {
+	run_model_sessions("split_delivery_through_open_relay.vp", 1, "e1");
+	run_model("split_delivery_through_open_relay.vp", "e1");
+}
+
+#[test]
 fn test_split_delivery_equivalence() {
 	run_model("split_delivery_equivalence.vp", "e1");
 	run_model_sessions("split_delivery_equivalence.vp", 1, "e1");

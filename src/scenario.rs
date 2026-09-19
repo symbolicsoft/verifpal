@@ -64,8 +64,9 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 
 	let freshen = m.freshened_constants();
 	let compromised = compromised_constants(m);
+	let keyed = key_material_constants(m);
 	let mentions = assignment_mentions(m);
-	let declared = honest_first(&m.scenarios, &compromised, &mentions);
+	let declared = honest_first(&m.scenarios, &compromised, &mentions, &keyed);
 	let m = &Model {
 		scenarios: declared,
 		..m.clone()
@@ -95,7 +96,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 
 	let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 	for k in 0..count {
-		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions);
+		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed);
 		if corrupt_from <= 0 {
 			continue;
 		}
@@ -108,7 +109,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 	for query in &m.queries {
 		let mut variants = Vec::new();
 		for k in 1..count {
-			if scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions) <= 0 {
+			if scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed) <= 0 {
 				continue;
 			}
 			let variant = clone_query(query, k, sessions, &freshen, &pids);
@@ -139,7 +140,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 				.iter()
 				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
 				.collect(),
-			honest: scenario_corrupt_from(s, &compromised, &mentions) > 0,
+			honest: scenario_corrupt_from(s, &compromised, &mentions, &keyed) > 0,
 		})
 		.collect();
 
@@ -213,6 +214,7 @@ fn interchangeable_clones(
 #[cfg(test)]
 pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
 	let compromised = compromised_constants(m);
+	let keyed = key_material_constants(m);
 	let mentions = assignment_mentions(m);
 	m.scenarios
 		.iter()
@@ -224,7 +226,7 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 				.collect();
 			(
 				format!("{}[{}]", s.principal_name, bindings.join(", ")),
-				scenario_corrupt_from(s, &compromised, &mentions),
+				scenario_corrupt_from(s, &compromised, &mentions, &keyed),
 			)
 		})
 		.collect()
@@ -234,9 +236,10 @@ fn honest_first(
 	scenarios: &[Scenario],
 	compromised: &IdMap<ValueId, i32>,
 	mentions: &IdMap<ValueId, Vec<ValueId>>,
+	keyed: &IdSet<ValueId>,
 ) -> Vec<Scenario> {
 	let mut out: Vec<Scenario> = scenarios.to_vec();
-	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised, mentions)));
+	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised, mentions, keyed)));
 	out
 }
 
@@ -263,19 +266,17 @@ fn scenario_corrupt_from(
 	scenario: &Scenario,
 	compromised: &IdMap<ValueId, i32>,
 	mentions: &IdMap<ValueId, Vec<ValueId>>,
+	keyed: &IdSet<ValueId>,
 ) -> i32 {
 	scenario
 		.bindings
 		.iter()
 		.filter(|(target, value)| target.id != value.id)
 		.filter_map(|(_, value)| {
-			if let Some(&at) = compromised.get(&value.id) {
-				return Some(at);
-			}
-			mentions
-				.get(&value.id)?
-				.iter()
-				.filter_map(|id| compromised.get(id).copied())
+			std::iter::once(value.id)
+				.chain(mentions.get(&value.id).into_iter().flatten().copied())
+				.filter(|id| keyed.contains(id))
+				.filter_map(|id| compromised.get(&id).copied())
 				.min()
 		})
 		.min()
@@ -459,38 +460,76 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 
 fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 	let mut out: IdSet<ValueId> = IdSet::default();
-	let mut generated: IdSet<ValueId> = IdSet::default();
-	let mut keyed: IdSet<ValueId> = IdSet::default();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
 			continue;
 		};
 		for expr in &p.expressions {
-			match expr.kind {
-				Declaration::Generates => generated.extend(expr.constants.iter().map(|c| c.id)),
-				Declaration::Knows if matches!(expr.qualifier, Some(Qualifier::Private)) => {
-					out.extend(expr.constants.iter().map(|c| c.id));
+			let secret = match expr.kind {
+				Declaration::Generates => true,
+				Declaration::Knows => matches!(expr.qualifier, Some(Qualifier::Private)),
+				_ => false,
+			};
+			if secret {
+				for c in &expr.constants {
+					out.insert(c.id);
 				}
-				_ => {}
+			}
+			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
+				if let Value::Primitive(inner) = term
+					&& crate::primitive::primitive_is_key_derivation(inner.id)
+					&& let Some(Value::Constant(c)) = inner.arguments.first()
+				{
+					out.insert(c.id);
+				}
+			}
+		}
+	}
+	out
+}
+
+fn key_material_constants(m: &Model) -> IdSet<ValueId> {
+	let mut out: IdSet<ValueId> = IdSet::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		for expr in &p.expressions {
+			if expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Private) {
+				out.extend(expr.constants.iter().map(|c| c.id));
 			}
 			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
 				let Value::Primitive(inner) = term else {
 					continue;
 				};
-				if crate::primitive::primitive_is_key_derivation(inner.id)
-					&& let Some(Value::Constant(c)) = inner.arguments.first()
-				{
-					out.insert(c.id);
-				}
 				for at in crate::primitive::secret_positions(inner.id) {
 					if let Some(Value::Constant(c)) = inner.arguments.get(at) {
-						keyed.insert(c.id);
+						out.insert(c.id);
 					}
 				}
 			}
 		}
 	}
-	out.extend(generated.intersection(&keyed).copied());
+	loop {
+		let before = out.len();
+		for block in &m.blocks {
+			let Block::Principal(p) = block else {
+				continue;
+			};
+			for expr in &p.expressions {
+				if let Some(Value::Primitive(inner)) = &expr.assigned
+					&& crate::primitive::primitive_is_key_derivation(inner.id)
+					&& let Some(Value::Constant(c)) = inner.arguments.first()
+					&& out.contains(&c.id)
+				{
+					out.extend(expr.constants.iter().map(|c| c.id));
+				}
+			}
+		}
+		if out.len() == before {
+			break;
+		}
+	}
 	out
 }
 
@@ -1023,9 +1062,10 @@ mod tests {
 			]\n";
 		let m = parse_string("pcl.vp", src).expect("parses");
 		let compromised = compromised_constants(&m);
+		let keyed = key_material_constants(&m);
 		let mentions = assignment_mentions(&m);
 		let corrupt_from =
-			|i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised, &mentions);
+			|i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised, &mentions, &keyed);
 
 		assert_eq!(
 			corrupt_from(1),

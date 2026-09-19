@@ -1,0 +1,42 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e1 at one session and at two.
+//
+// The counterweight to split_delivery_through_relay.vp: the relay leg is
+// open, so the attacker hands Alice PUBKEY(nil) and puts Carol's honest share
+// back on the Alice to Bob leg. The two hashes then disagree, and refusing
+// every relayed delivery an addressed install would lose this.
+
+attacker[active]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+Carol -> Alice: gc
+Alice -> Bob: gc
+
+principal Alice[
+	generates y
+	ka = HASH(gc, y)
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	kb = HASH(gc, y)
+]
+
+queries[
+	equivalence? ka, kb
+]

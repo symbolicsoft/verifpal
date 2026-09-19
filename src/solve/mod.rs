@@ -178,7 +178,11 @@ fn solve_principal(
 		.copied()
 		.filter(|&slot| !directly_unguarded(km, ps, slot))
 		.collect();
-	if !sym.var_slots.iter().any(|&slot| split_delivered(ps, slot)) {
+	if !sym
+		.var_slots
+		.iter()
+		.any(|&slot| split_delivered(km, ps, slot))
+	{
 		return Ok(());
 	}
 	let addressed = symbolic::build_addressed(&controllable, ps, &attacker, &shared);
@@ -199,8 +203,15 @@ fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> b
 	})
 }
 
-fn split_delivered(ps: &PrincipalState, slot: usize) -> bool {
-	ps.meta
+fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+	km.slots.get(slot).is_some_and(|trace_slot| {
+		!trace_slot.sent_by.iter().any(|event| event.sender == ps.id)
+			&& trace_slot
+				.sent_by
+				.iter()
+				.any(|event| event.recipient != ps.id && event.sender != ps.id)
+	}) && ps
+		.meta
 		.get(slot)
 		.is_some_and(|meta| meta.mutatable_to.iter().any(|&who| who != ps.id))
 }
@@ -581,6 +592,40 @@ fn oracle_input_goals(
 			}
 		}
 	}
+	let heads: Vec<(PrimitiveId, usize)> = emissions
+		.iter()
+		.filter_map(|emitted| match emitted {
+			Value::Primitive(p) => Some((p.id, p.arguments.len())),
+			Value::Constant(_) => None,
+		})
+		.collect();
+	let mut nested: Vec<(Value, Option<ValueId>)> = Vec::new();
+	for (shape, _) in &wanted {
+		let Value::Primitive(p) = shape else {
+			continue;
+		};
+		for inner in p.arguments.iter() {
+			let Value::Primitive(q) = inner else {
+				continue;
+			};
+			if !vars::contains_var(inner)
+				|| !heads
+					.iter()
+					.any(|&(id, arity)| id == q.id && arity == q.arguments.len())
+			{
+				continue;
+			}
+			if wanted
+				.iter()
+				.chain(nested.iter())
+				.any(|(seen, _)| seen.equivalent(inner, true))
+			{
+				continue;
+			}
+			nested.push((inner.clone(), None));
+		}
+	}
+	wanted.extend(nested);
 	let empty = Substitution::default();
 	let mut out: Vec<Substitution> = Vec::new();
 	for emission in emissions {
@@ -706,7 +751,7 @@ fn dispose(
 		if !emits_an_install(ps, sym, &proposal, &seen[at]) {
 			continue;
 		}
-		let prefix = validate::admitted_prefix(ctx, km, ps, guards, attacker, &seen[at]);
+		let prefix = validate::admitted_prefix(ctx, km, ps, guards, attacker, &seen[at], addressed);
 		if prefix.is_empty()
 			|| prefix.len() == seen[at].len()
 			|| !oracle_chain(ps, sym, &proposal, &seen[at], &prefix)

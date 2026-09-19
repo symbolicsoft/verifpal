@@ -324,6 +324,13 @@ impl ProtocolTrace {
 }
 
 impl AttackerState {
+	pub(crate) fn with_alternates(&self, alternates: Vec<Vec<Route>>) -> AttackerState {
+		AttackerState {
+			alternates: Arc::new(alternates),
+			..self.clone()
+		}
+	}
+
 	pub(crate) fn retaining(&self, keep: &[bool]) -> Option<Arc<AttackerState>> {
 		assert_eq!(keep.len(), self.known.len());
 		if keep.iter().all(|&keep| keep) {

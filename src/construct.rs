@@ -503,6 +503,12 @@ fn construct_trace_render_assignment(
 		if let Value::Primitive(ref mut p) = initial_value {
 			let mutable = Arc::make_mut(p);
 			mutable.output = output_idx;
+			if crate::primitive::primitive_get(mutable.id)
+				.is_ok_and(|spec| spec.distinct_per_assignment)
+				&& let Some(first) = expr.constants.first()
+			{
+				mutable.instance = crate::value::copy_index_of(first.id).1;
+			}
 			mutable.hash.clear();
 		}
 		trace_declare(

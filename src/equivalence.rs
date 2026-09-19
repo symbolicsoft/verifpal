@@ -45,6 +45,9 @@ pub(crate) fn memoised_pair(
 }
 
 pub(crate) fn equivalent_primitives(p1: &Primitive, p2: &Primitive, consider_output: bool) -> bool {
+	if p1.instance != p2.instance {
+		return false;
+	}
 	if p1.id != p2.id || p1.threshold != p2.threshold {
 		return false;
 	}
@@ -165,6 +168,7 @@ mod tests {
 			id: PRIM_ENC,
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -174,6 +178,7 @@ mod tests {
 			id: PRIM_ENC,
 			arguments: vec![a, b],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -190,6 +195,7 @@ mod tests {
 			id: PRIM_ENC,
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -199,6 +205,7 @@ mod tests {
 			id: PRIM_DEC,
 			arguments: vec![a, b],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -214,6 +221,7 @@ mod tests {
 			id: PRIM_HKDF,
 			arguments: vec![a.clone(), a.clone(), a.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -223,6 +231,7 @@ mod tests {
 			id: PRIM_HKDF,
 			arguments: vec![a.clone(), a.clone(), a],
 			output: 1,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,

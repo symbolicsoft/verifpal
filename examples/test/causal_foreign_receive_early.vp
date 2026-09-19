@@ -1,0 +1,61 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session.
+//
+// The counterweight to causal_foreign_receive.vp: the same shape, except that
+// the value the attacker reflects into the Server's copy of na is one Bob
+// leaks before the protocol runs, so it is held in time and the forgery
+// stands. The causal filter must restrict knowledge at a foreign recipient's
+// delivery without refusing substitutions the attacker really could make.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates na
+]
+
+principal Bob[
+	knows private k
+	knows private ks
+	generates nb
+	leaks nb
+]
+
+Alice -> Server: na
+
+principal Server[
+	knows private ks
+	generates nt
+	t = AEAD_ENC(ks, nt, na, nil)
+]
+
+Server -> Bob: nt, t
+
+principal Bob[
+	na_b = AEAD_DEC(ks, nt, t, nil)?
+	generates nc
+	c = AEAD_ENC(k, nc, na_b, nil)
+]
+
+Bob -> Alice: nc, c, nb
+
+principal Alice[
+	dc = AEAD_DEC(k, nc, c, nil)?
+	_ = ASSERT(dc, na)?
+	generates nr
+	r = AEAD_ENC(k, nr, nb, nil)
+]
+
+Alice -> Bob: nr, r
+
+principal Bob[
+	dr = AEAD_DEC(k, nr, r, nil)?
+	_ = ASSERT(dr, nb)?
+	_ = HASH(r)
+]
+
+queries[
+	authentication? Alice -> Bob: r
+]

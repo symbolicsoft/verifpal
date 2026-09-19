@@ -131,6 +131,7 @@ mod tests {
 			id: PRIM_AEAD_DEC,
 			arguments: vec![other, n, sealed, ad],
 			output: 0,
+			instance: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
 			threshold: 0,

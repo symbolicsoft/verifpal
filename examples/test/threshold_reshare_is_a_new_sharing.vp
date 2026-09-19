@@ -1,0 +1,46 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c0 at one session and at two.
+//
+// Proactive re-sharing: the dealer splits one long-term key twice, and one
+// share of each sharing leaks. Each sharing draws a fresh polynomial, so a
+// share of the first and a share of the second interpolate to nothing and the
+// key survives. Reading the two splits as the same term made the two leaked
+// shares meet the threshold and gave up a key no attacker holds.
+attacker[passive]
+
+principal Dealer[
+	knows private k
+	knows private psk
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	leaks s1
+	e2 = ENC(psk, s2)
+]
+
+Dealer -> Bob: e2
+
+principal Bob[
+	knows private psk
+	s2b = DEC(psk, e2)
+	_ = HASH(s2b)
+]
+
+phase[1]
+
+principal Dealer[
+	t1, t2, t3 = THRESHOLD_SPLIT[2](k)
+	leaks t2
+	f1 = ENC(psk, t1)
+]
+
+Dealer -> Bob: f1
+
+principal Bob[
+	t1b = DEC(psk, f1)
+	_ = HASH(t1b)
+]
+
+queries[
+	confidentiality? k
+]

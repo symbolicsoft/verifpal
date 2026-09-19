@@ -60,7 +60,8 @@ pub(crate) fn validate(
 		let Some(at) = attacker_can_derive(ctx, slot, ground, &ps, attacker, &restrict) else {
 			return Ok(false);
 		};
-		if let Some(available) = crate::reexec::available_before_receive(km, &ps, slot, attacker)
+		if let Some(available) =
+			crate::reexec::available_before_receive(km, &ps, slot, attacker, addressed)
 			&& !derivable(ground, &ps, &available)
 		{
 			return Ok(false);
@@ -141,6 +142,7 @@ pub(crate) fn admitted_prefix(
 	guards: &crate::reexec::Guards,
 	attacker: &AttackerState,
 	signature: &[(usize, Value)],
+	addressed: bool,
 ) -> Vec<(usize, Value)> {
 	let ps = ps_base.clone_for_depth(true);
 	let authored: Vec<usize> = signature
@@ -164,7 +166,7 @@ pub(crate) fn admitted_prefix(
 				&& guards.bound.admits_at(km, ps.id, *slot, ground)
 				&& !contains_failed_check(ground)
 				&& attacker_can_derive(ctx, *slot, ground, &ps, attacker, &restrict).is_some()
-				&& crate::reexec::available_before_receive(km, &ps, *slot, attacker)
+				&& crate::reexec::available_before_receive(km, &ps, *slot, attacker, addressed)
 					.is_none_or(|available| derivable(ground, &ps, &available))
 		})
 		.cloned()

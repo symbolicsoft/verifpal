@@ -1,0 +1,67 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session, a1 at two.
+//
+// Bob tags Alice's share before checking her guarded signature over it, so
+// the tag the attacker wants, MAC(k, PUBKEY(nil)), is produced only by an
+// execution of Bob that halts at that signature check. Mallory leaks the MAC
+// key only after Bob is done, so at one session nothing hands the attacker
+// that tag in time and Alice's x cannot be forged.
+//
+// The tag is one value with two derivations: the oracle output Bob computed,
+// and a term the attacker can build once k leaks. Causal restriction follows
+// primary routes, so keeping the value on the strength of a route recorded
+// through a late leak is what reported this attack. A retained alternate
+// counts only where the read is observable and everything the reading
+// execution was handed is public, which the late leak is not.
+//
+// At two sessions a second Bob supplies the tag honestly and the attack is
+// real.
+attacker[active]
+
+principal Alice[
+	knows private k, ska
+	pka = PUBKEY(ska)
+	generates ey, x
+	gy = PUBKEY(ey)
+	sigy = SIGN(ska, gy)
+	tm = MAC(k, PUBKEY(x))
+]
+
+principal Bob[
+	knows private k
+]
+
+principal Mallory[
+	knows private k
+]
+
+Alice -> Bob: [pka]
+Alice -> Bob: gy
+
+principal Bob[
+	t = MAC(k, gy)
+]
+
+Bob -> Alice: t
+Alice -> Bob: [sigy]
+Alice -> Bob: x, tm
+
+principal Bob[
+	_ = SIGNVERIF(pka, gy, sigy)?
+	_ = ASSERT(tm, MAC(k, PUBKEY(x)))?
+	h = HASH(x)
+	generates done
+]
+
+Bob -> Mallory: done
+
+principal Mallory[
+	_ = HASH(done)
+	leaks k
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

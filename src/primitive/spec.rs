@@ -484,6 +484,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			output: (2..=MAX_SHARES as i32).collect(),
 			recompose: Some(RecomposeRule { reveal: 0 }),
 			threshold: Some(ThresholdSpec { min: 2 }),
+			distinct_per_assignment: true,
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -710,6 +711,7 @@ mod tests {
 			id: PRIM_SIGNVERIF,
 			arguments: vec![k.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -727,6 +729,7 @@ mod tests {
 			id: PRIM_SIGNVERIF,
 			arguments: vec![hashed.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,

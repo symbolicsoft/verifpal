@@ -1646,8 +1646,14 @@ fn probe_with(
 				&known,
 				&|_| None,
 			)
-			.is_some() && crate::reexec::available_before_receive(km, base, slot.get(), &known)
-				.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
+			.is_some() && crate::reexec::available_before_receive(
+				km,
+				base,
+				slot.get(),
+				&known,
+				false,
+			)
+			.is_none_or(|available| crate::solve::validate::derivable(value, base, &available))
 		});
 		let Some(at) = next else {
 			grounded = false;

@@ -176,16 +176,34 @@ pub(crate) fn available_before_receive(
 	ps: &PrincipalState,
 	slot: usize,
 	attacker: &AttackerState,
+	addressed: bool,
 ) -> Option<Arc<AttackerState>> {
-	let at = km
+	let reaches = |recipient: PrincipalId| {
+		recipient == ps.id
+			|| (!addressed
+				&& ps
+					.meta
+					.get(slot)
+					.is_some_and(|meta| meta.mutatable_to.contains(&recipient)))
+	};
+	let mut after: Vec<(PrincipalId, i32)> = Vec::new();
+	for event in km
 		.slots
 		.get(slot)?
 		.sent_by
 		.iter()
-		.filter(|event| event.recipient == ps.id)
-		.map(|event| event.declared_at)
-		.min()?;
-	held_at(km, ps, at, attacker)
+		.filter(|event| reaches(event.recipient))
+	{
+		match after.iter_mut().find(|(who, _)| *who == event.recipient) {
+			Some(entry) => entry.1 = entry.1.min(event.declared_at),
+			None => after.push((event.recipient, event.declared_at)),
+		}
+	}
+	if after.is_empty() {
+		return None;
+	}
+	after.sort_unstable();
+	held_before(km, ps, after, attacker)
 }
 
 pub(crate) fn reachable_knowledge(
@@ -193,26 +211,26 @@ pub(crate) fn reachable_knowledge(
 	attacker: &AttackerState,
 	source_allowed: impl FnMut(usize, SlotIdx) -> bool,
 ) -> Vec<bool> {
-	reachable_knowledge_via(ps, attacker, source_allowed, |_| false)
+	reachable_knowledge_via(ps, attacker, source_allowed, |_| Vec::new())
 }
 
 fn reachable_knowledge_via(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	mut source_allowed: impl FnMut(usize, SlotIdx) -> bool,
-	mut alternate_allowed: impl FnMut(usize) -> bool,
+	mut alternate_needs: impl FnMut(usize) -> Vec<Vec<Value>>,
 ) -> Vec<bool> {
 	let n = attacker.known.len();
 	let mut inputs = crate::theory::KnowledgeInputs::new(ps, attacker);
 	let mut reachable = vec![false; n];
-	let mut dependents = vec![Vec::new(); n];
+	let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
 	let mut missing = vec![0usize; n];
 	let mut ready = Vec::new();
 	for i in 0..n {
 		let available = match attacker.derivation(KnownIdx(i)) {
 			None | Some(DerivationRecord::Initial) => true,
 			Some(DerivationRecord::Leaked { slot } | DerivationRecord::Obtained { slot }) => {
-				source_allowed(i, *slot) || alternate_allowed(i)
+				source_allowed(i, *slot)
 			}
 			Some(other) => {
 				let mut dependencies = IdSet::default();
@@ -225,17 +243,13 @@ fn reachable_knowledge_via(
 					dependencies.extend(known.into_iter().map(|idx| idx.get()));
 				}
 				if !complete {
-					if alternate_allowed(i) {
-						reachable[i] = true;
-						ready.push(i);
-					}
 					continue;
 				}
 				missing[i] = dependencies.len();
 				for dependency in dependencies {
 					dependents[dependency].push(i);
 				}
-				missing[i] == 0 || alternate_allowed(i)
+				missing[i] == 0
 			}
 		};
 		if available {
@@ -243,16 +257,58 @@ fn reachable_knowledge_via(
 			ready.push(i);
 		}
 	}
-	while let Some(known) = ready.pop() {
-		for &dependent in &dependents[known] {
-			missing[dependent] -= 1;
-			if missing[dependent] == 0 && !reachable[dependent] {
-				reachable[dependent] = true;
-				ready.push(dependent);
+	let offered: Vec<usize> = (0..n)
+		.filter(|&i| {
+			attacker
+				.alternates
+				.get(i)
+				.is_some_and(|routes| !routes.is_empty())
+		})
+		.collect();
+	let mut alternates: Vec<Option<Vec<Vec<Value>>>> = Vec::new();
+	loop {
+		while let Some(known) = ready.pop() {
+			for &dependent in &dependents[known] {
+				missing[dependent] -= 1;
+				if missing[dependent] == 0 && !reachable[dependent] {
+					reachable[dependent] = true;
+					ready.push(dependent);
+				}
 			}
 		}
+		if offered.is_empty() {
+			return reachable;
+		}
+		if alternates.is_empty() {
+			alternates = vec![None; n];
+		}
+		let mut changed = false;
+		for &i in &offered {
+			if reachable[i] {
+				continue;
+			}
+			if alternates[i].is_none() {
+				alternates[i] = Some(alternate_needs(i));
+			}
+			let opened = alternates[i].as_ref().is_some_and(|routes| {
+				routes.iter().any(|values| {
+					values.iter().all(|value| {
+						inputs
+							.of_value(value)
+							.is_some_and(|known| known.iter().all(|idx| reachable[idx.get()]))
+					})
+				})
+			});
+			if opened {
+				reachable[i] = true;
+				ready.push(i);
+				changed = true;
+			}
+		}
+		if !changed {
+			return reachable;
+		}
 	}
-	reachable
 }
 
 fn observable_slot(km: &ProtocolTrace, slot: usize) -> bool {
@@ -273,20 +329,32 @@ fn restrict_known(
 		attacker,
 		|_, slot| allowed(slot),
 		|i| {
-			attacker.alternates.get(i).is_some_and(|routes| {
+			let admissible = attacker.alternates.get(i).is_some_and(|routes| {
 				routes.iter().any(|(route, record)| match route {
 					DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
 						observable(slot.get())
-							&& allowed(*slot) && record
-							.tainted()
-							.all(|diff| public_construction(attacker, &diff.value, &mut Vec::new()))
+							&& allowed(*slot) && record.tainted().all(|diff| {
+							!received_by(ps, diff.index.get())
+								&& public_construction(attacker, &diff.value, &mut Vec::new())
+						})
 					}
 					_ => false,
 				})
-			})
+			});
+			if admissible {
+				vec![Vec::new()]
+			} else {
+				Vec::new()
+			}
 		},
 	);
 	attacker.retaining(&reachable)
+}
+
+fn received_by(ps: &PrincipalState, slot: usize) -> bool {
+	ps.meta
+		.get(slot)
+		.is_some_and(|meta| meta.wire.contains(&ps.id))
 }
 
 fn public_construction(attacker: &AttackerState, value: &Value, walked: &mut Vec<usize>) -> bool {
@@ -307,12 +375,6 @@ fn public_construction(attacker: &AttackerState, value: &Value, walked: &mut Vec
 	};
 	walked.pop();
 	free
-}
-
-fn influenced_from(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> IdMap<PrincipalId, i32> {
-	let mut after: IdMap<PrincipalId, i32> = IdMap::default();
-	after.insert(principal, at);
-	close_influences(km, after)
 }
 
 fn close_influences(
@@ -344,8 +406,8 @@ fn close_influences(
 	}
 }
 
-fn unreachable_before(km: &ProtocolTrace, principal: PrincipalId, at: i32) -> Vec<bool> {
-	let after = influenced_from(km, principal, at);
+fn unreachable_before(km: &ProtocolTrace, after: &[(PrincipalId, i32)]) -> Vec<bool> {
+	let after = close_influences(km, after.iter().copied().collect());
 	unreachable_from(km, &after)
 }
 
@@ -502,13 +564,73 @@ impl Coherence {
 		{
 			return hit.clone();
 		}
-		let keep = reachable_knowledge(ps, attacker, |i, slot| {
-			self.forwards(km, attacker, i, slot.get(), authored)
-				&& attacker.record(KnownIdx(i)).is_some_and(|record| {
-					self.execution_agrees(ctx, km, attacker, record, authored)
-				})
-		});
-		let built = attacker.retaining(&keep);
+		let admissible = |i: usize, slot: usize, record: &Arc<MutationRecord>| {
+			self.forwards(km, attacker, i, slot, authored)
+				&& self.execution_agrees(ctx, km, attacker, record, authored)
+		};
+		let alternate_route =
+			|i: usize, route: &DerivationRecord, record: &Arc<MutationRecord>| match route {
+				DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
+					observable_slot(km, slot.get())
+						&& !record
+							.tainted()
+							.any(|diff| received_by(ps, diff.index.get()))
+						&& admissible(i, slot.get(), record)
+				}
+				_ => false,
+			};
+		let consulted: std::cell::RefCell<Vec<(usize, Vec<bool>)>> =
+			std::cell::RefCell::new(Vec::new());
+		let keep = reachable_knowledge_via(
+			ps,
+			attacker,
+			|i, slot| {
+				attacker
+					.record(KnownIdx(i))
+					.is_some_and(|record| admissible(i, slot.get(), record))
+			},
+			|i| {
+				let Some(routes) = attacker.alternates.get(i) else {
+					return Vec::new();
+				};
+				let taken: Vec<bool> = routes
+					.iter()
+					.map(|(route, record)| alternate_route(i, route, record))
+					.collect();
+				let needs: Vec<Vec<Value>> = routes
+					.iter()
+					.zip(taken.iter())
+					.filter(|&(_, &keep)| keep)
+					.map(|((_, record), _)| {
+						record.tainted().map(|diff| diff.value.clone()).collect()
+					})
+					.collect();
+				consulted.borrow_mut().push((i, taken));
+				needs
+			},
+		);
+		let consulted = consulted.into_inner();
+		let mut pruned = false;
+		let mut alternates: Vec<Vec<Route>> = Vec::new();
+		for (i, taken) in consulted {
+			if taken.iter().all(|&keep| keep) {
+				continue;
+			}
+			if alternates.is_empty() {
+				alternates = attacker.alternates.as_ref().clone();
+			}
+			if let Some(routes) = alternates.get_mut(i) {
+				let mut keep = taken.iter();
+				routes.retain(|_| *keep.next().unwrap_or(&true));
+				pruned = true;
+			}
+		}
+		let built = if pruned {
+			let base = attacker.with_alternates(alternates);
+			base.retaining(&keep).or_else(|| Some(Arc::new(base)))
+		} else {
+			attacker.retaining(&keep)
+		};
 		locked(&self.agreed).entry(key).or_default().push((
 			authored.to_vec(),
 			Arc::clone(&attacker.known),
@@ -1023,11 +1145,15 @@ fn forwarded_installs(
 				sent = true;
 				newly |= !ctx.honest_run_delivered(km, at, event);
 			}
-			if !sent || at >= source.values.len() || source.slot_unreached(at) {
+			if !sent
+				|| at >= source.values.len()
+				|| source.slot_unreached(at)
+				|| source.slot_starved(at)
+			{
 				continue;
 			}
 			let emitted = &source.values[at].value;
-			if !attacker_authored(emitted, at, km, target) && !(newly && !source.slot_starved(at)) {
+			if !attacker_authored(emitted, at, km, target) && !newly {
 				continue;
 			}
 			out.push((SlotIdx(at), emitted.clone()));
@@ -1042,6 +1168,29 @@ fn adopt_foreign_halts(
 	executed: &[PrincipalState],
 ) {
 	let mut changed = false;
+	for source in executed {
+		for &(who, at) in &source.foreign_halts {
+			if who == state.id || executed.iter().any(|ran| ran.id == who) {
+				continue;
+			}
+			match state
+				.foreign_halts
+				.iter_mut()
+				.find(|(seen, _)| *seen == who)
+			{
+				Some((_, known)) => {
+					if at < *known {
+						*known = at;
+						changed = true;
+					}
+				}
+				None => {
+					state.foreign_halts.push((who, at));
+					changed = true;
+				}
+			}
+		}
+	}
 	for source in executed {
 		if source.id == state.id {
 			continue;
@@ -1280,11 +1429,11 @@ fn keyed_position(prim: &Primitive) -> Option<usize> {
 
 type BypassDecision = (PrincipalId, Primitive, i32, bool);
 
-type BlockedAt = crate::context::Generational<IdMap<(PrincipalId, i32), Arc<Vec<bool>>>>;
+type BlockedAt = crate::context::Generational<IdMap<Vec<(PrincipalId, i32)>, Arc<Vec<bool>>>>;
 type RestrictedAt = crate::context::Generational<
 	crate::context::Recent<
 		crate::context::KnowledgeKey,
-		(PrincipalId, i32),
+		Vec<(PrincipalId, i32)>,
 		Option<Arc<AttackerState>>,
 	>,
 >;
@@ -1314,27 +1463,30 @@ fn held_at(
 	at: i32,
 	attacker: &AttackerState,
 ) -> Option<Arc<AttackerState>> {
-	let principal = ps.id;
+	held_before(km, ps, vec![(ps.id, at)], attacker)
+}
+
+fn held_before(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	after: Vec<(PrincipalId, i32)>,
+	attacker: &AttackerState,
+) -> Option<Arc<AttackerState>> {
 	let blocked = BLOCKED_AT.with(|cache| {
 		cache
 			.borrow_mut()
 			.fresh()
-			.entry((principal, at))
-			.or_insert_with(|| Arc::new(unreachable_before(km, principal, at)))
+			.entry(after.clone())
+			.or_insert_with(|| Arc::new(unreachable_before(km, &after)))
 			.clone()
 	});
 	if !blocked.iter().any(|&blocked| blocked) {
 		return None;
 	}
 	let group = crate::context::KnowledgeKey::of(attacker);
-	if let Some(hit) = RESTRICTED_AT.with(|cache| {
-		cache
-			.borrow_mut()
-			.fresh()
-			.group(group)
-			.get(&(principal, at))
-			.cloned()
-	}) {
+	if let Some(hit) =
+		RESTRICTED_AT.with(|cache| cache.borrow_mut().fresh().group(group).get(&after).cloned())
+	{
 		return hit;
 	}
 	let built = restrict_known(&blocked, &|slot| observable_slot(km, slot), ps, attacker);
@@ -1343,7 +1495,7 @@ fn held_at(
 			.borrow_mut()
 			.fresh()
 			.group(group)
-			.insert((principal, at), built.clone());
+			.insert(after, built.clone());
 	});
 	built
 }
@@ -1635,7 +1787,7 @@ mod tests {
 		]);
 		let x = slot(&trace_constant(&km, "x")).get();
 		let receive_at = km.slots[x].sent_by[0].declared_at;
-		let restricted = available_before_receive(&km, ps, x, &attacker).unwrap();
+		let restricted = available_before_receive(&km, ps, x, &attacker, false).unwrap();
 		assert!(restricted.knows(&early).is_some());
 		assert!(restricted.knows(&late).is_none());
 		assert!(Arc::ptr_eq(
@@ -1652,14 +1804,14 @@ mod tests {
 		let after_leak = km.leaks.iter().map(|leak| leak.declared_at).max().unwrap() + 1;
 		assert!(held_at(&km, ps, after_leak, &attacker).is_none());
 		let other = make_attacker_state(vec![early, late]);
-		assert!(available_before_receive(&km, ps, x, &other).is_none());
+		assert!(available_before_receive(&km, ps, x, &other, false).is_none());
 		let mut upgraded = attacker.clone();
 		Arc::make_mut(&mut upgraded.derivations)[1] = DerivationRecord::Initial;
 		upgraded.routes_epoch += 1;
-		assert!(available_before_receive(&km, ps, x, &upgraded).is_none());
+		assert!(available_before_receive(&km, ps, x, &upgraded, false).is_none());
 		assert!(Arc::ptr_eq(
 			&restricted,
-			&available_before_receive(&km, ps, x, &attacker).unwrap()
+			&available_before_receive(&km, ps, x, &attacker, false).unwrap()
 		));
 	}
 
@@ -1910,6 +2062,7 @@ mod tests {
 			id: crate::primitive::PRIM_ASSERT,
 			arguments: vec![own.clone(), own],
 			output: 0,
+			instance: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
 			threshold: 0,

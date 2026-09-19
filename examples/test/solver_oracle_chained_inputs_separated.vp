@@ -1,0 +1,59 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and at two.
+//
+// The counterweight to solver_oracle_chained_inputs.vp: each oracle mixes a
+// domain separator of its own into what it tags, so neither one produces a
+// term the other consumes and the chain has no rungs. Adding nested shapes
+// to the goal set may not invent an oracle a protocol does not offer.
+
+attacker[active]
+
+principal Bob[
+	knows private k
+	generates nb
+]
+
+Bob -> Carol: [nb]
+
+principal Carol[
+	knows private k
+	generates nc
+	r = HASH(nc)
+	r2 = HASH(nc, nc)
+	t = MAC(k, MAC(k, CONCAT(nb, nc)))
+]
+
+Carol -> Alice: r
+Carol -> Dave: r2
+Carol -> Bob: nc, t
+
+principal Alice[
+	knows private k
+	knows public sep_a
+	o = MAC(k, CONCAT(sep_a, r))
+]
+
+Alice -> Carol: o
+
+principal Dave[
+	knows private k
+	knows public sep_d
+	o2 = MAC(k, CONCAT(sep_d, r2))
+]
+
+Dave -> Carol: o2
+
+principal Carol[
+	_ = HASH(o, o2)
+]
+
+principal Bob[
+	_ = ASSERT(MAC(k, MAC(k, CONCAT(nb, nc))), t)?
+	h = HASH(nc)
+]
+
+queries[
+	authentication? Carol -> Bob: nc
+]

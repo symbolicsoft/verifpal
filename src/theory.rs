@@ -142,6 +142,7 @@ pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> 
 	x.id == y.id
 		&& x.output == y.output
 		&& x.threshold == y.threshold
+		&& x.instance == y.instance
 		&& x.instance_check == y.instance_check
 		&& x.arguments.len() == y.arguments.len()
 		&& x.arguments
@@ -1446,6 +1447,7 @@ mod tests {
 				id: PRIM_SPLIT,
 				arguments: vec![concat.clone()],
 				output,
+				instance: 0,
 				instance_check: false,
 				capabilities: Capabilities::default(),
 				threshold: 0,
@@ -1476,6 +1478,7 @@ mod tests {
 			id: PRIM_PKE_DEC,
 			arguments: vec![sk2, enc],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1497,6 +1500,7 @@ mod tests {
 			id: PRIM_SPLIT,
 			arguments: vec![pair],
 			output: 1,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1528,6 +1532,7 @@ mod tests {
 				signature.clone(),
 			],
 			output: 0,
+			instance: 0,
 			instance_check: true,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1579,6 +1584,7 @@ mod tests {
 			id: PRIM_ASSERT,
 			arguments: vec![a.clone(), a.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1596,6 +1602,7 @@ mod tests {
 			id: PRIM_ASSERT,
 			arguments: vec![a, b],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1852,6 +1859,7 @@ mod tests {
 			id: PRIM_ENC,
 			arguments: vec![key.clone(), msg.clone()],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1889,6 +1897,7 @@ mod tests {
 			id: PRIM_KEM_ENCAP,
 			arguments: vec![ek.clone(), r.clone()],
 			output: 1,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1925,6 +1934,7 @@ mod tests {
 			id: PRIM_KEM_ENCAP,
 			arguments: vec![ek.clone(), r],
 			output: 1,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1955,6 +1965,7 @@ mod tests {
 			id: PRIM_KEM_DECAP,
 			arguments: vec![dk, ct],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1977,6 +1988,7 @@ mod tests {
 			id: PRIM_KEM_DECAP,
 			arguments: vec![other, ct],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
@@ -1994,6 +2006,7 @@ mod tests {
 			id: PRIM_ENC,
 			arguments: vec![key, msg],
 			output: 0,
+			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,

@@ -1,0 +1,45 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e0 at one session and at two.
+//
+// Carol's share reaches Bob only by Alice relaying it under a guard, so Bob's
+// copy is whatever Alice holds and the two hashes cannot differ. An addressed
+// install is a value handed to one recipient and not another, which requires
+// the other recipient to be served by somebody else: a relay through the
+// addressed principal carries the install with it. Offering an addressed pass
+// here let the attacker hold PUBKEY(nil) at Alice while Bob kept the honest
+// share, and report a divergence no execution produces.
+
+attacker[active]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+Carol -> Alice: gc
+Alice -> Bob: [gc]
+
+principal Alice[
+	generates y
+	ka = HASH(gc, y)
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	kb = HASH(gc, y)
+]
+
+queries[
+	equivalence? ka, kb
+]

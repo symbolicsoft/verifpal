@@ -152,6 +152,7 @@ pub(crate) struct PrimitiveSpec {
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<ArgumentRestriction>,
 	pub key_derivation: bool,
+	pub distinct_per_assignment: bool,
 	pub identifying_positions: Vec<usize>,
 	pub weak_reveals: Vec<usize>,
 	pub weak_reveals_output: Option<usize>,
@@ -397,11 +398,8 @@ pub(crate) fn secret_positions(id: PrimitiveId) -> Vec<usize> {
 	if let Some(at) = spec.forgeable_secret {
 		out.push(at);
 	}
-	if let Some(rule) = spec.decompose.as_ref() {
-		out.extend(rule.given.iter().copied());
-	}
-	if let Some(BypassKeyKind::Derived { arg, .. }) = spec.bypass_key {
-		out.push(arg);
+	if let Some(&opening) = spec.decompose.as_ref().and_then(|rule| rule.given.first()) {
+		out.push(opening);
 	}
 	out.sort_unstable();
 	out.dedup();
