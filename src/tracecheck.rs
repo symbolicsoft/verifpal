@@ -793,6 +793,7 @@ mod tests {
 					new_value: "tc_d".to_string(),
 					old_value: "honest".to_string(),
 					guarded: false,
+					upstream: false,
 					installed: injected,
 				}],
 			},

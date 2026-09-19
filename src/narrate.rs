@@ -148,6 +148,7 @@ pub(crate) struct MutationItem {
 	pub new_value: String,
 	pub old_value: String,
 	pub guarded: bool,
+	pub upstream: bool,
 	#[cfg(test)]
 	pub installed: Value,
 }
@@ -382,6 +383,7 @@ pub(crate) fn mutation_groups(
 				.map(|slot| oriented(&slot.initial_value, table, own, own, attacker))
 				.unwrap_or_default(),
 			guarded: sm.guard,
+			upstream: false,
 		};
 		let leg_at = km
 			.slots
@@ -392,6 +394,13 @@ pub(crate) fn mutation_groups(
 					.find(|event| event.sender == sender && event.recipient == recipient)
 			})
 			.map_or(sm.declared_at, |event| event.declared_at);
+		let mut item = item;
+		item.upstream = km.slots.get(i).is_some_and(|slot| {
+			slot.sent_by.iter().any(|event| {
+				event.recipient == sender && !event.guarded && event.declared_at < leg_at
+			})
+		});
+		let item = item;
 		match groups
 			.iter_mut()
 			.find(|(s, r, d, _, _)| *s == sender && *r == recipient && *d == leg_at)
@@ -1382,7 +1391,7 @@ fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> St
 	}
 	let guarded: Vec<String> = items
 		.iter()
-		.filter(|i| i.guarded)
+		.filter(|i| i.guarded && i.upstream)
 		.map(|i| i.name.to_string())
 		.collect();
 	if !guarded.is_empty() {
@@ -1398,6 +1407,33 @@ fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> St
 
 #[cfg(test)]
 mod tests {
+
+	#[test]
+	fn a_guarded_leg_is_only_called_upstream_when_an_unguarded_hop_exists() {
+		let item = |guarded, upstream| MutationItem {
+			name: std::sync::Arc::from("cert"),
+			new_value: "forged".to_string(),
+			old_value: "honest".to_string(),
+			guarded,
+			upstream,
+			installed: crate::value::value_nil(),
+		};
+		let claimed = render_mutations("Serv", "AS", &[item(true, true)]);
+		assert!(
+			claimed.contains("does not stop this"),
+			"a guard the value really did reach unguarded earlier is explained: {claimed}"
+		);
+		let created = render_mutations("Serv", "AS", &[item(true, false)]);
+		assert!(
+			!created.contains("does not stop this"),
+			"but a guarded leg whose sender created the value never had an earlier hop, \
+			 so the trace may not claim one: {created}"
+		);
+		assert!(
+			created.contains("Attacker replaces cert"),
+			"the substitution itself is still reported: {created}"
+		);
+	}
 	use super::*;
 	use crate::parser::parse_string;
 	use crate::primitive::*;
