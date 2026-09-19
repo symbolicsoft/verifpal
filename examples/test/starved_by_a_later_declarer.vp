@@ -1,0 +1,56 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e1 at one session and at two.
+//
+// Bob declares the public constant after the checked decryption the attacker
+// breaks, so Bob halts before his own declaration. Carol declares the same
+// constant herself and computes her hash from it and from a nonce delivered
+// to her directly. Replacing that nonce on the Alice to Carol leg leaves
+// Alice's own copy alone, so the two hashes differ.
+//
+// A halt withholds what a principal computes, not what it already knows.
+// Marking the declaration unreachable because its first declarer halted, and
+// then refusing to credit a principal that declares it too, starved every
+// slot downstream of it at every principal and withheld the verdict.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m, n
+	e = AEAD_ENC(k, n, m, nil)
+]
+
+principal Carol[
+	knows public cz
+]
+
+principal Bob[
+	knows private k
+]
+
+Alice -> Carol: n, e
+Carol -> Bob: n, e
+
+principal Bob[
+	d = AEAD_DEC(k, n, e, nil)?
+]
+
+principal Bob[
+	knows public psk
+]
+
+principal Alice[
+	knows public psk
+	xa = HASH(n, psk)
+]
+
+principal Carol[
+	knows public psk
+	xc = HASH(n, psk)
+]
+
+queries[
+	equivalence? xa, xc
+]

@@ -1092,6 +1092,24 @@ fn test_solver_oracle_chained_inputs_separated() {
 }
 
 #[test]
+fn test_split_delivery_relaying_recipient() {
+	run_model_sessions("split_delivery_relaying_recipient.vp", 1, "e1");
+	run_model("split_delivery_relaying_recipient.vp", "e1");
+}
+
+#[test]
+fn test_starved_by_a_later_declarer() {
+	run_model_sessions("starved_by_a_later_declarer.vp", 1, "e1");
+	run_model("starved_by_a_later_declarer.vp", "e1");
+}
+
+#[test]
+fn test_precondition_independent_late_block() {
+	run_model_sessions("precondition_independent_late_block.vp", 1, "a1a1");
+	run_model("precondition_independent_late_block.vp", "a1a1");
+}
+
+#[test]
 fn test_causal_foreign_receive() {
 	run_model_sessions("causal_foreign_receive.vp", 1, "a0");
 	run_model("causal_foreign_receive.vp", "a1");

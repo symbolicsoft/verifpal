@@ -205,11 +205,10 @@ fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> b
 
 fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
-		!trace_slot.sent_by.iter().any(|event| event.sender == ps.id)
-			&& trace_slot
-				.sent_by
-				.iter()
-				.any(|event| event.recipient != ps.id && event.sender != ps.id)
+		trace_slot
+			.sent_by
+			.iter()
+			.any(|event| event.recipient != ps.id && event.sender != ps.id)
 	}) && ps
 		.meta
 		.get(slot)

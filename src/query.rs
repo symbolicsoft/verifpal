@@ -787,8 +787,7 @@ fn preconditions_reached(
 	let mut options = Vec::with_capacity(query.options.len());
 	for option in &query.options {
 		let constant = option.message.constant().ok()?;
-		let (_, slot_idx) = ps.resolve_constant(constant, true);
-		let slot = km.slots.get(slot_idx?)?;
+		let slot = km.index_of(constant).and_then(|at| km.slots.get(at))?;
 		let reached = slot.sent_by.iter().any(|event| {
 			event.phase <= phase
 				&& event.sender == option.message.sender

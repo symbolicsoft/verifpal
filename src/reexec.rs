@@ -1145,15 +1145,11 @@ fn forwarded_installs(
 				sent = true;
 				newly |= !ctx.honest_run_delivered(km, at, event);
 			}
-			if !sent
-				|| at >= source.values.len()
-				|| source.slot_unreached(at)
-				|| source.slot_starved(at)
-			{
+			if !sent || at >= source.values.len() || source.slot_unreached(at) {
 				continue;
 			}
 			let emitted = &source.values[at].value;
-			if !attacker_authored(emitted, at, km, target) && !newly {
+			if !attacker_authored(emitted, at, km, target) && !(newly && !source.slot_starved(at)) {
 				continue;
 			}
 			out.push((SlotIdx(at), emitted.clone()));
@@ -1374,19 +1370,21 @@ fn slot_held(
 	slot: usize,
 	visiting: &mut Vec<PrincipalId>,
 ) -> bool {
-	if unreached[slot] {
-		return false;
-	}
 	if delivered(slot) {
 		return true;
 	}
 	let trace_slot = &km.slots[slot];
-	if trace_slot.creator == who
-		|| trace_slot
-			.known_by
-			.iter()
-			.any(|&(holder, sender)| holder == who && sender == who)
+	if trace_slot
+		.known_by
+		.iter()
+		.any(|&(holder, sender)| holder == who && sender == who)
 	{
+		return true;
+	}
+	if unreached[slot] {
+		return false;
+	}
+	if trace_slot.creator == who {
 		return true;
 	}
 	if visiting.contains(&who) {

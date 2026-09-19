@@ -43,6 +43,13 @@ pub(crate) struct Deducer<'a> {
 
 impl<'a> Deducer<'a> {
 	#[cfg(test)]
+	pub(crate) fn with_fresh_range(mut self, start: u32, end: u32) -> Self {
+		self.fresh = Cell::new(start);
+		self.fresh_end = end;
+		self
+	}
+
+	#[cfg(test)]
 	pub(crate) fn new(
 		ps: &PrincipalState,
 		attacker: &'a AttackerState,
@@ -147,6 +154,9 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
+		if self.fresh.get() >= self.fresh_end {
+			return;
+		}
 		let g = crate::theory::reduce_once(&apply(goal, s));
 		let key = g.hash_value();
 		if !contains_var(&g) && self.attacker.knows(&g).is_some() {
@@ -200,10 +210,9 @@ impl<'a> Deducer<'a> {
 
 	fn fresh_var(&self) -> Value {
 		let n = self.fresh.get();
-		assert!(
-			n < self.fresh_end,
-			"a solver lane ran out of fresh variables"
-		);
+		if n >= self.fresh_end {
+			return super::vars::free_var(self.fresh_end.saturating_sub(1));
+		}
 		self.fresh.set(n + 1);
 		super::vars::free_var(n)
 	}
@@ -1933,6 +1942,39 @@ mod tests {
 		assert!(
 			found.is_empty(),
 			"different commitments must not pool their counts"
+		);
+	}
+
+	#[test]
+	fn a_lane_out_of_fresh_variables_stops_instead_of_aborting() {
+		let key = make_private("exhausted_lane_key");
+		let message = make_private("exhausted_lane_message");
+		let held = Value::primitive(PRIM_ENC, vec![key.clone(), message.clone()], 0);
+		let attacker = make_attacker_state(vec![held]);
+		let ps = make_principal_state("Exhausted", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let (start, _) = super::super::vars::free_lane_bounds(0);
+		let deducer = Deducer::new(&ps, &attacker, &sym).with_fresh_range(start, start + 2);
+		let first = deducer.fresh_var();
+		let second = deducer.fresh_var();
+		assert_ne!(as_var(&first), as_var(&second), "distinct while ids remain");
+		let last = as_var(&second).expect("a variable");
+		for _ in 0..4 {
+			assert_eq!(
+				as_var(&deducer.fresh_var()),
+				Some(last),
+				"an exhausted lane repeats its last id rather than aborting or \
+				 spilling into another lane's band"
+			);
+		}
+		let goal = Value::primitive(PRIM_ENC, vec![key, second], 0);
+		assert!(
+			deducer.solve(&goal, &Substitution::default()).is_empty(),
+			"and it proposes nothing further, since ids it would need are gone"
 		);
 	}
 

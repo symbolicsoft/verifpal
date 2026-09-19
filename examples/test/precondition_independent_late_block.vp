@@ -1,0 +1,50 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1a1 at one session and at two.
+//
+// Carol receives nothing and checks nothing, so she sends her tag in every
+// execution and a precondition naming that message removes no verdict. The
+// two queries ask the same thing, one of them gated on it, and they must
+// agree.
+//
+// The gate resolved the precondition's constant against the state that
+// answered the query. Authentication answers at the recipient, whose state is
+// truncated at its own halt, so a constant declared after that point did not
+// resolve and the verdict was dropped on the floor. A precondition names a
+// message in the protocol, which is the trace's to resolve, not the answering
+// principal's.
+
+attacker[active]
+
+principal Alice[
+	knows private uak
+	generates uax
+	uat = MAC(uak, uax)
+]
+
+Alice -> Bob: uax, uat
+
+principal Bob[
+	knows private uak
+	ubh = HASH(uax)
+	_ = ASSERT(MAC(uak, uax), uat)?
+]
+
+principal Carol[
+	knows private uck
+	ucm = HASH(uck)
+]
+
+Carol -> Dave: ucm
+
+principal Dave[
+	_ = HASH(ucm)
+]
+
+queries[
+	authentication? Alice -> Bob: uax
+	authentication? Alice -> Bob: uax[
+		precondition[Carol -> Dave: ucm]
+	]
+]

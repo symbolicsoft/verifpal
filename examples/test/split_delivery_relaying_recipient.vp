@@ -1,0 +1,57 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: e1 at one session and at two.
+//
+// split_delivery_through_relay.vp with one line added: Bob forwards the share
+// he received on to a third principal under a guard. That forward changes
+// nothing about the attack, which still replaces Carol's share on the open
+// Alice to Bob leg and leaves Alice's own copy alone, so the two hashes
+// differ.
+//
+// An addressed install is refused where the other recipient's copy is relayed
+// through the addressed principal. Reading that as "this principal never
+// forwards the slot at all" withholds the addressed pass from every relay,
+// and a principal that passes a value on can still be handed a different one.
+
+attacker[active]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Alice[
+	knows private a
+]
+
+principal Bob[
+	knows private b
+]
+
+principal Dave[
+	knows private d
+]
+
+Carol -> Alice: gc
+Alice -> Bob: gc
+Bob -> Dave: [gc]
+
+principal Dave[
+	kd = HASH(gc, d)
+]
+
+principal Alice[
+	generates y
+	ka = HASH(gc, y)
+]
+
+Alice -> Bob: [y]
+
+principal Bob[
+	kb = HASH(gc, y)
+]
+
+queries[
+	equivalence? ka, kb
+]
