@@ -1989,6 +1989,8 @@ mod tests {
 			})]),
 			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
 			alternates: std::sync::Arc::new(vec![Vec::new()]),
+			worlds: std::sync::Arc::new(vec![vec![Vec::new()]]),
+			worlds_epoch: 0,
 			reused: std::sync::Arc::new(vec![]),
 			routes_epoch: 0,
 			chain: crate::types::next_chain(),

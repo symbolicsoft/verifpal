@@ -56,6 +56,7 @@ pub(crate) mod util;
 pub(crate) mod value;
 pub(crate) mod verify;
 pub(crate) mod witness;
+pub(crate) mod world;
 
 pub use html::html_report;
 pub use info::{Verbosity, info_banner, info_message, info_replay, set_verbosity};

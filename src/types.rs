@@ -514,6 +514,8 @@ impl KnownIdx {
 }
 
 pub type PrincipalId = u8;
+pub type Need = (PrincipalId, SlotIdx, Value);
+pub type Constraint = Vec<Need>;
 pub type ValueId = u32;
 pub type PrimitiveId = u8;
 
@@ -1711,6 +1713,8 @@ pub struct AttackerState {
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
 	pub alternates: Arc<Vec<Vec<Route>>>,
+	pub worlds: Arc<Vec<Vec<Constraint>>>,
+	pub worlds_epoch: u64,
 	pub reused: Arc<Vec<[Value; 2]>>,
 	pub routes_epoch: u64,
 	pub chain: u64,
@@ -1731,6 +1735,8 @@ impl Default for AttackerState {
 			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
 			alternates: Arc::new(vec![]),
+			worlds: Arc::new(vec![]),
+			worlds_epoch: 0,
 			reused: Arc::new(vec![]),
 			routes_epoch: 0,
 			chain: next_chain(),

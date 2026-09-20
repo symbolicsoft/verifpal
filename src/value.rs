@@ -368,11 +368,20 @@ impl AttackerState {
 			.filter(|&(_, &keep)| keep)
 			.map(|(d, _)| d.clone())
 			.collect();
+		let worlds = self
+			.worlds
+			.iter()
+			.zip(keep.iter())
+			.filter(|&(_, &keep)| keep)
+			.map(|(w, _)| w.clone())
+			.collect();
 		Some(Arc::new(AttackerState {
 			current_phase: self.current_phase,
 			mutation_records: Arc::new(mutation_records),
 			derivations: Arc::new(derivations),
 			alternates: Arc::new(alternates),
+			worlds: Arc::new(worlds),
+			worlds_epoch: self.worlds_epoch,
 			reused: Arc::clone(&self.reused),
 			known: Arc::new(known),
 			known_map: Arc::new(known_map),

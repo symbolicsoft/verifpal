@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::context::Put;
 use crate::context::VerifyContext;
 use crate::info::{info_deduction, info_output_text};
 use crate::pretty::pretty_values;
@@ -88,17 +89,42 @@ fn learn(
 	derivation: DerivationRecord,
 	message: impl FnOnce() -> String,
 ) -> bool {
+	learn_in(
+		ctx, km, ps, attacker, value, record, derivation, None, message,
+	)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn learn_in(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	value: &Value,
+	record: &Arc<MutationRecord>,
+	derivation: DerivationRecord,
+	worlds: Option<Vec<Constraint>>,
+	message: impl FnOnce() -> String,
+) -> bool {
+	let worlds = worlds
+		.unwrap_or_else(|| crate::world::derived_worlds(km, ps, attacker, value, &derivation));
+	if worlds.is_empty() {
+		return false;
+	}
 	if attacker.knows(value).is_none()
 		&& !ctx.attacker_knows(value)
 		&& !combination_coheres(ctx, km, ps, attacker, value, record, &derivation)
 	{
 		return false;
 	}
-	if !ctx.attacker_put_with(value, record, derivation) {
-		return false;
+	match ctx.attacker_put_with(value, record, derivation, worlds) {
+		Put::New => {
+			info_deduction(message);
+			true
+		}
+		Put::Widened => true,
+		Put::Known => false,
 	}
-	info_deduction(message);
-	true
 }
 
 /// Whether the reads a derivation rests on can all have happened in one
@@ -235,8 +261,6 @@ fn pair_coheres(
 		}
 	})
 }
-
-type Need = (PrincipalId, SlotIdx, Value);
 
 fn needs_signature(needs: &[Need]) -> u64 {
 	let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -656,7 +680,11 @@ fn read_needs(
 /// made it pass is a precondition of the read even though the value's own
 /// definition never mentions it. Dropping those let a signature harvested from
 /// one execution of a run stand beside a seed harvested from another.
-fn reach_cone(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> Arc<Vec<usize>> {
+pub(crate) fn reach_cone(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	slot: usize,
+) -> Arc<Vec<usize>> {
 	if let Some(hit) =
 		CONES.with(|cones| cones.borrow_mut().fresh().get(&(principal, slot)).cloned())
 	{
@@ -1327,7 +1355,16 @@ fn rule_equivalize(
 			continue;
 		}
 		let sv = &ps.values[slot];
-		found |= learn(
+		let travels = km.slots.get(slot).is_some_and(crate::world::observable);
+		let worlds = match attacker.knows(&sv.value) {
+			Some(idx) if !travels => attacker
+				.worlds
+				.get(idx.get())
+				.cloned()
+				.unwrap_or_else(|| vec![Vec::new()]),
+			_ => crate::world::state_world(km, ps, attacker, slot),
+		};
+		found |= learn_in(
 			ctx,
 			km,
 			ps,
@@ -1337,6 +1374,7 @@ fn rule_equivalize(
 			DerivationRecord::Obtained {
 				slot: SlotIdx(slot),
 			},
+			Some(worlds),
 			|| {
 				format!(
 					"{} obtained by equivalizing with the current resolution of {}.",

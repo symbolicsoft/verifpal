@@ -380,13 +380,35 @@ fn attacker_state_note_route(
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Put {
+	New,
+	Widened,
+	Known,
+}
+
+fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Vec<Constraint>) -> bool {
+	let mut widened = false;
+	if let Some(entry) = Arc::make_mut(&mut state.worlds).get_mut(existing.get()) {
+		for world in worlds {
+			widened |= crate::world::add(entry, world);
+		}
+	}
+	if widened {
+		state.worlds_epoch += 1;
+	}
+	widened
+}
+
 fn attacker_state_absorb(
 	state: &mut AttackerState,
 	value: &Value,
 	record: &Arc<MutationRecord>,
 	derivation: DerivationRecord,
+	worlds: Vec<Constraint>,
 ) {
 	if let Some(existing) = state.knows(value) {
+		widen(state, existing, worlds);
 		let candidate = derivation_provenance(state, record, &derivation);
 		let explains = |r: &MutationRecord| r.diffs.iter().any(|d| d.tainted);
 		let stale = state.record(existing).is_some_and(|r| !explains(r));
@@ -433,6 +455,14 @@ fn attacker_state_absorb(
 	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
 	Arc::make_mut(&mut state.derivations).push(derivation);
 	Arc::make_mut(&mut state.alternates).push(Vec::new());
+	let mut set: Vec<Constraint> = Vec::new();
+	for world in worlds {
+		crate::world::add(&mut set, world);
+	}
+	if set.is_empty() {
+		set.push(Vec::new());
+	}
+	Arc::make_mut(&mut state.worlds).push(set);
 }
 
 impl VerifyContext {
@@ -1028,14 +1058,16 @@ impl VerifyContext {
 		known: &Value,
 		record: &Arc<MutationRecord>,
 		derivation: DerivationRecord,
-	) -> bool {
+		worlds: Vec<Constraint>,
+	) -> Put {
 		let mut state = write_lock(&self.attacker);
-		if state.knows(known).is_some() {
+		if let Some(existing) = state.knows(known) {
 			attacker_state_note_route(&mut state, known, record, derivation);
-			return false;
+			let widened = widen(&mut state, existing, worlds);
+			return if widened { Put::Widened } else { Put::Known };
 		}
-		attacker_state_absorb(&mut state, known, record, derivation);
-		true
+		attacker_state_absorb(&mut state, known, record, derivation, worlds);
+		Put::New
 	}
 
 	pub(crate) fn attacker_phase_update(
@@ -1057,11 +1089,17 @@ impl VerifyContext {
 			{
 				continue;
 			}
-			attacker_state_absorb(&mut state, &sv.value, &record, DerivationRecord::Initial);
+			attacker_state_absorb(
+				&mut state,
+				&sv.value,
+				&record,
+				DerivationRecord::Initial,
+				vec![Vec::new()],
+			);
 		}
 
 		drop(state);
-		self.absorb_wire_values(ps, &record, phase, |slot, _| {
+		self.absorb_wire_values(km, ps, &record, phase, |slot, _| {
 			self.honest_run_disclosure(km, slot, phase)
 		})
 	}
@@ -1076,7 +1114,7 @@ impl VerifyContext {
 		if read_lock(&self.honest_halts).is_empty() {
 			return;
 		}
-		let _ = self.absorb_wire_values(ps, record, phase, |slot, sv| {
+		let _ = self.absorb_wire_values(km, ps, record, phase, |slot, sv| {
 			let holds_initially = sv.provenance.creator == ps.id
 				|| km.slots.get(slot).is_some_and(|trace_slot| {
 					trace_slot
@@ -1099,6 +1137,7 @@ impl VerifyContext {
 
 	fn absorb_wire_values(
 		&self,
+		km: &ProtocolTrace,
 		ps: &PrincipalState,
 		record: &Arc<MutationRecord>,
 		phase: i32,
@@ -1128,8 +1167,15 @@ impl VerifyContext {
 				},
 			};
 			let constant_value = Value::Constant(sm.constant.clone());
-			attacker_state_absorb(&mut state, &constant_value, record, derivation.clone());
-			attacker_state_absorb(&mut state, &sv.value, record, derivation);
+			let worlds = crate::world::state_world(km, ps, &state, slot);
+			attacker_state_absorb(
+				&mut state,
+				&constant_value,
+				record,
+				derivation.clone(),
+				worlds.clone(),
+			);
+			attacker_state_absorb(&mut state, &sv.value, record, derivation, worlds);
 		}
 		Ok(())
 	}
@@ -1496,14 +1542,17 @@ mod tests {
 		let learned = make_constant("drv_learned");
 		let source = make_constant("drv_source");
 
-		assert!(ctx.attacker_put_with(
-			&learned,
-			&record,
-			DerivationRecord::Decomposed {
-				of: source.clone(),
-				using: vec![learned.clone()],
-			},
-		));
+		assert!(
+			ctx.attacker_put_with(
+				&learned,
+				&record,
+				DerivationRecord::Decomposed {
+					of: source.clone(),
+					using: vec![learned.clone()],
+				},
+				vec![Vec::new()],
+			) == Put::New
+		);
 
 		let attacker = ctx.attacker_snapshot();
 		let idx = attacker.knows(&learned).expect("value was absorbed");
@@ -1565,16 +1614,19 @@ mod tests {
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(7) },
+			vec![Vec::new()],
 		);
 		ctx.attacker_put_with(
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(2) },
+			vec![Vec::new()],
 		);
 		ctx.attacker_put_with(
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(7) },
+			vec![Vec::new()],
 		);
 		let attacker = ctx.attacker_snapshot();
 		let idx = attacker.knows(&value).expect("the term is known");

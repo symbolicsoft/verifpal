@@ -70,6 +70,7 @@ False attacks and missed attacks are the worst possible regressions. These model
 | `split_delivery_through_relay.vp` | `e0` | an addressed install serves one recipient and not another, which needs the other recipient served by somebody else: where the second copy is relayed **through** the addressed principal it carries the install with it. Counterweight `split_delivery_through_open_relay.vp` (`e1`) |
 | `threshold_reshare_is_a_new_sharing.vp` | `c0` | two `THRESHOLD_SPLIT` assignments of one secret are two sharings, so one share of each interpolates to nothing (`distinct_per_assignment`, `Primitive.instance`) |
 | `unlink_forced_key_carries_no_secret.vp` | `u0` | a link witness must carry a secret leaf the queried values genuinely share, so a key the attacker forced is not a common origin |
+| `history_kem_reply_under_secret.vp` | `c0` | a reply sealed under a secret the attacker only holds in the execution that swapped the key was itself computed in the execution that did not: every learned value carries the executions that produce it (`src/world.rs`), and these two have none in common. `history_dh_reply_under_secret.vp` (`c1c0`) is the counterweight, where the disclosed half *is* sealed in the swapped execution |
 
 And these pin **missed** attacks, the other worst regression:
 
@@ -131,7 +132,7 @@ Emit replayable-first-flight notices **only in `emit_query_result`**, after acce
 cargo build --release                  # build (also: make build)
 cargo clippy --all-targets -- -D warnings   # exactly what CI runs
 make lint                              # the above, plus cargo fmt --check and the wasm clippy
-cargo test --release                   # 1382 tests (unit + model), ~4m once built (also: make test)
+cargo test --release                   # 1385 tests (unit + model), ~4m once built (also: make test)
 cargo test --release -- --ignored      # the exhaustive metamorphic sweeps (also: make test-exhaustive)
 make test-tex                          # compile every generated LaTeX report with tectonic
 cargo test --release test_ok           # a single end-to-end model test
@@ -289,6 +290,43 @@ Global monotone knowledge must not spend one execution's disclosures against ano
 - `execution_agrees` handles disclosures sent to third principals: replay each supplier under diffs observed in its own state (`history_incompatible_knowledge.vp`, `history_compatible_oracle.vp`).
 - Restrict only slots **received from another principal**, read in the **creator's** run or another execution of **this principal**. Skip where the proposal installs an **attacker-authored** value, but not an honest reinstall (`incompatible_histories.vp`, `incompatible_histories_mitm.vp`).
 - Separately, `validate.rs::spends_another_execution` refuses installs whose cone-filtered `deduction::needs_of` require a different value at this principal's **receive** slot. Recurse into unheld terms' arguments; do not reject own output reads needed for cross-session routing (`history_own_later_emission.vp` against `history_own_early_emission.vp`).
+
+### Worlds: which executions produce a value (world.rs)
+
+Knowledge is global and monotone, so a rule may pair a value read out of one
+execution of a principal with one that exists only in another. `combination_coheres`
+catches this where the two reads pin *one* slot to different values; it cannot
+catch it where the conflict is one derivation deeper, because nothing in the
+record says which executions a value belongs to.
+
+Every learned value therefore carries a **world set**: a disjunction of
+`Constraint`s, each a conjunction of `(principal, slot, value)` pins naming an
+execution that produces it. `learn` refuses a derivation whose ingredients'
+world sets have no consistent merge, which is the same rule `combination_coheres`
+applies, lifted from one slot to whole executions.
+
+- `state_world` reads a slot's world off the state: an attacker-installed slot
+  pins itself and inherits the installed value's own worlds; a received slot
+  pins itself and recurses into its creator's computation; a slot its owner
+  declares with `knows`, a public constant and `nil` pin nothing, since
+  pre-existing knowledge is not something an execution decides.
+- `derived_worlds` merges the ingredients' sets, and **adds the unconstrained
+  world when the value is `obtainable` from knowledge held in every execution**.
+  Without it the recorded route decides the verdict: `closure_route_withheld_by_halt.vp`
+  records its Diffie-Hellman leg through the ephemeral of a run that halts, while
+  the same term is computable from the peer's leaked key in every execution.
+- `rule_equivalize` records a route at every slot holding a known value, so it
+  widens a world set **only through a slot that travels or leaks**. Relabelling a
+  value at a private slot nobody observed would otherwise call it unconstrained.
+- The search is bounded and **degrades to admitting**: `merge_all` stops at
+  `MERGE_BUDGET` and a value keeps at most `MAX_WORLDS` worlds, and on either
+  limit the set collapses to the unconstrained world. A truncated search may
+  therefore miss a refusal, and can never invent one. Unbounded, the ring model
+  cost 32x.
+
+`AttackerState::worlds` is parallel to `known`; `worlds_epoch` invalidates the
+memos that key off it. Pins: `history_kem_reply_under_secret.vp`,
+`history_dh_reply_under_secret.vp`.
 
 ### Execution coherence in the closure (deduction.rs::combination_coheres)
 

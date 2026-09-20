@@ -1898,6 +1898,16 @@ fn test_incompatible_histories() {
 	run_model_sessions("incompatible_histories.vp", 2, "a0");
 }
 #[test]
+fn test_history_kem_reply_under_secret() {
+	run_model_sessions("history_kem_reply_under_secret.vp", 1, "c0");
+	run_model_sessions("history_kem_reply_under_secret.vp", 2, "c0");
+}
+#[test]
+fn test_history_dh_reply_under_secret() {
+	run_model_sessions("history_dh_reply_under_secret.vp", 1, "c1c0");
+	run_model_sessions("history_dh_reply_under_secret.vp", 2, "c1c0");
+}
+#[test]
 fn test_incompatible_histories_mitm() {
 	run_model_sessions("incompatible_histories_mitm.vp", 1, "c1a1");
 	run_model_sessions("incompatible_histories_mitm.vp", 2, "c1a1");
