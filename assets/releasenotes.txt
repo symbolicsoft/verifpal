@@ -1,43 +1,9 @@
-Verifpal 1.4.12
+Verifpal 1.5.0
 
-Changes since v1.4.11:
+Changes since v1.4.12:
 
-- Fix bug causing missed attack found by Heba Ajjour
-- Remove old references to Verifpal Manual
-
-Changes since v1.4.10:
-
-- completeness: only refuse derivation when no execution produces it
-
-Changes since v1.4.9:
-
-- Fix imprecision in forgeable threshold signatures relative to RFC 9591.
-  Congrats to Abdulrahman Abdulaziz for discovering this bug!
-
-Changes since v1.4.8:
-
-- Bug fixes and performance improvements.
-
-Changes since v1.4.7:
-
-- Massive improvements to RAM usage for large models, inspired by debugging
-  session with Mikerah Quintyne-Collins. Thanks, Mikerah!
-
-Changes since v1.4.6:
-
-- Many performance improvements and bug fixes.
-
-Changes since v1.4.5:
-
-- Add SimpleX models
-- Fix regression
-
-Changes since v1.4.4:
-
-- Soundness/completeness fixes + more regression tests
-
-Changes since v1.4.3:
-
-- Verifpal now models threshold cryptography, such as FROST-like threshold
-  signing. More details in this blog post:
-  https://symbolic.software/blog/2026-09-06-verifpal-threshold-cryptography/
+- Verifpal 1.5 focuses on the correctness of the verifier itself.
+  We used frontier AI models to audit the engine, reproduce errors
+  in small protocol models, and develop fixes.
+  Read the full blog post:
+  https://symbolic.software/blog/2026-09-20-verifpal-1-5/
