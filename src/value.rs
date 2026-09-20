@@ -158,7 +158,7 @@ pub(crate) fn compute_slot_diffs(
 					index: SlotIdx(i),
 					constant: sm.constant.clone(),
 					value: sv.value.clone(),
-					tainted: sv.provenance.attacker_tainted || sv.provenance.bypass_injected,
+					tainted: sv.provenance.attacker_tainted,
 					state: ps.id,
 				})
 			}

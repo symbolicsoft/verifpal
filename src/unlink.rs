@@ -18,6 +18,7 @@ pub(crate) enum LinkWitnessKind {
 pub(crate) struct LinkWitness {
 	pub kind: LinkWitnessKind,
 	pub value: Value,
+	components: Option<[Value; 2]>,
 }
 
 pub(crate) fn find_link_witness(
@@ -46,13 +47,19 @@ pub(crate) fn find_link_witness(
 		.or_else(|| witness_shared_secret(&av, &bv, ps, attacker))
 		.or_else(|| witness_recognized_secret(&av, &bv, ps, attacker))
 		.or_else(|| {
-			exposed(&av).iter().find_map(|x| {
-				exposed(&bv).iter().find_map(|y| {
+			let a_parts = linked_values(&av, ps, attacker);
+			let b_parts = linked_values(&bv, ps, attacker);
+			a_parts.iter().find_map(|x| {
+				b_parts.iter().find_map(|y| {
 					if x.equivalent(&av, true) && y.equivalent(&bv, true) {
 						return None;
 					}
 					witness_identifying_check(x, y, ps, attacker)
 						.or_else(|| witness_recognized_secret(x, y, ps, attacker))
+						.map(|mut witness| {
+							witness.components = Some([x.clone(), y.clone()]);
+							witness
+						})
 				})
 			})
 		})
@@ -92,13 +99,23 @@ fn carries_shared_secret(
 		.any(|c| secret_leaves.contains(&c.id))
 }
 
-fn exposed(v: &Value) -> Vec<Value> {
-	match v {
-		Value::Primitive(p) if primitive_core_reveals_args(p.id) => {
-			p.arguments.iter().flat_map(exposed).collect()
+fn linked_values(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> Vec<Value> {
+	let mut out = origin_leaves(v, ps, attacker).unwrap_or_default();
+	let mut pending = vec![v.clone()];
+	let mut seen = crate::hashing::TermSet::default();
+	while let Some(value) = pending.pop() {
+		if seen.contains(&value) {
+			continue;
 		}
-		_ => vec![v.clone()],
+		seen.insert(value.clone());
+		if let Value::Primitive(p) = &value
+			&& primitive_core_reveals_args(p.id)
+		{
+			pending.extend(p.arguments.iter().cloned());
+		}
+		push_leaf(&mut out, &value);
 	}
+	out
 }
 
 fn share_secret_subterm(
@@ -132,7 +149,22 @@ fn attacker_supplied(v: &Value, ps: &PrincipalState) -> bool {
 }
 
 impl LinkWitness {
-	pub(crate) fn describe(&self, term: &str) -> String {
+	pub(crate) fn describe(&self, render: impl Fn(&Value) -> String) -> String {
+		let term = render(&self.value);
+		if let Some([a, b]) = &self.components {
+			let relation = match self.kind {
+				LinkWitnessKind::IdentifyingCheck(id) => format!(
+					"for which {} succeeds under {term}",
+					crate::primitive::primitive_name(id)
+				),
+				LinkWitnessKind::RecognizedSecret(id) => format!(
+					"linked via {term}, which {} confirms",
+					crate::primitive::primitive_name(id)
+				),
+				_ => format!("linked via {term}"),
+			};
+			return format!("through {} and {}, {relation}", render(a), render(b));
+		}
 		match self.kind {
 			LinkWitnessKind::SharedSecret => format!("via {term}"),
 			LinkWitnessKind::IdentifyingCheck(id) => format!(
@@ -194,6 +226,7 @@ fn witness_identifying_check(
 	Some(LinkWitness {
 		kind: LinkWitnessKind::IdentifyingCheck(check.id),
 		value: identifier,
+		components: None,
 	})
 }
 
@@ -209,6 +242,7 @@ fn witness_shared_secret(
 		Some(LinkWitness {
 			kind: LinkWitnessKind::SharedSecret,
 			value: w.clone(),
+			components: None,
 		})
 	};
 	if let (Some(a_leaves), Some(b_leaves)) = (&a_leaves, &b_leaves) {
@@ -308,6 +342,7 @@ fn witness_recognized_secret(
 			return Some(LinkWitness {
 				kind: LinkWitnessKind::RecognizedSecret(*id),
 				value: w.clone(),
+				components: None,
 			});
 		}
 	}
@@ -484,6 +519,7 @@ fn witness_observed_equality(
 	Some(LinkWitness {
 		kind: LinkWitnessKind::ObservedEquality,
 		value: av.clone(),
+		components: None,
 	})
 }
 

@@ -103,11 +103,12 @@ fn learn_in(
 	value: &Value,
 	record: &Arc<MutationRecord>,
 	derivation: DerivationRecord,
-	worlds: Option<Vec<Constraint>>,
+	worlds: Option<Worlds>,
 	message: impl FnOnce() -> String,
 ) -> bool {
-	let worlds = worlds
-		.unwrap_or_else(|| crate::world::derived_worlds(km, ps, attacker, value, &derivation));
+	let worlds = worlds.unwrap_or_else(|| {
+		crate::world::derived_worlds(km, ps, &ctx.attacker_snapshot(), value, &derivation)
+	});
 	if worlds.is_empty() {
 		return false;
 	}
@@ -1361,7 +1362,7 @@ fn rule_equivalize(
 				.worlds
 				.get(idx.get())
 				.cloned()
-				.unwrap_or_else(|| vec![Vec::new()]),
+				.unwrap_or_else(Worlds::any),
 			_ => crate::world::state_world(km, ps, attacker, slot),
 		};
 		found |= learn_in(

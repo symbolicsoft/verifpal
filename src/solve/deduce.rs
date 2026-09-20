@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use crate::equivalence::equivalent_primitives;
-use crate::hashing::collect_subterm_hashes;
+use crate::hashing::collect_subterms;
 use crate::primitive::*;
 use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
@@ -23,6 +23,54 @@ struct SolvedGoal {
 	solutions: Vec<Substitution>,
 }
 
+fn combination_candidates(
+	partial: &Value,
+	rule: &CombineRule,
+	candidate: &Substitution,
+) -> Vec<Substitution> {
+	let mut out = vec![candidate.clone()];
+	for binding in &rule.bindings {
+		out = out
+			.into_iter()
+			.flat_map(|bound| {
+				let value = apply(partial, &bound);
+				let Some(p) = value.as_primitive() else {
+					return Vec::new();
+				};
+				let Some(list) = p.arguments.get(binding.list) else {
+					return Vec::new();
+				};
+				if as_var(list).is_some() {
+					return vec![bound];
+				}
+				let Some(argument) = p.arguments.get(binding.argument) else {
+					return Vec::new();
+				};
+				let mut candidates: Vec<_> = crate::theory::combine_binding_values(p, binding)
+					.into_iter()
+					.flat_map(|nonce| match_values(argument, &nonce, &bound).collect::<Vec<_>>())
+					.collect();
+				let nil = value_nil();
+				let owned = Value::primitive(binding.wrapper, vec![nil.clone()], 0);
+				let mut pending = vec![list];
+				while let Some(entry) = pending.pop() {
+					if as_var(entry).is_some() {
+						for committed in match_values(entry, &owned, &bound) {
+							candidates.extend(match_values(argument, &nil, &committed));
+						}
+					} else if let Value::Primitive(sequence) = entry
+						&& sequence.id == binding.sequence
+					{
+						pending.extend(sequence.arguments.iter().rev());
+					}
+				}
+				candidates
+			})
+			.collect();
+	}
+	out
+}
+
 type GoalMemo = IdMap<(u64, u64), Vec<SolvedGoal>>;
 type DecompositionMemo = IdMap<usize, (Arc<Primitive>, Vec<Substitution>)>;
 
@@ -35,10 +83,11 @@ pub(crate) struct Deducer<'a> {
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
-	basis: Arc<IdSet<u64>>,
+	basis: Arc<crate::hashing::TermSet>,
 	by_head: Arc<IdMap<(PrimitiveId, usize), Vec<usize>>>,
 	fresh: Cell<u32>,
 	fresh_end: u32,
+	truncated: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<'a> Deducer<'a> {
@@ -55,9 +104,9 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 	) -> Self {
-		let mut known = IdSet::default();
+		let mut known = crate::hashing::TermSet::default();
 		for held in attacker.known.iter() {
-			collect_subterm_hashes(held, &mut known);
+			collect_subterms(held, &mut known);
 		}
 		Self::with_basis(ps, attacker, sym, known, Substitution::default())
 	}
@@ -66,11 +115,11 @@ impl<'a> Deducer<'a> {
 		ps: &PrincipalState,
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
-		mut basis: IdSet<u64>,
+		mut basis: crate::hashing::TermSet,
 		honest: Substitution,
 	) -> Self {
 		for term in &sym.terms {
-			collect_subterm_hashes(term, &mut basis);
+			collect_subterms(term, &mut basis);
 		}
 		let (fresh, fresh_end) = super::vars::free_lane_bounds(0);
 		let mut wire_terms = Vec::new();
@@ -117,6 +166,7 @@ impl<'a> Deducer<'a> {
 			cycles_cut: Cell::new(0),
 			fresh: Cell::new(fresh),
 			fresh_end,
+			truncated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 		}
 	}
 
@@ -128,6 +178,7 @@ impl<'a> Deducer<'a> {
 		let honest = Arc::clone(&self.honest);
 		let basis = Arc::clone(&self.basis);
 		let by_head = Arc::clone(&self.by_head);
+		let truncated = Arc::clone(&self.truncated);
 		move |lane| {
 			let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
 			Self {
@@ -143,8 +194,13 @@ impl<'a> Deducer<'a> {
 				cycles_cut: Cell::new(0),
 				fresh: Cell::new(fresh),
 				fresh_end,
+				truncated: Arc::clone(&truncated),
 			}
 		}
+	}
+
+	pub(crate) fn truncation_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+		Arc::clone(&self.truncated)
 	}
 
 	pub(crate) fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -155,6 +211,8 @@ impl<'a> Deducer<'a> {
 
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		if self.fresh.get() >= self.fresh_end {
+			self.truncated
+				.store(true, std::sync::atomic::Ordering::Relaxed);
 			return;
 		}
 		let g = crate::theory::reduce_once(&apply(goal, s));
@@ -211,6 +269,8 @@ impl<'a> Deducer<'a> {
 	fn fresh_var(&self) -> Value {
 		let n = self.fresh.get();
 		if n >= self.fresh_end {
+			self.truncated
+				.store(true, std::sync::atomic::Ordering::Relaxed);
 			return super::vars::free_var(self.fresh_end.saturating_sub(1));
 		}
 		self.fresh.set(n + 1);
@@ -390,10 +450,70 @@ impl<'a> Deducer<'a> {
 						None => self.fresh_var(),
 					})
 					.collect();
+				if !rule.bindings.is_empty() {
+					let mut shaped = Vec::new();
+					for term in self.attacker.known.iter().chain(self.wire_terms.iter()) {
+						let Some(partial) = term.as_primitive() else {
+							continue;
+						};
+						if partial.id != rule.partial {
+							continue;
+						}
+						let Some(Value::Primitive(share)) = partial.arguments.get(rule.share)
+						else {
+							continue;
+						};
+						if share.id != split.id
+							|| share.threshold != split.threshold
+							|| share.instance != split.instance
+						{
+							continue;
+						}
+						let Some(source_secret) = share.arguments.get(reveal) else {
+							continue;
+						};
+						let mut choices: Vec<_> = frontier
+							.iter()
+							.flat_map(|(candidate, _)| unifiers(secret, source_secret, candidate))
+							.collect();
+						for (field, variable) in rule.agree.iter().zip(&shared) {
+							let Some(value) = partial.arguments.get(*field) else {
+								choices.clear();
+								break;
+							};
+							choices = choices
+								.iter()
+								.flat_map(|candidate| unifiers(variable, value, candidate))
+								.collect();
+						}
+						shaped.extend(choices);
+					}
+					frontier.extend(dedupe(shaped).into_iter().map(|candidate| (candidate, 0)));
+					frontier = dedupe_counts(frontier);
+				}
 				let threshold = split.threshold;
 				let mut done: Vec<Substitution> = Vec::new();
-				for output in 0..MAX_SHARES {
-					let after = MAX_SHARES - output - 1;
+				let mut outputs: Vec<_> = (0..MAX_SHARES).collect();
+				if !rule.bindings.is_empty() {
+					outputs.sort_by_key(|&output| {
+						!self.attacker.known.iter().any(|known| {
+							let Some(partial) = known.as_primitive() else {
+								return false;
+							};
+							partial.id == rule.partial
+								&& partial
+									.arguments
+									.get(rule.share)
+									.and_then(Value::as_primitive)
+									.is_some_and(|share| {
+										share.output == output
+											&& equivalent_primitives(share, &split, false)
+									})
+						})
+					});
+				}
+				for (position, output) in outputs.into_iter().enumerate() {
+					let after = MAX_SHARES - position - 1;
 					let share = Value::Primitive(Arc::new(split.with_output(output)));
 					let mut local = Vec::new();
 					let arguments: Vec<Value> = (0..arity)
@@ -418,8 +538,17 @@ impl<'a> Deducer<'a> {
 							next.push((candidate.clone(), *count));
 						}
 						let mut solved = Vec::new();
-						self.solve_into(&partial, candidate, &mut solved);
+						for constrained in combination_candidates(&partial, rule, candidate) {
+							self.solve_into(&partial, &constrained, &mut solved);
+						}
 						for solution in dedupe(solved) {
+							let materialized = apply(&partial, &solution);
+							if !materialized
+								.as_primitive()
+								.is_some_and(|p| crate::theory::combine_bindings_hold(p, rule))
+							{
+								continue;
+							}
 							let solution = super::vars::remove_local_bindings(solution, &local);
 							if count + 1 >= threshold {
 								done.push(solution);
@@ -647,7 +776,7 @@ impl<'a> Deducer<'a> {
 		let Some(var_id) = as_var(from) else {
 			return;
 		};
-		if !self.basis.contains(&goal.hash_value()) {
+		if !self.basis.contains(goal) {
 			crate::reads::basis_miss(goal.hash_value());
 			return;
 		}
@@ -862,7 +991,7 @@ impl<'a> Deducer<'a> {
 					}
 					_ => false,
 				};
-				!constructed || protocol.contains(&self.attacker.known[at].hash_value())
+				!constructed || protocol.contains(&self.attacker.known[at])
 			});
 		}
 		let base = &Substitution::default();
@@ -897,7 +1026,7 @@ impl<'a> Deducer<'a> {
 							continue;
 						}
 						if !refined.arguments.iter().any(contains_var) {
-							if primitive_extract_bypass_key(&refined).is_some_and(|key| {
+							if primitive_extract_check_key(&refined).is_some_and(|key| {
 								crate::theory::obtainable(&key, ps, self.attacker)
 							}) {
 								next.push(candidate);
@@ -930,7 +1059,7 @@ impl<'a> Deducer<'a> {
 				checked.iter().all(|p| {
 					let refined = refine_check(p, candidate);
 					check_passes(&refined)
-						|| primitive_extract_bypass_key(&refined).is_some_and(|key| {
+						|| primitive_extract_check_key(&refined).is_some_and(|key| {
 							contains_var(&key) || crate::theory::obtainable(&key, ps, self.attacker)
 						})
 				})
@@ -1842,6 +1971,57 @@ mod tests {
 	}
 
 	#[test]
+	fn threshold_search_constructs_a_missing_partial_with_a_committed_nonce() {
+		let key = make_private("threshold_bound_key");
+		let message = make_private("threshold_bound_message");
+		let honest_nonce = make_private("threshold_bound_honest_nonce");
+		let owned_nonce = make_private("threshold_bound_owned_nonce");
+		let commitments = Value::primitive(
+			PRIM_CONCAT,
+			vec![
+				Value::primitive(PRIM_PUBKEY, vec![honest_nonce.clone()], 0),
+				Value::primitive(PRIM_PUBKEY, vec![owned_nonce.clone()], 0),
+			],
+			0,
+		);
+		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0);
+		split.threshold = 2;
+		let held = Value::primitive(
+			PRIM_THRESHOLD_SIGN,
+			vec![
+				Value::Primitive(Arc::new(split.with_output(2))),
+				honest_nonce,
+				commitments.clone(),
+				message.clone(),
+			],
+			0,
+		);
+		let attacker = make_attacker_state(vec![
+			held,
+			Value::Primitive(Arc::new(split)),
+			owned_nonce,
+			commitments,
+			message.clone(),
+		]);
+		let ps = make_principal_state("Signer", 1, vec![], vec![]);
+		let sym = SymbolicState {
+			terms: vec![],
+			var_slots: vec![],
+			var_terms: vec![],
+		};
+		let deducer = Deducer::new(&ps, &attacker, &sym);
+		let signature = Primitive::new(PRIM_SIGN, vec![key, message], 0);
+		let mut found = Vec::new();
+		deducer.solve_by_combination(&signature, &Substitution::default(), &mut found);
+		assert!(!found.is_empty());
+		assert!(super::super::validate::derivable(
+			&Value::Primitive(Arc::new(signature)),
+			&ps,
+			&attacker
+		));
+	}
+
+	#[test]
 	fn threshold_search_retains_key_alignments_until_the_message_matches() {
 		let a = make_private("threshold_alignment_a");
 		let b = make_private("threshold_alignment_b");
@@ -1863,7 +2043,7 @@ mod tests {
 					vec![
 						Value::Primitive(Arc::new(split.with_output(output))),
 						value_nil(),
-						value_nil(),
+						Value::primitive(PRIM_PUBKEY, vec![value_nil()], 0),
 						b.clone(),
 					],
 					0,
@@ -1895,6 +2075,19 @@ mod tests {
 		let wanted = super::super::vars::free_var(10000);
 		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0);
 		split.threshold = 8;
+		let commitments = Value::primitive(
+			PRIM_CONCAT,
+			(0..16)
+				.map(|output| {
+					Value::primitive(
+						PRIM_PUBKEY,
+						vec![make_private(&format!("subset_search_nonce_{output}"))],
+						0,
+					)
+				})
+				.collect(),
+			0,
+		);
 		let partials: Vec<_> = (0..16)
 			.map(|output| {
 				Value::primitive(
@@ -1902,7 +2095,7 @@ mod tests {
 					vec![
 						Value::Primitive(Arc::new(split.with_output(output))),
 						make_private(&format!("subset_search_nonce_{output}")),
-						value_nil(),
+						commitments.clone(),
 						message.clone(),
 					],
 					0,
@@ -1931,7 +2124,14 @@ mod tests {
 					unreachable!();
 				};
 				let mut arguments = p.arguments.clone();
-				arguments[2] = make_constant(&format!("subset_commitments_{}", i % 4));
+				arguments[2] = Value::primitive(
+					PRIM_CONCAT,
+					vec![
+						commitments.clone(),
+						make_constant(&format!("subset_commitments_{}", i % 4)),
+					],
+					0,
+				);
 				Value::Primitive(Arc::new(p.with_arguments(arguments)))
 			})
 			.collect();
@@ -1971,6 +2171,11 @@ mod tests {
 				 spilling into another lane's band"
 			);
 		}
+		assert!(
+			deducer
+				.truncation_flag()
+				.load(std::sync::atomic::Ordering::Relaxed)
+		);
 		let goal = Value::primitive(PRIM_ENC, vec![key, second], 0);
 		assert!(
 			deducer.solve(&goal, &Substitution::default()).is_empty(),

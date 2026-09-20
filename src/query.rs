@@ -18,7 +18,7 @@ fn attack_trace(
 	query_index: usize,
 	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
-) -> Narration {
+) -> Option<Narration> {
 	attack_trace_with(ctx, km, ps, query, query_index, target, seed, |_| {
 		Vec::new()
 	})
@@ -34,13 +34,17 @@ fn attack_trace_with(
 	target: impl Fn(&PrincipalState) -> Value,
 	seed: &[(SlotIdx, Value)],
 	prelude: impl Fn(&PrincipalState) -> Vec<crate::narrate::Step>,
-) -> Narration {
+) -> Option<Narration> {
 	if in_minimization() {
-		return Narration::none(target(ps));
+		return Some(Narration::none(target(ps)));
 	}
 	let ambient = ctx.attacker_snapshot();
 	let claimed = target(ps);
 	let witness = minimize_witness(ctx, km, ps, query_index, seed, Some(&claimed), Some(query));
+	if !witness.reproduced || !witness.grounded {
+		ctx.note_query_truncation(Truncation::WitnessValidation, query_index);
+		return None;
+	}
 	#[cfg(test)]
 	ctx.witness_put(
 		query_index,
@@ -54,7 +58,7 @@ fn attack_trace_with(
 				.chain(std::iter::once(&witness.ps))
 				.flat_map(crate::narrate::narrated_installs)
 				.collect(),
-			principal: witness.ps.id,
+			principal: witness.driver,
 			phase: ambient.current_phase,
 			reproduced: witness.reproduced,
 			out_of_order: witness.out_of_order.clone(),
@@ -75,11 +79,12 @@ fn attack_trace_with(
 		steps: &narration.steps,
 		km,
 		ps: &witness.ps,
+		others: &witness.others,
 		attacker: &witness.attacker,
 		target: &target,
 		phase: ambient.current_phase,
 	});
-	narration
+	Some(narration)
 }
 
 fn disclosure_seeds(attacker: &AttackerState, attacker_idx: KnownIdx) -> crate::reexec::Seeds {
@@ -201,7 +206,7 @@ fn query_confidentiality(
 		return Ok(result);
 	};
 	let seed = recorded_mutations(attacker, attacker_idx);
-	let mutated_info = attack_trace(
+	let Some(mutated_info) = attack_trace(
 		ctx,
 		km,
 		ps,
@@ -215,7 +220,9 @@ fn query_confidentiality(
 				.unwrap_or_else(|| resolved_value.clone())
 		},
 		&seed,
-	);
+	) else {
+		return Ok(VerifyResult::new(query, query_index));
+	};
 	result.resolved = true;
 	result.options = options;
 	result.subtype = attacker_supplied(&mutated_info.target, km, ps, slot_idx);
@@ -297,10 +304,7 @@ fn query_authentication(
 	};
 	result.resolved = true;
 	result.options = options;
-	let before = match (&ps.values[index].bypassed, km.slots.get(index)) {
-		(Some(_), Some(slot)) => &slot.initial_value,
-		_ => &ps.values[index].pre_rewrite,
-	};
+	let before = &ps.values[index].pre_rewrite;
 	let prelude = |state: &PrincipalState| {
 		if sender == ATTACKER_ID {
 			return Vec::new();
@@ -316,7 +320,7 @@ fn query_authentication(
 			slot: SlotIdx(_idx),
 		}]
 	};
-	let mutated_info = attack_trace_with(
+	let Some(mutated_info) = attack_trace_with(
 		ctx,
 		km,
 		ps,
@@ -325,7 +329,9 @@ fn query_authentication(
 		|_| before.clone(),
 		&[],
 		prelude,
-	);
+	) else {
+		return Ok(VerifyResult::new(query, query_index));
+	};
 	let witnessed = mutated_info.state().and_then(|w| {
 		let used = query_find_constant_usage_indices(&c, km, w)?;
 		let &i = used.first()?;
@@ -416,11 +422,20 @@ fn query_authentication_get_pass_indices(
 	let sender = ps.values[idx].provenance.sender;
 	let mut sibling_replay = false;
 	if sender == ATTACKER_ID {
+		if delivery_is_guarded(km, idx, query.message.sender, ps.id)
+			&& (session_sibling_replay(&c, &ps.values[idx].value, km)
+				|| copy_sibling_replay(&c, &ps.values[idx].value, km))
+		{
+			return Ok((vec![], query.message.sender, c, false));
+		}
 		let v = &ps.values[idx].original;
 		if v.equivalent(&ps.values[idx].value, true) {
 			return Ok((vec![], sender, c, false));
 		}
-		sibling_replay = session_sibling_replay(&c, &ps.values[idx].value, km);
+		sibling_replay = sibling_accepts(ctx, query, km, ps, attacker, &km.session_siblings);
+		if !sibling_replay {
+			sibling_replay = sibling_accepts(ctx, query, km, ps, attacker, &km.copy_siblings);
+		}
 		if !sibling_replay
 			&& crate::agreement::emitted_by_matching_run(
 				ctx,
@@ -432,15 +447,154 @@ fn query_authentication_get_pass_indices(
 			) {
 			return Ok((vec![], query.message.sender, c, false));
 		}
-		if !sibling_replay {
-			sibling_replay = copy_sibling_replay(&c, &ps.values[idx].value, km);
-		}
-		if sibling_replay && delivery_is_guarded(km, idx, query.message.sender, ps.id) {
-			return Ok((vec![], query.message.sender, c, false));
-		}
 	}
 	let indices = query_find_constant_usage_indices(&c, km, ps).unwrap_or_default();
 	Ok((indices, sender, c, sibling_replay))
+}
+
+fn sibling_accepts(
+	ctx: &VerifyContext,
+	query: &Query,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	groups: &IdMap<ValueId, std::sync::Arc<Vec<ValueId>>>,
+) -> bool {
+	let Ok(constant) = query.message.constant() else {
+		return false;
+	};
+	let Some(slot) = ps.index_of(constant) else {
+		return false;
+	};
+	let Some(group) = groups.get(&constant.id) else {
+		return false;
+	};
+	let used = reduce_once(&ps.values[slot].value);
+	let candidates: Vec<_> = group
+		.iter()
+		.filter(|&&id| id != constant.id)
+		.filter_map(|id| {
+			let &at = km.index.get(id)?;
+			reduce_once(&resolve_trace_constant(&km.slots[at].constant, km))
+				.equivalent(&used, true)
+				.then_some(at)
+		})
+		.collect();
+	if candidates.is_empty() {
+		return false;
+	}
+	let mut needs = crate::deduction::needs_of(km, attacker, &used);
+	for (at, sv) in ps.values.iter().enumerate() {
+		if !sv.provenance.attacker_tainted {
+			continue;
+		}
+		let Some(meta) = ps.meta.get(at) else {
+			continue;
+		};
+		for &recipient in &meta.wire {
+			if meta.creator == recipient || (sv.addressed && recipient != ps.id) {
+				continue;
+			}
+			needs.push((recipient, SlotIdx(at), sv.pre_rewrite.clone()));
+		}
+	}
+	let mut seeds: crate::reexec::Seeds = Vec::new();
+	for (who, at, value) in needs {
+		if !seeds.iter().any(|(id, _)| *id == who) {
+			seeds.push((who, Vec::new()));
+		}
+		let mine = &mut seeds.iter_mut().find(|(id, _)| *id == who).unwrap().1;
+		if let Some((_, prior)) = mine.iter().find(|(slot, _)| *slot == at) {
+			if !prior.equivalent(&value, true) {
+				return false;
+			}
+		} else {
+			mine.push((at, value));
+		}
+	}
+	let Some(executed) = ctx.replayed(km, &seeds, attacker) else {
+		return false;
+	};
+	let first = executed
+		.iter()
+		.find(|state| state.id == ps.id)
+		.unwrap_or(ps);
+	let Some(first_uses) =
+		query_find_constant_usage_indices(constant, km, first).filter(|uses| !uses.is_empty())
+	else {
+		return false;
+	};
+	if !first
+		.values
+		.get(slot)
+		.is_some_and(|sv| reduce_once(&sv.value).equivalent(&used, true))
+	{
+		return false;
+	}
+	for at in candidates {
+		let sibling = &km.slots[at];
+		for event in &sibling.sent_by {
+			if event.phase > attacker.current_phase
+				|| event.recipient == ps.id
+				|| !km.same_actor(event.recipient, ps.id)
+				|| !km.interchangeable_for(event.sender, query.message.sender, at)
+			{
+				continue;
+			}
+			let Some(pristine) = ctx
+				.principal_states()
+				.iter()
+				.find(|state| state.id == event.recipient)
+			else {
+				continue;
+			};
+			let honest;
+			let second = if let Some(state) =
+				executed.iter().find(|state| state.id == event.recipient)
+			{
+				state
+			} else {
+				let Ok(state) =
+					crate::reexec::reexecute(&pristine.clone_for_depth(true), &[], attacker, km)
+				else {
+					continue;
+				};
+				honest = state;
+				&honest
+			};
+			let Some(second_uses) =
+				query_find_constant_usage_indices(&sibling.constant, km, second)
+					.filter(|uses| !uses.is_empty())
+			else {
+				continue;
+			};
+			if second.slot_starved(at)
+				|| !second
+					.values
+					.get(at)
+					.is_some_and(|sv| reduce_once(&sv.value).equivalent(&used, true))
+				|| !crate::reexec::message_available(km, second, &executed, event, at)
+			{
+				continue;
+			}
+			let first_world = crate::world::merge_all(
+				&first_uses
+					.iter()
+					.map(|&used| crate::world::state_world(km, first, attacker, used))
+					.collect::<Vec<_>>(),
+			);
+			let second_world = crate::world::merge_all(
+				&second_uses
+					.iter()
+					.map(|&used| crate::world::state_world(km, second, attacker, used))
+					.collect::<Vec<_>>(),
+			);
+			if !first_world.intersect(&second_world).is_empty() {
+				return true;
+			}
+		}
+	}
+	false
 }
 
 fn delivery_is_guarded(
@@ -566,7 +720,7 @@ fn query_authentication_handle_pass(
 		.unwrap_or_else(|| ps.resolve_constant(c, true).0);
 	let summary = match failure {
 		AuthFailure::Replayed => format!(
-			"{} ({}), which {} sent in another session and not in this one, is successfully \
+			"{} ({}), which {} sent in another run and not in this one, is successfully \
 			 used in {} within {}'s state: {} sent it once, {} accepts it twice, so agreement \
 			 is not injective.",
 			c,
@@ -640,7 +794,7 @@ fn query_freshness(
 			terms: leaves.iter().map(|c| Value::Constant(c.clone())).collect(),
 		}]
 	};
-	let mutated_info = attack_trace_with(
+	let Some(mutated_info) = attack_trace_with(
 		ctx,
 		km,
 		ps,
@@ -649,7 +803,9 @@ fn query_freshness(
 		|_| resolved.clone(),
 		&[],
 		prelude,
-	);
+	) else {
+		return Ok(VerifyResult::new(query, query_index));
+	};
 	result.resolved = true;
 	result.options = options;
 	result.set_summary(
@@ -684,7 +840,7 @@ fn query_unlinkability(
 			let Some(witness) = crate::unlink::find_link_witness(a, b, km, ps, attacker) else {
 				continue;
 			};
-			let mutated_info = attack_trace(
+			let Some(mutated_info) = attack_trace(
 				ctx,
 				km,
 				ps,
@@ -692,8 +848,10 @@ fn query_unlinkability(
 				query_index,
 				|_| witness.value.clone(),
 				&[],
-			);
-			let clause = witness.describe(&mutated_info.term_excluding(&witness.value, &[]));
+			) else {
+				continue;
+			};
+			let clause = witness.describe(|value| mutated_info.term_excluding(value, &[]));
 			result.resolved = true;
 			result.options = options;
 			result.set_summary(
@@ -773,7 +931,7 @@ fn query_equivalence(
 			})
 			.collect()
 	};
-	let mutated_info = attack_trace_with(
+	let Some(mutated_info) = attack_trace_with(
 		ctx,
 		km,
 		ps,
@@ -782,7 +940,9 @@ fn query_equivalence(
 		|_| empty.clone(),
 		&[],
 		prelude,
-	);
+	) else {
+		return Ok(VerifyResult::new(query, query_index));
+	};
 	result.resolved = true;
 	result.options = options;
 	result.set_summary(
@@ -821,7 +981,8 @@ fn preconditions_reached_in(
 	let mut options = Vec::with_capacity(query.options.len());
 	for option in &query.options {
 		let constant = option.message.constant().ok()?;
-		let slot = km.index_of(constant).and_then(|at| km.slots.get(at))?;
+		let at = km.index_of(constant)?;
+		let slot = km.slots.get(at)?;
 		let sender_state = witness
 			.and_then(|states| {
 				states
@@ -835,6 +996,7 @@ fn preconditions_reached_in(
 				&& event.recipient == option.message.recipient
 				&& ps.event_reached(km, event.sender, event.declared_at)
 				&& sender_state.event_reached(km, event.sender, event.declared_at)
+				&& crate::reexec::message_available(km, ps, witness.unwrap_or(&[]), event, at)
 		});
 		if !reached {
 			return None;
@@ -852,6 +1014,198 @@ fn preconditions_reached_in(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_sibling_value_requires_two_reached_acceptances() {
+		let source = "attacker[active]\nprincipal Carol[\ngenerates gate\n]\nCarol -> Bob: gate\nprincipal Alice[\nknows private sk\npk = PUBKEY(sk)\ngenerates m\nsig = SIGN(sk, m)\n]\nAlice -> Bob: [pk], m, sig\nprincipal Bob[\n_ = ASSERT(gate, nil)?\n_ = SIGNVERIF(pk, m, sig)?\n]\nqueries[\nauthentication? Alice -> Bob: sig\n]\n";
+		let model = crate::parser::parse_string("two_acceptances.vp", source).unwrap();
+		let expanded = crate::sessions::expand_sessions(&model, 2, &[]).unwrap();
+		let (mut km, states) = crate::sanity::sanity(&expanded.model).unwrap();
+		km.session_siblings = expanded.siblings;
+		for (clone, original) in expanded.principal_clones {
+			km.actors.insert(clone, original);
+			km.interchangeable.insert(clone, original);
+		}
+		let ctx = VerifyContext::new(
+			&expanded.model,
+			&states,
+			expanded.query_variants,
+			2,
+			None,
+			Vec::new(),
+		);
+		let first = states
+			.iter()
+			.find(|state| state.name == "Bob")
+			.unwrap()
+			.clone_for_depth(true);
+		crate::verify::attacker_seed_phase(&ctx, &km, &first, 0).unwrap();
+		let attacker = ctx.attacker_snapshot();
+		let slot = |name: &str| {
+			SlotIdx(
+				km.slots
+					.iter()
+					.position(|slot| slot.constant.name.as_ref() == name)
+					.unwrap(),
+			)
+		};
+		let value = |name: &str| resolve_trace_constant(&km.slots[slot(name).get()].constant, &km);
+		let mut installs = vec![
+			(slot("gate"), value_nil()),
+			(slot("m"), value("m#2")),
+			(slot("sig"), value("sig#2")),
+		];
+		let one = crate::reexec::reexecute(&first, &installs, &attacker, &km).unwrap();
+		let query = &expanded.model.queries[0];
+		assert!(
+			!query_find_constant_usage_indices(query.message.constant().unwrap(), &km, &one)
+				.unwrap()
+				.is_empty()
+		);
+		assert!(session_sibling_replay(
+			query.message.constant().unwrap(),
+			&one.values[slot("sig").get()].value,
+			&km
+		));
+		assert!(!sibling_accepts(
+			&ctx,
+			query,
+			&km,
+			&one,
+			&attacker,
+			&km.session_siblings
+		));
+		installs.push((slot("gate#2"), value_nil()));
+		let two = crate::reexec::reexecute(&first, &installs, &attacker, &km).unwrap();
+		assert!(sibling_accepts(
+			&ctx,
+			query,
+			&km,
+			&two,
+			&attacker,
+			&km.session_siblings
+		));
+	}
+
+	#[test]
+	fn key_confirmation_needs_two_compatible_accepting_prefixes() {
+		let source = std::fs::read_to_string("examples/test/dh_key_confirmation.vp").unwrap();
+		let confirmation = "\topened = AEAD_DEC(k_bob, n_sealed, sealed, nil)?\n\t_ = HASH(opened)";
+		assert!(source.contains(confirmation));
+		for (source, duplicate) in [
+			(source.clone(), false),
+			(source.replace(confirmation, ""), true),
+		] {
+			let model = crate::parser::parse_string("key_confirmation", &source).unwrap();
+			let ctx = crate::verify::analyze_sessions(&model, 2).unwrap();
+			let result = &ctx.results_get()[1];
+			assert_eq!(result.resolved, duplicate);
+			assert!(result.envelope.truncations.is_empty());
+		}
+	}
+
+	#[test]
+	fn an_oracle_can_keep_an_unguarded_key_honest() {
+		let mut missed = Vec::new();
+		for (name, guarded, open, query) in [
+			(
+				"spore_ns_pk",
+				"Mallory -> Alice: [gm]",
+				"Mallory -> Alice: gm",
+				0,
+			),
+			(
+				"threshold_sign_forgeable_partial",
+				"Dealer -> Bob: [pk]",
+				"Dealer -> Bob: pk",
+				2,
+			),
+			(
+				"threshold_sign_leaked_share_and_oracle",
+				"Dealer -> Alice: [pk]",
+				"Dealer -> Alice: pk",
+				2,
+			),
+			(
+				"threshold_sign_three_of_five_two_oracles",
+				"Dealer -> Alice: [pk]",
+				"Dealer -> Alice: pk",
+				2,
+			),
+		] {
+			let source = std::fs::read_to_string(format!("examples/test/{name}.vp")).unwrap();
+			assert!(source.contains(guarded));
+			let source = source.replace(guarded, open);
+			let model = crate::parser::parse_string(name, &source).unwrap();
+			let ctx = crate::verify::analyze_sessions(&model, 1).unwrap();
+			if !ctx.results_get()[query].resolved {
+				missed.push(name);
+			}
+		}
+		assert!(
+			missed.is_empty(),
+			"unguarded oracle inputs lose attacks in {missed:?}"
+		);
+	}
+
+	#[test]
+	fn decryption_oracles_survive_removing_each_guard() {
+		let source = include_str!("../examples/test/exa.vp");
+		let mut missed = Vec::new();
+		for slot in ["n_msg2", "msg2", "msg4"] {
+			let source = source.replace(&format!("[{slot}]"), slot);
+			let model = crate::parser::parse_string("exa_unguarded", &source).unwrap();
+			let ctx = crate::verify::analyze_sessions(&model, 1).unwrap();
+			if !ctx.results_get()[0].resolved {
+				missed.push(slot);
+			}
+		}
+		assert!(missed.is_empty(), "unguarding loses the oracle: {missed:?}");
+	}
+
+	#[test]
+	fn guarding_the_parallel_role_removes_its_one_session_oracle() {
+		let source = include_str!("../examples/test/woo_lam_parallel_role.vp").replace(
+			"Carol -> BobClient: challenge",
+			"Carol -> BobClient: [challenge]",
+		);
+		let model = crate::parser::parse_string("guarded_parallel_role.vp", &source).unwrap();
+		for (sessions, expected) in [(1, false), (2, true)] {
+			let ctx = crate::verify::analyze_sessions(&model, sessions).unwrap();
+			let results = ctx.results_get();
+			assert_eq!(results[0].resolved, expected, "{sessions} sessions");
+			assert!(results[0].resolved || results[0].envelope.exhausted());
+		}
+	}
+
+	#[test]
+	fn an_unreproduced_claim_keeps_searching_instead_of_recording_an_attack() {
+		let source = "attacker[passive]\nprincipal Alice[\nknows private unreported\n]\nqueries[\nconfidentiality? unreported\n]\n";
+		let model = crate::parser::parse_string("unconfirmed.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx = VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let mut state = states[0].clone_for_depth(true);
+		state.resolve_all_values().unwrap();
+		let target = crate::testutil::trace_constant(&km, "unreported");
+		assert!(
+			attack_trace(
+				&ctx,
+				&km,
+				&state,
+				&model.queries[0],
+				0,
+				|_| target.clone(),
+				&[]
+			)
+			.is_none()
+		);
+		assert!(!ctx.query_is_resolved(0));
+		ctx.finalize_envelopes();
+		assert_eq!(
+			ctx.results_get()[0].envelope.truncations,
+			vec![Truncation::WitnessValidation]
+		);
+	}
 
 	#[test]
 	fn duplicate_notices_belong_only_to_recorded_acceptances() {
@@ -1393,15 +1747,18 @@ mod tcb_tests {
 			!installs.is_empty(),
 			"reexec.rs must define `install_forwarded`"
 		);
-		for forbidden in ["provenance.sender", "provenance.creator"] {
-			assert!(
-				body_hits(&installs, forbidden).is_empty(),
-				"an honest principal really did send this value, so `install_forwarded` \
-				 must leave `{forbidden}` alone. Attributing a forwarded emission to the \
-				 attacker would turn every carried consequence into an authentication \
-				 failure against a sender that did exactly what the protocol says"
-			);
-		}
+		assert!(
+			body_hits(&installs, "provenance.creator").is_empty(),
+			"`install_forwarded` must preserve the creator of a locally computed reply"
+		);
+		assert!(
+			!body_hits(
+				&chooses,
+				"source.values[at].provenance.sender == ATTACKER_ID"
+			)
+			.is_empty()
+		);
+		assert!(!body_hits(&installs, "if authored").is_empty());
 		assert!(
 			!body_hits(&installs, "attacker_tainted = true").is_empty(),
 			"a forwarded slot is still a precondition of whatever is learned downstream \

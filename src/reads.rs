@@ -8,7 +8,7 @@ use crate::types::*;
 #[derive(Clone, Default)]
 pub(crate) struct Reads {
 	misses: IdSet<u64>,
-	patterns: IdMap<u64, Value>,
+	patterns: crate::hashing::TermSet,
 	heads: IdSet<(PrimitiveId, usize)>,
 	ids: IdSet<PrimitiveId>,
 	basis: IdSet<u64>,
@@ -48,10 +48,7 @@ pub(crate) fn head(id: PrimitiveId, arity: usize) {
 
 pub(crate) fn pattern(pattern: &Value) {
 	note(|reads| {
-		reads
-			.patterns
-			.entry(pattern.hash_value())
-			.or_insert_with(|| pattern.clone());
+		reads.patterns.insert(pattern.clone());
 	});
 }
 
@@ -78,7 +75,7 @@ pub(crate) fn absorb(other: Reads) {
 impl Reads {
 	pub(crate) fn merge(&mut self, other: Reads) {
 		self.misses.extend(other.misses);
-		self.patterns.extend(other.patterns);
+		self.patterns.extend(other.patterns.iter().cloned());
 		self.heads.extend(other.heads);
 		self.ids.extend(other.ids);
 		self.basis.extend(other.basis);
@@ -89,12 +86,12 @@ impl Reads {
 		&self,
 		attacker: &AttackerState,
 		since: usize,
-		protocol: &IdSet<u64>,
+		protocol: &crate::hashing::TermSet,
 	) -> bool {
 		attacker.known.get(since..).is_some_and(|learned| {
 			learned.iter().all(|v| {
 				let hash = v.hash_value();
-				if self.misses.contains(&hash) || (self.protocol && protocol.contains(&hash)) {
+				if self.misses.contains(&hash) || (self.protocol && protocol.contains(v)) {
 					return false;
 				}
 				if let Value::Primitive(p) = v
@@ -102,7 +99,7 @@ impl Reads {
 				{
 					return false;
 				}
-				if self.patterns.values().any(|pattern| {
+				if self.patterns.iter().any(|pattern| {
 					crate::solve::matching::match_values(pattern, v, &Default::default())
 						.next()
 						.is_some()
@@ -127,7 +124,7 @@ mod tests {
 		let b = make_constant("reads_b");
 		let hashed = make_primitive(crate::primitive::PRIM_HASH, vec![a.clone()], 0);
 		let mac = make_primitive(crate::primitive::PRIM_MAC, vec![a.clone(), b.clone()], 0);
-		let basis_terms: IdSet<u64> = [mac.hash_value()].into_iter().collect();
+		let basis_terms: crate::hashing::TermSet = [mac.clone()].into_iter().collect();
 		let (_, reads) = observe(|| {
 			miss(b.hash_value());
 			head(crate::primitive::PRIM_HASH, 1);

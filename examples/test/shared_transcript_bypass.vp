@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c0. Replacing seed makes Bob check a signature under a new
-// public transcript key. Testing that key must walk its shared graph once;
-// bypassing the check reveals nothing about the unrelated private secret.
+//
+// Expected: c0. Replacing seed changes the signature verification key.
+// Constructibility checks traverse the shared transcript graph without
+// disclosing the unrelated private secret.
 
 attacker[active]
 

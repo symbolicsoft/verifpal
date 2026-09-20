@@ -9,8 +9,9 @@ principal Dealer[
 	key = HASH(root, DH_KEX(PUBKEY(a), b))
 	s1, s2 = THRESHOLD_SPLIT[2](key)
 	generates n1, n2
-	p1 = THRESHOLD_SIGN(s1, n1, nil, b)
-	p2 = THRESHOLD_SIGN(s2, n2, nil, b)
+	cl = CONCAT(PUBKEY(n1), PUBKEY(n2))
+	p1 = THRESHOLD_SIGN(s1, n1, cl, b)
+	p2 = THRESHOLD_SIGN(s2, n2, cl, b)
 ]
 Dealer -> Carol: p1, p2
 principal Alice[

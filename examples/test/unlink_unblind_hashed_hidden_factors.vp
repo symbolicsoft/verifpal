@@ -1,0 +1,48 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+// Expected: u0 at one and two sessions.
+// The public blinded signatures identify their signing key, but hidden
+// blinding factors prevent tying them to either published hash.
+
+attacker[passive]
+
+principal Signer[
+	generates sk
+	pk = PUBKEY(sk)
+]
+
+Signer -> Alice: [pk]
+
+principal Alice[
+	knows public m1, m2
+	generates r1, r2
+	b1 = BLIND(r1, m1)
+	b2 = BLIND(r2, m2)
+]
+
+Alice -> Signer: b1, b2
+
+principal Signer[
+	sb1 = SIGN(sk, b1)
+	sb2 = SIGN(sk, b2)
+]
+
+Signer -> Alice: sb1, sb2
+
+principal Alice[
+	sig1 = UNBLIND(r1, m1, sb1)
+	sig2 = UNBLIND(r2, m2, sb2)
+	t1 = HASH(sig1)
+	t2 = HASH(sig2)
+]
+
+Alice -> Bob: pk, b1, b2, sb1, sb2, t1, t2
+
+principal Bob[
+	_ = HASH(t1, t2)
+]
+
+queries[
+	unlinkability? t1, t2
+]

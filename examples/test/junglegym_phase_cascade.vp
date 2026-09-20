@@ -17,13 +17,8 @@
 //            0, stays authentic: a capability arriving later than the message
 //            it would forge is no capability at all.
 //
-// Two modelling constraints shape this. The late authenticator is a MAC and
-// not a signature, because a signature needs a verification key on the wire
-// and try_guard_bypass defeats the guard on it. And both MACs are domain
-// separated by CONCAT'ing epoch or label, because without that the attacker
-// does not need to forge anything -- it simply REPLAYS the phase-0 pair
-// (claim, claim_tag) into the phase-3 slot, which the engine finds and which
-// makes the forgery capability inert.
+// The MACs include distinct epoch or label tags. Without these tags, the
+// phase-0 pair could be replayed into the later exchange without a forgery.
 
 attacker[active]
 

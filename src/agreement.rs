@@ -30,13 +30,12 @@ pub(crate) fn emitted_by_matching_run(
 	let target = reduce_once(&delivered.value);
 	let candidates: Vec<usize> = (0..km.slots.len())
 		.filter(|&j| corresponds(km, j, base, sender, ps.id))
-		.filter(|&j| !pristine_is(km, j, &target))
 		.collect();
 	if candidates.is_empty() || forgeable_without_sender(km, ps, sender, &target, attacker) {
 		return false;
 	}
 	let bound = ctx.term_bound(km);
-	let driving = driving_installs(attacker, &target);
+	let driving = driving_installs(km, attacker, &target);
 	let mut controllables: Vec<(PrincipalId, Controllable)> = Vec::new();
 	candidates.into_iter().any(|j| {
 		let Some(origin) = origin_of(ctx, km, j) else {
@@ -57,6 +56,7 @@ pub(crate) fn emitted_by_matching_run(
 			ctx,
 			km,
 			origin,
+			recipient: ps.id,
 			controllable,
 			attacker,
 			bound,
@@ -80,6 +80,7 @@ struct Emission<'a> {
 	ctx: &'a VerifyContext,
 	km: &'a ProtocolTrace,
 	origin: &'a PrincipalState,
+	recipient: PrincipalId,
 	controllable: &'a Controllable,
 	attacker: &'a AttackerState,
 	bound: &'a TermBound,
@@ -103,9 +104,6 @@ impl Emission<'_> {
 				continue;
 			}
 			installs.push((SlotIdx(at), value));
-		}
-		if installs.is_empty() {
-			return false;
 		}
 		let group = KnowledgeKey::of(self.attacker);
 		let key = self.key(&installs, target);
@@ -172,6 +170,12 @@ impl Emission<'_> {
 			return false;
 		}
 		reduce_once(&out.values[self.j].value).equivalent(target, true)
+			&& self.km.slots[self.j].sent_by.iter().any(|event| {
+				event.phase <= self.attacker.current_phase
+					&& self.km.interchangeable_for(event.sender, origin.id, self.j)
+					&& self.km.same_actor(event.recipient, self.recipient)
+					&& out.event_reached(self.km, event.sender, event.declared_at)
+			})
 	}
 
 	fn key(&self, installs: &[(SlotIdx, Value)], target: &Value) -> EmissionKey {
@@ -183,11 +187,11 @@ impl Emission<'_> {
 				.rotate_left(17)
 				.wrapping_add(value.hash_value());
 		}
-		(self.origin.id, self.j, mixed)
+		(self.origin.id, self.recipient, self.j, mixed)
 	}
 }
 
-type EmissionKey = (PrincipalId, usize, u64);
+type EmissionKey = (PrincipalId, PrincipalId, usize, u64);
 
 struct Emitted {
 	installs: Vec<(SlotIdx, Value)>,
@@ -207,6 +211,7 @@ thread_local! {
 }
 
 fn driving_installs(
+	km: &ProtocolTrace,
 	attacker: &AttackerState,
 	target: &Value,
 ) -> Option<(usize, Vec<(usize, Value)>)> {
@@ -214,10 +219,9 @@ fn driving_installs(
 	let DerivationRecord::Obtained { slot } = attacker.derivation(idx)? else {
 		return None;
 	};
-	let record = attacker.record(idx)?;
-	let diffs: Vec<(usize, Value)> = record
-		.tainted()
-		.map(|diff| (diff.index.get(), diff.value.clone()))
+	let diffs: Vec<(usize, Value)> = crate::deduction::needs_of(km, attacker, target)
+		.into_iter()
+		.map(|(_, at, value)| (at.get(), value))
 		.collect();
 	(!diffs.is_empty()).then_some((slot.get(), diffs))
 }
@@ -287,16 +291,15 @@ fn forgeable_without_sender_uncached(
 	target: &Value,
 	attacker: &AttackerState,
 ) -> bool {
-	let mut keep = crate::reexec::reachable_knowledge(ps, attacker, |_, slot| {
+	let keep = crate::reexec::reachable_knowledge(ps, attacker, |i, slot| {
 		!km.slots.get(slot.get()).is_some_and(|read| {
-			read.constant.declaration == Some(Declaration::Assignment)
-				&& km.interchangeable_with(read.creator, sender)
-				&& run_dependent(km, read)
+			km.interchangeable_for(read.creator, sender, slot.get())
+				&& ((read.constant.declaration == Some(Declaration::Assignment)
+					&& run_dependent(km, read))
+					|| (read.constant.declaration != Some(Declaration::Knows)
+						&& attacker.known[i].equivalent(target, true)))
 		})
 	});
-	if let Some(held) = attacker.knows(target) {
-		keep[held.get()] = false;
-	}
 	let without_sender = attacker.retaining(&keep);
 	let view = without_sender.as_deref().unwrap_or(attacker);
 	crate::solve::validate::derivable(target, ps, view)
@@ -333,12 +336,6 @@ fn corresponds(
 	}
 	slot.sent_by.iter().any(|event| {
 		km.interchangeable_for(event.sender, sender, j) && km.same_actor(event.recipient, recipient)
-	})
-}
-
-fn pristine_is(km: &ProtocolTrace, j: usize, target: &Value) -> bool {
-	km.slots.get(j).is_some_and(|slot| {
-		reduce_once(&resolve_trace_constant(&slot.constant, km)).equivalent(target, true)
 	})
 }
 

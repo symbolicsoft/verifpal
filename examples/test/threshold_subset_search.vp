@@ -9,38 +9,24 @@ principal Dealer[
 	generates k, m
 	pk = PUBKEY(k)
 	s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16 = THRESHOLD_SPLIT[8](k)
-	generates n1
-	p1 = THRESHOLD_SIGN(s1, n1, nil, m)
-	generates n2
-	p2 = THRESHOLD_SIGN(s2, n2, nil, m)
-	generates n3
-	p3 = THRESHOLD_SIGN(s3, n3, nil, m)
-	generates n4
-	p4 = THRESHOLD_SIGN(s4, n4, nil, m)
-	generates n5
-	p5 = THRESHOLD_SIGN(s5, n5, nil, m)
-	generates n6
-	p6 = THRESHOLD_SIGN(s6, n6, nil, m)
-	generates n7
-	p7 = THRESHOLD_SIGN(s7, n7, nil, m)
-	generates n8
-	p8 = THRESHOLD_SIGN(s8, n8, nil, m)
-	generates n9
-	p9 = THRESHOLD_SIGN(s9, n9, nil, m)
-	generates n10
-	p10 = THRESHOLD_SIGN(s10, n10, nil, m)
-	generates n11
-	p11 = THRESHOLD_SIGN(s11, n11, nil, m)
-	generates n12
-	p12 = THRESHOLD_SIGN(s12, n12, nil, m)
-	generates n13
-	p13 = THRESHOLD_SIGN(s13, n13, nil, m)
-	generates n14
-	p14 = THRESHOLD_SIGN(s14, n14, nil, m)
-	generates n15
-	p15 = THRESHOLD_SIGN(s15, n15, nil, m)
-	generates n16
-	p16 = THRESHOLD_SIGN(s16, n16, nil, m)
+	generates n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, n13, n14, n15, n16
+	cl = CONCAT(CONCAT(PUBKEY(n1), PUBKEY(n2), PUBKEY(n3), PUBKEY(n4)), CONCAT(PUBKEY(n5), PUBKEY(n6), PUBKEY(n7), PUBKEY(n8)), CONCAT(PUBKEY(n9), PUBKEY(n10), PUBKEY(n11), PUBKEY(n12)), CONCAT(PUBKEY(n13), PUBKEY(n14), PUBKEY(n15), PUBKEY(n16)))
+	p1 = THRESHOLD_SIGN(s1, n1, cl, m)
+	p2 = THRESHOLD_SIGN(s2, n2, cl, m)
+	p3 = THRESHOLD_SIGN(s3, n3, cl, m)
+	p4 = THRESHOLD_SIGN(s4, n4, cl, m)
+	p5 = THRESHOLD_SIGN(s5, n5, cl, m)
+	p6 = THRESHOLD_SIGN(s6, n6, cl, m)
+	p7 = THRESHOLD_SIGN(s7, n7, cl, m)
+	p8 = THRESHOLD_SIGN(s8, n8, cl, m)
+	p9 = THRESHOLD_SIGN(s9, n9, cl, m)
+	p10 = THRESHOLD_SIGN(s10, n10, cl, m)
+	p11 = THRESHOLD_SIGN(s11, n11, cl, m)
+	p12 = THRESHOLD_SIGN(s12, n12, cl, m)
+	p13 = THRESHOLD_SIGN(s13, n13, cl, m)
+	p14 = THRESHOLD_SIGN(s14, n14, cl, m)
+	p15 = THRESHOLD_SIGN(s15, n15, cl, m)
+	p16 = THRESHOLD_SIGN(s16, n16, cl, m)
 	sig = THRESHOLD_JOIN(p1, p2, p3, p4, p5, p6, p7, p8)
 ]
 

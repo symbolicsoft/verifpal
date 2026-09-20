@@ -516,6 +516,8 @@ impl KnownIdx {
 pub type PrincipalId = u8;
 pub type Need = (PrincipalId, SlotIdx, Value);
 pub type Constraint = Vec<Need>;
+
+pub use crate::world::Worlds;
 pub type ValueId = u32;
 pub type PrimitiveId = u8;
 
@@ -959,12 +961,16 @@ pub struct TraceValue {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Truncation {
 	TermDepth,
+	SolverVariables,
+	WitnessValidation,
 }
 
 impl Truncation {
 	pub fn name(self) -> &'static str {
 		match self {
 			Truncation::TermDepth => "term depth",
+			Truncation::SolverVariables => "solver variables",
+			Truncation::WitnessValidation => "witness validation",
 		}
 	}
 }
@@ -1408,7 +1414,6 @@ pub struct Provenance {
 	pub creator: PrincipalId,
 	pub sender: PrincipalId,
 	pub attacker_tainted: bool,
-	pub bypass_injected: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1416,7 +1421,6 @@ pub struct SlotValues {
 	pub value: Value,
 	pub pre_rewrite: Value,
 	pub original: Value,
-	pub bypassed: Option<Value>,
 	pub installed_at: Option<i32>,
 	pub addressed: bool,
 	pub provenance: Provenance,
@@ -1430,15 +1434,8 @@ impl SlotValues {
 		self.value = v;
 	}
 
-	pub fn override_all_bypassed(&mut self, v: Value) {
-		self.pre_rewrite = v.clone();
-		self.value = v.clone();
-		self.bypassed = Some(v);
-		self.provenance.bypass_injected = true;
-	}
-
 	pub fn perceived(&self) -> &Value {
-		self.bypassed.as_ref().unwrap_or(&self.original)
+		&self.original
 	}
 }
 
@@ -1713,7 +1710,7 @@ pub struct AttackerState {
 	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
 	pub alternates: Arc<Vec<Vec<Route>>>,
-	pub worlds: Arc<Vec<Vec<Constraint>>>,
+	pub worlds: Arc<Vec<Worlds>>,
 	pub worlds_epoch: u64,
 	pub reused: Arc<Vec<[Value; 2]>>,
 	pub routes_epoch: u64,

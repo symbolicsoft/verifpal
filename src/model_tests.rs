@@ -883,6 +883,30 @@ fn test_matching_run_halts_before_send() {
 }
 
 #[test]
+fn test_matching_run_unreached_send() {
+	run_model("matching_run_unreached_send.vp", "a1");
+	run_model_sessions("matching_run_unreached_send.vp", 1, "a1");
+}
+
+#[test]
+fn test_matching_run_unreached_send_checked_first() {
+	run_model("matching_run_unreached_send_checked_first.vp", "a1");
+	run_model_sessions("matching_run_unreached_send_checked_first.vp", 1, "a1");
+}
+
+#[test]
+fn test_matching_run_recipient_halt() {
+	run_model("matching_run_recipient_halt.vp", "a1a1");
+	run_model_sessions("matching_run_recipient_halt.vp", 1, "a0a1");
+}
+
+#[test]
+fn test_matching_run_independent_source() {
+	run_model("matching_run_independent_source.vp", "a1");
+	run_model_sessions("matching_run_independent_source.vp", 1, "a1");
+}
+
+#[test]
 fn a_matching_run_of_the_sender_is_not_an_authentication_failure() {
 	let (_, routed) =
 		crate::verify::verify_with_sessions("examples/test/matching_run_routing.vp", 1)
@@ -925,8 +949,8 @@ fn test_spore_ns_pk() {
 
 #[test]
 fn test_scenario_three_peers_multibind() {
-	run_model("scenario_three_peers_multibind.vp", "c1a1");
 	run_model_sessions("scenario_three_peers_multibind.vp", 1, "c1a1");
+	run_model("scenario_three_peers_multibind.vp", "c1a1");
 }
 
 #[test]
@@ -1101,6 +1125,12 @@ fn test_split_delivery_relaying_recipient() {
 fn test_starved_by_a_later_declarer() {
 	run_model_sessions("starved_by_a_later_declarer.vp", 1, "e1");
 	run_model("starved_by_a_later_declarer.vp", "e1");
+}
+
+#[test]
+fn test_precondition_undelivered_input() {
+	run_model("precondition_undelivered_input.vp", "c1c0");
+	run_model_sessions("precondition_undelivered_input.vp", 1, "c1c0");
 }
 
 #[test]
@@ -2534,6 +2564,24 @@ fn test_unlink_hash_chain_direct() {
 	run_model("unlink_hash_chain_direct.vp", "u1");
 	run_model_sessions("unlink_hash_chain_direct.vp", 1, "u1");
 }
+
+#[test]
+fn test_unlink_unblind_hashed_signatures() {
+	run_model("unlink_unblind_hashed_signatures.vp", "u1");
+	run_model_sessions("unlink_unblind_hashed_signatures.vp", 1, "u1");
+}
+
+#[test]
+fn test_unlink_unblind_hashed_distinct_keys() {
+	run_model("unlink_unblind_hashed_distinct_keys.vp", "u0");
+	run_model_sessions("unlink_unblind_hashed_distinct_keys.vp", 1, "u0");
+}
+
+#[test]
+fn test_unlink_unblind_hashed_hidden_factors() {
+	run_model("unlink_unblind_hashed_hidden_factors.vp", "u0");
+	run_model_sessions("unlink_unblind_hashed_hidden_factors.vp", 1, "u0");
+}
 #[test]
 fn test_unlink_signature_in_tuple() {
 	run_model("unlink_signature_in_tuple.vp", "u1u1");
@@ -3277,7 +3325,7 @@ fn test_dh_exponent_reuse() {
 }
 #[test]
 fn test_dh_key_confirmation() {
-	run_model("dh_key_confirmation.vp", "c0a1e1");
+	run_model("dh_key_confirmation.vp", "c0a0e1");
 	run_model_sessions("dh_key_confirmation.vp", 1, "c0a0e1");
 }
 #[test]
@@ -3980,6 +4028,12 @@ fn test_threshold_sign_rogue_coordinator() {
 }
 
 #[test]
+fn test_threshold_sign_guarded_commitments() {
+	run_model("threshold_sign_guarded_commitments.vp", "c0c0a0");
+	run_model_sessions("threshold_sign_guarded_commitments.vp", 1, "c0c0a0");
+}
+
+#[test]
 fn test_threshold_sign_leaked_share_and_oracle() {
 	run_model("threshold_sign_leaked_share_and_oracle.vp", "c0c0a1");
 	run_model_sessions("threshold_sign_leaked_share_and_oracle.vp", 1, "c0c0a1");
@@ -4532,4 +4586,10 @@ fn test_cap_malleable_causal_source() {
 		);
 		run_model_sessions("cap_malleable_early_source.vp", sessions, "a1a1");
 	}
+}
+
+#[test]
+fn test_woo_lam_parallel_role() {
+	run_model("woo_lam_parallel_role.vp", "a1");
+	run_model_sessions("woo_lam_parallel_role.vp", 1, "a1");
 }

@@ -1,0 +1,78 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+// Expected: a1 at one session and at two.
+// Bob also acts as an initiator under the same server key. Feeding that role
+// Bob's challenge yields the server response that Bob expects. The attacker
+// can then replace Alice's ticket with nil while replaying that response.
+// Its value equals the pristine response, but pinning its delivery matters:
+// the server's response to the substituted ticket would decrypt to something
+// else. Bob still reaches the completion message named by the precondition.
+
+attacker[active]
+
+principal Alice[
+	knows public alice_name
+	alice_id = HASH(alice_name)
+	knows private kas
+]
+
+Alice -> Bob: alice_id
+
+principal Bob[
+	knows private kbs
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Carol[
+	generates challenge
+]
+
+Carol -> BobClient: challenge
+
+principal BobClient[
+	knows private kbs
+	oracle = ENC(kbs, challenge)
+]
+
+BobClient -> Carol: oracle
+
+principal Alice[
+	ticket = ENC(kas, nb)
+]
+
+Alice -> Bob: ticket
+
+principal Bob[
+	request = ENC(kbs, CONCAT(alice_id, ticket))
+]
+
+Bob -> Server: request
+
+principal Server[
+	knows private kas, kbs
+	decoded = DEC(kbs, request)
+	claimed, ciphertext = SPLIT(decoded)?
+	nonce = DEC(kas, ciphertext)
+	response = ENC(kbs, nonce)
+]
+
+Server -> Bob: response
+
+principal Bob[
+	returned = DEC(kbs, response)
+	_ = ASSERT(returned, nb)?
+	done = HASH(returned)
+]
+
+Bob -> Observer: done
+
+principal Observer[]
+
+queries[
+	authentication? Alice -> Bob: ticket[
+		precondition[Bob -> Observer: done]
+	]
+]

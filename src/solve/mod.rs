@@ -239,18 +239,28 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 		&& !crate::theory::can_rewrite(p).0
 	{
 		let mut group = Vec::new();
+		let mut direct = Vec::new();
 		let positions = std::iter::once(rule.from).chain(rule.matching.iter().map(|(o, _)| *o));
 		for position in positions {
-			if let Some(Value::Constant(c)) = p.arguments.get(position)
-				&& vars::is_slot_var_id(c.id)
-			{
-				group.push(vars::slot_of_var_id(c.id));
+			if let Some(argument) = p.arguments.get(position) {
+				if let Value::Constant(c) = argument
+					&& vars::is_slot_var_id(c.id)
+				{
+					direct.push(vars::slot_of_var_id(c.id));
+				}
+				for c in argument.constant_leaves() {
+					if vars::is_slot_var_id(c.id) {
+						group.push(vars::slot_of_var_id(c.id));
+					}
+				}
 			}
 		}
-		group.sort();
-		group.dedup();
-		if !group.is_empty() {
-			out.push(group);
+		for mut candidate in [direct, group] {
+			candidate.sort();
+			candidate.dedup();
+			if !candidate.is_empty() {
+				out.push(candidate);
+			}
 		}
 	}
 	for a in &p.arguments {
@@ -316,7 +326,13 @@ fn solve_with(
 			Pass::Targeted => Vec::new(),
 			Pass::Constructed => ctx.take_deferred_replays(ps.id),
 		};
-		crate::reads::observe(|| propose(ctx, km, ps, pass, attacker, sym, deducer, taken))
+		let truncated = deducer.truncation_flag();
+		let proposed =
+			crate::reads::observe(|| propose(ctx, km, ps, pass, attacker, sym, deducer, taken));
+		if truncated.load(std::sync::atomic::Ordering::Relaxed) {
+			ctx.note_truncation(Truncation::SolverVariables);
+		}
+		proposed
 	};
 	let proposed = match recalled {
 		Some(proposed) => {
@@ -708,11 +724,18 @@ fn dispose(
 	let mut seen: Vec<Vec<(usize, Value)>> = Vec::new();
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	let mut checked = 0usize;
-	for proposal in dedupe(proposals) {
+	let variants = dedupe(proposals).into_iter().flat_map(|proposal| {
+		let unpinned = leave_honest_slots(km, ps, sym, proposal.clone());
+		if unpinned.len() == proposal.len() {
+			vec![proposal]
+		} else {
+			vec![unpinned, proposal]
+		}
+	});
+	for proposal in variants {
 		if ctx.all_resolved() || ctx.cancelled() {
 			break;
 		}
-		let proposal = leave_honest_slots(km, ps, sym, proposal);
 		if proposal.is_empty() {
 			continue;
 		}
@@ -744,6 +767,33 @@ fn dispose(
 		});
 		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key, addressed)?;
 		trace_proposal(ps, sym, &proposal, ran, addressed);
+		if ran && !addressed && !ctx.all_resolved() {
+			let flights = ctx
+				.recall_forged_flights(ps.id, key, &seen[at])
+				.unwrap_or_else(|| {
+					let flights = crate::witness::forged_check_flights(ctx, km, ps, &seen[at]);
+					ctx.remember_forged_flights(ps.id, key, &seen[at], flights.clone());
+					flights
+				});
+			for flight in flights {
+				let key = signature_hash(&flight);
+				let bucket = buckets.entry(key).or_default();
+				if bucket
+					.iter()
+					.any(|&i| same_install_signature(&seen[i], &flight))
+				{
+					continue;
+				}
+				bucket.push(seen.len());
+				seen.push(flight.clone());
+				let known = ctx.attacker_snapshot();
+				let ran = validate::validate(ctx, km, ps, guards, &known, &flight, key, false)?;
+				trace_signature(ps, &flight, ran, "forged");
+				if ctx.all_resolved() || ctx.cancelled() {
+					break;
+				}
+			}
+		}
 		if ran || seen[at].len() < 2 {
 			continue;
 		}
@@ -882,7 +932,7 @@ fn aligned_held_free(
 	sym: &SymbolicState,
 	proposals: &[Substitution],
 	attacker: &AttackerState,
-	protocol: &IdSet<u64>,
+	protocol: &crate::hashing::TermSet,
 ) -> Vec<Substitution> {
 	let mut index: IdMap<HeldShape, Vec<usize>> = IdMap::default();
 	crate::reads::protocol();
@@ -892,7 +942,7 @@ fn aligned_held_free(
 		};
 		if crate::primitive::primitive_is_core(h.id)
 			|| h.arguments.len() < 2
-			|| !protocol.contains(&held.hash_value())
+			|| !protocol.contains(held)
 		{
 			continue;
 		}
@@ -1253,7 +1303,7 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	out
 }
 
-fn solve_debug() -> bool {
+pub(crate) fn solve_debug() -> bool {
 	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some())
 }
@@ -1354,7 +1404,7 @@ fn slot_candidates(
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: &Deducer,
-	protocol: &IdSet<u64>,
+	protocol: &crate::hashing::TermSet,
 	honest: &Value,
 	blanket: &Substitution,
 	slot: usize,
@@ -1363,7 +1413,7 @@ fn slot_candidates(
 
 	crate::reads::protocol();
 	for candidate in attacker.known.iter() {
-		if !protocol.contains(&candidate.hash_value()) || candidate.equivalent(honest, true) {
+		if !protocol.contains(candidate) || candidate.equivalent(honest, true) {
 			continue;
 		}
 		let compatible = match (honest, candidate) {

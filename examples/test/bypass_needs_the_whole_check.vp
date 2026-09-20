@@ -1,25 +1,11 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0 — holding the key is not enough to defeat an AEAD check.
-//
-// `k` is leaked, so the attacker holds the decryption key. `ad` is a secret
-// Alice and Bob share and never send, so the attacker cannot produce any
-// AEAD_ENC(k, ., ad): the tag is bound to the associated data. Bob halts on
-// every substitution of `c`, and there is no attack.
-//
-// The guard bypass used to fire on the key alone, and reported a1 with the
-// trace saying "Attacker holds k, so it can supply a value this check
-// accepts" -- which the engine's own derivability judgement would have
-// refused. It now also requires every other position the rewrite rule pins,
-// which for AEAD_DEC is the associated data.
-//
-// bypass_needs_the_whole_check_ad_leaked.vp is the counterweight: leak `ad`
-// too and the forgery really is constructible, so the a1 comes back.
-// The nonce on `n_c` is declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+// Expected: a0. Knowing k does not supply the secret associated data ad. The
+// attacker cannot construct a different ciphertext accepted by Bob. The
+// companion with leaked ad permits a concrete forgery. Declared nonces keep
+// the ciphertext identical across sessions.
+
 attacker[active]
 
 principal Alice[

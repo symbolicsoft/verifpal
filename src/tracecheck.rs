@@ -166,6 +166,7 @@ pub(crate) fn step_problems(
 	steps: &[Step],
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	others: &[PrincipalState],
 	attacker: &AttackerState,
 	phase: i32,
 ) -> Vec<String> {
@@ -226,6 +227,15 @@ pub(crate) fn step_problems(
 			slot,
 		} = step
 		{
+			let Some(ps) = std::iter::once(ps)
+				.chain(others)
+				.find(|state| state.name == **principal)
+			else {
+				problems.push(format!(
+					"step `{primitive}` names an execution of {principal} outside the witness"
+				));
+				continue;
+			};
 			match term {
 				Value::Primitive(p) if p.instance_check && crate::theory::can_rewrite(p).0 => {
 					if **principal != *ps.name {
@@ -264,18 +274,6 @@ pub(crate) fn step_problems(
 				)),
 			}
 			continue;
-		}
-		if let Step::Bypass {
-			check,
-			key_term: Some(key),
-			..
-		} = step && !crate::theory::obtainable(key, ps, attacker)
-		{
-			problems.push(format!(
-				"step `{}` says the attacker holds the key that defeats the check, but that key \
-				 is not obtainable from what it knows",
-				check
-			));
 		}
 		let Step::Derive {
 			target,
@@ -505,6 +503,7 @@ pub(crate) struct TraceUnderTest<'a> {
 	pub steps: &'a [Step],
 	pub km: &'a ProtocolTrace,
 	pub ps: &'a PrincipalState,
+	pub others: &'a [PrincipalState],
 	pub attacker: &'a AttackerState,
 	pub target: &'a Value,
 	pub phase: i32,
@@ -518,12 +517,13 @@ pub(crate) fn assert_trace_is_well_founded(t: &TraceUnderTest<'_>) {
 		steps,
 		km,
 		ps,
+		others,
 		attacker,
 		target,
 		phase,
 	} = *t;
 	let mut problems = derivation_problems(steps, ps, attacker);
-	problems.extend(step_problems(steps, km, ps, attacker, phase));
+	problems.extend(step_problems(steps, km, ps, others, attacker, phase));
 	assert!(
 		problems.is_empty(),
 		"TRACE • {} query {} ({}) prints a derivation that does not stand up. A reader \
@@ -553,7 +553,6 @@ pub(crate) fn assert_trace_is_well_founded(t: &TraceUnderTest<'_>) {
 				s,
 				Step::Mutations { .. }
 					| Step::Replay { .. }
-					| Step::Bypass { .. }
 					| Step::Gate { .. }
 					| Step::Received { .. }
 			)),
@@ -639,7 +638,7 @@ mod tests {
 
 	fn checked(steps: &[Step], ps: &PrincipalState, attacker: &AttackerState) -> Vec<String> {
 		let mut problems = derivation_problems(steps, ps, attacker);
-		problems.extend(step_problems(steps, &make_trace(), ps, attacker, 0));
+		problems.extend(step_problems(steps, &make_trace(), ps, &[], attacker, 0));
 		problems
 	}
 

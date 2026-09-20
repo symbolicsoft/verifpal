@@ -70,7 +70,7 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		current_phase: 0,
 		mutation_records: Arc::new(known.iter().map(|_| Arc::clone(&free)).collect()),
 		alternates: Arc::new(vec![Vec::new(); known.len()]),
-		worlds: Arc::new(vec![vec![Vec::new()]; known.len()]),
+		worlds: Arc::new(vec![Worlds::any(); known.len()]),
 		worlds_epoch: 0,
 		reused: Arc::new(vec![]),
 		derivations: Arc::new(known.iter().map(|_| DerivationRecord::Initial).collect()),
@@ -127,7 +127,6 @@ pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
 
 pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 	SlotValues {
-		bypassed: None,
 		installed_at: None,
 		addressed: false,
 		value: v.clone(),
@@ -137,7 +136,6 @@ pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
 			creator,
 			sender: creator,
 			attacker_tainted: false,
-			bypass_injected: false,
 		},
 	}
 }

@@ -7,6 +7,7 @@ use crate::context::VerifyContext;
 use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
 use crate::primitive::attacker_public_key;
+use crate::principal::ATTACKER_ID;
 use crate::reexec::{causally_grounded, governing_attacker, reexecute, reexecute_at};
 use crate::types::*;
 use crate::value::value_nil;
@@ -93,7 +94,6 @@ struct Rung {
 	family: Family,
 	scope: Scope,
 	breadth: Breadth,
-	keeps_fallback: bool,
 }
 
 const LADDER: [Rung; 4] = [
@@ -101,25 +101,21 @@ const LADDER: [Rung; 4] = [
 		family: Family::SingleSlot,
 		scope: Scope::Own,
 		breadth: Breadth::Base,
-		keeps_fallback: true,
 	},
 	Rung {
 		family: Family::WholeFlight,
 		scope: Scope::Own,
 		breadth: Breadth::Base,
-		keeps_fallback: false,
 	},
 	Rung {
 		family: Family::AcrossSessions,
 		scope: Scope::Any,
 		breadth: Breadth::All,
-		keeps_fallback: true,
 	},
 	Rung {
 		family: Family::SplitRecipients,
 		scope: Scope::Any,
 		breadth: Breadth::All,
-		keeps_fallback: false,
 	},
 ];
 
@@ -135,6 +131,8 @@ fn dedup_in_order<T: PartialEq>(items: impl IntoIterator<Item = T>) -> Vec<T> {
 
 pub(crate) struct Witness {
 	pub ps: PrincipalState,
+	#[cfg(test)]
+	pub driver: PrincipalId,
 	pub others: Vec<PrincipalState>,
 	#[cfg(test)]
 	pub wide: bool,
@@ -157,6 +155,7 @@ struct Minimizer<'a> {
 	ambient: AttackerState,
 	sessions: Vec<PrincipalState>,
 	mutations: Installs,
+	support: Installs,
 	pruned: Installs,
 	needs: Addressed,
 	everywhere: Installs,
@@ -171,14 +170,66 @@ impl<'a> Minimizer<'a> {
 		km: &'a ProtocolTrace,
 		ps: &PrincipalState,
 		query_index: usize,
-		mutations: Installs,
+		mut mutations: Installs,
 		target: Option<&Value>,
 		concrete: Option<&Query>,
 	) -> Minimizer<'a> {
 		let ambient = ctx.attacker_snapshot();
-		let needs: Addressed = target
+		let mut needs: Addressed = target
 			.map(|value| crate::deduction::needs_of(km, &ambient, value))
 			.unwrap_or_default();
+		let support = target
+			.and_then(|value| ambient.knows(value))
+			.and_then(|known| ambient.worlds.get(known.get()))
+			.and_then(Worlds::choose)
+			.unwrap_or_else(|| needs.clone())
+			.into_iter()
+			.map(|(_, slot, value)| (slot, value))
+			.collect();
+		let addressed_all = ps
+			.values
+			.iter()
+			.any(|sv| sv.provenance.attacker_tainted && sv.addressed);
+		let signature: Vec<_> = mutations
+			.iter()
+			.map(|(slot, value)| (slot.get(), value.clone()))
+			.collect();
+		let mut compatible = crate::world::install_world(ps, &ambient, &signature, addressed_all);
+		if let Some(target) = target
+			&& let Some(known) = ambient.knows(target)
+			&& let Some(worlds) = ambient.worlds.get(known.get())
+		{
+			compatible = compatible.intersect(worlds);
+		}
+		if let Some(support) = compatible.choose() {
+			if crate::solve::solve_debug() {
+				eprintln!(
+					"[witness] {} query {query_index} support [{}]",
+					ps.name,
+					support
+						.iter()
+						.map(|(who, slot, value)| format!(
+							"{}:{}={value}",
+							km.principal_name(*who),
+							km.slots[slot.get()].constant.name
+						))
+						.collect::<Vec<_>>()
+						.join(" ")
+				);
+			}
+			needs = support;
+			for (_, slot, value) in &needs {
+				if mutations.iter().any(|(existing, _)| existing == slot)
+					|| ps
+						.values
+						.get(slot.get())
+						.is_some_and(|sv| sv.original.equivalent(value, true))
+				{
+					continue;
+				}
+				mutations.push((*slot, value.clone()));
+			}
+		}
 		let phase = ambient.current_phase;
 		let mut sessions: Vec<PrincipalState> = Vec::new();
 		for state in ctx.principal_states() {
@@ -210,18 +261,16 @@ impl<'a> Minimizer<'a> {
 			ambient,
 			sessions,
 			mutations,
+			support,
 			pruned: Vec::new(),
 			needs,
 			everywhere: Vec::new(),
 			bound: ctx.term_bound(km),
 			guards,
-			addressed_all: ps
-				.values
-				.iter()
-				.any(|sv| sv.provenance.attacker_tainted && sv.addressed),
+			addressed_all,
 		};
 		m.everywhere = m.mitm_everywhere();
-		m.pruned = m.prune_seed();
+		m.support = m.controlled_by_any(m.support.clone());
 		m
 	}
 
@@ -323,8 +372,7 @@ impl<'a> Minimizer<'a> {
 		&self,
 		group: &[PrincipalState],
 		installs: &[(SlotIdx, Value)],
-	) -> (usize, usize, usize) {
-		let mut bypasses = 0usize;
+	) -> (usize, usize) {
 		let mut halts = 0usize;
 		let mut stuck = 0usize;
 		for session in group {
@@ -334,18 +382,13 @@ impl<'a> Minimizer<'a> {
 			}
 			match reexecute(session, &mine, &self.ambient, self.km) {
 				Ok(state) => {
-					bypasses += state
-						.values
-						.iter()
-						.filter(|sv| sv.bypassed.is_some())
-						.count();
 					halts += usize::from(state.halted_at.is_some());
 					stuck += checks_wanting_shapes(self.km, session, &mine).len();
 				}
-				Err(_) => return (usize::MAX, usize::MAX, usize::MAX),
+				Err(_) => return (usize::MAX, usize::MAX),
 			}
 		}
-		(bypasses, halts, stuck)
+		(halts, stuck)
 	}
 
 	fn flight_shapes(
@@ -421,13 +464,6 @@ impl<'a> Minimizer<'a> {
 		wide: bool,
 		relaxed: bool,
 	) -> Vec<Installs> {
-		let rank = |(bypasses, halts, stuck): (usize, usize, usize)| {
-			if relaxed {
-				(halts, bypasses, stuck)
-			} else {
-				(bypasses, halts, stuck)
-			}
-		};
 		let mut installs = self.admitted(session, base, wide);
 		if installs.is_empty() {
 			return Vec::new();
@@ -445,7 +481,7 @@ impl<'a> Minimizer<'a> {
 			let mut advanced = false;
 			for i in &slots {
 				let here = self.scenario_cost(group, &installs);
-				if here == (0, 0, 0) {
+				if here == (0, 0) {
 					break;
 				}
 				let shapes = self.flight_shapes(group, &installs, *i);
@@ -455,7 +491,7 @@ impl<'a> Minimizer<'a> {
 				let honest = self.km.slots.get(*i).map(|slot| {
 					crate::resolution::resolve_trace_term(&slot.initial_value, self.km)
 				});
-				let mut accepted: Vec<(Installs, (usize, usize, usize))> = Vec::new();
+				let mut accepted: Vec<(Installs, (usize, usize))> = Vec::new();
 				for shape in shapes {
 					if !self.validator_admits(session, bound, *i, &shape) {
 						continue;
@@ -477,16 +513,11 @@ impl<'a> Minimizer<'a> {
 						continue;
 					}
 					let cost = self.scenario_cost(group, &trial);
-					if (relaxed && rank(cost) < rank(here))
-						|| (!relaxed && rank(cost) <= rank(here))
-					{
+					if (relaxed && cost < here) || (!relaxed && cost <= here) {
 						accepted.push((trial, cost));
 					}
 				}
-				if let Some((trial, _)) = accepted
-					.into_iter()
-					.min_by_key(|(_, (bypasses, halts, stuck))| (*halts, *bypasses, *stuck))
-				{
+				if let Some((trial, _)) = accepted.into_iter().min_by_key(|(_, cost)| *cost) {
 					seen.push(trial.clone());
 					installs = trial;
 					advanced = true;
@@ -607,11 +638,19 @@ impl<'a> Minimizer<'a> {
 	}
 
 	fn seeds(&self) -> Vec<Installs> {
-		if self.pruned.len() == self.mutations.len() {
+		let mut seeds = if self.pruned.len() == self.mutations.len() {
 			vec![self.mutations.clone()]
 		} else {
 			vec![self.pruned.clone(), self.mutations.clone()]
+		};
+		if !self.support.is_empty()
+			&& !seeds
+				.iter()
+				.any(|seed| same_install_set(seed, &self.support))
+		{
+			seeds.insert(0, self.support.clone());
 		}
+		seeds
 	}
 
 	fn prune_seed(&self) -> Installs {
@@ -736,7 +775,6 @@ impl<'a> Minimizer<'a> {
 
 	fn choose(&self) -> Option<Chosen> {
 		let mut chosen: Option<(PrincipalState, Installs, Addressed, Breadth, bool, bool)> = None;
-		let mut fallback: Option<(PrincipalState, Installs, Addressed, Breadth)> = None;
 		for rung in LADDER {
 			if chosen
 				.as_ref()
@@ -750,8 +788,7 @@ impl<'a> Minimizer<'a> {
 						Scope::Own => self.controlled(session, candidate),
 						Scope::Any => self.controlled_by_any(candidate),
 					};
-					let empty = candidate.is_empty() && addressed.is_empty();
-					if empty
+					if (candidate.is_empty() && addressed.is_empty())
 						|| (!candidate.is_empty() && !self.buildable(session, &candidate))
 						|| !self.addressed_buildable(&addressed)
 					{
@@ -762,36 +799,28 @@ impl<'a> Minimizer<'a> {
 					else {
 						continue;
 					};
-					let bypassed = needs_guard_bypass(&witness.ps)
-						|| witness.others.iter().any(needs_guard_bypass);
-					if !bypassed {
-						let halted = witness.ps.halted_at.is_some();
-						let better = match chosen.as_ref() {
-							None => true,
-							Some((base, _, _, _, was_grounded, was_halted)) => {
-								(witness.grounded && !*was_grounded)
-									|| (base.id == session.id
-										&& witness.grounded == *was_grounded
-										&& !halted && *was_halted)
-							}
-						};
-						if better {
-							chosen = Some((
-								session.clone(),
-								candidate,
-								addressed,
-								rung.breadth,
-								witness.grounded,
-								halted,
-							));
+					let halted = witness.ps.halted_at.is_some();
+					let better = match chosen.as_ref() {
+						None => true,
+						Some((base, _, _, _, was_grounded, was_halted)) => {
+							(witness.grounded && !*was_grounded)
+								|| (base.id == session.id
+									&& witness.grounded == *was_grounded
+									&& !halted && *was_halted)
 						}
-						if witness.grounded && !halted {
-							break 'rung;
-						}
-						continue;
+					};
+					if better {
+						chosen = Some((
+							session.clone(),
+							candidate,
+							addressed,
+							rung.breadth,
+							witness.grounded,
+							halted,
+						));
 					}
-					if rung.keeps_fallback && fallback.is_none() {
-						fallback = Some((session.clone(), candidate, addressed, rung.breadth));
+					if witness.grounded && !halted {
+						break 'rung;
 					}
 				}
 				if chosen
@@ -802,25 +831,13 @@ impl<'a> Minimizer<'a> {
 				}
 			}
 		}
-		let explanatory = chosen.is_some();
-		match chosen {
-			Some((base, installs, addressed, breadth, grounded, _)) => Some(Chosen {
-				base,
-				installs,
-				addressed,
-				breadth,
-				explanatory,
-				grounded,
-			}),
-			None => fallback.map(|(base, installs, addressed, breadth)| Chosen {
-				base,
-				installs,
-				addressed,
-				breadth,
-				explanatory,
-				grounded: false,
-			}),
-		}
+		chosen.map(|(base, installs, addressed, breadth, grounded, _)| Chosen {
+			base,
+			installs,
+			addressed,
+			breadth,
+			grounded,
+		})
 	}
 
 	fn drop_one(&self, chosen: &Chosen) -> (Installs, Addressed) {
@@ -829,7 +846,6 @@ impl<'a> Minimizer<'a> {
 			installs,
 			addressed,
 			breadth,
-			explanatory,
 			grounded,
 		} = chosen;
 		let mut keep = installs.clone();
@@ -842,9 +858,6 @@ impl<'a> Minimizer<'a> {
 			let Some(witness) = self.probe_at(base, &trial, &keep_addressed, *breadth) else {
 				continue;
 			};
-			if *explanatory && needs_guard_bypass(&witness.ps) {
-				continue;
-			}
 			if *grounded && !witness.grounded {
 				continue;
 			}
@@ -862,12 +875,6 @@ impl<'a> Minimizer<'a> {
 			let Some(witness) = self.probe_at(base, &keep, &trial, *breadth) else {
 				continue;
 			};
-			if *explanatory
-				&& (needs_guard_bypass(&witness.ps)
-					|| witness.others.iter().any(needs_guard_bypass))
-			{
-				continue;
-			}
 			if *grounded && !witness.grounded {
 				continue;
 			}
@@ -882,7 +889,6 @@ struct Chosen {
 	installs: Installs,
 	addressed: Addressed,
 	breadth: Breadth,
-	explanatory: bool,
 	grounded: bool,
 }
 
@@ -906,6 +912,27 @@ fn seeded_mutations(
 			.cloned()
 			.collect()
 	};
+	for (slot, sv) in ps.values.iter().enumerate() {
+		if !sv.provenance.attacker_tainted || sv.provenance.creator == ATTACKER_ID {
+			continue;
+		}
+		let Some(known) = attacker.knows(&sv.value) else {
+			continue;
+		};
+		let Some(record) = attacker.routes(known).find_map(|(derivation, record)| {
+			let record = record?;
+			(matches!(derivation, DerivationRecord::Obtained { slot: observed } if observed.get() == slot)
+				&& record.principal_id == sv.provenance.creator)
+				.then_some(record)
+		}) else {
+			continue;
+		};
+		for diff in record.tainted() {
+			if !mutations.iter().any(|(slot, _)| *slot == diff.index) {
+				mutations.push((diff.index, diff.value.clone()));
+			}
+		}
+	}
 	close_over_history(km, attacker, &mut mutations, target, seed.is_empty());
 	mutations.sort_by_key(|(slot, _)| *slot);
 	mutations
@@ -1007,6 +1034,8 @@ pub(crate) fn minimize_witness(
 ) -> Witness {
 	let unminimized = |reproduced: bool| Witness {
 		ps: ps.clone(),
+		#[cfg(test)]
+		driver: ps.id,
 		others: Vec::new(),
 		#[cfg(test)]
 		wide: false,
@@ -1028,11 +1057,38 @@ pub(crate) fn minimize_witness(
 	let _quiet = InfoQuiet::new();
 
 	let mutations = seeded_mutations(km, ps, seed, &ctx.attacker_snapshot(), target);
-	if mutations.is_empty() {
-		return unminimized(true);
+	if crate::solve::solve_debug() {
+		eprintln!(
+			"[witness] {} query {query_index} seed [{}]",
+			ps.name,
+			mutations
+				.iter()
+				.map(|(slot, value)| format!("{}={value}", km.slots[slot.get()].constant.name))
+				.collect::<Vec<_>>()
+				.join(" ")
+		);
 	}
-
-	let m = Minimizer::new(ctx, km, ps, query_index, mutations, target, concrete);
+	if mutations.is_empty() {
+		let base = ctx
+			.principal_states()
+			.iter()
+			.find(|state| state.id == ps.id)
+			.unwrap_or(ps)
+			.clone_for_depth(true);
+		if let Some(witness) = probe(
+			ctx,
+			km,
+			&base,
+			&[],
+			query_index,
+			ctx.attacker_snapshot().current_phase,
+			concrete,
+		) {
+			return witness;
+		}
+	}
+	let mut m = Minimizer::new(ctx, km, ps, query_index, mutations, target, concrete);
+	m.pruned = m.prune_seed();
 
 	let Some(chosen) = m.choose() else {
 		return unminimized(false);
@@ -1088,6 +1144,39 @@ pub(crate) fn minimize_witness(
 		}
 		None => unminimized(false),
 	}
+}
+
+pub(crate) fn forged_check_flights(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	signature: &[(usize, Value)],
+) -> Vec<Vec<(usize, Value)>> {
+	let installs: Installs = signature
+		.iter()
+		.map(|(slot, value)| (SlotIdx(*slot), value.clone()))
+		.collect();
+	let attacker = ctx.attacker_snapshot();
+	if !checks_wanting_shapes(km, ps, &installs)
+		.iter()
+		.any(|(check, _)| {
+			crate::primitive::primitive_extract_check_key(check)
+				.is_some_and(|key| crate::theory::obtainable(&key, ps, &attacker))
+		}) {
+		return Vec::new();
+	}
+	let _guard = MinimizingGuard::new();
+	let _quiet = InfoQuiet::new();
+	let m = Minimizer::new(ctx, km, ps, 0, installs.clone(), None, None);
+	m.forged_flight(ps, installs, false, true)
+		.into_iter()
+		.map(|flight| {
+			flight
+				.into_iter()
+				.map(|(slot, value)| (slot.get(), value))
+				.collect()
+		})
+		.collect()
 }
 
 fn same_install_set(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
@@ -1229,10 +1318,6 @@ pub(crate) fn attacker_can_build(shape: &Value, attacker: &AttackerState) -> boo
 		Value::Constant(_) => false,
 		Value::Primitive(p) => p.arguments.iter().all(|a| attacker_can_build(a, attacker)),
 	}
-}
-
-fn needs_guard_bypass(ps: &PrincipalState) -> bool {
-	ps.values.iter().any(|sv| sv.bypassed.is_some())
 }
 
 fn controlled_installs(
@@ -1711,8 +1796,8 @@ fn probe_with(
 
 	let mut carried: Vec<PrincipalState> = Vec::new();
 	if breadth == Breadth::All {
-		let mut held = 0usize;
-		for _ in 0..ctx.principal_states().len().max(1) {
+		loop {
+			let held = scratch.knowledge_saturation();
 			carried.clear();
 			for (session, guard) in &others {
 				let seeded = scratch.attacker_snapshot();
@@ -1736,11 +1821,9 @@ fn probe_with(
 					}
 				}
 			}
-			let grown = scratch.attacker_snapshot().known.len();
-			if grown == held {
+			if scratch.knowledge_saturation() == held {
 				break;
 			}
-			held = grown;
 		}
 	}
 
@@ -1757,16 +1840,22 @@ fn probe_with(
 		addressed_all,
 	)
 	.ok()?;
-	let ps = executed.first()?.clone();
 	for state in &executed {
 		let _ = compute_knowledge_closure(&scratch, km, state);
 	}
+	let ps = executed
+		.iter()
+		.find(|state| {
+			let _ = verify_resolve_queries(&scratch, km, state);
+			scratch.query_is_resolved(query_index)
+		})?
+		.clone();
 	for state in &executed {
-		let _ = verify_resolve_queries(&scratch, km, state);
+		if state.id != ps.id && !carried.iter().any(|prior| prior.id == state.id) {
+			carried.push(state.clone());
+		}
 	}
-	if !scratch.query_is_resolved(query_index) {
-		return None;
-	}
+	carried.retain(|state| state.id != ps.id);
 	let mut scheduled = Vec::new();
 	for state in ctx.principal_states() {
 		if state.id != base.id && breadth != Breadth::All {
@@ -1790,6 +1879,8 @@ fn probe_with(
 	}
 	Some(Witness {
 		#[cfg(test)]
+		driver: base.id,
+		#[cfg(test)]
 		installs: installs.to_vec(),
 		#[cfg(test)]
 		addressed: addressed.to_vec(),
@@ -1810,6 +1901,45 @@ fn probe_with(
 #[cfg(test)]
 mod tests {
 	use crate::parser::parse_string;
+
+	#[test]
+	fn forgeable_forwarding_retains_its_sender_execution() {
+		for (name, source, expected) in [
+			(
+				"computed",
+				include_str!("../examples/test/forward_computed_under_guard.vp"),
+				"f1",
+			),
+			(
+				"emission",
+				include_str!("../examples/test/forward_emission_is_not_a_forgery.vp"),
+				"a0f1",
+			),
+		] {
+			let model = parse_string(name, &source.replace("MAC(", "MAC[forgeable](")).unwrap();
+			for sessions in [1, 2] {
+				let ctx = crate::verify::analyze_sessions(&model, sessions).unwrap();
+				assert_eq!(
+					crate::types::VerifyResult::results_code(&ctx.results_get()),
+					expected
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_guarded_request_keeps_the_witness_target_reached() {
+		let source = include_str!("../examples/test/forged_key_swap_bare.vp")
+			.replace("Alice -> Bob: n_req, req", "Alice -> Bob: n_req, [req]");
+		let model = parse_string("guarded_key_swap.vp", &source).unwrap();
+		for sessions in [1, 2] {
+			let ctx = crate::verify::analyze_sessions(&model, sessions).unwrap();
+			assert_eq!(
+				crate::types::VerifyResult::results_code(&ctx.results_get()),
+				"c0"
+			);
+		}
+	}
 
 	#[test]
 	fn witness_installs_cannot_borrow_from_each_others_future() {
@@ -1899,7 +2029,7 @@ mod tests {
 	}
 
 	#[test]
-	fn minimize_witness_is_identity_without_mutations() {
+	fn a_disclosure_without_mutations_is_independently_reproduced() {
 		use crate::context::VerifyContext;
 		use crate::witness::minimize_witness;
 		let src = "attacker[passive]\n\
@@ -1919,6 +2049,27 @@ mod tests {
 
 		let w = minimize_witness(&ctx, &km, &pure, 0, &[], None, None);
 		assert_eq!(w.ps.values.len(), pure.values.len());
+		assert!(w.reproduced);
+		assert!(w.grounded);
+		assert!(
+			w.attacker
+				.knows(&crate::testutil::trace_constant(&km, "mw_m"))
+				.is_some()
+		);
+	}
+
+	#[test]
+	fn an_unmutated_state_is_not_reproduced_without_a_violation() {
+		use crate::context::VerifyContext;
+		let source = "attacker[passive]\nprincipal Alice[\nknows private secret\n]\nqueries[\nconfidentiality? secret\n]\n";
+		let model = parse_string("unviolated_witness.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx = VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let mut pure = states[0].clone_for_depth(true);
+		pure.resolve_all_values().unwrap();
+		let witness = super::minimize_witness(&ctx, &km, &pure, 0, &[], None, None);
+		assert!(!witness.reproduced);
+		assert!(!witness.grounded);
 	}
 
 	#[test]

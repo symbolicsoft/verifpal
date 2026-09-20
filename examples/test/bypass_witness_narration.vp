@@ -1,23 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
 //
-// A cloud-backup shape: Alice encrypts a file to Bob's long-term key under a
-// fresh ephemeral, binding her own public key as associated data, and the
-// Server relays. Nothing signs the upload, so `a1` is genuine: the attacker
-// picks its own ephemeral, computes DH_KEX(g_bob_longterm, nil), and forges a
-// ciphertext Bob's checked AEAD_DEC accepts — `encrypted_file_alice_a` is used
-// without having been sent by the Server. `c0` holds because the honest file
-// is encrypted to Bob's guarded long-term key.
-//
-// The model is pinned for its *narration*, not just its code: resolving the
-// query goes through a defeated check (Bob's AEAD_DEC fails on the substituted
-// ciphertext until the attacker also substitutes g_file_alice_a_key, which
-// makes the decryption key derivable). The witness minimizer once read that
-// bypass consequence back out of the mutation record and installed it directly
-// into Bob's own `decrypted_file_alice_a` slot — narrating an action no
-// attacker can take, and dropping the ephemeral-key substitution the attack
-// actually needs. `a_witness_narrates_only_actions_the_attacker_can_take`
-// in model_tests.rs asserts both halves.
+// Expected: c0a1. The attacker substitutes its ephemeral public key and
+// constructs an accepted ciphertext under the resulting shared key. The honest
+// file remains confidential under Bob's guarded long-term key. The trace must
+// show wire substitutions and a successful concrete decryption.
 
 attacker[active]
 

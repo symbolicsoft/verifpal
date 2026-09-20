@@ -715,14 +715,12 @@ pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Ve
 				value: slot.initial_value.clone(),
 				pre_rewrite: slot.initial_value.clone(),
 				original: slot.initial_value.clone(),
-				bypassed: None,
 				installed_at: None,
 				addressed: false,
 				provenance: Provenance {
 					creator: slot.creator,
 					sender,
 					attacker_tainted: false,
-					bypass_injected: false,
 				},
 			});
 		}
@@ -794,9 +792,6 @@ impl PrincipalState {
 					value: value.clone(),
 					pre_rewrite: pre_rewrite.clone(),
 					original: sv.original.clone(),
-					// Purification is now total: a bypassed slot cleans up like
-					// any other, because the honest value was never overwritten.
-					bypassed: if purify { None } else { sv.bypassed.clone() },
 					installed_at: if purify { None } else { sv.installed_at },
 					addressed: if purify { false } else { sv.addressed },
 					provenance: Provenance {
@@ -806,11 +801,6 @@ impl PrincipalState {
 							false
 						} else {
 							sv.provenance.attacker_tainted
-						},
-						bypass_injected: if purify {
-							false
-						} else {
-							sv.provenance.bypass_injected
 						},
 					},
 				}
@@ -964,13 +954,11 @@ mod tests {
 		ps.values[ga].provenance.attacker_tainted = true;
 		ps.values[ga].provenance.creator = crate::principal::ATTACKER_ID;
 		ps.values[ga].set_value(forged.clone());
-		ps.values[k].override_all_bypassed(crate::primitive::attacker_public_key());
 		ps.halted_at = Some(3);
 		ps.foreign_halts = vec![(1, 2)];
 
 		let kept = ps.clone_for_depth(false);
 		assert!(kept.values[ga].value.equivalent(&forged, true));
-		assert!(kept.values[k].bypassed.is_some());
 		assert_eq!(kept.halted_at, Some(3));
 		assert_eq!(kept.foreign_halts.len(), 1);
 
@@ -980,11 +968,8 @@ mod tests {
 			"a tainted slot purifies back to what the protocol computed"
 		);
 		assert!(
-			pure.values[k].bypassed.is_none()
-				&& !pure.values[k].provenance.bypass_injected
-				&& pure.values[k].value.equivalent(&honest_k, true),
-			"a bypassed slot purifies like any other, which is why the key a defeated \
-			 guard accepted lives beside `original` rather than inside it"
+			pure.values[k].value.equivalent(&honest_k, true),
+			"purification preserves an unchanged computation"
 		);
 		assert!(!pure.values[ga].provenance.attacker_tainted);
 		assert_eq!(pure.halted_at, None);

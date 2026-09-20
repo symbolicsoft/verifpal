@@ -160,14 +160,6 @@ pub(crate) enum Step {
 		recipient: Arc<str>,
 		items: Vec<MutationItem>,
 	},
-	Bypass {
-		principal: Arc<str>,
-		slot: Arc<str>,
-		check: String,
-		key: String,
-		#[cfg(test)]
-		key_term: Option<Value>,
-	},
 	Replay {
 		sender: Arc<str>,
 		recipient: Arc<str>,
@@ -219,14 +211,13 @@ pub(crate) enum Step {
 }
 
 fn reportable(sv: &SlotValues) -> bool {
-	sv.provenance.sender == ATTACKER_ID || sv.provenance.bypass_injected || replayed(sv)
+	sv.provenance.sender == ATTACKER_ID || replayed(sv)
 }
 
 fn replayed(sv: &SlotValues) -> bool {
 	sv.provenance.creator == ATTACKER_ID
 		&& sv.provenance.attacker_tainted
 		&& sv.provenance.sender != ATTACKER_ID
-		&& !sv.provenance.bypass_injected
 }
 
 pub(crate) fn constant_leaves(v: &Value) -> Vec<Constant> {
@@ -291,7 +282,6 @@ fn oriented(
 pub(crate) struct MutationSteps {
 	pub(crate) messages: Vec<(i32, Vec<usize>, Step)>,
 	pub(crate) replays: Vec<(usize, Step)>,
-	pub(crate) bypasses: Vec<Step>,
 }
 
 type MessageGroup = (PrincipalId, PrincipalId, i32, Vec<usize>, Vec<MutationItem>);
@@ -309,7 +299,6 @@ pub(crate) fn mutation_steps(
 		.into_iter()
 		.map(|(_, _, step)| step)
 		.chain(grouped.replays.into_iter().map(|(_, step)| step))
-		.chain(grouped.bypasses)
 		.collect()
 }
 
@@ -322,37 +311,13 @@ pub(crate) fn mutation_groups(
 	let shadowed = shadowed_names(km, ps);
 	let mutated: Vec<&str> = shadowed.iter().map(|s| &**s).collect();
 	let mut groups: Vec<MessageGroup> = Vec::new();
-	let mut bypasses: Vec<Step> = Vec::new();
 	let mut replays: Vec<(usize, Step)> = Vec::new();
 	for (i, sv) in ps.values.iter().enumerate() {
 		if !reportable(sv) {
 			continue;
 		}
 		let sm = &ps.meta[i];
-		if sv.provenance.bypass_injected && sv.provenance.sender != ATTACKER_ID {
-			let declared = km.slots.get(i).map(|slot| &slot.initial_value);
-			let bypass_key = match declared {
-				Some(Value::Primitive(p)) => {
-					let shallow = shallow_resolve(ps, p);
-					crate::primitive::primitive_extract_bypass_key(&shallow)
-				}
-				_ => None,
-			};
-			bypasses.push(Step::Bypass {
-				principal: Arc::from(ps.name.as_str()),
-				slot: Arc::clone(&sm.constant.name),
-				#[cfg(test)]
-				key_term: bypass_key.clone(),
-				check: declared
-					.map(|v| oriented(v, table, &mutated, &mutated, attacker))
-					.unwrap_or_else(|| sm.constant.name.to_string()),
-				key: bypass_key
-					.map(|k| oriented(&k, table, &mutated, &mutated, attacker))
-					.unwrap_or_default(),
-			});
-			continue;
-		}
-		let (sender, recipient) = wire_leg(km, ps, i);
+		let (sender, recipient, leg_at, guarded) = wire_leg(km, ps, i);
 		let own = mutated.as_slice();
 		let sibling = crate::query::copy_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
 		let session = crate::query::session_sibling_replay(&sm.constant, &sv.pre_rewrite, km);
@@ -382,18 +347,9 @@ pub(crate) fn mutation_groups(
 				.get(i)
 				.map(|slot| oriented(&slot.initial_value, table, own, own, attacker))
 				.unwrap_or_default(),
-			guarded: sm.guard,
+			guarded,
 			upstream: false,
 		};
-		let leg_at = km
-			.slots
-			.get(i)
-			.and_then(|slot| {
-				slot.sent_by
-					.iter()
-					.find(|event| event.sender == sender && event.recipient == recipient)
-			})
-			.map_or(sm.declared_at, |event| event.declared_at);
 		let mut item = item;
 		item.upstream = km.slots.get(i).is_some_and(|slot| {
 			slot.sent_by.iter().any(|event| {
@@ -429,69 +385,33 @@ pub(crate) fn mutation_groups(
 			})
 			.collect(),
 		replays,
-		bypasses,
 	}
 }
 
-fn deep_resolve(ps: &PrincipalState, v: &Value) -> Value {
-	deep_resolve_from(ps, v, &mut Vec::new(), &mut IdMap::default())
-}
-
-fn deep_resolve_from(
+fn wire_leg(
+	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	v: &Value,
-	chased: &mut Vec<ValueId>,
-	shared: &mut IdMap<usize, Value>,
-) -> Value {
-	match v {
-		Value::Constant(c) => {
-			let (resolved, _) = ps.resolve_constant(c, false);
-			match &resolved {
-				Value::Constant(r) if r.id == c.id || chased.contains(&r.id) => resolved,
-				other => {
-					chased.push(c.id);
-					let out = deep_resolve_from(ps, other, chased, shared);
-					chased.pop();
-					out
-				}
-			}
-		}
-		Value::Primitive(p) => {
-			let key = Arc::as_ptr(p) as usize;
-			if let Some(hit) = shared.get(&key) {
-				return hit.clone();
-			}
-			let arguments = p
-				.arguments
-				.iter()
-				.map(|a| deep_resolve_from(ps, a, chased, shared))
-				.collect();
-			let out = Value::Primitive(Arc::new(p.with_arguments(arguments)));
-			shared.insert(key, out.clone());
-			out
+	i: usize,
+) -> (PrincipalId, PrincipalId, i32, bool) {
+	if let Some(slot) = km.slots.get(i) {
+		let addressed = slot.sent_by.iter().filter(|event| event.recipient == ps.id);
+		if let Some(event) = addressed
+			.clone()
+			.find(|event| !event.guarded)
+			.or_else(|| addressed.clone().next())
+			.or_else(|| slot.sent_by.iter().find(|event| !event.guarded))
+			.or_else(|| slot.sent_by.first())
+		{
+			return (
+				event.sender,
+				event.recipient,
+				event.declared_at,
+				event.guarded,
+			);
 		}
 	}
-}
-
-fn shallow_resolve(ps: &PrincipalState, p: &Primitive) -> Primitive {
-	let arguments = p.arguments.iter().map(|a| deep_resolve(ps, a)).collect();
-	p.with_arguments(arguments)
-}
-
-fn wire_leg(km: &ProtocolTrace, ps: &PrincipalState, i: usize) -> (PrincipalId, PrincipalId) {
 	let meta = &ps.meta[i];
-	if let Some(&(_, from)) = meta.known_by.iter().find(|&&(to, _)| to == ps.id) {
-		return (from, ps.id);
-	}
-	if let Some(&(to, from)) = meta.known_by.first() {
-		return (from, to);
-	}
-	let creator = km
-		.slots
-		.get(i)
-		.map(|slot| slot.creator)
-		.unwrap_or(ps.values[i].provenance.creator);
-	(creator, ps.id)
+	(meta.creator, ps.id, meta.declared_at, meta.guard)
 }
 
 pub(crate) fn gate_steps(
@@ -939,7 +859,6 @@ impl Step {
 	pub(crate) fn kind(&self) -> &'static str {
 		match self {
 			Step::Mutations { .. } => "mutations",
-			Step::Bypass { .. } => "bypass",
 			Step::Replay { .. } => "replay",
 			Step::Resolves { .. } => "resolves",
 			Step::Static { .. } => "static",
@@ -1036,15 +955,6 @@ fn step_data(s: &Step) -> crate::types::TraceStep {
 			out.sender = Some(sender.to_string());
 			out.recipient = Some(recipient.to_string());
 			out.values = vec![value(name, Some(installed.clone()), None, false)];
-		}
-		Step::Bypass {
-			principal,
-			slot,
-			key,
-			..
-		} => {
-			out.principal = Some(principal.to_string());
-			out.values = vec![value(slot, Some(key.clone()), None, false)];
 		}
 		Step::Gate { principal, .. } => {
 			out.principal = Some(principal.to_string());
@@ -1194,7 +1104,6 @@ pub(crate) fn narrate_attack(
 	let mut steps: Vec<Step> = Vec::new();
 	let mut messages: Vec<(i32, usize, Vec<usize>, Step)> = Vec::new();
 	let mut replays: Vec<(usize, usize, Step)> = Vec::new();
-	let mut bypasses: Vec<Step> = Vec::new();
 	for (at, state) in states.iter().enumerate() {
 		let grouped = mutation_groups(km, state, &table, ambient);
 		messages.extend(
@@ -1209,7 +1118,6 @@ pub(crate) fn narrate_attack(
 				.into_iter()
 				.map(|(slot, step)| (at, slot, step)),
 		);
-		bypasses.extend(grouped.bypasses);
 	}
 	messages.sort_by_key(|(leg, _, _, _)| *leg);
 	for (_, at, slots, step) in messages {
@@ -1224,7 +1132,6 @@ pub(crate) fn narrate_attack(
 		steps.extend(narrator.derivation_steps(value, &shadowed_refs, &mut seen, false));
 		steps.push(step);
 	}
-	steps.extend(bypasses);
 	for state in &states {
 		steps.extend(gate_steps(km, state, &table, &shadowed_refs));
 	}
@@ -1264,13 +1171,6 @@ fn render(steps: &[Step]) -> String {
 	out
 }
 
-fn bypass_site(slot: &str) -> String {
-	if crate::util::is_anonymous_name(slot) {
-		return String::new();
-	}
-	format!(" at {}", slot)
-}
-
 fn render_one(step: &Step) -> String {
 	match step {
 		Step::Mutations {
@@ -1278,32 +1178,6 @@ fn render_one(step: &Step) -> String {
 			recipient,
 			items,
 		} => render_mutations(sender, recipient, items),
-		Step::Bypass {
-			principal,
-			slot,
-			check,
-			key,
-			..
-		} if !key.is_empty() => format!(
-			"{}'s {} does not halt{}: Attacker holds {}, so it can supply a value \
-				 this check accepts.",
-			principal,
-			check,
-			bypass_site(slot),
-			key,
-		),
-		Step::Bypass {
-			principal,
-			slot,
-			check,
-			..
-		} => format!(
-			"{}'s {} does not halt{}: Attacker holds the key it verifies \
-			 against, so it can supply a value this check accepts.",
-			principal,
-			check,
-			bypass_site(slot),
-		),
 		Step::Replay {
 			sender,
 			recipient,
@@ -1327,8 +1201,8 @@ fn render_one(step: &Step) -> String {
 			value,
 			..
 		} => format!(
-			"Attacker replays {} ({} to {}) unaltered: {} is what {} sent.",
-			name, sender, recipient, value, sender,
+			"Attacker replays {} ({} to {}) with its original value: {}.",
+			name, sender, recipient, value,
 		),
 		Step::Resolves { name, value, .. } => {
 			format!("In this state {} resolves to {}.", name, value)
@@ -1407,6 +1281,32 @@ fn render_mutations(sender: &str, recipient: &str, items: &[MutationItem]) -> St
 
 #[cfg(test)]
 mod tests {
+
+	#[test]
+	fn a_foreign_substitution_names_the_unguarded_delivery() {
+		let model = parse_string("wire_leg.vp", "attacker[active]\nprincipal Sender[\ngenerates message\n]\nSender -> Protected: [message]\nprincipal Protected[]\nSender -> Open: message\nprincipal Open[]\nprincipal Observer[]\nqueries[\nconfidentiality? message\n]\n").unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let observer = states
+			.iter()
+			.find(|state| state.name == "Observer")
+			.unwrap();
+		let open = states.iter().find(|state| state.name == "Open").unwrap();
+		let protected = states
+			.iter()
+			.find(|state| state.name == "Protected")
+			.unwrap();
+		let at = km
+			.slots
+			.iter()
+			.position(|slot| slot.constant.name.as_ref() == "message")
+			.unwrap();
+		let (_, recipient, _, guarded) = wire_leg(&km, observer, at);
+		assert_eq!(recipient, open.id);
+		assert!(!guarded);
+		let (_, recipient, _, guarded) = wire_leg(&km, protected, at);
+		assert_eq!(recipient, protected.id);
+		assert!(guarded);
+	}
 
 	#[test]
 	fn a_guarded_leg_is_only_called_upstream_when_an_unguarded_hop_exists() {
@@ -1500,7 +1400,6 @@ mod tests {
 		);
 		const KINDS: &[&str] = &[
 			"mutations",
-			"bypass",
 			"replay",
 			"resolves",
 			"static",
@@ -1739,57 +1638,6 @@ mod tests {
 			}
 			other => panic!("expected Mutations, got {:?}", other),
 		}
-	}
-
-	#[test]
-	fn a_bypass_injection_is_narrated_as_a_defeated_check_not_a_wire_replacement() {
-		use crate::narrate::{NameTable, Step, mutation_steps, render};
-		let k = make_constant("bwn_k");
-		let e = make_constant("bwn_e");
-		let chk = make_constant("bwn_chk");
-		let dec = Primitive {
-			id: PRIM_AEAD_DEC,
-			arguments: vec![
-				k.clone(),
-				make_constant("bwn_n"),
-				e.clone(),
-				crate::value::value_nil(),
-			],
-			output: 0,
-			instance: 0,
-			instance_check: true,
-			capabilities: Capabilities::default(),
-			threshold: 0,
-			hash: HashCell::default(),
-		};
-		let meta = vec![
-			make_slot_meta(k.as_constant().expect("c"), true),
-			make_slot_meta(e.as_constant().expect("c"), false),
-			make_slot_meta(chk.as_constant().expect("c"), true),
-		];
-		let mut values = vec![
-			make_slot_values(&k, 1),
-			make_slot_values(&e, 1),
-			make_slot_values(&Value::Primitive(Arc::new(dec)), 1),
-		];
-		values[2].override_all_bypassed(crate::primitive::attacker_public_key());
-		let ps = make_principal_state("Alice", 1, meta, values);
-
-		let table = NameTable::from_state(&ps);
-		let steps = mutation_steps(&make_trace(), &ps, &table, &AttackerState::new());
-		assert!(
-			!steps.iter().any(|s| matches!(s, Step::Mutations { .. })),
-			"the injected key never crossed a wire, so it is not a replacement \
-			 the attacker performed: {:?}",
-			steps
-		);
-		let text = render(&steps);
-		assert!(
-			text.contains("does not halt at bwn_chk"),
-			"a defeated check must be narrated as such, or the reader cannot \
-			 tell why the principal did not halt: {}",
-			text
-		);
 	}
 
 	fn gate_state(second: &str) -> PrincipalState {

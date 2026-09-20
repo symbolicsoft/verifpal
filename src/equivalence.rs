@@ -2,7 +2,8 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Weak};
 
 use crate::types::*;
 
@@ -10,6 +11,8 @@ use crate::types::*;
 struct PairMemo {
 	depth: usize,
 	equal: IdSet<(usize, usize, u8)>,
+	recent: IdMap<(usize, usize, u8), [Weak<Primitive>; 2]>,
+	order: VecDeque<(usize, usize, u8)>,
 }
 
 thread_local! {
@@ -28,13 +31,26 @@ pub(crate) fn memoised_pair(
 		let mut memo = memo.borrow_mut();
 		memo.depth += 1;
 		let nested = memo.depth > 1;
-		(nested && memo.equal.contains(&key), nested)
+		(
+			(nested && memo.equal.contains(&key)) || (kind == 2 && memo.recent.contains_key(&key)),
+			nested,
+		)
 	});
 	let result = known || compute();
 	PAIRS.with(|memo| {
 		let mut memo = memo.borrow_mut();
 		if result && nested && !known {
 			memo.equal.insert(key);
+		}
+		if result && kind == 2 && !known {
+			if memo.recent.len() >= 8192
+				&& let Some(oldest) = memo.order.pop_front()
+			{
+				memo.recent.remove(&oldest);
+			}
+			memo.recent
+				.insert(key, [Arc::downgrade(a), Arc::downgrade(b)]);
+			memo.order.push_back(key);
 		}
 		memo.depth -= 1;
 		if memo.depth == 0 && !memo.equal.is_empty() {
@@ -80,6 +96,23 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn transient_checked_terms_remain_structurally_distinct_after_cache_eviction() {
+		let a = make_constant("transient_checked_left");
+		let b = make_constant("transient_checked_right");
+		for i in 0..8300 {
+			let mut primitive = Primitive::new(PRIM_ASSERT, vec![a.clone(), b.clone()], 0);
+			primitive.instance_check = i % 2 == 0;
+			let left = Value::Primitive(Arc::new(primitive.clone()));
+			let right = Value::Primitive(Arc::new(primitive.clone()));
+			assert!(crate::theory::structurally_identical(&left, &right));
+			primitive.instance_check = !primitive.instance_check;
+			let different = Value::Primitive(Arc::new(primitive));
+			assert!(left.equivalent(&different, true));
+			assert!(!crate::theory::structurally_identical(&left, &different));
+		}
+	}
 
 	#[test]
 	fn splits_of_one_secret_under_different_thresholds_are_different_values() {

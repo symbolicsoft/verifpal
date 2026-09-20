@@ -190,7 +190,7 @@ pub(crate) struct VerifyContext {
 	#[cfg(test)]
 	searched: AtomicBool,
 	replays: RwLock<Recent<KnowledgeKey, u64, Vec<Replay>>>,
-	basis: RwLock<(i32, usize, IdSet<u64>)>,
+	basis: RwLock<(u64, i32, usize, crate::hashing::TermSet)>,
 	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
 	saturation: RwLock<IdMap<PrincipalId, Saturation>>,
 	executions: RwLock<IdMap<(PrincipalId, u64), Vec<Execution>>>,
@@ -222,9 +222,11 @@ struct Execution {
 	signature: Vec<(usize, Value)>,
 	phase: i32,
 	states: Vec<StoredState>,
-	decisions: Vec<(PrincipalId, Primitive, i32, bool)>,
 	closed: Option<Saturation>,
+	forged: Option<(KnowledgeKey, ForgedFlights)>,
 }
+
+type ForgedFlights = Vec<Vec<(usize, Value)>>;
 
 const REMEMBERED_EXECUTIONS: usize = 200_000;
 
@@ -236,16 +238,11 @@ fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
 	same_term(&a.value, &b.value)
 		&& same_term(&a.pre_rewrite, &b.pre_rewrite)
 		&& same_term(&a.original, &b.original)
-		&& match (&a.bypassed, &b.bypassed) {
-			(None, None) => true,
-			(Some(x), Some(y)) => same_term(x, y),
-			_ => false,
-		} && a.installed_at == b.installed_at
+		&& a.installed_at == b.installed_at
 		&& a.addressed == b.addressed
 		&& a.provenance.creator == b.provenance.creator
 		&& a.provenance.sender == b.provenance.sender
 		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
-		&& a.provenance.bypass_injected == b.provenance.bypass_injected
 }
 
 fn same_signature(a: &[(usize, Value)], b: &[(usize, Value)]) -> bool {
@@ -261,6 +258,7 @@ pub(crate) struct Saturation {
 	known: usize,
 	reused: usize,
 	routes_epoch: u64,
+	worlds_epoch: u64,
 }
 
 impl Saturation {
@@ -270,6 +268,7 @@ impl Saturation {
 			known: attacker.known.len(),
 			reused: attacker.reused.len(),
 			routes_epoch: attacker.routes_epoch,
+			worlds_epoch: attacker.worlds_epoch,
 		}
 	}
 }
@@ -387,12 +386,12 @@ pub(crate) enum Put {
 	Known,
 }
 
-fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Vec<Constraint>) -> bool {
+fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Worlds) -> bool {
 	let mut widened = false;
 	if let Some(entry) = Arc::make_mut(&mut state.worlds).get_mut(existing.get()) {
-		for world in worlds {
-			widened |= crate::world::add(entry, world);
-		}
+		let combined = entry.union(&worlds);
+		widened = !entry.equivalent(&combined);
+		*entry = combined;
 	}
 	if widened {
 		state.worlds_epoch += 1;
@@ -405,7 +404,7 @@ fn attacker_state_absorb(
 	value: &Value,
 	record: &Arc<MutationRecord>,
 	derivation: DerivationRecord,
-	worlds: Vec<Constraint>,
+	worlds: Worlds,
 ) {
 	if let Some(existing) = state.knows(value) {
 		widen(state, existing, worlds);
@@ -455,14 +454,7 @@ fn attacker_state_absorb(
 	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
 	Arc::make_mut(&mut state.derivations).push(derivation);
 	Arc::make_mut(&mut state.alternates).push(Vec::new());
-	let mut set: Vec<Constraint> = Vec::new();
-	for world in worlds {
-		crate::world::add(&mut set, world);
-	}
-	if set.is_empty() {
-		set.push(Vec::new());
-	}
-	Arc::make_mut(&mut state.worlds).push(set);
+	Arc::make_mut(&mut state.worlds).push(worlds);
 }
 
 impl VerifyContext {
@@ -488,7 +480,7 @@ impl VerifyContext {
 		analysis_count_reset();
 		VerifyContext {
 			replays: RwLock::new(Recent::default()),
-			basis: RwLock::new((-1, 0, IdSet::default())),
+			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			saturation: RwLock::new(IdMap::default()),
 			executions: RwLock::new(IdMap::default()),
@@ -561,6 +553,20 @@ impl VerifyContext {
 			self.note_truncation(Truncation::TermDepth);
 		}
 		first
+	}
+
+	pub(crate) fn note_query_truncation(&self, kind: Truncation, query_index: usize) {
+		let mut state = write_lock(&self.truncations);
+		match state.iter_mut().find(|(seen, _)| *seen == kind) {
+			Some((_, reached)) => {
+				if !reached.contains(&query_index) {
+					reached.push(query_index);
+					reached.sort_unstable();
+				}
+			}
+			None => state.push((kind, vec![query_index])),
+		}
+		state.sort_by_key(|(kind, _)| *kind);
 	}
 
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
@@ -700,10 +706,6 @@ impl VerifyContext {
 	/// The execution a substitution set describes, replayed once and shared by
 	/// every combination the closure then tests against it.
 	///
-	/// Keyed on what the attacker knows as well as on the substitution and the
-	/// phase: the replay runs `try_guard_bypass`, which reads knowledge, and
-	/// knowledge grows through the closure's fixed point, so a replay computed
-	/// early would otherwise answer for a later state that gets further.
 	pub(crate) fn replayed(
 		&self,
 		km: &ProtocolTrace,
@@ -749,7 +751,6 @@ impl VerifyContext {
 		signature: &[(usize, Value)],
 		phase: i32,
 		states: &[PrincipalState],
-		decisions: Vec<(PrincipalId, Primitive, i32, bool)>,
 	) {
 		if read_lock(&self.executions).len() >= REMEMBERED_EXECUTIONS {
 			return;
@@ -787,8 +788,8 @@ impl VerifyContext {
 				signature: signature.to_vec(),
 				phase,
 				states: stored,
-				decisions,
 				closed: None,
+				forged: None,
 			});
 	}
 
@@ -857,23 +858,56 @@ impl VerifyContext {
 		}
 	}
 
+	pub(crate) fn recall_forged_flights(
+		&self,
+		principal: PrincipalId,
+		key: u64,
+		signature: &[(usize, Value)],
+	) -> Option<ForgedFlights> {
+		let knowledge = KnowledgeKey::of(&read_lock(&self.attacker));
+		let executions = read_lock(&self.executions);
+		let seen = executions.get(&(principal, key)).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|seen| same_signature(&seen.signature, signature))
+		})?;
+		seen.forged
+			.as_ref()
+			.filter(|(against, _)| *against == knowledge)
+			.map(|(_, flights)| flights.clone())
+	}
+
+	pub(crate) fn remember_forged_flights(
+		&self,
+		principal: PrincipalId,
+		key: u64,
+		signature: &[(usize, Value)],
+		flights: ForgedFlights,
+	) {
+		let knowledge = KnowledgeKey::of(&read_lock(&self.attacker));
+		if let Some(seen) = write_lock(&self.executions)
+			.get_mut(&(principal, key))
+			.and_then(|bucket| {
+				bucket
+					.iter_mut()
+					.find(|seen| same_signature(&seen.signature, signature))
+			}) {
+			seen.forged = Some((knowledge, flights));
+		}
+	}
+
 	pub(crate) fn recall_execution(
 		&self,
 		principal: PrincipalId,
 		key: u64,
 		signature: &[(usize, Value)],
 		phase: i32,
-		still_valid: impl Fn(&[(PrincipalId, Primitive, i32, bool)]) -> bool,
 	) -> Option<(Vec<PrincipalState>, bool)> {
 		let mut executions = write_lock(&self.executions);
 		let bucket = executions.get_mut(&(principal, key))?;
 		let at = bucket
 			.iter()
 			.position(|seen| seen.phase == phase && same_signature(&seen.signature, signature))?;
-		if !still_valid(&bucket[at].decisions) {
-			bucket.remove(at);
-			return None;
-		}
 		let closed = bucket[at].closed == Some(Saturation::of(&read_lock(&self.attacker)));
 		let stored = &bucket[at].states;
 		let bases = read_lock(&self.bases);
@@ -918,16 +952,20 @@ impl VerifyContext {
 			.get_or_init(|| crate::reexec::TermBound::of(km))
 	}
 
-	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> IdSet<u64> {
+	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> crate::hashing::TermSet {
 		let mut basis = write_lock(&self.basis);
-		let (phase, covered, set) = &mut *basis;
-		if *phase != attacker.current_phase || *covered > attacker.known.len() {
+		let (chain, phase, covered, set) = &mut *basis;
+		if *chain != attacker.chain
+			|| *phase != attacker.current_phase
+			|| *covered > attacker.known.len()
+		{
+			*chain = attacker.chain;
 			*phase = attacker.current_phase;
 			*covered = 0;
 			set.clear();
 		}
 		for known in &attacker.known[*covered..] {
-			crate::hashing::collect_subterm_hashes(known, set);
+			crate::hashing::collect_subterms(known, set);
 		}
 		*covered = attacker.known.len();
 		set.clone()
@@ -1001,7 +1039,7 @@ impl VerifyContext {
 		&self,
 		key: &PassKey,
 		attacker: &AttackerState,
-		protocol: &IdSet<u64>,
+		protocol: &crate::hashing::TermSet,
 	) -> Option<Arc<Proposed>> {
 		let stored = Arc::clone(read_lock(&self.passes).get(key)?);
 		(stored.reused == attacker.reused.len()
@@ -1058,7 +1096,7 @@ impl VerifyContext {
 		known: &Value,
 		record: &Arc<MutationRecord>,
 		derivation: DerivationRecord,
-		worlds: Vec<Constraint>,
+		worlds: Worlds,
 	) -> Put {
 		let mut state = write_lock(&self.attacker);
 		if let Some(existing) = state.knows(known) {
@@ -1094,7 +1132,7 @@ impl VerifyContext {
 				&sv.value,
 				&record,
 				DerivationRecord::Initial,
-				vec![Vec::new()],
+				Worlds::any(),
 			);
 		}
 
@@ -1168,6 +1206,9 @@ impl VerifyContext {
 			};
 			let constant_value = Value::Constant(sm.constant.clone());
 			let worlds = crate::world::state_world(km, ps, &state, slot);
+			if worlds.is_empty() {
+				continue;
+			}
 			attacker_state_absorb(
 				&mut state,
 				&constant_value,
@@ -1328,7 +1369,7 @@ impl VerifyContext {
 			coherence: RwLock::new(IdMap::default()),
 			baselines: RwLock::new(IdMap::default()),
 			replays: RwLock::new(Recent::default()),
-			basis: RwLock::new((-1, 0, IdSet::default())),
+			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			sessions: self.sessions,
 			honest,
@@ -1488,6 +1529,45 @@ mod tests {
 	}
 
 	#[test]
+	fn forged_flights_are_recalled_for_validation_and_invalidate_with_knowledge() {
+		let model = parse_string("forgery_cache.vp", "attacker[passive]\nprincipal Alice[\nknows private secret\n]\nqueries[\nconfidentiality? secret\n]\n").unwrap();
+		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
+		let first = vec![(0, make_constant("forgery_cache_first"))];
+		let second = vec![(0, make_constant("forgery_cache_second"))];
+		ctx.remember_execution(1, 7, &first, 0, &[]);
+		ctx.remember_execution(1, 7, &second, 0, &[]);
+		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
+		ctx.remember_forged_flights(1, 7, &first, vec![second.clone()]);
+		let recalled = ctx.recall_forged_flights(1, 7, &first).unwrap();
+		assert!(same_signature(&recalled[0], &second));
+		assert!(ctx.recall_forged_flights(1, 7, &first).is_some());
+		assert!(ctx.recall_forged_flights(1, 7, &second).is_none());
+		assert!(ctx.recall_forged_flights(2, 7, &first).is_none());
+		write_lock(&ctx.attacker).worlds_epoch += 1;
+		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
+		ctx.remember_forged_flights(1, 7, &first, Vec::new());
+		write_lock(&ctx.attacker).routes_epoch += 1;
+		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
+		ctx.remember_forged_flights(1, 7, &first, Vec::new());
+		write_lock(&ctx.attacker).current_phase += 1;
+		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
+	}
+
+	#[test]
+	fn oracle_basis_changes_with_an_equal_length_knowledge_branch() {
+		let model = parse_string("basis.vp", "attacker[passive]\nprincipal Alice[\nknows private secret\n]\nqueries[\nconfidentiality? secret\n]\n").unwrap();
+		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
+		let first = make_constant("basis_first");
+		let second = make_constant("basis_second");
+		let left = make_attacker_state(vec![first.clone()]);
+		let right = make_attacker_state(vec![second.clone()]);
+		assert!(ctx.known_subterms(&left).contains(&first));
+		let changed = ctx.known_subterms(&right);
+		assert!(changed.contains(&second));
+		assert!(!changed.contains(&first));
+	}
+
+	#[test]
 	fn scratch_context_isolates_single_query() {
 		use crate::context::VerifyContext;
 		let src = "attacker[passive]\n\
@@ -1550,7 +1630,7 @@ mod tests {
 					of: source.clone(),
 					using: vec![learned.clone()],
 				},
-				vec![Vec::new()],
+				Worlds::any(),
 			) == Put::New
 		);
 
@@ -1614,19 +1694,19 @@ mod tests {
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(7) },
-			vec![Vec::new()],
+			Worlds::any(),
 		);
 		ctx.attacker_put_with(
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(2) },
-			vec![Vec::new()],
+			Worlds::any(),
 		);
 		ctx.attacker_put_with(
 			&value,
 			&record,
 			DerivationRecord::Obtained { slot: SlotIdx(7) },
-			vec![Vec::new()],
+			Worlds::any(),
 		);
 		let attacker = ctx.attacker_snapshot();
 		let idx = attacker.knows(&value).expect("the term is known");

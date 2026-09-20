@@ -74,7 +74,13 @@ pub(crate) fn validate(
 		phases.push(at);
 	}
 
-	if authored.is_empty() || spends_another_execution(km, &ps, signature, attacker) {
+	if authored.is_empty() {
+		return Ok(false);
+	}
+	if spends_another_execution(km, &ps, signature, attacker, addressed) {
+		return Ok(false);
+	}
+	if crate::world::install_world(&ps, attacker, signature, addressed).is_empty() {
 		return Ok(false);
 	}
 
@@ -84,16 +90,7 @@ pub(crate) fn validate(
 		.compatible(ctx, km, &ps, &authored, &governing);
 	let governing = restricted.as_deref().unwrap_or(&governing);
 	let phase = governing.current_phase;
-	let recalled = ctx.recall_execution(ps.id, key, signature, phase, |decisions| {
-		decisions.iter().all(|(who, prim, at, was)| {
-			ctx.principal_states()
-				.iter()
-				.find(|state| state.id == *who)
-				.is_none_or(|state| {
-					*was == crate::reexec::bypass_constructible_at(km, prim, state, *at, governing)
-				})
-		})
-	});
+	let recalled = ctx.recall_execution(ps.id, key, signature, phase);
 	let executed = match recalled {
 		Some((executed, closed)) => {
 			if closed {
@@ -105,7 +102,6 @@ pub(crate) fn validate(
 			executed
 		}
 		None => {
-			crate::reexec::record_bypass_decisions();
 			let executed = crate::reexec::execute_forward(
 				ctx,
 				km,
@@ -115,11 +111,10 @@ pub(crate) fn validate(
 				governing,
 				addressed,
 			);
-			let decisions = crate::reexec::take_bypass_decisions();
 			let Ok(executed) = executed else {
 				return Ok(false);
 			};
-			ctx.remember_execution(ps.id, key, signature, phase, &executed, decisions);
+			ctx.remember_execution(ps.id, key, signature, phase, &executed);
 			executed
 		}
 	};
@@ -230,6 +225,7 @@ fn spends_another_execution(
 	ps: &PrincipalState,
 	chosen: &[(usize, Value)],
 	attacker: &AttackerState,
+	addressed: bool,
 ) -> bool {
 	let mut pending: Vec<_> = chosen.iter().rev().map(|(_, ground)| ground).collect();
 	let mut seen = IdSet::default();
@@ -269,7 +265,27 @@ fn spends_another_execution(
 						})
 					}
 			}) {
-			return true;
+			let receiving = crate::world::constraints(
+				ps,
+				ps.meta
+					.iter()
+					.enumerate()
+					.filter_map(|(at, meta)| {
+						if meta.creator == ps.id || !meta.wire.contains(&ps.id) {
+							return None;
+						}
+						let value = chosen
+							.iter()
+							.find(|(slot, _)| *slot == at)
+							.map(|(_, value)| value.clone())
+							.unwrap_or_else(|| resolve_trace_constant(&meta.constant, km));
+						Some((ps.id, SlotIdx(at), reduce_once(&value)))
+					})
+					.collect(),
+			);
+			return crate::world::install_world(ps, attacker, chosen, addressed)
+				.intersect(&receiving)
+				.is_empty();
 		}
 	}
 	false
@@ -390,6 +406,7 @@ mod tests {
 			&empty_state(),
 			&[(0, term)],
 			&make_attacker_state(vec![value_nil()]),
+			false,
 		));
 	}
 

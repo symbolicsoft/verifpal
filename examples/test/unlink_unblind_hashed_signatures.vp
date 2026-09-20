@@ -1,0 +1,52 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+// Expected: u1 at one and two sessions.
+// Published blinding factors let the attacker unblind both signatures, verify
+// them under the same public key, and recompute the two published hashes.
+
+attacker[passive]
+
+principal Signer[
+	generates sk
+	pk = PUBKEY(sk)
+]
+
+Signer -> Alice: [pk]
+
+principal Alice[
+	knows public m1, m2
+	generates r1, r2
+	b1 = BLIND(r1, m1)
+	b2 = BLIND(r2, m2)
+]
+
+Alice -> Signer: [r1], [r2], b1, b2
+
+principal Signer[
+	sb1 = SIGN(sk, b1)
+	sb2 = SIGN(sk, b2)
+]
+
+Signer -> Alice: sb1, sb2
+
+principal Alice[
+	sig1 = UNBLIND(r1, m1, sb1)
+	sig2 = UNBLIND(r2, m2, sb2)
+	t1 = HASH(sig1)
+	t2 = HASH(sig2)
+]
+
+Alice -> Bob: pk, r1, r2, b1, b2, sb1, sb2, t1, t2
+
+principal Bob[
+	sig1_b = UNBLIND(r1, m1, sb1)
+	sig2_b = UNBLIND(r2, m2, sb2)
+	_ = SIGNVERIF(pk, m1, sig1_b)?
+	_ = SIGNVERIF(pk, m2, sig2_b)?
+	_ = HASH(t1, t2)
+]
+
+queries[
+	unlinkability? t1, t2
+]

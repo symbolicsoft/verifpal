@@ -23,11 +23,11 @@ Verifpal has been used to verify security properties for Signal, Scuttlebutt, TL
 
 ## Scientific Paper
 
-[*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654) documents the semantics, the deduction rules, the search, the soundness theorem, the termination bound and the session model, along with what each of them does not cover.
+[*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654) documents the semantics, the deduction rules, the search, the witness-transfer theorem, the termination bound and the session model, along with what each of them does not cover.
 
-## Sound, but Incomplete
+## Validation and Search Bounds
 
-Any attack Verifpal reports should be genuine; its search may still miss one. Soundness is structural rather than argued. The solver can only *propose* a substitution. Every proposal is then materialized into real principal state, re-executed through the ordinary analysis pipeline, and re-checked against actual attacker knowledge before it is allowed to resolve. A solver bug therefore costs you a missed attack and cannot manufacture a false one.
+The solver proposes substitutions. Independent validation checks attacker control, derivability, causal availability and compatible execution constraints before re-execution. Every reported attack must also reproduce and pass grounding from baseline knowledge. The paper states the additional support condition under which a reproduced witness transfers to a single protocol history.
 
 A passing query means "this search found no attack", which is weaker than a proof. Verifpal supports neither observational equivalence nor user-defined equational theories, and it always terminates instead of offering unbounded session replication. If you are designing a protocol for production, cross-check it with ProVerif and Tamarin.
 

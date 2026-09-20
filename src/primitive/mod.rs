@@ -88,6 +88,14 @@ pub(crate) struct RewriteRule {
 }
 
 #[derive(Clone)]
+pub(crate) struct CombineBinding {
+	pub argument: usize,
+	pub list: usize,
+	pub wrapper: PrimitiveId,
+	pub sequence: PrimitiveId,
+}
+
+#[derive(Clone)]
 pub(crate) struct CombineRule {
 	pub partial: PrimitiveId,
 	pub split: PrimitiveId,
@@ -95,6 +103,7 @@ pub(crate) struct CombineRule {
 	pub agree: Vec<usize>,
 	pub carry: Vec<usize>,
 	pub whole: PrimitiveId,
+	pub bindings: Vec<CombineBinding>,
 }
 
 #[derive(Clone)]
@@ -121,7 +130,7 @@ pub(crate) struct PrimitiveCoreSpec {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum BypassKeyKind {
+pub(crate) enum CheckKeyKind {
 	Direct(usize),
 	Derived {
 		arg: usize,
@@ -148,7 +157,7 @@ pub(crate) struct PrimitiveSpec {
 	pub rebuild: Option<RebuildRule>,
 	pub combine: Vec<CombineRule>,
 	pub definition_check: bool,
-	pub bypass_key: Option<BypassKeyKind>,
+	pub check_key: Option<CheckKeyKind>,
 	pub commutativity: Option<CommutativityRule>,
 	pub argument_restrictions: Vec<ArgumentRestriction>,
 	pub key_derivation: bool,
@@ -574,14 +583,14 @@ pub(crate) fn primitives_supporting(
 	prim_specs().filter(|s| supports(s.id)).collect()
 }
 
-pub(crate) fn primitive_extract_bypass_key(prim: &Primitive) -> Option<Value> {
+pub(crate) fn primitive_extract_check_key(prim: &Primitive) -> Option<Value> {
 	if primitive_is_core(prim.id) {
 		return None;
 	}
 	let spec = primitive_get(prim.id).ok()?;
-	match spec.bypass_key {
-		Some(BypassKeyKind::Direct(i)) => Some(prim.arguments[i].clone()),
-		Some(BypassKeyKind::Derived { arg, constructor }) => match &prim.arguments[arg] {
+	match spec.check_key {
+		Some(CheckKeyKind::Direct(i)) => Some(prim.arguments[i].clone()),
+		Some(CheckKeyKind::Derived { arg, constructor }) => match &prim.arguments[arg] {
 			Value::Primitive(p) if p.id == constructor && p.arguments.len() == 1 => {
 				Some(p.arguments[0].clone())
 			}
@@ -790,13 +799,11 @@ mod tests {
 	}
 
 	#[test]
-	fn a_bypass_key_is_declared_only_on_a_primitive_that_can_be_checked() {
+	fn a_check_key_is_declared_only_on_a_primitive_that_can_be_checked() {
 		for spec in super::spec::build_primitive_specs() {
 			assert!(
-				spec.bypass_key.is_none() || spec.definition_check,
-				"{} declares a bypass key but cannot take `?`: try_guard_bypass runs only on a \
-				 failed check, so the entry can never fire and reads as a capability that is \
-				 not there",
+				spec.check_key.is_none() || spec.definition_check,
+				"{} declares a checking key but cannot take `?`",
 				spec.name
 			);
 		}
@@ -919,6 +926,11 @@ mod tests {
 				let whole = primitive_get(rule.whole)
 					.unwrap_or_else(|_| panic!("{name}.combine.whole is not a primitive"));
 				let fewest = narrowest(&partial.arity);
+				for binding in &rule.bindings {
+					assert!(binding.argument < fewest && binding.list < fewest);
+					assert!(primitive_get(binding.wrapper).unwrap().arity.contains(&1));
+					assert!(primitive_is_core(binding.sequence));
+				}
 				for (what, i) in std::iter::once(("combine.share", rule.share))
 					.chain(rule.agree.iter().map(|&i| ("combine.agree", i)))
 					.chain(rule.carry.iter().map(|&i| ("combine.carry", i)))
@@ -948,16 +960,16 @@ mod tests {
 				);
 			}
 
-			match spec.bypass_key {
-				Some(BypassKeyKind::Direct(i)) => must("bypass_key", i),
-				Some(BypassKeyKind::Derived {
+			match spec.check_key {
+				Some(CheckKeyKind::Direct(i)) => must("check_key", i),
+				Some(CheckKeyKind::Derived {
 					arg: i,
 					constructor,
 				}) => {
-					must("bypass_key", i);
+					must("check_key", i);
 					assert!(
 						primitive_get(constructor).is_ok(),
-						"{name}.bypass_key names a constructor that is not a primitive"
+						"{name}.check_key names a constructor that is not a primitive"
 					);
 				}
 				None => {}

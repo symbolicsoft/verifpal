@@ -1,109 +1,110 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use crate::context::Generational;
 use crate::types::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-const MERGE_BUDGET: usize = 4096;
-const MAX_WORLDS: usize = 16;
+mod diagram;
 
-fn key(need: &Need) -> (PrincipalId, usize) {
-	(need.0, need.1.get())
-}
+pub use diagram::Worlds;
 
-fn normalise(mut constraint: Constraint) -> Constraint {
-	constraint.sort_by_key(key);
-	constraint.dedup_by(|a, b| key(a) == key(b) && a.2.equivalent(&b.2, true));
-	constraint
-}
-
-fn merge_into(needs: &[Need], union: &mut Constraint) -> bool {
-	for need in needs {
-		match union.iter().find(|held| key(held) == key(need)) {
-			Some(held) => {
-				if !held.2.equivalent(&need.2, true) {
-					return false;
-				}
-			}
-			None => union.push(need.clone()),
-		}
-	}
-	true
-}
-
-fn covers(narrow: &Constraint, wide: &Constraint) -> bool {
-	narrow.iter().all(|need| {
-		wide.iter()
-			.any(|held| key(held) == key(need) && held.2.equivalent(&need.2, true))
+pub(crate) fn constraints(ps: &PrincipalState, needs: Constraint) -> Worlds {
+	Worlds::ordered(needs, |slot| {
+		crate::value::copy_index_of(ps.meta[slot.get()].constant.id).1
 	})
 }
 
-pub(crate) fn add(set: &mut Vec<Constraint>, new: Constraint) -> bool {
-	if set.len() == 1 && set[0].is_empty() {
+#[cfg(test)]
+fn add(set: &mut Worlds, new: Constraint) -> bool {
+	let widened = set.union(&Worlds::from_constraint(new));
+	if set.equivalent(&widened) {
 		return false;
 	}
-	let new = normalise(new);
-	if new.is_empty() {
-		set.clear();
-		set.push(new);
-		return true;
-	}
-	if set.iter().any(|existing| covers(existing, &new)) {
-		return false;
-	}
-	set.retain(|existing| !covers(&new, existing));
-	set.push(new);
-	if set.len() > MAX_WORLDS {
-		set.clear();
-		set.push(Vec::new());
-	}
+	*set = widened;
 	true
 }
 
-pub(crate) fn merge_all(sets: &[Vec<Constraint>]) -> Vec<Constraint> {
-	if sets.iter().any(|choices| choices.is_empty()) {
-		return Vec::new();
-	}
-	let mut out: Vec<Constraint> = Vec::new();
-	let mut budget = MERGE_BUDGET;
-	let mut acc: Constraint = Vec::new();
-	descend(sets, 0, &mut acc, &mut out, &mut budget);
-	if budget == 0 {
-		return vec![Vec::new()];
+pub(crate) fn merge_all(sets: &[Worlds]) -> Worlds {
+	let mut out = Worlds::any();
+	for choices in sets {
+		out = out.intersect(choices);
+		if out.is_empty() {
+			break;
+		}
 	}
 	out
 }
 
-fn descend(
-	sets: &[Vec<Constraint>],
-	depth: usize,
-	acc: &mut Constraint,
-	out: &mut Vec<Constraint>,
-	budget: &mut usize,
-) {
-	if *budget == 0 {
-		return;
-	}
-	*budget -= 1;
-	let Some(choices) = sets.get(depth) else {
-		add(out, acc.clone());
-		return;
+pub(crate) fn scheduled_world(
+	states: &[PrincipalState],
+	attacker: &AttackerState,
+	scheduled: &[Need],
+) -> Worlds {
+	let Some(state) = states.first() else {
+		return if scheduled.is_empty() {
+			Worlds::any()
+		} else {
+			Worlds::default()
+		};
 	};
-	if choices.is_empty() {
-		descend(sets, depth + 1, acc, out, budget);
-		return;
-	}
-	if out.len() == 1 && out[0].is_empty() {
-		return;
-	}
-	for choice in choices {
-		let mark = acc.len();
-		if merge_into(choice, acc) {
-			descend(sets, depth + 1, acc, out, budget);
+	let mut world = constraints(state, scheduled.to_vec());
+	for (who, _, value) in scheduled {
+		let Some(state) = states.iter().find(|state| state.id == *who) else {
+			return Worlds::default();
+		};
+		let mut inputs = crate::theory::KnowledgeInputs::new(state, attacker);
+		let Some(known) = inputs.of_value(value) else {
+			return Worlds::default();
+		};
+		for at in known {
+			let Some(available) = attacker.worlds.get(at.get()) else {
+				return Worlds::default();
+			};
+			world = world.intersect(available);
+			if world.is_empty() {
+				return world;
+			}
 		}
-		acc.truncate(mark);
 	}
+	world
+}
+
+pub(crate) fn install_world(
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	installs: &[(usize, Value)],
+	addressed: bool,
+) -> Worlds {
+	let mut inputs = crate::theory::KnowledgeInputs::new(ps, attacker);
+	let mut pins = Vec::new();
+	let mut required = Vec::new();
+	for (slot, value) in installs {
+		let Some(meta) = ps.meta.get(*slot) else {
+			return Worlds::default();
+		};
+		for &recipient in &meta.wire {
+			if meta.creator != recipient && (!addressed || recipient == ps.id) {
+				pins.push((recipient, SlotIdx(*slot), value.clone()));
+			}
+		}
+		let Some(known) = inputs.of_value(value) else {
+			return Worlds::default();
+		};
+		required.extend(known);
+	}
+	let mut world = constraints(ps, pins);
+	for at in required {
+		let Some(available) = attacker.worlds.get(at.get()) else {
+			return Worlds::default();
+		};
+		world = world.intersect(available);
+		if world.is_empty() {
+			return world;
+		}
+	}
+	world
 }
 
 pub(crate) fn state_world(
@@ -111,44 +112,85 @@ pub(crate) fn state_world(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	slot: usize,
-) -> Vec<Constraint> {
+) -> Worlds {
 	let key = (
-		ps as *const PrincipalState as usize,
+		ps.id,
 		attacker.chain,
 		attacker.known.len(),
-		attacker.worlds_epoch,
+		attacker.reused.len(),
+		attacker.current_phase,
 	);
 	if let Some(hit) = WORLDS.with(|cell| {
-		let cache = cell.borrow();
+		let mut cache = cell.borrow_mut();
 		cache
+			.fresh()
 			.as_ref()
-			.filter(|(seen, _)| *seen == key)
-			.and_then(|(_, slots)| slots.get(&slot).cloned())
+			.filter(|cached| cached.key == key && cached.matches(ps))
+			.and_then(|cached| cached.slots.get(&slot))
+			.filter(|cached| {
+				cached.inputs.iter().all(|(at, expected)| {
+					attacker
+						.worlds
+						.get(at.get())
+						.is_some_and(|actual| actual.equivalent(expected))
+				})
+			})
+			.map(|cached| cached.worlds.clone())
 	}) {
 		return hit;
 	}
 	let owner = match (ps.values.get(slot), km.slots.get(slot)) {
 		(Some(sv), _) if sv.provenance.attacker_tainted => ps.id,
 		(_, Some(trace_slot)) => trace_slot.creator,
-		_ => return vec![Vec::new()],
+		_ => return Worlds::any(),
 	};
-	let mut memo: IdMap<(PrincipalId, usize), Vec<Constraint>> = IdMap::default();
-	let mut active: Vec<(PrincipalId, usize)> = Vec::new();
-	let out = walk(km, ps, attacker, slot, owner, &mut memo, &mut active);
+	let mut visit = WorldVisit::default();
+	walk(km, ps, attacker, slot, owner, &mut visit);
+	let mut out = constraints(ps, visit.pins);
+	for worlds in visit.inputs.values().filter(|worlds| !worlds.is_empty()) {
+		out = out.intersect(worlds);
+		if out.is_empty() {
+			break;
+		}
+	}
+	let result = CachedWorld {
+		worlds: out.clone(),
+		inputs: visit.inputs,
+	};
 	WORLDS.with(|cell| {
 		let mut cache = cell.borrow_mut();
+		let cache = cache.fresh();
 		match cache.as_mut() {
-			Some((seen, slots)) if *seen == key => {
-				slots.insert(slot, out.clone());
+			Some(cached) if cached.key == key && cached.matches(ps) => {
+				cached.slots.insert(slot, result);
 			}
 			_ => {
-				let mut slots: IdMap<usize, Vec<Constraint>> = IdMap::default();
-				slots.insert(slot, out.clone());
-				*cache = Some((key, slots));
+				*cache = Some(WorldCache {
+					key,
+					values: ps
+						.values
+						.iter()
+						.map(|sv| {
+							(
+								sv.value.clone(),
+								sv.provenance.attacker_tainted,
+								sv.provenance.creator,
+							)
+						})
+						.collect(),
+					slots: IdMap::from_iter([(slot, result)]),
+				});
 			}
 		}
 	});
 	out
+}
+
+#[derive(Default)]
+struct WorldVisit {
+	seen: IdSet<(PrincipalId, usize)>,
+	pins: Constraint,
+	inputs: IdMap<KnownIdx, Worlds>,
 }
 
 fn walk(
@@ -157,26 +199,25 @@ fn walk(
 	attacker: &AttackerState,
 	slot: usize,
 	owner: PrincipalId,
-	memo: &mut IdMap<(PrincipalId, usize), Vec<Constraint>>,
-	active: &mut Vec<(PrincipalId, usize)>,
-) -> Vec<Constraint> {
-	if let Some(hit) = memo.get(&(owner, slot)) {
-		return hit.clone();
-	}
-	if active.contains(&(owner, slot)) {
-		return vec![Vec::new()];
+	visit: &mut WorldVisit,
+) {
+	if !visit.seen.insert((owner, slot)) {
+		return;
 	}
 	let (Some(sv), Some(trace_slot)) = (ps.values.get(slot), km.slots.get(slot)) else {
-		return vec![Vec::new()];
+		return;
 	};
 	if pinless(trace_slot, owner) {
-		return vec![Vec::new()];
+		return;
 	}
-	active.push((owner, slot));
-	let out = if owner == ps.id && sv.provenance.attacker_tainted {
-		installed(ps, slot, &sv.value, attacker)
+	if owner == ps.id && sv.provenance.attacker_tainted {
+		visit.pins.push((ps.id, SlotIdx(slot), sv.value.clone()));
+		if let Some(idx) = attacker.knows(&sv.value)
+			&& let Some(worlds) = attacker.worlds.get(idx.get())
+		{
+			visit.inputs.insert(idx, worlds.clone());
+		}
 	} else if owner == trace_slot.creator {
-		let mut sets: Vec<Vec<Constraint>> = Vec::new();
 		for &at in crate::deduction::reach_cone(km, owner, slot).iter() {
 			let Some(leaf) = km.slots.get(at) else {
 				continue;
@@ -184,20 +225,13 @@ fn walk(
 			if at == slot || leaf.creator == owner || pinless(leaf, owner) {
 				continue;
 			}
-			sets.push(walk(km, ps, attacker, at, owner, memo, active));
+			walk(km, ps, attacker, at, owner, visit);
 		}
-		merge_all(&sets)
 	} else {
-		let pin: Constraint = vec![(owner, SlotIdx(slot), sv.value.clone())];
+		visit.pins.push((owner, SlotIdx(slot), sv.value.clone()));
 		let creator = trace_slot.creator;
-		merge_all(&[
-			vec![pin],
-			walk(km, ps, attacker, slot, creator, memo, active),
-		])
-	};
-	active.pop();
-	memo.insert((owner, slot), out.clone());
-	out
+		walk(km, ps, attacker, slot, creator, visit);
+	}
 }
 
 fn pinless(trace_slot: &TraceSlot, owner: PrincipalId) -> bool {
@@ -213,44 +247,60 @@ pub(crate) fn observable(trace_slot: &TraceSlot) -> bool {
 	!trace_slot.sent_by.is_empty() || trace_slot.constant.leaked
 }
 
-fn installed(
-	ps: &PrincipalState,
-	slot: usize,
-	value: &Value,
-	attacker: &AttackerState,
-) -> Vec<Constraint> {
-	let pin: Constraint = vec![(ps.id, SlotIdx(slot), value.clone())];
-	let mut sets: Vec<Vec<Constraint>> = vec![vec![pin]];
-	if let Some(idx) = attacker.knows(value)
-		&& let Some(worlds) = attacker.worlds.get(idx.get())
-		&& !worlds.is_empty()
-	{
-		sets.push(worlds.clone());
-	}
-	merge_all(&sets)
-}
-
 pub(crate) fn derived_worlds(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	target: &Value,
 	derivation: &DerivationRecord,
-) -> Vec<Constraint> {
-	let mut out = recorded_worlds(km, ps, attacker, derivation);
-	if !out.iter().any(|world| world.is_empty()) && unconditional(ps, attacker, target) {
-		add(&mut out, Vec::new());
+) -> Worlds {
+	let existing = attacker.knows(target).and_then(|known| {
+		attacker
+			.worlds
+			.get(known.get())
+			.map(|worlds| (known, worlds))
+	});
+	if matches!(derivation, DerivationRecord::Initial)
+		|| existing.is_some_and(|(_, worlds)| worlds.is_unconditional())
+		|| unconditional(ps, attacker, target)
+	{
+		return Worlds::any();
 	}
-	out
+	recorded_worlds(km, ps, attacker, derivation, existing)
 }
 
 type Everywhere = ((u64, usize, u64), Option<Arc<AttackerState>>);
 
-type WorldCache = ((usize, u64, usize, u64), IdMap<usize, Vec<Constraint>>);
+struct CachedWorld {
+	worlds: Worlds,
+	inputs: IdMap<KnownIdx, Worlds>,
+}
+
+struct WorldCache {
+	key: (PrincipalId, u64, usize, usize, i32),
+	values: Vec<(Value, bool, PrincipalId)>,
+	slots: IdMap<usize, CachedWorld>,
+}
+
+impl WorldCache {
+	fn matches(&self, ps: &PrincipalState) -> bool {
+		self.values.len() == ps.values.len()
+			&& self
+				.values
+				.iter()
+				.zip(&ps.values)
+				.all(|((value, tainted, creator), sv)| {
+					*tainted == sv.provenance.attacker_tainted
+						&& *creator == sv.provenance.creator
+						&& value.equivalent(&sv.value, true)
+				})
+	}
+}
 
 thread_local! {
 	static EVERYWHERE: RefCell<Option<Everywhere>> = const { RefCell::new(None) };
-	static WORLDS: RefCell<Option<WorldCache>> = const { RefCell::new(None) };
+	static WORLDS: RefCell<Generational<Option<WorldCache>>> = RefCell::new(Generational::default());
+	static DERIVED: RefCell<Generational<crate::context::Recent<u64, KnownIdx, Vec<CachedWorld>>>> = RefCell::new(Generational::default());
 }
 
 fn everywhere_state(attacker: &AttackerState) -> Option<Arc<AttackerState>> {
@@ -268,7 +318,7 @@ fn everywhere_state(attacker: &AttackerState) -> Option<Arc<AttackerState>> {
 			attacker
 				.worlds
 				.get(i)
-				.is_some_and(|worlds| worlds.iter().any(|world| world.is_empty()))
+				.is_some_and(|worlds| worlds.is_unconditional())
 		})
 		.collect();
 	let built = if keep.iter().any(|&kept| kept) {
@@ -296,15 +346,16 @@ fn recorded_worlds(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	derivation: &DerivationRecord,
-) -> Vec<Constraint> {
+	existing: Option<(KnownIdx, &Worlds)>,
+) -> Worlds {
 	match derivation {
-		DerivationRecord::Initial => vec![Vec::new()],
+		DerivationRecord::Initial => Worlds::any(),
 		DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
 			state_world(km, ps, attacker, slot.get())
 		}
 		_ => {
 			let mut inputs = crate::theory::KnowledgeInputs::new(ps, attacker);
-			let mut sets: Vec<Vec<Constraint>> = Vec::new();
+			let mut sets: IdMap<KnownIdx, Worlds> = IdMap::default();
 			for ingredient in derivation.ingredients() {
 				let Some(found) = inputs.of_value(ingredient) else {
 					continue;
@@ -313,11 +364,197 @@ fn recorded_worlds(
 					if let Some(worlds) = attacker.worlds.get(idx.get())
 						&& !worlds.is_empty()
 					{
-						sets.push(worlds.clone());
+						if let Some((_, existing)) = existing
+							&& existing.includes(worlds)
+						{
+							return existing.clone();
+						}
+						sets.insert(idx, worlds.clone());
 					}
 				}
 			}
-			merge_all(&sets)
+			if let Some((target, _)) = existing
+				&& let Some(hit) = DERIVED.with(|cell| {
+					cell.borrow_mut()
+						.fresh()
+						.group(attacker.chain)
+						.get(&target)
+						.and_then(|choices| {
+							choices.iter().find(|cached| {
+								cached.inputs.len() == sets.len()
+									&& sets.iter().all(|(at, worlds)| {
+										cached
+											.inputs
+											.get(at)
+											.is_some_and(|seen| seen.equivalent(worlds))
+									})
+							})
+						})
+						.map(|cached| cached.worlds.clone())
+				}) {
+				return hit;
+			}
+			let out = merge_all(&sets.values().cloned().collect::<Vec<_>>());
+			if let Some((target, _)) = existing {
+				DERIVED.with(|cell| {
+					let mut cache = cell.borrow_mut();
+					let choices = cache
+						.fresh()
+						.group(attacker.chain)
+						.entry(target)
+						.or_default();
+					choices.retain(|cached| {
+						cached.inputs.len() != sets.len()
+							|| cached.inputs.keys().any(|at| !sets.contains_key(at))
+					});
+					if choices.len() >= 8 {
+						choices.remove(0);
+					}
+					choices.push(CachedWorld {
+						worlds: out.clone(),
+						inputs: sets,
+					});
+				});
+			}
+			out
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::make_constant;
+
+	#[test]
+	fn derived_world_cache_follows_changed_ingredients_and_worlds() {
+		let first = make_constant("derive_cache_first");
+		let second = make_constant("derive_cache_second");
+		let target = make_constant("derive_cache_target");
+		let a = Worlds::from_constraint(vec![(1, SlotIdx(0), first.clone())]);
+		let b = Worlds::from_constraint(vec![(1, SlotIdx(0), second.clone())]);
+		let mut attacker =
+			crate::testutil::make_attacker_state(vec![first.clone(), second.clone(), target]);
+		let ps = crate::testutil::make_principal_state("DeriveCache", 1, Vec::new(), Vec::new());
+		let km = ProtocolTrace::default();
+		let empty = Worlds::default();
+		for (mut worlds, from, expected) in [
+			(
+				vec![a.clone(), a.clone()],
+				vec![first.clone(), second.clone()],
+				a.clone(),
+			),
+			(
+				vec![a.clone(), a.clone()],
+				vec![first.clone(), second.clone()],
+				a.clone(),
+			),
+			(
+				vec![b.clone(), a.clone()],
+				vec![first.clone(), second.clone()],
+				empty.clone(),
+			),
+			(
+				vec![b.clone(), b.clone()],
+				vec![first.clone(), second.clone()],
+				b.clone(),
+			),
+			(vec![a.clone(), b.clone()], vec![first.clone()], a.clone()),
+			(vec![a, b.clone()], vec![second], b),
+		] {
+			worlds.push(empty.clone());
+			attacker.worlds = Arc::new(worlds);
+			let actual = recorded_worlds(
+				&km,
+				&ps,
+				&attacker,
+				&DerivationRecord::Reconstructed { from },
+				Some((KnownIdx(2), &empty)),
+			);
+			assert!(actual.equivalent(&expected));
+		}
+	}
+
+	#[test]
+	fn cached_state_worlds_follow_their_installed_value_dependencies() {
+		use crate::testutil::{
+			make_attacker_state, make_principal_state, make_private, make_slot_meta,
+			make_slot_values,
+		};
+		let received = make_private("world_cache_received");
+		let first = make_constant("world_cache_first");
+		let second = make_constant("world_cache_second");
+		let declared = make_private("world_cache_declared");
+		let constant = declared.as_constant().unwrap().clone();
+		let mut slot = make_slot_values(&received, 2);
+		slot.provenance.attacker_tainted = true;
+		let ps = make_principal_state(
+			"WorldCache",
+			1,
+			vec![make_slot_meta(&constant, false)],
+			vec![slot],
+		);
+		let mut km = ProtocolTrace::default();
+		km.slots.push(TraceSlot {
+			declared_span: Span::default(),
+			constant,
+			initial_value: declared,
+			creator: 2,
+			known_by: vec![(2, 2), (1, 2)],
+			sent_by: Vec::new(),
+			declared_at: 0,
+			phases: vec![0],
+		});
+		let a = constraints(&ps, vec![(3, SlotIdx(0), first)]);
+		let b = constraints(&ps, vec![(3, SlotIdx(0), second)]);
+		let mut attacker = make_attacker_state(vec![received]);
+		attacker.worlds = Arc::new(vec![a.clone()]);
+		let before = state_world(&km, &ps, &attacker, 0);
+		assert!(before.intersect(&b).is_empty());
+		attacker.worlds = Arc::new(vec![a.union(&b)]);
+		attacker.worlds_epoch += 1;
+		let after = state_world(&km, &ps, &attacker, 0);
+		assert!(!after.intersect(&b).is_empty());
+	}
+
+	#[test]
+	fn alternatives_never_erase_their_constraints() {
+		let mut worlds = Worlds::default();
+		for i in 0..32 {
+			assert!(add(
+				&mut worlds,
+				vec![(1, SlotIdx(0), make_constant(&format!("world_{i}")))]
+			));
+		}
+		assert!(!worlds.is_empty());
+		assert!(!worlds.is_unconditional());
+		let incompatible =
+			Worlds::from_constraint(vec![(1, SlotIdx(0), make_constant("world_other"))]);
+		assert!(merge_all(&[worlds, incompatible]).is_empty());
+	}
+
+	#[test]
+	fn repeated_alternatives_do_not_exhaust_a_merge_budget() {
+		let pin = vec![(1, SlotIdx(0), make_constant("world_pin"))];
+		let mut choices = Worlds::default();
+		for _ in 0..5000 {
+			add(&mut choices, pin.clone());
+		}
+		let expected = Worlds::from_constraint(pin);
+		let result = merge_all(&[choices, expected.clone()]);
+		assert!(result.equivalent(&expected));
+	}
+
+	#[test]
+	fn contradictory_constraints_are_not_worlds() {
+		let mut worlds = Worlds::default();
+		assert!(!add(
+			&mut worlds,
+			vec![
+				(1, SlotIdx(0), make_constant("world_first")),
+				(1, SlotIdx(0), make_constant("world_second")),
+			]
+		));
+		assert!(worlds.is_empty());
 	}
 }

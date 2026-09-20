@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0e1 at one session, c0a1e1 at two. The equivalence query
-// fails for a different reason at each count, and the one-session reason is
-// the sharper one; the two-session authentication failure is the ordinary
-// duplicate acceptance of a first flight.
+// Expected: c0a0e1 at one session and two. The equivalence query fails
+// by reflection or by mixing runs. Authentication holds because two Bob
+// instances cannot both finish using one Alice flight: their different
+// Diffie-Hellman keys would require incompatible responses from that Alice.
 //
 // An anonymous Diffie-Hellman exchange with both public
 // keys sent UNGUARDED, which is normally the definition of a man in the
@@ -19,19 +19,19 @@
 // her as (gb, conf_b) is a valid confirmation: MAC(psk, ga) is Bob's MAC over
 // a share, just not over Bob's share. Alice derives DH_KEX(ga, a) while Bob
 // holds DH_KEX(ga, b), and the two disagree. Nothing here is forged; the
-// attacker never touches psk. This was a missed attack until the solver
-// learned that leaving a DH share as it is, or handing back one it observed,
-// obliges it to hold the public value and not the exponent.
+// attacker never touches psk. Relaying a public Diffie-Hellman share
+// requires the share, not its secret exponent.
 //
 // At two sessions it fails a second way: replaying a sibling session's
 // (gb, conf_b) pair whole gets past Alice's ASSERT on its own merits, the MAC
 // is Bob's, just from the wrong run, and Alice derives DH_KEX(gb#2, a) while
 // Bob still holds DH_KEX(ga, b). Confirming the transcript is not the same as
 // confirming which run produced it, or who did, and nothing here binds the
-// exchange to either. The same replay in the other direction, the sibling
-// Alice's (ga, conf_a) handed to this Bob while she is handed his share so
-// that her sealed box opens for him, is what fails the authentication query
-// at two sessions: Alice sent that share once and Bob accepts it twice.
+// exchange to either. Replaying one Alice flight to both Bobs passes their
+// first MAC checks, but both must also decrypt her sealed message. Each Bob
+// needs Alice to encrypt under his own different key; one Alice cannot
+// produce both responses in the same execution. Both complete uses are
+// required for duplicate acceptance, so the authentication query holds.
 //
 // The lesson is the one the unguarded MitM models in this directory are
 // missing: guards in a Verifpal model stand in for an authentication

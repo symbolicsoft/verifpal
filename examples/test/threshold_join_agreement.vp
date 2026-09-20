@@ -17,8 +17,8 @@ principal Dealer[
 	generates nc
 	generates na2
 	knows public m
-	knows public cl
-	knows public cl_other
+	cl = CONCAT(PUBKEY(na), PUBKEY(nb), PUBKEY(nc), PUBKEY(na2))
+	cl_other = CONCAT(cl, nil)
 	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
 	pa = THRESHOLD_SIGN(s1, na, cl, m)
 	pb = THRESHOLD_SIGN(s2, nb, cl, m)

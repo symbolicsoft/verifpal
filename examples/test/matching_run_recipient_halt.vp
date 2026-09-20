@@ -1,0 +1,46 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a1 at one session, a1a1 at two.
+// Alice sends her tag to Dave before checking the guarded digest, and to Bob
+// afterward. The earlier send can match Dave's acceptance even when Alice later
+// halts, but cannot excuse Bob's acceptance after the failed check. Cached
+// matching-run answers must therefore distinguish the two recipient actors.
+// At two sessions Dave can instead accept a pristine sibling tag twice.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+]
+principal Bob[
+	knows private k
+]
+principal Dave[
+	knows private k
+]
+principal Carol[
+	generates n
+	hn = HASH(n)
+]
+Carol -> Dave: n
+Carol -> Alice: n, [hn]
+Carol -> Bob: n
+principal Alice[
+	tag = MAC(k, n)
+]
+Alice -> Dave: tag
+principal Dave[
+	_ = ASSERT(tag, MAC(k, n))?
+]
+principal Alice[
+	_ = ASSERT(hn, HASH(n))?
+]
+Alice -> Bob: tag
+principal Bob[
+	_ = ASSERT(tag, MAC(k, n))?
+]
+queries[
+	authentication? Alice -> Dave: tag
+	authentication? Alice -> Bob: tag
+]

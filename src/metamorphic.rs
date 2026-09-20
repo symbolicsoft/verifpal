@@ -46,6 +46,15 @@ enum Outcome {
 }
 
 fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
+	let progress = std::env::var_os("VERIFPAL_METAMORPHIC_PROGRESS").is_some();
+	if progress {
+		eprintln!(
+			"[metamorphic {:?}] begin {} sessions={sessions} scenarios={}",
+			std::thread::current().id(),
+			model.file_name,
+			model.scenarios.len()
+		);
+	}
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
 		let _verdicts_only = (!sweep.builds_traces()).then(crate::witness::MinimizingGuard::new);
@@ -53,6 +62,13 @@ fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
 			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
 	}));
+	if progress {
+		eprintln!(
+			"[metamorphic {:?}] end {}",
+			std::thread::current().id(),
+			model.file_name
+		);
+	}
 	match attempt {
 		Ok(Some(code)) => Outcome::Code(code),
 		Ok(None) => Outcome::Rejected,

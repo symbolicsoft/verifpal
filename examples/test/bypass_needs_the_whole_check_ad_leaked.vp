@@ -1,13 +1,9 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1 — the counterweight to bypass_needs_the_whole_check.vp.
-//
-// The same protocol with the associated data leaked as well. The attacker can
-// now build AEAD_ENC(k, ., ad) for a plaintext of its choosing, so the check
-// really is defeatable and Bob really does accept a value Alice never sent.
-// Without this model, the fix that made the first one a0 could equally have
-// been "never bypass an AEAD check".
+// Expected: a1. The attacker knows the encryption key, nonce, and associated
+// data, so it constructs a ciphertext of its choosing that Bob successfully
+// decrypts.
 
 attacker[active]
 

@@ -1,20 +1,9 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — AEAD_DEC declares a direct bypass key at argument 0, and a
-// leaked symmetric key is what turns that declaration into an attack: the
-// attacker seals a message of its own under the key it now holds, and Bob's
-// checked decryption succeeds on its own merits. No bypass of the check is
-// even needed; the check simply passes.
-//
-// The second flight is the same construction under a key that never leaves
-// Alice and Bob, and it is what keeps the first verdict specific. Both
-// decryptions are checked, both are in the same block, and the attacker's
-// power over them differs only by one `leaks` line.
-// The nonces on `n_e_lost`, `n_e_held` are declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+// Expected: a1a0. The leaked key permits a concrete ciphertext forgery in the
+// first flight. The independent secret key protects the second. Declared
+// nonces keep honest ciphertexts identical across sessions.
 
 attacker[active]
 

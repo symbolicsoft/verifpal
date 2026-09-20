@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+// Moving Alice's check before her MAC computation preserves the origin attack.
+// The result must not depend on whether a never-sent tag was computed first.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+]
+principal Bob[
+	knows private k
+]
+principal Dave[]
+principal Carol[
+	knows private k
+	generates n
+	hn = HASH(n)
+	other = MAC(k, nil)
+]
+Carol -> Dave: other
+Carol -> Alice: n, [hn]
+Carol -> Bob: n
+principal Alice[
+	_ = ASSERT(hn, HASH(n))?
+	tag = MAC(k, n)
+]
+Alice -> Bob: tag
+principal Bob[
+	_ = ASSERT(tag, MAC(k, n))?
+]
+queries[
+	authentication? Alice -> Bob: tag
+]

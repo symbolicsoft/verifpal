@@ -4,11 +4,8 @@
 use std::sync::Arc;
 
 use crate::context::VerifyContext;
-use crate::primitive::{
-	BypassKeyKind, attacker_public_key, primitive_extract_bypass_key, primitive_get,
-};
 use crate::principal::ATTACKER_ID;
-use crate::theory::{can_rewrite, obtainable, reduce_once};
+use crate::theory::reduce_once;
 use crate::types::*;
 use crate::value::{resolve_trace_constant, resolve_trace_term};
 
@@ -51,7 +48,7 @@ pub(crate) struct TermBound {
 }
 
 struct Deep {
-	protocol: IdSet<u64>,
+	protocol: crate::hashing::TermSet,
 	ids: Vec<ValueId>,
 	creators: Vec<PrincipalId>,
 	consumes: Vec<Option<ValueId>>,
@@ -74,11 +71,11 @@ impl TermBound {
 
 	fn deep(&self, km: &ProtocolTrace) -> &Deep {
 		self.deep.get_or_init(|| {
-			let mut protocol: IdSet<u64> = IdSet::default();
+			let mut protocol = crate::hashing::TermSet::default();
 			for slot in &km.slots {
 				let term = resolve_trace_constant(&slot.constant, km);
-				crate::hashing::collect_subterm_hashes(&term, &mut protocol);
-				crate::hashing::collect_subterm_hashes(&reduce_once(&term), &mut protocol);
+				crate::hashing::collect_subterms(&term, &mut protocol);
+				crate::hashing::collect_subterms(&reduce_once(&term), &mut protocol);
 			}
 			Deep {
 				protocol,
@@ -110,7 +107,7 @@ impl TermBound {
 			&& deep.depth_over_protocol(v) <= self.max_depth
 	}
 
-	pub(crate) fn protocol(&self, km: &ProtocolTrace) -> &IdSet<u64> {
+	pub(crate) fn protocol(&self, km: &ProtocolTrace) -> &crate::hashing::TermSet {
 		&self.deep(km).protocol
 	}
 
@@ -448,6 +445,10 @@ pub(crate) fn causally_grounded(
 	states: &[PrincipalState],
 	attacker: &AttackerState,
 ) -> bool {
+	if crate::world::scheduled_world(states, attacker, installs).is_empty() {
+		return false;
+	}
+
 	let mut remaining: Vec<_> = installs.iter().collect();
 	remaining
 		.sort_by_key(|(_, slot, _)| km.slots.get(slot.get()).map(|s| s.declared_at).unwrap_or(0));
@@ -779,14 +780,22 @@ pub(crate) struct Guards<'a> {
 }
 
 fn term_depth(v: &Value) -> usize {
-	term_depth_outside(v, &IdSet::default(), &mut IdMap::default())
+	term_depth_outside(
+		v,
+		&crate::hashing::TermSet::default(),
+		&mut IdMap::default(),
+	)
 }
 
-fn term_depth_outside(v: &Value, basis: &IdSet<u64>, memo: &mut IdMap<usize, usize>) -> usize {
+fn term_depth_outside(
+	v: &Value,
+	basis: &crate::hashing::TermSet,
+	memo: &mut IdMap<usize, usize>,
+) -> usize {
 	match v {
 		Value::Constant(_) => 0,
 		Value::Primitive(p) => {
-			if !basis.is_empty() && basis.contains(&v.hash_value()) {
+			if !basis.is_empty() && basis.contains(v) {
 				return 0;
 			}
 			let key = Arc::as_ptr(p) as usize;
@@ -894,8 +903,8 @@ fn reexecute_with(
 	ps_base: &PrincipalState,
 	installs: &[(SlotIdx, Value)],
 	phases: Option<&[i32]>,
-	forwarded: &[(SlotIdx, Value)],
-	attacker: &AttackerState,
+	forwarded: &[(SlotIdx, Value, bool)],
+	_attacker: &AttackerState,
 	km: &ProtocolTrace,
 	addressed: bool,
 ) -> VResult<PrincipalState> {
@@ -913,9 +922,9 @@ fn reexecute_with(
 			install(&mut ps, slot.get(), ground.clone(), authored, at, addressed);
 		}
 	}
-	for (slot, value) in forwarded {
+	for (slot, value, authored) in forwarded {
 		if slot.get() < ps.values.len() {
-			install_forwarded(&mut ps, slot.get(), value.clone());
+			install_forwarded(&mut ps, slot.get(), value.clone(), *authored);
 		}
 	}
 
@@ -925,11 +934,10 @@ fn reexecute_with(
 		));
 	}
 
-	let ps_pre = ps.clone();
 	ps.resolve_all_values()?;
 	let failures = ps.perform_all_rewrites();
 
-	if !relays_are_forwarded(&ps, km, &relayed, &failures, attacker) {
+	if !relays_are_forwarded(&ps, km, &relayed, &failures) {
 		return Err(VerifpalError::resolution(
 			"a guarded value's forwarder halts before forwarding it".into(),
 		));
@@ -938,11 +946,7 @@ fn reexecute_with(
 	let foreign = foreign_halts(&ps, &failures);
 	let starved = starved_slots(km, &ps, &foreign);
 
-	if let Some(bypassed) = try_guard_bypass(km, &ps_pre, &ps, &failures, attacker)? {
-		ps = bypassed;
-	} else {
-		ps = halt_at(ps, &failures);
-	}
+	ps = halt_at(ps, &failures);
 	ps.foreign_halts = foreign;
 	ps.starved = starved;
 	ps.forwarded = !forwarded.is_empty();
@@ -981,57 +985,104 @@ pub(crate) fn execute_forward(
 ) -> VResult<Vec<PrincipalState>> {
 	let first = reexecute_with(base, installs, phases, &[], attacker, km, addressed)?;
 	let mut out = vec![first];
-	forward_to_fixpoint(ctx, km, &mut out, &[], Some(base.id), attacker);
+	forward_to_fixpoint(
+		ctx,
+		km,
+		&mut out,
+		&[(base.id, installs.to_vec())],
+		Some(DrivingReplay {
+			base,
+			phases,
+			addressed,
+		}),
+		attacker,
+	)?;
 	Ok(out)
 }
 
 pub(crate) type Seeds = Vec<(PrincipalId, Vec<(SlotIdx, Value)>)>;
+
+type Forwardings = Vec<(PrincipalId, Vec<(SlotIdx, Value, bool)>)>;
+
+fn same_forwardings(a: &[(SlotIdx, Value, bool)], b: &[(SlotIdx, Value, bool)]) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b)
+			.all(|((slot, value, authored), (other, seen, was))| {
+				slot == other && authored == was && value.equivalent(seen, true)
+			})
+}
+
+struct DrivingReplay<'a> {
+	base: &'a PrincipalState,
+	phases: Option<&'a [i32]>,
+	addressed: bool,
+}
+
+#[derive(PartialEq, Eq)]
+struct ForwardReach {
+	principal: PrincipalId,
+	halted_at: Option<i32>,
+	foreign_halts: Vec<(PrincipalId, usize)>,
+	starved: Vec<usize>,
+}
+
+impl ForwardReach {
+	fn of(state: &PrincipalState) -> Self {
+		Self {
+			principal: state.id,
+			halted_at: state.halted_at,
+			foreign_halts: state.foreign_halts.clone(),
+			starved: state.starved.clone(),
+		}
+	}
+}
 
 fn forward_to_fixpoint(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	out: &mut Vec<PrincipalState>,
 	seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
-	skip: Option<PrincipalId>,
+	driving: Option<DrivingReplay<'_>>,
 	attacker: &AttackerState,
-) {
-	let mut applied: Vec<(PrincipalId, Vec<(SlotIdx, Value)>)> = Vec::new();
-	for _ in 0..ctx.principal_states().len() {
+) -> VResult<()> {
+	let mut applied: Forwardings = Vec::new();
+	let mut seen: Vec<(Forwardings, Vec<ForwardReach>)> = Vec::new();
+	loop {
 		let mut changed = false;
 		for pristine in ctx.principal_states() {
-			if skip == Some(pristine.id) {
-				continue;
-			}
+			let driver = driving
+				.as_ref()
+				.filter(|driver| driver.base.id == pristine.id);
+			let pristine = driver.map_or(pristine, |driver| driver.base);
 			let seed: &[(SlotIdx, Value)] = seeds
 				.iter()
 				.find(|(principal, _)| *principal == pristine.id)
 				.map(|(_, mine)| mine.as_slice())
 				.unwrap_or(&[]);
-			let forwarded: Vec<(SlotIdx, Value)> =
+			let forwarded: Vec<(SlotIdx, Value, bool)> =
 				forwarded_installs(ctx, km, out, pristine, attacker)
 					.into_iter()
-					.filter(|(slot, _)| !seed.iter().any(|(held, _)| held == slot))
+					.filter(|(slot, _, _)| !seed.iter().any(|(held, _)| held == slot))
 					.collect();
-			if forwarded.is_empty() {
+			if forwarded.is_empty() && !applied.iter().any(|(id, _)| *id == pristine.id) {
 				continue;
 			}
 			if applied
 				.iter()
-				.any(|(id, seen)| *id == pristine.id && same_installs(seen, &forwarded))
+				.any(|(id, seen)| *id == pristine.id && same_forwardings(seen, &forwarded))
 			{
 				continue;
 			}
-			let Ok(mut state) = reexecute_with(
+			let mut state = reexecute_with(
 				&pristine.clone_for_depth(true),
 				seed,
-				None,
+				driver.and_then(|driver| driver.phases),
 				&forwarded,
 				attacker,
 				km,
-				false,
-			) else {
-				continue;
-			};
+				driver.is_some_and(|driver| driver.addressed),
+			)?;
 			adopt_foreign_halts(km, &mut state, out);
 			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
 				Some((_, seen)) => *seen = forwarded,
@@ -1043,9 +1094,31 @@ fn forward_to_fixpoint(
 			}
 			changed = true;
 		}
-		if !changed {
-			break;
+		for at in 0..out.len() {
+			let mut updated = out[at].clone();
+			adopt_foreign_halts(km, &mut updated, out);
+			if ForwardReach::of(&updated) != ForwardReach::of(&out[at]) {
+				out[at] = updated;
+				changed = true;
+			}
 		}
+		if !changed {
+			return Ok(());
+		}
+		let reach = out.iter().map(ForwardReach::of).collect::<Vec<_>>();
+		if seen.iter().any(|(prior, prior_reach)| {
+			*prior_reach == reach
+				&& prior.len() == applied.len()
+				&& prior
+					.iter()
+					.zip(&applied)
+					.all(|((a, left), (b, right))| a == b && same_forwardings(left, right))
+		}) {
+			return Err(VerifpalError::resolution(
+				"message forwarding repeats an execution without stabilizing".into(),
+			));
+		}
+		seen.push((applied.clone(), reach));
 	}
 }
 
@@ -1103,7 +1176,7 @@ pub(crate) fn replay_diffs(
 	if out.is_empty() {
 		return Some(out);
 	}
-	forward_to_fixpoint(ctx, km, &mut out, &installed, None, attacker);
+	forward_to_fixpoint(ctx, km, &mut out, &installed, None, attacker).ok()?;
 	Some(out)
 }
 
@@ -1120,14 +1193,14 @@ fn forwarded_installs(
 	executed: &[PrincipalState],
 	target: &PrincipalState,
 	attacker: &AttackerState,
-) -> Vec<(SlotIdx, Value)> {
-	let mut out: Vec<(SlotIdx, Value)> = Vec::new();
+) -> Vec<(SlotIdx, Value, bool)> {
+	let mut out: Vec<(SlotIdx, Value, bool)> = Vec::new();
 	for source in executed {
 		if source.id == target.id {
 			continue;
 		}
 		for at in 0..target.values.len() {
-			if out.iter().any(|(slot, _)| slot.get() == at) {
+			if out.iter().any(|(slot, _, _)| slot.get() == at) {
 				continue;
 			}
 			let Some(slot) = km.slots.get(at) else {
@@ -1152,7 +1225,11 @@ fn forwarded_installs(
 			if !attacker_authored(emitted, at, km, target) && !(newly && !source.slot_starved(at)) {
 				continue;
 			}
-			out.push((SlotIdx(at), emitted.clone()));
+			out.push((
+				SlotIdx(at),
+				emitted.clone(),
+				source.values[at].provenance.sender == ATTACKER_ID,
+			));
 		}
 	}
 	out
@@ -1222,11 +1299,14 @@ fn adopt_foreign_halts(
 	}
 }
 
-fn install_forwarded(ps: &mut PrincipalState, slot: usize, value: Value) {
+fn install_forwarded(ps: &mut PrincipalState, slot: usize, value: Value, authored: bool) {
 	let sv = &mut ps.values[slot];
 	sv.pre_rewrite = value.clone();
 	sv.value = value;
 	sv.provenance.attacker_tainted = true;
+	if authored {
+		sv.provenance.sender = ATTACKER_ID;
+	}
 }
 
 fn relayed_installs(
@@ -1249,7 +1329,6 @@ fn relays_are_forwarded(
 	km: &ProtocolTrace,
 	relayed: &[(usize, PrincipalId)],
 	failures: &[(Primitive, usize)],
-	attacker: &AttackerState,
 ) -> bool {
 	relayed.iter().all(|&(slot, sender)| {
 		let send = km.slots.get(slot).and_then(|s| {
@@ -1264,7 +1343,6 @@ fn relays_are_forwarded(
 			!prim.instance_check
 				|| ps.values[*idx].provenance.creator != sender
 				|| ps.meta[*idx].declared_at >= send.declared_at
-				|| bypass_is_constructible(km, prim, ps, *idx, attacker)
 		})
 	})
 }
@@ -1304,6 +1382,92 @@ pub(crate) fn creator_halts(
 		}
 	}
 	out
+}
+
+pub(crate) fn message_available(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	witness: &[PrincipalState],
+	event: &SendEvent,
+	slot: usize,
+) -> bool {
+	struct Availability<'a> {
+		km: &'a ProtocolTrace,
+		ps: &'a PrincipalState,
+		witness: &'a [PrincipalState],
+		active: Vec<(PrincipalId, usize, i32)>,
+		memo: IdMap<(PrincipalId, usize, i32), bool>,
+	}
+	impl Availability<'_> {
+		fn state(&self, who: PrincipalId) -> &PrincipalState {
+			self.witness
+				.iter()
+				.find(|state| state.id == who)
+				.unwrap_or(self.ps)
+		}
+
+		fn held(&mut self, who: PrincipalId, at: usize, before: i32) -> bool {
+			let slot = &self.km.slots[at];
+			let state = self.state(who);
+			if !state.event_reached(self.km, who, before) {
+				return false;
+			}
+			if slot.constant.is_nil()
+				|| slot.constant.qualifier == Some(Qualifier::Public)
+				|| slot
+					.known_by
+					.iter()
+					.any(|&(holder, sender)| holder == who && sender == who)
+			{
+				return true;
+			}
+			if state.id == who
+				&& state
+					.values
+					.get(at)
+					.is_some_and(|sv| sv.provenance.attacker_tainted)
+				&& slot
+					.sent_by
+					.iter()
+					.any(|send| send.recipient == who && send.declared_at <= before)
+			{
+				return true;
+			}
+			let key = (who, at, before);
+			if let Some(&held) = self.memo.get(&key) {
+				return held;
+			}
+			if self.active.contains(&key) {
+				return false;
+			}
+			self.active.push(key);
+			let held = if slot.creator == who {
+				slot.declared_at <= before
+					&& slot.initial_value.constant_leaves().all(|leaf| {
+						self.km.index_of(leaf).is_none_or(|input| {
+							input == at || self.held(who, input, slot.declared_at)
+						})
+					})
+			} else {
+				slot.sent_by.iter().any(|send| {
+					send.recipient == who
+						&& send.declared_at <= before
+						&& self.held(send.sender, at, send.declared_at)
+				})
+			};
+			self.active.pop();
+			self.memo.insert(key, held);
+			held
+		}
+	}
+	Availability {
+		km,
+		ps,
+		witness,
+		active: Vec::new(),
+		memo: IdMap::default(),
+	}
+	.held(event.sender, slot, event.declared_at)
 }
 
 pub(crate) fn honest_run_unreached(
@@ -1418,15 +1582,6 @@ fn foreign_halts(
 		.collect()
 }
 
-fn keyed_position(prim: &Primitive) -> Option<usize> {
-	match primitive_get(prim.id).ok()?.bypass_key? {
-		BypassKeyKind::Direct(at) => Some(at),
-		BypassKeyKind::Derived { arg, .. } => Some(arg),
-	}
-}
-
-type BypassDecision = (PrincipalId, Primitive, i32, bool);
-
 type BlockedAt = crate::context::Generational<IdMap<Vec<(PrincipalId, i32)>, Arc<Vec<bool>>>>;
 type RestrictedAt = crate::context::Generational<
 	crate::context::Recent<
@@ -1437,24 +1592,13 @@ type RestrictedAt = crate::context::Generational<
 >;
 
 thread_local! {
-	static BYPASS_DECISIONS: std::cell::RefCell<Option<Vec<BypassDecision>>> =
-		const { std::cell::RefCell::new(None) };
 	static BLOCKED_AT: std::cell::RefCell<BlockedAt> =
 		std::cell::RefCell::new(crate::context::Generational::default());
 	static RESTRICTED_AT: std::cell::RefCell<RestrictedAt> =
 		std::cell::RefCell::new(crate::context::Generational::default());
 }
 
-pub(crate) fn record_bypass_decisions() {
-	BYPASS_DECISIONS.with(|decisions| *decisions.borrow_mut() = Some(Vec::new()));
-}
-
-pub(crate) fn take_bypass_decisions() -> Vec<BypassDecision> {
-	BYPASS_DECISIONS
-		.with(|decisions| decisions.borrow_mut().take())
-		.unwrap_or_default()
-}
-
+#[cfg(test)]
 fn held_at(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -1496,148 +1640,6 @@ fn held_before(
 			.insert(after, built.clone());
 	});
 	built
-}
-
-pub(crate) fn bypass_constructible_at(
-	km: &ProtocolTrace,
-	prim: &Primitive,
-	ps: &PrincipalState,
-	at: i32,
-	attacker: &AttackerState,
-) -> bool {
-	match held_at(km, ps, at, attacker) {
-		Some(held) => bypass_constructible(prim, ps, &held),
-		None => bypass_constructible(prim, ps, attacker),
-	}
-}
-
-fn bypass_is_constructible(
-	km: &ProtocolTrace,
-	prim: &Primitive,
-	ps: &PrincipalState,
-	idx: usize,
-	attacker: &AttackerState,
-) -> bool {
-	let at = ps.meta.get(idx).map(|meta| meta.declared_at).unwrap_or(0);
-	let constructible = bypass_constructible_at(km, prim, ps, at, attacker);
-	BYPASS_DECISIONS.with(|decisions| {
-		if let Some(decisions) = decisions.borrow_mut().as_mut()
-			&& !decisions.iter().any(|(who, seen, seen_at, _)| {
-				*who == ps.id
-					&& *seen_at == at
-					&& crate::hashing::primitive_hash(seen) == crate::hashing::primitive_hash(prim)
-					&& crate::theory::structurally_identical_primitive(seen, prim)
-			}) {
-			decisions.push((ps.id, prim.clone(), at, constructible));
-		}
-	});
-	constructible
-}
-
-fn bypass_constructible(prim: &Primitive, ps: &PrincipalState, attacker: &AttackerState) -> bool {
-	let Some(key) = primitive_extract_bypass_key(prim) else {
-		return false;
-	};
-	if !obtainable(&key, ps, attacker) {
-		return false;
-	}
-	let Ok(spec) = primitive_get(prim.id) else {
-		return false;
-	};
-	let Some(rule) = spec.rewrite.as_ref() else {
-		return false;
-	};
-	let keyed = keyed_position(prim);
-	rule.matching.iter().all(|(outer, _)| {
-		Some(*outer) == keyed
-			|| prim
-				.arguments
-				.get(*outer)
-				.is_some_and(|a| obtainable(a, ps, attacker))
-	})
-}
-
-fn honest_input_accepted(km: &ProtocolTrace, prim: &Primitive, idx: usize) -> bool {
-	let Ok(spec) = primitive_get(prim.id) else {
-		return false;
-	};
-	let Some(rule) = spec.rewrite.as_ref() else {
-		return false;
-	};
-	let Some(slot) = km.slots.get(idx) else {
-		return false;
-	};
-	let Value::Primitive(honest) = resolve_trace_term(&slot.initial_value, km) else {
-		return false;
-	};
-	let Some(honest_from) = honest.arguments.get(rule.from) else {
-		return false;
-	};
-	if rule.from >= prim.arguments.len() {
-		return false;
-	}
-	let mut arguments = prim.arguments.clone();
-	arguments[rule.from] = reduce_once(honest_from);
-	let restored = Primitive {
-		arguments,
-		hash: HashCell::default(),
-		..prim.clone()
-	};
-	can_rewrite(&Arc::new(restored)).0
-}
-
-fn try_guard_bypass(
-	km: &ProtocolTrace,
-	ps_pre: &PrincipalState,
-	ps_resolved: &PrincipalState,
-	failures: &[(Primitive, usize)],
-	attacker: &AttackerState,
-) -> VResult<Option<PrincipalState>> {
-	let bypassable: Vec<usize> = failures
-		.iter()
-		.filter(|(prim, idx)| {
-			prim.instance_check
-				&& ps_resolved.values[*idx].provenance.creator == ps_resolved.id
-				&& !honest_input_accepted(km, prim, *idx)
-				&& bypass_is_constructible(km, prim, ps_resolved, *idx, attacker)
-		})
-		.map(|(_, idx)| *idx)
-		.collect();
-
-	if bypassable.is_empty() {
-		return Ok(None);
-	}
-
-	let mut overridden = bypassable;
-	loop {
-		let mut ps = ps_pre.clone();
-		for &idx in &overridden {
-			if idx < ps.values.len() {
-				ps.values[idx].override_all_bypassed(attacker_public_key());
-			}
-		}
-		ps.resolve_all_values()?;
-		let round = ps.perform_all_rewrites();
-		let mut injected = false;
-		for (prim, idx) in &round {
-			if !prim.instance_check
-				|| ps.values[*idx].provenance.creator != ps.id
-				|| ps.values[*idx].provenance.bypass_injected
-				|| overridden.contains(idx)
-			{
-				continue;
-			}
-			if !honest_input_accepted(km, prim, *idx)
-				&& bypass_is_constructible(km, prim, &ps, *idx, attacker)
-			{
-				overridden.push(*idx);
-				injected = true;
-			}
-		}
-		if !injected {
-			return Ok(Some(halt_at(ps, &round)));
-		}
-	}
 }
 
 pub(crate) fn attacker_authored(
@@ -1901,7 +1903,7 @@ mod tests {
 	fn shared_transcript_depth_respects_the_protocol_boundary() {
 		use super::*;
 		let mut term = make_constant("shared_depth_seed");
-		let mut basis = IdSet::default();
+		let mut basis = crate::hashing::TermSet::default();
 		for depth in 1..=40 {
 			term = Value::primitive(
 				crate::primitive::PRIM_HASH,
@@ -1909,7 +1911,7 @@ mod tests {
 				0,
 			);
 			if depth == 16 {
-				basis.insert(term.hash_value());
+				basis.insert(term.clone());
 			}
 		}
 		assert_eq!(term_depth(&term), 40);
@@ -1965,6 +1967,98 @@ mod tests {
 		(trace, ps)
 	}
 
+	#[test]
+	fn forwarding_stabilizes_across_repeated_principal_visits() {
+		use super::*;
+		let mut source = String::from(
+			"attacker[active]\nprincipal Alice[\ngenerates seed\n]\nAlice -> Bob: seed\n",
+		);
+		let mut previous = "seed".to_owned();
+		for i in 0..12 {
+			let (sender, recipient) = if i % 2 == 0 {
+				("Bob", "Alice")
+			} else {
+				("Alice", "Bob")
+			};
+			source.push_str(&format!(
+				"principal {sender}[\nx{i} = HASH({previous})\n]\n{sender} -> {recipient}: [x{i}]\n"
+			));
+			previous = format!("x{i}");
+		}
+		source.push_str("queries[\nfreshness? x11\n]\n");
+		let model = crate::parser::parse_string("forwarding_rounds.vp", &source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let ctx =
+			crate::context::VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let bob = states.iter().find(|state| state.name == "Bob").unwrap();
+		let seed = km
+			.slots
+			.iter()
+			.position(|slot| slot.constant.name.as_ref() == "seed")
+			.unwrap();
+		let last = km
+			.slots
+			.iter()
+			.position(|slot| slot.constant.name.as_ref() == "x11")
+			.unwrap();
+		let nil = crate::value::value_nil();
+		let attacker = make_attacker_state(vec![nil.clone()]);
+		let runs = replay_diffs(
+			&ctx,
+			&km,
+			&[(bob.id, vec![(SlotIdx(seed), nil.clone())])],
+			&attacker,
+		)
+		.unwrap();
+		let mut expected = nil;
+		for _ in 0..12 {
+			expected = Value::primitive(crate::primitive::PRIM_HASH, vec![expected], 0);
+		}
+		let forwarded = execute_forward(
+			&ctx,
+			&km,
+			&bob.clone_for_depth(true),
+			&[(SlotIdx(seed), crate::value::value_nil())],
+			None,
+			&attacker,
+			false,
+		)
+		.unwrap();
+		for group in [&runs, &forwarded] {
+			assert_eq!(group.len(), 2);
+			for state in group {
+				assert!(
+					state
+						.values
+						.get(last)
+						.is_some_and(|sv| sv.value.equivalent(&expected, true)),
+					"{} retains a stale final receive",
+					state.name
+				);
+			}
+		}
+		let mut continued = runs.clone();
+		forward_to_fixpoint(
+			&ctx,
+			&km,
+			&mut continued,
+			&[(bob.id, vec![(SlotIdx(seed), crate::value::value_nil())])],
+			None,
+			&attacker,
+		)
+		.unwrap();
+		for state in &continued {
+			let prior = runs.iter().find(|prior| prior.id == state.id).unwrap();
+			assert!(
+				state
+					.values
+					.iter()
+					.zip(&prior.values)
+					.all(|(a, b)| a.value.equivalent(&b.value, true))
+			);
+		}
+	}
+
 	fn coherence_context() -> crate::context::VerifyContext {
 		let src = "attacker[active]\nprincipal Alice[\nknows private coh_ctx_m\n]\nqueries[\nconfidentiality? coh_ctx_m\n]\n";
 		let m = crate::parser::parse_string("coh.vp", src).expect("parse");
@@ -1989,7 +2083,7 @@ mod tests {
 			})]),
 			derivations: std::sync::Arc::new(vec![DerivationRecord::Obtained { slot: SlotIdx(0) }]),
 			alternates: std::sync::Arc::new(vec![Vec::new()]),
-			worlds: std::sync::Arc::new(vec![vec![Vec::new()]]),
+			worlds: std::sync::Arc::new(vec![Worlds::any()]),
 			worlds_epoch: 0,
 			reused: std::sync::Arc::new(vec![]),
 			routes_epoch: 0,

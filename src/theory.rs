@@ -721,6 +721,63 @@ struct PartialGroup {
 	held: Vec<(usize, Value)>,
 }
 
+pub(crate) fn combine_binding_values(partial: &Primitive, binding: &CombineBinding) -> Vec<Value> {
+	let Some(list) = partial.arguments.get(binding.list) else {
+		return Vec::new();
+	};
+	let mut pending = vec![list];
+	let mut seen = IdSet::default();
+	let mut out = Vec::new();
+	while let Some(term) = pending.pop() {
+		let Value::Primitive(p) = term else {
+			continue;
+		};
+		if !seen.insert(Arc::as_ptr(p) as usize) {
+			continue;
+		}
+		if p.id == binding.sequence {
+			pending.extend(p.arguments.iter().rev());
+		} else if p.id == binding.wrapper && p.arguments.len() == 1 {
+			crate::value::push_unique_value(&mut out, p.arguments[0].clone());
+		}
+	}
+	out
+}
+
+pub(crate) fn combine_bindings_hold(partial: &Primitive, rule: &CombineRule) -> bool {
+	rule.bindings.iter().all(|binding| {
+		partial
+			.arguments
+			.get(binding.argument)
+			.is_some_and(|argument| {
+				combine_binding_values(partial, binding)
+					.iter()
+					.any(|candidate| candidate.equivalent(argument, true))
+			})
+	})
+}
+
+fn bound_partials(partial: &Primitive, rule: &CombineRule) -> Vec<Value> {
+	let mut choices = vec![partial.arguments.clone()];
+	for binding in &rule.bindings {
+		let values = combine_binding_values(partial, binding);
+		choices = choices
+			.into_iter()
+			.flat_map(|arguments| {
+				values.iter().filter_map(move |value| {
+					let mut bound = arguments.clone();
+					*bound.get_mut(binding.argument)? = value.clone();
+					Some(bound)
+				})
+			})
+			.collect();
+	}
+	choices
+		.into_iter()
+		.map(|arguments| Value::Primitive(Arc::new(partial.with_arguments(arguments))))
+		.collect()
+}
+
 fn partial_groups(
 	target: &Primitive,
 	rule: &CombineRule,
@@ -740,7 +797,7 @@ fn partial_groups(
 		let Value::Primitive(q) = known else {
 			continue;
 		};
-		if q.id != rule.partial {
+		if q.id != rule.partial || !combine_bindings_hold(q, rule) {
 			continue;
 		}
 		let Some(Value::Primitive(share)) = q.arguments.get(rule.share) else {
@@ -831,10 +888,13 @@ fn combinable(
 						}
 					})
 					.collect();
-				let candidate = Value::primitive(rule.partial, arguments, 0);
-				if !obtainable(&candidate, ps, attacker) {
+				let candidate = Primitive::new(rule.partial, arguments, 0);
+				let Some(candidate) = bound_partials(&candidate, rule)
+					.into_iter()
+					.find(|candidate| obtainable(candidate, ps, attacker))
+				else {
 					continue;
-				}
+				};
 				used.push(candidate);
 				if used.len() >= threshold {
 					return Some(used);
@@ -994,7 +1054,7 @@ fn combine_with(p: &Primitive, rule: &CombineRule) -> Option<Value> {
 		let Value::Primitive(q) = a else {
 			return None;
 		};
-		if q.id != rule.partial {
+		if q.id != rule.partial || !combine_bindings_hold(q, rule) {
 			return None;
 		}
 		partials.push(q);
@@ -1639,6 +1699,24 @@ mod tests {
 		Value::Primitive(Arc::new(p))
 	}
 
+	fn tsh_commitments(nonces: &[&str]) -> Value {
+		Value::primitive(
+			PRIM_CONCAT,
+			nonces
+				.iter()
+				.map(|name| {
+					let nonce = if *name == "nil" {
+						value_nil()
+					} else {
+						make_constant(name)
+					};
+					Value::primitive(PRIM_PUBKEY, vec![nonce], 0)
+				})
+				.collect(),
+			0,
+		)
+	}
+
 	fn tsh_partial(share: Value, nonce: &str, commitments: &Value, message: &Value) -> Value {
 		make_primitive(
 			PRIM_THRESHOLD_SIGN,
@@ -1678,7 +1756,7 @@ mod tests {
 	fn a_join_of_partials_over_distinct_shares_is_the_plain_signature() {
 		let k = make_constant("cmb_k");
 		let m = make_constant("cmb_m");
-		let c = make_constant("cmb_c");
+		let c = tsh_commitments(&["cmb_n1", "cmb_n2"]);
 		let join = make_primitive(
 			PRIM_THRESHOLD_JOIN,
 			vec![
@@ -1696,8 +1774,8 @@ mod tests {
 	fn partials_that_disagree_or_repeat_a_share_do_not_combine() {
 		let k = make_constant("cmd_k");
 		let m = make_constant("cmd_m");
-		let c = make_constant("cmd_c");
-		let other = make_constant("cmd_other");
+		let c = tsh_commitments(&["cmd_n1", "cmd_n2", "cmd_n3"]);
+		let other = tsh_commitments(&["cmd_n2", "cmd_other"]);
 		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
 		let mixed = make_primitive(
 			PRIM_THRESHOLD_JOIN,
@@ -1758,7 +1836,7 @@ mod tests {
 	fn a_signature_is_reconstructed_from_a_held_partial_and_a_held_share() {
 		let k = make_constant("cmr_k");
 		let m = make_constant("cmr_m");
-		let c = make_constant("cmr_c");
+		let c = tsh_commitments(&["cmr_n1", "nil"]);
 		let ps = tsh_state("cmr_dummy");
 		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
 		let Value::Primitive(sig_p) = &sig else {
@@ -1798,17 +1876,85 @@ mod tests {
 			panic!("a primitive");
 		};
 		let attacker = make_attacker_state(vec![
-			tsh_partial(tsh_share(&k, 2, 0), "cmz_n1", &make_constant("cmz_c1"), &m),
-			tsh_partial(tsh_share(&k, 2, 1), "cmz_n2", &make_constant("cmz_c2"), &m),
+			tsh_partial(
+				tsh_share(&k, 2, 0),
+				"cmz_n1",
+				&tsh_commitments(&["cmz_n1", "cmz_n2"]),
+				&m,
+			),
+			tsh_partial(
+				tsh_share(&k, 2, 1),
+				"cmz_n2",
+				&tsh_commitments(&["cmz_n1", "cmz_n2", "cmz_other"]),
+				&m,
+			),
 			value_nil(),
 		]);
 		assert!(can_reconstruct_primitive(sig_p, &ps, &attacker).is_none());
 		let agreeing = make_attacker_state(vec![
-			tsh_partial(tsh_share(&k, 2, 0), "cmz_n1", &make_constant("cmz_c1"), &m),
-			tsh_partial(tsh_share(&k, 2, 1), "cmz_n2", &make_constant("cmz_c1"), &m),
+			tsh_partial(
+				tsh_share(&k, 2, 0),
+				"cmz_n1",
+				&tsh_commitments(&["cmz_n1", "cmz_n2"]),
+				&m,
+			),
+			tsh_partial(
+				tsh_share(&k, 2, 1),
+				"cmz_n2",
+				&tsh_commitments(&["cmz_n1", "cmz_n2"]),
+				&m,
+			),
 			value_nil(),
 		]);
 		assert!(can_reconstruct_primitive(sig_p, &ps, &agreeing).is_some());
+	}
+
+	#[test]
+	fn combining_partials_binds_every_nonce_to_the_shared_commitments() {
+		let k = make_private("binding_key");
+		let m = make_constant("binding_message");
+		let commitments = tsh_commitments(&["binding_nonce_a", "binding_nonce_b"]);
+		let first = tsh_partial(tsh_share(&k, 2, 0), "binding_nonce_a", &commitments, &m);
+		let second = tsh_partial(tsh_share(&k, 2, 1), "binding_nonce_b", &commitments, &m);
+		let invalid = tsh_partial(tsh_share(&k, 2, 1), "binding_wrong_nonce", &commitments, &m);
+		let valid = Primitive::new(PRIM_THRESHOLD_JOIN, vec![first.clone(), second], 0);
+		assert!(can_combine(&valid).is_some());
+		let invalid = Primitive::new(PRIM_THRESHOLD_JOIN, vec![first, invalid], 0);
+		assert!(can_combine(&invalid).is_none());
+		let attacker = make_attacker_state(invalid.arguments.clone());
+		let signature = Arc::new(Primitive::new(PRIM_SIGN, vec![k, m], 0));
+		assert!(
+			can_reconstruct_primitive(&signature, &tsh_state("binding_dummy"), &attacker).is_none()
+		);
+	}
+
+	#[test]
+	fn a_leaked_share_uses_a_known_nonce_from_the_committed_session() {
+		let k = make_private("binding_reconstruct_key");
+		let m = make_constant("binding_reconstruct_message");
+		let commitments = tsh_commitments(&["binding_honest_nonce", "binding_attacker_nonce"]);
+		let partial = tsh_partial(
+			tsh_share(&k, 2, 1),
+			"binding_honest_nonce",
+			&commitments,
+			&m,
+		);
+		let nonce = make_constant("binding_attacker_nonce");
+		let attacker = make_attacker_state(vec![
+			partial,
+			tsh_share(&k, 2, 0),
+			nonce,
+			commitments,
+			m.clone(),
+		]);
+		let signature = Arc::new(Primitive::new(PRIM_SIGN, vec![k, m], 0));
+		let built = can_reconstruct_primitive(
+			&signature,
+			&tsh_state("binding_reconstruct_dummy"),
+			&attacker,
+		)
+		.unwrap();
+		assert!(combination_holds(&signature, &built.from));
 	}
 
 	#[test]

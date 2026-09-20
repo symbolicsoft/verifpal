@@ -1,0 +1,53 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: GPL-3.0-only */
+
+// Expected: u0 at one and two sessions.
+// The signatures and their hashes can be recomputed, but separate signing
+// keys provide no common secret or identifying verification key.
+
+attacker[passive]
+
+principal Signer[
+	generates sk1, sk2
+	pk1 = PUBKEY(sk1)
+	pk2 = PUBKEY(sk2)
+]
+
+Signer -> Alice: [pk1], [pk2]
+
+principal Alice[
+	knows public m1, m2
+	generates r1, r2
+	b1 = BLIND(r1, m1)
+	b2 = BLIND(r2, m2)
+]
+
+Alice -> Signer: [r1], [r2], b1, b2
+
+principal Signer[
+	sb1 = SIGN(sk1, b1)
+	sb2 = SIGN(sk2, b2)
+]
+
+Signer -> Alice: sb1, sb2
+
+principal Alice[
+	sig1 = UNBLIND(r1, m1, sb1)
+	sig2 = UNBLIND(r2, m2, sb2)
+	t1 = HASH(sig1)
+	t2 = HASH(sig2)
+]
+
+Alice -> Bob: pk1, pk2, r1, r2, b1, b2, sb1, sb2, t1, t2
+
+principal Bob[
+	sig1_b = UNBLIND(r1, m1, sb1)
+	sig2_b = UNBLIND(r2, m2, sb2)
+	_ = SIGNVERIF(pk1, m1, sig1_b)?
+	_ = SIGNVERIF(pk2, m2, sig2_b)?
+	_ = HASH(t1, t2)
+]
+
+queries[
+	unlinkability? t1, t2
+]

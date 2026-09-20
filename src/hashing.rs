@@ -35,8 +35,54 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 	h
 }
 
-pub(crate) fn collect_subterm_hashes(v: &Value, out: &mut IdSet<u64>) {
-	out.extend(crate::value::subterms(v).map(Value::hash_value));
+#[derive(Clone, Default)]
+pub(crate) struct TermSet(IdMap<u64, Vec<Value>>);
+
+impl TermSet {
+	pub(crate) fn insert(&mut self, value: Value) {
+		let bucket = self.0.entry(value.hash_value()).or_default();
+		if !bucket.iter().any(|held| held.equivalent(&value, true)) {
+			bucket.push(value);
+		}
+	}
+
+	pub(crate) fn contains(&self, value: &Value) -> bool {
+		self.0
+			.get(&value.hash_value())
+			.is_some_and(|bucket| bucket.iter().any(|held| held.equivalent(value, true)))
+	}
+
+	pub(crate) fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	pub(crate) fn clear(&mut self) {
+		self.0.clear();
+	}
+
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Value> {
+		self.0.values().flatten()
+	}
+}
+
+impl Extend<Value> for TermSet {
+	fn extend<T: IntoIterator<Item = Value>>(&mut self, iter: T) {
+		for value in iter {
+			self.insert(value);
+		}
+	}
+}
+
+impl FromIterator<Value> for TermSet {
+	fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
+		let mut out = Self::default();
+		out.extend(iter);
+		out
+	}
+}
+
+pub(crate) fn collect_subterms(v: &Value, out: &mut TermSet) {
+	out.extend(crate::value::subterms(v).cloned());
 }
 
 #[cfg(test)]
@@ -53,9 +99,12 @@ mod tests {
 			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 			expected.insert(term.hash_value());
 		}
-		let mut found = IdSet::default();
-		collect_subterm_hashes(&term, &mut found);
-		assert_eq!(found, expected);
+		let mut found = TermSet::default();
+		collect_subterms(&term, &mut found);
+		assert_eq!(
+			found.iter().map(Value::hash_value).collect::<IdSet<_>>(),
+			expected
+		);
 	}
 
 	#[test]
@@ -66,12 +115,27 @@ mod tests {
 		let right = dh_kex(y, x);
 		assert!(left.equivalent(&right, true));
 		let root = make_primitive(PRIM_HASH, vec![left.clone(), right.clone()], 0);
-		let mut found = IdSet::default();
-		collect_subterm_hashes(&root, &mut found);
+		let mut found = TermSet::default();
+		collect_subterms(&root, &mut found);
 		for term in [&left, &right] {
 			let key = &term.as_primitive().unwrap().arguments[0];
-			assert!(found.contains(&key.hash_value()));
+			assert!(found.contains(key));
 		}
+	}
+
+	#[test]
+	fn term_membership_confirms_equality_after_a_hash_collision() {
+		let left = make_primitive(PRIM_HASH, vec![make_constant("collision_left")], 0);
+		let right = make_primitive(PRIM_HASH, vec![make_constant("collision_right")], 0);
+		right.as_primitive().unwrap().hash.set(left.hash_value());
+		let mut set = TermSet::default();
+		set.insert(left.clone());
+		assert!(set.contains(&left));
+		assert!(!set.contains(&right));
+		set.insert(right.clone());
+		assert!(set.contains(&left));
+		assert!(set.contains(&right));
+		assert_eq!(set.iter().count(), 2);
 	}
 
 	fn dh_kex(pubkey_inner: Value, bare: Value) -> Value {

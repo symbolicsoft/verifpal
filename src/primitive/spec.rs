@@ -282,7 +282,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: filter_aead_dec_rewrite,
 			}),
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::Direct(0)),
+			check_key: Some(CheckKeyKind::Direct(0)),
 			identifying_positions: vec![0],
 			arity_help: Some((3, AEAD_NONCE_HELP)),
 			..PrimitiveSpec::default()
@@ -426,7 +426,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: filter_extract_dh_exponent,
 			}),
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::Derived {
+			check_key: Some(CheckKeyKind::Derived {
 				arg: 0,
 				constructor: PRIM_PUBKEY,
 			}),
@@ -497,7 +497,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_JOIN",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_JOIN(s1, s2, ...): k",
-				help: "Lagrange interpolation over pieces of one THRESHOLD_SPLIT. Given at least t distinct shares it yields the secret; given at least t partial signatures from THRESHOLD_SIGN over distinct shares, the same commitments and the same message, it yields the plain signature SIGN(k, message), which SIGNVERIF checks under PUBKEY(k); given at least t PUBKEY(share) values it yields PUBKEY(k). Fewer than t pieces, a repeated share, or partials that disagree leave the term unreduced.",
+				help: "Lagrange interpolation over pieces of one THRESHOLD_SPLIT. Given at least t distinct shares it yields the secret; given at least t partial signatures from THRESHOLD_SIGN over distinct shares, the same commitments and the same message, it yields the plain signature SIGN(k, message), which SIGNVERIF checks under PUBKEY(k); given at least t PUBKEY(share) values it yields PUBKEY(k). Each signing nonce must have its PUBKEY commitment in the shared commitment list. Fewer than t pieces, a repeated share, a missing commitment, or partials that disagree leave the term unreduced.",
 			},
 			arity: (2..=MAX_SHARES as i32).collect(),
 			output: vec![1],
@@ -513,6 +513,12 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 					agree: vec![2, 3],
 					carry: vec![3],
 					whole: PRIM_SIGN,
+					bindings: vec![CombineBinding {
+						argument: 1,
+						list: 2,
+						wrapper: PRIM_PUBKEY,
+						sequence: PRIM_CONCAT,
+					}],
 				},
 				CombineRule {
 					partial: PRIM_PUBKEY,
@@ -521,6 +527,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 					agree: vec![],
 					carry: vec![],
 					whole: PRIM_PUBKEY,
+					bindings: vec![],
 				},
 			],
 			..PrimitiveSpec::default()
@@ -531,7 +538,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_SIGN",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_SIGN(share, nonce, commitments, message): partial",
-				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce (representing FROST's hiding-and-binding nonce pair), `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message). Knowing a partial's nonce, commitments and message reveals its signing share. Reusing a nonce under one share, whatever else differs, reveals the share.",
+				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce (representing FROST's hiding-and-binding nonce pair), `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message), provided each nonce has its PUBKEY commitment in that list. Nested CONCAT lists are accepted. Knowing a partial's nonce, commitments and message reveals its signing share. Reusing a nonce under one share, whatever else differs, reveals the share.",
 			},
 			arity: vec![4],
 			output: vec![1],
@@ -592,7 +599,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: filter_ringsignverif_rewrite,
 			}),
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::Derived {
+			check_key: Some(CheckKeyKind::Derived {
 				arg: 0,
 				constructor: PRIM_PUBKEY,
 			}),
@@ -687,7 +694,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				filter: filter_derived_key_rewrite,
 			}),
 			definition_check: true,
-			bypass_key: Some(BypassKeyKind::Direct(0)),
+			check_key: Some(CheckKeyKind::Direct(0)),
 			argument_restrictions: vec![ArgumentRestriction {
 				position: 0,
 				banned: vec![PRIM_PUBKEY, PRIM_DH_KEX],

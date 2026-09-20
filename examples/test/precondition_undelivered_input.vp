@@ -1,0 +1,55 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1c0 at one session and at two.
+// Swapping Bob's share discloses Alice's secret, but Bob then fails to decrypt
+// and never sends the guarded acknowledgement that Carol needs for her own
+// message. Carol has no failed check herself. Her undelivered input still
+// prevents her send from satisfying the precondition.
+
+attacker[active]
+
+principal Alice[
+	generates xa
+	generates xsec
+	xga = PUBKEY(xa)
+]
+
+principal Bob[
+	generates xb
+	xgb = PUBKEY(xb)
+]
+
+Alice -> Bob: [xga]
+Bob -> Alice: xgb
+
+principal Alice[
+	xk = DH_KEX(xgb, xa)
+	generates xn
+	xe = AEAD_ENC(xk, xn, xsec, nil)
+]
+
+Alice -> Bob: xn, xe
+
+principal Bob[
+	xkb = DH_KEX(xga, xb)
+	xp = AEAD_DEC(xkb, xn, xe, nil)?
+	xack = HASH(xp)
+]
+
+Bob -> Carol: [xack]
+
+principal Carol[
+	forwarded = HASH(xack)
+]
+Carol -> Dave: forwarded
+principal Dave[
+	_ = HASH(forwarded)
+]
+
+queries[
+	confidentiality? xsec
+	confidentiality? xsec[
+		precondition[Carol -> Dave: forwarded]
+	]
+]

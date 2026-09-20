@@ -1,21 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a1 at one session and a1a1 at two.
-//
-// Alice sends x with a signature over it and a ciphertext under a key
-// Mallory leaks. The attacker forges the ciphertext, and Bob's AEAD check is
-// bypassable because the attacker holds k. Bob's signature check is not: sk
-// is nobody's but Alice's, so a substituted x can only fail it.
-//
-// Reporting a1 for x at one session was a false attack. After bypassing the
-// AEAD check the re-execution resolved the state a second time, and a state
-// resolved twice loses the provenance of the terms it inlined the first
-// time: Alice's SIGN(sk, x) was re-read through Bob's substituted x and
-// became SIGN(sk, nil), which verifies. Every bypass round now resolves the
-// pre-resolution state once, with every bypass so far applied. At two
-// sessions x is accepted from the sibling session, a replay Bob cannot rule
-// out, not a forgery.
+// Expected: a0a1 at one session and a1a1 at two. A leaked encryption key
+// permits a ciphertext forgery, while the independent signing key protects x
+// from a one-session forgery. Another session supplies a replay of the
+// honestly signed x.
 
 attacker[active]
 

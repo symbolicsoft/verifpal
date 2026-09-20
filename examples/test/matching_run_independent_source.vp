@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+// Carol independently exposes MAC(k, nil). Replacing Bob's nonce with nil
+// lets Bob accept Carol's tag without an Alice send. The existence of a
+// different run in which Alice computes this tag cannot excuse that attack.
+// Guarding the nonce at Alice must preserve the same origin failure.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+]
+principal Bob[
+	knows private k
+]
+principal Dave[]
+principal Carol[
+	knows private k
+	generates n
+	other = MAC(k, nil)
+]
+Carol -> Dave: other
+Carol -> Alice: n
+Carol -> Bob: n
+principal Alice[
+	tag = MAC(k, n)
+]
+Alice -> Bob: tag
+principal Bob[
+	_ = ASSERT(tag, MAC(k, n))?
+]
+queries[
+	authentication? Alice -> Bob: tag
+]

@@ -3,26 +3,16 @@
 
 // Expected: a1 at one session and at two, reported as a replay.
 //
-// Alice signs a fresh m and sends it to Bob, who verifies the signature and
-// then seals m for whichever peer his scenario binds. The second scenario
-// binds Bob's peer to Mallory, whose key is leaked, so that run of Bob is a
-// corrupt-peer run and its clones of Alice are the same configuration as the
-// honest one (the scenario rebinds only Bob). The attacker takes the flight
-// Alice@2 sent to Bob@2 -- m@2 and SIGN(ska, m@2) -- and delivers it to the
-// honest Bob, whose signature check passes. Nothing is forged: Alice signed
-// m@2 herself, in the other run. Bob accepts a message Alice sent once and
-// meant for a different run of Bob, so injective agreement fails, and that is
-// a replay. It is not excused by the matching-run exemption, because the
-// emitting run's recipient is the corrupt-peer configuration of Bob.
+// Alice signs a fresh m for Bob. Both modeled instances of Bob verify their
+// incoming signatures before sealing the message for the peer selected by
+// their scenario. The second Bob has Mallory as its peer, but still performs
+// its signature check and uses m@2 successfully.
 //
-// The verdict was already a1. What this model pins is the classification: the
-// sibling groups used to recognise a replay were built only over the session
-// axis, so a scenario copy was never a sibling and the trace said m@2 was
-// "sent by Attacker and not by Alice", one step after showing Alice signing
-// it. The copy-axis groups are consulted only after the matching-run
-// exemption has declined, so they can relabel an a1 as a replay but can never
-// turn an exempted a0 into an attack; adding an identity scenario stays the
-// no-op the `scenario` metamorphic property says it is.
+// Delivering Alice@2's m@2 and signature to the honest Bob therefore yields
+// two successful uses of one signed flight. Nothing is forged: Alice signed
+// it herself. Query scope selects the honest recipient for the reported
+// violation; the other modeled recipient supplies the second acceptance.
+// The classification and trace must identify this as a cross-scenario replay.
 
 attacker[active]
 
