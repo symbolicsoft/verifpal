@@ -8,7 +8,7 @@ use crate::deduction::compute_knowledge_closure;
 use crate::info::InfoQuiet;
 use crate::primitive::attacker_public_key;
 use crate::principal::ATTACKER_ID;
-use crate::reexec::{causally_grounded, governing_attacker, reexecute, reexecute_at};
+use crate::reexec::{causally_grounded, governing_attacker, reexecute_at};
 use crate::types::*;
 use crate::value::value_nil;
 use crate::verify::verify_resolve_queries;
@@ -380,10 +380,22 @@ impl<'a> Minimizer<'a> {
 			if mine.is_empty() {
 				continue;
 			}
-			match reexecute(session, &mine, &self.ambient, self.km) {
-				Ok(state) => {
-					halts += usize::from(state.halted_at.is_some());
-					stuck += checks_wanting_shapes(self.km, session, &mine).len();
+			match crate::reexec::reexecute_with_failures(session, &mine, &self.ambient, self.km) {
+				Ok(executed) => {
+					halts += usize::from(executed.state.halted_at.is_some());
+					if mine
+						.iter()
+						.enumerate()
+						.any(|(i, (slot, _))| mine[..i].iter().any(|(earlier, _)| earlier == slot))
+					{
+						stuck += checks_wanting_shapes(self.km, session, &mine).len();
+					} else {
+						stuck += executed
+							.failures
+							.into_iter()
+							.filter_map(|(prim, _)| wanted_check(prim))
+							.count();
+					}
 				}
 				Err(_) => return (usize::MAX, usize::MAX),
 			}
@@ -469,6 +481,9 @@ impl<'a> Minimizer<'a> {
 			return Vec::new();
 		}
 		let slots = self.reachable_slots(session, wide);
+		if slots.is_empty() {
+			return Vec::new();
+		}
 		let bound = self.bound;
 		let group: &[PrincipalState] = if wide {
 			&self.sessions
@@ -477,10 +492,10 @@ impl<'a> Minimizer<'a> {
 		};
 		let mut out: Vec<Installs> = Vec::new();
 		let mut seen: Vec<Installs> = vec![installs.clone()];
+		let mut here = self.scenario_cost(group, &installs);
 		for _ in 0..slots.len() {
 			let mut advanced = false;
 			for i in &slots {
-				let here = self.scenario_cost(group, &installs);
 				if here == (0, 0) {
 					break;
 				}
@@ -517,9 +532,10 @@ impl<'a> Minimizer<'a> {
 						accepted.push((trial, cost));
 					}
 				}
-				if let Some((trial, _)) = accepted.into_iter().min_by_key(|(_, cost)| *cost) {
+				if let Some((trial, cost)) = accepted.into_iter().min_by_key(|(_, cost)| *cost) {
 					seen.push(trial.clone());
 					installs = trial;
+					here = cost;
 					advanced = true;
 				}
 			}
@@ -1205,6 +1221,13 @@ fn forgeable_slots(km: &ProtocolTrace, session: &PrincipalState) -> Vec<usize> {
 
 type WantedCheck = (Primitive, Option<&'static crate::primitive::RewriteRule>);
 
+fn wanted_check(prim: Primitive) -> Option<WantedCheck> {
+	match crate::primitive::primitive_get(prim.id) {
+		Ok(spec) => spec.rewrite.as_ref().map(|rule| (prim, Some(rule))),
+		Err(_) => crate::primitive::primitive_is_core(prim.id).then_some((prim, None)),
+	}
+}
+
 fn checks_wanting_shapes(
 	km: &ProtocolTrace,
 	session: &PrincipalState,
@@ -1231,10 +1254,7 @@ fn checks_wanting_shapes(
 	staged
 		.perform_all_rewrites()
 		.into_iter()
-		.filter_map(|(prim, _)| match crate::primitive::primitive_get(prim.id) {
-			Ok(spec) => spec.rewrite.as_ref().map(|rule| (prim, Some(rule))),
-			Err(_) => crate::primitive::primitive_is_core(prim.id).then_some((prim, None)),
-		})
+		.filter_map(|(prim, _)| wanted_check(prim))
 		.collect()
 }
 
@@ -1901,6 +1921,37 @@ fn probe_with(
 #[cfg(test)]
 mod tests {
 	use crate::parser::parse_string;
+
+	#[test]
+	fn replay_scoring_retains_failed_checks_beyond_the_halt() {
+		let source = "attacker[active]\nprincipal Alice[\nknows private key\ngenerates message\ntag = MAC(key, message)\n]\nAlice -> Bob: message, tag\nprincipal Bob[\nknows private key\n_ = ASSERT(tag, MAC(key, message))?\n_ = ASSERT(tag, MAC(key, message))?\n]\nqueries[\nauthentication? Alice -> Bob: tag\n]\n";
+		let model = parse_string("scoring_halt.vp", source).unwrap();
+		let (km, states) = crate::sanity::sanity(&model).unwrap();
+		let session = states
+			.iter()
+			.find(|state| state.name == "Bob")
+			.unwrap()
+			.clone_for_depth(true);
+		let tag = crate::testutil::trace_constant(&km, "tag");
+		let slot = crate::types::SlotIdx(km.index_of(tag.as_constant().unwrap()).unwrap());
+		let installs = vec![(slot, crate::value::value_nil())];
+		let attacker = crate::testutil::make_attacker_state(Vec::new());
+		let replayed =
+			crate::reexec::reexecute_with_failures(&session, &installs, &attacker, &km).unwrap();
+		assert!(replayed.state.halted_at.is_some());
+		assert_eq!(replayed.failures.len(), 2);
+		assert!(replayed.failures[1].1 >= replayed.state.values.len());
+		let separate = super::checks_wanting_shapes(&km, &session, &installs);
+		let reused: Vec<_> = replayed
+			.failures
+			.into_iter()
+			.filter_map(|(prim, _)| super::wanted_check(prim))
+			.collect();
+		assert_eq!(reused.len(), separate.len());
+		for ((a, _), (b, _)) in reused.iter().zip(&separate) {
+			assert!(crate::theory::structurally_identical_primitive(a, b));
+		}
+	}
 
 	#[test]
 	fn forgeable_forwarding_retains_its_sender_execution() {

@@ -387,16 +387,16 @@ pub(crate) enum Put {
 }
 
 fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Worlds) -> bool {
-	let mut widened = false;
-	if let Some(entry) = Arc::make_mut(&mut state.worlds).get_mut(existing.get()) {
-		let combined = entry.union(&worlds);
-		widened = !entry.equivalent(&combined);
-		*entry = combined;
+	let Some(entry) = state.worlds.get(existing.get()) else {
+		return false;
+	};
+	let combined = entry.union(&worlds);
+	if entry.equivalent(&combined) {
+		return false;
 	}
-	if widened {
-		state.worlds_epoch += 1;
-	}
-	widened
+	Arc::make_mut(&mut state.worlds)[existing.get()] = combined;
+	state.worlds_epoch += 1;
+	true
 }
 
 fn attacker_state_absorb(
@@ -1551,6 +1551,25 @@ mod tests {
 		ctx.remember_forged_flights(1, 7, &first, Vec::new());
 		write_lock(&ctx.attacker).current_phase += 1;
 		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
+	}
+
+	#[test]
+	fn unchanged_worlds_share_storage_and_widening_preserves_snapshots() {
+		let first = make_constant("widen_first");
+		let second = make_constant("widen_second");
+		let a = Worlds::from_constraint(vec![(1, SlotIdx(0), first.clone())]);
+		let b = Worlds::from_constraint(vec![(1, SlotIdx(0), second)]);
+		let mut attacker = make_attacker_state(vec![first]);
+		attacker.worlds = Arc::new(vec![a.clone()]);
+		let snapshot = attacker.clone();
+		assert!(!widen(&mut attacker, KnownIdx(0), a.clone()));
+		assert!(Arc::ptr_eq(&attacker.worlds, &snapshot.worlds));
+		assert_eq!(attacker.worlds_epoch, snapshot.worlds_epoch);
+		assert!(widen(&mut attacker, KnownIdx(0), b.clone()));
+		assert_eq!(attacker.worlds_epoch, snapshot.worlds_epoch + 1);
+		assert!(attacker.worlds[0].equivalent(&a.union(&b)));
+		assert!(snapshot.worlds[0].equivalent(&a));
+		assert!(snapshot.worlds[0].intersect(&b).is_empty());
 	}
 
 	#[test]

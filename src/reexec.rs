@@ -877,6 +877,20 @@ pub(crate) fn reexecute(
 	attacker: &AttackerState,
 	km: &ProtocolTrace,
 ) -> VResult<PrincipalState> {
+	reexecute_with_failures(ps_base, installs, attacker, km).map(|executed| executed.state)
+}
+
+pub(crate) struct Reexecution {
+	pub state: PrincipalState,
+	pub failures: Vec<(Primitive, usize)>,
+}
+
+pub(crate) fn reexecute_with_failures(
+	ps_base: &PrincipalState,
+	installs: &[(SlotIdx, Value)],
+	attacker: &AttackerState,
+	km: &ProtocolTrace,
+) -> VResult<Reexecution> {
 	reexecute_with(ps_base, installs, None, &[], attacker, km, false)
 }
 
@@ -897,6 +911,7 @@ pub(crate) fn reexecute_at(
 		km,
 		addressed,
 	)
+	.map(|executed| executed.state)
 }
 
 fn reexecute_with(
@@ -907,7 +922,7 @@ fn reexecute_with(
 	_attacker: &AttackerState,
 	km: &ProtocolTrace,
 	addressed: bool,
-) -> VResult<PrincipalState> {
+) -> VResult<Reexecution> {
 	let mut ps = ps_base.clone();
 	let relayed = relayed_installs(&ps, installs);
 	let authored: Vec<bool> = installs
@@ -950,7 +965,10 @@ fn reexecute_with(
 	ps.foreign_halts = foreign;
 	ps.starved = starved;
 	ps.forwarded = !forwarded.is_empty();
-	Ok(ps)
+	Ok(Reexecution {
+		state: ps,
+		failures,
+	})
 }
 
 fn starved_slots(
@@ -983,7 +1001,7 @@ pub(crate) fn execute_forward(
 	attacker: &AttackerState,
 	addressed: bool,
 ) -> VResult<Vec<PrincipalState>> {
-	let first = reexecute_with(base, installs, phases, &[], attacker, km, addressed)?;
+	let first = reexecute_with(base, installs, phases, &[], attacker, km, addressed)?.state;
 	let mut out = vec![first];
 	forward_to_fixpoint(
 		ctx,
@@ -1082,7 +1100,8 @@ fn forward_to_fixpoint(
 				attacker,
 				km,
 				driver.is_some_and(|driver| driver.addressed),
-			)?;
+			)?
+			.state;
 			adopt_foreign_halts(km, &mut state, out);
 			match applied.iter_mut().find(|(id, _)| *id == pristine.id) {
 				Some((_, seen)) => *seen = forwarded,

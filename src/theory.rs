@@ -12,6 +12,8 @@ use crate::types::*;
 #[derive(Default)]
 struct RewriteCache {
 	entries: IdMap<u64, Vec<RewriteEntry>>,
+	pointers: IdMap<usize, RewriteEntry>,
+	order: std::collections::VecDeque<usize>,
 	inserted: usize,
 	recent: std::collections::VecDeque<Arc<Primitive>>,
 }
@@ -24,10 +26,20 @@ struct RewriteEntry {
 
 const TERM_MEMO_SWEEP: usize = 65536;
 const TERM_MEMO_RECENT: usize = 1024;
+const TERM_MEMO_POINTERS: usize = 8192;
 
 impl RewriteCache {
-	fn get(&self, key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
-		self.entries.get(&key)?.iter().find_map(|entry| {
+	fn get(&mut self, key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
+		if let Some(entry) = self.pointers.get(&(Arc::as_ptr(p) as usize)) {
+			return Some((
+				entry.result,
+				entry
+					.value
+					.clone()
+					.unwrap_or_else(|| Value::Primitive(Arc::clone(p))),
+			));
+		}
+		let hit = self.entries.get(&key)?.iter().find_map(|entry| {
 			let held = entry.input.upgrade()?;
 			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p)).then(|| {
 				(
@@ -35,10 +47,15 @@ impl RewriteCache {
 					entry.value.clone().unwrap_or(Value::Primitive(held)),
 				)
 			})
-		})
+		});
+		if let Some((result, value)) = &hit {
+			self.remember_pointer(p, *result, value.clone());
+		}
+		hit
 	}
 
 	fn put(&mut self, key: u64, p: &Arc<Primitive>, result: bool, value: Value) {
+		self.remember_pointer(p, result, value.clone());
 		if self.recent.len() == TERM_MEMO_RECENT {
 			self.recent.pop_front();
 		}
@@ -61,7 +78,31 @@ impl RewriteCache {
 		});
 	}
 
+	fn remember_pointer(&mut self, p: &Arc<Primitive>, result: bool, value: Value) {
+		let key = Arc::as_ptr(p) as usize;
+		let value = match &value {
+			Value::Primitive(output) if Arc::ptr_eq(p, output) => None,
+			_ => Some(value),
+		};
+		let entry = RewriteEntry {
+			input: Arc::downgrade(p),
+			result,
+			value,
+		};
+		if self.pointers.insert(key, entry).is_none() {
+			self.order.push_back(key);
+			if self.pointers.len() > TERM_MEMO_POINTERS
+				&& let Some(oldest) = self.order.pop_front()
+			{
+				self.pointers.remove(&oldest);
+			}
+		}
+	}
+
 	fn sweep(&mut self) {
+		self.pointers
+			.retain(|_, entry| entry.input.strong_count() > 0);
+		self.order.retain(|key| self.pointers.contains_key(key));
 		self.entries.retain(|_, bucket| {
 			bucket.retain(|entry| entry.input.strong_count() > 0);
 			!bucket.is_empty()
@@ -1272,6 +1313,63 @@ mod tests {
 			);
 		}
 		assert!(weak.upgrade().is_none());
+	}
+
+	#[test]
+	fn rewrite_pointer_aliases_release_their_results_after_eviction() {
+		let mut cache = RewriteCache::default();
+		let original = Arc::new(Primitive::new(
+			PRIM_HASH,
+			vec![make_constant("pointer_alias_original")],
+			0,
+		));
+		let observed = Arc::downgrade(&original);
+		let twin = Arc::new((*original).clone());
+		let hash = crate::hashing::primitive_hash(&original);
+		cache.put(
+			hash,
+			&original,
+			true,
+			Value::Primitive(Arc::clone(&original)),
+		);
+		assert!(cache.get(hash, &twin).is_some());
+		assert!(cache.get(hash, &twin).is_some());
+		drop((original, twin));
+		for i in 0..TERM_MEMO_POINTERS {
+			let next = Arc::new(Primitive::new(
+				PRIM_HASH,
+				vec![make_constant(&format!("pointer_alias_eviction_{i}"))],
+				0,
+			));
+			cache.put(
+				crate::hashing::primitive_hash(&next),
+				&next,
+				true,
+				Value::Primitive(Arc::clone(&next)),
+			);
+		}
+		assert!(observed.upgrade().is_none());
+	}
+
+	#[test]
+	fn rewrite_pointer_hits_preserve_collisions_and_checked_instances() {
+		let a = make_constant("pointer_collision_a");
+		let b = make_constant("pointer_collision_b");
+		let pass = Arc::new(Primitive::new(PRIM_ASSERT, vec![a.clone(), a.clone()], 0));
+		let fail = Arc::new(Primitive::new(PRIM_ASSERT, vec![a, b], 0));
+		fail.hash.set(crate::hashing::primitive_hash(&pass));
+		let mut checked = (*fail).clone();
+		checked.instance_check = true;
+		let checked = Arc::new(checked);
+		for _ in 0..3 {
+			assert!(can_rewrite(&pass).0);
+			let (succeeded, value) = can_rewrite(&fail);
+			assert!(!succeeded);
+			assert!(!value.as_primitive().unwrap().instance_check);
+			let (succeeded, value) = can_rewrite(&checked);
+			assert!(!succeeded);
+			assert!(value.as_primitive().unwrap().instance_check);
+		}
 	}
 
 	#[test]

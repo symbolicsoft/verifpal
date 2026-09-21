@@ -269,7 +269,7 @@ pub(crate) fn derived_worlds(
 	recorded_worlds(km, ps, attacker, derivation, existing)
 }
 
-type Everywhere = ((u64, usize, u64), Option<Arc<AttackerState>>);
+type Everywhere = ((u64, usize, u64, i32, usize), Option<Arc<AttackerState>>);
 
 struct CachedWorld {
 	worlds: Worlds,
@@ -304,7 +304,13 @@ thread_local! {
 }
 
 fn everywhere_state(attacker: &AttackerState) -> Option<Arc<AttackerState>> {
-	let key = (attacker.chain, attacker.known.len(), attacker.worlds_epoch);
+	let key = (
+		attacker.chain,
+		attacker.known.len(),
+		attacker.worlds_epoch,
+		attacker.current_phase,
+		attacker.reused.len(),
+	);
 	if let Some(hit) = EVERYWHERE.with(|cell| {
 		cell.borrow()
 			.as_ref()
@@ -425,6 +431,57 @@ fn recorded_worlds(
 mod tests {
 	use super::*;
 	use crate::testutil::make_constant;
+
+	#[test]
+	fn unconditional_deductions_revisit_new_reuse_capabilities() {
+		let key = make_constant("everywhere_reuse_key");
+		let nonce = make_constant("everywhere_reuse_nonce");
+		let first = make_constant("everywhere_reuse_first");
+		let second = make_constant("everywhere_reuse_second");
+		let message = make_constant("everywhere_reuse_message");
+		let ad = make_constant("everywhere_reuse_ad");
+		let sealed = |message: Value| {
+			Value::primitive(
+				crate::primitive::PRIM_AEAD_ENC,
+				vec![key.clone(), nonce.clone(), message, ad.clone()],
+				0,
+			)
+		};
+		let pair = [sealed(first), sealed(second)];
+		let target = sealed(message.clone());
+		let mut attacker = crate::testutil::make_attacker_state(vec![
+			pair[0].clone(),
+			pair[1].clone(),
+			message,
+			ad,
+		]);
+		let ps =
+			crate::testutil::make_principal_state("EverywhereReuse", 1, Vec::new(), Vec::new());
+		assert!(!unconditional(&ps, &attacker, &target));
+		attacker.reused = Arc::new(vec![pair]);
+		assert!(unconditional(&ps, &attacker, &target));
+		attacker.reused = Arc::new(Vec::new());
+		assert!(!unconditional(&ps, &attacker, &target));
+	}
+
+	#[test]
+	fn unconditional_deductions_follow_phase_and_principal_capabilities() {
+		let key = make_constant("everywhere_forgery_key");
+		let message = make_constant("everywhere_forgery_message");
+		let target = Value::primitive(crate::primitive::PRIM_SIGN, vec![key, message.clone()], 0);
+		let mut attacker = crate::testutil::make_attacker_state(vec![message]);
+		let mut ps =
+			crate::testutil::make_principal_state("EverywhereForgery", 1, Vec::new(), Vec::new());
+		assert!(!unconditional(&ps, &attacker, &target));
+		let mut annotated = target.as_primitive().unwrap().clone();
+		annotated.capabilities.set(Capability::Forgeable, 1);
+		Arc::make_mut(&mut ps.capabilities).insert(&Value::Primitive(Arc::new(annotated)));
+		assert!(!unconditional(&ps, &attacker, &target));
+		attacker.current_phase = 1;
+		assert!(unconditional(&ps, &attacker, &target));
+		ps.capabilities = Arc::new(CapabilityIndex::default());
+		assert!(!unconditional(&ps, &attacker, &target));
+	}
 
 	#[test]
 	fn derived_world_cache_follows_changed_ingredients_and_worlds() {

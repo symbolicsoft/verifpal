@@ -46,6 +46,37 @@ struct Node {
 }
 
 impl Node {
+	fn equivalent(&self, other: &Self, seen: &mut IdSet<(usize, usize)>) -> bool {
+		self.hash == other.hash
+			&& self.key == other.key
+			&& self.edges.len() == other.edges.len()
+			&& self.fallback.equivalent_with(&other.fallback, seen)
+			&& self.edges.iter().all(|(value, next)| {
+				other
+					.matching(value)
+					.is_some_and(|tail| next.equivalent_with(tail, seen))
+			})
+	}
+
+	fn map_edges(
+		&self,
+		mut map: impl FnMut(&Value, &Worlds) -> Worlds,
+	) -> Option<Vec<(Value, Worlds)>> {
+		let mut changed: Option<Vec<(Value, Worlds)>> = None;
+		for (at, (value, child)) in self.edges.iter().enumerate() {
+			let result = map(value, child);
+			if let Some(edges) = &mut changed {
+				edges.push((value.clone(), result));
+			} else if result.identity() != child.identity() {
+				let mut edges = Vec::with_capacity(self.edges.len());
+				edges.extend_from_slice(&self.edges[..at]);
+				edges.push((value.clone(), result));
+				changed = Some(edges);
+			}
+		}
+		changed
+	}
+
 	fn matching(&self, value: &Value) -> Option<&Worlds> {
 		let hash = value.hash_value();
 		let at = self
@@ -175,13 +206,13 @@ impl Inclusions {
 
 impl Applications {
 	fn insert(&mut self, key: ApplicationKey, entry: Applied, capacity: usize) {
-		if self.entries.len() >= capacity
-			&& let Some(oldest) = self.order.pop_front()
-		{
-			self.entries.remove(&oldest);
-		}
 		if self.entries.insert(key, entry).is_none() {
 			self.order.push_back(key);
+			if self.entries.len() > capacity
+				&& let Some(oldest) = self.order.pop_front()
+			{
+				self.entries.remove(&oldest);
+			}
 		}
 	}
 }
@@ -313,30 +344,21 @@ impl Worlds {
 	}
 
 	pub(crate) fn equivalent(&self, other: &Self) -> bool {
-		fn visit(a: &Worlds, b: &Worlds, seen: &mut IdSet<(usize, usize)>) -> bool {
-			if a.identity() == b.identity() {
-				return true;
-			}
-			let (Root::Branch(a_node), Root::Branch(b_node)) = (&a.0, &b.0) else {
-				return false;
-			};
-			if a_node.hash != b_node.hash
-				|| a_node.key != b_node.key
-				|| a_node.edges.len() != b_node.edges.len()
-			{
-				return false;
-			}
-			if !seen.insert((a.identity(), b.identity())) {
-				return true;
-			}
-			visit(&a_node.fallback, &b_node.fallback, seen)
-				&& a_node.edges.iter().all(|(value, next)| {
-					b_node
-						.matching(value)
-						.is_some_and(|tail| visit(next, tail, seen))
-				})
+		self.equivalent_with(other, &mut IdSet::default())
+	}
+
+	fn equivalent_with(&self, other: &Self, seen: &mut IdSet<(usize, usize)>) -> bool {
+		if self.identity() == other.identity() {
+			return true;
 		}
-		visit(self, other, &mut IdSet::default())
+		let (Root::Branch(left), Root::Branch(right)) = (&self.0, &other.0) else {
+			return false;
+		};
+		if left.hash != right.hash || left.key != right.key || left.edges.len() != right.edges.len()
+		{
+			return false;
+		}
+		!seen.insert((self.identity(), other.identity())) || left.equivalent(right, seen)
 	}
 
 	fn branch(key: Key, mut edges: Vec<(Value, Worlds)>, fallback: Worlds) -> Self {
@@ -355,12 +377,12 @@ impl Worlds {
 				.wrapping_add(next.hash().rotate_left(29));
 			hash ^= (edge ^ (edge >> 31)).wrapping_mul(0x9E37_79B1_85EB_CA87);
 		}
-		let candidate = Self(Root::Branch(Arc::new(Node {
+		let candidate = Node {
 			key,
 			edges,
 			fallback,
 			hash,
-		})));
+		};
 		NODES.with(|cell| {
 			let mut cache = cell.borrow_mut();
 			let cache = cache.fresh();
@@ -375,15 +397,13 @@ impl Worlds {
 			let bucket = nodes.entry(hash).or_default();
 			bucket.retain(|node| node.strong_count() != 0);
 			for existing in bucket.iter().filter_map(Weak::upgrade) {
-				let existing = Self(Root::Branch(existing));
-				if candidate.equivalent(&existing) {
-					return existing;
+				if candidate.equivalent(&existing, &mut IdSet::default()) {
+					return Self(Root::Branch(existing));
 				}
 			}
-			if let Root::Branch(node) = &candidate.0 {
-				bucket.push(Arc::downgrade(node));
-			}
-			candidate
+			let node = Arc::new(candidate);
+			bucket.push(Arc::downgrade(&node));
+			Self(Root::Branch(node))
 		})
 	}
 
@@ -520,27 +540,26 @@ impl Worlds {
 		};
 		let out = if left.key == right.key {
 			let fallback = left.fallback.apply(&right.fallback, intersect, memo);
-			let mut unchanged = fallback.identity() == left.fallback.identity();
-			let mut edges = Vec::with_capacity(left.edges.len() + right.edges.len());
-			for (value, child) in &left.edges {
+			let mut edges = left.map_edges(|value, child| {
 				let other_child = right.matching(value).unwrap_or(&right.fallback);
-				let result = child.apply(other_child, intersect, memo);
-				unchanged &= result.identity() == child.identity();
-				edges.push((value.clone(), result));
-			}
+				child.apply(other_child, intersect, memo)
+			});
 			for (value, child) in &right.edges {
 				if left.matching(value).is_none() {
 					let result = left.fallback.apply(child, intersect, memo);
 					if result.identity() != fallback.identity() {
-						unchanged = false;
-						edges.push((value.clone(), result));
+						edges
+							.get_or_insert_with(|| left.edges.clone())
+							.push((value.clone(), result));
 					}
 				}
 			}
-			if unchanged {
+			if let Some(edges) = edges {
+				Self::branch(left.key, edges, fallback)
+			} else if fallback.identity() == left.fallback.identity() {
 				self.clone()
 			} else {
-				Self::branch(left.key, edges, fallback)
+				Self::branch(left.key, left.edges.clone(), fallback)
 			}
 		} else {
 			let (original, first, second) = if left.key < right.key {
@@ -549,20 +568,12 @@ impl Worlds {
 				(other, right, self)
 			};
 			let fallback = first.fallback.apply(second, intersect, memo);
-			let mut unchanged = fallback.identity() == first.fallback.identity();
-			let edges = first
-				.edges
-				.iter()
-				.map(|(value, child)| {
-					let result = child.apply(second, intersect, memo);
-					unchanged &= result.identity() == child.identity();
-					(value.clone(), result)
-				})
-				.collect();
-			if unchanged {
+			if let Some(edges) = first.map_edges(|_, child| child.apply(second, intersect, memo)) {
+				Self::branch(first.key, edges, fallback)
+			} else if fallback.identity() == first.fallback.identity() {
 				original.clone()
 			} else {
-				Self::branch(first.key, edges, fallback)
+				Self::branch(first.key, first.edges.clone(), fallback)
 			}
 		};
 		memo.insert(memo_key, out.clone());
@@ -580,6 +591,48 @@ mod tests {
 	use super::*;
 	use crate::testutil::make_constant;
 	use crate::types::SlotIdx;
+
+	#[test]
+	fn refreshing_an_operation_preserves_other_cached_results() {
+		let left = Worlds::from_constraint(vec![(1, SlotIdx(0), make_constant("refresh_left"))]);
+		let right = Worlds::from_constraint(vec![(1, SlotIdx(1), make_constant("refresh_right"))]);
+		let union = left.union(&right);
+		let intersection = left.intersect(&right);
+		let union_key = (left.identity(), right.identity(), 0);
+		let intersection_key = (left.identity(), right.identity(), 1);
+		let mut cache = Applications::default();
+		cache.insert(union_key, Applied::new(&left, &right, &union), 2);
+		cache.insert(
+			intersection_key,
+			Applied::new(&left, &right, &intersection),
+			2,
+		);
+		for _ in 0..4 {
+			cache.insert(
+				intersection_key,
+				Applied::new(&left, &right, &intersection),
+				2,
+			);
+			assert!(
+				cache.entries[&union_key]
+					.result()
+					.unwrap()
+					.equivalent(&union)
+			);
+			assert!(
+				cache.entries[&intersection_key]
+					.result()
+					.unwrap()
+					.equivalent(&intersection)
+			);
+			assert_eq!(cache.order.len(), 2);
+		}
+		let extra = (right.identity(), left.identity(), 0);
+		cache.insert(extra, Applied::new(&right, &left, &union), 2);
+		assert!(!cache.entries.contains_key(&union_key));
+		assert_eq!(cache.entries.len(), 2);
+		assert_eq!(cache.order.len(), 2);
+	}
 
 	#[test]
 	fn colliding_term_hashes_still_name_different_worlds() {
