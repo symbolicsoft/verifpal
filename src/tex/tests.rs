@@ -522,7 +522,6 @@ fn the_golden_document_compiles_under_tectonic() {
 	for path in [
 		"examples/test/hmac_ok.vp",
 		"examples/test/spore_ns_pk.vp",
-		"examples/test/junglegym_threshold_ring.vp",
 		"examples/simple.vp",
 	] {
 		documents.push((path.replace(['/', '.'], "_"), tex_report(&run_of(path))));

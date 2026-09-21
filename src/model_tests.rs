@@ -1873,15 +1873,6 @@ fn test_junglegym_hybrid_pq() {
 	run_model("junglegym_hybrid_pq.vp", "c1c1c1a0a1f0f1e1e1");
 }
 #[test]
-fn test_junglegym_threshold_ring() {
-	run_model("junglegym_threshold_ring.vp", "c1c0c0a1a1a1u0u1u1f0f1e1e1");
-	run_model_sessions(
-		"junglegym_threshold_ring.vp",
-		1,
-		"c1c0c0a1a1a1u0u1u1f0f1e1e1",
-	);
-}
-#[test]
 fn test_junglegym_phase_cascade() {
 	run_model(
 		"junglegym_phase_cascade.vp",

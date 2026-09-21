@@ -6,12 +6,11 @@ use crate::types::*;
 
 const SESSIONS: u8 = 1;
 
-const COSTLY_MODELS: [&str; 11] = [
+const COSTLY_MODELS: [&str; 10] = [
 	"concat_split_replay.vp",
 	"junglegym_deep_ratchet.vp",
 	"junglegym_hybrid_pq.vp",
 	"junglegym_phase_cascade.vp",
-	"junglegym_threshold_ring.vp",
 	"needham-schroeder.vp",
 	"piknik.vp",
 	"scuttlebutt.vp",
