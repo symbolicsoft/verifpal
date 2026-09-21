@@ -205,16 +205,18 @@ fn combination_coheres(
 	{
 		return true;
 	}
-	let keep = crate::reexec::reachable_knowledge(ps, attacker, |_, slot| {
-		let at = slot.get();
-		let who = km
-			.slots
-			.get(at)
-			.map(|s| s.creator)
-			.unwrap_or(crate::principal::ATTACKER_ID);
-		reached(who, at)
-	});
-	let Some(restricted) = attacker.retaining(&keep) else {
+	let Some(restricted) = crate::theory::scoped_restriction(ps, attacker, &replayed, || {
+		let keep = crate::reexec::reachable_knowledge(ps, attacker, |_, slot| {
+			let at = slot.get();
+			let who = km
+				.slots
+				.get(at)
+				.map(|s| s.creator)
+				.unwrap_or(crate::principal::ATTACKER_ID);
+			reached(who, at)
+		});
+		attacker.retaining(&keep)
+	}) else {
 		return true;
 	};
 	match derivation {

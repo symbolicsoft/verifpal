@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: e0 at both session counts. Guarding Alice's first public value
+// prevents Bob from accepting the other session's encrypted flight.
+
+attacker[active]
+
+principal Alice[
+	knows private network
+	generates alice_ephemeral
+	alice_ephemeral_public = PUBKEY(alice_ephemeral)
+	alice_hello = MAC(network, alice_ephemeral_public)
+]
+
+principal Bob[
+	knows private network
+	generates bob_ephemeral
+	bob_ephemeral_public = PUBKEY(bob_ephemeral)
+]
+
+Alice -> Bob: [alice_ephemeral_public], alice_hello
+
+principal Bob[
+	_ = ASSERT(alice_hello, MAC(network, alice_ephemeral_public))?
+	bob_hello = MAC(network, bob_ephemeral_public)
+]
+
+Bob -> Alice: bob_ephemeral_public, bob_hello
+
+principal Alice[
+	_ = ASSERT(bob_hello, MAC(network, bob_ephemeral_public))?
+	ea = DH_KEX(bob_ephemeral_public, alice_ephemeral)
+	first_a = HASH(network, ea)
+	generates nonce_a
+	identity_box = AEAD_ENC(first_a, nonce_a, network, nil)
+	key_a = HASH(network, ea)
+]
+
+Alice -> Bob: nonce_a, identity_box
+
+principal Bob[
+	eb = DH_KEX(alice_ephemeral_public, bob_ephemeral)
+	first_b = HASH(network, eb)
+	_ = AEAD_DEC(first_b, nonce_a, identity_box, nil)?
+	key_b = HASH(network, eb)
+	generates nonce_b
+	confirmation = AEAD_ENC(key_b, nonce_b, network, nil)
+]
+
+Bob -> Alice: nonce_b, confirmation
+
+principal Alice[
+	_ = AEAD_DEC(key_a, nonce_b, confirmation, nil)?
+]
+
+queries[
+	equivalence? key_a, key_b
+]

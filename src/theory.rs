@@ -114,7 +114,11 @@ struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
 	entries: IdMap<u64, Vec<(Value, bool)>>,
 	index: Option<Arc<StateIndex>>,
+	inputs: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
+	restrictions: Vec<Restriction>,
 }
+
+type Restriction = (Arc<Vec<PrincipalState>>, Option<Arc<AttackerState>>);
 
 impl ObtainableMemo {
 	fn is_for_state(&self, ps: &PrincipalState) -> bool {
@@ -249,6 +253,8 @@ impl<'a> DeductionMemo<'a> {
 			owner: (ps as *const _, attacker as *const _),
 			entries: IdMap::default(),
 			index: index.cloned(),
+			inputs: IdMap::default(),
+			restrictions: Vec::new(),
 		};
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
@@ -561,7 +567,17 @@ impl<'a> KnowledgeInputs<'a> {
 		if let Some((_, found)) = self.built.get(&key) {
 			return found.clone();
 		}
+		if let Some(found) = memo_inputs_get(key, self.ps, self.attacker) {
+			return found;
+		}
 		self.built.insert(key, (Arc::clone(p), None));
+		let found = self.build(p);
+		self.built.insert(key, (Arc::clone(p), found.clone()));
+		memo_inputs_put(key, p, self.ps, self.attacker, found.clone());
+		found
+	}
+
+	fn build(&mut self, p: &Arc<Primitive>) -> Option<Vec<KnownIdx>> {
 		let inputs = construction_inputs(p, self.ps, self.attacker)?;
 		let mut known = Vec::new();
 		let mut seen = IdSet::default();
@@ -572,9 +588,70 @@ impl<'a> KnowledgeInputs<'a> {
 				}
 			}
 		}
-		self.built.insert(key, (Arc::clone(p), Some(known.clone())));
 		Some(known)
 	}
+}
+
+fn memo_inputs_get(
+	key: usize,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+) -> Option<Option<Vec<KnownIdx>>> {
+	MEMO.with(|m| {
+		let borrowed = m.borrow();
+		let memo = borrowed.as_ref()?;
+		if !memo.is_for(ps, attacker) {
+			return None;
+		}
+		memo.inputs.get(&key).map(|(_, found)| found.clone())
+	})
+}
+
+fn memo_inputs_put(
+	key: usize,
+	p: &Arc<Primitive>,
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	found: Option<Vec<KnownIdx>>,
+) {
+	MEMO.with(|m| {
+		if let Some(memo) = m.borrow_mut().as_mut()
+			&& memo.is_for(ps, attacker)
+		{
+			memo.inputs.insert(key, (Arc::clone(p), found));
+		}
+	});
+}
+
+pub(crate) fn scoped_restriction(
+	ps: &PrincipalState,
+	attacker: &AttackerState,
+	replayed: &Arc<Vec<PrincipalState>>,
+	build: impl FnOnce() -> Option<Arc<AttackerState>>,
+) -> Option<Arc<AttackerState>> {
+	if let Some(hit) = MEMO.with(|m| {
+		let borrowed = m.borrow();
+		let memo = borrowed.as_ref()?;
+		if !memo.is_for(ps, attacker) {
+			return None;
+		}
+		memo.restrictions
+			.iter()
+			.find(|(seen, _)| Arc::ptr_eq(seen, replayed))
+			.map(|(_, restricted)| restricted.clone())
+	}) {
+		return hit;
+	}
+	let restricted = build();
+	MEMO.with(|m| {
+		if let Some(memo) = m.borrow_mut().as_mut()
+			&& memo.is_for(ps, attacker)
+		{
+			memo.restrictions
+				.push((Arc::clone(replayed), restricted.clone()));
+		}
+	});
+	restricted
 }
 
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {

@@ -552,7 +552,26 @@ fn public_declarations(m: &Model) -> IdSet<ValueId> {
 
 fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
+	let assignments: IdMap<ValueId, &Value> = m
+		.blocks
+		.iter()
+		.filter_map(|block| match block {
+			Block::Principal(p) => Some(&p.expressions),
+			_ => None,
+		})
+		.flatten()
+		.filter_map(|expression| expression.assigned.as_ref().map(|v| (expression, v)))
+		.flat_map(|(expression, value)| expression.constants.iter().map(move |c| (c.id, value)))
+		.collect();
 	let mut out: IdMap<ValueId, i32> = IdMap::default();
+	let mut disclose = |c: &Constant, phase: i32| {
+		for id in exposed_constants(c, &assignments) {
+			if secret.contains(&id) {
+				let at = out.entry(id).or_insert(phase);
+				*at = (*at).min(phase);
+			}
+		}
+	};
 	let mut phase = 0i32;
 	for block in &m.blocks {
 		match block {
@@ -563,21 +582,13 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 						continue;
 					}
 					for c in &expression.constants {
-						if !secret.contains(&c.id) {
-							continue;
-						}
-						let at = out.entry(c.id).or_insert(phase);
-						*at = (*at).min(phase);
+						disclose(c, phase);
 					}
 				}
 			}
 			Block::Message(message) => {
 				for c in &message.constants {
-					if !secret.contains(&c.id) {
-						continue;
-					}
-					let at = out.entry(c.id).or_insert(phase);
-					*at = (*at).min(phase);
+					disclose(c, phase);
 				}
 			}
 		}
@@ -612,6 +623,27 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 		}
 	}
 	out
+}
+
+fn exposed_constants(c: &Constant, assignments: &IdMap<ValueId, &Value>) -> IdSet<ValueId> {
+	let mut seen = IdSet::from_iter([c.id]);
+	let mut primitives = IdSet::default();
+	let mut pending: Vec<&Value> = assignments.get(&c.id).copied().into_iter().collect();
+	while let Some(value) = pending.pop() {
+		match value {
+			Value::Constant(c) if seen.insert(c.id) => {
+				pending.extend(assignments.get(&c.id).copied());
+			}
+			Value::Primitive(p)
+				if crate::primitive::primitive_core_reveals_args(p.id)
+					&& primitives.insert(Arc::as_ptr(p) as usize) =>
+			{
+				pending.extend(&p.arguments);
+			}
+			_ => {}
+		}
+	}
+	seen
 }
 
 fn computable_from(
@@ -1017,6 +1049,49 @@ mod tests {
 			"a leaked assignment standing as a private key marks its peer corrupt: {:?}",
 			e.summaries
 		);
+	}
+
+	#[test]
+	fn a_wrapped_key_is_compromised_at_its_first_disclosure_phase() {
+		let source = include_str!("../examples/test/scenario_corrupt_by_leaked_wrapped_key.vp")
+			.replace("\tleaks scl_wrap\n", "");
+		for disclosure in [
+			"principal Mallory[\nleaks scl_wrap\n]",
+			"Mallory -> Bob: [scl_wrap]",
+		] {
+			let source = source.replace(
+				"scenarios[",
+				&format!(
+					"phase[1]\n{disclosure}\nphase[2]\n\
+					 principal Mallory[\nleaks scl_mk2\n]\nscenarios["
+				),
+			);
+			let model = parse_string("wrapped_later.vp", &source).expect("parses");
+			let profile = honesty_profile(&model);
+			assert_eq!(profile["Alice[scl_gpeer = scl_gb]"], i32::MAX);
+			assert_eq!(profile["Alice[scl_gpeer = scl_gm]"], 1, "{disclosure}");
+		}
+	}
+
+	#[test]
+	fn a_disclosed_tuple_keeps_keys_inside_opaque_arguments_secret() {
+		let source = include_str!("../examples/test/scenario_corrupt_by_leaked_wrapped_key.vp");
+		for opaque in [
+			"HASH(scl_mk2)",
+			"PUBKEY(scl_mk2)",
+			"ENC(scl_mk, scl_mk2)",
+			"PKE_ENC(scl_gm, scl_mk2)",
+		] {
+			let source = source.replace(
+				"CONCAT(scl_mk2, scl_pad)",
+				&format!("CONCAT({opaque}, scl_pad)"),
+			);
+			let model = parse_string("wrapped_opaque.vp", &source).expect("parses");
+			assert!(
+				honesty_profile(&model).values().all(|&at| at == i32::MAX),
+				"{opaque} does not disclose its private inputs"
+			);
+		}
 	}
 
 	#[test]

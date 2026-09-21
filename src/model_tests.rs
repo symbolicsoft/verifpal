@@ -2178,6 +2178,30 @@ fn test_history_own_later_emission() {
 }
 
 #[test]
+fn test_session_key_divergence_late_confirmation() {
+	run_model_sessions("session_key_divergence_late_confirmation.vp", 1, "e0");
+	run_model("session_key_divergence_late_confirmation.vp", "e1");
+}
+
+#[test]
+fn test_session_key_divergence_guarded() {
+	run_model_sessions("session_key_divergence_guarded.vp", 1, "e0");
+	run_model("session_key_divergence_guarded.vp", "e0");
+}
+
+#[test]
+fn test_session_key_divergence_bundled() {
+	run_model_sessions("session_key_divergence_bundled.vp", 1, "e0");
+	run_model("session_key_divergence_bundled.vp", "e1");
+}
+
+#[test]
+fn test_session_key_divergence_bundled_guarded() {
+	run_model_sessions("session_key_divergence_bundled_guarded.vp", 1, "e0");
+	run_model("session_key_divergence_bundled_guarded.vp", "e0");
+}
+
+#[test]
 fn test_history_own_early_emission() {
 	run_model("history_own_early_emission.vp", "a1");
 	run_model_sessions("history_own_early_emission.vp", 1, "a1");
@@ -3983,6 +4007,21 @@ fn test_scenario_corrupt_by_wire() {
 fn test_scenario_corrupt_by_leaked_derived_key() {
 	run_model("scenario_corrupt_by_leaked_derived_key.vp", "c0");
 	run_model_sessions("scenario_corrupt_by_leaked_derived_key.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_leaked_wrapped_key() {
+	run_model("scenario_corrupt_by_leaked_wrapped_key.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_leaked_wrapped_key.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_wrapped_key_on_wire() {
+	run_model("scenario_corrupt_by_wrapped_key_on_wire.vp", "c0");
+	run_model_sessions("scenario_corrupt_by_wrapped_key_on_wire.vp", 1, "c0");
+}
+#[test]
+fn test_scenario_corrupt_by_opaque_wrapped_key() {
+	run_model("scenario_corrupt_by_opaque_wrapped_key.vp", "c1");
+	run_model_sessions("scenario_corrupt_by_opaque_wrapped_key.vp", 1, "c1");
 }
 #[test]
 fn test_scenario_corrupt_by_derived_key_on_wire() {

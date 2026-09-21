@@ -1,0 +1,58 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: c1 at one session and at two.
+// A tuple containing a hash of a key exposes only the hash. Mallory remains
+// an honest peer; her explicit disclosure of the decrypted nonce must still
+// violate the claim in her scenario. Treating every tuple leaf as exposed
+// would wrongly discard that scenario and lose this attack.
+
+attacker[active]
+
+principal Bob[
+	knows private scl_b
+	scl_gb = PUBKEY(scl_b)
+]
+
+principal Mallory[
+	knows private scl_mk
+	knows public scl_pad
+	scl_mk2 = HASH(scl_mk)
+	scl_gm = PUBKEY(scl_mk2)
+	scl_wrap = CONCAT(HASH(scl_mk2), scl_pad)
+	leaks scl_wrap
+]
+
+principal Alice[
+	knows public scl_gpeer
+	generates scl_ni
+]
+
+Bob -> Alice: [scl_gb]
+Mallory -> Alice: [scl_gm]
+
+principal Alice[
+	scl_m1 = PKE_ENC(scl_gpeer, scl_ni)
+]
+
+Alice -> Bob: scl_m1
+
+principal Bob[
+	scl_ni_b = PKE_DEC(scl_b, scl_m1)
+]
+
+Alice -> Mallory: [scl_m1]
+
+principal Mallory[
+	scl_open = PKE_DEC(scl_mk2, scl_m1)
+	leaks scl_open
+]
+
+scenarios[
+	Alice[scl_gpeer = scl_gb]
+	Alice[scl_gpeer = scl_gm]
+]
+
+queries[
+	confidentiality? scl_ni
+]

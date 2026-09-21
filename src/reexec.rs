@@ -430,13 +430,32 @@ fn available_before_pending(
 			.and_modify(|earliest| *earliest = (*earliest).min(at))
 			.or_insert(at);
 	}
-	let after = close_influences(km, after);
-	restrict_known(
-		&unreachable_from(km, &after),
-		&|slot| observable_slot(km, slot),
-		ps,
-		attacker,
-	)
+	let mut key: Vec<(PrincipalId, i32)> = after.iter().map(|(&who, &at)| (who, at)).collect();
+	key.sort_unstable();
+	key.push((ps.id, i32::MIN));
+	let blocked = PENDING_BLOCKED.with(|cache| {
+		cache
+			.borrow_mut()
+			.fresh()
+			.entry(key.clone())
+			.or_insert_with(|| Arc::new(unreachable_from(km, &close_influences(km, after))))
+			.clone()
+	});
+	let group = crate::context::KnowledgeKey::of(attacker);
+	if let Some(hit) =
+		PENDING_RESTRICTED.with(|cache| cache.borrow_mut().fresh().group(group).get(&key).cloned())
+	{
+		return hit;
+	}
+	let built = restrict_known(&blocked, &|slot| observable_slot(km, slot), ps, attacker);
+	PENDING_RESTRICTED.with(|cache| {
+		cache
+			.borrow_mut()
+			.fresh()
+			.group(group)
+			.insert(key, built.clone());
+	});
+	built
 }
 
 pub(crate) fn causally_grounded(
@@ -514,13 +533,13 @@ fn unreachable_from(km: &ProtocolTrace, after: &IdMap<PrincipalId, i32>) -> Vec<
 
 type Agreement = (Vec<usize>, Arc<Vec<Value>>, Option<Arc<AttackerState>>);
 
-type Agreed = (Arc<MutationRecord>, Vec<usize>, Arc<Vec<Value>>, bool);
+type Agreed = (Vec<(PrincipalId, SlotIdx, Value)>, Vec<(Vec<usize>, bool)>);
 
 pub(crate) struct Coherence {
 	principal: PrincipalId,
 	forwarded: Vec<Option<Value>>,
 	agreed: std::sync::Mutex<IdMap<u64, Vec<Agreement>>>,
-	histories: std::sync::Mutex<Vec<Agreed>>,
+	histories: std::sync::Mutex<IdMap<u64, Vec<Agreed>>>,
 }
 
 fn locked<T>(lock: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -541,7 +560,7 @@ impl Coherence {
 			principal: ps.id,
 			forwarded,
 			agreed: std::sync::Mutex::new(IdMap::default()),
-			histories: std::sync::Mutex::new(Vec::new()),
+			histories: std::sync::Mutex::new(IdMap::default()),
 		}
 	}
 
@@ -655,23 +674,30 @@ impl Coherence {
 		if diffs.is_empty() {
 			return true;
 		}
-		if let Some((_, _, _, hit)) =
-			locked(&self.histories)
-				.iter()
-				.find(|(seen, seen_authored, known, _)| {
-					Arc::ptr_eq(seen, record)
-						&& seen_authored == authored
-						&& Arc::ptr_eq(known, &attacker.known)
-				}) {
-			return *hit;
+		let key = diffs_signature(&diffs);
+		let same = |seen: &[(PrincipalId, SlotIdx, Value)]| {
+			seen.len() == diffs.len()
+				&& seen.iter().zip(&diffs).all(|((sa, ia, va), (sb, ib, vb))| {
+					sa == sb && ia == ib && va.equivalent(vb, true)
+				})
+		};
+		if let Some(hit) = locked(&self.histories)
+			.get(&key)
+			.and_then(|bucket| bucket.iter().find(|(seen, _)| same(seen)))
+			.and_then(|(_, seen)| {
+				seen.iter()
+					.find(|(seen_authored, _)| seen_authored == authored)
+					.map(|(_, hit)| *hit)
+			}) {
+			return hit;
 		}
 		let agrees = self.replays_agree(ctx, km, attacker, &diffs, authored);
-		locked(&self.histories).push((
-			Arc::clone(record),
-			authored.to_vec(),
-			Arc::clone(&attacker.known),
-			agrees,
-		));
+		let mut histories = locked(&self.histories);
+		let bucket = histories.entry(key).or_default();
+		match bucket.iter_mut().find(|(seen, _)| same(seen)) {
+			Some((_, seen)) => seen.push((authored.to_vec(), agrees)),
+			None => bucket.push((diffs, vec![(authored.to_vec(), agrees)])),
+		}
 		agrees
 	}
 
@@ -757,6 +783,20 @@ impl Coherence {
 		}
 		reduce_once(&attacker.known[held]).equivalent(forwarded, true)
 	}
+}
+
+fn diffs_signature(diffs: &[(PrincipalId, SlotIdx, Value)]) -> u64 {
+	let mut hash = 0xcbf2_9ce4_8422_2325u64;
+	let mut mix = |word: u64| {
+		hash ^= word;
+		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+	};
+	for (state, slot, value) in diffs {
+		mix(u64::from(*state));
+		mix(slot.get() as u64);
+		mix(value.hash_value());
+	}
+	hash
 }
 
 fn authored_hash(authored: &[usize], known: *const Vec<Value>, size: usize) -> u64 {
@@ -943,7 +983,11 @@ fn reexecute_with(
 		}
 	}
 
-	if slot_graph_is_cyclic(&ps) {
+	let roots = installs
+		.iter()
+		.map(|(slot, _)| slot.get())
+		.chain(forwarded.iter().map(|(slot, _, _)| slot.get()));
+	if slot_graph_is_cyclic_from(&ps, roots) {
 		return Err(VerifpalError::resolution(
 			"attacker-chosen values would define a slot in terms of itself".into(),
 		));
@@ -1158,7 +1202,7 @@ pub(crate) fn replay_diffs(
 	km: &ProtocolTrace,
 	seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
 	attacker: &AttackerState,
-) -> Option<Vec<PrincipalState>> {
+) -> Option<Arc<Vec<PrincipalState>>> {
 	let mut bases: Vec<&PrincipalState> = Vec::new();
 	let mut installed: Seeds = Vec::new();
 	for (principal, mine) in seeds {
@@ -1188,15 +1232,17 @@ pub(crate) fn replay_diffs(
 	if !causally_grounded(km, &scheduled, ctx.principal_states(), attacker) {
 		return None;
 	}
-	let mut out = Vec::new();
-	for (pristine, (_, mine)) in bases.iter().zip(&installed) {
-		out.push(reexecute(&pristine.clone_for_depth(true), mine, attacker, km).ok()?);
-	}
-	if out.is_empty() {
-		return Some(out);
-	}
-	forward_to_fixpoint(ctx, km, &mut out, &installed, None, attacker).ok()?;
-	Some(out)
+	ctx.replay_execution(&installed, attacker.current_phase, || {
+		let mut out = Vec::new();
+		for (pristine, (_, mine)) in bases.iter().zip(&installed) {
+			out.push(reexecute(&pristine.clone_for_depth(true), mine, attacker, km).ok()?);
+		}
+		if out.is_empty() {
+			return Some(out);
+		}
+		forward_to_fixpoint(ctx, km, &mut out, &installed, None, attacker).ok()?;
+		Some(out)
+	})
 }
 
 pub(crate) fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
@@ -1615,6 +1661,12 @@ thread_local! {
 		std::cell::RefCell::new(crate::context::Generational::default());
 	static RESTRICTED_AT: std::cell::RefCell<RestrictedAt> =
 		std::cell::RefCell::new(crate::context::Generational::default());
+	static PENDING_BLOCKED: std::cell::RefCell<BlockedAt> =
+		std::cell::RefCell::new(crate::context::Generational::default());
+	static HONEST_REDUCTS: std::cell::RefCell<crate::context::Generational<IdMap<(usize, ValueId), Value>>> =
+		std::cell::RefCell::new(crate::context::Generational::default());
+	static PENDING_RESTRICTED: std::cell::RefCell<RestrictedAt> =
+		std::cell::RefCell::new(crate::context::Generational::default());
 }
 
 #[cfg(test)]
@@ -1668,54 +1720,71 @@ pub(crate) fn attacker_authored(
 	ps: &PrincipalState,
 ) -> bool {
 	let honest = &ps.values[slot].value;
-	let trace_reduct = reduce_once(&resolve_trace_term(honest, km));
+	let trace_reduct = match honest {
+		Value::Constant(c) => HONEST_REDUCTS.with(|cache| {
+			cache
+				.borrow_mut()
+				.fresh()
+				.entry((slot, c.id))
+				.or_insert_with(|| reduce_once(&resolve_trace_term(honest, km)))
+				.clone()
+		}),
+		Value::Primitive(_) => reduce_once(&resolve_trace_term(honest, km)),
+	};
 	let ground_reduct = reduce_once(ground);
 	!ground_reduct.equivalent(&trace_reduct, true)
 }
 
-pub(crate) fn slot_graph_is_cyclic(ps: &PrincipalState) -> bool {
+pub(crate) fn slot_graph_is_cyclic_from(
+	ps: &PrincipalState,
+	roots: impl IntoIterator<Item = usize>,
+) -> bool {
 	let n = ps.values.len();
-	let mut edges: Vec<usize> = Vec::new();
-	let mut bounds: Vec<usize> = Vec::with_capacity(n + 1);
-	bounds.push(0);
-	for (own, sv) in ps.values.iter().enumerate() {
-		let from = edges.len();
-		for v in [&sv.value, sv.perceived()] {
+	let mut edges: Vec<Option<Vec<usize>>> = vec![None; n];
+	let slot_edges = |own: usize, edges: &mut Vec<Option<Vec<usize>>>| -> Vec<usize> {
+		if let Some(known) = &edges[own] {
+			return known.clone();
+		}
+		let mut out: Vec<usize> = Vec::new();
+		for v in [&ps.values[own].value, ps.values[own].perceived()] {
 			match v {
-				Value::Primitive(_) => collect_slot_references(v, ps, &mut edges, from),
+				Value::Primitive(_) => collect_slot_references(v, ps, &mut out, 0),
 				Value::Constant(c) => {
 					if let Some(alias) = ps.index_of(c)
-						&& alias != own && !edges[from..].contains(&alias)
+						&& alias != own && !out.contains(&alias)
 					{
-						edges.push(alias);
+						out.push(alias);
 					}
 				}
 			}
 		}
-		bounds.push(edges.len());
-	}
+		edges[own] = Some(out.clone());
+		out
+	};
 
 	// Iterative depth-first search: 0 unvisited, 1 on the current path, 2 done.
 	let mut mark = vec![0u8; n];
-	let mut stack: Vec<(usize, usize)> = Vec::new();
-	for start in 0..n {
-		if mark[start] != 0 {
+	let mut stack: Vec<(usize, Vec<usize>, usize)> = Vec::new();
+	for start in roots {
+		if start >= n || mark[start] != 0 {
 			continue;
 		}
 		mark[start] = 1;
-		stack.push((start, bounds[start]));
-		while let Some((slot, edge)) = stack.pop() {
-			if edge >= bounds[slot + 1] {
+		let first = slot_edges(start, &mut edges);
+		stack.push((start, first, 0));
+		while let Some((slot, outgoing, edge)) = stack.pop() {
+			if edge >= outgoing.len() {
 				mark[slot] = 2;
 				continue;
 			}
-			let next = edges[edge];
-			stack.push((slot, edge + 1));
+			let next = outgoing[edge];
+			stack.push((slot, outgoing, edge + 1));
 			match mark[next] {
 				1 => return true,
 				0 => {
 					mark[next] = 1;
-					stack.push((next, bounds[next]));
+					let following = slot_edges(next, &mut edges);
+					stack.push((next, following, 0));
 				}
 				_ => {}
 			}
@@ -2022,13 +2091,15 @@ mod tests {
 			.unwrap();
 		let nil = crate::value::value_nil();
 		let attacker = make_attacker_state(vec![nil.clone()]);
-		let runs = replay_diffs(
+		let runs: Vec<PrincipalState> = replay_diffs(
 			&ctx,
 			&km,
 			&[(bob.id, vec![(SlotIdx(seed), nil.clone())])],
 			&attacker,
 		)
-		.unwrap();
+		.unwrap()
+		.as_ref()
+		.clone();
 		let mut expected = nil;
 		for _ in 0..12 {
 			expected = Value::primitive(crate::primitive::PRIM_HASH, vec![expected], 0);

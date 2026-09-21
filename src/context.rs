@@ -201,7 +201,18 @@ pub(crate) struct VerifyContext {
 	replication_only: AtomicBool,
 	replication_rejected: AtomicBool,
 	cancel: Arc<AtomicBool>,
+	pub(crate) staged_checks: StagedMemo<Vec<(usize, crate::witness::WantedCheck)>>,
+	pub(crate) staged_costs: StagedMemo<Option<(usize, Vec<usize>)>>,
+	replay_executions: RwLock<IdMap<u64, Vec<ReplayExecution>>>,
+	honest_epoch: std::sync::atomic::AtomicU64,
 }
+
+type ReplayExecution = (
+	crate::reexec::Seeds,
+	i32,
+	u64,
+	Option<Arc<Vec<PrincipalState>>>,
+);
 
 struct StoredState {
 	id: PrincipalId,
@@ -243,6 +254,74 @@ fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
 		&& a.provenance.creator == b.provenance.creator
 		&& a.provenance.sender == b.provenance.sender
 		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
+}
+
+type Staged<V> = Vec<(Vec<(SlotIdx, Value)>, V)>;
+
+pub(crate) struct StagedMemo<V> {
+	entries: RwLock<IdMap<(PrincipalId, u64), Staged<V>>>,
+	stored: std::sync::atomic::AtomicUsize,
+}
+
+const STAGED_ENTRIES: usize = 200_000;
+
+impl<V> Default for StagedMemo<V> {
+	fn default() -> Self {
+		StagedMemo {
+			entries: RwLock::new(IdMap::default()),
+			stored: std::sync::atomic::AtomicUsize::new(0),
+		}
+	}
+}
+
+fn installs_hash(installs: &[(SlotIdx, Value)]) -> u64 {
+	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
+	for (slot, value) in installs {
+		acc = acc
+			.rotate_left(13)
+			.wrapping_add((slot.get() as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+			^ value.hash_value();
+	}
+	acc
+}
+
+fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
+	a.len() == b.len()
+		&& a.iter()
+			.zip(b.iter())
+			.all(|((sa, va), (sb, vb))| sa == sb && same_term(va, vb))
+}
+
+impl<V: Clone> StagedMemo<V> {
+	pub(crate) fn recall(
+		&self,
+		principal: PrincipalId,
+		installs: &[(SlotIdx, Value)],
+	) -> Option<V> {
+		read_lock(&self.entries)
+			.get(&(principal, installs_hash(installs)))
+			.and_then(|bucket| {
+				bucket
+					.iter()
+					.find(|(seen, _)| same_installs(seen, installs))
+					.map(|(_, value)| value.clone())
+			})
+	}
+
+	pub(crate) fn remember(&self, principal: PrincipalId, installs: &[(SlotIdx, Value)], value: V) {
+		if self.stored.load(Ordering::Relaxed) >= STAGED_ENTRIES {
+			return;
+		}
+		let mut entries = write_lock(&self.entries);
+		let bucket = entries
+			.entry((principal, installs_hash(installs)))
+			.or_default();
+		if bucket.iter().any(|(seen, _)| same_installs(seen, installs)) {
+			return;
+		}
+		bucket.push((installs.to_vec(), value));
+		self.stored.fetch_add(1, Ordering::Relaxed);
+	}
 }
 
 fn same_signature(a: &[(usize, Value)], b: &[(usize, Value)]) -> bool {
@@ -512,6 +591,10 @@ impl VerifyContext {
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
 			cancel: Arc::new(AtomicBool::new(false)),
+			staged_checks: StagedMemo::default(),
+			staged_costs: StagedMemo::default(),
+			replay_executions: RwLock::new(IdMap::default()),
+			honest_epoch: std::sync::atomic::AtomicU64::new(0),
 		}
 	}
 
@@ -614,6 +697,34 @@ impl VerifyContext {
 		*write_lock(&self.honest_unreached) =
 			Arc::new(crate::reexec::honest_run_unreached(km, &halts));
 		*write_lock(&self.honest_halts) = halts;
+		self.honest_epoch.fetch_add(1, Ordering::Relaxed);
+	}
+
+	pub(crate) fn replay_execution(
+		&self,
+		installed: &crate::reexec::Seeds,
+		phase: i32,
+		build: impl FnOnce() -> Option<Vec<PrincipalState>>,
+	) -> Option<Arc<Vec<PrincipalState>>> {
+		let key = seeds_signature(installed);
+		let epoch = self.honest_epoch.load(Ordering::Relaxed);
+		if let Some(hit) = read_lock(&self.replay_executions)
+			.get(&key)
+			.and_then(|bucket| {
+				bucket.iter().find(|(seen, at, seen_epoch, _)| {
+					*at == phase && *seen_epoch == epoch && same_seeds(seen, installed)
+				})
+			})
+			.map(|(_, _, _, built)| built.clone())
+		{
+			return hit;
+		}
+		let built = build().map(Arc::new);
+		write_lock(&self.replay_executions)
+			.entry(key)
+			.or_default()
+			.push((installed.clone(), phase, epoch, built.clone()));
+		built
 	}
 
 	fn honest_run_reached(
@@ -722,7 +833,7 @@ impl VerifyContext {
 		{
 			return hit;
 		}
-		let built = crate::reexec::replay_diffs(self, km, seeds, attacker).map(Arc::new);
+		let built = crate::reexec::replay_diffs(self, km, seeds, attacker);
 		write_lock(&self.replays)
 			.group(group)
 			.entry(key)
@@ -1386,6 +1497,10 @@ impl VerifyContext {
 			replication_only: AtomicBool::new(false),
 			replication_rejected: AtomicBool::new(false),
 			cancel: Arc::clone(&self.cancel),
+			staged_checks: StagedMemo::default(),
+			staged_costs: StagedMemo::default(),
+			replay_executions: RwLock::new(IdMap::default()),
+			honest_epoch: std::sync::atomic::AtomicU64::new(0),
 		}
 	}
 
