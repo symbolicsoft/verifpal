@@ -1,0 +1,37 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and a1 at two.
+//
+// Alice signs a fresh message and hands it to Bob on an open leg; Bob
+// verifies it and does nothing else. At one session there is no second
+// flight to hand him, so the query holds.
+//
+// At two the attacker takes Alice's other run's pair off the wire and gives
+// it to this Bob, whose check passes because the signature is Alice's own.
+// Nothing is forged: Alice sent that pair once and both of her Bobs accept
+// it, so agreement is not injective. Bob contributes nothing to the message
+// before accepting it, so the verdict carries
+// Subtype::ReplayableFirstFlight rather than DuplicateAcceptance.
+//
+// This is the smallest shape of that duplicate, and the baseline
+// duplicate_acceptance_partial_guarded_forward.vp has to reproduce.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

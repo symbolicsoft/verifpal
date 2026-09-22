@@ -4224,6 +4224,28 @@ fn test_relay_guarded_replay_open_hop() {
 	run_model_sessions("relay_guarded_replay_open_hop.vp", 1, "a0a0");
 }
 #[test]
+fn test_duplicate_acceptance_no_forward() {
+	run_model("duplicate_acceptance_no_forward.vp", "a1");
+	run_model_sessions("duplicate_acceptance_no_forward.vp", 1, "a0");
+}
+#[test]
+fn test_duplicate_acceptance_partial_guarded_forward() {
+	run_model("duplicate_acceptance_partial_guarded_forward.vp", "a1");
+	run_model_sessions("duplicate_acceptance_partial_guarded_forward.vp", 1, "a0");
+}
+#[test]
+fn test_relay_guarded_replay_misses_upstream_duplicate() {
+	run_model(
+		"relay_guarded_replay_misses_upstream_duplicate.vp",
+		"a1a0a0",
+	);
+	run_model_sessions(
+		"relay_guarded_replay_misses_upstream_duplicate.vp",
+		1,
+		"a0a0a0",
+	);
+}
+#[test]
 fn test_unlink_sealed_carrier_not_observed() {
 	run_model("unlink_sealed_carrier_not_observed.vp", "u0");
 	run_model_sessions("unlink_sealed_carrier_not_observed.vp", 1, "u0");

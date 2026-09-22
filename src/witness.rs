@@ -407,37 +407,6 @@ impl<'a> Minimizer<'a> {
 		cost
 	}
 
-	fn prime_costs(&self, group: &[PrincipalState], trials: &[Installs]) {
-		let mut pending: Vec<(usize, Installs)> = Vec::new();
-		for trial in trials {
-			for (at, session) in group.iter().enumerate() {
-				if !pristine(session) {
-					continue;
-				}
-				let mine = self.controlled(session, trial.clone());
-				if mine.is_empty()
-					|| self.ctx.staged_costs.recall(session.id, &mine).is_some()
-					|| pending
-						.iter()
-						.any(|(seen, installs)| *seen == at && same_install_set(installs, &mine))
-				{
-					continue;
-				}
-				pending.push((at, mine));
-			}
-		}
-		if pending.len() < 2 {
-			return;
-		}
-		let computed = crate::parallel::map_ordered(pending, |(at, mine)| {
-			let cost = self.compute_session_cost(&group[at], &mine);
-			(at, mine, cost)
-		});
-		for (at, mine, cost) in computed {
-			self.ctx.staged_costs.remember(group[at].id, &mine, cost);
-		}
-	}
-
 	fn compute_session_cost(
 		&self,
 		session: &PrincipalState,
@@ -523,16 +492,16 @@ impl<'a> Minimizer<'a> {
 		if checks.is_empty() {
 			return Vec::new();
 		}
-		let mut shapes = payload_shapes(self.km, &self.ambient, &checks, at);
-		shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| {
-			attacker_public_key()
-		}));
-		shapes.extend(shapes_the_checks_wanted(&checks, &mut |_| value_nil()));
+		let mut shapes = Shapes::from(payload_shapes(self.km, &self.ambient, &checks, at));
+		for shape in shapes_the_checks_wanted(&checks, &mut |_| attacker_public_key()) {
+			shapes.push_raw(shape);
+		}
+		for shape in shapes_the_checks_wanted(&checks, &mut |_| value_nil()) {
+			shapes.push_raw(shape);
+		}
 		for (prim, _) in &checks {
 			for argument in prim.arguments.iter() {
-				if !shapes.iter().any(|s| s.equivalent(argument, true)) {
-					shapes.push(argument.clone());
-				}
+				shapes.push(argument.clone());
 			}
 		}
 		if let Some((_, Value::Primitive(current))) = installs.iter().find(|(s, _)| s.get() == at) {
@@ -551,7 +520,7 @@ impl<'a> Minimizer<'a> {
 						.and_then(|i| self.km.slots.get(i))
 						.is_some_and(|slot| !slot.sent_by.is_empty()))
 			};
-			let wanted: Vec<Value> = shapes.clone();
+			let wanted: Vec<Value> = shapes.values.clone();
 			for shape in wanted {
 				for position in 0..current.arguments.len() {
 					if settled(position) || current.arguments[position].equivalent(&shape, true) {
@@ -564,13 +533,11 @@ impl<'a> Minimizer<'a> {
 						hash: HashCell::default(),
 						..(**current).clone()
 					}));
-					if !shapes.iter().any(|s| s.equivalent(&nested, true)) {
-						shapes.push(nested);
-					}
+					shapes.push(nested);
 				}
 			}
 		}
-		shapes
+		shapes.values
 	}
 
 	fn forged_flight(
@@ -655,7 +622,6 @@ impl<'a> Minimizer<'a> {
 						Some(trial)
 					})
 					.collect();
-				self.prime_costs(group, &trials);
 				let accepted = trials.into_iter().filter_map(|trial| {
 					let cost = self.scenario_cost(group, &trial);
 					((relaxed && cost < here) || (!relaxed && cost <= here))
@@ -998,18 +964,23 @@ impl<'a> Minimizer<'a> {
 		} = chosen;
 		let mut keep = installs.clone();
 		let mut keep_addressed = addressed.clone();
-		for (slot, _) in installs {
-			let trial: Installs = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
-			if trial.len() == keep.len() {
-				continue;
+		let mut settled = false;
+		while !settled {
+			settled = true;
+			for (slot, _) in installs {
+				let trial: Installs = keep.iter().filter(|(s, _)| s != slot).cloned().collect();
+				if trial.len() == keep.len() {
+					continue;
+				}
+				let Some(witness) = self.probe_at(base, &trial, &keep_addressed, *breadth) else {
+					continue;
+				};
+				if *grounded && !witness.grounded {
+					continue;
+				}
+				keep = trial;
+				settled = false;
 			}
-			let Some(witness) = self.probe_at(base, &trial, &keep_addressed, *breadth) else {
-				continue;
-			};
-			if *grounded && !witness.grounded {
-				continue;
-			}
-			keep = trial;
 		}
 		for (at, slot, _) in addressed {
 			let trial: Addressed = keep_addressed
@@ -1491,18 +1462,54 @@ fn shapes_the_checks_wanted(
 	checks: &[WantedCheck],
 	fill: &mut dyn FnMut(usize) -> Value,
 ) -> Vec<Value> {
-	let mut shapes: Vec<Value> = Vec::new();
+	let mut shapes = Shapes::default();
 	for (prim, rule) in checks {
 		let Some(rule) = rule else {
 			continue;
 		};
 		for shape in crate::solve::deduce::build_rewrite_shapes_with(prim, rule, &mut *fill) {
-			if !shapes.iter().any(|s| s.equivalent(&shape, true)) {
-				shapes.push(shape);
-			}
+			shapes.push(shape);
 		}
 	}
-	shapes
+	shapes.values
+}
+
+#[derive(Default)]
+struct Shapes {
+	values: Vec<Value>,
+	buckets: IdMap<u64, Vec<usize>>,
+}
+
+impl Shapes {
+	fn from(values: Vec<Value>) -> Shapes {
+		let mut shapes = Shapes::default();
+		for value in values {
+			shapes.push_raw(value);
+		}
+		shapes
+	}
+
+	fn push_raw(&mut self, value: Value) {
+		self.buckets
+			.entry(value.hash_value())
+			.or_default()
+			.push(self.values.len());
+		self.values.push(value);
+	}
+
+	fn contains(&self, value: &Value) -> bool {
+		self.buckets.get(&value.hash_value()).is_some_and(|bucket| {
+			bucket
+				.iter()
+				.any(|&at| self.values[at].equivalent(value, true))
+		})
+	}
+
+	fn push(&mut self, value: Value) {
+		if !self.contains(&value) {
+			self.push_raw(value);
+		}
+	}
 }
 
 fn payload_shapes(

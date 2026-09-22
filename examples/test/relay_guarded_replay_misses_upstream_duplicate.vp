@@ -1,0 +1,53 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0a0a0 at one session and a1a0a0 at two.
+//
+// relay_guarded_replay_is_not_a_duplicate.vp with the open leg above the
+// relays queried too, which is the same loss duplicate_acceptance_partial_
+// guarded_forward.vp isolates, reached through the pinned relay shape: the
+// guarded Bob -> Carol and Carol -> Dave hops both land in m's wire list,
+// and the seeds they produced took the upstream duplicate down with them.
+//
+// Bob's acceptance of Alice's flight is a genuine duplicate at two sessions
+// and is exactly what duplicate_acceptance_no_forward.vp reports: the open
+// Alice -> Bob leg carries the other run's honestly signed pair and both of
+// Alice's Bobs take it.
+//
+// The two relayed legs keep the a0 their own model pins. A guard says Bob
+// chose what reached Carol and Carol chose what reached Dave, so each
+// forwards what it accepted, once, and each recipient takes it once.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+Alice -> Carol: [pk]
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Bob -> Carol: [m], [s]
+
+principal Carol[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Carol -> Dave: [m]
+
+principal Dave[
+	h = HASH(m)
+]
+
+queries[
+	authentication? Alice -> Bob: m
+	authentication? Bob -> Carol: m
+	authentication? Carol -> Dave: m
+]

@@ -422,7 +422,7 @@ fn query_authentication_get_pass_indices(
 	let sender = ps.values[idx].provenance.sender;
 	let mut sibling_replay = false;
 	if sender == ATTACKER_ID {
-		if delivery_is_guarded(km, idx, query.message.sender, ps.id)
+		if delivery_is_guarded(km, idx, Some(query.message.sender), ps.id)
 			&& (session_sibling_replay(&c, &ps.values[idx].value, km)
 				|| copy_sibling_replay(&c, &ps.values[idx].value, km))
 		{
@@ -492,7 +492,10 @@ fn sibling_accepts(
 			continue;
 		};
 		for &recipient in &meta.wire {
-			if meta.creator == recipient || (sv.addressed && recipient != ps.id) {
+			if meta.creator == recipient
+				|| (sv.addressed && recipient != ps.id)
+				|| delivery_is_guarded(km, at, None, recipient)
+			{
 				continue;
 			}
 			needs.push((recipient, SlotIdx(at), sv.pre_rewrite.clone()));
@@ -600,7 +603,7 @@ fn sibling_accepts(
 fn delivery_is_guarded(
 	km: &ProtocolTrace,
 	slot: usize,
-	sender: PrincipalId,
+	sender: Option<PrincipalId>,
 	recipient: PrincipalId,
 ) -> bool {
 	let Some(trace_slot) = km.slots.get(slot) else {
@@ -608,7 +611,7 @@ fn delivery_is_guarded(
 	};
 	let mut delivered = false;
 	for event in &trace_slot.sent_by {
-		if event.sender != sender || event.recipient != recipient {
+		if sender.is_some_and(|from| event.sender != from) || event.recipient != recipient {
 			continue;
 		}
 		delivered = true;

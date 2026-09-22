@@ -1,0 +1,47 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a0 at one session and a1 at two.
+//
+// duplicate_acceptance_no_forward.vp with one guarded message added below
+// the query, to a principal that does nothing with it. The added leg is
+// downstream of the acceptance being asked about and the attacker cannot
+// choose what travels on it, so it can bear on nothing the query asks: the
+// verdict has to be the one the model without it reports.
+//
+// The engine used to lose it. The duplicate-acceptance check seeded an
+// install at every wire recipient of an attacker-tainted slot, and a slot's
+// wire list records each recipient guard or no guard, so the guarded hop put
+// Carol in m's. That seed asks the replay to install m at a leg the attacker
+// cannot touch, where the value arrives by forwarding from Bob instead;
+// Carol re-executes it with the signature left honest, Bob's check fails in
+// her view, and relays_are_forwarded refuses the whole replay. With no
+// replay the duplicate check returned false, the matching-run gate fired
+// below it, and a real attack printed as a hold with no envelope
+// qualifying it.
+//
+// A recipient reached only through guarded deliveries takes the value by
+// forwarding, so it is not seeded.
+
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+Alice -> Bob: [pk], m, s
+
+principal Bob[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+Bob -> Carol: [m]
+
+principal Carol[]
+
+queries[
+	authentication? Alice -> Bob: m
+]
