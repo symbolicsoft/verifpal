@@ -296,7 +296,7 @@ fn solve_with(
 	};
 	let protocol = ctx.term_bound(km).protocol(km);
 	let recalled = ctx.pass_repeats(&key, attacker, protocol);
-	if solve_debug() {
+	if solve_debug() || pass_debug() {
 		eprintln!(
 			"[pass] {} {}{} honest={:?} phase={} unresolved={} recalled={}",
 			ps.name,
@@ -376,6 +376,15 @@ fn solve_with(
 		ctx.defer_replays(ps.id, proposed.id, proposed.replays.clone());
 	}
 	let proposals = proposed.proposals.clone();
+	if pass_debug() {
+		eprintln!(
+			"[search] {} {} known={} proposals={}",
+			ps.name,
+			pass.name(),
+			attacker.known.len(),
+			proposals.len()
+		);
+	}
 	dispose(
 		ctx, km, ps, pass, attacker, guards, sym, proposals, addressed,
 	)
@@ -1305,7 +1314,16 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 
 pub(crate) fn solve_debug() -> bool {
 	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some())
+	*ENABLED.get_or_init(|| {
+		std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some_and(|value| value != "passes")
+	})
+}
+
+fn pass_debug() -> bool {
+	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+	*ENABLED.get_or_init(|| {
+		std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some_and(|value| value == "passes")
+	})
 }
 
 fn check_proposals() -> bool {

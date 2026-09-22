@@ -27,7 +27,7 @@ impl PartialOrd for Key {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Worlds(Root);
+pub(crate) struct Worlds(Root);
 
 #[derive(Clone, Debug, Default)]
 enum Root {

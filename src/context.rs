@@ -469,10 +469,10 @@ fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Worlds) -> bool 
 	let Some(entry) = state.worlds.get(existing.get()) else {
 		return false;
 	};
-	let combined = entry.union(&worlds);
-	if entry.equivalent(&combined) {
+	if worlds.subset_of(entry) {
 		return false;
 	}
+	let combined = entry.union(&worlds);
 	Arc::make_mut(&mut state.worlds)[existing.get()] = combined;
 	state.worlds_epoch += 1;
 	true

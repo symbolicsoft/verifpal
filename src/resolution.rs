@@ -1,11 +1,96 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use crate::types::*;
 
 type TraceMemo = IdMap<usize, Option<Value>>;
+
+#[derive(Default)]
+struct ResolvedTerms {
+	entries: IdMap<u64, Vec<Arc<Primitive>>>,
+	order: VecDeque<(u64, usize)>,
+}
+
+thread_local! {
+	static RESOLVED: RefCell<crate::context::Generational<ResolvedTerms>> = RefCell::new(crate::context::Generational::default());
+}
+
+fn same_resolved_argument(left: &Value, right: &Value) -> bool {
+	match (left, right) {
+		(Value::Primitive(left), Value::Primitive(right)) => Arc::ptr_eq(left, right),
+		(Value::Constant(left), Value::Constant(right)) => {
+			left.id == right.id
+				&& left.name == right.name
+				&& left.guard == right.guard
+				&& left.fresh == right.fresh
+				&& left.leaked == right.leaked
+				&& left.declaration == right.declaration
+				&& left.qualifier == right.qualifier
+		}
+		_ => false,
+	}
+}
+
+fn resolved_primitive(mapped: Primitive) -> Value {
+	let mut hash = IdHasher::default();
+	hash.write_u8(mapped.id);
+	hash.write_usize(mapped.output);
+	hash.write_usize(mapped.threshold);
+	hash.write_u32(mapped.instance);
+	hash.write_u8(u8::from(mapped.instance_check));
+	for argument in &mapped.arguments {
+		match argument {
+			Value::Constant(c) => {
+				hash.write_u8(0);
+				hash.write_u32(c.id);
+			}
+			Value::Primitive(p) => {
+				hash.write_u8(1);
+				hash.write_usize(Arc::as_ptr(p) as usize);
+			}
+		}
+	}
+	let key = hash.finish();
+	RESOLVED.with(|cell| {
+		let mut cache = cell.borrow_mut();
+		let cache = cache.fresh();
+		let bucket = cache.entries.entry(key).or_default();
+		if let Some(entry) = bucket.iter().find(|entry| {
+			entry.id == mapped.id
+				&& entry.output == mapped.output
+				&& entry.threshold == mapped.threshold
+				&& entry.instance == mapped.instance
+				&& entry.instance_check == mapped.instance_check
+				&& entry.capabilities == mapped.capabilities
+				&& entry.arguments.len() == mapped.arguments.len()
+				&& entry
+					.arguments
+					.iter()
+					.zip(&mapped.arguments)
+					.all(|(left, right)| same_resolved_argument(left, right))
+		}) {
+			return Value::Primitive(entry.clone());
+		}
+		let value = Arc::new(mapped);
+		bucket.push(value.clone());
+		cache.order.push_back((key, Arc::as_ptr(&value) as usize));
+		if cache.order.len() > 8192
+			&& let Some((hash, pointer)) = cache.order.pop_front()
+		{
+			let bucket = cache.entries.get_mut(&hash).unwrap();
+			bucket.retain(|entry| Arc::as_ptr(entry) as usize != pointer);
+			if bucket.is_empty() {
+				cache.entries.remove(&hash);
+			}
+		}
+		Value::Primitive(value)
+	})
+}
 
 pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
 	let value = Value::Constant(c.clone());
@@ -44,9 +129,11 @@ fn resolve_trace_primitive(
 	trace: &ProtocolTrace,
 	memo: &mut TraceMemo,
 ) -> Option<Value> {
-	let prim = value.as_primitive()?;
+	let Value::Primitive(prim) = value else {
+		return None;
+	};
 	prim.map_arguments(|arg| resolve_trace_value(arg, trace, memo))
-		.map(|mapped| Value::Primitive(Arc::new(mapped)))
+		.map(resolved_primitive)
 }
 
 pub(crate) fn state_mentions(
@@ -225,7 +312,7 @@ fn resolve_ps_primitive(
 	let mapped = prim.try_map_arguments(|arg| {
 		resolve_ps_values(arg, root_value, root_index, ps, use_orig, memo)
 	})?;
-	let out = mapped.map(|mapped| Value::Primitive(Arc::new(mapped)));
+	let out = mapped.map(resolved_primitive);
 	memo.terms.insert(key, (Arc::clone(prim), out.clone()));
 	Ok(out)
 }
@@ -284,6 +371,109 @@ pub(crate) fn value_constant_contains_fresh_values(
 mod tests {
 	use super::*;
 	use crate::testutil::*;
+
+	#[test]
+	fn repeated_resolution_shares_ground_terms_and_tracks_changed_inputs() {
+		let model = crate::parser::parse_string("resolved.vp", "attacker[active]\nprincipal Sender[generates a, b]\nSender -> Reader: a, b\nprincipal Reader[x = HASH(a)]\nqueries[confidentiality? x]\n").unwrap();
+		let (_, states) = crate::sanity::sanity(&model).unwrap();
+		let base = states.iter().find(|state| state.name == "Reader").unwrap();
+		let index = |name: &str| {
+			base.meta
+				.iter()
+				.position(|slot| slot.constant.name.as_ref() == name)
+				.unwrap()
+		};
+		let target = index("x");
+		let mut first = base.clone();
+		let mut second = base.clone();
+		first.resolve_all_values().unwrap();
+		second.resolve_all_values().unwrap();
+		assert!(
+			first.values[target]
+				.value
+				.same_term(&second.values[target].value)
+		);
+		let mut changed = base.clone();
+		let replacement = base.values[index("b")].value.clone();
+		crate::reexec::install(&mut changed, index("a"), replacement, true, None, false);
+		changed.resolve_all_values().unwrap();
+		assert!(
+			!first.values[target]
+				.value
+				.equivalent(&changed.values[target].value, true)
+		);
+	}
+
+	#[test]
+	fn resolved_terms_preserve_annotations_checks_and_constant_metadata() {
+		let input = make_constant("resolution_metadata_input");
+		let source = Arc::new(Primitive::new(
+			crate::primitive::PRIM_ENC,
+			vec![input.clone(), input.clone()],
+			0,
+		));
+		let output = make_constant("resolution_metadata_output");
+		let plain = resolved_primitive(source.with_arguments(vec![input.clone(), output.clone()]));
+		let mut annotated = source.as_ref().clone();
+		annotated.capabilities.set(Capability::Weak, 2);
+		annotated.instance_check = true;
+		let annotated = Arc::new(annotated);
+		let checked =
+			resolved_primitive(annotated.with_arguments(vec![input.clone(), output.clone()]));
+		assert!(checked.as_primitive().unwrap().instance_check);
+		assert_eq!(
+			checked.as_primitive().unwrap().capabilities,
+			annotated.capabilities
+		);
+		assert!(!plain.as_primitive().unwrap().instance_check);
+		let parent = Arc::new(Primitive::new(
+			crate::primitive::PRIM_HASH,
+			vec![input.clone()],
+			0,
+		));
+		let plain_parent = resolved_primitive(parent.with_arguments(vec![plain.clone()]));
+		let checked_parent = resolved_primitive(parent.with_arguments(vec![checked]));
+		assert!(
+			!plain_parent.as_primitive().unwrap().arguments[0]
+				.as_primitive()
+				.unwrap()
+				.instance_check
+		);
+		assert!(
+			checked_parent.as_primitive().unwrap().arguments[0]
+				.as_primitive()
+				.unwrap()
+				.instance_check
+		);
+		let mut fresh = output.as_constant().unwrap().clone();
+		fresh.fresh = true;
+		let changed =
+			resolved_primitive(source.with_arguments(vec![input, Value::Constant(fresh)]));
+		assert!(
+			changed.as_primitive().unwrap().arguments[1]
+				.as_constant()
+				.unwrap()
+				.fresh
+		);
+		assert!(
+			!plain.as_primitive().unwrap().arguments[1]
+				.as_constant()
+				.unwrap()
+				.fresh
+		);
+	}
+
+	#[test]
+	fn evicting_resolved_terms_only_recomputes_the_same_value() {
+		let input = make_constant("resolution_eviction_input");
+		let source = Arc::new(Primitive::new(crate::primitive::PRIM_HASH, vec![input], 0));
+		let output = make_constant("resolution_eviction_output");
+		let before = resolved_primitive(source.with_arguments(vec![output.clone()]));
+		RESOLVED.with(|cell| *cell.borrow_mut().fresh() = ResolvedTerms::default());
+		let after = resolved_primitive(source.with_arguments(vec![output]));
+		assert!(!before.same_term(&after));
+		assert!(crate::theory::structurally_identical(&before, &after));
+	}
 
 	#[test]
 	fn use_checks_visit_shared_terms_without_expanding_their_occurrences() {

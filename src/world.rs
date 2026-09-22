@@ -6,9 +6,11 @@ use crate::types::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
+#[cfg(test)]
 mod diagram;
+mod formula;
 
-pub use diagram::Worlds;
+pub use formula::Worlds;
 
 pub(crate) fn constraints(ps: &PrincipalState, needs: Constraint) -> Worlds {
 	Worlds::ordered(needs, |slot| {
@@ -27,14 +29,14 @@ fn add(set: &mut Worlds, new: Constraint) -> bool {
 }
 
 pub(crate) fn merge_all(sets: &[Worlds]) -> Worlds {
-	let mut out = Worlds::any();
-	for choices in sets {
-		out = out.intersect(choices);
-		if out.is_empty() {
-			break;
-		}
+	let out = sets
+		.iter()
+		.fold(Worlds::any(), |out, choices| out.intersect(choices));
+	if out.is_empty() {
+		Worlds::default()
+	} else {
+		out
 	}
-	out
 }
 
 pub(crate) fn scheduled_world(
@@ -63,12 +65,13 @@ pub(crate) fn scheduled_world(
 				return Worlds::default();
 			};
 			world = world.intersect(available);
-			if world.is_empty() {
-				return world;
-			}
 		}
 	}
-	world
+	if world.is_empty() {
+		Worlds::default()
+	} else {
+		world
+	}
 }
 
 pub(crate) fn install_world(
@@ -100,11 +103,12 @@ pub(crate) fn install_world(
 			return Worlds::default();
 		};
 		world = world.intersect(available);
-		if world.is_empty() {
-			return world;
-		}
 	}
-	world
+	if world.is_empty() {
+		Worlds::default()
+	} else {
+		world
+	}
 }
 
 pub(crate) fn state_world(
@@ -149,9 +153,9 @@ pub(crate) fn state_world(
 	let mut out = constraints(ps, visit.pins);
 	for worlds in visit.inputs.values().filter(|worlds| !worlds.is_empty()) {
 		out = out.intersect(worlds);
-		if out.is_empty() {
-			break;
-		}
+	}
+	if out.is_empty() {
+		out = Worlds::default();
 	}
 	let result = CachedWorld {
 		worlds: out.clone(),
