@@ -300,7 +300,7 @@ fn step_run<'i>(
 		Event::Leak(slot) => {
 			if let Some(h) = ex.runs[r].held(slot) {
 				let v = h.value.clone();
-				ex.knowledge.learn(&v, Origin::Leak { slot });
+				ex.knowledge.learn(&v, Origin::Leak { run: r, slot });
 			}
 			Outcome::Done
 		}

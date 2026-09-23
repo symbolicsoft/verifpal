@@ -14,7 +14,7 @@ use crate::types::*;
 pub(crate) enum Origin {
 	Initial,
 	Wire { run: usize, slot: usize },
-	Leak { slot: usize },
+	Leak { run: usize, slot: usize },
 	Derived(DerivationRecord),
 }
 

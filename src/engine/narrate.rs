@@ -201,6 +201,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
+	fn delivered(&self, v: &Value, exclude: &[&str]) -> String {
+		match self.names.lookup(v, exclude) {
+			Some(name) if !self.names.shaped(name) => name.to_string(),
+			_ => self.spelled(v, exclude),
+		}
+	}
+
 	fn spelled_honest(&self, v: &Value, exclude: &[&str]) -> String {
 		match v {
 			Value::Constant(c) => c.to_string(),
@@ -315,9 +322,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					));
 				}
 			}
-			Origin::Leak { slot, .. } => {
+			Origin::Leak { run, slot } => {
 				let name = &self.cx.km.slots[slot].constant;
-				self.say(format!("Attacker is handed {name} by a leaks declaration."));
+				let leaker = &self.cx.program.runs[run].name;
+				self.say(format!(
+					"Attacker is handed {name} by a leaks declaration in {leaker}."
+				));
 			}
 			Origin::Derived(record) => {
 				for ingredient in record.ingredients() {
@@ -468,7 +478,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					continue;
 				}
 				self.explain(&value, before);
-				let shown = self.spelled(&value, &own);
+				let shown = self.delivered(&value, &own);
 				names.push(constant.clone());
 				values.push(shown.clone());
 				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
