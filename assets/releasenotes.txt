@@ -1,4 +1,9 @@
-Verifpal 1.5.2
+Verifpal 1.6.0
+
+Changes since v1.5.2:
+
+- Replace the gate-based engine with joint execution
+- Performance pass with five engine improvements
 
 Changes since v1.5.1:
 
