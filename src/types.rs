@@ -517,7 +517,6 @@ pub type PrincipalId = u8;
 pub type Need = (PrincipalId, SlotIdx, Value);
 pub type Constraint = Vec<Need>;
 
-pub use crate::world::Worlds;
 pub type ValueId = u32;
 pub type PrimitiveId = u8;
 
@@ -906,20 +905,6 @@ impl Model {
 	}
 }
 
-#[cfg(test)]
-#[derive(Clone, Debug)]
-pub(crate) struct ResultWitness {
-	pub installs: Vec<(SlotIdx, Value)>,
-	pub addressed: Vec<(PrincipalId, SlotIdx, Value)>,
-	pub wide: bool,
-	pub narrated: Vec<SlotIdx>,
-	pub principal: PrincipalId,
-	pub phase: i32,
-	pub reproduced: bool,
-	pub out_of_order: Vec<String>,
-	pub addressed_all: bool,
-}
-
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct TraceStep {
 	pub kind: &'static str,
@@ -962,7 +947,6 @@ pub struct TraceValue {
 pub enum Truncation {
 	TermDepth,
 	SolverVariables,
-	WitnessValidation,
 }
 
 impl Truncation {
@@ -970,7 +954,6 @@ impl Truncation {
 		match self {
 			Truncation::TermDepth => "term depth",
 			Truncation::SolverVariables => "solver variables",
-			Truncation::WitnessValidation => "witness validation",
 		}
 	}
 }
@@ -1551,28 +1534,6 @@ impl PrincipalState {
 }
 
 #[derive(Clone, Debug)]
-pub struct SlotDiff {
-	pub index: SlotIdx,
-	pub constant: Constant,
-	pub value: Value,
-	pub tainted: bool,
-	pub state: PrincipalId,
-}
-
-#[derive(Clone, Debug)]
-pub struct MutationRecord {
-	pub diffs: Vec<SlotDiff>,
-	pub principal_id: PrincipalId,
-	pub phase: i32,
-}
-
-impl MutationRecord {
-	pub fn tainted(&self) -> impl Iterator<Item = &SlotDiff> {
-		self.diffs.iter().filter(|diff| diff.tainted)
-	}
-}
-
-#[derive(Clone, Debug)]
 pub enum DerivationRecord {
 	Initial,
 	Leaked {
@@ -1700,20 +1661,13 @@ impl DerivationRecord {
 	}
 }
 
-pub type Route = (DerivationRecord, Arc<MutationRecord>);
-
 #[derive(Clone, Debug)]
 pub struct AttackerState {
 	pub current_phase: i32,
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
-	pub mutation_records: Arc<Vec<Arc<MutationRecord>>>,
 	pub derivations: Arc<Vec<DerivationRecord>>,
-	pub alternates: Arc<Vec<Vec<Route>>>,
-	pub worlds: Arc<Vec<Worlds>>,
-	pub worlds_epoch: u64,
 	pub reused: Arc<Vec<[Value; 2]>>,
-	pub routes_epoch: u64,
 	pub chain: u64,
 }
 
@@ -1729,13 +1683,8 @@ impl Default for AttackerState {
 			current_phase: 0,
 			known: Arc::new(vec![]),
 			known_map: Arc::new(IdMap::default()),
-			mutation_records: Arc::new(vec![]),
 			derivations: Arc::new(vec![]),
-			alternates: Arc::new(vec![]),
-			worlds: Arc::new(vec![]),
-			worlds_epoch: 0,
 			reused: Arc::new(vec![]),
-			routes_epoch: 0,
 			chain: next_chain(),
 		}
 	}
@@ -2013,16 +1962,6 @@ mod tests {
 			phases: vec![0],
 		};
 		assert!(slot.known_by_principal(1));
-	}
-
-	#[test]
-	fn mutation_record_empty() {
-		let record = MutationRecord {
-			diffs: vec![],
-			principal_id: 0,
-			phase: 0,
-		};
-		assert!(record.diffs.is_empty());
 	}
 
 	#[test]

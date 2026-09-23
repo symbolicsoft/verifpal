@@ -164,6 +164,6 @@ mod tests {
 		assert_sync::<crate::types::AttackerState>();
 		assert_sync::<crate::solve::symbolic::SymbolicState>();
 		assert_sync::<crate::types::Value>();
-		assert_sync::<crate::reexec::TermBound>();
+		assert_sync::<crate::solve::control::TermBound>();
 	}
 }

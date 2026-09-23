@@ -27,7 +27,7 @@ Verifpal has been used to verify security properties for Signal, Scuttlebutt, TL
 
 ## Validation and Search Bounds
 
-The solver proposes substitutions. Independent validation checks attacker control, derivability, causal availability and compatible execution constraints before re-execution. Every reported attack must also reproduce and pass grounding from baseline knowledge. The paper states the additional support condition under which a reproduced witness transfers to a single protocol history.
+The search proposes attacker substitutions and nothing else. Each candidate is run as one joint execution of every principal and session, in which a substituted value is delivered only if the attacker can derive it from what that same execution has disclosed by then; a query fails only when the evaluator finds its violation in such an execution, and the reported trace narrates that execution. Since September 2026 this replaces the validation, grounding and witness-transfer machinery the paper describes: an attack is a single protocol history by construction.
 
 A passing query means "this search found no attack", which is weaker than a proof. Verifpal supports neither observational equivalence nor user-defined equational theories, and it always terminates instead of offering unbounded session replication. If you are designing a protocol for production, cross-check it with ProVerif and Tamarin.
 

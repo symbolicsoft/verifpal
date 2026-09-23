@@ -354,19 +354,6 @@ pub(crate) fn constant_used_by_principal(
 		.is_some_and(|principals| principals.contains(&principal_id))
 }
 
-pub(crate) fn value_constant_contains_fresh_values(
-	c: &Constant,
-	ps: &PrincipalState,
-) -> VResult<bool> {
-	let idx = ps
-		.index_of(c)
-		.ok_or_else(|| VerifpalError::resolution("invalid value".into()))?;
-	Ok(ps.values[idx].value.constant_leaves().any(|inner| {
-		ps.index_of(inner)
-			.is_some_and(|i| ps.meta[i].constant.fresh)
-	}))
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -395,7 +382,13 @@ mod tests {
 		);
 		let mut changed = base.clone();
 		let replacement = base.values[index("b")].value.clone();
-		crate::reexec::install(&mut changed, index("a"), replacement, true, None, false);
+		let slot = &mut changed.values[index("a")];
+		slot.original = slot.value.clone();
+		slot.provenance.creator = crate::principal::ATTACKER_ID;
+		slot.provenance.sender = crate::principal::ATTACKER_ID;
+		slot.provenance.attacker_tainted = true;
+		slot.pre_rewrite = replacement.clone();
+		slot.value = replacement;
 		changed.resolve_all_values().unwrap();
 		assert!(
 			!first.values[target]
@@ -521,40 +514,6 @@ mod tests {
 		assert!(!state_mentions(&sealed, &trace, ps, ps.id, id));
 		let both = Value::primitive(crate::primitive::PRIM_HASH, vec![sealed, shared], 0);
 		assert!(state_mentions(&both, &trace, ps, ps.id, id));
-	}
-
-	#[test]
-	fn freshness_scans_a_shared_graph_without_enumerating_occurrences() {
-		let mut seed = make_private("freshness_dag_seed")
-			.as_constant()
-			.unwrap()
-			.clone();
-		seed.fresh = true;
-		let name = make_constant("freshness_dag_term");
-		let mut term = Value::Constant(seed.clone());
-		for _ in 0..40 {
-			term = Value::primitive(
-				crate::primitive::PRIM_HASH,
-				vec![term.clone(), term.clone(), term],
-				0,
-			);
-		}
-		let mut ps = make_principal_state(
-			"Freshness",
-			1,
-			vec![
-				make_slot_meta(&seed, true),
-				make_slot_meta(name.as_constant().unwrap(), true),
-			],
-			vec![
-				make_slot_values(&Value::Constant(seed), 1),
-				make_slot_values(&term, 1),
-			],
-		);
-		let name = name.as_constant().unwrap();
-		assert!(value_constant_contains_fresh_values(name, &ps).unwrap());
-		Arc::make_mut(&mut ps.meta)[0].constant.fresh = false;
-		assert!(!value_constant_contains_fresh_values(name, &ps).unwrap());
 	}
 
 	fn two_slot_state(mutatable_to: Vec<PrincipalId>, root_creator: PrincipalId) -> PrincipalState {

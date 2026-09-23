@@ -1,0 +1,102 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 at one session and at two.
+//
+// Woo-Lam Pi, unrepaired: B -> A: Nb; A -> B: {Nb}Kas; B -> S: {A, {Nb}Kas}Kbs;
+// S -> B: {Nb}Kbs. B runs a responder exchange with Alice and one with
+// Mallory, a legitimate principal whose key k_ms leaks. Message 1 is dropped
+// because Alice's name is public; ENC/DEC has no integrity, so S decrypts
+// garbage rather than halting, exactly as the 1990s protocol does.
+//
+// Abadi's attack at one session: the attacker hands Mallory nb1 in place of
+// nb2, so Mallory's honest {nb1}Kms travels through Bob's M-branch and S
+// answers it with {nb1}Kbs. It hands Bob nil as m3a and delivers {nb1}Kbs as
+// m5a. Bob's check passes and his uses of nil (in m4a and after the final
+// check) count, so the first query fails. That m5a install equals the value an
+// honest S would send there, but in this execution S sends ENC(k_bs,
+// DEC(k_as, nil)), so delivering {nb1}Kbs is a real attacker action; an
+// engine that drops installs equal to the pristine value misses the attack.
+// The second query holds: the m5a Bob accepts is the value S's honest run
+// sends him. woolam_pif_pristine_pin.vp is the repaired counterweight.
+
+attacker[active]
+
+principal Server[
+	knows private k_as
+	knows private k_bs
+	knows private k_ms
+	knows public a_name, b_name, m_name
+]
+
+principal Alice[
+	knows private k_as
+]
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, b_name, m_name
+]
+
+principal Mallory[
+	knows private k_ms
+	leaks k_ms
+]
+
+principal Bob[
+	generates nb1
+	generates nb2
+]
+
+Bob -> Alice: nb1
+Bob -> Mallory: nb2
+
+principal Alice[
+	m3a = ENC(k_as, nb1)
+]
+
+principal Mallory[
+	m3b = ENC(k_ms, nb2)
+]
+
+Alice -> Bob: m3a
+Mallory -> Bob: m3b
+
+principal Bob[
+	m4a = ENC(k_bs, CONCAT(a_name, m3a))
+	m4b = ENC(k_bs, CONCAT(m_name, m3b))
+]
+
+Bob -> Server: m4b
+
+principal Server[
+	p4b = DEC(k_bs, m4b)
+	idb, tokb = SPLIT(p4b)?
+	_ = ASSERT(idb, m_name)?
+	m5b = ENC(k_bs, DEC(k_ms, tokb))
+]
+
+Server -> Bob: m5b
+
+Bob -> Server: m4a
+
+principal Server[
+	p4a = DEC(k_bs, m4a)
+	ida, toka = SPLIT(p4a)?
+	_ = ASSERT(ida, a_name)?
+	m5a = ENC(k_bs, DEC(k_as, toka))
+]
+
+Server -> Bob: m5a
+
+principal Bob[
+	r_a = DEC(k_bs, m5a)
+	_ = ASSERT(r_a, nb1)?
+	_ = HASH(m3a, nb1)
+	_ = HASH(m5a, nb1)
+]
+
+queries[
+	authentication? Alice -> Bob: m3a
+	authentication? Server -> Bob: m5a
+]

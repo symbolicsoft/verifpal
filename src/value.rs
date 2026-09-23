@@ -12,7 +12,6 @@ use crate::types::*;
 
 pub(crate) use crate::resolution::{
 	ResolveMemo, resolve_ps_values, resolve_trace_constant, resolve_trace_term,
-	value_constant_contains_fresh_values,
 };
 
 pub(crate) fn subterms(v: &Value) -> impl Iterator<Item = &Value> {
@@ -72,8 +71,6 @@ pub(crate) const COPY_STRIDE: ValueId = 0x0400_0000;
 
 pub(crate) const MAX_COPIES: u32 = 30;
 
-const MINIMIZER_BAND: ValueId = 30;
-
 pub(crate) fn copy_value_id(base: ValueId, copy: u32) -> ValueId {
 	debug_assert!((1..=MAX_COPIES).contains(&copy));
 	debug_assert!(base < COPY_STRIDE);
@@ -89,19 +86,6 @@ pub(crate) fn copy_index_of(id: ValueId) -> (u32, ValueId) {
 			(id - COPY_BASE) % COPY_STRIDE,
 		)
 	}
-}
-
-pub(crate) fn session_copy(c: &Constant) -> Value {
-	let base = if c.id >= COPY_BASE {
-		(c.id - COPY_BASE) % COPY_STRIDE
-	} else {
-		c.id
-	};
-	Value::Constant(Constant {
-		name: Arc::from(format!("{}#other", c.name)),
-		id: COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + base,
-		..c.clone()
-	})
 }
 
 static STATIC_NIL: LazyLock<Value> = LazyLock::new(|| {
@@ -137,38 +121,6 @@ pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
 
 pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<usize> {
 	constants.iter().position(|existing| c.equivalent(existing))
-}
-
-pub(crate) fn compute_slot_diffs(
-	ps: &PrincipalState,
-	trace: &ProtocolTrace,
-	phase: i32,
-) -> Arc<MutationRecord> {
-	let diffs = ps
-		.values
-		.iter()
-		.zip(ps.meta.iter())
-		.zip(trace.slots.iter())
-		.enumerate()
-		.filter_map(|(i, ((sv, sm), slot))| {
-			if sv.pre_rewrite.equivalent(&slot.initial_value, true) {
-				None
-			} else {
-				Some(SlotDiff {
-					index: SlotIdx(i),
-					constant: sm.constant.clone(),
-					value: sv.value.clone(),
-					tainted: sv.provenance.attacker_tainted,
-					state: ps.id,
-				})
-			}
-		})
-		.collect();
-	Arc::new(MutationRecord {
-		diffs,
-		principal_id: ps.id,
-		phase,
-	})
 }
 
 impl Value {
@@ -324,13 +276,6 @@ impl ProtocolTrace {
 }
 
 impl AttackerState {
-	pub(crate) fn with_alternates(&self, alternates: Vec<Vec<Route>>) -> AttackerState {
-		AttackerState {
-			alternates: Arc::new(alternates),
-			..self.clone()
-		}
-	}
-
 	pub(crate) fn retaining(&self, keep: &[bool]) -> Option<Arc<AttackerState>> {
 		assert_eq!(keep.len(), self.known.len());
 		if keep.iter().all(|&keep| keep) {
@@ -347,13 +292,6 @@ impl AttackerState {
 		for (i, v) in known.iter().enumerate() {
 			known_map.entry(v.hash_value()).or_default().push(i);
 		}
-		let mutation_records = self
-			.mutation_records
-			.iter()
-			.zip(keep.iter())
-			.filter(|&(_, &keep)| keep)
-			.map(|(r, _)| Arc::clone(r))
-			.collect();
 		let derivations = self
 			.derivations
 			.iter()
@@ -361,31 +299,12 @@ impl AttackerState {
 			.filter(|&(_, &keep)| keep)
 			.map(|(d, _)| d.clone())
 			.collect();
-		let alternates = self
-			.alternates
-			.iter()
-			.zip(keep.iter())
-			.filter(|&(_, &keep)| keep)
-			.map(|(d, _)| d.clone())
-			.collect();
-		let worlds = self
-			.worlds
-			.iter()
-			.zip(keep.iter())
-			.filter(|&(_, &keep)| keep)
-			.map(|(w, _)| w.clone())
-			.collect();
 		Some(Arc::new(AttackerState {
 			current_phase: self.current_phase,
-			mutation_records: Arc::new(mutation_records),
 			derivations: Arc::new(derivations),
-			alternates: Arc::new(alternates),
-			worlds: Arc::new(worlds),
-			worlds_epoch: self.worlds_epoch,
 			reused: Arc::clone(&self.reused),
 			known: Arc::new(known),
 			known_map: Arc::new(known_map),
-			routes_epoch: self.routes_epoch,
 			chain: crate::types::next_chain(),
 		}))
 	}
@@ -394,25 +313,6 @@ impl AttackerState {
 		self.derivations.get(idx.get())
 	}
 
-	pub fn routes(
-		&self,
-		idx: KnownIdx,
-	) -> impl Iterator<Item = (&DerivationRecord, Option<&Arc<MutationRecord>>)> {
-		self.derivations
-			.get(idx.get())
-			.map(|primary| (primary, self.mutation_records.get(idx.get())))
-			.into_iter()
-			.chain(
-				self.alternates
-					.get(idx.get())
-					.into_iter()
-					.flatten()
-					.map(|(route, record)| (route, Some(record))),
-			)
-	}
-	pub fn record(&self, idx: KnownIdx) -> Option<&Arc<MutationRecord>> {
-		self.mutation_records.get(idx.get())
-	}
 	pub fn knows(&self, v: &Value) -> Option<KnownIdx> {
 		self.knows_hashed(v, v.hash_value())
 	}
@@ -425,7 +325,6 @@ impl AttackerState {
 				}
 			}
 		}
-		crate::reads::miss(h);
 		None
 	}
 }
@@ -438,52 +337,8 @@ mod tests {
 	use std::sync::Arc;
 
 	#[test]
-	fn filtering_knowledge_preserves_routes_and_invalidates_its_chain() {
-		let values: Vec<Value> = ["retained_a", "retained_b", "retained_c"]
-			.map(make_constant)
-			.into();
-		let mut attacker = make_attacker_state(values.clone());
-		attacker.current_phase = 3;
-		attacker.routes_epoch = 7;
-		for i in 0..values.len() {
-			let derivation = DerivationRecord::Obtained {
-				slot: SlotIdx(i + 4),
-			};
-			Arc::make_mut(&mut attacker.derivations)[i] = derivation.clone();
-			Arc::make_mut(&mut attacker.alternates)[i]
-				.push((derivation, Arc::clone(&attacker.mutation_records[i])));
-		}
-		Arc::make_mut(&mut attacker.reused).push([values[0].clone(), values[2].clone()]);
-		assert!(attacker.retaining(&[true; 3]).is_none());
-		let retained = attacker.retaining(&[false, true, true]).unwrap();
-		assert_eq!(retained.current_phase, 3);
-		assert_eq!(retained.routes_epoch, 7);
-		assert_ne!(retained.chain, attacker.chain);
-		assert!(retained.knows(&values[0]).is_none());
-		assert!(Arc::ptr_eq(&retained.reused, &attacker.reused));
-		for (i, value) in values.iter().enumerate().skip(1) {
-			let idx = retained.knows(value).unwrap();
-			assert_eq!(idx.get(), i - 1);
-			assert!(
-				matches!(retained.derivation(idx), Some(DerivationRecord::Obtained { slot }) if slot.get() == i + 4)
-			);
-			assert!(Arc::ptr_eq(
-				retained.record(idx).unwrap(),
-				attacker.record(KnownIdx(i)).unwrap()
-			));
-			assert_eq!(retained.routes(idx).count(), 2);
-		}
-		let empty = attacker.retaining(&[false; 3]).unwrap();
-		assert!(empty.known.is_empty());
-		assert!(empty.known_map.is_empty());
-		assert!(empty.derivations.is_empty());
-		assert!(empty.mutation_records.is_empty());
-		assert!(empty.alternates.is_empty());
-	}
-
-	#[test]
 	fn session_bands_stay_below_the_solver_ranges() {
-		let worst = COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + (COPY_STRIDE - 1);
+		let worst = COPY_BASE + MAX_COPIES * COPY_STRIDE + (COPY_STRIDE - 1);
 		assert!(worst < crate::solve::vars::ATTACKER_VAR_BASE);
 	}
 
@@ -504,30 +359,6 @@ mod tests {
 				);
 			}
 		}
-		for base in bases {
-			let c = Constant {
-				name: Arc::from("cpy_x"),
-				id: base,
-				..Constant::default()
-			};
-			let id = session_copy(&c).as_constant().expect("constant").id;
-			assert!(seen.insert(id), "minimizer copy of {base} collides");
-			assert!(id < crate::solve::vars::ATTACKER_VAR_BASE);
-		}
-	}
-
-	#[test]
-	fn session_copy_of_a_session_clone_stays_out_of_solver_ranges() {
-		let clone_id = copy_value_id(42, 4);
-		let c = Constant {
-			name: Arc::from("scb_x#5"),
-			id: clone_id,
-			..Constant::default()
-		};
-		let copied = session_copy(&c);
-		let id = copied.as_constant().expect("constant").id;
-		assert!(id < crate::solve::vars::ATTACKER_VAR_BASE);
-		assert_eq!(id, COPY_BASE + MINIMIZER_BAND * COPY_STRIDE + 42);
 	}
 
 	#[test]
@@ -635,139 +466,5 @@ mod tests {
 				b.as_constant().unwrap().id
 			]
 		);
-	}
-
-	#[test]
-	fn compute_slot_diffs_no_changes() {
-		let c = Constant {
-			name: Arc::from("csd_a"),
-			id: test_value_id("csd_a"),
-			..Constant::default()
-		};
-		let val = make_constant("csd_a");
-		let trace = ProtocolTrace {
-			principals: vec!["Alice".to_string()],
-			principal_ids: vec![0],
-			slots: vec![TraceSlot {
-				declared_span: Span::default(),
-				constant: c.clone(),
-				initial_value: val.clone(),
-				creator: 0,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at: 0,
-				phases: vec![0],
-			}],
-			index: {
-				let mut m = IdMap::default();
-				m.insert(c.id, 0);
-				m
-			},
-			max_phase: 0,
-			used_by: IdMap::default(),
-			leaks: Arc::new(Vec::new()),
-			session_siblings: IdMap::default(),
-			copy_siblings: IdMap::default(),
-			interchangeable: IdMap::default(),
-			actors: IdMap::default(),
-			scenario_bound: IdSet::default(),
-			equivalence_queried: IdSet::default(),
-		};
-		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&val, 0)];
-		let ps = make_principal_state("Alice", 0, meta, values);
-		let record = compute_slot_diffs(&ps, &trace, 0);
-		assert!(record.diffs.is_empty());
-	}
-
-	#[test]
-	fn compute_slot_diffs_with_changes() {
-		let c = Constant {
-			name: Arc::from("csd2_a"),
-			id: test_value_id("csd2_a"),
-			..Constant::default()
-		};
-		let original = make_constant("csd2_a");
-		let mutated = make_constant("csd2_mutated");
-		let trace = ProtocolTrace {
-			principals: vec!["Alice".to_string()],
-			principal_ids: vec![0],
-			slots: vec![TraceSlot {
-				declared_span: Span::default(),
-				constant: c.clone(),
-				initial_value: original.clone(),
-				creator: 0,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at: 0,
-				phases: vec![0],
-			}],
-			index: {
-				let mut m = IdMap::default();
-				m.insert(c.id, 0);
-				m
-			},
-			max_phase: 0,
-			used_by: IdMap::default(),
-			leaks: Arc::new(Vec::new()),
-			session_siblings: IdMap::default(),
-			copy_siblings: IdMap::default(),
-			interchangeable: IdMap::default(),
-			actors: IdMap::default(),
-			scenario_bound: IdSet::default(),
-			equivalence_queried: IdSet::default(),
-		};
-		let meta = vec![make_slot_meta(&c, true)];
-		let mut sv = make_slot_values(&mutated, 0);
-		sv.provenance.attacker_tainted = true;
-		let ps = make_principal_state("Alice", 0, meta, vec![sv]);
-		let record = compute_slot_diffs(&ps, &trace, 0);
-		assert_eq!(record.diffs.len(), 1);
-		assert_eq!(record.diffs[0].index, SlotIdx(0));
-		assert!(record.diffs[0].tainted);
-	}
-
-	#[test]
-	fn slot_diffs_record_principal_and_phase() {
-		let c = Constant {
-			name: Arc::from("mrp_a"),
-			id: test_value_id("mrp_a"),
-			..Constant::default()
-		};
-		let val = make_constant("mrp_a");
-		let trace = ProtocolTrace {
-			principals: vec!["Bob".to_string()],
-			principal_ids: vec![3],
-			slots: vec![TraceSlot {
-				declared_span: Span::default(),
-				constant: c.clone(),
-				initial_value: val.clone(),
-				creator: 3,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at: 0,
-				phases: vec![0],
-			}],
-			index: {
-				let mut m = IdMap::default();
-				m.insert(c.id, 0);
-				m
-			},
-			max_phase: 0,
-			used_by: IdMap::default(),
-			leaks: Arc::new(Vec::new()),
-			session_siblings: IdMap::default(),
-			copy_siblings: IdMap::default(),
-			interchangeable: IdMap::default(),
-			actors: IdMap::default(),
-			scenario_bound: IdSet::default(),
-			equivalence_queried: IdSet::default(),
-		};
-		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&val, 3)];
-		let ps = make_principal_state("Bob", 3, meta, values);
-		let record = compute_slot_diffs(&ps, &trace, 2);
-		assert_eq!(record.principal_id, 3);
-		assert_eq!(record.phase, 2);
 	}
 }

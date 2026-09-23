@@ -1012,29 +1012,6 @@ mod tests {
 	}
 
 	#[test]
-	fn withholding_a_value_keeps_knowledge_and_its_explanation_in_step() {
-		let seed = make_private("ulw_seed");
-		let label = make_constant("ulw_label");
-		let tok = make_primitive(PRIM_HASH, vec![seed.clone(), label.clone()], 0);
-		let attacker = make_attacker_state(vec![tok.clone(), seed.clone(), label.clone()]);
-
-		let without = attacker_without(&attacker, &tok);
-
-		assert_eq!(without.known.len(), 2);
-		assert!(without.knows(&tok).is_none());
-		assert_eq!(without.mutation_records.len(), without.known.len());
-		assert_eq!(without.derivations.len(), without.known.len());
-		for value in [&seed, &label] {
-			let idx = without.knows(value).expect("still known");
-			assert!(
-				without.derivation(idx).is_some() && without.record(idx).is_some(),
-				"a value the attacker still holds must still carry the derivation \
-				 that explains it"
-			);
-		}
-	}
-
-	#[test]
 	fn signatures_link_but_ring_signatures_do_not() {
 		let sk = make_private("w2_sk");
 		let gb = make_constant("w2_gb");

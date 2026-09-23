@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -85,15 +84,19 @@ impl<T: Default> Generational<T> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct KnowledgeKey {
-	saturation: Saturation,
 	chain: u64,
+	known: usize,
+	phase: i32,
+	reused: usize,
 }
 
 impl KnowledgeKey {
 	pub(crate) fn of(attacker: &AttackerState) -> KnowledgeKey {
 		KnowledgeKey {
-			saturation: Saturation::of(attacker),
 			chain: attacker.chain,
+			known: attacker.known.len(),
+			phase: attacker.current_phase,
+			reused: attacker.reused.len(),
 		}
 	}
 }
@@ -135,405 +138,21 @@ fn analysis_count_reset() {
 	ANALYSIS_COUNT.with(|c| c.set(0));
 }
 
-use crate::theory::structurally_identical;
 use crate::types::*;
-use crate::util::*;
-use crate::value::compute_slot_diffs;
-
-type Replay = (crate::reexec::Seeds, Option<Arc<Vec<PrincipalState>>>);
-
-type Replays = Vec<Vec<(ValueId, Value)>>;
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) struct PassKey {
-	pub principal: PrincipalId,
-	pub targeted: bool,
-	pub(crate) addressed: bool,
-	pub honest: Vec<usize>,
-	pub phase: i32,
-	pub unresolved: i32,
-	pub replays_from: Option<u64>,
-}
-
-pub(crate) type Proposals = Vec<crate::solve::vars::Substitution>;
-
-pub(crate) struct Proposed {
-	pub id: u64,
-	pub proposals: Proposals,
-	pub replays: Replays,
-	reads: crate::reads::Reads,
-	known: usize,
-	reused: usize,
-	routes_epoch: u64,
-}
 
 pub(crate) struct VerifyContext {
-	attacker: RwLock<AttackerState>,
-	deferred_replays: RwLock<IdMap<PrincipalId, (u64, Replays)>>,
-	passes: RwLock<HashMap<PassKey, Arc<Proposed>>>,
 	results: RwLock<Vec<VerifyResult>>,
 	unresolved: AtomicI32,
 	file_name: String,
 	states: Vec<PrincipalState>,
-	phase_knowledge: RwLock<Vec<AttackerState>>,
 	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
 	truncations: RwLock<Vec<(Truncation, Vec<usize>)>>,
 	sessions: u8,
 	honest: Option<IdMap<PrincipalId, i32>>,
-	honest_halts: RwLock<Vec<(PrincipalId, usize)>>,
-	honest_unreached: RwLock<Arc<Vec<bool>>>,
 	scenarios: Vec<ScenarioSummary>,
-	#[cfg(test)]
-	witnesses: RwLock<Vec<Option<ResultWitness>>>,
-	#[cfg(test)]
-	query_goals: RwLock<Vec<usize>>,
-	#[cfg(test)]
-	searched: AtomicBool,
-	replays: RwLock<Recent<KnowledgeKey, u64, Vec<Replay>>>,
 	basis: RwLock<(u64, i32, usize, crate::hashing::TermSet)>,
-	term_bound: std::sync::OnceLock<crate::reexec::TermBound>,
-	saturation: RwLock<IdMap<PrincipalId, Saturation>>,
-	executions: RwLock<IdMap<(PrincipalId, u64), Vec<Execution>>>,
-	bases: RwLock<IdMap<PrincipalId, Arc<PrincipalState>>>,
-	coherence: RwLock<IdMap<PrincipalId, (Saturation, Arc<crate::reexec::Coherence>)>>,
-	baselines: RwLock<IdMap<(PrincipalId, i32), Arc<Baseline>>>,
-	prefer_replication: AtomicBool,
-	replication_only: AtomicBool,
-	replication_rejected: AtomicBool,
+	term_bound: std::sync::OnceLock<crate::solve::control::TermBound>,
 	cancel: Arc<AtomicBool>,
-	pub(crate) staged_checks: StagedMemo<Vec<(usize, crate::witness::WantedCheck)>>,
-	pub(crate) staged_costs: StagedMemo<Option<(usize, Vec<usize>)>>,
-	replay_executions: RwLock<IdMap<u64, Vec<ReplayExecution>>>,
-	honest_epoch: std::sync::atomic::AtomicU64,
-}
-
-type ReplayExecution = (
-	crate::reexec::Seeds,
-	i32,
-	u64,
-	Option<Arc<Vec<PrincipalState>>>,
-);
-
-struct StoredState {
-	id: PrincipalId,
-	len: usize,
-	diffs: Vec<(usize, SlotValues)>,
-	halted_at: Option<i32>,
-	foreign_halts: Vec<(PrincipalId, usize)>,
-	starved: Vec<usize>,
-	forwarded: bool,
-}
-
-pub(crate) struct Baseline {
-	attacker: AttackerState,
-	saturation: IdMap<PrincipalId, Saturation>,
-}
-
-struct Execution {
-	signature: Vec<(usize, Value)>,
-	phase: i32,
-	states: Vec<StoredState>,
-	closed: Option<Saturation>,
-	forged: Option<(KnowledgeKey, ForgedFlights)>,
-}
-
-type ForgedFlights = Vec<Vec<(usize, Value)>>;
-
-const REMEMBERED_EXECUTIONS: usize = 200_000;
-
-fn same_term(a: &Value, b: &Value) -> bool {
-	a.hash_value() == b.hash_value() && structurally_identical(a, b)
-}
-
-fn same_slot(a: &SlotValues, b: &SlotValues) -> bool {
-	same_term(&a.value, &b.value)
-		&& same_term(&a.pre_rewrite, &b.pre_rewrite)
-		&& same_term(&a.original, &b.original)
-		&& a.installed_at == b.installed_at
-		&& a.addressed == b.addressed
-		&& a.provenance.creator == b.provenance.creator
-		&& a.provenance.sender == b.provenance.sender
-		&& a.provenance.attacker_tainted == b.provenance.attacker_tainted
-}
-
-type Staged<V> = Vec<(Vec<(SlotIdx, Value)>, V)>;
-
-pub(crate) struct StagedMemo<V> {
-	entries: RwLock<IdMap<(PrincipalId, u64), Staged<V>>>,
-	stored: std::sync::atomic::AtomicUsize,
-}
-
-const STAGED_ENTRIES: usize = 200_000;
-
-impl<V> Default for StagedMemo<V> {
-	fn default() -> Self {
-		StagedMemo {
-			entries: RwLock::new(IdMap::default()),
-			stored: std::sync::atomic::AtomicUsize::new(0),
-		}
-	}
-}
-
-fn installs_hash(installs: &[(SlotIdx, Value)]) -> u64 {
-	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
-	for (slot, value) in installs {
-		acc = acc
-			.rotate_left(13)
-			.wrapping_add((slot.get() as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
-			^ value.hash_value();
-	}
-	acc
-}
-
-fn same_installs(a: &[(SlotIdx, Value)], b: &[(SlotIdx, Value)]) -> bool {
-	a.len() == b.len()
-		&& a.iter()
-			.zip(b.iter())
-			.all(|((sa, va), (sb, vb))| sa == sb && same_term(va, vb))
-}
-
-impl<V: Clone> StagedMemo<V> {
-	pub(crate) fn recall(
-		&self,
-		principal: PrincipalId,
-		installs: &[(SlotIdx, Value)],
-	) -> Option<V> {
-		read_lock(&self.entries)
-			.get(&(principal, installs_hash(installs)))
-			.and_then(|bucket| {
-				bucket
-					.iter()
-					.find(|(seen, _)| same_installs(seen, installs))
-					.map(|(_, value)| value.clone())
-			})
-	}
-
-	pub(crate) fn remember(&self, principal: PrincipalId, installs: &[(SlotIdx, Value)], value: V) {
-		if self.stored.load(Ordering::Relaxed) >= STAGED_ENTRIES {
-			return;
-		}
-		let mut entries = write_lock(&self.entries);
-		let bucket = entries
-			.entry((principal, installs_hash(installs)))
-			.or_default();
-		if bucket.iter().any(|(seen, _)| same_installs(seen, installs)) {
-			return;
-		}
-		bucket.push((installs.to_vec(), value));
-		self.stored.fetch_add(1, Ordering::Relaxed);
-	}
-}
-
-fn same_signature(a: &[(usize, Value)], b: &[(usize, Value)]) -> bool {
-	a.len() == b.len()
-		&& a.iter()
-			.zip(b.iter())
-			.all(|((sa, va), (sb, vb))| sa == sb && same_term(va, vb))
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Saturation {
-	phase: i32,
-	known: usize,
-	reused: usize,
-	routes_epoch: u64,
-	worlds_epoch: u64,
-}
-
-impl Saturation {
-	pub(crate) fn of(attacker: &AttackerState) -> Saturation {
-		Saturation {
-			phase: attacker.current_phase,
-			known: attacker.known.len(),
-			reused: attacker.reused.len(),
-			routes_epoch: attacker.routes_epoch,
-			worlds_epoch: attacker.worlds_epoch,
-		}
-	}
-}
-
-fn seeds_signature(seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)]) -> u64 {
-	let mut hash = 0xcbf2_9ce4_8422_2325u64;
-	let mut mix = |word: u64| {
-		hash ^= word;
-		hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-	};
-	for (principal, diffs) in seeds {
-		mix(u64::from(*principal));
-		for (slot, value) in diffs {
-			mix(slot.get() as u64);
-			mix(value.hash_value());
-		}
-	}
-	hash
-}
-
-fn same_seeds(
-	a: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
-	b: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
-) -> bool {
-	a.len() == b.len()
-		&& a.iter()
-			.zip(b.iter())
-			.all(|((pa, da), (pb, db))| pa == pb && crate::reexec::same_installs(da, db))
-}
-
-fn derivation_provenance(
-	state: &AttackerState,
-	ambient: &Arc<MutationRecord>,
-	derivation: &DerivationRecord,
-) -> Arc<MutationRecord> {
-	let ingredients = derivation.ingredients();
-	if ingredients.is_empty() && !derivation.reads_from_state() {
-		return Arc::new(MutationRecord {
-			diffs: vec![],
-			principal_id: ambient.principal_id,
-			phase: ambient.phase,
-		});
-	}
-
-	let mut diffs: Vec<SlotDiff> = Vec::new();
-	let mut principal_id = ambient.principal_id;
-	let mut phase = ambient.phase;
-	let mut adopted = false;
-
-	let rebuilt_in_place = ingredients
-		.iter()
-		.any(|ingredient| state.knows(ingredient).is_none());
-
-	if derivation.reads_from_state() || rebuilt_in_place {
-		diffs.extend(ambient.diffs.iter().cloned());
-		adopted = true;
-	}
-	for ingredient in ingredients {
-		let Some(idx) = state.knows(ingredient) else {
-			continue;
-		};
-		let Some(inherited) = state.record(idx) else {
-			continue;
-		};
-		if !adopted && !inherited.diffs.is_empty() {
-			principal_id = inherited.principal_id;
-			phase = inherited.phase;
-			adopted = true;
-		}
-		for diff in &inherited.diffs {
-			if !diffs
-				.iter()
-				.any(|d| d.index == diff.index && d.state == diff.state)
-			{
-				diffs.push(diff.clone());
-			}
-		}
-	}
-	diffs.sort_by_key(|d| d.index);
-	Arc::new(MutationRecord {
-		diffs,
-		principal_id,
-		phase,
-	})
-}
-
-fn attacker_state_note_route(
-	state: &mut AttackerState,
-	value: &Value,
-	record: &Arc<MutationRecord>,
-	derivation: DerivationRecord,
-) {
-	if !derivation.reads_from_state() {
-		return;
-	}
-	let Some(existing) = state.knows(value) else {
-		return;
-	};
-	if state
-		.routes(existing)
-		.any(|(route, _)| route.same_route(&derivation))
-	{
-		return;
-	}
-	let candidate = derivation_provenance(state, record, &derivation);
-	if let Some(entry) = Arc::make_mut(&mut state.alternates).get_mut(existing.get()) {
-		entry.push((derivation, candidate));
-	}
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Put {
-	New,
-	Widened,
-	Known,
-}
-
-fn widen(state: &mut AttackerState, existing: KnownIdx, worlds: Worlds) -> bool {
-	let Some(entry) = state.worlds.get(existing.get()) else {
-		return false;
-	};
-	if worlds.subset_of(entry) {
-		return false;
-	}
-	let combined = entry.union(&worlds);
-	Arc::make_mut(&mut state.worlds)[existing.get()] = combined;
-	state.worlds_epoch += 1;
-	true
-}
-
-fn attacker_state_absorb(
-	state: &mut AttackerState,
-	value: &Value,
-	record: &Arc<MutationRecord>,
-	derivation: DerivationRecord,
-	worlds: Worlds,
-) {
-	if let Some(existing) = state.knows(value) {
-		widen(state, existing, worlds);
-		let candidate = derivation_provenance(state, record, &derivation);
-		let explains = |r: &MutationRecord| r.diffs.iter().any(|d| d.tainted);
-		let stale = state.record(existing).is_some_and(|r| !explains(r));
-		let names_assumption = |d: &DerivationRecord| matches!(d, DerivationRecord::Broken { .. });
-		let unnamed = state
-			.derivation(existing)
-			.is_some_and(|d| !names_assumption(d));
-		let known_route = !derivation.reads_from_state()
-			|| state
-				.routes(existing)
-				.any(|(route, _)| route.same_route(&derivation));
-		if (stale && explains(&candidate)) || (names_assumption(&derivation) && unnamed) {
-			let displaced = state
-				.derivation(existing)
-				.cloned()
-				.zip(state.record(existing).cloned());
-			Arc::make_mut(&mut state.mutation_records)[existing.get()] = candidate;
-			Arc::make_mut(&mut state.derivations)[existing.get()] = derivation;
-			state.routes_epoch += 1;
-			if let Some((displaced, prior)) = displaced {
-				let alternates = Arc::make_mut(&mut state.alternates);
-				if let Some(entry) = alternates.get_mut(existing.get())
-					&& !entry.iter().any(|(route, _)| route.same_route(&displaced))
-				{
-					entry.push((displaced, prior));
-				}
-			}
-		} else if !known_route {
-			let alternates = Arc::make_mut(&mut state.alternates);
-			if let Some(entry) = alternates.get_mut(existing.get()) {
-				entry.push((derivation, candidate));
-			}
-		}
-		return;
-	}
-	let record = &derivation_provenance(state, record, &derivation);
-	let idx = state.known.len();
-	Arc::make_mut(&mut state.known).push(value.clone());
-	let h = value.hash_value();
-	Arc::make_mut(&mut state.known_map)
-		.entry(h)
-		.or_default()
-		.push(idx);
-	Arc::make_mut(&mut state.mutation_records).push(Arc::clone(record));
-	Arc::make_mut(&mut state.derivations).push(derivation);
-	Arc::make_mut(&mut state.alternates).push(Vec::new());
-	Arc::make_mut(&mut state.worlds).push(worlds);
 }
 
 impl VerifyContext {
@@ -558,43 +177,18 @@ impl VerifyContext {
 		let unresolved = results.len() as i32;
 		analysis_count_reset();
 		VerifyContext {
-			replays: RwLock::new(Recent::default()),
-			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
-			term_bound: std::sync::OnceLock::new(),
-			saturation: RwLock::new(IdMap::default()),
-			executions: RwLock::new(IdMap::default()),
-			bases: RwLock::new(IdMap::default()),
-			coherence: RwLock::new(IdMap::default()),
-			baselines: RwLock::new(IdMap::default()),
-			attacker: RwLock::new(AttackerState::new()),
-			deferred_replays: RwLock::new(IdMap::default()),
-			passes: RwLock::new(HashMap::new()),
 			results: RwLock::new(results),
 			unresolved: AtomicI32::new(unresolved),
 			file_name: m.file_name.clone(),
 			states: states.to_vec(),
-			phase_knowledge: RwLock::new(vec![]),
 			depth_cuts: RwLock::new(IdSet::default()),
 			truncations: RwLock::new(Vec::new()),
 			sessions,
 			honest,
-			honest_halts: RwLock::new(Vec::new()),
-			honest_unreached: RwLock::new(Arc::new(Vec::new())),
 			scenarios,
-			#[cfg(test)]
-			witnesses: RwLock::new(vec![None; unresolved as usize]),
-			#[cfg(test)]
-			query_goals: RwLock::new(vec![0; unresolved as usize]),
-			#[cfg(test)]
-			searched: AtomicBool::new(false),
-			prefer_replication: AtomicBool::new(false),
-			replication_only: AtomicBool::new(false),
-			replication_rejected: AtomicBool::new(false),
+			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
+			term_bound: std::sync::OnceLock::new(),
 			cancel: Arc::new(AtomicBool::new(false)),
-			staged_checks: StagedMemo::default(),
-			staged_costs: StagedMemo::default(),
-			replay_executions: RwLock::new(IdMap::default()),
-			honest_epoch: std::sync::atomic::AtomicU64::new(0),
 		}
 	}
 
@@ -606,50 +200,12 @@ impl VerifyContext {
 		self.cancel.load(Ordering::Relaxed)
 	}
 
-	pub(crate) fn prefer_replication_valid_witnesses(&self) {
-		self.prefer_replication.store(true, Ordering::SeqCst);
-	}
-
-	pub(crate) fn prefers_replication(&self) -> bool {
-		self.prefer_replication.load(Ordering::SeqCst)
-	}
-
-	pub(crate) fn set_replication_only(&self, on: bool) {
-		self.replication_only.store(on, Ordering::SeqCst);
-	}
-
-	pub(crate) fn replication_only(&self) -> bool {
-		self.replication_only.load(Ordering::SeqCst)
-	}
-
-	pub(crate) fn note_replication_rejection(&self) {
-		self.replication_rejected.store(true, Ordering::SeqCst);
-	}
-
-	pub(crate) fn replication_rejected(&self) -> bool {
-		self.replication_rejected.load(Ordering::SeqCst)
-	}
-
 	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
 		let first = write_lock(&self.depth_cuts).insert((principal, slot));
 		if first {
 			self.note_truncation(Truncation::TermDepth);
 		}
 		first
-	}
-
-	pub(crate) fn note_query_truncation(&self, kind: Truncation, query_index: usize) {
-		let mut state = write_lock(&self.truncations);
-		match state.iter_mut().find(|(seen, _)| *seen == kind) {
-			Some((_, reached)) => {
-				if !reached.contains(&query_index) {
-					reached.push(query_index);
-					reached.sort_unstable();
-				}
-			}
-			None => state.push((kind, vec![query_index])),
-		}
-		state.sort_by_key(|(kind, _)| *kind);
 	}
 
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
@@ -673,11 +229,11 @@ impl VerifyContext {
 		state.sort_by_key(|(kind, _)| *kind);
 	}
 
-	pub(crate) fn is_honest(&self, principal: PrincipalId) -> bool {
-		self.is_honest_at(principal, read_lock(&self.attacker).current_phase)
+	pub(crate) fn claims_apply_at(&self, principal: PrincipalId, phase: i32) -> bool {
+		self.nothing_is_honest_at(phase) || self.is_honest_at(principal, phase)
 	}
 
-	fn is_honest_at(&self, principal: PrincipalId, phase: i32) -> bool {
+	pub(crate) fn is_honest_at(&self, principal: PrincipalId, phase: i32) -> bool {
 		match &self.honest {
 			None => true,
 			Some(honest) => honest
@@ -691,94 +247,6 @@ impl VerifyContext {
 			None => false,
 			Some(honest) => honest.values().all(|&corrupt_from| phase >= corrupt_from),
 		}
-	}
-
-	pub(crate) fn record_honest_halts(&self, km: &ProtocolTrace, halts: Vec<(PrincipalId, usize)>) {
-		*write_lock(&self.honest_unreached) =
-			Arc::new(crate::reexec::honest_run_unreached(km, &halts));
-		*write_lock(&self.honest_halts) = halts;
-		self.honest_epoch.fetch_add(1, Ordering::Relaxed);
-	}
-
-	pub(crate) fn replay_execution(
-		&self,
-		installed: &crate::reexec::Seeds,
-		phase: i32,
-		build: impl FnOnce() -> Option<Vec<PrincipalState>>,
-	) -> Option<Arc<Vec<PrincipalState>>> {
-		let key = seeds_signature(installed);
-		let epoch = self.honest_epoch.load(Ordering::Relaxed);
-		if let Some(hit) = read_lock(&self.replay_executions)
-			.get(&key)
-			.and_then(|bucket| {
-				bucket.iter().find(|(seen, at, seen_epoch, _)| {
-					*at == phase && *seen_epoch == epoch && same_seeds(seen, installed)
-				})
-			})
-			.map(|(_, _, _, built)| built.clone())
-		{
-			return hit;
-		}
-		let built = build().map(Arc::new);
-		write_lock(&self.replay_executions)
-			.entry(key)
-			.or_default()
-			.push((installed.clone(), phase, epoch, built.clone()));
-		built
-	}
-
-	fn honest_run_reached(
-		&self,
-		km: &ProtocolTrace,
-		principal: PrincipalId,
-		declared_at: i32,
-	) -> bool {
-		read_lock(&self.honest_halts)
-			.iter()
-			.find(|&&(halted, _)| halted == principal)
-			.and_then(|&(_, at)| km.slots.get(at))
-			.is_none_or(|meta| declared_at <= meta.declared_at)
-	}
-
-	fn honest_run_computed(&self, slot: usize) -> bool {
-		!read_lock(&self.honest_unreached)
-			.get(slot)
-			.copied()
-			.unwrap_or(false)
-	}
-
-	pub(crate) fn honest_run_delivered(
-		&self,
-		km: &ProtocolTrace,
-		slot: usize,
-		event: &SendEvent,
-	) -> bool {
-		self.honest_run_computed(slot)
-			&& self.honest_run_reached(km, event.sender, event.declared_at)
-	}
-
-	pub(crate) fn honest_run_disclosure(
-		&self,
-		km: &ProtocolTrace,
-		slot: usize,
-		phase: i32,
-	) -> Option<Disclosure> {
-		if !self.honest_run_computed(slot) {
-			return None;
-		}
-		km.disclosure(slot, phase, |principal, declared_at| {
-			self.honest_run_reached(km, principal, declared_at)
-		})
-	}
-
-	pub(crate) fn claims_apply_to(&self, principal: PrincipalId) -> bool {
-		let phase = read_lock(&self.attacker).current_phase;
-		self.nothing_is_honest_at(phase) || self.is_honest_at(principal, phase)
-	}
-
-	pub(crate) fn relativises(&self) -> bool {
-		let phase = read_lock(&self.attacker).current_phase;
-		self.honest.is_some() && !self.nothing_is_honest_at(phase)
 	}
 
 	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
@@ -814,253 +282,9 @@ impl VerifyContext {
 		}
 	}
 
-	/// The execution a substitution set describes, replayed once and shared by
-	/// every combination the closure then tests against it.
-	///
-	pub(crate) fn replayed(
-		&self,
-		km: &ProtocolTrace,
-		seeds: &[(PrincipalId, Vec<(SlotIdx, Value)>)],
-		attacker: &AttackerState,
-	) -> Option<Arc<Vec<PrincipalState>>> {
-		let key = seeds_signature(seeds);
-		let group = KnowledgeKey::of(attacker);
-		if let Some(hit) = write_lock(&self.replays)
-			.group(group)
-			.get(&key)
-			.and_then(|bucket| bucket.iter().find(|(of, _)| same_seeds(of, seeds)))
-			.map(|(_, hit)| hit.clone())
-		{
-			return hit;
-		}
-		let built = crate::reexec::replay_diffs(self, km, seeds, attacker);
-		write_lock(&self.replays)
-			.group(group)
-			.entry(key)
-			.or_default()
-			.push((seeds.to_vec(), built.clone()));
-		built
-	}
-
-	pub(crate) fn execution_base(&self, principal: PrincipalId) -> Option<Arc<PrincipalState>> {
-		if let Some(base) = read_lock(&self.bases).get(&principal) {
-			return Some(Arc::clone(base));
-		}
-		let pristine = self.states.iter().find(|state| state.id == principal)?;
-		let mut base = pristine.clone_for_depth(true);
-		base.resolve_all_values().ok()?;
-		base.perform_all_rewrites();
-		let base = Arc::new(base);
-		write_lock(&self.bases).insert(principal, Arc::clone(&base));
-		Some(base)
-	}
-
-	pub(crate) fn remember_execution(
-		&self,
-		principal: PrincipalId,
-		key: u64,
-		signature: &[(usize, Value)],
-		phase: i32,
-		states: &[PrincipalState],
-	) {
-		if read_lock(&self.executions).len() >= REMEMBERED_EXECUTIONS {
-			return;
-		}
-		let mut stored = Vec::with_capacity(states.len());
-		for state in states {
-			let Some(base) = self.execution_base(state.id) else {
-				return;
-			};
-			if state.values.len() > base.values.len() {
-				return;
-			}
-			let diffs = state
-				.values
-				.iter()
-				.zip(base.values.iter())
-				.enumerate()
-				.filter(|(_, (mine, theirs))| !same_slot(mine, theirs))
-				.map(|(i, (mine, _))| (i, mine.clone()))
-				.collect();
-			stored.push(StoredState {
-				id: state.id,
-				len: state.values.len(),
-				diffs,
-				halted_at: state.halted_at,
-				foreign_halts: state.foreign_halts.clone(),
-				starved: state.starved.clone(),
-				forwarded: state.forwarded,
-			});
-		}
-		write_lock(&self.executions)
-			.entry((principal, key))
-			.or_default()
-			.push(Execution {
-				signature: signature.to_vec(),
-				phase,
-				states: stored,
-				closed: None,
-				forged: None,
-			});
-	}
-
-	pub(crate) fn coherence(
-		&self,
-		km: &ProtocolTrace,
-		ps: &PrincipalState,
-		attacker: &AttackerState,
-	) -> Arc<crate::reexec::Coherence> {
-		let now = Saturation::of(attacker);
-		if let Some((seen, history)) = read_lock(&self.coherence).get(&ps.id)
-			&& *seen == now
-		{
-			return Arc::clone(history);
-		}
-		let history = Arc::new(crate::reexec::Coherence::of(km, ps));
-		write_lock(&self.coherence).insert(ps.id, (now, Arc::clone(&history)));
-		history
-	}
-
-	pub(crate) fn cached_baseline(
-		&self,
-		principal: PrincipalId,
-		phase: i32,
-	) -> Option<Arc<Baseline>> {
-		read_lock(&self.baselines).get(&(principal, phase)).cloned()
-	}
-
-	pub(crate) fn baseline_reached(&self) -> Baseline {
-		Baseline {
-			attacker: self.attacker_snapshot(),
-			saturation: read_lock(&self.saturation).clone(),
-		}
-	}
-
-	pub(crate) fn store_baseline(&self, principal: PrincipalId, phase: i32, baseline: Baseline) {
-		write_lock(&self.baselines).insert((principal, phase), Arc::new(baseline));
-	}
-
-	pub(crate) fn install_baseline(&self, baseline: &Baseline) {
-		let mut state = write_lock(&self.attacker);
-		*state = baseline.attacker.clone();
-		state.chain = crate::types::next_chain();
-		drop(state);
-		*write_lock(&self.saturation) = baseline.saturation.clone();
-	}
-
-	pub(crate) fn knowledge_saturation(&self) -> Saturation {
-		Saturation::of(&read_lock(&self.attacker))
-	}
-
-	pub(crate) fn note_execution_closed(
-		&self,
-		principal: PrincipalId,
-		key: u64,
-		signature: &[(usize, Value)],
-		phase: i32,
-		against: Saturation,
-	) {
-		if let Some(bucket) = write_lock(&self.executions).get_mut(&(principal, key))
-			&& let Some(seen) = bucket
-				.iter_mut()
-				.find(|seen| seen.phase == phase && same_signature(&seen.signature, signature))
-		{
-			seen.closed = Some(against);
-		}
-	}
-
-	pub(crate) fn recall_forged_flights(
-		&self,
-		principal: PrincipalId,
-		key: u64,
-		signature: &[(usize, Value)],
-	) -> Option<ForgedFlights> {
-		let knowledge = KnowledgeKey::of(&read_lock(&self.attacker));
-		let executions = read_lock(&self.executions);
-		let seen = executions.get(&(principal, key)).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|seen| same_signature(&seen.signature, signature))
-		})?;
-		seen.forged
-			.as_ref()
-			.filter(|(against, _)| *against == knowledge)
-			.map(|(_, flights)| flights.clone())
-	}
-
-	pub(crate) fn remember_forged_flights(
-		&self,
-		principal: PrincipalId,
-		key: u64,
-		signature: &[(usize, Value)],
-		flights: ForgedFlights,
-	) {
-		let knowledge = KnowledgeKey::of(&read_lock(&self.attacker));
-		if let Some(seen) = write_lock(&self.executions)
-			.get_mut(&(principal, key))
-			.and_then(|bucket| {
-				bucket
-					.iter_mut()
-					.find(|seen| same_signature(&seen.signature, signature))
-			}) {
-			seen.forged = Some((knowledge, flights));
-		}
-	}
-
-	pub(crate) fn recall_execution(
-		&self,
-		principal: PrincipalId,
-		key: u64,
-		signature: &[(usize, Value)],
-		phase: i32,
-	) -> Option<(Vec<PrincipalState>, bool)> {
-		let mut executions = write_lock(&self.executions);
-		let bucket = executions.get_mut(&(principal, key))?;
-		let at = bucket
-			.iter()
-			.position(|seen| seen.phase == phase && same_signature(&seen.signature, signature))?;
-		let closed = bucket[at].closed == Some(Saturation::of(&read_lock(&self.attacker)));
-		let stored = &bucket[at].states;
-		let bases = read_lock(&self.bases);
-		let mut out = Vec::with_capacity(stored.len());
-		for state in stored {
-			let base = bases.get(&state.id)?;
-			let mut rebuilt = (**base).clone();
-			if state.len < rebuilt.values.len() {
-				rebuilt.values.truncate(state.len);
-				Arc::make_mut(&mut rebuilt.meta).truncate(state.len);
-			}
-			for (i, slot) in &state.diffs {
-				rebuilt.values[*i] = slot.clone();
-			}
-			rebuilt.halted_at = state.halted_at;
-			rebuilt.foreign_halts = state.foreign_halts.clone();
-			rebuilt.starved = state.starved.clone();
-			rebuilt.forwarded = state.forwarded;
-			out.push(rebuilt);
-		}
-		Some((out, closed))
-	}
-
-	pub(crate) fn knowledge_rules_saturated(
-		&self,
-		principal: PrincipalId,
-		attacker: &AttackerState,
-	) -> bool {
-		read_lock(&self.saturation).get(&principal) == Some(&Saturation::of(attacker))
-	}
-
-	pub(crate) fn note_knowledge_rules_saturated(
-		&self,
-		principal: PrincipalId,
-		attacker: &AttackerState,
-	) {
-		write_lock(&self.saturation).insert(principal, Saturation::of(attacker));
-	}
-
-	pub(crate) fn term_bound(&self, km: &ProtocolTrace) -> &crate::reexec::TermBound {
+	pub(crate) fn term_bound(&self, km: &ProtocolTrace) -> &crate::solve::control::TermBound {
 		self.term_bound
-			.get_or_init(|| crate::reexec::TermBound::of(km))
+			.get_or_init(|| crate::solve::control::TermBound::of(km))
 	}
 
 	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> crate::hashing::TermSet {
@@ -1100,284 +324,8 @@ impl VerifyContext {
 			.unwrap_or_default()
 	}
 
-	pub(crate) fn attacker_phase_archive(&self, phase: i32) {
-		let snapshot = self.attacker_snapshot();
-		let idx = phase.max(0) as usize;
-		let mut archive = write_lock(&self.phase_knowledge);
-		if archive.len() <= idx {
-			archive.resize_with(idx + 1, AttackerState::new);
-		}
-		archive[idx] = snapshot;
-	}
-
-	pub(crate) fn attacker_knowledge_at(&self, phase: i32) -> Option<AttackerState> {
-		read_lock(&self.phase_knowledge)
-			.get(phase.max(0) as usize)
-			.cloned()
-	}
-
-	pub(crate) fn attacker_init(&self) {
-		let mut state = write_lock(&self.attacker);
-		*state = AttackerState::new();
-	}
-
-	pub(crate) fn attacker_snapshot(&self) -> AttackerState {
-		read_lock(&self.attacker).clone()
-	}
-
-	pub(crate) fn defer_replays(&self, principal: PrincipalId, from: u64, replays: Replays) {
-		write_lock(&self.deferred_replays).insert(principal, (from, replays));
-	}
-
-	pub(crate) fn deferred_from(&self, principal: PrincipalId) -> Option<u64> {
-		read_lock(&self.deferred_replays)
-			.get(&principal)
-			.map(|(from, _)| *from)
-	}
-
-	pub(crate) fn take_deferred_replays(&self, principal: PrincipalId) -> Replays {
-		write_lock(&self.deferred_replays)
-			.remove(&principal)
-			.map(|(_, replays)| replays)
-			.unwrap_or_default()
-	}
-
-	pub(crate) fn unresolved_count(&self) -> i32 {
-		self.unresolved.load(Ordering::SeqCst)
-	}
-
-	pub(crate) fn pass_repeats(
-		&self,
-		key: &PassKey,
-		attacker: &AttackerState,
-		protocol: &crate::hashing::TermSet,
-	) -> Option<Arc<Proposed>> {
-		let stored = Arc::clone(read_lock(&self.passes).get(key)?);
-		(stored.reused == attacker.reused.len()
-			&& stored.routes_epoch == attacker.routes_epoch
-			&& stored.known <= attacker.known.len()
-			&& stored.reads.admits(attacker, stored.known, protocol))
-		.then_some(stored)
-	}
-
-	pub(crate) fn note_pass(
-		&self,
-		key: PassKey,
-		proposals: Proposals,
-		replays: Replays,
-		reads: crate::reads::Reads,
-		attacker: &AttackerState,
-	) -> Arc<Proposed> {
-		let mut passes = write_lock(&self.passes);
-		let stored = Arc::new(Proposed {
-			id: passes.len() as u64 + 1 + passes.values().map(|p| p.id).max().unwrap_or(0),
-			proposals,
-			replays,
-			reads,
-			known: attacker.known.len(),
-			reused: attacker.reused.len(),
-			routes_epoch: attacker.routes_epoch,
-		});
-		passes.insert(key, Arc::clone(&stored));
-		stored
-	}
-
-	pub(crate) fn attacker_note_reuse(&self, pair: [Value; 2]) -> bool {
-		let mut state = write_lock(&self.attacker);
-		let seen = state.reused.iter().any(|held| {
-			(held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true))
-				|| (held[0].equivalent(&pair[1], true) && held[1].equivalent(&pair[0], true))
-		});
-		if !seen {
-			Arc::make_mut(&mut state.reused).push(pair);
-		}
-		!seen
-	}
-
-	pub(crate) fn attacker_knows(&self, value: &Value) -> bool {
-		read_lock(&self.attacker).knows(value).is_some()
-	}
-
-	pub(crate) fn attacker_known_count(&self) -> usize {
-		read_lock(&self.attacker).known.len()
-	}
-
-	pub(crate) fn attacker_put_with(
-		&self,
-		known: &Value,
-		record: &Arc<MutationRecord>,
-		derivation: DerivationRecord,
-		worlds: Worlds,
-	) -> Put {
-		let mut state = write_lock(&self.attacker);
-		if let Some(existing) = state.knows(known) {
-			attacker_state_note_route(&mut state, known, record, derivation);
-			let widened = widen(&mut state, existing, worlds);
-			return if widened { Put::Widened } else { Put::Known };
-		}
-		attacker_state_absorb(&mut state, known, record, derivation, worlds);
-		Put::New
-	}
-
-	pub(crate) fn attacker_phase_update(
-		&self,
-		km: &ProtocolTrace,
-		ps: &PrincipalState,
-		phase: i32,
-	) -> VResult<()> {
-		let record = compute_slot_diffs(ps, km, phase);
-		let mut state = write_lock(&self.attacker);
-		state.current_phase = phase;
-
-		for (sm, sv) in ps.meta.iter().zip(ps.values.iter()) {
-			if sm.constant.qualifier != Some(Qualifier::Public) {
-				continue;
-			}
-			if let Ok(earliest) = min_int_in_slice(&sm.phase)
-				&& earliest > phase
-			{
-				continue;
-			}
-			attacker_state_absorb(
-				&mut state,
-				&sv.value,
-				&record,
-				DerivationRecord::Initial,
-				Worlds::any(),
-			);
-		}
-
-		drop(state);
-		self.absorb_wire_values(km, ps, &record, phase, |slot, _| {
-			self.honest_run_disclosure(km, slot, phase)
-		})
-	}
-
-	pub(crate) fn attacker_absorb_disclosed(
-		&self,
-		km: &ProtocolTrace,
-		ps: &PrincipalState,
-		record: &Arc<MutationRecord>,
-		phase: i32,
-	) {
-		if read_lock(&self.honest_halts).is_empty() {
-			return;
-		}
-		let _ = self.absorb_wire_values(km, ps, record, phase, |slot, sv| {
-			let holds_initially = sv.provenance.creator == ps.id
-				|| km.slots.get(slot).is_some_and(|trace_slot| {
-					trace_slot
-						.known_by
-						.iter()
-						.any(|&(holder, sender)| holder == ps.id && sender == ps.id)
-				});
-			if !holds_initially
-				|| ps.slot_unreached(slot)
-				|| ps.slot_starved(slot)
-				|| self.honest_run_disclosure(km, slot, phase).is_some()
-			{
-				return None;
-			}
-			km.disclosure(slot, phase, |principal, declared_at| {
-				principal == ps.id && ps.event_reached(km, principal, declared_at)
-			})
-		});
-	}
-
-	fn absorb_wire_values(
-		&self,
-		km: &ProtocolTrace,
-		ps: &PrincipalState,
-		record: &Arc<MutationRecord>,
-		phase: i32,
-		admit: impl Fn(usize, &SlotValues) -> Option<Disclosure>,
-	) -> VResult<()> {
-		let mut state = write_lock(&self.attacker);
-		for (slot, (sm, sv)) in ps.meta.iter().zip(ps.values.iter()).enumerate() {
-			if sm.wire.is_empty() && !sm.constant.leaked {
-				continue;
-			}
-			if sm.constant.qualifier == Some(Qualifier::Public) {
-				continue;
-			}
-			let earliest = min_int_in_slice(&sm.phase)?;
-			if earliest > phase {
-				continue;
-			}
-			let Some(disclosure) = admit(slot, sv) else {
-				continue;
-			};
-			let derivation = match disclosure {
-				Disclosure::Message => DerivationRecord::Obtained {
-					slot: SlotIdx(slot),
-				},
-				Disclosure::Leak => DerivationRecord::Leaked {
-					slot: SlotIdx(slot),
-				},
-			};
-			let constant_value = Value::Constant(sm.constant.clone());
-			let worlds = crate::world::state_world(km, ps, &state, slot);
-			if worlds.is_empty() {
-				continue;
-			}
-			attacker_state_absorb(
-				&mut state,
-				&constant_value,
-				record,
-				derivation.clone(),
-				worlds.clone(),
-			);
-			attacker_state_absorb(&mut state, &sv.value, record, derivation, worlds);
-		}
-		Ok(())
-	}
-
 	pub(crate) fn results_get(&self) -> Vec<VerifyResult> {
 		read_lock(&self.results).clone()
-	}
-
-	#[cfg(test)]
-	pub(crate) fn witness_put(&self, query_index: usize, witness: ResultWitness) {
-		let mut state = write_lock(&self.witnesses);
-		if let Some(slot) = state.get_mut(query_index)
-			&& slot.is_none()
-		{
-			*slot = Some(witness);
-		}
-	}
-
-	#[cfg(test)]
-	pub(crate) fn goals_noted(&self, query_index: usize, count: usize) {
-		let mut state = write_lock(&self.query_goals);
-		if let Some(slot) = state.get_mut(query_index) {
-			*slot += count;
-		}
-	}
-
-	#[cfg(test)]
-	pub(crate) fn goals_for(&self, query_index: usize) -> usize {
-		read_lock(&self.query_goals)
-			.get(query_index)
-			.copied()
-			.unwrap_or(0)
-	}
-
-	#[cfg(test)]
-	pub(crate) fn note_search_reached_a_controllable_slot(&self) {
-		self.searched.store(true, Ordering::SeqCst);
-	}
-
-	#[cfg(test)]
-	pub(crate) fn search_reached_a_controllable_slot(&self) -> bool {
-		self.searched.load(Ordering::SeqCst)
-	}
-
-	#[cfg(test)]
-	pub(crate) fn witness_get(&self, query_index: usize) -> Option<ResultWitness> {
-		read_lock(&self.witnesses)
-			.get(query_index)
-			.cloned()
-			.flatten()
 	}
 
 	pub(crate) fn results_file_name(&self) -> &str {
@@ -1387,7 +335,7 @@ impl VerifyContext {
 	pub(crate) fn results_put(
 		&self,
 		result: &VerifyResult,
-		_verdict: &crate::query::QueryVerdict,
+		_verdict: &crate::engine::query::Verdict,
 	) -> bool {
 		let mut state = write_lock(&self.results);
 		if let Some(vr) = state.get_mut(result.query_index)
@@ -1419,91 +367,6 @@ impl VerifyContext {
 		self.unresolved.load(Ordering::SeqCst) <= 0
 	}
 
-	pub(crate) fn query_is_resolved(&self, query_index: usize) -> bool {
-		read_lock(&self.results)
-			.get(query_index)
-			.is_some_and(|r| r.resolved)
-	}
-
-	#[cfg(test)]
-	pub(crate) fn scratch_for_query(&self, query_index: usize) -> VerifyContext {
-		self.scratch(query_index, self.honest.clone())
-	}
-
-	pub(crate) fn scratch_for_witness(
-		&self,
-		query_index: usize,
-		concrete: Option<&Query>,
-	) -> VerifyContext {
-		let scratch = self.scratch(query_index, self.honest.clone());
-		if let Some(query) = concrete
-			&& let Some(result) = write_lock(&scratch.results).get_mut(query_index)
-		{
-			result.query = query.clone();
-			result.variants.clear();
-		}
-		scratch
-	}
-
-	fn scratch(
-		&self,
-		query_index: usize,
-		honest: Option<IdMap<PrincipalId, i32>>,
-	) -> VerifyContext {
-		let mut results = self.results_get();
-		for (i, r) in results.iter_mut().enumerate() {
-			if i == query_index {
-				r.resolved = false;
-				r.summary = String::new();
-				r.options = vec![];
-			} else {
-				r.resolved = true;
-			}
-		}
-		let unresolved = i32::from(query_index < results.len());
-		#[cfg(test)]
-		let results_len = results.len();
-		VerifyContext {
-			attacker: RwLock::new(self.attacker_snapshot()),
-			deferred_replays: RwLock::new(IdMap::default()),
-			passes: RwLock::new(HashMap::new()),
-			results: RwLock::new(results),
-			unresolved: AtomicI32::new(unresolved),
-			file_name: self.file_name.clone(),
-			states: self.states.clone(),
-			phase_knowledge: RwLock::new(read_lock(&self.phase_knowledge).clone()),
-			depth_cuts: RwLock::new(read_lock(&self.depth_cuts).clone()),
-			truncations: RwLock::new(read_lock(&self.truncations).clone()),
-			saturation: RwLock::new(IdMap::default()),
-			executions: RwLock::new(IdMap::default()),
-			bases: RwLock::new(IdMap::default()),
-			coherence: RwLock::new(IdMap::default()),
-			baselines: RwLock::new(IdMap::default()),
-			replays: RwLock::new(Recent::default()),
-			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
-			term_bound: std::sync::OnceLock::new(),
-			sessions: self.sessions,
-			honest,
-			honest_halts: RwLock::new(read_lock(&self.honest_halts).clone()),
-			honest_unreached: RwLock::new(Arc::clone(&read_lock(&self.honest_unreached))),
-			scenarios: self.scenarios.clone(),
-			#[cfg(test)]
-			witnesses: RwLock::new(vec![None; results_len]),
-			#[cfg(test)]
-			query_goals: RwLock::new(vec![0; results_len]),
-			#[cfg(test)]
-			searched: AtomicBool::new(false),
-			prefer_replication: AtomicBool::new(false),
-			replication_only: AtomicBool::new(false),
-			replication_rejected: AtomicBool::new(false),
-			cancel: Arc::clone(&self.cancel),
-			staged_checks: StagedMemo::default(),
-			staged_costs: StagedMemo::default(),
-			replay_executions: RwLock::new(IdMap::default()),
-			honest_epoch: std::sync::atomic::AtomicU64::new(0),
-		}
-	}
-
 	pub(crate) fn analysis_count_increment(&self) {
 		if !crate::info::info_is_quiet() {
 			ANALYSIS_COUNT.with(|c| c.set(c.get() + 1));
@@ -1515,7 +378,6 @@ impl VerifyContext {
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
-	use crate::testutil::*;
 	use std::sync::Arc;
 
 	#[test]
@@ -1607,267 +469,6 @@ mod tests {
 	}
 
 	#[test]
-	fn witness_scratch_keeps_only_the_selected_session_variant() {
-		let source = "attacker[passive]\nprincipal Alice[\ngenerates first, second\n]\nqueries[\nconfidentiality? first\nconfidentiality? second\n]\n";
-		let model = parse_string("witness_variant.vp", source).unwrap();
-		let expanded = crate::sessions::expand_sessions(&model, 2, &[]).unwrap();
-		let selected = expanded.query_variants[0][0].clone();
-		let ctx = VerifyContext::new(
-			&expanded.model,
-			&[],
-			expanded.query_variants,
-			2,
-			None,
-			Vec::new(),
-		);
-		let scratch = ctx.scratch_for_witness(0, Some(&selected));
-		let results = scratch.results_get();
-		assert_eq!(
-			results[0].query.subject().unwrap().id,
-			selected.subject().unwrap().id
-		);
-		assert!(results[0].variants.is_empty());
-		assert!(!results[0].resolved);
-		assert!(results[1].resolved);
-		let original = ctx.results_get();
-		assert_ne!(
-			original[0].query.subject().unwrap().id,
-			selected.subject().unwrap().id
-		);
-		assert_eq!(original[0].variants.len(), 1);
-		assert_eq!(
-			ctx.scratch_for_witness(0, None).results_get()[0]
-				.variants
-				.len(),
-			1
-		);
-	}
-
-	#[test]
-	fn forged_flights_are_recalled_for_validation_and_invalidate_with_knowledge() {
-		let model = parse_string("forgery_cache.vp", "attacker[passive]\nprincipal Alice[\nknows private secret\n]\nqueries[\nconfidentiality? secret\n]\n").unwrap();
-		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
-		let first = vec![(0, make_constant("forgery_cache_first"))];
-		let second = vec![(0, make_constant("forgery_cache_second"))];
-		ctx.remember_execution(1, 7, &first, 0, &[]);
-		ctx.remember_execution(1, 7, &second, 0, &[]);
-		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
-		ctx.remember_forged_flights(1, 7, &first, vec![second.clone()]);
-		let recalled = ctx.recall_forged_flights(1, 7, &first).unwrap();
-		assert!(same_signature(&recalled[0], &second));
-		assert!(ctx.recall_forged_flights(1, 7, &first).is_some());
-		assert!(ctx.recall_forged_flights(1, 7, &second).is_none());
-		assert!(ctx.recall_forged_flights(2, 7, &first).is_none());
-		write_lock(&ctx.attacker).worlds_epoch += 1;
-		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
-		ctx.remember_forged_flights(1, 7, &first, Vec::new());
-		write_lock(&ctx.attacker).routes_epoch += 1;
-		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
-		ctx.remember_forged_flights(1, 7, &first, Vec::new());
-		write_lock(&ctx.attacker).current_phase += 1;
-		assert!(ctx.recall_forged_flights(1, 7, &first).is_none());
-	}
-
-	#[test]
-	fn unchanged_worlds_share_storage_and_widening_preserves_snapshots() {
-		let first = make_constant("widen_first");
-		let second = make_constant("widen_second");
-		let a = Worlds::from_constraint(vec![(1, SlotIdx(0), first.clone())]);
-		let b = Worlds::from_constraint(vec![(1, SlotIdx(0), second)]);
-		let mut attacker = make_attacker_state(vec![first]);
-		attacker.worlds = Arc::new(vec![a.clone()]);
-		let snapshot = attacker.clone();
-		assert!(!widen(&mut attacker, KnownIdx(0), a.clone()));
-		assert!(Arc::ptr_eq(&attacker.worlds, &snapshot.worlds));
-		assert_eq!(attacker.worlds_epoch, snapshot.worlds_epoch);
-		assert!(widen(&mut attacker, KnownIdx(0), b.clone()));
-		assert_eq!(attacker.worlds_epoch, snapshot.worlds_epoch + 1);
-		assert!(attacker.worlds[0].equivalent(&a.union(&b)));
-		assert!(snapshot.worlds[0].equivalent(&a));
-		assert!(snapshot.worlds[0].intersect(&b).is_empty());
-	}
-
-	#[test]
-	fn oracle_basis_changes_with_an_equal_length_knowledge_branch() {
-		let model = parse_string("basis.vp", "attacker[passive]\nprincipal Alice[\nknows private secret\n]\nqueries[\nconfidentiality? secret\n]\n").unwrap();
-		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
-		let first = make_constant("basis_first");
-		let second = make_constant("basis_second");
-		let left = make_attacker_state(vec![first.clone()]);
-		let right = make_attacker_state(vec![second.clone()]);
-		assert!(ctx.known_subterms(&left).contains(&first));
-		let changed = ctx.known_subterms(&right);
-		assert!(changed.contains(&second));
-		assert!(!changed.contains(&first));
-	}
-
-	#[test]
-	fn scratch_context_isolates_single_query() {
-		use crate::context::VerifyContext;
-		let src = "attacker[passive]\n\
-			principal Alice[\n\
-			knows private scr_m\n\
-			knows private scr_k\n\
-			scr_e = ENC(scr_k, scr_m)\n\
-			]\n\
-			queries[\n\
-			confidentiality? scr_m\n\
-			confidentiality? scr_k\n\
-			]\n";
-		let m = parse_string("scratch.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
-		let scratch = ctx.scratch_for_query(1);
-
-		assert!(!scratch.query_is_resolved(1));
-		assert!(scratch.query_is_resolved(0));
-		assert!(!scratch.all_resolved());
-
-		let mut r = VerifyResult::new(&m.queries[1], 1);
-		r.resolved = true;
-		r.summary = " probe".to_string();
-		assert!(scratch.results_put(&r, &crate::query::QueryVerdict::for_test()));
-		assert!(scratch.query_is_resolved(1));
-		assert!(scratch.all_resolved());
-
-		assert!(!ctx.query_is_resolved(1));
-		assert!(!ctx.all_resolved());
-		assert_eq!(ctx.results_get()[1].summary, "");
-	}
-
-	#[test]
-	fn attacker_put_with_records_derivation() {
-		use crate::context::VerifyContext;
-		let src = "attacker[passive]\n\
-			principal Alice[\n\
-			knows private drv_m\n\
-			knows private drv_k\n\
-			drv_e = ENC(drv_k, drv_m)\n\
-			]\n\
-			queries[\n\
-			confidentiality? drv_m\n\
-			]\n";
-		let m = parse_string("drv.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
-		let record = Arc::new(MutationRecord {
-			diffs: vec![],
-			principal_id: 0,
-			phase: 0,
-		});
-		let learned = make_constant("drv_learned");
-		let source = make_constant("drv_source");
-
-		assert!(
-			ctx.attacker_put_with(
-				&learned,
-				&record,
-				DerivationRecord::Decomposed {
-					of: source.clone(),
-					using: vec![learned.clone()],
-				},
-				Worlds::any(),
-			) == Put::New
-		);
-
-		let attacker = ctx.attacker_snapshot();
-		let idx = attacker.knows(&learned).expect("value was absorbed");
-		match attacker.derivation(idx) {
-			Some(DerivationRecord::Decomposed { of, using }) => {
-				assert!(of.equivalent(&source, true));
-				assert_eq!(using.len(), 1);
-			}
-			other => panic!("expected Decomposed, got {:?}", other),
-		}
-		assert_eq!(attacker.known.len(), attacker.derivations.len());
-	}
-
-	#[test]
-	fn a_later_leak_does_not_explain_an_earlier_wire_observation() {
-		let src = "attacker[passive]\nprincipal Alice[\nknows private cl_m\n]\nprincipal Bob[\n_ = HASH(nil)\n]\nAlice -> Bob: cl_m\nphase[1]\nprincipal Alice[\nleaks cl_m\n]\nqueries[\nconfidentiality? cl_m\n]\n";
-		let m = parse_string("leak-origin.vp", src).expect("parses");
-		let (km, states) = crate::sanity::sanity(&m).expect("passes sanity");
-		let ctx = VerifyContext::new(&m, &states, Vec::new(), 1, None, Vec::new());
-		let mut pure = states[0].clone_for_depth(true);
-		pure.resolve_all_values().expect("resolves");
-		ctx.attacker_phase_update(&km, &pure, 0)
-			.expect("seeds phase zero");
-		let constant = km
-			.slots
-			.iter()
-			.find(|slot| slot.constant.name.as_ref() == "cl_m")
-			.map(|slot| Value::Constant(slot.constant.clone()))
-			.expect("cl_m exists");
-		let attacker = ctx.attacker_snapshot();
-		let index = attacker.knows(&constant).expect("attacker observes cl_m");
-		assert!(matches!(
-			attacker.derivation(index),
-			Some(DerivationRecord::Obtained { .. })
-		));
-	}
-
-	#[test]
-	fn a_term_reachable_two_ways_keeps_both_routes() {
-		use crate::testutil::make_constant;
-		let src = "attacker[active]\n\
-			principal Alice[\n\
-			knows private alt_m\n\
-			knows private alt_k\n\
-			alt_e = ENC(alt_k, alt_m)\n\
-			]\n\
-			queries[\n\
-			confidentiality? alt_m\n\
-			]\n";
-		let m = parse_string("alt.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 1, None, Vec::new());
-		let value = make_constant("alt_value");
-		let record = std::sync::Arc::new(MutationRecord {
-			diffs: vec![],
-			principal_id: 1,
-			phase: 0,
-		});
-		ctx.attacker_put_with(
-			&value,
-			&record,
-			DerivationRecord::Obtained { slot: SlotIdx(7) },
-			Worlds::any(),
-		);
-		ctx.attacker_put_with(
-			&value,
-			&record,
-			DerivationRecord::Obtained { slot: SlotIdx(2) },
-			Worlds::any(),
-		);
-		ctx.attacker_put_with(
-			&value,
-			&record,
-			DerivationRecord::Obtained { slot: SlotIdx(7) },
-			Worlds::any(),
-		);
-		let attacker = ctx.attacker_snapshot();
-		let idx = attacker.knows(&value).expect("the term is known");
-		let slots: Vec<usize> = attacker
-			.routes(idx)
-			.filter_map(|(route, _)| match route {
-				DerivationRecord::Obtained { slot } => Some(slot.get()),
-				_ => None,
-			})
-			.collect();
-		assert_eq!(
-			slots,
-			vec![7, 2],
-			"a term the attacker can reach at two slots records both, each with the \
-			 execution it was found in. The repeat must not be stored twice.\n\n\
-			 The filters still follow the first route only, and deliberately. A route is \
-			 discovered inside some execution and is a route at all only in executions \
-			 like it, so admitting one found elsewhere needs a proof that it is available \
-			 here too. Letting any recorded route stand in for that was measured and \
-			 returns three false attacks the corpus pins shut: incompatible_histories.vp, \
-			 history_incompatible_knowledge.vp and atemporal_forward_value.vp all report \
-			 an attack again. Whoever narrows this must produce that proof, not widen \
-			 what counts as a route"
-		);
-	}
-
-	#[test]
 	fn a_context_with_no_truncation_reports_an_exhausted_search() {
 		let src = "attacker[active]\n\
 			principal Alice[\n\
@@ -1924,7 +525,7 @@ mod tests {
 		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
 		let mut resolved = crate::types::VerifyResult::new(&m.queries[0], 0);
 		resolved.resolved = true;
-		assert!(ctx.results_put(&resolved, &crate::query::QueryVerdict::for_test()));
+		assert!(ctx.results_put(&resolved, &crate::engine::query::Verdict::for_test()));
 		ctx.note_depth_cut(1, 0);
 		ctx.finalize_envelopes();
 		let results = ctx.results_get();
@@ -1954,26 +555,23 @@ mod tests {
 		let m = parse_string("cat.vp", src).expect("parse");
 
 		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
-		assert!(plain.claims_apply_to(1));
-		assert!(plain.claims_apply_to(9));
-		assert!(!plain.relativises());
+		assert!(plain.claims_apply_at(1, 0));
+		assert!(plain.claims_apply_at(9, 0));
 
 		let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 		honest.insert(1, i32::MAX);
 		let mixed = VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new());
-		assert!(mixed.claims_apply_to(1));
-		assert!(!mixed.claims_apply_to(2));
-		assert!(mixed.relativises());
+		assert!(mixed.claims_apply_at(1, 0));
+		assert!(!mixed.claims_apply_at(2, 0));
 
 		let corrupt =
 			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdMap::default()), Vec::new());
 		assert!(
-			corrupt.claims_apply_to(2),
+			corrupt.claims_apply_at(2, 0),
 			"a model with nothing honest to relativise against must not hold vacuously"
 		);
-		assert!(!corrupt.relativises());
 		assert!(
-			!corrupt.is_honest(2),
+			!corrupt.is_honest_at(2, 0),
 			"the honest-run check stays relaxed there even so"
 		);
 	}
