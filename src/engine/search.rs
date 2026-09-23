@@ -617,9 +617,9 @@ impl<'a, 'b> Search<'a, 'b> {
 						honest_terms,
 					)
 				});
-				let started = std::time::Instant::now();
+				let started = self.debug.then(std::time::Instant::now);
 				let solutions = deducer.repair_check(p, &binding);
-				if self.debug {
+				if let Some(started) = started {
 					eprintln!(
 						"[search] repair {} at {} -> {} solutions in {:?}",
 						ps.name,
