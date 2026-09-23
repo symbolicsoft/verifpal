@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// Alice computes right early but leaks it only after Bob's ack. The attacker
+// can learn s only by replacing e with the leaked sealed = ENC(ka, s): Bob
+// decrypts it, leaks d = s, and his checked ASSERT(d, nil)? halts him before
+// ack. Alice stays blocked at that receive and never leaks right, and no
+// other disclosed value carries it, so right is not observable in that
+// execution. The guarded fresh n keeps every other session's Bob from opening
+// this session's sealed. The judge once counted the leak as reached, both in
+// Alice's view (her run was blocked, not halted) and in Bob's (Alice created
+// nothing after the block, so no cut was recorded for her): u1. A blocked run
+// now reaches only the events before its blocked receive.
+// unlink_blocked_disclosure_unchecked.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public p, q
+	generates s, n
+	ka = HASH(k, n)
+	e = ENC(ka, nil)
+	sealed = ENC(ka, s)
+	left = HASH(s, p)
+	right = HASH(s, q)
+	leaks left, sealed
+]
+
+Alice -> Bob: [n], e
+
+principal Bob[
+	knows private k
+	kb = HASH(k, n)
+	d = DEC(kb, e)
+	leaks d
+	_ = ASSERT(d, nil)?
+	generates ack
+]
+
+Bob -> Alice: [ack]
+
+principal Alice[
+	leaks right
+]
+
+queries[
+	unlinkability? left, right
+]

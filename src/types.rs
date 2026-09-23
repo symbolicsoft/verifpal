@@ -1431,19 +1431,14 @@ pub struct PrincipalState {
 	pub index: Arc<IdMap<ValueId, usize>>,
 	pub leaks: Arc<Vec<LeakEvent>>,
 	pub halted_at: Option<i32>,
-	pub foreign_halts: Vec<(PrincipalId, usize)>,
+	pub foreign_halts: Vec<(PrincipalId, Option<usize>, i32)>,
 	pub starved: Vec<usize>,
 	pub capabilities: Arc<CapabilityIndex>,
 	pub forwarded: bool,
 }
 
 impl PrincipalState {
-	pub fn event_reached(
-		&self,
-		km: &ProtocolTrace,
-		principal: PrincipalId,
-		declared_at: i32,
-	) -> bool {
+	pub fn event_reached(&self, principal: PrincipalId, declared_at: i32) -> bool {
 		if principal == self.id {
 			return self
 				.halted_at
@@ -1451,9 +1446,8 @@ impl PrincipalState {
 		}
 		self.foreign_halts
 			.iter()
-			.find(|&&(halted, _)| halted == principal)
-			.and_then(|&(_, at)| km.slots.get(at))
-			.is_none_or(|meta| declared_at <= meta.declared_at)
+			.find(|&&(halted, _, _)| halted == principal)
+			.is_none_or(|&(_, _, reached)| declared_at <= reached)
 	}
 
 	pub fn answers_for(&self, constants: &[Constant]) -> bool {
@@ -1473,7 +1467,7 @@ impl PrincipalState {
 		};
 		self.foreign_halts
 			.iter()
-			.any(|&(principal, at)| principal == meta.creator && i >= at)
+			.any(|&(principal, at, _)| principal == meta.creator && at.is_some_and(|at| i >= at))
 	}
 
 	pub fn slot_starved(&self, i: usize) -> bool {
@@ -1845,7 +1839,7 @@ mod tests {
 			values,
 		);
 		ps.values[2].provenance.creator = crate::principal::ATTACKER_ID;
-		ps.foreign_halts = vec![(2, 1)];
+		ps.foreign_halts = vec![(2, Some(1), 0)];
 		assert!(ps.slot_unreached(2));
 	}
 

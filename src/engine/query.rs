@@ -370,8 +370,18 @@ impl Judge<'_, '_> {
 				continue;
 			}
 			let ps = self.view(r);
+			let executed = |c: &Constant| {
+				ps.index_of(c)
+					.is_some_and(|slot| super::view::executed(self.cx, self.ex, r, slot))
+			};
 			for (i, a) in q.constants.iter().enumerate() {
+				if !executed(a) {
+					continue;
+				}
 				for b in q.constants.iter().skip(i + 1) {
+					if !executed(b) {
+						continue;
+					}
 					let Some(witness) = crate::unlink::find_link_witness(
 						a,
 						b,

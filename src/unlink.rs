@@ -539,7 +539,7 @@ fn disclosed(slot: usize, km: &ProtocolTrace, ps: &PrincipalState, phase: i32) -
 		&& !ps.slot_unreached(slot)
 		&& km
 			.disclosure(slot, phase, |principal, declared_at| {
-				ps.event_reached(km, principal, declared_at)
+				ps.event_reached(principal, declared_at)
 			})
 			.is_some()
 }

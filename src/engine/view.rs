@@ -22,6 +22,31 @@ pub(crate) fn executed(cx: &Context, ex: &Execution, r: usize, slot: usize) -> b
 	creator_run(cx, slot).is_none() || view_of(cx, ex, r, slot).is_some()
 }
 
+fn reached_until(cx: &Context, ex: &Execution, r: usize) -> Option<i32> {
+	let state = &ex.runs[r];
+	if let Some(slot) = state.halted {
+		return Some(cx.km.slots[slot].declared_at);
+	}
+	if !state.frozen {
+		return None;
+	}
+	let Event::Recv(d) = cx.program.runs[r].steps.get(state.pc)?.event else {
+		return None;
+	};
+	let delivery = &cx.program.deliveries[d];
+	let (sender, recipient) = (
+		cx.program.runs[delivery.sender].id,
+		cx.program.runs[delivery.recipient].id,
+	);
+	delivery.slots.iter().find_map(|&(slot, _)| {
+		cx.km.slots[slot]
+			.sent_by
+			.iter()
+			.find(|event| event.sender == sender && event.recipient == recipient)
+			.map(|event| event.declared_at - 1)
+	})
+}
+
 pub(crate) fn project(
 	cx: &Context,
 	ex: &Execution,
@@ -64,6 +89,9 @@ pub(crate) fn project(
 		if q == r {
 			continue;
 		}
+		let Some(reached) = reached_until(cx, ex, q) else {
+			continue;
+		};
 		let state = &ex.runs[q];
 		let first_missing = km.slots.iter().enumerate().position(|(slot, s)| {
 			s.creator == run.id
@@ -72,13 +100,10 @@ pub(crate) fn project(
 					Some(Declaration::Assignment | Declaration::Generates | Declaration::Knows)
 				) && (state.held(slot).is_none() || state.halted == Some(slot))
 		});
-		if let Some(at) = first_missing
-			&& (state.halted.is_some() || state.frozen)
-		{
-			foreign.push((run.id, at));
-		}
+		foreign.push((run.id, first_missing, reached));
 	}
 	ps.foreign_halts = foreign;
+	ps.halted_at = reached_until(cx, ex, r);
 	let state = &ex.runs[r];
 	let mut starved = Vec::new();
 	for (i, step) in program.runs[r].steps.iter().enumerate() {
@@ -94,7 +119,6 @@ pub(crate) fn project(
 	starved.dedup();
 	ps.starved = starved;
 	if let Some(slot) = state.halted {
-		ps.halted_at = Some(km.slots[slot].declared_at);
 		let at = slot + 1;
 		Arc::make_mut(&mut ps.meta).truncate(at);
 		ps.values.truncate(at);

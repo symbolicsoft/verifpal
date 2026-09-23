@@ -4694,3 +4694,19 @@ fn test_equivalence_unexecuted_assignment() {
 		);
 	}
 }
+
+#[test]
+fn test_unlink_unexecuted_assignment() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_unexecuted_assignment.vp", sessions, "u0");
+		run_model_sessions("unlink_unexecuted_assignment_unchecked.vp", sessions, "u1");
+	}
+}
+
+#[test]
+fn test_unlink_blocked_disclosure() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_blocked_disclosure.vp", sessions, "u0");
+		run_model_sessions("unlink_blocked_disclosure_unchecked.vp", sessions, "u1");
+	}
+}

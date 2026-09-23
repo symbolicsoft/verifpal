@@ -955,7 +955,7 @@ mod tests {
 		ps.values[ga].provenance.creator = crate::principal::ATTACKER_ID;
 		ps.values[ga].set_value(forged.clone());
 		ps.halted_at = Some(3);
-		ps.foreign_halts = vec![(1, 2)];
+		ps.foreign_halts = vec![(1, Some(2), 3)];
 
 		let kept = ps.clone_for_depth(false);
 		assert!(kept.values[ga].value.equivalent(&forged, true));

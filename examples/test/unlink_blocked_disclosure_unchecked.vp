@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// unlink_blocked_disclosure.vp with Bob's ASSERT unchecked. The attacker
+// replaces e with the leaked sealed, and Bob leaks d = s. Bob no longer halts,
+// so he sends ack and Alice leaks right in that execution. left and right are
+// both leaked and share s, which the attacker holds: u1.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public p, q
+	generates s, n
+	ka = HASH(k, n)
+	e = ENC(ka, nil)
+	sealed = ENC(ka, s)
+	left = HASH(s, p)
+	right = HASH(s, q)
+	leaks left, sealed
+]
+
+Alice -> Bob: [n], e
+
+principal Bob[
+	knows private k
+	kb = HASH(k, n)
+	d = DEC(kb, e)
+	leaks d
+	_ = ASSERT(d, nil)
+	generates ack
+]
+
+Bob -> Alice: [ack]
+
+principal Alice[
+	leaks right
+]
+
+queries[
+	unlinkability? left, right
+]
