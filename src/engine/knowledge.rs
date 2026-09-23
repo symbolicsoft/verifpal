@@ -69,9 +69,12 @@ pub(crate) struct Knowledge {
 	pub(crate) state: Arc<AttackerState>,
 	pub(crate) origins: Arc<Vec<Origin>>,
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
+	pub(crate) built: Arc<IdMap<u64, Vec<Value>>>,
+	built_len: usize,
 	candidates: Arc<Candidates>,
 	closed: usize,
 	closed_protocol: usize,
+	closed_built: usize,
 	closed_phase: i32,
 }
 
@@ -83,9 +86,12 @@ impl Knowledge {
 			state: Arc::new(state),
 			origins: Arc::new(Vec::new()),
 			protocol: Arc::new(Vec::new()),
+			built: Arc::new(IdMap::default()),
+			built_len: 0,
 			candidates: Arc::new(Candidates::default()),
 			closed: 0,
 			closed_protocol: 0,
+			closed_built: 0,
 			closed_phase: phase,
 		}
 	}
@@ -146,9 +152,41 @@ impl Knowledge {
 		Arc::make_mut(&mut self.candidates).note(value, pre);
 	}
 
+	pub(crate) fn note_computed(&mut self, declared: &Value, pre: &Value, value: &Value) {
+		let mut built = Vec::new();
+		applied(declared, pre, &mut built);
+		if !value.same_term(pre) {
+			let mut inputs: IdMap<u64, Vec<&Value>> = IdMap::default();
+			for term in crate::value::subterms(pre) {
+				inputs.entry(term.hash_value()).or_default().push(term);
+			}
+			reassembled(value, &inputs, &mut IdSet::default(), &mut built);
+		}
+		for term in &built {
+			self.note_built(term);
+		}
+	}
+
+	pub(crate) fn note_built(&mut self, term: &Value) {
+		let key = term.hash_value();
+		if self
+			.built
+			.get(&key)
+			.is_some_and(|bucket| bucket.iter().any(|held| held.equivalent(term, true)))
+		{
+			return;
+		}
+		Arc::make_mut(&mut self.built)
+			.entry(key)
+			.or_default()
+			.push(term.clone());
+		self.built_len += 1;
+	}
+
 	pub(crate) fn is_closed(&self) -> bool {
 		self.closed == self.len()
 			&& self.closed_protocol == self.protocol.len()
+			&& self.closed_built == self.built_len
 			&& self.closed_phase == self.phase()
 	}
 
@@ -172,7 +210,7 @@ impl Knowledge {
 			for (v, origin) in learned {
 				progress |= self.learn(&v, origin);
 			}
-			let pairs = reuse_pairs(ps, &self.state, &self.protocol);
+			let pairs = reuse_pairs(ps, &self.state, &self.built);
 			for pair in pairs {
 				if !self.state.reused.iter().any(|held| {
 					held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true)
@@ -211,6 +249,7 @@ impl Knowledge {
 		}
 		self.closed = self.len();
 		self.closed_protocol = self.protocol.len();
+		self.closed_built = self.built_len;
 		self.closed_phase = self.phase();
 	}
 }
@@ -442,11 +481,10 @@ fn rewrite_build(
 fn reuse_pairs(
 	ps: &PrincipalState,
 	attacker: &AttackerState,
-	protocol: &[(Value, Value, bool)],
+	built: &IdMap<u64, Vec<Value>>,
 ) -> Vec<[Value; 2]> {
 	let _memo = crate::theory::DeductionMemo::ensure(ps, attacker);
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
-	let mut produced: Option<IdMap<u64, Vec<Value>>> = None;
 	for (i, known) in attacker.known.iter().enumerate() {
 		let Value::Primitive(p) = known else {
 			continue;
@@ -462,14 +500,12 @@ fn reuse_pairs(
 			continue;
 		}
 		let mints = can_reconstruct_primitive(p, ps, attacker).is_some_and(|b| b.forged.is_some());
-		if mints {
-			let produced = produced.get_or_insert_with(|| protocol_produced(protocol));
-			if !produced
+		if mints
+			&& !built
 				.get(&known.hash_value())
 				.is_some_and(|terms| terms.iter().any(|term| term.equivalent(known, true)))
-			{
-				continue;
-			}
+		{
+			continue;
 		}
 		let mut key = u64::from(p.id);
 		for &at in &rule.fixed {
@@ -499,26 +535,36 @@ fn reuse_pairs(
 	pairs
 }
 
-fn protocol_produced(protocol: &[(Value, Value, bool)]) -> IdMap<u64, Vec<Value>> {
-	let mut produced: IdMap<u64, Vec<Value>> = IdMap::default();
-	let mut seen = IdSet::default();
-	let mut pending: Vec<&Value> = protocol
-		.iter()
-		.filter(|(_, _, own)| *own)
-		.map(|(v, _, _)| v)
-		.collect();
-	while let Some(term) = pending.pop() {
-		let Value::Primitive(p) = term else {
-			continue;
-		};
-		if !seen.insert(Arc::as_ptr(p) as usize) {
-			continue;
-		}
-		pending.extend(&p.arguments);
-		produced
-			.entry(term.hash_value())
-			.or_default()
-			.push(term.clone());
+fn applied(declared: &Value, pre: &Value, out: &mut Vec<Value>) {
+	let (Value::Primitive(d), Value::Primitive(p)) = (declared, pre) else {
+		return;
+	};
+	out.push(pre.clone());
+	for (d, p) in d.arguments.iter().zip(&p.arguments) {
+		applied(d, p, out);
 	}
-	produced
+}
+
+fn reassembled(
+	value: &Value,
+	inputs: &IdMap<u64, Vec<&Value>>,
+	seen: &mut IdSet<usize>,
+	out: &mut Vec<Value>,
+) {
+	let Value::Primitive(p) = value else {
+		return;
+	};
+	if !seen.insert(Arc::as_ptr(p) as usize) {
+		return;
+	}
+	if inputs
+		.get(&value.hash_value())
+		.is_some_and(|bucket| bucket.iter().any(|input| input.equivalent(value, true)))
+	{
+		return;
+	}
+	out.push(value.clone());
+	for argument in &p.arguments {
+		reassembled(argument, inputs, seen, out);
+	}
 }

@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two (GitHub issue #35).
+//
+// Each assignment hashes the previous one twice, so t40 is a term DAG of 41
+// distinct nodes but 2^40 paths. The search measures the depth of every
+// principal-produced emission it may keep. That measurement once walked every
+// path and made this model run for longer than anyone would wait. Depth is
+// now memoized per shared node. Nothing here involves secret, which is never
+// sent: c0.
+attacker[active]
+
+principal Alice[
+	knows private secret
+	generates x
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	t0 = HASH(x)
+	t1 = HASH(t0, t0)
+	t2 = HASH(t1, t1)
+	t3 = HASH(t2, t2)
+	t4 = HASH(t3, t3)
+	t5 = HASH(t4, t4)
+	t6 = HASH(t5, t5)
+	t7 = HASH(t6, t6)
+	t8 = HASH(t7, t7)
+	t9 = HASH(t8, t8)
+	t10 = HASH(t9, t9)
+	t11 = HASH(t10, t10)
+	t12 = HASH(t11, t11)
+	t13 = HASH(t12, t12)
+	t14 = HASH(t13, t13)
+	t15 = HASH(t14, t14)
+	t16 = HASH(t15, t15)
+	t17 = HASH(t16, t16)
+	t18 = HASH(t17, t17)
+	t19 = HASH(t18, t18)
+	t20 = HASH(t19, t19)
+	t21 = HASH(t20, t20)
+	t22 = HASH(t21, t21)
+	t23 = HASH(t22, t22)
+	t24 = HASH(t23, t23)
+	t25 = HASH(t24, t24)
+	t26 = HASH(t25, t25)
+	t27 = HASH(t26, t26)
+	t28 = HASH(t27, t27)
+	t29 = HASH(t28, t28)
+	t30 = HASH(t29, t29)
+	t31 = HASH(t30, t30)
+	t32 = HASH(t31, t31)
+	t33 = HASH(t32, t32)
+	t34 = HASH(t33, t33)
+	t35 = HASH(t34, t34)
+	t36 = HASH(t35, t35)
+	t37 = HASH(t36, t36)
+	t38 = HASH(t37, t37)
+	t39 = HASH(t38, t38)
+	t40 = HASH(t39, t39)
+]
+
+Bob -> Alice: t40
+
+queries[
+	confidentiality? secret
+]

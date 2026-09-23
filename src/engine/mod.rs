@@ -23,20 +23,23 @@ pub(crate) fn verify(
 	km: &ProtocolTrace,
 	states: &[PrincipalState],
 ) -> VResult<()> {
-	for ps in states {
-		crate::verify::check_honest_run(ctx, km, ps)?;
-	}
 	let Some(carrier) = states.first() else {
 		return Ok(());
 	};
 	let program = Program::of(m, km);
 	let cx = Context::new(&program, km, carrier);
+	let root = execute(&cx, &Vec::new());
+	for ps in states {
+		let run = program.run_index(ps.id);
+		crate::verify::check_honest_run(ctx, km, ps, |slot| {
+			run.is_some_and(|r| root.runs[r].held(slot).is_some())
+		})?;
+	}
 	info_message(
 		&format!("Attacker is configured as {}.", m.attacker),
 		InfoLevel::Info,
 		false,
 	);
-	let root = execute(&cx, &Vec::new());
 	ctx.analysis_count_increment();
 	for (i, v) in root.knowledge.state.known.iter().enumerate() {
 		if matches!(root.knowledge.origin(i), knowledge::Origin::Initial) {

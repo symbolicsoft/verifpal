@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0 at one session and at two (GitHub issue #29).
+//
+// The PKE_ENC companion to kem_signed_unauthenticated_ek.vp. Substituting ek
+// hands the attacker s, so k_s falls. The client decrypts only a ct whose
+// signature covers its own ek, so k_c holds. Verifpal 1.4.10 reported k_c at
+// two sessions by reading s from a ciphertext sent toward the substituted key
+// and reusing it against the honest one. That needs two incompatible histories
+// of one session.
+attacker[active]
+
+principal Server[
+	knows private ssk
+	spk = PUBKEY(ssk)
+]
+
+principal Client[
+	generates dk
+	ek = PUBKEY(dk)
+]
+
+Server -> Client: [spk]
+
+Client -> Server: ek
+
+principal Server[
+	generates s
+	ct = PKE_ENC(ek, s)
+	sig = SIGN(ssk, HASH(ek, ct))
+	k_s = HASH(s)
+]
+
+Server -> Client: ct, sig
+
+principal Client[
+	s_c = PKE_DEC(dk, ct)
+	_ = SIGNVERIF(spk, HASH(ek, ct), sig)?
+	k_c = HASH(s_c)
+]
+
+queries[
+	confidentiality? k_s
+	confidentiality? k_c
+]

@@ -149,18 +149,30 @@ impl Judge<'_, '_> {
 		let km = self.km();
 		let program = &self.cx.program.runs[run];
 		let state = &self.ex.runs[run];
+		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(usize, usize)> {
+			program
+				.steps
+				.iter()
+				.enumerate()
+				.filter_map(|(i, step)| match step.event {
+					Event::Assign(slot)
+						if matches!(km.slots[slot].initial_value, Value::Primitive(_))
+							&& mentioned(&km.slots[slot].initial_value) =>
+					{
+						Some((i, slot))
+					}
+					_ => None,
+				})
+				.collect()
+		};
+		let mut mentioning = sites(&|v| mentions(km, v, target, program.id, &mut Vec::new()));
+		if mentioning.is_empty() {
+			let ps = &self.states[run];
+			mentioning =
+				sites(&|v| crate::resolution::state_mentions(v, km, ps, program.id, target));
+		}
 		let mut uses = Vec::new();
-		for (i, step) in program.steps.iter().enumerate() {
-			let Event::Assign(slot) = step.event else {
-				continue;
-			};
-			let initial = &km.slots[slot].initial_value;
-			if !matches!(initial, Value::Primitive(_)) {
-				continue;
-			}
-			if !mentions(km, initial, target, program.id, &mut Vec::new()) {
-				continue;
-			}
+		for (i, slot) in mentioning {
 			if !state.reached(i) {
 				return None;
 			}
@@ -333,7 +345,11 @@ impl Judge<'_, '_> {
 				let Some(slot) = slot else {
 					continue 'runs;
 				};
-				if ps.slot_unreached(slot) || ps.slot_starved(slot) || check_failed(&value) {
+				if !super::view::executed(self.cx, self.ex, r, slot)
+					|| ps.slot_unreached(slot)
+					|| ps.slot_starved(slot)
+					|| check_failed(&value)
+				{
 					continue 'runs;
 				}
 				resolved.push((c.clone(), value));

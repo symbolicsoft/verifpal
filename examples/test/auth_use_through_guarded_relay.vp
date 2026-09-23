@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1 at one session and at two (GitHub issue #33).
+//
+// Bob uses x only through Carol: he relays it to her under a guard, she
+// returns HASH(x) under a guard, and Bob hashes that. Sanity accepts the
+// query because the guarded relay carries whatever Bob received, so Bob's x
+// reaches Carol's digest. The attacker replaces x at Bob's unguarded receive
+// with nil. Bob relays nil, Carol returns HASH(nil) and Bob uses it: a1. The
+// judge once followed only Bob's own assignments. It stopped at Carol's digest,
+// found no use and reported a0. A recipient with no direct use of a value now
+// has its uses found as sanity finds them, through other principals'
+// computations. A recipient that uses the value directly keeps only those uses
+// (spore_ns_pk.vp). auth_use_through_checked_relay.vp is the counterweight,
+// where the relayed use never runs.
+attacker[active]
+
+principal Alice[
+	generates x
+]
+
+Alice -> Bob: x
+
+Bob -> Carol: [x]
+
+principal Carol[
+	digest = HASH(x)
+]
+
+Carol -> Bob: [digest]
+
+principal Bob[
+	result = HASH(digest)
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

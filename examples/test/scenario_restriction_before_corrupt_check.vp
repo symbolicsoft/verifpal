@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error at one session and at two: the companion to
+// scenario_restriction_after_corrupt_check.vp with Charlie declared before
+// Alice's failing check. Declaration order must not decide whether bad =
+// PUBKEY(gg) is checked.
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Charlie[
+	knows private s
+	gg = PUBKEY(s)
+	bad = PUBKEY(gg)
+]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+]
+
+Alice -> Bob: sealed
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

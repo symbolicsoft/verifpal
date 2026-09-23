@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1a1 at one session and at two (GitHub issue #30).
+//
+// auth_key_substitution_private_psk.vp with qkd_key public. The attacker
+// knows strictly more, so no verdict may weaken. The key substitution that
+// breaks authentication never touches qkd_key, so a1 stays. Verifpal 1.4.10
+// reported a0 because its solver stopped proposing the server_pk substitution.
+// Both session keys now fall. The attacker substitutes kem_ek for the server's
+// key. For the client's key it substitutes server_pk, encapsulates to kem_ek
+// under nil and signs the transcript itself.
+attacker[active]
+
+principal Server[
+	knows public qkd_key
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+	generates server_random
+]
+
+principal Client[
+	knows public qkd_key
+	generates client_random
+	generates kem_sk
+	kem_ek = PUBKEY(kem_sk)
+]
+
+Server -> Client: server_pk
+
+Client -> Server: client_random, kem_ek
+
+principal Server[
+	generates kem_r
+	kem_ss, kem_ct = KEM_ENCAP(kem_ek, kem_r)
+	transcript_s = HASH(client_random, server_random, kem_ek, server_pk, kem_ct)
+	transcript_sig = SIGN(server_sk, transcript_s)
+	mixed_s = HASH(qkd_key, kem_ss)
+	session_key_s = HASH(mixed_s, transcript_s)
+]
+
+Server -> Client: server_random, kem_ct, transcript_sig
+
+principal Client[
+	kem_ss_c = KEM_DECAP(kem_sk, kem_ct)
+	transcript_c = HASH(client_random, server_random, kem_ek, server_pk, kem_ct)
+	_ = SIGNVERIF(server_pk, transcript_c, transcript_sig)?
+	mixed_c = HASH(qkd_key, kem_ss_c)
+	session_key_c = HASH(mixed_c, transcript_c)
+]
+
+queries[
+	confidentiality? session_key_s
+	confidentiality? session_key_c
+	authentication? Server -> Client: transcript_sig
+]

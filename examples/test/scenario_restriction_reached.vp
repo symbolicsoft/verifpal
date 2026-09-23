@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error at one session and at two: scenario_restriction_unreached.vp
+// with Alice's ASSERT unchecked. In the corrupt scenario (peer = mpk) Alice no
+// longer halts, so she reaches PUBKEY(mpk) and passes a public key where
+// PUBKEY takes a private one.
+attacker[passive]
+
+principal Bob[
+	knows private shared
+	tag = HASH(shared)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows private shared
+	knows private peer
+]
+
+Bob -> Alice: [tag]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = ASSERT(HASH(peer), tag)
+	peerpub = PUBKEY(peer)
+]
+
+scenarios[
+	Alice[peer = shared]
+	Alice[peer = mpk]
+]
+
+queries[
+	confidentiality? shared
+]

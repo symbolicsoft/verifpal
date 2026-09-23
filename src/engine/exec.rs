@@ -284,6 +284,8 @@ fn step_run<'i>(
 			);
 			let (value, failed) = evaluate(&pre);
 			ex.knowledge.note_protocol(&value, &pre, true);
+			ex.knowledge
+				.note_computed(&km.slots[slot].initial_value, &pre, &value);
 			ex.runs[r].env[slot] = Some(Held {
 				value,
 				pre,

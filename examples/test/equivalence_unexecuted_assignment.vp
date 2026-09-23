@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e0 at one session and at two (GitHub issue #36).
+//
+// Charlie computes right only after Bob's ack, and Bob sends ack only once
+// his checked ASSERT(HASH(x), digest)? passes on the x Charlie relays. When
+// the check passes, Charlie's x hashes to Alice's digest, so left =
+// HASH(HASH(x)) equals right = HASH(digest). When the attacker replaces x at
+// Charlie, Bob halts and Charlie never computes right. The judge once compared
+// the honest execution's right against the replaced left and reported e1.
+// Equivalence now compares only values the judged execution holds.
+// equivalence_unexecuted_assignment_unchecked.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates x
+	digest = HASH(x)
+]
+
+Alice -> Charlie: x, [digest]
+
+principal Charlie[
+	left = HASH(HASH(x))
+]
+
+Charlie -> Bob: [x]
+
+Alice -> Bob: [digest]
+
+principal Bob[
+	_ = ASSERT(HASH(x), digest)?
+	generates ack
+]
+
+Bob -> Charlie: [ack]
+
+principal Charlie[
+	right = HASH(digest)
+]
+
+queries[
+	equivalence? left, right
+]

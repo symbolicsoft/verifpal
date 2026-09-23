@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0a1 at one session and at two (GitHub issue #32).
+//
+// cap_forgeable_is_not_a_reuse_pair.vp, except Bob also hashes the ciphertext
+// he receives. The attacker mints AEAD_ENC(k, n_pub, nil, ad) under the
+// forgeable assumption and installs it as e, so authentication fails. Bob
+// hashing that term does not make it a second encryption under k and n_pub.
+// Only a constructor a principal's assignment applies counts as produced, and
+// a received argument is not one. So the installed term is no reuse partner
+// for Alice's ciphertext and m stays confidential. The engine once counted
+// every subterm of HASH(e) as principal-produced and reported c1.
+// cap_forgeable_inline_reuse_pair.vp is the counterweight, where Bob really
+// does encrypt under the same key and nonce.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public n_pub, ad
+	e = AEAD_ENC[forgeable](k, n_pub, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public n_pub, ad
+	hashed_ciphertext = HASH(e)
+	d = AEAD_DEC(k, n_pub, e, ad)?
+	_ = HASH(d)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

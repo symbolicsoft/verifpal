@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1a1 at one session and at two.
+//
+// The counterweight to cap_forgeable_hashed_is_not_a_reuse_pair.vp. Bob
+// encrypts ad under k and n_pub inside a CONCAT and sends the result. The
+// attacker could mint that ciphertext under the forgeable assumption, but Bob's
+// assignment applies AEAD_ENC itself, nested as it is. So it is a genuine
+// second encryption under Alice's key and nonce. The attacker splits wrapped,
+// pairs the ciphertext with e and recovers m: c1. Authentication fails as in
+// the base model: a1.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows private m
+	knows public n_pub, ad
+	e = AEAD_ENC[forgeable](k, n_pub, m, ad)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	knows public n_pub, ad
+	hashed_ciphertext = HASH(e)
+	d = AEAD_DEC(k, n_pub, e, ad)?
+	wrapped = CONCAT(AEAD_ENC(k, n_pub, ad, ad), hashed_ciphertext)
+]
+
+Bob -> Alice: [wrapped]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0a1 at one session and at two (GitHub issue #30).
+//
+// The server's key travels unguarded. The attacker replaces server_pk with
+// PUBKEY(nil) and signs its own transcript under nil, so the client's
+// SIGNVERIF passes on a transcript_sig the server never sent: a1. The
+// pre-shared qkd_key is private, so neither session key falls.
+// auth_key_substitution_public_psk.vp makes qkd_key public, which may only add
+// attacks. Verifpal 1.4.10 lost the a1 there.
+attacker[active]
+
+principal Server[
+	knows private qkd_key
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+	generates server_random
+]
+
+principal Client[
+	knows private qkd_key
+	generates client_random
+	generates kem_sk
+	kem_ek = PUBKEY(kem_sk)
+]
+
+Server -> Client: server_pk
+
+Client -> Server: client_random, kem_ek
+
+principal Server[
+	generates kem_r
+	kem_ss, kem_ct = KEM_ENCAP(kem_ek, kem_r)
+	transcript_s = HASH(client_random, server_random, kem_ek, server_pk, kem_ct)
+	transcript_sig = SIGN(server_sk, transcript_s)
+	mixed_s = HASH(qkd_key, kem_ss)
+	session_key_s = HASH(mixed_s, transcript_s)
+]
+
+Server -> Client: server_random, kem_ct, transcript_sig
+
+principal Client[
+	kem_ss_c = KEM_DECAP(kem_sk, kem_ct)
+	transcript_c = HASH(client_random, server_random, kem_ek, server_pk, kem_ct)
+	_ = SIGNVERIF(server_pk, transcript_c, transcript_sig)?
+	mixed_c = HASH(qkd_key, kem_ss_c)
+	session_key_c = HASH(mixed_c, transcript_c)
+]
+
+queries[
+	confidentiality? session_key_s
+	confidentiality? session_key_c
+	authentication? Server -> Client: transcript_sig
+]

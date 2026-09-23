@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// equivalence_unexecuted_assignment.vp with Bob's ASSERT unchecked. The
+// attacker replaces x at Charlie with nil. Bob no longer halts, so he sends
+// ack and Charlie does compute right = HASH(digest) in that execution, while
+// left = HASH(HASH(nil)). Both values are held and they differ: e1.
+attacker[active]
+
+principal Alice[
+	generates x
+	digest = HASH(x)
+]
+
+Alice -> Charlie: x, [digest]
+
+principal Charlie[
+	left = HASH(HASH(x))
+]
+
+Charlie -> Bob: [x]
+
+Alice -> Bob: [digest]
+
+principal Bob[
+	_ = ASSERT(HASH(x), digest)
+	generates ack
+]
+
+Bob -> Charlie: [ack]
+
+principal Charlie[
+	right = HASH(digest)
+]
+
+queries[
+	equivalence? left, right
+]

@@ -171,7 +171,7 @@ fn unwrapped_by(v: &Value) -> Option<ValueId> {
 	}
 }
 
-fn term_depth(v: &Value) -> usize {
+pub(crate) fn term_depth(v: &Value) -> usize {
 	term_depth_outside(
 		v,
 		&crate::hashing::TermSet::default(),
@@ -269,4 +269,19 @@ pub(crate) fn attacker_authored(
 	};
 	let ground_reduct = reduce_once(ground);
 	!ground_reduct.equivalent(&trace_reduct, true)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::testutil::*;
+
+	#[test]
+	fn term_depth_visits_each_shared_node_once() {
+		let mut term = make_constant("control_term_depth_seed");
+		for _ in 0..256 {
+			term = Value::primitive(crate::primitive::PRIM_HASH, vec![term.clone(), term], 0);
+		}
+		assert_eq!(term_depth(&term), 256);
+	}
 }

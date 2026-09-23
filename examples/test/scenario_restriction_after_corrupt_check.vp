@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Sanity error at one session and at two (GitHub issue #34): Charlie's
+// bad = PUBKEY(gg) passes a public key where PUBKEY takes a private one.
+// Alice's SIGNVERIF fails in the corrupt scenario (peerpk = mpk), and that
+// halt suppresses restriction checks only for what Alice's halt leaves
+// unreached. Charlie runs to completion after it, so his assignment is
+// checked. The check once stopped at the earliest suppressed failure in any
+// run, and this model was accepted. scenario_restriction_before_corrupt_check.vp
+// declares Charlie first and must fail the same way.
+attacker[passive]
+
+principal Bob[
+	knows private bsk
+	bpk = PUBKEY(bsk)
+	sig = SIGN(bsk, nil)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows public peerpk
+	knows private master
+]
+
+Bob -> Alice: [bpk], [sig]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = SIGNVERIF(peerpk, nil, sig)?
+	sealed = PKE_ENC(peerpk, master)
+]
+
+Alice -> Bob: sealed
+
+principal Charlie[
+	knows private s
+	gg = PUBKEY(s)
+	bad = PUBKEY(gg)
+]
+
+scenarios[
+	Alice[peerpk = bpk]
+	Alice[peerpk = mpk]
+]
+
+queries[
+	confidentiality? master
+]

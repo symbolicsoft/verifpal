@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// auth_use_through_guarded_relay.vp, except Carol checks the relayed x
+// against a guarded HASH(x) from Alice before computing digest. A replaced x
+// fails Carol's check, so she halts and never returns digest. Bob's only use
+// of x is then never reached, and an unreached use cannot accept anything.
+// Without a replacement, Bob holds Alice's x: a0.
+attacker[active]
+
+principal Alice[
+	generates x
+	hx = HASH(x)
+]
+
+Alice -> Carol: [hx]
+
+Alice -> Bob: x
+
+Bob -> Carol: [x]
+
+principal Carol[
+	_ = ASSERT(HASH(x), hx)?
+	digest = HASH(x)
+]
+
+Carol -> Bob: [digest]
+
+principal Bob[
+	result = HASH(digest)
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

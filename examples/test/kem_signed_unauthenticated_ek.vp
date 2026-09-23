@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0 at one session and at two (GitHub issue #29).
+//
+// The server signs HASH(ek, ct) under a pinned key, but the client's ek
+// travels unauthenticated. The attacker substitutes PUBKEY(nil) for ek, so
+// the server encapsulates to the attacker and k_s falls. The client accepts
+// only a ct whose signature covers its own ek, so it never decapsulates
+// anything but the server's encapsulation to it, and k_c holds.
+//
+// Verifpal 1.4.10 reported k_c at two sessions by opening a ciphertext the
+// server made toward PUBKEY(nil), reading r out of it, and re-encapsulating
+// to the honest ek with that r. That needs session 1's ek both substituted
+// and not substituted. In one execution the server encapsulates with each r
+// once, so the attack is gone. pke_signed_unauthenticated_ek.vp is the same
+// protocol with PKE_ENC.
+attacker[active]
+
+principal Server[
+	knows private ssk
+	spk = PUBKEY(ssk)
+]
+
+principal Client[
+	generates dk
+	ek = PUBKEY(dk)
+]
+
+Server -> Client: [spk]
+
+Client -> Server: ek
+
+principal Server[
+	generates r
+	ss, ct = KEM_ENCAP(ek, r)
+	sig = SIGN(ssk, HASH(ek, ct))
+	k_s = HASH(ss)
+]
+
+Server -> Client: ct, sig
+
+principal Client[
+	ss_c = KEM_DECAP(dk, ct)
+	_ = SIGNVERIF(spk, HASH(ek, ct), sig)?
+	k_c = HASH(ss_c)
+]
+
+queries[
+	confidentiality? k_s
+	confidentiality? k_c
+]

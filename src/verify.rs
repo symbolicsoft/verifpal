@@ -382,14 +382,16 @@ pub(crate) fn check_honest_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
+	reached: impl Fn(usize) -> bool,
 ) -> VResult<()> {
 	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values()?;
 
-	let (failures, suppressed): (Failures, Failures) = ps_resolved
+	let failures: Failures = ps_resolved
 		.perform_all_rewrites()
 		.into_iter()
-		.partition(|(_, slot)| !failure_is_suppressible(ctx, km, *slot));
+		.filter(|(_, slot)| !failure_is_suppressible(ctx, km, *slot))
+		.collect();
 	if let Err(e) = sanity_fail_on_failed_checked_primitive_rewrite(&failures) {
 		let span = failures
 			.iter()
@@ -401,12 +403,10 @@ pub(crate) fn check_honest_run(
 			None => e,
 		});
 	}
-	let cut = suppressed
-		.iter()
-		.map(|(_, slot)| slot + 1)
-		.min()
-		.unwrap_or(ps_resolved.values.len());
-	for (index, sv) in ps_resolved.values.iter().enumerate().take(cut) {
+	for (index, sv) in ps_resolved.values.iter().enumerate() {
+		if !reached(index) {
+			continue;
+		}
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
 			return Err(match km.slots.get(index) {
 				Some(slot) => e.or_span(slot.declared_span),

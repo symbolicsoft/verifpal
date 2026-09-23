@@ -1425,18 +1425,23 @@ fn assert_code(
 }
 
 fn run_model_err(model: &str, expected_substring: &str) {
+	run_model_sessions_err(model, crate::sessions::DEFAULT_SESSIONS, expected_substring);
+}
+
+fn run_model_sessions_err(model: &str, sessions: u8, expected_substring: &str) {
 	let path = format!("examples/test/{}", model);
-	match crate::verify::verify(&path) {
+	match crate::verify::verify_with_sessions(&path, sessions) {
 		Ok((_, code)) => panic!(
-			"FAIL • {} (expected an error containing {:?}, got result code {})",
-			model, expected_substring, code
+			"FAIL • {} at {} sessions (expected an error containing {:?}, got result code {})",
+			model, sessions, expected_substring, code
 		),
 		Err(e) => {
 			let text = format!("{}", e);
 			assert!(
 				text.contains(expected_substring),
-				"FAIL • {} (expected an error containing {:?}, got: {})",
+				"FAIL • {} at {} sessions (expected an error containing {:?}, got: {})",
 				model,
+				sessions,
 				expected_substring,
 				text
 			);
@@ -4614,4 +4619,78 @@ fn test_cap_malleable_causal_source() {
 fn test_woo_lam_parallel_role() {
 	run_model("woo_lam_parallel_role.vp", "a1");
 	run_model_sessions("woo_lam_parallel_role.vp", 1, "a1");
+}
+
+#[test]
+fn test_signed_encapsulation_to_an_unauthenticated_key() {
+	for sessions in [1, 2] {
+		run_model_sessions("kem_signed_unauthenticated_ek.vp", sessions, "c1c0");
+		run_model_sessions("pke_signed_unauthenticated_ek.vp", sessions, "c1c0");
+	}
+}
+
+#[test]
+fn test_key_substitution_survives_a_public_psk() {
+	for sessions in [1, 2] {
+		run_model_sessions("auth_key_substitution_private_psk.vp", sessions, "c0c0a1");
+		run_model_sessions("auth_key_substitution_public_psk.vp", sessions, "c1c1a1");
+	}
+}
+
+#[test]
+fn test_cap_forgeable_hashed_is_not_a_reuse_pair() {
+	for sessions in [1, 2] {
+		run_model_sessions(
+			"cap_forgeable_hashed_is_not_a_reuse_pair.vp",
+			sessions,
+			"c0a1",
+		);
+		run_model_sessions("cap_forgeable_inline_reuse_pair.vp", sessions, "c1a1");
+	}
+}
+
+#[test]
+fn test_auth_use_through_a_relay() {
+	for sessions in [1, 2] {
+		run_model_sessions("auth_use_through_guarded_relay.vp", sessions, "a1");
+		run_model_sessions("auth_use_through_checked_relay.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_scenario_restrictions_follow_each_run() {
+	let restriction = "`PUBKEY` cannot take `PUBKEY` as its first argument";
+	for sessions in [1, 2] {
+		run_model_sessions_err(
+			"scenario_restriction_after_corrupt_check.vp",
+			sessions,
+			restriction,
+		);
+		run_model_sessions_err(
+			"scenario_restriction_before_corrupt_check.vp",
+			sessions,
+			restriction,
+		);
+		run_model_sessions_err("scenario_restriction_reached.vp", sessions, restriction);
+		run_model_sessions("scenario_restriction_unreached.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_search_shared_term_depth() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_shared_term_depth.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_equivalence_unexecuted_assignment() {
+	for sessions in [1, 2] {
+		run_model_sessions("equivalence_unexecuted_assignment.vp", sessions, "e0");
+		run_model_sessions(
+			"equivalence_unexecuted_assignment_unchecked.vp",
+			sessions,
+			"e1",
+		);
+	}
 }

@@ -43,13 +43,6 @@ type Stuck = (Installs, Vec<(usize, usize)>, Vec<usize>);
 
 type Candidate = (Vec<(usize, Value)>, Vec<Value>, Substitution);
 
-fn term_depth(v: &Value) -> usize {
-	match v {
-		Value::Constant(_) => 0,
-		Value::Primitive(p) => 1 + p.arguments.iter().map(term_depth).max().unwrap_or(0),
-	}
-}
-
 fn installs_hash(installs: &Installs) -> u64 {
 	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
 	for (run, slot, value) in installs {
@@ -124,6 +117,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		for (value, pre, own) in protocol {
 			search.note_union_protocol(value, pre, own);
 		}
+		let built = Arc::clone(&search.nodes[0].ex.knowledge.built);
+		for term in built.values().flatten() {
+			search.union.note_built(term);
+		}
 		search.close_union();
 		search
 	}
@@ -172,7 +169,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					super::knowledge::Origin::Wire { .. } | super::knowledge::Origin::Leak { .. }
 				);
 				union.knows(v).is_none()
-					&& ((emitted && produced(v) && term_depth(v) <= depth)
+					&& ((emitted && produced(v) && crate::solve::control::term_depth(v) <= depth)
 						|| !crate::theory::obtainable(v, carrier, union))
 			})
 			.map(|(_, v)| v.clone())
@@ -203,6 +200,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		let protocol: Vec<(Value, Value, bool)> = self.nodes[node].ex.knowledge.protocol.to_vec();
 		for (value, pre, own) in protocol {
 			self.note_union_protocol(value, pre, own);
+		}
+		let built = Arc::clone(&self.nodes[node].ex.knowledge.built);
+		for term in built.values().flatten() {
+			self.union.note_built(term);
 		}
 		self.absorb_reuse(node);
 	}

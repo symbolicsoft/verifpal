@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// A restriction violation that only a corrupt scenario would reach. With
+// peer = shared, Alice's ASSERT passes and PUBKEY(shared) is well formed.
+// With peer = mpk, which Mallory's leaked key compromises, the ASSERT fails
+// and halts Alice before PUBKEY(mpk). That application would violate
+// PUBKEY's argument restriction, but no execution reaches it, so the model is
+// accepted. scenario_restriction_reached.vp drops the ? and must be rejected.
+// Nothing discloses shared to the passive attacker: c0.
+attacker[passive]
+
+principal Bob[
+	knows private shared
+	tag = HASH(shared)
+]
+
+principal Mallory[
+	knows private msk
+	mpk = PUBKEY(msk)
+	leaks msk
+]
+
+principal Alice[
+	knows private shared
+	knows private peer
+]
+
+Bob -> Alice: [tag]
+Mallory -> Alice: [mpk]
+
+principal Alice[
+	_ = ASSERT(HASH(peer), tag)?
+	peerpub = PUBKEY(peer)
+]
+
+scenarios[
+	Alice[peer = shared]
+	Alice[peer = mpk]
+]
+
+queries[
+	confidentiality? shared
+]
