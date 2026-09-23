@@ -1,0 +1,101 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a0 at one session and a1a0 at two.
+//
+// Woo-Lam Pi-f (Abadi and Needham), the repair of woolam_pi_pristine_pin.vp:
+// S's reply names the principals the request was made for, {A, B, Nb}Kbs, and
+// B checks both names. At one session the crosswire of woolam_pi_pristine_pin.vp
+// now delivers a reply naming M, which Bob rejects, and nothing else passes his
+// checks with a nil m3a.
+//
+// At two sessions the first query fails without breaking the repair. The
+// attacker hands Bob nil as m3a and diverts Alice's {nb1}Kas into Bob#2's
+// A-branch, where S#2 answers {A, B, nb1}Kbs; replayed to Bob as m5a, it names
+// A and B and carries nb1, so Bob's checks pass. Alice did answer nb1, but
+// Bob's own m3a is nil, which Alice never sent, and under positional
+// acceptance his uses of it in m4a and after the final check count. The second
+// query holds: S#2 sent that reply once and only Bob accepts it.
+
+attacker[active]
+
+principal Server[
+	knows private k_as
+	knows private k_bs
+	knows private k_ms
+	knows public a_name, b_name, m_name
+]
+
+principal Alice[
+	knows private k_as
+]
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, b_name, m_name
+]
+
+principal Mallory[
+	knows private k_ms
+	leaks k_ms
+]
+
+principal Bob[
+	generates nb1
+	generates nb2
+]
+
+Bob -> Alice: nb1
+Bob -> Mallory: nb2
+
+principal Alice[
+	m3a = ENC(k_as, nb1)
+]
+
+principal Mallory[
+	m3b = ENC(k_ms, nb2)
+]
+
+Alice -> Bob: m3a
+Mallory -> Bob: m3b
+
+principal Bob[
+	m4a = ENC(k_bs, CONCAT(a_name, b_name, m3a))
+	m4b = ENC(k_bs, CONCAT(m_name, b_name, m3b))
+]
+
+Bob -> Server: m4b
+
+principal Server[
+	p4b = DEC(k_bs, m4b)
+	idb, bidb, tokb = SPLIT(p4b)?
+	_ = ASSERT(idb, m_name)?
+	m5b = ENC(k_bs, CONCAT(idb, bidb, DEC(k_ms, tokb)))
+]
+
+Server -> Bob: m5b
+
+Bob -> Server: m4a
+
+principal Server[
+	p4a = DEC(k_bs, m4a)
+	ida, bida, toka = SPLIT(p4a)?
+	_ = ASSERT(ida, a_name)?
+	m5a = ENC(k_bs, CONCAT(ida, bida, DEC(k_as, toka)))
+]
+
+Server -> Bob: m5a
+
+principal Bob[
+	r_ida, r_idb, r_a = SPLIT(DEC(k_bs, m5a))?
+	_ = ASSERT(r_ida, a_name)?
+	_ = ASSERT(r_idb, b_name)?
+	_ = ASSERT(r_a, nb1)?
+	_ = HASH(m3a, nb1)
+	_ = HASH(m5a, nb1)
+]
+
+queries[
+	authentication? Alice -> Bob: m3a
+	authentication? Server -> Bob: m5a
+]

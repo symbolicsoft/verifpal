@@ -1,5 +1,19 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a0a0a0 at one session and c1a1a1a0 at two.
+//
+// msg is disclosed at every session count because Bob sends msg_b to Damian in
+// the clear: the guard prevents its replacement, not its observation.
+//
+// At two sessions Carol and Bob accept envelopes replayed from the other
+// session, so the two middle authentication queries fail as injective
+// agreement failures. The last one holds: Damian checks audit_mac against
+// msg_b, which reaches him guarded from his own Bob run, so the only value he
+// accepts is the MAC that Bob run computed. A replay of Bob#2's audit_mac
+// passes only when Bob's msg_b was itself replayed from session 2, and then
+// Bob's own run sent exactly that MAC, so each Damian run accepts what its own
+// Bob run sent.
 
 attacker[active]
 

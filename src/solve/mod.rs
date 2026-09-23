@@ -1,200 +1,31 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+pub(crate) mod control;
 pub(crate) mod deduce;
 pub(crate) mod diverge;
 pub(crate) mod matching;
 pub(crate) mod symbolic;
-pub(crate) mod validate;
 pub(crate) mod vars;
 
 use std::sync::Arc;
 
-use crate::context::{PassKey, VerifyContext};
-use crate::info::info_message;
+use crate::context::VerifyContext;
 use crate::types::*;
 use crate::value::{push_unique_value, resolve_trace_constant};
-use crate::verify::verify_standard_run;
 
 use deduce::Deducer;
 use matching::unifiers;
 use symbolic::SymbolicState;
-use vars::{Substitution, dedupe};
-
-pub(crate) fn verify_active(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-) -> VResult<()> {
-	info_message("Attacker is configured as active.", InfoLevel::Info, false);
-	let bound = ctx.term_bound(km);
-	let Some(seed) = principal_states.first() else {
-		return Ok(());
-	};
-
-	for phase in 0..=km.max_phase {
-		info_message(
-			&format!("Running at phase {phase}."),
-			InfoLevel::Info,
-			false,
-		);
-		crate::verify::attacker_seed_phase(ctx, km, seed, phase)?;
-		verify_standard_run(ctx, km, principal_states)?;
-		if ctx.prefers_replication() {
-			ctx.set_replication_only(true);
-			search_rounds(ctx, km, principal_states, bound)?;
-			ctx.set_replication_only(false);
-			if ctx.replication_rejected() && !ctx.all_resolved() {
-				search_rounds(ctx, km, principal_states, bound)?;
-			}
-		} else {
-			search_rounds(ctx, km, principal_states, bound)?;
-		}
-		if ctx.relativises() && !ctx.all_resolved() && !ctx.cancelled() {
-			verify_standard_run(ctx, km, principal_states)?;
-		}
-		ctx.attacker_phase_archive(phase);
-	}
-	Ok(())
-}
-
-fn search_rounds(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-	bound: &crate::reexec::TermBound,
-) -> VResult<()> {
-	search_fixpoint(ctx, km, principal_states, bound, Search::Direct)?;
-	if ctx.all_resolved() || ctx.cancelled() {
-		return Ok(());
-	}
-	let before = ctx.attacker_known_count();
-	search_fixpoint(ctx, km, principal_states, bound, Search::Refined)?;
-	if ctx.attacker_known_count() != before && !ctx.all_resolved() {
-		search_fixpoint(ctx, km, principal_states, bound, Search::Direct)?;
-	}
-	Ok(())
-}
-
-fn search_fixpoint(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-	bound: &crate::reexec::TermBound,
-	search: Search,
-) -> VResult<()> {
-	loop {
-		if ctx.all_resolved() || ctx.cancelled() {
-			break;
-		}
-		let before = ctx.attacker_known_count();
-
-		for ps in principal_states {
-			solve_principal(ctx, km, ps, Pass::Targeted, bound, search)?;
-			if ctx.all_resolved() {
-				break;
-			}
-		}
-		if !ctx.all_resolved() {
-			for ps in principal_states {
-				solve_principal(ctx, km, ps, Pass::Constructed, bound, search)?;
-				if ctx.all_resolved() {
-					break;
-				}
-			}
-		}
-		if ctx.attacker_known_count() == before {
-			break;
-		}
-	}
-	Ok(())
-}
+use vars::Substitution;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Search {
-	Direct,
-	Refined,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Pass {
+pub(crate) enum Pass {
 	Targeted,
 	Constructed,
 }
 
-impl Pass {
-	fn name(self) -> &'static str {
-		match self {
-			Pass::Targeted => "targeted search",
-			Pass::Constructed => "constructed search",
-		}
-	}
-}
-
-fn solve_principal(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	pass: Pass,
-	bound: &crate::reexec::TermBound,
-	search: Search,
-) -> VResult<()> {
-	let attacker = ctx.attacker_snapshot();
-	let controllable = crate::reexec::Controllable::of(km, ps, &attacker);
-	if !(0..ps.values.len()).any(|slot| controllable.admits(ps, &attacker, slot)) {
-		return Ok(());
-	}
-	let sym = symbolic::build(&controllable, ps, &attacker);
-	if sym.var_slots.is_empty() {
-		return Ok(());
-	}
-	let history = ctx.coherence(km, ps, &attacker);
-	let guards = crate::reexec::Guards {
-		controllable: &controllable,
-		bound,
-		history: &history,
-	};
-	if search == Search::Direct || pass != Pass::Targeted {
-		solve_with(ctx, km, ps, pass, &attacker, &guards, &sym, &[], false)?;
-	} else {
-		for honest in slots_blocking_reduction(&sym) {
-			if ctx.all_resolved() || ctx.cancelled() {
-				return Ok(());
-			}
-			let refined = symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
-			if !refined.var_slots.is_empty() {
-				solve_with(
-					ctx, km, ps, pass, &attacker, &guards, &refined, &honest, false,
-				)?;
-			}
-		}
-	}
-	if pass != Pass::Targeted || ctx.all_resolved() || ctx.cancelled() {
-		return Ok(());
-	}
-	let shared: Vec<usize> = sym
-		.var_slots
-		.iter()
-		.copied()
-		.filter(|&slot| !directly_unguarded(km, ps, slot))
-		.collect();
-	if !sym
-		.var_slots
-		.iter()
-		.any(|&slot| split_delivered(km, ps, slot))
-	{
-		return Ok(());
-	}
-	let addressed = symbolic::build_addressed(&controllable, ps, &attacker, &shared);
-	if addressed.var_slots.is_empty() {
-		return Ok(());
-	}
-	solve_with(
-		ctx, km, ps, pass, &attacker, &guards, &addressed, &shared, true,
-	)
-}
-
-fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+pub(crate) fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
@@ -203,7 +34,7 @@ fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> b
 	})
 }
 
-fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+pub(crate) fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
@@ -215,7 +46,7 @@ fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool
 		.is_some_and(|meta| meta.mutatable_to.iter().any(|&who| who != ps.id))
 }
 
-fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
+pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
 	let mut out: Vec<Vec<usize>> = Vec::new();
 	let mut seen = IdSet::default();
 	for term in &sym.terms {
@@ -269,129 +100,7 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 }
 
 #[allow(clippy::too_many_arguments)]
-fn solve_with(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	pass: Pass,
-	attacker: &AttackerState,
-	guards: &crate::reexec::Guards,
-	sym: &SymbolicState,
-	honest: &[usize],
-	addressed: bool,
-) -> VResult<()> {
-	#[cfg(test)]
-	ctx.note_search_reached_a_controllable_slot();
-
-	let key = PassKey {
-		principal: ps.id,
-		targeted: pass == Pass::Targeted,
-		addressed,
-		honest: honest.to_vec(),
-		phase: attacker.current_phase,
-		unresolved: ctx.unresolved_count(),
-		replays_from: (pass == Pass::Constructed)
-			.then(|| ctx.deferred_from(ps.id))
-			.flatten(),
-	};
-	let protocol = ctx.term_bound(km).protocol(km);
-	let recalled = ctx.pass_repeats(&key, attacker, protocol);
-	if solve_debug() || pass_debug() {
-		eprintln!(
-			"[pass] {} {}{} honest={:?} phase={} unresolved={} recalled={}",
-			ps.name,
-			pass.name(),
-			if addressed { " addressed" } else { "" },
-			key.honest,
-			key.phase,
-			key.unresolved,
-			recalled.is_some()
-		);
-	}
-	let fresh = || {
-		let honest_terms = sym
-			.var_slots
-			.iter()
-			.zip(honest_slot_terms(km, ps, sym))
-			.map(|(&slot, honest)| (vars::attacker_var_id(slot), honest))
-			.collect();
-		let deducer = Deducer::with_basis(
-			ps,
-			attacker,
-			sym,
-			ctx.known_subterms(attacker),
-			honest_terms,
-		);
-		let taken = match pass {
-			Pass::Targeted => Vec::new(),
-			Pass::Constructed => ctx.take_deferred_replays(ps.id),
-		};
-		let truncated = deducer.truncation_flag();
-		let proposed =
-			crate::reads::observe(|| propose(ctx, km, ps, pass, attacker, sym, deducer, taken));
-		if truncated.load(std::sync::atomic::Ordering::Relaxed) {
-			ctx.note_truncation(Truncation::SolverVariables);
-		}
-		proposed
-	};
-	let proposed = match recalled {
-		Some(proposed) => {
-			#[cfg(test)]
-			if pass == Pass::Targeted {
-				for result in ctx.results_get() {
-					if !result.resolved {
-						ctx.goals_noted(result.query_index, 1 + result.variants.len());
-					}
-				}
-			}
-			if check_proposals() {
-				let ((proposals, replays), _) = fresh();
-				assert!(
-					proposals.len() == proposed.proposals.len()
-						&& proposals
-							.iter()
-							.zip(&proposed.proposals)
-							.all(|(a, b)| vars::same_substitution(a, b))
-						&& replays.len() == proposed.replays.len()
-						&& replays.iter().zip(&proposed.replays).all(|(a, b)| {
-							a.len() == b.len()
-								&& a.iter()
-									.zip(b)
-									.all(|((x, u), (y, v))| x == y && u.equivalent(v, true))
-						}),
-					"a recalled proposal search for {} differs from a fresh one",
-					ps.name
-				);
-			} else if pass == Pass::Constructed {
-				ctx.take_deferred_replays(ps.id);
-			}
-			proposed
-		}
-		None => {
-			let ((proposals, replays), reads) = fresh();
-			ctx.note_pass(key, proposals, replays, reads, attacker)
-		}
-	};
-	if pass == Pass::Targeted {
-		ctx.defer_replays(ps.id, proposed.id, proposed.replays.clone());
-	}
-	let proposals = proposed.proposals.clone();
-	if pass_debug() {
-		eprintln!(
-			"[search] {} {} known={} proposals={}",
-			ps.name,
-			pass.name(),
-			attacker.known.len(),
-			proposals.len()
-		);
-	}
-	dispose(
-		ctx, km, ps, pass, attacker, guards, sym, proposals, addressed,
-	)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn propose(
+pub(crate) fn propose(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
@@ -413,8 +122,6 @@ fn propose(
 				continue;
 			}
 			for query in std::iter::once(&result.query).chain(result.variants.iter()) {
-				#[cfg(test)]
-				ctx.goals_noted(result.query_index, 1);
 				pending.push(query);
 			}
 		}
@@ -553,7 +260,7 @@ fn oracle_input_goals(
 	let mut foreign: Substitution = Substitution::default();
 	let slot_var = |v: &Value| vars::as_var(v).filter(|&id| vars::is_slot_var_id(id));
 	for state in ctx.principal_states() {
-		let controllable = crate::reexec::Controllable::of(km, state, attacker);
+		let controllable = crate::solve::control::Controllable::of(km, state, attacker);
 		let other = symbolic::build(&controllable, state, attacker);
 		for &slot in &other.var_slots {
 			if sym.var_slots.contains(&slot) {
@@ -717,125 +424,11 @@ fn sibling_replay(
 	slots > 0
 }
 
-#[allow(clippy::too_many_arguments)]
-fn dispose(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
+pub(crate) fn emissions_under(
 	ps: &PrincipalState,
-	pass: Pass,
-	attacker: &AttackerState,
-	guards: &crate::reexec::Guards,
 	sym: &SymbolicState,
-	proposals: Vec<Substitution>,
-	addressed: bool,
-) -> VResult<()> {
-	let salt = if addressed { ADDRESSED_SALT } else { 0 };
-	let mut seen: Vec<Vec<(usize, Value)>> = Vec::new();
-	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
-	let mut checked = 0usize;
-	let variants = dedupe(proposals).into_iter().flat_map(|proposal| {
-		let unpinned = leave_honest_slots(km, ps, sym, proposal.clone());
-		if unpinned.len() == proposal.len() {
-			vec![proposal]
-		} else {
-			vec![unpinned, proposal]
-		}
-	});
-	for proposal in variants {
-		if ctx.all_resolved() || ctx.cancelled() {
-			break;
-		}
-		if proposal.is_empty() {
-			continue;
-		}
-		let signature = install_signature(sym, &proposal);
-		let key = signature_hash(&signature) ^ salt;
-		let bucket = buckets.entry(key).or_default();
-		if bucket
-			.iter()
-			.any(|&i| same_install_signature(&seen[i], &signature))
-		{
-			continue;
-		}
-		let at = seen.len();
-		bucket.push(at);
-		seen.push(signature);
-		checked += 1;
-		crate::info::info_status_update(|| {
-			crate::verify::status_line(
-				ctx,
-				attacker.current_phase,
-				&ps.name,
-				&format!(
-					"{}, {} state{} checked",
-					pass.name(),
-					checked,
-					if checked == 1 { "" } else { "s" }
-				),
-			)
-		});
-		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key, addressed)?;
-		trace_proposal(ps, sym, &proposal, ran, addressed);
-		if ran && !addressed && !ctx.all_resolved() {
-			let flights = ctx
-				.recall_forged_flights(ps.id, key, &seen[at])
-				.unwrap_or_else(|| {
-					let flights = crate::witness::forged_check_flights(ctx, km, ps, &seen[at]);
-					ctx.remember_forged_flights(ps.id, key, &seen[at], flights.clone());
-					flights
-				});
-			for flight in flights {
-				let key = signature_hash(&flight);
-				let bucket = buckets.entry(key).or_default();
-				if bucket
-					.iter()
-					.any(|&i| same_install_signature(&seen[i], &flight))
-				{
-					continue;
-				}
-				bucket.push(seen.len());
-				seen.push(flight.clone());
-				let known = ctx.attacker_snapshot();
-				let ran = validate::validate(ctx, km, ps, guards, &known, &flight, key, false)?;
-				trace_signature(ps, &flight, ran, "forged");
-				if ctx.all_resolved() || ctx.cancelled() {
-					break;
-				}
-			}
-		}
-		if ran || seen[at].len() < 2 {
-			continue;
-		}
-		if !emits_an_install(ps, sym, &proposal, &seen[at]) {
-			continue;
-		}
-		let prefix = validate::admitted_prefix(ctx, km, ps, guards, attacker, &seen[at], addressed);
-		if prefix.is_empty()
-			|| prefix.len() == seen[at].len()
-			|| !oracle_chain(ps, sym, &proposal, &seen[at], &prefix)
-		{
-			continue;
-		}
-		let key = signature_hash(&prefix) ^ salt;
-		let bucket = buckets.entry(key).or_default();
-		if bucket
-			.iter()
-			.any(|&i| same_install_signature(&seen[i], &prefix))
-		{
-			continue;
-		}
-		let at = seen.len();
-		bucket.push(at);
-		seen.push(prefix);
-		let ran = validate::validate(ctx, km, ps, guards, attacker, &seen[at], key, addressed)?;
-		trace_signature(ps, &seen[at], ran, "prefix");
-	}
-	Ok(())
-}
-
-const ADDRESSED_SALT: u64 = 0x5A17_ADD2_E55E_D001;
-
-fn emissions_under(ps: &PrincipalState, sym: &SymbolicState, binding: &Substitution) -> Vec<Value> {
+	binding: &Substitution,
+) -> Vec<Value> {
 	(0..ps.values.len())
 		.filter(|&e| {
 			ps.values[e].provenance.creator == ps.id
@@ -848,7 +441,7 @@ fn emissions_under(ps: &PrincipalState, sym: &SymbolicState, binding: &Substitut
 		.collect()
 }
 
-fn emits_an_install(
+pub(crate) fn emits_an_install(
 	ps: &PrincipalState,
 	sym: &SymbolicState,
 	proposal: &Substitution,
@@ -861,45 +454,6 @@ fn emits_an_install(
 			.iter()
 			.any(|emitted| emitted.equivalent(&ground, true))
 	})
-}
-
-fn oracle_chain(
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-	proposal: &Substitution,
-	signature: &[(usize, Value)],
-	prefix: &[(usize, Value)],
-) -> bool {
-	let dropped: Vec<&(usize, Value)> = signature
-		.iter()
-		.filter(|(slot, _)| !prefix.iter().any(|(kept, _)| kept == slot))
-		.collect();
-	let mut restricted = proposal.clone();
-	for (slot, _) in &dropped {
-		restricted.remove(&vars::attacker_var_id(*slot));
-	}
-	let emissions = emissions_under(ps, sym, &restricted);
-	dropped.iter().all(|(_, ground)| {
-		let ground = crate::theory::reduce_once(ground);
-		emissions
-			.iter()
-			.any(|emitted| emitted.equivalent(&ground, true))
-	})
-}
-
-fn trace_signature(ps: &PrincipalState, signature: &[(usize, Value)], ran: bool, kind: &str) {
-	if !solve_debug() {
-		return;
-	}
-	let bindings: Vec<String> = signature
-		.iter()
-		.map(|(slot, ground)| format!("{}={ground}", ps.meta[*slot].constant.name))
-		.collect();
-	eprintln!(
-		"[solve] {} ran={ran} {kind} [{}]",
-		ps.name,
-		bindings.join(" ")
-	);
 }
 
 fn keyed_free(
@@ -944,7 +498,6 @@ fn aligned_held_free(
 	protocol: &crate::hashing::TermSet,
 ) -> Vec<Substitution> {
 	let mut index: IdMap<HeldShape, Vec<usize>> = IdMap::default();
-	crate::reads::protocol();
 	for (i, held) in attacker.known.iter().enumerate() {
 		let Value::Primitive(h) = held else {
 			continue;
@@ -1077,7 +630,11 @@ fn aligned_free_positions<'a>(
 /// called for every proposal and, for the aligned family, for every held term
 /// besides, so resolving the whole trace inside that loop is the difference
 /// between a constant factor and a multiplicative one.
-fn honest_slot_terms(km: &ProtocolTrace, ps: &PrincipalState, sym: &SymbolicState) -> Vec<Value> {
+pub(crate) fn honest_slot_terms(
+	km: &ProtocolTrace,
+	ps: &PrincipalState,
+	sym: &SymbolicState,
+) -> Vec<Value> {
 	sym.var_slots
 		.iter()
 		.map(|&slot| match ps.meta.get(slot) {
@@ -1128,7 +685,7 @@ fn fill_free_positions(
 	filled
 }
 
-fn leave_honest_slots(
+pub(crate) fn leave_honest_slots(
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	sym: &SymbolicState,
@@ -1144,7 +701,9 @@ fn leave_honest_slots(
 			continue;
 		}
 		let ground = vars::ground_free(&vars::apply(term, &proposal));
-		if vars::contains_var(&ground) || crate::reexec::attacker_authored(&ground, slot, km, ps) {
+		if vars::contains_var(&ground)
+			|| crate::solve::control::attacker_authored(&ground, slot, km, ps)
+		{
 			continue;
 		}
 		let referenced = proposal
@@ -1163,7 +722,10 @@ fn leave_honest_slots(
 		.collect()
 }
 
-fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize, Value)> {
+pub(crate) fn install_signature(
+	sym: &SymbolicState,
+	proposal: &Substitution,
+) -> Vec<(usize, Value)> {
 	let mut out = Vec::new();
 	for &slot in &sym.var_slots {
 		let Some(term) = &sym.var_terms[slot] else {
@@ -1181,7 +743,7 @@ fn install_signature(sym: &SymbolicState, proposal: &Substitution) -> Vec<(usize
 	out
 }
 
-fn same_install_signature(left: &[(usize, Value)], right: &[(usize, Value)]) -> bool {
+pub(crate) fn same_install_signature(left: &[(usize, Value)], right: &[(usize, Value)]) -> bool {
 	left.len() == right.len()
 		&& left
 			.iter()
@@ -1191,7 +753,7 @@ fn same_install_signature(left: &[(usize, Value)], right: &[(usize, Value)]) -> 
 			})
 }
 
-fn signature_hash(signature: &[(usize, Value)]) -> u64 {
+pub(crate) fn signature_hash(signature: &[(usize, Value)]) -> u64 {
 	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
 	for (slot, value) in signature {
 		acc = acc
@@ -1312,72 +874,8 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	out
 }
 
-pub(crate) fn solve_debug() -> bool {
-	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-	*ENABLED.get_or_init(|| {
-		std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some_and(|value| value != "passes")
-	})
-}
-
-fn pass_debug() -> bool {
-	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-	*ENABLED.get_or_init(|| {
-		std::env::var_os("VERIFPAL_SOLVE_DEBUG").is_some_and(|value| value == "passes")
-	})
-}
-
-fn check_proposals() -> bool {
-	static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-	*ENABLED.get_or_init(|| std::env::var_os("VERIFPAL_CHECK_PROPOSALS").is_some())
-}
-
 fn observed<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -> Vec<R> {
-	let (out, logs): (Vec<R>, Vec<crate::reads::Reads>) =
-		crate::parallel::map_ordered(items, |item| crate::reads::observe(|| f(item)))
-			.into_iter()
-			.unzip();
-	for log in logs {
-		crate::reads::absorb(log);
-	}
-	out
-}
-
-fn trace_proposal(
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-	proposal: &Substitution,
-	ran: bool,
-	addressed: bool,
-) {
-	if !solve_debug() {
-		return;
-	}
-	let bindings = binding_summary(ps, sym, proposal);
-	eprintln!(
-		"[solve] {} ran={ran}{} [{}]",
-		ps.name,
-		if addressed { " addressed" } else { "" },
-		bindings.join(" ")
-	);
-}
-
-fn binding_summary(
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-	proposal: &Substitution,
-) -> Vec<String> {
-	sym.var_slots
-		.iter()
-		.filter_map(|&slot| {
-			let term = sym.var_terms[slot].as_ref()?;
-			let ground = vars::ground_free(&vars::apply(term, proposal));
-			if vars::contains_var(&ground) {
-				None
-			} else {
-				Some(format!("{}={}", ps.meta[slot].constant.name, ground))
-			}
-		})
-		.collect()
+	crate::parallel::map_ordered(items, f)
 }
 
 fn sibling_flight_substitutions(
@@ -1429,7 +927,6 @@ fn slot_candidates(
 ) -> Vec<Value> {
 	let mut out = Vec::new();
 
-	crate::reads::protocol();
 	for candidate in attacker.known.iter() {
 		if !protocol.contains(candidate) || candidate.equivalent(honest, true) {
 			continue;
@@ -1530,28 +1027,6 @@ mod tests {
 		assert!(positions[1].1.equivalent(&public, true));
 		let filled = keyed_positions(&proposed, &honest);
 		assert!(filled[&free_var_id(0)].equivalent(&attacker_public_key(), true));
-	}
-
-	#[test]
-	fn an_uncontrollable_principal_needs_no_symbolic_execution() {
-		let source = "attacker[active]\nprincipal Alice[\ngenerates nonce\n]\nAlice -> Bob: [nonce]\nprincipal Bob[\nknows private secret\nresult = HASH(nonce, secret)\n]\nqueries[\nconfidentiality? secret\n]\n";
-		let model = crate::parser::parse_string("guarded.vp", source).unwrap();
-		let (km, states) = crate::sanity::sanity(&model).unwrap();
-		let ctx = VerifyContext::new(&model, &[], Vec::new(), 1, None, Vec::new());
-		let bound = crate::reexec::TermBound::of(&km);
-		for mut ps in states {
-			let mut term = crate::testutil::trace_constant(&km, "nonce");
-			for _ in 0..40 {
-				term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
-			}
-			ps.values.last_mut().unwrap().value = term;
-			for search in [Search::Direct, Search::Refined] {
-				for pass in [Pass::Targeted, Pass::Constructed] {
-					solve_principal(&ctx, &km, &ps, pass, &bound, search).unwrap();
-				}
-			}
-		}
-		assert!(!ctx.search_reached_a_controllable_slot());
 	}
 
 	#[test]

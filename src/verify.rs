@@ -7,9 +7,7 @@ use std::sync::atomic::AtomicBool;
 use crate::context::VerifyContext;
 use crate::info::info_message;
 use crate::parser::parse_file;
-use crate::query::query_start;
 use crate::sanity::*;
-use crate::solve::verify_active;
 use crate::types::*;
 
 #[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
@@ -106,14 +104,7 @@ fn analyze_sessions_traced_cancellable(
 	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
-	ctx.record_honest_halts(&trace, honest_run_halts(&ctx, &trace, &states)?);
-	if sessions > 1 {
-		ctx.prefer_replication_valid_witnesses();
-	}
-	match m.attacker {
-		AttackerKind::Passive => verify_passive(&ctx, &trace, &states)?,
-		AttackerKind::Active => verify_active(&ctx, &trace, &states)?,
-	}
+	crate::engine::verify(&ctx, m, &trace, &states)?;
 	if ctx.cancelled() {
 		return Err(VerifpalError::cancelled());
 	}
@@ -319,9 +310,8 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 	let analyzed = analyze_sessions_traced(m, sessions);
 	let elapsed = crate::info::info_status_elapsed();
 	crate::info::info_status_end();
-	let (ctx, trace) = analyzed?;
+	let (ctx, _) = analyzed?;
 	let (results, code) = verify_end(&ctx, elapsed)?;
-	witness_replay_check(&ctx, &trace, m.attacker);
 	Ok(VerifyReport {
 		file_name: ctx.results_file_name().to_string(),
 		sessions,
@@ -335,126 +325,19 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 	})
 }
 
-#[cfg(test)]
-fn witness_replay_check(ctx: &VerifyContext, km: &ProtocolTrace, attacker: AttackerKind) {
-	crate::witness::assert_reported_attacks_replay(ctx, km, ctx.results_file_name());
-	crate::tracecheck::assert_holds_survive_final_knowledge(ctx, km, ctx.results_file_name());
-	crate::tracecheck::assert_holds_were_searched(ctx, attacker, ctx.results_file_name());
-}
-
-#[cfg(not(test))]
-fn witness_replay_check(_ctx: &VerifyContext, _km: &ProtocolTrace, _attacker: AttackerKind) {}
-
-pub(crate) fn verify_resolve_queries(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-) -> VResult<()> {
-	let results = ctx.results_get();
-	for result in &results {
-		if result.resolved {
-			continue;
-		}
-		query_start(ctx, &result.query, result.query_index, km, ps)?;
-		for variant in &result.variants {
-			if ctx.query_is_resolved(result.query_index) {
-				break;
-			}
-			query_start(ctx, variant, result.query_index, km, ps)?;
-		}
-	}
-	Ok(())
-}
-
 type Failures = Vec<(Primitive, usize)>;
 
 fn failure_is_suppressible(ctx: &VerifyContext, km: &ProtocolTrace, slot: usize) -> bool {
 	km.slots
 		.get(slot)
-		.is_some_and(|s| !ctx.is_honest(s.creator))
+		.is_some_and(|s| !ctx.is_honest_at(s.creator, 0))
 }
 
-pub(crate) fn honest_run_halts(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-) -> VResult<Vec<(PrincipalId, usize)>> {
-	if ctx.scenarios().is_empty() {
-		return Ok(Vec::new());
-	}
-	let Some(seed) = principal_states.first() else {
-		return Ok(Vec::new());
-	};
-	let mut pure = seed.clone_for_depth(true);
-	pure.resolve_all_values()?;
-	let suppressed: Failures = pure
-		.perform_all_rewrites()
-		.into_iter()
-		.filter(|(_, slot)| failure_is_suppressible(ctx, km, *slot))
-		.collect();
-	Ok(crate::reexec::creator_halts(&pure, &suppressed))
-}
-
-pub(crate) fn halt_honest_run(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: PrincipalState,
-) -> PrincipalState {
-	if ctx.scenarios().is_empty() {
-		return ps;
-	}
-	let suppressed: Failures = ps
-		.clone()
-		.perform_all_rewrites()
-		.into_iter()
-		.filter(|(_, slot)| failure_is_suppressible(ctx, km, *slot))
-		.collect();
-	if suppressed.is_empty() {
-		return ps;
-	}
-	crate::reexec::halt_at_failed_checks(km, ps, &suppressed)
-}
-
-pub(crate) fn attacker_seed_phase(
+pub(crate) fn check_honest_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
-	phase: i32,
 ) -> VResult<()> {
-	ctx.attacker_init();
-	let mut pure = ps.clone_for_depth(true);
-	pure.resolve_all_values()?;
-	let _ = pure.perform_all_rewrites();
-	ctx.attacker_phase_update(km, &pure, phase)
-}
-
-pub(crate) fn verify_standard_run(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-) -> VResult<()> {
-	let attacker = ctx.attacker_snapshot();
-	for ps in principal_states {
-		if ctx.cancelled() {
-			return Ok(());
-		}
-		crate::info::info_status_update(|| {
-			status_line(ctx, attacker.current_phase, &ps.name, "running")
-		});
-		let ps_resolved = generate_trace(ctx, km, ps)?;
-
-		crate::deduction::compute_knowledge_closure(ctx, km, &ps_resolved)?;
-
-		verify_resolve_queries(ctx, km, &ps_resolved)?;
-	}
-	Ok(())
-}
-
-pub(crate) fn generate_trace(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-) -> VResult<PrincipalState> {
 	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values()?;
 
@@ -473,35 +356,17 @@ pub(crate) fn generate_trace(
 			None => e,
 		});
 	}
-	if !suppressed.is_empty() {
-		ps_resolved = crate::reexec::halt_at_failed_checks(km, ps_resolved, &suppressed);
-	}
-	for (index, sv) in ps_resolved.values.iter().enumerate() {
+	let cut = suppressed
+		.iter()
+		.map(|(_, slot)| slot + 1)
+		.min()
+		.unwrap_or(ps_resolved.values.len());
+	for (index, sv) in ps_resolved.values.iter().enumerate().take(cut) {
 		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
 			return Err(match km.slots.get(index) {
 				Some(slot) => e.or_span(slot.declared_span),
 				None => e,
 			});
-		}
-	}
-
-	Ok(ps_resolved)
-}
-
-pub(crate) fn verify_passive(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	principal_states: &[PrincipalState],
-) -> VResult<()> {
-	info_message("Attacker is configured as passive.", InfoLevel::Info, false);
-	let Some(seed) = principal_states.first() else {
-		return Ok(());
-	};
-	for phase in 0..=km.max_phase {
-		attacker_seed_phase(ctx, km, seed, phase)?;
-		verify_standard_run(ctx, km, principal_states)?;
-		if ctx.relativises() && !ctx.all_resolved() && !ctx.cancelled() {
-			verify_standard_run(ctx, km, principal_states)?;
 		}
 	}
 	Ok(())

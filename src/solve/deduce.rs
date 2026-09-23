@@ -384,7 +384,6 @@ impl<'a> Deducer<'a> {
 			&& contains_var(g)
 		{
 			let head = (pattern.id, pattern.arguments.len());
-			crate::reads::pattern(g);
 			for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
 				let Some(known) = self.attacker.known.get(at) else {
 					continue;
@@ -569,8 +568,6 @@ impl<'a> Deducer<'a> {
 
 	fn held_splits(&self, rule: &CombineRule) -> Vec<Arc<Primitive>> {
 		let mut splits: Vec<Arc<Primitive>> = Vec::new();
-		crate::reads::id(rule.split);
-		crate::reads::id(rule.partial);
 		for known in self.attacker.known.iter() {
 			let Value::Primitive(q) = known else {
 				continue;
@@ -662,7 +659,6 @@ impl<'a> Deducer<'a> {
 			return;
 		}
 		let head = (target.id, target.arguments.len());
-		crate::reads::head(head.0, head.1);
 		for &at in self.by_head.get(&head).map(Vec::as_slice).unwrap_or(&[]) {
 			let Some(Value::Primitive(held)) = self.attacker.known.get(at) else {
 				continue;
@@ -777,7 +773,6 @@ impl<'a> Deducer<'a> {
 			return;
 		};
 		if !self.basis.contains(goal) {
-			crate::reads::basis_miss(goal.hash_value());
 			return;
 		}
 		for (shape, bound) in self.rewrite_shapes_yielding(p, rule, goal, s) {
@@ -979,18 +974,10 @@ impl<'a> Deducer<'a> {
 		let protocol = ctx.term_bound(km).protocol(km);
 		for entries in Arc::make_mut(&mut self.by_head).values_mut() {
 			entries.retain(|&at| {
-				let constructed = match self.attacker.derivation(KnownIdx(at)) {
-					Some(DerivationRecord::Reconstructed { .. }) => true,
-					Some(DerivationRecord::Obtained { slot }) => {
-						self.attacker.record(KnownIdx(at)).is_some_and(|record| {
-							record
-								.diffs
-								.iter()
-								.any(|diff| diff.index == *slot && diff.tainted)
-						})
-					}
-					_ => false,
-				};
+				let constructed = matches!(
+					self.attacker.derivation(KnownIdx(at)),
+					Some(DerivationRecord::Reconstructed { .. })
+				);
 				!constructed || protocol.contains(&self.attacker.known[at])
 			});
 		}
@@ -1135,6 +1122,16 @@ impl<'a> Deducer<'a> {
 
 	fn satisfy_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
 		self.satisfy_check_shaped(p, base, true)
+	}
+
+	pub(crate) fn repair_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
+		let refined = refine_check(p, base);
+		if check_passes(&refined) {
+			return Vec::new();
+		}
+		let solutions = self.satisfy_check(&refined, base);
+		self.memo.borrow_mut().clear();
+		solutions
 	}
 
 	fn satisfy_check_shaped(
@@ -1618,11 +1615,11 @@ mod tests {
 		assert!(!solutions.is_empty());
 		for solution in solutions {
 			let sent = super::super::vars::ground_free(&apply(&variable, &solution));
-			assert!(super::super::validate::derivable(&sent, &ps, &attacker));
+			assert!(crate::theory::obtainable(&sent, &ps, &attacker));
 			let reduced = crate::theory::reduce_once(&super::super::vars::ground_free(&apply(
 				&goal, &solution,
 			)));
-			assert!(super::super::validate::derivable(&reduced, &ps, &attacker));
+			assert!(crate::theory::obtainable(&reduced, &ps, &attacker));
 			assert!(!reduced.equivalent(&hidden, true));
 		}
 	}
@@ -1920,7 +1917,7 @@ mod tests {
 		assert!(apply(&x, &found[0]).equivalent(&b, true));
 		assert!(apply(&y, &found[0]).equivalent(&a, true));
 		assert!(attacker.knows(&apply(&target, &found[0])).is_none());
-		assert!(super::super::validate::derivable(
+		assert!(crate::theory::obtainable(
 			&apply(&target, &found[0]),
 			&ps,
 			&attacker
@@ -1963,7 +1960,7 @@ mod tests {
 		assert!(apply(&x, &found[0]).equivalent(&b, true));
 		assert!(apply(&y, &found[0]).equivalent(&a, true));
 		assert!(attacker.knows(&apply(&target, &found[0])).is_none());
-		assert!(super::super::validate::derivable(
+		assert!(crate::theory::obtainable(
 			&apply(&target, &found[0]),
 			&ps,
 			&attacker
@@ -2014,7 +2011,7 @@ mod tests {
 		let mut found = Vec::new();
 		deducer.solve_by_combination(&signature, &Substitution::default(), &mut found);
 		assert!(!found.is_empty());
-		assert!(super::super::validate::derivable(
+		assert!(crate::theory::obtainable(
 			&Value::Primitive(Arc::new(signature)),
 			&ps,
 			&attacker
@@ -2257,7 +2254,7 @@ authentication? Sender -> Bob: payload
 		let (km, states) = crate::sanity::sanity(&model).unwrap();
 		let ps = states.iter().find(|ps| ps.name == "Bob").unwrap();
 		let attacker = make_attacker_state(vec![]);
-		let controllable = crate::reexec::Controllable::of(&km, ps, &attacker);
+		let controllable = crate::solve::control::Controllable::of(&km, ps, &attacker);
 		let sym = super::super::symbolic::build(&controllable, ps, &attacker);
 		let ctx =
 			crate::context::VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());

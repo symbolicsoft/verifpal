@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c0c1c0a1a1a0a1a1e1 at every session count.
+// Expected: c1c0c1c0a1a1a0a1a1e1 at one session and c1c0c1c0a1a1a1a1a1e1 at two.
 //
 // Secure Scuttlebutt's "Secret Handshake" — the mutual-authentication key
 // exchange used by the SSB peer-to-peer social network. Alice (client)
@@ -38,18 +38,17 @@
 //     other concurrent session. (Some of these witnesses reproduce only
 //     because parallel sessions share the model's ephemerals; the m2 story
 //     above does not need that crutch.)
-//   authentication? Bob -> Alice: secretBox1Bob  HOLDS — the exception, and
-//     it is the server-authentication half working. Alice derives her master
-//     secret through Bob's guarded long-term key, so the only ciphertext that
-//     opens under it is one Bob made; the only other such box is
-//     secretBoxM2Bob, which Bob sends two messages later and only after Alice
-//     has already accepted this one, so it is not causally available here.
-//     At two sessions the attacker can steer Alice's key onto the other Bob
-//     and hand her his boxes, but his first box is then a matching run of Bob
-//     talking to her, and his secretBoxM2Bob still needs the reply she sends
-//     only after accepting a first box: the search once reported that as an
-//     attack by spending one execution of her run against another, which the
-//     validator now refuses (history_own_later_emission.vp).
+//   authentication? Bob -> Alice: secretBox1Bob  HOLDS at one session — the
+//     exception, and it is the server-authentication half working. Alice
+//     derives her master secret through Bob's guarded long-term key, so the
+//     only ciphertext that opens under it is one Bob made; the only other such
+//     box is secretBoxM2Bob, which Bob sends two messages later and only after
+//     Alice has already accepted this one.
+//     At two sessions it FAILS by reflection. The attacker steers Alice's key
+//     onto Bob#2 and hands Bob#2 its own secretBox1Bob back as Alice's
+//     secretBoxM1Alice: both directions use the same master secret and no
+//     associated data, so Bob#2 opens it and answers with secretBoxM2Bob, which
+//     Alice then opens as her secretBox1Bob.
 //
 // The honest reading: Secret Handshake authenticates the SERVER to the
 // client and hides identities from OUTSIDERS; a client identity is

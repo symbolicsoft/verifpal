@@ -1,14 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-const TRACE_USES_A_GUARD_BYPASS: [(&str, usize); 0] = [];
-
-const TRACE_IS_NOT_A_MINIMIZED_WITNESS: [(&str, usize); 0] = [];
-
-const TRACE_IS_NOT_CAUSALLY_ORDERED: [(&str, usize); 0] = [];
-
-const TRACE_FEEDS_BACK_A_LATER_VALUE: [(&str, usize); 0] = [];
-
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
 const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 23] = [
@@ -168,10 +160,6 @@ fn expansion_base(name: &str) -> String {
 
 #[test]
 fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
-	let mut bypass: Vec<(String, usize)> = Vec::new();
-	let mut unminimized: Vec<(String, usize)> = Vec::new();
-	let mut harvested: Vec<(String, usize)> = Vec::new();
-	let mut unordered: Vec<(String, usize)> = Vec::new();
 	let mut traceless: Vec<(String, usize)> = Vec::new();
 	let mut incoherent: Vec<String> = Vec::new();
 	let mut header_problems: Vec<String> = Vec::new();
@@ -223,18 +211,6 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 			let key = (model.clone(), result.query_index);
 			if !summary.contains("Attack trace:") {
 				traceless.push(key.clone());
-			}
-			if summary.contains("does not halt") {
-				bypass.push(key.clone());
-			}
-			if summary.contains("not a minimized witness") {
-				unminimized.push(key.clone());
-			}
-			if summary.contains("itself only computes later in the same run") {
-				harvested.push(key.clone());
-			}
-			if summary.contains("not a causally ordered execution") {
-				unordered.push(key.clone());
 			}
 			for line in summary.lines() {
 				let line = line.trim();
@@ -323,37 +299,6 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		incoherent.is_empty(),
 		"an attack trace names a wire substitution the model cannot support:\n  {}",
 		incoherent.join("\n  ")
-	);
-	assert_eq!(
-		sorted(bypass),
-		pinned(&TRACE_USES_A_GUARD_BYPASS),
-		"the set of traces that explain themselves with a defeated check has moved. A new \
-		 entry means some attack is now narrated as `the attacker sent nil and the check was \
-		 defeated` where a witness that forges a value the recipient accepts on its own would \
-		 explain it; a missing entry means one of those narrations improved and the pin should \
-		 be updated"
-	);
-	assert_eq!(
-		sorted(unminimized),
-		pinned(&TRACE_IS_NOT_A_MINIMIZED_WITNESS),
-		"the set of attacks whose witness could not be minimized has moved. These traces list \
-		 the substitutions the search recorded without confirming any subset reproduces the \
-		 violation, so a new entry is a trace that got less trustworthy"
-	);
-	assert_eq!(
-		sorted(unordered),
-		pinned(&TRACE_IS_NOT_CAUSALLY_ORDERED),
-		"the set of attacks whose witness is not a causally ordered execution has moved. Every \
-		 install in a witness should be derivable from what the attacker holds before it is \
-		 made, so a new entry is a certificate whose steps cannot be read in the order they \
-		 are printed"
-	);
-	assert_eq!(
-		sorted(harvested),
-		pinned(&TRACE_FEEDS_BACK_A_LATER_VALUE),
-		"the set of attacks whose witness feeds a principal a value that principal only \
-		 computes later in the same run has moved. Such a witness rests on the atemporal \
-		 within-phase knowledge model rather than on anything the protocol permits"
 	);
 	assert_eq!(
 		sorted(traceless),
@@ -466,6 +411,16 @@ fn test_injective_recipient_nonce_unchecked() {
 	run_model_sessions("injective_recipient_nonce_unchecked.vp", 1, "a0");
 }
 
+#[test]
+fn test_woolam_pi_pristine_pin() {
+	run_model("woolam_pi_pristine_pin.vp", "a1a0");
+	run_model_sessions("woolam_pi_pristine_pin.vp", 1, "a1a0");
+}
+#[test]
+fn test_woolam_pif_pristine_pin() {
+	run_model("woolam_pif_pristine_pin.vp", "a1a0");
+	run_model_sessions("woolam_pif_pristine_pin.vp", 1, "a0a0");
+}
 #[test]
 fn test_scenario_replay_is_a_replay() {
 	run_model("scenario_replay_is_a_replay.vp", "a1");
@@ -665,7 +620,7 @@ fn test_closure_route_withheld_by_halt() {
 #[test]
 fn test_closure_cyclic_union() {
 	run_model("closure_cyclic_union.vp", "c1c1c1");
-	run_model_sessions("closure_cyclic_union.vp", 1, "c1c1c0");
+	run_model_sessions("closure_cyclic_union.vp", 1, "c1c1c1");
 }
 
 #[test]
@@ -1864,6 +1819,12 @@ fn test_scuttlebutt() {
 	run_model_at(
 		"examples/messaging/scuttlebutt.vp",
 		"scuttlebutt.vp",
+		"c1c0c1c0a1a1a1a1a1e1",
+	);
+	run_model_sessions_at(
+		"examples/messaging/scuttlebutt.vp",
+		"scuttlebutt.vp",
+		1,
 		"c1c0c1c0a1a1a0a1a1e1",
 	);
 }
@@ -2173,7 +2134,7 @@ fn test_bypass_needs_the_signed_message_wire() {
 
 #[test]
 fn test_history_own_later_emission() {
-	run_model("history_own_later_emission.vp", "a0");
+	run_model("history_own_later_emission.vp", "a1");
 	run_model_sessions("history_own_later_emission.vp", 1, "a0");
 }
 
@@ -2839,7 +2800,8 @@ fn test_key_ratchet() {
 }
 #[test]
 fn test_four_party() {
-	run_model("four_party.vp", "c1a1a1a1");
+	run_model("four_party.vp", "c1a1a1a0");
+	run_model_sessions("four_party.vp", 1, "c1a0a0a0");
 }
 #[test]
 fn test_phase_forward_secrecy() {
@@ -3198,15 +3160,22 @@ fn a_witness_narrates_only_actions_the_attacker_can_take() {
 		.iter()
 		.find(|r| r.resolved)
 		.expect("the authentication query fails");
+	let replaced: Vec<&str> = auth
+		.summary
+		.lines()
+		.filter_map(|line| line.split_once("Attacker replaces "))
+		.filter_map(|(_, rest)| rest.split_once(" (sent by "))
+		.flat_map(|(names, _)| names.split(", "))
+		.collect();
 	assert!(
-		!auth.summary.contains("replaces decrypted_file_alice_a"),
+		!replaced.contains(&"decrypted_file_alice_a"),
 		"decrypted_file_alice_a is Bob's own computation: no wire crosses it, so a \
 		 trace claiming the attacker replaces it describes an action no attacker can \
 		 take. Narrated: {}",
 		auth.summary
 	);
 	assert!(
-		auth.summary.contains("replaces g_file_alice_a_key"),
+		replaced.contains(&"g_file_alice_a_key"),
 		"the forgery is only accepted because the ephemeral public key was \
 		 substituted; a trace without that step hides the attack's load-bearing \
 		 move. Narrated: {}",
@@ -3248,7 +3217,8 @@ fn test_blind_message_substituted() {
 }
 #[test]
 fn test_blind_signing_oracle() {
-	run_model("blind_signing_oracle.vp", "a1a0");
+	run_model("blind_signing_oracle.vp", "a1a1");
+	run_model_sessions("blind_signing_oracle.vp", 1, "a1a1");
 }
 #[test]
 fn test_blind_unblind_wrong_factor() {

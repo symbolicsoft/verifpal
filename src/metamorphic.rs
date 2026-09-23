@@ -44,7 +44,7 @@ enum Outcome {
 	Panicked,
 }
 
-fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
+fn analysed(model: &Model, sessions: u8) -> Outcome {
 	let progress = std::env::var_os("VERIFPAL_METAMORPHIC_PROGRESS").is_some();
 	if progress {
 		eprintln!(
@@ -56,7 +56,6 @@ fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
 	}
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
-		let _verdicts_only = (!sweep.builds_traces()).then(crate::witness::MinimizingGuard::new);
 		crate::verify::analyze_sessions(model, sessions)
 			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
@@ -75,10 +74,10 @@ fn analysed(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
 	}
 }
 
-fn code_of(model: &Model, sessions: u8, sweep: Sweep) -> Outcome {
+fn code_of(model: &Model, sessions: u8) -> Outcome {
 	let rendered = crate::pretty::pretty_model(model);
 	match crate::parser::parse_string(&model.file_name, &rendered) {
-		Ok(reparsed) => analysed(&reparsed, sessions, sweep),
+		Ok(reparsed) => analysed(&reparsed, sessions),
 		Err(_) => Outcome::Rejected,
 	}
 }
@@ -617,10 +616,10 @@ fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(one) = code_of(model, 1, sweep) else {
+		let Outcome::Code(one) = code_of(model, 1) else {
 			return local;
 		};
-		match code_of(model, 2, sweep) {
+		match code_of(model, 2) {
 			Outcome::Rejected => {}
 			Outcome::Panicked => {
 				local.ran.push(name.clone());
@@ -657,7 +656,7 @@ fn check_invariant(
 	let models = corpus();
 	let parts = spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(before) = code_of(model, SESSIONS, sweep) else {
+		let Outcome::Code(before) = code_of(model, SESSIONS) else {
 			return local;
 		};
 		let Some(transformed) = variant(model) else {
@@ -666,7 +665,7 @@ fn check_invariant(
 		if !asks_the_same_question(model, &transformed) {
 			return local;
 		}
-		match code_of(&transformed, SESSIONS, sweep) {
+		match code_of(&transformed, SESSIONS) {
 			Outcome::Rejected => {}
 			Outcome::Panicked => {
 				local.ran.push(name.clone());
@@ -780,7 +779,7 @@ fn check_monotone(
 		if sweep.skips(name) {
 			return local;
 		}
-		let Outcome::Code(before) = code_of(model, SESSIONS, sweep) else {
+		let Outcome::Code(before) = code_of(model, SESSIONS) else {
 			return local;
 		};
 		if strength == Strength::Stronger && !before.contains('1') {
@@ -791,7 +790,7 @@ fn check_monotone(
 			if !asks_the_same_question(model, &variant) {
 				continue;
 			}
-			match code_of(&variant, SESSIONS, sweep) {
+			match code_of(&variant, SESSIONS) {
 				Outcome::Rejected => continue,
 				Outcome::Panicked => {
 					ran = true;
@@ -846,10 +845,10 @@ mod tests {
 	fn rendering_and_reparsing_a_model_preserves_every_verdict() {
 		let models = corpus();
 		let parts = spread(&models, |(name, model)| {
-			let Outcome::Code(direct) = analysed(model, SESSIONS, Sweep::Exhaustive) else {
+			let Outcome::Code(direct) = analysed(model, SESSIONS) else {
 				return (0usize, None);
 			};
-			let drift = match code_of(model, SESSIONS, Sweep::Exhaustive) {
+			let drift = match code_of(model, SESSIONS) {
 				Outcome::Code(round_tripped) if round_tripped == direct => None,
 				Outcome::Code(other) => {
 					Some(format!("{name}: direct={direct} round-tripped={other}"))

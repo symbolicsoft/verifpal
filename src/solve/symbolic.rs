@@ -31,7 +31,7 @@ fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
 }
 
 pub(crate) fn build(
-	controllable: &crate::reexec::Controllable,
+	controllable: &crate::solve::control::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 ) -> SymbolicState {
@@ -39,7 +39,7 @@ pub(crate) fn build(
 }
 
 pub(crate) fn build_assuming_honest(
-	controllable: &crate::reexec::Controllable,
+	controllable: &crate::solve::control::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	honest: &[usize],
@@ -48,7 +48,7 @@ pub(crate) fn build_assuming_honest(
 }
 
 pub(crate) fn build_addressed(
-	controllable: &crate::reexec::Controllable,
+	controllable: &crate::solve::control::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	honest: &[usize],
@@ -57,7 +57,7 @@ pub(crate) fn build_addressed(
 }
 
 fn build_with(
-	controllable: &crate::reexec::Controllable,
+	controllable: &crate::solve::control::Controllable,
 	ps: &PrincipalState,
 	attacker: &AttackerState,
 	honest: &[usize],
@@ -224,7 +224,7 @@ mod tests {
 	#[test]
 	fn a_controllable_wire_slot_becomes_a_variable_shaped_like_what_it_replaced() {
 		let (km, ps, attacker) = bob();
-		let controllable = crate::reexec::Controllable::of(&km, &ps, &attacker);
+		let controllable = crate::solve::control::Controllable::of(&km, &ps, &attacker);
 		let sym = build(&controllable, &ps, &attacker);
 		let ga = slot(&ps, "sym_ga");
 		assert!(
@@ -246,7 +246,7 @@ mod tests {
 	#[test]
 	fn holding_one_slot_honest_removes_it_from_the_variables_and_from_every_term() {
 		let (km, ps, attacker) = bob();
-		let controllable = crate::reexec::Controllable::of(&km, &ps, &attacker);
+		let controllable = crate::solve::control::Controllable::of(&km, &ps, &attacker);
 		let ga = slot(&ps, "sym_ga");
 		let refined = build_assuming_honest(&controllable, &ps, &attacker, &[ga]);
 		assert!(!refined.is_var_slot(ga), "the held slot is not a variable");
@@ -263,7 +263,7 @@ mod tests {
 	#[test]
 	fn a_slot_this_principal_created_is_never_a_variable() {
 		let (km, ps, attacker) = bob();
-		let controllable = crate::reexec::Controllable::of(&km, &ps, &attacker);
+		let controllable = crate::solve::control::Controllable::of(&km, &ps, &attacker);
 		let sym = build(&controllable, &ps, &attacker);
 		for name in ["sym_b", "sym_k", "sym_t"] {
 			assert!(

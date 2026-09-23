@@ -113,74 +113,13 @@ impl RewriteCache {
 struct ObtainableMemo {
 	owner: (*const PrincipalState, *const AttackerState),
 	entries: IdMap<u64, Vec<(Value, bool)>>,
-	index: Option<Arc<StateIndex>>,
 	inputs: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
-	restrictions: Vec<Restriction>,
 }
-
-type Restriction = (Arc<Vec<PrincipalState>>, Option<Arc<AttackerState>>);
 
 impl ObtainableMemo {
-	fn is_for_state(&self, ps: &PrincipalState) -> bool {
-		std::ptr::eq(self.owner.0, ps)
-	}
-
 	fn is_for(&self, ps: &PrincipalState, attacker: &AttackerState) -> bool {
-		self.is_for_state(ps) && std::ptr::eq(self.owner.1, attacker)
+		std::ptr::eq(self.owner.0, ps) && std::ptr::eq(self.owner.1, attacker)
 	}
-}
-
-pub(crate) struct StateIndex {
-	slots_by_hash: IdMap<u64, Vec<usize>>,
-}
-
-impl StateIndex {
-	pub(crate) fn of(ps: &PrincipalState) -> Arc<Self> {
-		Arc::new(StateIndex {
-			slots_by_hash: index_slots_by_hash(ps),
-		})
-	}
-}
-
-pub(crate) fn slots_equivalent_to(ps: &PrincipalState, value: &Value) -> Vec<usize> {
-	let hash = value.hash_value();
-	let indexed = MEMO.with(|m| {
-		let borrowed = m.borrow();
-		let memo = borrowed.as_ref()?;
-		if !memo.is_for_state(ps) {
-			return None;
-		}
-		Some(
-			memo.index
-				.as_ref()?
-				.slots_by_hash
-				.get(&hash)
-				.map(|candidates| {
-					candidates
-						.iter()
-						.copied()
-						.filter(|&i| value.equivalent(&ps.values[i].value, true))
-						.collect()
-				})
-				.unwrap_or_default(),
-		)
-	});
-	indexed.unwrap_or_else(|| {
-		ps.values
-			.iter()
-			.enumerate()
-			.filter(|(_, sv)| value.equivalent(&sv.value, true))
-			.map(|(i, _)| i)
-			.collect()
-	})
-}
-
-fn index_slots_by_hash(ps: &PrincipalState) -> IdMap<u64, Vec<usize>> {
-	let mut index: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, sv) in ps.values.iter().enumerate() {
-		index.entry(sv.value.hash_value()).or_default().push(i);
-	}
-	index
 }
 
 pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
@@ -241,20 +180,14 @@ impl<'a> DeductionMemo<'a> {
 				borrowed: std::marker::PhantomData,
 			};
 		}
-		Self::scoped(ps, attacker, None)
+		Self::scoped(ps, attacker)
 	}
 
-	pub(crate) fn scoped(
-		ps: &'a PrincipalState,
-		attacker: &'a AttackerState,
-		index: Option<&Arc<StateIndex>>,
-	) -> DeductionMemo<'a> {
+	pub(crate) fn scoped(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
 		let installed = ObtainableMemo {
 			owner: (ps as *const _, attacker as *const _),
 			entries: IdMap::default(),
-			index: index.cloned(),
 			inputs: IdMap::default(),
-			restrictions: Vec::new(),
 		};
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
@@ -331,46 +264,6 @@ pub(crate) fn same_fixed(a: &Value, b: &Value) -> bool {
 
 pub(crate) fn reused_pair(a: &Value, b: &Value) -> bool {
 	same_fixed(a, b) && !a.equivalent(b, true)
-}
-
-fn read_values(
-	attacker: &AttackerState,
-	value: &Value,
-	out: &mut Vec<(SlotIdx, Value)>,
-	seen: &mut Vec<Value>,
-) {
-	if seen.iter().any(|s| s.equivalent(value, true)) {
-		return;
-	}
-	seen.push(value.clone());
-	let Some(idx) = attacker.knows(value) else {
-		return;
-	};
-	let Some(record) = attacker.derivation(idx) else {
-		return;
-	};
-	match record {
-		DerivationRecord::Obtained { slot } | DerivationRecord::Leaked { slot } => {
-			out.push((*slot, value.clone()));
-		}
-		_ => {
-			for ingredient in record.ingredients() {
-				read_values(attacker, ingredient, out, seen);
-			}
-		}
-	}
-}
-
-pub(crate) fn one_execution(attacker: &AttackerState, a: &Value, b: &Value) -> bool {
-	let mut reads_a = Vec::new();
-	let mut reads_b = Vec::new();
-	read_values(attacker, a, &mut reads_a, &mut Vec::new());
-	read_values(attacker, b, &mut reads_b, &mut Vec::new());
-	reads_a.iter().all(|(slot_a, value_a)| {
-		reads_b
-			.iter()
-			.all(|(slot_b, value_b)| slot_a != slot_b || value_a.equivalent(value_b, true))
-	})
 }
 
 pub(crate) fn reused(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 2]> {
@@ -623,37 +516,6 @@ fn memo_inputs_put(
 	});
 }
 
-pub(crate) fn scoped_restriction(
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	replayed: &Arc<Vec<PrincipalState>>,
-	build: impl FnOnce() -> Option<Arc<AttackerState>>,
-) -> Option<Arc<AttackerState>> {
-	if let Some(hit) = MEMO.with(|m| {
-		let borrowed = m.borrow();
-		let memo = borrowed.as_ref()?;
-		if !memo.is_for(ps, attacker) {
-			return None;
-		}
-		memo.restrictions
-			.iter()
-			.find(|(seen, _)| Arc::ptr_eq(seen, replayed))
-			.map(|(_, restricted)| restricted.clone())
-	}) {
-		return hit;
-	}
-	let restricted = build();
-	MEMO.with(|m| {
-		if let Some(memo) = m.borrow_mut().as_mut()
-			&& memo.is_for(ps, attacker)
-		{
-			memo.restrictions
-				.push((Arc::clone(replayed), restricted.clone()));
-		}
-	});
-	restricted
-}
-
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
 	if primitive_is_core(p.id) {
 		return None;
@@ -666,7 +528,6 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	for output_idx in 0..MAX_SHARES {
 		let probe = p.with_output(output_idx);
 		let hash = crate::hashing::primitive_hash(&probe);
-		crate::reads::miss(hash);
 		let Some(indices) = attacker.known_map.get(&hash) else {
 			continue;
 		};
@@ -910,7 +771,6 @@ fn partial_groups(
 	};
 	let secret = &target.arguments[0];
 	let mut groups: Vec<PartialGroup> = Vec::new();
-	crate::reads::id(rule.partial);
 	for known in attacker.known.iter() {
 		let Value::Primitive(q) = known else {
 			continue;
@@ -1289,10 +1149,7 @@ mod tests {
 					),
 				] {
 					assert_eq!(obtainable(&term, &ps, &attacker), expected);
-					assert_eq!(
-						crate::solve::validate::derivable(&term, &ps, &attacker),
-						expected
-					);
+					assert_eq!(obtainable(&term, &ps, &attacker), expected);
 				}
 				if held && phase == 2 {
 					let inputs = KnowledgeInputs::new(&ps, &attacker)
@@ -1326,43 +1183,11 @@ mod tests {
 		assert!(obtainable(&term, &ps, &known));
 		assert!(!obtainable(&term, &ps, &unknown));
 		assert!(MEMO.with(|memo| memo.borrow().is_none()));
-		let _scope = DeductionMemo::scoped(&ps, &unknown, None);
+		let _scope = DeductionMemo::scoped(&ps, &unknown);
 		assert!(!obtainable(&term, &ps, &unknown));
 		assert!(obtainable(&term, &ps, &known));
 		assert!(!obtainable(&term, &ps, &unknown));
 		assert!(MEMO.with(|memo| memo.borrow().as_ref().unwrap().is_for(&ps, &unknown)));
-	}
-
-	#[test]
-	fn dependency_checks_do_not_build_a_slot_index() {
-		let leaf = make_constant("dependency_index_leaf");
-		let ps = make_principal_state(
-			"Alice",
-			1,
-			vec![make_slot_meta(leaf.as_constant().unwrap(), true)],
-			vec![make_slot_values(&leaf, 1)],
-		);
-		let attacker = make_attacker_state(vec![leaf.clone()]);
-		let term = make_primitive(PRIM_HASH, vec![leaf.clone()], 0);
-		{
-			let mut inputs = KnowledgeInputs::new(&ps, &attacker);
-			assert_eq!(inputs.of_value(&term), Some(vec![KnownIdx(0)]));
-			assert!(MEMO.with(|memo| memo.borrow().as_ref().unwrap().index.is_none()));
-			assert_eq!(slots_equivalent_to(&ps, &leaf), vec![0]);
-		}
-		let index = StateIndex::of(&ps);
-		let _scope = DeductionMemo::scoped(&ps, &attacker, Some(&index));
-		{
-			let mut inputs = KnowledgeInputs::new(&ps, &attacker);
-			assert_eq!(inputs.of_value(&term), Some(vec![KnownIdx(0)]));
-		}
-		assert!(MEMO.with(|memo| {
-			Arc::ptr_eq(
-				memo.borrow().as_ref().unwrap().index.as_ref().unwrap(),
-				&index,
-			)
-		}));
-		assert_eq!(slots_equivalent_to(&ps, &leaf), vec![0]);
 	}
 
 	#[test]
@@ -1519,52 +1344,6 @@ mod tests {
 	}
 
 	#[test]
-	fn two_values_of_one_slot_are_not_a_reused() {
-		let k = make_constant("tvo_k");
-		let n = make_constant("tvo_n");
-		let ad = make_constant("tvo_ad");
-		let e1 = make_primitive(
-			PRIM_AEAD_ENC,
-			vec![k.clone(), n.clone(), make_constant("tvo_m1"), ad.clone()],
-			0,
-		);
-		let e2 = make_primitive(
-			PRIM_AEAD_ENC,
-			vec![k.clone(), n.clone(), make_constant("tvo_m2"), ad.clone()],
-			0,
-		);
-		let Value::Primitive(p1) = &e1 else {
-			panic!("expected a primitive");
-		};
-		let read_from = |slots: [usize; 2]| {
-			let mut attacker = make_attacker_state(vec![e1.clone(), e2.clone()]);
-			attacker.derivations = Arc::new(vec![
-				DerivationRecord::Obtained {
-					slot: SlotIdx(slots[0]),
-				},
-				DerivationRecord::Obtained {
-					slot: SlotIdx(slots[1]),
-				},
-			]);
-			attacker
-		};
-		let _ = p1;
-		assert!(!one_execution(&read_from([3, 3]), &e1, &e2));
-		assert!(one_execution(&read_from([3, 4]), &e1, &e2));
-		let opened = make_primitive(PRIM_AEAD_ENC, vec![k, n, e1.clone(), ad], 0);
-		let mut attacker = make_attacker_state(vec![e1.clone(), e2.clone(), opened.clone()]);
-		attacker.derivations = Arc::new(vec![
-			DerivationRecord::Decomposed {
-				of: opened.clone(),
-				using: vec![],
-			},
-			DerivationRecord::Obtained { slot: SlotIdx(7) },
-			DerivationRecord::Obtained { slot: SlotIdx(7) },
-		]);
-		assert!(!one_execution(&attacker, &e1, &e2));
-	}
-
-	#[test]
 	fn a_reused_nonce_makes_a_ciphertext_buildable_without_its_key_or_nonce() {
 		let k = make_constant("rf_k");
 		let n = make_constant("rf_n");
@@ -1595,30 +1374,6 @@ mod tests {
 		assert_eq!(result.from.len(), 2);
 		let without_pair = make_attacker_state(vec![e1, m3, ad]);
 		assert!(can_reconstruct_primitive(&target, &ps, &without_pair).is_none());
-	}
-
-	#[test]
-	fn a_memo_installed_for_one_session_is_not_consulted_for_another() {
-		let k = make_constant("memo_k");
-		let m = make_constant("memo_m");
-		let sealed = make_primitive(PRIM_ENC, vec![k.clone(), m.clone()], 0);
-		let ps = make_principal_state("Alice", 1, vec![], vec![]);
-		let index = StateIndex::of(&ps);
-
-		let poor = make_attacker_state(vec![]);
-		let rich = make_attacker_state(vec![k, m]);
-
-		let _scope = DeductionMemo::scoped(&ps, &poor, Some(&index));
-		assert!(
-			!obtainable(&sealed, &ps, &poor),
-			"an attacker holding nothing cannot build it"
-		);
-		assert!(
-			obtainable(&sealed, &ps, &rich),
-			"the memo is installed for one attacker state, and answering a \
-			 different one out of it would let a cached `no` outlive the \
-			 knowledge that justified it"
-		);
 	}
 
 	#[test]

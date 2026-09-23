@@ -251,8 +251,10 @@ pub(crate) fn info_analysis_result(headline: &str, full: impl FnOnce() -> String
 	}
 }
 
+#[cfg(test)]
 pub(crate) struct InfoQuiet;
 
+#[cfg(test)]
 impl InfoQuiet {
 	pub(crate) fn new() -> InfoQuiet {
 		QUIET_DEPTH.with(|d| d.set(d.get() + 1));
@@ -260,12 +262,14 @@ impl InfoQuiet {
 	}
 }
 
+#[cfg(test)]
 impl Default for InfoQuiet {
 	fn default() -> Self {
 		InfoQuiet::new()
 	}
 }
 
+#[cfg(test)]
 impl Drop for InfoQuiet {
 	fn drop(&mut self) {
 		QUIET_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));

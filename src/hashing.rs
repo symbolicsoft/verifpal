@@ -39,6 +39,11 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 pub(crate) struct TermSet(IdMap<u64, Vec<Value>>);
 
 impl TermSet {
+	#[cfg(test)]
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Value> {
+		self.0.values().flatten()
+	}
+
 	pub(crate) fn insert(&mut self, value: Value) {
 		let bucket = self.0.entry(value.hash_value()).or_default();
 		if !bucket.iter().any(|held| held.equivalent(&value, true)) {
@@ -58,10 +63,6 @@ impl TermSet {
 
 	pub(crate) fn clear(&mut self) {
 		self.0.clear();
-	}
-
-	pub(crate) fn iter(&self) -> impl Iterator<Item = &Value> {
-		self.0.values().flatten()
 	}
 }
 

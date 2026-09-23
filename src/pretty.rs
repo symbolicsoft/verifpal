@@ -268,14 +268,6 @@ pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 		.join(", ")
 }
 
-pub(crate) fn pretty_values(values: &[Value]) -> String {
-	values
-		.iter()
-		.map(|v| v.to_string())
-		.collect::<Vec<_>>()
-		.join(", ")
-}
-
 pub(crate) fn pretty_principal(principal: &Principal) -> String {
 	let mut output = format!("principal {}[", principal.name);
 	output.push_str(&render_trailing(principal.header_trailing.as_ref()));
