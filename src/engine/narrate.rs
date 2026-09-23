@@ -17,6 +17,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	names: Names,
 	honest_names: Names,
 	cutoff: std::cell::Cell<usize>,
+	gated: Vec<(usize, usize)>,
 	pub(crate) lines: Vec<String>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: Vec<Value>,
@@ -126,6 +127,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			names: Names::of(cx, ex, honest),
 			honest_names: Names::of(cx, honest, honest),
 			cutoff: std::cell::Cell::new(ex.knowledge.len()),
+			gated: Vec::new(),
 			lines: Vec::new(),
 			steps: Vec::new(),
 			explained: Vec::new(),
@@ -449,8 +451,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		let program = self.cx.program;
 		let km = self.cx.km;
 		for &(run, step, before) in &self.ex.order {
-			let Event::Recv(d) = program.runs[run].steps[step].event else {
-				continue;
+			let d = match program.runs[run].steps[step].event {
+				Event::Recv(d) => d,
+				Event::Assign(slot) => {
+					if self.influenced(run, slot, &mut Vec::new()) {
+						self.gate(run, slot);
+					}
+					continue;
+				}
+				_ => continue,
 			};
 			let delivery = &program.deliveries[d];
 			let route = format!(
@@ -613,7 +622,34 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
+	fn influenced(&self, run: usize, slot: usize, seen: &mut Vec<usize>) -> bool {
+		if seen.contains(&slot) {
+			return false;
+		}
+		seen.push(slot);
+		let Some(h) = self.ex.runs[run].held(slot) else {
+			return false;
+		};
+		if h.authored {
+			return true;
+		}
+		let program = &self.cx.program.runs[run];
+		let assigned = program
+			.step_of_slot
+			.get(&slot)
+			.is_some_and(|&at| matches!(program.steps[at].event, Event::Assign(_)));
+		assigned
+			&& self.cx.km.slots[slot]
+				.initial_value
+				.constant_leaves()
+				.filter_map(|c| self.cx.km.index_of(c))
+				.any(|at| at != slot && self.influenced(run, at, seen))
+	}
+
 	pub(crate) fn gate(&mut self, run: usize, slot: usize) {
+		if self.gated.contains(&(run, slot)) || self.ex.runs[run].halted == Some(slot) {
+			return;
+		}
 		let Some(h) = self.ex.runs[run].held(slot) else {
 			return;
 		};
@@ -639,6 +675,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			format!("{principal}'s {shown} passes — the attacker controls one of its inputs."),
 		);
 		step.principal = Some(principal);
+		self.gated.push((run, slot));
 		self.push(step);
 	}
 
