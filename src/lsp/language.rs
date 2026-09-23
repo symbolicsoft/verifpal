@@ -26,6 +26,7 @@ pub(crate) const TOKEN_TYPES: &[&str] = &[
 	"comment",
 ];
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) const TOKEN_MODIFIERS: &[&str] = &["declaration", "defaultLibrary"];
 
 fn token_type(kind: TokenKind) -> Option<u32> {
@@ -47,6 +48,7 @@ fn token_type(kind: TokenKind) -> Option<u32> {
 		.map(|i| i as u32)
 }
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 	let mut data = Vec::new();
 	let mut previous = Position::new(0, 0);
@@ -356,6 +358,7 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 	})
 }
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 	let mut ranges = Vec::new();
 	if let Ok(model) = &doc.model {

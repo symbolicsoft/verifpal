@@ -4,9 +4,9 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use verifpal::{
-	ColorChoice, InfoLevel, Run, SATURATE_MAX, Saturation, Verbosity, VerifyReport, diagram,
-	html_report, info_banner, info_message, info_replay, pretty_print, saturation_sessions,
-	set_color_choice, set_verbosity, tex_report, update_check_report, update_check_start,
+	ColorChoice, InfoLevel, Run, SATURATE_MAX, Verbosity, VerifyReport, diagram, html_report,
+	info_banner, info_message, info_replay, pretty_print, saturation_sessions, set_color_choice,
+	set_verbosity, tex_report, update_check_report, update_check_start,
 	verify_report_with_source_opts,
 };
 
@@ -629,7 +629,7 @@ fn run_verify(
 					);
 				}
 				if !structured && !result_code {
-					info_message(&saturation_line(&saturation), InfoLevel::Info, false);
+					info_message(&saturation.summary(), InfoLevel::Info, false);
 				}
 				info_replay(&saturation.output);
 				(saturation.report, saturation.source)
@@ -696,29 +696,6 @@ fn run_verify(
 		return EXIT_ATTACK;
 	}
 	0
-}
-
-fn saturation_line(saturation: &Saturation) -> String {
-	if !saturation.saturated {
-		return format!(
-			"Verdicts were still changing at {} sessions, the highest --saturate tries; \
-			 analyzing there.",
-			saturation.sessions
-		);
-	}
-	if saturation.stable_from == saturation.sessions {
-		return format!(
-			"Verdicts were unchanged at {} session; analyzing there.",
-			saturation.sessions
-		);
-	}
-	format!(
-		"Verdicts were unchanged from {} session{} through {}; analyzing at {}.",
-		saturation.stable_from,
-		if saturation.stable_from == 1 { "" } else { "s" },
-		saturation.sessions,
-		saturation.sessions
-	)
 }
 
 fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {

@@ -103,6 +103,7 @@ struct Parser<'a> {
 	value_end: usize,
 	depth: usize,
 	anonymous_ok: bool,
+	queries_optional: bool,
 }
 
 const MAX_NESTING: usize = 64;
@@ -118,6 +119,7 @@ impl<'a> Parser<'a> {
 			value_end: 0,
 			depth: 0,
 			anonymous_ok: false,
+			queries_optional: false,
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
 			values: ValueNames::new(),
@@ -614,7 +616,8 @@ impl<'a> Parser<'a> {
 		}
 		let queries_leading_comments = self.take_leading();
 		let queries_kw = self.pos;
-		if !self.try_expect_keyword("queries") {
+		let absent = self.queries_optional && self.at_end();
+		if !absent && !self.try_expect_keyword("queries") {
 			if !scenarios.is_empty() {
 				return Err(VerifpalError::parse(
 					"the `scenarios` block must come directly before `queries`".into(),
@@ -634,51 +637,12 @@ impl<'a> Parser<'a> {
 				.note("a model must ask at least one question, or there is nothing to verify")
 				.help("add `queries[ confidentiality? m ]` at the end of the model"));
 		}
-		self.record_from(queries_kw, crate::tokens::TokenKind::Keyword);
-		self.skip_whitespace();
-		let queries_bracket = self.pos;
-		self.expect("[")?;
-		let queries_header_trailing = self.try_take_trailing();
-		self.consume_trivia();
-		let mut queries = Vec::new();
-		loop {
-			self.consume_trivia();
-			if self.peek() == Some(b']') {
-				break;
-			}
-			if self.at_end() {
-				if queries.is_empty() {
-					break;
-				}
-				return Err(self.unclosed_hint(
-					VerifpalError::parse("the `queries` block is never closed".into())
-						.at(self.here())
-						.labelled(self.found_here()),
-					queries_bracket,
-				));
-			}
-			let mut leading = self.take_leading();
-			let mut query = self.parse_query()?;
-			leading.extend(self.take_leading());
-			query.leading_comments = leading;
-			query.trailing_comment = self.try_take_trailing();
-			queries.push(query);
-			self.consume_trivia();
-		}
-		if queries.is_empty() {
-			return Err(VerifpalError::parse("`queries` block is empty".into())
-				.at(Span::new(queries_kw, queries_kw + "queries".len()))
-				.labelled("no queries here")
-				.note("a model must ask at least one question, or there is nothing to verify")
-				.help("add a query, for example `confidentiality? m`"));
-		}
-		let queries_tail_comments = self.take_leading();
-		let queries_closing_trailing = if self.peek() == Some(b']') {
-			self.advance();
-			self.try_take_trailing()
-		} else {
-			None
-		};
+		let (queries, queries_header_trailing, queries_tail_comments, queries_closing_trailing) =
+			if absent {
+				(Vec::new(), None, Vec::new(), None)
+			} else {
+				self.parse_queries(queries_kw)?
+			};
 		self.consume_trivia();
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
@@ -717,6 +681,64 @@ impl<'a> Parser<'a> {
 			queries_closing_trailing,
 			tail_comments,
 		})
+	}
+
+	#[allow(clippy::type_complexity)]
+	fn parse_queries(
+		&mut self,
+		queries_kw: usize,
+	) -> VResult<(Vec<Query>, Option<Comment>, Vec<Comment>, Option<Comment>)> {
+		self.record_from(queries_kw, crate::tokens::TokenKind::Keyword);
+		self.skip_whitespace();
+		let queries_bracket = self.pos;
+		self.expect("[")?;
+		let queries_header_trailing = self.try_take_trailing();
+		self.consume_trivia();
+		let mut queries = Vec::new();
+		loop {
+			self.consume_trivia();
+			if self.peek() == Some(b']') {
+				break;
+			}
+			if self.at_end() {
+				if queries.is_empty() && !self.queries_optional {
+					break;
+				}
+				return Err(self.unclosed_hint(
+					VerifpalError::parse("the `queries` block is never closed".into())
+						.at(self.here())
+						.labelled(self.found_here()),
+					queries_bracket,
+				));
+			}
+			let mut leading = self.take_leading();
+			let mut query = self.parse_query()?;
+			leading.extend(self.take_leading());
+			query.leading_comments = leading;
+			query.trailing_comment = self.try_take_trailing();
+			queries.push(query);
+			self.consume_trivia();
+		}
+		if queries.is_empty() && !self.queries_optional {
+			return Err(VerifpalError::parse("`queries` block is empty".into())
+				.at(Span::new(queries_kw, queries_kw + "queries".len()))
+				.labelled("no queries here")
+				.note("a model must ask at least one question, or there is nothing to verify")
+				.help("add a query, for example `confidentiality? m`"));
+		}
+		let queries_tail_comments = self.take_leading();
+		let queries_closing_trailing = if self.peek() == Some(b']') {
+			self.advance();
+			self.try_take_trailing()
+		} else {
+			None
+		};
+		Ok((
+			queries,
+			queries_header_trailing,
+			queries_tail_comments,
+			queries_closing_trailing,
+		))
 	}
 
 	#[allow(clippy::type_complexity)]
@@ -1809,7 +1831,7 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	parse_string(&file_name, &content)
 }
 
-#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 pub(crate) fn parse_string_indexed(
 	file_name: &str,
 	input: &str,
@@ -1829,7 +1851,17 @@ pub(crate) fn parse_string_indexed(
 }
 
 pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
+	parse_string_with(file_name, input, false)
+}
+
+#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
+pub(crate) fn parse_string_queries_optional(file_name: &str, input: &str) -> VResult<Model> {
+	parse_string_with(file_name, input, true)
+}
+
+fn parse_string_with(file_name: &str, input: &str, queries_optional: bool) -> VResult<Model> {
 	let mut parser = Parser::new(input);
+	parser.queries_optional = queries_optional;
 	let mut model = parser
 		.parse_model()
 		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input))?;
@@ -1841,6 +1873,38 @@ pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn only_the_optional_parse_accepts_a_model_without_queries() {
+		let body = "attacker[passive]\nprincipal Alice[\n\tknows private oq_m\n]\n";
+		for source in [
+			body.to_string(),
+			format!("{body}queries[]\n"),
+			format!("{body}queries[\n\t// none yet\n]\n"),
+		] {
+			assert!(parse_string("oq.vp", &source).is_err(), "{source:?}");
+			let m = parse_string_queries_optional("oq.vp", &source).expect("parses");
+			assert!(m.queries.is_empty());
+		}
+		for source in [
+			format!("{body}queries[\n"),
+			format!("{body}queries[]\nphase[1]\n"),
+			"attacker[passive]\nqueries[]\n".to_string(),
+		] {
+			assert!(
+				parse_string_queries_optional("oq.vp", &source).is_err(),
+				"{source:?}"
+			);
+		}
+		let asked = format!("{body}queries[\n\tconfidentiality? oq_m\n]\n");
+		assert_eq!(
+			parse_string_queries_optional("oq.vp", &asked)
+				.expect("parses")
+				.queries
+				.len(),
+			1
+		);
+	}
 
 	#[test]
 	fn spans_end_at_their_last_character() {

@@ -55,9 +55,10 @@ cargo test --release model_tests::           # end-to-end models only
 cargo test --release test_ok                 # one test
 cargo test --release -- --ignored            # exhaustive metamorphic sweeps
 cargo clippy --all-targets -- -D warnings     # native CI lint
-make lint                                   # native/WASM clippy + fmt check
+make lint                                   # native/WASM (host and wasm32) clippy + fmt check
 cargo fmt                                   # hard tabs, Unix newlines
 cargo check --lib --no-default-features --features wasm
+cargo test --release --no-default-features --features wasm --lib wasm::
 make test-tex                               # compile generated LaTeX with tectonic
 make wasm                                   # build/copy website WASM
 make dist-assets                            # completions + man pages
@@ -81,7 +82,9 @@ For wrong active-attacker results, start with `VERIFPAL_SOLVE_DEBUG=1`. It logs 
 - Lib `verifpal` (`cdylib`, `rlib`), bin `src/main.rs` (default `cli` feature). CLI stdout uses `out!`/`outp!`, ignoring closed pipes.
 - **Engine modules are `pub(crate)`**; only `lib.rs` re-exports are public. Keep `#![warn(unreachable_pub)]` / `#![forbid(unsafe_code)]`.
 - No `tests/` directory: integration targets collide with the `cdylib` artifact; use `src/model_tests.rs`.
-- Features: default `cli` (clap, colored, ureq, rayon, `lsp`), `lsp`, `wasm` (`wasm_verify`/`wasm_pretty` return JSON; `info::wasm_messages_*` buffers output).
+- Features: default `cli` (clap, colored, ureq, rayon, `lsp`); `language` (lsp-types only); `lsp` (`language`, crossbeam, lsp-server); `wasm` (`language`, wasm-bindgen, js-sys). Language items the WASM build does not use carry `cfg_attr(not(feature = "lsp"), allow(dead_code))`.
+- `src/wasm.rs` holds every export. Each takes and returns JSON strings and never panics on bad input. `wasm_verify`/`wasm_pretty` shapes are depended on; do not change them. `wasm_analyze(input, options)` runs the CLI's `--sessions`/`--auto-queries`/`--saturate` through `verify_parsed`/`saturate` and adds `Run::of`'s model report and, on request, `html_report`. `wasm_check` is the LSP's live diagnostics; `wasm_language` answers hover, completion, signature help, definition, references, highlights, rename, symbols and inlay hints in LSP JSON with UTF-16 positions; `wasm_suggest_queries` returns `auto_queries` as canonical query lines; it alone parses with `parse_string_queries_optional`, which accepts a missing or empty `queries` block and keeps every other check. The language exports run under `InfoQuiet`, since wasm32 messages ignore verbosity.
+- `info::wasm_messages_*` buffers output for `messages`. On wasm32 each buffered line (`"message"`) and the search status line, throttled to 100 ms (`"status"`), also go to `globalThis.verifpalProgress(kind, text)` through a `catch` import, so an absent or throwing handler is ignored. On wasm32 `info_status_elapsed` reads `js_sys::Date`, so reports carry real elapsed time, while the forwarded status line omits it. Imported JS panics natively: gate those calls on `target_arch = "wasm32"`; the `wasm` unit tests run natively.
 - `parallel.rs` is the sole rayon seam, with a sequential WASM twin: **change both and run the WASM check**. `map_ordered` preserves order; `VERIFPAL_THREADS=n` sets pool size, `1` is sequential (`an_analysis_is_identical_under_one_thread_and_many`). Only the solver's pure proposal work runs on workers (`solve::propose`); execution, knowledge closure, judgment, reporting and every `VerifyContext` write stay on the caller thread. `VerifyContext` is interior-mutable and `Sync` (`everything_a_worker_borrows_is_sync`).
 - Thread-local caches use `context::Generational`, clearing on first access in a different generation to prevent cross-model id contamination. **Internal parallelism only with one live analysis**: `live_generations() > 1` makes `map_ordered` sequential. `DeductionMemo::scoped` installs/restores the theory's deduction memo.
 - **Always use `--release`**: opt-level 3, fat LTO, one codegen unit, abort panics, stripped symbols.
@@ -137,7 +140,7 @@ parse_file (parser.rs)              hand-written recursive-descent, comment-pres
   → verify_end                      prints results, returns the results code
 ```
 
-`verify::analyze(&Model)` is the **one** place that sequence exists; it is `analyze_sessions(m, DEFAULT_SESSIONS)`, and the wasm entry points and the LSP call it too — **do not give one entry point its own default.** Throughout, `km` is the `ProtocolTrace`, `ps` a `PrincipalState`, `cx` the engine `Context` (program, `km`, carrier state, initial knowledge) and `ex` an `Execution`.
+`verify::analyze(&Model)` is the **one** place that sequence exists; it is `analyze_sessions(m, DEFAULT_SESSIONS)`, and `wasm_verify` and the LSP call it too, while `wasm_analyze` takes the CLI's `verify_parsed` path at `DEFAULT_SESSIONS` unless asked otherwise — **do not give one entry point its own default.** Throughout, `km` is the `ProtocolTrace`, `ps` a `PrincipalState`, `cx` the engine `Context` (program, `km`, carrier state, initial knowledge) and `ex` an `Execution`.
 
 ### Program (engine/program.rs)
 
@@ -239,7 +242,7 @@ Acceptance pair: `spore_ns_pk.vp` (`c1a1a0`, Lowe attack), `spore_nsl_pk.vp` (`c
 
 `autoquery.rs::auto_queries` **replaces** queries after `sanity` validates the original model. Generate confidentiality for each fresh/private trace constant, authentication for each delivery used in a recipient primitive, freshness for every sent-and-used constant; skip unlinkability/equivalence (`generated_queries_all_pass_sanity`).
 
-`saturation_sessions` tries `DEFAULT_SESSIONS` through `SATURATE_MAX` (4), stopping at the first repeated result code and returning that count's **analysis**. Starting at one would stop before three-run attacks (`saturation_never_stops_before_it_has_looked_above_the_default`). `attack_disappeared` warns about attacks vanishing at higher counts: an engine bug.
+`verify::saturate`, behind `saturation_sessions` and `wasm_analyze`, tries `DEFAULT_SESSIONS` through `SATURATE_MAX` (4), stopping at the first repeated result code and returning that count's **analysis**. Each round's output is captured (on wasm32 too) and only the reported round's is replayed. Starting at one would stop before three-run attacks (`saturation_never_stops_before_it_has_looked_above_the_default`). `attack_disappeared` warns about attacks vanishing at higher counts: an engine bug.
 
 ### Core data model (types.rs)
 
@@ -294,7 +297,7 @@ Adding a query kind must update `Judge::evaluate`, `Violation`, `report` and `go
 
 - `parser.rs` preserves comments and skips a leading BOM by position. `pretty.rs` is pure, idempotent, golden-tested and **not sanity-gated**; it owns AST `Display`. `resolution.rs` follows bare aliases with cycle guards; registry argument normalization bounds forbidden nesting.
 - `info.rs` handles output, silent probes and saturation capture. `update.rs` makes the sole outbound request (GitHub tags), **only when stdout is a terminal**; network work under pipes delayed exit.
-- `lsp/` uses stdio, debouncing, worker analysis and URI-keyed documents without filesystem access. **Both threads set Silent verbosity** or thread-local output corrupts stdout. Keyword/query prose lives in `docs.rs`; primitive/capability docs come from specs.
+- `lsp/server.rs` uses stdio, debouncing, worker analysis (`analysis.rs`) and URI-keyed documents (`state.rs`) without filesystem access. Only the server, `analysis.rs` and `proto.rs` need `lsp`; the rest also serves the WASM language exports. **Both threads set Silent verbosity** or thread-local output corrupts stdout. Keyword/query prose lives in `docs.rs`; primitive/capability docs come from specs.
 - `report.rs` supplies JSON/HTML/TeX/LSP. Ranges use byte offsets and 1-based line/column, not LSP positions. Parse once in `Run::of`; renderers never parse. Include leak-only principals. Session/scenario suffix notes appear only when a structured trace step names a `#`/`@` value.
 - **No HTML/LaTeX markup in Rust.** Embed templates/assets; `Val::Text` escapes, `Val::Raw` does not. Tests reject missing/unused placeholders. LaTeX figures retain paired extraction markers and `\vp…` macros; `listing_safe` excludes embedded `\end{lstlisting}`. Preserve the no-proof disclaimer. Bless goldens with `VERIFPAL_BLESS_HTML`/`VERIFPAL_BLESS_TEX`; `VERIFPAL_TECTONIC=1` enables compilation.
 - `msc.rs` shares diagram rows; `tokens.rs` indexes even failed parses. **Do not add `Span` to `Constant` or process-global mutable state.** Interners are parser-owned and error before ids enter attacker/copy/solver bands.

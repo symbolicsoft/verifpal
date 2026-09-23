@@ -11,7 +11,9 @@ use crate::types::{Model, ProtocolTrace, VResult, VerifpalError};
 
 pub(crate) struct Document {
 	pub text: String,
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub version: i32,
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub name: String,
 	pub line: LineIndex,
 	pub model: VResult<Model>,
@@ -38,6 +40,7 @@ impl Documents {
 		self.open.insert(uri, doc);
 	}
 
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub(crate) fn change(&mut self, uri: &str, version: i32, text: String) {
 		let Some(name) = self.open.get(uri).map(|d| d.name.clone()) else {
 			return;
@@ -46,6 +49,7 @@ impl Documents {
 		self.open.insert(uri.to_string(), doc);
 	}
 
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub(crate) fn close(&mut self, uri: &str) {
 		self.open.remove(uri);
 	}
@@ -54,6 +58,7 @@ impl Documents {
 		self.open.get(uri)
 	}
 
+	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub(crate) fn uris(&self) -> Vec<String> {
 		self.open.keys().cloned().collect()
 	}
@@ -95,6 +100,7 @@ impl Documents {
 	}
 }
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn file_name(uri: &Uri) -> String {
 	let path = uri.path().as_str();
 	let last = path.rsplit('/').next().unwrap_or("");

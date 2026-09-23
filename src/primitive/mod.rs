@@ -22,7 +22,7 @@ pub(crate) enum Reveal {
 }
 
 #[derive(Clone, Copy, Default)]
-#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+#[cfg_attr(not(feature = "language"), allow(dead_code))]
 pub(crate) struct PrimitiveDoc {
 	pub example: &'static str,
 	pub help: &'static str,
@@ -125,7 +125,7 @@ pub(crate) struct PrimitiveCoreSpec {
 	pub equality: bool,
 	pub unwraps: Option<usize>,
 	pub arg_names: Vec<&'static str>,
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+	#[cfg_attr(not(feature = "language"), allow(dead_code))]
 	pub doc: PrimitiveDoc,
 }
 
@@ -172,7 +172,7 @@ pub(crate) struct PrimitiveSpec {
 	pub divergence_filler: bool,
 	pub arity_help: Option<(i32, &'static str)>,
 	pub arg_names: Vec<&'static str>,
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+	#[cfg_attr(not(feature = "language"), allow(dead_code))]
 	pub doc: PrimitiveDoc,
 }
 
@@ -568,7 +568,7 @@ pub(crate) fn primitive_arity_help(id: PrimitiveId, given: i32) -> Option<&'stat
 	(arity == given).then_some(help)
 }
 
-#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+#[cfg_attr(not(feature = "language"), allow(dead_code))]
 pub(crate) fn primitive_docs() -> Vec<(&'static str, PrimitiveDoc)> {
 	core_specs()
 		.map(|s| (s.name, s.doc))
@@ -576,7 +576,7 @@ pub(crate) fn primitive_docs() -> Vec<(&'static str, PrimitiveDoc)> {
 		.collect()
 }
 
-#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
+#[cfg_attr(not(feature = "language"), allow(dead_code))]
 pub(crate) fn primitives_supporting(
 	supports: impl Fn(PrimitiveId) -> bool,
 ) -> Vec<&'static PrimitiveSpec> {

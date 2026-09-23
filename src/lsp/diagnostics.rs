@@ -59,6 +59,7 @@ pub(crate) fn of_error(e: &VerifpalError, source: &str, line: &LineIndex, uri: &
 	}
 }
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn shown(verdicts: &[Diagnostic], passing: bool) -> Vec<Diagnostic> {
 	verdicts
 		.iter()
@@ -67,6 +68,7 @@ pub(crate) fn shown(verdicts: &[Diagnostic], passing: bool) -> Vec<Diagnostic> {
 		.collect()
 }
 
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) -> Vec<Diagnostic> {
 	analysis
 		.queries

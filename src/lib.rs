@@ -16,7 +16,7 @@ pub(crate) mod equivalence;
 pub(crate) mod hashing;
 pub(crate) mod html;
 pub(crate) mod info;
-#[cfg(feature = "lsp")]
+#[cfg(feature = "language")]
 pub(crate) mod lsp;
 #[cfg(test)]
 mod metamorphic;
@@ -49,6 +49,8 @@ pub(crate) mod update;
 pub(crate) mod util;
 pub(crate) mod value;
 pub(crate) mod verify;
+#[cfg(feature = "wasm")]
+pub(crate) mod wasm;
 
 pub use html::html_report;
 pub use info::{Verbosity, info_banner, info_message, info_replay, set_verbosity};
@@ -67,148 +69,7 @@ pub use verify::{
 	verify_report, verify_report_with_source, verify_report_with_source_opts, verify_saturating,
 	verify_with_sessions,
 };
-
 #[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize)]
-struct WasmVerify {
-	ok: bool,
-	error: String,
-	results: Vec<WasmResult>,
-	code: String,
-	assumptions: Vec<WasmAssumption>,
-	scenarios: Vec<WasmScenario>,
-	messages: Vec<String>,
-}
-
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize)]
-struct WasmScenario {
-	summary: String,
-	honest: bool,
-}
-
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize)]
-struct WasmResult {
-	query: String,
-	resolved: bool,
-	kind: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	subtype: Option<String>,
-	summary: String,
-	envelope: String,
-}
-
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WasmAssumption {
-	term: String,
-	capability: String,
-	from_phase: i32,
-}
-
-#[cfg(feature = "wasm")]
-#[derive(serde::Serialize)]
-struct WasmPretty {
-	ok: bool,
-	error: String,
-	output: String,
-}
-
-#[cfg(feature = "wasm")]
-fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
-	let m = parser::parse_string("workbench.vp", input)?;
-	let ctx = verify::analyze(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-	let results = ctx.results_get();
-	Ok(WasmVerify {
-		ok: true,
-		error: String::new(),
-		code: types::VerifyResult::results_code(&results),
-		results: results
-			.iter()
-			.map(|r| WasmResult {
-				query: r.query.to_string(),
-				resolved: r.resolved,
-				kind: r.query.kind.name().to_string(),
-				subtype: r.subtype.map(|s| s.name().to_string()),
-				summary: r.summary.clone(),
-				envelope: r.envelope.summary(),
-			})
-			.collect(),
-		assumptions: ctx
-			.capability_assumptions()
-			.iter()
-			.map(|(term, capability, onset)| WasmAssumption {
-				term: term.to_string(),
-				capability: capability.name().to_string(),
-				from_phase: *onset,
-			})
-			.collect(),
-		scenarios: ctx
-			.scenarios()
-			.iter()
-			.map(|s| WasmScenario {
-				summary: s.to_string(),
-				honest: s.honest,
-			})
-			.collect(),
-		messages: info::wasm_messages_drain(),
-	})
-}
-
-#[cfg(feature = "wasm")]
-#[wasm_bindgen]
-pub fn wasm_verify(input: &str) -> String {
-	info::wasm_messages_init();
-	let payload = wasm_verify_inner(input).unwrap_or_else(|e| WasmVerify {
-		ok: false,
-		error: e.to_string(),
-		results: vec![],
-		code: String::new(),
-		assumptions: vec![],
-		scenarios: vec![],
-		messages: info::wasm_messages_drain(),
-	});
-	serde_json::to_string(&payload).unwrap_or_else(|_| {
-		r#"{"ok":false,"error":"could not serialize the result","results":[],"code":"","assumptions":[],"scenarios":[],"messages":[]}"#
-			.to_string()
-	})
-}
-
-#[cfg(feature = "wasm")]
-#[wasm_bindgen]
-pub fn wasm_pretty(input: &str) -> String {
-	let payload =
-		match parser::parse_string("workbench.vp", input).map(|m| pretty::pretty_model(&m)) {
-			Ok(output) => WasmPretty {
-				ok: true,
-				error: String::new(),
-				output,
-			},
-			Err(e) => WasmPretty {
-				ok: false,
-				error: e.to_string(),
-				output: String::new(),
-			},
-		};
-	serde_json::to_string(&payload)
-		.unwrap_or_else(|_| r#"{"ok":false,"error":"could not serialize","output":""}"#.to_string())
-}
-
-#[cfg(all(test, feature = "wasm"))]
-mod tests {
-	#[test]
-	fn a_wasm_result_carries_the_verdict_qualifier() {
-		let source = std::fs::read_to_string("examples/test/conf_attacker_supplied_value.vp")
-			.expect("the model is in the corpus");
-		let payload: serde_json::Value =
-			serde_json::from_str(&super::wasm_verify(&source)).expect("valid JSON");
-		assert_eq!(payload["ok"], true);
-		assert_eq!(payload["results"][0]["subtype"], "attacker-supplied value");
-		assert!(payload["results"][1].get("subtype").is_none());
-	}
-}
+pub use wasm::{
+	wasm_analyze, wasm_check, wasm_language, wasm_pretty, wasm_suggest_queries, wasm_verify,
+};

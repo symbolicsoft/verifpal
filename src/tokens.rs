@@ -24,7 +24,7 @@ pub(crate) enum TokenKind {
 	Comment,
 }
 
-#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(crate) struct Token {
 	pub span: Span,
@@ -32,7 +32,7 @@ pub(crate) struct Token {
 	pub text: Arc<str>,
 }
 
-#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(crate) struct Symbol {
 	pub name: Arc<str>,
@@ -59,7 +59,7 @@ impl TokenIndex {
 		});
 	}
 
-	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn tokens(&self) -> &[Token] {
 		&self.tokens
 	}
@@ -72,7 +72,7 @@ impl TokenIndex {
 		self.tokens.truncate(len);
 	}
 
-	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn references(&self, token: &Token) -> Vec<Span> {
 		self.tokens
 			.iter()
@@ -81,7 +81,7 @@ impl TokenIndex {
 			.collect()
 	}
 
-	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn declaration_of(&self, token: &Token) -> Option<Span> {
 		if token.kind == TokenKind::PrincipalName {
 			return self.tokens.windows(2).find_map(|pair| {
@@ -97,7 +97,7 @@ impl TokenIndex {
 		self.references(token).first().copied()
 	}
 
-	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn resolve(&self, token: &Token, trace: &ProtocolTrace) -> Option<Symbol> {
 		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
 			return None;
@@ -124,7 +124,7 @@ impl TokenIndex {
 		})
 	}
 
-	#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn at(&self, offset: usize) -> Option<&Token> {
 		let i = self
 			.tokens

@@ -38,6 +38,11 @@ thread_local! {
 	static STATUS_START: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
 }
 
+#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
+thread_local! {
+	static WASM_STATUS_START: Cell<Option<f64>> = const { Cell::new(None) };
+}
+
 #[cfg(feature = "cli")]
 const STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
 
@@ -131,6 +136,8 @@ pub(crate) fn info_status_begin() {
 		STATUS_START.with(|c| c.set(Some(std::time::Instant::now())));
 		STATUS_LAST.with(|c| c.set(None));
 	}
+	#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
+	WASM_STATUS_START.set(Some(js_sys::Date::now()));
 }
 
 #[cfg(feature = "cli")]
@@ -138,7 +145,13 @@ pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
 	STATUS_START.with(|c| c.get()).map(|start| start.elapsed())
 }
 
-#[cfg(not(feature = "cli"))]
+#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
+pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+	let start = WASM_STATUS_START.get()?;
+	std::time::Duration::try_from_secs_f64((js_sys::Date::now() - start).max(0.0) / 1000.0).ok()
+}
+
+#[cfg(not(any(feature = "cli", all(feature = "wasm", target_arch = "wasm32"))))]
 pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
 	None
 }
@@ -158,6 +171,8 @@ pub(crate) fn info_status_update(_text: impl FnOnce() -> String) {
 		STATUS_LAST.with(|c| c.set(Some(now)));
 		status_draw(&_text());
 	}
+	#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+	crate::wasm::progress_status(_text);
 }
 
 #[cfg(feature = "cli")]
@@ -189,6 +204,8 @@ pub(crate) fn info_status_end() {
 	info_status_erase();
 	#[cfg(feature = "cli")]
 	STATUS_LAST.with(|c| c.set(None));
+	#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
+	WASM_STATUS_START.set(None);
 }
 
 pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
@@ -200,6 +217,9 @@ pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
 }
 
 pub(crate) fn info_blank_line() {
+	if cfg!(target_arch = "wasm32") {
+		return;
+	}
 	if !chrome_is_visible() {
 		return;
 	}
@@ -251,10 +271,10 @@ pub(crate) fn info_analysis_result(headline: &str, full: impl FnOnce() -> String
 	}
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "wasm"))]
 pub(crate) struct InfoQuiet;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "wasm"))]
 impl InfoQuiet {
 	pub(crate) fn new() -> InfoQuiet {
 		QUIET_DEPTH.with(|d| d.set(d.get() + 1));
@@ -269,7 +289,7 @@ impl Default for InfoQuiet {
 	}
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "wasm"))]
 impl Drop for InfoQuiet {
 	fn drop(&mut self) {
 		QUIET_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
@@ -295,7 +315,16 @@ pub(crate) fn wasm_messages_drain() -> Vec<String> {
 		.collect()
 }
 
+#[cfg(feature = "wasm")]
+pub(crate) fn wasm_messages_replay(lines: Vec<String>) {
+	for line in lines {
+		wasm_push(line);
+	}
+}
+
 fn wasm_push(msg: String) {
+	#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+	crate::wasm::progress_message(&msg);
 	WASM_MSG_BUF
 		.lock()
 		.unwrap_or_else(|e| e.into_inner())
@@ -381,7 +410,12 @@ pub fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
 	}
 	let (indent, plain_label, plain_symbol, ..) = level_columns(level);
 	if cfg!(target_arch = "wasm32") {
-		wasm_push(format!("[{}] {}", plain_label, msg));
+		let line = format!("[{}] {}", plain_label, msg);
+		if info_is_capturing() {
+			CAPTURED.with(|c| c.borrow_mut().push(line));
+		} else {
+			wasm_push(line);
+		}
 		return;
 	}
 	if !level_is_visible(level) {

@@ -743,6 +743,7 @@ dependencies = [
  "clap_mangen",
  "colored",
  "crossbeam-channel",
+ "js-sys",
  "lsp-server",
  "lsp-types",
  "rayon",

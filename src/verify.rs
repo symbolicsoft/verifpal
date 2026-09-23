@@ -186,7 +186,14 @@ pub fn verify_report_with_source_opts(
 	sessions: u8,
 	auto_queries: bool,
 ) -> VResult<(VerifyReport, String)> {
-	let mut m = parse_file(file_path)?;
+	verify_parsed(parse_file(file_path)?, sessions, auto_queries)
+}
+
+pub(crate) fn verify_parsed(
+	mut m: Model,
+	sessions: u8,
+	auto_queries: bool,
+) -> VResult<(VerifyReport, String)> {
 	let source = m.source.to_string();
 	if auto_queries {
 		let (km, ps) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
@@ -209,18 +216,47 @@ pub struct Saturation {
 	pub output: Vec<String>,
 }
 
+impl Saturation {
+	pub fn summary(&self) -> String {
+		if !self.saturated {
+			return format!(
+				"Verdicts were still changing at {} sessions, the highest --saturate tries; \
+				 analyzing there.",
+				self.sessions
+			);
+		}
+		if self.stable_from == self.sessions {
+			return format!(
+				"Verdicts were unchanged at {} session; analyzing there.",
+				self.sessions
+			);
+		}
+		format!(
+			"Verdicts were unchanged from {} session{} through {}; analyzing at {}.",
+			self.stable_from,
+			if self.stable_from == 1 { "" } else { "s" },
+			self.sessions,
+			self.sessions
+		)
+	}
+}
+
+pub(crate) fn saturation_regressed_warning() {
+	info_message(
+		"an attack found at a lower session count disappeared at a higher one; \
+		 that is an engine bug, not a protocol result",
+		InfoLevel::Warning,
+		false,
+	);
+}
+
 pub fn verify_saturating(
 	file_path: &str,
 	max: u8,
 ) -> VResult<(Vec<VerifyResult>, String, u8, bool)> {
 	let saturation = saturation_sessions(file_path, max, false)?;
 	if saturation.regressed {
-		info_message(
-			"an attack found at a lower session count disappeared at a higher one; \
-			 that is an engine bug, not a protocol result",
-			InfoLevel::Warning,
-			false,
-		);
+		saturation_regressed_warning();
 	}
 	Ok((
 		saturation.report.results,
@@ -231,6 +267,15 @@ pub fn verify_saturating(
 }
 
 pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VResult<Saturation> {
+	saturate(max, |k| {
+		verify_report_with_source_opts(file_path, k, auto_queries)
+	})
+}
+
+pub(crate) fn saturate(
+	max: u8,
+	mut analyze: impl FnMut(u8) -> VResult<(VerifyReport, String)>,
+) -> VResult<Saturation> {
 	let mut previous: Option<String> = None;
 	let mut regressed = false;
 	let mut saturated_at: Option<u8> = None;
@@ -238,7 +283,7 @@ pub fn saturation_sessions(file_path: &str, max: u8, auto_queries: bool) -> VRes
 	let first = crate::sessions::DEFAULT_SESSIONS.min(max).max(1);
 	for k in first..=max {
 		let capture = crate::info::InfoCapture::new();
-		let analyzed = verify_report_with_source_opts(file_path, k, auto_queries);
+		let analyzed = analyze(k);
 		drop(capture);
 		let output = crate::info::info_capture_take();
 		let (report, source) = analyzed?;
@@ -379,11 +424,15 @@ pub(crate) fn status_line(
 	activity: &str,
 ) -> String {
 	let (done, total) = ctx.query_counts();
-	let elapsed = crate::info::info_status_elapsed()
-		.map(crate::info::info_elapsed_text)
-		.unwrap_or_default();
+	let elapsed = if cfg!(target_arch = "wasm32") {
+		String::new()
+	} else {
+		crate::info::info_status_elapsed()
+			.map(|d| format!(" \u{00b7} {}", crate::info::info_elapsed_text(d)))
+			.unwrap_or_default()
+	};
 	format!(
-		"  phase {phase} \u{00b7} {principal} \u{00b7} {activity} \u{00b7} {done}/{total} queries resolved \u{00b7} {elapsed}"
+		"  phase {phase} \u{00b7} {principal} \u{00b7} {activity} \u{00b7} {done}/{total} queries resolved{elapsed}"
 	)
 }
 

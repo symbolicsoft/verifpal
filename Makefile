@@ -10,6 +10,7 @@ lint:
 	@cargo fmt --check
 	@cargo clippy --all-targets -- -D warnings
 	@cargo clippy --lib --no-default-features --features wasm -- -D warnings
+	@cargo clippy --lib --no-default-features --features wasm --target wasm32-unknown-unknown -- -D warnings
 
 test:
 	@/bin/echo "[Verifpal] Running test battery..."
