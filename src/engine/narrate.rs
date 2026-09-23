@@ -8,14 +8,90 @@ use super::knowledge::{Knowledge, Origin};
 use super::program::Event;
 use crate::primitive::primitive_name;
 use crate::types::*;
+use crate::util::copy_base_name;
 
 pub(crate) struct Narrator<'a, 'b> {
 	cx: &'a Context<'b>,
 	ex: &'a Execution,
 	honest: &'a Execution,
+	names: Names,
+	honest_names: Names,
+	cutoff: std::cell::Cell<usize>,
 	pub(crate) lines: Vec<String>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: Vec<Value>,
+}
+
+struct Names {
+	entries: IdMap<u64, Vec<(Value, String)>>,
+	shaped: Vec<String>,
+}
+
+fn excluded(exclude: &[&str], name: &str) -> bool {
+	let base = copy_base_name(name);
+	exclude
+		.iter()
+		.any(|e| *e == name || copy_base_name(e) == base)
+}
+
+impl Names {
+	fn of(cx: &Context, ex: &Execution, honest: &Execution) -> Names {
+		let attacker_key = crate::primitive::attacker_public_key();
+		let mut names = Names {
+			entries: IdMap::default(),
+			shaped: Vec::new(),
+		};
+		for (r, run) in ex.runs.iter().enumerate() {
+			for (slot, held) in run.env.iter().enumerate() {
+				let Some(h) = held else {
+					continue;
+				};
+				let constant = &cx.km.slots[slot].constant;
+				if h.authored || crate::util::is_anonymous_name(&constant.name) {
+					continue;
+				}
+				let name = constant.to_string();
+				let unchanged = honest.runs[r]
+					.held(slot)
+					.is_some_and(|o| o.value.equivalent(&h.value, true));
+				if !unchanged && !names.shaped.contains(&name) {
+					names.shaped.push(name.clone());
+				}
+				for form in [&h.value, &h.pre] {
+					if matches!(form, Value::Constant(_)) || form.equivalent(&attacker_key, true) {
+						continue;
+					}
+					let bucket = names.entries.entry(form.hash_value()).or_default();
+					if bucket
+						.iter()
+						.any(|(v, n)| *n == name && v.equivalent(form, true))
+					{
+						continue;
+					}
+					bucket.push((form.clone(), name.clone()));
+				}
+			}
+		}
+		names
+	}
+
+	fn shaped(&self, name: &str) -> bool {
+		self.shaped.iter().any(|s| s == name)
+	}
+
+	fn lookup(&self, v: &Value, exclude: &[&str]) -> Option<&str> {
+		let candidates: Vec<&str> = self
+			.entries
+			.get(&v.hash_value())?
+			.iter()
+			.filter(|(known, name)| !excluded(exclude, name) && known.equivalent(v, true))
+			.map(|(_, name)| name.as_str())
+			.collect();
+		candidates
+			.iter()
+			.min_by_key(|name| (self.shaped(name), copy_base_name(name) != **name))
+			.copied()
+	}
 }
 
 fn prefix(knowledge: &Knowledge, len: usize) -> AttackerState {
@@ -34,12 +110,11 @@ fn prefix(knowledge: &Knowledge, len: usize) -> AttackerState {
 	out
 }
 
-fn list(values: &[Value]) -> String {
-	values
-		.iter()
-		.map(|v| v.to_string())
-		.collect::<Vec<_>>()
-		.join(", ")
+fn head(p: &Primitive) -> String {
+	match crate::primitive::primitive_threshold(p.id) {
+		Some(_) => format!("{}[{}]", primitive_name(p.id), p.threshold),
+		None => primitive_name(p.id).to_string(),
+	}
 }
 
 impl<'a, 'b> Narrator<'a, 'b> {
@@ -48,10 +123,111 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			cx,
 			ex,
 			honest,
+			names: Names::of(cx, ex, honest),
+			honest_names: Names::of(cx, honest, honest),
+			cutoff: std::cell::Cell::new(ex.knowledge.len()),
 			lines: Vec::new(),
 			steps: Vec::new(),
 			explained: Vec::new(),
 		}
+	}
+
+	fn available(&self, v: &Value) -> bool {
+		if self
+			.ex
+			.knowledge
+			.knows(v)
+			.is_some_and(|i| i < self.cutoff.get())
+		{
+			return true;
+		}
+		match v {
+			Value::Primitive(p) => self.oriented(p).is_some(),
+			Value::Constant(_) => false,
+		}
+	}
+
+	fn oriented(&self, p: &Arc<Primitive>) -> Option<Arc<Primitive>> {
+		if p.arguments.iter().all(|a| self.available(a)) {
+			return Some(Arc::clone(p));
+		}
+		let swapped = crate::primitive::commutativity_swap(p)?;
+		swapped
+			.arguments
+			.iter()
+			.all(|a| self.available(a))
+			.then(|| Arc::new(swapped))
+	}
+
+	fn render(&self, names: &Names, p: &Arc<Primitive>, exclude: &[&str]) -> String {
+		let oriented = self.oriented(p).unwrap_or_else(|| Arc::clone(p));
+		let args: Vec<String> = oriented
+			.arguments
+			.iter()
+			.map(|a| self.named(names, a, exclude))
+			.collect();
+		let projection = if crate::primitive::primitive_has_single_output(oriented.id) {
+			String::new()
+		} else {
+			format!("|{}", oriented.output + 1)
+		};
+		format!(
+			"{}({}){}{}",
+			head(&oriented),
+			args.join(", "),
+			projection,
+			if oriented.instance_check { "?" } else { "" }
+		)
+	}
+
+	fn named(&self, names: &Names, v: &Value, exclude: &[&str]) -> String {
+		if let Some(name) = names.lookup(v, exclude) {
+			return name.to_string();
+		}
+		match v {
+			Value::Constant(c) => c.to_string(),
+			Value::Primitive(p) => self.render(names, p, exclude),
+		}
+	}
+
+	pub(crate) fn term(&self, v: &Value, exclude: &[&str]) -> String {
+		self.named(&self.names, v, exclude)
+	}
+
+	pub(crate) fn spelled(&self, v: &Value, exclude: &[&str]) -> String {
+		match v {
+			Value::Constant(c) => c.to_string(),
+			Value::Primitive(p) => self.render(&self.names, p, exclude),
+		}
+	}
+
+	fn spelled_honest(&self, v: &Value, exclude: &[&str]) -> String {
+		match v {
+			Value::Constant(c) => c.to_string(),
+			Value::Primitive(p) => self.render(&self.honest_names, p, exclude),
+		}
+	}
+
+	fn subject(&self, v: &Value) -> String {
+		match self.names.lookup(v, &[]) {
+			Some(name) if self.names.shaped(name) => {
+				format!("{name}, where it is {}", self.spelled(v, &[name]))
+			}
+			Some(name) => name.to_string(),
+			None => self.spelled(v, &[]),
+		}
+	}
+
+	fn list(&self, values: &[Value]) -> String {
+		values
+			.iter()
+			.map(|v| self.term(v, &[]))
+			.collect::<Vec<_>>()
+			.join(", ")
+	}
+
+	pub(crate) fn declared(&self, slot: usize) -> String {
+		self.cx.km.slots[slot].initial_value.to_string()
 	}
 
 	fn say(&mut self, line: String) {
@@ -89,8 +265,25 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		if self.done(v) {
 			return;
 		}
+		let outer = self.cutoff.replace(len);
+		self.narrate(v, len);
+		self.cutoff.set(outer);
+	}
+
+	fn narrate(&mut self, v: &Value, len: usize) {
 		let knowledge = &self.ex.knowledge;
 		let known = knowledge.knows(v).filter(|&i| i < len);
+		if known.is_none()
+			&& let Value::Primitive(p) = v
+			&& let Some(built) = self.oriented(p)
+		{
+			for argument in &built.arguments {
+				self.explain(argument, len);
+			}
+			let shown = self.subject(v);
+			self.say(format!("Attacker constructs {shown}."));
+			return;
+		}
 		let Some(i) = known else {
 			let state = prefix(knowledge, len);
 			let mut inputs = crate::theory::KnowledgeInputs::new(self.cx.carrier, &state);
@@ -103,20 +296,22 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.explain(&ingredient, len);
 			}
 			if matches!(v, Value::Primitive(_)) {
-				self.say(format!("Attacker constructs {v}."));
+				let shown = self.subject(v);
+				self.say(format!("Attacker constructs {shown}."));
 			}
 			return;
 		};
 		match knowledge.origin(i).clone() {
 			Origin::Initial => {}
 			Origin::Wire { run, slot } => {
-				let name = &self.cx.km.slots[slot].constant;
+				let name = self.cx.km.slots[slot].constant.to_string();
 				let honest = self.honest.runs[run].held(slot).map(|h| &h.value);
-				if honest.is_some_and(|h| h.equivalent(v, true)) && v.as_constant().is_some() {
+				if honest.is_some_and(|h| h.equivalent(v, true)) {
 					self.say(format!("Attacker observes {name} on the wire."));
 				} else {
+					let shown = self.term(v, &[&name]);
 					self.say(format!(
-						"Attacker observes {name} on the wire, where it is {v}."
+						"Attacker observes {name} on the wire, where it is {shown}."
 					));
 				}
 			}
@@ -134,20 +329,31 @@ impl<'a, 'b> Narrator<'a, 'b> {
 						for u in using {
 							self.explain(u, len);
 						}
-						format!("Attacker opens {of} with {}, obtaining {v}.", list(using))
+						format!(
+							"Attacker opens {} with {}, obtaining {}.",
+							self.term(of, &[]),
+							self.list(using),
+							self.term(v, &[])
+						)
 					}
-					DerivationRecord::Reconstructed { .. } => format!("Attacker constructs {v}."),
+					DerivationRecord::Reconstructed { .. } => {
+						format!("Attacker constructs {}.", self.subject(v))
+					}
 					DerivationRecord::Combined { from } => format!(
-						"Attacker combines {v} out of the partial signatures {}.",
-						list(from)
+						"Attacker combines {} out of the partial signatures {}.",
+						self.subject(v),
+						self.list(from)
 					),
 					DerivationRecord::Recomposed { using, .. } => format!(
-						"Attacker recomposes {v} from enough of its shares ({}).",
-						list(using)
+						"Attacker recomposes {} from enough of its shares ({}).",
+						self.term(v, &[]),
+						self.list(using)
 					),
-					DerivationRecord::Fragment { of } => {
-						format!("Attacker splits {of} and takes {v}.")
-					}
+					DerivationRecord::Fragment { of } => format!(
+						"Attacker splits {} and takes {}.",
+						self.term(of, &[]),
+						self.term(v, &[])
+					),
 					DerivationRecord::Rewritten { of, using, .. } => {
 						for u in using {
 							self.explain(u, len);
@@ -156,21 +362,31 @@ impl<'a, 'b> Narrator<'a, 'b> {
 							Value::Primitive(p) => primitive_name(p.id),
 							Value::Constant(_) => "a rewrite",
 						};
-						format!("Attacker applies {name} to {}, obtaining {v}.", list(using))
+						format!(
+							"Attacker applies {name} to {}, obtaining {}.",
+							self.list(using),
+							self.subject(v)
+						)
 					}
 					DerivationRecord::Broken { of, capability, .. } => format!(
-						"Attacker breaks {of} under the declared `{}` assumption, obtaining {v}.",
-						capability.name()
+						"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
+						self.term(of, &[]),
+						capability.name(),
+						self.term(v, &[])
 					),
 					DerivationRecord::Reused { of, with } => format!(
-						"Attacker recovers {v} from {of}: {with} shares its {}.",
+						"Attacker recovers {} from {}: {} shares its {}.",
+						self.term(v, &[]),
+						self.term(of, &[]),
+						self.term(with, &[]),
 						crate::primitive::reuse_fixed_names(of)
 					),
 					DerivationRecord::ReusedForge { with, .. } => format!(
-						"Attacker forges {v} under the {} shared by {} and {}.",
+						"Attacker forges {} under the {} shared by {} and {}.",
+						self.subject(v),
 						crate::primitive::reuse_fixed_names(&with[0]),
-						with[0],
-						with[1]
+						self.term(&with[0], &[]),
+						self.term(&with[1], &[])
 					),
 					DerivationRecord::Initial
 					| DerivationRecord::Leaked { .. }
@@ -181,7 +397,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
-	fn replayed_from(&self, run: usize, slot: usize, value: &Value) -> Option<&'static str> {
+	pub(crate) fn replayed_from(
+		&self,
+		run: usize,
+		slot: usize,
+		value: &Value,
+	) -> Option<&'static str> {
 		let program = self.cx.program;
 		let km = self.cx.km;
 		let id = km.slots[slot].constant.id;
@@ -239,21 +460,28 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					continue;
 				}
 				let value = h.value.clone();
-				let constant = &km.slots[slot].constant;
+				let constant = km.slots[slot].constant.to_string();
+				let own: [&str; 1] = [&constant];
 				if let Some(axis) = self.replayed_from(run, slot, &value) {
 					self.done(&value);
-					replays.push((axis, constant.to_string(), value.to_string()));
+					replays.push((axis, constant.clone(), self.spelled(&value, &own)));
 					continue;
 				}
 				self.explain(&value, before);
-				names.push(constant.to_string());
-				values.push(value.to_string());
+				let shown = self.spelled(&value, &own);
+				names.push(constant.clone());
+				values.push(shown.clone());
 				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
-				let shown = previous.filter(|honest| {
+				let displaced = previous.map(|honest| self.spelled_honest(honest, &own));
+				let shown_was = previous.filter(|honest| {
 					!honest.equivalent(&value, true)
-						&& honest.as_constant().is_none_or(|c| c.id != constant.id)
+						&& honest
+							.as_constant()
+							.is_none_or(|c| c.name.as_ref() != constant)
 				});
-				if let Some(honest) = shown {
+				if shown_was.is_some()
+					&& let Some(honest) = &displaced
+				{
 					was.push(format!("{constant} was {honest}"));
 				} else if previous.is_some_and(|honest| honest.equivalent(&value, true))
 					&& let Some(sent) = self.ex.sent[d]
@@ -262,14 +490,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 						.filter(|sent| !sent.equivalent(&value, true))
 				{
 					was.push(format!(
-						"{} sent {sent} in this execution",
-						program.runs[delivery.sender].name
+						"{} sent {} in this execution",
+						program.runs[delivery.sender].name,
+						self.spelled(sent, &own)
 					));
 				}
 				items.push(TraceValue {
-					name: constant.to_string(),
-					installed: Some(value.to_string()),
-					was: previous.map(|honest| honest.to_string()),
+					name: constant.clone(),
+					installed: Some(shown),
+					was: displaced,
 					guarded: false,
 				});
 			}
@@ -316,7 +545,8 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			&& matches!(self.ex.knowledge.origin(i), Origin::Initial)
 			&& !self.done(v)
 		{
-			self.say(format!("Attacker knows {v}: it is public."));
+			let shown = self.term(v, &[]);
+			self.say(format!("Attacker knows {shown}: it is public."));
 		}
 	}
 
@@ -364,9 +594,11 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	pub(crate) fn resolves(&mut self, resolved: &[(Constant, Value)]) {
 		for (c, v) in resolved {
+			let name = c.to_string();
+			let shown = self.spelled(v, &[&name]);
 			self.push(TraceStep::new(
 				"resolves",
-				format!("In this state {c} resolves to {v}."),
+				format!("In this state {c} resolves to {shown}."),
 			));
 		}
 	}
@@ -382,12 +614,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			return;
 		}
 		let principal = self.cx.program.runs[run].name.clone();
+		let installed: Vec<String> = self.ex.runs[run]
+			.env
+			.iter()
+			.enumerate()
+			.filter(|(_, held)| held.as_ref().is_some_and(|h| h.installed))
+			.map(|(s, _)| self.cx.km.slots[s].constant.to_string())
+			.chain(std::iter::once(self.cx.km.slots[slot].constant.to_string()))
+			.collect();
+		let hidden: Vec<&str> = installed.iter().map(String::as_str).collect();
+		let shown = self.spelled(&h.pre, &hidden);
 		let mut step = TraceStep::new(
 			"gate",
-			format!(
-				"{principal}'s {} passes — the attacker controls one of its inputs.",
-				h.pre
-			),
+			format!("{principal}'s {shown} passes — the attacker controls one of its inputs."),
 		);
 		step.principal = Some(principal);
 		self.push(step);

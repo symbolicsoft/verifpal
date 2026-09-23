@@ -211,19 +211,18 @@ fn report(
 		})
 		.collect();
 	let name = |run: usize| program.runs[run].name.clone();
-	let pre = |run: usize, slot: usize| {
-		ex.runs[run]
-			.held(slot)
-			.map(|h| h.pre.to_string())
-			.unwrap_or_default()
-	};
 	let mut narrator = narrate::Narrator::new(cx, ex, honest);
 	narrator.installs();
+	let shown = |narrator: &narrate::Narrator, slot: usize, value: &Value| {
+		let own = km.slots[slot].constant.to_string();
+		narrator.spelled(value, &[&own])
+	};
 	let conclusion = match v {
 		Violation::Disclosed { run, slot, value } => {
 			narrator.public(value);
 			narrator.explain(value, ex.knowledge.len());
 			let constant = &km.slots[*slot].constant;
+			let value_shown = shown(&narrator, *slot, value);
 			let honest_value =
 				crate::theory::reduce_once(&crate::value::resolve_trace_constant(constant, km));
 			if !crate::theory::reduce_once(value).equivalent(&honest_value, true)
@@ -231,13 +230,13 @@ fn report(
 			{
 				out.subtype = Some(Subtype::AttackerSuppliedValue);
 				format!(
-					"{constant} ({value}) is obtained by Attacker, but that is the value the attacker put \
-					 there: it carries nothing {} generated or holds privately, so the honest \
-					 {constant} is not shown to be disclosed.",
+					"{constant} ({value_shown}) is obtained by Attacker, but that is the value the \
+					 attacker put there: it carries nothing {} generated or holds privately, so the \
+					 honest {constant} is not shown to be disclosed.",
 					name(*run)
 				)
 			} else {
-				format!("{constant} ({value}) is obtained by Attacker.")
+				format!("{constant} ({value_shown}) is obtained by Attacker.")
 			}
 		}
 		Violation::Forged {
@@ -250,9 +249,9 @@ fn report(
 			format!(
 				"{} ({}), sent by Attacker and not by {}, is successfully used in {} within {}'s state.",
 				km.slots[*slot].constant,
-				value,
+				shown(&narrator, *slot, value),
 				q.message.sender_name,
-				pre(*run, *used),
+				narrator.declared(*used),
 				name(*run)
 			)
 		}
@@ -271,11 +270,13 @@ fn report(
 					Subtype::ReplayableFirstFlight
 				},
 			);
+			let axis = narrator.replayed_from(*run, *slot, value).unwrap_or("run");
 			format!(
-				"{constant} ({value}), which {s} sent in another run and not in this one, is \
+				"{constant} ({}), which {s} sent in another {axis} and not in this one, is \
 				 successfully used in {} within {r}'s state: {s} sent it once, {r} accepts it \
 				 twice, so agreement is not injective.",
-				pre(*run, *used),
+				shown(&narrator, *slot, value),
+				narrator.declared(*used),
 				s = q.message.sender_name,
 				r = q.message.recipient_name,
 			)
@@ -292,7 +293,7 @@ fn report(
 				km.slots[*slot].constant,
 				name(*sender),
 				q.message.sender_name,
-				pre(*run, *used),
+				narrator.declared(*used),
 				name(*run)
 			)
 		}
@@ -306,9 +307,9 @@ fn report(
 			format!(
 				"{} ({}) is used by {} in {} despite not being a fresh value.",
 				km.slots[*slot].constant,
-				value,
+				shown(&narrator, *slot, value),
 				name(*run),
-				pre(*run, *used)
+				narrator.declared(*used)
 			)
 		}
 		Violation::Linked { clause, resolved } => {
