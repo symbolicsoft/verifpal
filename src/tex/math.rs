@@ -223,12 +223,7 @@ pub(crate) fn render(term: &Term) -> String {
 			projection,
 			arguments,
 		} => {
-			let head = match name.split_once('_') {
-				Some((lead, tail)) => {
-					format!("\\vpprim{{{}}}{{{}}}", escaped_tex(lead), escaped_tex(tail))
-				}
-				None => format!("\\vpprimo{{{}}}", escaped_tex(name)),
-			};
+			let head = head(name);
 			let caps = if capabilities.is_empty() {
 				String::new()
 			} else {
@@ -253,6 +248,15 @@ pub(crate) fn render(term: &Term) -> String {
 			};
 			format!("{head}{caps}{check}({args}){projected}")
 		}
+	}
+}
+
+fn head(name: &str) -> String {
+	match name.split_once('_') {
+		Some((lead, tail)) => {
+			format!("\\vpprim{{{}}}{{{}}}", escaped_tex(lead), escaped_tex(tail))
+		}
+		None => format!("\\vpprimo{{{}}}", escaped_tex(name)),
 	}
 }
 
@@ -364,7 +368,10 @@ impl Names {
 	}
 
 	fn holds_constant(&self, name: &str) -> bool {
-		self.constants.iter().any(|known| known == name)
+		let base = name.split(['#', '@']).next().unwrap_or(name);
+		self.constants
+			.iter()
+			.any(|known| known.eq_ignore_ascii_case(name) || known.eq_ignore_ascii_case(base))
 	}
 
 	fn holds_principal(&self, name: &str) -> bool {
@@ -405,14 +412,18 @@ pub(crate) fn prose(text: &str, names: &Names) -> String {
 			continue;
 		}
 		at = word_end;
+		if names.holds_principal(word) {
+			out.push_str(&format!("\\vpactor{{{}}}", escaped_tex(word)));
+			continue;
+		}
 		if names.holds_constant(word)
 			&& let Some(parsed) = parse(word)
 		{
 			out.push_str(&format!("\\vpterm{{{}}}", render(&parsed)));
 			continue;
 		}
-		if names.holds_principal(word) {
-			out.push_str(&format!("\\vpactor{{{}}}", escaped_tex(word)));
+		if word.bytes().all(|b| b.is_ascii_uppercase() || b == b'_') && is_primitive(word) {
+			out.push_str(&format!("\\vpterm{{{}}}", head(word)));
 			continue;
 		}
 		out.push_str(&escaped_tex(word));
@@ -437,12 +448,19 @@ fn balanced(bytes: &[u8], open: usize) -> Option<usize> {
 			b')' => {
 				depth -= 1;
 				if depth == 0 {
-					let end = at + 1;
-					return Some(if bytes.get(end) == Some(&b'?') {
-						end + 1
-					} else {
-						end
-					});
+					let mut end = at + 1;
+					if bytes.get(end) == Some(&b'|')
+						&& bytes.get(end + 1).is_some_and(|b| is_name_byte(*b))
+					{
+						end += 1;
+						while bytes.get(end).is_some_and(|b| is_name_byte(*b)) {
+							end += 1;
+						}
+					}
+					if bytes.get(end) == Some(&b'?') {
+						end += 1;
+					}
+					return Some(end);
 				}
 			}
 			_ => {}
@@ -578,6 +596,42 @@ mod tests {
 			prose("100% of $x_1 & more", &names),
 			"100\\% of \\$x\\_1 \\& more"
 		);
+	}
+
+	#[test]
+	fn prose_knows_a_constant_in_any_case_and_in_any_copy() {
+		let mut names = Names::default();
+		names.constant("clientId");
+		names.constant("dhe_c");
+		let out = prose("clientid and dhe_c@2 and dhe_c#2 are obtained.", &names);
+		assert!(out.starts_with("\\vpterm{\\vpconst{clientid}}"), "{out}");
+		assert!(
+			out.contains("\\vpscenario{\\vpconst{dhe\\vpus c}}{2}"),
+			"{out}"
+		);
+		assert!(
+			out.contains("\\vpsession{\\vpconst{dhe\\vpus c}}{2}"),
+			"{out}"
+		);
+	}
+
+	#[test]
+	fn prose_keeps_a_projection_with_its_term() {
+		let out = prose("it is HKDF(a, b, c)|1.", &Names::default());
+		assert!(out.contains("\\vpprojection{1}"), "{out}");
+		assert!(!out.contains("\\textbar"), "{out}");
+		assert!(out.ends_with("}."), "{out}");
+	}
+
+	#[test]
+	fn prose_sets_a_bare_primitive_name_as_one() {
+		let out = prose(
+			"Alice's SIGNVERIF check and AEAD_DEC fail.",
+			&Names::default(),
+		);
+		assert!(out.contains("\\vpterm{\\vpprimo{SIGNVERIF}}"), "{out}");
+		assert!(out.contains("\\vpterm{\\vpprim{AEAD}{DEC}}"), "{out}");
+		assert!(out.contains("check and"), "{out}");
 	}
 
 	#[test]

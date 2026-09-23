@@ -4,7 +4,9 @@
 // Sanity error at one session and at two: scenario_restriction_unreached.vp
 // with Alice's ASSERT unchecked. In the corrupt scenario (peer = mpk) Alice no
 // longer halts, so she reaches PUBKEY(mpk) and passes a public key where
-// PUBKEY takes a private one.
+// PUBKEY takes a private one. The old check cut validation at any failed
+// rewrite in a corrupt run, even an unchecked one that halts nothing, and
+// accepted this model.
 attacker[passive]
 
 principal Bob[

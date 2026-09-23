@@ -1,15 +1,24 @@
 % SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 % SPDX-License-Identifier: GPL-3.0-only
 %% --- BEGIN verifpal table: summary ---
-\begin{center}
-\captionof{table}{Every model analysed in this run.}
-\label{tab:summary}
-\begin{tabular}{@{}llrlr@{}}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\setlength{\LTpre}{0.5\baselineskip}\setlength{\LTpost}{0.5\baselineskip}
+\setlength{\LTleft}{0pt}\setlength{\LTright}{0pt plus 1fill}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.34\linewidth}>{\raggedright\arraybackslash}p{4.6em}>{\raggedleft\arraybackslash}p{4.2em}>{\raggedleft\arraybackslash}p{3.8em}>{\raggedright\arraybackslash}p{\dimexpr0.66\linewidth-12.6em-8\tabcolsep\relax}@{}}
+\caption{Every model analysed in this run.}\label{tab:summary}\\
 \toprule
-Model & Attacker & Sessions & Result & Attacks \\
+\vpth{Model} & \vpth{Attacker} & \vpth{Sessions} & \vpth{Attacks} & \vpth{Result code}\\
 \midrule
-<<#index>><<file>> & <<attacker>> & <<sessions>> & \texttt{<<code>>} & <<attacks>> \\
-<</index>>\bottomrule
-\end{tabular}
-\end{center}
+\endfirsthead
+\multicolumn{5}{@{}l}{\footnotesize\color{vpslate}\tablename~\thetable, continued}\\
+\toprule
+\vpth{Model} & \vpth{Attacker} & \vpth{Sessions} & \vpth{Attacks} & \vpth{Result code}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+<<#index>>\hyperref[sec:<<slug>>]{<<file>>} & <<attacker>> & <<sessions>> & <<#hit>>\textcolor{vpaccent}{\bfseries <<attacks>>}<</hit>><<^hit>><<attacks>><</hit>> & <<code>> \\
+<</index>>\end{longtable}
+\endgroup
 %% --- END verifpal table: summary ---

@@ -34,6 +34,7 @@ pub(crate) enum Row {
 	Leak {
 		principal: String,
 		text: String,
+		values: Vec<String>,
 	},
 	Activity {
 		principal: String,
@@ -232,17 +233,14 @@ pub(crate) fn protocol_rows(model: &ModelReport, hits: &HashMap<String, Vec<usiz
 					.collect(),
 			},
 			DiagramRow::Phase { number } => Row::Phase { number: *number },
-			DiagramRow::Leak { principal, values } => Row::Leak {
-				principal: principal.clone(),
-				text: format!(
-					"{principal} leaks {}",
-					values
-						.iter()
-						.map(|v| v.name.as_str())
-						.collect::<Vec<_>>()
-						.join(", ")
-				),
-			},
+			DiagramRow::Leak { principal, values } => {
+				let values: Vec<String> = values.iter().map(|v| v.name.clone()).collect();
+				Row::Leak {
+					principal: principal.clone(),
+					text: format!("{principal} leaks {}", values.join(", ")),
+					values,
+				}
+			}
 			DiagramRow::Activity {
 				principal,
 				generates,
@@ -348,6 +346,7 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 							Row::Leak {
 								principal: principal.to_string(),
 								text: format!("{principal} leaks {}", values.join(", ")),
+								values: values.iter().map(|v| v.to_string()).collect(),
 							},
 						);
 					}

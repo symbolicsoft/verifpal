@@ -19,6 +19,7 @@ templates! { TEX,
 	PAGE "page" = "tpl/page.tex",
 	SUMMARY "summary" = "tpl/summary.tex",
 	MODEL "model" = "tpl/model.tex",
+	FACTS "facts" = "tpl/facts.tex",
 	ERROR "error" = "tpl/error.tex",
 	DIAGRAM "diagram" = "tpl/diagram.tex",
 	ACTOR "actor" = "tpl/actor.tex",
@@ -40,6 +41,8 @@ pub fn tex_report(run: &Run) -> String {
 		.text("version", run.version.as_str())
 		.raw("preamble", PREAMBLE.trim_end())
 		.text("title", title(run))
+		.text("heading", heading(run))
+		.list("stats", stats(run))
 		.raw("abstract", abstract_of(run))
 		.flag("multi", multi)
 		.list("index", index(run))
@@ -81,6 +84,58 @@ fn title(run: &Run) -> String {
 	match run.models.as_slice() {
 		[only] => format!("Verifpal analysis of {}", crate::report::short_name(only)),
 		models => format!("Verifpal analysis of {} models", models.len()),
+	}
+}
+
+fn heading(run: &Run) -> String {
+	match run.models.as_slice() {
+		[only] => crate::report::short_name(only).to_string(),
+		models => format!("{} models", models.len()),
+	}
+}
+
+fn stat(value: impl std::fmt::Display, label: &str, alert: bool) -> Ctx {
+	Ctx::new()
+		.text("value", value.to_string())
+		.text("label", label)
+		.flag("alert", alert)
+}
+
+fn stats(run: &Run) -> Vec<Ctx> {
+	let attacks: usize = run.models.iter().map(attacks_of).sum();
+	let queries: usize = run
+		.models
+		.iter()
+		.filter_map(|m| m.analysis.as_ref())
+		.map(|a| a.queries.len())
+		.sum();
+	match run.models.as_slice() {
+		[only] => match &only.analysis {
+			Some(a) => vec![
+				stat(a.queries.len(), "queries", false),
+				stat(a.attacks, "attacks found", a.attacks > 0),
+				stat(
+					a.queries.len().saturating_sub(a.attacks),
+					"no attack found",
+					false,
+				),
+			],
+			None => vec![stat("--", "not analysed", true)],
+		},
+		models => {
+			let hit = models.iter().filter(|m| attacks_of(m) > 0).count();
+			let broken = models.iter().filter(|m| m.analysis.is_none()).count();
+			let mut out = vec![
+				stat(models.len(), "models", false),
+				stat(queries, "queries", false),
+				stat(attacks, "attacks found", attacks > 0),
+				stat(hit, "models attacked", hit > 0),
+			];
+			if broken > 0 {
+				out.push(stat(broken, "not analysed", true));
+			}
+			out
+		}
 	}
 }
 
@@ -152,22 +207,47 @@ fn math_name(name: &str) -> String {
 	format!("\\texttt{{{}}}", escaped_tex(name))
 }
 
+fn result_code(code: &str) -> String {
+	let pairs: Vec<String> = code
+		.chars()
+		.collect::<Vec<char>>()
+		.chunks(2)
+		.map(|pair| escaped_tex(&pair.iter().collect::<String>()))
+		.collect();
+	format!("\\vpcode{{{}}}", pairs.join("\\allowbreak{}"))
+}
+
+fn elapsed(ms: u128) -> String {
+	if ms < 1000 {
+		format!("{ms} ms")
+	} else {
+		format!("{:.1} s", ms as f64 / 1000.0)
+	}
+}
+
 fn index(run: &Run) -> Vec<Ctx> {
 	if run.models.len() < 2 {
 		return Vec::new();
 	}
 	run.models
 		.iter()
-		.map(|model| {
+		.enumerate()
+		.map(|(i, model)| {
 			let (attacker, sessions, code) = match &model.analysis {
-				Some(a) => (a.attacker.clone(), a.sessions.to_string(), a.code.clone()),
+				Some(a) => (
+					a.attacker.clone(),
+					a.sessions.to_string(),
+					result_code(&a.code),
+				),
 				None => ("--".to_string(), "--".to_string(), "--".to_string()),
 			};
 			Ctx::new()
 				.raw("file", math_name(crate::report::short_name(model)))
+				.text("slug", slug(model, i))
 				.text("attacker", attacker)
 				.text("sessions", sessions)
-				.text("code", code)
+				.raw("code", code)
+				.flag("hit", attacks_of(model) > 0)
 				.num("attacks", attacks_of(model))
 		})
 		.collect()
@@ -187,8 +267,7 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		.list("failed", failed);
 	let Some(a) = &model.analysis else {
 		return ctx
-			.flag("ok", false)
-			.text("intro", String::new())
+			.list("facts", Vec::new())
 			.list("protocol", Vec::new())
 			.list("verdicts", Vec::new())
 			.flag("attacked", false)
@@ -202,10 +281,8 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		Lanes::of(&rows),
 		format!("{slug}-protocol"),
 		protocol_caption(&hits),
-		true,
 	);
-	ctx.flag("ok", true)
-		.raw("intro", intro(a))
+	ctx.list("facts", vec![facts_ctx(a)])
 		.list("protocol", protocol.into_iter().collect())
 		.list("verdicts", vec![verdicts_ctx(a, &slug, &names)])
 		.flag("attacked", a.attacks > 0)
@@ -223,31 +300,32 @@ fn protocol_caption(hits: &std::collections::HashMap<String, Vec<usize>>) -> Str
 	}
 }
 
-fn intro(a: &Analysis) -> String {
-	let mut out = format!(
-		"Analysed against {} {} attacker at {} session{} per principal, in {} ms. \
-		 The result code is \\texttt{{{}}}.",
-		crate::util::article(&a.attacker),
-		escaped_tex(&a.attacker),
-		a.sessions,
-		crate::util::plural(a.sessions as usize),
-		a.elapsed_ms,
-		escaped_tex(&a.code)
-	);
-	for sentence in &a.provenance {
-		out.push(' ');
-		out.push_str(&escaped_tex(sentence));
-	}
-	out
+fn facts_ctx(a: &Analysis) -> Ctx {
+	let queries = match a.attacks {
+		0 => format!("{}, with no attack found", a.queries.len()),
+		n => format!(
+			"{}, with {} attack{} found",
+			a.queries.len(),
+			n,
+			crate::util::plural(n)
+		),
+	};
+	Ctx::new()
+		.text("attacker", a.attacker.as_str())
+		.text("sessions", format!("{} per principal", a.sessions))
+		.text("queries", queries)
+		.raw("code", result_code(&a.code))
+		.text("elapsed", elapsed(a.elapsed_ms))
+		.list(
+			"provenance",
+			a.provenance
+				.iter()
+				.map(|sentence| Ctx::new().text("text", sentence.as_str()))
+				.collect(),
+		)
 }
 
-fn diagram_ctx(
-	rows: &[Row],
-	lanes: Lanes,
-	figid: String,
-	caption: String,
-	floats: bool,
-) -> Option<Ctx> {
+fn diagram_ctx(rows: &[Row], lanes: Lanes, figid: String, caption: String) -> Option<Ctx> {
 	if lanes.is_empty() || rows.is_empty() {
 		return None;
 	}
@@ -266,29 +344,11 @@ fn diagram_ctx(
 	Some(
 		Ctx::new()
 			.text("figid", figid)
-			.flag("float", floats)
 			.num("lanes", lanes.len())
 			.raw("caption", caption)
 			.list("actors", actors)
 			.list("rows", drawn),
 	)
-}
-
-// The box is one fixed width, so a line longer than it wraps and the row has to
-// leave room for the wrapped height. This mirrors the width the preamble
-// computes from the lane count; guessing high only adds white space.
-const TEXT_CM: f32 = 16.6;
-const CHAR_CM: f32 = 0.145;
-
-fn box_chars(lanes: usize) -> usize {
-	let lanes = lanes.max(1) as f32;
-	let sep = (4.6f32).max((TEXT_CM - 1.4) / (lanes - 1.0).max(1.0));
-	let width = (3.2f32).max(((TEXT_CM - 1.2) / lanes - 0.5).min(sep - 0.9));
-	((width / CHAR_CM) as usize).max(8)
-}
-
-fn wrapped(text: &str, chars: usize) -> usize {
-	text.chars().count().div_ceil(chars).max(1)
 }
 
 fn activity_line(kind: &str, names: String, primitive: &str) -> Ctx {
@@ -329,7 +389,6 @@ fn base(kind: &'static str) -> Ctx {
 }
 
 fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
-	let chars = box_chars(lanes.len());
 	match row {
 		Row::Wire {
 			num,
@@ -354,7 +413,7 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 				.iter()
 				.map(|v| math::label(&v.name, v.guarded, v.hit || (breach && v.changed)))
 				.collect::<Vec<String>>()
-				.join(",\\, ");
+				.join(", ");
 			base("wire")
 				.flag("breach", breach)
 				.text("numstyle", if breach { "vpnumadv" } else { "vpnum" })
@@ -376,23 +435,21 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 				.raw("label", label)
 		}
 		Row::Phase { number } => base("phase").num("number", *number),
-		Row::Leak { principal, text } => base("leak")
+		Row::Leak {
+			principal, values, ..
+		} => base("leak")
 			.num("lane", lanes.index(principal))
-			.num("lines", wrapped(text, chars))
-			.text("text", text.as_str()),
+			.raw("values", math_list(values)),
 		Row::Activity {
 			principal,
 			generates,
 			computes,
 		} => {
 			let mut lines: Vec<Ctx> = Vec::new();
-			let mut count = 0usize;
 			if !generates.is_empty() {
-				count += wrapped(&format!("new {}", generates.join(", ")), chars);
 				lines.push(activity_line("fresh", math_list(generates), ""));
 			}
 			for step in computes {
-				count += wrapped(&step.label(), chars);
 				let named = math_list_str(&step.names);
 				let bare = step.names.is_empty();
 				let shown = step.expression.as_deref().or(step.primitive.as_deref());
@@ -405,7 +462,6 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 			}
 			base("activity")
 				.num("lane", lanes.index(principal))
-				.num("count", count)
 				.list("lines", lines)
 		}
 		Row::Mark {
@@ -449,6 +505,39 @@ fn sentence(text: &str, names: &Names) -> String {
 	math::prose(&text.replace("->", "\u{2192}"), names)
 }
 
+struct Query {
+	head: String,
+	plain: String,
+	options: String,
+}
+
+fn split_options(text: &str) -> (&str, Vec<&str>) {
+	match text.find("[precondition[") {
+		Some(at) if text.ends_with(']') => (
+			&text[..at],
+			text[at + 1..text.len() - 1]
+				.split("precondition[")
+				.map(|option| option.trim().trim_end_matches(']').trim())
+				.filter(|option| !option.is_empty())
+				.collect(),
+		),
+		_ => (text, Vec::new()),
+	}
+}
+
+fn query_of(text: &str, names: &Names) -> Query {
+	let (head, options) = split_options(text);
+	Query {
+		head: query_tex(head, names),
+		plain: head.to_string(),
+		options: options
+			.iter()
+			.map(|option| format!("\\vpprecondition{{{}}}", operands(option, names)))
+			.collect::<Vec<String>>()
+			.join("\\newline"),
+	}
+}
+
 fn query_tex(text: &str, names: &Names) -> String {
 	let Some((kind, rest)) = text.split_once("? ") else {
 		return sentence(text, names);
@@ -473,15 +562,22 @@ fn operands(rest: &str, names: &Names) -> String {
 		.join(", ")
 }
 
+fn attack_id(slug: &str, qi: usize) -> String {
+	format!("{slug}-{qi}")
+}
+
 fn verdicts_ctx(a: &Analysis, slug: &str, names: &Names) -> Ctx {
 	let queries = a
 		.queries
 		.iter()
-		.map(|q| {
+		.enumerate()
+		.map(|(qi, q)| {
+			let query = query_of(&q.query, names);
 			Ctx::new()
-				.raw("query", query_tex(&q.query, names))
+				.raw("query", query.head)
+				.raw("options", query.options)
 				.flag("resolved", q.resolved)
-				.text("envelope", envelope_text(q))
+				.raw("envelope", envelope_tex(q, &attack_id(slug, qi)))
 				.text("loc", query_location(q))
 		})
 		.collect();
@@ -494,14 +590,15 @@ fn verdicts_ctx(a: &Analysis, slug: &str, names: &Names) -> Ctx {
 		.list("queries", queries)
 }
 
-fn envelope_text(q: &QueryReport) -> String {
+fn envelope_tex(q: &QueryReport, id: &str) -> String {
 	if q.resolved {
+		let found = format!("witness in \\S\\ref{{atk:{id}}}");
 		return match &q.subtype {
-			Some(subtype) => format!("a witness, shown below ({subtype})"),
-			None => "a witness, shown below".to_string(),
+			Some(subtype) => format!("{found}; {}", escaped_tex(subtype)),
+			None => found,
 		};
 	}
-	q.envelope.summary.clone()
+	escaped_tex(&q.envelope.summary)
 }
 
 fn query_location(q: &QueryReport) -> String {
@@ -518,6 +615,7 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 		.enumerate()
 		.filter(|(_, q)| q.resolved)
 		.map(|(qi, q)| {
+			let query = query_of(&q.query, names);
 			let (rows, lanes) = msc::attack_rows(q, model);
 			let diagram = diagram_ctx(
 				&rows,
@@ -526,13 +624,14 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 				format!(
 					"How the attacker breaks \\textnormal{{{}}}. Substituted values carry a \
 					 dagger.",
-					query_tex(&q.query, names)
+					query.head
 				),
-				false,
 			);
 			Ctx::new()
-				.raw("query", query_tex(&q.query, names))
-				.text("queryplain", q.query.as_str())
+				.raw("query", query.head)
+				.text("queryplain", query.plain)
+				.text("atkid", attack_id(slug, qi))
+				.raw("options", query.options)
 				.raw("lead", sentence(&q.conclusion, names))
 				.list("diagram", diagram.into_iter().collect())
 				.flag("stepped", crate::report::has_trace(q))
@@ -625,15 +724,14 @@ fn callouts(a: &Analysis, names: &Names) -> Vec<Ctx> {
 			.collect::<Vec<String>>()
 			.join(", ");
 		let peer = if scenario.honest {
-			"honest"
+			"an honest"
 		} else {
-			"compromised"
+			"a compromised"
 		};
 		out.push(format!(
-			"Scenario: {} runs with {}, {} {} peer.",
+			"Scenario: {} runs with {}, {} peer.",
 			escaped_tex(&scenario.principal),
 			bindings,
-			crate::util::article(peer),
 			peer
 		));
 	}

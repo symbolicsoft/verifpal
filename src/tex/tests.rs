@@ -3,7 +3,8 @@
 
 use super::*;
 use crate::report::{
-	Assumption, Binding, DiagramRow, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
+	Assumption, Binding, Computation, DiagramRow, DiagramValue, EnvelopeReport, ScenarioReport,
+	SourceRange,
 };
 use crate::types::TraceValue;
 
@@ -265,6 +266,85 @@ fn the_rendered_document_matches_its_golden_file() {
 	);
 }
 
+fn figure<'a>(tex: &'a str, figid: &str) -> &'a str {
+	let begin = format!("%% --- BEGIN verifpal figure: {figid} ---");
+	let end = format!("%% --- END verifpal figure: {figid} ---");
+	let from = tex.find(&begin).expect("the figure begins");
+	let to = tex[from..].find(&end).expect("the figure ends") + from;
+	&tex[from..to]
+}
+
+fn tall_run() -> Run {
+	let mut run = golden_run();
+	let computes = (0..160)
+		.map(|i| Computation {
+			names: vec![format!("tall{i}")],
+			primitive: None,
+			expression: Some("HASH(m)".to_string()),
+			checked: false,
+		})
+		.collect();
+	run.models[0].diagram.insert(
+		0,
+		DiagramRow::Activity {
+			principal: "Alice".to_string(),
+			phase: 0,
+			generates: vec![],
+			computes,
+		},
+	);
+	run
+}
+
+#[test]
+fn a_chart_taller_than_a_page_is_one_column_for_the_preamble_to_break() {
+	let tex = tex_report(&tall_run());
+	let chart = figure(&tex, "golden-vp-0-protocol");
+	assert_eq!(chart.matches("\\begin{vpdiagram}").count(), 1);
+	assert!(
+		chart.contains("\\begin{vpdiagram}[fig:golden-vp-0-protocol]"),
+		"the column names its figure, so a continued piece can refer to it:\n{chart}"
+	);
+	assert_eq!(chart.matches("\\captionof{figure}").count(), 1);
+	assert_eq!(chart.matches("\\label{fig:").count(), 1);
+	for i in 0..160 {
+		assert_eq!(
+			chart.matches(&format!("\\vpconst{{tall{i}}}")).count(),
+			1,
+			"tall{i} is drawn exactly once"
+		);
+	}
+}
+
+#[test]
+fn preconditions_are_split_from_the_query_they_restrict() {
+	assert_eq!(
+		split_options(
+			"confidentiality? k[precondition[Alice -> Bob: m] precondition[Bob -> Alice: n]]"
+		),
+		(
+			"confidentiality? k",
+			vec!["Alice -> Bob: m", "Bob -> Alice: n"]
+		)
+	);
+	assert_eq!(
+		split_options("authentication? Alice -> Bob: e"),
+		("authentication? Alice -> Bob: e", vec![])
+	);
+	let tex = tex_report(&golden_run());
+	assert!(
+		!tex.contains("precondition["),
+		"an option is typeset, never printed as source"
+	);
+}
+
+#[test]
+fn every_attacked_query_links_to_its_trace() {
+	let tex = tex_report(&golden_run());
+	assert!(tex.contains("\\label{atk:golden-vp-0-0}"), "{tex}");
+	assert!(tex.contains("\\ref{atk:golden-vp-0-0}"), "{tex}");
+}
+
 #[test]
 fn every_model_in_the_corpus_renders_a_sound_document() {
 	let paths = corpus();
@@ -517,8 +597,10 @@ fn the_golden_document_compiles_under_tectonic() {
 	);
 	let dir = std::env::temp_dir().join(format!("verifpal-tex-{}", std::process::id()));
 	std::fs::create_dir_all(&dir).expect("scratch dir");
-	let mut documents: Vec<(String, String)> =
-		vec![("golden".to_string(), tex_report(&golden_run()))];
+	let mut documents: Vec<(String, String)> = vec![
+		("golden".to_string(), tex_report(&golden_run())),
+		("tall".to_string(), tex_report(&tall_run())),
+	];
 	for path in [
 		"examples/test/hmac_ok.vp",
 		"examples/test/spore_ns_pk.vp",

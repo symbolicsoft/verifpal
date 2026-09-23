@@ -1,14 +1,23 @@
 % SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 % SPDX-License-Identifier: GPL-3.0-only
 %% --- BEGIN verifpal table: <<tabid>> ---
-\begin{center}
-\captionof{table}{<<caption>>}
-\label{tab:<<tabid>>}
-\begin{tabular}{@{}llll@{}}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+\setlength{\LTpre}{0.5\baselineskip}\setlength{\LTpost}{0.5\baselineskip}
+\setlength{\LTleft}{0pt}\setlength{\LTright}{0pt plus 1fill}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.5\linewidth}>{\raggedright\arraybackslash}p{3.6em}>{\raggedright\arraybackslash\footnotesize\color{vpslate}}p{\dimexpr0.5\linewidth-5.8em-6\tabcolsep\relax}>{\raggedleft\arraybackslash\footnotesize\color{vpslate}}p{2.2em}@{}}
+\caption{<<caption>>}\label{tab:<<tabid>>}\\
 \toprule
-Query & Verdict & Scope of the verdict & Line \\
+\vpth{Query} & \vpth{Verdict} & \vpth{Scope} & \vpth{Line}\\
 \midrule
-<<#queries>><<>verdict>><</queries>>\bottomrule
-\end{tabular}
-\end{center}
+\endfirsthead
+\multicolumn{4}{@{}l}{\footnotesize\color{vpslate}\tablename~\thetable, continued}\\
+\toprule
+\vpth{Query} & \vpth{Verdict} & \vpth{Scope} & \vpth{Line}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+<<#queries>><<>verdict>><</queries>>\end{longtable}
+\endgroup
 %% --- END verifpal table: <<tabid>> ---
