@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f0e0 at one session and at two (GitHub issue #42).
+//
+// In the gpeer = gb scenario, x@2 = HASH(gb) carries no generated value and
+// differs from y@2 = HASH(gc@2), so that run would fail both queries. Bob
+// leaks b in phase 1, so the scenario is honest during phase 0 and corrupt
+// from phase 1, and Alice computes and uses x@2 and y@2 only in phase 1. Each
+// phase is judged as the execution stood at its end: at the end of phase 0
+// Alice@2 holds neither value, and in phase 1 her claims no longer apply.
+// Queries were once judged at phase 0 against the final values, crediting
+// Alice@2 with values she computed after her peer was compromised: f1e1.
+// Equivalence also failed at phase 1, in Carol's run, whose view borrowed
+// x@2 and y@2 from Alice@2; a view now borrows a queried value only from a
+// run whose claims apply. phase_claims_before_compromise.vp and
+// phase_claims_without_compromise.vp are the counterweights.
+attacker[passive]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Carol -> Alice: [gc]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows public gpeer
+]
+
+phase[1]
+
+principal Bob[
+	leaks b
+]
+
+principal Alice[
+	x = HASH(gpeer)
+	y = HASH(gc)
+	z = HASH(x)
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	freshness? x
+	equivalence? x, y
+]

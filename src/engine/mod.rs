@@ -74,16 +74,10 @@ fn violation_at(
 	phase: i32,
 	q: &Query,
 ) -> Option<(Violation, query::Verdict)> {
-	let knowledge = if cx.program.max_phase == 0 {
-		&ex.knowledge
-	} else {
-		&ex.phases[phase as usize]
-	};
 	let claims = |p: PrincipalId| ctx.claims_apply_at(p, phase);
 	Judge {
 		cx,
-		ex,
-		knowledge,
+		ex: ex.at(phase),
 		honest,
 		states,
 		claims: &claims,
@@ -160,8 +154,10 @@ pub(crate) fn judge(
 					continue;
 				};
 				match minimal(ctx, cx, installs, honest, states, phase, q) {
-					Some((smaller, found)) => report(ctx, cx, &smaller, honest, &result, q, &found),
-					None => report(ctx, cx, ex, honest, &result, q, &first),
+					Some((smaller, found)) => {
+						report(ctx, cx, smaller.at(phase), honest, &result, q, &found)
+					}
+					None => report(ctx, cx, ex.at(phase), honest, &result, q, &first),
 				}
 				found = true;
 				break;

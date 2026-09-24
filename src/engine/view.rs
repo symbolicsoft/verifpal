@@ -18,8 +18,18 @@ fn view_of<'a>(cx: &Context, ex: &'a Execution, r: usize, slot: usize) -> Option
 		.or_else(|| creator_run(cx, slot).and_then(|c| ex.runs[c].held(slot)))
 }
 
-pub(crate) fn executed(cx: &Context, ex: &Execution, r: usize, slot: usize) -> bool {
-	creator_run(cx, slot).is_none() || view_of(cx, ex, r, slot).is_some()
+pub(crate) fn claimable(
+	cx: &Context,
+	ex: &Execution,
+	r: usize,
+	slot: usize,
+	claims: &dyn Fn(PrincipalId) -> bool,
+) -> bool {
+	let Some(creator) = creator_run(cx, slot) else {
+		return true;
+	};
+	ex.runs[r].held(slot).is_some()
+		|| (claims(cx.program.runs[creator].id) && ex.runs[creator].held(slot).is_some())
 }
 
 fn reached_until(cx: &Context, ex: &Execution, r: usize) -> Option<i32> {

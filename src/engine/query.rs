@@ -59,7 +59,6 @@ impl Verdict {
 pub(crate) struct Judge<'a, 'b> {
 	pub(crate) cx: &'a Context<'b>,
 	pub(crate) ex: &'a Execution,
-	pub(crate) knowledge: &'a super::knowledge::Knowledge,
 	pub(crate) honest: &'a Execution,
 	pub(crate) states: &'a [PrincipalState],
 	pub(crate) claims: &'a dyn Fn(PrincipalId) -> bool,
@@ -124,7 +123,7 @@ impl Judge<'_, '_> {
 	fn confidentiality(&self, q: &Query) -> Option<Violation> {
 		let c = q.subject().ok()?;
 		let slot = self.km().index_of(c)?;
-		let knowledge = self.knowledge;
+		let knowledge = &self.ex.knowledge;
 		for (r, run) in self.ex.runs.iter().enumerate() {
 			if !(self.claims)(self.cx.program.runs[r].id) {
 				continue;
@@ -345,7 +344,7 @@ impl Judge<'_, '_> {
 				let Some(slot) = slot else {
 					continue 'runs;
 				};
-				if !super::view::executed(self.cx, self.ex, r, slot)
+				if !super::view::claimable(self.cx, self.ex, r, slot, self.claims)
 					|| ps.slot_unreached(slot)
 					|| ps.slot_starved(slot)
 					|| check_failed(&value)
@@ -370,16 +369,17 @@ impl Judge<'_, '_> {
 				continue;
 			}
 			let ps = self.view(r);
-			let executed = |c: &Constant| {
-				ps.index_of(c)
-					.is_some_and(|slot| super::view::executed(self.cx, self.ex, r, slot))
+			let claimable = |c: &Constant| {
+				ps.index_of(c).is_some_and(|slot| {
+					super::view::claimable(self.cx, self.ex, r, slot, self.claims)
+				})
 			};
 			for (i, a) in q.constants.iter().enumerate() {
-				if !executed(a) {
+				if !claimable(a) {
 					continue;
 				}
 				for b in q.constants.iter().skip(i + 1) {
-					if !executed(b) {
+					if !claimable(b) {
 						continue;
 					}
 					let Some(witness) = crate::unlink::find_link_witness(
@@ -387,7 +387,7 @@ impl Judge<'_, '_> {
 						b,
 						self.km(),
 						&ps,
-						&self.knowledge.state,
+						&self.ex.knowledge.state,
 					) else {
 						continue;
 					};

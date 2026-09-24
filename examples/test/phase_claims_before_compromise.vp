@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f1e1 at one session and at two.
+//
+// phase_claims_after_compromise.vp with Alice computing and using x and y in
+// phase 0, before Bob's phase-1 leak. The gpeer = gb scenario is honest when
+// Alice@2 uses the stale x@2 = HASH(gb) and when she holds x@2 and y@2 =
+// HASH(gc@2), which differ, so both violations are recorded at phase 0.
+attacker[passive]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Carol -> Alice: [gc]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows public gpeer
+	x = HASH(gpeer)
+	y = HASH(gc)
+	z = HASH(x)
+]
+
+phase[1]
+
+principal Bob[
+	leaks b
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	freshness? x
+	equivalence? x, y
+]

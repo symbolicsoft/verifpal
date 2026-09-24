@@ -4758,3 +4758,12 @@ fn test_cap_weak_shared_chain_assumption() {
 		run_model_sessions("cap_weak_shared_chain_assumption.vp", sessions, "c0");
 	}
 }
+
+#[test]
+fn test_phase_claims_after_compromise() {
+	for sessions in [1, 2] {
+		run_model_sessions("phase_claims_after_compromise.vp", sessions, "f0e0");
+		run_model_sessions("phase_claims_before_compromise.vp", sessions, "f1e1");
+		run_model_sessions("phase_claims_without_compromise.vp", sessions, "f1e1");
+	}
+}

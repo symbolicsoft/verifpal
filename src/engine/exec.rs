@@ -45,7 +45,28 @@ pub(crate) struct Execution {
 	pub(crate) order: Vec<(usize, usize, usize)>,
 	pub(crate) stuck: Vec<(usize, usize)>,
 	pub(crate) withheld: Vec<(usize, usize)>,
-	pub(crate) phases: Vec<Knowledge>,
+	pub(crate) barriers: Vec<Execution>,
+}
+
+impl Execution {
+	pub(crate) fn at(&self, phase: i32) -> &Execution {
+		usize::try_from(phase)
+			.ok()
+			.and_then(|phase| self.barriers.get(phase))
+			.unwrap_or(self)
+	}
+
+	fn configuration(&self) -> Execution {
+		Execution {
+			runs: self.runs.clone(),
+			knowledge: self.knowledge.clone(),
+			sent: self.sent.clone(),
+			order: self.order.clone(),
+			stuck: self.stuck.clone(),
+			withheld: self.withheld.clone(),
+			barriers: Vec::new(),
+		}
+	}
 }
 
 pub(crate) struct Context<'a> {
@@ -153,7 +174,7 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		order: Vec::new(),
 		stuck: Vec::new(),
 		withheld: Vec::new(),
-		phases: Vec::new(),
+		barriers: Vec::new(),
 	};
 	let install_of = |run: usize, slot: usize| -> Option<&Value> {
 		installs
@@ -241,9 +262,10 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 				ex.runs[r].frozen = true;
 			}
 		}
-		if program.max_phase > 0 {
+		if phase < program.max_phase {
 			ex.knowledge.close(cx.carrier);
-			ex.phases.push(ex.knowledge.clone());
+			let configuration = ex.configuration();
+			ex.barriers.push(configuration);
 		}
 	}
 	ex.knowledge.close(cx.carrier);

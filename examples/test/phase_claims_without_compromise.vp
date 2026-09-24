@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f1e1 at one session and at two.
+//
+// phase_claims_after_compromise.vp without Bob's leak. The gpeer = gb scenario
+// is honest throughout, so its phase-1 values are judged at phase 1: x@2 =
+// HASH(gb) carries no generated value and differs from y@2 = HASH(gc@2).
+attacker[passive]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Carol -> Alice: [gc]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows public gpeer
+]
+
+phase[1]
+
+principal Alice[
+	x = HASH(gpeer)
+	y = HASH(gc)
+	z = HASH(x)
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	freshness? x
+	equivalence? x, y
+]
