@@ -73,18 +73,8 @@ struct WasmAnalyze {
 	scenarios: Vec<WasmScenario>,
 	messages: Vec<String>,
 	sessions: u8,
-	saturation: Option<WasmSaturation>,
 	report: Option<ModelReport>,
 	html: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WasmSaturation {
-	stable_from: u8,
-	saturated: bool,
-	regressed: bool,
-	ceiling: u8,
 }
 
 #[derive(Default, Deserialize)]
@@ -92,7 +82,6 @@ struct WasmSaturation {
 struct AnalyzeOptions {
 	sessions: Option<i64>,
 	auto_queries: bool,
-	saturate: bool,
 	report: bool,
 }
 
@@ -256,36 +245,14 @@ fn analyze_model(
 	input: &str,
 	sessions: u8,
 	options: &AnalyzeOptions,
-) -> VResult<(VerifyReport, String, Option<WasmSaturation>)> {
+) -> VResult<(VerifyReport, String)> {
 	let m = crate::parser::parse_string(FILE_NAME, input)?;
-	if !options.saturate {
-		let (report, source) = crate::verify::verify_parsed(m, sessions, options.auto_queries)?;
-		return Ok((report, source, None));
-	}
-	let saturation = crate::verify::saturate(crate::verify::SATURATE_MAX, |k| {
-		crate::verify::verify_parsed(m.clone(), k, options.auto_queries)
-	})?;
-	if saturation.regressed {
-		crate::verify::saturation_regressed_warning();
-	}
-	info::info_message(&saturation.summary(), InfoLevel::Info, false);
-	info::wasm_messages_replay(saturation.output);
-	let note = saturation
-		.report
-		.provenance
-		.saturation
-		.map(|s| WasmSaturation {
-			stable_from: s.stable_from,
-			saturated: s.saturated,
-			regressed: s.regressed,
-			ceiling: s.ceiling,
-		});
-	Ok((saturation.report, saturation.source, note))
+	crate::verify::verify_parsed(m, sessions, options.auto_queries)
 }
 
 fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
 	let (payload, outcome, source) = match analyze_model(input, sessions, options) {
-		Ok((report, source, saturation)) => (
+		Ok((report, source)) => (
 			WasmAnalyze {
 				ok: true,
 				error: String::new(),
@@ -295,7 +262,6 @@ fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
 				scenarios: scenarios_of(&report.scenarios),
 				messages: Vec::new(),
 				sessions: report.sessions,
-				saturation,
 				report: None,
 				html: None,
 			},
@@ -336,7 +302,6 @@ impl WasmAnalyze {
 			scenarios: Vec::new(),
 			messages: Vec::new(),
 			sessions: 0,
-			saturation: None,
 			report: None,
 			html: None,
 		}
@@ -355,7 +320,7 @@ pub fn wasm_analyze(input: &str, options: &str) -> String {
 	};
 	serialize(
 		&payload,
-		r#"{"ok":false,"error":"could not serialize the result","code":"","results":[],"assumptions":[],"scenarios":[],"messages":[],"sessions":0,"saturation":null,"report":null,"html":null}"#,
+		r#"{"ok":false,"error":"could not serialize the result","code":"","results":[],"assumptions":[],"scenarios":[],"messages":[],"sessions":0,"report":null,"html":null}"#,
 	)
 }
 
@@ -591,7 +556,6 @@ mod tests {
 		assert_eq!(analyzed["assumptions"], verified["assumptions"]);
 		assert_eq!(analyzed["scenarios"], verified["scenarios"]);
 		assert_eq!(analyzed["sessions"], DEFAULT_SESSIONS);
-		assert!(analyzed["saturation"].is_null());
 		assert!(analyzed["html"].is_null());
 		assert_eq!(analyzed["report"]["file"], FILE_NAME);
 		assert_eq!(analyzed["report"]["analysis"]["code"], "c0a1");
@@ -647,31 +611,6 @@ mod tests {
 			"{}",
 			payload["report"]["analysis"]["provenance"]
 		);
-	}
-
-	#[test]
-	fn saturation_reports_where_the_verdicts_settled() {
-		let source = corpus("session_replay_breaks_injectivity.vp");
-		let payload = json(wasm_analyze(
-			&source,
-			r#"{"saturate": true, "sessions": 1}"#,
-		));
-		assert_eq!(payload["ok"], true, "{payload}");
-		assert_eq!(payload["code"], "a1");
-		assert_eq!(
-			payload["sessions"], 3,
-			"saturation overrides the requested count, as --saturate does"
-		);
-		assert_eq!(
-			payload["saturation"],
-			serde_json::json!({
-				"stableFrom": 2,
-				"saturated": true,
-				"regressed": false,
-				"ceiling": crate::verify::SATURATE_MAX,
-			})
-		);
-		assert_eq!(payload["report"]["analysis"]["sessions"], 3);
 	}
 
 	#[test]
@@ -741,7 +680,7 @@ mod tests {
 			r#"{"sessions": 2.5}"#,
 			r#"{"sessions": "2"}"#,
 			r#"{"session": 2}"#,
-			r#"{"saturate": "yes"}"#,
+			r#"{"saturate": true}"#,
 		] {
 			let payload = json(wasm_analyze(DH, options));
 			assert_eq!(payload["ok"], false, "{options}: {payload}");
@@ -758,7 +697,6 @@ mod tests {
 			assert_eq!(payload["code"], "");
 			assert!(payload["report"].is_null(), "{options}");
 			assert!(payload["html"].is_null(), "{options}");
-			assert!(payload["saturation"].is_null(), "{options}");
 		}
 	}
 

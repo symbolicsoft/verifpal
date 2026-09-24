@@ -493,28 +493,6 @@ fn analysis_provenance(report: &VerifyReport) -> Vec<String> {
 				.to_string(),
 		);
 	}
-	if let Some(s) = report.provenance.saturation {
-		if s.saturated {
-			out.push(format!(
-				"--saturate raised the session count until the verdicts stopped moving: they \
-				 were unchanged from {} to {} sessions.",
-				s.stable_from, report.sessions
-			));
-		} else {
-			out.push(format!(
-				"--saturate reached {} sessions, the highest it tries, with the verdicts still \
-				 changing; they may keep changing beyond it.",
-				s.ceiling
-			));
-		}
-		if s.regressed {
-			out.push(
-				"An attack found at a lower session count disappeared at a higher one. That is \
-				 an engine bug, not a protocol result."
-					.to_string(),
-			);
-		}
-	}
 	out
 }
 

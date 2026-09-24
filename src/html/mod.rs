@@ -1095,16 +1095,16 @@ mod tests {
 	}
 
 	#[test]
-	fn a_generated_or_saturated_run_says_where_its_shape_came_from() {
+	fn a_generated_run_says_where_its_shape_came_from() {
 		let mut a = analysis(
 			"active",
 			"c0",
 			vec![query("confidentiality", "c? m", false)],
 		);
-		a.provenance = vec!["--saturate stopped at 2 sessions.".to_string()];
+		a.provenance = vec!["--auto-queries replaced the model's queries.".to_string()];
 		let html = one(a);
 		assert!(html.contains("How this analysis was produced"));
-		assert!(html.contains("--saturate stopped at 2 sessions."));
+		assert!(html.contains("--auto-queries replaced the model"));
 	}
 
 	#[test]
@@ -1525,7 +1525,7 @@ mod tests {
 			},
 		];
 		a.notes = vec!["Per-session values carry the suffix #2.".to_string()];
-		a.provenance = vec!["--saturate stopped at 2 sessions.".to_string()];
+		a.provenance = vec!["The model's own queries block was replaced by the set --auto-queries derives from the protocol; these are generated claims, not the author's.".to_string()];
 
 		let full = ModelReport {
 			file: "examples/golden.vp".to_string(),

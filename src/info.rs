@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::borrow::Cow;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::sync::{LazyLock, Mutex};
 
 use crate::primitive::primitive_has_single_output;
@@ -23,8 +23,6 @@ pub enum Verbosity {
 }
 
 thread_local! {
-	static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
-	static CAPTURED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SHOWN: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SUPPRESSED: Cell<usize> = const { Cell::new(0) };
@@ -82,44 +80,9 @@ pub(crate) fn info_is_quiet() -> bool {
 	QUIET_DEPTH.with(|d| d.get() > 0)
 }
 
-fn info_is_capturing() -> bool {
-	CAPTURE_DEPTH.with(|d| d.get() > 0)
-}
-
 fn emit(line: String) {
-	if info_is_capturing() {
-		CAPTURED.with(|c| c.borrow_mut().push(line));
-		return;
-	}
 	use std::io::Write as _;
 	let _ = writeln!(std::io::stdout().lock(), "{line}");
-}
-
-pub(crate) struct InfoCapture;
-
-impl InfoCapture {
-	pub(crate) fn new() -> InfoCapture {
-		CAPTURE_DEPTH.with(|d| d.set(d.get() + 1));
-		InfoCapture
-	}
-}
-
-impl Drop for InfoCapture {
-	fn drop(&mut self) {
-		CAPTURE_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-	}
-}
-
-pub(crate) fn info_capture_take() -> Vec<String> {
-	CAPTURED.with(|c| std::mem::take(&mut *c.borrow_mut()))
-}
-
-pub fn info_replay(lines: &[String]) {
-	use std::io::Write as _;
-	let mut out = std::io::stdout().lock();
-	for line in lines {
-		let _ = writeln!(out, "{line}");
-	}
 }
 
 #[cfg(feature = "cli")]
@@ -315,13 +278,6 @@ pub(crate) fn wasm_messages_drain() -> Vec<String> {
 		.collect()
 }
 
-#[cfg(feature = "wasm")]
-pub(crate) fn wasm_messages_replay(lines: Vec<String>) {
-	for line in lines {
-		wasm_push(line);
-	}
-}
-
 fn wasm_push(msg: String) {
 	#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 	crate::wasm::progress_message(&msg);
@@ -410,12 +366,7 @@ pub fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
 	}
 	let (indent, plain_label, plain_symbol, ..) = level_columns(level);
 	if cfg!(target_arch = "wasm32") {
-		let line = format!("[{}] {}", plain_label, msg);
-		if info_is_capturing() {
-			CAPTURED.with(|c| c.borrow_mut().push(line));
-		} else {
-			wasm_push(line);
-		}
+		wasm_push(format!("[{}] {}", plain_label, msg));
 		return;
 	}
 	if !level_is_visible(level) {
@@ -623,44 +574,6 @@ mod tests {
 		assert_eq!(info_elapsed_text(Duration::from_millis(7)), "7ms");
 		assert_eq!(info_elapsed_text(Duration::from_millis(999)), "999ms");
 		assert_eq!(info_elapsed_text(Duration::from_millis(1400)), "1.40s");
-	}
-
-	#[test]
-	fn a_captured_message_is_buffered_rather_than_printed() {
-		use crate::info::{InfoCapture, Verbosity, info_capture_take, info_message, set_verbosity};
-		use crate::types::InfoLevel;
-		set_verbosity(Verbosity::Normal);
-		assert!(info_capture_take().is_empty());
-		{
-			let _capture = InfoCapture::new();
-			info_message("icb captured line", InfoLevel::Info, false);
-		}
-		let lines = info_capture_take();
-		assert_eq!(lines.len(), 1, "{lines:?}");
-		assert!(lines[0].contains("icb captured line"), "{}", lines[0]);
-		assert!(
-			info_capture_take().is_empty(),
-			"taking the buffer must drain it"
-		);
-	}
-
-	#[test]
-	fn capture_and_quiet_are_independent_guards() {
-		use crate::info::{
-			InfoCapture, InfoQuiet, Verbosity, info_capture_take, info_message, set_verbosity,
-		};
-		use crate::types::InfoLevel;
-		set_verbosity(Verbosity::Normal);
-		let _ = info_capture_take();
-		{
-			let _capture = InfoCapture::new();
-			let _quiet = InfoQuiet::new();
-			info_message("cqi silenced line", InfoLevel::Info, false);
-		}
-		assert!(
-			info_capture_take().is_empty(),
-			"a quiet guard inside a capture must still silence, not buffer"
-		);
 	}
 
 	#[test]

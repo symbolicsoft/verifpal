@@ -4,9 +4,8 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use verifpal::{
-	ColorChoice, InfoLevel, Run, SATURATE_MAX, Verbosity, VerifyReport, diagram, html_report,
-	info_banner, info_message, info_replay, pretty_print, saturation_sessions, set_color_choice,
-	set_verbosity, tex_report, update_check_report, update_check_start,
+	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
+	set_color_choice, set_verbosity, tex_report, update_check_report, update_check_start,
 	verify_report_with_source_opts,
 };
 
@@ -177,8 +176,8 @@ enum Commands {
 			             Verdicts are relative to this count. Raising it \
 			             strengthens a query that still holds, and can only reveal more attacks, \
 			             never fewer, but it is expensive: cost grows steeply with the number of \
-			             replicated principals. Start at the default and raise it deliberately, \
-			             or let --saturate find the point where the verdicts stop moving. \
+			             replicated principals. Start at the default and raise it deliberately; \
+			             no finite count rules out an attack that needs more concurrent runs. \
 			             Accepted values run from 1 to 16."
 		)]
 		sessions: u8,
@@ -220,33 +219,6 @@ enum Commands {
 			             equivalence, and any query carrying a precondition option."
 		)]
 		auto_queries: bool,
-		#[arg(
-			long,
-			default_value_t = false,
-			help = "Raise the session count until the verdicts stop changing",
-			long_help = "Find the session count at which the model's verdicts stabilize, and \
-			             report the analysis from there.\n\n\
-			             Verifpal analyzes the model at the default two sessions, then at three, \
-			             and so on up to four, stopping at the first count whose result code is \
-			             identical to the previous count's. The ladder starts at the default \
-			             rather than at one session because an attack needing three concurrent \
-			             runs leaves one and two sessions reading alike, and a ladder that began \
-			             there would stop before it ever reached the count that finds it. That \
-			             count is the one whose analysis is reported, \
-			             and a line saying that the verdicts stopped changing there is printed \
-			             before it. Since an attack requiring k concurrent runs first appears at \
-			             k sessions and persists above it, a code that stopped changing is \
-			             evidence, though not proof, that the model has stopped yielding new \
-			             attacks.\n\n\
-			             This overrides --sessions. It costs the sum of every analysis it runs, \
-			             so it is much slower than a single run; the intermediate runs print \
-			             nothing, and the reported one is not analyzed twice.\n\n\
-			             Giving the attacker another session can only give it more to work with, \
-			             so an attack found at a lower count must still be found at a higher \
-			             one. If one disappears, that is a bug in Verifpal and not a fact about \
-			             the protocol, and a warning saying so is printed on stderr."
-		)]
-		saturate: bool,
 		#[arg(
 			long,
 			value_enum,
@@ -583,7 +555,6 @@ fn run_verify(
 	sessions: u8,
 	fail_on_attack: bool,
 	auto_queries: bool,
-	saturate: bool,
 	format: FormatArg,
 	quiet: bool,
 	verbose: bool,
@@ -619,24 +590,7 @@ fn run_verify(
 		if index > 0 && !structured && !result_code {
 			out!();
 		}
-		let analyzed = if saturate {
-			saturation_sessions(model, SATURATE_MAX, auto_queries).map(|saturation| {
-				if saturation.regressed {
-					eprintln!(
-						"warning: an attack found at a lower session count \
-						 disappeared at a higher one; that is an engine bug, \
-						 not a protocol result"
-					);
-				}
-				if !structured && !result_code {
-					info_message(&saturation.summary(), InfoLevel::Info, false);
-				}
-				info_replay(&saturation.output);
-				(saturation.report, saturation.source)
-			})
-		} else {
-			verify_report_with_source_opts(model, sessions, auto_queries)
-		};
+		let analyzed = verify_report_with_source_opts(model, sessions, auto_queries);
 		match analyzed {
 			Ok((report, source)) => {
 				had_attack |= report.results.iter().any(|r| r.resolved);
@@ -751,7 +705,6 @@ fn main() {
 			sessions,
 			fail_on_attack,
 			auto_queries,
-			saturate,
 			format,
 			quiet,
 			verbose,
@@ -762,7 +715,6 @@ fn main() {
 			sessions,
 			fail_on_attack,
 			auto_queries,
-			saturate,
 			format,
 			quiet,
 			verbose,

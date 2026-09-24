@@ -334,25 +334,6 @@ fn auto_queries_asks_more_than_the_model_wrote() {
 }
 
 #[test]
-fn a_model_saturates_when_its_verdict_stops_moving() {
-	let (_, code, k, regressed) =
-		crate::verify::verify_saturating("examples/test/hmac_ok.vp", 4).expect("analyses");
-	assert_eq!(code, "c0a1");
-	assert_eq!(k, 3);
-	assert!(!regressed);
-}
-
-#[test]
-fn a_cross_session_attack_saturates_only_after_it_appears() {
-	let (_, code, k, regressed) =
-		crate::verify::verify_saturating("examples/test/session_replay_breaks_injectivity.vp", 4)
-			.expect("analyses");
-	assert_eq!(code, "a1");
-	assert_eq!(k, 3);
-	assert!(!regressed);
-}
-
-#[test]
 fn test_pitoy_depth() {
 	run_model("pitoy_depth.vp", "c1");
 	run_model_sessions("pitoy_depth.vp", 1, "c0");
@@ -880,20 +861,6 @@ fn a_matching_run_of_the_sender_is_not_an_authentication_failure() {
 		"guarding Alice's nonce leaves no substitution that drives her into emitting the \
 		 forged tag, so the exemption must not excuse a value the leaked key manufactured"
 	);
-}
-
-#[test]
-fn saturation_never_stops_before_it_has_looked_above_the_default() {
-	let stable = crate::verify::saturation_sessions("examples/test/aead_leak.vp", 4, false)
-		.expect("analyses");
-	assert!(stable.saturated);
-	assert_eq!(
-		stable.sessions, 3,
-		"a model reading alike at one and two sessions must still be probed at three: an \
-		 attack needing three concurrent runs is invisible below that, and a ladder that \
-		 began at one session would have called this saturated at two and stopped"
-	);
-	assert_eq!(stable.stable_from, 2);
 }
 
 #[test]
@@ -4766,4 +4733,12 @@ fn test_phase_claims_after_compromise() {
 		run_model_sessions("phase_claims_before_compromise.vp", sessions, "f1e1");
 		run_model_sessions("phase_claims_without_compromise.vp", sessions, "f1e1");
 	}
+}
+
+#[test]
+fn test_sessions_four_run_threshold() {
+	for sessions in [1, 2, 3] {
+		run_model_sessions("sessions_four_run_threshold.vp", sessions, "c0");
+	}
+	run_model_sessions("sessions_four_run_threshold.vp", 4, "c1");
 }

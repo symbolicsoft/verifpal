@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two (GitHub issue #43). It is still c0
+// at three sessions and c1 at four.
+//
+// secret is split four ways and every share is needed to recompose it. The
+// three shares Alice leaks are wrapped under wrap, and Bob decrypts only what
+// arrives as eone, leaking the result. Each Bob run can therefore unwrap one
+// share: the attacker replaces eone with a different leaked wrapping in each
+// run, and the fourth share is Bob's honest one. With fewer than four runs one
+// share is always missing, so the results at one, two and three sessions agree
+// and still say nothing about four. This is why Verifpal has no saturation mode
+// that stops raising the count once adjacent counts agree.
+attacker[active]
+
+principal Alice[
+	knows private secret, wrap
+	sone, stwo, sthree, sfour = THRESHOLD_SPLIT[4](secret)
+	eone = ENC(wrap, sone)
+	etwo = ENC(wrap, stwo)
+	ethree = ENC(wrap, sthree)
+	efour = ENC(wrap, sfour)
+	leaks etwo, ethree, efour
+]
+
+Alice -> Bob: eone
+
+principal Bob[
+	knows private wrap
+	d = DEC(wrap, eone)
+	leaks d
+]
+
+queries[
+	confidentiality? secret
+]

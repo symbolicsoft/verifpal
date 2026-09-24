@@ -144,9 +144,7 @@ fn golden_run() -> Run {
 			honest: false,
 		}],
 		notes: vec!["Per-session values and principals carry the suffix #2.".to_string()],
-		provenance: vec![
-			"--saturate raised the session count until the verdicts stopped moving.".to_string(),
-		],
+		provenance: vec!["The model's own queries block was replaced by the set --auto-queries derives from the protocol; these are generated claims, not the author's.".to_string()],
 		queries: vec![broken, holding],
 	};
 	Run {
