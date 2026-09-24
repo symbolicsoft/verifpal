@@ -634,11 +634,6 @@ section.model[hidden] {
 	color: var(--ink-4);
 }
 
-.tvRelay {
-	color: var(--ink-4);
-	font-style: italic;
-}
-
 .traceStep .n {
 	color: var(--ink-4);
 }

@@ -249,7 +249,7 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 	let variants = if q.variants == 0 {
 		String::new()
 	} else {
-		format!("{} session variant{}", q.variants, plural(q.variants))
+		format!("{} variant{}", q.variants, plural(q.variants))
 	};
 	Ctx::new()
 		.text("class", class)
@@ -346,10 +346,10 @@ fn callouts(a: &Analysis) -> Vec<Ctx> {
 				)
 				.text(
 					"peer",
-					if scenario.honest {
-						"honest peer"
-					} else {
-						"corrupt peer"
+					match scenario.corrupt_from {
+						None => "honest peer".to_string(),
+						Some(0) => "corrupt peer".to_string(),
+						Some(phase) => format!("peer corrupt from phase {phase}"),
 					},
 				)
 		})
@@ -485,15 +485,10 @@ fn trace_values(s: &ReportStep) -> Vec<Ctx> {
 			} else {
 				v.name.clone()
 			};
-			let relay = v.was.is_some() && v.was == v.installed;
-			let ctx = Ctx::new()
-				.flag("relay", relay)
+			Ctx::new()
 				.text("gclass", if v.guarded { " tvGuard" } else { "" })
-				.text("name", name);
-			if relay {
-				return ctx;
-			}
-			ctx.text("installed", v.installed.clone().unwrap_or_default())
+				.text("name", name)
+				.text("installed", v.installed.clone().unwrap_or_default())
 				.text("was", v.was.clone().unwrap_or_default())
 		})
 		.collect()
@@ -1136,6 +1131,7 @@ mod tests {
 				value: "gm".to_string(),
 			}],
 			honest: false,
+			corrupt_from: Some(0),
 		}];
 		let html = one(a);
 		assert!(html.contains("<code>HASH(m)</code> (from phase 2)"));
@@ -1199,20 +1195,24 @@ mod tests {
 	}
 
 	#[test]
-	fn a_mutation_step_renders_structured_value_rows_and_a_relay_says_so() {
-		let mut relay = mutation();
-		relay.values.push(TraceValue {
+	fn a_mutation_step_renders_every_value_it_lists_as_an_install() {
+		let mut step = mutation();
+		step.values.push(TraceValue {
 			name: "gb".to_string(),
 			installed: Some("PUBKEY(b)".to_string()),
 			was: Some("PUBKEY(b)".to_string()),
 			guarded: true,
 		});
 		let mut q = query("authentication", "a? A -> B: ga", true);
-		q.steps = vec![relay];
+		q.steps = vec![step];
 		let html = one(analysis("active", "a1", vec![q]));
 		assert!(html.contains("<span class=\"tvNew\">PUBKEY(nil)</span>"));
 		assert!(html.contains("honest value: PUBKEY(a)"));
-		assert!(html.contains("relayed unchanged"));
+		assert!(
+			html.contains("<span class=\"tvNew\">PUBKEY(b)</span>"),
+			"an install equal to the honest value is still an install"
+		);
+		assert!(!html.contains("relayed unchanged"));
 		assert!(html.contains("[gb]"));
 		assert!(html.contains("tvGuard"));
 	}
@@ -1514,6 +1514,7 @@ mod tests {
 					value: "gb".to_string(),
 				}],
 				honest: true,
+				corrupt_from: None,
 			},
 			ScenarioReport {
 				principal: "Alice".to_string(),
@@ -1522,6 +1523,7 @@ mod tests {
 					value: "gm".to_string(),
 				}],
 				honest: false,
+				corrupt_from: Some(0),
 			},
 		];
 		a.notes = vec!["Per-session values carry the suffix #2.".to_string()];

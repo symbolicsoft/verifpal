@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// Mallory's key is PUBKEY(HASH(seed)) and she leaks seed, so a run with her
+// as peer is corrupt and its secret is not the protocol's to keep. Key
+// material was once recorded only when a constant sat at the key position,
+// so the inline HASH(seed) left the scenario honest and the attacker's
+// decryption of Alice's s in it was reported. scenario_corrupt_inline_key_dh.vp
+// is the DH form.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+principal Mallory[
+	generates seed
+	gm = PUBKEY(HASH(seed))
+	leaks seed
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows public gpeer
+	generates s
+	e = PKE_ENC(gpeer, s)
+]
+Alice -> Bob: e
+principal Bob[
+	sb = PKE_DEC(b, e)
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	confidentiality? s
+]

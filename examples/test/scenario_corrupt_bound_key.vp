@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// Alice[kpeer = km] binds Alice's AEAD key to km = HASH(sm), and Mallory
+// sends sm in the clear, so that run's key is computable and its peer
+// corrupt. km sits at no key position in the model as written; the binding
+// puts it at one. Only values the model itself used as keys were once
+// considered, so the scenario was left honest and the attacker's reading of
+// m there reported.
+attacker[active]
+principal Bob[
+	knows private kb
+]
+principal Mallory[
+	generates sm
+]
+Mallory -> Alice: sm
+principal Alice[
+	knows private kb
+	km = HASH(sm)
+	knows private kpeer
+	generates m, n
+	e = AEAD_ENC(kpeer, n, m, nil)
+]
+Alice -> Bob: n, e
+principal Bob[
+	d = AEAD_DEC(kb, n, e, nil)
+]
+scenarios[
+	Alice[kpeer = kb]
+	Alice[kpeer = km]
+]
+queries[
+	confidentiality? m
+]

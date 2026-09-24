@@ -25,6 +25,8 @@ pub(crate) enum Violation {
 		slot: usize,
 		value: Value,
 		used: usize,
+		emissions: usize,
+		acceptances: usize,
 	},
 	Substituted {
 		run: usize,
@@ -39,7 +41,9 @@ pub(crate) enum Violation {
 		used: usize,
 	},
 	Linked {
-		clause: String,
+		a: Constant,
+		b: Constant,
+		link: super::unlink::Link,
 		resolved: Vec<(Constant, Value)>,
 	},
 	Differ {
@@ -59,6 +63,7 @@ impl Verdict {
 pub(crate) struct Judge<'a, 'b> {
 	pub(crate) cx: &'a Context<'b>,
 	pub(crate) ex: &'a Execution,
+	pub(crate) whole: &'a Execution,
 	pub(crate) honest: &'a Execution,
 	pub(crate) states: &'a [PrincipalState],
 	pub(crate) claims: &'a dyn Fn(PrincipalId) -> bool,
@@ -115,7 +120,7 @@ impl Judge<'_, '_> {
 				program.runs[delivery.sender].id == option.message.sender
 					&& program.runs[delivery.recipient].id == option.message.recipient
 					&& delivery.slots.iter().any(|&(s, _)| s == slot)
-					&& self.ex.sent[d].is_some()
+					&& self.whole.sent[d].is_some()
 			})
 		})
 	}
@@ -171,8 +176,12 @@ impl Judge<'_, '_> {
 				sites(&|v| crate::resolution::state_mentions(v, km, ps, program.id, target));
 		}
 		let mut uses = Vec::new();
+		let eventually = &self.whole.runs[run];
 		for (i, slot) in mentioning {
 			if !state.reached(i) {
+				if eventually.reached(i) {
+					continue;
+				}
 				return None;
 			}
 			let h = state.held(slot)?;
@@ -296,6 +305,8 @@ impl Judge<'_, '_> {
 				slot,
 				value: h.value.clone(),
 				used: use_slot,
+				emissions,
+				acceptances,
 			});
 		}
 		None
@@ -364,40 +375,36 @@ impl Judge<'_, '_> {
 	}
 
 	fn unlinkability(&self, q: &Query) -> Option<Violation> {
+		let km = self.km();
 		for r in 0..self.ex.runs.len() {
 			if !(self.claims)(self.cx.program.runs[r].id) {
 				continue;
 			}
-			let ps = self.view(r);
-			let claimable = |c: &Constant| {
-				ps.index_of(c).is_some_and(|slot| {
+			let claimable: Vec<(&Constant, usize)> = q
+				.constants
+				.iter()
+				.filter_map(|c| {
+					let slot = km.index_of(c)?;
 					super::view::claimable(self.cx, self.ex, r, slot, self.claims)
+						.then_some((c, slot))
 				})
-			};
-			for (i, a) in q.constants.iter().enumerate() {
-				if !claimable(a) {
-					continue;
-				}
-				for b in q.constants.iter().skip(i + 1) {
-					if !claimable(b) {
-						continue;
-					}
-					let Some(witness) = crate::unlink::find_link_witness(
-						a,
-						b,
-						self.km(),
-						&ps,
-						&self.ex.knowledge.state,
-					) else {
+				.collect();
+			for (i, &(a, sa)) in claimable.iter().enumerate() {
+				for &(b, sb) in &claimable[i + 1..] {
+					let Some(link) = super::unlink::link(self.cx, self.ex, r, sa, sb) else {
 						continue;
 					};
-					let clause = witness.describe(|v| v.to_string());
-					let resolved = [a, b]
+					let resolved = [(a, sa), (b, sb)]
 						.into_iter()
-						.map(|c| (c.clone(), ps.resolve_constant(c, false).0))
+						.filter_map(|(c, slot)| {
+							let held = super::view::view_of(self.cx, self.ex, r, slot)?;
+							Some((c.clone(), held.value.clone()))
+						})
 						.collect();
 					return Some(Violation::Linked {
-						clause: format!("Attacker links {a} and {b} {clause}."),
+						a: a.clone(),
+						b: b.clone(),
+						link,
 						resolved,
 					});
 				}

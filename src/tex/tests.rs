@@ -142,6 +142,7 @@ fn golden_run() -> Run {
 				value: "gm".to_string(),
 			}],
 			honest: false,
+			corrupt_from: Some(0),
 		}],
 		notes: vec!["Per-session values and principals carry the suffix #2.".to_string()],
 		provenance: vec!["The model's own queries block was replaced by the set --auto-queries derives from the protocol; these are generated claims, not the author's.".to_string()],
@@ -426,6 +427,17 @@ fn the_source_appendix_cannot_be_closed_from_inside_a_model() {
 }
 
 #[test]
+fn box_drawing_in_the_source_appendix_keeps_its_shape() {
+	let safe = super::listing_safe(
+		"// \u{250c}\u{2500}\u{2510} A \u{25ba} B\n// \u{2502}x\u{2502} caf\u{e9}",
+	);
+	assert_eq!(
+		safe, "// +-+ A > B\n// |x| caf\u{e9}",
+		"the listing font has no box-drawing glyphs, which would otherwise vanish"
+	);
+}
+
+#[test]
 fn a_split_or_spaced_terminator_is_still_caught() {
 	let terminator = super::listing_terminator();
 	for line in [
@@ -576,11 +588,18 @@ fn every_partial_reference_names_a_template_that_exists() {
 fn a_failed_model_is_reported_inside_the_document() {
 	let run = Run::of(
 		"0.0.0",
-		&[("broken.vp".to_string(), Err("parse error: 100% bad".into()))],
+		&[(
+			"broken.vp".to_string(),
+			Err("parse error: 100% bad\n  |   ^^ here".into()),
+		)],
 		&[String::new()],
 	);
 	let tex = tex_report(&run);
-	assert!(tex.contains("parse error: 100\\% bad"), "{tex}");
+	assert!(
+		tex.contains("\\mbox{}parse~error:~100\\%~bad\\\\\n\\mbox{}~~\\textbar{}~~~\\textasciicircum{}\\textasciicircum{}~here"),
+		"a diagnostic keeps its lines and the spaces that put its caret under the \
+		 source: {tex}"
+	);
 	assert!(braces_balance(&tex));
 }
 

@@ -431,29 +431,15 @@ pub(crate) fn emissions_under(
 ) -> Vec<Value> {
 	(0..ps.values.len())
 		.filter(|&e| {
-			ps.values[e].provenance.creator == ps.id
-				&& (ps.meta[e].sent_at.is_some() || ps.meta[e].constant.leaked)
+			!sym.is_var_slot(e)
+				&& (!ps.meta[e].wire.is_empty() || ps.meta[e].constant.leaked)
+				&& vars::contains_var(&sym.terms[e])
 		})
 		.map(|e| {
 			crate::theory::reduce_once(&vars::ground_free(&vars::apply(&sym.terms[e], binding)))
 		})
 		.filter(|emitted| !vars::contains_var(emitted))
 		.collect()
-}
-
-pub(crate) fn emits_an_install(
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-	proposal: &Substitution,
-	signature: &[(usize, Value)],
-) -> bool {
-	let emissions = emissions_under(ps, sym, proposal);
-	signature.iter().any(|(_, ground)| {
-		let ground = crate::theory::reduce_once(ground);
-		emissions
-			.iter()
-			.any(|emitted| emitted.equivalent(&ground, true))
-	})
 }
 
 fn keyed_free(
@@ -788,7 +774,7 @@ fn goals_for_query(
 					continue;
 				};
 				for arg in &p.arguments {
-					if !crate::unlink::depends_on_secret(arg, ps) {
+					if !crate::engine::unlink::depends_on_secret(arg, km) {
 						continue;
 					}
 					out.extend(deducer.solve(arg, base));

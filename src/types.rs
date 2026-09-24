@@ -395,6 +395,18 @@ fn narrow_span(span: Span, source: &str, needle: &str, index: usize) -> Option<S
 		return None;
 	}
 	let haystack = &source[start..end];
+	find_word(haystack, needle, index)
+		.or_else(|| {
+			find_word(
+				&haystack.to_ascii_lowercase(),
+				&needle.to_ascii_lowercase(),
+				index,
+			)
+		})
+		.map(|(at, after)| Span::new(start + at, start + after))
+}
+
+fn find_word(haystack: &str, needle: &str, index: usize) -> Option<(usize, usize)> {
 	let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
 	let bytes = haystack.as_bytes();
 	let mut from = 0usize;
@@ -406,7 +418,7 @@ fn narrow_span(span: Span, source: &str, needle: &str, index: usize) -> Option<S
 		let after_ok = after >= bytes.len() || !is_word(bytes[after]);
 		if before_ok && after_ok {
 			if seen == index {
-				return Some(Span::new(start + at, start + after));
+				return Some((at, after));
 			}
 			seen += 1;
 		}
@@ -812,7 +824,21 @@ pub struct Scenario {
 pub struct ScenarioSummary {
 	pub principal: Arc<str>,
 	pub bindings: Vec<(Arc<str>, Arc<str>)>,
-	pub honest: bool,
+	pub corrupt_from: Option<i32>,
+}
+
+impl ScenarioSummary {
+	pub fn honest(&self) -> bool {
+		self.corrupt_from.is_none_or(|phase| phase > 0)
+	}
+
+	pub fn peer(&self) -> String {
+		match self.corrupt_from {
+			None => "honest peer".to_string(),
+			Some(0) => "corrupt peer".to_string(),
+			Some(phase) => format!("peer corrupt from phase {phase}"),
+		}
+	}
 }
 
 impl std::fmt::Display for ScenarioSummary {
@@ -1237,12 +1263,6 @@ impl TraceSlot {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Disclosure {
-	Message,
-	Leak,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct ProtocolTrace {
 	pub principals: Vec<String>,
@@ -1289,52 +1309,6 @@ impl ProtocolTrace {
 
 	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {
 		a == b || map.get(&a).copied().unwrap_or(a) == map.get(&b).copied().unwrap_or(b)
-	}
-
-	pub(crate) fn disclosure(
-		&self,
-		slot: usize,
-		phase: i32,
-		reached: impl Fn(PrincipalId, i32) -> bool,
-	) -> Option<Disclosure> {
-		let trace_slot = self.slots.get(slot)?;
-		let initially_holds = |principal: PrincipalId| {
-			principal == trace_slot.creator
-				|| trace_slot
-					.known_by
-					.iter()
-					.any(|&(recipient, sender)| recipient == principal && sender == principal)
-		};
-		let message = trace_slot
-			.sent_by
-			.iter()
-			.filter(|event| {
-				event.phase <= phase
-					&& initially_holds(event.sender)
-					&& reached(event.sender, event.declared_at)
-			})
-			.map(|event| (event.declared_at, Disclosure::Message))
-			.min_by_key(|(at, _)| *at);
-		let leak = self
-			.leaks
-			.iter()
-			.filter(|leak| {
-				leak.constant_id == trace_slot.constant.id
-					&& leak.phase <= phase
-					&& initially_holds(leak.principal_id)
-					&& reached(leak.principal_id, leak.declared_at)
-			})
-			.map(|leak| (leak.declared_at, Disclosure::Leak))
-			.min_by_key(|(at, _)| *at);
-		match (message, leak) {
-			(Some(message), Some(leak)) => Some(if message.0 <= leak.0 {
-				message.1
-			} else {
-				leak.1
-			}),
-			(Some((_, disclosure)), None) | (None, Some((_, disclosure))) => Some(disclosure),
-			(None, None) => None,
-		}
 	}
 
 	pub(crate) fn substitution_phase(&self, slot: usize, recipient: PrincipalId) -> Option<i32> {

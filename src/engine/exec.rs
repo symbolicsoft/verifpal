@@ -184,6 +184,7 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 	};
 	for phase in 0..=program.max_phase {
 		ex.knowledge.set_phase(phase);
+		let mut early = false;
 		loop {
 			let mut progress = false;
 			for r in 0..program.runs.len() {
@@ -200,7 +201,7 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 					}
 					let pc = state.pc;
 					let before = ex.knowledge.len();
-					let outcome = step_run(cx, &mut ex, r, step.event, &install_of);
+					let outcome = step_run(cx, &mut ex, r, step.event, &install_of, early);
 					let known = match step.event {
 						Event::Recv(_) => ex.knowledge.len(),
 						_ => before,
@@ -219,10 +220,17 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 						}
 						Outcome::Blocked => break,
 					}
+					if early {
+						break;
+					}
 				}
 			}
-			if !progress {
+			if progress {
+				early = false;
+			} else if early {
 				break;
+			} else {
+				early = true;
 			}
 		}
 		for r in 0..program.runs.len() {
@@ -278,6 +286,7 @@ fn step_run<'i>(
 	r: usize,
 	event: Event,
 	install_of: &impl Fn(usize, usize) -> Option<&'i Value>,
+	early: bool,
 ) -> Outcome {
 	let km = cx.km;
 	match event {
@@ -343,6 +352,9 @@ fn step_run<'i>(
 		Event::Recv(d) => {
 			let delivery = &cx.program.deliveries[d];
 			let sent = ex.sent[d].clone();
+			if sent.is_none() != early {
+				return Outcome::Blocked;
+			}
 			let mut received: Vec<(usize, Value, bool)> = Vec::with_capacity(delivery.slots.len());
 			for (k, &(slot, guarded)) in delivery.slots.iter().enumerate() {
 				let forwarded = sent.as_ref().map(|values| values[k].clone());

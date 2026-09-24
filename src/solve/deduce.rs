@@ -895,6 +895,16 @@ impl<'a> Deducer<'a> {
 		for (revealed, given, annotated) in routes {
 			for value in revealed {
 				let mut frontier: Vec<_> = match_values(&value, goal, s).collect();
+				let constructible: Vec<_> = frontier
+					.iter()
+					.filter(|bound| {
+						bound
+							.iter()
+							.any(|(id, value)| !s.contains_key(id) && contains_var(value))
+					})
+					.flat_map(|bound| self.require_constructible(bound, s, false))
+					.collect();
+				frontier.extend(constructible);
 				frontier.extend(self.solve_decomposition_from(&value, goal, s, memo));
 				if let Some(annotated) = annotated {
 					frontier = dedupe(

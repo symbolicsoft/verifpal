@@ -43,7 +43,6 @@ pub(crate) mod tex;
 pub(crate) mod theory;
 pub(crate) mod tokens;
 pub mod types;
-pub(crate) mod unlink;
 #[cfg(feature = "cli")]
 pub(crate) mod update;
 pub(crate) mod util;

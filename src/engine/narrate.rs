@@ -15,6 +15,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	ex: &'a Execution,
 	honest: &'a Execution,
 	names: Names,
+	unshaped: Names,
 	honest_names: Names,
 	cutoff: std::cell::Cell<usize>,
 	gated: Vec<(usize, usize)>,
@@ -80,6 +81,25 @@ impl Names {
 		self.shaped.iter().any(|s| s == name)
 	}
 
+	fn unshaped(&self) -> Names {
+		let entries = self
+			.entries
+			.iter()
+			.map(|(hash, bucket)| {
+				let kept = bucket
+					.iter()
+					.filter(|(_, name)| !self.shaped(name))
+					.cloned()
+					.collect();
+				(*hash, kept)
+			})
+			.collect();
+		Names {
+			entries,
+			shaped: Vec::new(),
+		}
+	}
+
 	fn lookup(&self, v: &Value, exclude: &[&str]) -> Option<&str> {
 		let candidates: Vec<&str> = self
 			.entries
@@ -120,11 +140,13 @@ fn head(p: &Primitive) -> String {
 
 impl<'a, 'b> Narrator<'a, 'b> {
 	pub(crate) fn new(cx: &'a Context<'b>, ex: &'a Execution, honest: &'a Execution) -> Self {
+		let names = Names::of(cx, ex, honest);
 		Narrator {
 			cx,
 			ex,
 			honest,
-			names: Names::of(cx, ex, honest),
+			unshaped: names.unshaped(),
+			names,
 			honest_names: Names::of(cx, honest, honest),
 			cutoff: std::cell::Cell::new(ex.knowledge.len()),
 			gated: Vec::new(),
@@ -295,6 +317,51 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 		let Some(i) = known else {
 			let state = prefix(knowledge, len);
+			if let Value::Primitive(p) = v
+				&& let Some(built) =
+					crate::theory::can_reconstruct_primitive(p, self.cx.carrier, &state)
+			{
+				let mut ingredients = built.from.clone();
+				match &built.forged {
+					Some(Forged::Reuse(pair)) => ingredients.extend(pair.iter().cloned()),
+					Some(Forged::Assumption {
+						capability: Capability::Malleable,
+						of,
+					}) => ingredients.push(of.clone()),
+					_ => {}
+				}
+				for ingredient in &ingredients {
+					self.explain(ingredient, len);
+				}
+				let shown = self.subject(v);
+				let line = match &built.forged {
+					Some(Forged::Assumption {
+						capability: capability @ Capability::Malleable,
+						of,
+					}) => format!(
+						"Under the declared `{}` assumption, Attacker reshapes {} into {shown}.",
+						capability.name(),
+						self.term(of, &[])
+					),
+					Some(Forged::Assumption { capability, .. }) => format!(
+						"Under the declared `{}` assumption, Attacker forges {shown}.",
+						capability.name()
+					),
+					Some(Forged::Reuse(with)) => format!(
+						"Attacker forges {shown} under the {} shared by {} and {}.",
+						crate::primitive::reuse_fixed_names(&with[0]),
+						self.term(&with[0], &[]),
+						self.term(&with[1], &[])
+					),
+					None if built.combined => format!(
+						"Attacker combines {shown} out of the partial signatures {}.",
+						self.list(&built.from)
+					),
+					None => format!("Attacker constructs {shown}."),
+				};
+				self.say(line);
+				return;
+			}
 			let mut inputs = crate::theory::KnowledgeInputs::new(self.cx.carrier, &state);
 			let used: Vec<usize> = inputs
 				.of_value(v)
@@ -380,12 +447,25 @@ impl<'a, 'b> Narrator<'a, 'b> {
 							self.subject(v)
 						)
 					}
-					DerivationRecord::Broken { of, capability, .. } => format!(
-						"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
-						self.term(of, &[]),
-						capability.name(),
-						self.term(v, &[])
-					),
+					DerivationRecord::Broken { of, capability, .. } => match capability {
+						Capability::Weak => format!(
+							"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
+							self.term(of, &[]),
+							capability.name(),
+							self.term(v, &[])
+						),
+						Capability::Malleable => format!(
+							"Under the declared `{}` assumption, Attacker reshapes {} into {}.",
+							capability.name(),
+							self.term(of, &[]),
+							self.subject(v)
+						),
+						_ => format!(
+							"Under the declared `{}` assumption, Attacker forges {}.",
+							capability.name(),
+							self.subject(v)
+						),
+					},
 					DerivationRecord::Reused { of, with } => format!(
 						"Attacker recovers {} from {}: {} shares its {}.",
 						self.term(v, &[]),
@@ -409,12 +489,35 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
+	fn received_at(&self, run: usize, slot: usize) -> usize {
+		let program = self.cx.program;
+		program.runs[run]
+			.step_of_slot
+			.get(&slot)
+			.and_then(|&step| {
+				self.ex
+					.order
+					.iter()
+					.position(|&(r, s, _)| r == run && s == step)
+			})
+			.unwrap_or(self.ex.order.len())
+	}
+
+	fn sent_before(&self, d: usize, at: usize) -> bool {
+		let program = self.cx.program;
+		let sender = program.deliveries[d].sender;
+		self.ex.order[..at.min(self.ex.order.len())]
+			.iter()
+			.any(|&(r, s, _)| r == sender && program.runs[r].steps[s].event == Event::Send(d))
+	}
+
 	pub(crate) fn replayed_from(
 		&self,
 		run: usize,
 		slot: usize,
 		value: &Value,
 	) -> Option<&'static str> {
+		let at = self.received_at(run, slot);
 		let program = self.cx.program;
 		let km = self.cx.km;
 		let id = km.slots[slot].constant.id;
@@ -441,7 +544,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.iter()
 			.enumerate()
 			.find_map(|(d, delivery)| {
-				if delivery.recipient == run {
+				if delivery.recipient == run || !self.sent_before(d, at) {
 					return None;
 				}
 				let sent = self.ex.sent[d].as_ref()?;
@@ -485,28 +588,58 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			let mut values = Vec::new();
 			let mut was = Vec::new();
 			let mut items = Vec::new();
-			let mut replays: Vec<(&'static str, String, String)> = Vec::new();
-			for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
+			let mut replayed = Vec::new();
+			for &(slot, _) in &delivery.slots {
 				let Some(h) = self.ex.runs[run].held(slot) else {
 					continue;
 				};
 				if !h.installed {
 					continue;
 				}
+				let Some(axis) = self.replayed_from(run, slot, &h.value) else {
+					continue;
+				};
+				let value = h.value.clone();
+				let name = km.slots[slot].constant.to_string();
+				let shown = self.spelled(&value, &[&name]);
+				self.done(&value);
+				replayed.push(slot);
+				let mut step = self.route(
+					delivery,
+					"replay",
+					format!(
+						"Attacker replays {name} ({route}) from another {axis}, where it is {shown}."
+					),
+				);
+				step.values = vec![TraceValue {
+					name,
+					installed: Some(shown),
+					was: None,
+					guarded: false,
+				}];
+				self.push(step);
+			}
+			for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
+				let Some(h) = self.ex.runs[run].held(slot) else {
+					continue;
+				};
+				if !h.installed || replayed.contains(&slot) {
+					continue;
+				}
 				let value = h.value.clone();
 				let constant = km.slots[slot].constant.to_string();
 				let own: [&str; 1] = [&constant];
-				if let Some(axis) = self.replayed_from(run, slot, &value) {
-					self.done(&value);
-					replays.push((axis, constant.clone(), self.spelled(&value, &own)));
-					continue;
-				}
 				self.explain(&value, before);
-				let shown = self.delivered(&value, &own);
-				names.push(constant.clone());
-				values.push(shown.clone());
 				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
 				let displaced = previous.map(|honest| self.spelled_honest(honest, &own));
+				let mut shown = self.delivered(&value, &own);
+				if displaced.as_ref() == Some(&shown)
+					&& previous.is_some_and(|honest| !honest.equivalent(&value, true))
+				{
+					shown = self.named(&self.unshaped, &value, &own);
+				}
+				names.push(constant.clone());
+				values.push(shown.clone());
 				let shown_was = previous.filter(|honest| {
 					!honest.equivalent(&value, true)
 						&& honest
@@ -517,17 +650,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					&& let Some(honest) = &displaced
 				{
 					was.push(format!("{constant} was {honest}"));
-				} else if previous.is_some_and(|honest| honest.equivalent(&value, true))
-					&& let Some(sent) = self.ex.sent[d]
-						.as_ref()
-						.and_then(|sent| sent.get(k))
-						.filter(|sent| !sent.equivalent(&value, true))
-				{
-					was.push(format!(
-						"{} sent {} in this execution",
-						program.runs[delivery.sender].name,
-						self.spelled(sent, &own)
-					));
+				} else if previous.is_some_and(|honest| honest.equivalent(&value, true)) {
+					match self.ex.sent[d].as_ref().and_then(|sent| sent.get(k)) {
+						Some(sent) if !sent.equivalent(&value, true) => was.push(format!(
+							"{} sent {} in this execution",
+							program.runs[delivery.sender].name,
+							self.spelled(sent, &own)
+						)),
+						None => was.push(format!(
+							"{} does not send it in this execution",
+							program.runs[delivery.sender].name
+						)),
+						Some(_) => {}
+					}
 				}
 				items.push(TraceValue {
 					name: constant.clone(),
@@ -535,22 +670,6 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					was: displaced,
 					guarded: false,
 				});
-			}
-			for (axis, name, value) in replays {
-				let mut step = self.route(
-					delivery,
-					"replay",
-					format!(
-						"Attacker replays {name} ({route}) from another {axis}, where it is {value}."
-					),
-				);
-				step.values = vec![TraceValue {
-					name,
-					installed: Some(value),
-					was: None,
-					guarded: false,
-				}];
-				self.push(step);
 			}
 			if names.is_empty() {
 				continue;
@@ -662,7 +781,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	pub(crate) fn gate(&mut self, run: usize, slot: usize) {
-		if self.gated.contains(&(run, slot)) || self.ex.runs[run].halted == Some(slot) {
+		let span = self.cx.km.slots[slot].declared_span;
+		let same_assignment = |&(r, s): &(usize, usize)| {
+			r == run
+				&& (s == slot
+					|| (span != Span::default() && self.cx.km.slots[s].declared_span == span))
+		};
+		if self.gated.iter().any(same_assignment) || self.ex.runs[run].halted == Some(slot) {
 			return;
 		}
 		let Some(h) = self.ex.runs[run].held(slot) else {

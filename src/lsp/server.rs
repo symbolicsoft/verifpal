@@ -706,7 +706,9 @@ impl Server {
 		let Ok(readable) = crate::pretty::pretty_diagram(model) else {
 			return serde_json::Value::Null;
 		};
-		let mermaid = crate::pretty::mermaid_of(&readable);
+		let Ok(mermaid) = crate::pretty::mermaid_of(model) else {
+			return serde_json::Value::Null;
+		};
 		serde_json::json!(proto::DiagramResult { mermaid, readable })
 	}
 

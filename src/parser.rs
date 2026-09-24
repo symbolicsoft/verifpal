@@ -59,6 +59,10 @@ pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 	Ok(())
 }
 
+pub(crate) fn reserved_for_principal(lower: &str) -> bool {
+	RESERVED.contains(&lower) || names_a_primitive(lower)
+}
+
 fn title_case(s: &str) -> String {
 	let mut result = String::with_capacity(s.len());
 	let mut chars = s.chars();
@@ -137,8 +141,7 @@ impl<'a> Parser<'a> {
 		let span = self.last_ident;
 		let name = std::str::from_utf8(&self.input[span.start..span.end]).unwrap_or("");
 		let lower = name.to_lowercase();
-		if lower != "attacker" && (RESERVED.contains(&lower.as_str()) || names_a_primitive(&lower))
-		{
+		if lower != "attacker" && reserved_for_principal(&lower) {
 			return Err(VerifpalError::parse(
 				format!("`{}` is a reserved word and cannot name a principal", name).into(),
 			)
@@ -307,8 +310,13 @@ impl<'a> Parser<'a> {
 			while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
 				self.pos += 1;
 			}
-			self.record_from(at, crate::tokens::TokenKind::Comment);
-			let text = std::str::from_utf8(&self.input[start..self.pos])
+			let end = if self.pos > start && self.input[self.pos - 1] == b'\r' {
+				self.pos - 1
+			} else {
+				self.pos
+			};
+			self.record(Span::new(at, end), crate::tokens::TokenKind::Comment);
+			let text = std::str::from_utf8(&self.input[start..end])
 				.unwrap_or("")
 				.to_string();
 			Some(Comment {
@@ -1034,6 +1042,7 @@ impl<'a> Parser<'a> {
 
 	fn parse_guarded_constant(&mut self) -> VResult<Constant> {
 		self.expect("[")?;
+		self.skip_whitespace();
 		let mut c = self.parse_constant()?;
 		self.skip_whitespace();
 		self.expect("]")?;
@@ -2131,6 +2140,14 @@ mod tests {
 			.err()
 			.map(|e| e.located(&m.file_name, &m.source).to_string())
 			.unwrap_or_default()
+	}
+
+	#[test]
+	fn an_error_narrows_to_a_name_written_in_another_case() {
+		let text = model_error(
+			"attacker[active]\nprincipal Alice[\n\tknows private nc_m\n]\nqueries[\n\tconfidentiality? NC_UNKNOWN\n]\n",
+		);
+		assert!(text.contains("diag.vp:6:19"), "{text}");
 	}
 
 	#[test]

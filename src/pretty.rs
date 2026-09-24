@@ -162,6 +162,14 @@ fn render_comment(c: &Comment, indent: &str) -> String {
 				format!("/*{}*/", c.text)
 			} else {
 				let cont_indent: String = format!("{}   ", indent);
+				let margin = c
+					.text
+					.split('\n')
+					.skip(1)
+					.filter(|line| !line.trim().is_empty())
+					.map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+					.min()
+					.unwrap_or(0);
 				let mut out = String::from("/*");
 				for (i, line) in c.text.split('\n').enumerate() {
 					if i == 0 {
@@ -169,7 +177,9 @@ fn render_comment(c: &Comment, indent: &str) -> String {
 					} else {
 						out.push('\n');
 						out.push_str(&cont_indent);
-						out.push_str(line.trim_start());
+						if !line.trim().is_empty() {
+							out.push_str(&line[margin..]);
+						}
 					}
 				}
 				out.push_str("*/");
@@ -307,7 +317,12 @@ pub(crate) fn pretty_model(m: &Model) -> String {
 		}
 	}
 
-	if !m.scenarios.is_empty() {
+	if !m.scenarios.is_empty()
+		|| !m.scenarios_leading_comments.is_empty()
+		|| m.scenarios_header_trailing.is_some()
+		|| !m.scenarios_tail_comments.is_empty()
+		|| m.scenarios_closing_trailing.is_some()
+	{
 		output.push_str(&render_leading(&m.scenarios_leading_comments, ""));
 		output.push_str("scenarios[");
 		output.push_str(&render_trailing(m.scenarios_header_trailing.as_ref()));
@@ -377,20 +392,46 @@ pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
 
 pub fn diagram(model_file: &str) -> VResult<String> {
 	let m = parse_file(model_file)?;
-	let body = pretty_diagram(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-	Ok(mermaid_of(&body))
+	mermaid_of(&m).map_err(|e| e.located(&m.file_name, &m.source))
 }
 
-pub(crate) fn mermaid_of(body: &str) -> String {
+pub(crate) fn mermaid_of(m: &Model) -> VResult<String> {
+	let mut principals: Vec<&str> = Vec::new();
+	for block in &m.blocks {
+		let names: Vec<&str> = match block {
+			Block::Principal(p) => vec![p.name.as_str()],
+			Block::Message(msg) => vec![&msg.sender_name, &msg.recipient_name],
+			Block::Phase(_) => Vec::new(),
+		};
+		for name in names {
+			if !principals.contains(&name) {
+				principals.push(name);
+			}
+		}
+	}
+	let id = |name: &str| {
+		let at = principals.iter().position(|n| *n == name).unwrap_or(0);
+		format!("p{at}")
+	};
+	let body = diagram_body(m, &id)?;
 	let mut out = String::from("sequenceDiagram\n");
+	for (at, name) in principals.iter().enumerate() {
+		out.push_str(&format!("    participant p{at} as {name}\n"));
+	}
 	for line in body.lines() {
 		out.push_str("    ");
 		out.push_str(line);
 		out.push('\n');
 	}
-	out
+	Ok(out)
 }
+
+#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
+	diagram_body(m, &|name: &str| name.to_string())
+}
+
+fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> VResult<String> {
 	let anchor = m.blocks.iter().find_map(|block| match block {
 		Block::Principal(p) => Some(p.name.clone()),
 		Block::Message(msg) => Some(msg.sender_name.to_string()),
@@ -401,14 +442,14 @@ pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 		match block {
 			Block::Principal(p) => {
 				for expr in &p.expressions {
-					output.push_str(&format!("Note over {}: {}\n", p.name, expr));
+					output.push_str(&format!("Note over {}: {}\n", id(&p.name), expr));
 				}
 			}
 			Block::Message(msg) => {
 				output.push_str(&format!(
 					"{}->{}:{}\n",
-					msg.sender_name,
-					msg.recipient_name,
+					id(&msg.sender_name),
+					id(&msg.recipient_name),
 					pretty_constants(&msg.constants),
 				));
 			}
@@ -416,7 +457,8 @@ pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
 				if let Some(anchor) = &anchor {
 					output.push_str(&format!(
 						"Note right of {}: phase[{}]\n",
-						anchor, phase.number
+						id(anchor),
+						phase.number
 					));
 				}
 			}
@@ -445,6 +487,46 @@ mod tests {
 			assert!(once.contains(text), "{text} was dropped:\n{once}");
 		}
 		let m2 = parse_string("pc.vp", &once).expect("reparse");
+		assert_eq!(pretty_model(&m2), once, "formatting is not stable");
+	}
+
+	#[test]
+	fn a_crlf_trailing_comment_leaves_no_carriage_return() {
+		let src = "attacker[active] // a\r\n\r\nprincipal Alice[\r\n\tknows private crt_a // b\r\n]\r\n\r\nqueries[\r\n\tconfidentiality? crt_a // c\r\n]\r\n";
+		let once = pretty_model(&parse_string("crt.vp", src).expect("parse"));
+		assert!(!once.contains('\r'), "{once:?}");
+		for text in ["// a", "// b", "// c"] {
+			assert!(once.contains(text), "{text} was dropped:\n{once}");
+		}
+	}
+
+	#[test]
+	fn an_empty_scenarios_block_keeps_its_comments() {
+		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private esc_a\n]\n\n// before\nscenarios[ // header\n\t// inside\n] // closing\n\nqueries[\n\tconfidentiality? esc_a\n]\n";
+		let once = pretty_model(&parse_string("esc.vp", src).expect("parse"));
+		for text in ["// before", "// header", "// inside", "// closing"] {
+			assert!(once.contains(text), "{text} was dropped:\n{once}");
+		}
+		let m2 = parse_string("esc.vp", &once).expect("reparse");
+		assert_eq!(pretty_model(&m2), once, "formatting is not stable");
+	}
+
+	#[test]
+	fn a_guard_may_pad_its_constant() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private gp_a\n]\nAlice -> Bob: [ gp_a ]\nprincipal Bob[\n\t_ = HASH(gp_a)\n]\nqueries[\n\tconfidentiality? gp_a\n]\n";
+		let once = pretty_model(&parse_string("gp.vp", src).expect("parse"));
+		assert!(once.contains("Alice -> Bob: [gp_a]"), "{once}");
+	}
+
+	#[test]
+	fn a_block_comment_keeps_its_relative_indentation() {
+		let src = "attacker[active]\n\n/*\nAlice   Bob\n  |--ga-->|\n    |<-gb-|\n*/\nprincipal Alice[\n\tknows private bci_a\n]\n\nqueries[\n\tconfidentiality? bci_a\n]\n";
+		let once = pretty_model(&parse_string("bci.vp", src).expect("parse"));
+		assert!(
+			once.contains("/*\n   Alice   Bob\n     |--ga-->|\n       |<-gb-|\n   */"),
+			"{once}"
+		);
+		let m2 = parse_string("bci.vp", &once).expect("reparse");
 		assert_eq!(pretty_model(&m2), once, "formatting is not stable");
 	}
 

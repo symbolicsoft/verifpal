@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two.
+//
+// Alice sends ga unguarded to Bob and to Carol, who compare HASH(ga) before
+// Bob encrypts sb under DH_KEX(ga, b). Replacing ga with PUBKEY(nil) at both
+// recipients keeps their hashes equal, so Bob's ASSERT passes and the
+// attacker computes his key from gb. The search solved each recipient's
+// proposal as if the other received the same value, but installed it at
+// that recipient alone, where the comparison always failed.
+// broadcast_consistent_replacement_guarded.vp is the counterweight.
+attacker[active]
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+Alice -> Bob: ga
+Alice -> Carol: ga
+principal Bob[
+	generates b, sb
+	gb = PUBKEY(b)
+	hb = HASH(ga)
+]
+principal Carol[
+	hc = HASH(ga)
+]
+Bob -> Carol: [hb]
+Carol -> Bob: [hc]
+principal Bob[
+	_ = ASSERT(hb, hc)?
+	kb = DH_KEX(ga, b)
+	generates n
+	e = AEAD_ENC(kb, n, sb, nil)
+]
+Bob -> Alice: gb, n, e
+queries[
+	confidentiality? sb
+]

@@ -257,7 +257,16 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 	let slug = slug(model, index);
 	let names = Names::of(model, model.analysis.as_ref());
 	let failed = match &model.error {
-		Some(error) => vec![Ctx::new().text("error", error.as_str())],
+		Some(error) => vec![
+			Ctx::new().raw(
+				"error",
+				error
+					.lines()
+					.map(|line| format!("\\mbox{{}}{}", escaped_tex(line).replace(' ', "~")))
+					.collect::<Vec<String>>()
+					.join("\\\\\n"),
+			),
+		],
 		None => Vec::new(),
 	};
 	let ctx = Ctx::new()
@@ -723,13 +732,13 @@ fn callouts(a: &Analysis, names: &Names) -> Vec<Ctx> {
 			.map(|b| format!("{} as {}", math::term(&b.target), math::term(&b.value)))
 			.collect::<Vec<String>>()
 			.join(", ");
-		let peer = if scenario.honest {
-			"an honest"
-		} else {
-			"a compromised"
+		let peer = match scenario.corrupt_from {
+			None => "an honest peer".to_string(),
+			Some(0) => "a compromised peer".to_string(),
+			Some(phase) => format!("a peer compromised from phase {phase}"),
 		};
 		out.push(format!(
-			"Scenario: {} runs with {}, {} peer.",
+			"Scenario: {} runs with {}, {}.",
 			escaped_tex(&scenario.principal),
 			bindings,
 			peer
@@ -773,13 +782,28 @@ fn listing_safe(source: &str) -> String {
 		.lines()
 		.map(|line| {
 			if closes_listing(line, &terminator) {
-				WITHHELD
+				WITHHELD.to_string()
 			} else {
-				line
+				line.chars().map(listing_glyph).collect()
 			}
 		})
-		.collect::<Vec<&str>>()
+		.collect::<Vec<String>>()
 		.join("\n")
+}
+
+fn listing_glyph(c: char) -> char {
+	match c {
+		'\u{2500}'..='\u{257f}' => match c {
+			'\u{2500}' | '\u{2501}' | '\u{2504}' | '\u{2505}' | '\u{2508}' | '\u{2509}'
+			| '\u{254c}' | '\u{254d}' | '\u{2550}' => '-',
+			'\u{2502}' | '\u{2503}' | '\u{2506}' | '\u{2507}' | '\u{250a}' | '\u{250b}'
+			| '\u{254e}' | '\u{254f}' | '\u{2551}' => '|',
+			_ => '+',
+		},
+		'\u{25b6}' | '\u{25b8}' | '\u{25ba}' => '>',
+		'\u{25c0}' | '\u{25c2}' | '\u{25c4}' => '<',
+		_ => c,
+	}
 }
 
 #[cfg(test)]

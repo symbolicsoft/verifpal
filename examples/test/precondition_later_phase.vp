@@ -4,11 +4,11 @@
 // Expected: c1c1
 //
 // A passive attacker learns m at phase 0 from the leaked key. The
-// precondition names a message Bob only sends in phase 1, so the gated query
-// cannot be contradicted while phase 0 is analyzed: the send has not
-// happened. Attacker knowledge carries forward, so at phase 1 the send is
-// reached and m is still known, and the gated query fails there. A
-// precondition in a later phase delays a verdict; it never loses one.
+// precondition names a message Bob only sends in phase 1. A precondition
+// restricts the query to executions that reach that send, and this one does,
+// so the gated query fails as the ungated one does. A precondition in a later
+// phase never loses a verdict; precondition_later_phase_scenario.vp is the
+// case where the phase-0 claim is the only one that applies.
 
 attacker[passive]
 

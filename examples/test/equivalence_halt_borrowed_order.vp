@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two, like
+// equivalence_halt_borrowed_order_swapped.vp, which declares Carol's block
+// after Bob's.
+//
+// The attacker replaces x at Bob with nil, and Bob halts at his check. Bob
+// holds x = nil and borrows y from its creator Carol, so x and y differ in
+// his view. A halted run's view was once cut at the halted slot's index,
+// which also dropped borrowed slots declared later in the file, so the
+// verdict depended on where Carol's block sat.
+attacker[active]
+principal Alice[
+	knows private s
+	x = HASH(s)
+	hx = HASH(x)
+]
+Alice -> Bob: x, [hx]
+principal Carol[
+	knows private s
+	y = HASH(s)
+]
+principal Bob[
+	_ = ASSERT(HASH(x), hx)?
+]
+queries[
+	equivalence? x, y
+]

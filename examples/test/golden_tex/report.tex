@@ -37,8 +37,8 @@
 \newcommand{\vpprim}[2]{\mathsf{#1}_{\mathsf{#2}}}
 \newcommand{\vpprimo}[1]{\mathsf{#1}}
 \newcommand{\vpconst}[1]{\mathit{#1}}
-\newcommand{\vpsession}[2]{#1^{\##2}}
-\newcommand{\vpscenario}[2]{#1^{@#2}}
+\newcommand{\vpsession}[2]{{#1}^{\##2}}
+\newcommand{\vpscenario}[2]{{#1}^{@#2}}
 \newcommand{\vpprojection}[1]{_{#1}}
 \newcommand{\vpguard}[1]{[#1]}
 \newcommand{\vpcaps}[1]{^{[\mathrm{#1}]}}
@@ -525,7 +525,7 @@ Analysis time & 12 ms \\
 \begin{vpdiagram}[fig:golden-vp-0-protocol]{2}
 \vplane{0}{Alice}
 \vplane{1}{Bob}
-\vphop{0}{-1}{1}{vpplain}{vpnum}{1}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}}, \vpterm{\vpconst{e}}}
+\vphop{0}{-1}{1}{vpplain}{vpnum}{1}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}}, \vpdagger{\vpterm{\vpconst{e}}}}
 \vpphase{1}
 \vpleak{1}{\vpleaks{\vpterm{\vpconst{b}}}}
 \end{vpdiagram}
@@ -550,7 +550,7 @@ Analysis time & 12 ms \\
 \vplaneadv{2}{Attacker}
 \vpleak{0}{\vpleaks{\vpterm{\vpconst{b}}}}
 \vprun{2}{vpnumwide}{1--3}{computes}
-\vphopforged{1}{2}{0}{vpforged}{vpnumadv}{4}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}}, \vpterm{\vpconst{e}}}
+\vphopforged{1}{2}{0}{vpforged}{vpnumadv}{4}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}}, \vpdagger{\vpterm{\vpconst{e}}}}
 \vpmark{0}{vpnote}{vpnumadv}{5}{check passes}
 \vpmark{1}{vpnoteadv}{vpnumadv}{6}{check defeated}
 \vprun{2}{vpnumwide}{7--8}{computes}

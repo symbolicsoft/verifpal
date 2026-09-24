@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// Counterweight to phase_claim_ignores_later_use.vp. The attacker replaces x,
+// Bob hashes it in phase 0, and then halts at the phase-1 MAC check before
+// h2 = HASH(h1, x). Under positional acceptance a use the run never reaches
+// cancels its acceptance, and judging at the phase-0 barrier must not
+// change that: only uses the run does reach later are left out of a phase-0
+// claim. Without the phase boundary the model holds too, so ignoring every
+// later-phase use would let removing a phase lose an attack.
+attacker[active]
+principal Alice[
+	generates x
+	knows private k
+	xtag = MAC(k, x)
+]
+Alice -> Bob: x
+principal Bob[
+	h1 = HASH(x)
+]
+phase[1]
+Alice -> Bob: [xtag]
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, x), xtag)?
+	h2 = HASH(h1, x)
+]
+queries[
+	authentication? Alice -> Bob: x
+]

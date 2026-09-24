@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two, and the same codes as
+// order_relay_declared_later.vp, which differs only in where Hop's first
+// block sits.
+//
+// body = MAC(k, label) is the same in every session. At two sessions the
+// attacker replaces body at Hop with nil, so Relay forwards nil and Bob's
+// check would halt him, and delivers Bob the body Relay#2 sends in its place:
+// Relay sent it once and Bob and Bob#2 both accept it. The executor once ran
+// principals in declaration order and let an install through before its
+// sender had sent the same value, which then counted as attacker-authored.
+// Declaring Hop first let the attacker deliver Alice's own body to Hop before
+// Alice sent it, marking every forwarded copy authored, so Relay's emission
+// stopped counting and the verdict followed the declaration order. A receive
+// now waits for its sender unless the phase can make no other progress.
+attacker[active]
+
+principal Hop[
+	knows public label
+]
+
+principal Alice[
+	knows private k
+	knows public label
+	body = MAC(k, label)
+]
+
+Alice -> Hop: body
+
+principal Hop[
+	_ = HASH(body)
+]
+
+Hop -> Relay: body
+
+principal Relay[
+	_ = HASH(body)
+]
+
+Relay -> Bob: body
+
+principal Bob[
+	knows private k
+	knows public label
+	_ = ASSERT(body, MAC(k, label))?
+]
+
+queries[
+	authentication? Relay -> Bob: body
+]

@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f1 at one session and at two.
+//
+// The gpeer = gb scenario uses the stale x = HASH(gb) in phase 0 and becomes
+// corrupt in phase 1, so its claims are judged at the phase-0 barrier. The
+// precondition names Alice's phase-1 send of late, which the execution does
+// reach. A precondition restricts a query to executions reaching that send;
+// it was once checked against the phase-0 configuration, where late is not
+// yet sent, so the only phase at which the claim applies could never meet
+// it and the attack was lost. precondition_later_phase.vp is the passive,
+// scenario-free counterpart.
+attacker[passive]
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Carol -> Alice: [gc]
+Bob -> Alice: [gb]
+principal Alice[
+	knows public gpeer
+	x = HASH(gpeer)
+	z = HASH(x)
+	generates early
+]
+Alice -> Carol: early
+phase[1]
+principal Bob[
+	leaks b
+]
+principal Alice[
+	generates late
+]
+Alice -> Carol: late
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+queries[
+	freshness? x[
+		precondition[Alice -> Carol: late]
+	]
+]

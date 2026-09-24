@@ -150,7 +150,7 @@ fn scenarios_of(scenarios: &[ScenarioSummary]) -> Vec<WasmScenario> {
 		.iter()
 		.map(|s| WasmScenario {
 			summary: s.to_string(),
-			honest: s.honest,
+			honest: s.corrupt_from.is_none(),
 		})
 		.collect()
 }

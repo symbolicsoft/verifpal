@@ -3649,7 +3649,8 @@ fn test_receipt_chain_broken_link() {
 }
 #[test]
 fn test_relay_four_hops() {
-	run_model("relay_four_hops.vp", "c0a1a0");
+	run_model_sessions("relay_four_hops.vp", 1, "c0a1a0");
+	run_model_sessions("relay_four_hops.vp", 2, "c0a1a1");
 }
 #[test]
 fn test_ringsign_forgeable_cap() {
@@ -4708,6 +4709,26 @@ fn test_auth_withheld_static_replay() {
 }
 
 #[test]
+fn test_auth_tampered_static_replay() {
+	run_model_sessions("auth_tampered_static_replay.vp", 1, "a0");
+	run_model_sessions("auth_tampered_static_replay.vp", 2, "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("auth_tampered_static_replay_guarded.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_order_relay_declared() {
+	for model in [
+		"order_relay_declared_first.vp",
+		"order_relay_declared_later.vp",
+	] {
+		run_model_sessions(model, 1, "a0");
+		run_model_sessions(model, 2, "a1");
+	}
+}
+
+#[test]
 fn test_scenario_corrupt_at_late_check() {
 	for sessions in [1, 2] {
 		run_model_sessions("scenario_corrupt_at_late_check.vp", sessions, "c0");
@@ -4741,4 +4762,61 @@ fn test_sessions_four_run_threshold() {
 		run_model_sessions("sessions_four_run_threshold.vp", sessions, "c0");
 	}
 	run_model_sessions("sessions_four_run_threshold.vp", 4, "c1");
+}
+
+#[test]
+fn test_phase_claim_later_uses() {
+	for sessions in [1, 2] {
+		run_model_sessions("phase_claim_ignores_later_use.vp", sessions, "f1");
+		run_model_sessions("phase_claim_never_reached_use.vp", sessions, "a0");
+		run_model_sessions("precondition_later_phase_scenario.vp", sessions, "f1");
+	}
+	run_model_sessions("phase_claim_later_use_auth.vp", 1, "a0");
+	run_model_sessions("phase_claim_later_use_auth.vp", 2, "a1");
+}
+
+#[test]
+fn test_scenario_corrupt_key_material() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_corrupt_inline_key.vp", sessions, "c0");
+		run_model_sessions("scenario_corrupt_inline_key_dh.vp", sessions, "c0");
+		run_model_sessions("scenario_corrupt_bound_key.vp", sessions, "c0");
+		run_model_sessions("scenario_corrupt_wrapped_key.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_scenario_all_corrupt_order() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_all_corrupt_order.vp", sessions, "f1");
+		run_model_sessions("scenario_all_corrupt_order_swapped.vp", sessions, "f1");
+	}
+}
+
+#[test]
+fn test_equivalence_halt_borrowed_order() {
+	for sessions in [1, 2] {
+		run_model_sessions("equivalence_halt_borrowed_order.vp", sessions, "e1");
+		run_model_sessions("equivalence_halt_borrowed_order_swapped.vp", sessions, "e1");
+	}
+}
+
+#[test]
+fn test_broadcast_consistent_replacement() {
+	for sessions in [1, 2] {
+		run_model_sessions("broadcast_consistent_replacement.vp", sessions, "c1");
+		run_model_sessions(
+			"broadcast_consistent_replacement_guarded.vp",
+			sessions,
+			"c0",
+		);
+	}
+}
+
+#[test]
+fn test_oracle_output_hashed() {
+	for sessions in [1, 2] {
+		run_model_sessions("oracle_output_hashed.vp", sessions, "a1");
+		run_model_sessions("oracle_output_hashed_guarded.vp", sessions, "a0");
+	}
 }

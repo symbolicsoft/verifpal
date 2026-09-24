@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// equivalence_halt_borrowed_order.vp with Carol's block after Bob's.
+attacker[active]
+principal Alice[
+	knows private s
+	x = HASH(s)
+	hx = HASH(x)
+]
+Alice -> Bob: x, [hx]
+principal Bob[
+	_ = ASSERT(HASH(x), hx)?
+]
+principal Carol[
+	knows private s
+	y = HASH(s)
+]
+queries[
+	equivalence? x, y
+]

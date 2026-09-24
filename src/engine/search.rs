@@ -561,11 +561,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				if signature.is_empty() {
 					continue;
 				}
-				let chained = if crate::solve::emits_an_install(ps, sym, &variant, &signature) {
-					crate::solve::emissions_under(ps, sym, &variant)
-				} else {
-					Vec::new()
-				};
+				let chained = crate::solve::emissions_under(ps, sym, &variant);
 				let bucket = buckets
 					.entry(crate::solve::signature_hash(&signature))
 					.or_default();
@@ -675,15 +671,25 @@ impl<'a, 'b> Search<'a, 'b> {
 		let carrier = self.cx.carrier;
 		let mut inputs = crate::theory::KnowledgeInputs::new(carrier, attacker);
 		let mut chosen: Vec<usize> = Vec::new();
+		let mut emitted: Option<Knowledge> = None;
 		for (_, value) in signature {
 			if self.derivable_in(0, value) || chosen.iter().any(|&n| self.derivable_in(n, value)) {
 				continue;
 			}
 			let Some(used) = inputs.of_value(value) else {
-				let reduced = crate::theory::reduce_once(value);
-				if chained
-					.iter()
-					.any(|emitted| emitted.equivalent(&reduced, true))
+				if chained.is_empty() {
+					return None;
+				}
+				let with = emitted.get_or_insert_with(|| {
+					let mut with = self.closed.clone();
+					for v in chained {
+						with.learn(v, Origin::Initial);
+					}
+					with
+				});
+				if with.state.knows(value).is_some()
+					|| crate::theory::obtainable(value, carrier, &with.state)
+					|| with.derivable(value, carrier)
 				{
 					continue;
 				}
@@ -748,7 +754,35 @@ impl<'a, 'b> Search<'a, 'b> {
 		if receivers.contains(&r) || addressed {
 			return vec![r];
 		}
-		receivers
+		let program = self.cx.program;
+		let mut reach = vec![r];
+		let mut upstream = Vec::new();
+		let mut at = 0;
+		while at < reach.len() {
+			let run = reach[at];
+			at += 1;
+			for delivery in &program.deliveries {
+				if delivery.recipient != run {
+					continue;
+				}
+				for &(s, guarded) in &delivery.slots {
+					if s != slot {
+						continue;
+					}
+					if !guarded {
+						if !upstream.contains(&run) {
+							upstream.push(run);
+						}
+					} else if !reach.contains(&delivery.sender) {
+						reach.push(delivery.sender);
+					}
+				}
+			}
+		}
+		if upstream.is_empty() {
+			return receivers;
+		}
+		upstream
 	}
 
 	fn try_flight(
@@ -765,6 +799,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();
+		let mut shared: Installs = Vec::new();
 		for (slot, value) in signature {
 			for run in self.targets(r, slot, addressed) {
 				let id = self.cx.program.runs[run].id;
@@ -774,10 +809,41 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				installs.push((run, slot, value.clone()));
 			}
+			if addressed {
+				continue;
+			}
+			for run in self.receivers(slot) {
+				if installs.iter().any(|(r2, s2, _)| *r2 == run && *s2 == slot) {
+					continue;
+				}
+				let id = self.cx.program.runs[run].id;
+				let consumed = km.constant_used_by(id, &km.slots[slot].constant)
+					|| km.slots[slot]
+						.sent_by
+						.iter()
+						.any(|event| event.sender == id && event.guarded);
+				if consumed && bound.admits_at(km, id, slot, &value) {
+					shared.push((run, slot, value.clone()));
+				}
+			}
 		}
+		let everywhere = (!shared.is_empty()).then(|| {
+			let mut everywhere = installs.clone();
+			everywhere.extend(shared);
+			everywhere
+		});
 		let merged = self.merged(&bases, installs);
 		let halts = self.consider_halts(merged).1;
 		self.drain_drops();
+		if let Some(everywhere) = everywhere
+			&& !self.done()
+		{
+			let merged = self.merged(&bases, everywhere);
+			let family = std::mem::replace(&mut self.family, "shared");
+			self.consider_halts(merged);
+			self.family = family;
+			self.drain_drops();
+		}
 		halts
 	}
 
@@ -1108,6 +1174,38 @@ impl<'a, 'b> Search<'a, 'b> {
 				})
 				.unwrap_or_else(crate::value::value_nil);
 			fills.push((run, slot, value));
+		}
+		for (b, run) in ex.runs.iter().enumerate() {
+			if run.halted.is_none() || self.nodes[0].ex.runs[b].halted.is_some() {
+				continue;
+			}
+			for step in &self.cx.program.runs[b].steps[..run.pc] {
+				let super::program::Event::Recv(d) = step.event else {
+					continue;
+				};
+				for &(slot, guarded) in &self.cx.program.deliveries[d].slots {
+					let Some(held) = run.held(slot) else {
+						continue;
+					};
+					if guarded || held.installed {
+						continue;
+					}
+					let Some(honest) = self.nodes[0].ex.runs[b].held(slot).map(|h| h.value.clone())
+					else {
+						continue;
+					};
+					if honest.equivalent(&held.value, true)
+						|| !(ex.knowledge.knows(&honest).is_some()
+							|| crate::theory::obtainable(
+								&honest,
+								self.cx.carrier,
+								&ex.knowledge.state,
+							)) {
+						continue;
+					}
+					fills.push((b, slot, honest));
+				}
+			}
 		}
 		let accepted = self.settle(installs.clone(), ex);
 		if !fills.is_empty() && !self.done() {

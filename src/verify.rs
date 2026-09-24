@@ -36,6 +36,71 @@ pub(crate) fn analyze_sessions_traced(
 	analyze_sessions_traced_cancellable(m, sessions, Arc::new(AtomicBool::new(false)))
 }
 
+pub(crate) struct Expansion {
+	pub(crate) model: Model,
+	honest: Option<IdMap<PrincipalId, i32>>,
+	scenarios: Vec<ScenarioSummary>,
+	variants: Vec<Vec<Query>>,
+	siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	interchangeable: IdMap<PrincipalId, PrincipalId>,
+	actors: IdMap<PrincipalId, PrincipalId>,
+	bound: IdSet<ValueId>,
+}
+
+pub(crate) fn expand(m: &Model, sessions: u8) -> VResult<Expansion> {
+	let sessions = sessions.max(1);
+	let mut e = if m.scenarios.is_empty() {
+		Expansion {
+			model: m.clone(),
+			honest: None,
+			scenarios: Vec::new(),
+			variants: Vec::new(),
+			siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
+			bound: IdSet::default(),
+		}
+	} else {
+		let e = crate::scenario::expand_scenarios(m, sessions)?;
+		Expansion {
+			model: e.model,
+			honest: Some(e.honest),
+			scenarios: e.summaries,
+			variants: e.query_variants,
+			siblings: IdMap::default(),
+			interchangeable: e.interchangeable.into_iter().collect(),
+			actors: e.actors.into_iter().collect(),
+			bound: e.bound.into_iter().collect(),
+		}
+	};
+	if sessions > 1 {
+		let s = crate::sessions::expand_sessions(&e.model, sessions, &e.variants)?;
+		if let Some(honest) = e.honest.as_mut() {
+			for &(original, clone) in &s.principal_clones {
+				if let Some(&corrupt_from) = honest.get(&original) {
+					honest.insert(clone, corrupt_from);
+				}
+			}
+		}
+		for &(original, clone) in &s.principal_clones {
+			let canonical = e
+				.interchangeable
+				.get(&original)
+				.copied()
+				.unwrap_or(original);
+			e.interchangeable.insert(clone, canonical);
+			e.interchangeable.entry(original).or_insert(canonical);
+			let actor = e.actors.get(&original).copied().unwrap_or(original);
+			e.actors.insert(clone, actor);
+			e.actors.entry(original).or_insert(actor);
+		}
+		e.model = s.model;
+		e.variants = s.query_variants;
+		e.siblings = s.siblings;
+	}
+	Ok(e)
+}
+
 fn analyze_sessions_traced_cancellable(
 	m: &Model,
 	sessions: u8,
@@ -45,54 +110,17 @@ fn analyze_sessions_traced_cancellable(
 	let _generation = crate::context::GenerationGuard::enter();
 	crate::info::info_reset_deductions();
 	let assumptions = crate::capability::declared_assumptions(m);
-	let scenario_expanded;
-	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors, bound) =
-		if m.scenarios.is_empty() {
-			(
-				m,
-				None,
-				Vec::new(),
-				Vec::new(),
-				IdMap::default(),
-				IdMap::default(),
-				IdSet::default(),
-			)
-		} else {
-			let e = crate::scenario::expand_scenarios(m, sessions)?;
-			scenario_expanded = e.model;
-			(
-				&scenario_expanded,
-				Some(e.honest),
-				e.summaries,
-				e.query_variants,
-				e.interchangeable.into_iter().collect(),
-				e.actors.into_iter().collect(),
-				e.bound.into_iter().collect(),
-			)
-		};
-	let expanded;
-	let (m, variants, siblings) = if sessions > 1 {
-		let e = crate::sessions::expand_sessions(m, sessions, &scenario_variants)?;
-		if let Some(honest) = honest.as_mut() {
-			for &(original, clone) in &e.principal_clones {
-				if let Some(&corrupt_from) = honest.get(&original) {
-					honest.insert(clone, corrupt_from);
-				}
-			}
-		}
-		for &(original, clone) in &e.principal_clones {
-			let canonical = interchangeable.get(&original).copied().unwrap_or(original);
-			interchangeable.insert(clone, canonical);
-			interchangeable.entry(original).or_insert(canonical);
-			let actor = actors.get(&original).copied().unwrap_or(original);
-			actors.insert(clone, actor);
-			actors.entry(original).or_insert(actor);
-		}
-		expanded = e.model;
-		(&expanded, e.query_variants, e.siblings)
-	} else {
-		(m, scenario_variants, IdMap::default())
-	};
+	let Expansion {
+		model,
+		honest,
+		scenarios,
+		variants,
+		siblings,
+		interchangeable,
+		actors,
+		bound,
+	} = expand(m, sessions)?;
+	let m = &model;
 	let (mut trace, states) = sanity(m)?;
 	trace.session_siblings = siblings;
 	trace.copy_siblings = copy_sibling_groups(&trace.slots);
@@ -347,14 +375,7 @@ fn verify_end(
 		);
 		for scenario in scenarios {
 			info_message(
-				&format!(
-					"{scenario} ({})",
-					if scenario.honest {
-						"honest peer"
-					} else {
-						"corrupt peer"
-					}
-				),
+				&format!("{scenario} ({})", scenario.peer()),
 				InfoLevel::Warning,
 				false,
 			);

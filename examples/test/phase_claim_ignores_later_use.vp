@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f1 at one session and at two.
+//
+// In the gpeer = gb scenario x = HASH(gb) carries no fresh value, and Alice
+// uses it in z = HASH(x) in phase 0. Bob leaks b in phase 1, so that run is
+// honest only at phase 0 and its claims are judged as the phase-0 barrier
+// left them. Alice's second use, z2, runs in phase 1. A claim at phase 0 is
+// never about later uses, but the judge once treated z2 as an unreached use
+// that cancels z, so adding a later use lost the attack.
+// phase_claim_never_reached_use.vp is the counterweight: a use that the run
+// never reaches still cancels.
+attacker[passive]
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Carol -> Alice: [gc]
+Bob -> Alice: [gb]
+principal Alice[
+	knows public gpeer
+	x = HASH(gpeer)
+	z = HASH(x)
+]
+phase[1]
+principal Bob[
+	leaks b
+]
+principal Alice[
+	z2 = HASH(x, gc)
+]
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+queries[
+	freshness? x
+]

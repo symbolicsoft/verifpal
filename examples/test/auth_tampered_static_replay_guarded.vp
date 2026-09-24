@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// auth_tampered_static_replay.vp with x guarded. The attacker can no longer
+// divert Alice, so Alice and Alice#2 each send MAC(k, x) and Bob and Bob#2
+// each accept one: two emissions, two acceptances.
+attacker[active]
+
+principal Carol[
+	knows private x
+]
+
+Carol -> Alice: [x]
+
+principal Alice[
+	knows private k
+	tag = MAC(k, x)
+]
+
+Alice -> Bob: tag
+
+principal Bob[
+	knows private k
+	knows private x
+	_ = ASSERT(tag, MAC(k, x))?
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

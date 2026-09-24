@@ -72,14 +72,8 @@ impl Documents {
 			match crate::sanity::sanity(m) {
 				Ok((t, _)) => {
 					trace = Some(t);
-					// A scenario binding is only checked once the scenarios are
-					// expanded, which is what `verify` does before its own sanity
-					// pass. The live check has to agree with the analysis, or an
-					// error surfaces only when the analysis is run.
-					if !m.scenarios.is_empty()
-						&& let Err(e) =
-							crate::scenario::expand_scenarios(m, crate::sessions::DEFAULT_SESSIONS)
-								.and_then(|e| crate::sanity::sanity(&e.model))
+					if let Err(e) = crate::verify::expand(m, crate::sessions::DEFAULT_SESSIONS)
+						.and_then(|e| crate::sanity::sanity(&e.model))
 					{
 						sanity = Some(e.located(&m.file_name, &m.source));
 					}
@@ -260,6 +254,34 @@ mod tests {
 		);
 		docs.change("file:///sb.vp", 2, fine);
 		let doc = docs.get("file:///sb.vp").expect("open");
+		assert!(doc.sanity.is_none(), "{:?}", doc.sanity);
+	}
+
+	#[test]
+	fn a_model_the_default_sessions_would_overflow_fails_sanity_live() {
+		let model = |count: usize| {
+			let mut src = String::from("attacker[passive]\n");
+			for i in 0..count {
+				src.push_str(&format!("principal Pc{i}[\n\tknows private pc_{i}\n]\n"));
+			}
+			src.push_str("queries[\n\tconfidentiality? pc_0\n]\n");
+			src
+		};
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///pc.vp".to_string(),
+			"pc.vp".to_string(),
+			1,
+			model(65),
+		);
+		let doc = docs.get("file:///pc.vp").expect("open");
+		assert!(
+			doc.sanity.is_some(),
+			"two sessions of 65 principals exceed the cap `verify` enforces, so the live \
+			 check must report it too"
+		);
+		docs.change("file:///pc.vp", 2, model(64));
+		let doc = docs.get("file:///pc.vp").expect("open");
 		assert!(doc.sanity.is_none(), "{:?}", doc.sanity);
 	}
 

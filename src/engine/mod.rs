@@ -7,6 +7,7 @@ pub(crate) mod narrate;
 pub(crate) mod program;
 pub(crate) mod query;
 pub(crate) mod search;
+pub(crate) mod unlink;
 pub(crate) mod view;
 
 use crate::context::VerifyContext;
@@ -78,6 +79,7 @@ fn violation_at(
 	Judge {
 		cx,
 		ex: ex.at(phase),
+		whole: ex,
 		honest,
 		states,
 		claims: &claims,
@@ -263,6 +265,8 @@ fn report(
 			slot,
 			value,
 			used,
+			emissions,
+			acceptances,
 		} => {
 			narrator.gate(*run, *used);
 			let constant = &km.slots[*slot].constant;
@@ -274,14 +278,22 @@ fn report(
 				},
 			);
 			let axis = narrator.replayed_from(*run, *slot, value).unwrap_or("run");
+			let times = |n: usize| match n {
+				1 => "once".to_string(),
+				2 => "twice".to_string(),
+				n => format!("{n} times"),
+			};
 			format!(
 				"{constant} ({}), which {s} sent in another {axis} and not in this one, is \
-				 successfully used in {} within {r}'s state: {s} sent it once, {r} accepts it \
-				 twice, so agreement is not injective.",
+				 successfully used in {} within {}'s state: {s} sent it {}, {r} accepts it \
+				 {}, so agreement is not injective.",
 				shown(&narrator, *slot, value),
 				narrator.declared(*used),
-				s = q.message.sender_name,
-				r = q.message.recipient_name,
+				name(*run),
+				times(*emissions),
+				times(*acceptances),
+				s = crate::util::copy_base_name(&q.message.sender_name),
+				r = crate::util::copy_base_name(&q.message.recipient_name),
 			)
 		}
 		Violation::Substituted {
@@ -315,9 +327,19 @@ fn report(
 				narrator.declared(*used)
 			)
 		}
-		Violation::Linked { clause, resolved } => {
+		Violation::Linked {
+			a,
+			b,
+			link,
+			resolved,
+		} => {
 			narrator.resolves(resolved);
-			clause.clone()
+			let queried = [a.to_string(), b.to_string()];
+			let queried: [&str; 2] = [&queried[0], &queried[1]];
+			format!(
+				"Attacker links {a} and {b} {}.",
+				link.describe(|v| narrator.term(v, &queried))
+			)
 		}
 		Violation::Differ { resolved } => {
 			narrator.resolves(resolved);

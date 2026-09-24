@@ -105,11 +105,14 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		}
 	}
 
+	let any_honest = honest_first_corrupt_from(m, &compromised, &mentions, &keyed) > 0;
 	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
 	for query in &m.queries {
 		let mut variants = Vec::new();
 		for k in 1..count {
-			if scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed) <= 0 {
+			if any_honest
+				&& scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed) <= 0
+			{
 				continue;
 			}
 			let variant = clone_query(query, k, sessions, &freshen, &pids);
@@ -140,11 +143,15 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 				.iter()
 				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
 				.collect(),
-			honest: scenario_corrupt_from(s, &compromised, &mentions, &keyed) > 0,
+			corrupt_from: Some(scenario_corrupt_from(s, &compromised, &mentions, &keyed))
+				.filter(|&phase| phase != i32::MAX),
 		})
 		.collect();
 
-	let corrupt = summaries.iter().filter(|s| !s.honest).count();
+	let corrupt = summaries
+		.iter()
+		.filter(|s| s.corrupt_from.is_some())
+		.count();
 	crate::info::info_message(
 		&format!(
 			"Analyzing {count} peer scenarios per principal, {corrupt} of them with a \
@@ -232,6 +239,18 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 		.collect()
 }
 
+fn honest_first_corrupt_from(
+	m: &Model,
+	compromised: &IdMap<ValueId, i32>,
+	mentions: &IdMap<ValueId, Vec<ValueId>>,
+	keyed: &IdSet<ValueId>,
+) -> i32 {
+	m.scenarios
+		.first()
+		.map(|s| scenario_corrupt_from(s, compromised, mentions, keyed))
+		.unwrap_or(i32::MAX)
+}
+
 fn honest_first(
 	scenarios: &[Scenario],
 	compromised: &IdMap<ValueId, i32>,
@@ -272,10 +291,14 @@ fn scenario_corrupt_from(
 		.bindings
 		.iter()
 		.filter(|(target, value)| target.id != value.id)
-		.filter_map(|(_, value)| {
+		.filter_map(|(target, value)| {
 			std::iter::once(value.id)
-				.chain(mentions.get(&value.id).into_iter().flatten().copied())
-				.filter(|id| keyed.contains(id))
+				.filter(|_| keyed.contains(&target.id))
+				.chain(
+					std::iter::once(value.id)
+						.chain(mentions.get(&value.id).into_iter().flatten().copied())
+						.filter(|id| keyed.contains(id)),
+				)
 				.filter_map(|id| compromised.get(&id).copied())
 				.min()
 		})
@@ -503,8 +526,14 @@ fn key_material_constants(m: &Model) -> IdSet<ValueId> {
 					continue;
 				};
 				for at in crate::primitive::secret_positions(inner.id) {
-					if let Some(Value::Constant(c)) = inner.arguments.get(at) {
-						out.insert(c.id);
+					match inner.arguments.get(at) {
+						Some(Value::Constant(c)) => {
+							out.insert(c.id);
+						}
+						Some(Value::Primitive(_)) => {
+							out.extend(expr.constants.iter().map(|c| c.id));
+						}
+						None => {}
 					}
 				}
 			}
@@ -552,6 +581,7 @@ fn public_declarations(m: &Model) -> IdSet<ValueId> {
 
 fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
+	let public = public_declarations(m);
 	let assignments: IdMap<ValueId, &Value> = m
 		.blocks
 		.iter()
@@ -563,39 +593,34 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 		.filter_map(|expression| expression.assigned.as_ref().map(|v| (expression, v)))
 		.flat_map(|(expression, value)| expression.constants.iter().map(move |c| (c.id, value)))
 		.collect();
-	let mut out: IdMap<ValueId, i32> = IdMap::default();
-	let mut disclose = |c: &Constant, phase: i32| {
-		for id in exposed_constants(c, &assignments) {
-			if secret.contains(&id) {
-				let at = out.entry(id).or_insert(phase);
-				*at = (*at).min(phase);
-			}
-		}
-	};
+	let mut disclosures: Vec<(&Constant, i32)> = Vec::new();
 	let mut phase = 0i32;
 	for block in &m.blocks {
 		match block {
 			Block::Phase(p) => phase = p.number,
 			Block::Principal(p) => {
 				for expression in &p.expressions {
-					if expression.kind != Declaration::Leaks {
-						continue;
-					}
-					for c in &expression.constants {
-						disclose(c, phase);
+					if expression.kind == Declaration::Leaks {
+						disclosures.extend(expression.constants.iter().map(|c| (c, phase)));
 					}
 				}
 			}
 			Block::Message(message) => {
-				for c in &message.constants {
-					disclose(c, phase);
-				}
+				disclosures.extend(message.constants.iter().map(|c| (c, phase)));
 			}
 		}
 	}
-	let public = public_declarations(m);
+	let mut out: IdMap<ValueId, i32> = IdMap::default();
 	loop {
 		let mut changed = false;
+		for &(c, phase) in &disclosures {
+			for (id, at) in exposed_constants(c, phase, &assignments, &out, &public) {
+				if secret.contains(&id) && out.get(&id).is_none_or(|&known| at < known) {
+					out.insert(id, at);
+					changed = true;
+				}
+			}
+		}
 		for block in &m.blocks {
 			let Block::Principal(p) = block else {
 				continue;
@@ -625,25 +650,82 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	out
 }
 
-fn exposed_constants(c: &Constant, assignments: &IdMap<ValueId, &Value>) -> IdSet<ValueId> {
-	let mut seen = IdSet::from_iter([c.id]);
+fn exposed_constants(
+	c: &Constant,
+	phase: i32,
+	assignments: &IdMap<ValueId, &Value>,
+	compromised: &IdMap<ValueId, i32>,
+	public: &IdSet<ValueId>,
+) -> IdMap<ValueId, i32> {
+	let mut seen: IdMap<ValueId, i32> = IdMap::from_iter([(c.id, phase)]);
 	let mut primitives = IdSet::default();
-	let mut pending: Vec<&Value> = assignments.get(&c.id).copied().into_iter().collect();
-	while let Some(value) = pending.pop() {
+	let mut pending: Vec<(&Value, i32)> = assignments
+		.get(&c.id)
+		.map(|v| (*v, phase))
+		.into_iter()
+		.collect();
+	while let Some((value, at)) = pending.pop() {
 		match value {
-			Value::Constant(c) if seen.insert(c.id) => {
-				pending.extend(assignments.get(&c.id).copied());
+			Value::Constant(c) => {
+				if seen.get(&c.id).is_none_or(|&known| at < known) {
+					seen.insert(c.id, at);
+					pending.extend(assignments.get(&c.id).map(|v| (*v, at)));
+				}
 			}
-			Value::Primitive(p)
-				if crate::primitive::primitive_core_reveals_args(p.id)
-					&& primitives.insert(Arc::as_ptr(p) as usize) =>
-			{
-				pending.extend(&p.arguments);
+			Value::Primitive(p) if primitives.insert(Arc::as_ptr(p) as usize) => {
+				if crate::primitive::primitive_core_reveals_args(p.id) {
+					pending.extend(p.arguments.iter().map(|a| (a, at)));
+				} else if let Some((opened, reveals)) =
+					opened_from(p, assignments, compromised, public)
+				{
+					pending.extend(reveals.into_iter().map(|a| (a, at.max(opened))));
+				}
 			}
 			_ => {}
 		}
 	}
 	seen
+}
+
+fn opened_from<'a>(
+	p: &'a Primitive,
+	assignments: &IdMap<ValueId, &Value>,
+	compromised: &IdMap<ValueId, i32>,
+	public: &IdSet<ValueId>,
+) -> Option<(i32, Vec<&'a Value>)> {
+	let rule = crate::primitive::primitive_get(p.id)
+		.ok()?
+		.decompose
+		.as_ref()?;
+	if rule.output.is_some_and(|output| output != p.output) {
+		return None;
+	}
+	let mut at = 0;
+	for &idx in &rule.given {
+		let mut argument = p.arguments.get(idx)?;
+		let mut hops = 0;
+		while let Value::Constant(c) = argument
+			&& let Some(assigned) = assignments.get(&c.id)
+			&& hops < assignments.len()
+		{
+			argument = assigned;
+			hops += 1;
+		}
+		let (key, valid) = (rule.filter)(p, argument, idx);
+		if !valid {
+			return None;
+		}
+		at = at.max(computable_from(&key, compromised, public)?);
+	}
+	let reveals = rule
+		.reveals
+		.iter()
+		.filter_map(|reveal| match *reveal {
+			crate::primitive::Reveal::Argument(i) => p.arguments.get(i),
+			crate::primitive::Reveal::Output(_) => None,
+		})
+		.collect();
+	Some((at, reveals))
 }
 
 fn computable_from(
@@ -959,7 +1041,7 @@ mod tests {
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(e.honest.is_empty());
 		assert_eq!(e.summaries.len(), 1);
-		assert!(!e.summaries[0].honest);
+		assert!(!e.summaries[0].honest());
 	}
 
 	#[test]
@@ -1027,8 +1109,102 @@ mod tests {
 		let m = parse_string("scx.vp", &src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			e.summaries.iter().all(|s| s.honest),
+			e.summaries.iter().all(|s| s.honest()),
 			"only a leaked secret marks a peer corrupt: {:?}",
+			e.summaries
+		);
+	}
+
+	#[test]
+	fn an_inline_derived_private_key_marks_its_peer_only_once_its_seed_leaks() {
+		let inline = SRC.replace("scx_gm = PUBKEY(scx_mk)", "scx_gm = PUBKEY(HASH(scx_mk))");
+		let m = parse_string("scx.vp", &inline).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(
+			!e.summaries[1].honest(),
+			"HASH(scx_mk) is Mallory's private key and scx_mk leaks: {:?}",
+			e.summaries
+		);
+		let kept = inline.replace("leaks scx_mk", "leaks scx_gm");
+		let m = parse_string("scx.vp", &kept).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(
+			e.summaries.iter().all(|s| s.honest()),
+			"leaking the public key computes nothing: {:?}",
+			e.summaries
+		);
+	}
+
+	#[test]
+	fn a_key_wrapped_under_a_computable_key_is_disclosed_with_it() {
+		let wrapped = |wrap: &str, extra: &str| {
+			SRC.replace(
+				"leaks scx_mk",
+				&format!("{extra}scx_w = {wrap}\n\t\tleaks scx_w"),
+			)
+		};
+		for (wrap, extra, honest) in [
+			("ENC(scx_wk, scx_mk)", "knows public scx_wk\n\t\t", false),
+			("ENC(scx_wk, scx_mk)", "knows private scx_wk\n\t\t", true),
+			(
+				"PKE_ENC(scx_gw, scx_mk)",
+				"knows private scx_wk\n\t\tscx_gw = PUBKEY(scx_wk)\n\t\tleaks scx_wk\n\t\t",
+				false,
+			),
+			(
+				"PKE_ENC(scx_gw, scx_mk)",
+				"knows private scx_wk\n\t\tscx_gw = PUBKEY(scx_wk)\n\t\t",
+				true,
+			),
+		] {
+			let src = wrapped(wrap, extra);
+			let m = parse_string("scx.vp", &src).expect("parses");
+			let e = expand_scenarios(&m, 1).expect("expands");
+			assert_eq!(
+				e.summaries[1].honest(),
+				honest,
+				"{wrap} with {extra:?}: {:?}",
+				e.summaries
+			);
+		}
+	}
+
+	#[test]
+	fn a_bound_value_at_a_key_position_is_key_material() {
+		let src = "attacker[active]\n\
+			principal Mallory[\n\
+			generates sbk_sm\n\
+			]\n\
+			Mallory -> Alice: sbk_sm\n\
+			principal Alice[\n\
+			knows private sbk_kb\n\
+			sbk_km = HASH(sbk_sm)\n\
+			knows private sbk_kpeer\n\
+			generates sbk_m, sbk_n\n\
+			sbk_e = AEAD_ENC(sbk_kpeer, sbk_n, sbk_m, nil)\n\
+			]\n\
+			scenarios[\n\
+			Alice[sbk_kpeer = sbk_kb]\n\
+			Alice[sbk_kpeer = sbk_km]\n\
+			]\n\
+			queries[\n\
+			confidentiality? sbk_m\n\
+			]\n";
+		let m = parse_string("sbk.vp", src).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(e.summaries[0].honest());
+		assert!(
+			!e.summaries[1].honest(),
+			"sbk_km becomes Alice's key once bound there, and its only ingredient \
+			 goes out in the clear: {:?}",
+			e.summaries
+		);
+		let m =
+			parse_string("sbk.vp", &src.replace("Mallory -> Alice: sbk_sm\n", "")).expect("parses");
+		let e = expand_scenarios(&m, 1).expect("expands");
+		assert!(
+			e.summaries.iter().all(|s| s.honest()),
+			"an ingredient never disclosed leaves the bound key secret: {:?}",
 			e.summaries
 		);
 	}
@@ -1043,9 +1219,9 @@ mod tests {
 			.replace("leaks scx_mk", "leaks scx_mk2");
 		let m = parse_string("scx.vp", &src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.summaries[0].honest);
+		assert!(e.summaries[0].honest());
 		assert!(
-			!e.summaries[1].honest,
+			!e.summaries[1].honest(),
 			"a leaked assignment standing as a private key marks its peer corrupt: {:?}",
 			e.summaries
 		);
@@ -1098,8 +1274,8 @@ mod tests {
 	fn a_leaked_private_key_still_makes_its_scenario_corrupt() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.summaries[0].honest);
-		assert!(!e.summaries[1].honest);
+		assert!(e.summaries[0].honest());
+		assert!(!e.summaries[1].honest());
 	}
 
 	#[test]
@@ -1163,7 +1339,7 @@ mod tests {
 			"the honest set records when a run stops being honest, not just whether"
 		);
 		assert!(
-			e.summaries[0].honest && !e.summaries[1].honest,
+			e.summaries[0].honest() && !e.summaries[1].honest(),
 			"the block is normalised honest-first, so the run the written query names \
 			 is one that is honest at phase 0 whenever the model declares any"
 		);

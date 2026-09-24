@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// Mallory leaks w = ENC(wrapkey, mk) with wrapkey public, so her private key
+// mk is computable and a run with her as peer is corrupt. Disclosure was once
+// followed only through bare values and tuples, so the wrapped key left that
+// scenario honest and the attacker's reading of Alice's s in it was reported.
+// A wrapping key the attacker cannot compute keeps the scenario honest; the
+// scenario unit tests pin that side.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	knows public wrapkey
+	w = ENC(wrapkey, mk)
+	leaks w
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows public gpeer
+	generates s
+	e = PKE_ENC(gpeer, s)
+]
+Alice -> Bob: e
+principal Bob[
+	sb = PKE_DEC(b, e)
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	confidentiality? s
+]

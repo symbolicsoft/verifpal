@@ -301,7 +301,7 @@ pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHigh
 
 pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Option<Vec<TextEdit>> {
 	let token = token_at(doc, position)?;
-	if !renameable(token) || !valid_rename(doc, token, new_name) {
+	if doc.model.is_err() || !renameable(token) || !valid_rename(doc, token, new_name) {
 		return None;
 	}
 	Some(
@@ -341,11 +341,7 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 			}
 		}
 		TokenKind::PrincipalName => {
-			if new_name.eq_ignore_ascii_case(crate::principal::ATTACKER_NAME)
-				|| ["phase", "principal", "queries", "scenarios"]
-					.iter()
-					.any(|word| new_name.eq_ignore_ascii_case(word))
-			{
+			if crate::parser::reserved_for_principal(&new_name.to_ascii_lowercase()) {
 				return false;
 			}
 		}
@@ -838,7 +834,7 @@ fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
 
 pub(crate) fn prepare_rename(doc: &Document, position: Position) -> Option<Range> {
 	let token = token_at(doc, position)?;
-	renameable(token).then(|| doc.line.range(token.span))
+	(doc.model.is_ok() && renameable(token)).then(|| doc.line.range(token.span))
 }
 
 #[cfg(test)]
@@ -1009,9 +1005,34 @@ queries[\n\
 			"Queries",
 			"Scenarios",
 			"ATTACKER",
+			"Hash",
+			"Knows",
+			"G",
+			"Active",
+			"Public",
+			"Confidentiality",
+			"Unnamed",
 		] {
 			assert!(rename(d, principal, name).is_none(), "accepted {name:?}");
 		}
+	}
+
+	#[test]
+	fn rename_refuses_a_document_that_does_not_parse() {
+		let source = SRC.replace("_ = HASH(lg_ga)", "_ = HASH(lg_ga) +");
+		let mut docs = Documents::new(PositionEncodingKind::UTF8);
+		docs.open(
+			"file:///broken.vp".to_string(),
+			"broken.vp".to_string(),
+			1,
+			source.clone(),
+		);
+		let d = docs.get("file:///broken.vp").expect("open");
+		let at = d
+			.line
+			.position(source.find("lg_a\n").expect("in the source"));
+		assert!(prepare_rename(d, at).is_none());
+		assert!(rename(d, at, "renamed").is_none());
 	}
 
 	#[test]

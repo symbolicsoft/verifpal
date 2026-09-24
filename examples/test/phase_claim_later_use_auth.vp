@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two.
+//
+// In the chal = sb scenario h = HASH(sb) is the same in every session, so at
+// two sessions the attacker replays Alice's m and signature from the other
+// session into Bob@2, who accepts in phase 0. Bob leaks sb in phase 1, so
+// that run's claims are judged at the phase-0 barrier; Bob's phase-1
+// HASH(m) once counted there as an unreached use and cancelled the
+// acceptance.
+attacker[active]
+principal Alice[
+	knows private ska
+	pka = PUBKEY(ska)
+]
+Alice -> Bob: [pka]
+principal Bob[
+	generates nb
+	knows private sb
+	knows private chal
+	_ = MAC(sb, nil)
+	h = HASH(chal)
+]
+Bob -> Alice: [h]
+principal Alice[
+	generates m
+	sig = SIGN(ska, CONCAT(h, m))
+]
+Alice -> Bob: m, sig
+principal Bob[
+	_ = SIGNVERIF(pka, CONCAT(h, m), sig)?
+]
+phase[1]
+principal Bob[
+	leaks sb
+	_ = HASH(m)
+]
+scenarios[
+	Bob[chal = nb]
+	Bob[chal = sb]
+]
+queries[
+	authentication? Alice -> Bob: m
+]

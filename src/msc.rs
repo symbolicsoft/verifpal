@@ -375,7 +375,6 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 		match step.kind.as_str() {
 			"mutations" | "replay" | "received" => {
 				let Some(recipient) = recipient else { continue };
-				let forged = step.values.iter().any(|v| v.was != v.installed);
 				let replay = step.kind == "replay";
 				let relayed = step.kind != "received";
 				rows.push(Row::Wire {
@@ -385,7 +384,7 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 					from: sender.unwrap_or(ATTACKER).to_string(),
 					to: recipient.to_string(),
 					via: relayed.then(|| ATTACKER.to_string()),
-					forged: forged || replay,
+					forged: relayed,
 					replay,
 					values: step
 						.values
@@ -394,7 +393,7 @@ pub(crate) fn attack_rows(q: &QueryReport, model: &ModelReport) -> (Vec<Row>, La
 							name: v.name.clone(),
 							guarded: v.guarded,
 							hit: false,
-							changed: v.was != v.installed,
+							changed: relayed,
 							queries: Vec::new(),
 						})
 						.collect(),

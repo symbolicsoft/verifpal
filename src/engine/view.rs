@@ -1,8 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::sync::Arc;
-
 use super::exec::{Context, Execution, Held};
 use super::program::Event;
 use crate::principal::ATTACKER_ID;
@@ -12,7 +10,12 @@ fn creator_run(cx: &Context, slot: usize) -> Option<usize> {
 	cx.program.run_index(cx.km.slots[slot].creator)
 }
 
-fn view_of<'a>(cx: &Context, ex: &'a Execution, r: usize, slot: usize) -> Option<&'a Held> {
+pub(crate) fn view_of<'a>(
+	cx: &Context,
+	ex: &'a Execution,
+	r: usize,
+	slot: usize,
+) -> Option<&'a Held> {
 	ex.runs[r]
 		.held(slot)
 		.or_else(|| creator_run(cx, slot).and_then(|c| ex.runs[c].held(slot)))
@@ -128,10 +131,5 @@ pub(crate) fn project(
 	starved.sort_unstable();
 	starved.dedup();
 	ps.starved = starved;
-	if let Some(slot) = state.halted {
-		let at = slot + 1;
-		Arc::make_mut(&mut ps.meta).truncate(at);
-		ps.values.truncate(at);
-	}
 	ps
 }

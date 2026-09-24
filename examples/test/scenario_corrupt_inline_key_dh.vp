@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// scenario_corrupt_inline_key.vp with a Diffie-Hellman key agreement.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+principal Mallory[
+	generates seed
+	gm = PUBKEY(HASH(seed))
+	leaks seed
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+	knows public gpeer
+	generates s, n
+	k = DH_KEX(gpeer, a)
+	e = AEAD_ENC(k, n, s, nil)
+]
+Alice -> Bob: [ga], n, e
+principal Bob[
+	kb = DH_KEX(ga, b)
+	sb = AEAD_DEC(kb, n, e, nil)
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	confidentiality? s
+]

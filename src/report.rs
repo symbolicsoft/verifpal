@@ -106,6 +106,8 @@ pub struct ScenarioReport {
 	pub principal: String,
 	pub bindings: Vec<Binding>,
 	pub honest: bool,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub corrupt_from: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -168,14 +170,10 @@ pub(crate) fn attacked_values(a: &Analysis) -> std::collections::HashMap<String,
 	let mut out: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
 	for (qi, q) in a.queries.iter().enumerate() {
 		for s in &q.steps {
-			let replay = s.kind == "replay";
-			if !replay && s.kind != "mutations" {
+			if s.kind != "replay" && s.kind != "mutations" {
 				continue;
 			}
 			for v in &s.values {
-				if !replay && v.was == v.installed {
-					continue;
-				}
 				let queries = out
 					.entry(crate::util::copy_base_name(&v.name).to_string())
 					.or_default();
@@ -285,7 +283,8 @@ impl Analysis {
 							value: value.to_string(),
 						})
 						.collect(),
-					honest: s.honest,
+					honest: s.corrupt_from.is_none(),
+					corrupt_from: s.corrupt_from,
 				})
 				.collect(),
 			notes: analysis_notes(report),

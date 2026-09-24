@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// oracle_output_hashed.vp with x1 guarded: Bob only ever encrypts Alice's
+// fresh x1, so no ciphertext he emits hashes to what the check expects.
+attacker[active]
+principal Bob[
+	knows private k
+	generates nb
+]
+Bob -> Alice: nb
+principal Alice[
+	knows private k
+	generates x1
+]
+Alice -> Bob: [x1]
+principal Bob[
+	o = ENC(k, x1)
+]
+Bob -> Alice: o
+principal Alice[
+	generates cmd
+	x2 = HASH(ENC(k, CONCAT(nb, cmd)))
+]
+Alice -> Bob: cmd, x2
+principal Bob[
+	_ = ASSERT(HASH(ENC(k, CONCAT(nb, cmd))), x2)?
+]
+queries[
+	authentication? Alice -> Bob: cmd
+]
