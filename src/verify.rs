@@ -362,12 +362,7 @@ fn verify_end(
 		crate::info::info_blank_line();
 	}
 
-	let mut assumptions: Vec<&Value> = Vec::new();
-	for (term, _, _) in ctx.assumptions() {
-		if !assumptions.iter().any(|held| held.same_term(term)) {
-			assumptions.push(term);
-		}
-	}
+	let assumptions = ctx.assumptions();
 	if !assumptions.is_empty() {
 		info_message(
 			&format!(
@@ -378,7 +373,7 @@ fn verify_end(
 			InfoLevel::Warning,
 			false,
 		);
-		for term in &assumptions {
+		for (term, _, _) in assumptions {
 			info_message(&term.to_string(), InfoLevel::Warning, false);
 		}
 		crate::info::info_blank_line();

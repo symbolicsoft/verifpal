@@ -758,6 +758,79 @@ mod tests {
 	}
 
 	#[test]
+	fn a_merged_assumption_names_each_capability_at_its_earliest_onset() {
+		let listed = |name: &str, body: &str, phases: &str| -> Vec<(String, &'static str, i32)> {
+			let src = format!(
+				"attacker[passive]\nprincipal Alice[\n\
+				 knows private rmerge_k, rmerge_m, rmerge_p\n{body}]\n{phases}\
+				 queries[\nconfidentiality? rmerge_p\n]\n"
+			);
+			let m = crate::parser::parse_string(name, &src).expect("parses");
+			crate::verify::analyze(&m)
+				.expect("analyzes")
+				.assumptions()
+				.iter()
+				.map(|(term, cap, onset)| (term.to_string(), cap.name(), *onset))
+				.collect()
+		};
+		let onset = vec![("HASH[weak](rmerge_m)".to_string(), "weak", 0)];
+		assert_eq!(
+			listed(
+				"rmerge1.vp",
+				"rmerge_a = HASH[weak from phase 1](rmerge_m)\nrmerge_b = HASH[weak](rmerge_m)\n",
+				"phase[1]\n",
+			),
+			onset
+		);
+		assert_eq!(
+			listed(
+				"rmerge2.vp",
+				"rmerge_a = HASH[weak](rmerge_m)\nrmerge_b = HASH[weak from phase 1](rmerge_m)\n",
+				"phase[1]\n",
+			),
+			onset
+		);
+		let capabilities = vec![
+			("ENC[weak](rmerge_k, rmerge_m)".to_string(), "weak", 0),
+			(
+				"ENC[malleable](rmerge_k, rmerge_m)".to_string(),
+				"malleable",
+				0,
+			),
+		];
+		assert_eq!(
+			listed(
+				"rmerge3.vp",
+				"rmerge_a = ENC[weak](rmerge_k, rmerge_m)\n\
+				 rmerge_b = ENC[malleable](rmerge_k, rmerge_m)\n",
+				"",
+			),
+			capabilities
+		);
+		assert_eq!(
+			listed(
+				"rmerge4.vp",
+				"rmerge_a = ENC[malleable](rmerge_k, rmerge_m)\n\
+				 rmerge_b = ENC[weak](rmerge_k, rmerge_m)\n",
+				"",
+			),
+			capabilities
+		);
+		assert_eq!(
+			listed(
+				"rmerge5.vp",
+				"rmerge_a = ENC[weak](HASH[weak from phase 1](rmerge_k), rmerge_m)\n\
+				 rmerge_b = HASH[weak](rmerge_k)\n",
+				"phase[1]\n",
+			),
+			vec![
+				("ENC[weak](HASH(rmerge_k), rmerge_m)".to_string(), "weak", 0),
+				("HASH[weak](rmerge_k)".to_string(), "weak", 0),
+			]
+		);
+	}
+
+	#[test]
 	fn a_report_omits_assumptions_when_none_are_declared() {
 		let src = "attacker[passive]\n\
 			principal Alice[\n\

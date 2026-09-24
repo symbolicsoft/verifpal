@@ -184,10 +184,28 @@ pub(crate) fn declared_assumptions(m: &Model) -> Vec<(Value, Capability, i32)> {
 		.into_iter()
 		.flat_map(|(term, caps)| {
 			caps.iter()
-				.map(move |(cap, onset)| (term.clone(), cap, onset))
+				.map(move |(cap, onset)| {
+					let mut only = Capabilities::default();
+					only.set(cap, onset);
+					(annotated(&term, only), cap, onset)
+				})
 				.collect::<Vec<_>>()
 		})
 		.collect()
+}
+
+fn annotated(v: &Value, capabilities: Capabilities) -> Value {
+	let Value::Primitive(p) = v else {
+		return v.clone();
+	};
+	let mut rebuilt = p.with_arguments(
+		p.arguments
+			.iter()
+			.map(|arg| annotated(arg, Capabilities::default()))
+			.collect(),
+	);
+	rebuilt.capabilities = capabilities;
+	Value::Primitive(Arc::new(rebuilt))
 }
 
 #[derive(Clone, Debug)]
