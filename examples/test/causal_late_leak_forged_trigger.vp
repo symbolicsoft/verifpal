@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+ * SPDX-License-Identifier: CC-BY-SA-4.0 */
+
+// Expected: a1 at one session and at two.
+//
+// causal_late_leak.vp with Bob's answer unguarded. Alice leaks her signing
+// key after receiving cll_ok and checks nothing about it, so the attacker
+// hands her cll_ok = nil before Bob answers. The leak then precedes Bob's
+// receive, and the attacker forges SIGN(cll_a, nil) for Bob's check within
+// the same execution: a1 at one session. Every disclosure still precedes the
+// receive it enables; the trigger for the disclosure was forgeable. The
+// search once missed this: it only filled the unsent messages a run waited on
+// when some of their slots already carried installs, so Alice stayed blocked
+// on Bob's answer while Bob's forged signature stayed underivable.
+
+attacker[active]
+
+principal Alice[
+	knows private cll_a
+	cll_ga = PUBKEY(cll_a)
+	generates cll_na
+	cll_sig = SIGN(cll_a, cll_na)
+]
+
+Alice -> Bob: [cll_ga], cll_na, cll_sig
+
+principal Bob[
+	_ = SIGNVERIF(cll_ga, cll_na, cll_sig)?
+	generates cll_ok
+]
+
+Bob -> Alice: cll_ok
+
+principal Alice[
+	_ = HASH(cll_ok)
+	leaks cll_a
+]
+
+queries[
+	authentication? Alice -> Bob: cll_sig
+]

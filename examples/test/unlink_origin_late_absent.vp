@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u0 at one session and at two.
+//
+// unlink_origin_late_leak.vp without the phase-1 disclosure. The attacker
+// holds secret only as recomposed from the two queried shares, so withholding
+// either share leaves it nothing to compare them against: u0, as in
+// unlink_shares_recomposed_secret.vp. The phase boundary alone discloses
+// nothing.
+attacker[passive]
+
+principal Alice[
+	generates secret
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+]
+
+Alice -> Bob: share_a, share_b
+
+principal Bob[
+	_ = HASH(share_a, share_b)
+]
+
+phase[1]
+
+queries[
+	confidentiality? secret
+	unlinkability? share_a, share_b
+]

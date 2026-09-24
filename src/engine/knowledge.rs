@@ -121,7 +121,8 @@ impl Knowledge {
 	}
 
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
-		if self.state.knows(v).is_some() {
+		let known = self.state.knows(v);
+		if known.is_some() && matches!(origin, Origin::Derived(_)) {
 			return false;
 		}
 		let derivation = match &origin {
@@ -134,6 +135,14 @@ impl Knowledge {
 			},
 			Origin::Initial => DerivationRecord::Initial,
 		};
+		if let Some(at) = known {
+			if !self.state.derivations[at.get()].ingredients().is_empty() {
+				let state = Arc::make_mut(&mut self.state);
+				Arc::make_mut(&mut state.derivations)[at.get()] = derivation;
+				state.chain = next_chain();
+			}
+			return false;
+		}
 		let state = Arc::make_mut(&mut self.state);
 		let at = state.known.len();
 		Arc::make_mut(&mut state.known).push(v.clone());

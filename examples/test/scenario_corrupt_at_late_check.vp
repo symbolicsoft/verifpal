@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two (GitHub issue #40).
+//
+// In the gpeer = gb scenario Alice checks Carol's signature against Bob's
+// key, so her SIGNVERIF fails. Bob leaks b in phase 1, and Alice's check runs
+// in phase 1, so that scenario's run is already corrupt when its check fails:
+// a halt, not a model error. The honest-run check once asked whether the
+// failing run was honest at phase 0 whatever phase the check ran in, and
+// rejected the model. scenario_corrupt_after_check.vp is the counterweight,
+// where the check runs in phase 0, before the compromise, and must still be
+// rejected.
+attacker[passive]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+	sig = SIGN(c, nil)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+Carol -> Alice: [gc], [sig]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	knows public gpeer
+	knows private secret
+]
+
+phase[1]
+
+principal Bob[
+	leaks b
+]
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, nil, sig)?
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	confidentiality? secret
+]

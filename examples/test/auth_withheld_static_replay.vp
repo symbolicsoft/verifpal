@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two (GitHub issue #39).
+//
+// Alice's tag = MAC(k, nil) is the same in every session. At two sessions the
+// attacker replaces c at Alice with nil; Charlie's guarded h no longer
+// matches, so Alice's checked ASSERT halts her before she sends tag. Bob waits
+// on that tag, and the attacker delivers Alice#2's tag, observed on the wire,
+// in its place. Bob and Bob#2 both pass their checks on MAC(k, nil), which
+// Alice sent once: duplicate acceptance, a1. The judge once dismissed any
+// install equal to the recipient's honest value before counting; that
+// equality now only rules out forgery. The search also never delivered a
+// replay into a receive left waiting by a halted sender, since it filled only
+// partly installed unsent messages. At one session no other Alice sends the
+// tag, so the attacker cannot supply it: a0.
+// auth_withheld_static_replay_unchecked.vp and
+// auth_withheld_static_replay_tag_guarded.vp are the counterweights.
+attacker[active]
+
+principal Charlie[
+	generates c
+	h = HASH(c)
+]
+
+Charlie -> Alice: c, [h]
+
+principal Alice[
+	knows private k
+	_ = ASSERT(HASH(c), h)?
+	tag = MAC(k, nil)
+]
+
+Alice -> Bob: tag
+
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, nil))?
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

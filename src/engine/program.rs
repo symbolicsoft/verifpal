@@ -137,4 +137,13 @@ impl Program {
 	pub(crate) fn run_index(&self, id: PrincipalId) -> Option<usize> {
 		self.run_of.get(&id).copied()
 	}
+
+	pub(crate) fn phase_of(&self, id: PrincipalId, slot: usize) -> i32 {
+		self.run_index(id)
+			.and_then(|r| {
+				let run = &self.runs[r];
+				run.step_of_slot.get(&slot).map(|&i| run.steps[i].phase)
+			})
+			.unwrap_or(0)
+	}
 }

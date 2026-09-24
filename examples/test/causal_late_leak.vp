@@ -9,6 +9,10 @@
 // check passed. Within one run the substitution is causally impossible;
 // a second run of Alice leaks the key independently of this Bob, which is a
 // genuine forgery at two sessions.
+//
+// Bob's answer is guarded. Unguarded, the attacker hands Alice an answer of
+// its own before Bob sends one, Alice leaks the key first, and the forgery is
+// real at one session: causal_late_leak_forged_trigger.vp pins that attack.
 
 attacker[active]
 
@@ -26,7 +30,7 @@ principal Bob[
 	generates cll_ok
 ]
 
-Bob -> Alice: cll_ok
+Bob -> Alice: [cll_ok]
 
 principal Alice[
 	_ = HASH(cll_ok)

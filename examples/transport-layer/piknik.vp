@@ -8,20 +8,22 @@
 // and the key identifier ekid are handed to the attacker outright with
 // `leaks`, the wire is fully attacker-controlled, and the untrusted server
 // is simply modeled AS the attacker. At one session all queries hold
-// (c0a0a0a0f0); at the default two sessions the two authentication queries
-// over n and ct report injective-agreement replays (c0a0a1a1f0), the other
-// run's signed content being accepted a second time:
+// (c0a0a0a0f0); at the default two sessions the three authentication
+// queries report injective-agreement replays (c0a1a1a1f0), the other run's
+// signed content being accepted a second time. For ekid, a declared value
+// that is the same in both sessions, the attacker first makes Client1's
+// check of h1 fail so that run never sends its flight:
 //
 //   confidentiality? m    HOLDS — the clipboard content is encrypted under
 //     a key derived from `keygen`, which is never leaked. Losing the MAC
 //     key costs integrity of the framing, not confidentiality of the data.
-//   authentication? Client1 -> Client2: ekid, n, ct   all HOLD — every one
-//     of these values sits under Client1's signature, and forging that
-//     signature would need signprivkey (never leaked). Note what this
-//     demonstrates about the analysis: the attacker *knows* ekid (it was
-//     leaked!) yet still cannot get Client2 to accept a substituted one,
-//     because known-to-the-attacker is not the same as forgeable-by-the-
-//     attacker once a signature check stands in the way.
+//   authentication? Client1 -> Client2: ekid, n, ct   all HOLD at one
+//     session — every one of these values sits under Client1's signature,
+//     and forging that signature would need signprivkey (never leaked).
+//     Note what this demonstrates about the analysis: the attacker *knows*
+//     ekid (it was leaked!) yet still cannot get Client2 to accept a
+//     substituted one, because known-to-the-attacker is not the same as
+//     forgeable-by-the-attacker once a signature check stands in the way.
 //   freshness? m    HOLDS — m is `generates`-fresh and reaches Client2
 //     inside ct, so Client2's view of it cannot be a replay of an older
 //     value.

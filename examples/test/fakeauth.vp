@@ -1,13 +1,18 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0 — the phone accepts the wrapped private key only through a
-// checked AEAD_DEC under a key derived from the private password, which the
-// attacker never holds, so the only blob that passes is the one Alice stored.
-// The nonce on `n_e_alice_private_key` is declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+// Expected: a0 at one session, a1 at two. The phone accepts the wrapped
+// private key only through a checked AEAD_DEC under a key derived from the
+// private password, which the attacker never holds, so no blob but the one
+// Alice stored passes, and at one session that blob is not forged.
+// The nonce on `n_e_alice_private_key` is declared rather than generated, so
+// the ciphertext is the same value in every session. At two sessions the
+// attacker replaces one phone's alicephone_master_auth, that Server run halts
+// at its ASSERT before releasing the blob, and the attacker delivers the blob
+// the other Server run sent in its place. The phones accept one emission
+// twice: a duplicate acceptance, not a forgery (GitHub issue #39). The judge
+// once dismissed an installed value equal to the recipient's honest one
+// before counting emissions.
 
 attacker[active]
 

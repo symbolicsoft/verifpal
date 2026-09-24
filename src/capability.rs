@@ -4,22 +4,7 @@
 use std::sync::Arc;
 
 use crate::primitive::{primitive_get, primitive_is_core, primitive_name};
-use crate::types::{IdMap, Primitive, PrimitiveId, TraceSlot, Value};
-
-fn assumption_key(text: &str) -> String {
-	let mut out = String::with_capacity(text.len());
-	let mut chars = text.chars().peekable();
-	while let Some(c) = chars.next() {
-		if c == '#' || c == '@' {
-			while chars.peek().is_some_and(|d| d.is_ascii_digit()) {
-				chars.next();
-			}
-			continue;
-		}
-		out.push(c);
-	}
-	out
-}
+use crate::types::{Block, IdMap, Model, Primitive, PrimitiveId, TraceSlot, Value};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Capability {
@@ -167,6 +152,44 @@ pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
 	}
 }
 
+pub(crate) fn declared_assumptions(m: &Model) -> Vec<(Value, Capability, i32)> {
+	let mut declared: Vec<(Value, Capabilities)> = Vec::new();
+	for block in &m.blocks {
+		let Block::Principal(principal) = block else {
+			continue;
+		};
+		for assigned in principal
+			.expressions
+			.iter()
+			.filter_map(|e| e.assigned.as_ref())
+		{
+			for term in crate::value::subterms(assigned) {
+				let Value::Primitive(p) = term else {
+					continue;
+				};
+				if p.capabilities.is_empty() {
+					continue;
+				}
+				match declared
+					.iter_mut()
+					.find(|(held, _)| held.equivalent(term, true))
+				{
+					Some((_, caps)) => caps.merge(&p.capabilities),
+					None => declared.push((term.clone(), p.capabilities)),
+				}
+			}
+		}
+	}
+	declared
+		.into_iter()
+		.flat_map(|(term, caps)| {
+			caps.iter()
+				.map(move |(cap, onset)| (term.clone(), cap, onset))
+				.collect::<Vec<_>>()
+		})
+		.collect()
+}
+
 #[derive(Clone, Debug)]
 pub enum Reach {
 	SameTerm(Value),
@@ -290,22 +313,6 @@ impl CapabilityIndex {
 			.flat_map(|b| b.iter().map(|(v, caps)| (v, caps)))
 	}
 
-	pub fn assumption_terms(&self) -> Vec<Value> {
-		let mut out: Vec<Value> = self
-			.buckets
-			.values()
-			.flatten()
-			.map(|(v, _)| v.clone())
-			.collect();
-		out.sort_by_cached_key(|v| {
-			let text = v.to_string();
-			(assumption_key(&text), text.len(), v.hash_value(), text)
-		});
-		out.dedup_by_key(|v| assumption_key(&v.to_string()));
-		out.sort_by_cached_key(|v| (v.hash_value(), v.to_string()));
-		out
-	}
-
 	pub fn governed_occurrences(&self, slots: &[TraceSlot]) -> Vec<(String, Reach)> {
 		if self.buckets.is_empty() {
 			return Vec::new();
@@ -341,21 +348,6 @@ impl CapabilityIndex {
 		for slot in slots {
 			walk(self, &slot.constant.name, &slot.initial_value, &mut out);
 		}
-		out
-	}
-
-	pub fn assumptions(&self) -> Vec<(Value, Capability, i32)> {
-		let mut out = Vec::new();
-		for bucket in self.buckets.values() {
-			for (v, caps) in bucket {
-				for (cap, onset) in caps.iter() {
-					out.push((v.clone(), cap, onset));
-				}
-			}
-		}
-		out.sort_by_cached_key(|(v, cap, onset)| {
-			(v.hash_value(), v.to_string(), cap.index(), *onset)
-		});
 		out
 	}
 }
@@ -626,90 +618,6 @@ mod tests {
 		for cap in Capability::ALL {
 			assert!(!index.in_force(p, cap, 0));
 		}
-	}
-
-	#[test]
-	fn colliding_assumptions_have_a_stable_order() {
-		use crate::primitive::*;
-		use crate::testutil::make_primitive;
-		use crate::types::{Constant, ValueId};
-
-		fn constant(name: &str, id: ValueId) -> Value {
-			Value::Constant(Constant {
-				name: Arc::from(name),
-				id,
-				..Default::default()
-			})
-		}
-
-		let left = make_primitive(
-			PRIM_HASH,
-			vec![constant("cap_order_a", 10), constant("cap_order_b", 100)],
-			0,
-		);
-		let right = make_primitive(
-			PRIM_HASH,
-			vec![constant("cap_order_c", 11), constant("cap_order_d", 69)],
-			0,
-		);
-		assert_eq!(left.hash_value(), right.hash_value());
-		let left = annotated(left, Capability::Weak, 0);
-		let right = annotated(right, Capability::Weak, 0);
-		let ordered = |values: &[Value]| {
-			let mut index = CapabilityIndex::default();
-			for value in values {
-				index.insert(value);
-			}
-			index
-				.assumptions()
-				.into_iter()
-				.map(|(value, _, _)| value.to_string())
-				.collect::<Vec<_>>()
-		};
-		assert_eq!(
-			ordered(&[left.clone(), right.clone()]),
-			ordered(&[right, left])
-		);
-	}
-
-	#[test]
-	fn colliding_copy_terms_choose_the_same_assumption_representative() {
-		use crate::primitive::*;
-		use crate::testutil::make_primitive;
-		use crate::types::{Constant, ValueId};
-
-		fn constant(name: &str, id: ValueId) -> Value {
-			Value::Constant(Constant {
-				name: Arc::from(name),
-				id,
-				..Default::default()
-			})
-		}
-
-		let left = make_primitive(
-			PRIM_HASH,
-			vec![constant("copy_a#1", 10), constant("copy_b#1", 100)],
-			0,
-		);
-		let right = make_primitive(
-			PRIM_HASH,
-			vec![constant("copy_a#2", 11), constant("copy_b#2", 69)],
-			0,
-		);
-		assert_eq!(left.hash_value(), right.hash_value());
-		let left = annotated(left, Capability::Weak, 0);
-		let right = annotated(right, Capability::Weak, 0);
-		let chosen = |values: &[Value]| {
-			let mut index = CapabilityIndex::default();
-			for value in values {
-				index.insert(value);
-			}
-			index.assumption_terms()[0].to_string()
-		};
-		assert_eq!(
-			chosen(&[left.clone(), right.clone()]),
-			chosen(&[right, left])
-		);
 	}
 
 	#[test]

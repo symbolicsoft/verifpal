@@ -2256,8 +2256,15 @@ authentication? Sender -> Bob: payload
 		let attacker = make_attacker_state(vec![]);
 		let controllable = crate::solve::control::Controllable::of(&km, ps, &attacker);
 		let sym = super::super::symbolic::build(&controllable, ps, &attacker);
-		let ctx =
-			crate::context::VerifyContext::new(&model, &states, Vec::new(), 1, None, Vec::new());
+		let ctx = crate::context::VerifyContext::new(
+			&model,
+			&states,
+			Vec::new(),
+			1,
+			None,
+			Vec::new(),
+			Vec::new(),
+		);
 		let groups = constraint_sets(&ctx, &km, ps, &sym);
 		let slot = |name: &str| {
 			ps.meta

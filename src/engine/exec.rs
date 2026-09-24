@@ -44,7 +44,7 @@ pub(crate) struct Execution {
 	pub(crate) sent: Vec<Option<Vec<Value>>>,
 	pub(crate) order: Vec<(usize, usize, usize)>,
 	pub(crate) stuck: Vec<(usize, usize)>,
-	pub(crate) partial: Vec<(usize, usize)>,
+	pub(crate) withheld: Vec<(usize, usize)>,
 	pub(crate) phases: Vec<Knowledge>,
 }
 
@@ -152,7 +152,7 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		sent: vec![None; program.deliveries.len()],
 		order: Vec::new(),
 		stuck: Vec::new(),
-		partial: Vec::new(),
+		withheld: Vec::new(),
 		phases: Vec::new(),
 	};
 	let install_of = |run: usize, slot: usize| -> Option<&Value> {
@@ -214,14 +214,10 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 				&& let Event::Recv(d) = step.event
 			{
 				let delivery = &program.deliveries[d];
-				let partly = delivery
-					.slots
-					.iter()
-					.any(|&(slot, guarded)| !guarded && install_of(r, slot).is_some());
-				if partly && ex.sent[d].is_none() {
+				if ex.sent[d].is_none() {
 					for &(slot, guarded) in &delivery.slots {
 						if !guarded && install_of(r, slot).is_none() {
-							ex.partial.push((r, slot));
+							ex.withheld.push((r, slot));
 						}
 					}
 				}

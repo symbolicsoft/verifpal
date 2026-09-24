@@ -1635,10 +1635,16 @@ fn test_cen() {
 }
 #[test]
 fn test_firefox_sync() {
+	run_model_sessions_at(
+		"examples/transport-layer/firefox-sync.vp",
+		"firefox-sync.vp",
+		1,
+		"c0a0",
+	);
 	run_model_at(
 		"examples/transport-layer/firefox-sync.vp",
 		"firefox-sync.vp",
-		"c0a0",
+		"c0a1",
 	);
 }
 #[test]
@@ -2753,7 +2759,8 @@ fn test_exa2() {
 }
 #[test]
 fn test_fakeauth() {
-	run_model("fakeauth.vp", "a0");
+	run_model_sessions("fakeauth.vp", 1, "a0");
+	run_model("fakeauth.vp", "a1");
 }
 #[test]
 fn test_replay_simple() {
@@ -2906,7 +2913,7 @@ fn test_piknik_signature_not_forgeable() {
 	run_model_at(
 		"examples/transport-layer/piknik.vp",
 		"piknik.vp",
-		"c0a0a1a1f0",
+		"c0a1a1a1f0",
 	);
 }
 #[test]
@@ -3942,6 +3949,9 @@ fn test_aead_nonce_reuse_partner_unreached() {
 fn test_causal_late_leak() {
 	run_model("causal_late_leak.vp", "a1");
 	run_model_sessions("causal_late_leak.vp", 1, "a0");
+	for sessions in [1, 2] {
+		run_model_sessions("causal_late_leak_forged_trigger.vp", sessions, "a1");
+	}
 }
 #[test]
 fn test_equivalence_unused_received() {
@@ -4708,5 +4718,43 @@ fn test_unlink_blocked_disclosure() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_blocked_disclosure.vp", sessions, "u0");
 		run_model_sessions("unlink_blocked_disclosure_unchecked.vp", sessions, "u1");
+	}
+}
+
+#[test]
+fn test_unlink_origin_late_disclosure() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_origin_late_leak.vp", sessions, "c1u1");
+		run_model_sessions("unlink_origin_late_send.vp", sessions, "c1u1");
+		run_model_sessions("unlink_origin_late_absent.vp", sessions, "c1u0");
+	}
+}
+
+#[test]
+fn test_auth_withheld_static_replay() {
+	run_model_sessions("auth_withheld_static_replay.vp", 1, "a0");
+	run_model_sessions("auth_withheld_static_replay.vp", 2, "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("auth_withheld_static_replay_unchecked.vp", sessions, "a0");
+		run_model_sessions("auth_withheld_static_replay_tag_guarded.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_scenario_corrupt_at_late_check() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_corrupt_at_late_check.vp", sessions, "c0");
+		run_model_sessions_err(
+			"scenario_corrupt_after_check.vp",
+			sessions,
+			"this check fails in the honest run",
+		);
+	}
+}
+
+#[test]
+fn test_cap_weak_shared_chain_assumption() {
+	for sessions in [1, 2] {
+		run_model_sessions("cap_weak_shared_chain_assumption.vp", sessions, "c0");
 	}
 }

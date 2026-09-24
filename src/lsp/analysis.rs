@@ -36,7 +36,7 @@ pub(crate) fn analyze(
 		code: crate::types::VerifyResult::results_code(&results),
 		results,
 		elapsed: Some(started.elapsed()),
-		assumptions: ctx.capability_assumptions(),
+		assumptions: ctx.assumptions().to_vec(),
 		scenarios: ctx.scenarios().to_vec(),
 		provenance: crate::verify::Provenance::default(),
 	};

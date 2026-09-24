@@ -423,6 +423,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				.get(&id)
 				.is_some_and(|group| group.contains(&km.slots[s].constant.id))
 		};
+		let sender = program
+			.deliveries
+			.iter()
+			.find(|delivery| {
+				delivery.recipient == run && delivery.slots.iter().any(|&(s, _)| s == slot)
+			})
+			.map(|delivery| delivery.sender);
+		let copy_of_sender = |other: usize| {
+			sender.is_some_and(|sender| {
+				other != sender
+					&& km.interchangeable_for(program.runs[other].id, program.runs[sender].id, slot)
+			})
+		};
 		program
 			.deliveries
 			.iter()
@@ -433,10 +446,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				}
 				let sent = self.ex.sent[d].as_ref()?;
 				delivery.slots.iter().zip(sent).find_map(|(&(s, _), v)| {
-					if s == slot || !v.equivalent(value, true) {
+					if !v.equivalent(value, true) {
 						return None;
 					}
-					if within(&km.session_siblings, s) {
+					if s == slot {
+						copy_of_sender(delivery.sender).then_some("run")
+					} else if within(&km.session_siblings, s) {
 						Some("session")
 					} else if within(&km.copy_siblings, s) {
 						Some("scenario")

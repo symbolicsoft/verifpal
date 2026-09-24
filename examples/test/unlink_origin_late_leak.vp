@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u1 at one session and at two (GitHub issue #38).
+//
+// Two shares of a 2-of-3 sharing travel in the clear, so the attacker
+// recomposes secret at the phase-0 barrier and its confidentiality fails. In
+// phase 1 Alice leaks secret itself. That leak is a disclosure independent of
+// both shares, so the secret stays held when either share is withheld, and the
+// split ties both shares to it: u1 at phase 1. Knowledge used to keep only the
+// first way it obtained a value, so the later leak left secret recorded as
+// recomposed from the two queried shares, and withholding either one dropped
+// it: u0. A later disclosure now replaces a derivation as the record of how
+// the value is held; narration of earlier steps still reads the first origin.
+// unlink_origin_late_absent.vp is the counterweight, and
+// unlink_origin_late_send.vp discloses secret on the wire instead.
+attacker[passive]
+
+principal Alice[
+	generates secret
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+]
+
+Alice -> Bob: share_a, share_b
+
+principal Bob[
+	_ = HASH(share_a, share_b)
+]
+
+phase[1]
+
+principal Alice[
+	leaks secret
+]
+
+queries[
+	confidentiality? secret
+	unlinkability? share_a, share_b
+]

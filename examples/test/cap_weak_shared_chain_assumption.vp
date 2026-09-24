@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two (GitHub issue #41).
+//
+// Each t_i hashes the previous one twice, so the resolved t24 is a shared term
+// graph whose written-out tree is 2^24 leaves long. extra is annotated weak,
+// and nothing else in the model involves it. The report once listed the
+// capability index's resolved copies of every annotated term as "declared
+// assumptions" and rendered them in full, which exhausted memory after the
+// analysis had finished. Declared assumptions are now the annotations as the
+// model writes them: HASH[weak](t24), once.
+attacker[passive]
+
+principal Alice[
+	knows private secret
+	generates seed
+	t0 = HASH(seed)
+	t1 = HASH(t0, t0)
+	t2 = HASH(t1, t1)
+	t3 = HASH(t2, t2)
+	t4 = HASH(t3, t3)
+	t5 = HASH(t4, t4)
+	t6 = HASH(t5, t5)
+	t7 = HASH(t6, t6)
+	t8 = HASH(t7, t7)
+	t9 = HASH(t8, t8)
+	t10 = HASH(t9, t9)
+	t11 = HASH(t10, t10)
+	t12 = HASH(t11, t11)
+	t13 = HASH(t12, t12)
+	t14 = HASH(t13, t13)
+	t15 = HASH(t14, t14)
+	t16 = HASH(t15, t15)
+	t17 = HASH(t16, t16)
+	t18 = HASH(t17, t17)
+	t19 = HASH(t18, t18)
+	t20 = HASH(t19, t19)
+	t21 = HASH(t20, t20)
+	t22 = HASH(t21, t21)
+	t23 = HASH(t22, t22)
+	t24 = HASH(t23, t23)
+	extra = HASH[weak](t24)
+]
+
+queries[
+	confidentiality? secret
+]

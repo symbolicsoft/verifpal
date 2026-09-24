@@ -44,6 +44,7 @@ fn analyze_sessions_traced_cancellable(
 	let sessions = sessions.max(1);
 	let _generation = crate::context::GenerationGuard::enter();
 	crate::info::info_reset_deductions();
+	let assumptions = crate::capability::declared_assumptions(m);
 	let scenario_expanded;
 	let (m, mut honest, scenarios, scenario_variants, mut interchangeable, mut actors, bound) =
 		if m.scenarios.is_empty() {
@@ -101,7 +102,15 @@ fn analyze_sessions_traced_cancellable(
 	trace.equivalence_queried =
 		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
 	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(m, &states, variants, sessions, honest, scenarios);
+	let mut ctx = VerifyContext::new(
+		m,
+		&states,
+		variants,
+		sessions,
+		honest,
+		scenarios,
+		assumptions,
+	);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
 	crate::engine::verify(&ctx, m, &trace, &states)?;
@@ -364,7 +373,7 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 		results,
 		code,
 		elapsed,
-		assumptions: ctx.capability_assumptions(),
+		assumptions: ctx.assumptions().to_vec(),
 		scenarios: ctx.scenarios().to_vec(),
 		provenance: Provenance::default(),
 	})
@@ -372,17 +381,12 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 
 type Failures = Vec<(Primitive, usize)>;
 
-fn failure_is_suppressible(ctx: &VerifyContext, km: &ProtocolTrace, slot: usize) -> bool {
-	km.slots
-		.get(slot)
-		.is_some_and(|s| !ctx.is_honest_at(s.creator, 0))
-}
-
 pub(crate) fn check_honest_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
 	ps: &PrincipalState,
 	reached: impl Fn(usize) -> bool,
+	phase_of: impl Fn(usize) -> i32,
 ) -> VResult<()> {
 	let mut ps_resolved = ps.clone_for_depth(false);
 	ps_resolved.resolve_all_values()?;
@@ -390,7 +394,11 @@ pub(crate) fn check_honest_run(
 	let failures: Failures = ps_resolved
 		.perform_all_rewrites()
 		.into_iter()
-		.filter(|(_, slot)| !failure_is_suppressible(ctx, km, *slot))
+		.filter(|&(_, slot)| {
+			km.slots
+				.get(slot)
+				.is_none_or(|s| ctx.is_honest_at(s.creator, phase_of(slot)))
+		})
 		.collect();
 	if let Err(e) = sanity_fail_on_failed_checked_primitive_rewrite(&failures) {
 		let span = failures
@@ -490,7 +498,12 @@ fn verify_end(
 		crate::info::info_blank_line();
 	}
 
-	let assumptions = ctx.capability_assumption_terms();
+	let mut assumptions: Vec<&Value> = Vec::new();
+	for (term, _, _) in ctx.assumptions() {
+		if !assumptions.iter().any(|held| held.same_term(term)) {
+			assumptions.push(term);
+		}
+	}
 	if !assumptions.is_empty() {
 		info_message(
 			&format!(
@@ -502,11 +515,7 @@ fn verify_end(
 			false,
 		);
 		for term in &assumptions {
-			info_message(
-				&crate::pretty::term_with_projections(term),
-				InfoLevel::Warning,
-				false,
-			);
+			info_message(&term.to_string(), InfoLevel::Warning, false);
 		}
 		crate::info::info_blank_line();
 	}

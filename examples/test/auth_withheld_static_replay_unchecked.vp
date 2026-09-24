@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// auth_withheld_static_replay.vp with Alice's ASSERT unchecked. Replacing c no
+// longer halts Alice, so every Alice sends her tag and every Bob's receipt of
+// MAC(k, nil) is matched by an emission: a replay across sessions delivers the
+// very value the recipient's own Alice sent, and nothing is accepted more
+// often than it is sent.
+attacker[active]
+
+principal Charlie[
+	generates c
+	h = HASH(c)
+]
+
+Charlie -> Alice: c, [h]
+
+principal Alice[
+	knows private k
+	_ = ASSERT(HASH(c), h)
+	tag = MAC(k, nil)
+]
+
+Alice -> Bob: tag
+
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, nil))?
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

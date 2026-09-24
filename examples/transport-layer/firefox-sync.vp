@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0 at one session and at two.
+// Expected: c0a0 at one session, c0a1 at two.
 //
 // A simplified model of the Firefox Sync account protocol ("onepw"): one
 // password, stretched into two independent keys with different destinies —
@@ -13,10 +13,14 @@
 //     the attacker) only ever see h2 and the ciphertext e1; the encryption
 //     key h1 never leaves the client, and HKDF's outputs tell you nothing
 //     about each other.
-//   authentication? Server -> ComputerB: e1     HOLDS — ComputerB accepts
-//     e1 only if the *checked* AEAD_DEC under its own password-derived h1b
-//     succeeds. The attacker cannot forge such a ciphertext without the
-//     password, so the only e1 that passes is the one ComputerA created.
+//   authentication? Server -> ComputerB: e1     HOLDS at one session —
+//     ComputerB accepts e1 only if the *checked* AEAD_DEC under its own
+//     password-derived h1b succeeds. The attacker cannot forge such a
+//     ciphertext without the password, so the only e1 that passes is the
+//     one ComputerA created. At two sessions that one e1 is accepted
+//     twice: the attacker replaces one ComputerB's h2b, that Server run
+//     halts before releasing e1, and the attacker delivers the e1 the
+//     other Server run sent. That is a duplicate acceptance, not a forgery.
 //
 // The instructive move is the HKDF split:
 //     h1, h2 = HKDF(pass, salt, nil)
@@ -30,9 +34,10 @@
 // PBKDF2-stretches the password; `knows private` models the assumption that
 // the stretching succeeded.
 // The nonce on `n_e1` is declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+// stays the same value in every session, as it was before nonces were named.
+// That does not keep the ciphertext from being accepted twice: a run that
+// never receives e1 from its own Server can still be handed the other
+// session's.
 
 attacker[active]
 

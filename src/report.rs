@@ -267,7 +267,7 @@ impl Analysis {
 				.assumptions
 				.iter()
 				.map(|(term, capability, onset)| Assumption {
-					term: crate::pretty::term_with_projections(term),
+					term: term.to_string(),
 					capability: capability.name().to_string(),
 					from_phase: *onset,
 				})
@@ -723,9 +723,60 @@ mod tests {
 			]\n";
 		let m = crate::parser::parse_string("rcap.vp", src).expect("parses");
 		let ctx = crate::verify::analyze(&m).expect("analyzes");
-		let assumptions = ctx.capability_assumptions();
+		let assumptions = ctx.assumptions();
 		assert_eq!(assumptions.len(), 1);
 		assert_eq!(assumptions[0].1.name(), "weak");
+	}
+
+	#[test]
+	fn a_report_lists_each_declared_assumption_once_as_written() {
+		let src = "attacker[active]\n\
+			principal Carol[\n\
+			knows private ronce_c\n\
+			ronce_gc = PUBKEY(ronce_c)\n\
+			]\n\
+			principal Bob[\n\
+			knows private ronce_b\n\
+			ronce_gb = PUBKEY(ronce_b)\n\
+			]\n\
+			Carol -> Alice: [ronce_gc]\n\
+			Bob -> Alice: [ronce_gb]\n\
+			principal Alice[\n\
+			knows public ronce_peer\n\
+			generates ronce_m\n\
+			ronce_h = HASH[weak](ronce_peer, ronce_m)\n\
+			ronce_g = HASH[weak from phase 1](HASH(ronce_m, ronce_m))\n\
+			]\n\
+			Alice -> Bob: ronce_h, ronce_g\n\
+			phase[1]\n\
+			principal Bob[\n\
+			leaks ronce_b\n\
+			]\n\
+			scenarios[\n\
+			Alice[ronce_peer = ronce_gc]\n\
+			Alice[ronce_peer = ronce_gb]\n\
+			]\n\
+			queries[\n\
+			confidentiality? ronce_m\n\
+			]\n";
+		let m = crate::parser::parse_string("ronce.vp", src).expect("parses");
+		let ctx = crate::verify::analyze(&m).expect("analyzes");
+		let listed: Vec<(String, &str, i32)> = ctx
+			.assumptions()
+			.iter()
+			.map(|(term, cap, onset)| (term.to_string(), cap.name(), *onset))
+			.collect();
+		assert_eq!(
+			listed,
+			vec![
+				("HASH[weak](ronce_peer, ronce_m)".to_string(), "weak", 0),
+				(
+					"HASH[weak from phase 1](HASH(ronce_m, ronce_m))".to_string(),
+					"weak",
+					1
+				),
+			]
+		);
 	}
 
 	#[test]
@@ -744,7 +795,7 @@ mod tests {
 			]\n";
 		let m = crate::parser::parse_string("rnoc.vp", src).expect("parses");
 		let ctx = crate::verify::analyze(&m).expect("analyzes");
-		assert!(ctx.capability_assumptions().is_empty());
+		assert!(ctx.assumptions().is_empty());
 	}
 
 	#[test]

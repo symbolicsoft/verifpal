@@ -181,7 +181,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 		error: String::new(),
 		code: VerifyResult::results_code(&results),
 		results: results_of(&results),
-		assumptions: assumptions_of(&ctx.capability_assumptions()),
+		assumptions: assumptions_of(ctx.assumptions()),
 		scenarios: scenarios_of(ctx.scenarios()),
 		messages: info::wasm_messages_drain(),
 	})

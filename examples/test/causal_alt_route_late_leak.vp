@@ -18,6 +18,10 @@
 //
 // At two sessions a second Bob supplies the tag honestly and the attack is
 // real.
+//
+// Bob's done is guarded. Unguarded, the attacker hands Mallory a done of its
+// own, Mallory leaks k before Bob's check, and the forgery is real at one
+// session, as in causal_late_leak_forged_trigger.vp.
 attacker[active]
 
 principal Alice[
@@ -55,7 +59,7 @@ principal Bob[
 	generates done
 ]
 
-Bob -> Mallory: done
+Bob -> Mallory: [done]
 
 principal Mallory[
 	_ = HASH(done)

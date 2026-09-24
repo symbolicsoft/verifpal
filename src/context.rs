@@ -150,6 +150,7 @@ pub(crate) struct VerifyContext {
 	sessions: u8,
 	honest: Option<IdMap<PrincipalId, i32>>,
 	scenarios: Vec<ScenarioSummary>,
+	assumptions: Vec<(Value, Capability, i32)>,
 	basis: RwLock<(u64, i32, usize, crate::hashing::TermSet)>,
 	term_bound: std::sync::OnceLock<crate::solve::control::TermBound>,
 	cancel: Arc<AtomicBool>,
@@ -163,6 +164,7 @@ impl VerifyContext {
 		sessions: u8,
 		honest: Option<IdMap<PrincipalId, i32>>,
 		scenarios: Vec<ScenarioSummary>,
+		assumptions: Vec<(Value, Capability, i32)>,
 	) -> Self {
 		let results: Vec<VerifyResult> = m
 			.queries
@@ -186,6 +188,7 @@ impl VerifyContext {
 			sessions,
 			honest,
 			scenarios,
+			assumptions,
 			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
 			term_bound: std::sync::OnceLock::new(),
 			cancel: Arc::new(AtomicBool::new(false)),
@@ -310,18 +313,8 @@ impl VerifyContext {
 		&self.states
 	}
 
-	pub(crate) fn capability_assumptions(&self) -> Vec<(Value, Capability, i32)> {
-		self.states
-			.first()
-			.map(|ps| ps.capabilities.assumptions())
-			.unwrap_or_default()
-	}
-
-	pub(crate) fn capability_assumption_terms(&self) -> Vec<Value> {
-		self.states
-			.first()
-			.map(|ps| ps.capabilities.assumption_terms())
-			.unwrap_or_default()
+	pub(crate) fn assumptions(&self) -> &[(Value, Capability, i32)] {
+		&self.assumptions
 	}
 
 	pub(crate) fn results_get(&self) -> Vec<VerifyResult> {
@@ -480,7 +473,7 @@ mod tests {
 			confidentiality? trc_m\n\
 			]\n";
 		let m = parse_string("trc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
 		ctx.finalize_envelopes();
 		assert!(ctx.truncations().is_empty());
 		assert!(ctx.results_get()[0].envelope.exhausted());
@@ -499,7 +492,7 @@ mod tests {
 			confidentiality? tdc_m\n\
 			]\n";
 		let m = parse_string("tdc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
 		ctx.note_depth_cut(1, 0);
 		ctx.finalize_envelopes();
 		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
@@ -522,7 +515,7 @@ mod tests {
 			confidentiality? tdq_n\n\
 			]\n";
 		let m = parse_string("tdq.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
 		let mut resolved = crate::types::VerifyResult::new(&m.queries[0], 0);
 		resolved.resolved = true;
 		assert!(ctx.results_put(&resolved, &crate::engine::query::Verdict::for_test()));
@@ -554,18 +547,26 @@ mod tests {
 			]\n";
 		let m = parse_string("cat.vp", src).expect("parse");
 
-		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
 		assert!(plain.claims_apply_at(1, 0));
 		assert!(plain.claims_apply_at(9, 0));
 
 		let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 		honest.insert(1, i32::MAX);
-		let mixed = VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new());
+		let mixed =
+			VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new(), Vec::new());
 		assert!(mixed.claims_apply_at(1, 0));
 		assert!(!mixed.claims_apply_at(2, 0));
 
-		let corrupt =
-			VerifyContext::new(&m, &[], Vec::new(), 2, Some(IdMap::default()), Vec::new());
+		let corrupt = VerifyContext::new(
+			&m,
+			&[],
+			Vec::new(),
+			2,
+			Some(IdMap::default()),
+			Vec::new(),
+			Vec::new(),
+		);
 		assert!(
 			corrupt.claims_apply_at(2, 0),
 			"a model with nothing honest to relativise against must not hold vacuously"
@@ -588,7 +589,7 @@ mod tests {
 			confidentiality? fev_m\n\
 			]\n";
 		let m = parse_string("fev.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new());
+		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
 		assert!(!ctx.all_resolved());
 		ctx.finalize_envelopes();
 		assert!(!ctx.all_resolved());

@@ -1097,7 +1097,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let ex = self.execute_counted(&installs);
 		let halts: Vec<Option<usize>> = ex.runs.iter().map(|run| run.halted).collect();
 		let mut fills: Installs = Vec::new();
-		for &(run, slot) in &ex.partial {
+		for &(run, slot) in &ex.withheld {
 			let honest = self.nodes[0].ex.runs[run]
 				.held(slot)
 				.map(|h| h.value.clone());

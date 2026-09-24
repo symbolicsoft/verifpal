@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u1 at one session and at two.
+//
+// unlink_origin_late_leak.vp with secret sent in the clear in phase 1 rather
+// than leaked. The attacker has recomposed secret from share_a and share_b
+// at the phase-0 barrier; observing it on the wire in phase 1 is a disclosure
+// independent of both shares, so the split ties the shares to it: u1.
+attacker[passive]
+
+principal Alice[
+	generates secret
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+]
+
+Alice -> Bob: share_a, share_b
+
+principal Bob[
+	_ = HASH(share_a, share_b)
+]
+
+phase[1]
+
+Alice -> Bob: secret
+
+queries[
+	confidentiality? secret
+	unlinkability? share_a, share_b
+]

@@ -234,12 +234,6 @@ impl Judge<'_, '_> {
 			});
 		}
 		let used = reduce_once(&h.value);
-		if self.honest.runs[b]
-			.held(slot)
-			.is_some_and(|honest| reduce_once(&honest.value).equivalent(&used, true))
-		{
-			return None;
-		}
 		let siblings = self.siblings(slot);
 		let mut emissions = 0usize;
 		for (d, delivery) in program.deliveries.iter().enumerate() {
@@ -262,6 +256,12 @@ impl Judge<'_, '_> {
 			}
 		}
 		if emissions == 0 {
+			if self.honest.runs[b]
+				.held(slot)
+				.is_some_and(|honest| reduce_once(&honest.value).equivalent(&used, true))
+			{
+				return None;
+			}
 			return Some(Violation::Forged {
 				run: b,
 				slot,

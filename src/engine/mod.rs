@@ -31,9 +31,13 @@ pub(crate) fn verify(
 	let root = execute(&cx, &Vec::new());
 	for ps in states {
 		let run = program.run_index(ps.id);
-		crate::verify::check_honest_run(ctx, km, ps, |slot| {
-			run.is_some_and(|r| root.runs[r].held(slot).is_some())
-		})?;
+		crate::verify::check_honest_run(
+			ctx,
+			km,
+			ps,
+			|slot| run.is_some_and(|r| root.runs[r].held(slot).is_some()),
+			|slot| program.phase_of(km.slots[slot].creator, slot),
+		)?;
 	}
 	info_message(
 		&format!("Attacker is configured as {}.", m.attacker),

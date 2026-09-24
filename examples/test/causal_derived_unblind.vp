@@ -3,6 +3,9 @@
 // Expected: a0 at one session, a1 at two. Public unblinding needs its
 // derived factor, whose ingredients leak only after the attacked check.
 // The factor is reconstructed in place, not held as a named known term.
+// Bob's ack is guarded. Unguarded, the attacker hands Alice an ack of its
+// own, she leaks left and right before Bob's check, and the forgery is real
+// at one session, as in causal_late_leak_forged_trigger.vp.
 attacker[active]
 
 principal Alice[
@@ -24,7 +27,7 @@ principal Bob[
 	generates ack
 ]
 
-Bob -> Alice: ack
+Bob -> Alice: [ack]
 
 principal Alice[
 	_ = HASH(ack)
