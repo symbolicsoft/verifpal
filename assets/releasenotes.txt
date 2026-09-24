@@ -1,4 +1,14 @@
-Verifpal 1.6.0
+Verifpal 1.6.1
+
+Changes since v1.6.0:
+
+- Remove --saturate (closes #43)
+- Fix #42
+- Fix #38, #39, #40, #41
+- Fix #37
+- LaTeX rendering improvements
+- Fix #32, #33, #34, #35, #36
+- Improvements for Verifpal Workbench
 
 Changes since v1.5.2:
 
