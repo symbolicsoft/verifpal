@@ -1,4 +1,11 @@
-Verifpal 1.6.1
+Verifpal 1.6.2
+
+Changes since v1.6.1:
+
+- More engine tightening + bug fixes + tests
+- Remove vestiges of old engine
+- Minor bug fixes + more tests
+- Fix #44
 
 Changes since v1.6.0:
 
